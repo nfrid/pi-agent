@@ -8,7 +8,7 @@ export function unfinished(task: Task): boolean {
 export function missingDeps(task: Task): string[] {
 	return task.dependsOn.filter((id) => {
 		const dep = getState().tasks.find((candidate) => candidate.id === id);
-		return !dep || dep.status !== "done";
+		return dep?.status !== "done";
 	});
 }
 

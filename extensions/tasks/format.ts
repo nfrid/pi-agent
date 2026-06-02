@@ -53,7 +53,9 @@ export function formatVisualTask(
 }
 
 export function dashboard(includeDone = false, limit = 40): string {
-	const visible = getState().tasks.filter((task) => includeDone || unfinished(task));
+	const visible = getState().tasks.filter(
+		(task) => includeDone || unfinished(task),
+	);
 	if (!visible.length) return "No active tasks.";
 	const ready = new Set(readyTasks().map((task) => task.id));
 	const lines = visible.slice(0, limit).map((task) => {
