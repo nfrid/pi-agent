@@ -1,0 +1,6 @@
+node_modules
+auth.json
+*.log
+sessions/
+inspect/
+system-prompts/.selection.json
