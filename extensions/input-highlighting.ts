@@ -1,9 +1,13 @@
-import { CustomEditor, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+	CustomEditor,
+	type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 
 const FG_CYAN = "\x1b[36m";
 const FG_MAGENTA = "\x1b[35m";
 const RESET_FG = "\x1b[39m";
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminals amiright?
 const FILE_MENTION_RE = /(^|[\s([{])(@(?:"[^"]+"|[^\s\x1b\])}.,;:!?]+))/g;
 const SLASH_COMMAND_RE = /(^|\s)(\/[a-zA-Z][a-zA-Z0-9_-]*)/g;
 
@@ -22,8 +26,8 @@ class HighlightEditor extends CustomEditor {
 export default function inputHighlighting(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		if (!ctx.hasUI) return;
-		ctx.ui.setEditorComponent((tui, theme, keybindings) =>
-			new HighlightEditor(tui, theme, keybindings),
+		ctx.ui.setEditorComponent(
+			(tui, theme, keybindings) => new HighlightEditor(tui, theme, keybindings),
 		);
 	});
 }
