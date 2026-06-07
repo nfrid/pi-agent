@@ -47,13 +47,33 @@ function appendProjectContext(
 
 	let nextPrompt = `${prompt}\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n`;
 	for (const { path, content } of contextFiles) {
-		nextPrompt += `<project_instructions path="${path}">\n${content}\n</project_instructions>\n\n`;
+		nextPrompt += `<project_instructions path="${escapeXml(path)}">\n${content}\n</project_instructions>\n\n`;
 	}
 	nextPrompt += "</project_context>\n";
 	return nextPrompt;
 }
 
-function buildSystemPrompt(options: BuildSystemPromptOptions): string {
+function formatPromptInfo(options: BuildSystemPromptOptions): string {
+	const contextFiles = options.contextFiles ?? [];
+	const skills = options.skills ?? [];
+	const tools = options.selectedTools ?? [];
+
+	return [
+		`CWD: ${options.cwd}`,
+		`Custom prompt: ${options.customPrompt ? "yes" : "no"}`,
+		`Appended prompt: ${options.appendSystemPrompt ? "yes" : "no"}`,
+		`Active tools: ${tools.length > 0 ? tools.join(", ") : "default"}`,
+		`Context files: ${contextFiles.length}`,
+		...contextFiles.map((file) => `- ${file.path}`),
+		`Skills: ${skills.length}`,
+		...skills.map((skill) => `- ${skill.name}: ${skill.filePath}`),
+	].join("\n");
+}
+
+function buildSystemPrompt(
+	options: BuildSystemPromptOptions,
+	mode?: string,
+): string {
 	const {
 		customPrompt,
 		selectedTools,
@@ -123,6 +143,12 @@ function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 		}
 	}
 
+	if (mode && mode !== "tui") {
+		addGuideline(
+			`Pi is running in ${mode} mode; avoid assuming interactive terminal UI is available.`,
+		);
+	}
+
 	addGuideline("Be concise in your responses");
 	addGuideline("Show file paths clearly when working with files");
 	const guidelines = guidelinesList
@@ -154,7 +180,35 @@ ${guidelines}`;
 }
 
 export default function systemPrompt(pi: ExtensionAPI) {
-	pi.on("before_agent_start", (event) => ({
-		systemPrompt: buildSystemPrompt(event.systemPromptOptions),
-	}));
+	pi.on("before_agent_start", (event, ctx) => {
+		const mode = "mode" in ctx ? String(ctx.mode) : undefined;
+		return {
+			systemPrompt: buildSystemPrompt(event.systemPromptOptions, mode),
+		};
+	});
+
+	pi.registerCommand("prompt-info", {
+		description: "Show current system prompt inputs",
+		handler: async (_args, ctx) => {
+			const getSystemPromptOptions = (
+				ctx as typeof ctx & {
+					getSystemPromptOptions?: () => BuildSystemPromptOptions;
+				}
+			).getSystemPromptOptions;
+			if (!getSystemPromptOptions) {
+				ctx.ui.notify(
+					"This Pi version does not expose system prompt options.",
+					"warning",
+				);
+				return;
+			}
+
+			const info = formatPromptInfo(getSystemPromptOptions.call(ctx));
+			if (ctx.hasUI) {
+				ctx.ui.notify(info, "info");
+				return;
+			}
+			console.log(info);
+		},
+	});
 }
