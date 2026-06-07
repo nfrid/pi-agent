@@ -13,10 +13,12 @@ export default function usage(pi: ExtensionAPI) {
 	let refreshPromise: Promise<void> | undefined;
 	let timer: NodeJS.Timeout | undefined;
 
-	const clear = (ctx: ExtensionContext) =>
-		ctx.ui.setStatus(STATUS_KEY, undefined);
+	const clear = (ctx: ExtensionContext) => {
+		if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
+	};
 
 	const refresh = (ctx: ExtensionContext, force = false) => {
+		if (!ctx.hasUI) return;
 		if (!isCodexModel(ctx.model)) {
 			clear(ctx);
 			return;
@@ -49,6 +51,7 @@ export default function usage(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
+		if (!ctx.hasUI) return;
 		refresh(ctx, true);
 		if (timer) clearInterval(timer);
 		timer = setInterval(() => refresh(ctx), REFRESH_INTERVAL_MS);

@@ -25,7 +25,8 @@ class HighlightEditor extends CustomEditor {
 
 export default function inputHighlighting(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
-		if (!ctx.hasUI) return;
+		const mode = "mode" in ctx ? ctx.mode : "tui";
+		if (mode !== "tui") return;
 		ctx.ui.setEditorComponent(
 			(tui, theme, keybindings) => new HighlightEditor(tui, theme, keybindings),
 		);

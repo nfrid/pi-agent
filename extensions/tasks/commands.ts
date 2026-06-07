@@ -28,8 +28,10 @@ export function registerTodoCommands(pi: ExtensionAPI): void {
 		description: "Manage todos interactively",
 		handler: async (_args, ctx) => {
 			setLastCtx(ctx);
-			if (!ctx.hasUI) {
-				ctx.ui.notify(replayText(), "info");
+			const mode = "mode" in ctx ? ctx.mode : "tui";
+			if (mode !== "tui") {
+				if (ctx.hasUI) ctx.ui.notify(replayText(), "info");
+				else console.log(replayText());
 				return;
 			}
 
@@ -134,6 +136,9 @@ export function registerTodoCommands(pi: ExtensionAPI): void {
 
 	pi.registerCommand("todump", {
 		description: "Insert current todo replay into the editor",
-		handler: async (_args, ctx) => ctx.ui.setEditorText(replayText()),
+		handler: async (_args, ctx) => {
+			if (ctx.hasUI) ctx.ui.setEditorText(replayText());
+			else console.log(replayText());
+		},
 	});
 }

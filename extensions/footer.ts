@@ -52,7 +52,8 @@ export default function (pi: ExtensionAPI) {
 	const refresh = () => requestRender();
 
 	pi.on("session_start", (_event, ctx) => {
-		if (!ctx.hasUI) return;
+		const mode = "mode" in ctx ? ctx.mode : "tui";
+		if (mode !== "tui") return;
 
 		ctx.ui.setFooter((tui, theme, footerData) => {
 			requestRender = () => tui.requestRender();
