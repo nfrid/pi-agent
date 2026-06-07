@@ -19,7 +19,9 @@ import type { Action, Params, Task } from "./types";
 
 function visibleWidgetTasks(): Task[] {
 	return getState().tasks.filter(
-		(task) => task.status !== "dropped" && !getHiddenCompleted().has(task.id),
+		(task) =>
+			task.status !== "dropped" &&
+			(task.status !== "done" || !getHiddenCompleted().has(task.id)),
 	);
 }
 

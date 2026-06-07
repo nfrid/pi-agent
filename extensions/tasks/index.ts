@@ -18,9 +18,9 @@ export default function tasks(pi: ExtensionAPI) {
 		reconstruct(ctx);
 		updateUi(ctx);
 	});
-	pi.on("agent_start", () => {
-		if (!flushCompletedPendingHide()) return;
-		updateUi();
+	pi.on("agent_start", (_event, ctx) => {
+		flushCompletedPendingHide();
+		updateUi(ctx);
 	});
 
 	registerTodoContext(pi);
