@@ -15,9 +15,9 @@
     "check": "npm run typecheck && npm run lint && npm run format"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.78.0",
-    "@earendil-works/pi-coding-agent": "0.78.0",
-    "@earendil-works/pi-tui": "0.78.0",
+    "@earendil-works/pi-ai": "0.78.1",
+    "@earendil-works/pi-coding-agent": "0.78.1",
+    "@earendil-works/pi-tui": "0.78.1",
     "typebox": "1.1.38"
   },
   "devDependencies": {
