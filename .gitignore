@@ -1,5 +1,6 @@
 node_modules
 auth.json
+trust.json
 *.log
 sessions/
 inspect/
