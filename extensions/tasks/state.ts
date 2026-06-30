@@ -79,6 +79,19 @@ export function persist(pi: ExtensionAPI): void {
 	} satisfies SnapshotEntry);
 }
 
+export function forgetCompletedHide(ids?: Iterable<string>): void {
+	const store = getTaskStore();
+	if (!ids) {
+		store.completedPendingHide = new Set();
+		store.hiddenCompleted = new Set();
+		return;
+	}
+	for (const id of ids) {
+		store.completedPendingHide.delete(id);
+		store.hiddenCompleted.delete(id);
+	}
+}
+
 export function flushCompletedPendingHide(): boolean {
 	const store = getTaskStore();
 	if (!store.completedPendingHide.size) return false;

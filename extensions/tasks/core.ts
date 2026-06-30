@@ -1,6 +1,6 @@
 import { dashboard } from "./format";
 import { findTask, newId, normalizeId, normalizeIds } from "./ids";
-import { getState } from "./state";
+import { forgetCompletedHide, getState } from "./state";
 import type { Action, Params, Task } from "./types";
 import { validateDeps } from "./validate";
 
@@ -100,6 +100,7 @@ export function mutate(
 				};
 		}
 		const state = getState();
+		forgetCompletedHide(tasks.map((task) => task.id));
 		state.tasks = tasks;
 		state.nextId = 1;
 		for (const task of state.tasks) {
@@ -112,9 +113,13 @@ export function mutate(
 	if (action === "clear_done") {
 		const state = getState();
 		const before = state.tasks.length;
+		const removed = state.tasks
+			.filter((task) => task.status === "done" || task.status === "dropped")
+			.map((task) => task.id);
 		state.tasks = state.tasks.filter(
 			(task) => task.status !== "done" && task.status !== "dropped",
 		);
+		forgetCompletedHide(removed);
 		return {
 			changed: before !== state.tasks.length,
 			message: `cleared ${before - state.tasks.length} completed/dropped tasks`,
@@ -142,18 +147,28 @@ export function mutate(
 		getState().tasks = getState().tasks.filter(
 			(candidate) => candidate.id !== task.id,
 		);
+		forgetCompletedHide([task.id]);
 		return { changed: true, message: `removed ${task.id}` };
 	}
 
-	if (action === "drop") task.status = "dropped";
-	else if (action === "done") task.status = "done";
-	else if (action === "start") task.status = "doing";
-	else if (action === "block") {
+	if (action === "drop") {
+		forgetCompletedHide([task.id]);
+		task.status = "dropped";
+	} else if (action === "done") {
+		forgetCompletedHide([task.id]);
+		task.status = "done";
+	} else if (action === "start") {
+		forgetCompletedHide([task.id]);
+		task.status = "doing";
+	} else if (action === "block") {
 		task.status = "blocked";
 		if (params.notes) task.notes = params.notes;
 	} else if (action === "update") {
 		if (params.text !== undefined) task.text = params.text;
-		if (params.status !== undefined) task.status = params.status;
+		if (params.status !== undefined) {
+			forgetCompletedHide([task.id]);
+			task.status = params.status;
+		}
 		if (params.priority !== undefined) task.priority = params.priority;
 		if (params.notes !== undefined) task.notes = params.notes;
 		if (params.depends_on !== undefined) {
