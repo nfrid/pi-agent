@@ -14,10 +14,15 @@ export function missingDeps(task: Task): string[] {
 
 export function readyTasks(): Task[] {
 	return getState().tasks.filter(
+		(task) => task.status === "todo" && missingDeps(task).length === 0,
+	);
+}
+
+export function blockedTasks(): Task[] {
+	return getState().tasks.filter(
 		(task) =>
 			unfinished(task) &&
-			task.status !== "blocked" &&
-			missingDeps(task).length === 0,
+			(task.status === "blocked" || missingDeps(task).length > 0),
 	);
 }
 
@@ -28,7 +33,7 @@ export function stats() {
 		total: tasks.length,
 		active: active.length,
 		done: tasks.filter((task) => task.status === "done").length,
-		blocked: tasks.filter((task) => task.status === "blocked").length,
+		blocked: blockedTasks().length,
 		ready: readyTasks().length,
 	};
 }

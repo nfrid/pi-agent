@@ -60,7 +60,7 @@ export function updateUi(ctx = getLastCtx()): void {
 				? theme.fg("accent", "●")
 				: theme.fg("dim", "○");
 			const lines = [
-				`${headingIcon} ${theme.fg(s.active ? "accent" : "dim", `Todos (${s.done}/${s.total})`)} ${theme.fg("dim", `ready ${s.ready} • blocked ${s.blocked}`)}`,
+				`${headingIcon} ${theme.fg(s.active ? "accent" : "dim", `Todos (${s.done}/${s.total})`)}`,
 			];
 			const visible = tasks.slice(0, MAX_WIDGET_LINES - 1);
 			markDisplayedCompleted(visible);

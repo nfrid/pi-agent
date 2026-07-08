@@ -3,7 +3,6 @@
 	"tui.select.down": ["down", "ctrl+j"],
 	"tui.editor.cursorUp": ["up", "ctrl+k"],
 	"tui.editor.cursorDown": ["down", "ctrl+j"],
-	"app.model.select": "ctrl+o",
 	"tui.select.confirm": ["ctrl+l", "enter"],
 	"app.thinking.cycle": "ctrl+t",
 	"app.thinking.toggle": "shift+tab",
