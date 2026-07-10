@@ -21,6 +21,7 @@ const MAX_JSON_LINE_BYTES = 1024 * 1024;
 const READ_ONLY_TOOLS = "read,bash,grep,find,ls";
 const WRITE_TOOLS = "read,bash,edit,write,grep,find,ls";
 const MAX_GLOBAL_CONCURRENCY = 3;
+const PROGRESS_UPDATE_INTERVAL_MS = 1000;
 
 let activeRuns = 0;
 const slotWaiters: Array<() => void> = [];
@@ -176,6 +177,10 @@ export async function runDelegate(
 	};
 
 	emitUpdate();
+	const updateTimer = options.onUpdate
+		? setInterval(emitUpdate, PROGRESS_UPDATE_INTERVAL_MS)
+		: undefined;
+	updateTimer?.unref();
 	try {
 		releaseSlot = await acquireSlot(options.signal);
 		if (options.signal?.aborted)
@@ -326,6 +331,7 @@ export async function runDelegate(
 				: String(error);
 		run.state = aborted ? "aborted" : "error";
 	} finally {
+		if (updateTimer) clearInterval(updateTimer);
 		run.finishedAt = Date.now();
 		emitUpdate();
 		if (tmp) cleanup(tmp.dir);
