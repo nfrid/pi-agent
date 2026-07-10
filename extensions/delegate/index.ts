@@ -127,10 +127,11 @@ export default function delegate(pi: ExtensionAPI) {
 			"Children have inspection tools, including bash, by default; edit/write require allowWrites. Read-only bash behavior is policy-based rather than sandboxed. Parallel tasks must not mutate overlapping files.",
 		].join(" "),
 		promptSnippet:
-			"Delegate focused exploration, review, validation, implementation, or option checks to child Pi processes.",
+			"Delegate substantial focused exploration, review, validation, implementation, or independent option checks when a child process would save context or enable useful parallelism.",
 		promptGuidelines: [
-			"Use delegate for context-heavy investigation, review, validation, debugging, planning, or parallel option checks when keeping noisy tool output out of the main context is valuable.",
-			"Do not use delegate for trivial edits or questions answerable with a small number of tool calls.",
+			"Use delegate autonomously for substantial context-heavy investigation, review, debugging, planning, or independent parallel work when isolating the work would provide a clear benefit.",
+			"Prefer direct tool use for routine checks, small edits, and questions answerable with a few tool calls; delegation should earn its additional usage cost.",
+			"Prefer the fast effort profile for focused or routine delegated work. Use balanced or deep only when the task's complexity warrants the additional usage.",
 			"Delegate children have bash for inspection, but edit/write require allowWrites. Enable allowWrites only for deliberate implementation, and do not give parallel children overlapping mutation scopes.",
 			"Delegate cannot be called by child processes; do not ask a delegated child to delegate further.",
 		],
