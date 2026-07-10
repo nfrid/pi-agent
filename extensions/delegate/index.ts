@@ -16,7 +16,7 @@ import {
 } from "./types";
 
 const MAX_PARALLEL_TASKS = 6;
-const MAX_CONCURRENCY = 3;
+const MAX_CONCURRENCY = 5;
 const OUTPUT_CAP = 50 * 1024;
 const SINGLE_OUTPUT_CAP = 12 * 1024;
 const PER_TASK_OUTPUT_CAP = 8 * 1024;
