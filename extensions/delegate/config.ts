@@ -17,11 +17,12 @@ const THINKING_LEVELS = [
 	"xhigh",
 ] as const;
 const SETTINGS_KEY = "delegate";
-const PROJECT_CONFIG_DIR = ".pi";
 
 export interface DelegateConfig {
+	provider?: string;
 	defaultEffort?: DelegateEffort;
 	effortProfiles?: Partial<Record<DelegateEffort, DelegateEffortProfile>>;
+	error?: string;
 }
 
 function isEffort(value: unknown): value is DelegateEffort {
@@ -40,11 +41,9 @@ function isThinking(value: unknown): value is ThinkingLevel {
 function parseProfile(raw: unknown): DelegateEffortProfile | undefined {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
 	const record = raw as Record<string, unknown>;
-	const provider =
-		typeof record.provider === "string" ? record.provider.trim() : "";
-	const id = typeof record.id === "string" ? record.id.trim() : "";
-	if (!provider || !id || !isThinking(record.thinking)) return undefined;
-	return { provider, id, thinking: record.thinking };
+	const model = typeof record.model === "string" ? record.model.trim() : "";
+	if (!model || !isThinking(record.thinking)) return undefined;
+	return { model, thinking: record.thinking };
 }
 
 function parseProfiles(
@@ -71,38 +70,24 @@ function readConfigFile(settingsPath: string): DelegateConfig {
 			return {};
 		const record = nested as Record<string, unknown>;
 		const config: DelegateConfig = {};
+		if (typeof record.provider === "string" && record.provider.trim())
+			config.provider = record.provider.trim();
 		if (isEffort(record.defaultEffort))
 			config.defaultEffort = record.defaultEffort;
 		const profiles = parseProfiles(record.effortProfiles);
 		if (profiles) config.effortProfiles = profiles;
 		return config;
 	} catch {
-		return {};
+		return {
+			error: `Could not parse delegate configuration at ${settingsPath}.`,
+		};
 	}
 }
 
-function mergeProfiles(
-	base: Partial<Record<DelegateEffort, DelegateEffortProfile>> | undefined,
-	override: Partial<Record<DelegateEffort, DelegateEffortProfile>> | undefined,
-): Partial<Record<DelegateEffort, DelegateEffortProfile>> | undefined {
-	const merged = { ...(base ?? {}), ...(override ?? {}) };
-	return Object.keys(merged).length > 0 ? merged : undefined;
-}
-
-export function loadDelegateConfig(cwd: string): DelegateConfig {
-	const agentDir = getAgentDir();
-	const globalConfig = readConfigFile(path.join(agentDir, "settings.json"));
-	const projectConfig = readConfigFile(
-		path.join(cwd, PROJECT_CONFIG_DIR, "settings.json"),
-	);
-	const config: DelegateConfig = { ...globalConfig, ...projectConfig };
-	const profiles = mergeProfiles(
-		globalConfig.effortProfiles,
-		projectConfig.effortProfiles,
-	);
-	if (profiles) config.effortProfiles = profiles;
-	else delete config.effortProfiles;
-	return config;
+export function loadDelegateConfig(_cwd: string): DelegateConfig {
+	// Model routing is user-owned. Do not let a repository silently choose which
+	// subscription/provider delegated work consumes.
+	return readConfigFile(path.join(getAgentDir(), "settings.json"));
 }
 
 export function resolveEffort(
@@ -110,15 +95,19 @@ export function resolveEffort(
 	config: DelegateConfig,
 ): {
 	selected?: DelegateEffort;
+	provider?: string;
 	profile?: DelegateEffortProfile;
-	warning?: string;
+	error?: string;
 } {
+	if (config.error) return { error: config.error };
 	const selected = isEffort(requested) ? requested : config.defaultEffort;
 	if (!selected) return {};
 	const profile = config.effortProfiles?.[selected];
-	if (profile) return { selected, profile };
-	return {
-		selected,
-		warning: `Effort "${selected}" has no configured profile; using child Pi defaults.`,
-	};
+	if (!profile || !config.provider) {
+		return {
+			selected,
+			error: `Delegate effort "${selected}" is not fully configured. Set delegate.provider and delegate.effortProfiles.${selected}.`,
+		};
+	}
+	return { selected, provider: config.provider, profile };
 }

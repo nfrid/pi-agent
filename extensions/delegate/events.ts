@@ -2,6 +2,8 @@ import type { Message } from "@earendil-works/pi-ai";
 import type { DelegatedRun } from "./types";
 
 const MAX_ACTIVITY_COUNT = 20;
+const MAX_MESSAGE_COUNT = 100;
+const MAX_MESSAGE_BYTES = 5 * 1024 * 1024;
 const MAX_PREVIEW_CHARS = 1000;
 
 function truncate(text: string, max = MAX_PREVIEW_CHARS): string {
@@ -103,6 +105,21 @@ function eventId(
 	return undefined;
 }
 
+function messageBytes(messages: Message[]): number {
+	return Buffer.byteLength(JSON.stringify(messages), "utf8");
+}
+
+function addMessage(run: DelegatedRun, message: Message) {
+	run.messages.push(message);
+	while (
+		run.messages.length > 1 &&
+		(run.messages.length > MAX_MESSAGE_COUNT ||
+			messageBytes(run.messages) > MAX_MESSAGE_BYTES)
+	)
+		run.messages.shift();
+	updateMessageMetadata(run, message);
+}
+
 function updateMessageMetadata(run: DelegatedRun, message: Message) {
 	if (message.role !== "assistant") return;
 	const usage = message.usage;
@@ -138,21 +155,19 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
 	switch (event.type) {
 		case "message_end":
 			if (event.message) {
-				const message = event.message as Message;
-				run.messages.push(message);
-				updateMessageMetadata(run, message);
+				addMessage(run, event.message as Message);
 				return true;
 			}
 			return false;
 		case "agent_end":
-			if (Array.isArray(event.messages)) {
-				for (const message of event.messages as Message[]) {
-					if (!run.messages.includes(message)) {
-						run.messages.push(message);
-						updateMessageMetadata(run, message);
-					}
-				}
-				return true;
+			// message_end is authoritative. agent_end repeats those messages as
+			// separately deserialized objects, so identity checks cannot deduplicate it.
+			// Retain agent_end only as a fallback for unexpected streams without
+			// message_end events.
+			if (run.messages.length === 0 && Array.isArray(event.messages)) {
+				for (const message of event.messages as Message[])
+					addMessage(run, message);
+				return run.messages.length > 0;
 			}
 			return false;
 		case "tool_execution_start":

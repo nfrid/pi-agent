@@ -27,13 +27,13 @@ export type ThinkingLevel =
 	| "xhigh";
 
 export interface DelegateEffortProfile {
-	provider: string;
-	id: string;
+	model: string;
 	thinking: ThinkingLevel;
 }
 
 export interface DelegateEffortState {
 	selected?: DelegateEffort;
+	provider?: string;
 	profile?: DelegateEffortProfile;
 	warning?: string;
 }

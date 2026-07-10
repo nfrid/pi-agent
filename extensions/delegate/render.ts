@@ -49,7 +49,7 @@ function effortLabel(run: DelegatedRun): string {
 	const profile = effort.profile;
 	if (!profile)
 		return effort.warning ? `${effort.selected} (default)` : effort.selected;
-	return `${effort.selected}: ${profile.provider}/${profile.id} • ${profile.thinking}`;
+	return `${effort.selected}: ${effort.provider ?? "default"}/${profile.model} • ${profile.thinking}`;
 }
 
 function usage(run: DelegatedRun): string {

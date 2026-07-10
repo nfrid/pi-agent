@@ -2,6 +2,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { EFFORT_LEVELS, loadDelegateConfig, resolveEffort } from "./config";
+import { truncateBytes } from "./output";
 import { renderDelegateCall, renderDelegateResult } from "./render";
 import { mapWithConcurrency, runDelegate } from "./runner";
 import { buildSessionSnapshotJsonl } from "./session";
@@ -9,6 +10,7 @@ import {
 	createRun,
 	type DelegateDetails,
 	type DelegatedRun,
+	type DelegateEffortState,
 	getFinalAssistantText,
 	isRunError,
 } from "./types";
@@ -19,12 +21,12 @@ const OUTPUT_CAP = 50 * 1024;
 
 const EffortSchema = StringEnum(EFFORT_LEVELS, {
 	description:
-		"Optional child model profile. Use fast for easy/narrow tasks, balanced for normal work, deep for ambiguous/risky review or debugging.",
+		"Optional child model profile. fast favors speed and economy for focused or routine work; balanced provides stronger general-purpose reasoning at moderate cost; deep spends more time and compute on demanding work where additional scrutiny may help. Choose based on the task.",
 });
 
 const ContextSchema = StringEnum(["branch", "fresh"] as const, {
 	description:
-		"Optional context mode. Use branch to include the current session branch, or fresh to start without parent conversation history. Defaults to branch.",
+		"Optional context mode. branch includes the current session branch; fresh starts without parent conversation history. Defaults to branch.",
 });
 
 const TaskItem = Type.Object({
@@ -42,20 +44,20 @@ const TaskItem = Type.Object({
 
 const DelegateParams = Type.Object({
 	task: Type.Optional(
-		Type.String({ description: "Focused task to delegate (single mode)" }),
+		Type.String({ description: "Focused task to delegate to one child" }),
 	),
 	tasks: Type.Optional(
-		Type.Array(TaskItem, { description: "Parallel delegated tasks" }),
+		Type.Array(TaskItem, {
+			description: "Focused tasks to delegate in parallel",
+		}),
+	),
+	cwd: Type.Optional(
+		Type.String({
+			description: "Optional working directory for a single child",
+		}),
 	),
 	effort: Type.Optional(EffortSchema),
 	context: Type.Optional(ContextSchema),
-	mode: Type.Optional(
-		StringEnum(["auto", "single", "parallel"] as const, {
-			description:
-				"Optional mode hint. Usually omit; task means single, tasks means parallel.",
-			default: "auto",
-		}),
-	),
 });
 
 function makeDetails(
@@ -63,13 +65,6 @@ function makeDetails(
 	runs: DelegatedRun[],
 ): DelegateDetails {
 	return { mode, runs };
-}
-
-function truncateBytes(text: string, maxBytes: number): string {
-	if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
-	let out = text.slice(0, maxBytes);
-	while (Buffer.byteLength(out, "utf8") > maxBytes) out = out.slice(0, -1);
-	return `${out}\n\n[Output truncated for parent context; full output is preserved in tool details.]`;
 }
 
 function resultText(run: DelegatedRun): string {
@@ -93,7 +88,17 @@ function invalidParams(message: string): {
 	};
 }
 
+function effortFor(
+	requested: unknown,
+	config: ReturnType<typeof loadDelegateConfig>,
+): { effort?: DelegateEffortState; error?: string } {
+	const resolved = resolveEffort(requested, config);
+	if (resolved.error) return { error: resolved.error };
+	return { effort: resolved };
+}
+
 export default function delegate(pi: ExtensionAPI) {
+	// Recursive fan-out wastes tokens and is especially unreliable with small models.
 	if (process.env.PI_DELEGATE_CHILD === "1") return;
 
 	pi.registerTool({
@@ -101,15 +106,17 @@ export default function delegate(pi: ExtensionAPI) {
 		label: "Delegate",
 		description: [
 			"Delegate focused work to one or more child Pi processes with isolated context windows.",
-			"Use this when exploration, review, validation, or parallel option checks would add noisy tool output to the main conversation.",
-			"By default each child starts from the current active session branch and returns a compact decision-useful report; pass context: fresh to omit parent conversation history.",
+			"Use this for exploration, review, validation, debugging, planning, or parallel option checks that would add noisy tool output to the main conversation.",
+			"Children receive the current session branch by default; pass context: fresh to omit it. Delegate is unavailable to children to prevent recursive fan-out.",
+			"Children share the selected working directory. They are read-only by default; explicitly authorize changes only for a deliberate implementation task. Parallel tasks should not mutate overlapping files.",
 		].join(" "),
 		promptSnippet:
-			"Delegate focused exploration, review, validation, or option checks to child Pi processes.",
+			"Delegate focused exploration, review, validation, implementation, or option checks to child Pi processes.",
 		promptGuidelines: [
 			"Use delegate for context-heavy investigation, review, validation, debugging, planning, or parallel option checks when keeping noisy tool output out of the main context is valuable.",
-			"Do not use delegate for trivial edits or questions you can answer directly with a small number of tool calls.",
-			"When using delegate, give each child a narrow task with clear boundaries and ask for concrete evidence anchors when they matter.",
+			"Do not use delegate for trivial edits or questions answerable with a small number of tool calls.",
+			"Delegate children are read-only unless the task explicitly authorizes filesystem changes. Do not give parallel children overlapping mutation scopes.",
+			"Delegate cannot be called by child processes; do not ask a delegated child to delegate further.",
 		],
 		parameters: DelegateParams,
 		renderCall: renderDelegateCall,
@@ -128,31 +135,31 @@ export default function delegate(pi: ExtensionAPI) {
 				typeof params.task === "string" && params.task.trim().length > 0;
 			const hasParallel =
 				Array.isArray(params.tasks) && params.tasks.length > 0;
-			if (hasSingle === hasParallel) {
+			if (hasSingle === hasParallel)
 				return invalidParams(
-					"Provide exactly one delegation mode: either task for a single child, or tasks for parallel children.",
+					"Provide exactly one delegation mode: task for one child, or tasks for parallel children.",
 				);
-			}
 
 			if (hasSingle && typeof params.task === "string") {
 				const task = params.task.trim();
-				const effort = resolveEffort(params.effort, config);
-				const context = params.context === "fresh" ? "fresh" : "branch";
+				const resolved = effortFor(params.effort, config);
+				if (resolved.error) return invalidParams(resolved.error);
+				const context = params.context ?? "branch";
 				const runSnapshot = context === "branch" ? getSnapshot() : undefined;
 				if (context === "branch" && !runSnapshot)
 					return invalidParams(
 						"Cannot delegate: failed to snapshot current session branch.",
 					);
 				const run = await runDelegate({
-					cwd: ctx.cwd,
+					cwd: params.cwd ?? ctx.cwd,
 					task,
-					snapshotJsonl: runSnapshot || undefined,
-					effort,
+					snapshotJsonl: runSnapshot ?? undefined,
+					effort: resolved.effort,
 					signal,
 					onUpdate,
 					makeDetails: (runs) => makeDetails("single", runs),
 				});
-				const text = resultText(run);
+				const text = truncateBytes(resultText(run), OUTPUT_CAP);
 				return {
 					content: [
 						{
@@ -172,17 +179,18 @@ export default function delegate(pi: ExtensionAPI) {
 				return invalidParams(
 					"Parallel delegation requires at least one non-empty task.",
 				);
-			if (tasks.length > MAX_PARALLEL_TASKS) {
+			if (tasks.length > MAX_PARALLEL_TASKS)
 				return invalidParams(
 					`Too many delegated tasks (${tasks.length}). Maximum is ${MAX_PARALLEL_TASKS}.`,
 				);
-			}
 
 			const efforts = tasks.map((item) =>
-				resolveEffort(item.effort ?? params.effort, config),
+				effortFor(item.effort ?? params.effort, config),
 			);
+			const effortError = efforts.find((result) => result.error)?.error;
+			if (effortError) return invalidParams(effortError);
 			const liveRuns = tasks.map((item, index) =>
-				createRun(item.task, efforts[index]),
+				createRun(item.task, efforts[index].effort),
 			);
 			const emitParallelUpdate = () => {
 				const done = liveRuns.filter((run) => run.exitCode !== -1).length;
@@ -197,10 +205,8 @@ export default function delegate(pi: ExtensionAPI) {
 				});
 			};
 
-			const contexts = tasks.map((item) =>
-				item.context === "fresh" || params.context === "fresh"
-					? "fresh"
-					: "branch",
+			const contexts = tasks.map(
+				(item) => item.context ?? params.context ?? "branch",
 			);
 			if (contexts.includes("branch") && !getSnapshot())
 				return invalidParams(
@@ -216,9 +222,9 @@ export default function delegate(pi: ExtensionAPI) {
 						task: item.task,
 						snapshotJsonl:
 							contexts[index] === "branch"
-								? getSnapshot() || undefined
+								? (getSnapshot() ?? undefined)
 								: undefined,
-						effort: efforts[index],
+						effort: efforts[index].effort,
 						signal,
 						onUpdate: (partial) => {
 							const current = partial.details?.runs?.[0];
@@ -236,16 +242,14 @@ export default function delegate(pi: ExtensionAPI) {
 			const succeeded = runs.filter((run) => !isRunError(run)).length;
 			const sections = runs.map((run, index) => {
 				const state = isRunError(run) ? "failed" : "completed";
-				return `## Task ${index + 1}: ${state}\n\n${truncateBytes(resultText(run), OUTPUT_CAP)}`;
+				return `## Task ${index + 1}: ${state}\n\n${resultText(run)}`;
 			});
-
+			const text = truncateBytes(
+				`Delegated tasks: ${succeeded}/${runs.length} succeeded\n\n${sections.join("\n\n---\n\n")}`,
+				OUTPUT_CAP,
+			);
 			return {
-				content: [
-					{
-						type: "text" as const,
-						text: `Delegated tasks: ${succeeded}/${runs.length} succeeded\n\n${sections.join("\n\n---\n\n")}`,
-					},
-				],
+				content: [{ type: "text" as const, text }],
 				details: makeDetails("parallel", runs),
 				...(succeeded === 0 ? { isError: true as const } : {}),
 			};

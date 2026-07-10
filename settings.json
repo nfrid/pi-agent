@@ -8,21 +8,19 @@
   "quietStartup": true,
   "theme": "dracula",
   "delegate": {
+    "provider": "openai-codex",
     "defaultEffort": "fast",
     "effortProfiles": {
       "fast": {
-        "provider": "openai-codex",
-        "id": "gpt-5.6-luna",
+        "model": "gpt-5.6-luna",
         "thinking": "medium"
       },
       "balanced": {
-        "provider": "openai-codex",
-        "id": "gpt-5.6-terra",
+        "model": "gpt-5.6-terra",
         "thinking": "medium"
       },
       "deep": {
-        "provider": "openai-codex",
-        "id": "gpt-5.6-sol",
+        "model": "gpt-5.6-sol",
         "thinking": "medium"
       }
     }
