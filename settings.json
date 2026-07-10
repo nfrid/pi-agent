@@ -1,7 +1,7 @@
 {
-  "lastChangelogVersion": "0.80.3",
+  "lastChangelogVersion": "0.80.6",
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.5",
+  "defaultModel": "gpt-5.6-sol",
   "defaultThinkingLevel": "low",
   "editorPaddingX": 1,
   "hideThinkingBlock": false,
@@ -12,18 +12,18 @@
     "effortProfiles": {
       "fast": {
         "provider": "openai-codex",
-        "id": "gpt-5.4-mini",
-        "thinking": "minimal"
+        "id": "gpt-5.6-luna",
+        "thinking": "medium"
       },
       "balanced": {
         "provider": "openai-codex",
-        "id": "gpt-5.5",
-        "thinking": "low"
+        "id": "gpt-5.6-terra",
+        "thinking": "medium"
       },
       "deep": {
         "provider": "openai-codex",
-        "id": "gpt-5.5",
-        "thinking": "high"
+        "id": "gpt-5.6-sol",
+        "thinking": "medium"
       }
     }
   }
