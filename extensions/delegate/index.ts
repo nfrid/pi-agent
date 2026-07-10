@@ -18,6 +18,8 @@ import {
 const MAX_PARALLEL_TASKS = 6;
 const MAX_CONCURRENCY = 3;
 const OUTPUT_CAP = 50 * 1024;
+const SINGLE_OUTPUT_CAP = 12 * 1024;
+const PER_TASK_OUTPUT_CAP = 8 * 1024;
 
 const EffortSchema = StringEnum(EFFORT_LEVELS, {
 	description:
@@ -26,7 +28,7 @@ const EffortSchema = StringEnum(EFFORT_LEVELS, {
 
 const ContextSchema = StringEnum(["branch", "fresh"] as const, {
 	description:
-		"Optional context mode. branch includes the current session branch; fresh starts without parent conversation history. Defaults to branch.",
+		"Optional context mode. fresh starts with only the task and project instructions; branch also includes parent conversation history. Defaults to fresh to reduce cost.",
 });
 
 const TaskItem = Type.Object({
@@ -40,6 +42,12 @@ const TaskItem = Type.Object({
 	),
 	effort: Type.Optional(EffortSchema),
 	context: Type.Optional(ContextSchema),
+	allowWrites: Type.Optional(
+		Type.Boolean({
+			description:
+				"Enable edit/write for a deliberate implementation task. Bash remains available for inspection when false.",
+		}),
+	),
 });
 
 const DelegateParams = Type.Object({
@@ -58,6 +66,12 @@ const DelegateParams = Type.Object({
 	),
 	effort: Type.Optional(EffortSchema),
 	context: Type.Optional(ContextSchema),
+	allowWrites: Type.Optional(
+		Type.Boolean({
+			description:
+				"Enable edit/write for a single task, or as the default for parallel tasks. Bash remains available when false.",
+		}),
+	),
 });
 
 function makeDetails(
@@ -76,16 +90,8 @@ function resultText(run: DelegatedRun): string {
 	return `${warning}${run.errorMessage?.trim() || run.stderr.trim() || "(no output)"}`;
 }
 
-function invalidParams(message: string): {
-	content: Array<{ type: "text"; text: string }>;
-	details: DelegateDetails;
-	isError: true;
-} {
-	return {
-		content: [{ type: "text", text: message }],
-		details: makeDetails("single", []),
-		isError: true,
-	};
+function invalidParams(message: string): never {
+	throw new Error(message);
 }
 
 function effortFor(
@@ -101,33 +107,47 @@ export default function delegate(pi: ExtensionAPI) {
 	// Recursive fan-out wastes tokens and is especially unreliable with small models.
 	if (process.env.PI_DELEGATE_CHILD === "1") return;
 
+	pi.on("tool_result", (event) => {
+		if (event.toolName !== "delegate") return;
+		const details = event.details as DelegateDetails | undefined;
+		if (
+			details?.runs.length &&
+			details.runs.every((run) => run.exitCode !== -1 && isRunError(run))
+		)
+			return { isError: true };
+	});
+
 	pi.registerTool({
 		name: "delegate",
 		label: "Delegate",
 		description: [
 			"Delegate focused work to one or more child Pi processes with isolated context windows.",
 			"Use this for exploration, review, validation, debugging, planning, or parallel option checks that would add noisy tool output to the main conversation.",
-			"Children receive the current session branch by default; pass context: fresh to omit it. Delegate is unavailable to children to prevent recursive fan-out.",
-			"Children share the selected working directory. They are read-only by default; explicitly authorize changes only for a deliberate implementation task. Parallel tasks should not mutate overlapping files.",
+			"Children start fresh by default to minimize input tokens; pass context: branch only when parent conversation is essential. Delegate is unavailable to children to prevent recursive fan-out.",
+			"Children have inspection tools, including bash, by default; edit/write require allowWrites. Read-only bash behavior is policy-based rather than sandboxed. Parallel tasks must not mutate overlapping files.",
 		].join(" "),
 		promptSnippet:
 			"Delegate focused exploration, review, validation, implementation, or option checks to child Pi processes.",
 		promptGuidelines: [
 			"Use delegate for context-heavy investigation, review, validation, debugging, planning, or parallel option checks when keeping noisy tool output out of the main context is valuable.",
 			"Do not use delegate for trivial edits or questions answerable with a small number of tool calls.",
-			"Delegate children are read-only unless the task explicitly authorizes filesystem changes. Do not give parallel children overlapping mutation scopes.",
+			"Delegate children have bash for inspection, but edit/write require allowWrites. Enable allowWrites only for deliberate implementation, and do not give parallel children overlapping mutation scopes.",
 			"Delegate cannot be called by child processes; do not ask a delegated child to delegate further.",
 		],
 		parameters: DelegateParams,
 		renderCall: renderDelegateCall,
 		renderResult: renderDelegateResult,
 
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const config = loadDelegateConfig(ctx.cwd);
-			let snapshot: string | null | undefined;
-			const getSnapshot = () => {
-				if (snapshot !== undefined) return snapshot;
-				snapshot = buildSessionSnapshotJsonl(ctx.sessionManager);
+			const snapshots = new Map<string, string | null>();
+			const getSnapshot = (cwd: string) => {
+				if (snapshots.has(cwd)) return snapshots.get(cwd) ?? null;
+				const snapshot = buildSessionSnapshotJsonl(ctx.sessionManager, {
+					cwd,
+					excludeToolCallId: toolCallId,
+				});
+				snapshots.set(cwd, snapshot);
 				return snapshot;
 			};
 
@@ -144,22 +164,24 @@ export default function delegate(pi: ExtensionAPI) {
 				const task = params.task.trim();
 				const resolved = effortFor(params.effort, config);
 				if (resolved.error) return invalidParams(resolved.error);
-				const context = params.context ?? "branch";
-				const runSnapshot = context === "branch" ? getSnapshot() : undefined;
+				const context = params.context ?? "fresh";
+				const cwd = params.cwd ?? ctx.cwd;
+				const runSnapshot = context === "branch" ? getSnapshot(cwd) : undefined;
 				if (context === "branch" && !runSnapshot)
 					return invalidParams(
 						"Cannot delegate: failed to snapshot current session branch.",
 					);
 				const run = await runDelegate({
-					cwd: params.cwd ?? ctx.cwd,
+					cwd,
 					task,
 					snapshotJsonl: runSnapshot ?? undefined,
 					effort: resolved.effort,
+					allowWrites: params.allowWrites ?? false,
 					signal,
 					onUpdate,
 					makeDetails: (runs) => makeDetails("single", runs),
 				});
-				const text = truncateBytes(resultText(run), OUTPUT_CAP);
+				const text = truncateBytes(resultText(run), SINGLE_OUTPUT_CAP);
 				return {
 					content: [
 						{
@@ -168,7 +190,6 @@ export default function delegate(pi: ExtensionAPI) {
 						},
 					],
 					details: makeDetails("single", [run]),
-					...(isRunError(run) ? { isError: true as const } : {}),
 				};
 			}
 
@@ -206,12 +227,16 @@ export default function delegate(pi: ExtensionAPI) {
 			};
 
 			const contexts = tasks.map(
-				(item) => item.context ?? params.context ?? "branch",
+				(item) => item.context ?? params.context ?? "fresh",
 			);
-			if (contexts.includes("branch") && !getSnapshot())
-				return invalidParams(
-					"Cannot delegate: failed to snapshot current session branch.",
-				);
+			for (let index = 0; index < tasks.length; index++) {
+				if (contexts[index] !== "branch") continue;
+				const cwd = tasks[index].cwd ?? ctx.cwd;
+				if (!getSnapshot(cwd))
+					return invalidParams(
+						"Cannot delegate: failed to snapshot current session branch.",
+					);
+			}
 
 			const runs = await mapWithConcurrency(
 				tasks,
@@ -222,9 +247,10 @@ export default function delegate(pi: ExtensionAPI) {
 						task: item.task,
 						snapshotJsonl:
 							contexts[index] === "branch"
-								? (getSnapshot() ?? undefined)
+								? (getSnapshot(item.cwd ?? ctx.cwd) ?? undefined)
 								: undefined,
 						effort: efforts[index].effort,
+						allowWrites: item.allowWrites ?? params.allowWrites ?? false,
 						signal,
 						onUpdate: (partial) => {
 							const current = partial.details?.runs?.[0];
@@ -242,7 +268,7 @@ export default function delegate(pi: ExtensionAPI) {
 			const succeeded = runs.filter((run) => !isRunError(run)).length;
 			const sections = runs.map((run, index) => {
 				const state = isRunError(run) ? "failed" : "completed";
-				return `## Task ${index + 1}: ${state}\n\n${resultText(run)}`;
+				return `## Task ${index + 1}: ${state}\n\n${truncateBytes(resultText(run), PER_TASK_OUTPUT_CAP)}`;
 			});
 			const text = truncateBytes(
 				`Delegated tasks: ${succeeded}/${runs.length} succeeded\n\n${sections.join("\n\n---\n\n")}`,
@@ -251,7 +277,6 @@ export default function delegate(pi: ExtensionAPI) {
 			return {
 				content: [{ type: "text" as const, text }],
 				details: makeDetails("parallel", runs),
-				...(succeeded === 0 ? { isError: true as const } : {}),
 			};
 		},
 	});

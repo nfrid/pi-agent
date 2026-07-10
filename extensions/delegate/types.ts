@@ -6,6 +6,7 @@ export interface UsageStats {
 	cacheRead: number;
 	cacheWrite: number;
 	contextTokens: number;
+	cost: number;
 	turns: number;
 }
 
@@ -46,6 +47,7 @@ export interface DelegatedRun {
 	usage: UsageStats;
 	stopReason?: string;
 	errorMessage?: string;
+	model?: string;
 	effort?: DelegateEffortState;
 	activities: DelegatedActivity[];
 }
@@ -67,6 +69,7 @@ export function emptyUsage(): UsageStats {
 		cacheRead: 0,
 		cacheWrite: 0,
 		contextTokens: 0,
+		cost: 0,
 		turns: 0,
 	};
 }
@@ -96,9 +99,12 @@ export function getFinalAssistantText(messages: Message[]): string {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
 		if (message.role !== "assistant") continue;
-		for (const part of message.content) {
-			if (part.type === "text" && part.text.trim()) return part.text;
-		}
+		const text = message.content
+			.filter((part) => part.type === "text" && part.text.trim())
+			.map((part) => (part.type === "text" ? part.text : ""))
+			.join("\n")
+			.trim();
+		if (text) return text;
 	}
 	return "";
 }

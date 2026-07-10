@@ -129,7 +129,9 @@ function updateMessageMetadata(run: DelegatedRun, message: Message) {
 		run.usage.cacheRead += usage.cacheRead || 0;
 		run.usage.cacheWrite += usage.cacheWrite || 0;
 		run.usage.contextTokens = usage.totalTokens || run.usage.contextTokens;
+		run.usage.cost += usage.cost?.total || 0;
 	}
+	if (message.model) run.model = message.model;
 	run.usage.turns++;
 	if (message.stopReason) run.stopReason = message.stopReason;
 	if (message.errorMessage) run.errorMessage = message.errorMessage;
@@ -159,17 +161,21 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
 				return true;
 			}
 			return false;
-		case "agent_end":
-			// message_end is authoritative. agent_end repeats those messages as
-			// separately deserialized objects, so identity checks cannot deduplicate it.
-			// Retain agent_end only as a fallback for unexpected streams without
-			// message_end events.
-			if (run.messages.length === 0 && Array.isArray(event.messages)) {
-				for (const message of event.messages as Message[])
-					addMessage(run, message);
-				return run.messages.length > 0;
+		case "agent_end": {
+			// message_end is authoritative. Recover only when its assistant event was
+			// missing (for example because an oversized JSON line was discarded).
+			if (
+				!run.messages.some((message) => message.role === "assistant") &&
+				Array.isArray(event.messages)
+			) {
+				const assistants = (event.messages as Message[]).filter(
+					(message) => message.role === "assistant",
+				);
+				for (const message of assistants) addMessage(run, message);
+				return assistants.length > 0;
 			}
 			return false;
+		}
 		case "tool_execution_start":
 			upsertActivity(run, {
 				id: eventId(event, "tool"),

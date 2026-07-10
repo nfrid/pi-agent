@@ -13,8 +13,44 @@ import {
 } from "./types";
 
 const SIGKILL_TIMEOUT_MS = 5000;
+const CHILD_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_STDERR_BYTES = 64 * 1024;
 const MAX_JSON_LINE_BYTES = 1024 * 1024;
+const READ_ONLY_TOOLS = "read,bash,grep,find,ls";
+const WRITE_TOOLS = "read,bash,edit,write,grep,find,ls";
+const MAX_GLOBAL_CONCURRENCY = 3;
+
+let activeRuns = 0;
+const slotWaiters: Array<() => void> = [];
+
+async function acquireSlot(signal?: AbortSignal): Promise<() => void> {
+	if (signal?.aborted)
+		throw new Error("Delegated task was aborted before launch.");
+	if (activeRuns < MAX_GLOBAL_CONCURRENCY) activeRuns++;
+	else {
+		await new Promise<void>((resolve, reject) => {
+			const onAbort = () => {
+				const index = slotWaiters.indexOf(onReady);
+				if (index >= 0) slotWaiters.splice(index, 1);
+				reject(new Error("Delegated task was aborted before launch."));
+			};
+			const onReady = () => {
+				signal?.removeEventListener("abort", onAbort);
+				resolve();
+			};
+			slotWaiters.push(onReady);
+			signal?.addEventListener("abort", onAbort, { once: true });
+		});
+	}
+	let released = false;
+	return () => {
+		if (released) return;
+		released = true;
+		const next = slotWaiters.shift();
+		if (next) next();
+		else activeRuns--;
+	};
+}
 
 type OnUpdate = (partial: {
 	content: Array<{ type: "text"; text: string }>;
@@ -84,9 +120,36 @@ export interface RunDelegateOptions {
 	task: string;
 	snapshotJsonl?: string;
 	effort?: DelegateEffortState;
+	allowWrites?: boolean;
 	signal?: AbortSignal;
 	onUpdate?: OnUpdate;
 	makeDetails: (runs: DelegatedRun[]) => DelegateDetails;
+}
+
+export function buildChildArgs(
+	options: Pick<RunDelegateOptions, "task" | "effort" | "allowWrites">,
+	sessionPath?: string,
+): string[] {
+	const args = [
+		"--mode",
+		"json",
+		"-p",
+		"--no-extensions",
+		"--no-skills",
+		"--no-prompt-templates",
+		"--no-themes",
+		"--tools",
+		options.allowWrites ? WRITE_TOOLS : READ_ONLY_TOOLS,
+	];
+	if (sessionPath) args.push("--session", sessionPath);
+	else args.push("--no-session");
+	if (options.effort?.profile && options.effort.provider) {
+		args.push("--provider", options.effort.provider);
+		args.push("--model", options.effort.profile.model);
+		args.push("--thinking", options.effort.profile.thinking);
+	}
+	args.push(buildDelegatePrompt(options.task, options.allowWrites));
+	return args;
 }
 
 export async function runDelegate(
@@ -94,7 +157,9 @@ export async function runDelegate(
 ): Promise<DelegatedRun> {
 	const run = createRun(options.task, options.effort);
 	let tmp: { dir: string; filePath: string } | undefined;
+	let releaseSlot: (() => void) | undefined;
 	let wasAborted = false;
+	let timedOut = false;
 
 	const emitUpdate = () => {
 		options.onUpdate?.({
@@ -104,16 +169,12 @@ export async function runDelegate(
 	};
 
 	try {
+		releaseSlot = await acquireSlot(options.signal);
+		if (options.signal?.aborted)
+			throw new Error("Delegated task was aborted before launch.");
 		if (options.snapshotJsonl) tmp = writeSnapshot(options.snapshotJsonl);
 		const { command, prefixArgs } = resolvePiSpawn();
-		const args = ["--mode", "json", "-p"];
-		if (tmp) args.push("--session", tmp.filePath);
-		if (options.effort?.profile && options.effort.provider) {
-			args.push("--provider", options.effort.provider);
-			args.push("--model", options.effort.profile.model);
-			args.push("--thinking", options.effort.profile.thinking);
-		}
-		args.push(buildDelegatePrompt(options.task));
+		const args = buildChildArgs(options, tmp?.filePath);
 
 		const exitCode = await new Promise<number>((resolve) => {
 			const isWindows = process.platform === "win32";
@@ -142,10 +203,11 @@ export async function runDelegate(
 				resolve(code);
 			};
 
-			const terminate = () => {
+			const terminate = (reason: "abort" | "timeout" = "abort") => {
 				if (terminating || closed) return;
 				terminating = true;
-				wasAborted = true;
+				if (reason === "timeout") timedOut = true;
+				else wasAborted = true;
 				if (isWindows && proc.pid) {
 					spawn("taskkill", ["/T", "/F", "/PID", String(proc.pid)], {
 						stdio: "ignore",
@@ -216,26 +278,40 @@ export async function runDelegate(
 				finish(1);
 			});
 
-			abortHandler = terminate;
-			if (options.signal?.aborted) terminate();
-			else options.signal?.addEventListener("abort", terminate, { once: true });
+			const timeout = setTimeout(() => terminate("timeout"), CHILD_TIMEOUT_MS);
+			timeout.unref();
+			proc.once("close", () => clearTimeout(timeout));
+
+			abortHandler = () => terminate("abort");
+			if (options.signal?.aborted) abortHandler();
+			else
+				options.signal?.addEventListener("abort", abortHandler, { once: true });
 		});
 
-		run.exitCode = wasAborted ? 130 : exitCode;
+		run.exitCode = wasAborted ? 130 : timedOut ? 124 : exitCode;
 		if (wasAborted) {
 			run.stopReason = "aborted";
 			run.errorMessage = "Delegated task was aborted.";
+		} else if (timedOut) {
+			run.stopReason = "error";
+			run.errorMessage = `Delegated task timed out after ${CHILD_TIMEOUT_MS / 60_000} minutes.`;
 		} else if (exitCode !== 0 && !run.errorMessage) {
 			run.stopReason = "error";
 			run.errorMessage =
 				run.stderr.trim() || `Child Pi exited with code ${exitCode}.`;
 		}
 	} catch (error) {
-		run.exitCode = 1;
-		run.stopReason = "error";
-		run.errorMessage = error instanceof Error ? error.message : String(error);
+		const aborted = options.signal?.aborted ?? false;
+		run.exitCode = aborted ? 130 : 1;
+		run.stopReason = aborted ? "aborted" : "error";
+		run.errorMessage = aborted
+			? "Delegated task was aborted."
+			: error instanceof Error
+				? error.message
+				: String(error);
 	} finally {
 		if (tmp) cleanup(tmp.dir);
+		releaseSlot?.();
 	}
 	return run;
 }

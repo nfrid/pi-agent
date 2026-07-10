@@ -2,7 +2,7 @@
   "lastChangelogVersion": "0.80.6",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.6-sol",
-  "defaultThinkingLevel": "low",
+  "defaultThinkingLevel": "medium",
   "editorPaddingX": 1,
   "hideThinkingBlock": false,
   "quietStartup": true,
@@ -13,7 +13,7 @@
     "effortProfiles": {
       "fast": {
         "model": "gpt-5.6-luna",
-        "thinking": "medium"
+        "thinking": "low"
       },
       "balanced": {
         "model": "gpt-5.6-terra",
@@ -21,7 +21,7 @@
       },
       "deep": {
         "model": "gpt-5.6-sol",
-        "thinking": "medium"
+        "thinking": "high"
       }
     }
   }

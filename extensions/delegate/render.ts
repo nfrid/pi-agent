@@ -62,6 +62,8 @@ function usage(run: DelegatedRun): string {
 	if (run.usage.cacheWrite) parts.push(`W${count(run.usage.cacheWrite)}`);
 	if (run.usage.contextTokens)
 		parts.push(`ctx:${count(run.usage.contextTokens)}`);
+	if (run.usage.cost) parts.push(`$${run.usage.cost.toFixed(4)}`);
+	if (run.model) parts.push(run.model);
 	return parts.join(" ");
 }
 
@@ -169,7 +171,7 @@ export function renderDelegateResult(
 		const container = new Container();
 		const title =
 			details.mode === "parallel"
-				? `delegate ${details.runs.filter((run) => run.exitCode !== -1).length}/${details.runs.length}`
+				? `delegate ${details.runs.filter((run) => !isRunError(run) && run.exitCode !== -1).length}/${details.runs.length} succeeded`
 				: "delegate";
 		container.addChild(new Text(fg("toolTitle", theme.bold(title)), 0, 0));
 		for (const run of details.runs) {
