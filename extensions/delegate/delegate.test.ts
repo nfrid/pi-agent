@@ -1,11 +1,20 @@
+import { initTheme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { describe, expect, test } from "vitest";
 import { resolveEffort } from "./config";
 import { processJsonLine } from "./events";
 import { truncateBytes } from "./output";
 import { buildDelegatePrompt } from "./prompt";
+import { renderDelegateCall, renderDelegateResult } from "./render";
 import { buildChildArgs } from "./runner";
 import { buildSessionSnapshotJsonl } from "./session";
-import { createRun, getFinalAssistantText } from "./types";
+import { createRun, getFinalAssistantText, getRunState } from "./types";
+
+initTheme("dark", false);
+
+const theme = {
+	fg: (_color: ThemeColor, text: string) => text,
+	bold: (text: string) => text,
+};
 
 const assistantMessage = {
 	role: "assistant",
@@ -129,5 +138,188 @@ describe("delegate", () => {
 				} as never,
 			]),
 		).toBe("first\nsecond");
+	});
+
+	test("tracks effective scope and lifecycle state", () => {
+		const run = createRun("inspect", undefined, {
+			cwd: "/tmp/project",
+			context: "branch",
+			allowWrites: true,
+		});
+		expect(run).toMatchObject({
+			state: "queued",
+			cwd: "/tmp/project",
+			context: "branch",
+			allowWrites: true,
+		});
+		expect(getRunState(run)).toBe("queued");
+		expect(getRunState({ ...run, state: undefined, exitCode: 124 })).toBe(
+			"timed-out",
+		);
+	});
+
+	test("renders call scope badges with inherited parallel defaults", () => {
+		const component = renderDelegateCall(
+			{
+				tasks: [
+					{ task: "inspect" },
+					{ task: "implement", allowWrites: true, context: "branch" },
+				],
+				cwd: "/tmp/project",
+				context: "fresh",
+			},
+			theme,
+			{ cwd: "/tmp/project" },
+		);
+		const output = component.render(300).join("\n");
+		expect(output).toContain("inspect [fresh] [inspect] /tmp/project");
+		expect(output).toContain("implement [branch] [writes] /tmp/project");
+	});
+
+	test("shows the full delegated prompt when the call is expanded", () => {
+		const prompt = `Inspect the project and report ${"all relevant details ".repeat(20)}`;
+		const component = renderDelegateCall({ task: prompt }, theme, {
+			cwd: "/tmp/project",
+			expanded: true,
+		});
+		expect(component.render(1000).join("\n")).toContain(prompt.trim());
+	});
+
+	test("preserves detailed tool labels when end events omit args", () => {
+		const run = createRun("inspect");
+		processJsonLine(
+			JSON.stringify({
+				type: "tool_execution_start",
+				toolCallId: "read-1",
+				toolName: "read",
+				args: { path: "/tmp/project/file.ts" },
+			}),
+			run,
+		);
+		processJsonLine(
+			JSON.stringify({
+				type: "tool_execution_end",
+				toolCallId: "read-1",
+				toolName: "read",
+				result: { content: [{ type: "text", text: "contents" }] },
+			}),
+			run,
+		);
+		expect(run.activities[0]).toMatchObject({
+			label: "read /tmp/project/file.ts",
+			status: "completed",
+		});
+	});
+
+	test("uses the first thinking text as an activity title", () => {
+		const run = createRun("inspect");
+		processJsonLine(
+			JSON.stringify({
+				type: "message_update",
+				assistantMessageEvent: {
+					type: "thinking_delta",
+					contentIndex: 0,
+					delta: "I should inspect the type definitions first.",
+				},
+			}),
+			run,
+		);
+		expect(run.activities[0]?.label).toBe(
+			"thinking: I should inspect the type definitions first.",
+		);
+	});
+
+	test("shows only a GPT-style bold thinking title", () => {
+		const run = createRun("inspect");
+		processJsonLine(
+			JSON.stringify({
+				type: "message_update",
+				assistantMessageEvent: {
+					type: "thinking_delta",
+					contentIndex: 0,
+					delta:
+						"**Thinking about oranges.**\n<!-- -->\nThe rest should stay hidden.",
+				},
+			}),
+			run,
+		);
+		expect(run.activities[0]?.label).toBe("Thinking about oranges.");
+	});
+
+	test("dims tool metadata but not the tool name", () => {
+		const run = createRun("inspect");
+		run.state = "running";
+		run.activities.push({
+			type: "tool",
+			label: "read /tmp/project/file.ts",
+			status: "running",
+		});
+		const styledTheme = {
+			fg: (color: ThemeColor, text: string) => `<${color}>${text}</${color}>`,
+			bold: (text: string) => text,
+		};
+		const component = renderDelegateResult(
+			{ details: { mode: "single", runs: [run] } },
+			{ expanded: false },
+			styledTheme,
+		);
+		const output = component.render(300).join("\n");
+		expect(output).toContain("<toolOutput>read</toolOutput>");
+		expect(output).toContain("<dim> /tmp/project/file.ts</dim>");
+	});
+
+	test("does not repeat a single task in the collapsed result", () => {
+		const run = createRun("A unique delegated task", undefined, {
+			cwd: "/tmp/project",
+			context: "fresh",
+		});
+		run.state = "success";
+		run.exitCode = 0;
+		run.messages = [
+			{
+				...assistantMessage,
+				content: [{ type: "text", text: "## Result\n\n- first\n- second" }],
+			} as never,
+		];
+		run.finishedAt = Date.now();
+		const component = renderDelegateResult(
+			{ details: { mode: "single", runs: [run] } },
+			{ expanded: false },
+			theme,
+		);
+		const output = component.render(300).join("\n");
+		expect(output).not.toContain("A unique delegated task");
+		expect(output).toContain("Result");
+		expect(output).toContain("first");
+		expect(output).toContain("second");
+	});
+
+	test("renders partial parallel completion prominently", () => {
+		const success = createRun("review", undefined, {
+			cwd: "/tmp/project",
+			context: "fresh",
+		});
+		success.state = "success";
+		success.exitCode = 0;
+		success.messages = [assistantMessage as never];
+		success.finishedAt = Date.now();
+		const failure = createRun("test", undefined, {
+			cwd: "/tmp/project",
+			context: "fresh",
+		});
+		failure.state = "error";
+		failure.exitCode = 1;
+		failure.errorMessage = "Tests failed";
+		failure.finishedAt = Date.now();
+
+		const component = renderDelegateResult(
+			{ details: { mode: "parallel", runs: [success, failure] } },
+			{ expanded: false },
+			theme,
+		);
+		const output = component.render(300).join("\n");
+		expect(output).toContain("1/2 succeeded");
+		expect(output).toContain("Partial success");
+		expect(output).toContain("Tests failed");
 	});
 });

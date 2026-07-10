@@ -39,7 +39,22 @@ export interface DelegateEffortState {
 	warning?: string;
 }
 
-export interface DelegatedRun {
+export type DelegateContext = "branch" | "fresh";
+export type DelegateRunState =
+	| "queued"
+	| "running"
+	| "success"
+	| "error"
+	| "aborted"
+	| "timed-out";
+
+export interface DelegateRunMetadata {
+	cwd?: string;
+	context?: DelegateContext;
+	allowWrites?: boolean;
+}
+
+export interface DelegatedRun extends DelegateRunMetadata {
 	task: string;
 	exitCode: number;
 	messages: Message[];
@@ -50,6 +65,10 @@ export interface DelegatedRun {
 	model?: string;
 	effort?: DelegateEffortState;
 	activities: DelegatedActivity[];
+	state?: DelegateRunState;
+	queuedAt?: number;
+	startedAt?: number;
+	finishedAt?: number;
 }
 
 export interface DelegateDetails {
@@ -77,6 +96,7 @@ export function emptyUsage(): UsageStats {
 export function createRun(
 	task: string,
 	effort?: DelegateEffortState,
+	metadata: DelegateRunMetadata = {},
 ): DelegatedRun {
 	return {
 		task,
@@ -86,7 +106,18 @@ export function createRun(
 		usage: emptyUsage(),
 		effort,
 		activities: [],
+		state: "queued",
+		queuedAt: Date.now(),
+		...metadata,
 	};
+}
+
+export function getRunState(run: DelegatedRun): DelegateRunState {
+	if (run.state) return run.state;
+	if (run.exitCode === -1) return "running";
+	if (run.stopReason === "aborted") return "aborted";
+	if (run.exitCode === 124) return "timed-out";
+	return isRunError(run) ? "error" : "success";
 }
 
 export function isRunError(run: DelegatedRun): boolean {

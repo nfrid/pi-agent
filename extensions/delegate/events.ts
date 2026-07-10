@@ -75,6 +75,13 @@ function toolLabel(name: string, args: unknown): string {
 	}
 }
 
+function findActivity(
+	run: DelegatedRun,
+	id: string | undefined,
+): DelegatedRun["activities"][number] | undefined {
+	return id ? run.activities.find((activity) => activity.id === id) : undefined;
+}
+
 function upsertActivity(
 	run: DelegatedRun,
 	activity: {
@@ -103,6 +110,25 @@ function eventId(
 	const contentIndex = assistantMessageEvent?.contentIndex;
 	if (typeof contentIndex === "number") return `${prefix}:${contentIndex}`;
 	return undefined;
+}
+
+function existingToolLabel(
+	run: DelegatedRun,
+	event: Record<string, unknown>,
+): string {
+	const name = String(event.toolName || "tool");
+	if (event.args && typeof event.args === "object")
+		return toolLabel(name, event.args);
+	return findActivity(run, eventId(event, "tool"))?.label ?? name;
+}
+
+function thinkingLabel(value: unknown): string {
+	if (typeof value !== "string") return "thinking";
+	const text = value.trim();
+	const title = text.match(/^\*\*([^\n]+?)\*\*(?:\s|$)/)?.[1]?.trim();
+	if (title) return title;
+	const preview = text.replace(/\s+/g, " ").trim().slice(0, 160);
+	return preview ? `thinking: ${preview}` : "thinking";
 }
 
 function messageBytes(messages: Message[]): number {
@@ -188,7 +214,7 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
 			upsertActivity(run, {
 				id: eventId(event, "tool"),
 				type: "tool",
-				label: toolLabel(String(event.toolName || "tool"), event.args),
+				label: existingToolLabel(run, event),
 				status: "running",
 				latestText: resultPreview(event.partialResult),
 			});
@@ -197,7 +223,7 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
 			upsertActivity(run, {
 				id: eventId(event, "tool"),
 				type: "tool",
-				label: toolLabel(String(event.toolName || "tool"), event.args),
+				label: existingToolLabel(run, event),
 				status: event.isError ? "error" : "completed",
 				latestText: resultPreview(event.result),
 			});
@@ -213,12 +239,36 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
 				});
 				return true;
 			}
-			if (assistantMessageEvent?.type === "thinking_end") {
+			if (assistantMessageEvent?.type === "thinking_delta") {
+				const id = eventId(event, "thinking");
+				const existing = findActivity(run, id);
+				const latestText =
+					`${existing?.latestText ?? ""}${typeof assistantMessageEvent.delta === "string" ? assistantMessageEvent.delta : ""}`.slice(
+						0,
+						MAX_PREVIEW_CHARS,
+					);
 				upsertActivity(run, {
-					id: eventId(event, "thinking"),
+					id,
 					type: "thinking",
-					label: "thinking",
+					label: thinkingLabel(latestText),
+					status: "running",
+					latestText,
+				});
+				return true;
+			}
+			if (assistantMessageEvent?.type === "thinking_end") {
+				const id = eventId(event, "thinking");
+				const existing = findActivity(run, id);
+				const content =
+					typeof assistantMessageEvent.content === "string"
+						? assistantMessageEvent.content
+						: existing?.latestText;
+				upsertActivity(run, {
+					id,
+					type: "thinking",
+					label: thinkingLabel(content),
 					status: "completed",
+					latestText: content,
 				});
 				return true;
 			}

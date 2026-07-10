@@ -174,6 +174,7 @@ export default function delegate(pi: ExtensionAPI) {
 				const run = await runDelegate({
 					cwd,
 					task,
+					context,
 					snapshotJsonl: runSnapshot ?? undefined,
 					effort: resolved.effort,
 					allowWrites: params.allowWrites ?? false,
@@ -210,8 +211,19 @@ export default function delegate(pi: ExtensionAPI) {
 			);
 			const effortError = efforts.find((result) => result.error)?.error;
 			if (effortError) return invalidParams(effortError);
+			const contexts = tasks.map(
+				(item) => item.context ?? params.context ?? "fresh",
+			);
+			const cwds = tasks.map((item) => item.cwd ?? ctx.cwd);
+			const writeModes = tasks.map(
+				(item) => item.allowWrites ?? params.allowWrites ?? false,
+			);
 			const liveRuns = tasks.map((item, index) =>
-				createRun(item.task, efforts[index].effort),
+				createRun(item.task, efforts[index].effort, {
+					cwd: cwds[index],
+					context: contexts[index],
+					allowWrites: writeModes[index],
+				}),
 			);
 			const emitParallelUpdate = () => {
 				const done = liveRuns.filter((run) => run.exitCode !== -1).length;
@@ -226,31 +238,29 @@ export default function delegate(pi: ExtensionAPI) {
 				});
 			};
 
-			const contexts = tasks.map(
-				(item) => item.context ?? params.context ?? "fresh",
-			);
 			for (let index = 0; index < tasks.length; index++) {
 				if (contexts[index] !== "branch") continue;
-				const cwd = tasks[index].cwd ?? ctx.cwd;
-				if (!getSnapshot(cwd))
+				if (!getSnapshot(cwds[index]))
 					return invalidParams(
 						"Cannot delegate: failed to snapshot current session branch.",
 					);
 			}
 
+			emitParallelUpdate();
 			const runs = await mapWithConcurrency(
 				tasks,
 				MAX_CONCURRENCY,
 				async (item, index) => {
 					const run = await runDelegate({
-						cwd: item.cwd ?? ctx.cwd,
+						cwd: cwds[index],
 						task: item.task,
+						context: contexts[index],
 						snapshotJsonl:
 							contexts[index] === "branch"
-								? (getSnapshot(item.cwd ?? ctx.cwd) ?? undefined)
+								? (getSnapshot(cwds[index]) ?? undefined)
 								: undefined,
 						effort: efforts[index].effort,
-						allowWrites: item.allowWrites ?? params.allowWrites ?? false,
+						allowWrites: writeModes[index],
 						signal,
 						onUpdate: (partial) => {
 							const current = partial.details?.runs?.[0];

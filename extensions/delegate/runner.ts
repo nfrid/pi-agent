@@ -6,10 +6,12 @@ import { processJsonLine } from "./events";
 import { buildDelegatePrompt } from "./prompt";
 import {
 	createRun,
+	type DelegateContext,
 	type DelegateDetails,
 	type DelegatedRun,
 	type DelegateEffortState,
 	getFinalAssistantText,
+	isRunError,
 } from "./types";
 
 const SIGKILL_TIMEOUT_MS = 5000;
@@ -118,6 +120,7 @@ function progressText(run: DelegatedRun): string {
 export interface RunDelegateOptions {
 	cwd: string;
 	task: string;
+	context: DelegateContext;
 	snapshotJsonl?: string;
 	effort?: DelegateEffortState;
 	allowWrites?: boolean;
@@ -155,7 +158,11 @@ export function buildChildArgs(
 export async function runDelegate(
 	options: RunDelegateOptions,
 ): Promise<DelegatedRun> {
-	const run = createRun(options.task, options.effort);
+	const run = createRun(options.task, options.effort, {
+		cwd: options.cwd,
+		context: options.context,
+		allowWrites: options.allowWrites ?? false,
+	});
 	let tmp: { dir: string; filePath: string } | undefined;
 	let releaseSlot: (() => void) | undefined;
 	let wasAborted = false;
@@ -168,10 +175,14 @@ export async function runDelegate(
 		});
 	};
 
+	emitUpdate();
 	try {
 		releaseSlot = await acquireSlot(options.signal);
 		if (options.signal?.aborted)
 			throw new Error("Delegated task was aborted before launch.");
+		run.state = "running";
+		run.startedAt = Date.now();
+		emitUpdate();
 		if (options.snapshotJsonl) tmp = writeSnapshot(options.snapshotJsonl);
 		const { command, prefixArgs } = resolvePiSpawn();
 		const args = buildChildArgs(options, tmp?.filePath);
@@ -271,7 +282,7 @@ export async function runDelegate(
 			proc.on("close", (code) => {
 				closed = true;
 				if (buffer.trim() && !discardingLongLine) processLine(buffer);
-				finish(code ?? 0);
+				finish(code ?? 1);
 			});
 			proc.on("error", (error) => {
 				run.stderr = appendTail(run.stderr, error.message, MAX_STDERR_BYTES);
@@ -292,14 +303,18 @@ export async function runDelegate(
 		if (wasAborted) {
 			run.stopReason = "aborted";
 			run.errorMessage = "Delegated task was aborted.";
+			run.state = "aborted";
 		} else if (timedOut) {
 			run.stopReason = "error";
 			run.errorMessage = `Delegated task timed out after ${CHILD_TIMEOUT_MS / 60_000} minutes.`;
+			run.state = "timed-out";
 		} else if (exitCode !== 0 && !run.errorMessage) {
 			run.stopReason = "error";
 			run.errorMessage =
 				run.stderr.trim() || `Child Pi exited with code ${exitCode}.`;
 		}
+		if (run.state === "running")
+			run.state = isRunError(run) ? "error" : "success";
 	} catch (error) {
 		const aborted = options.signal?.aborted ?? false;
 		run.exitCode = aborted ? 130 : 1;
@@ -309,7 +324,10 @@ export async function runDelegate(
 			: error instanceof Error
 				? error.message
 				: String(error);
+		run.state = aborted ? "aborted" : "error";
 	} finally {
+		run.finishedAt = Date.now();
+		emitUpdate();
 		if (tmp) cleanup(tmp.dir);
 		releaseSlot?.();
 	}
