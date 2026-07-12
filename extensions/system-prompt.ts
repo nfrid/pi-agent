@@ -70,6 +70,24 @@ function formatPromptInfo(options: BuildSystemPromptOptions): string {
 	].join("\n");
 }
 
+const BASH_GUIDELINES = [
+	"Prefer one composed bash call for dependent deterministic discovery, filtering, aggregation, or validation; run unrelated inspections in parallel.",
+	"Keep bash output bounded and relevant using targeted paths, filters, counts, excerpts, diffs, or compact structured summaries.",
+	"Use separate calls when results require semantic judgment, and before writes, destructive actions, or scope-expanding work; prefer dedicated read, edit, and write tools for file contents.",
+];
+
+function enhanceToolSnippet(name: string, snippet: string): string {
+	if (name !== "bash") {
+		return snippet;
+	}
+
+	return `${snippet} Prefer readable composed pipelines or temporary scripts for deterministic multi-step work, and keep stdout focused because it is added to model context.`;
+}
+
+function formatBashGuidance(): string {
+	return `\n\nBash guidance:\n${BASH_GUIDELINES.map((guideline) => `- ${guideline}`).join("\n")}`;
+}
+
 function buildSystemPrompt(
 	options: BuildSystemPromptOptions,
 	mode?: string,
@@ -88,11 +106,16 @@ function buildSystemPrompt(
 	const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : "";
 	const contextFiles = providedContextFiles ?? [];
 	const skills = providedSkills ?? [];
+	const tools = selectedTools || ["read", "bash", "edit", "write"];
+	const hasBash = tools.includes("bash");
 
 	if (customPrompt) {
 		let prompt = customPrompt;
 		if (appendSection) {
 			prompt += appendSection;
+		}
+		if (hasBash) {
+			prompt += formatBashGuidance();
 		}
 		prompt = appendProjectContext(prompt, contextFiles);
 
@@ -107,12 +130,14 @@ function buildSystemPrompt(
 		return prompt;
 	}
 
-	const tools = selectedTools || ["read", "bash", "edit", "write"];
 	const visibleTools = tools.filter((name) => !!toolSnippets?.[name]);
 	const toolsList =
 		visibleTools.length > 0
 			? visibleTools
-					.map((name) => `- ${name}: ${toolSnippets?.[name]}`)
+					.map((name) => {
+						const snippet = toolSnippets?.[name];
+						return `- ${name}: ${enhanceToolSnippet(name, snippet ?? "")}`;
+					})
 					.join("\n")
 			: "(none)";
 
@@ -126,14 +151,18 @@ function buildSystemPrompt(
 		guidelinesList.push(guideline);
 	};
 
-	const hasBash = tools.includes("bash");
 	const hasGrep = tools.includes("grep");
 	const hasFind = tools.includes("find");
 	const hasLs = tools.includes("ls");
 	const hasRead = tools.includes("read");
 
-	if (hasBash && !hasGrep && !hasFind && !hasLs) {
-		addGuideline("Use bash for file operations like ls, rg, find");
+	if (hasBash) {
+		if (!hasGrep && !hasFind && !hasLs) {
+			addGuideline("Use bash for file operations like ls, rg, find");
+		}
+		for (const guideline of BASH_GUIDELINES) {
+			addGuideline(guideline);
+		}
 	}
 
 	for (const guideline of promptGuidelines ?? []) {

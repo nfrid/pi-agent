@@ -16,12 +16,12 @@
         "thinking": "low"
       },
       "balanced": {
-        "model": "gpt-5.6-terra",
-        "thinking": "medium"
+        "model": "gpt-5.6-sol",
+        "thinking": "low"
       },
       "deep": {
         "model": "gpt-5.6-sol",
-        "thinking": "high"
+        "thinking": "medium"
       }
     }
   }
