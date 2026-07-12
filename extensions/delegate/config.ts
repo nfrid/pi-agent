@@ -18,7 +18,25 @@ const THINKING_LEVELS = [
 ] as const;
 const SETTINGS_KEY = "delegate";
 
-export interface DelegateConfig {
+export const DEFAULT_DELEGATE_RUNTIME = {
+	timeoutMs: 10 * 60 * 1000,
+	maxParallelTasks: 6,
+	maxConcurrency: 3,
+} as const;
+
+const RUNTIME_LIMITS = {
+	timeoutMs: { min: 10_000, max: 60 * 60 * 1000 },
+	maxParallelTasks: { min: 1, max: 20 },
+	maxConcurrency: { min: 1, max: 10 },
+} as const;
+
+export interface DelegateRuntimeConfig {
+	timeoutMs: number;
+	maxParallelTasks: number;
+	maxConcurrency: number;
+}
+
+export interface DelegateConfig extends DelegateRuntimeConfig {
 	provider?: string;
 	defaultEffort?: DelegateEffort;
 	effortProfiles?: Partial<Record<DelegateEffort, DelegateEffortProfile>>;
@@ -58,18 +76,60 @@ function parseProfiles(
 	return Object.keys(profiles).length > 0 ? profiles : undefined;
 }
 
+function defaultConfig(): DelegateConfig {
+	return { ...DEFAULT_DELEGATE_RUNTIME };
+}
+
+function parseRuntimeSetting(
+	record: Record<string, unknown>,
+	key: keyof DelegateRuntimeConfig,
+): { value: number; error?: string } {
+	const raw = record[key];
+	const fallback = DEFAULT_DELEGATE_RUNTIME[key];
+	if (raw === undefined) return { value: fallback };
+	const limits = RUNTIME_LIMITS[key];
+	if (typeof raw !== "number" || !Number.isInteger(raw)) {
+		return {
+			value: fallback,
+			error: `delegate.${key} must be an integer between ${limits.min} and ${limits.max}.`,
+		};
+	}
+	if (raw < limits.min || raw > limits.max) {
+		return {
+			value: Math.min(limits.max, Math.max(limits.min, raw)),
+			error: `delegate.${key} must be between ${limits.min} and ${limits.max}; received ${raw}.`,
+		};
+	}
+	return { value: raw };
+}
+
 function readConfigFile(settingsPath: string): DelegateConfig {
-	if (!existsSync(settingsPath)) return {};
+	if (!existsSync(settingsPath)) return defaultConfig();
 	try {
 		const raw = JSON.parse(readFileSync(settingsPath, "utf8")) as Record<
 			string,
 			unknown
 		>;
 		const nested = raw[SETTINGS_KEY];
+		if (nested === undefined) return defaultConfig();
 		if (!nested || typeof nested !== "object" || Array.isArray(nested))
-			return {};
+			return {
+				...defaultConfig(),
+				error: "delegate configuration must be an object.",
+			};
 		const record = nested as Record<string, unknown>;
-		const config: DelegateConfig = {};
+		const timeout = parseRuntimeSetting(record, "timeoutMs");
+		const maxTasks = parseRuntimeSetting(record, "maxParallelTasks");
+		const concurrency = parseRuntimeSetting(record, "maxConcurrency");
+		const config: DelegateConfig = {
+			timeoutMs: timeout.value,
+			maxParallelTasks: maxTasks.value,
+			maxConcurrency: concurrency.value,
+		};
+		const runtimeError = [timeout.error, maxTasks.error, concurrency.error]
+			.filter(Boolean)
+			.join(" ");
+		if (runtimeError) config.error = runtimeError;
 		if (typeof record.provider === "string" && record.provider.trim())
 			config.provider = record.provider.trim();
 		if (isEffort(record.defaultEffort))
@@ -79,6 +139,7 @@ function readConfigFile(settingsPath: string): DelegateConfig {
 		return config;
 	} catch {
 		return {
+			...defaultConfig(),
 			error: `Could not parse delegate configuration at ${settingsPath}.`,
 		};
 	}
@@ -92,7 +153,10 @@ export function loadDelegateConfig(_cwd: string): DelegateConfig {
 
 export function resolveEffort(
 	requested: unknown,
-	config: DelegateConfig,
+	config: Pick<
+		DelegateConfig,
+		"error" | "defaultEffort" | "effortProfiles" | "provider"
+	>,
 ): {
 	selected?: DelegateEffort;
 	provider?: string;

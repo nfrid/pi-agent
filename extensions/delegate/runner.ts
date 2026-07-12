@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { processJsonLine } from "./events";
 import { buildDelegatePrompt } from "./prompt";
@@ -15,7 +14,6 @@ import {
 } from "./types";
 
 const SIGKILL_TIMEOUT_MS = 5000;
-const CHILD_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_STDERR_BYTES = 64 * 1024;
 const MAX_JSON_LINE_BYTES = 1024 * 1024;
 const READ_ONLY_TOOLS = "read,bash,grep,find,ls";
@@ -26,11 +24,30 @@ const SYSTEM_PROMPT_EXTENSION = path.resolve(__dirname, "../system-prompt.ts");
 
 let activeRuns = 0;
 const slotWaiters: Array<() => void> = [];
+const sessionTails = new Map<string, Promise<void>>();
 
-async function acquireSlot(signal?: AbortSignal): Promise<() => void> {
+async function acquireSession(sessionPath: string): Promise<() => void> {
+	const previous = sessionTails.get(sessionPath) ?? Promise.resolve();
+	let release!: () => void;
+	const current = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	sessionTails.set(sessionPath, current);
+	await previous;
+	return () => {
+		release();
+		if (sessionTails.get(sessionPath) === current)
+			sessionTails.delete(sessionPath);
+	};
+}
+
+async function acquireSlot(
+	signal?: AbortSignal,
+	maxConcurrency = MAX_GLOBAL_CONCURRENCY,
+): Promise<() => void> {
 	if (signal?.aborted)
 		throw new Error("Delegated task was aborted before launch.");
-	if (activeRuns < MAX_GLOBAL_CONCURRENCY) activeRuns++;
+	if (activeRuns < maxConcurrency) activeRuns++;
 	else {
 		await new Promise<void>((resolve, reject) => {
 			const onAbort = () => {
@@ -70,24 +87,6 @@ function resolvePiSpawn(): { command: string; prefixArgs: string[] } {
 	return { command: "pi", prefixArgs: [] };
 }
 
-function writeSnapshot(snapshotJsonl: string): {
-	dir: string;
-	filePath: string;
-} {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-delegate-"));
-	const filePath = path.join(dir, "delegate.jsonl");
-	fs.writeFileSync(filePath, snapshotJsonl, { encoding: "utf-8", mode: 0o600 });
-	return { dir, filePath };
-}
-
-function cleanup(dir: string): void {
-	try {
-		fs.rmSync(dir, { recursive: true, force: true });
-	} catch {
-		// Ignore cleanup errors.
-	}
-}
-
 function appendTail(current: string, chunk: string, maxBytes: number): string {
 	const combined = current + chunk;
 	if (Buffer.byteLength(combined, "utf8") <= maxBytes) return combined;
@@ -123,17 +122,26 @@ export interface RunDelegateOptions {
 	cwd: string;
 	task: string;
 	context: DelegateContext;
-	snapshotJsonl?: string;
+	sessionPath: string;
 	effort?: DelegateEffortState;
 	allowWrites?: boolean;
+	contextNote?: string;
+	scope?: string[];
+	continuation?: string;
+	resuming?: boolean;
+	timeoutMs: number;
+	maxConcurrency: number;
 	signal?: AbortSignal;
 	onUpdate?: OnUpdate;
 	makeDetails: (runs: DelegatedRun[]) => DelegateDetails;
 }
 
 export function buildChildArgs(
-	options: Pick<RunDelegateOptions, "task" | "effort" | "allowWrites">,
-	sessionPath?: string,
+	options: Pick<
+		RunDelegateOptions,
+		"task" | "effort" | "allowWrites" | "contextNote" | "scope" | "resuming"
+	>,
+	sessionPath: string,
 ): string[] {
 	const args = [
 		"--mode",
@@ -148,14 +156,20 @@ export function buildChildArgs(
 		"--tools",
 		options.allowWrites ? WRITE_TOOLS : READ_ONLY_TOOLS,
 	];
-	if (sessionPath) args.push("--session", sessionPath);
-	else args.push("--no-session");
+	args.push("--session", sessionPath);
 	if (options.effort?.profile && options.effort.provider) {
 		args.push("--provider", options.effort.provider);
 		args.push("--model", options.effort.profile.model);
 		args.push("--thinking", options.effort.profile.thinking);
 	}
-	args.push(buildDelegatePrompt(options.task, options.allowWrites));
+	args.push(
+		buildDelegatePrompt(options.task, {
+			allowWrites: options.allowWrites,
+			contextNote: options.contextNote,
+			scope: options.scope,
+			continuation: options.resuming,
+		}),
+	);
 	return args;
 }
 
@@ -166,9 +180,12 @@ export async function runDelegate(
 		cwd: options.cwd,
 		context: options.context,
 		allowWrites: options.allowWrites ?? false,
+		contextNote: options.contextNote,
+		scope: options.scope,
+		continuation: options.continuation,
 	});
-	let tmp: { dir: string; filePath: string } | undefined;
 	let releaseSlot: (() => void) | undefined;
+	let releaseSession: (() => void) | undefined;
 	let wasAborted = false;
 	let timedOut = false;
 
@@ -185,15 +202,17 @@ export async function runDelegate(
 		: undefined;
 	updateTimer?.unref();
 	try {
-		releaseSlot = await acquireSlot(options.signal);
+		releaseSession = await acquireSession(options.sessionPath);
+		if (options.signal?.aborted)
+			throw new Error("Delegated task was aborted before launch.");
+		releaseSlot = await acquireSlot(options.signal, options.maxConcurrency);
 		if (options.signal?.aborted)
 			throw new Error("Delegated task was aborted before launch.");
 		run.state = "running";
 		run.startedAt = Date.now();
 		emitUpdate();
-		if (options.snapshotJsonl) tmp = writeSnapshot(options.snapshotJsonl);
 		const { command, prefixArgs } = resolvePiSpawn();
-		const args = buildChildArgs(options, tmp?.filePath);
+		const args = buildChildArgs(options, options.sessionPath);
 
 		const exitCode = await new Promise<number>((resolve) => {
 			const isWindows = process.platform === "win32";
@@ -297,7 +316,7 @@ export async function runDelegate(
 				finish(1);
 			});
 
-			const timeout = setTimeout(() => terminate("timeout"), CHILD_TIMEOUT_MS);
+			const timeout = setTimeout(() => terminate("timeout"), options.timeoutMs);
 			timeout.unref();
 			proc.once("close", () => clearTimeout(timeout));
 
@@ -314,7 +333,7 @@ export async function runDelegate(
 			run.state = "aborted";
 		} else if (timedOut) {
 			run.stopReason = "error";
-			run.errorMessage = `Delegated task timed out after ${CHILD_TIMEOUT_MS / 60_000} minutes.`;
+			run.errorMessage = `Delegated task timed out after ${Math.round(options.timeoutMs / 1000)} seconds.`;
 			run.state = "timed-out";
 		} else if (exitCode !== 0 && !run.errorMessage) {
 			run.stopReason = "error";
@@ -337,8 +356,8 @@ export async function runDelegate(
 		if (updateTimer) clearInterval(updateTimer);
 		run.finishedAt = Date.now();
 		emitUpdate();
-		if (tmp) cleanup(tmp.dir);
 		releaseSlot?.();
+		releaseSession?.();
 	}
 	return run;
 }

@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -5,7 +6,11 @@ import { EFFORT_LEVELS, loadDelegateConfig, resolveEffort } from "./config";
 import { truncateBytes } from "./output";
 import { renderDelegateCall, renderDelegateResult } from "./render";
 import { mapWithConcurrency, runDelegate } from "./runner";
-import { buildSessionSnapshotJsonl } from "./session";
+import {
+	buildSessionSnapshotJsonl,
+	createDelegateSession,
+	resolveDelegateSession,
+} from "./session";
 import {
 	createRun,
 	type DelegateDetails,
@@ -15,63 +20,49 @@ import {
 	isRunError,
 } from "./types";
 
-const MAX_PARALLEL_TASKS = 6;
-const MAX_CONCURRENCY = 5;
 const OUTPUT_CAP = 50 * 1024;
 const SINGLE_OUTPUT_CAP = 12 * 1024;
 const PER_TASK_OUTPUT_CAP = 8 * 1024;
 
 const EffortSchema = StringEnum(EFFORT_LEVELS, {
-	description:
-		"Optional child model profile. fast favors speed and economy for focused or routine work; balanced provides stronger general-purpose reasoning at moderate cost; deep spends more time and compute on demanding work where additional scrutiny may help. Choose based on the task.",
+	description: "Optional child model profile: fast, balanced, or deep.",
 });
-
 const ContextSchema = StringEnum(["branch", "fresh"] as const, {
 	description:
-		"Optional context mode. fresh starts with only the task and project instructions; branch also includes parent conversation history. Defaults to fresh to reduce cost.",
+		"Optional context mode. fresh starts with the task and project instructions; branch also includes parent conversation history.",
+});
+const ScopeSchema = Type.Array(Type.String(), {
+	description:
+		"Advisory paths where work is expected. This helps coordinate parallel writes but is not a hard boundary.",
 });
 
 const TaskItem = Type.Object({
-	task: Type.String({
-		description: "Focused task to delegate to a child Pi process",
-	}),
-	cwd: Type.Optional(
-		Type.String({
-			description: "Optional working directory for this child process",
-		}),
-	),
+	task: Type.String({ description: "Focused task or continuation feedback" }),
+	cwd: Type.Optional(Type.String()),
 	effort: Type.Optional(EffortSchema),
 	context: Type.Optional(ContextSchema),
-	allowWrites: Type.Optional(
-		Type.Boolean({
-			description:
-				"Enable edit/write for a deliberate implementation task. Bash remains available for inspection when false.",
-		}),
+	contextNote: Type.Optional(
+		Type.String({ description: "Curated context from the parent agent" }),
 	),
+	scope: Type.Optional(ScopeSchema),
+	continuation: Type.Optional(
+		Type.String({ description: "Opaque token from a previous delegate run" }),
+	),
+	allowWrites: Type.Optional(Type.Boolean()),
 });
 
 const DelegateParams = Type.Object({
 	task: Type.Optional(
-		Type.String({ description: "Focused task to delegate to one child" }),
+		Type.String({ description: "Focused task or follow-up feedback" }),
 	),
-	tasks: Type.Optional(
-		Type.Array(TaskItem, {
-			description: "Focused tasks to delegate in parallel",
-		}),
-	),
-	cwd: Type.Optional(
-		Type.String({
-			description: "Optional working directory for a single child",
-		}),
-	),
+	tasks: Type.Optional(Type.Array(TaskItem)),
+	cwd: Type.Optional(Type.String()),
 	effort: Type.Optional(EffortSchema),
 	context: Type.Optional(ContextSchema),
-	allowWrites: Type.Optional(
-		Type.Boolean({
-			description:
-				"Enable edit/write for a single task, or as the default for parallel tasks. Bash remains available when false.",
-		}),
-	),
+	contextNote: Type.Optional(Type.String()),
+	scope: Type.Optional(ScopeSchema),
+	continuation: Type.Optional(Type.String()),
+	allowWrites: Type.Optional(Type.Boolean()),
 });
 
 function makeDetails(
@@ -82,12 +73,17 @@ function makeDetails(
 }
 
 function resultText(run: DelegatedRun): string {
-	const warning = run.effort?.warning
-		? `Delegate warning: ${run.effort.warning}\n\n`
-		: "";
+	const warning = [run.effort?.warning, ...(run.warnings ?? [])]
+		.filter(Boolean)
+		.map((item) => `Delegate warning: ${item}`)
+		.join("\n");
 	const final = getFinalAssistantText(run.messages).trim();
-	if (final) return `${warning}${final}`;
-	return `${warning}${run.errorMessage?.trim() || run.stderr.trim() || "(no output)"}`;
+	const body =
+		final || run.errorMessage?.trim() || run.stderr.trim() || "(no output)";
+	const continuation = run.continuation
+		? `Continuation token: ${run.continuation}\n\n`
+		: "";
+	return `${continuation}${warning ? `${warning}\n\n` : ""}${body}`;
 }
 
 function invalidParams(message: string): never {
@@ -97,14 +93,61 @@ function invalidParams(message: string): never {
 function effortFor(
 	requested: unknown,
 	config: ReturnType<typeof loadDelegateConfig>,
-): { effort?: DelegateEffortState; error?: string } {
+): {
+	effort?: DelegateEffortState;
+	error?: string;
+} {
 	const resolved = resolveEffort(requested, config);
-	if (resolved.error) return { error: resolved.error };
-	return { effort: resolved };
+	return resolved.error ? { error: resolved.error } : { effort: resolved };
+}
+
+function normalizedScopes(cwd: string, scopes: string[]): string[] {
+	return scopes.map((scope) => path.resolve(cwd, scope));
+}
+
+function scopesOverlap(a: string[], b: string[]): boolean {
+	return a.some((left) =>
+		b.some(
+			(right) =>
+				left === right ||
+				left.startsWith(`${right}${path.sep}`) ||
+				right.startsWith(`${left}${path.sep}`),
+		),
+	);
+}
+
+function writeWarnings(
+	cwds: string[],
+	writeModes: boolean[],
+	scopes: Array<string[] | undefined>,
+): string[][] {
+	const warnings = scopes.map(() => [] as string[]);
+	for (let i = 0; i < scopes.length; i++) {
+		if (!writeModes[i]) continue;
+		for (let j = i + 1; j < scopes.length; j++) {
+			if (!writeModes[j] || path.resolve(cwds[i]) !== path.resolve(cwds[j]))
+				continue;
+			const left = scopes[i]?.filter(Boolean) ?? [];
+			const right = scopes[j]?.filter(Boolean) ?? [];
+			const warning =
+				left.length === 0 || right.length === 0
+					? `Parallel write tasks ${i + 1} and ${j + 1} share a working directory and at least one has no declared scope; coordinate changes carefully.`
+					: scopesOverlap(
+								normalizedScopes(cwds[i], left),
+								normalizedScopes(cwds[j], right),
+							)
+						? `Parallel write tasks ${i + 1} and ${j + 1} have overlapping declared scopes; coordinate changes carefully.`
+						: undefined;
+			if (warning) {
+				warnings[i].push(warning);
+				warnings[j].push(warning);
+			}
+		}
+	}
+	return warnings;
 }
 
 export default function delegate(pi: ExtensionAPI) {
-	// Recursive fan-out wastes tokens and is especially unreliable with small models.
 	if (process.env.PI_DELEGATE_CHILD === "1") return;
 
 	pi.on("tool_result", (event) => {
@@ -120,20 +163,17 @@ export default function delegate(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "delegate",
 		label: "Delegate",
-		description: [
-			"Delegate focused work to one or more child Pi processes with isolated context windows.",
-			"Use this for exploration, review, validation, debugging, planning, or parallel option checks that would add noisy tool output to the main conversation.",
-			"Children start fresh by default to minimize input tokens; pass context: branch only when parent conversation is essential. Delegate is unavailable to children to prevent recursive fan-out.",
-			"Children have inspection tools, including bash, by default; edit/write require allowWrites. Read-only bash behavior is policy-based rather than sandboxed. Parallel tasks must not mutate overlapping files.",
-		].join(" "),
+		description:
+			"Delegate focused work to child Pi processes with isolated context windows. Children can be continued using the opaque continuation token returned in run details. contextNote supplies curated prose context. scope is advisory for coordinating parallel writes.",
 		promptSnippet:
-			"Delegate substantial focused exploration, review, validation, implementation, or independent option checks when a child process would save context or enable useful parallelism.",
+			"Delegate substantial focused exploration, review, validation, implementation, or independent parallel work when a child process would save context.",
 		promptGuidelines: [
-			"Use delegate autonomously for substantial context-heavy investigation, review, debugging, planning, or independent parallel work when isolating the work would provide a clear benefit.",
-			"Prefer direct tool use for routine checks, small edits, and questions answerable with a few tool calls; delegation should earn its additional usage cost.",
-			"Prefer the fast effort profile for focused or routine delegated work. Use balanced or deep only when the task's complexity warrants the additional usage.",
-			"Delegate children have bash for inspection, but edit/write require allowWrites. Enable allowWrites only for deliberate implementation, and do not give parallel children overlapping mutation scopes.",
-			"Delegate cannot be called by child processes; do not ask a delegated child to delegate further.",
+			"Prefer direct tools for small work and fast effort for routine delegation; do not create research, implementation, test, or review stages unless each adds concrete value.",
+			"Use contextNote to give a fresh child only the relevant decisions, constraints, and prior findings; use branch only when exact parent history matters.",
+			"Continue a child when it already has useful task context and needs focused correction or extension; start fresh when its approach is unsuitable or an independent view is more valuable.",
+			"Parallelize only independent work. When one task depends on another's findings, inspect the first result before starting or continuing the next; for parallel writes, provide advisory scopes where practical and avoid knowingly overlapping mutations.",
+			"Treat delegated results as evidence rather than authority: use reported checks and concrete evidence, and verify directly or continue the child when important claims remain unsupported.",
+			"Delegate cannot be called by child processes.",
 		],
 		parameters: DelegateParams,
 		renderCall: renderDelegateCall,
@@ -158,27 +198,50 @@ export default function delegate(pi: ExtensionAPI) {
 				Array.isArray(params.tasks) && params.tasks.length > 0;
 			if (hasSingle === hasParallel)
 				return invalidParams(
-					"Provide exactly one delegation mode: task for one child, or tasks for parallel children.",
+					"Provide exactly one delegation mode: task or tasks.",
 				);
 
 			if (hasSingle && typeof params.task === "string") {
-				const task = params.task.trim();
-				const resolved = effortFor(params.effort, config);
-				if (resolved.error) return invalidParams(resolved.error);
-				const context = params.context ?? "fresh";
-				const cwd = params.cwd ?? ctx.cwd;
-				const runSnapshot = context === "branch" ? getSnapshot(cwd) : undefined;
-				if (context === "branch" && !runSnapshot)
+				const effort = effortFor(params.effort, config);
+				if (effort.error) return invalidParams(effort.error);
+				if (
+					params.continuation &&
+					(params.cwd !== undefined || params.context !== undefined)
+				)
+					return invalidParams(
+						"A continuation reuses its original cwd and context; do not provide cwd or context.",
+					);
+				const resumed = params.continuation
+					? resolveDelegateSession(params.continuation)
+					: undefined;
+				if (params.continuation && !resumed)
+					return invalidParams(
+						"Unknown or expired delegate continuation token.",
+					);
+				const cwd = resumed?.cwd ?? params.cwd ?? ctx.cwd;
+				const context = resumed ? "continuation" : (params.context ?? "fresh");
+				const snapshot =
+					!resumed && context === "branch" ? getSnapshot(cwd) : undefined;
+				if (!resumed && context === "branch" && !snapshot)
 					return invalidParams(
 						"Cannot delegate: failed to snapshot current session branch.",
 					);
+				const session =
+					resumed ??
+					createDelegateSession({ cwd, snapshotJsonl: snapshot ?? undefined });
 				const run = await runDelegate({
 					cwd,
-					task,
+					task: params.task.trim(),
 					context,
-					snapshotJsonl: runSnapshot ?? undefined,
-					effort: resolved.effort,
+					sessionPath: session.filePath,
+					continuation: session.token,
+					resuming: Boolean(resumed),
+					contextNote: params.contextNote,
+					scope: params.scope,
+					effort: effort.effort,
 					allowWrites: params.allowWrites ?? false,
+					timeoutMs: config.timeoutMs,
+					maxConcurrency: config.maxConcurrency,
 					signal,
 					onUpdate,
 					makeDetails: (runs) => makeDetails("single", runs),
@@ -198,95 +261,152 @@ export default function delegate(pi: ExtensionAPI) {
 			const tasks = (params.tasks ?? [])
 				.map((item) => ({ ...item, task: item.task.trim() }))
 				.filter((item) => item.task);
-			if (tasks.length === 0)
+			if (!tasks.length)
+				return invalidParams("Parallel delegation requires a non-empty task.");
+			if (tasks.length > config.maxParallelTasks)
 				return invalidParams(
-					"Parallel delegation requires at least one non-empty task.",
+					`Too many delegated tasks (${tasks.length}). Maximum is ${config.maxParallelTasks}.`,
 				);
-			if (tasks.length > MAX_PARALLEL_TASKS)
-				return invalidParams(
-					`Too many delegated tasks (${tasks.length}). Maximum is ${MAX_PARALLEL_TASKS}.`,
-				);
-
 			const efforts = tasks.map((item) =>
 				effortFor(item.effort ?? params.effort, config),
 			);
-			const effortError = efforts.find((result) => result.error)?.error;
+			const effortError = efforts.find((item) => item.error)?.error;
 			if (effortError) return invalidParams(effortError);
-			const contexts = tasks.map(
-				(item) => item.context ?? params.context ?? "fresh",
+			if (params.continuation)
+				return invalidParams(
+					"For parallel delegation, set continuation on each task rather than as a shared default.",
+				);
+			const resumed = tasks.map((item) => {
+				if (
+					item.continuation &&
+					(item.cwd !== undefined || item.context !== undefined)
+				)
+					return invalidParams(
+						"A continuation task cannot provide cwd or context.",
+					);
+				const session = item.continuation
+					? resolveDelegateSession(item.continuation)
+					: undefined;
+				if (item.continuation && !session)
+					return invalidParams(
+						"Unknown or expired delegate continuation token.",
+					);
+				return session;
+			});
+			if (
+				resumed.some(Boolean) &&
+				(params.cwd !== undefined || params.context !== undefined)
+			)
+				return invalidParams(
+					"Parallel continuations reuse their original cwd and history; do not provide top-level cwd or context.",
+				);
+			const contexts = tasks.map((item, index) =>
+				resumed[index]
+					? ("continuation" as const)
+					: (item.context ?? params.context ?? "fresh"),
 			);
-			const cwds = tasks.map((item) => item.cwd ?? ctx.cwd);
-			const writeModes = tasks.map(
+			const cwds = tasks.map(
+				(item, index) =>
+					resumed[index]?.cwd ?? item.cwd ?? params.cwd ?? ctx.cwd,
+			);
+			const notes = tasks.map((item) => item.contextNote ?? params.contextNote);
+			const scopes = tasks.map((item) => item.scope ?? params.scope);
+			const writes = tasks.map(
 				(item) => item.allowWrites ?? params.allowWrites ?? false,
+			);
+			const warnings = writeWarnings(cwds, writes, scopes);
+			for (let i = 0; i < tasks.length; i++) {
+				if (!resumed[i] && contexts[i] === "branch" && !getSnapshot(cwds[i]))
+					return invalidParams(
+						"Cannot delegate: failed to snapshot current session branch.",
+					);
+			}
+			const sessions = tasks.map(
+				(_, index) =>
+					resumed[index] ??
+					createDelegateSession({
+						cwd: cwds[index],
+						snapshotJsonl:
+							contexts[index] === "branch"
+								? (getSnapshot(cwds[index]) ?? undefined)
+								: undefined,
+					}),
 			);
 			const liveRuns = tasks.map((item, index) =>
 				createRun(item.task, efforts[index].effort, {
 					cwd: cwds[index],
 					context: contexts[index],
-					allowWrites: writeModes[index],
+					contextNote: notes[index],
+					scope: scopes[index],
+					allowWrites: writes[index],
+					continuation: sessions[index].token,
+					warnings: warnings[index],
 				}),
 			);
-			const emitParallelUpdate = () => {
+			const warningText = [...new Set(warnings.flat())];
+			const emit = () => {
 				const done = liveRuns.filter((run) => run.exitCode !== -1).length;
 				onUpdate?.({
 					content: [
 						{
 							type: "text",
-							text: `Delegated tasks: ${done}/${liveRuns.length} complete`,
+							text: `${warningText.length ? `${warningText.map((w) => `Warning: ${w}`).join("\n")}\n\n` : ""}Delegated tasks: ${done}/${liveRuns.length} complete`,
 						},
 					],
 					details: makeDetails("parallel", [...liveRuns]),
 				});
 			};
-
-			for (let index = 0; index < tasks.length; index++) {
-				if (contexts[index] !== "branch") continue;
-				if (!getSnapshot(cwds[index]))
-					return invalidParams(
-						"Cannot delegate: failed to snapshot current session branch.",
-					);
-			}
-
-			emitParallelUpdate();
+			emit();
 			const runs = await mapWithConcurrency(
 				tasks,
-				MAX_CONCURRENCY,
+				config.maxConcurrency,
 				async (item, index) => {
 					const run = await runDelegate({
 						cwd: cwds[index],
 						task: item.task,
 						context: contexts[index],
-						snapshotJsonl:
-							contexts[index] === "branch"
-								? (getSnapshot(cwds[index]) ?? undefined)
-								: undefined,
+						sessionPath: sessions[index].filePath,
+						continuation: sessions[index].token,
+						resuming: Boolean(resumed[index]),
+						contextNote: notes[index],
+						scope: scopes[index],
 						effort: efforts[index].effort,
-						allowWrites: writeModes[index],
+						allowWrites: writes[index],
+						timeoutMs: config.timeoutMs,
+						maxConcurrency: config.maxConcurrency,
 						signal,
 						onUpdate: (partial) => {
 							const current = partial.details?.runs?.[0];
-							if (current) liveRuns[index] = current;
-							emitParallelUpdate();
+							if (current)
+								liveRuns[index] = { ...current, warnings: warnings[index] };
+							emit();
 						},
-						makeDetails: (runs) => makeDetails("parallel", runs),
+						makeDetails: (items) => makeDetails("parallel", items),
 					});
+					run.warnings = warnings[index];
 					liveRuns[index] = run;
-					emitParallelUpdate();
+					emit();
 					return run;
 				},
 			);
-
 			const succeeded = runs.filter((run) => !isRunError(run)).length;
-			const sections = runs.map((run, index) => {
-				const state = isRunError(run) ? "failed" : "completed";
-				return `## Task ${index + 1}: ${state}\n\n${truncateBytes(resultText(run), PER_TASK_OUTPUT_CAP)}`;
-			});
-			const text = truncateBytes(
-				`Delegated tasks: ${succeeded}/${runs.length} succeeded\n\n${sections.join("\n\n---\n\n")}`,
-				OUTPUT_CAP,
+			const sections = runs.map(
+				(run, index) =>
+					`## Task ${index + 1}: ${isRunError(run) ? "failed" : "completed"}\n\n${truncateBytes(resultText(run), PER_TASK_OUTPUT_CAP)}`,
 			);
+			const prefix = warningText.length
+				? `${warningText.map((w) => `Warning: ${w}`).join("\n")}\n\n`
+				: "";
 			return {
-				content: [{ type: "text" as const, text }],
+				content: [
+					{
+						type: "text" as const,
+						text: truncateBytes(
+							`${prefix}Delegated tasks: ${succeeded}/${runs.length} succeeded\n\n${sections.join("\n\n---\n\n")}`,
+							OUTPUT_CAP,
+						),
+					},
+				],
 				details: makeDetails("parallel", runs),
 			};
 		},

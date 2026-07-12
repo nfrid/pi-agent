@@ -1,5 +1,10 @@
-import { existsSync } from "node:fs";
-import { initTheme, type ThemeColor } from "@earendil-works/pi-coding-agent";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import * as path from "node:path";
+import {
+	getAgentDir,
+	initTheme,
+	type ThemeColor,
+} from "@earendil-works/pi-coding-agent";
 import { describe, expect, test } from "vitest";
 import { buildSystemPrompt } from "../system-prompt";
 import { resolveEffort } from "./config";
@@ -8,7 +13,11 @@ import { truncateBytes } from "./output";
 import { buildDelegatePrompt } from "./prompt";
 import { renderDelegateCall, renderDelegateResult } from "./render";
 import { buildChildArgs } from "./runner";
-import { buildSessionSnapshotJsonl } from "./session";
+import {
+	buildSessionSnapshotJsonl,
+	createDelegateSession,
+	resolveDelegateSession,
+} from "./session";
 import { createRun, getFinalAssistantText, getRunState } from "./types";
 
 initTheme("dark", false);
@@ -35,6 +44,18 @@ describe("delegate", () => {
 		const prompt = buildDelegatePrompt("Inspect the repository");
 		expect(prompt).toMatch(/read-only task/);
 		expect(prompt).not.toMatch(/Use this exact structure/);
+	});
+
+	test("adds curated context, advisory scope, and continuation framing", () => {
+		const prompt = buildDelegatePrompt("Recheck the failure", {
+			contextNote: "The parser path is already ruled out.",
+			scope: ["src/cache", "tests/cache"],
+			continuation: true,
+		});
+		expect(prompt).toContain("Context from the parent agent");
+		expect(prompt).toContain("parser path is already ruled out");
+		expect(prompt).toContain("guidance, not a hard boundary");
+		expect(prompt).toContain("follow-up feedback");
 	});
 
 	test("does not duplicate agent_end messages received through message_end", () => {
@@ -115,9 +136,30 @@ describe("delegate", () => {
 		);
 	});
 
-	test("uses ephemeral, minimal, read-only children with the system prompt extension", () => {
-		const args = buildChildArgs({ task: "inspect" });
-		expect(args).toContain("--no-session");
+	test("creates durable opaque sessions that can be resolved for continuation", () => {
+		const session = createDelegateSession({ cwd: "/tmp/project" });
+		try {
+			expect(resolveDelegateSession(session.token)).toEqual(session);
+			const header = JSON.parse(
+				readFileSync(session.filePath, "utf8").trim(),
+			) as Record<string, unknown>;
+			expect(header).toMatchObject({
+				type: "session",
+				id: session.token,
+				cwd: "/tmp/project",
+			});
+			expect(resolveDelegateSession("../../not-a-token")).toBeNull();
+		} finally {
+			const dir = path.join(getAgentDir(), "delegate-sessions");
+			rmSync(path.join(dir, `${session.token}.jsonl`), { force: true });
+			rmSync(path.join(dir, `${session.token}.json`), { force: true });
+		}
+	});
+
+	test("uses persistent, minimal, read-only children with the system prompt extension", () => {
+		const args = buildChildArgs({ task: "inspect" }, "/tmp/child.jsonl");
+		expect(args).toContain("--session");
+		expect(args[args.indexOf("--session") + 1]).toBe("/tmp/child.jsonl");
 		expect(args).toContain("--no-extensions");
 		const extensionPath = args[args.indexOf("--extension") + 1];
 		expect(extensionPath).toMatch(/extensions[\\/]system-prompt\.ts$/);
@@ -150,7 +192,10 @@ describe("delegate", () => {
 	});
 
 	test("enables mutation tools only when explicitly requested", () => {
-		const args = buildChildArgs({ task: "implement", allowWrites: true });
+		const args = buildChildArgs(
+			{ task: "implement", allowWrites: true },
+			"/tmp/child.jsonl",
+		);
 		expect(args[args.indexOf("--tools") + 1]).toContain("write");
 		expect(args[args.indexOf("--tools") + 1]).toContain("bash");
 	});

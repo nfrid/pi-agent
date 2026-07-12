@@ -39,7 +39,7 @@ export interface DelegateEffortState {
 	warning?: string;
 }
 
-export type DelegateContext = "branch" | "fresh";
+export type DelegateContext = "branch" | "fresh" | "continuation";
 export type DelegateRunState =
 	| "queued"
 	| "running"
@@ -51,7 +51,11 @@ export type DelegateRunState =
 export interface DelegateRunMetadata {
 	cwd?: string;
 	context?: DelegateContext;
+	contextNote?: string;
 	allowWrites?: boolean;
+	scope?: string[];
+	continuation?: string;
+	warnings?: string[];
 }
 
 export interface DelegatedRun extends DelegateRunMetadata {
