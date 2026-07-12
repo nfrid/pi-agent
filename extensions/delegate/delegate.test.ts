@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import { initTheme, type ThemeColor } from "@earendil-works/pi-coding-agent";
 import { describe, expect, test } from "vitest";
+import { buildSystemPrompt } from "../system-prompt";
 import { resolveEffort } from "./config";
 import { processJsonLine } from "./events";
 import { truncateBytes } from "./output";
@@ -113,11 +115,38 @@ describe("delegate", () => {
 		);
 	});
 
-	test("uses ephemeral, minimal, read-only children by default", () => {
+	test("uses ephemeral, minimal, read-only children with the system prompt extension", () => {
 		const args = buildChildArgs({ task: "inspect" });
 		expect(args).toContain("--no-session");
 		expect(args).toContain("--no-extensions");
+		const extensionPath = args[args.indexOf("--extension") + 1];
+		expect(extensionPath).toMatch(/extensions[\\/]system-prompt\.ts$/);
+		expect(existsSync(extensionPath)).toBe(true);
 		expect(args[args.indexOf("--tools") + 1]).toBe("read,bash,grep,find,ls");
+	});
+
+	test("gives delegate children a focused role without changing the main role", () => {
+		const options = {
+			cwd: "/tmp/project",
+			selectedTools: ["read"],
+			toolSnippets: { read: "Read files" },
+		} as never;
+		expect(buildSystemPrompt(options, "json", true)).toContain(
+			"focused coding subagent",
+		);
+		expect(buildSystemPrompt(options, "tui", false)).toContain(
+			"expert coding assistant",
+		);
+		expect(
+			buildSystemPrompt(
+				{
+					cwd: "/tmp/project",
+					customPrompt: "A carefully customized prompt",
+				} as never,
+				"json",
+				true,
+			),
+		).toContain("Delegated child context");
 	});
 
 	test("enables mutation tools only when explicitly requested", () => {

@@ -22,6 +22,7 @@ const READ_ONLY_TOOLS = "read,bash,grep,find,ls";
 const WRITE_TOOLS = "read,bash,edit,write,grep,find,ls";
 const MAX_GLOBAL_CONCURRENCY = 3;
 const PROGRESS_UPDATE_INTERVAL_MS = 1000;
+const SYSTEM_PROMPT_EXTENSION = path.resolve(__dirname, "../system-prompt.ts");
 
 let activeRuns = 0;
 const slotWaiters: Array<() => void> = [];
@@ -139,6 +140,8 @@ export function buildChildArgs(
 		"json",
 		"-p",
 		"--no-extensions",
+		"--extension",
+		SYSTEM_PROMPT_EXTENSION,
 		"--no-skills",
 		"--no-prompt-templates",
 		"--no-themes",

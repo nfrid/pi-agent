@@ -88,9 +88,10 @@ function formatBashGuidance(): string {
 	return `\n\nBash guidance:\n${BASH_GUIDELINES.map((guideline) => `- ${guideline}`).join("\n")}`;
 }
 
-function buildSystemPrompt(
+export function buildSystemPrompt(
 	options: BuildSystemPromptOptions,
 	mode?: string,
+	isDelegateChild = process.env.PI_DELEGATE_CHILD === "1",
 ): string {
 	const {
 		customPrompt,
@@ -111,6 +112,10 @@ function buildSystemPrompt(
 
 	if (customPrompt) {
 		let prompt = customPrompt;
+		if (isDelegateChild) {
+			prompt +=
+				"\n\nDelegated child context:\n- You are a focused subagent reporting to a parent agent. Complete only the delegated task and prioritize decision-useful findings over broad exploration.\n- Work autonomously without asking the user questions; when the task is ambiguous, make the safest reasonable assumption and state it in your result.";
+		}
 		if (appendSection) {
 			prompt += appendSection;
 		}
@@ -178,13 +183,25 @@ function buildSystemPrompt(
 		);
 	}
 
+	if (isDelegateChild) {
+		addGuideline(
+			"You are a focused subagent reporting to a parent agent. Complete only the delegated task and prioritize decision-useful findings over broad exploration.",
+		);
+		addGuideline(
+			"Work autonomously without asking the user questions; when the task is ambiguous, make the safest reasonable assumption and state it in your result.",
+		);
+	}
 	addGuideline("Be concise in your responses");
 	addGuideline("Show file paths clearly when working with files");
 	const guidelines = guidelinesList
 		.map((guideline) => `- ${guideline}`)
 		.join("\n");
 
-	let prompt = `You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
+	const role = isDelegateChild
+		? "You are a focused coding subagent operating inside pi, a coding agent harness. You complete a delegated task autonomously and return the result to a parent agent."
+		: "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.";
+
+	let prompt = `${role}
 
 Available tools:
 ${toolsList}
