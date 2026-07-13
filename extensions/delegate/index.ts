@@ -172,7 +172,7 @@ export default function delegate(pi: ExtensionAPI) {
 		if (event.toolName !== "delegate") return;
 		const details = event.details as DelegateDetails | undefined;
 		if (
-			details?.runs.length &&
+			details?.runs?.length &&
 			details.runs.every((run) => run.exitCode !== -1 && isRunError(run))
 		)
 			return { isError: true };
