@@ -31,7 +31,7 @@ const TOKEN_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function sessionDir(): string {
-	return path.join(getAgentDir(), "delegate-sessions");
+	return path.join(getAgentDir(), ".delegate-sessions");
 }
 
 function sessionPaths(token: string): {

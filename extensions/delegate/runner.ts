@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import * as fs from "node:fs";
 import * as path from "node:path";
 import { processJsonLine } from "./events";
 import { buildDelegatePrompt } from "./prompt";
@@ -78,12 +77,10 @@ type OnUpdate = (partial: {
 	details: DelegateDetails;
 }) => void;
 
-function resolvePiSpawn(): { command: string; prefixArgs: string[] } {
-	const isNode = /[\\/]node(?:\.exe)?$/i.test(process.execPath);
-	const isBun = /[\\/]bun(?:\.exe)?$/i.test(process.execPath);
-	const script = process.argv[1];
-	if ((isNode || isBun) && script && fs.existsSync(script))
-		return { command: process.execPath, prefixArgs: [script] };
+export function resolvePiSpawn(): { command: string; prefixArgs: string[] } {
+	// Resolve Pi from PATH rather than reusing the parent process's entry script.
+	// A long-running parent may point at an older installation after Pi is upgraded,
+	// causing delegates to use stale provider/model routing code.
 	return { command: "pi", prefixArgs: [] };
 }
 

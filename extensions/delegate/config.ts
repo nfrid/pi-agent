@@ -7,7 +7,8 @@ import type {
 	ThinkingLevel,
 } from "./types";
 
-export const EFFORT_LEVELS = ["fast", "balanced", "deep"] as const;
+export const EFFORT_LEVELS = ["economy", "balanced", "deep"] as const;
+const LEGACY_EFFORT_ALIASES = { fast: "economy" } as const;
 const THINKING_LEVELS = [
 	"off",
 	"minimal",
@@ -49,6 +50,12 @@ function isEffort(value: unknown): value is DelegateEffort {
 	);
 }
 
+export function canonicalizeEffort(value: unknown): DelegateEffort | undefined {
+	if (isEffort(value)) return value;
+	if (typeof value !== "string") return undefined;
+	return LEGACY_EFFORT_ALIASES[value as keyof typeof LEGACY_EFFORT_ALIASES];
+}
+
 function isThinking(value: unknown): value is ThinkingLevel {
 	return (
 		typeof value === "string" &&
@@ -64,13 +71,16 @@ function parseProfile(raw: unknown): DelegateEffortProfile | undefined {
 	return { model, thinking: record.thinking };
 }
 
-function parseProfiles(
+export function normalizeEffortProfiles(
 	raw: unknown,
 ): Partial<Record<DelegateEffort, DelegateEffortProfile>> | undefined {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+	const record = raw as Record<string, unknown>;
 	const profiles: Partial<Record<DelegateEffort, DelegateEffortProfile>> = {};
 	for (const effort of EFFORT_LEVELS) {
-		const profile = parseProfile((raw as Record<string, unknown>)[effort]);
+		const profile = parseProfile(
+			record[effort] ?? (effort === "economy" ? record.fast : undefined),
+		);
 		if (profile) profiles[effort] = profile;
 	}
 	return Object.keys(profiles).length > 0 ? profiles : undefined;
@@ -132,9 +142,9 @@ function readConfigFile(settingsPath: string): DelegateConfig {
 		if (runtimeError) config.error = runtimeError;
 		if (typeof record.provider === "string" && record.provider.trim())
 			config.provider = record.provider.trim();
-		if (isEffort(record.defaultEffort))
-			config.defaultEffort = record.defaultEffort;
-		const profiles = parseProfiles(record.effortProfiles);
+		const defaultEffort = canonicalizeEffort(record.defaultEffort);
+		if (defaultEffort) config.defaultEffort = defaultEffort;
+		const profiles = normalizeEffortProfiles(record.effortProfiles);
 		if (profiles) config.effortProfiles = profiles;
 		return config;
 	} catch {
@@ -164,7 +174,7 @@ export function resolveEffort(
 	error?: string;
 } {
 	if (config.error) return { error: config.error };
-	const selected = isEffort(requested) ? requested : config.defaultEffort;
+	const selected = canonicalizeEffort(requested) ?? config.defaultEffort;
 	if (!selected) return {};
 	const profile = config.effortProfiles?.[selected];
 	if (!profile || !config.provider) {

@@ -18,7 +18,7 @@ export interface DelegatedActivity {
 	latestText?: string;
 }
 
-export type DelegateEffort = "fast" | "balanced" | "deep";
+export type DelegateEffort = "economy" | "balanced" | "deep";
 export type ThinkingLevel =
 	| "off"
 	| "minimal"

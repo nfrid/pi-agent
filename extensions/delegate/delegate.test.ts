@@ -7,12 +7,17 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, test } from "vitest";
 import { buildSystemPrompt } from "../system-prompt";
-import { resolveEffort } from "./config";
+import {
+	canonicalizeEffort,
+	normalizeEffortProfiles,
+	resolveEffort,
+} from "./config";
 import { processJsonLine } from "./events";
+import { prepareDelegateArguments } from "./index";
 import { truncateBytes } from "./output";
 import { buildDelegatePrompt } from "./prompt";
 import { renderDelegateCall, renderDelegateResult } from "./render";
-import { buildChildArgs } from "./runner";
+import { buildChildArgs, resolvePiSpawn } from "./runner";
 import {
 	buildSessionSnapshotJsonl,
 	createDelegateSession,
@@ -88,22 +93,56 @@ describe("delegate", () => {
 		expect(run.usage.turns).toBe(1);
 	});
 
-	test("uses one configured provider for effort profiles", () => {
+	test("uses one configured provider for economy effort profiles", () => {
 		expect(
-			resolveEffort("fast", {
+			resolveEffort("economy", {
 				provider: "openai-codex",
 				effortProfiles: {
-					fast: { model: "quick", thinking: "medium" },
+					economy: { model: "quick", thinking: "high" },
 				},
 			}),
 		).toEqual({
-			selected: "fast",
+			selected: "economy",
 			provider: "openai-codex",
-			profile: { model: "quick", thinking: "medium" },
+			profile: { model: "quick", thinking: "high" },
 		});
 		expect(resolveEffort("deep", { provider: "openai-codex" }).error).toMatch(
 			/not fully configured/,
 		);
+	});
+
+	test("maps legacy fast effort settings and stored tool calls to economy", () => {
+		expect(canonicalizeEffort("fast")).toBe("economy");
+		expect(
+			normalizeEffortProfiles({
+				fast: { model: "legacy-quick", thinking: "high" },
+			}),
+		).toEqual({
+			economy: { model: "legacy-quick", thinking: "high" },
+		});
+		expect(
+			resolveEffort("fast", {
+				provider: "openai-codex",
+				effortProfiles: {
+					economy: { model: "quick", thinking: "high" },
+				},
+			}),
+		).toMatchObject({ selected: "economy" });
+		expect(
+			prepareDelegateArguments({
+				effort: "fast",
+				tasks: [{ task: "one" }, { task: "two", effort: "fast" }],
+			}),
+		).toEqual({
+			effort: "economy",
+			tasks: [{ task: "one" }, { task: "two", effort: "economy" }],
+		});
+		const legacyCall = renderDelegateCall(
+			{ task: "legacy", effort: "fast" },
+			theme,
+			{ cwd: "/tmp/project" },
+		);
+		expect(legacyCall.render(200).join("\n")).toContain("Eco");
 	});
 
 	test("caps parent-visible output by UTF-8 bytes", () => {
@@ -150,10 +189,14 @@ describe("delegate", () => {
 			});
 			expect(resolveDelegateSession("../../not-a-token")).toBeNull();
 		} finally {
-			const dir = path.join(getAgentDir(), "delegate-sessions");
+			const dir = path.join(getAgentDir(), ".delegate-sessions");
 			rmSync(path.join(dir, `${session.token}.jsonl`), { force: true });
 			rmSync(path.join(dir, `${session.token}.json`), { force: true });
 		}
+	});
+
+	test("resolves delegate children through PATH instead of a stale parent script", () => {
+		expect(resolvePiSpawn()).toEqual({ command: "pi", prefixArgs: [] });
 	});
 
 	test("uses persistent, minimal, read-only children with the system prompt extension", () => {
@@ -232,7 +275,7 @@ describe("delegate", () => {
 		);
 	});
 
-	test("renders call scope badges with inherited parallel defaults", () => {
+	test("renders labelled parallel tasks with plain-language modes", () => {
 		const component = renderDelegateCall(
 			{
 				tasks: [
@@ -241,13 +284,17 @@ describe("delegate", () => {
 				],
 				cwd: "/tmp/project",
 				context: "fresh",
+				effort: "economy",
 			},
 			theme,
 			{ cwd: "/tmp/project" },
 		);
 		const output = component.render(300).join("\n");
-		expect(output).toContain("inspect [fresh] [inspect] /tmp/project");
-		expect(output).toContain("implement [branch] [writes] /tmp/project");
+		expect(output).toContain("Delegate · 2 subagents");
+		expect(output).toContain("1 Task  inspect");
+		expect(output).toContain("Fresh context · Read-only · /tmp/project · Eco");
+		expect(output).toContain("2 Task  implement");
+		expect(output).toContain("Parent context · Can edit · /tmp/project");
 	});
 
 	test("shows the full delegated prompt when the call is expanded", () => {
@@ -257,6 +304,15 @@ describe("delegate", () => {
 			expanded: true,
 		});
 		expect(component.render(1000).join("\n")).toContain(prompt.trim());
+	});
+
+	test("lets result details own the card after execution starts", () => {
+		const component = renderDelegateCall(
+			{ task: "Inspect the project" },
+			theme,
+			{ cwd: "/tmp/project", executionStarted: true },
+		);
+		expect(component.render(100)).toEqual([]);
 	});
 
 	test("preserves detailed tool labels when end events omit args", () => {
@@ -320,8 +376,11 @@ describe("delegate", () => {
 		expect(run.activities[0]?.label).toBe("Thinking about oranges.");
 	});
 
-	test("dims tool metadata but not the tool name", () => {
-		const run = createRun("inspect");
+	test("renders a task-first running hierarchy and dims tool metadata", () => {
+		const run = createRun("Inspect the cache invalidation path", undefined, {
+			cwd: "/tmp/project",
+			context: "fresh",
+		});
 		run.state = "running";
 		run.activities.push({
 			type: "tool",
@@ -338,11 +397,136 @@ describe("delegate", () => {
 			styledTheme,
 		);
 		const output = component.render(300).join("\n");
+		expect(output).toContain("<toolTitle>Delegate</toolTitle>");
+		expect(output).toContain(
+			"<text>Inspect the cache invalidation path</text>",
+		);
 		expect(output).toContain("<toolOutput>read</toolOutput>");
 		expect(output).toContain("<dim> /tmp/project/file.ts</dim>");
+		expect(output).toContain(
+			"<dim>Fresh context</dim><dim> · </dim><dim>Read-only</dim>",
+		);
+		expect(output).toContain("cancel");
 	});
 
-	test("does not repeat a single task in the collapsed result", () => {
+	test("dims routine startup and running status", () => {
+		const run = createRun(
+			"Inspect the project",
+			{
+				selected: "economy",
+				provider: "openai-codex",
+				profile: { model: "gpt-5.6-terra", thinking: "medium" },
+			},
+			{
+				cwd: "/tmp/project",
+				context: "fresh",
+			},
+		);
+		run.state = "running";
+		const styledTheme = {
+			fg: (color: ThemeColor, text: string) => `<${color}>${text}</${color}>`,
+			bold: (text: string) => text,
+		};
+		const output = renderDelegateResult(
+			{ details: { mode: "single", runs: [run] } },
+			{ expanded: false },
+			styledTheme,
+		)
+			.render(300)
+			.join("\n");
+		expect(output).toContain("<muted>…</muted>");
+		expect(output).toContain("<dim>Starting subagent</dim>");
+		expect(output).toContain("<success>Eco</success>");
+		expect(output).not.toContain("<warning>…</warning>");
+	});
+
+	test("color-codes effort profiles and elevated write access", () => {
+		const styledTheme = {
+			fg: (color: ThemeColor, text: string) => `<${color}>${text}</${color}>`,
+			bold: (text: string) => text,
+		};
+		for (const [effort, color, label] of [
+			["economy", "success", "Eco"],
+			["balanced", "accent", "Balanced"],
+			["deep", "warning", "Deep"],
+		] as const) {
+			const output = renderDelegateCall(
+				{ task: "inspect", effort, allowWrites: true },
+				styledTheme,
+				{ cwd: "/tmp/project" },
+			)
+				.render(300)
+				.join("\n");
+			expect(output).toContain(`<${color}>${label}</${color}>`);
+			expect(output).toContain("<warning>Can edit</warning>");
+		}
+	});
+
+	test("shows effort profiles instead of model names in result views", () => {
+		const run = createRun(
+			"Inspect the project",
+			{
+				selected: "balanced",
+				provider: "openai-codex",
+				profile: { model: "gpt-5.6-terra", thinking: "medium" },
+			},
+			{ cwd: "/tmp/project", context: "fresh" },
+		);
+		run.state = "success";
+		run.exitCode = 0;
+		run.model = "gpt-5.6-terra";
+		run.messages = [assistantMessage as never];
+		run.finishedAt = Date.now();
+		for (const expanded of [false, true]) {
+			const output = renderDelegateResult(
+				{ details: { mode: "single", runs: [run] } },
+				{ expanded },
+				theme,
+			)
+				.render(300)
+				.join("\n");
+			const modeLine = output
+				.split("\n")
+				.find((line) => line.includes("Fresh context · Read-only"));
+			expect(modeLine).toContain("Balanced");
+			expect(output).not.toContain("gpt-5.6-terra");
+			expect(output).not.toMatch(/Balanced effort/);
+			expect(output).not.toMatch(/\n[ \t]*\nResult/);
+		}
+	});
+
+	test("organizes expanded output into explicit sections", () => {
+		const run = createRun("Recheck the cache fix", undefined, {
+			cwd: "/tmp/project",
+			context: "continuation",
+			continuation: "child-token",
+			contextNote: "The parser has already been ruled out.",
+			scope: ["src/cache"],
+		});
+		run.state = "success";
+		run.exitCode = 0;
+		run.messages = [assistantMessage as never];
+		run.finishedAt = Date.now();
+		const component = renderDelegateResult(
+			{ details: { mode: "single", runs: [run] } },
+			{ expanded: true },
+			theme,
+		);
+		const output = component.render(300).join("\n");
+		expect(output).toContain("Task");
+		expect(output).toContain("Recheck the cache fix");
+		expect(output).toContain("Mode");
+		expect(output).toContain("Continued context · Read-only · /tmp/project");
+		expect(output).toContain("Advisory scope: src/cache");
+		expect(output).toContain(
+			"Parent note: The parser has already been ruled out.",
+		);
+		expect(output).toContain("Result");
+		expect(output).toContain("Usage & continuation");
+		expect(output).toContain("Continuation: child-token");
+	});
+
+	test("keeps the task visible without duplicating a result heading", () => {
 		const run = createRun("A unique delegated task", undefined, {
 			cwd: "/tmp/project",
 			context: "fresh",
@@ -356,16 +540,19 @@ describe("delegate", () => {
 			} as never,
 		];
 		run.finishedAt = Date.now();
-		const component = renderDelegateResult(
-			{ details: { mode: "single", runs: [run] } },
-			{ expanded: false },
-			theme,
-		);
-		const output = component.render(300).join("\n");
-		expect(output).not.toContain("A unique delegated task");
-		expect(output).toContain("Result");
-		expect(output).toContain("first");
-		expect(output).toContain("second");
+		for (const expanded of [false, true]) {
+			const component = renderDelegateResult(
+				{ details: { mode: "single", runs: [run] } },
+				{ expanded },
+				theme,
+			);
+			const output = component.render(300).join("\n");
+			expect(output).toContain("Delegate · done");
+			expect(output).toContain("A unique delegated task");
+			expect(output.match(/Result/g)).toHaveLength(1);
+			expect(output).toContain("first");
+			expect(output).toContain("Fresh context · Read-only · /tmp/project");
+		}
 	});
 
 	test("renders partial parallel completion prominently", () => {
@@ -384,6 +571,7 @@ describe("delegate", () => {
 		failure.state = "error";
 		failure.exitCode = 1;
 		failure.errorMessage = "Tests failed";
+		failure.warnings = ["Parallel write scopes overlap."];
 		failure.finishedAt = Date.now();
 
 		const component = renderDelegateResult(
@@ -394,6 +582,9 @@ describe("delegate", () => {
 		const output = component.render(300).join("\n");
 		expect(output).toContain("1/2 succeeded");
 		expect(output).toContain("Partial success");
+		expect(output).toContain("Warning: Parallel write scopes overlap.");
+		expect(output).toContain(" 1 ✓ review");
+		expect(output).toContain(" 2 × test");
 		expect(output).toContain("Tests failed");
 	});
 });

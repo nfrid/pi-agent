@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { type Static, Type } from "typebox";
 import { EFFORT_LEVELS, loadDelegateConfig, resolveEffort } from "./config";
 import { truncateBytes } from "./output";
 import { renderDelegateCall, renderDelegateResult } from "./render";
@@ -25,7 +25,8 @@ const SINGLE_OUTPUT_CAP = 12 * 1024;
 const PER_TASK_OUTPUT_CAP = 8 * 1024;
 
 const EffortSchema = StringEnum(EFFORT_LEVELS, {
-	description: "Optional child model profile: fast, balanced, or deep.",
+	description:
+		"Optional child model profile: economy for cost-efficient routine work, balanced, or deep.",
 });
 const ContextSchema = StringEnum(["branch", "fresh"] as const, {
 	description:
@@ -86,8 +87,25 @@ function resultText(run: DelegatedRun): string {
 	return `${continuation}${warning ? `${warning}\n\n` : ""}${body}`;
 }
 
+type DelegateParamsInput = Static<typeof DelegateParams>;
+
 function invalidParams(message: string): never {
 	throw new Error(message);
+}
+
+export function prepareDelegateArguments(args: unknown): DelegateParamsInput {
+	if (!args || typeof args !== "object" || Array.isArray(args))
+		return args as DelegateParamsInput;
+	const input = args as Record<string, unknown>;
+	const prepared: Record<string, unknown> = { ...input };
+	if (input.effort === "fast") prepared.effort = "economy";
+	if (Array.isArray(input.tasks))
+		prepared.tasks = input.tasks.map((task) => {
+			if (!task || typeof task !== "object" || Array.isArray(task)) return task;
+			const item = task as Record<string, unknown>;
+			return item.effort === "fast" ? { ...item, effort: "economy" } : task;
+		});
+	return prepared as DelegateParamsInput;
 }
 
 function effortFor(
@@ -164,11 +182,11 @@ export default function delegate(pi: ExtensionAPI) {
 		name: "delegate",
 		label: "Delegate",
 		description:
-			"Delegate focused work to child Pi processes with isolated context windows. Children can be continued using the opaque continuation token returned in run details. contextNote supplies curated prose context. scope is advisory for coordinating parallel writes.",
+			"Delegate focused work to child Pi processes with isolated context windows. Effort profiles are economy for cost-efficient routine work, balanced, and deep. Children can be continued using the opaque continuation token returned in run details. contextNote supplies curated prose context. scope is advisory for coordinating parallel writes.",
 		promptSnippet:
 			"Delegate substantial focused exploration, review, validation, implementation, or independent parallel work when a child process would save context.",
 		promptGuidelines: [
-			"Prefer direct tools for small work and fast effort for routine delegation; do not create research, implementation, test, or review stages unless each adds concrete value.",
+			"Prefer direct tools for small work and economy effort for routine, cost-efficient delegation; use balanced or deep only when the task benefits from the additional capability. Do not create research, implementation, test, or review stages unless each adds concrete value.",
 			"Use contextNote to give a fresh child only the relevant decisions, constraints, and prior findings; use branch only when exact parent history matters.",
 			"Continue a child when it already has useful task context and needs focused correction or extension; start fresh when its approach is unsuitable or an independent view is more valuable.",
 			"Parallelize only independent work. When one task depends on another's findings, inspect the first result before starting or continuing the next; for parallel writes, provide advisory scopes where practical and avoid knowingly overlapping mutations.",
@@ -176,6 +194,7 @@ export default function delegate(pi: ExtensionAPI) {
 			"Delegate cannot be called by child processes.",
 		],
 		parameters: DelegateParams,
+		prepareArguments: prepareDelegateArguments,
 		renderCall: renderDelegateCall,
 		renderResult: renderDelegateResult,
 

@@ -12,9 +12,9 @@ import {
 	getRunState,
 } from "./types";
 
-const COLLAPSED_ACTIVITY_COUNT = 8;
-const TASK_PREVIEW_CHARS = 180;
+const TASK_PREVIEW_CHARS = 220;
 const ACTIVITY_PREVIEW_CHARS = 280;
+const RESULT_PREVIEW_CHARS = 420;
 const FINAL_PREVIEW_CHARS = 700;
 const FINAL_PREVIEW_LINES = 10;
 
@@ -34,17 +34,31 @@ type DelegateCallTask = {
 	cwd?: unknown;
 	context?: unknown;
 	allowWrites?: unknown;
+	continuation?: unknown;
 };
 
 type DelegateCallArgs = DelegateCallTask & {
 	tasks?: DelegateCallTask[];
 };
 
-type RenderContextLike = { cwd?: string; expanded?: boolean };
+type RenderContextLike = {
+	cwd?: string;
+	expanded?: boolean;
+	executionStarted?: boolean;
+};
 
 function truncate(text: string, max: number): string {
 	const compact = text.replace(/\s+/g, " ").trim();
 	return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
+}
+
+function taskText(value: unknown, expanded: boolean): string {
+	const text = String(value || "...").trim();
+	return expanded ? text : truncate(text, TASK_PREVIEW_CHARS);
+}
+
+function hasResultHeading(text: string): boolean {
+	return /^(?:#{1,6}\s+|\*\*)result\b/i.test(text.trim());
 }
 
 function markdownPreview(text: string): string {
@@ -68,13 +82,19 @@ function count(n: number): string {
 	return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-function effortLabel(run: DelegatedRun): string {
-	const effort = run.effort;
-	if (!effort?.selected) return "";
-	const profile = effort.profile;
-	if (!profile)
-		return effort.warning ? `${effort.selected} (default)` : effort.selected;
-	return `${effort.selected}: ${effort.provider ?? "default"}/${profile.model} • ${profile.thinking}`;
+function effortName(value: unknown): string {
+	if (value === "fast") return "economy";
+	return typeof value === "string" ? value : "";
+}
+
+function effortDisplayName(value: string): string {
+	return value === "economy" ? "Eco" : capitalize(value);
+}
+
+function effortColor(value: string): ThemeColor {
+	if (value === "economy") return "success";
+	if (value === "deep") return "warning";
+	return "accent";
 }
 
 function usage(run: DelegatedRun): string {
@@ -88,7 +108,6 @@ function usage(run: DelegatedRun): string {
 	if (run.usage.contextTokens)
 		parts.push(`ctx:${count(run.usage.contextTokens)}`);
 	if (run.usage.cost) parts.push(`$${run.usage.cost.toFixed(4)}`);
-	if (run.model) parts.push(run.model);
 	return parts.join(" ");
 }
 
@@ -100,17 +119,41 @@ function compactPath(value: unknown): string {
 		: value;
 }
 
-function scopeBadges(
-	values: { context?: unknown; allowWrites?: unknown; cwd?: unknown },
+function capitalize(value: string): string {
+	return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
+}
+
+function contextLabel(values: {
+	context?: unknown;
+	continuation?: unknown;
+}): string {
+	if (values.continuation || values.context === "continuation")
+		return "Continued context";
+	return values.context === "branch" ? "Parent context" : "Fresh context";
+}
+
+function modeDescription(
+	values: {
+		context?: unknown;
+		continuation?: unknown;
+		allowWrites?: unknown;
+		cwd?: unknown;
+		effort?: unknown;
+	},
 	fg: (color: ThemeColor, text: string) => string,
 ): string {
-	const context = values.context === "branch" ? "branch" : "fresh";
-	const access = values.allowWrites === true ? "writes" : "inspect";
-	return [
-		fg("muted", `[${context}]`),
-		fg(values.allowWrites === true ? "warning" : "muted", `[${access}]`),
+	const separator = fg("dim", " · ");
+	const parts = [
+		fg("dim", contextLabel(values)),
+		fg(
+			values.allowWrites === true ? "warning" : "dim",
+			values.allowWrites === true ? "Can edit" : "Read-only",
+		),
 		fg("dim", compactPath(values.cwd)),
-	].join(" ");
+	];
+	const effort = effortName(values.effort);
+	if (effort) parts.push(fg(effortColor(effort), effortDisplayName(effort)));
+	return parts.join(separator);
 }
 
 function formatDuration(run: DelegatedRun): string {
@@ -141,7 +184,7 @@ function icon(
 ): string {
 	const state = getRunState(run);
 	if (state === "queued") return fg("muted", "○");
-	if (state === "running") return fg("warning", "…");
+	if (state === "running") return fg("muted", "…");
 	if (state === "error") return fg("error", "×");
 	if (state === "aborted") return fg("warning", "−");
 	if (state === "timed-out") return fg("warning", "◷");
@@ -151,8 +194,7 @@ function icon(
 function stateColor(state: DelegateRunState): ThemeColor {
 	if (state === "success") return "success";
 	if (state === "error") return "error";
-	if (state === "running" || state === "aborted" || state === "timed-out")
-		return "warning";
+	if (state === "aborted" || state === "timed-out") return "warning";
 	return "muted";
 }
 
@@ -170,34 +212,72 @@ function activityLabel(
 function activityLines(
 	run: DelegatedRun,
 	fg: (color: ThemeColor, text: string) => string,
-	expanded: boolean,
 ): string {
-	const activities = expanded
-		? run.activities
-		: run.activities.slice(-COLLAPSED_ACTIVITY_COUNT);
-	const skipped = run.activities.length - activities.length;
 	const lines: string[] = [];
-	if (skipped > 0)
-		lines.push(
-			fg(
-				"muted",
-				`... ${skipped} earlier activit${skipped === 1 ? "y" : "ies"}`,
-			),
-		);
-	for (const activity of activities) {
+	for (const activity of run.activities) {
 		const marker =
 			activity.status === "running"
-				? fg("warning", "…")
+				? fg("muted", "…")
 				: activity.status === "error"
 					? fg("error", "×")
-					: fg("success", "✓");
+					: fg("dim", "✓");
 		lines.push(`${marker} ${activityLabel(activity, fg)}`);
-		if (activity.latestText && expanded)
+		if (activity.latestText)
 			lines.push(
 				fg("dim", truncate(activity.latestText, ACTIVITY_PREVIEW_CHARS)),
 			);
 	}
 	return lines.join("\n");
+}
+
+function fieldLine(
+	label: string,
+	value: string,
+	fg: (color: ThemeColor, text: string) => string,
+	valueColor: ThemeColor | null = "toolOutput",
+): string {
+	return `${fg(label.endsWith("Task") ? "accent" : "muted", `${label.padEnd(7)} `)}${valueColor ? fg(valueColor, value) : value}`;
+}
+
+function sectionTitle(title: string, theme: ThemeLike): Text {
+	return new Text(theme.fg("accent", theme.bold(title)), 0, 0);
+}
+
+function controls(runs: DelegatedRun[]): string {
+	const hints = [keyHint("app.tools.expand", "details")];
+	if (runs.some((run) => ["queued", "running"].includes(getRunState(run))))
+		hints.push(keyHint("app.interrupt", "cancel"));
+	return hints.join(" · ");
+}
+
+function currentActivityLines(
+	run: DelegatedRun,
+	fg: (color: ThemeColor, text: string) => string,
+): string[] {
+	const state = getRunState(run);
+	if (state === "queued")
+		return [fieldLine("Status", "Waiting for a slot", fg, "dim")];
+	if (state !== "running") return [];
+	const latest = run.activities.at(-1);
+	const lines = latest
+		? [
+				`${fg("muted", `${(latest.status === "running" ? "Now" : "Last").padEnd(7)} `)}${activityLabel(
+					{ ...latest, label: truncate(latest.label, TASK_PREVIEW_CHARS) },
+					fg,
+				)}`,
+			]
+		: [fieldLine("Now", "Starting subagent", fg, "dim")];
+	const completed = run.activities.filter(
+		(activity) => activity.status === "completed",
+	).length;
+	if (completed > 0)
+		lines.push(
+			fg(
+				"dim",
+				`${"".padEnd(8)}${completed} step${completed === 1 ? "" : "s"} completed`,
+			),
+		);
+	return lines;
 }
 
 function getDetails(toolResult: ToolResultLike): DelegateDetails | undefined {
@@ -220,50 +300,156 @@ export function renderDelegateCall(
 	theme: ThemeLike,
 	context?: RenderContextLike,
 ) {
+	// Once execution starts, result details own the complete card. This avoids
+	// showing the task twice while keeping it visible during argument streaming.
+	if (context?.executionStarted) return new Container();
+
 	const fg = theme.fg.bind(theme);
-	const topLevelEffort =
-		typeof args.effort === "string"
-			? ` ${fg("muted", `[${args.effort}]`)}`
-			: "";
-	if (Array.isArray(args?.tasks) && args.tasks.length > 0) {
-		let text = `${fg("toolTitle", theme.bold("delegate"))}${topLevelEffort} ${fg("accent", `${args.tasks.length} tasks`)}`;
-		const visibleTasks = context?.expanded
-			? args.tasks
-			: args.tasks.slice(0, 3);
-		for (const task of visibleTasks) {
-			const taskEffort =
-				typeof task?.effort === "string"
-					? ` ${fg("muted", `[${task.effort}]`)}`
-					: "";
-			const scope = scopeBadges(
-				{
-					context: task.context ?? args.context,
-					allowWrites: task.allowWrites ?? args.allowWrites,
-					cwd: task.cwd ?? context?.cwd,
-				},
+	const expanded = context?.expanded === true;
+	if (Array.isArray(args.tasks) && args.tasks.length > 0) {
+		const visibleTasks = expanded ? args.tasks : args.tasks.slice(0, 3);
+		let text = `${fg("toolTitle", theme.bold("Delegate"))} ${fg("muted", `· ${args.tasks.length} subagents`)}`;
+		for (const [index, task] of visibleTasks.entries()) {
+			text += `\n${fieldLine(
+				`${index + 1} Task`,
+				taskText(task.task, expanded),
 				fg,
-			);
-			const prompt = String(task?.task || "...");
-			text += `\n  ${fg("dim", context?.expanded ? prompt : truncate(prompt, TASK_PREVIEW_CHARS))}${taskEffort} ${scope}`;
+				"text",
+			)}`;
+			text += `\n${fieldLine(
+				"Mode",
+				modeDescription(
+					{
+						context: task.context ?? args.context,
+						continuation: task.continuation,
+						allowWrites: task.allowWrites ?? args.allowWrites,
+						cwd: task.cwd ?? args.cwd ?? context?.cwd,
+						effort: task.effort ?? args.effort,
+					},
+					fg,
+				),
+				fg,
+				null,
+			)}`;
 		}
-		if (!context?.expanded && args.tasks.length > 3)
-			text += `\n  ${fg("muted", `... +${args.tasks.length - 3} more`)}`;
+		if (!expanded && args.tasks.length > visibleTasks.length)
+			text += `\n${fg("muted", `… ${args.tasks.length - visibleTasks.length} more subagents`)}`;
 		return new Text(text, 0, 0);
 	}
-	const scope = scopeBadges(
-		{
-			context: args.context,
-			allowWrites: args.allowWrites,
-			cwd: args.cwd ?? context?.cwd,
-		},
-		fg,
+
+	const text = [
+		fg("toolTitle", theme.bold("Delegate")),
+		fieldLine("Task", taskText(args.task, expanded), fg, "text"),
+		fieldLine(
+			"Mode",
+			modeDescription(
+				{
+					context: args.context,
+					continuation: args.continuation,
+					allowWrites: args.allowWrites,
+					cwd: args.cwd ?? context?.cwd,
+					effort: args.effort,
+				},
+				fg,
+			),
+			fg,
+			null,
+		),
+	].join("\n");
+	return new Text(text, 0, 0);
+}
+
+function addExpandedRun(
+	container: Container,
+	run: DelegatedRun,
+	theme: ThemeLike,
+	label?: string,
+): void {
+	const fg = theme.fg.bind(theme);
+	const state = getRunState(run);
+	const mdTheme = getMarkdownTheme();
+	if (label)
+		container.addChild(
+			new Text(
+				`${icon(run, fg)} ${fg("toolTitle", theme.bold(label))} ${fg(stateColor(state), `· ${stateLabel(run)}`)}`,
+				0,
+				0,
+			),
+		);
+
+	container.addChild(new Spacer(1));
+	container.addChild(sectionTitle("Task", theme));
+	container.addChild(new Text(run.task.trim() || "(no task)", 0, 0));
+
+	container.addChild(new Spacer(1));
+	container.addChild(sectionTitle("Mode", theme));
+	container.addChild(
+		new Text(
+			modeDescription(
+				{
+					context: run.context,
+					continuation:
+						run.context === "continuation" ? run.continuation : undefined,
+					allowWrites: run.allowWrites,
+					cwd: run.cwd,
+					effort: run.effort?.selected,
+				},
+				fg,
+			),
+			0,
+			0,
+		),
 	);
-	const prompt = String(args?.task || "...");
-	return new Text(
-		`${fg("toolTitle", theme.bold("delegate"))}${topLevelEffort} ${fg("dim", context?.expanded ? prompt : truncate(prompt, TASK_PREVIEW_CHARS))}\n  ${scope}`,
-		0,
-		0,
-	);
+	if (run.scope?.length)
+		container.addChild(
+			new Text(fg("muted", `Advisory scope: ${run.scope.join(", ")}`), 0, 0),
+		);
+	if (run.contextNote?.trim())
+		container.addChild(
+			new Text(fg("muted", `Parent note: ${run.contextNote.trim()}`), 0, 0),
+		);
+	for (const warning of [run.effort?.warning, ...(run.warnings ?? [])].filter(
+		(value): value is string => Boolean(value),
+	))
+		container.addChild(new Text(fg("warning", warning), 0, 0));
+
+	const activities = activityLines(run, fg);
+	if (activities) {
+		container.addChild(new Spacer(1));
+		container.addChild(sectionTitle("Activity", theme));
+		container.addChild(new Text(activities, 0, 0));
+	}
+
+	const final = getFinalAssistantText(run.messages).trim();
+	if (!hasResultHeading(final))
+		container.addChild(sectionTitle("Result", theme));
+	if (final) container.addChild(new Markdown(final, 0, 0, mdTheme));
+	else if (["queued", "running"].includes(state))
+		container.addChild(
+			new Text(fg("muted", "Waiting for the subagent…"), 0, 0),
+		);
+	else
+		container.addChild(
+			new Text(
+				fg(
+					state === "error" ? "error" : "warning",
+					run.errorMessage || run.stderr.trim() || "No final response",
+				),
+				0,
+				0,
+			),
+		);
+
+	const stats = usage(run);
+	if (stats || run.continuation) {
+		container.addChild(new Spacer(1));
+		container.addChild(sectionTitle("Usage & continuation", theme));
+		if (stats) container.addChild(new Text(fg("dim", stats), 0, 0));
+		if (run.continuation)
+			container.addChild(
+				new Text(fg("dim", `Continuation: ${run.continuation}`), 0, 0),
+			);
+	}
 }
 
 export function renderDelegateResult(
@@ -275,85 +461,27 @@ export function renderDelegateResult(
 	if (!details?.runs?.length) return new Text(fallbackText(toolResult), 0, 0);
 
 	const fg = theme.fg.bind(theme);
-	const mdTheme = getMarkdownTheme();
+	const states = details.runs.map(getRunState);
+	const complete = states.filter(
+		(state) => !(["queued", "running"] as DelegateRunState[]).includes(state),
+	).length;
+	const succeeded = states.filter((state) => state === "success").length;
 
 	if (expanded) {
 		const container = new Container();
-		const succeeded = details.runs.filter(
-			(run) => getRunState(run) === "success",
-		).length;
-		const completed = details.runs.filter(
-			(run) =>
-				!(["queued", "running"] as DelegateRunState[]).includes(
-					getRunState(run),
-				),
-		).length;
 		const title =
 			details.mode === "parallel"
-				? `delegate ${succeeded}/${details.runs.length} succeeded • ${completed}/${details.runs.length} complete`
-				: "delegate result";
+				? `Delegate · ${succeeded}/${details.runs.length} succeeded · ${complete}/${details.runs.length} complete`
+				: `Delegate · ${stateLabel(details.runs[0])}`;
 		container.addChild(new Text(fg("toolTitle", theme.bold(title)), 0, 0));
-		for (const run of details.runs) {
-			container.addChild(new Spacer(1));
-			const state = getRunState(run);
-			container.addChild(
-				new Text(
-					details.mode === "parallel"
-						? `${icon(run, fg)} ${fg("accent", truncate(run.task, TASK_PREVIEW_CHARS))} ${fg(stateColor(state), `[${stateLabel(run)}]`)}`
-						: `${icon(run, fg)} ${fg(stateColor(state), stateLabel(run))}`,
-					0,
-					0,
-				),
+		for (const [index, run] of details.runs.entries()) {
+			if (index > 0) container.addChild(new Spacer(1));
+			addExpandedRun(
+				container,
+				run,
+				theme,
+				details.mode === "parallel" ? `Subagent ${index + 1}` : undefined,
 			);
-			if (
-				details.mode === "parallel" &&
-				(run.context !== undefined ||
-					run.allowWrites !== undefined ||
-					run.cwd !== undefined)
-			)
-				container.addChild(
-					new Text(
-						fg(
-							"muted",
-							scopeBadges(
-								{
-									context: run.context,
-									allowWrites: run.allowWrites,
-									cwd: run.cwd,
-								},
-								(_color, text) => text,
-							),
-						),
-						0,
-						0,
-					),
-				);
-			const effort = effortLabel(run);
-			if (effort) container.addChild(new Text(fg("muted", effort), 0, 0));
-			if (run.effort?.warning)
-				container.addChild(new Text(fg("warning", run.effort.warning), 0, 0));
-			const activities = activityLines(run, fg, true);
-			if (activities) container.addChild(new Text(activities, 0, 0));
-			const final = getFinalAssistantText(run.messages).trim();
-			if (final) {
-				container.addChild(new Spacer(1));
-				container.addChild(new Markdown(final, 0, 0, mdTheme));
-			} else if (
-				!(["queued", "running"] as DelegateRunState[]).includes(state)
-			) {
-				container.addChild(
-					new Text(
-						fg(
-							"error",
-							run.errorMessage || run.stderr.trim() || "No final response",
-						),
-						0,
-						0,
-					),
-				);
-			}
-			const stats = usage(run);
-			if (stats) container.addChild(new Text(fg("dim", stats), 0, 0));
 		}
 		return container;
 	}
@@ -364,101 +492,188 @@ export function renderDelegateResult(
 		const container = new Container();
 		container.addChild(
 			new Text(
-				`${icon(run, fg)} ${fg(stateColor(state), stateLabel(run))}`,
+				`${icon(run, fg)} ${fg("toolTitle", theme.bold("Delegate"))} ${fg(stateColor(state), `· ${stateLabel(run)}`)}`,
+				0,
+				0,
+			),
+		);
+		container.addChild(
+			new Text(fieldLine("Task", taskText(run.task, false), fg, "text"), 0, 0),
+		);
+		for (const line of currentActivityLines(run, fg))
+			container.addChild(new Text(line, 0, 0));
+
+		const final = getFinalAssistantText(run.messages).trim();
+		if (final) {
+			if (!hasResultHeading(final))
+				container.addChild(sectionTitle("Result", theme));
+			container.addChild(
+				new Markdown(markdownPreview(final), 0, 0, getMarkdownTheme()),
+			);
+		} else if (["error", "aborted", "timed-out"].includes(state)) {
+			container.addChild(
+				new Text(
+					fieldLine(
+						"Error",
+						truncate(
+							run.errorMessage || run.stderr || stateLabel(run),
+							ACTIVITY_PREVIEW_CHARS,
+						),
+						fg,
+						state === "error" ? "error" : "warning",
+					),
+					0,
+					0,
+				),
+			);
+		}
+
+		container.addChild(
+			new Text(
+				fieldLine(
+					"Mode",
+					modeDescription(
+						{
+							context: run.context,
+							continuation:
+								run.context === "continuation" ? run.continuation : undefined,
+							allowWrites: run.allowWrites,
+							cwd: run.cwd,
+							effort: run.effort?.selected,
+						},
+						fg,
+					),
+					fg,
+					null,
+				),
 				0,
 				0,
 			),
 		);
 		if (run.effort?.warning)
 			container.addChild(new Text(fg("warning", run.effort.warning), 0, 0));
-		const activities = activityLines(run, fg, false);
-		if (activities) container.addChild(new Text(activities, 0, 0));
-		if (["error", "aborted", "timed-out"].includes(state))
-			container.addChild(
-				new Text(
-					fg(
-						state === "error" ? "error" : "warning",
-						truncate(
-							run.errorMessage || run.stderr || stateLabel(run),
-							ACTIVITY_PREVIEW_CHARS,
-						),
-					),
-					0,
-					0,
-				),
-			);
-		const final = getFinalAssistantText(run.messages).trim();
-		if (final) {
-			container.addChild(new Spacer(1));
-			container.addChild(new Markdown(markdownPreview(final), 0, 0, mdTheme));
-		}
-		const footer = [usage(run), `(${keyHint("app.tools.expand", "to expand")})`]
-			.filter(Boolean)
-			.join("\n");
+		const footer = [usage(run), controls([run])].filter(Boolean).join(" · ");
 		container.addChild(new Text(fg("dim", footer), 0, 0));
 		return container;
 	}
 
-	const states = details.runs.map(getRunState);
-	const complete = states.filter(
-		(state) => !(["queued", "running"] as DelegateRunState[]).includes(state),
-	).length;
-	const succeeded = states.filter((state) => state === "success").length;
-	let text =
-		details.mode === "parallel"
-			? `${fg("toolTitle", theme.bold("delegate"))} ${fg(succeeded === details.runs.length ? "success" : complete === details.runs.length ? "warning" : "accent", `${succeeded}/${details.runs.length} succeeded`)} ${fg("muted", `• ${complete}/${details.runs.length} complete`)}`
-			: "";
+	const container = new Container();
+	container.addChild(
+		new Text(
+			`${fg("toolTitle", theme.bold("Delegate"))} ${fg(
+				succeeded === details.runs.length
+					? "success"
+					: complete === details.runs.length
+						? "warning"
+						: "accent",
+				`· ${succeeded}/${details.runs.length} succeeded`,
+			)} ${fg("muted", `· ${complete}/${details.runs.length} complete`)}`,
+			0,
+			0,
+		),
+	);
 	if (
-		details.mode === "parallel" &&
 		complete === details.runs.length &&
 		succeeded > 0 &&
 		succeeded < details.runs.length
 	)
-		text += `\n${fg("warning", "Partial success — expand for complete results and diagnostics.")}`;
+		container.addChild(
+			new Text(
+				fg("warning", "Partial success — open details for diagnostics."),
+				0,
+				0,
+			),
+		);
+	const warnings = [
+		...new Set(
+			details.runs.flatMap((run) => [
+				...(run.warnings ?? []),
+				...(run.effort?.warning ? [run.effort.warning] : []),
+			]),
+		),
+	];
+	for (const warning of warnings)
+		container.addChild(
+			new Text(
+				fg("warning", `Warning: ${truncate(warning, RESULT_PREVIEW_CHARS)}`),
+				0,
+				0,
+			),
+		);
 
-	for (const run of details.runs) {
-		if (text) text += "\n";
+	for (const [index, run] of details.runs.entries()) {
 		const state = getRunState(run);
-		text += `${icon(run, fg)} ${fg("accent", truncate(run.task, TASK_PREVIEW_CHARS))} ${fg(stateColor(state), `[${stateLabel(run)}]`)}`;
-		if (details.runs.length === 1) {
-			if (
-				run.context !== undefined ||
-				run.allowWrites !== undefined ||
-				run.cwd !== undefined
-			)
-				text += `\n${scopeBadges(
+		container.addChild(
+			new Text(
+				`${fg("muted", `${index + 1}`.padStart(2))} ${icon(run, fg)} ${fg("text", taskText(run.task, false))}`,
+				0,
+				0,
+			),
+		);
+		container.addChild(
+			new Text(
+				`${fg("dim", "     ")}${fg(stateColor(state), capitalize(stateLabel(run)))}`,
+				0,
+				0,
+			),
+		);
+		container.addChild(
+			new Text(
+				`${fg("dim", "     Mode: ")}${modeDescription(
 					{
 						context: run.context,
+						continuation:
+							run.context === "continuation" ? run.continuation : undefined,
 						allowWrites: run.allowWrites,
 						cwd: run.cwd,
+						effort: run.effort?.selected,
 					},
 					fg,
-				)}`;
-			const effort = effortLabel(run);
-			if (effort) text += ` ${fg("muted", `[${effort}]`)}`;
-			if (run.effort?.warning) text += `\n${fg("warning", run.effort.warning)}`;
-			const activities = activityLines(run, fg, false);
-			if (activities) text += `\n${activities}`;
-			const final = getFinalAssistantText(run.messages).trim();
-			if (final) text += `\n${fg("toolOutput", truncate(final, 240))}`;
-			const stats = usage(run);
-			if (stats) text += `\n${fg("dim", stats)}`;
-		}
-		if (details.runs.length > 1 && ["queued", "running"].includes(state)) {
+				)}`,
+				0,
+				0,
+			),
+		);
+		if (["queued", "running"].includes(state)) {
 			const latest = run.activities.at(-1);
-			if (latest)
-				text += `\n  ${activityLabel(
-					{ ...latest, label: truncate(latest.label, TASK_PREVIEW_CHARS) },
-					fg,
-				)}`;
-			else
-				text += `\n  ${fg("muted", state === "queued" ? "waiting for a slot" : "starting child")}`;
+			container.addChild(
+				new Text(
+					`${fg("dim", "     ")}${fg("muted", latest ? "Now: " : "Status: ")}${
+						latest
+							? activityLabel(
+									{
+										...latest,
+										label: truncate(latest.label, TASK_PREVIEW_CHARS),
+									},
+									fg,
+								)
+							: fg(
+									"dim",
+									state === "queued"
+										? "Waiting for a slot"
+										: "Starting subagent",
+								)
+					}`,
+					0,
+					0,
+				),
+			);
 		}
-		if (details.runs.length > 1 && run.effort?.warning)
-			text += `\n  ${fg("warning", truncate(run.effort.warning, 240))}`;
 		if (["error", "aborted", "timed-out"].includes(state))
-			text += `\n  ${fg(state === "error" ? "error" : "warning", truncate(run.errorMessage || run.stderr || stateLabel(run), 240))}`;
+			container.addChild(
+				new Text(
+					`${fg("dim", "     ")}${fg(
+						state === "error" ? "error" : "warning",
+						truncate(
+							run.errorMessage || run.stderr || stateLabel(run),
+							RESULT_PREVIEW_CHARS,
+						),
+					)}`,
+					0,
+					0,
+				),
+			);
 	}
-	text += `\n${fg("muted", `(${keyHint("app.tools.expand", "to expand")})`)}`;
-	return new Text(text, 0, 0);
+	container.addChild(new Text(fg("dim", controls(details.runs)), 0, 0));
+	return container;
 }
