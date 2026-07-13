@@ -205,8 +205,8 @@ function activityLabel(
 	if (activity.status === "error") return fg("error", activity.label);
 	if (activity.type === "thinking") return fg("dim", activity.label);
 	const separator = activity.label.indexOf(" ");
-	if (separator < 0) return fg("toolOutput", activity.label);
-	return `${fg("toolOutput", activity.label.slice(0, separator))}${fg("dim", activity.label.slice(separator))}`;
+	if (separator < 0) return fg("success", activity.label);
+	return `${fg("success", activity.label.slice(0, separator))}${fg("dim", activity.label.slice(separator))}`;
 }
 
 function activityLines(
