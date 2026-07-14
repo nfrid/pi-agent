@@ -63,7 +63,7 @@ export const paramsSchema = Type.Object({
 	operations: Type.Optional(
 		Type.Array(Type.Any(), {
 			description:
-				"For batch: ordered todo operations, each shaped like a todo call except action=batch.",
+				'For batch: all already-known mutations as ordered todo operations, each shaped like a todo call except action=batch. Example: [{"action":"done","id":"T1"},{"action":"start","id":"T2"}].',
 		}),
 	),
 });
