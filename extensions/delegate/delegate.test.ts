@@ -462,7 +462,7 @@ describe('delegate', () => {
     expect(output).toContain(
       '<text>Inspect the cache invalidation path</text>',
     );
-    expect(output).toContain('<toolOutput>read</toolOutput>');
+    expect(output).toContain('<success>read</success>');
     expect(output).toContain('<dim> /tmp/project/file.ts</dim>');
     expect(output).toContain(
       '<dim>Fresh context</dim><dim> · </dim><dim>Read-only</dim>',
