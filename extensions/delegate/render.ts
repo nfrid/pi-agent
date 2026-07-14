@@ -203,7 +203,7 @@ function activityLabel(
 	fg: (color: ThemeColor, text: string) => string,
 ): string {
 	if (activity.status === "error") return fg("error", activity.label);
-	if (activity.type === "thinking") return fg("dim", activity.label);
+	if (activity.type === "thinking") return fg("thinkingText", activity.label);
 	const separator = activity.label.indexOf(" ");
 	if (separator < 0) return fg("success", activity.label);
 	return `${fg("success", activity.label.slice(0, separator))}${fg("dim", activity.label.slice(separator))}`;
@@ -222,7 +222,9 @@ function activityLines(
 					? fg("error", "×")
 					: fg("dim", "✓");
 		lines.push(`${marker} ${activityLabel(activity, fg)}`);
-		if (activity.latestText)
+		// A thinking activity's label is its concise trace title. Its full text can
+		// contain the provider's cumulative title group, which repeats prior traces.
+		if (activity.type === "tool" && activity.latestText)
 			lines.push(
 				fg("dim", truncate(activity.latestText, ACTIVITY_PREVIEW_CHARS)),
 			);

@@ -6,6 +6,20 @@ const MAX_MESSAGE_COUNT = 100;
 const MAX_MESSAGE_BYTES = 5 * 1024 * 1024;
 const MAX_PREVIEW_CHARS = 1000;
 
+type ThinkingGroup = {
+	id: string;
+	text: string;
+	titles: string[];
+	activityIds: string[];
+};
+
+type ThinkingRunState = {
+	active: Map<string, ThinkingGroup>;
+	nextGroupId: number;
+};
+
+const thinkingState = new WeakMap<DelegatedRun, ThinkingRunState>();
+
 function truncate(text: string, max = MAX_PREVIEW_CHARS): string {
 	if (text.length <= max) return text;
 	return `… ${text.slice(text.length - max)}`;
@@ -122,13 +136,102 @@ function existingToolLabel(
 	return findActivity(run, eventId(event, "tool"))?.label ?? name;
 }
 
+function thinkingTitles(text: string): string[] {
+	return [...text.matchAll(/\*\*([^\n*]+?)\*\*(?=\s|$)/g)]
+		.map((match) => match[1]?.trim())
+		.filter((title): title is string => Boolean(title));
+}
+
 function thinkingLabel(value: unknown): string {
 	if (typeof value !== "string") return "thinking";
 	const text = value.trim();
-	const title = text.match(/^\*\*([^\n]+?)\*\*(?:\s|$)/)?.[1]?.trim();
+	const title = thinkingTitles(text).at(-1);
 	if (title) return title;
 	const preview = text.replace(/\s+/g, " ").trim().slice(0, 160);
 	return preview ? `thinking: ${preview}` : "thinking";
+}
+
+function getThinkingState(run: DelegatedRun): ThinkingRunState {
+	let state = thinkingState.get(run);
+	if (!state) {
+		state = { active: new Map(), nextGroupId: 0 };
+		thinkingState.set(run, state);
+	}
+	return state;
+}
+
+function thinkingKey(event: Record<string, unknown>): string {
+	return eventId(event, "thinking") ?? "thinking";
+}
+
+function startThinkingGroup(
+	run: DelegatedRun,
+	event: Record<string, unknown>,
+): ThinkingGroup {
+	const state = getThinkingState(run);
+	const key = thinkingKey(event);
+	const previous = state.active.get(key);
+	if (previous) {
+		const latest = findActivity(run, previous.activityIds.at(-1));
+		if (latest) latest.status = "completed";
+	}
+	const id = `${key}:group:${state.nextGroupId++}`;
+	const group = { id, text: "", titles: [], activityIds: [`${id}:0`] };
+	state.active.set(key, group);
+	upsertActivity(run, {
+		id: group.activityIds[0],
+		type: "thinking",
+		label: "thinking",
+		status: "running",
+	});
+	return group;
+}
+
+function findTitleSuffix(titles: string[], previous: string[]): string[] {
+	if (previous.length === 0) return titles;
+	for (let start = titles.length - previous.length; start >= 0; start--) {
+		if (previous.every((title, index) => titles[start + index] === title))
+			return titles.slice(start + previous.length);
+	}
+	return titles;
+}
+
+function updateThinkingGroup(
+	run: DelegatedRun,
+	event: Record<string, unknown>,
+	text: string,
+): ThinkingGroup {
+	const state = getThinkingState(run);
+	const key = thinkingKey(event);
+	const group = state.active.get(key) ?? startThinkingGroup(run, event);
+	group.text = `${group.text}${text}`.slice(0, MAX_PREVIEW_CHARS);
+	const newTitles = findTitleSuffix(thinkingTitles(group.text), group.titles);
+
+	for (const title of newTitles) {
+		if (group.titles.length > 0) {
+			const previous = findActivity(run, group.activityIds.at(-1));
+			if (previous) previous.status = "completed";
+			group.activityIds.push(`${group.id}:${group.activityIds.length}`);
+		}
+		group.titles.push(title);
+		upsertActivity(run, {
+			id: group.activityIds.at(-1),
+			type: "thinking",
+			label: title,
+			status: "running",
+			latestText: group.text,
+		});
+	}
+
+	if (group.titles.length === 0)
+		upsertActivity(run, {
+			id: group.activityIds[0],
+			type: "thinking",
+			label: thinkingLabel(group.text),
+			status: "running",
+			latestText: group.text,
+		});
+	return group;
 }
 
 function messageBytes(messages: Message[]): number {
@@ -231,45 +334,36 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
 		case "message_update": {
 			const assistantMessageEvent = asRecord(event.assistantMessageEvent);
 			if (assistantMessageEvent?.type === "thinking_start") {
-				upsertActivity(run, {
-					id: eventId(event, "thinking"),
-					type: "thinking",
-					label: "thinking",
-					status: "running",
-				});
+				startThinkingGroup(run, event);
 				return true;
 			}
 			if (assistantMessageEvent?.type === "thinking_delta") {
-				const id = eventId(event, "thinking");
-				const existing = findActivity(run, id);
-				const latestText =
-					`${existing?.latestText ?? ""}${typeof assistantMessageEvent.delta === "string" ? assistantMessageEvent.delta : ""}`.slice(
-						0,
-						MAX_PREVIEW_CHARS,
-					);
-				upsertActivity(run, {
-					id,
-					type: "thinking",
-					label: thinkingLabel(latestText),
-					status: "running",
-					latestText,
-				});
+				updateThinkingGroup(
+					run,
+					event,
+					typeof assistantMessageEvent.delta === "string"
+						? assistantMessageEvent.delta
+						: "",
+				);
 				return true;
 			}
 			if (assistantMessageEvent?.type === "thinking_end") {
-				const id = eventId(event, "thinking");
-				const existing = findActivity(run, id);
-				const content =
-					typeof assistantMessageEvent.content === "string"
-						? assistantMessageEvent.content
-						: existing?.latestText;
-				upsertActivity(run, {
-					id,
-					type: "thinking",
-					label: thinkingLabel(content),
-					status: "completed",
-					latestText: content,
-				});
+				const state = getThinkingState(run);
+				const key = thinkingKey(event);
+				let group = state.active.get(key);
+				if (!group) group = startThinkingGroup(run, event);
+				if (
+					typeof assistantMessageEvent.content === "string" &&
+					!assistantMessageEvent.content.startsWith(group.text)
+				)
+					group = updateThinkingGroup(
+						run,
+						event,
+						assistantMessageEvent.content,
+					);
+				const latest = findActivity(run, group.activityIds.at(-1));
+				if (latest) latest.status = "completed";
+				state.active.delete(key);
 				return true;
 			}
 			return false;

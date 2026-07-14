@@ -376,6 +376,67 @@ describe("delegate", () => {
 		expect(run.activities[0]?.label).toBe("Thinking about oranges.");
 	});
 
+	test("keeps grouped thinking titles in chronological activity order", () => {
+		const run = createRun("inspect");
+		const thinkingEvent = (
+			type: string,
+			values: Record<string, unknown> = {},
+		) =>
+			processJsonLine(
+				JSON.stringify({
+					type: "message_update",
+					assistantMessageEvent: { type, contentIndex: 0, ...values },
+				}),
+				run,
+			);
+
+		thinkingEvent("thinking_start");
+		thinkingEvent("thinking_delta", { delta: "**One trace**" });
+		thinkingEvent("thinking_delta", {
+			delta: "**One trace** **Another trace**",
+		});
+		thinkingEvent("thinking_delta", {
+			delta: "**One trace** **Another trace** **Third trace**",
+		});
+		thinkingEvent("thinking_end");
+		processJsonLine(
+			JSON.stringify({
+				type: "tool_execution_end",
+				toolCallId: "read-1",
+				toolName: "read",
+			}),
+			run,
+		);
+		thinkingEvent("thinking_start");
+		thinkingEvent("thinking_delta", {
+			delta: "**A trace from the next group**",
+		});
+		thinkingEvent("thinking_end");
+
+		expect(run.activities.map((activity) => activity.label)).toEqual([
+			"One trace",
+			"Another trace",
+			"Third trace",
+			"read",
+			"A trace from the next group",
+		]);
+
+		const styledTheme = {
+			fg: (color: ThemeColor, text: string) => `<${color}>${text}</${color}>`,
+			bold: (text: string) => text,
+		};
+		const output = renderDelegateResult(
+			{ details: { mode: "single", runs: [run] } },
+			{ expanded: true },
+			styledTheme,
+		)
+			.render(300)
+			.join("\n");
+		expect(output).toContain("<thinkingText>Another trace</thinkingText>");
+		expect(output).not.toContain("<dim>Another trace</dim>");
+		expect(output).not.toContain("**One trace** **Another trace**");
+	});
+
 	test("renders a task-first running hierarchy and dims tool metadata", () => {
 		const run = createRun("Inspect the cache invalidation path", undefined, {
 			cwd: "/tmp/project",
