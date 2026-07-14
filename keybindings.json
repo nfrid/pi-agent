@@ -1,10 +1,10 @@
 {
-	"tui.select.up": ["up", "ctrl+k"],
-	"tui.select.down": ["down", "ctrl+j"],
-	"tui.editor.cursorUp": ["up", "ctrl+k"],
-	"tui.editor.cursorDown": ["down", "ctrl+j"],
-	"tui.select.confirm": ["ctrl+l", "enter"],
-	"app.thinking.cycle": "ctrl+t",
-	"app.thinking.toggle": "shift+tab",
-	"app.interrupt": "ctrl+c"
+  "tui.select.up": ["up", "ctrl+k"],
+  "tui.select.down": ["down", "ctrl+j"],
+  "tui.editor.cursorUp": ["up", "ctrl+k"],
+  "tui.editor.cursorDown": ["down", "ctrl+j"],
+  "tui.select.confirm": ["ctrl+l", "enter"],
+  "app.thinking.cycle": "ctrl+t",
+  "app.thinking.toggle": "shift+tab",
+  "app.interrupt": "ctrl+c"
 }

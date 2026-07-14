@@ -1,28 +1,28 @@
 {
-	"lastChangelogVersion": "0.80.6",
-	"defaultProvider": "openai-codex",
-	"defaultModel": "gpt-5.6-sol",
-	"defaultThinkingLevel": "medium",
-	"editorPaddingX": 1,
-	"hideThinkingBlock": false,
-	"quietStartup": true,
-	"theme": "dracula",
-	"delegate": {
-		"provider": "openai-codex",
-		"defaultEffort": "economy",
-		"effortProfiles": {
-			"economy": {
-				"model": "gpt-5.6-luna",
-				"thinking": "high"
-			},
-			"balanced": {
-				"model": "gpt-5.6-terra",
-				"thinking": "high"
-			},
-			"deep": {
-				"model": "gpt-5.6-sol",
-				"thinking": "medium"
-			}
-		}
-	}
+  "lastChangelogVersion": "0.80.6",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.6-sol",
+  "defaultThinkingLevel": "medium",
+  "editorPaddingX": 1,
+  "hideThinkingBlock": false,
+  "quietStartup": true,
+  "theme": "dracula",
+  "delegate": {
+    "provider": "openai-codex",
+    "defaultEffort": "economy",
+    "effortProfiles": {
+      "economy": {
+        "model": "gpt-5.6-luna",
+        "thinking": "high"
+      },
+      "balanced": {
+        "model": "gpt-5.6-terra",
+        "thinking": "high"
+      },
+      "deep": {
+        "model": "gpt-5.6-sol",
+        "thinking": "medium"
+      }
+    }
+  }
 }
