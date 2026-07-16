@@ -1,5 +1,5 @@
 import type { Theme } from '@earendil-works/pi-coding-agent';
-import { MAX_REPLAY_CHARS, STATUS_GLYPH } from './constants';
+import { MAX_TODO_CONTEXT_CHARS, STATUS_GLYPH } from './constants';
 import { missingDeps, readyTasks, stats, unfinished } from './queries';
 import { getState } from './state';
 import type { Task } from './types';
@@ -72,13 +72,25 @@ export function dashboard(includeDone = false, limit = 40): string {
   return lines.join('\n');
 }
 
-export function replayText(): string {
-  const s = stats();
-  let text = `Current todo state (${s.active} active, ${s.ready} ready, ${s.blocked} blocked, ${s.done} done).\n`;
-  text +=
-    'This replay is authoritative; it survives compaction/forking. Prefer updating it with the todo tool instead of free-form planning.\n';
-  text += dashboard(false, 120);
-  if (text.length > MAX_REPLAY_CHARS)
-    text = `${text.slice(0, MAX_REPLAY_CHARS)}\n… todo replay truncated; use todo list include_done=false if needed.`;
+function boundedTodoText(header: string, guidance: string): string {
+  let text = `${header}\n${guidance}\n${dashboard(false, 120)}`;
+  if (text.length > MAX_TODO_CONTEXT_CHARS)
+    text = `${text.slice(0, MAX_TODO_CONTEXT_CHARS)}\n… todo context truncated; use todo list include_done=false if needed.`;
   return text;
+}
+
+export function todoStateText(): string {
+  const s = stats();
+  return boundedTodoText(
+    `Current todo state (${s.active} active, ${s.ready} ready, ${s.blocked} blocked, ${s.done} done).`,
+    'Prefer updating this state with the todo tool instead of free-form planning.',
+  );
+}
+
+export function turnSnapshotText(): string {
+  const s = stats();
+  return boundedTodoText(
+    `Todo state at the start of this user turn (${s.active} active, ${s.ready} ready, ${s.blocked} blocked, ${s.done} done).`,
+    'This snapshot is authoritative at this position. Later todo tool results and later snapshots supersede it; prefer the newest state evidence.',
+  );
 }

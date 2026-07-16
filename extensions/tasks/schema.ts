@@ -1,19 +1,51 @@
 import { StringEnum } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
 
-const taskSchema = Type.Object({
-  id: Type.String({
-    description: 'Stable task id, e.g. T1. Required for replace.',
-  }),
-  text: Type.String(),
-  status: Type.Optional(
-    StringEnum(['todo', 'doing', 'blocked', 'done', 'dropped'] as const),
-  ),
+const statusSchema = () =>
+  StringEnum(['todo', 'doing', 'blocked', 'done', 'dropped'] as const);
+const prioritySchema = () =>
+  StringEnum(['low', 'normal', 'high', 'urgent'] as const);
+
+const taskSchema = Type.Object(
+  {
+    id: Type.String({
+      description: 'Stable task id, e.g. T1. Required for replace.',
+    }),
+    text: Type.String(),
+    status: Type.Optional(statusSchema()),
+    depends_on: Type.Optional(Type.Array(Type.String())),
+    priority: Type.Optional(prioritySchema()),
+    notes: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+
+const operationProperties = {
+  action: StringEnum([
+    'list',
+    'add',
+    'update',
+    'start',
+    'done',
+    'block',
+    'drop',
+    'remove',
+    'clear_done',
+    'replace',
+  ] as const),
+  id: Type.Optional(Type.String()),
+  text: Type.Optional(Type.String()),
+  status: Type.Optional(statusSchema()),
   depends_on: Type.Optional(Type.Array(Type.String())),
-  priority: Type.Optional(
-    StringEnum(['low', 'normal', 'high', 'urgent'] as const),
-  ),
+  priority: Type.Optional(prioritySchema()),
   notes: Type.Optional(Type.String()),
+  include_done: Type.Optional(Type.Boolean()),
+  tasks: Type.Optional(Type.Array(taskSchema)),
+};
+
+/** Compact validated batch member; nested batch and unknown fields are invalid. */
+export const operationSchema = Type.Object(operationProperties, {
+  additionalProperties: false,
 });
 
 export const paramsSchema = Type.Object({
@@ -38,17 +70,13 @@ export const paramsSchema = Type.Object({
   text: Type.Optional(
     Type.String({ description: 'Task text for add/update.' }),
   ),
-  status: Type.Optional(
-    StringEnum(['todo', 'doing', 'blocked', 'done', 'dropped'] as const),
-  ),
+  status: Type.Optional(statusSchema()),
   depends_on: Type.Optional(
     Type.Array(Type.String(), {
       description: 'Task ids this task depends on.',
     }),
   ),
-  priority: Type.Optional(
-    StringEnum(['low', 'normal', 'high', 'urgent'] as const),
-  ),
+  priority: Type.Optional(prioritySchema()),
   notes: Type.Optional(
     Type.String({ description: 'Extra context or block reason.' }),
   ),
@@ -61,9 +89,9 @@ export const paramsSchema = Type.Object({
     }),
   ),
   operations: Type.Optional(
-    Type.Array(Type.Any(), {
+    Type.Array(operationSchema, {
       description:
-        'For batch: all already-known mutations as ordered todo operations, each shaped like a todo call except action=batch. Example: [{"action":"done","id":"T1"},{"action":"start","id":"T2"}].',
+        'For batch: ordered non-batch todo operations. Example: [{"action":"done","id":"T1"},{"action":"start","id":"T2"}].',
     }),
   ),
 });

@@ -2,7 +2,7 @@ import type { Action, Status } from './types';
 
 export const EXT = 'lean-todo';
 export const TOOL = 'todo';
-export const MAX_REPLAY_CHARS = 12_000;
+export const MAX_TODO_CONTEXT_CHARS = 12_000;
 export const MAX_WIDGET_LINES = 12;
 export const MAX_RENDER_ITEMS = 14;
 

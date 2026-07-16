@@ -2,7 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionUIContext,
 } from '@earendil-works/pi-coding-agent';
-import { replayText } from './format';
+import { todoStateText } from './format';
 import { findTask } from './ids';
 import { TodoOverlay } from './overlay';
 import { setLastCtx } from './state';
@@ -30,8 +30,8 @@ export function registerTodoCommands(pi: ExtensionAPI): void {
       setLastCtx(ctx);
       const mode = 'mode' in ctx ? ctx.mode : 'tui';
       if (mode !== 'tui') {
-        if (ctx.hasUI) ctx.ui.notify(replayText(), 'info');
-        else console.log(replayText());
+        if (ctx.hasUI) ctx.ui.notify(todoStateText(), 'info');
+        else console.log(todoStateText());
         return;
       }
 
@@ -135,10 +135,10 @@ export function registerTodoCommands(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand('todump', {
-    description: 'Insert current todo replay into the editor',
+    description: 'Insert current todo state into the editor',
     handler: async (_args, ctx) => {
-      if (ctx.hasUI) ctx.ui.setEditorText(replayText());
-      else console.log(replayText());
+      if (ctx.hasUI) ctx.ui.setEditorText(todoStateText());
+      else console.log(todoStateText());
     },
   });
 }

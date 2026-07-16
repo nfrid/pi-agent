@@ -1,13 +1,14 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
-import { ACTION_GLYPH, EXT, TOOL } from './constants';
+import { ACTION_GLYPH, TOOL } from './constants';
+import { TODO_SNAPSHOT_TYPE, transformTodoContext } from './context';
 import { mutate } from './core';
-import { dashboard, replayText } from './format';
+import { dashboard, turnSnapshotText } from './format';
 import { normalizeId } from './ids';
 import { stats } from './queries';
 import { paramsSchema } from './schema';
 import { persist, setLastCtx } from './state';
-import type { Params, ToolDetails } from './types';
+import type { ToolDetails } from './types';
 import { updateUi } from './ui-widget';
 
 export function registerTodoTool(pi: ExtensionAPI): void {
@@ -31,7 +32,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
       setLastCtx(ctx);
       let result: { changed: boolean; message: string; error?: string };
       if (params.action === 'batch') {
-        const operations = (params.operations ?? []) as Params[];
+        const operations = params.operations ?? [];
         if (!operations.length)
           result = {
             changed: false,
@@ -43,11 +44,6 @@ export function registerTodoTool(pi: ExtensionAPI): void {
           let changed = false;
           let error: string | undefined;
           for (const op of operations) {
-            if (!op || op.action === 'batch') {
-              error = 'batch operations must be non-batch todo actions';
-              messages.push(error);
-              break;
-            }
             const step = mutate(op.action, op);
             changed ||= step.changed;
             messages.push(step.error ? `error: ${step.message}` : step.message);
@@ -118,36 +114,33 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 }
 
 export function registerTodoContext(pi: ExtensionAPI): void {
-  pi.on('context', (event) => {
-    let todoResultsLeft = 6;
-    const messages = event.messages
-      .map((message) => {
-        if (message.role === 'custom' && message.customType === `${EXT}-replay`)
-          return undefined;
-        if (message.role === 'toolResult' && message.toolName === TOOL) {
-          if (todoResultsLeft-- > 0) return message;
-          return {
-            ...message,
-            content: [
-              {
-                type: 'text' as const,
-                text: '[older todo tool result elided; current state is in the todo replay]',
-              },
-            ],
-          };
-        }
-        return message;
-      })
-      .filter((message): message is NonNullable<typeof message> =>
-        Boolean(message),
-      );
-    messages.push({
-      role: 'custom' as const,
-      customType: `${EXT}-replay`,
-      content: replayText(),
-      display: false,
-      timestamp: Date.now(),
-    });
-    return { messages };
+  let needsRecovery = false;
+
+  pi.on('session_start', () => {
+    needsRecovery = false;
   });
+  pi.on('session_compact', () => {
+    needsRecovery = true;
+  });
+  pi.on('session_tree', () => {
+    needsRecovery = true;
+  });
+  pi.on('before_agent_start', () => {
+    needsRecovery = false;
+    return {
+      message: {
+        customType: TODO_SNAPSHOT_TYPE,
+        content: turnSnapshotText(),
+        display: false,
+      },
+    };
+  });
+  pi.on('context', (event) => ({
+    messages: transformTodoContext(
+      event.messages,
+      turnSnapshotText(),
+      Date.now(),
+      needsRecovery,
+    ),
+  }));
 }
