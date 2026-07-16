@@ -8,12 +8,13 @@
   "main": "index.js",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "lint": "biome check extensions",
-    "lint:fix": "biome check extensions --write",
-    "format": "biome format extensions",
-    "format:fix": "biome format extensions --write",
+    "lint": "biome check extensions scripts",
+    "lint:fix": "biome check extensions scripts --write",
+    "format": "biome format extensions scripts docs",
+    "format:fix": "biome format extensions scripts docs --write",
     "check": "npm run typecheck && npm run lint && npm run format",
     "test": "vitest run",
+    "session:metrics": "node scripts/session-metrics/index.mjs",
     "pi:update": "pi update && pnpm run pi:sdk-sync",
     "pi:sdk-sync": "VERSION=$(pi --version) && pnpm add -E @earendil-works/pi-ai@$VERSION @earendil-works/pi-coding-agent@$VERSION @earendil-works/pi-tui@$VERSION"
   },
