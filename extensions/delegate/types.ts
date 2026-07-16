@@ -1,4 +1,5 @@
 import type { Message } from '@earendil-works/pi-ai';
+import type { ArtifactMetadata } from '../artifacts';
 
 export interface UsageStats {
   input: number;
@@ -56,6 +57,8 @@ export interface DelegateRunMetadata {
   scope?: string[];
   continuation?: string;
   warnings?: string[];
+  /** Exact final assistant output, stored only when the parent handoff omits it. */
+  artifact?: ArtifactMetadata;
 }
 
 export interface DelegatedRun extends DelegateRunMetadata {
@@ -128,6 +131,19 @@ export function isRunError(run: DelegatedRun): boolean {
   if (run.exitCode === -1) return false;
   if (run.stopReason === 'error' || run.stopReason === 'aborted') return true;
   return run.exitCode !== 0 || !getFinalAssistantText(run.messages).trim();
+}
+
+export function getExactFinalAssistantText(messages: Message[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role !== 'assistant') continue;
+    const text = message.content
+      .filter((part) => part.type === 'text')
+      .map((part) => (part.type === 'text' ? part.text : ''))
+      .join('\n');
+    if (text.trim()) return text;
+  }
+  return '';
 }
 
 export function getFinalAssistantText(messages: Message[]): string {

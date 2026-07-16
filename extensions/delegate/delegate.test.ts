@@ -5,7 +5,7 @@ import {
   initTheme,
   type ThemeColor,
 } from '@earendil-works/pi-coding-agent';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { buildSystemPrompt } from '../system-prompt';
 import {
   canonicalizeEffort,
@@ -14,7 +14,7 @@ import {
   resolveEffort,
 } from './config';
 import { processJsonLine } from './events';
-import { prepareDelegateArguments } from './index';
+import { buildArtifactBackedHandoff, prepareDelegateArguments } from './index';
 import {
   buildParentHandoff,
   PARENT_HANDOFF_CAPS,
@@ -154,6 +154,113 @@ describe('delegate', () => {
     const output = truncateBytes('🙂'.repeat(100), 100);
     expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(100);
     expect(output).toMatch(/Output truncated/);
+  });
+
+  test('artifacts only exact final assistant output omitted by handoff caps', async () => {
+    const protectedValues = {
+      task: 'PROTECTED_TASK',
+      contextNote: 'PROTECTED_CONTEXT',
+      user: 'PROTECTED_CHILD_INPUT',
+      approval: 'PROTECTED_APPROVAL',
+      decision: 'PROTECTED_DECISION',
+      stderr: 'PROTECTED_STDERR',
+    };
+    const exact = `  exact child output\n${'x'.repeat(20_000)}\n`;
+    const run = createRun(protectedValues.task, undefined, {
+      contextNote: protectedValues.contextNote,
+      continuation: 'continue-safe',
+    });
+    run.exitCode = 0;
+    run.state = 'success';
+    run.stderr = protectedValues.stderr;
+    run.messages = [
+      {
+        role: 'user',
+        content: `${protectedValues.user} ${protectedValues.approval} ${protectedValues.decision}`,
+        timestamp: Date.now(),
+      },
+      {
+        ...assistantMessage,
+        content: [{ type: 'text', text: exact }],
+      } as never,
+    ] as never;
+    const persisted: string[] = [];
+    const put = async (
+      _pi: unknown,
+      _ctx: unknown,
+      input: { bytes: string },
+    ) => {
+      persisted.push(input.bytes);
+      return {
+        handle: `art_${'d'.repeat(22)}`,
+        sha256: 'a'.repeat(64),
+        size: Buffer.byteLength(input.bytes),
+        producer: 'delegate' as const,
+        contentClass: 'delegate-output' as const,
+        creationSource: 'delegate.result',
+        encoding: 'utf-8' as const,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      };
+    };
+    const handoff = await buildArtifactBackedHandoff(
+      {} as never,
+      {} as never,
+      [run],
+      put as never,
+    );
+    expect(persisted).toEqual([exact]);
+    for (const protectedValue of Object.values(protectedValues))
+      expect(persisted[0]).not.toContain(protectedValue);
+    expect(handoff).toContain(`Artifact: art_${'d'.repeat(22)}`);
+    expect(handoff).toContain('Continuation: continue-safe');
+    expect(run.messages).toHaveLength(2);
+  });
+
+  test('keeps successful handoff and metadata when artifact creation fails', async () => {
+    const run = createRun('protected task', undefined, {
+      continuation: 'continue-after-artifact-failure',
+    });
+    run.exitCode = 0;
+    run.state = 'success';
+    const exact = `Validation: passed\nChanged files: src/a.ts\n${'z'.repeat(20_000)}`;
+    run.messages = [
+      {
+        ...assistantMessage,
+        content: [{ type: 'text', text: exact }],
+      } as never,
+    ];
+    const put = async () => {
+      throw new Error('/secret/path or policy detail');
+    };
+    const handoff = await buildArtifactBackedHandoff(
+      {} as never,
+      {} as never,
+      [run],
+      put as never,
+    );
+    expect(handoff).toContain('Status: success');
+    expect(handoff).toContain('Continuation: continue-after-artifact-failure');
+    expect(handoff).toContain('Validation: passed');
+    expect(handoff).toContain('Changed files: src/a.ts');
+    expect(handoff).toContain('Exact output artifact unavailable');
+    expect(handoff).not.toContain('/secret/path');
+    expect(run.artifact).toBeUndefined();
+  });
+
+  test('does not artifact complete final output that fits the handoff', async () => {
+    const run = createRun('protected task');
+    run.exitCode = 0;
+    run.state = 'success';
+    run.messages = [assistantMessage as never];
+    const put = vi.fn();
+    await buildArtifactBackedHandoff(
+      {} as never,
+      {} as never,
+      [run],
+      put as never,
+    );
+    expect(put).not.toHaveBeenCalled();
+    expect(run.artifact).toBeUndefined();
   });
 
   test('uses fixed production parent handoff caps', () => {

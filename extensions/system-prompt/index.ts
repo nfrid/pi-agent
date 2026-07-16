@@ -7,6 +7,10 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from '@earendil-works/pi-coding-agent';
+import {
+  appendEagerCriticalRules,
+  FLAG_NAME as SCOPED_INSTRUCTIONS_FLAG,
+} from '../scoped-instructions';
 
 const PI_DIAGNOSTICS_LIMITATION =
   'Pi 0.80.7 exposes loaded skill winners only. Duplicate definitions below are an advisory filesystem scan, not active collision diagnostics; extensions cannot control /skill resolution or add qualified /skill selection.';
@@ -562,10 +566,15 @@ export default function systemPrompt(pi: ExtensionAPI) {
   });
 
   pi.on('before_agent_start', (event, ctx) => {
-    const rebuiltPrompt = buildSystemPrompt(
+    let rebuiltPrompt = buildSystemPrompt(
       event.systemPromptOptions,
       String(ctx.mode),
     );
+    // The scoped-instructions extension may run earlier; preserve critical rules
+    // after this extension's full prompt rebuild as a defense against hook order.
+    if (pi.getFlag(SCOPED_INSTRUCTIONS_FLAG) === true) {
+      rebuiltPrompt = appendEagerCriticalRules(rebuiltPrompt, ctx.cwd).prompt;
+    }
     return { systemPrompt: rebuiltPrompt };
   });
 

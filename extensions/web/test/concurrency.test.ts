@@ -1,6 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ active: 0, peak: 0 }));
+const state = vi.hoisted(() => ({
+  active: 0,
+  peak: 0,
+  payload: '' as string,
+}));
+vi.mock('../../artifacts', () => ({
+  artifactProducer: {
+    put: vi.fn(async (_pi, _ctx, input: { bytes: string }) => {
+      state.payload = input.bytes;
+      return {
+        handle: `art_${'a'.repeat(22)}`,
+        sha256: 'b'.repeat(64),
+        size: Buffer.byteLength(input.bytes),
+        producer: 'web',
+        contentClass: 'json',
+        creationSource: 'web.search',
+        encoding: 'utf-8',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      };
+    }),
+  },
+}));
 vi.mock('../search', () => ({
   search: vi.fn(async (query: string) => {
     state.active += 1;
@@ -32,6 +53,7 @@ describe('query batching', () => {
     ) => Promise<{ content: Array<{ text: string }> }>;
     const tools = new Map<string, { execute: Execute }>();
     const entries: unknown[] = [];
+    state.payload = '';
     const pi = {
       on: vi.fn(),
       registerTool: vi.fn((tool: { name: string; execute: Execute }) =>
@@ -55,9 +77,9 @@ describe('query batching', () => {
       result.content[0].text.indexOf('## second'),
     );
     expect(
-      (entries[0] as { queries: Array<{ query: string }> }).queries.map(
-        (q) => q.query,
-      ),
+      (
+        JSON.parse(state.payload) as { queries: Array<{ query: string }> }
+      ).queries.map((q) => q.query),
     ).toEqual(['first', 'second', 'third', 'fourth', 'fifth']);
     expect(updates).toHaveLength(10);
   });

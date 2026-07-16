@@ -1,7 +1,11 @@
 import * as path from 'node:path';
 import { StringEnum } from '@earendil-works/pi-ai';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent';
 import { type Static, Type } from 'typebox';
+import { artifactProducer } from '../artifacts';
 import { EFFORT_LEVELS, loadDelegateConfig, resolveEffort } from './config';
 import { buildParentHandoff } from './output';
 import { renderDelegateCall, renderDelegateResult } from './render';
@@ -16,6 +20,7 @@ import {
   type DelegateDetails,
   type DelegatedRun,
   type DelegateEffortState,
+  getExactFinalAssistantText,
   isRunError,
 } from './types';
 
@@ -81,6 +86,47 @@ function makeDetails(
   runs: DelegatedRun[],
 ): DelegateDetails {
   return { mode, runs };
+}
+
+export async function buildArtifactBackedHandoff(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  runs: DelegatedRun[],
+  put = artifactProducer.put,
+): Promise<string> {
+  let handoff = buildParentHandoff(runs);
+  const failedRuns = new Set<DelegatedRun>();
+  // Artifact only the final assistant bytes that parent handoff caps or
+  // normalization actually omit. Child sessions and run messages remain authoritative.
+  for (let pass = 0; pass < runs.length; pass++) {
+    let changed = false;
+    for (const run of runs) {
+      if (run.artifact || failedRuns.has(run)) continue;
+      const exact = getExactFinalAssistantText(run.messages);
+      if (!exact || handoff.includes(exact)) continue;
+      try {
+        run.artifact = await put(pi, ctx, {
+          bytes: exact,
+          producer: 'delegate',
+          contentClass: 'delegate-output',
+          mediaType: 'text/plain; charset=utf-8',
+          creationSource: 'delegate.result',
+        });
+        changed = true;
+      } catch {
+        // Artifact policy/filesystem/size failures must not change child outcome.
+        run.warnings = [
+          ...(run.warnings ?? []),
+          'Exact output artifact unavailable; child session remains authoritative.',
+        ];
+        failedRuns.add(run);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+    handoff = buildParentHandoff(runs);
+  }
+  return handoff;
 }
 
 type DelegateParamsInput = Static<typeof DelegateParams>;
@@ -261,14 +307,11 @@ export default function delegate(pi: ExtensionAPI) {
           onUpdate,
           makeDetails: (runs) => makeDetails('single', runs),
         });
+        const runs = [run];
+        const handoff = await buildArtifactBackedHandoff(pi, ctx, runs);
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: buildParentHandoff([run]),
-            },
-          ],
-          details: makeDetails('single', [run]),
+          content: [{ type: 'text' as const, text: handoff }],
+          details: makeDetails('single', runs),
         };
       }
 
@@ -403,13 +446,9 @@ export default function delegate(pi: ExtensionAPI) {
           return run;
         },
       );
+      const handoff = await buildArtifactBackedHandoff(pi, ctx, runs);
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: buildParentHandoff(runs),
-          },
-        ],
+        content: [{ type: 'text' as const, text: handoff }],
         details: makeDetails('parallel', runs),
       };
     },

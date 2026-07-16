@@ -85,6 +85,10 @@ function prepareRun(run: DelegatedRun, bodyCap: number): PreparedRun {
   const bodyTruncated = body !== original;
   const lines = [`Status: ${getRunState(run)}`];
   if (run.continuation) lines.push(`Continuation: ${run.continuation}`);
+  if (run.artifact)
+    lines.push(
+      `Artifact: ${run.artifact.handle} (${run.artifact.size} bytes, sha256 ${run.artifact.sha256})`,
+    );
   if (isRunError(run)) {
     const failure = run.errorMessage?.trim() || run.stderr.trim() || original;
     lines.push(`Failure: ${clip(failure, 120)}`);

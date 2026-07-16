@@ -3,6 +3,7 @@ auth.json
 trust.json
 *.log
 sessions/
+/artifacts/
 .delegate-sessions/
 inspect/
 system-prompts/.selection.json

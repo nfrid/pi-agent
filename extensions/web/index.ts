@@ -4,6 +4,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import pLimit from 'p-limit';
 import { Type } from 'typebox';
+import { type ArtifactMetadata, artifactProducer } from '../artifacts';
 import {
   DEFAULT_CONTENT_CHARS,
   MAX_CONTENT_CHARS,
@@ -20,10 +21,13 @@ import { search } from './search';
 import {
   generateId,
   getResult,
+  getResultArtifact,
   type QueryResultData,
   restoreFromSession,
   type StoredSearchData,
   storeResult,
+  WEB_FALLBACK_TYPE,
+  WEB_REFERENCE_TYPE,
 } from './storage';
 import { throwIfAborted } from './utils';
 
@@ -45,15 +49,84 @@ function urlList(
   return [...new Set(input.map((item) => item.trim()).filter(Boolean))];
 }
 
-function store(pi: ExtensionAPI, data: StoredSearchData): void {
+interface StoredPayload {
+  artifact?: ArtifactMetadata;
+  warning?: string;
+}
+
+const ARTIFACT_WARNING =
+  'Exact artifact unavailable; retained an in-session fallback.';
+
+async function store(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  data: StoredSearchData,
+): Promise<StoredPayload> {
   storeResult(data.id, data);
-  pi.appendEntry('web-search-results', data);
+  try {
+    const artifact = await artifactProducer.put(pi, ctx, {
+      bytes: JSON.stringify(data),
+      producer: 'web',
+      contentClass: 'json',
+      mediaType: 'application/json',
+      creationSource: `web.${data.type}`,
+      itemCount: Object.keys(data).length,
+    });
+    pi.appendEntry(WEB_REFERENCE_TYPE, {
+      version: 1,
+      responseId: data.id,
+      resultType: data.type,
+      artifact,
+    });
+    return { artifact };
+  } catch {
+    // Do not expose artifact paths, policy details, or raw errors to the model.
+    try {
+      pi.appendEntry(WEB_FALLBACK_TYPE, { version: 1, data });
+    } catch {
+      // The in-memory result still serves this invocation if session append fails.
+    }
+    return { warning: ARTIFACT_WARNING };
+  }
+}
+
+function artifactDetails(artifact: ArtifactMetadata) {
+  return {
+    handle: artifact.handle,
+    sha256: artifact.sha256,
+    size: artifact.size,
+    producer: artifact.producer,
+    contentClass: artifact.contentClass,
+    creationSource: artifact.creationSource,
+    itemCount: artifact.itemCount,
+  };
+}
+
+function persistenceDetails(payload: StoredPayload) {
+  return {
+    ...(payload.artifact
+      ? { artifact: artifactDetails(payload.artifact) }
+      : {}),
+    ...(payload.warning ? { artifactWarning: payload.warning } : {}),
+  };
+}
+
+function truncatedPreviewNotice(
+  contentLength: number,
+  responseId: string,
+  selector: string,
+  selectedChars: number,
+  nextOffset: number | null,
+  artifactHandle?: string,
+): string {
+  return `[Content truncated: showing ${selectedChars} of ${contentLength} characters. Use get_search_content({ responseId: "${responseId}", ${selector}, offset: ${nextOffset} }) to continue.${artifactHandle ? ` Exact payload artifact: ${artifactHandle}.` : ''}]`;
 }
 
 function boundedPreview(
   content: string,
   responseId: string,
   selector: string,
+  artifactHandle?: string,
 ): ReturnType<typeof pageContent> & { rendered: string } {
   if (content.length <= MAX_INLINE_CHARS) {
     const page = pageContent(content, { maxChars: MAX_INLINE_CHARS });
@@ -64,20 +137,26 @@ function boundedPreview(
   let page = pageContent(content, { maxChars: budget });
   let notice = '';
   for (let iteration = 0; iteration < 3; iteration++) {
-    notice = `[Content truncated: showing ${page.details.selectedChars} of ${content.length} characters. Use get_search_content({ responseId: "${responseId}", ${selector}, offset: ${page.details.nextOffset} }) to continue.]`;
+    notice = truncatedPreviewNotice(
+      content.length,
+      responseId,
+      selector,
+      page.details.selectedChars,
+      page.details.nextOffset,
+      artifactHandle,
+    );
     budget = Math.max(2, MAX_INLINE_CHARS - notice.length - 2);
     page = pageContent(content, { maxChars: budget });
   }
-  notice = `[Content truncated: showing ${page.details.selectedChars} of ${content.length} characters. Use get_search_content({ responseId: "${responseId}", ${selector}, offset: ${page.details.nextOffset} }) to continue.]`;
+  notice = truncatedPreviewNotice(
+    content.length,
+    responseId,
+    selector,
+    page.details.selectedChars,
+    page.details.nextOffset,
+    artifactHandle,
+  );
   return { ...page, rendered: `${page.text}\n\n${notice}` };
-}
-
-function truncate(
-  content: string,
-  responseId: string,
-  selector: string,
-): string {
-  return boundedPreview(content, responseId, selector).rendered;
 }
 
 const recencySchema = Type.Union(
@@ -235,20 +314,26 @@ export default function web(pi: ExtensionAPI): void {
         .join('\n\n---\n\n');
       const failed = queryResults.filter((item) => item.error).length;
       const summary = `${output}\n\nResponse ID: ${id}`;
-      const initial = boundedPreview(summary, id, 'view: "summary"');
-      store(pi, {
+      const artifact = await store(pi, ctx, {
         id,
         type: 'search',
         timestamp: Date.now(),
         queries: queryResults,
         summary,
       });
+      const initial = boundedPreview(
+        summary,
+        id,
+        'view: "summary"',
+        artifact.artifact?.handle,
+      );
       return {
         content: [{ type: 'text', text: initial.rendered }],
         details: {
           responseId: id,
           queryCount: queries.length,
           failed,
+          ...persistenceDetails(artifact),
           ...initial.details,
         },
         isError: failed === queries.length,
@@ -275,7 +360,7 @@ export default function web(pi: ExtensionAPI): void {
         }),
       ),
     }),
-    async execute(_callId, params, signal, onUpdate) {
+    async execute(_callId, params, signal, onUpdate, ctx) {
       const urls = urlList(params.url, params.urls);
       if (urls.length === 0) {
         return {
@@ -291,23 +376,41 @@ export default function web(pi: ExtensionAPI): void {
       const results = await fetchAllContent(urls, signal);
       const id = generateId();
       if (results.length === 1) {
-        store(pi, { id, type: 'fetch', timestamp: Date.now(), urls: results });
+        const artifact = await store(pi, ctx, {
+          id,
+          type: 'fetch',
+          timestamp: Date.now(),
+          urls: results,
+        });
         const result = results[0];
         if (result.error) {
           return {
             content: [{ type: 'text', text: `Error: ${result.error}` }],
-            details: { responseId: id, error: result.error },
+            details: {
+              responseId: id,
+              error: result.error,
+              ...persistenceDetails(artifact),
+            },
             isError: true,
           };
         }
         return {
           content: [
-            { type: 'text', text: truncate(result.content, id, 'urlIndex: 0') },
+            {
+              type: 'text',
+              text: boundedPreview(
+                result.content,
+                id,
+                'urlIndex: 0',
+                artifact.artifact?.handle,
+              ).rendered,
+            },
           ],
           details: {
             responseId: id,
             title: result.title,
             totalChars: result.content.length,
+            ...persistenceDetails(artifact),
           },
         };
       }
@@ -320,20 +423,26 @@ export default function web(pi: ExtensionAPI): void {
         )
         .join('\n');
       const renderedSummary = `${summary}\n\nResponse ID: ${id}`;
-      const initial = boundedPreview(renderedSummary, id, 'view: "summary"');
-      store(pi, {
+      const artifact = await store(pi, ctx, {
         id,
         type: 'fetch',
         timestamp: Date.now(),
         urls: results,
         summary: renderedSummary,
       });
+      const initial = boundedPreview(
+        renderedSummary,
+        id,
+        'view: "summary"',
+        artifact.artifact?.handle,
+      );
       return {
         content: [{ type: 'text', text: initial.rendered }],
         details: {
           responseId: id,
           urlCount: urls.length,
           successful,
+          ...persistenceDetails(artifact),
           ...initial.details,
         },
         isError: successful === 0,
@@ -397,6 +506,7 @@ export default function web(pi: ExtensionAPI): void {
     }),
     async execute(_callId, params, signal) {
       throwIfAborted(signal);
+      const artifact = getResultArtifact(params.responseId);
       const respond = (
         text: string,
         isError = false,
@@ -414,7 +524,11 @@ export default function web(pi: ExtensionAPI): void {
           });
           return {
             content: [{ type: 'text' as const, text: page.text }],
-            details: { responseId: params.responseId, ...page.details },
+            details: {
+              responseId: params.responseId,
+              ...(artifact ? { artifact: artifactDetails(artifact) } : {}),
+              ...page.details,
+            },
             ...(isError ? { isError: true } : {}),
           };
         } catch (error) {

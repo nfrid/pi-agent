@@ -1,5 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
 
+const artifacts = vi.hoisted(() => ({ payloads: [] as string[] }));
+vi.mock('../../artifacts', () => ({
+  artifactProducer: {
+    put: vi.fn(async (_pi, _ctx, input: { bytes: string }) => {
+      artifacts.payloads.push(input.bytes);
+      return {
+        handle: `art_${'a'.repeat(22)}`,
+        sha256: 'b'.repeat(64),
+        size: Buffer.byteLength(input.bytes),
+        producer: 'web',
+        contentClass: 'json',
+        creationSource: 'web.search',
+        encoding: 'utf-8',
+        itemCount: Object.keys(JSON.parse(input.bytes)).length,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      };
+    }),
+  },
+}));
+
 vi.mock('../search', () => ({
   search: vi.fn(async (query: string) => ({
     answer: `${query}:${'answer'.repeat(900)}`,
@@ -31,20 +51,25 @@ type Execute = (
 
 function setup(): {
   tools: Map<string, { execute: Execute }>;
-  entries: StoredSearchData[];
+  entries: unknown[];
 } {
   const tools = new Map<string, { execute: Execute }>();
-  const entries: StoredSearchData[] = [];
+  const entries: unknown[] = [];
+  artifacts.payloads.length = 0;
   web({
     on: vi.fn(),
     registerTool: vi.fn((tool: { name: string; execute: Execute }) =>
       tools.set(tool.name, tool),
     ),
-    appendEntry: vi.fn((_type: string, data: StoredSearchData) =>
-      entries.push(data),
-    ),
+    appendEntry: vi.fn((_type: string, data: unknown) => entries.push(data)),
   } as never);
   return { tools, entries };
+}
+
+function takeStoredPayload(): StoredSearchData {
+  const payload = artifacts.payloads.shift();
+  if (!payload) throw new Error('artifact payload was not persisted');
+  return JSON.parse(payload) as StoredSearchData;
 }
 
 async function reconstructInitialView(
@@ -76,7 +101,7 @@ async function reconstructInitialView(
 
 describe('stored aggregate and summary continuation', () => {
   it('reconstructs the exact stored web_search aggregate from initial and continued text', async () => {
-    const { tools, entries } = setup();
+    const { tools } = setup();
     const searchTool = tools.get('web_search');
     const getContent = tools.get('get_search_content');
     if (!searchTool || !getContent) throw new Error('web tools not registered');
@@ -88,12 +113,12 @@ describe('stored aggregate and summary continuation', () => {
       {},
     );
     const reconstructed = await reconstructInitialView(initial, getContent);
-    expect(reconstructed).toBe(entries[0].summary);
+    expect(reconstructed).toBe(takeStoredPayload().summary);
     expect(initial.content[0].text).toContain('view: "summary"');
   });
 
   it('reconstructs the exact stored multi-URL summary from initial and continued text', async () => {
-    const { tools, entries } = setup();
+    const { tools } = setup();
     const fetchTool = tools.get('fetch_content');
     const getContent = tools.get('get_search_content');
     if (!fetchTool || !getContent) throw new Error('web tools not registered');
@@ -107,7 +132,7 @@ describe('stored aggregate and summary continuation', () => {
       new AbortController().signal,
     );
     const reconstructed = await reconstructInitialView(initial, getContent);
-    expect(reconstructed).toBe(entries[0].summary);
+    expect(reconstructed).toBe(takeStoredPayload().summary);
     expect(initial.content[0].text).toContain('view: "summary"');
   });
 });
