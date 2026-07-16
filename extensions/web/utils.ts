@@ -20,6 +20,74 @@ export function throwIfAborted(signal?: AbortSignal): void {
     : new DOMException('Aborted', 'AbortError');
 }
 
+const TRANSIENT_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
+function retryAfterMs(response: Response): number | null {
+  const value = response.headers.get('retry-after');
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
+}
+
+export async function abortableDelay(
+  ms: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  throwIfAborted(signal);
+  await new Promise<void>((resolve, reject) => {
+    const done = () => {
+      signal?.removeEventListener('abort', aborted);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    const aborted = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', aborted);
+      reject(
+        signal?.reason instanceof Error
+          ? signal.reason
+          : new DOMException('Aborted', 'AbortError'),
+      );
+    };
+    signal?.addEventListener('abort', aborted, { once: true });
+  });
+}
+
+/** Fetch with a small, bounded retry budget for transient transport/server failures. */
+export async function fetchWithRetry(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  options: { retries?: number; baseDelayMs?: number; maxDelayMs?: number } = {},
+): Promise<Response> {
+  const retries = Math.min(5, Math.max(0, options.retries ?? 2));
+  const baseDelayMs = Math.max(0, options.baseDelayMs ?? 250);
+  const maxDelayMs = Math.max(baseDelayMs, options.maxDelayMs ?? 5_000);
+  for (let attempt = 0; ; attempt += 1) {
+    throwIfAborted(init.signal ?? undefined);
+    try {
+      const response = await fetch(input, init);
+      if (!TRANSIENT_STATUSES.has(response.status) || attempt >= retries)
+        return response;
+      const retryAfter = retryAfterMs(response);
+      await response.body?.cancel('Retrying transient response');
+      const delay = Math.min(
+        maxDelayMs,
+        retryAfter ?? baseDelayMs * 2 ** attempt,
+      );
+      await abortableDelay(delay, init.signal ?? undefined);
+    } catch (error) {
+      throwIfAborted(init.signal ?? undefined);
+      if (attempt >= retries) throw error;
+      await abortableDelay(
+        Math.min(maxDelayMs, baseDelayMs * 2 ** attempt),
+        init.signal ?? undefined,
+      );
+    }
+  }
+}
+
 export async function readResponseTextLimited(
   response: Response,
   maxBytes: number,

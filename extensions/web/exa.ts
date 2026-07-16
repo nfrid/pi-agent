@@ -1,7 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { ExtractedContent } from './extract';
 import type { SearchOptions, SearchResponse } from './types';
-import { getWebSearchConfigPath, readResponseTextLimited } from './utils';
+import {
+  fetchWithRetry,
+  getWebSearchConfigPath,
+  readResponseTextLimited,
+} from './utils';
 
 const EXA_ANSWER_URL = 'https://api.exa.ai/answer';
 const EXA_SEARCH_URL = 'https://api.exa.ai/search';
@@ -193,7 +197,7 @@ export async function callExaMcp(
   args: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<string> {
-  const response = await fetch(EXA_MCP_URL, {
+  const response = await fetchWithRetry(EXA_MCP_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -413,7 +417,7 @@ export async function searchWithExa(
     !!options.domainFilter?.length ||
     !!(options.numResults && options.numResults !== 5);
   if (!useSearch) {
-    const response = await fetch(EXA_ANSWER_URL, {
+    const response = await fetchWithRetry(EXA_ANSWER_URL, {
       method: 'POST',
       headers: {
         'x-api-key': apiKey,
@@ -446,7 +450,7 @@ export async function searchWithExa(
     ? recencyToStartDate(options.recencyFilter)
     : null;
   const domainFilters = mapDomainFilter(options.domainFilter);
-  const response = await fetch(EXA_SEARCH_URL, {
+  const response = await fetchWithRetry(EXA_SEARCH_URL, {
     method: 'POST',
     headers: {
       'x-api-key': apiKey,

@@ -2,7 +2,13 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import pLimit from 'p-limit';
 import { Type } from 'typebox';
+import {
+  DEFAULT_CONTENT_CHARS,
+  MAX_CONTENT_CHARS,
+  pageContent,
+} from './content-retrieval';
 import { fetchAllContent } from './extract';
 import {
   renderFetchCall,
@@ -44,13 +50,34 @@ function store(pi: ExtensionAPI, data: StoredSearchData): void {
   pi.appendEntry('web-search-results', data);
 }
 
+function boundedPreview(
+  content: string,
+  responseId: string,
+  selector: string,
+): ReturnType<typeof pageContent> & { rendered: string } {
+  if (content.length <= MAX_INLINE_CHARS) {
+    const page = pageContent(content, { maxChars: MAX_INLINE_CHARS });
+    return { ...page, rendered: page.text };
+  }
+
+  let budget = MAX_INLINE_CHARS - 512;
+  let page = pageContent(content, { maxChars: budget });
+  let notice = '';
+  for (let iteration = 0; iteration < 3; iteration++) {
+    notice = `[Content truncated: showing ${page.details.selectedChars} of ${content.length} characters. Use get_search_content({ responseId: "${responseId}", ${selector}, offset: ${page.details.nextOffset} }) to continue.]`;
+    budget = Math.max(2, MAX_INLINE_CHARS - notice.length - 2);
+    page = pageContent(content, { maxChars: budget });
+  }
+  notice = `[Content truncated: showing ${page.details.selectedChars} of ${content.length} characters. Use get_search_content({ responseId: "${responseId}", ${selector}, offset: ${page.details.nextOffset} }) to continue.]`;
+  return { ...page, rendered: `${page.text}\n\n${notice}` };
+}
+
 function truncate(
   content: string,
   responseId: string,
   selector: string,
 ): string {
-  if (content.length <= MAX_INLINE_CHARS) return content;
-  return `${content.slice(0, MAX_INLINE_CHARS)}\n\n[Content truncated: showing ${MAX_INLINE_CHARS} of ${content.length} characters. Use get_search_content({ responseId: "${responseId}", ${selector} }) for the full text.]`;
+  return boundedPreview(content, responseId, selector).rendered;
 }
 
 const recencySchema = Type.Union(
@@ -119,62 +146,81 @@ export default function web(pi: ExtensionAPI): void {
         };
       }
       const id = generateId();
-      const queryResults: QueryResultData[] = [];
-      for (let index = 0; index < queries.length; index += 1) {
-        const query = queries[index];
-        onUpdate?.({
-          content: [
-            {
-              type: 'text',
-              text: `Searching ${index + 1}/${queries.length}: ${query}`,
-            },
-          ],
-          details: { phase: 'search', index, total: queries.length },
-        });
-        try {
-          const result = await search(
-            query,
-            {
-              numResults: params.numResults,
-              recencyFilter: params.recencyFilter,
-              domainFilter: params.domainFilter,
-              includeContent: params.includeContent,
-              signal,
-            },
-            ctx as ExtensionContext,
-          );
-          let content = result.inlineContent;
-          if (params.includeContent && !content?.length) {
-            content = await fetchAllContent(
-              result.results.map((item) => item.url),
-              signal,
-            );
-          }
-          queryResults.push({
-            query,
-            answer: result.answer,
-            results: result.results,
-            error: null,
-            provider: result.provider,
-            content,
-          });
-        } catch (error) {
-          throwIfAborted(signal);
-          queryResults.push({
-            query,
-            answer: '',
-            results: [],
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
-      const data: StoredSearchData = {
-        id,
-        type: 'search',
-        timestamp: Date.now(),
-        queries: queryResults,
-      };
-      store(pi, data);
+      const queryResults = new Array<QueryResultData>(queries.length);
+      const limit = pLimit(3);
+      let completed = 0;
+      await Promise.all(
+        queries.map((query, index) =>
+          limit(async () => {
+            onUpdate?.({
+              content: [
+                {
+                  type: 'text',
+                  text: `Searching ${index + 1}/${queries.length}: ${query}`,
+                },
+              ],
+              details: {
+                phase: 'search',
+                index,
+                completed,
+                total: queries.length,
+              },
+            });
+            try {
+              const result = await search(
+                query,
+                {
+                  numResults: params.numResults,
+                  recencyFilter: params.recencyFilter,
+                  domainFilter: params.domainFilter,
+                  includeContent: params.includeContent,
+                  signal,
+                },
+                ctx as ExtensionContext,
+              );
+              let content = result.inlineContent;
+              if (params.includeContent && !content?.length) {
+                content = await fetchAllContent(
+                  result.results.map((item) => item.url),
+                  signal,
+                );
+              }
+              queryResults[index] = {
+                query,
+                answer: result.answer,
+                results: result.results,
+                error: null,
+                provider: result.provider,
+                content,
+              };
+            } catch (error) {
+              throwIfAborted(signal);
+              queryResults[index] = {
+                query,
+                answer: '',
+                results: [],
+                error: error instanceof Error ? error.message : String(error),
+              };
+            } finally {
+              completed += 1;
+              onUpdate?.({
+                content: [
+                  {
+                    type: 'text',
+                    text: `Completed ${completed}/${queries.length} searches`,
+                  },
+                ],
+                details: {
+                  phase: 'search',
+                  index,
+                  completed,
+                  total: queries.length,
+                },
+              });
+            }
+          }),
+        ),
+      );
       const output = queryResults
         .map((item) => {
           if (item.error) return `## ${item.query}\n\nError: ${item.error}`;
@@ -188,18 +234,23 @@ export default function web(pi: ExtensionAPI): void {
         })
         .join('\n\n---\n\n');
       const failed = queryResults.filter((item) => item.error).length;
+      const summary = `${output}\n\nResponse ID: ${id}`;
+      const initial = boundedPreview(summary, id, 'view: "summary"');
+      store(pi, {
+        id,
+        type: 'search',
+        timestamp: Date.now(),
+        queries: queryResults,
+        summary,
+      });
       return {
-        content: [
-          {
-            type: 'text',
-            text: truncate(
-              `${output}\n\nResponse ID: ${id}`,
-              id,
-              'queryIndex: 0',
-            ),
-          },
-        ],
-        details: { responseId: id, queryCount: queries.length, failed },
+        content: [{ type: 'text', text: initial.rendered }],
+        details: {
+          responseId: id,
+          queryCount: queries.length,
+          failed,
+          ...initial.details,
+        },
         isError: failed === queries.length,
       };
     },
@@ -239,8 +290,8 @@ export default function web(pi: ExtensionAPI): void {
       });
       const results = await fetchAllContent(urls, signal);
       const id = generateId();
-      store(pi, { id, type: 'fetch', timestamp: Date.now(), urls: results });
       if (results.length === 1) {
+        store(pi, { id, type: 'fetch', timestamp: Date.now(), urls: results });
         const result = results[0];
         if (result.error) {
           return {
@@ -268,12 +319,22 @@ export default function web(pi: ExtensionAPI): void {
             : `${index}. ${result.title || result.url} — ${result.content.length} characters`,
         )
         .join('\n');
+      const renderedSummary = `${summary}\n\nResponse ID: ${id}`;
+      const initial = boundedPreview(renderedSummary, id, 'view: "summary"');
+      store(pi, {
+        id,
+        type: 'fetch',
+        timestamp: Date.now(),
+        urls: results,
+        summary: renderedSummary,
+      });
       return {
-        content: [{ type: 'text', text: `${summary}\n\nResponse ID: ${id}` }],
+        content: [{ type: 'text', text: initial.rendered }],
         details: {
           responseId: id,
           urlCount: urls.length,
           successful,
+          ...initial.details,
         },
         isError: successful === 0,
       };
@@ -286,10 +347,18 @@ export default function web(pi: ExtensionAPI): void {
     name: 'get_search_content',
     label: 'Get Search Content',
     description:
-      'Retrieve content saved by web_search or fetch_content. Pass the returned responseId and optionally select a query or page by index or exact value.',
+      'Retrieve a bounded, exact slice of content saved by web_search or fetch_content. Use view: "summary" to continue an aggregate search or multi-URL summary; or narrow page content with a heading or literal selector.',
     promptSnippet: 'Retrieve previously saved web search or page content',
     parameters: Type.Object({
-      responseId: Type.String({ description: 'ID returned by a web tool' }),
+      responseId: Type.String({
+        description: 'ID returned by a web tool',
+        maxLength: 128,
+      }),
+      view: Type.Optional(
+        Type.Literal('summary', {
+          description: 'Retrieve the exact rendered aggregate/summary view',
+        }),
+      ),
       query: Type.Optional(
         Type.String({ description: 'Exact stored search query' }),
       ),
@@ -300,8 +369,64 @@ export default function web(pi: ExtensionAPI): void {
       urlIndex: Type.Optional(
         Type.Integer({ description: 'Zero-based page index', minimum: 0 }),
       ),
+      offset: Type.Optional(
+        Type.Integer({
+          description: 'UTF-16 offset within selected text',
+          minimum: 0,
+        }),
+      ),
+      maxChars: Type.Optional(
+        Type.Integer({
+          description: `Maximum characters to return (default ${DEFAULT_CONTENT_CHARS})`,
+          minimum: 2,
+          maximum: MAX_CONTENT_CHARS,
+        }),
+      ),
+      heading: Type.Optional(
+        Type.String({
+          description: 'Exact Markdown heading text',
+          maxLength: 500,
+        }),
+      ),
+      literal: Type.Optional(
+        Type.String({
+          description: 'Select the first line containing this exact text',
+          maxLength: 2_000,
+        }),
+      ),
     }),
-    async execute(_callId, params) {
+    async execute(_callId, params, signal) {
+      throwIfAborted(signal);
+      const respond = (
+        text: string,
+        isError = false,
+      ): {
+        content: Array<{ type: 'text'; text: string }>;
+        details: Record<string, unknown>;
+        isError?: boolean;
+      } => {
+        try {
+          const page = pageContent(text, {
+            offset: params.offset,
+            maxChars: params.maxChars,
+            heading: params.heading,
+            literal: params.literal,
+          });
+          return {
+            content: [{ type: 'text' as const, text: page.text }],
+            details: { responseId: params.responseId, ...page.details },
+            ...(isError ? { isError: true } : {}),
+          };
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          return {
+            content: [{ type: 'text' as const, text: `Error: ${message}` }],
+            details: { responseId: params.responseId, error: message },
+            isError: true,
+          };
+        }
+      };
       const data = getResult(params.responseId);
       if (!data) {
         return {
@@ -315,24 +440,20 @@ export default function web(pi: ExtensionAPI): void {
           isError: true,
         };
       }
+      if (params.view === 'summary') {
+        return data.summary
+          ? respond(data.summary)
+          : respond('Error: no stored summary view for this result.', true);
+      }
       if (data.type === 'fetch') {
         const item = params.url
           ? data.urls?.find((result) => result.url === params.url)
           : data.urls?.[params.urlIndex ?? 0];
-        return {
-          content: [
-            {
-              type: 'text',
-              text: item
-                ? item.error
-                  ? `Error: ${item.error}`
-                  : item.content
-                : 'Error: URL not found in stored result.',
-            },
-          ],
-          details: undefined,
-          isError: !item || !!item.error,
-        };
+        return item
+          ? item.error
+            ? respond(`Error: ${item.error}`, true)
+            : respond(item.content)
+          : respond('Error: URL not found in stored result.', true);
       }
       const query = params.query
         ? data.queries?.find((item) => item.query === params.query)
@@ -347,38 +468,25 @@ export default function web(pi: ExtensionAPI): void {
         };
       }
       if (query.error) {
-        return {
-          content: [{ type: 'text', text: `Error: ${query.error}` }],
-          details: undefined,
-          isError: true,
-        };
+        return respond(`Error: ${query.error}`, true);
       }
       if (params.url !== undefined || params.urlIndex !== undefined) {
         const item = params.url
           ? query.content?.find((result) => result.url === params.url)
           : query.content?.[params.urlIndex ?? 0];
-        return {
-          content: [
-            {
-              type: 'text',
-              text: item
-                ? item.error
-                  ? `Error: ${item.error}`
-                  : item.content
-                : 'Error: stored page content not found; search with includeContent: true.',
-            },
-          ],
-          details: undefined,
-          isError: !item || !!item.error,
-        };
+        return item
+          ? item.error
+            ? respond(`Error: ${item.error}`, true)
+            : respond(item.content)
+          : respond(
+              'Error: stored page content not found; search with includeContent: true.',
+              true,
+            );
       }
       const sources = query.results
         .map((item) => `${item.title}\n${item.url}`)
         .join('\n\n');
-      return {
-        content: [{ type: 'text', text: `${query.answer}\n\n${sources}` }],
-        details: undefined,
-      };
+      return respond(`${query.answer}\n\n${sources}`);
     },
     renderCall: renderGetContentCall,
     renderResult: renderWebResult,

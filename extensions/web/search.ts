@@ -9,19 +9,31 @@ export async function search(
   options: SearchOptions = {},
   ctx?: ExtensionContext,
 ): Promise<SearchResponseWithProvider> {
+  let openAIError: unknown;
   if (await isOpenAISearchAvailable(ctx)) {
     try {
       return {
         ...(await searchWithOpenAI(query, options, ctx)),
         provider: 'openai',
       };
-    } catch {
+    } catch (error) {
       throwIfAborted(options.signal);
+      openAIError = error;
       // Exa remains a zero-configuration fallback when Codex/OpenAI search fails.
     }
   }
   throwIfAborted(options.signal);
-  const result = await searchWithExa(query, options);
-  if (!result) throw new Error('Exa returned no search results');
-  return { ...result, provider: 'exa' };
+  try {
+    const result = await searchWithExa(query, options);
+    if (!result) throw new Error('Exa returned no search results');
+    return { ...result, provider: 'exa' };
+  } catch (exaError) {
+    throwIfAborted(options.signal);
+    if (!openAIError) throw exaError;
+    const message = (error: unknown) =>
+      error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `OpenAI search failed: ${message(openAIError)}; Exa fallback failed: ${message(exaError)}`,
+    );
+  }
 }

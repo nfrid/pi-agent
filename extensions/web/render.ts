@@ -51,6 +51,7 @@ type FetchCallArgs = {
 
 type GetContentCallArgs = {
   responseId?: string;
+  view?: 'summary';
   query?: string;
   queryIndex?: number;
   url?: string;
@@ -188,6 +189,7 @@ export function renderGetContentCall(
   theme: ThemeLike,
 ): Component {
   const selectors: string[] = [];
+  if (args.view) selectors.push(args.view);
   if (args.query) selectors.push(`query “${preview(args.query, 60)}”`);
   else if (args.queryIndex !== undefined)
     selectors.push(`query ${args.queryIndex}`);

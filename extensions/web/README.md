@@ -53,11 +53,21 @@ Results are stored in the Pi session. Retrieve them by the returned
 from a search is available when that search used `includeContent: true`.
 
 ```ts
+get_search_content({ responseId: 'abc123', view: 'summary', offset: 30000 });
 get_search_content({ responseId: 'abc123', queryIndex: 0 });
 get_search_content({ responseId: 'abc123', queryIndex: 0, urlIndex: 0 });
+get_search_content({ responseId: 'abc123', urlIndex: 0, offset: 12000 });
+get_search_content({ responseId: 'abc123', urlIndex: 0, heading: 'Details' });
+get_search_content({ responseId: 'abc123', urlIndex: 0, literal: 'needle' });
 ```
 
-Tool responses inline at most 30,000 characters; stored content remains full.
+Retrieval returns at most 12,000 characters by default. Its metadata includes a
+SHA-256 hash, exact UTF-16 offsets, selected/remaining counts, and `nextOffset`
+for lossless paging. Use `view: 'summary'` to continue the exact aggregate
+`web_search` output or multi-URL `fetch_content` summary. `maxChars` can raise
+the bound up to 100,000; heading and literal selectors narrow page text. Tool
+responses inline at most 30,000 characters; stored content remains full and
+unchanged.
 In Pi's TUI, results are rendered as Markdown with a compact preview. Use the
 normal tool-expansion keybinding to show the full rendered result.
 

@@ -1,7 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { SearchOptions, SearchResponse, SearchResult } from './types';
-import { getWebSearchConfigPath, readResponseTextLimited } from './utils';
+import {
+  fetchWithRetry,
+  getWebSearchConfigPath,
+  readResponseTextLimited,
+} from './utils';
 
 const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
@@ -475,7 +479,7 @@ export async function searchWithOpenAI(
     tool_choice: 'required' as const,
     parallel_tool_calls: true,
   };
-  const response = await fetch(
+  const response = await fetchWithRetry(
     useCodexEndpoint ? CODEX_RESPONSES_URL : OPENAI_RESPONSES_URL,
     {
       method: 'POST',

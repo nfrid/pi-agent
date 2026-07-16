@@ -10,6 +10,7 @@ import {
   validateRemoteUrl,
 } from './ssrf-protection';
 import {
+  fetchWithRetry,
   getWebSearchConfigPath,
   readResponseTextLimited,
   throwIfAborted,
@@ -93,7 +94,7 @@ async function extractWithJina(
       allowRanges: loadSsrfAllowRanges(),
       lookup,
     });
-    const response = await fetch(`https://r.jina.ai/${url}`, {
+    const response = await fetchWithRetry(`https://r.jina.ai/${url}`, {
       headers: { Accept: 'text/markdown', 'X-No-Cache': 'true' },
       signal: signal
         ? AbortSignal.any([signal, AbortSignal.timeout(DEFAULT_TIMEOUT_MS)])

@@ -19,6 +19,8 @@ export interface StoredSearchData {
   timestamp: number;
   queries?: QueryResultData[];
   urls?: ExtractedContent[];
+  /** Exact aggregate/summary representation initially rendered by the tool. */
+  summary?: string;
 }
 
 const storedResults = new Map<string, StoredSearchData>();
@@ -53,6 +55,7 @@ function isValidStoredData(data: unknown): data is StoredSearchData {
   if (typeof d.id !== 'string' || !d.id) return false;
   if (d.type !== 'search' && d.type !== 'fetch') return false;
   if (typeof d.timestamp !== 'number') return false;
+  if (d.summary !== undefined && typeof d.summary !== 'string') return false;
   if (d.type === 'search' && !Array.isArray(d.queries)) return false;
   if (d.type === 'fetch' && !Array.isArray(d.urls)) return false;
   return true;
