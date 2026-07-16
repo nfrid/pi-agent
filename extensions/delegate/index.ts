@@ -3,7 +3,7 @@ import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { type Static, Type } from 'typebox';
 import { EFFORT_LEVELS, loadDelegateConfig, resolveEffort } from './config';
-import { truncateBytes } from './output';
+import { buildParentHandoff } from './output';
 import { renderDelegateCall, renderDelegateResult } from './render';
 import { mapWithConcurrency, runDelegate } from './runner';
 import {
@@ -16,13 +16,8 @@ import {
   type DelegateDetails,
   type DelegatedRun,
   type DelegateEffortState,
-  getFinalAssistantText,
   isRunError,
 } from './types';
-
-const OUTPUT_CAP = 50 * 1024;
-const SINGLE_OUTPUT_CAP = 12 * 1024;
-const PER_TASK_OUTPUT_CAP = 8 * 1024;
 
 const EffortSchema = StringEnum(EFFORT_LEVELS, {
   description:
@@ -32,37 +27,52 @@ const ContextSchema = StringEnum(['branch', 'fresh'] as const, {
   description:
     'Optional context mode. fresh starts with the task and project instructions; branch also includes parent conversation history.',
 });
-const ScopeSchema = Type.Array(Type.String(), {
+const ScopeSchema = Type.Array(Type.String({ maxLength: 4096 }), {
+  maxItems: 100,
   description:
     'Advisory paths where work is expected. This helps coordinate parallel writes but is not a hard boundary.',
 });
 
 const TaskItem = Type.Object({
-  task: Type.String({ description: 'Focused task or continuation feedback' }),
-  cwd: Type.Optional(Type.String()),
+  task: Type.String({
+    minLength: 1,
+    maxLength: 32 * 1024,
+    description: 'Focused task or continuation feedback',
+  }),
+  cwd: Type.Optional(Type.String({ maxLength: 4096 })),
   effort: Type.Optional(EffortSchema),
   context: Type.Optional(ContextSchema),
   contextNote: Type.Optional(
-    Type.String({ description: 'Curated context from the parent agent' }),
+    Type.String({
+      maxLength: 64 * 1024,
+      description: 'Curated context from the parent agent',
+    }),
   ),
   scope: Type.Optional(ScopeSchema),
   continuation: Type.Optional(
-    Type.String({ description: 'Opaque token from a previous delegate run' }),
+    Type.String({
+      maxLength: 512,
+      description: 'Opaque token from a previous delegate run',
+    }),
   ),
   allowWrites: Type.Optional(Type.Boolean()),
 });
 
 const DelegateParams = Type.Object({
   task: Type.Optional(
-    Type.String({ description: 'Focused task or follow-up feedback' }),
+    Type.String({
+      minLength: 1,
+      maxLength: 32 * 1024,
+      description: 'Focused task or follow-up feedback',
+    }),
   ),
-  tasks: Type.Optional(Type.Array(TaskItem)),
-  cwd: Type.Optional(Type.String()),
+  tasks: Type.Optional(Type.Array(TaskItem, { maxItems: 20 })),
+  cwd: Type.Optional(Type.String({ maxLength: 4096 })),
   effort: Type.Optional(EffortSchema),
   context: Type.Optional(ContextSchema),
-  contextNote: Type.Optional(Type.String()),
+  contextNote: Type.Optional(Type.String({ maxLength: 64 * 1024 })),
   scope: Type.Optional(ScopeSchema),
-  continuation: Type.Optional(Type.String()),
+  continuation: Type.Optional(Type.String({ maxLength: 512 })),
   allowWrites: Type.Optional(Type.Boolean()),
 });
 
@@ -71,20 +81,6 @@ function makeDetails(
   runs: DelegatedRun[],
 ): DelegateDetails {
   return { mode, runs };
-}
-
-function resultText(run: DelegatedRun): string {
-  const warning = [run.effort?.warning, ...(run.warnings ?? [])]
-    .filter(Boolean)
-    .map((item) => `Delegate warning: ${item}`)
-    .join('\n');
-  const final = getFinalAssistantText(run.messages).trim();
-  const body =
-    final || run.errorMessage?.trim() || run.stderr.trim() || '(no output)';
-  const continuation = run.continuation
-    ? `Continuation token: ${run.continuation}\n\n`
-    : '';
-  return `${continuation}${warning ? `${warning}\n\n` : ''}${body}`;
 }
 
 type DelegateParamsInput = Static<typeof DelegateParams>;
@@ -265,12 +261,11 @@ export default function delegate(pi: ExtensionAPI) {
           onUpdate,
           makeDetails: (runs) => makeDetails('single', runs),
         });
-        const text = truncateBytes(resultText(run), SINGLE_OUTPUT_CAP);
         return {
           content: [
             {
               type: 'text' as const,
-              text: isRunError(run) ? `Delegated task failed: ${text}` : text,
+              text: buildParentHandoff([run]),
             },
           ],
           details: makeDetails('single', [run]),
@@ -408,22 +403,11 @@ export default function delegate(pi: ExtensionAPI) {
           return run;
         },
       );
-      const succeeded = runs.filter((run) => !isRunError(run)).length;
-      const sections = runs.map(
-        (run, index) =>
-          `## Task ${index + 1}: ${isRunError(run) ? 'failed' : 'completed'}\n\n${truncateBytes(resultText(run), PER_TASK_OUTPUT_CAP)}`,
-      );
-      const prefix = warningText.length
-        ? `${warningText.map((w) => `Warning: ${w}`).join('\n')}\n\n`
-        : '';
       return {
         content: [
           {
             type: 'text' as const,
-            text: truncateBytes(
-              `${prefix}Delegated tasks: ${succeeded}/${runs.length} succeeded\n\n${sections.join('\n\n---\n\n')}`,
-              OUTPUT_CAP,
-            ),
+            text: buildParentHandoff(runs),
           },
         ],
         details: makeDetails('parallel', runs),

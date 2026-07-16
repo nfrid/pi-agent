@@ -10,11 +10,16 @@ import { buildSystemPrompt } from '../system-prompt';
 import {
   canonicalizeEffort,
   normalizeEffortProfiles,
+  parseDelegateConfig,
   resolveEffort,
 } from './config';
 import { processJsonLine } from './events';
 import { prepareDelegateArguments } from './index';
-import { truncateBytes } from './output';
+import {
+  buildParentHandoff,
+  PARENT_HANDOFF_CAPS,
+  truncateBytes,
+} from './output';
 import { buildDelegatePrompt } from './prompt';
 import { renderDelegateCall, renderDelegateResult } from './render';
 import { buildChildArgs, resolvePiSpawn } from './runner';
@@ -151,6 +156,146 @@ describe('delegate', () => {
     expect(output).toMatch(/Output truncated/);
   });
 
+  test('uses fixed production parent handoff caps', () => {
+    expect(PARENT_HANDOFF_CAPS).toEqual({
+      singleMaxBytes: 12 * 1024,
+      aggregateMaxBytes: 50 * 1024,
+      perTaskMaxBytes: 8 * 1024,
+    });
+  });
+
+  test('runtime configuration errors block effort resolution', () => {
+    const runtimeInvalid = parseDelegateConfig({
+      timeoutMs: 1,
+      provider: 'openai-codex',
+      effortProfiles: {
+        economy: { model: 'quick', thinking: 'high' },
+      },
+    });
+    expect(resolveEffort('economy', runtimeInvalid).error).toContain(
+      'timeoutMs',
+    );
+  });
+
+  test('reserves continuation and truncation metadata for all 20 tasks', () => {
+    const runs = Array.from({ length: 20 }, (_, index) => {
+      const run = createRun(`task ${index + 1}`, undefined, {
+        continuation: `continuation-${index + 1}`,
+      });
+      run.exitCode = 0;
+      run.state = 'success';
+      run.messages = [
+        {
+          ...assistantMessage,
+          content: [{ type: 'text', text: '🙂'.repeat(10_000) }],
+        } as never,
+      ];
+      return run;
+    });
+    const output = buildParentHandoff(runs);
+    expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(
+      PARENT_HANDOFF_CAPS.aggregateMaxBytes,
+    );
+    for (let index = 1; index <= 20; index++) {
+      expect(output).toContain(`## Task ${index}\n`);
+      expect(output).toContain(`Continuation: continuation-${index}`);
+    }
+    expect(output.match(/Truncation:/g)).toHaveLength(20);
+  });
+
+  test('preserves 20 maximum-length opaque continuations within production caps', () => {
+    const continuations = Array.from(
+      { length: 20 },
+      (_, index) => `${index.toString().padStart(2, '0')}:${'界'.repeat(509)}`,
+    );
+    const runs = continuations.map((continuation, index) => {
+      const run = createRun(`task ${index + 1}`, undefined, {
+        continuation,
+        warnings: ['w'.repeat(500)],
+      });
+      run.exitCode = 1;
+      run.state = 'error';
+      run.errorMessage = 'failure '.repeat(100);
+      run.messages = [
+        {
+          ...assistantMessage,
+          content: [
+            {
+              type: 'text',
+              text: `Changed files:\n- ${'path/'.repeat(100)}\n\nValidation:\n- ${'check '.repeat(100)}`,
+            },
+          ],
+        } as never,
+      ];
+      return run;
+    });
+    const output = buildParentHandoff(runs);
+    expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(
+      PARENT_HANDOFF_CAPS.aggregateMaxBytes,
+    );
+    for (const continuation of continuations)
+      expect(output).toContain(`Continuation: ${continuation}`);
+
+    const impossible = buildParentHandoff(runs, {
+      ...PARENT_HANDOFF_CAPS,
+      aggregateMaxBytes: 4096,
+    });
+    expect(Buffer.byteLength(impossible, 'utf8')).toBeGreaterThan(4096);
+    expect(impossible).toContain('Mandatory envelope exceeds');
+    for (const continuation of continuations)
+      expect(impossible).toContain(`Continuation: ${continuation}`);
+  });
+
+  test('keeps failure, validation, and changed-file evidence in the envelope', () => {
+    const run = createRun('implement', undefined, {
+      continuation: 'retry-token',
+      warnings: ['scope overlap'],
+    });
+    run.exitCode = 1;
+    run.state = 'error';
+    run.errorMessage = 'Tests failed';
+    run.messages = [
+      {
+        ...assistantMessage,
+        content: [
+          {
+            type: 'text',
+            text: `Changed files:\n- src/delegate.ts\n\nValidation:\n- npm test failed\n\n${'details '.repeat(4000)}`,
+          },
+        ],
+      } as never,
+    ];
+    const output = buildParentHandoff([run], {
+      ...PARENT_HANDOFF_CAPS,
+      singleMaxBytes: 2048,
+    });
+    expect(output).toContain('Status: error');
+    expect(output).toContain('Continuation: retry-token');
+    expect(output).toContain('Failure: Tests failed');
+    expect(output).toContain('Warnings: scope overlap');
+    expect(output).toContain('Changed files: src/delegate.ts');
+    expect(output).toContain('Validation: npm test failed');
+    expect(output).toContain('Truncation: body truncated');
+    expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(2048);
+  });
+
+  test('bounded handoffs do not mutate full run details or transcripts', () => {
+    const run = createRun('inspect', undefined, { continuation: 'full-token' });
+    run.exitCode = 0;
+    run.messages = [
+      {
+        ...assistantMessage,
+        content: [{ type: 'text', text: 'exact transcript '.repeat(2000) }],
+      } as never,
+    ];
+    const before = structuredClone(run);
+    buildParentHandoff([run]);
+    expect(run).toEqual(before);
+    expect(getFinalAssistantText(run.messages)).toContain(
+      'exact transcript exact transcript',
+    );
+  });
+
   test('snapshots the branch before the current delegate call and overrides cwd', () => {
     expect(
       buildSessionSnapshotJsonl(
@@ -205,7 +350,9 @@ describe('delegate', () => {
     expect(args[args.indexOf('--session') + 1]).toBe('/tmp/child.jsonl');
     expect(args).toContain('--no-extensions');
     const extensionPath = args[args.indexOf('--extension') + 1];
-    expect(extensionPath).toMatch(/extensions[\\/]system-prompt\.ts$/);
+    expect(extensionPath).toMatch(
+      /extensions[\\/]system-prompt[\\/]index\.ts$/,
+    );
     expect(existsSync(extensionPath)).toBe(true);
     expect(args[args.indexOf('--tools') + 1]).toBe('read,bash,grep,find,ls');
   });

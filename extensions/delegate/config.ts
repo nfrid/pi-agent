@@ -113,6 +113,34 @@ function parseRuntimeSetting(
   return { value: raw };
 }
 
+export function parseDelegateConfig(raw: unknown): DelegateConfig {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return {
+      ...defaultConfig(),
+      error: 'delegate configuration must be an object.',
+    };
+  const record = raw as Record<string, unknown>;
+  const timeout = parseRuntimeSetting(record, 'timeoutMs');
+  const maxTasks = parseRuntimeSetting(record, 'maxParallelTasks');
+  const concurrency = parseRuntimeSetting(record, 'maxConcurrency');
+  const config: DelegateConfig = {
+    timeoutMs: timeout.value,
+    maxParallelTasks: maxTasks.value,
+    maxConcurrency: concurrency.value,
+  };
+  const runtimeError = [timeout.error, maxTasks.error, concurrency.error]
+    .filter(Boolean)
+    .join(' ');
+  if (runtimeError) config.error = runtimeError;
+  if (typeof record.provider === 'string' && record.provider.trim())
+    config.provider = record.provider.trim();
+  const defaultEffort = canonicalizeEffort(record.defaultEffort);
+  if (defaultEffort) config.defaultEffort = defaultEffort;
+  const profiles = normalizeEffortProfiles(record.effortProfiles);
+  if (profiles) config.effortProfiles = profiles;
+  return config;
+}
+
 function readConfigFile(settingsPath: string): DelegateConfig {
   if (!existsSync(settingsPath)) return defaultConfig();
   try {
@@ -122,31 +150,7 @@ function readConfigFile(settingsPath: string): DelegateConfig {
     >;
     const nested = raw[SETTINGS_KEY];
     if (nested === undefined) return defaultConfig();
-    if (!nested || typeof nested !== 'object' || Array.isArray(nested))
-      return {
-        ...defaultConfig(),
-        error: 'delegate configuration must be an object.',
-      };
-    const record = nested as Record<string, unknown>;
-    const timeout = parseRuntimeSetting(record, 'timeoutMs');
-    const maxTasks = parseRuntimeSetting(record, 'maxParallelTasks');
-    const concurrency = parseRuntimeSetting(record, 'maxConcurrency');
-    const config: DelegateConfig = {
-      timeoutMs: timeout.value,
-      maxParallelTasks: maxTasks.value,
-      maxConcurrency: concurrency.value,
-    };
-    const runtimeError = [timeout.error, maxTasks.error, concurrency.error]
-      .filter(Boolean)
-      .join(' ');
-    if (runtimeError) config.error = runtimeError;
-    if (typeof record.provider === 'string' && record.provider.trim())
-      config.provider = record.provider.trim();
-    const defaultEffort = canonicalizeEffort(record.defaultEffort);
-    if (defaultEffort) config.defaultEffort = defaultEffort;
-    const profiles = normalizeEffortProfiles(record.effortProfiles);
-    if (profiles) config.effortProfiles = profiles;
-    return config;
+    return parseDelegateConfig(nested);
   } catch {
     return {
       ...defaultConfig(),
