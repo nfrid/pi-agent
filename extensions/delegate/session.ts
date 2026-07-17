@@ -3,11 +3,13 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import type { DelegateRouteState } from './types';
 
 interface SessionSnapshotSource {
   getHeader: () => unknown;
@@ -18,15 +20,19 @@ export interface DelegateSession {
   token: string;
   filePath: string;
   cwd: string;
+  isolationId?: string;
+  routing?: DelegateRouteState;
 }
 
 interface DelegateSessionMetadata {
   token: string;
   cwd: string;
   createdAt: string;
+  isolationId?: string;
+  routing?: DelegateRouteState;
 }
 
-const SESSION_VERSION = 3;
+const SESSION_VERSION = 4;
 const TOKEN_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -85,6 +91,8 @@ function initialSessionJsonl(
 export function createDelegateSession(options: {
   cwd: string;
   snapshotJsonl?: string;
+  isolationId?: string;
+  routing?: DelegateRouteState;
 }): DelegateSession {
   const token = randomUUID();
   const createdAt = new Date().toISOString();
@@ -101,6 +109,8 @@ export function createDelegateSession(options: {
       token,
       cwd: options.cwd,
       createdAt,
+      ...(options.isolationId ? { isolationId: options.isolationId } : {}),
+      ...(options.routing ? { routing: options.routing } : {}),
     };
     writeFileSync(metadataPath, `${JSON.stringify(metadata)}\n`, {
       encoding: 'utf8',
@@ -112,7 +122,13 @@ export function createDelegateSession(options: {
     rmSync(metadataPath, { force: true });
     throw error;
   }
-  return { token, filePath, cwd: options.cwd };
+  return {
+    token,
+    filePath,
+    cwd: options.cwd,
+    ...(options.isolationId ? { isolationId: options.isolationId } : {}),
+    ...(options.routing ? { routing: options.routing } : {}),
+  };
 }
 
 /** Resolve a continuation token without allowing arbitrary path access. */
@@ -130,10 +146,44 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
       !metadata.cwd
     )
       return null;
-    return { token, filePath, cwd: metadata.cwd };
+    return {
+      token,
+      filePath,
+      cwd: metadata.cwd,
+      ...(typeof metadata.isolationId === 'string'
+        ? { isolationId: metadata.isolationId }
+        : {}),
+      ...(metadata.routing && typeof metadata.routing === 'object'
+        ? { routing: metadata.routing }
+        : {}),
+    };
   } catch {
     return null;
   }
+}
+
+export function updateDelegateSessionRouting(
+  token: string,
+  routing: DelegateRouteState,
+): DelegateSession | null {
+  const current = resolveDelegateSession(token);
+  if (!current) return null;
+  const { metadataPath } = sessionPaths(token);
+  const metadata = JSON.parse(
+    readFileSync(metadataPath, 'utf8'),
+  ) as DelegateSessionMetadata;
+  const temporary = `${metadataPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify({ ...metadata, routing })}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx',
+    });
+    renameSync(temporary, metadataPath);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+  return { ...current, routing };
 }
 
 function containsToolCall(entry: unknown, toolCallId: string): boolean {

@@ -20,46 +20,6 @@ type ThinkingRunState = {
 
 const thinkingState = new WeakMap<DelegatedRun, ThinkingRunState>();
 
-function truncate(text: string, max = MAX_PREVIEW_CHARS): string {
-  if (text.length <= max) return text;
-  return `… ${text.slice(text.length - max)}`;
-}
-
-function textFromContent(content: unknown): string {
-  if (!Array.isArray(content)) return '';
-  return content
-    .map((part) => {
-      if (!part || typeof part !== 'object') return '';
-      const p = part as { type?: string; text?: unknown };
-      if (p.type === 'text' && typeof p.text === 'string') return p.text;
-      if (p.type === 'image') return '[image]';
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-}
-
-function resultPreview(value: unknown): string {
-  if (!value || typeof value !== 'object') return '';
-  const result = value as {
-    content?: unknown;
-    text?: unknown;
-    message?: unknown;
-  };
-  const content = textFromContent(result.content);
-  if (content) return truncate(content);
-  if (typeof result.text === 'string') return truncate(result.text.trim());
-  if (typeof result.message === 'string')
-    return truncate(result.message.trim());
-  return '';
-}
-
-function inline(value: string, max = 80): string {
-  const text = value.replace(/\s+/g, ' ').trim();
-  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
-}
-
 function pathValue(value: unknown, fallback = '.'): string {
   return typeof value === 'string' && value
     ? value.replace(/^\/Users\/[^/]+/, '~')
@@ -71,7 +31,7 @@ function toolLabel(name: string, args: unknown): string {
   const a = args as Record<string, unknown>;
   switch (name) {
     case 'bash':
-      return `bash $ ${inline(typeof a.command === 'string' ? a.command : '...')}`;
+      return 'bash';
     case 'read':
       return `read ${pathValue(a.path ?? a.file_path, '...')}`;
     case 'write':
@@ -81,9 +41,9 @@ function toolLabel(name: string, args: unknown): string {
     case 'ls':
       return `ls ${pathValue(a.path)}`;
     case 'find':
-      return `find ${inline(String(a.pattern ?? '*'))} in ${pathValue(a.path)}`;
+      return `find in ${pathValue(a.path)}`;
     case 'grep':
-      return `grep ${inline(String(a.pattern ?? ''))} in ${pathValue(a.path)}`;
+      return `grep in ${pathValue(a.path)}`;
     default:
       return name;
   }
@@ -136,21 +96,6 @@ function existingToolLabel(
   return findActivity(run, eventId(event, 'tool'))?.label ?? name;
 }
 
-function thinkingTitles(text: string): string[] {
-  return [...text.matchAll(/\*\*([^\n*]+?)\*\*(?=\s|$)/g)]
-    .map((match) => match[1]?.trim())
-    .filter((title): title is string => Boolean(title));
-}
-
-function thinkingLabel(value: unknown): string {
-  if (typeof value !== 'string') return 'thinking';
-  const text = value.trim();
-  const title = thinkingTitles(text).at(-1);
-  if (title) return title;
-  const preview = text.replace(/\s+/g, ' ').trim().slice(0, 160);
-  return preview ? `thinking: ${preview}` : 'thinking';
-}
-
 function getThinkingState(run: DelegatedRun): ThinkingRunState {
   let state = thinkingState.get(run);
   if (!state) {
@@ -187,15 +132,6 @@ function startThinkingGroup(
   return group;
 }
 
-function findTitleSuffix(titles: string[], previous: string[]): string[] {
-  if (previous.length === 0) return titles;
-  for (let start = titles.length - previous.length; start >= 0; start--) {
-    if (previous.every((title, index) => titles[start + index] === title))
-      return titles.slice(start + previous.length);
-  }
-  return titles;
-}
-
 function updateThinkingGroup(
   run: DelegatedRun,
   event: Record<string, unknown>,
@@ -205,32 +141,12 @@ function updateThinkingGroup(
   const key = thinkingKey(event);
   const group = state.active.get(key) ?? startThinkingGroup(run, event);
   group.text = `${group.text}${text}`.slice(0, MAX_PREVIEW_CHARS);
-  const newTitles = findTitleSuffix(thinkingTitles(group.text), group.titles);
-
-  for (const title of newTitles) {
-    if (group.titles.length > 0) {
-      const previous = findActivity(run, group.activityIds.at(-1));
-      if (previous) previous.status = 'completed';
-      group.activityIds.push(`${group.id}:${group.activityIds.length}`);
-    }
-    group.titles.push(title);
-    upsertActivity(run, {
-      id: group.activityIds.at(-1),
-      type: 'thinking',
-      label: title,
-      status: 'running',
-      latestText: group.text,
-    });
-  }
-
-  if (group.titles.length === 0)
-    upsertActivity(run, {
-      id: group.activityIds[0],
-      type: 'thinking',
-      label: thinkingLabel(group.text),
-      status: 'running',
-      latestText: group.text,
-    });
+  upsertActivity(run, {
+    id: group.activityIds[0],
+    type: 'thinking',
+    label: 'thinking',
+    status: 'running',
+  });
   return group;
 }
 
@@ -239,7 +155,14 @@ function messageBytes(messages: Message[]): number {
 }
 
 function addMessage(run: DelegatedRun, message: Message) {
-  run.messages.push(message);
+  const sanitized =
+    message.role === 'assistant'
+      ? {
+          ...message,
+          content: message.content.filter((part) => part.type === 'text'),
+        }
+      : message;
+  run.messages.push(sanitized as Message);
   while (
     run.messages.length > 1 &&
     (run.messages.length > MAX_MESSAGE_COUNT ||
@@ -262,8 +185,22 @@ function updateMessageMetadata(run: DelegatedRun, message: Message) {
   }
   if (message.model) run.model = message.model;
   run.usage.turns++;
+  run.usage.computeUnits += run.routing?.computeUnitsPerTurn ?? 1;
   if (message.stopReason) run.stopReason = message.stopReason;
   if (message.errorMessage) run.errorMessage = message.errorMessage;
+}
+
+function assistantFingerprint(message: Message): string {
+  if (message.role !== 'assistant') return '';
+  return JSON.stringify({
+    timestamp: message.timestamp,
+    model: message.model,
+    stopReason: message.stopReason,
+    usage: message.usage,
+    text: message.content
+      .filter((part) => part.type === 'text')
+      .map((part) => (part.type === 'text' ? part.text : '')),
+  });
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -285,23 +222,30 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
 
   switch (event.type) {
     case 'message_end':
-      if (event.message) {
+      if (
+        event.message &&
+        (event.message as { role?: unknown }).role === 'assistant'
+      ) {
         addMessage(run, event.message as Message);
         return true;
       }
       return false;
     case 'agent_end': {
-      // message_end is authoritative. Recover only when its assistant event was
-      // missing (for example because an oversized JSON line was discarded).
-      if (
-        !run.messages.some((message) => message.role === 'assistant') &&
-        Array.isArray(event.messages)
-      ) {
-        const assistants = (event.messages as Message[]).filter(
-          (message) => message.role === 'assistant',
+      // message_end is authoritative. Reconcile any missing assistant event by
+      // stable response metadata without duplicating events already processed.
+      if (Array.isArray(event.messages)) {
+        const existing = new Set(
+          run.messages
+            .filter((message) => message.role === 'assistant')
+            .map(assistantFingerprint),
         );
-        for (const message of assistants) addMessage(run, message);
-        return assistants.length > 0;
+        const missing = (event.messages as Message[]).filter(
+          (message) =>
+            message.role === 'assistant' &&
+            !existing.has(assistantFingerprint(message)),
+        );
+        for (const message of missing) addMessage(run, message);
+        return missing.length > 0;
       }
       return false;
     }
@@ -319,7 +263,6 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
         type: 'tool',
         label: existingToolLabel(run, event),
         status: 'running',
-        latestText: resultPreview(event.partialResult),
       });
       return true;
     case 'tool_execution_end':
@@ -328,7 +271,6 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
         type: 'tool',
         label: existingToolLabel(run, event),
         status: event.isError ? 'error' : 'completed',
-        latestText: resultPreview(event.result),
       });
       return true;
     case 'message_update': {

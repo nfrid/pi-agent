@@ -1,13 +1,24 @@
 import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { processJsonLine } from './events';
+import {
+  discardChildAuth,
+  discardReadOnlySandbox,
+  isolationSpawn,
+  type PreparedIsolation,
+  prepareChildAuth,
+  prepareReadOnlySandbox,
+  readOnlySandboxSpawn,
+  scrubIsolationCredentials,
+} from './isolation';
 import { buildDelegatePrompt } from './prompt';
 import {
   createRun,
   type DelegateContext,
   type DelegateDetails,
   type DelegatedRun,
-  type DelegateEffortState,
+  type DelegateRouteState,
   getFinalAssistantText,
   isRunError,
 } from './types';
@@ -15,14 +26,17 @@ import {
 const SIGKILL_TIMEOUT_MS = 5000;
 const MAX_STDERR_BYTES = 64 * 1024;
 const MAX_JSON_LINE_BYTES = 1024 * 1024;
-const READ_ONLY_TOOLS = 'read,bash,grep,find,ls';
-const WRITE_TOOLS = 'read,bash,edit,write,grep,find,ls';
+const CONTROLLED_READ_ONLY_TOOLS = 'read,grep,find,ls';
+const SANDBOXED_READ_ONLY_TOOLS = 'read,inspect_shell,grep,find,ls';
+const WRITE_TOOLS = 'read,edit,write,grep,find,ls';
 const MAX_GLOBAL_CONCURRENCY = 3;
 const PROGRESS_UPDATE_INTERVAL_MS = 1000;
 const SYSTEM_PROMPT_EXTENSION = path.resolve(
   __dirname,
   '../system-prompt/index.ts',
 );
+const INSPECT_SHELL_EXTENSION = path.resolve(__dirname, 'inspect-shell.ts');
+const BUDGET_GUARD_EXTENSION = path.resolve(__dirname, 'budget-guard.ts');
 
 let activeRuns = 0;
 const slotWaiters: Array<() => void> = [];
@@ -123,26 +137,83 @@ export interface RunDelegateOptions {
   task: string;
   context: DelegateContext;
   sessionPath: string;
-  effort?: DelegateEffortState;
+  routing?: DelegateRouteState;
   allowWrites?: boolean;
+  writeRequested?: boolean;
+  isolation?: PreparedIsolation;
   contextNote?: string;
   scope?: string[];
   continuation?: string;
   resuming?: boolean;
   timeoutMs: number;
   maxConcurrency: number;
+  maxTurns?: number;
+  maxComputeUnits?: number;
+  killGraceMs?: number;
+  readOnlyBash?: boolean;
   signal?: AbortSignal;
   onUpdate?: OnUpdate;
   makeDetails: (runs: DelegatedRun[]) => DelegateDetails;
 }
 
+export function localBudgetReason(
+  run: DelegatedRun,
+  limits: { maxTurns?: number; maxComputeUnits?: number },
+): string | undefined {
+  if (limits.maxTurns !== undefined && run.usage.turns >= limits.maxTurns)
+    return `turn budget ${limits.maxTurns} reached`;
+  if (
+    limits.maxComputeUnits !== undefined &&
+    run.usage.computeUnits >= limits.maxComputeUnits
+  )
+    return `compute-unit budget ${limits.maxComputeUnits} reached`;
+  return undefined;
+}
+
+export function effectiveModelTurnLimit(
+  options: Pick<RunDelegateOptions, 'routing' | 'maxTurns' | 'maxComputeUnits'>,
+): number | undefined {
+  const limits: number[] = [];
+  if (options.maxTurns !== undefined) limits.push(options.maxTurns);
+  if (options.maxComputeUnits !== undefined) {
+    const perTurn = options.routing?.computeUnitsPerTurn ?? 1;
+    limits.push(Math.floor(options.maxComputeUnits / perTurn));
+  }
+  return limits.length > 0 ? Math.max(0, Math.min(...limits)) : undefined;
+}
+
+export function writeBudgetedChildSettings(
+  env: NodeJS.ProcessEnv,
+  modelTurnLimit: number | undefined,
+): void {
+  const agentDir = env.PI_CODING_AGENT_DIR;
+  if (modelTurnLimit === undefined || !agentDir) return;
+  writeFileSync(
+    path.join(agentDir, 'settings.json'),
+    `${JSON.stringify({ retry: { enabled: false, provider: { maxRetries: 0 } } })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+}
+
 export function buildChildArgs(
   options: Pick<
     RunDelegateOptions,
-    'task' | 'effort' | 'allowWrites' | 'contextNote' | 'scope' | 'resuming'
+    | 'task'
+    | 'routing'
+    | 'allowWrites'
+    | 'isolation'
+    | 'readOnlyBash'
+    | 'contextNote'
+    | 'scope'
+    | 'resuming'
+    | 'maxTurns'
+    | 'maxComputeUnits'
   >,
   sessionPath: string,
 ): string[] {
+  const allowWrites =
+    options.allowWrites === true && Boolean(options.isolation);
+  const modelTurnLimit = effectiveModelTurnLimit(options);
   const args = [
     '--mode',
     'json',
@@ -150,21 +221,29 @@ export function buildChildArgs(
     '--no-extensions',
     '--extension',
     SYSTEM_PROMPT_EXTENSION,
+    ...(options.readOnlyBash ? ['--extension', INSPECT_SHELL_EXTENSION] : []),
+    ...(modelTurnLimit !== undefined
+      ? ['--extension', BUDGET_GUARD_EXTENSION]
+      : []),
     '--no-skills',
     '--no-prompt-templates',
     '--no-themes',
     '--tools',
-    options.allowWrites ? WRITE_TOOLS : READ_ONLY_TOOLS,
+    allowWrites
+      ? WRITE_TOOLS
+      : options.readOnlyBash
+        ? SANDBOXED_READ_ONLY_TOOLS
+        : CONTROLLED_READ_ONLY_TOOLS,
   ];
   args.push('--session', sessionPath);
-  if (options.effort?.profile && options.effort.provider) {
-    args.push('--provider', options.effort.provider);
-    args.push('--model', options.effort.profile.model);
-    args.push('--thinking', options.effort.profile.thinking);
+  if (options.routing) {
+    args.push('--provider', options.routing.provider);
+    args.push('--model', options.routing.model);
+    args.push('--thinking', options.routing.thinking);
   }
   args.push(
     buildDelegatePrompt(options.task, {
-      allowWrites: options.allowWrites,
+      allowWrites,
       contextNote: options.contextNote,
       scope: options.scope,
       continuation: options.resuming,
@@ -176,18 +255,73 @@ export function buildChildArgs(
 export async function runDelegate(
   options: RunDelegateOptions,
 ): Promise<DelegatedRun> {
-  const run = createRun(options.task, options.effort, {
+  const writeRequested = options.writeRequested ?? options.allowWrites ?? false;
+  const allowWrites =
+    options.allowWrites === true && Boolean(options.isolation);
+  const readOnlySandbox =
+    options.allowWrites !== true && !options.isolation
+      ? prepareReadOnlySandbox(options.cwd, options.sessionPath)
+      : undefined;
+  const childAuth =
+    !options.isolation && !readOnlySandbox && options.allowWrites !== true
+      ? prepareChildAuth()
+      : undefined;
+  const run = createRun(options.task, options.routing, {
     cwd: options.cwd,
     context: options.context,
-    allowWrites: options.allowWrites ?? false,
+    allowWrites,
+    writeRequested,
+    readOnlyBoundary: allowWrites
+      ? undefined
+      : readOnlySandbox
+        ? 'macos-sandbox-exec'
+        : options.isolation
+          ? 'isolated-controlled-tools'
+          : 'controlled-tools',
+    isolation: options.isolation
+      ? {
+          id: options.isolation.record.id,
+          backend: options.isolation.record.backend,
+          repositoryRoot: options.isolation.record.repositoryRoot,
+          worktreePath: options.isolation.record.worktreePath,
+          workingDirectory: options.isolation.record.workingDirectory,
+          baseHead: options.isolation.record.baseHead,
+          dependencyMode: options.isolation.record.dependencyMode,
+          status: options.isolation.record.status,
+        }
+      : undefined,
     contextNote: options.contextNote,
     scope: options.scope,
     continuation: options.continuation,
   });
+  if (
+    !allowWrites &&
+    !options.isolation &&
+    !readOnlySandbox &&
+    options.allowWrites !== true
+  )
+    run.warnings = [
+      ...(run.warnings ?? []),
+      'Read-only shell sandbox is unavailable; Bash was removed and only controlled inspection tools are enabled.',
+    ];
+  if (options.allowWrites === true && !options.isolation) {
+    run.exitCode = 1;
+    run.state = 'error';
+    run.stopReason = 'error';
+    run.errorMessage =
+      'Writable delegate execution requires a prepared isolation proof; child launch was blocked.';
+    run.finishedAt = Date.now();
+    options.onUpdate?.({
+      content: [{ type: 'text', text: run.errorMessage }],
+      details: options.makeDetails([run]),
+    });
+    return run;
+  }
   let releaseSlot: (() => void) | undefined;
   let releaseSession: (() => void) | undefined;
   let wasAborted = false;
   let timedOut = false;
+  let budgetExceeded: string | undefined;
 
   const emitUpdate = () => {
     options.onUpdate?.({
@@ -212,13 +346,40 @@ export async function runDelegate(
     run.startedAt = Date.now();
     emitUpdate();
     const { command, prefixArgs } = resolvePiSpawn();
-    const args = buildChildArgs(options, options.sessionPath);
+    const modelTurnLimit = effectiveModelTurnLimit(options);
+    const args = buildChildArgs(
+      { ...options, readOnlyBash: Boolean(readOnlySandbox) },
+      options.sessionPath,
+    );
+    const spawnTarget = options.isolation
+      ? isolationSpawn(options.isolation, command, [...prefixArgs, ...args])
+      : readOnlySandbox
+        ? readOnlySandboxSpawn(readOnlySandbox, command, [
+            ...prefixArgs,
+            ...args,
+          ])
+        : {
+            command,
+            args: [...prefixArgs, ...args],
+            cwd: options.cwd,
+            env: childAuth?.env ?? {},
+          };
 
+    writeBudgetedChildSettings(spawnTarget.env, modelTurnLimit);
     const exitCode = await new Promise<number>((resolve) => {
       const isWindows = process.platform === 'win32';
-      const proc = spawn(command, [...prefixArgs, ...args], {
-        cwd: options.cwd,
-        env: { ...process.env, PI_DELEGATE_CHILD: '1' },
+      const proc = spawn(spawnTarget.command, spawnTarget.args, {
+        cwd: spawnTarget.cwd,
+        env: {
+          PATH: process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin',
+          LANG: 'C',
+          LC_ALL: 'C',
+          ...spawnTarget.env,
+          PI_DELEGATE_CHILD: '1',
+          ...(modelTurnLimit !== undefined
+            ? { PI_DELEGATE_MAX_MODEL_TURNS: String(modelTurnLimit) }
+            : {}),
+        },
         shell: false,
         stdio: ['ignore', 'pipe', 'pipe'],
         // A detached Unix child is its own process group, allowing us to stop
@@ -241,11 +402,11 @@ export async function runDelegate(
         resolve(code);
       };
 
-      const terminate = (reason: 'abort' | 'timeout' = 'abort') => {
+      const terminate = (reason: 'abort' | 'timeout' | 'budget' = 'abort') => {
         if (terminating || closed) return;
         terminating = true;
         if (reason === 'timeout') timedOut = true;
-        else wasAborted = true;
+        else if (reason === 'abort') wasAborted = true;
         if (isWindows && proc.pid) {
           spawn('taskkill', ['/T', '/F', '/PID', String(proc.pid)], {
             stdio: 'ignore',
@@ -266,11 +427,27 @@ export async function runDelegate(
           } catch {
             proc.kill('SIGKILL');
           }
-        }, SIGKILL_TIMEOUT_MS).unref();
+        }, options.killGraceMs ?? SIGKILL_TIMEOUT_MS).unref();
       };
 
       const processLine = (line: string) => {
-        if (processJsonLine(line, run)) emitUpdate();
+        if (terminating || !processJsonLine(line, run)) return;
+        emitUpdate();
+        const reason = localBudgetReason(run, options);
+        // A terminal answer may consume the final permitted turn. Stop only
+        // when Pi would need another model turn, or malformed/fallback events
+        // already exceeded the local reservation.
+        if (
+          reason &&
+          (run.stopReason === 'toolUse' ||
+            (options.maxTurns !== undefined &&
+              run.usage.turns > options.maxTurns) ||
+            (options.maxComputeUnits !== undefined &&
+              run.usage.computeUnits > options.maxComputeUnits))
+        ) {
+          budgetExceeded = reason;
+          terminate('budget');
+        }
       };
 
       proc.stdout.on('data', (chunk: Buffer) => {
@@ -326,7 +503,15 @@ export async function runDelegate(
         options.signal?.addEventListener('abort', abortHandler, { once: true });
     });
 
-    run.exitCode = wasAborted ? 130 : timedOut ? 124 : exitCode;
+    if (exitCode === 125 && modelTurnLimit !== undefined && !budgetExceeded)
+      budgetExceeded = `model-turn budget ${modelTurnLimit} reached`;
+    run.exitCode = wasAborted
+      ? 130
+      : timedOut
+        ? 124
+        : budgetExceeded
+          ? 125
+          : exitCode;
     if (wasAborted) {
       run.stopReason = 'aborted';
       run.errorMessage = 'Delegated task was aborted.';
@@ -335,6 +520,10 @@ export async function runDelegate(
       run.stopReason = 'error';
       run.errorMessage = `Delegated task timed out after ${Math.round(options.timeoutMs / 1000)} seconds.`;
       run.state = 'timed-out';
+    } else if (budgetExceeded) {
+      run.stopReason = 'error';
+      run.errorMessage = `Delegated task stopped because ${budgetExceeded}.`;
+      run.state = 'error';
     } else if (exitCode !== 0 && !run.errorMessage) {
       run.stopReason = 'error';
       run.errorMessage =
@@ -358,6 +547,9 @@ export async function runDelegate(
     emitUpdate();
     releaseSlot?.();
     releaseSession?.();
+    scrubIsolationCredentials(options.isolation);
+    discardReadOnlySandbox(readOnlySandbox);
+    discardChildAuth(childAuth);
   }
   return run;
 }

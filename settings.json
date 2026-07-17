@@ -7,21 +7,91 @@
   "hideThinkingBlock": false,
   "quietStartup": true,
   "theme": "dracula",
+  "autonomy": {
+    "mode": "canary",
+    "profile": "standard",
+    "capabilities": [
+      "inspect"
+    ],
+    "scope": [
+      "."
+    ],
+    "trustedRoots": [
+      "/Users/nfrid/job",
+      "/Users/nfrid/.pi/agent"
+    ],
+    "autoApprove": [
+      "inspect",
+      "edit"
+    ]
+  },
   "delegate": {
     "provider": "openai-codex",
-    "defaultEffort": "economy",
-    "effortProfiles": {
-      "economy": {
+    "maxRelativeCost": 21,
+    "modelCatalog": {
+      "luna-low": {
+        "provider": "openai-codex",
         "model": "gpt-5.6-luna",
-        "thinking": "high"
+        "thinking": "low",
+        "relativeCost": 1,
+        "relativeIntelligence": 42,
+        "description": "Cheapest reasoning-capable configuration. Fast and economical, but unreliable on long-horizon implementation, difficult debugging, and recovery after a wrong approach."
       },
-      "balanced": {
+      "luna-medium": {
+        "provider": "openai-codex",
+        "model": "gpt-5.6-luna",
+        "thinking": "medium",
+        "relativeCost": 2,
+        "relativeIntelligence": 59,
+        "description": "Large capability improvement over Luna low at modest cost. Reasonable repository understanding and scoped coding ability, but still inconsistent on autonomous multi-step implementation."
+      },
+      "luna-high": {
+        "provider": "openai-codex",
+        "model": "gpt-5.6-luna",
+        "thinking": "high",
+        "relativeCost": 5,
+        "relativeIntelligence": 68,
+        "description": "Strong coding performance for the price. Capable implementation and terminal use, but relatively token-hungry, slower, and more likely to meander than stronger base models at comparable quality."
+      },
+      "luna-max": {
+        "provider": "openai-codex",
+        "model": "gpt-5.6-luna",
+        "thinking": "max",
+        "relativeCost": 7,
+        "relativeIntelligence": 75,
+        "description": "Meaningfully stronger than Luna high and competitive with more expensive models. Excellent monetary efficiency, but very high token consumption, increased latency, and less concise execution."
+      },
+      "terra-high": {
+        "provider": "openai-codex",
         "model": "gpt-5.6-terra",
-        "thinking": "high"
+        "thinking": "high",
+        "relativeCost": 8,
+        "relativeIntelligence": 72,
+        "description": "Best normal Terra configuration. Strong, balanced implementation, terminal execution, and repository understanding with better efficiency and discipline than compute-heavy Luna configurations."
       },
-      "deep": {
+      "terra-max": {
+        "provider": "openai-codex",
+        "model": "gpt-5.6-terra",
+        "thinking": "max",
+        "relativeCost": 13,
+        "relativeIntelligence": 77,
+        "description": "Material capability improvement over Terra high, especially for difficult implementation and persistent tool-driven work. Substantially more expensive, but the additional reasoning produces measurable gains."
+      },
+      "sol-medium": {
+        "provider": "openai-codex",
         "model": "gpt-5.6-sol",
-        "thinking": "medium"
+        "thinking": "medium",
+        "relativeCost": 15,
+        "relativeIntelligence": 75,
+        "description": "Sol's practical efficiency sweet spot. Strong judgment, ambiguity handling, debugging, and cross-cutting reasoning while retaining much lower latency and token usage than higher Sol efforts."
+      },
+      "sol-high": {
+        "provider": "openai-codex",
+        "model": "gpt-5.6-sol",
+        "thinking": "high",
+        "relativeCost": 21,
+        "relativeIntelligence": 77,
+        "description": "Near-maximum practical Sol capability. Strong across implementation, tools, architecture, and difficult reasoning, but only moderately better than Sol medium. Higher Sol reasoning levels usually add disproportionate cost and latency."
       }
     }
   }

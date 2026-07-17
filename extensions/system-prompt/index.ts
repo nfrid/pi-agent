@@ -1,19 +1,31 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import type {
   BuildSystemPromptOptions,
   ExtensionAPI,
   ExtensionCommandContext,
+  ToolInfo,
 } from '@earendil-works/pi-coding-agent';
+import {
+  type DelegateConfig,
+  describeDelegateRouting,
+  loadDelegateConfig,
+} from '../delegate/config';
 import {
   appendEagerCriticalRules,
   FLAG_NAME as SCOPED_INSTRUCTIONS_FLAG,
 } from '../scoped-instructions';
 
 const PI_DIAGNOSTICS_LIMITATION =
-  'Pi 0.80.7 exposes loaded skill winners only. Duplicate definitions below are an advisory filesystem scan, not active collision diagnostics; extensions cannot control /skill resolution or add qualified /skill selection.';
+  'Pi exposes loaded skill winners only. Duplicate definitions below are an advisory filesystem scan, not active collision diagnostics; extensions cannot control /skill resolution or add qualified /skill selection.';
 
 function formatSkillsForPrompt(
   skills: NonNullable<BuildSystemPromptOptions['skills']>,
@@ -310,6 +322,7 @@ export function formatPromptInfo(
   usage: UsageDiagnostics,
   definitions: readonly SkillDefinition[],
   replayVersion?: number,
+  toolInfo: readonly ToolInfo[] = [],
 ): string {
   const contextFiles = options.contextFiles ?? [];
   const allSkills = options.skills ?? [];
@@ -378,7 +391,15 @@ export function formatPromptInfo(
       const snippet = options.toolSnippets?.[tool];
       return `- ${tool}: ${snippet === undefined ? 'no prompt snippet exposed' : `${snippet.length} snippet chars`}`;
     }),
-    'Tool parameter schemas: unavailable (Pi 0.80.7 does not expose active schemas through the typed extension API).',
+    `Tool parameter schemas: ${toolInfo.length} runtime definition(s) exposed.`,
+    ...toolInfo.map((tool) => {
+      const schema = JSON.stringify(tool.parameters);
+      const hash = createHash('sha256')
+        .update(schema)
+        .digest('hex')
+        .slice(0, 12);
+      return `- ${tool.name}: ${Buffer.byteLength(schema, 'utf8')} schema bytes, sha256 ${hash}, source=${tool.sourceInfo.source}`;
+    }),
     `Latest context observation at this extension hook (later context transforms, if any, are not included): ${context.calls} call(s), ${context.messages} messages`,
     sizeLine(
       `Retained tool results (${context.retainedToolResults.count})`,
@@ -414,6 +435,25 @@ function formatBashGuidance(): string {
   return `\n\nBash guidance:\n${BASH_GUIDELINES.map((guideline) => `- ${guideline}`).join('\n')}`;
 }
 
+function compactPromptText(value: string | undefined): string {
+  return value?.replace(/\s+/g, ' ').trim() ?? '';
+}
+
+export function formatDelegateRoutingConfig(config: DelegateConfig): string {
+  if (config.error)
+    return `\n\n<delegate_routing>\nUnavailable: ${escapeXml(config.error)}\n</delegate_routing>`;
+  const routing = describeDelegateRouting(config);
+  const catalog = routing.catalog.map((route) => {
+    const description = compactPromptText(route.description);
+    return `- ${escapeXml(route.route)}: model=${escapeXml(route.model)}; thinking=${route.thinking}; relativeCost=${route.relativeCost}; relativeIntelligence=${route.relativeIntelligence}${route.allowed ? '' : '; unavailable-above-ceiling'}${description ? `; ${escapeXml(description)}` : ''}`;
+  });
+  return `\n\n<delegate_routing>\nUser-owned delegate routes. Fresh tasks must pass one exact route key; continuations reuse their persisted route when omitted. Select the lowest relativeCost whose relativeIntelligence and description fit the task. relativeIntelligence is role-neutral metadata. maxRelativeCost=${routing.maxRelativeCost}.\nCatalog routes:\n${catalog.length > 0 ? catalog.join('\n') : '- (none)'}\n</delegate_routing>`;
+}
+
+export function formatDelegateRoutingPrompt(cwd: string): string {
+  return formatDelegateRoutingConfig(loadDelegateConfig(cwd));
+}
+
 export function buildSystemPrompt(
   options: BuildSystemPromptOptions,
   mode?: string,
@@ -435,6 +475,10 @@ export function buildSystemPrompt(
   const skills = providedSkills ?? [];
   const tools = selectedTools || ['read', 'bash', 'edit', 'write'];
   const hasBash = tools.includes('bash');
+  const delegateRoutingSection =
+    !isDelegateChild && tools.includes('delegate')
+      ? formatDelegateRoutingPrompt(cwd)
+      : '';
 
   if (customPrompt) {
     let prompt = customPrompt;
@@ -448,6 +492,7 @@ export function buildSystemPrompt(
     if (hasBash) {
       prompt += formatBashGuidance();
     }
+    prompt += delegateRoutingSection;
     prompt = appendProjectContext(prompt, contextFiles);
 
     const customPromptHasRead =
@@ -540,6 +585,7 @@ ${guidelines}`;
   if (appendSection) {
     prompt += appendSection;
   }
+  prompt += delegateRoutingSection;
 
   prompt = appendProjectContext(prompt, contextFiles);
   if (hasRead) {
@@ -551,7 +597,62 @@ ${guidelines}`;
   return prompt;
 }
 
+export function workspaceSkillPath(cwd: string): string | undefined {
+  let cursor = resolve(cwd);
+  while (true) {
+    const skills = join(cursor, '.agents', 'skills');
+    if (
+      existsSync(skills) &&
+      existsSync(join(cursor, 'AGENTS.md')) &&
+      existsSync(join(cursor, 'mg'))
+    )
+      return skills;
+    const parent = dirname(cursor);
+    if (parent === cursor) return;
+    cursor = parent;
+  }
+}
+
+export function delegateToolBoundary(
+  toolName: string,
+  input: unknown,
+  cwd: string,
+): string | undefined {
+  if (!['read', 'grep', 'find', 'ls', 'edit', 'write'].includes(toolName))
+    return;
+  const raw =
+    typeof input === 'object' && input !== null && 'path' in input
+      ? (input as { path?: unknown }).path
+      : undefined;
+  const requested = typeof raw === 'string' ? raw : '.';
+  const root = realpathSync(cwd);
+  const absolute = resolve(cwd, requested);
+  let existing = absolute;
+  while (!existsSync(existing) && dirname(existing) !== existing)
+    existing = dirname(existing);
+  const canonical = existsSync(existing)
+    ? resolve(realpathSync(existing), relative(existing, absolute))
+    : absolute;
+  const fromRoot = relative(root, canonical);
+  if (
+    isAbsolute(fromRoot) ||
+    fromRoot === '..' ||
+    fromRoot.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)
+  )
+    return 'Delegate tools cannot access paths outside the delegated checkout.';
+}
+
 export default function systemPrompt(pi: ExtensionAPI) {
+  if (process.env.PI_DELEGATE_CHILD === '1')
+    pi.on('tool_call', (event, ctx) => {
+      const reason = delegateToolBoundary(event.toolName, event.input, ctx.cwd);
+      return reason ? { block: true, reason } : undefined;
+    });
+  pi.on('resources_discover', (event) => {
+    const skills = workspaceSkillPath(event.cwd);
+    return skills ? { skillPaths: [skills] } : undefined;
+  });
+
   let contextCalls = 0;
   let lastContext = summarizeContextMessages([], contextCalls);
 
@@ -595,6 +696,7 @@ export default function systemPrompt(pi: ExtensionAPI) {
           ? discoverAncestorSkillDefinitions(options.cwd)
           : [],
         todoStateVersion(branch),
+        pi.getAllTools(),
       );
       if (ctx.hasUI) {
         ctx.ui.notify(info, 'info');

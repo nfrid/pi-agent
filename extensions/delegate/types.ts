@@ -9,6 +9,7 @@ export interface UsageStats {
   contextTokens: number;
   cost: number;
   turns: number;
+  computeUnits: number;
 }
 
 export interface DelegatedActivity {
@@ -19,24 +20,32 @@ export interface DelegatedActivity {
   latestText?: string;
 }
 
-export type DelegateEffort = 'economy' | 'balanced' | 'deep';
 export type ThinkingLevel =
   | 'off'
   | 'minimal'
   | 'low'
   | 'medium'
   | 'high'
-  | 'xhigh';
+  | 'xhigh'
+  | 'max';
 
-export interface DelegateEffortProfile {
+export interface DelegateModelCatalogEntry {
+  provider?: string;
   model: string;
   thinking: ThinkingLevel;
+  relativeCost: number;
+  relativeIntelligence: number;
+  description?: string;
 }
 
-export interface DelegateEffortState {
-  selected?: DelegateEffort;
-  provider?: string;
-  profile?: DelegateEffortProfile;
+export interface DelegateRouteState {
+  route: string;
+  provider: string;
+  model: string;
+  thinking: ThinkingLevel;
+  relativeCost: number;
+  relativeIntelligence: number;
+  computeUnitsPerTurn: number;
   warning?: string;
 }
 
@@ -49,14 +58,59 @@ export type DelegateRunState =
   | 'aborted'
   | 'timed-out';
 
+export interface DelegateIsolationState {
+  id: string;
+  backend: 'macos-sandbox-exec';
+  repositoryRoot: string;
+  worktreePath: string;
+  workingDirectory: string;
+  baseHead: string;
+  dependencyMode: 'link' | 'isolated';
+  runOutcome?: 'success' | 'error' | 'aborted' | 'timed-out' | 'unknown';
+  validation?: {
+    status: 'not-run' | 'passed' | 'failed';
+    script?: string;
+    scriptSha256?: string;
+    exitCode?: number;
+    outputSha256?: string;
+    validatedAt?: string;
+    reason?: string;
+  };
+  status:
+    | 'prepared'
+    | 'running'
+    | 'ran'
+    | 'patch-ready'
+    | 'no-changes'
+    | 'applied'
+    | 'discarded'
+    | 'conflicted'
+    | 'failed';
+  patch?: {
+    handle?: string;
+    sha256: string;
+    size: number;
+    changedPaths: string[];
+    diffCheckPassed: boolean;
+    requiresIsolatedDependencyValidation: boolean;
+    unsafeReason?: string;
+  };
+}
+
 export interface DelegateRunMetadata {
   cwd?: string;
   context?: DelegateContext;
   contextNote?: string;
   allowWrites?: boolean;
+  writeRequested?: boolean;
+  readOnlyBoundary?:
+    | 'macos-sandbox-exec'
+    | 'isolated-controlled-tools'
+    | 'controlled-tools';
   scope?: string[];
   continuation?: string;
   warnings?: string[];
+  isolation?: DelegateIsolationState;
   /** Exact final assistant output, stored only when the parent handoff omits it. */
   artifact?: ArtifactMetadata;
 }
@@ -70,7 +124,7 @@ export interface DelegatedRun extends DelegateRunMetadata {
   stopReason?: string;
   errorMessage?: string;
   model?: string;
-  effort?: DelegateEffortState;
+  routing?: DelegateRouteState;
   activities: DelegatedActivity[];
   state?: DelegateRunState;
   queuedAt?: number;
@@ -97,12 +151,13 @@ export function emptyUsage(): UsageStats {
     contextTokens: 0,
     cost: 0,
     turns: 0,
+    computeUnits: 0,
   };
 }
 
 export function createRun(
   task: string,
-  effort?: DelegateEffortState,
+  routing?: DelegateRouteState,
   metadata: DelegateRunMetadata = {},
 ): DelegatedRun {
   return {
@@ -111,7 +166,7 @@ export function createRun(
     messages: [],
     stderr: '',
     usage: emptyUsage(),
-    effort,
+    routing,
     activities: [],
     state: 'queued',
     queuedAt: Date.now(),

@@ -89,11 +89,29 @@ function prepareRun(run: DelegatedRun, bodyCap: number): PreparedRun {
     lines.push(
       `Artifact: ${run.artifact.handle} (${run.artifact.size} bytes, sha256 ${run.artifact.sha256})`,
     );
+  if (run.readOnlyBoundary)
+    lines.push(`Read-only boundary: ${run.readOnlyBoundary}`);
+  if (run.isolation) {
+    lines.push(
+      `Isolation: ${run.isolation.id} (${run.isolation.backend}, dependencies=${run.isolation.dependencyMode}, status=${run.isolation.status})`,
+    );
+    if (run.isolation.patch)
+      lines.push(
+        `Patch: ${run.isolation.patch.changedPaths.length} path(s), ${run.isolation.patch.size} bytes, sha256 ${run.isolation.patch.sha256}${run.isolation.patch.handle ? `, artifact ${run.isolation.patch.handle}` : ''}`,
+      );
+    if (run.isolation.validation)
+      lines.push(
+        `Patch validation: ${run.isolation.validation.status}${run.isolation.validation.script ? ` (${run.isolation.validation.script})` : ''}`,
+      );
+    lines.push(
+      `Patch actions: /delegate-patch ${run.isolation.id} show|diff|validate <script>|validate-command <argv...>|apply|discard`,
+    );
+  }
   if (isRunError(run)) {
     const failure = run.errorMessage?.trim() || run.stderr.trim() || original;
     lines.push(`Failure: ${clip(failure, 120)}`);
   }
-  const warnings = [run.effort?.warning, ...(run.warnings ?? [])].filter(
+  const warnings = [run.routing?.warning, ...(run.warnings ?? [])].filter(
     (item): item is string => Boolean(item),
   );
   if (warnings.length)

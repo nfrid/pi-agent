@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import * as path from 'node:path';
 import {
   getAgentDir,
@@ -7,14 +7,14 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { describe, expect, test, vi } from 'vitest';
 import { buildSystemPrompt } from '../system-prompt';
+import budgetGuard from './budget-guard';
 import {
-  canonicalizeEffort,
-  normalizeEffortProfiles,
+  describeDelegateRouting,
   parseDelegateConfig,
-  resolveEffort,
+  resolveDelegateRoute,
 } from './config';
 import { processJsonLine } from './events';
-import { buildArtifactBackedHandoff, prepareDelegateArguments } from './index';
+import { buildArtifactBackedHandoff, mergeDelegateRouteRequest } from './index';
 import {
   buildParentHandoff,
   PARENT_HANDOFF_CAPS,
@@ -22,11 +22,19 @@ import {
 } from './output';
 import { buildDelegatePrompt } from './prompt';
 import { renderDelegateCall, renderDelegateResult } from './render';
-import { buildChildArgs, resolvePiSpawn } from './runner';
+import {
+  buildChildArgs,
+  effectiveModelTurnLimit,
+  localBudgetReason,
+  resolvePiSpawn,
+  runDelegate,
+  writeBudgetedChildSettings,
+} from './runner';
 import {
   buildSessionSnapshotJsonl,
   createDelegateSession,
   resolveDelegateSession,
+  updateDelegateSessionRouting,
 } from './session';
 import { createRun, getFinalAssistantText, getRunState } from './types';
 
@@ -84,6 +92,31 @@ describe('delegate', () => {
     ).toBe(false);
     expect(run.messages).toHaveLength(1);
     expect(run.usage.turns).toBe(1);
+    expect(run.usage.computeUnits).toBe(1);
+  });
+
+  test('reconciles a partially missing message_end sequence at agent_end', () => {
+    const run = createRun('test');
+    processJsonLine(
+      JSON.stringify({ type: 'message_end', message: assistantMessage }),
+      run,
+    );
+    const recovered = {
+      ...assistantMessage,
+      timestamp: 2,
+      content: [{ type: 'text', text: 'second turn' }],
+    };
+    expect(
+      processJsonLine(
+        JSON.stringify({
+          type: 'agent_end',
+          messages: [assistantMessage, recovered],
+        }),
+        run,
+      ),
+    ).toBe(true);
+    expect(run.messages).toHaveLength(2);
+    expect(run.usage).toMatchObject({ turns: 2, computeUnits: 2 });
   });
 
   test('uses agent_end as a fallback when message_end events are absent', () => {
@@ -96,58 +129,189 @@ describe('delegate', () => {
     ).toBe(true);
     expect(run.messages).toHaveLength(1);
     expect(run.usage.turns).toBe(1);
+    expect(run.usage.computeUnits).toBe(1);
   });
 
-  test('uses one configured provider for economy effort profiles', () => {
-    expect(
-      resolveEffort('economy', {
-        provider: 'openai-codex',
-        effortProfiles: {
-          economy: { model: 'quick', thinking: 'high' },
-        },
-      }),
-    ).toEqual({
-      selected: 'economy',
+  test('weights completed model turns by effective catalog route', () => {
+    const run = createRun('test', {
+      route: 'smart-high',
       provider: 'openai-codex',
-      profile: { model: 'quick', thinking: 'high' },
+      model: 'smart',
+      thinking: 'high',
+      relativeCost: 2,
+      relativeIntelligence: 2.5,
+      computeUnitsPerTurn: 6,
     });
-    expect(resolveEffort('deep', { provider: 'openai-codex' }).error).toMatch(
-      /not fully configured/,
+    processJsonLine(
+      JSON.stringify({ type: 'message_end', message: assistantMessage }),
+      run,
+    );
+    expect(run.usage).toMatchObject({ turns: 1, computeUnits: 6 });
+  });
+
+  test('resolves exact catalog route keys within the cost ceiling', () => {
+    const config = parseDelegateConfig({
+      provider: 'openai-codex',
+      maxRelativeCost: 3,
+      modelCatalog: {
+        precise: {
+          provider: 'custom-provider',
+          model: 'precise-model',
+          thinking: 'high',
+          relativeCost: 1.5,
+          relativeIntelligence: 3.5,
+        },
+        forbidden: {
+          model: 'expensive',
+          thinking: 'high',
+          relativeCost: 4,
+          relativeIntelligence: 5,
+        },
+      },
+    });
+    expect(resolveDelegateRoute('precise', config)).toEqual({
+      routing: {
+        route: 'precise',
+        provider: 'custom-provider',
+        model: 'precise-model',
+        thinking: 'high',
+        relativeCost: 1.5,
+        relativeIntelligence: 3.5,
+        computeUnitsPerTurn: 4.5,
+      },
+    });
+    expect(resolveDelegateRoute('missing', config).error).toMatch(
+      /not in user-owned/,
+    );
+    expect(resolveDelegateRoute(undefined, config).error).toMatch(
+      /requires one exact route/,
+    );
+    expect(resolveDelegateRoute('forbidden', config).error).toMatch(
+      /exceeds user-owned maximum/,
     );
   });
 
-  test('maps legacy fast effort settings and stored tool calls to economy', () => {
-    expect(canonicalizeEffort('fast')).toBe('economy');
+  test('requires strict catalog-only configuration and positive metrics', () => {
+    expect(parseDelegateConfig({ defaultEffort: 'economy' }).error).toMatch(
+      /defaultEffort is not supported/,
+    );
     expect(
-      normalizeEffortProfiles({
-        fast: { model: 'legacy-quick', thinking: 'high' },
-      }),
-    ).toEqual({
-      economy: { model: 'legacy-quick', thinking: 'high' },
-    });
-    expect(
-      resolveEffort('fast', {
-        provider: 'openai-codex',
-        effortProfiles: {
-          economy: { model: 'quick', thinking: 'high' },
+      parseDelegateConfig({
+        modelCatalog: {
+          incomplete: { model: 'x', thinking: 'low', relativeCost: 1 },
         },
-      }),
-    ).toMatchObject({ selected: 'economy' });
+      }).error,
+    ).toMatch(/relativeIntelligence must be a finite number/);
     expect(
-      prepareDelegateArguments({
-        effort: 'fast',
-        tasks: [{ task: 'one' }, { task: 'two', effort: 'fast' }],
-      }),
-    ).toEqual({
-      effort: 'economy',
-      tasks: [{ task: 'one' }, { task: 'two', effort: 'economy' }],
+      parseDelegateConfig({
+        modelCatalog: {
+          invalid: {
+            model: 'x',
+            thinking: ['low'],
+            relativeCost: 1,
+            relativeIntelligence: 2,
+          },
+        },
+      }).error,
+    ).toMatch(/one exact supported thinking level/);
+    expect(
+      parseDelegateConfig({
+        modelCatalog: {
+          strict: {
+            model: 'x',
+            thinking: 'low',
+            relativeCost: 1,
+            relativeIntelligence: 2,
+            extra: true,
+          },
+        },
+      }).error,
+    ).toMatch(/extra is not supported/);
+    expect(
+      parseDelegateConfig({
+        modelCatalog: {
+          route: {
+            model: 'one',
+            thinking: 'low',
+            relativeCost: 1,
+            relativeIntelligence: 2,
+          },
+          ' route ': {
+            model: 'two',
+            thinking: 'high',
+            relativeCost: 2,
+            relativeIntelligence: 3,
+          },
+        },
+      }).error,
+    ).toMatch(/route labels must remain unique/);
+    expect(
+      parseDelegateConfig({
+        modelCatalog: {
+          one: {
+            model: 'same',
+            thinking: 'low',
+            relativeCost: 1,
+            relativeIntelligence: 2,
+          },
+          two: {
+            model: 'same',
+            thinking: 'low',
+            relativeCost: 2,
+            relativeIntelligence: 3,
+          },
+        },
+      }).error,
+    ).toMatch(/same model\/thinking pair/);
+  });
+
+  test('continuations reuse their persisted route unless overridden', () => {
+    const persisted = {
+      route: 'original',
+      provider: 'provider',
+      model: 'model',
+      thinking: 'high' as const,
+      relativeCost: 1,
+      relativeIntelligence: 2,
+      computeUnitsPerTurn: 3,
+    };
+    expect(mergeDelegateRouteRequest(undefined, persisted)).toBe('original');
+    expect(mergeDelegateRouteRequest('replacement', persisted)).toBe(
+      'replacement',
+    );
+  });
+
+  test('describes only explicit catalog routes', () => {
+    const config = parseDelegateConfig({
+      provider: 'openai-codex',
+      modelCatalog: {
+        quick: {
+          model: 'quick',
+          thinking: 'high',
+          relativeCost: 1,
+          relativeIntelligence: 3,
+        },
+        custom: {
+          model: 'custom',
+          thinking: 'low',
+          relativeCost: 2,
+          relativeIntelligence: 4,
+        },
+      },
     });
-    const legacyCall = renderDelegateCall(
-      { task: 'legacy', effort: 'fast' },
+    expect(describeDelegateRouting(config).catalog).toEqual([
+      expect.objectContaining({ route: 'quick', model: 'quick' }),
+      expect.objectContaining({ route: 'custom', model: 'custom' }),
+    ]);
+  });
+
+  test('renders catalog routes', () => {
+    const call = renderDelegateCall(
+      { task: 'inspect', route: 'quick' },
       theme,
       { cwd: '/tmp/project' },
     );
-    expect(legacyCall.render(200).join('\n')).toContain('Eco');
+    expect(call.render(200).join('\n')).toContain('quick');
   });
 
   test('caps parent-visible output by UTF-8 bytes', () => {
@@ -271,15 +435,20 @@ describe('delegate', () => {
     });
   });
 
-  test('runtime configuration errors block effort resolution', () => {
+  test('runtime configuration errors block route resolution', () => {
     const runtimeInvalid = parseDelegateConfig({
       timeoutMs: 1,
       provider: 'openai-codex',
-      effortProfiles: {
-        economy: { model: 'quick', thinking: 'high' },
+      modelCatalog: {
+        quick: {
+          model: 'quick',
+          thinking: 'high',
+          relativeCost: 1,
+          relativeIntelligence: 2,
+        },
       },
     });
-    expect(resolveEffort('economy', runtimeInvalid).error).toContain(
+    expect(resolveDelegateRoute('quick', runtimeInvalid).error).toContain(
       'timeoutMs',
     );
   });
@@ -427,10 +596,33 @@ describe('delegate', () => {
     );
   });
 
-  test('creates durable opaque sessions that can be resolved for continuation', () => {
-    const session = createDelegateSession({ cwd: '/tmp/project' });
+  test('creates durable opaque sessions with revalidatable resource routing', () => {
+    const session = createDelegateSession({
+      cwd: '/tmp/project',
+      routing: {
+        route: 'quick-high',
+        provider: 'openai-codex',
+        model: 'quick',
+        thinking: 'high',
+        relativeCost: 1,
+        relativeIntelligence: 1,
+        computeUnitsPerTurn: 3,
+      },
+    });
     try {
       expect(resolveDelegateSession(session.token)).toEqual(session);
+      const updatedRouting = {
+        ...session.routing,
+        route: 'quick-low',
+        thinking: 'low' as const,
+        computeUnitsPerTurn: 1,
+      } as NonNullable<typeof session.routing>;
+      expect(
+        updateDelegateSessionRouting(session.token, updatedRouting),
+      ).toMatchObject({ routing: updatedRouting });
+      expect(resolveDelegateSession(session.token)).toMatchObject({
+        routing: updatedRouting,
+      });
       const header = JSON.parse(
         readFileSync(session.filePath, 'utf8').trim(),
       ) as Record<string, unknown>;
@@ -461,7 +653,14 @@ describe('delegate', () => {
       /extensions[\\/]system-prompt[\\/]index\.ts$/,
     );
     expect(existsSync(extensionPath)).toBe(true);
-    expect(args[args.indexOf('--tools') + 1]).toBe('read,bash,grep,find,ls');
+    expect(args[args.indexOf('--tools') + 1]).toBe('read,grep,find,ls');
+    const sandboxed = buildChildArgs(
+      { task: 'inspect', readOnlyBash: true },
+      '/tmp/child.jsonl',
+    );
+    expect(sandboxed[sandboxed.indexOf('--tools') + 1]).toBe(
+      'read,inspect_shell,grep,find,ls',
+    );
   });
 
   test('gives delegate children a focused role without changing the main role', () => {
@@ -488,13 +687,154 @@ describe('delegate', () => {
     ).toContain('Delegated child context');
   });
 
-  test('enables mutation tools only when explicitly requested', () => {
+  test('passes the effective explicit model and thinking to child Pi', () => {
     const args = buildChildArgs(
+      {
+        task: 'inspect',
+        routing: {
+          route: 'exact-low',
+          provider: 'openai-codex',
+          model: 'exact-model',
+          thinking: 'low',
+          relativeCost: 2,
+          relativeIntelligence: 3,
+          computeUnitsPerTurn: 2,
+        },
+      },
+      '/tmp/child.jsonl',
+    );
+    expect(
+      args.slice(args.indexOf('--provider'), args.indexOf('--thinking') + 2),
+    ).toEqual([
+      '--provider',
+      'openai-codex',
+      '--model',
+      'exact-model',
+      '--thinking',
+      'low',
+    ]);
+  });
+
+  test('child budget guard exits before a model turn beyond reservation', () => {
+    const previous = process.env.PI_DELEGATE_MAX_MODEL_TURNS;
+    process.env.PI_DELEGATE_MAX_MODEL_TURNS = '1';
+    let handler: ((event: { payload: unknown }) => unknown) | undefined;
+    const exit = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => undefined) as never);
+    const stderr = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation((() => true) as never);
+    try {
+      budgetGuard({
+        on(event: string, callback: (value: { payload: unknown }) => unknown) {
+          if (event === 'before_provider_request') handler = callback;
+        },
+      } as never);
+      expect(handler?.({ payload: { request: 1 } })).toEqual({ request: 1 });
+      expect(exit).not.toHaveBeenCalled();
+      handler?.({ payload: { request: 2 } });
+      expect(exit).toHaveBeenCalledWith(125);
+    } finally {
+      exit.mockRestore();
+      stderr.mockRestore();
+      if (previous === undefined)
+        delete process.env.PI_DELEGATE_MAX_MODEL_TURNS;
+      else process.env.PI_DELEGATE_MAX_MODEL_TURNS = previous;
+    }
+  });
+
+  test('disables provider and agent-loop retries for budgeted children', () => {
+    const agentDir = `/tmp/delegate-budget-settings-${process.pid}-${Date.now()}`;
+    mkdirSync(agentDir, { recursive: true });
+    try {
+      writeBudgetedChildSettings({ PI_CODING_AGENT_DIR: agentDir }, 2);
+      expect(
+        JSON.parse(readFileSync(path.join(agentDir, 'settings.json'), 'utf8')),
+      ).toEqual({ retry: { enabled: false, provider: { maxRetries: 0 } } });
+    } finally {
+      rmSync(agentDir, { recursive: true, force: true });
+    }
+  });
+
+  test('derives and loads a child-side pre-turn budget guard', () => {
+    const routing = {
+      route: 'smart-high',
+      provider: 'openai-codex',
+      model: 'smart',
+      thinking: 'high' as const,
+      relativeCost: 2,
+      relativeIntelligence: 4,
+      computeUnitsPerTurn: 6,
+    };
+    expect(
+      effectiveModelTurnLimit({
+        routing,
+        maxTurns: 5,
+        maxComputeUnits: 18,
+      }),
+    ).toBe(3);
+    const args = buildChildArgs(
+      {
+        task: 'bounded',
+        routing,
+        maxTurns: 5,
+        maxComputeUnits: 18,
+      },
+      '/tmp/child.jsonl',
+    );
+    expect(
+      args.some((value) => /delegate[\\/]budget-guard\.ts$/.test(value)),
+    ).toBe(true);
+  });
+
+  test('classifies local turn and compute-unit exhaustion', () => {
+    const run = createRun('bounded');
+    run.usage.turns = 2;
+    run.usage.computeUnits = 6;
+    expect(localBudgetReason(run, { maxTurns: 2 })).toMatch(/turn budget/);
+    expect(localBudgetReason(run, { maxComputeUnits: 6 })).toMatch(
+      /compute-unit budget/,
+    );
+  });
+
+  test('emits controlled mutation tools only with an isolation proof', () => {
+    const blocked = buildChildArgs(
       { task: 'implement', allowWrites: true },
       '/tmp/child.jsonl',
     );
-    expect(args[args.indexOf('--tools') + 1]).toContain('write');
-    expect(args[args.indexOf('--tools') + 1]).toContain('bash');
+    expect(blocked[blocked.indexOf('--tools') + 1]).not.toContain('write');
+    const isolated = buildChildArgs(
+      {
+        task: 'implement',
+        allowWrites: true,
+        isolation: { record: {}, profilePath: '', env: {} } as never,
+      },
+      '/tmp/child.jsonl',
+    );
+    expect(isolated[isolated.indexOf('--tools') + 1]).toContain('write');
+    expect(isolated[isolated.indexOf('--tools') + 1]).not.toContain('bash');
+  });
+
+  test('blocks direct writable runner calls without isolation', async () => {
+    const previousState = process.env.PI_DELEGATE_STATE_DIR;
+    const state = `/tmp/delegate-no-leak-${process.pid}-${Date.now()}`;
+    process.env.PI_DELEGATE_STATE_DIR = state;
+    const run = await runDelegate({
+      cwd: '/tmp',
+      task: 'unsafe direct write',
+      context: 'fresh',
+      sessionPath: '/tmp/unused.jsonl',
+      allowWrites: true,
+      timeoutMs: 10_000,
+      maxConcurrency: 1,
+      makeDetails: (runs) => ({ mode: 'single', runs }),
+    });
+    expect(run.state).toBe('error');
+    expect(run.errorMessage).toMatch(/isolation proof/);
+    expect(existsSync(state)).toBe(false);
+    if (previousState) process.env.PI_DELEGATE_STATE_DIR = previousState;
+    else delete process.env.PI_DELEGATE_STATE_DIR;
   });
 
   test('joins all text blocks in the final assistant response', () => {
@@ -538,7 +878,7 @@ describe('delegate', () => {
         ],
         cwd: '/tmp/project',
         context: 'fresh',
-        effort: 'economy',
+        route: 'quick',
       },
       theme,
       { cwd: '/tmp/project' },
@@ -546,9 +886,11 @@ describe('delegate', () => {
     const output = component.render(300).join('\n');
     expect(output).toContain('Delegate · 2 subagents');
     expect(output).toContain('1 Task  inspect');
-    expect(output).toContain('Fresh context · Read-only · /tmp/project · Eco');
+    expect(output).toContain(
+      'Fresh context · Read-only · /tmp/project · quick',
+    );
     expect(output).toContain('2 Task  implement');
-    expect(output).toContain('Parent context · Can edit · /tmp/project');
+    expect(output).toContain('Parent context · Requests edits · /tmp/project');
   });
 
   test('shows the full delegated prompt when the call is expanded', () => {
@@ -593,102 +935,70 @@ describe('delegate', () => {
       label: 'read /tmp/project/file.ts',
       status: 'completed',
     });
+    expect(JSON.stringify(run)).not.toContain('contents');
   });
 
-  test('uses the first thinking text as an activity title', () => {
+  test('does not stream tool output, thinking, or tool arguments to the parent', () => {
     const run = createRun('inspect');
     processJsonLine(
       JSON.stringify({
-        type: 'message_update',
-        assistantMessageEvent: {
-          type: 'thinking_delta',
-          contentIndex: 0,
-          delta: 'I should inspect the type definitions first.',
-        },
-      }),
-      run,
-    );
-    expect(run.activities[0]?.label).toBe(
-      'thinking: I should inspect the type definitions first.',
-    );
-  });
-
-  test('shows only a GPT-style bold thinking title', () => {
-    const run = createRun('inspect');
-    processJsonLine(
-      JSON.stringify({
-        type: 'message_update',
-        assistantMessageEvent: {
-          type: 'thinking_delta',
-          contentIndex: 0,
-          delta:
-            '**Thinking about oranges.**\n<!-- -->\nThe rest should stay hidden.',
-        },
-      }),
-      run,
-    );
-    expect(run.activities[0]?.label).toBe('Thinking about oranges.');
-  });
-
-  test('keeps grouped thinking titles in chronological activity order', () => {
-    const run = createRun('inspect');
-    const thinkingEvent = (
-      type: string,
-      values: Record<string, unknown> = {},
-    ) =>
-      processJsonLine(
-        JSON.stringify({
-          type: 'message_update',
-          assistantMessageEvent: { type, contentIndex: 0, ...values },
-        }),
-        run,
-      );
-
-    thinkingEvent('thinking_start');
-    thinkingEvent('thinking_delta', { delta: '**One trace**' });
-    thinkingEvent('thinking_delta', {
-      delta: '**One trace** **Another trace**',
-    });
-    thinkingEvent('thinking_delta', {
-      delta: '**One trace** **Another trace** **Third trace**',
-    });
-    thinkingEvent('thinking_end');
-    processJsonLine(
-      JSON.stringify({
-        type: 'tool_execution_end',
+        type: 'tool_execution_update',
         toolCallId: 'read-1',
         toolName: 'read',
+        partialResult: {
+          content: [{ type: 'text', text: 'private-tool-output' }],
+        },
       }),
       run,
     );
-    thinkingEvent('thinking_start');
-    thinkingEvent('thinking_delta', {
-      delta: '**A trace from the next group**',
-    });
-    thinkingEvent('thinking_end');
-
+    processJsonLine(
+      JSON.stringify({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'thinking_delta',
+          contentIndex: 0,
+          delta: 'private-thinking',
+        },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'message_end',
+        message: {
+          role: 'toolResult',
+          content: [{ type: 'text', text: 'private-tool-message' }],
+        },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'private-final-thinking' },
+            {
+              type: 'toolCall',
+              id: 'secret-call',
+              name: 'read',
+              arguments: { path: 'private-path' },
+            },
+            { type: 'text', text: 'safe handoff' },
+          ],
+          usage: {},
+        },
+      }),
+      run,
+    );
     expect(run.activities.map((activity) => activity.label)).toEqual([
-      'One trace',
-      'Another trace',
-      'Third trace',
       'read',
-      'A trace from the next group',
+      'thinking',
     ]);
-
-    const styledTheme = {
-      fg: (color: ThemeColor, text: string) => `<${color}>${text}</${color}>`,
-      bold: (text: string) => text,
-    };
-    const output = renderDelegateResult(
-      { details: { mode: 'single', runs: [run] } },
-      { expanded: true },
-      styledTheme,
-    )
-      .render(300)
-      .join('\n');
-    expect(output).toContain('<thinkingText>Another trace</thinkingText>');
-    expect(output).not.toContain('<dim>Another trace</dim>');
-    expect(output).not.toContain('**One trace** **Another trace**');
+    expect(run.messages).toHaveLength(1);
+    expect(JSON.stringify(run)).not.toContain('private-');
+    expect(JSON.stringify(run)).toContain('safe handoff');
   });
 
   test('renders a task-first running hierarchy and dims tool metadata', () => {
@@ -724,13 +1034,58 @@ describe('delegate', () => {
     expect(output).toContain('cancel');
   });
 
+  test('renders worktree and patch lifecycle details with actions', () => {
+    const run = createRun('Implement safely', undefined, {
+      cwd: '/tmp/worktree',
+      context: 'fresh',
+      allowWrites: true,
+      scope: ['src'],
+      isolation: {
+        id: '11111111-1111-1111-1111-111111111111',
+        backend: 'macos-sandbox-exec',
+        repositoryRoot: '/tmp/project',
+        worktreePath: '/tmp/worktree',
+        workingDirectory: '',
+        baseHead: 'abc123',
+        dependencyMode: 'isolated',
+        status: 'patch-ready',
+        patch: {
+          sha256: 'a'.repeat(64),
+          size: 42,
+          changedPaths: ['src/file.ts'],
+          diffCheckPassed: true,
+          requiresIsolatedDependencyValidation: false,
+        },
+        validation: { status: 'not-run' },
+      },
+    });
+    run.state = 'success';
+    run.exitCode = 0;
+    const output = renderDelegateResult(
+      { details: { mode: 'single', runs: [run] } },
+      { expanded: true },
+      theme,
+    )
+      .render(300)
+      .join('\n');
+    expect(output).toContain('Isolation & patch');
+    expect(output).toContain('State: patch-ready');
+    expect(output).toContain('src/file.ts');
+    expect(output).toContain('/delegate-patch');
+    expect(output).toContain('Enforced scope: src');
+  });
+
   test('dims routine startup and running status', () => {
     const run = createRun(
       'Inspect the project',
       {
-        selected: 'economy',
+        route: 'terra-medium',
         provider: 'openai-codex',
-        profile: { model: 'gpt-5.6-terra', thinking: 'medium' },
+        model: 'gpt-5.6-terra',
+        thinking: 'medium',
+        relativeCost: 8,
+        relativeIntelligence: 72,
+        computeUnitsPerTurn: 16,
       },
       {
         cwd: '/tmp/project',
@@ -751,39 +1106,37 @@ describe('delegate', () => {
       .join('\n');
     expect(output).toContain('<muted>…</muted>');
     expect(output).toContain('<dim>Starting subagent</dim>');
-    expect(output).toContain('<success>Eco</success>');
+    expect(output).toContain('<accent>terra-medium</accent>');
     expect(output).not.toContain('<warning>…</warning>');
   });
 
-  test('color-codes effort profiles and elevated write access', () => {
+  test('shows catalog route and elevated write access', () => {
     const styledTheme = {
       fg: (color: ThemeColor, text: string) => `<${color}>${text}</${color}>`,
       bold: (text: string) => text,
     };
-    for (const [effort, color, label] of [
-      ['economy', 'success', 'Eco'],
-      ['balanced', 'accent', 'Balanced'],
-      ['deep', 'warning', 'Deep'],
-    ] as const) {
-      const output = renderDelegateCall(
-        { task: 'inspect', effort, allowWrites: true },
-        styledTheme,
-        { cwd: '/tmp/project' },
-      )
-        .render(300)
-        .join('\n');
-      expect(output).toContain(`<${color}>${label}</${color}>`);
-      expect(output).toContain('<warning>Can edit</warning>');
-    }
+    const output = renderDelegateCall(
+      { task: 'inspect', route: 'quick', allowWrites: true },
+      styledTheme,
+      { cwd: '/tmp/project' },
+    )
+      .render(300)
+      .join('\n');
+    expect(output).toContain('<accent>quick</accent>');
+    expect(output).toContain('<warning>Requests edits</warning>');
   });
 
-  test('shows effort profiles instead of model names in result views', () => {
+  test('shows catalog route in result views', () => {
     const run = createRun(
       'Inspect the project',
       {
-        selected: 'balanced',
+        route: 'terra-medium',
         provider: 'openai-codex',
-        profile: { model: 'gpt-5.6-terra', thinking: 'medium' },
+        model: 'gpt-5.6-terra',
+        thinking: 'medium',
+        relativeCost: 8,
+        relativeIntelligence: 72,
+        computeUnitsPerTurn: 16,
       },
       { cwd: '/tmp/project', context: 'fresh' },
     );
@@ -803,9 +1156,7 @@ describe('delegate', () => {
       const modeLine = output
         .split('\n')
         .find((line) => line.includes('Fresh context · Read-only'));
-      expect(modeLine).toContain('Balanced');
-      expect(output).not.toContain('gpt-5.6-terra');
-      expect(output).not.toMatch(/Balanced effort/);
+      expect(modeLine).toContain('terra-medium');
       expect(output).not.toMatch(/\n[ \t]*\nResult/);
     }
   });

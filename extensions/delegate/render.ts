@@ -30,7 +30,7 @@ type ToolResultLike = {
 
 type DelegateCallTask = {
   task?: unknown;
-  effort?: unknown;
+  route?: unknown;
   cwd?: unknown;
   context?: unknown;
   allowWrites?: unknown;
@@ -82,25 +82,11 @@ function count(n: number): string {
   return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-function effortName(value: unknown): string {
-  if (value === 'fast') return 'economy';
-  return typeof value === 'string' ? value : '';
-}
-
-function effortDisplayName(value: string): string {
-  return value === 'economy' ? 'Eco' : capitalize(value);
-}
-
-function effortColor(value: string): ThemeColor {
-  if (value === 'economy') return 'success';
-  if (value === 'deep') return 'warning';
-  return 'accent';
-}
-
 function usage(run: DelegatedRun): string {
   const parts: string[] = [];
   if (run.usage.turns)
     parts.push(`${run.usage.turns} turn${run.usage.turns === 1 ? '' : 's'}`);
+  if (run.usage.computeUnits) parts.push(`${run.usage.computeUnits}cu`);
   if (run.usage.input) parts.push(`↑${count(run.usage.input)}`);
   if (run.usage.output) parts.push(`↓${count(run.usage.output)}`);
   if (run.usage.cacheRead) parts.push(`R${count(run.usage.cacheRead)}`);
@@ -138,7 +124,8 @@ function modeDescription(
     continuation?: unknown;
     allowWrites?: unknown;
     cwd?: unknown;
-    effort?: unknown;
+    route?: unknown;
+    requestedMode?: boolean;
   },
   fg: (color: ThemeColor, text: string) => string,
 ): string {
@@ -147,13 +134,42 @@ function modeDescription(
     fg('dim', contextLabel(values)),
     fg(
       values.allowWrites === true ? 'warning' : 'dim',
-      values.allowWrites === true ? 'Can edit' : 'Read-only',
+      values.allowWrites === true
+        ? values.requestedMode
+          ? 'Requests edits'
+          : 'Can edit'
+        : 'Read-only',
     ),
     fg('dim', compactPath(values.cwd)),
   ];
-  const effort = effortName(values.effort);
-  if (effort) parts.push(fg(effortColor(effort), effortDisplayName(effort)));
+  if (typeof values.route === 'string' && values.route)
+    parts.push(fg('accent', values.route));
   return parts.join(separator);
+}
+
+function isolationLines(run: DelegatedRun): string[] {
+  if (!run.isolation) {
+    return run.readOnlyBoundary ? [`Boundary: ${run.readOnlyBoundary}`] : [];
+  }
+  const lines = [
+    `Isolation: ${run.isolation.id}`,
+    `State: ${run.isolation.status} · ${run.isolation.backend}`,
+    `Worktree: ${compactPath(run.isolation.worktreePath)}`,
+    `Dependencies: ${run.isolation.dependencyMode}`,
+  ];
+  if (run.isolation.patch)
+    lines.push(
+      `Patch: ${run.isolation.patch.changedPaths.length} path(s) · ${run.isolation.patch.size} bytes · sha256 ${run.isolation.patch.sha256}`,
+      ...run.isolation.patch.changedPaths.map((name) => `- ${name}`),
+    );
+  if (run.isolation.validation)
+    lines.push(
+      `Validation: ${run.isolation.validation.status}${run.isolation.validation.script ? ` (${run.isolation.validation.script})` : ''}`,
+    );
+  lines.push(
+    `Actions: /delegate-patch ${run.isolation.id} show|diff|validate <script>|validate-command <argv...>|apply|discard`,
+  );
+  return lines;
 }
 
 function formatDuration(run: DelegatedRun): string {
@@ -326,7 +342,8 @@ export function renderDelegateCall(
             continuation: task.continuation,
             allowWrites: task.allowWrites ?? args.allowWrites,
             cwd: task.cwd ?? args.cwd ?? context?.cwd,
-            effort: task.effort ?? args.effort,
+            route: task.route ?? args.route,
+            requestedMode: true,
           },
           fg,
         ),
@@ -350,7 +367,8 @@ export function renderDelegateCall(
           continuation: args.continuation,
           allowWrites: args.allowWrites,
           cwd: args.cwd ?? context?.cwd,
-          effort: args.effort,
+          route: args.route,
+          requestedMode: true,
         },
         fg,
       ),
@@ -394,7 +412,7 @@ function addExpandedRun(
             run.context === 'continuation' ? run.continuation : undefined,
           allowWrites: run.allowWrites,
           cwd: run.cwd,
-          effort: run.effort?.selected,
+          route: run.routing?.route,
         },
         fg,
       ),
@@ -404,16 +422,30 @@ function addExpandedRun(
   );
   if (run.scope?.length)
     container.addChild(
-      new Text(fg('muted', `Advisory scope: ${run.scope.join(', ')}`), 0, 0),
+      new Text(
+        fg(
+          'muted',
+          `${run.allowWrites ? 'Enforced' : 'Advisory'} scope: ${run.scope.join(', ')}`,
+        ),
+        0,
+        0,
+      ),
     );
   if (run.contextNote?.trim())
     container.addChild(
       new Text(fg('muted', `Parent note: ${run.contextNote.trim()}`), 0, 0),
     );
-  for (const warning of [run.effort?.warning, ...(run.warnings ?? [])].filter(
+  for (const warning of [run.routing?.warning, ...(run.warnings ?? [])].filter(
     (value): value is string => Boolean(value),
   ))
     container.addChild(new Text(fg('warning', warning), 0, 0));
+
+  const isolation = isolationLines(run);
+  if (isolation.length) {
+    container.addChild(new Spacer(1));
+    container.addChild(sectionTitle('Isolation & patch', theme));
+    container.addChild(new Text(isolation.join('\n'), 0, 0));
+  }
 
   const activities = activityLines(run, fg);
   if (activities) {
@@ -541,7 +573,7 @@ export function renderDelegateResult(
                 run.context === 'continuation' ? run.continuation : undefined,
               allowWrites: run.allowWrites,
               cwd: run.cwd,
-              effort: run.effort?.selected,
+              route: run.routing?.route,
             },
             fg,
           ),
@@ -552,8 +584,25 @@ export function renderDelegateResult(
         0,
       ),
     );
-    if (run.effort?.warning)
-      container.addChild(new Text(fg('warning', run.effort.warning), 0, 0));
+    for (const warning of [
+      run.routing?.warning,
+      ...(run.warnings ?? []),
+    ].filter((value): value is string => Boolean(value)))
+      container.addChild(new Text(fg('warning', warning), 0, 0));
+    const isolation = isolationLines(run);
+    if (isolation.length)
+      container.addChild(
+        new Text(
+          fieldLine(
+            'Patch',
+            isolation.slice(0, 2).join(' · '),
+            fg,
+            run.isolation?.status === 'patch-ready' ? 'warning' : 'dim',
+          ),
+          0,
+          0,
+        ),
+      );
     const footer = [usage(run), controls([run])].filter(Boolean).join(' · ');
     container.addChild(new Text(fg('dim', footer), 0, 0));
     return container;
@@ -590,7 +639,7 @@ export function renderDelegateResult(
     ...new Set(
       details.runs.flatMap((run) => [
         ...(run.warnings ?? []),
-        ...(run.effort?.warning ? [run.effort.warning] : []),
+        ...(run.routing?.warning ? [run.routing.warning] : []),
       ]),
     ),
   ];
@@ -628,7 +677,7 @@ export function renderDelegateResult(
               run.context === 'continuation' ? run.continuation : undefined,
             allowWrites: run.allowWrites,
             cwd: run.cwd,
-            effort: run.effort?.selected,
+            route: run.routing?.route,
           },
           fg,
         )}`,
