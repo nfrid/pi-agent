@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import * as path from 'node:path';
 import {
   getAgentDir,
@@ -7,7 +7,6 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import { describe, expect, test, vi } from 'vitest';
 import { buildSystemPrompt } from '../system-prompt';
-import budgetGuard from './budget-guard';
 import {
   describeDelegateRouting,
   parseDelegateConfig,
@@ -22,14 +21,7 @@ import {
 } from './output';
 import { buildDelegatePrompt } from './prompt';
 import { renderDelegateCall, renderDelegateResult } from './render';
-import {
-  buildChildArgs,
-  effectiveModelTurnLimit,
-  localBudgetReason,
-  resolvePiSpawn,
-  runDelegate,
-  writeBudgetedChildSettings,
-} from './runner';
+import { buildChildArgs, resolvePiSpawn, runDelegate } from './runner';
 import {
   buildSessionSnapshotJsonl,
   createDelegateSession,
@@ -92,7 +84,6 @@ describe('delegate', () => {
     ).toBe(false);
     expect(run.messages).toHaveLength(1);
     expect(run.usage.turns).toBe(1);
-    expect(run.usage.computeUnits).toBe(1);
   });
 
   test('reconciles a partially missing message_end sequence at agent_end', () => {
@@ -116,7 +107,7 @@ describe('delegate', () => {
       ),
     ).toBe(true);
     expect(run.messages).toHaveLength(2);
-    expect(run.usage).toMatchObject({ turns: 2, computeUnits: 2 });
+    expect(run.usage).toMatchObject({ turns: 2 });
   });
 
   test('uses agent_end as a fallback when message_end events are absent', () => {
@@ -129,24 +120,6 @@ describe('delegate', () => {
     ).toBe(true);
     expect(run.messages).toHaveLength(1);
     expect(run.usage.turns).toBe(1);
-    expect(run.usage.computeUnits).toBe(1);
-  });
-
-  test('weights completed model turns by effective catalog route', () => {
-    const run = createRun('test', {
-      route: 'smart-high',
-      provider: 'openai-codex',
-      model: 'smart',
-      thinking: 'high',
-      relativeCost: 2,
-      relativeIntelligence: 2.5,
-      computeUnitsPerTurn: 6,
-    });
-    processJsonLine(
-      JSON.stringify({ type: 'message_end', message: assistantMessage }),
-      run,
-    );
-    expect(run.usage).toMatchObject({ turns: 1, computeUnits: 6 });
   });
 
   test('resolves exact catalog route keys within the cost ceiling', () => {
@@ -177,7 +150,6 @@ describe('delegate', () => {
         thinking: 'high',
         relativeCost: 1.5,
         relativeIntelligence: 3.5,
-        computeUnitsPerTurn: 4.5,
       },
     });
     expect(resolveDelegateRoute('missing', config).error).toMatch(
@@ -273,7 +245,6 @@ describe('delegate', () => {
       thinking: 'high' as const,
       relativeCost: 1,
       relativeIntelligence: 2,
-      computeUnitsPerTurn: 3,
     };
     expect(mergeDelegateRouteRequest(undefined, persisted)).toBe('original');
     expect(mergeDelegateRouteRequest('replacement', persisted)).toBe(
@@ -606,7 +577,6 @@ describe('delegate', () => {
         thinking: 'high',
         relativeCost: 1,
         relativeIntelligence: 1,
-        computeUnitsPerTurn: 3,
       },
     });
     try {
@@ -615,7 +585,6 @@ describe('delegate', () => {
         ...session.routing,
         route: 'quick-low',
         thinking: 'low' as const,
-        computeUnitsPerTurn: 1,
       } as NonNullable<typeof session.routing>;
       expect(
         updateDelegateSessionRouting(session.token, updatedRouting),
@@ -698,7 +667,6 @@ describe('delegate', () => {
           thinking: 'low',
           relativeCost: 2,
           relativeIntelligence: 3,
-          computeUnitsPerTurn: 2,
         },
       },
       '/tmp/child.jsonl',
@@ -713,89 +681,6 @@ describe('delegate', () => {
       '--thinking',
       'low',
     ]);
-  });
-
-  test('child budget guard exits before a model turn beyond reservation', () => {
-    const previous = process.env.PI_DELEGATE_MAX_MODEL_TURNS;
-    process.env.PI_DELEGATE_MAX_MODEL_TURNS = '1';
-    let handler: ((event: { payload: unknown }) => unknown) | undefined;
-    const exit = vi
-      .spyOn(process, 'exit')
-      .mockImplementation((() => undefined) as never);
-    const stderr = vi
-      .spyOn(process.stderr, 'write')
-      .mockImplementation((() => true) as never);
-    try {
-      budgetGuard({
-        on(event: string, callback: (value: { payload: unknown }) => unknown) {
-          if (event === 'before_provider_request') handler = callback;
-        },
-      } as never);
-      expect(handler?.({ payload: { request: 1 } })).toEqual({ request: 1 });
-      expect(exit).not.toHaveBeenCalled();
-      handler?.({ payload: { request: 2 } });
-      expect(exit).toHaveBeenCalledWith(125);
-    } finally {
-      exit.mockRestore();
-      stderr.mockRestore();
-      if (previous === undefined)
-        delete process.env.PI_DELEGATE_MAX_MODEL_TURNS;
-      else process.env.PI_DELEGATE_MAX_MODEL_TURNS = previous;
-    }
-  });
-
-  test('disables provider and agent-loop retries for budgeted children', () => {
-    const agentDir = `/tmp/delegate-budget-settings-${process.pid}-${Date.now()}`;
-    mkdirSync(agentDir, { recursive: true });
-    try {
-      writeBudgetedChildSettings({ PI_CODING_AGENT_DIR: agentDir }, 2);
-      expect(
-        JSON.parse(readFileSync(path.join(agentDir, 'settings.json'), 'utf8')),
-      ).toEqual({ retry: { enabled: false, provider: { maxRetries: 0 } } });
-    } finally {
-      rmSync(agentDir, { recursive: true, force: true });
-    }
-  });
-
-  test('derives and loads a child-side pre-turn budget guard', () => {
-    const routing = {
-      route: 'smart-high',
-      provider: 'openai-codex',
-      model: 'smart',
-      thinking: 'high' as const,
-      relativeCost: 2,
-      relativeIntelligence: 4,
-      computeUnitsPerTurn: 6,
-    };
-    expect(
-      effectiveModelTurnLimit({
-        routing,
-        maxTurns: 5,
-        maxComputeUnits: 18,
-      }),
-    ).toBe(3);
-    const args = buildChildArgs(
-      {
-        task: 'bounded',
-        routing,
-        maxTurns: 5,
-        maxComputeUnits: 18,
-      },
-      '/tmp/child.jsonl',
-    );
-    expect(
-      args.some((value) => /delegate[\\/]budget-guard\.ts$/.test(value)),
-    ).toBe(true);
-  });
-
-  test('classifies local turn and compute-unit exhaustion', () => {
-    const run = createRun('bounded');
-    run.usage.turns = 2;
-    run.usage.computeUnits = 6;
-    expect(localBudgetReason(run, { maxTurns: 2 })).toMatch(/turn budget/);
-    expect(localBudgetReason(run, { maxComputeUnits: 6 })).toMatch(
-      /compute-unit budget/,
-    );
   });
 
   test('emits controlled mutation tools only with an isolation proof', () => {
@@ -1085,7 +970,6 @@ describe('delegate', () => {
         thinking: 'medium',
         relativeCost: 8,
         relativeIntelligence: 72,
-        computeUnitsPerTurn: 16,
       },
       {
         cwd: '/tmp/project',
@@ -1136,7 +1020,6 @@ describe('delegate', () => {
         thinking: 'medium',
         relativeCost: 8,
         relativeIntelligence: 72,
-        computeUnitsPerTurn: 16,
       },
       { cwd: '/tmp/project', context: 'fresh' },
     );

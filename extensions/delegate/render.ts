@@ -86,7 +86,6 @@ function usage(run: DelegatedRun): string {
   const parts: string[] = [];
   if (run.usage.turns)
     parts.push(`${run.usage.turns} turn${run.usage.turns === 1 ? '' : 's'}`);
-  if (run.usage.computeUnits) parts.push(`${run.usage.computeUnits}cu`);
   if (run.usage.input) parts.push(`↑${count(run.usage.input)}`);
   if (run.usage.output) parts.push(`↓${count(run.usage.output)}`);
   if (run.usage.cacheRead) parts.push(`R${count(run.usage.cacheRead)}`);

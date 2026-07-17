@@ -7,7 +7,6 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { artifactProducer } from '../artifacts';
-import { recordPatchConflict } from '../autonomy/metrics';
 import { loadDelegateConfig, resolveDelegateRoute } from './config';
 import {
   applyIsolationPatch,
@@ -168,13 +167,6 @@ export async function buildArtifactBackedHandoff(
 
 function invalidParams(message: string): never {
   throw new Error(message);
-}
-
-function isPatchConflict(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return /Parent (?:HEAD|repository) changed|git .* apply|patch does not apply|postcondition|concurrent parent drift/i.test(
-    error.message,
-  );
 }
 
 async function finalizeIsolatedRun(
@@ -926,7 +918,6 @@ export default function delegate(pi: ExtensionAPI) {
           ctx.ui.notify(`Discarded isolation ${record.id}.`, 'info');
         }
       } catch (error) {
-        if (action === 'apply' && isPatchConflict(error)) recordPatchConflict();
         ctx.ui.notify(
           `Patch broker rejected ${action}: ${error instanceof Error ? error.message : String(error)}`,
           'error',

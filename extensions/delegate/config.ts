@@ -16,15 +16,6 @@ export const THINKING_LEVELS = [
   'xhigh',
   'max',
 ] as const;
-const THINKING_COMPUTE_WEIGHT: Record<ThinkingLevel, number> = {
-  off: 1,
-  minimal: 1,
-  low: 1,
-  medium: 2,
-  high: 3,
-  xhigh: 4,
-  max: 5,
-};
 const SETTINGS_KEY = 'delegate';
 const DEFAULT_MAX_RELATIVE_COST = 3;
 const MAX_RELATIVE_METRIC = 1000;
@@ -342,8 +333,6 @@ export function resolveDelegateRoute(
       thinking: entry.thinking,
       relativeCost: entry.relativeCost,
       relativeIntelligence: entry.relativeIntelligence,
-      computeUnitsPerTurn:
-        entry.relativeCost * THINKING_COMPUTE_WEIGHT[entry.thinking],
     },
   };
 }

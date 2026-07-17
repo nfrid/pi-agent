@@ -9,7 +9,6 @@ export interface UsageStats {
   contextTokens: number;
   cost: number;
   turns: number;
-  computeUnits: number;
 }
 
 export interface DelegatedActivity {
@@ -45,7 +44,6 @@ export interface DelegateRouteState {
   thinking: ThinkingLevel;
   relativeCost: number;
   relativeIntelligence: number;
-  computeUnitsPerTurn: number;
   warning?: string;
 }
 
@@ -151,7 +149,6 @@ export function emptyUsage(): UsageStats {
     contextTokens: 0,
     cost: 0,
     turns: 0,
-    computeUnits: 0,
   };
 }
 

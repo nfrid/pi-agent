@@ -5,7 +5,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const SCHEMA_VERSION = 'session-metrics/v2';
+export const SCHEMA_VERSION = 'session-metrics/v1';
 const METRIC_KEYS = [
   'userTurns',
   'assistantTurns',
@@ -18,84 +18,7 @@ const METRIC_KEYS = [
   'usageCacheRead',
   'usageCacheWrite',
   'peakRequestContext',
-  'autonomyDelegateCalls',
-  'autonomyDelegateInputTokens',
-  'autonomyDelegateOutputTokens',
-  'autonomyDelegateCostUsd',
-  'autonomyBlockedAttempts',
-  'autonomyPolicyDenials',
-  'autonomyMissingCapabilityDenials',
-  'autonomyOutsideScopeDenials',
-  'autonomyUncontrolledShellDenials',
-  'autonomyExpiredEnvelopeDenials',
-  'autonomyInvalidTargetDenials',
-  'autonomyWriteScopeDenials',
-  'autonomyConfirmationDenials',
-  'autonomyUnsupportedToolDenials',
-  'autonomySandboxUnavailableDenials',
-  'autonomyObservedViolations',
-  'autonomyAutoApprovedLeases',
-  'autonomyLeasedRepositories',
-  'autonomyLeasedPaths',
-  'autonomyInteractiveApprovals',
-  'autonomyInteractiveDenials',
-  'sandboxShellInspectCalls',
-  'sandboxShellValidateCalls',
-  'sandboxShellEditCalls',
-  'sandboxShellFailures',
-  'sandboxShellAppliedEdits',
-  'sandboxShellRejectedEdits',
-  'sandboxShellChangedPaths',
-  'autonomyPatchConflicts',
 ];
-
-const AUTONOMY_METRICS_TYPES = new Set([
-  'workflow-autonomy-metrics:v1',
-  'workflow-autonomy-metrics:v2',
-]);
-
-function applyAutonomySnapshot(metrics, data) {
-  const policyDenials =
-    data.policyDenials && typeof data.policyDenials === 'object'
-      ? data.policyDenials
-      : {};
-  const values = {
-    autonomyDelegateCalls: data.delegateCalls,
-    autonomyDelegateInputTokens: data.delegateInputTokens,
-    autonomyDelegateOutputTokens: data.delegateOutputTokens,
-    autonomyDelegateCostUsd: data.delegateCostUsd,
-    autonomyBlockedAttempts: data.blockedCapabilityAttempts,
-    autonomyPolicyDenials: Object.values(policyDenials).reduce(
-      (sum, value) => sum + finiteNumber(value),
-      0,
-    ),
-    autonomyMissingCapabilityDenials: policyDenials['missing-capability'],
-    autonomyOutsideScopeDenials: policyDenials['outside-scope'],
-    autonomyUncontrolledShellDenials: policyDenials['uncontrolled-shell'],
-    autonomyExpiredEnvelopeDenials: policyDenials['expired-envelope'],
-    autonomyInvalidTargetDenials: policyDenials['invalid-target'],
-    autonomyWriteScopeDenials: policyDenials['write-scope-required'],
-    autonomyConfirmationDenials: policyDenials['confirmation-required'],
-    autonomyUnsupportedToolDenials: policyDenials['unsupported-tool'],
-    autonomySandboxUnavailableDenials: policyDenials['sandbox-unavailable'],
-    autonomyObservedViolations: data.observedCapabilityViolations,
-    autonomyAutoApprovedLeases: data.autoApprovedLeases,
-    autonomyLeasedRepositories: data.leasedRepositories,
-    autonomyLeasedPaths: data.leasedPaths,
-    autonomyInteractiveApprovals: data.interactiveApprovals,
-    autonomyInteractiveDenials: data.interactiveDenials,
-    sandboxShellInspectCalls: data.sandboxShellInspectCalls,
-    sandboxShellValidateCalls: data.sandboxShellValidateCalls,
-    sandboxShellEditCalls: data.sandboxShellEditCalls,
-    sandboxShellFailures: data.sandboxShellFailures,
-    sandboxShellAppliedEdits: data.sandboxShellAppliedEdits,
-    sandboxShellRejectedEdits: data.sandboxShellRejectedEdits,
-    sandboxShellChangedPaths: data.sandboxShellChangedPaths,
-    autonomyPatchConflicts: data.patchConflicts,
-  };
-  for (const [key, value] of Object.entries(values))
-    metrics[key] = finiteNumber(value);
-}
 
 function finiteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -150,20 +73,10 @@ export function parseSessionJsonl(source) {
   const active = activeAncestry(entries);
   const metrics = Object.fromEntries(METRIC_KEYS.map((key) => [key, 0]));
   const timestamps = [];
-  let autonomyMode = 'unknown';
   for (const entry of active) {
     const timestamp = Date.parse(entry.timestamp ?? entry.message?.timestamp);
     if (Number.isFinite(timestamp)) timestamps.push(timestamp);
     if (entry.type === 'compaction') metrics.compactions += 1;
-    if (
-      entry.type === 'custom' &&
-      AUTONOMY_METRICS_TYPES.has(entry.customType) &&
-      entry.data &&
-      typeof entry.data === 'object'
-    ) {
-      applyAutonomySnapshot(metrics, entry.data);
-      if (typeof entry.data.mode === 'string') autonomyMode = entry.data.mode;
-    }
     if (entry.type !== 'message') continue;
     const message = entry.message;
     if (message?.role === 'user') metrics.userTurns += 1;
@@ -193,7 +106,6 @@ export function parseSessionJsonl(source) {
   return {
     sessionId: createHash('sha256').update(source).digest('hex').slice(0, 12),
     ...metrics,
-    autonomyMode,
     cacheHitRatio: denominator === 0 ? 0 : metrics.usageCacheRead / denominator,
     malformedLines,
   };
@@ -225,15 +137,7 @@ export function aggregateSessions(sessions) {
       median(sessions.map((session) => session[key])),
     ]),
   );
-  const modeCounts = Object.fromEntries(
-    [...new Set(sessions.map((session) => session.autonomyMode))].map(
-      (mode) => [
-        mode,
-        sessions.filter((session) => session.autonomyMode === mode).length,
-      ],
-    ),
-  );
-  return { sessionCount: sessions.length, totals, medians, modeCounts };
+  return { sessionCount: sessions.length, totals, medians };
 }
 
 async function discover(input) {

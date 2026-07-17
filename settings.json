@@ -7,24 +7,6 @@
   "hideThinkingBlock": false,
   "quietStartup": true,
   "theme": "dracula",
-  "autonomy": {
-    "mode": "canary",
-    "profile": "standard",
-    "capabilities": [
-      "inspect"
-    ],
-    "scope": [
-      "."
-    ],
-    "trustedRoots": [
-      "/Users/nfrid/job",
-      "/Users/nfrid/.pi/agent"
-    ],
-    "autoApprove": [
-      "inspect",
-      "edit"
-    ]
-  },
   "delegate": {
     "provider": "openai-codex",
     "maxRelativeCost": 21,

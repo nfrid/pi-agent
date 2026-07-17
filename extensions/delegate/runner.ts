@@ -1,5 +1,4 @@
 import { spawn } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { processJsonLine } from './events';
 import {
@@ -36,7 +35,6 @@ const SYSTEM_PROMPT_EXTENSION = path.resolve(
   '../system-prompt/index.ts',
 );
 const INSPECT_SHELL_EXTENSION = path.resolve(__dirname, 'inspect-shell.ts');
-const BUDGET_GUARD_EXTENSION = path.resolve(__dirname, 'budget-guard.ts');
 
 let activeRuns = 0;
 const slotWaiters: Array<() => void> = [];
@@ -147,52 +145,11 @@ export interface RunDelegateOptions {
   resuming?: boolean;
   timeoutMs: number;
   maxConcurrency: number;
-  maxTurns?: number;
-  maxComputeUnits?: number;
   killGraceMs?: number;
   readOnlyBash?: boolean;
   signal?: AbortSignal;
   onUpdate?: OnUpdate;
   makeDetails: (runs: DelegatedRun[]) => DelegateDetails;
-}
-
-export function localBudgetReason(
-  run: DelegatedRun,
-  limits: { maxTurns?: number; maxComputeUnits?: number },
-): string | undefined {
-  if (limits.maxTurns !== undefined && run.usage.turns >= limits.maxTurns)
-    return `turn budget ${limits.maxTurns} reached`;
-  if (
-    limits.maxComputeUnits !== undefined &&
-    run.usage.computeUnits >= limits.maxComputeUnits
-  )
-    return `compute-unit budget ${limits.maxComputeUnits} reached`;
-  return undefined;
-}
-
-export function effectiveModelTurnLimit(
-  options: Pick<RunDelegateOptions, 'routing' | 'maxTurns' | 'maxComputeUnits'>,
-): number | undefined {
-  const limits: number[] = [];
-  if (options.maxTurns !== undefined) limits.push(options.maxTurns);
-  if (options.maxComputeUnits !== undefined) {
-    const perTurn = options.routing?.computeUnitsPerTurn ?? 1;
-    limits.push(Math.floor(options.maxComputeUnits / perTurn));
-  }
-  return limits.length > 0 ? Math.max(0, Math.min(...limits)) : undefined;
-}
-
-export function writeBudgetedChildSettings(
-  env: NodeJS.ProcessEnv,
-  modelTurnLimit: number | undefined,
-): void {
-  const agentDir = env.PI_CODING_AGENT_DIR;
-  if (modelTurnLimit === undefined || !agentDir) return;
-  writeFileSync(
-    path.join(agentDir, 'settings.json'),
-    `${JSON.stringify({ retry: { enabled: false, provider: { maxRetries: 0 } } })}\n`,
-    { encoding: 'utf8', mode: 0o600 },
-  );
 }
 
 export function buildChildArgs(
@@ -206,14 +163,11 @@ export function buildChildArgs(
     | 'contextNote'
     | 'scope'
     | 'resuming'
-    | 'maxTurns'
-    | 'maxComputeUnits'
   >,
   sessionPath: string,
 ): string[] {
   const allowWrites =
     options.allowWrites === true && Boolean(options.isolation);
-  const modelTurnLimit = effectiveModelTurnLimit(options);
   const args = [
     '--mode',
     'json',
@@ -222,9 +176,6 @@ export function buildChildArgs(
     '--extension',
     SYSTEM_PROMPT_EXTENSION,
     ...(options.readOnlyBash ? ['--extension', INSPECT_SHELL_EXTENSION] : []),
-    ...(modelTurnLimit !== undefined
-      ? ['--extension', BUDGET_GUARD_EXTENSION]
-      : []),
     '--no-skills',
     '--no-prompt-templates',
     '--no-themes',
@@ -321,7 +272,6 @@ export async function runDelegate(
   let releaseSession: (() => void) | undefined;
   let wasAborted = false;
   let timedOut = false;
-  let budgetExceeded: string | undefined;
 
   const emitUpdate = () => {
     options.onUpdate?.({
@@ -346,7 +296,6 @@ export async function runDelegate(
     run.startedAt = Date.now();
     emitUpdate();
     const { command, prefixArgs } = resolvePiSpawn();
-    const modelTurnLimit = effectiveModelTurnLimit(options);
     const args = buildChildArgs(
       { ...options, readOnlyBash: Boolean(readOnlySandbox) },
       options.sessionPath,
@@ -365,7 +314,6 @@ export async function runDelegate(
             env: childAuth?.env ?? {},
           };
 
-    writeBudgetedChildSettings(spawnTarget.env, modelTurnLimit);
     const exitCode = await new Promise<number>((resolve) => {
       const isWindows = process.platform === 'win32';
       const proc = spawn(spawnTarget.command, spawnTarget.args, {
@@ -376,9 +324,6 @@ export async function runDelegate(
           LC_ALL: 'C',
           ...spawnTarget.env,
           PI_DELEGATE_CHILD: '1',
-          ...(modelTurnLimit !== undefined
-            ? { PI_DELEGATE_MAX_MODEL_TURNS: String(modelTurnLimit) }
-            : {}),
         },
         shell: false,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -402,7 +347,7 @@ export async function runDelegate(
         resolve(code);
       };
 
-      const terminate = (reason: 'abort' | 'timeout' | 'budget' = 'abort') => {
+      const terminate = (reason: 'abort' | 'timeout' = 'abort') => {
         if (terminating || closed) return;
         terminating = true;
         if (reason === 'timeout') timedOut = true;
@@ -433,21 +378,6 @@ export async function runDelegate(
       const processLine = (line: string) => {
         if (terminating || !processJsonLine(line, run)) return;
         emitUpdate();
-        const reason = localBudgetReason(run, options);
-        // A terminal answer may consume the final permitted turn. Stop only
-        // when Pi would need another model turn, or malformed/fallback events
-        // already exceeded the local reservation.
-        if (
-          reason &&
-          (run.stopReason === 'toolUse' ||
-            (options.maxTurns !== undefined &&
-              run.usage.turns > options.maxTurns) ||
-            (options.maxComputeUnits !== undefined &&
-              run.usage.computeUnits > options.maxComputeUnits))
-        ) {
-          budgetExceeded = reason;
-          terminate('budget');
-        }
       };
 
       proc.stdout.on('data', (chunk: Buffer) => {
@@ -503,15 +433,7 @@ export async function runDelegate(
         options.signal?.addEventListener('abort', abortHandler, { once: true });
     });
 
-    if (exitCode === 125 && modelTurnLimit !== undefined && !budgetExceeded)
-      budgetExceeded = `model-turn budget ${modelTurnLimit} reached`;
-    run.exitCode = wasAborted
-      ? 130
-      : timedOut
-        ? 124
-        : budgetExceeded
-          ? 125
-          : exitCode;
+    run.exitCode = wasAborted ? 130 : timedOut ? 124 : exitCode;
     if (wasAborted) {
       run.stopReason = 'aborted';
       run.errorMessage = 'Delegated task was aborted.';
@@ -520,10 +442,6 @@ export async function runDelegate(
       run.stopReason = 'error';
       run.errorMessage = `Delegated task timed out after ${Math.round(options.timeoutMs / 1000)} seconds.`;
       run.state = 'timed-out';
-    } else if (budgetExceeded) {
-      run.stopReason = 'error';
-      run.errorMessage = `Delegated task stopped because ${budgetExceeded}.`;
-      run.state = 'error';
     } else if (exitCode !== 0 && !run.errorMessage) {
       run.stopReason = 'error';
       run.errorMessage =

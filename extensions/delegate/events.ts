@@ -185,7 +185,6 @@ function updateMessageMetadata(run: DelegatedRun, message: Message) {
   }
   if (message.model) run.model = message.model;
   run.usage.turns++;
-  run.usage.computeUnits += run.routing?.computeUnitsPerTurn ?? 1;
   if (message.stopReason) run.stopReason = message.stopReason;
   if (message.errorMessage) run.errorMessage = message.errorMessage;
 }
