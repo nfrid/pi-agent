@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "workflow-command/v1",
+  "label": "control",
+  "module": "../synthetic-agent.mjs",
+  "args": ["--profile", "control"]
+}

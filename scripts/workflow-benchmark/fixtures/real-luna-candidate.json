@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "workflow-command/v1",
+  "label": "real-luna-candidate",
+  "module": "../real-agent.mjs",
+  "args": [
+    "--profile",
+    "candidate",
+    "--model",
+    "openai-codex/gpt-5.6-luna",
+    "--thinking",
+    "low"
+  ]
+}
