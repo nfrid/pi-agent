@@ -1,6 +1,7 @@
 node_modules
 auth.json
 trust.json
+models-store.json
 *.log
 sessions/
 /artifacts/
