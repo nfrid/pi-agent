@@ -2,10 +2,6 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from '@earendil-works/pi-coding-agent';
-import {
-  finalizeScopedPrompt,
-  FLAG_NAME as SCOPED_INSTRUCTIONS_FLAG,
-} from '../scoped-instructions';
 import { buildSystemPrompt } from './composition';
 import {
   aggregateAssistantUsage,
@@ -67,13 +63,10 @@ export default function systemPrompt(pi: ExtensionAPI) {
   });
 
   pi.on('before_agent_start', (event, ctx) => {
-    let rebuiltPrompt = buildSystemPrompt(
+    const rebuiltPrompt = buildSystemPrompt(
       event.systemPromptOptions,
       String(ctx.mode),
     );
-    // One named finalization stage owns correctness-sensitive augmentation.
-    if (pi.getFlag(SCOPED_INSTRUCTIONS_FLAG) === true)
-      rebuiltPrompt = finalizeScopedPrompt(pi, rebuiltPrompt, ctx.cwd);
     return { systemPrompt: rebuiltPrompt };
   });
 
