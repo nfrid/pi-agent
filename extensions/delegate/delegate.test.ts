@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, utimesSync } from 'node:fs';
 import * as path from 'node:path';
 import {
   getAgentDir,
@@ -13,7 +13,12 @@ import {
   resolveDelegateRoute,
 } from './config';
 import { processJsonLine } from './events';
-import { buildArtifactBackedHandoff, mergeDelegateRouteRequest } from './index';
+import {
+  assertDistinctContinuationTokens,
+  buildArtifactBackedHandoff,
+  mergeDelegateRouteRequest,
+  throwIfAllRunsFailed,
+} from './index';
 import {
   buildParentHandoff,
   PARENT_HANDOFF_CAPS,
@@ -21,10 +26,17 @@ import {
 } from './output';
 import { buildDelegatePrompt } from './prompt';
 import { renderDelegateCall, renderDelegateResult } from './render';
-import { buildChildArgs, resolvePiSpawn, runDelegate } from './runner';
+import {
+  buildChildArgs,
+  mapWithConcurrency,
+  resolvePiSpawn,
+  runDelegate,
+} from './runner';
 import {
   buildSessionSnapshotJsonl,
   createDelegateSession,
+  DELEGATE_SESSION_MAX_AGE_MS,
+  pruneDelegateSessions,
   resolveDelegateSession,
   updateDelegateSessionRouting,
 } from './session';
@@ -50,6 +62,65 @@ const assistantMessage = {
 };
 
 describe('delegate', () => {
+  test('throws only when every completed delegate run failed', () => {
+    const failed = createRun('failed');
+    failed.exitCode = 1;
+    failed.state = 'error';
+    failed.errorMessage = 'boom';
+    expect(() => throwIfAllRunsFailed([failed], 'all failed')).toThrow(
+      'all failed',
+    );
+
+    const success = createRun('success');
+    success.exitCode = 0;
+    success.state = 'success';
+    success.messages = [assistantMessage as never];
+    expect(() =>
+      throwIfAllRunsFailed([success, failed], 'must not throw'),
+    ).not.toThrow();
+  });
+
+  test('rejects duplicate parallel continuation ownership', () => {
+    expect(() =>
+      assertDistinctContinuationTokens(['session-a', undefined, 'session-a']),
+    ).toThrow('Each parallel task must use a distinct continuation token.');
+    expect(() =>
+      assertDistinctContinuationTokens(['session-a', undefined, 'session-b']),
+    ).not.toThrow();
+  });
+
+  test('drains started workers and stops scheduling after a worker fails', async () => {
+    let releaseFirst!: () => void;
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const started: number[] = [];
+    let settled = false;
+    const mapped = mapWithConcurrency([0, 1, 2], 2, async (_item, index) => {
+      started.push(index);
+      if (index === 0) await first;
+      if (index === 1) throw new Error('worker failed');
+      return index;
+    });
+    void mapped.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(started).toEqual([0, 1]);
+    expect(settled).toBe(false);
+
+    releaseFirst();
+    await expect(mapped).rejects.toThrow('worker failed');
+    expect(started).toEqual([0, 1]);
+  });
+
   test('defaults children to read-only work without a rigid report format', () => {
     const prompt = buildDelegatePrompt('Inspect the repository');
     expect(prompt).toMatch(/read-only task/);
@@ -605,6 +676,34 @@ describe('delegate', () => {
       const dir = path.join(getAgentDir(), '.delegate-sessions');
       rmSync(path.join(dir, `${session.token}.jsonl`), { force: true });
       rmSync(path.join(dir, `${session.token}.json`), { force: true });
+    }
+  });
+
+  test('prunes aged unlinked transcripts but retains isolation-linked evidence', () => {
+    const unlinked = createDelegateSession({ cwd: '/tmp/project' });
+    const linked = createDelegateSession({
+      cwd: '/tmp/project',
+      isolationId: 'iso-retained',
+    });
+    const dir = path.join(getAgentDir(), '.delegate-sessions');
+    const old = new Date(Date.now() - DELEGATE_SESSION_MAX_AGE_MS - 1);
+    for (const session of [unlinked, linked]) {
+      utimesSync(session.filePath, old, old);
+      utimesSync(path.join(dir, `${session.token}.json`), old, old);
+    }
+    try {
+      expect(
+        pruneDelegateSessions({
+          isIsolationRetained: (id) => id === 'iso-retained',
+        }),
+      ).toEqual({ removed: 1 });
+      expect(resolveDelegateSession(unlinked.token)).toBeNull();
+      expect(resolveDelegateSession(linked.token)).toEqual(linked);
+    } finally {
+      for (const session of [unlinked, linked]) {
+        rmSync(session.filePath, { force: true });
+        rmSync(path.join(dir, `${session.token}.json`), { force: true });
+      }
     }
   });
 

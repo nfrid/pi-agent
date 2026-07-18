@@ -2,16 +2,21 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { ACTION_GLYPH, TOOL } from './constants';
 import { TODO_SNAPSHOT_TYPE, transformTodoContext } from './context';
-import { mutate } from './core';
+import { mutate, mutateBatch } from './core';
 import { dashboard, turnSnapshotText } from './format';
 import { normalizeId } from './ids';
 import { stats } from './queries';
 import { paramsSchema } from './schema';
-import { persist, setLastCtx } from './state';
+import {
+  captureMutationSnapshot,
+  persist,
+  restoreMutationSnapshot,
+} from './state';
+import type { TaskStore } from './store';
 import type { ToolDetails } from './types';
 import { updateUi } from './ui-widget';
 
-export function registerTodoTool(pi: ExtensionAPI): void {
+export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
   pi.registerTool<typeof paramsSchema, ToolDetails>({
     name: TOOL,
     label: 'Todo',
@@ -29,50 +34,40 @@ export function registerTodoTool(pi: ExtensionAPI): void {
     parameters: paramsSchema,
     executionMode: 'sequential',
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      setLastCtx(ctx);
-      let result: { changed: boolean; message: string; error?: string };
-      if (params.action === 'batch') {
-        const operations = params.operations ?? [];
-        if (!operations.length)
-          result = {
-            changed: false,
-            message: 'operations are required for batch',
-            error: 'operations are required for batch',
-          };
-        else {
-          const messages: string[] = [];
-          let changed = false;
-          let error: string | undefined;
-          for (const op of operations) {
-            const step = mutate(op.action, op);
-            changed ||= step.changed;
-            messages.push(step.error ? `error: ${step.message}` : step.message);
-            if (step.error) {
-              error = step.error;
-              break;
-            }
-          }
-          result = { changed, message: messages.join('; '), error };
+      store.lastCtx = ctx;
+      const snapshot = captureMutationSnapshot(store);
+      const result =
+        params.action === 'batch'
+          ? mutateBatch(store, params.operations ?? [])
+          : mutate(store, params.action, params);
+      if (result.error) throw new Error(result.message);
+      try {
+        updateUi(store, ctx);
+        if (result.changed) persist(store, pi);
+      } catch (error) {
+        restoreMutationSnapshot(store, snapshot);
+        try {
+          updateUi(store, ctx);
+        } catch {
+          // Preserve the original persistence/UI failure.
         }
-      } else {
-        result = mutate(params.action, params);
+        throw error;
       }
-      if (result.changed) persist(pi);
-      updateUi(ctx);
+
       const details: ToolDetails = {
         action: params.action,
         changed: result.changed,
         message: result.message,
-        stats: stats(),
-        error: result.error,
+        stats: stats(store),
       };
-      const body = result.error
-        ? `Error: ${result.message}`
-        : `${result.message}\n${dashboard(Boolean(params.include_done), 24)}`;
       return {
-        content: [{ type: 'text', text: body }],
+        content: [
+          {
+            type: 'text',
+            text: `${result.message}\n${dashboard(store, Boolean(params.include_done), 24)}`,
+          },
+        ],
         details,
-        isError: Boolean(result.error),
       };
     },
     renderCall(args, theme) {
@@ -113,7 +108,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
   });
 }
 
-export function registerTodoContext(pi: ExtensionAPI): void {
+export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
   let needsRecovery = false;
 
   pi.on('session_start', () => {
@@ -130,7 +125,7 @@ export function registerTodoContext(pi: ExtensionAPI): void {
     return {
       message: {
         customType: TODO_SNAPSHOT_TYPE,
-        content: turnSnapshotText(),
+        content: turnSnapshotText(store),
         display: false,
       },
     };
@@ -138,7 +133,7 @@ export function registerTodoContext(pi: ExtensionAPI): void {
   pi.on('context', (event) => ({
     messages: transformTodoContext(
       event.messages,
-      turnSnapshotText(),
+      turnSnapshotText(store),
       Date.now(),
       needsRecovery,
     ),

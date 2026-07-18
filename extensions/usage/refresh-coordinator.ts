@@ -1,6 +1,6 @@
 export interface RefreshCoordinatorOptions<Context, Report> {
   debounceMs: number;
-  query: (ctx: Context) => Promise<Report>;
+  query: (ctx: Context, signal: AbortSignal) => Promise<Report>;
   canRefresh: (ctx: Context) => boolean;
   isFresh: (report: Report, ctx: Context) => boolean;
   onLoading: (ctx: Context) => void;
@@ -23,6 +23,7 @@ export class RefreshCoordinator<Context, Report> {
   private inFlight = false;
   private trailing: Batch<Context> | undefined;
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  private queryController: AbortController | undefined;
 
   constructor(
     private readonly options: RefreshCoordinatorOptions<Context, Report>,
@@ -46,7 +47,7 @@ export class RefreshCoordinator<Context, Report> {
     this.options.onClear(ctx);
   }
 
-  /** Coalesce adjacent turn_end and agent_end notifications. */
+  /** Debounce settled notifications and retain one refresh behind active work. */
   settled(ctx: Context): void {
     if (!this.active) return;
     this.clearDebounce();
@@ -54,7 +55,7 @@ export class RefreshCoordinator<Context, Report> {
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = undefined;
       if (!this.active || generation !== this.generation) return;
-      void this.request(ctx, true, false);
+      void this.request(ctx, true, true);
     }, this.options.debounceMs);
     this.debounceTimer.unref?.();
   }
@@ -69,6 +70,7 @@ export class RefreshCoordinator<Context, Report> {
 
   private advanceGeneration(): void {
     this.generation++;
+    this.queryController?.abort();
     this.clearDebounce();
     if (this.trailing) {
       this.resolve(this.trailing);
@@ -122,10 +124,12 @@ export class RefreshCoordinator<Context, Report> {
 
   private start(batch: Batch<Context>): void {
     this.inFlight = true;
+    const controller = new AbortController();
+    this.queryController = controller;
     if (this.isCurrent(batch)) this.options.onLoading(batch.ctx);
 
     void this.options
-      .query(batch.ctx)
+      .query(batch.ctx, controller.signal)
       .then((report) => {
         if (!this.isCurrent(batch) || !this.options.canRefresh(batch.ctx))
           return;
@@ -138,6 +142,8 @@ export class RefreshCoordinator<Context, Report> {
         }
       })
       .finally(() => {
+        if (this.queryController === controller)
+          this.queryController = undefined;
         this.inFlight = false;
         this.resolve(batch);
         const trailing = this.trailing;

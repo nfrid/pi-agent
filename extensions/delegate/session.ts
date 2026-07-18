@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
@@ -33,6 +35,9 @@ interface DelegateSessionMetadata {
 }
 
 const SESSION_VERSION = 4;
+export const DELEGATE_SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+export const DELEGATE_SESSION_MAX_UNLINKED = 200;
+const ACTIVE_GRACE_MS = 24 * 60 * 60 * 1000;
 const TOKEN_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -164,7 +169,7 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
 
 export function updateDelegateSessionRouting(
   token: string,
-  routing: DelegateRouteState,
+  routing: DelegateRouteState | undefined,
 ): DelegateSession | null {
   const current = resolveDelegateSession(token);
   if (!current) return null;
@@ -174,7 +179,9 @@ export function updateDelegateSessionRouting(
   ) as DelegateSessionMetadata;
   const temporary = `${metadataPath}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(temporary, `${JSON.stringify({ ...metadata, routing })}\n`, {
+    const updated = { ...metadata, routing };
+    if (!routing) delete updated.routing;
+    writeFileSync(temporary, `${JSON.stringify(updated)}\n`, {
       encoding: 'utf8',
       mode: 0o600,
       flag: 'wx',
@@ -183,7 +190,75 @@ export function updateDelegateSessionRouting(
   } finally {
     rmSync(temporary, { force: true });
   }
-  return { ...current, routing };
+  if (routing) return { ...current, routing };
+  const { routing: _routing, ...withoutRouting } = current;
+  return withoutRouting;
+}
+
+export function removeDelegateSession(session: DelegateSession): void {
+  const paths = sessionPaths(session.token);
+  rmSync(paths.filePath, { force: true });
+  rmSync(paths.metadataPath, { force: true });
+}
+
+/**
+ * Prune durable read-only/unlinked transcripts. Isolation-linked evidence is
+ * retained with its worktree. Recently-written files are protected so another
+ * Pi process cannot have an active transcript removed underneath it.
+ */
+export function pruneDelegateSessions(options: {
+  now?: number;
+  isIsolationRetained: (id: string) => boolean;
+}): { removed: number } {
+  const now = options.now ?? Date.now();
+  const dir = sessionDir();
+  if (!existsSync(dir)) return { removed: 0 };
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return { removed: 0 };
+  }
+  const candidates: Array<{ session: DelegateSession; touchedAt: number }> = [];
+  for (const name of names) {
+    try {
+      const match = /^([0-9a-f-]{36})\.json$/.exec(name);
+      if (!match || !TOKEN_PATTERN.test(match[1])) continue;
+      const session = resolveDelegateSession(match[1]);
+      if (!session) continue;
+      if (
+        session.isolationId &&
+        options.isIsolationRetained(session.isolationId)
+      )
+        continue;
+      const paths = sessionPaths(session.token);
+      const touchedAt = Math.max(
+        statSync(paths.filePath).mtimeMs,
+        statSync(paths.metadataPath).mtimeMs,
+      );
+      if (now - touchedAt < ACTIVE_GRACE_MS) continue;
+      candidates.push({ session, touchedAt });
+    } catch {
+      // Concurrent cleanup or malformed metadata is ignored safely.
+    }
+  }
+  candidates.sort((left, right) => right.touchedAt - left.touchedAt);
+  let removed = 0;
+  for (let index = 0; index < candidates.length; index++) {
+    const candidate = candidates[index];
+    if (
+      now - candidate.touchedAt <= DELEGATE_SESSION_MAX_AGE_MS &&
+      index < DELEGATE_SESSION_MAX_UNLINKED
+    )
+      continue;
+    try {
+      removeDelegateSession(candidate.session);
+      removed++;
+    } catch {
+      // Best-effort retention cleanup must not break session startup.
+    }
+  }
+  return { removed };
 }
 
 function containsToolCall(entry: unknown, toolCallId: string): boolean {

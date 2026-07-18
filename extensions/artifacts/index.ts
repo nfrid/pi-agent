@@ -9,7 +9,12 @@ import {
   retrieveArtifact,
 } from './retrieval';
 import { registerSnapshotReads } from './snapshot-reads';
-import { putArtifact, restoreArtifacts, revokeArtifact } from './storage';
+import {
+  putArtifact,
+  recoverArtifactFromEntries,
+  restoreArtifacts,
+  revokeArtifact,
+} from './storage';
 
 const registered = new WeakSet<object>();
 
@@ -37,19 +42,43 @@ export {
   SNAPSHOT_DETAILS_KEY,
   SNAPSHOT_READS_FLAG,
 } from './snapshot-reads';
-export { putArtifact, restoreArtifacts, revokeArtifact } from './storage';
+export {
+  putArtifact,
+  recoverArtifactFromEntries,
+  restoreArtifacts,
+  revokeArtifact,
+  validateMetadata,
+} from './storage';
 export type {
   ArtifactMetadata,
   ContentClass,
   ProducerClass,
   PutArtifactInput,
+  ResolvedArtifact,
 } from './types';
+export { MAX_ARTIFACT_BYTES } from './types';
 
 /** Public producer surface. Allowlists block explicit protected labels, but cannot
  * determine what bytes mean. Every producer must still enforce protected-data policy. */
 export const artifactProducer = {
   put: putArtifact,
   revoke: revokeArtifact,
+} as const;
+
+export function mergeToolResultChanges<
+  S extends Record<string, unknown>,
+  G extends Record<string, unknown>,
+>(
+  snapshot: S | undefined,
+  governed: G | undefined,
+): S | G | (S & G) | undefined {
+  if (!governed) return snapshot;
+  return snapshot ? { ...snapshot, ...governed } : governed;
+}
+
+/** Public read boundary for consumers of artifact-backed session entries. */
+export const artifactConsumer = {
+  recoverFromEntries: recoverArtifactFromEntries,
 } as const;
 
 export default function artifacts(pi: ExtensionAPI): void {
@@ -62,10 +91,20 @@ export default function artifacts(pi: ExtensionAPI): void {
   pi.on('session_tree', async (_event, ctx) => {
     await restoreArtifacts(ctx);
   });
-  registerSnapshotReads(pi);
-  // Registration order matters: the read snapshot hook establishes its artifact
-  // details before the governor considers the completed result.
-  registerContextGovernor(pi);
+  const snapshotResult = registerSnapshotReads(pi, {
+    registerToolResult: false,
+  });
+  const governResult = registerContextGovernor(pi, {
+    registerToolResult: false,
+  });
+  // Encode the security-sensitive transform order in one composed hook: exact
+  // read snapshot publication must precede governor inspection.
+  pi.on('tool_result', async (event, ctx) => {
+    const snapshot = await snapshotResult(event, ctx);
+    const current = snapshot ? { ...event, ...snapshot } : event;
+    const governed = await governResult(current, ctx);
+    return mergeToolResultChanges(snapshot, governed);
+  });
 
   pi.registerCommand('artifact-revoke', {
     description:
@@ -145,16 +184,7 @@ export default function artifacts(pi: ExtensionAPI): void {
           details: result,
         };
       } catch (error) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: error instanceof Error ? error.message : String(error),
-            },
-          ],
-          details: {},
-          isError: true,
-        };
+        throw new Error(error instanceof Error ? error.message : String(error));
       }
     },
   });

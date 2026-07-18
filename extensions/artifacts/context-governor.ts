@@ -306,7 +306,10 @@ export async function governContextMessages(
   );
 }
 
-export function registerContextGovernor(pi: ExtensionAPI): void {
+export function registerContextGovernor(
+  pi: ExtensionAPI,
+  options: { registerToolResult?: boolean } = {},
+) {
   pi.registerFlag(CONTEXT_GOVERNOR_FLAG, {
     type: 'boolean',
     default: false,
@@ -325,7 +328,10 @@ export function registerContextGovernor(pi: ExtensionAPI): void {
     lastPersisted = '';
   };
   pi.on('session_start', reset);
-  pi.on('tool_result', (event, ctx) => {
+  const transformToolResult = (
+    event: Parameters<typeof markGovernorResult>[0],
+    ctx: ExtensionContext,
+  ) => {
     if (pi.getFlag(CONTEXT_GOVERNOR_FLAG) !== true) return;
     return markGovernorResult(
       event,
@@ -333,7 +339,9 @@ export function registerContextGovernor(pi: ExtensionAPI): void {
       resolveArtifact,
       contextGovernorPreviewBytes(pi.getFlag(CONTEXT_GOVERNOR_PREVIEW_FLAG)),
     );
-  });
+  };
+  if (options.registerToolResult !== false)
+    pi.on('tool_result', transformToolResult);
   pi.on('context', async (event: ContextEvent, ctx) => {
     if (pi.getFlag(CONTEXT_GOVERNOR_FLAG) !== true) return;
     return {
@@ -368,4 +376,5 @@ export function registerContextGovernor(pi: ExtensionAPI): void {
       );
     },
   });
+  return transformToolResult;
 }

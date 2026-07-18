@@ -6,6 +6,7 @@ const state = vi.hoisted(() => ({
   payload: '' as string,
 }));
 vi.mock('../../artifacts', () => ({
+  MAX_ARTIFACT_BYTES: 16 * 1024 * 1024,
   artifactProducer: {
     put: vi.fn(async (_pi, _ctx, input: { bytes: string }) => {
       state.payload = input.bytes;

@@ -9,32 +9,25 @@ export type TaskStore = {
   uiPauseDepth: number;
 };
 
-const STORE_KEY = '__piAgentTasksStore';
-
-export function getTaskStore(): TaskStore {
-  const global = globalThis as typeof globalThis & {
-    [STORE_KEY]?: TaskStore;
+/** Runtime state owned by one task extension registration. */
+export function createTaskStore(): TaskStore {
+  return {
+    state: { version: 1, nextId: 1, tasks: [] },
+    lastCtx: undefined,
+    completedPendingHide: new Set(),
+    hiddenCompleted: new Set(),
+    uiPauseDepth: 0,
   };
-  if (!global[STORE_KEY]) {
-    global[STORE_KEY] = {
-      state: { version: 1, nextId: 1, tasks: [] },
-      lastCtx: undefined,
-      completedPendingHide: new Set(),
-      hiddenCompleted: new Set(),
-      uiPauseDepth: 0,
-    };
-  }
-  return global[STORE_KEY];
 }
 
-export function pauseUiUpdates(): void {
-  getTaskStore().uiPauseDepth++;
+export function pauseUiUpdates(store: TaskStore): void {
+  store.uiPauseDepth++;
 }
 
-export function resumeUiUpdates(): void {
-  getTaskStore().uiPauseDepth = Math.max(0, getTaskStore().uiPauseDepth - 1);
+export function resumeUiUpdates(store: TaskStore): void {
+  store.uiPauseDepth = Math.max(0, store.uiPauseDepth - 1);
 }
 
-export function uiUpdatesPaused(): boolean {
-  return getTaskStore().uiPauseDepth > 0;
+export function uiUpdatesPaused(store: TaskStore): boolean {
+  return store.uiPauseDepth > 0;
 }

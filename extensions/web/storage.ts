@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import type { ArtifactMetadata } from '../artifacts';
+import { type ArtifactMetadata, artifactConsumer } from '../artifacts';
 import type { ExtractedContent } from './extract';
 import type { SearchResult } from './types';
 
@@ -40,39 +39,21 @@ export interface StoredSearchData {
   summary?: string;
 }
 
-const storedResults = new Map<string, StoredSearchData>();
-const storedArtifacts = new Map<string, ArtifactMetadata>();
+export interface WebResultStore {
+  store(id: string, data: StoredSearchData, artifact?: ArtifactMetadata): void;
+  get(id: string): StoredSearchData | null;
+  all(): StoredSearchData[];
+  artifact(id: string): ArtifactMetadata | undefined;
+  delete(id: string): boolean;
+  clear(): void;
+  restore(ctx: ExtensionContext): void;
+}
 
 export function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
 
-export function storeResult(id: string, data: StoredSearchData): void {
-  storedResults.set(id, data);
-}
-
-export function getResult(id: string): StoredSearchData | null {
-  return storedResults.get(id) ?? null;
-}
-
-export function getAllResults(): StoredSearchData[] {
-  return Array.from(storedResults.values());
-}
-
-export function getResultArtifact(id: string): ArtifactMetadata | undefined {
-  return storedArtifacts.get(id);
-}
-
-export function deleteResult(id: string): boolean {
-  return storedResults.delete(id);
-}
-
-export function clearResults(): void {
-  storedResults.clear();
-  storedArtifacts.clear();
-}
-
-function isValidStoredData(data: unknown): data is StoredSearchData {
+export function isValidStoredData(data: unknown): data is StoredSearchData {
   if (!data || typeof data !== 'object') return false;
   const d = data as Record<string, unknown>;
   if (typeof d.id !== 'string' || !d.id) return false;
@@ -99,83 +80,77 @@ function validReference(data: unknown): data is WebArtifactReference {
     typeof value.responseId === 'string' &&
     (value.resultType === 'search' || value.resultType === 'fetch') &&
     artifact?.producer === 'web' &&
-    artifact.contentClass === 'json' &&
-    typeof artifact.handle === 'string' &&
-    typeof artifact.sha256 === 'string' &&
-    typeof artifact.size === 'number'
+    artifact.contentClass === 'json'
   );
 }
 
-export function restoreFromSession(ctx: ExtensionContext): void {
-  clearResults();
-  const branch = ctx.sessionManager.getBranch();
-  const recovery = new Map<
-    string,
-    { metadata: ArtifactMetadata; bytes: string }
-  >();
-  const purged = new Set<string>();
+/** Create branch-local continuation state for exactly one web extension instance. */
+export function createWebResultStore(): WebResultStore {
+  const results = new Map<string, StoredSearchData>();
+  const artifacts = new Map<string, ArtifactMetadata>();
+  const clear = () => {
+    results.clear();
+    artifacts.clear();
+  };
 
-  for (const entry of branch) {
-    if (entry.type !== 'custom' || entry.customType !== 'artifact:v1') continue;
-    const value = entry.data as Record<string, unknown> | undefined;
-    if (
-      (value?.kind === 'revoke' || value?.kind === 'purge') &&
-      typeof value.handle === 'string'
-    ) {
-      purged.add(value.handle);
-      recovery.delete(value.handle);
-    } else if (
-      value?.kind === 'recovery' &&
-      typeof value.bytes === 'string' &&
-      value.metadata &&
-      typeof value.metadata === 'object'
-    ) {
-      const metadata = value.metadata as ArtifactMetadata;
-      if (!purged.has(metadata.handle))
-        recovery.set(metadata.handle, { metadata, bytes: value.bytes });
-    }
-  }
-
-  for (const entry of branch) {
-    if (entry.type !== 'custom') continue;
-    if (entry.customType === 'web-search-results') {
-      const data = entry.data;
-      // Historical entries retain their one-hour cache semantics.
-      if (isValidStoredData(data) && Date.now() - data.timestamp < CACHE_TTL_MS)
-        storedResults.set(data.id, data);
-      continue;
-    }
-    if (entry.customType === WEB_FALLBACK_TYPE) {
-      // Versioned fallback entries are exact and intentionally never TTL-expire.
-      if (validFallback(entry.data))
-        storedResults.set(entry.data.data.id, entry.data.data);
-      continue;
-    }
-    if (entry.customType !== WEB_REFERENCE_TYPE || !validReference(entry.data))
-      continue;
-    const reference = entry.data;
-    const recovered = recovery.get(reference.artifact.handle);
-    if (!recovered || purged.has(reference.artifact.handle)) continue;
-    try {
-      const bytes = Buffer.from(recovered.bytes, 'base64');
-      const hash = createHash('sha256').update(bytes).digest('hex');
-      if (
-        bytes.length !== reference.artifact.size ||
-        hash !== reference.artifact.sha256 ||
-        recovered.metadata.sha256 !== reference.artifact.sha256
-      )
-        continue;
-      const data = JSON.parse(bytes.toString('utf8')) as unknown;
-      if (
-        isValidStoredData(data) &&
-        data.id === reference.responseId &&
-        data.type === reference.resultType
-      ) {
-        storedResults.set(data.id, data);
-        storedArtifacts.set(data.id, reference.artifact);
+  return {
+    store(id, data, artifact) {
+      results.set(id, data);
+      if (artifact) artifacts.set(id, artifact);
+      else artifacts.delete(id);
+    },
+    get: (id) => results.get(id) ?? null,
+    all: () => Array.from(results.values()),
+    artifact: (id) => artifacts.get(id),
+    delete(id) {
+      artifacts.delete(id);
+      return results.delete(id);
+    },
+    clear,
+    restore(ctx) {
+      clear();
+      const branch = ctx.sessionManager.getBranch();
+      for (const entry of branch) {
+        if (entry.type !== 'custom') continue;
+        if (entry.customType === 'web-search-results') {
+          const data = entry.data;
+          if (
+            isValidStoredData(data) &&
+            Date.now() - data.timestamp < CACHE_TTL_MS
+          )
+            results.set(data.id, data);
+          continue;
+        }
+        if (entry.customType === WEB_FALLBACK_TYPE) {
+          if (validFallback(entry.data))
+            results.set(entry.data.data.id, entry.data.data);
+          continue;
+        }
+        if (
+          entry.customType !== WEB_REFERENCE_TYPE ||
+          !validReference(entry.data)
+        )
+          continue;
+        const reference = entry.data;
+        const recovered = artifactConsumer.recoverFromEntries(
+          branch,
+          reference.artifact,
+        );
+        if (!recovered) continue;
+        try {
+          const data = JSON.parse(recovered.bytes.toString('utf8')) as unknown;
+          if (
+            isValidStoredData(data) &&
+            data.id === reference.responseId &&
+            data.type === reference.resultType
+          ) {
+            results.set(data.id, data);
+            artifacts.set(data.id, recovered.metadata);
+          }
+        } catch {
+          // Ignore malformed or unavailable artifact payloads.
+        }
       }
-    } catch {
-      // Ignore malformed or unavailable recovery records.
-    }
-  }
+    },
+  };
 }

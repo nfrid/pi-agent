@@ -73,6 +73,11 @@ export interface LegacyPurgeEntry {
 export type TombstoneEntry = RevocationEntry | LegacyPurgeEntry;
 export type ArtifactEntry = RecoveryEntry | TombstoneEntry;
 
+export interface ResolvedArtifact {
+  metadata: ArtifactMetadata;
+  bytes: Buffer;
+}
+
 export interface PutArtifactInput {
   bytes: Uint8Array | string;
   producer: ProducerClass;

@@ -14,7 +14,19 @@ import {
 
 export const FLAG_NAME = 'scoped-instructions';
 export const DIAGNOSTIC_ENTRY = 'scoped-instructions-diagnostic-v1';
-const PROMPT_MARKER = '<scoped_instructions critical="true">';
+const PROMPT_MARKER = '<scoped_instructions critical="true"';
+const registered = new WeakSet<object>();
+const runtimeByApi = new WeakMap<
+  object,
+  { seen: Set<string>; eager: Set<string> }
+>();
+
+export function criticalRuleHashes(systemPrompt: string): Set<string> {
+  const match = systemPrompt.match(
+    /<scoped_instructions critical="true" hashes="([a-f0-9,]*)">/,
+  );
+  return new Set((match?.[1] ?? '').split(',').filter(Boolean));
+}
 
 interface Diagnostic {
   at: string;
@@ -36,7 +48,7 @@ function record(pi: ExtensionAPI, diagnostic: Omit<Diagnostic, 'at'>): void {
   });
 }
 
-/** Shared with the system-prompt extension so the final rebuilt prompt retains critical rules. */
+/** Pure critical-rule composition used by diagnostics and tests. */
 export function appendEagerCriticalRules(
   systemPrompt: string,
   cwd: string,
@@ -45,18 +57,32 @@ export function appendEagerCriticalRules(
   if (!manifest) return { prompt: systemPrompt, hashes: [] };
   if (manifest.error)
     return {
-      prompt: `${systemPrompt}\n\n${PROMPT_MARKER}\nMANIFEST REJECTED: ${manifest.error}\n</scoped_instructions>`,
+      prompt: `${systemPrompt}\n\n${PROMPT_MARKER} hashes="">\nMANIFEST REJECTED: ${manifest.error}\n</scoped_instructions>`,
       hashes: [],
       error: manifest.error,
     };
   const critical = manifest.rules.filter((rule) => rule.critical);
   const hashes = critical.map((rule) => rule.hash);
-  if (critical.length === 0 || systemPrompt.includes(PROMPT_MARKER))
-    return { prompt: systemPrompt, hashes };
+  if (critical.length === 0) return { prompt: systemPrompt, hashes };
   return {
-    prompt: `${systemPrompt}\n\n${PROMPT_MARKER}\nThese repository rules are critical and apply before any covered edit/write mutation.\n\n${formatRules(critical)}\n</scoped_instructions>`,
+    prompt: `${systemPrompt}\n\n${PROMPT_MARKER} hashes="${hashes.join(',')}">\nThese repository rules are critical and apply before any covered edit/write mutation.\n\n${formatRules(critical)}\n</scoped_instructions>`,
     hashes,
   };
+}
+
+/** Explicit final composition point called by the system-prompt owner. */
+export function finalizeScopedPrompt(
+  pi: ExtensionAPI,
+  systemPrompt: string,
+  cwd: string,
+): string {
+  const result = appendEagerCriticalRules(systemPrompt, cwd);
+  const runtime = runtimeByApi.get(pi);
+  if (runtime) {
+    runtime.eager.clear();
+    for (const hash of result.hashes) runtime.eager.add(hash);
+  }
+  return result.prompt;
 }
 
 function commandDiagnostics(
@@ -91,6 +117,8 @@ function commandDiagnostics(
 }
 
 export default function scopedInstructions(pi: ExtensionAPI): void {
+  if (registered.has(pi)) return;
+  registered.add(pi);
   pi.registerFlag(FLAG_NAME, {
     type: 'boolean',
     default: false,
@@ -99,30 +127,15 @@ export default function scopedInstructions(pi: ExtensionAPI): void {
 
   const seen = new Set<string>();
   const eager = new Set<string>();
-
-  pi.on('session_start', () => {
+  runtimeByApi.set(pi, { seen, eager });
+  const resetAcknowledgements = () => {
     seen.clear();
     eager.clear();
-  });
+  };
 
-  pi.on('before_agent_start', (event, ctx) => {
-    if (!enabled(pi)) return;
-    const result = appendEagerCriticalRules(event.systemPrompt, ctx.cwd);
-    eager.clear();
-    for (const hash of result.hashes) eager.add(hash);
-    record(pi, {
-      outcome: result.error ? 'rejected' : 'eager',
-      rules: result.hashes.map((hash) => ({
-        id: '(critical)',
-        hash,
-        reason: 'loaded into system prompt before agent start',
-      })),
-      reason:
-        result.error ??
-        `eagerly loaded ${result.hashes.length} critical rule(s)`,
-    });
-    return { systemPrompt: result.prompt };
-  });
+  pi.on('session_start', resetAcknowledgements);
+  pi.on('session_tree', resetAcknowledgements);
+  pi.on('session_compact', resetAcknowledgements);
 
   pi.on('tool_call', (event: ToolCallEvent, ctx: ExtensionContext) => {
     if (

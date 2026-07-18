@@ -479,15 +479,23 @@ export async function mapWithConcurrency<TIn, TOut>(
 ): Promise<TOut[]> {
   const results = new Array<TOut>(items.length);
   let next = 0;
+  let failed = false;
+  let firstError: unknown;
   const workers = new Array(Math.max(1, Math.min(concurrency, items.length)))
     .fill(null)
     .map(async () => {
-      while (true) {
+      while (!failed) {
         const index = next++;
         if (index >= items.length) return;
-        results[index] = await fn(items[index], index);
+        try {
+          results[index] = await fn(items[index], index);
+        } catch (error) {
+          if (!failed) firstError = error;
+          failed = true;
+        }
       }
     });
   await Promise.all(workers);
+  if (failed) throw firstError;
   return results;
 }

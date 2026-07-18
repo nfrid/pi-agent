@@ -3,7 +3,7 @@ import { matchesKey, truncateToWidth } from '@earendil-works/pi-tui';
 import { MAX_RENDER_ITEMS } from './constants';
 import { formatVisualTask } from './format';
 import { missingDeps, stats } from './queries';
-import { getState } from './state';
+import type { TaskStore } from './store';
 import type { Task, TodoUiAction } from './types';
 
 export class TodoOverlay {
@@ -11,13 +11,14 @@ export class TodoOverlay {
   private showCompleted = false;
 
   constructor(
+    private readonly store: TaskStore,
     private readonly theme: Theme,
     private readonly requestRender: () => void,
     private readonly done: (action: TodoUiAction) => void,
   ) {}
 
   private visibleTasks(): Task[] {
-    return getState().tasks.filter(
+    return this.store.state.tasks.filter(
       (task) =>
         this.showCompleted ||
         (task.status !== 'dropped' && task.status !== 'done'),
@@ -95,7 +96,7 @@ export class TodoOverlay {
   }
 
   render(width: number): string[] {
-    const s = stats();
+    const s = stats(this.store);
     const allTasks = this.visibleTasks();
     const tasks = allTasks.slice(0, MAX_RENDER_ITEMS);
     const lines = [
@@ -114,7 +115,7 @@ export class TodoOverlay {
       lines.push(
         `${marker} ${formatVisualTask(task, this.theme, { showNotes: true })}`,
       );
-      const waiting = missingDeps(task);
+      const waiting = missingDeps(this.store, task);
       if (waiting.length)
         lines.push(
           `  ${this.theme.fg('dim', `waiting on ${waiting.join(', ')}`)}`,

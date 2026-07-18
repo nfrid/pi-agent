@@ -1,7 +1,7 @@
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import { MAX_TODO_CONTEXT_CHARS, STATUS_GLYPH } from './constants';
 import { missingDeps, readyTasks, stats, unfinished } from './queries';
-import { getState } from './state';
+import type { TaskStore } from './store';
 import type { Task } from './types';
 
 export function statusColor(
@@ -52,14 +52,18 @@ export function formatVisualTask(
   return `${glyph}${id} ${text}${priority}${deps}${notes}`;
 }
 
-export function dashboard(includeDone = false, limit = 40): string {
-  const visible = getState().tasks.filter(
+export function dashboard(
+  store: TaskStore,
+  includeDone = false,
+  limit = 40,
+): string {
+  const visible = store.state.tasks.filter(
     (task) => includeDone || unfinished(task),
   );
   if (!visible.length) return 'No active tasks.';
-  const ready = new Set(readyTasks().map((task) => task.id));
+  const ready = new Set(readyTasks(store).map((task) => task.id));
   const lines = visible.slice(0, limit).map((task) => {
-    const blockedBy = missingDeps(task);
+    const blockedBy = missingDeps(store, task);
     const suffix = blockedBy.length
       ? ` (waiting on ${blockedBy.join(', ')})`
       : ready.has(task.id)
@@ -72,24 +76,30 @@ export function dashboard(includeDone = false, limit = 40): string {
   return lines.join('\n');
 }
 
-function boundedTodoText(header: string, guidance: string): string {
-  let text = `${header}\n${guidance}\n${dashboard(false, 120)}`;
+function boundedTodoText(
+  store: TaskStore,
+  header: string,
+  guidance: string,
+): string {
+  let text = `${header}\n${guidance}\n${dashboard(store, false, 120)}`;
   if (text.length > MAX_TODO_CONTEXT_CHARS)
     text = `${text.slice(0, MAX_TODO_CONTEXT_CHARS)}\n… todo context truncated; use todo list include_done=false if needed.`;
   return text;
 }
 
-export function todoStateText(): string {
-  const s = stats();
+export function todoStateText(store: TaskStore): string {
+  const s = stats(store);
   return boundedTodoText(
+    store,
     `Current todo state (${s.active} active, ${s.ready} ready, ${s.blocked} blocked, ${s.done} done).`,
     'Prefer updating this state with the todo tool instead of free-form planning.',
   );
 }
 
-export function turnSnapshotText(): string {
-  const s = stats();
+export function turnSnapshotText(store: TaskStore): string {
+  const s = stats(store);
   return boundedTodoText(
+    store,
     `Todo state at the start of this user turn (${s.active} active, ${s.ready} ready, ${s.blocked} blocked, ${s.done} done).`,
     'This snapshot is authoritative at this position. Later todo tool results and later snapshots supersede it; prefer the newest state evidence.',
   );

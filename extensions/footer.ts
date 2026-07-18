@@ -56,6 +56,8 @@ function joinParts(theme: Theme, width: number, parts: string[]): string {
   return truncateToWidth(line, width, '…');
 }
 
+const registered = new WeakSet<object>();
+
 function getLastAssistantMessage(
   ctx: ExtensionContext,
 ): AssistantMessage | undefined {
@@ -67,6 +69,8 @@ function getLastAssistantMessage(
 }
 
 export default function (pi: ExtensionAPI) {
+  if (registered.has(pi)) return;
+  registered.add(pi);
   let requestRender = () => {};
 
   const refresh = () => requestRender();
@@ -148,4 +152,8 @@ export default function (pi: ExtensionAPI) {
   pi.on('thinking_level_select', refresh);
   pi.on('agent_end', refresh);
   pi.on('turn_end', refresh);
+  pi.on('session_shutdown', (_event, ctx) => {
+    requestRender = () => {};
+    if (ctx.hasUI) ctx.ui.setFooter(undefined);
+  });
 }

@@ -144,6 +144,7 @@ export async function processReadSnapshot(
   state: ReadSnapshotState,
   event: ToolResultEvent,
   root?: string,
+  assertCurrent?: () => void,
 ): Promise<SnapshotResult | undefined> {
   if (event.toolName !== 'read' || event.isError) return undefined;
   if (event.content.length !== 1 || event.content[0]?.type !== 'text')
@@ -178,10 +179,12 @@ export async function processReadSnapshot(
         creationSource: 'read.snapshot',
       },
       root,
+      assertCurrent,
     );
   } catch {
     return undefined;
   }
+  assertCurrent?.();
   const snapshot: ReadSnapshotDetails = {
     version: 1,
     snapshotId: readSnapshotId(key, digest),
@@ -204,7 +207,10 @@ export async function processReadSnapshot(
   };
 }
 
-export function registerSnapshotReads(pi: ExtensionAPI): void {
+export function registerSnapshotReads(
+  pi: ExtensionAPI,
+  options: { registerToolResult?: boolean } = {},
+) {
   pi.registerFlag(SNAPSHOT_READS_FLAG, {
     type: 'boolean',
     default: false,
@@ -213,19 +219,54 @@ export function registerSnapshotReads(pi: ExtensionAPI): void {
 
   let state: ReadSnapshotState = { byKey: new Map() };
   let queue = Promise.resolve();
+  let generation = 0;
   const rebuild = (ctx: ExtensionContext) => {
+    generation++;
     state = reconstructReadSnapshots(ctx);
   };
   pi.on('session_start', (_event, ctx) => rebuild(ctx));
   pi.on('session_tree', (_event, ctx) => rebuild(ctx));
-  pi.on('tool_result', (event, ctx) => {
+  pi.on('session_shutdown', () => {
+    generation++;
+    state = { byKey: new Map() };
+  });
+  const transformToolResult = (
+    event: Parameters<typeof processReadSnapshot>[3],
+    ctx: ExtensionContext,
+  ) => {
     if (pi.getFlag(SNAPSHOT_READS_FLAG) !== true || event.toolName !== 'read')
       return;
-    const work = queue.then(() => processReadSnapshot(pi, ctx, state, event));
+    const scheduledGeneration = generation;
+    const scheduledState = state;
+    const guardedPi: SnapshotPi = {
+      appendEntry(customType, data) {
+        if (scheduledGeneration !== generation)
+          throw new Error('Stale read snapshot lifecycle generation');
+        return pi.appendEntry(customType, data);
+      },
+    };
+    const work = queue.then(async () => {
+      if (scheduledGeneration !== generation) return undefined;
+      const result = await processReadSnapshot(
+        guardedPi,
+        ctx,
+        scheduledState,
+        event,
+        undefined,
+        () => {
+          if (scheduledGeneration !== generation)
+            throw new Error('Stale read snapshot lifecycle generation');
+        },
+      );
+      return scheduledGeneration === generation ? result : undefined;
+    });
     queue = work.then(
       () => undefined,
       () => undefined,
     );
     return work;
-  });
+  };
+  if (options.registerToolResult !== false)
+    pi.on('tool_result', transformToolResult);
+  return transformToolResult;
 }

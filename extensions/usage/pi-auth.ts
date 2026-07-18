@@ -37,13 +37,36 @@ async function resolvePiCodexHeaders(
   return undefined;
 }
 
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 export async function queryViaPiAuth(
   ctx: ExtensionContext,
+  signal: AbortSignal,
 ): Promise<UsageReport> {
-  const headers = await resolvePiCodexHeaders(ctx);
+  const headers = await abortable(resolvePiCodexHeaders(ctx), signal);
+  signal.throwIfAborted();
   if (!headers) throw new Error('No Pi Codex auth available.');
 
-  const response = await fetchWithTimeout(CODEX_USAGE_URL, { headers });
+  const response = await fetchWithTimeout(CODEX_USAGE_URL, {
+    headers,
+    signal,
+  });
   const text = await response.text();
   if (!response.ok) {
     throw new Error(

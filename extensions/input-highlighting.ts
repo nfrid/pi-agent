@@ -184,7 +184,11 @@ class HighlightEditor extends CustomEditor {
   }
 }
 
+const registered = new WeakSet<object>();
+
 export default function inputHighlighting(pi: ExtensionAPI) {
+  if (registered.has(pi)) return;
+  registered.add(pi);
   pi.on('session_start', (_event, ctx) => {
     const mode = 'mode' in ctx ? ctx.mode : 'tui';
     if (mode !== 'tui') return;
@@ -198,5 +202,8 @@ export default function inputHighlighting(pi: ExtensionAPI) {
 
       return new HighlightEditor([tui, dimTheme, keybindings], thinkingBorder);
     });
+  });
+  pi.on('session_shutdown', (_event, ctx) => {
+    if (ctx.hasUI) ctx.ui.setEditorComponent(undefined);
   });
 }

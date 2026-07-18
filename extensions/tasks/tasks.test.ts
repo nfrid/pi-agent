@@ -2,7 +2,7 @@ import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { Value } from 'typebox/value';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   EXACT_TODO_RESULT_PREFIX,
   TODO_RESULT_ELIDED,
@@ -10,9 +10,15 @@ import {
   type TodoContextMessages,
   transformTodoContext,
 } from './context';
+import { mutate, mutateBatch } from './core';
 import { turnSnapshotText } from './format';
 import { operationSchema, paramsSchema } from './schema';
-import { registerTodoContext } from './tool';
+import { applySnapshot, cloneState, initialState } from './state';
+import { createTaskStore } from './store';
+import { registerTodoContext, registerTodoTool } from './tool';
+import { applyMutation, updateUi } from './ui-widget';
+
+let store = createTaskStore();
 
 function user(text: string, timestamp = 1): TodoContextMessages[number] {
   return {
@@ -200,7 +206,7 @@ describe('immutable todo turn snapshots', () => {
 
   it('uses a production snapshot wire type and turn-start wording', () => {
     expect(TODO_SNAPSHOT_TYPE).toBe('lean-todo-turn-snapshot');
-    const content = turnSnapshotText();
+    const content = turnSnapshotText(store);
     expect(content).toContain('Todo state at the start of this user turn');
     expect(content).toContain('Later todo tool results and later snapshots');
     expect(content).not.toContain('survives compaction/forking');
@@ -216,7 +222,7 @@ describe('registerTodoContext', () => {
       },
     } as unknown as ExtensionAPI;
 
-    registerTodoContext(pi);
+    registerTodoContext(pi, store);
 
     expect([...handlers.keys()].sort()).toEqual([
       'before_agent_start',
@@ -242,6 +248,335 @@ describe('registerTodoContext', () => {
       role: 'custom',
       customType: TODO_SNAPSHOT_TYPE,
     });
+  });
+});
+
+describe('atomic todo mutations', () => {
+  beforeEach(() => {
+    store = createTaskStore();
+    applySnapshot(store, initialState());
+  });
+
+  it('isolates mutable state between extension-owned stores', () => {
+    const other = createTaskStore();
+    expect(
+      mutate(store, 'add', { action: 'add', id: 'T1', text: 'first' }),
+    ).toMatchObject({ changed: true });
+    expect(
+      mutate(other, 'add', { action: 'add', id: 'T1', text: 'second' }),
+    ).toMatchObject({ changed: true });
+    expect(store.state.tasks[0]?.text).toBe('first');
+    expect(other.state.tasks[0]?.text).toBe('second');
+  });
+
+  it('rolls back fields changed before invalid dependency validation', () => {
+    expect(
+      mutate(store, 'add', { action: 'add', id: 'T1', text: 'original' }),
+    ).toMatchObject({
+      changed: true,
+    });
+    const before = cloneState(store);
+    const stateReference = store.state;
+
+    const result = mutate(store, 'update', {
+      action: 'update',
+      id: 'T1',
+      text: 'leaked change',
+      status: 'doing',
+      depends_on: ['missing'],
+    });
+
+    expect(result).toMatchObject({
+      changed: false,
+      error: 'unknown dependencies: missing',
+    });
+    expect(cloneState(store)).toEqual(before);
+    expect(store.state).toBe(stateReference);
+  });
+
+  it('rejects cycles from update, replace, and transactional batches', () => {
+    expect(
+      mutate(store, 'replace', {
+        action: 'replace',
+        tasks: [
+          { id: 'T1', text: 'one', depends_on: [] },
+          { id: 'T2', text: 'two', depends_on: ['T1'] },
+        ],
+      }),
+    ).toMatchObject({ changed: true });
+    const before = cloneState(store);
+
+    expect(
+      mutate(store, 'update', {
+        action: 'update',
+        id: 'T1',
+        depends_on: ['T2'],
+      }),
+    ).toMatchObject({
+      changed: false,
+      error: expect.stringContaining('dependency cycle:'),
+    });
+    expect(cloneState(store)).toEqual(before);
+
+    expect(
+      mutate(store, 'replace', {
+        action: 'replace',
+        tasks: [
+          { id: 'T1', text: 'one', depends_on: ['T2'] },
+          { id: 'T2', text: 'two', depends_on: ['T1'] },
+        ],
+      }),
+    ).toMatchObject({
+      changed: false,
+      error: expect.stringContaining('cycle'),
+    });
+    expect(cloneState(store)).toEqual(before);
+
+    expect(
+      mutateBatch(store, [
+        { action: 'add', id: 'T3', text: 'three', depends_on: ['T2'] },
+        { action: 'update', id: 'T1', depends_on: ['T3'] },
+      ]),
+    ).toMatchObject({
+      changed: false,
+      error: expect.stringContaining('cycle'),
+    });
+    expect(cloneState(store)).toEqual(before);
+  });
+
+  it('throws failed tool executions so Pi records an error result', async () => {
+    let tool:
+      | {
+          execute: (
+            id: string,
+            params: Record<string, unknown>,
+            signal: AbortSignal,
+            onUpdate: undefined,
+            ctx: unknown,
+          ) => Promise<unknown>;
+        }
+      | undefined;
+    registerTodoTool(
+      {
+        registerTool(value: typeof tool) {
+          tool = value;
+        },
+        appendEntry() {},
+      } as unknown as ExtensionAPI,
+      store,
+    );
+
+    await expect(
+      tool?.execute(
+        'invalid',
+        { action: 'update', id: 'missing', text: 'nope' },
+        new AbortController().signal,
+        undefined,
+        { hasUI: false },
+      ),
+    ).rejects.toThrow('unknown task missing');
+  });
+
+  it('rolls back mutation state when persistence fails', async () => {
+    let tool:
+      | {
+          execute: (
+            id: string,
+            params: Record<string, unknown>,
+            signal: AbortSignal,
+            onUpdate: undefined,
+            ctx: unknown,
+          ) => Promise<unknown>;
+        }
+      | undefined;
+    registerTodoTool(
+      {
+        registerTool(value: typeof tool) {
+          tool = value;
+        },
+        appendEntry() {
+          throw new Error('persistence failed');
+        },
+      } as unknown as ExtensionAPI,
+      store,
+    );
+    const before = cloneState(store);
+
+    await expect(
+      tool?.execute(
+        'add',
+        { action: 'add', text: 'must roll back' },
+        new AbortController().signal,
+        undefined,
+        { hasUI: false },
+      ),
+    ).rejects.toThrow('persistence failed');
+    expect(cloneState(store)).toEqual(before);
+  });
+
+  it('rolls back interactive mutations when persistence fails', () => {
+    expect(() =>
+      applyMutation(
+        store,
+        {
+          appendEntry: () => {
+            throw new Error('interactive persistence failed');
+          },
+        } as never,
+        { hasUI: false } as never,
+        'add',
+        { action: 'add', text: 'must not leak' },
+      ),
+    ).toThrow('interactive persistence failed');
+    expect(store.state).toEqual(initialState());
+  });
+
+  it('does not persist an interactive mutation when UI update fails', () => {
+    const persisted: Array<{ state: ReturnType<typeof initialState> }> = [];
+    let updates = 0;
+    const pi = {
+      appendEntry(
+        _type: string,
+        data: { state: ReturnType<typeof initialState> },
+      ) {
+        persisted.push(structuredClone(data));
+      },
+    } as never;
+    const ctx = {
+      hasUI: true,
+      ui: {
+        theme: { fg: (_color: string, text: string) => text },
+        setStatus() {
+          updates++;
+          if (updates === 1) throw new Error('UI failed');
+        },
+        setWidget() {},
+      },
+    } as never;
+
+    expect(() =>
+      applyMutation(store, pi, ctx, 'add', {
+        action: 'add',
+        text: 'must be compensated',
+      }),
+    ).toThrow('UI failed');
+    expect(store.state).toEqual(initialState());
+    expect(persisted).toEqual([]);
+  });
+
+  it('does not persist a tool mutation when UI update fails', async () => {
+    const persisted: Array<{ state: ReturnType<typeof initialState> }> = [];
+    let tool:
+      | {
+          execute: (
+            id: string,
+            params: Record<string, unknown>,
+            signal: AbortSignal,
+            onUpdate: undefined,
+            ctx: unknown,
+          ) => Promise<unknown>;
+        }
+      | undefined;
+    registerTodoTool(
+      {
+        registerTool(value: typeof tool) {
+          tool = value;
+        },
+        appendEntry(
+          _type: string,
+          data: { state: ReturnType<typeof initialState> },
+        ) {
+          persisted.push(structuredClone(data));
+        },
+      } as unknown as ExtensionAPI,
+      store,
+    );
+    let updates = 0;
+    const ctx = {
+      hasUI: true,
+      ui: {
+        theme: { fg: (_color: string, text: string) => text },
+        setStatus() {
+          updates++;
+          if (updates === 1) throw new Error('tool UI failed');
+        },
+        setWidget() {},
+      },
+    };
+
+    await expect(
+      tool?.execute(
+        'add',
+        { action: 'add', text: 'must be compensated' },
+        new AbortController().signal,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow('tool UI failed');
+    expect(store.state).toEqual(initialState());
+    expect(persisted).toEqual([]);
+  });
+
+  it('rolls back every operation and id allocation when a batch fails', () => {
+    const before = cloneState(store);
+
+    const result = mutateBatch(store, [
+      { action: 'add', text: 'temporary' },
+      { action: 'update', id: 'T1', depends_on: ['missing'] },
+    ]);
+
+    expect(result.changed).toBe(false);
+    expect(result.error).toBe('unknown dependencies: missing');
+    expect(cloneState(store)).toEqual(before);
+    expect(mutate(store, 'add', { action: 'add', text: 'real' }).message).toBe(
+      'added T1',
+    );
+  });
+});
+
+describe('todo widget lifecycle', () => {
+  beforeEach(() => {
+    store = createTaskStore();
+    applySnapshot(store, initialState());
+  });
+
+  it('records every completion outside render and renders without mutation', () => {
+    mutate(store, 'replace', {
+      action: 'replace',
+      tasks: Array.from({ length: 15 }, (_, index) => ({
+        id: `T${index + 1}`,
+        text: `done ${index + 1}`,
+        status: 'done' as const,
+      })),
+    });
+    let widgetFactory:
+      | ((
+          tui: unknown,
+          theme: { fg: (_color: string, value: string) => string },
+        ) => { render: (width: number) => string[] })
+      | undefined;
+    const theme = {
+      fg: (_color: string, value: string) => value,
+      strikethrough: (value: string) => value,
+    };
+    updateUi(store, {
+      hasUI: true,
+      ui: {
+        theme,
+        setStatus() {},
+        setWidget(_id: string, widget: typeof widgetFactory) {
+          widgetFactory = widget;
+        },
+      },
+    } as never);
+    expect(store.completedPendingHide.size).toBe(15);
+    const pending = [...store.completedPendingHide];
+    const hidden = [...store.hiddenCompleted];
+    const widget = widgetFactory?.({}, theme);
+
+    expect(widget?.render(100)).toEqual(widget?.render(100));
+    expect([...store.completedPendingHide]).toEqual(pending);
+    expect([...store.hiddenCompleted]).toEqual(hidden);
   });
 });
 

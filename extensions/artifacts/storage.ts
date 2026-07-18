@@ -18,12 +18,14 @@ import type {
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import {
   ARTIFACT_ENTRY_TYPE,
+  type ArtifactMetadata,
   CONTENT_CLASSES,
   MAX_ARTIFACT_BYTES,
   type Manifest,
   PRODUCER_CLASSES,
   type PutArtifactInput,
   type RecoveryEntry,
+  type ResolvedArtifact,
   SAFE_SOURCE_RE,
   TEXTUAL_CONTENT_CLASSES,
   type TombstoneEntry,
@@ -35,6 +37,7 @@ const ROOT_LOCK_NAME = '.artifact-root.lock';
 const ROOT_LOCK_MAX_WAIT_MS = 3_000;
 const ROOT_LOCK_MIN_BACKOFF_MS = 10;
 const ROOT_LOCK_MAX_BACKOFF_MS = 200;
+const MAX_RECOVERY_BASE64_CHARS = 4 * Math.ceil(MAX_ARTIFACT_BYTES / 3);
 const artifactRootQueues = new Map<string, Promise<void>>();
 const manifestQueues = new Map<string, Promise<void>>();
 
@@ -524,6 +527,8 @@ export async function putArtifact(
   ctx: Pick<ExtensionContext, 'sessionManager'>,
   input: PutArtifactInput,
   root = artifactRoot(),
+  assertCurrent: () => void = () => {},
+  publish?: (metadata: ArtifactMetadata) => void,
 ) {
   const bytes = validateInput(input);
   const sessionId = ctx.sessionManager.getSessionId();
@@ -548,20 +553,34 @@ export async function putArtifact(
   };
   validateMetadata(metadata, bytes);
   return withArtifactRootLock(root, async () => {
+    assertCurrent();
     await putBlob(root, bytes, digest);
     return withManifestLock(manifestPath(root, sessionId), async () => {
       const manifest = await readManifest(root, sessionId);
+      assertCurrent();
       manifest.artifacts[metadata.handle] = metadata;
       manifest.revoked = manifest.revoked.filter(
         (value) => value !== metadata.handle,
       );
       await writeManifest(root, manifest);
-      pi.appendEntry(ARTIFACT_ENTRY_TYPE, {
-        version: 1,
-        kind: 'recovery',
-        metadata,
-        bytes: bytes.toString('base64'),
-      } satisfies RecoveryEntry);
+      try {
+        assertCurrent();
+        // Publish the consumer reference first. If it fails, no recovery entry
+        // can survive. If recovery append then fails, the reference is inert
+        // and the caller may safely publish its bounded fallback.
+        publish?.(metadata);
+        assertCurrent();
+        pi.appendEntry(ARTIFACT_ENTRY_TYPE, {
+          version: 1,
+          kind: 'recovery',
+          metadata,
+          bytes: bytes.toString('base64'),
+        } satisfies RecoveryEntry);
+      } catch (error) {
+        delete manifest.artifacts[metadata.handle];
+        await writeManifest(root, manifest);
+        throw error;
+      }
       return metadata;
     });
   });
@@ -578,19 +597,84 @@ export async function revokeArtifact(
   return withArtifactRootLock(root, () =>
     withManifestLock(manifestPath(root, sessionId), async () => {
       const manifest = await readManifest(root, sessionId);
-      if (!manifest.artifacts[handle]) return false;
+      const metadata = manifest.artifacts[handle];
+      if (!metadata) return false;
+      const priorRevoked = [...manifest.revoked];
       delete manifest.artifacts[handle];
       if (!manifest.revoked.includes(handle)) manifest.revoked.push(handle);
       await writeManifest(root, manifest);
-      pi.appendEntry(ARTIFACT_ENTRY_TYPE, {
-        version: 1,
-        kind: 'revoke',
-        handle,
-        revokedAt: new Date().toISOString(),
-      } satisfies TombstoneEntry);
+      try {
+        pi.appendEntry(ARTIFACT_ENTRY_TYPE, {
+          version: 1,
+          kind: 'revoke',
+          handle,
+          revokedAt: new Date().toISOString(),
+        } satisfies TombstoneEntry);
+      } catch (error) {
+        manifest.artifacts[handle] = metadata;
+        manifest.revoked = priorRevoked;
+        await writeManifest(root, manifest);
+        throw error;
+      }
       return true;
     }),
   );
+}
+
+function validTombstone(
+  data: RecoveryEntry | TombstoneEntry | undefined,
+): data is TombstoneEntry {
+  if (data?.version !== 1 || (data.kind !== 'revoke' && data.kind !== 'purge'))
+    return false;
+  const timestamp = data.kind === 'revoke' ? data.revokedAt : data.purgedAt;
+  return (
+    typeof data.handle === 'string' &&
+    HANDLE_RE.test(data.handle) &&
+    typeof timestamp === 'string' &&
+    Number.isFinite(Date.parse(timestamp))
+  );
+}
+
+function validBase64(value: string): boolean {
+  if (value.length % 4 !== 0) return false;
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+  for (let index = 0; index < value.length - padding; index++) {
+    const code = value.charCodeAt(index);
+    if (
+      !(
+        (code >= 65 && code <= 90) ||
+        (code >= 97 && code <= 122) ||
+        (code >= 48 && code <= 57) ||
+        code === 43 ||
+        code === 47
+      )
+    )
+      return false;
+  }
+  return true;
+}
+
+function validRecoveryBytes(data: RecoveryEntry): Buffer | undefined {
+  if (
+    typeof data.bytes !== 'string' ||
+    data.bytes.length > MAX_RECOVERY_BASE64_CHARS
+  )
+    return undefined;
+  const padding = data.bytes.endsWith('==')
+    ? 2
+    : data.bytes.endsWith('=')
+      ? 1
+      : 0;
+  const decodedBytes = (data.bytes.length / 4) * 3 - padding;
+  if (decodedBytes > MAX_ARTIFACT_BYTES || !validBase64(data.bytes))
+    return undefined;
+  const bytes = Buffer.from(data.bytes, 'base64');
+  try {
+    validateMetadata(data.metadata, bytes);
+    return bytes;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function restoreArtifacts(
@@ -607,16 +691,7 @@ export async function restoreArtifacts(
         continue;
       const data = entry.data as RecoveryEntry | TombstoneEntry | undefined;
       if (data?.version !== 1) continue;
-      if (
-        (data.kind === 'revoke' || data.kind === 'purge') &&
-        typeof data.handle === 'string' &&
-        HANDLE_RE.test(data.handle) &&
-        typeof (data.kind === 'revoke' ? data.revokedAt : data.purgedAt) ===
-          'string' &&
-        Number.isFinite(
-          Date.parse(data.kind === 'revoke' ? data.revokedAt : data.purgedAt),
-        )
-      ) {
+      if (validTombstone(data)) {
         recovered.delete(data.handle);
         revoked.add(data.handle);
       } else if (data.kind === 'recovery') {
@@ -625,7 +700,8 @@ export async function restoreArtifacts(
           metadata &&
           typeof metadata === 'object' &&
           typeof metadata.handle === 'string' &&
-          HANDLE_RE.test(metadata.handle)
+          HANDLE_RE.test(metadata.handle) &&
+          validRecoveryBytes(data)
         ) {
           recovered.set(metadata.handle, data);
           revoked.delete(metadata.handle);
@@ -639,19 +715,8 @@ export async function restoreArtifacts(
       revoked: [...revoked],
     };
     for (const [handle, entry] of recovered) {
-      if (
-        typeof entry.bytes !== 'string' ||
-        !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
-          entry.bytes,
-        )
-      )
-        continue;
-      const bytes = Buffer.from(entry.bytes, 'base64');
-      try {
-        validateMetadata(entry.metadata, bytes);
-      } catch {
-        continue;
-      }
+      const bytes = validRecoveryBytes(entry);
+      if (!bytes) continue;
       await putBlob(root, bytes, entry.metadata.sha256);
       manifest.artifacts[handle] = entry.metadata;
     }
@@ -660,6 +725,65 @@ export async function restoreArtifacts(
     );
     return Object.keys(manifest.artifacts).length;
   });
+}
+
+function sameMetadata(
+  left: ArtifactMetadata,
+  right: ArtifactMetadata,
+): boolean {
+  return (
+    left.handle === right.handle &&
+    left.sha256 === right.sha256 &&
+    left.size === right.size &&
+    left.producer === right.producer &&
+    left.contentClass === right.contentClass &&
+    left.mediaType === right.mediaType &&
+    left.creationSource === right.creationSource &&
+    left.encoding === right.encoding &&
+    left.lineCount === right.lineCount &&
+    left.itemCount === right.itemCount &&
+    left.createdAt === right.createdAt
+  );
+}
+
+/** Resolve an untrusted consumer reference from append-only session entries.
+ * Artifact wire parsing, tombstone ordering, integrity, and metadata parity stay
+ * owned by this module rather than each consumer. */
+export function recoverArtifactFromEntries(
+  entries: Iterable<{
+    type: string;
+    customType?: string;
+    data?: unknown;
+  }>,
+  expected: ArtifactMetadata,
+): ResolvedArtifact | undefined {
+  if (!HANDLE_RE.test(expected.handle)) return undefined;
+  let recovery: RecoveryEntry | undefined;
+  for (const entry of entries) {
+    if (entry.type !== 'custom' || entry.customType !== ARTIFACT_ENTRY_TYPE)
+      continue;
+    const data = entry.data as RecoveryEntry | TombstoneEntry | undefined;
+    if (data?.version !== 1) continue;
+    if (validTombstone(data) && data.handle === expected.handle) {
+      recovery = undefined;
+    } else if (
+      data.kind === 'recovery' &&
+      data.metadata?.handle === expected.handle &&
+      validRecoveryBytes(data)
+    ) {
+      recovery = data;
+    }
+  }
+  if (!recovery) return undefined;
+  try {
+    const bytes = validRecoveryBytes(recovery);
+    if (!bytes) return undefined;
+    validateMetadata(expected, bytes);
+    if (!sameMetadata(recovery.metadata, expected)) return undefined;
+    return { metadata: recovery.metadata, bytes };
+  } catch {
+    return undefined;
+  }
 }
 
 export async function resolveArtifact(

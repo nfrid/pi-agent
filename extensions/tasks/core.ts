@@ -1,21 +1,74 @@
 import { dashboard } from './format';
 import { findTask, newId, normalizeId, normalizeIds } from './ids';
-import { forgetCompletedHide, getState } from './state';
+import {
+  captureMutationSnapshot,
+  forgetCompletedHide,
+  restoreMutationSnapshot,
+} from './state';
+import type { TaskStore } from './store';
 import type { Action, Params, Task } from './types';
-import { validateDeps } from './validate';
+import { validateDependencyGraph, validateDeps } from './validate';
 
 export { stats } from './queries';
 
+export interface MutationResult {
+  changed: boolean;
+  message: string;
+  error?: string;
+}
+
 export function mutate(
+  store: TaskStore,
   action: Action,
   params: Params,
-): { changed: boolean; message: string; error?: string } {
+): MutationResult {
+  const snapshot = captureMutationSnapshot(store);
+  const result = mutateUnsafe(store, action, params);
+  if (result.error) restoreMutationSnapshot(store, snapshot);
+  return result;
+}
+
+export function mutateBatch(
+  store: TaskStore,
+  operations: NonNullable<Params['operations']>,
+): MutationResult {
+  if (!operations.length)
+    return {
+      changed: false,
+      message: 'operations are required for batch',
+      error: 'operations are required for batch',
+    };
+
+  const snapshot = captureMutationSnapshot(store);
+  const messages: string[] = [];
+  let changed = false;
+  for (const operation of operations) {
+    const step = mutateUnsafe(store, operation.action, operation);
+    messages.push(step.error ? `error: ${step.message}` : step.message);
+    if (step.error) {
+      restoreMutationSnapshot(store, snapshot);
+      return {
+        changed: false,
+        message: messages.join('; '),
+        error: step.error,
+      };
+    }
+    changed ||= step.changed;
+  }
+  return { changed, message: messages.join('; ') };
+}
+
+function mutateUnsafe(
+  store: TaskStore,
+  action: Action,
+  params: Params,
+): MutationResult {
   const now = Date.now();
   const id = normalizeId(params.id);
   if (action === 'list')
     return {
       changed: false,
-      message: dashboard(Boolean(params.include_done), 80),
+      message: dashboard(store, Boolean(params.include_done), 80),
     };
   if (action === 'batch')
     return {
@@ -32,7 +85,7 @@ export function mutate(
         error: 'text is required',
       };
     const task: Task = {
-      id: normalizeId(params.id) ?? newId(),
+      id: normalizeId(params.id) ?? newId(store),
       text: params.text.trim(),
       status: params.status ?? 'todo',
       dependsOn: normalizeIds(params.depends_on),
@@ -41,15 +94,15 @@ export function mutate(
       createdAt: now,
       updatedAt: now,
     };
-    if (getState().tasks.some((existing) => existing.id === task.id))
+    if (store.state.tasks.some((existing) => existing.id === task.id))
       return {
         changed: false,
         message: `${task.id} already exists`,
         error: `${task.id} already exists`,
       };
-    const depError = validateDeps(task.id, task.dependsOn);
+    const depError = validateDeps(store, task.id, task.dependsOn);
     if (depError) return { changed: false, message: depError, error: depError };
-    getState().tasks.push(task);
+    store.state.tasks.push(task);
     return { changed: true, message: `added ${task.id}` };
   }
 
@@ -83,24 +136,18 @@ export function mutate(
         updatedAt: now,
       });
     }
-    const ids = new Set(tasks.map((task) => task.id));
-    for (const task of tasks) {
-      if (task.dependsOn.includes(task.id))
-        return {
-          changed: false,
-          message: `${task.id} depends on itself`,
-          error: `${task.id} depends on itself`,
-        };
-      const missing = task.dependsOn.filter((dep) => !ids.has(dep));
-      if (missing.length)
-        return {
-          changed: false,
-          message: `${task.id} has unknown deps ${missing.join(', ')}`,
-          error: `${task.id} has unknown deps ${missing.join(', ')}`,
-        };
-    }
-    const state = getState();
-    forgetCompletedHide(tasks.map((task) => task.id));
+    const dependencyError = validateDependencyGraph(tasks);
+    if (dependencyError)
+      return {
+        changed: false,
+        message: dependencyError,
+        error: dependencyError,
+      };
+    const state = store.state;
+    forgetCompletedHide(
+      store,
+      tasks.map((task) => task.id),
+    );
     state.tasks = tasks;
     state.nextId = 1;
     for (const task of state.tasks) {
@@ -111,7 +158,7 @@ export function mutate(
   }
 
   if (action === 'clear_done') {
-    const state = getState();
+    const state = store.state;
     const before = state.tasks.length;
     const removed = state.tasks
       .filter((task) => task.status === 'done' || task.status === 'dropped')
@@ -119,14 +166,14 @@ export function mutate(
     state.tasks = state.tasks.filter(
       (task) => task.status !== 'done' && task.status !== 'dropped',
     );
-    forgetCompletedHide(removed);
+    forgetCompletedHide(store, removed);
     return {
       changed: before !== state.tasks.length,
       message: `cleared ${before - state.tasks.length} completed/dropped tasks`,
     };
   }
 
-  const task = findTask(id);
+  const task = findTask(store, id);
   if (!task)
     return {
       changed: false,
@@ -135,8 +182,8 @@ export function mutate(
     };
 
   if (action === 'remove') {
-    const dependents = getState()
-      .tasks.filter((candidate) => candidate.dependsOn.includes(task.id))
+    const dependents = store.state.tasks
+      .filter((candidate) => candidate.dependsOn.includes(task.id))
       .map((candidate) => candidate.id);
     if (dependents.length)
       return {
@@ -144,21 +191,21 @@ export function mutate(
         message: `${task.id} is depended on by ${dependents.join(', ')}; drop it instead or update dependents first`,
         error: 'task has dependents',
       };
-    getState().tasks = getState().tasks.filter(
+    store.state.tasks = store.state.tasks.filter(
       (candidate) => candidate.id !== task.id,
     );
-    forgetCompletedHide([task.id]);
+    forgetCompletedHide(store, [task.id]);
     return { changed: true, message: `removed ${task.id}` };
   }
 
   if (action === 'drop') {
-    forgetCompletedHide([task.id]);
+    forgetCompletedHide(store, [task.id]);
     task.status = 'dropped';
   } else if (action === 'done') {
-    forgetCompletedHide([task.id]);
+    forgetCompletedHide(store, [task.id]);
     task.status = 'done';
   } else if (action === 'start') {
-    forgetCompletedHide([task.id]);
+    forgetCompletedHide(store, [task.id]);
     task.status = 'doing';
   } else if (action === 'block') {
     task.status = 'blocked';
@@ -166,14 +213,14 @@ export function mutate(
   } else if (action === 'update') {
     if (params.text !== undefined) task.text = params.text;
     if (params.status !== undefined) {
-      forgetCompletedHide([task.id]);
+      forgetCompletedHide(store, [task.id]);
       task.status = params.status;
     }
     if (params.priority !== undefined) task.priority = params.priority;
     if (params.notes !== undefined) task.notes = params.notes;
     if (params.depends_on !== undefined) {
       const deps = normalizeIds(params.depends_on);
-      const depError = validateDeps(task.id, deps);
+      const depError = validateDeps(store, task.id, deps);
       if (depError)
         return { changed: false, message: depError, error: depError };
       task.dependsOn = deps;

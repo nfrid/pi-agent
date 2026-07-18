@@ -25,24 +25,8 @@ export default function askUser(pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const mode = 'mode' in ctx ? ctx.mode : 'tui';
-      if (mode !== 'tui') {
-        const details: Answer = {
-          question: params.question,
-          answer: null,
-          custom: false,
-          cancelled: true,
-        };
-        return {
-          content: [
-            {
-              type: 'text',
-              text: 'Cannot ask user: interactive TUI is not available.',
-            },
-          ],
-          details,
-          isError: true,
-        };
-      }
+      if (mode !== 'tui')
+        throw new Error('Cannot ask user: interactive TUI is not available.');
 
       const choices = normalizeChoices(params);
       const result = await ctx.ui.custom<UiResult>(

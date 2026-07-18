@@ -8,34 +8,31 @@ import { mutate } from './core';
 import { formatVisualTask } from './format';
 import { stats } from './queries';
 import {
-  getCompletedPendingHide,
-  getHiddenCompleted,
-  getLastCtx,
-  getState,
+  captureMutationSnapshot,
   persist,
+  restoreMutationSnapshot,
 } from './state';
-import { uiUpdatesPaused } from './store';
+import { type TaskStore, uiUpdatesPaused } from './store';
 import type { Action, Params, Task } from './types';
 
-function visibleWidgetTasks(): Task[] {
-  return getState().tasks.filter(
+function visibleWidgetTasks(store: TaskStore): Task[] {
+  return store.state.tasks.filter(
     (task) =>
       task.status !== 'dropped' &&
-      (task.status !== 'done' || !getHiddenCompleted().has(task.id)),
+      (task.status !== 'done' || !store.hiddenCompleted.has(task.id)),
   );
 }
 
-function markDisplayedCompleted(tasks: Task[]): void {
-  const pending = getCompletedPendingHide();
+function markDisplayedCompleted(store: TaskStore, tasks: Task[]): void {
   for (const task of tasks) {
-    if (task.status === 'done' && !getHiddenCompleted().has(task.id))
-      pending.add(task.id);
+    if (task.status === 'done' && !store.hiddenCompleted.has(task.id))
+      store.completedPendingHide.add(task.id);
   }
 }
 
-export function updateUi(ctx = getLastCtx()): void {
-  if (uiUpdatesPaused() || !ctx?.hasUI) return;
-  const s = stats();
+export function updateUi(store: TaskStore, ctx = store.lastCtx): void {
+  if (uiUpdatesPaused(store) || !ctx?.hasUI) return;
+  const s = stats(store);
   ctx.ui.setStatus(
     EXT,
     s.active
@@ -44,26 +41,27 @@ export function updateUi(ctx = getLastCtx()): void {
   );
   if (
     !s.active &&
-    getState().tasks.every(
-      (task) => task.status !== 'done' || getHiddenCompleted().has(task.id),
+    store.state.tasks.every(
+      (task) => task.status !== 'done' || store.hiddenCompleted.has(task.id),
     )
   ) {
     ctx.ui.setWidget(EXT, undefined);
     return;
   }
+  markDisplayedCompleted(store, visibleWidgetTasks(store));
   ctx.ui.setWidget(EXT, (_tui, theme) => ({
     invalidate() {},
     render(width: number): string[] {
-      const tasks = visibleWidgetTasks();
+      const tasks = visibleWidgetTasks(store);
       if (!tasks.length) return [];
-      const headingIcon = s.active
+      const current = stats(store);
+      const headingIcon = current.active
         ? theme.fg('accent', '●')
         : theme.fg('dim', '○');
       const lines = [
-        `${headingIcon} ${theme.fg(s.active ? 'accent' : 'dim', `Todos (${s.done}/${s.total})`)}`,
+        `${headingIcon} ${theme.fg(current.active ? 'accent' : 'dim', `Todos (${current.done}/${current.total})`)}`,
       ];
       const visible = tasks.slice(0, MAX_WIDGET_LINES - 1);
-      markDisplayedCompleted(visible);
       visible.forEach((task, index) => {
         const prefix =
           index === visible.length - 1 && tasks.length === visible.length
@@ -83,13 +81,25 @@ export function updateUi(ctx = getLastCtx()): void {
 }
 
 export function applyMutation(
+  store: TaskStore,
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   action: Action,
   params: Params,
 ): { changed: boolean; message: string; error?: string } {
-  const result = mutate(action, params);
-  if (result.changed) persist(pi);
-  updateUi(ctx);
-  return result;
+  const snapshot = captureMutationSnapshot(store);
+  const result = mutate(store, action, params);
+  try {
+    updateUi(store, ctx);
+    if (result.changed) persist(store, pi);
+    return result;
+  } catch (error) {
+    restoreMutationSnapshot(store, snapshot);
+    try {
+      updateUi(store, ctx);
+    } catch {
+      // Preserve the original persistence/UI failure.
+    }
+    throw error;
+  }
 }

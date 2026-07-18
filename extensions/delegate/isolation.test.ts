@@ -24,6 +24,7 @@ import {
   isolationSpawn,
   isolationValidationCommand,
   isolationValidationScript,
+  loadIsolation,
   markIsolationRunning,
   prepareChildAuth,
   prepareReadOnlySandbox,
@@ -119,6 +120,27 @@ describe('writable delegate isolation', () => {
     } finally {
       if (configured) process.env.PI_DELEGATE_STATE_DIR = configured;
     }
+  });
+
+  test('rejects malformed or mis-rooted records before cleanup uses their paths', () => {
+    const id = randomUUID();
+    const directory = path.join(
+      delegateStateRoot(),
+      'delegate-worktrees',
+      'v1',
+      id,
+    );
+    const external = path.join(root, 'external-scratch');
+    mkdirSync(path.join(external, 'agent'), { recursive: true });
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      path.join(directory, 'record.json'),
+      JSON.stringify({ version: 1, id, scratchPath: external }),
+    );
+
+    expect(loadIsolation(id)).toBeUndefined();
+    expect(() => scrubStaleIsolationCredentials()).not.toThrow();
+    expect(existsSync(path.join(external, 'agent'))).toBe(true);
   });
 
   test.skipIf(!sandboxBackendAvailable())(
@@ -400,6 +422,104 @@ describe('writable delegate isolation', () => {
   );
 
   test.skipIf(!sandboxBackendAvailable())(
+    'keeps broker patch files outside child-writable scratch space',
+    async () => {
+      const result = await prepareWritableIsolation({
+        cwd: repository,
+        scopes: ['src'],
+      });
+      expect(result.isolation).toBeDefined();
+      const prepared = result.isolation as NonNullable<typeof result.isolation>;
+      const sentinel = path.join(root, 'broker-sentinel');
+      writeFileSync(sentinel, 'unchanged');
+      symlinkSync(
+        sentinel,
+        path.join(prepared.record.scratchPath, 'changes.patch'),
+      );
+      writeFileSync(
+        path.join(prepared.record.worktreePath, 'src', 'value.txt'),
+        'two\n',
+      );
+
+      const captured = await captureIsolationPatch(prepared.record.id, {
+        outcome: 'success',
+      });
+      expect(captured.status).toBe('patch-ready');
+      expect(readFileSync(sentinel, 'utf8')).toBe('unchanged');
+      expect(isolationPatchBytes(captured)?.length).toBeGreaterThan(0);
+      await discardIsolation(captured.id);
+    },
+  );
+
+  test.skipIf(!sandboxBackendAvailable())(
+    'propagates broker capture failures and persists failed isolation state',
+    async () => {
+      const result = await prepareWritableIsolation({
+        cwd: repository,
+        scopes: ['src'],
+      });
+      expect(result.isolation).toBeDefined();
+      const prepared = result.isolation as NonNullable<typeof result.isolation>;
+      const broker = path.join(
+        delegateStateRoot(),
+        'delegate-worktrees',
+        'v1',
+        prepared.record.id,
+        'broker',
+      );
+      symlinkSync(root, broker);
+      writeFileSync(
+        path.join(prepared.record.worktreePath, 'src', 'value.txt'),
+        'two\n',
+      );
+
+      await expect(
+        captureIsolationPatch(prepared.record.id, { outcome: 'success' }),
+      ).rejects.toThrow('Unsafe broker directory');
+      expect(loadIsolation(prepared.record.id)?.status).toBe('failed');
+      rmSync(broker);
+      await discardIsolation(prepared.record.id);
+    },
+  );
+
+  test.skipIf(!sandboxBackendAvailable())(
+    'applies rename-like changes with consistent no-rename path verification',
+    async () => {
+      const result = await prepareWritableIsolation({
+        cwd: repository,
+        scopes: ['src'],
+        dependencyMode: 'isolated',
+      });
+      expect(result.isolation).toBeDefined();
+      const prepared = attachIsolationSession(
+        result.isolation as NonNullable<typeof result.isolation>,
+        randomUUID(),
+        path.join(agentDir, 'rename-session.jsonl'),
+      );
+      git(prepared.record.worktreePath, [
+        'mv',
+        'src/value.txt',
+        'src/renamed.txt',
+      ]);
+      const captured = await captureIsolationPatch(prepared.record.id, {
+        outcome: 'success',
+      });
+      expect(captured.patch?.changedPaths).toEqual([
+        'src/renamed.txt',
+        'src/value.txt',
+      ]);
+      const validated = await validate(captured.id);
+      expect(validated.validation?.status).toBe('passed');
+      const applied = await applyIsolationPatch(validated.id);
+      expect(applied.status).toBe('applied');
+      expect(existsSync(path.join(repository, 'src', 'renamed.txt'))).toBe(
+        true,
+      );
+      await discardIsolation(applied.id);
+    },
+  );
+
+  test.skipIf(!sandboxBackendAvailable())(
     'validates non-package repositories with exact command argv',
     async () => {
       const result = await prepareWritableIsolation({
@@ -663,6 +783,17 @@ describe('writable delegate isolation', () => {
       ]);
       expect(result.isolation?.record.writablePaths[0]).toMatch(
         /packages\/app$/,
+      );
+      const spawn = isolationSpawn(
+        result.isolation as NonNullable<typeof result.isolation>,
+        '/bin/pwd',
+        [],
+      );
+      expect(spawn.cwd).toBe(
+        path.join(
+          result.isolation?.record.worktreePath as string,
+          'packages/app',
+        ),
       );
       await discardIsolation(result.isolation?.record.id as string);
     },

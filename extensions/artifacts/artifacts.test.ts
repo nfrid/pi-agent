@@ -3,6 +3,7 @@ import { appendFileSync } from 'node:fs';
 import {
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   stat,
   utimes,
@@ -11,9 +12,9 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { collectGarbage } from './gc';
-import artifacts from './index';
+import artifacts, { mergeToolResultChanges } from './index';
 import { renderRetrievalResult, retrieveArtifact } from './retrieval';
 import {
   artifactLockPath,
@@ -25,7 +26,7 @@ import {
   sanitizeCreationSource,
   withArtifactRootLock,
 } from './storage';
-import { MAX_RESULT_BYTES } from './types';
+import { MAX_ARTIFACT_BYTES, MAX_RESULT_BYTES } from './types';
 
 const roots: string[] = [];
 
@@ -128,11 +129,11 @@ describe('artifact CAS and recovery', () => {
       'session_tree',
       'session_start',
       'session_tree',
-      'tool_result',
+      'session_shutdown',
       'session_start',
-      'tool_result',
       'context',
       'agent_settled',
+      'tool_result',
     ]);
     const notices: string[] = [];
     await commands['artifact-revoke'].handler(
@@ -143,6 +144,54 @@ describe('artifact CAS and recovery', () => {
       } as never,
     );
     expect(notices[0]).toContain('Usage: /artifact-revoke');
+  });
+
+  it('preserves snapshot content when later governor changes add details', () => {
+    expect(
+      mergeToolResultChanges(
+        {
+          content: [{ type: 'text', text: 'snapshot text' }],
+          details: { snapshot: true },
+        },
+        { details: { snapshot: true, governor: true } },
+      ),
+    ).toEqual({
+      content: [{ type: 'text', text: 'snapshot text' }],
+      details: { snapshot: true, governor: true },
+    });
+  });
+
+  it('rolls back manifest publication when lifecycle generation changes', async () => {
+    const directory = await root();
+    const session = harness();
+    let checks = 0;
+    await expect(
+      putArtifact(
+        session.pi,
+        session.ctx,
+        {
+          bytes: 'stale snapshot',
+          producer: 'tool',
+          contentClass: 'tool-output',
+          creationSource: 'read.snapshot',
+        },
+        directory,
+        () => {
+          checks++;
+          if (checks === 3) throw new Error('stale generation');
+        },
+      ),
+    ).rejects.toThrow('stale generation');
+    expect(session.entries).toEqual([]);
+    const manifestNames = await readdir(path.join(directory, 'manifests'));
+    expect(manifestNames).toHaveLength(1);
+    const manifest = JSON.parse(
+      await readFile(
+        path.join(directory, 'manifests', manifestNames[0]),
+        'utf8',
+      ),
+    ) as { artifacts: Record<string, unknown> };
+    expect(manifest.artifacts).toEqual({});
   });
 
   it('stores exact bytes, deduplicates CAS, and uses private modes', async () => {
@@ -278,6 +327,93 @@ describe('artifact CAS and recovery', () => {
         directory,
       ),
     ).rejects.toThrow('Disallowed');
+  });
+
+  it('does not append recovery and rolls back manifest when linked publication fails', async () => {
+    const directory = await root();
+    const h = harness();
+    await expect(
+      putArtifact(
+        h.pi,
+        h.ctx,
+        {
+          bytes: '{"value":"orphan candidate"}',
+          producer: 'web',
+          contentClass: 'json',
+          creationSource: 'web.linked-publication',
+        },
+        directory,
+        undefined,
+        () => {
+          throw new Error('reference append failed');
+        },
+      ),
+    ).rejects.toThrow('reference append failed');
+    expect(h.entries).toEqual([]);
+    const manifests = await readdir(path.join(directory, 'manifests'));
+    const manifest = JSON.parse(
+      await readFile(path.join(directory, 'manifests', manifests[0]), 'utf8'),
+    ) as { artifacts: Record<string, unknown> };
+    expect(manifest.artifacts).toEqual({});
+  });
+
+  it('rolls back revocation when the durable tombstone append fails', async () => {
+    const directory = await root();
+    const h = harness();
+    const metadata = await putArtifact(
+      h.pi,
+      h.ctx,
+      {
+        bytes: 'still available',
+        producer: 'web',
+        contentClass: 'text',
+        creationSource: 'web.revoke-rollback',
+      },
+      directory,
+    );
+    await expect(
+      revokeArtifact(
+        {
+          appendEntry: () => {
+            throw new Error('journal unavailable');
+          },
+        },
+        h.ctx,
+        metadata.handle,
+        directory,
+      ),
+    ).rejects.toThrow('journal unavailable');
+    expect(
+      (
+        await resolveArtifact(h.ctx, metadata.handle, directory)
+      )?.bytes.toString(),
+    ).toBe('still available');
+  });
+
+  it('rejects oversized recovery envelopes before base64 decoding', async () => {
+    const directory = await root();
+    const h = harness();
+    const oversized = 'A'.repeat(4 * Math.ceil(MAX_ARTIFACT_BYTES / 3));
+    h.entries.push({
+      type: 'custom',
+      customType: 'artifact:v1',
+      data: {
+        version: 1,
+        kind: 'recovery',
+        metadata: { handle: 'art_aaaaaaaaaaaaaaaaaaaaaa' },
+        bytes: oversized,
+      },
+    });
+    const from = vi.spyOn(Buffer, 'from');
+    expect(await restoreArtifacts(h.ctx, directory)).toBe(0);
+    expect(
+      from.mock.calls.some(
+        (call) =>
+          call[0] === oversized &&
+          (call as unknown as unknown[])[1] === 'base64',
+      ),
+    ).toBe(false);
+    from.mockRestore();
   });
 
   it('skips corrupted recovery metadata and stale handles', async () => {

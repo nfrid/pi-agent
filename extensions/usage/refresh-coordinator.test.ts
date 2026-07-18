@@ -23,16 +23,20 @@ function deferred<T>(): Deferred<T> {
 }
 
 function harness() {
-  const queries: Array<{ ctx: TestContext; result: Deferred<string> }> = [];
+  const queries: Array<{
+    ctx: TestContext;
+    signal: AbortSignal;
+    result: Deferred<string>;
+  }> = [];
   const reports: string[] = [];
   const errors: string[] = [];
   const clears: string[] = [];
   const loading: string[] = [];
   const coordinator = new RefreshCoordinator<TestContext, string>({
     debounceMs: 20,
-    query: (ctx) => {
+    query: (ctx, signal) => {
       const result = deferred<string>();
-      queries.push({ ctx, result });
+      queries.push({ ctx, signal, result });
       return result.promise;
     },
     canRefresh: (ctx) => ctx.enabled,
@@ -70,6 +74,25 @@ describe('RefreshCoordinator', () => {
     await vi.advanceTimersByTimeAsync(19);
     expect(h.queries).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
+    expect(h.queries).toHaveLength(2);
+
+    h.queries[1]?.result.resolve('settled');
+    await flush();
+    expect(h.reports).toEqual(['session:initial', 'session:settled']);
+  });
+
+  it('retains one settled refresh behind an in-flight query', async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    const ctx = { id: 'session', enabled: true };
+    void h.coordinator.sessionStart(ctx);
+
+    h.coordinator.settled(ctx);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(h.queries).toHaveLength(1);
+
+    h.queries[0]?.result.resolve('initial');
+    await flush();
     expect(h.queries).toHaveLength(2);
 
     h.queries[1]?.result.resolve('settled');
@@ -141,6 +164,7 @@ describe('RefreshCoordinator', () => {
     h.coordinator.settled(ctx);
     h.coordinator.sessionShutdown(ctx);
 
+    expect(h.queries[0]?.signal.aborted).toBe(true);
     await vi.advanceTimersByTimeAsync(20);
     expect(h.queries).toHaveLength(1);
     expect(h.clears).toEqual(['session']);

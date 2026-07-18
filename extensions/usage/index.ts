@@ -13,9 +13,14 @@ import { queryUsage } from './query';
 import { RefreshCoordinator } from './refresh-coordinator';
 import type { UsageReport } from './types';
 
+const registered = new WeakSet<object>();
+
 export function registerUsage(
   pi: ExtensionAPI,
-  query: (ctx: ExtensionContext) => Promise<UsageReport> = queryUsage,
+  query: (
+    ctx: ExtensionContext,
+    signal: AbortSignal,
+  ) => Promise<UsageReport> = queryUsage,
 ) {
   let timer: NodeJS.Timeout | undefined;
 
@@ -67,5 +72,7 @@ export function registerUsage(
 }
 
 export default function usage(pi: ExtensionAPI) {
+  if (registered.has(pi)) return;
+  registered.add(pi);
   registerUsage(pi);
 }

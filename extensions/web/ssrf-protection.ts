@@ -1,12 +1,33 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
+import http from 'node:http';
+import https from 'node:https';
 import net from 'node:net';
+import { Readable } from 'node:stream';
 
 const DEFAULT_MAX_REDIRECTS = 5;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const CROSS_ORIGIN_SENSITIVE_HEADERS = [
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'cookie2',
+];
+const BODY_HEADERS = [
+  'content-encoding',
+  'content-language',
+  'content-length',
+  'content-location',
+  'content-type',
+  'transfer-encoding',
+];
 
 export type LookupAddress = { address: string; family: number };
 export type Lookup = (hostname: string) => Promise<LookupAddress[]>;
-type Fetch = typeof fetch;
+type PinnedFetch = (
+  url: URL,
+  init: RequestInit,
+  address: LookupAddress,
+) => Promise<Response>;
 
 interface ValidationOptions {
   lookup?: Lookup;
@@ -26,7 +47,8 @@ interface ParsedCidr {
 }
 
 interface FetchRemoteOptions extends ValidationOptions {
-  fetch?: Fetch;
+  /** Test seam. Production requests use the pinned socket implementation. */
+  fetch?: PinnedFetch;
   maxRedirects?: number;
 }
 
@@ -34,10 +56,10 @@ async function defaultLookup(hostname: string): Promise<LookupAddress[]> {
   return dnsLookup(hostname, { all: true, verbatim: true });
 }
 
-export async function validateRemoteUrl(
+async function resolveRemoteUrl(
   rawUrl: string | URL,
   options: ValidationOptions = {},
-): Promise<URL> {
+): Promise<{ url: URL; addresses: LookupAddress[] }> {
   const url = rawUrl instanceof URL ? rawUrl : new URL(rawUrl);
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('Only HTTP and HTTPS URLs can be fetched remotely');
@@ -51,9 +73,13 @@ export async function validateRemoteUrl(
 
   const allowRanges = parseAllowRanges(options.allowRanges);
 
-  if (net.isIP(hostname)) {
+  const literalFamily = net.isIP(hostname);
+  if (literalFamily) {
     assertPublicAddress(hostname, hostname, allowRanges);
-    return url;
+    return {
+      url,
+      addresses: [{ address: hostname, family: literalFamily }],
+    };
   }
 
   let addresses: LookupAddress[];
@@ -69,7 +95,92 @@ export async function validateRemoteUrl(
   for (const { address } of addresses) {
     assertPublicAddress(address, hostname, allowRanges);
   }
-  return url;
+  return { url, addresses };
+}
+
+export async function validateRemoteUrl(
+  rawUrl: string | URL,
+  options: ValidationOptions = {},
+): Promise<URL> {
+  return (await resolveRemoteUrl(rawUrl, options)).url;
+}
+
+async function pinnedFetch(
+  url: URL,
+  init: RequestInit,
+  pinned: LookupAddress,
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const transport = url.protocol === 'https:' ? https : http;
+    const headers = Object.fromEntries(new Headers(init.headers));
+    headers.host = url.host;
+    const request = transport.request(
+      url,
+      {
+        method: init.method,
+        headers,
+        signal: init.signal ?? undefined,
+        agent: false,
+        lookup: (_hostname, _options, callback) =>
+          callback(null, pinned.address, pinned.family),
+        ...(url.protocol === 'https:' && !net.isIP(url.hostname)
+          ? { servername: url.hostname }
+          : {}),
+      },
+      (response) => {
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(response.headers)) {
+          if (Array.isArray(value))
+            for (const item of value) headers.append(name, item);
+          else if (value !== undefined) headers.set(name, String(value));
+        }
+        const status = response.statusCode ?? 500;
+        const method = init.method?.toUpperCase() ?? 'GET';
+        const noBody =
+          method === 'HEAD' ||
+          status === 204 ||
+          status === 205 ||
+          status === 304;
+        resolve(
+          new Response(
+            noBody
+              ? null
+              : (Readable.toWeb(response) as ReadableStream<Uint8Array>),
+            {
+              status,
+              statusText: response.statusMessage,
+              headers,
+            },
+          ),
+        );
+      },
+    );
+    request.on('error', reject);
+    const body = init.body;
+    if (body === undefined || body === null) {
+      request.end();
+    } else if (
+      typeof body === 'string' ||
+      body instanceof Uint8Array ||
+      body instanceof ArrayBuffer
+    ) {
+      request.end(body);
+    } else if (body instanceof URLSearchParams) {
+      request.end(body.toString());
+    } else {
+      request.destroy(new Error('Unsupported request body for pinned fetch'));
+    }
+  });
+}
+
+function withoutHeaders(
+  headers: HeadersInit | undefined,
+  names: string[],
+): Headers | undefined {
+  if (!headers) return undefined;
+  const sanitized = new Headers(headers);
+  for (const name of names) sanitized.delete(name);
+  return sanitized;
 }
 
 export async function fetchRemoteUrl(
@@ -77,16 +188,24 @@ export async function fetchRemoteUrl(
   init: RequestInit = {},
   options: FetchRemoteOptions = {},
 ): Promise<Response> {
-  const fetchImpl = options.fetch ?? fetch;
+  const fetchImpl = options.fetch ?? pinnedFetch;
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
-  let current = await validateRemoteUrl(url, options);
+  let resolved = await resolveRemoteUrl(url, options);
+  let current = resolved.url;
   let requestInit = init;
 
   for (let redirects = 0; redirects <= maxRedirects; redirects++) {
-    const response = await fetchImpl(current, {
-      ...requestInit,
-      redirect: 'manual',
-    });
+    const pinned = resolved.addresses[0];
+    if (!pinned)
+      throw new Error(`No validated address for ${current.hostname}`);
+    const response = await fetchImpl(
+      current,
+      {
+        ...requestInit,
+        redirect: 'manual',
+      },
+      pinned,
+    );
     if (!REDIRECT_STATUSES.has(response.status)) return response;
 
     const location = response.headers.get('location');
@@ -94,14 +213,30 @@ export async function fetchRemoteUrl(
     if (redirects === maxRedirects)
       throw new Error(`Too many redirects fetching ${current.toString()}`);
 
-    current = await validateRemoteUrl(new URL(location, current), options);
+    await response.body?.cancel();
+    const nextUrl = new URL(location, current);
+    if (nextUrl.origin !== current.origin)
+      requestInit = {
+        ...requestInit,
+        headers: withoutHeaders(
+          requestInit.headers,
+          CROSS_ORIGIN_SENSITIVE_HEADERS,
+        ),
+      };
+    resolved = await resolveRemoteUrl(nextUrl, options);
+    current = resolved.url;
+    const method = requestInit.method?.toUpperCase() ?? 'GET';
     if (
-      response.status === 303 ||
+      (response.status === 303 && method !== 'HEAD') ||
       ((response.status === 301 || response.status === 302) &&
-        requestInit.method?.toUpperCase() === 'POST')
+        method === 'POST')
     ) {
       const { body: _body, ...nextInit } = requestInit;
-      requestInit = { ...nextInit, method: 'GET' };
+      requestInit = {
+        ...nextInit,
+        method: 'GET',
+        headers: withoutHeaders(requestInit.headers, BODY_HEADERS),
+      };
     }
   }
 
@@ -142,7 +277,7 @@ function isBlockedIPv4(address: string): boolean {
     parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
   )
     return true;
-  const [a, b] = parts;
+  const [a, b, c] = parts;
   return (
     a === 0 ||
     a === 10 ||
@@ -150,8 +285,11 @@ function isBlockedIPv4(address: string): boolean {
     (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0) ||
+    (a === 192 && b === 88 && c === 99) ||
     (a === 192 && b === 168) ||
-    (a === 198 && (b === 18 || b === 19)) ||
+    (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
+    (a === 203 && b === 0 && c === 113) ||
     a >= 224
   );
 }
@@ -166,17 +304,20 @@ function isBlockedIPv6(address: string): boolean {
     return true;
   if ((first & 0xfe00) === 0xfc00) return true;
   if ((first & 0xffc0) === 0xfe80) return true;
+  if ((first & 0xffc0) === 0xfec0) return true;
+  if ((first & 0xff00) === 0xff00) return true;
 
   const isMappedIPv4 =
     groups.slice(0, 5).every((group) => group === 0) && groups[5] === 0xffff;
-  if (isMappedIPv4) {
+  const isCompatibleIPv4 = groups.slice(0, 6).every((group) => group === 0);
+  if (isMappedIPv4 || isCompatibleIPv4) {
     const ipv4 = [
       groups[6] >> 8,
       groups[6] & 0xff,
       groups[7] >> 8,
       groups[7] & 0xff,
     ].join('.');
-    return isBlockedIPv4(ipv4);
+    return isCompatibleIPv4 || isBlockedIPv4(ipv4);
   }
 
   return false;
