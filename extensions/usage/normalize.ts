@@ -103,8 +103,17 @@ export function normalizeAppServerResponse(
     const index = snapshots.findIndex(
       (item) => item.limitId === snapshot.limitId,
     );
-    if (index >= 0) snapshots[index] = { ...snapshots[index], ...snapshot };
-    else snapshots.push(snapshot);
+    if (index >= 0) {
+      const existing = snapshots[index];
+      if (!existing) return;
+      snapshots[index] = {
+        ...existing,
+        ...snapshot,
+        limitName: snapshot.limitName ?? existing.limitName,
+        primary: snapshot.primary ?? existing.primary,
+        secondary: snapshot.secondary ?? existing.secondary,
+      };
+    } else snapshots.push(snapshot);
   };
 
   add(response.rateLimits, 'codex');

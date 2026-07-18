@@ -56,6 +56,20 @@ function appendProjectContext(
   return nextPrompt;
 }
 
+function finalizePrompt(
+  prompt: string,
+  contextFiles: NonNullable<BuildSystemPromptOptions['contextFiles']>,
+  skills: NonNullable<BuildSystemPromptOptions['skills']>,
+  includeSkills: boolean,
+  cwd: string,
+): string {
+  let finalized = appendProjectContext(prompt, contextFiles);
+  if (includeSkills) finalized += formatSkillsForPrompt(skills);
+  finalized += `\nCurrent date: ${currentDate()}`;
+  finalized += `\nCurrent working directory: ${cwd.replace(/\\/g, '/')}`;
+  return finalized;
+}
+
 const BASH_GUIDELINES = [
   'Prefer one composed bash call for dependent deterministic discovery, filtering, aggregation, or validation; run unrelated inspections in parallel.',
   'Keep bash output bounded and relevant using targeted paths, filters, counts, excerpts, diffs, or compact structured summaries.',
@@ -89,12 +103,12 @@ export function buildSystemPrompt(
     contextFiles: providedContextFiles,
     skills: providedSkills,
   } = options;
-  const promptCwd = cwd.replace(/\\/g, '/');
   const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : '';
   const contextFiles = providedContextFiles ?? [];
   const skills = providedSkills ?? [];
   const tools = selectedTools || ['read', 'bash', 'edit', 'write'];
   const hasBash = tools.includes('bash');
+  const hasRead = tools.includes('read');
   const delegateRoutingSection =
     !isDelegateChild && tools.includes('delegate')
       ? formatDelegateRoutingPrompt(cwd)
@@ -113,17 +127,7 @@ export function buildSystemPrompt(
       prompt += formatBashGuidance();
     }
     prompt += delegateRoutingSection;
-    prompt = appendProjectContext(prompt, contextFiles);
-
-    const customPromptHasRead =
-      !selectedTools || selectedTools.includes('read');
-    if (customPromptHasRead) {
-      prompt += formatSkillsForPrompt(skills);
-    }
-
-    prompt += `\nCurrent date: ${currentDate()}`;
-    prompt += `\nCurrent working directory: ${promptCwd}`;
-    return prompt;
+    return finalizePrompt(prompt, contextFiles, skills, hasRead, cwd);
   }
 
   const visibleTools = tools.filter((name) => !!toolSnippets?.[name]);
@@ -150,7 +154,6 @@ export function buildSystemPrompt(
   const hasGrep = tools.includes('grep');
   const hasFind = tools.includes('find');
   const hasLs = tools.includes('ls');
-  const hasRead = tools.includes('read');
 
   if (hasBash) {
     if (!hasGrep && !hasFind && !hasLs) {
@@ -207,12 +210,5 @@ ${guidelines}`;
   }
   prompt += delegateRoutingSection;
 
-  prompt = appendProjectContext(prompt, contextFiles);
-  if (hasRead) {
-    prompt += formatSkillsForPrompt(skills);
-  }
-
-  prompt += `\nCurrent date: ${currentDate()}`;
-  prompt += `\nCurrent working directory: ${promptCwd}`;
-  return prompt;
+  return finalizePrompt(prompt, contextFiles, skills, hasRead, cwd);
 }

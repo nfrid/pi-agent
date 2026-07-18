@@ -23,7 +23,6 @@ import type {
   PatchEligibilityCode,
 } from './model';
 import {
-  delegateStateRoot,
   isolationRecordDir,
   isolationRootDir,
   loadIsolation,
@@ -34,8 +33,6 @@ import { sandboxProfile } from './sandbox';
 const execFileAsync = promisify(execFile);
 const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
-const _SAFE_ID = /^[0-9a-f-]{36}$/;
-const READ_ONLY_ROOT = 'delegate-readonly/v1';
 const MANIFEST_NAMES = new Set([
   'package.json',
   'package-lock.json',
@@ -45,10 +42,6 @@ const MANIFEST_NAMES = new Set([
   'bun.lock',
   'bun.lockb',
 ]);
-
-function _readOnlyRootDir(): string {
-  return path.join(delegateStateRoot(), READ_ONLY_ROOT);
-}
 
 function brokerPath(record: IsolationRecord, basename: string): string {
   if (path.basename(basename) !== basename)

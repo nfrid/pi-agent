@@ -33,8 +33,8 @@ async function filesBelow(directory: string): Promise<string[]> {
 }
 
 /**
- * Conservatively reconciles CAS blobs. Pi 0.80.7 has no public session-deletion
- * event, so callers may run this periodically. Any unreadable/malformed session
+ * Conservatively reconciles CAS blobs. Pi has no public session-deletion event,
+ * so callers may run this periodically. Any unreadable/malformed session
  * aborts collection; live digests have no age expiry. A grace period only protects
  * newly-created, not-yet-flushed unreferenced blobs. Collection can unlink an
  * unreferenced CAS copy, but cannot remove base64 recovery bytes from append-only

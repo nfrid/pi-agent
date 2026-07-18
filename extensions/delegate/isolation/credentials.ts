@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
-import { delegateChildEnvironment, isInside } from './kernel';
+import { delegateChildEnvironment } from './kernel';
 import { processIdentity } from './locks';
 import type { PreparedChildAuth, PreparedIsolation } from './model';
 import { delegateStateRoot, isolationRootDir, loadIsolation } from './records';
@@ -43,16 +43,6 @@ export function prepareChildAuth(): PreparedChildAuth {
   mkdirSync(scratchPath, { recursive: true, mode: 0o700 });
   writeCredentialOwner(directory);
   return { directory, env: delegateChildEnvironment(scratchPath) };
-}
-
-export function scrubChildAuth(auth: PreparedChildAuth | undefined): void {
-  const agentDir = auth?.env.PI_CODING_AGENT_DIR;
-  if (
-    typeof agentDir === 'string' &&
-    auth &&
-    isInside(auth.directory, path.resolve(agentDir))
-  )
-    rmSync(agentDir, { recursive: true, force: true });
 }
 
 export function discardChildAuth(auth: PreparedChildAuth | undefined): void {

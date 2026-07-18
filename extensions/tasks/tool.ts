@@ -2,19 +2,13 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { ACTION_GLYPH, TOOL } from './constants';
 import { TODO_SNAPSHOT_TYPE, transformTodoContext } from './context';
-import { mutate, mutateBatch } from './core';
 import { dashboard, turnSnapshotText } from './format';
 import { normalizeId } from './ids';
 import { stats } from './queries';
 import { paramsSchema } from './schema';
-import {
-  captureMutationSnapshot,
-  persist,
-  restoreMutationSnapshot,
-} from './state';
 import type { TaskStore } from './store';
 import type { ToolDetails } from './types';
-import { updateUi } from './ui-widget';
+import { applyMutation } from './ui-widget';
 
 export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
   pi.registerTool<typeof paramsSchema, ToolDetails>({
@@ -35,24 +29,10 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
     executionMode: 'sequential',
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       store.lastCtx = ctx;
-      const snapshot = captureMutationSnapshot(store);
-      const result =
-        params.action === 'batch'
-          ? mutateBatch(store, params.operations ?? [])
-          : mutate(store, params.action, params);
+      const result = applyMutation(store, pi, ctx, params.action, params, {
+        updateOnError: false,
+      });
       if (result.error) throw new Error(result.message);
-      try {
-        updateUi(store, ctx);
-        if (result.changed) persist(store, pi);
-      } catch (error) {
-        restoreMutationSnapshot(store, snapshot);
-        try {
-          updateUi(store, ctx);
-        } catch {
-          // Preserve the original persistence/UI failure.
-        }
-        throw error;
-      }
 
       const details: ToolDetails = {
         action: params.action,

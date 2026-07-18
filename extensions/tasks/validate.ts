@@ -1,4 +1,4 @@
-import { normalizeId } from './normalize';
+import { normalizeIds } from './normalize';
 import type { TaskStore } from './store';
 import type { Task } from './types';
 
@@ -44,11 +44,7 @@ export function validateDeps(
   id: string,
   deps: string[],
 ): string | undefined {
-  const unique = [
-    ...new Set(
-      deps.map(normalizeId).filter((dep): dep is string => Boolean(dep)),
-    ),
-  ];
+  const unique = normalizeIds(deps);
   const tasks = [
     ...store.state.tasks.filter((task) => task.id !== id),
     {

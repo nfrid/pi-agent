@@ -1,29 +1,30 @@
-import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import {
+  buildRule,
+  formatRules,
+  parseManifestEnvelope,
+  parseManifestRule,
+  type ScopedRule,
+} from './manifest';
+
+export {
+  formatRules,
+  MANIFEST_VERSION,
+  MAX_FILES_PER_RULE,
+  MAX_RULE_COUNT,
+  type MutationIntent,
+  type ScopedRule,
+} from './manifest';
+
+import type { MutationIntent } from './manifest';
 
 export const MANIFEST_RELATIVE_PATH = '.pi/scoped-instructions.json';
-export const MANIFEST_VERSION = 1;
-
 /** Hard input/prompt limits. Byte limits are measured as UTF-8/on-disk bytes. */
 export const MAX_MANIFEST_BYTES = 64 * 1024;
-export const MAX_RULE_COUNT = 64;
-export const MAX_FILES_PER_RULE = 8;
 export const MAX_INSTRUCTION_BYTES = 64 * 1024;
 export const MAX_TOTAL_INSTRUCTION_BYTES = 256 * 1024;
 export const MAX_TOTAL_CRITICAL_EAGER_BYTES = 128 * 1024;
-
-export type MutationIntent = 'edit' | 'write';
-
-export interface ScopedRule {
-  id: string;
-  scope: string;
-  intents: MutationIntent[];
-  instructionFiles: string[];
-  critical: boolean;
-  texts: Array<{ path: string; text: string; hash: string }>;
-  hash: string;
-}
 
 export interface LoadedManifest {
   repositoryRoot: string;
@@ -32,55 +33,12 @@ export interface LoadedManifest {
   error?: string;
 }
 
-function hash(value: string): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, 12);
-}
-
 function isInside(root: string, path: string): boolean {
   const child = relative(root, path);
   return (
     child === '' ||
     (!child.startsWith(`..${sep}`) && child !== '..' && !isAbsolute(child))
   );
-}
-
-function safeRelative(value: unknown, kind: string): string {
-  if (
-    typeof value !== 'string' ||
-    value.length === 0 ||
-    isAbsolute(value) ||
-    value.includes('\\') ||
-    value.includes('\0')
-  ) {
-    throw new Error(`${kind} must be a non-empty portable relative path`);
-  }
-  const parts = value.split('/');
-  if (parts.some((part) => part === '' || part === '.' || part === '..')) {
-    throw new Error(`${kind} contains an empty, dot, or traversal segment`);
-  }
-  return value;
-}
-
-function safeScope(value: unknown): string {
-  if (value === '.') return '.';
-  if (typeof value !== 'string' || !value.endsWith('/'))
-    throw new Error('scope must be "." or end in "/"');
-  return safeRelative(value.slice(0, -1), 'scope');
-}
-
-function exactKeys(
-  value: Record<string, unknown>,
-  expected: string[],
-  kind: string,
-): void {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  if (
-    actual.length !== wanted.length ||
-    actual.some((key, index) => key !== wanted[index])
-  ) {
-    throw new Error(`${kind} must contain exactly: ${expected.join(', ')}`);
-  }
 }
 
 export function findRepositoryRoot(cwd: string): string | undefined {
@@ -93,7 +51,7 @@ export function findRepositoryRoot(cwd: string): string | undefined {
   }
 }
 
-/** Load and strictly validate the repository manifest as one atomic unit. */
+/** Securely load a strictly validated repository manifest as one atomic unit. */
 export function loadManifest(cwd: string): LoadedManifest | undefined {
   const repositoryRoot = findRepositoryRoot(cwd);
   if (!repositoryRoot) return undefined;
@@ -106,9 +64,8 @@ export function loadManifest(cwd: string): LoadedManifest | undefined {
     if (
       !isInside(repositoryRoot, canonicalManifest) ||
       !lstatSync(canonicalManifest).isFile()
-    ) {
+    )
       throw new Error('manifest is not a regular file inside the repository');
-    }
     const manifestStat = lstatSync(canonicalManifest);
     if (manifestStat.size > MAX_MANIFEST_BYTES)
       throw new Error(
@@ -119,71 +76,13 @@ export function loadManifest(cwd: string): LoadedManifest | undefined {
       throw new Error(
         `manifest exceeds ${MAX_MANIFEST_BYTES} byte limit (${manifestBytes.byteLength} bytes)`,
       );
-    const parsed: unknown = JSON.parse(manifestBytes.toString('utf8'));
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
-      throw new Error('manifest must be an object');
-    const object = parsed as Record<string, unknown>;
-    exactKeys(object, ['version', 'rules'], 'manifest');
-    if (object.version !== MANIFEST_VERSION)
-      throw new Error(
-        `unsupported version ${String(object.version)} (expected ${MANIFEST_VERSION})`,
-      );
-    if (!Array.isArray(object.rules)) throw new Error('rules must be an array');
-    if (object.rules.length > MAX_RULE_COUNT)
-      throw new Error(
-        `manifest exceeds ${MAX_RULE_COUNT} rule limit (${object.rules.length} rules)`,
-      );
-
+    const candidates = parseManifestEnvelope(manifestBytes.toString('utf8'));
     const ids = new Set<string>();
     let totalInstructionBytes = 0;
     let totalCriticalInstructionBytes = 0;
-    const rules = object.rules.map((candidate, index): ScopedRule => {
-      if (
-        typeof candidate !== 'object' ||
-        candidate === null ||
-        Array.isArray(candidate)
-      )
-        throw new Error(`rule ${index} must be an object`);
-      const rule = candidate as Record<string, unknown>;
-      exactKeys(
-        rule,
-        ['id', 'scope', 'intents', 'instructionFiles', 'critical'],
-        `rule ${index}`,
-      );
-      if (
-        typeof rule.id !== 'string' ||
-        !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(rule.id)
-      )
-        throw new Error(`rule ${index} has an invalid id`);
-      if (ids.has(rule.id)) throw new Error(`duplicate rule id: ${rule.id}`);
-      ids.add(rule.id);
-      const scope = safeScope(rule.scope);
-      if (
-        !Array.isArray(rule.intents) ||
-        rule.intents.length === 0 ||
-        rule.intents.some(
-          (intent) => intent !== 'edit' && intent !== 'write',
-        ) ||
-        new Set(rule.intents).size !== rule.intents.length
-      )
-        throw new Error(`rule ${rule.id} has invalid or duplicate intents`);
-      if (
-        !Array.isArray(rule.instructionFiles) ||
-        rule.instructionFiles.length === 0
-      )
-        throw new Error(`rule ${rule.id} requires instructionFiles`);
-      if (rule.instructionFiles.length > MAX_FILES_PER_RULE)
-        throw new Error(
-          `rule ${rule.id} exceeds ${MAX_FILES_PER_RULE} instruction file limit (${rule.instructionFiles.length} files)`,
-        );
-      const files = rule.instructionFiles.map((file) =>
-        safeRelative(file, `rule ${rule.id} instruction file`),
-      );
-      if (new Set(files).size !== files.length)
-        throw new Error(`rule ${rule.id} has duplicate instruction files`);
-      if (typeof rule.critical !== 'boolean')
-        throw new Error(`rule ${rule.id} critical must be boolean`);
-      const texts = files.map((path) => {
+    const rules = candidates.map((candidate, index) => {
+      const rule = parseManifestRule(candidate, index, ids);
+      const texts = rule.instructionFiles.map((path) => {
         const canonical = realpathSync(join(repositoryRoot, path));
         if (!isInside(repositoryRoot, canonical))
           throw new Error(
@@ -230,27 +129,9 @@ export function loadManifest(cwd: string): LoadedManifest | undefined {
               `critical eager instructions exceed ${MAX_TOTAL_CRITICAL_EAGER_BYTES} total byte limit`,
             );
         }
-        const text = bytes.toString('utf8');
-        return { path, text, hash: hash(text) };
+        return { path, text: bytes.toString('utf8') };
       });
-      const intents = rule.intents as MutationIntent[];
-      return {
-        id: rule.id,
-        scope,
-        intents,
-        instructionFiles: files,
-        critical: rule.critical,
-        texts,
-        hash: hash(
-          JSON.stringify({
-            id: rule.id,
-            scope,
-            intents,
-            critical: rule.critical,
-            texts,
-          }),
-        ),
-      };
+      return buildRule(rule, texts);
     });
     const criticalEagerBytes = Buffer.byteLength(
       formatRules(rules.filter((rule) => rule.critical)),
@@ -317,16 +198,4 @@ export function applicableRules(
       target.startsWith(`${rule.scope}/`);
     return inScope && rule.intents.includes(intent);
   });
-}
-
-export function formatRules(rules: readonly ScopedRule[]): string {
-  return rules
-    .flatMap((rule) => [
-      `### Scoped instruction: ${rule.id} [${rule.hash}]`,
-      ...rule.texts.flatMap((file) => [
-        `--- ${file.path} [${file.hash}] ---`,
-        file.text,
-      ]),
-    ])
-    .join('\n\n');
 }

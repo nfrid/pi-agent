@@ -3,7 +3,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SETTLED_REFRESH_DEBOUNCE_MS } from './constants';
+import { REFRESH_INTERVAL_MS, SETTLED_REFRESH_DEBOUNCE_MS } from './constants';
 import { registerUsage } from './index';
 import type { UsageReport } from './types';
 
@@ -17,13 +17,13 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function context(): ExtensionContext {
+function context(id = 'codex-test'): ExtensionContext {
   return {
     hasUI: true,
     model: {
       provider: 'openai-codex',
-      id: 'codex-test',
-      name: 'Codex Test',
+      id,
+      name: id,
     },
     ui: {
       setStatus: vi.fn(),
@@ -40,24 +40,28 @@ afterEach(() => {
 });
 
 describe('usage lifecycle wiring', () => {
-  it('waits through multi-turn/retry-like events and queries once after agent_settled', async () => {
-    vi.useFakeTimers();
+  function harness() {
     const handlers = new Map<string, Handler>();
-    const on = vi.fn((event: string, handler: Handler) => {
-      handlers.set(event, handler);
-    });
     const pi = {
-      on,
+      on: vi.fn((event: string, handler: Handler) => {
+        handlers.set(event, handler);
+      }),
       registerCommand: vi.fn(),
     } as unknown as ExtensionAPI;
     const pending: Array<ReturnType<typeof deferred<UsageReport>>> = [];
-    const query = vi.fn(() => {
+    const query = vi.fn((_ctx: ExtensionContext) => {
       const result = deferred<UsageReport>();
       pending.push(result);
       return result.promise;
     });
-    const ctx = context();
     registerUsage(pi, query);
+    return { handlers, pending, query };
+  }
+
+  it('waits through multi-turn/retry-like events and queries once after agent_settled', async () => {
+    vi.useFakeTimers();
+    const { handlers, pending, query } = harness();
+    const ctx = context();
 
     handlers.get('session_start')?.({}, ctx);
     expect(query).toHaveBeenCalledTimes(1);
@@ -85,5 +89,44 @@ describe('usage lifecycle wiring', () => {
     await vi.advanceTimersByTimeAsync(SETTLED_REFRESH_DEBOUNCE_MS * 2);
     expect(query).toHaveBeenCalledTimes(2);
     handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  it('uses the latest model context for periodic refreshes', async () => {
+    vi.useFakeTimers();
+    const { handlers, pending, query } = harness();
+    const first = context('first');
+    const selected = context('selected');
+
+    handlers.get('session_start')?.({}, first);
+    pending[0]?.resolve({ capturedAt: Date.now(), snapshots: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    handlers.get('model_select')?.({}, selected);
+    pending[1]?.resolve({ capturedAt: Date.now(), snapshots: [] });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS);
+    expect(query).toHaveBeenCalledTimes(3);
+    expect(query.mock.calls[2]?.[0]).toBe(selected);
+    handlers.get('session_shutdown')?.({}, selected);
+  });
+
+  it('replaces the periodic context across sessions', async () => {
+    vi.useFakeTimers();
+    const { handlers, pending, query } = harness();
+    const first = context('first-session');
+    const second = context('second-session');
+
+    handlers.get('session_start')?.({}, first);
+    pending[0]?.resolve({ capturedAt: Date.now(), snapshots: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    handlers.get('session_shutdown')?.({}, first);
+    handlers.get('session_start')?.({}, second);
+    pending[1]?.resolve({ capturedAt: Date.now(), snapshots: [] });
+    await vi.advanceTimersByTimeAsync(0);
+
+    await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS);
+    expect(query).toHaveBeenCalledTimes(3);
+    expect(query.mock.calls[2]?.[0]).toBe(second);
+    handlers.get('session_shutdown')?.({}, second);
   });
 });

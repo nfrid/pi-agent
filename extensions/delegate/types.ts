@@ -135,11 +135,6 @@ export interface DelegateDetails {
   runs: DelegatedRun[];
 }
 
-export interface DelegateTask {
-  task: string;
-  cwd?: string;
-}
-
 export function emptyUsage(): UsageStats {
   return {
     input: 0,

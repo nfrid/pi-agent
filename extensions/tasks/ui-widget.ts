@@ -4,28 +4,28 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth } from '@earendil-works/pi-tui';
 import { EXT, MAX_WIDGET_LINES } from './constants';
-import { mutate } from './core';
+import { executeMutation, type MutationResult } from './core';
 import { formatVisualTask } from './format';
 import { stats } from './queries';
-import {
-  captureMutationSnapshot,
-  persist,
-  restoreMutationSnapshot,
-} from './state';
+import { persist } from './state';
 import { type TaskStore, uiUpdatesPaused } from './store';
 import type { Action, Params, Task } from './types';
+
+function completedTaskVisible(store: TaskStore, task: Task): boolean {
+  return task.status === 'done' && !store.hiddenCompleted.has(task.id);
+}
 
 function visibleWidgetTasks(store: TaskStore): Task[] {
   return store.state.tasks.filter(
     (task) =>
       task.status !== 'dropped' &&
-      (task.status !== 'done' || !store.hiddenCompleted.has(task.id)),
+      (task.status !== 'done' || completedTaskVisible(store, task)),
   );
 }
 
 function markDisplayedCompleted(store: TaskStore, tasks: Task[]): void {
   for (const task of tasks) {
-    if (task.status === 'done' && !store.hiddenCompleted.has(task.id))
+    if (completedTaskVisible(store, task))
       store.completedPendingHide.add(task.id);
   }
 }
@@ -41,9 +41,7 @@ export function updateUi(store: TaskStore, ctx = store.lastCtx): void {
   );
   if (
     !s.active &&
-    store.state.tasks.every(
-      (task) => task.status !== 'done' || store.hiddenCompleted.has(task.id),
-    )
+    !store.state.tasks.some((task) => completedTaskVisible(store, task))
   ) {
     ctx.ui.setWidget(EXT, undefined);
     return;
@@ -86,20 +84,11 @@ export function applyMutation(
   ctx: ExtensionContext,
   action: Action,
   params: Params,
-): { changed: boolean; message: string; error?: string } {
-  const snapshot = captureMutationSnapshot(store);
-  const result = mutate(store, action, params);
-  try {
-    updateUi(store, ctx);
-    if (result.changed) persist(store, pi);
-    return result;
-  } catch (error) {
-    restoreMutationSnapshot(store, snapshot);
-    try {
-      updateUi(store, ctx);
-    } catch {
-      // Preserve the original persistence/UI failure.
-    }
-    throw error;
-  }
+  options: { updateOnError?: boolean } = {},
+): MutationResult {
+  return executeMutation(store, action, params, {
+    updateUi: () => updateUi(store, ctx),
+    persist: () => persist(store, pi),
+    updateOnError: options.updateOnError ?? true,
+  });
 }

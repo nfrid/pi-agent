@@ -4,7 +4,6 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { artifactProducer } from '../artifacts';
-import { type loadDelegateConfig, resolveDelegateRoute } from './config';
 import {
   captureIsolationPatch,
   discardIsolation,
@@ -92,6 +91,20 @@ export function throwIfAllRunsFailed(
     runs.every((run) => run.exitCode !== -1 && isRunError(run))
   )
     throw new Error(handoff);
+}
+
+export async function delegateToolResult(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  mode: DelegateDetails['mode'],
+  runs: DelegatedRun[],
+) {
+  const handoff = await buildArtifactBackedHandoff(pi, ctx, runs);
+  throwIfAllRunsFailed(runs, handoff);
+  return {
+    content: [{ type: 'text' as const, text: handoff }],
+    details: makeDetails(mode, runs),
+  };
 }
 
 export function assertDistinctContinuationTokens(
@@ -260,13 +273,6 @@ export async function finalizeIsolatedRun(
       ...(run.warnings ?? []),
       'Dependency manifests changed; application is blocked until isolated dependency validation is recorded.',
     ];
-}
-
-export function routingFor(
-  requested: unknown,
-  config: ReturnType<typeof loadDelegateConfig>,
-): { routing?: DelegateRouteState; error?: string } {
-  return resolveDelegateRoute(requested, config);
 }
 
 export function mergeDelegateRouteRequest(

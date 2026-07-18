@@ -7,6 +7,7 @@ const CACHE_TTL_MS = 60 * 60 * 1000;
 export const WEB_REFERENCE_TYPE = 'web-artifact-reference:v1';
 /** Exact full-payload fallback used only when artifact persistence is unavailable. */
 export const WEB_FALLBACK_TYPE = 'web-search-results:v1';
+const LEGACY_WEB_RESULTS_TYPE = 'web-search-results';
 
 export interface WebFallbackEntry {
   version: 1;
@@ -112,7 +113,7 @@ export function createWebResultStore(): WebResultStore {
       const branch = ctx.sessionManager.getBranch();
       for (const entry of branch) {
         if (entry.type !== 'custom') continue;
-        if (entry.customType === 'web-search-results') {
+        if (entry.customType === LEGACY_WEB_RESULTS_TYPE) {
           const data = entry.data;
           if (
             isValidStoredData(data) &&

@@ -73,6 +73,15 @@ describe('version 1 manifest validation', () => {
     expect(loaded?.rules).toEqual([]);
   });
 
+  it('preserves rule validation and filesystem loading order', () => {
+    const root = repository();
+    manifest(root, [rule(), rule({ id: 'later', extra: true })]);
+    const loaded = loadManifest(root);
+    expect(loaded?.error).toContain('ENOENT');
+    expect(loaded?.error).not.toContain('must contain exactly');
+    expect(loaded?.rules).toEqual([]);
+  });
+
   it('rejects an oversized manifest atomically', () => {
     const root = repository();
     writeFileSync(

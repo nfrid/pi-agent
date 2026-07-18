@@ -1,12 +1,14 @@
 import type { ContextEvent } from '@earendil-works/pi-coding-agent';
-import { EXT, TOOL } from './constants';
+import {
+  EXT,
+  LEGACY_TODO_REPLAY_TYPE,
+  LEGACY_TODO_SNAPSHOT_TYPE,
+  TOOL,
+} from './constants';
 
 export const TODO_RESULT_ELIDED = '[todo tool result elided]';
 export const TODO_SNAPSHOT_TYPE = `${EXT}-turn-snapshot`;
 export const EXACT_TODO_RESULT_PREFIX = 6;
-
-const LEGACY_TODO_SNAPSHOT_TYPE = `${EXT}-replay-v2`;
-const LEGACY_TODO_REPLAY_TYPE = `${EXT}-replay`;
 
 export type TodoContextMessages = ContextEvent['messages'];
 

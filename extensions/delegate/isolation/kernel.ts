@@ -10,26 +10,9 @@ import * as path from 'node:path';
 import { promisify } from 'node:util';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import type { IsolationRecord } from './model';
-import { delegateStateRoot } from './records';
 
 const execFileAsync = promisify(execFile);
-const _SANDBOX_EXEC = '/usr/bin/sandbox-exec';
-const READ_ONLY_ROOT = 'delegate-readonly/v1';
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
-const _SAFE_ID = /^[0-9a-f-]{36}$/;
-function _readOnlyRootDir(): string {
-  return path.join(delegateStateRoot(), READ_ONLY_ROOT);
-}
-
-const _MANIFEST_NAMES = new Set([
-  'package.json',
-  'package-lock.json',
-  'npm-shrinkwrap.json',
-  'pnpm-lock.yaml',
-  'yarn.lock',
-  'bun.lock',
-  'bun.lockb',
-]);
 
 export function canonical(value: string): string {
   return realpathSync(value);

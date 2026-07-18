@@ -23,6 +23,7 @@ export function registerUsage(
   ) => Promise<UsageReport> = queryUsage,
 ) {
   let timer: NodeJS.Timeout | undefined;
+  let currentContext: ExtensionContext | undefined;
 
   const clear = (ctx: ExtensionContext) => {
     if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
@@ -43,19 +44,23 @@ export function registerUsage(
   });
 
   pi.on('session_start', (_event, ctx) => {
+    currentContext = ctx;
     void coordinator.sessionStart(ctx);
     if (timer) clearInterval(timer);
-    timer = setInterval(
-      () => void coordinator.periodic(ctx),
-      REFRESH_INTERVAL_MS,
-    );
+    timer = setInterval(() => {
+      if (currentContext) void coordinator.periodic(currentContext);
+    }, REFRESH_INTERVAL_MS);
     timer.unref?.();
   });
 
   pi.on('model_select', (_event, ctx) => {
+    currentContext = ctx;
     void coordinator.modelChanged(ctx);
   });
-  pi.on('agent_settled', (_event, ctx) => coordinator.settled(ctx));
+  pi.on('agent_settled', (_event, ctx) => {
+    currentContext = ctx;
+    coordinator.settled(ctx);
+  });
 
   pi.registerCommand('usage', {
     description: 'Refresh Codex 5h / weekly usage in the footer',
@@ -66,6 +71,7 @@ export function registerUsage(
 
   pi.on('session_shutdown', (_event, ctx) => {
     coordinator.sessionShutdown(ctx);
+    currentContext = undefined;
     if (timer) clearInterval(timer);
     timer = undefined;
   });

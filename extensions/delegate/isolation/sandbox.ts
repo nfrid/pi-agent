@@ -182,18 +182,6 @@ export function readOnlySandboxSpawn(
   };
 }
 
-export function scrubReadOnlyCredentials(
-  sandbox: PreparedReadOnlySandbox | undefined,
-): void {
-  const agentDir = sandbox?.env.PI_CODING_AGENT_DIR;
-  if (
-    typeof agentDir === 'string' &&
-    sandbox &&
-    isInside(sandbox.directory, path.resolve(agentDir))
-  )
-    rmSync(agentDir, { recursive: true, force: true });
-}
-
 export function discardReadOnlySandbox(
   sandbox: PreparedReadOnlySandbox | undefined,
 ): void {

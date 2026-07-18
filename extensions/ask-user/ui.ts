@@ -125,11 +125,9 @@ export function createQuestionDialog(
     return new Markdown(preview, 0, 0, getMarkdownTheme()).render(innerWidth);
   }
 
-  function renderPreview(width: number): string[] {
-    const choice = choices[selected];
-    if (!choice?.preview || typing) return [];
+  function renderPreview(preview: string, width: number): string[] {
     const innerWidth = Math.max(1, width - 4);
-    const rendered = renderMarkdownPreview(choice.preview, innerWidth);
+    const rendered = renderMarkdownPreview(preview, innerWidth);
     const maxPreviewRows = 30;
     const body = rendered.slice(0, maxPreviewRows);
     const hidden = rendered.length - body.length;
@@ -171,14 +169,12 @@ export function createQuestionDialog(
     add();
 
     if (choices.length > 0) {
-      const preview = renderPreview(
-        width >= 96 ? Math.floor(width * 0.48) : width - 2,
-      );
-      if (preview.length > 0 && width >= 96) {
-        const leftWidth = Math.max(32, width - Math.floor(width * 0.48) - 3);
-        const rightWidth = width - leftWidth - 3;
+      const previewText = typing ? undefined : choices[selected]?.preview;
+      if (previewText && width >= 96) {
+        const rightWidth = Math.floor(width * 0.48);
+        const leftWidth = Math.max(32, width - rightWidth - 3);
         const left = renderOptions(leftWidth);
-        const right = renderPreview(rightWidth);
+        const right = renderPreview(previewText, rightWidth);
         const rows = Math.max(left.length, right.length);
         for (let i = 0; i < rows; i++) {
           const l = padToWidth(
@@ -188,6 +184,9 @@ export function createQuestionDialog(
           add(`${l}   ${right[i] ?? ''}`);
         }
       } else {
+        const preview = previewText
+          ? renderPreview(previewText, width - 2)
+          : [];
         for (const line of renderOptions(width)) add(line);
         if (preview.length > 0) {
           add();

@@ -1,4 +1,3 @@
-import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -10,7 +9,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
-import { promisify } from 'node:util';
 import { canonical, delegateChildEnvironment, git, isInside } from './kernel';
 import { processIdentity, withIsolationLock } from './locks';
 import type {
@@ -27,8 +25,6 @@ import {
 } from './records';
 import { sandboxBackendAvailable, sandboxProfile } from './sandbox';
 
-const _execFileAsync = promisify(execFile);
-const _MAX_GIT_OUTPUT = 16 * 1024 * 1024;
 const MANIFEST_NAMES = new Set([
   'package.json',
   'package-lock.json',

@@ -1,526 +1,55 @@
-import { createHash, randomBytes } from 'node:crypto';
-import {
-  chmod,
-  link,
-  mkdir,
-  open,
-  readFile,
-  rename,
-  rm,
-  unlink,
-  writeFile,
-} from 'node:fs/promises';
-import path from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import {
+  artifactRoot,
+  blobPath,
+  manifestPath,
+  putBlob,
+  readManifest,
+  writeManifest,
+} from './storage-io';
+import { withArtifactRootLock, withManifestLock } from './storage-locking';
+import {
+  countLines,
+  decodeText,
+  derivedItemCount,
+  HANDLE_RE,
+  isTextual,
+  sameMetadata,
+  sanitizeCreationSource,
+  sha256,
+  validateInput,
+  validateMetadata,
+  validRecoveryBytes,
+  validTombstone,
+} from './storage-validation';
 import {
   ARTIFACT_ENTRY_TYPE,
   type ArtifactMetadata,
-  CONTENT_CLASSES,
-  MAX_ARTIFACT_BYTES,
   type Manifest,
-  PRODUCER_CLASSES,
   type PutArtifactInput,
   type RecoveryEntry,
   type ResolvedArtifact,
-  SAFE_SOURCE_RE,
-  TEXTUAL_CONTENT_CLASSES,
   type TombstoneEntry,
 } from './types';
 
-const ROOT = 'artifacts/v1';
-const HANDLE_RE = /^art_[A-Za-z0-9_-]{22}$/;
-const ROOT_LOCK_NAME = '.artifact-root.lock';
-const ROOT_LOCK_MAX_WAIT_MS = 3_000;
-const ROOT_LOCK_MIN_BACKOFF_MS = 10;
-const ROOT_LOCK_MAX_BACKOFF_MS = 200;
-const MAX_RECOVERY_BASE64_CHARS = 4 * Math.ceil(MAX_ARTIFACT_BYTES / 3);
-const artifactRootQueues = new Map<string, Promise<void>>();
-const manifestQueues = new Map<string, Promise<void>>();
-
-interface RootLockOwner {
-  version: 1;
-  token: string;
-  pid: number;
-  createdAt: number;
-}
-
-export class ArtifactRootLockError extends Error {
-  readonly code = 'ARTIFACT_ROOT_LOCK_UNAVAILABLE';
-
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'ArtifactRootLockError';
-  }
-}
-
-export function artifactLockPath(root: string): string {
-  return path.join(path.resolve(root), ROOT_LOCK_NAME);
-}
-
-function validOwner(value: unknown): value is RootLockOwner {
-  if (value === null || typeof value !== 'object') return false;
-  const owner = value as Record<string, unknown>;
-  return (
-    owner.version === 1 &&
-    typeof owner.token === 'string' &&
-    /^[A-Za-z0-9_-]{32}$/.test(owner.token) &&
-    typeof owner.pid === 'number' &&
-    Number.isSafeInteger(owner.pid) &&
-    owner.pid > 0 &&
-    typeof owner.createdAt === 'number' &&
-    Number.isSafeInteger(owner.createdAt) &&
-    owner.createdAt > 0
-  );
-}
-
-async function readLockOwner(
-  lockPath: string,
-): Promise<RootLockOwner | undefined> {
-  try {
-    const parsed = JSON.parse(await readFile(lockPath, 'utf8')) as unknown;
-    if (!validOwner(parsed))
-      throw new Error('Artifact root lock owner metadata is invalid');
-    return parsed;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    // Malformed, empty, or inaccessible metadata is ambiguous and must block.
-    throw new Error('Artifact root lock owner metadata is ambiguous', {
-      cause: error,
-    });
-  }
-}
-
-function processIsAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    // EPERM means the process exists but is not signalable by this user.
-    if (code === 'EPERM') return true;
-    if (code === 'ESRCH') return false;
-    return true;
-  }
-}
-
-async function recoverAbandonedLock(
-  lockPath: string,
-  owner: RootLockOwner | undefined,
-): Promise<boolean> {
-  if (!owner || processIsAlive(owner.pid)) return false;
-  try {
-    const current = await readLockOwner(lockPath);
-    if (
-      !current ||
-      current.token !== owner.token ||
-      current.pid !== owner.pid ||
-      current.createdAt !== owner.createdAt
-    )
-      return false;
-    await unlink(lockPath);
-    return true;
-  } catch (error) {
-    // ENOENT means another contender won the race. All other errors, including
-    // malformed metadata, are ambiguous and remain blocking.
-    return (error as NodeJS.ErrnoException).code === 'ENOENT';
-  }
-}
-
-async function acquireFilesystemLock(
-  root: string,
-  maxWaitMs: number,
-): Promise<() => Promise<void>> {
-  await ensureDir(root);
-  const lockPath = artifactLockPath(root);
-  const owner: RootLockOwner = {
-    version: 1,
-    token: randomBytes(24).toString('base64url'),
-    pid: process.pid,
-    createdAt: Date.now(),
-  };
-  const temporary = `${lockPath}.${process.pid}.${owner.token}.tmp`;
-  const deadline = Date.now() + Math.max(0, maxWaitMs);
-  let backoff = ROOT_LOCK_MIN_BACKOFF_MS;
-  for (;;) {
-    try {
-      const descriptor = await open(temporary, 'wx', 0o600);
-      try {
-        await descriptor.writeFile(`${JSON.stringify(owner)}\n`);
-        await descriptor.sync();
-      } finally {
-        await descriptor.close();
-      }
-      await chmod(temporary, 0o600);
-      try {
-        // The fixed path becomes visible only after complete, synced metadata
-        // exists. link() is atomic and never overwrites another holder.
-        await link(temporary, lockPath);
-      } finally {
-        // Only this acquisition's temporary file is ever cleaned up.
-        await unlink(temporary).catch(() => undefined);
-      }
-      return async () => {
-        try {
-          const current = await readLockOwner(lockPath);
-          if (
-            !current ||
-            current.token !== owner.token ||
-            current.pid !== owner.pid ||
-            current.createdAt !== owner.createdAt
-          )
-            return;
-          await unlink(lockPath);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return;
-        }
-      };
-    } catch (error) {
-      await unlink(temporary).catch(() => undefined);
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      let existingOwner: RootLockOwner | undefined;
-      try {
-        existingOwner = await readLockOwner(lockPath);
-        await recoverAbandonedLock(lockPath, existingOwner);
-      } catch {
-        // Ambiguous owner state remains blocking until the bounded deadline.
-      }
-      if (Date.now() >= deadline)
-        throw new ArtifactRootLockError(
-          `Artifact root lock unavailable after ${maxWaitMs}ms`,
-        );
-      await new Promise((resolve) =>
-        setTimeout(
-          resolve,
-          Math.min(backoff, Math.max(1, deadline - Date.now())),
-        ),
-      );
-      backoff = Math.min(ROOT_LOCK_MAX_BACKOFF_MS, backoff * 2);
-    }
-  }
-}
-
-/**
- * Serializes CAS publication/recovery/revocation with GC for one artifact root.
- * Lock order is always root queue, filesystem lock, then per-session manifest lock.
- */
-export async function withArtifactRootLock<T>(
-  root: string,
-  work: () => Promise<T>,
-  options: { maxWaitMs?: number } = {},
-): Promise<T> {
-  const key = path.resolve(root);
-  const previous = artifactRootQueues.get(key) ?? Promise.resolve();
-  let releaseQueue!: () => void;
-  const current = new Promise<void>((resolve) => {
-    releaseQueue = resolve;
-  });
-  artifactRootQueues.set(key, current);
-  await previous.catch(() => undefined);
-  let releaseFilesystem: (() => Promise<void>) | undefined;
-  try {
-    try {
-      releaseFilesystem = await acquireFilesystemLock(
-        key,
-        options.maxWaitMs ?? ROOT_LOCK_MAX_WAIT_MS,
-      );
-    } catch (error) {
-      if (error instanceof ArtifactRootLockError) throw error;
-      throw new ArtifactRootLockError('Artifact root lock acquisition failed', {
-        cause: error,
-      });
-    }
-    return await work();
-  } finally {
-    if (releaseFilesystem) await releaseFilesystem();
-    releaseQueue();
-    if (artifactRootQueues.get(key) === current) artifactRootQueues.delete(key);
-  }
-}
-
-async function withManifestLock<T>(
-  key: string,
-  work: () => Promise<T>,
-): Promise<T> {
-  const previous = manifestQueues.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  manifestQueues.set(key, current);
-  await previous.catch(() => undefined);
-  try {
-    return await work();
-  } finally {
-    release();
-    if (manifestQueues.get(key) === current) manifestQueues.delete(key);
-  }
-}
-
-function sha256(bytes: Uint8Array | string): string {
-  return createHash('sha256').update(bytes).digest('hex');
-}
-
-function sessionKey(sessionId: string): string {
-  return sha256(sessionId);
-}
-
-export function artifactRoot(agentDir = getAgentDir()): string {
-  return path.join(agentDir, ROOT);
-}
-
-function blobPath(root: string, digest: string): string {
-  return path.join(root, 'blobs', digest.slice(0, 2), digest.slice(2));
-}
-
-function manifestPath(root: string, sessionId: string): string {
-  return path.join(root, 'manifests', `${sessionKey(sessionId)}.json`);
-}
-
-async function ensureDir(dir: string): Promise<void> {
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  await chmod(dir, 0o700);
-}
-
-async function atomicReplace(
-  file: string,
-  bytes: Uint8Array | string,
-): Promise<void> {
-  await ensureDir(path.dirname(file));
-  const temporary = `${file}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
-  const descriptor = await open(temporary, 'wx', 0o600);
-  try {
-    await descriptor.writeFile(bytes);
-    await descriptor.sync();
-  } finally {
-    await descriptor.close();
-  }
-  await chmod(temporary, 0o600);
-  await rename(temporary, file);
-  await chmod(file, 0o600);
-}
-
-async function putBlob(
-  root: string,
-  bytes: Uint8Array,
-  digest: string,
-): Promise<void> {
-  const target = blobPath(root, digest);
-  await ensureDir(path.dirname(target));
-  const temporary = `${target}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
-  await writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 });
-  try {
-    try {
-      // link is an atomic, no-clobber publication even with concurrent writers.
-      await link(temporary, target);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-  } finally {
-    await unlink(temporary).catch(() => undefined);
-  }
-  await chmod(target, 0o600);
-  let stored = await readFile(target);
-  if (stored.length !== bytes.length || sha256(stored) !== digest) {
-    // A damaged CAS blob must not make a fresh snapshot fail closed. Repair only
-    // after verifying the published bytes are actually wrong; a concurrent writer
-    // may win the no-clobber replacement and will be verified below.
-    await unlink(target).catch(() => undefined);
-    try {
-      await writeFile(target, bytes, { flag: 'wx', mode: 0o600 });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-    stored = await readFile(target);
-  }
-  if (stored.length !== bytes.length || sha256(stored) !== digest) {
-    throw new Error(`Artifact CAS integrity failure for ${digest}`);
-  }
-}
-
-async function readManifest(
-  root: string,
-  sessionId: string,
-): Promise<Manifest> {
-  try {
-    const parsed = JSON.parse(
-      await readFile(manifestPath(root, sessionId), 'utf8'),
-    ) as Manifest;
-    if (parsed.version !== 1 || parsed.sessionId !== sessionId)
-      throw new Error();
-    parsed.revoked ??= parsed.purged ?? [];
-    delete parsed.purged;
-    return parsed;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return { version: 1, sessionId, artifacts: {}, revoked: [] };
-    }
-    throw error;
-  }
-}
-
-async function writeManifest(root: string, manifest: Manifest): Promise<void> {
-  await atomicReplace(
-    manifestPath(root, manifest.sessionId),
-    `${JSON.stringify(manifest)}\n`,
-  );
-}
-
-function isTextual(contentClass: string): boolean {
-  return (TEXTUAL_CONTENT_CLASSES as readonly string[]).includes(contentClass);
-}
-
-/** Source IDs are deliberately identifiers, not paths, URLs, labels, or snippets. */
-export function sanitizeCreationSource(source: string): string {
-  if (typeof source !== 'string' || source.length > 128) {
-    throw new Error('creationSource must be a short safe identifier');
-  }
-  const sanitized = source.trim().toLowerCase();
-  if (
-    !SAFE_SOURCE_RE.test(sanitized) ||
-    sanitized.includes('://') ||
-    sanitized.includes('/') ||
-    sanitized.includes('\\') ||
-    sanitized.includes('@') ||
-    sanitized.includes('%')
-  ) {
-    throw new Error('creationSource must be a sanitized safe identifier');
-  }
-  return sanitized;
-}
-
-function decodeText(bytes: Uint8Array): string {
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-  } catch {
-    throw new Error('Textual artifacts must contain valid UTF-8');
-  }
-}
-
-function countLines(text: string): number {
-  if (text.length === 0) return 0;
-  const lines = text.split(/\r\n|\n|\r/);
-  return lines.length - (lines.at(-1) === '' ? 1 : 0);
-}
-
-function derivedItemCount(
-  contentClass: string,
-  text: string,
-): number | undefined {
-  if (contentClass !== 'json') return undefined;
-  const value = JSON.parse(text) as unknown;
-  if (Array.isArray(value)) return value.length;
-  if (value !== null && typeof value === 'object') {
-    return Object.keys(value).length;
-  }
-  return undefined;
-}
-
-function validateItemCount(value: unknown): number | undefined {
-  if (value === undefined) return undefined;
-  if (
-    typeof value !== 'number' ||
-    !Number.isSafeInteger(value) ||
-    value < 0 ||
-    value > MAX_ARTIFACT_BYTES
-  ) {
-    throw new Error('itemCount must be a non-negative safe integer');
-  }
-  return value;
-}
-
-export function validateMetadata(
-  metadata: unknown,
-  bytes: Uint8Array,
-): asserts metadata is import('./types').ArtifactMetadata {
-  if (metadata === null || typeof metadata !== 'object')
-    throw new Error('Invalid artifact metadata');
-  const value = metadata as Record<string, unknown>;
-  if (
-    typeof value.handle !== 'string' ||
-    !/^art_[A-Za-z0-9_-]{22}$/.test(value.handle) ||
-    typeof value.sha256 !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(value.sha256) ||
-    typeof value.size !== 'number' ||
-    !Number.isSafeInteger(value.size) ||
-    value.size < 0 ||
-    value.size > MAX_ARTIFACT_BYTES ||
-    typeof value.producer !== 'string' ||
-    !(PRODUCER_CLASSES as readonly string[]).includes(value.producer) ||
-    typeof value.contentClass !== 'string' ||
-    !(CONTENT_CLASSES as readonly string[]).includes(value.contentClass) ||
-    typeof value.createdAt !== 'string' ||
-    !Number.isFinite(Date.parse(value.createdAt)) ||
-    value.createdAt !== new Date(value.createdAt).toISOString()
-  ) {
-    throw new Error('Invalid artifact metadata');
-  }
-  const source = sanitizeCreationSource(value.creationSource as string);
-  if (source !== value.creationSource)
-    throw new Error('Invalid creationSource');
-  const textual = isTextual(value.contentClass);
-  if (value.encoding !== (textual ? 'utf-8' : 'binary'))
-    throw new Error('Invalid artifact encoding');
-  const actualText = textual ? decodeText(bytes) : undefined;
-  const expectedLines =
-    actualText === undefined ? undefined : countLines(actualText);
-  if (value.lineCount !== expectedLines)
-    throw new Error('Invalid artifact lineCount');
-  const suppliedItems = validateItemCount(value.itemCount);
-  const expectedItems =
-    actualText === undefined
-      ? undefined
-      : derivedItemCount(value.contentClass, actualText);
-  if (
-    expectedItems !== undefined &&
-    suppliedItems !== undefined &&
-    suppliedItems !== expectedItems
-  )
-    throw new Error('Invalid artifact itemCount');
-  if (
-    value.mediaType !== undefined &&
-    (typeof value.mediaType !== 'string' || value.mediaType.length > 256)
-  )
-    throw new Error('Invalid artifact mediaType');
-  if (bytes.length !== value.size || sha256(bytes) !== value.sha256)
-    throw new Error('Artifact metadata does not match bytes');
-}
-
-function validateInput(input: PutArtifactInput): Buffer {
-  if (!(PRODUCER_CLASSES as readonly string[]).includes(input.producer)) {
-    throw new Error(
-      `Disallowed artifact producer class: ${String(input.producer)}`,
-    );
-  }
-  if (!(CONTENT_CLASSES as readonly string[]).includes(input.contentClass)) {
-    throw new Error(
-      `Disallowed artifact content class: ${String(input.contentClass)}`,
-    );
-  }
-  sanitizeCreationSource(input.creationSource);
-  const bytes = Buffer.from(input.bytes);
-  if (bytes.length > MAX_ARTIFACT_BYTES) {
-    throw new Error(`Artifact exceeds ${MAX_ARTIFACT_BYTES} byte ceiling`);
-  }
-  if (input.mediaType && input.mediaType.length > 256) {
-    throw new Error('Artifact mediaType exceeds 256 characters');
-  }
-  if (isTextual(input.contentClass)) decodeText(bytes);
-  const itemCount = validateItemCount(input.itemCount);
-  if (input.contentClass === 'json') {
-    const expected = derivedItemCount(input.contentClass, decodeText(bytes));
-    if (
-      itemCount !== undefined &&
-      expected !== undefined &&
-      itemCount !== expected
-    )
-      throw new Error('itemCount must match JSON top-level item count');
-  }
-  return bytes;
-}
+export {
+  artifactRoot,
+  clearArtifactRoot,
+} from './storage-io';
+export {
+  ArtifactRootLockError,
+  artifactLockPath,
+  withArtifactRootLock,
+} from './storage-locking';
+export {
+  sanitizeCreationSource,
+  validateMetadata,
+} from './storage-validation';
 
 export async function putArtifact(
   pi: Pick<ExtensionAPI, 'appendEntry'>,
@@ -621,69 +150,16 @@ export async function revokeArtifact(
   );
 }
 
-function validTombstone(
-  data: RecoveryEntry | TombstoneEntry | undefined,
-): data is TombstoneEntry {
-  if (data?.version !== 1 || (data.kind !== 'revoke' && data.kind !== 'purge'))
-    return false;
-  const timestamp = data.kind === 'revoke' ? data.revokedAt : data.purgedAt;
-  return (
-    typeof data.handle === 'string' &&
-    HANDLE_RE.test(data.handle) &&
-    typeof timestamp === 'string' &&
-    Number.isFinite(Date.parse(timestamp))
-  );
-}
-
-function validBase64(value: string): boolean {
-  if (value.length % 4 !== 0) return false;
-  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
-  for (let index = 0; index < value.length - padding; index++) {
-    const code = value.charCodeAt(index);
-    if (
-      !(
-        (code >= 65 && code <= 90) ||
-        (code >= 97 && code <= 122) ||
-        (code >= 48 && code <= 57) ||
-        code === 43 ||
-        code === 47
-      )
-    )
-      return false;
-  }
-  return true;
-}
-
-function validRecoveryBytes(data: RecoveryEntry): Buffer | undefined {
-  if (
-    typeof data.bytes !== 'string' ||
-    data.bytes.length > MAX_RECOVERY_BASE64_CHARS
-  )
-    return undefined;
-  const padding = data.bytes.endsWith('==')
-    ? 2
-    : data.bytes.endsWith('=')
-      ? 1
-      : 0;
-  const decodedBytes = (data.bytes.length / 4) * 3 - padding;
-  if (decodedBytes > MAX_ARTIFACT_BYTES || !validBase64(data.bytes))
-    return undefined;
-  const bytes = Buffer.from(data.bytes, 'base64');
-  try {
-    validateMetadata(data.metadata, bytes);
-    return bytes;
-  } catch {
-    return undefined;
-  }
-}
-
 export async function restoreArtifacts(
   ctx: Pick<ExtensionContext, 'sessionManager'>,
   root = artifactRoot(),
 ): Promise<number> {
   return withArtifactRootLock(root, async () => {
     const sessionId = ctx.sessionManager.getSessionId();
-    const recovered = new Map<string, RecoveryEntry>();
+    const recovered = new Map<
+      string,
+      { entry: RecoveryEntry; bytes: Buffer }
+    >();
     const revoked = new Set<string>();
     // getEntries(), deliberately not getBranch(): recovery must survive tree changes.
     for (const entry of ctx.sessionManager.getEntries()) {
@@ -695,16 +171,10 @@ export async function restoreArtifacts(
         recovered.delete(data.handle);
         revoked.add(data.handle);
       } else if (data.kind === 'recovery') {
-        const metadata = data.metadata;
-        if (
-          metadata &&
-          typeof metadata === 'object' &&
-          typeof metadata.handle === 'string' &&
-          HANDLE_RE.test(metadata.handle) &&
-          validRecoveryBytes(data)
-        ) {
-          recovered.set(metadata.handle, data);
-          revoked.delete(metadata.handle);
+        const bytes = validRecoveryBytes(data);
+        if (bytes) {
+          recovered.set(data.metadata.handle, { entry: data, bytes });
+          revoked.delete(data.metadata.handle);
         }
       }
     }
@@ -714,9 +184,7 @@ export async function restoreArtifacts(
       artifacts: {},
       revoked: [...revoked],
     };
-    for (const [handle, entry] of recovered) {
-      const bytes = validRecoveryBytes(entry);
-      if (!bytes) continue;
+    for (const [handle, { entry, bytes }] of recovered) {
       await putBlob(root, bytes, entry.metadata.sha256);
       manifest.artifacts[handle] = entry.metadata;
     }
@@ -725,25 +193,6 @@ export async function restoreArtifacts(
     );
     return Object.keys(manifest.artifacts).length;
   });
-}
-
-function sameMetadata(
-  left: ArtifactMetadata,
-  right: ArtifactMetadata,
-): boolean {
-  return (
-    left.handle === right.handle &&
-    left.sha256 === right.sha256 &&
-    left.size === right.size &&
-    left.producer === right.producer &&
-    left.contentClass === right.contentClass &&
-    left.mediaType === right.mediaType &&
-    left.creationSource === right.creationSource &&
-    left.encoding === right.encoding &&
-    left.lineCount === right.lineCount &&
-    left.itemCount === right.itemCount &&
-    left.createdAt === right.createdAt
-  );
 }
 
 /** Resolve an untrusted consumer reference from append-only session entries.
@@ -758,7 +207,7 @@ export function recoverArtifactFromEntries(
   expected: ArtifactMetadata,
 ): ResolvedArtifact | undefined {
   if (!HANDLE_RE.test(expected.handle)) return undefined;
-  let recovery: RecoveryEntry | undefined;
+  let recovery: { entry: RecoveryEntry; bytes: Buffer } | undefined;
   for (const entry of entries) {
     if (entry.type !== 'custom' || entry.customType !== ARTIFACT_ENTRY_TYPE)
       continue;
@@ -768,19 +217,17 @@ export function recoverArtifactFromEntries(
       recovery = undefined;
     } else if (
       data.kind === 'recovery' &&
-      data.metadata?.handle === expected.handle &&
-      validRecoveryBytes(data)
+      data.metadata?.handle === expected.handle
     ) {
-      recovery = data;
+      const bytes = validRecoveryBytes(data);
+      if (bytes) recovery = { entry: data, bytes };
     }
   }
   if (!recovery) return undefined;
   try {
-    const bytes = validRecoveryBytes(recovery);
-    if (!bytes) return undefined;
-    validateMetadata(expected, bytes);
-    if (!sameMetadata(recovery.metadata, expected)) return undefined;
-    return { metadata: recovery.metadata, bytes };
+    validateMetadata(expected, recovery.bytes);
+    if (!sameMetadata(recovery.entry.metadata, expected)) return undefined;
+    return { metadata: recovery.entry.metadata, bytes: recovery.bytes };
   } catch {
     return undefined;
   }
@@ -809,8 +256,4 @@ export async function resolveArtifact(
   }
   validateMetadata(metadata, bytes);
   return { metadata, bytes };
-}
-
-export async function clearArtifactRoot(root: string): Promise<void> {
-  await rm(root, { recursive: true, force: true });
 }

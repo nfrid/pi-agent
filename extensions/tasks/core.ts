@@ -17,18 +17,57 @@ export interface MutationResult {
   error?: string;
 }
 
+export interface MutationEffects {
+  updateUi: () => void;
+  persist: () => void;
+  updateOnError?: boolean;
+}
+
+export function executeMutation(
+  store: TaskStore,
+  action: Action,
+  params: Params,
+  effects?: MutationEffects,
+): MutationResult {
+  const snapshot = captureMutationSnapshot(store);
+  const result =
+    action === 'batch'
+      ? mutateBatchUnsafe(store, params.operations ?? [])
+      : mutateUnsafe(store, action, params);
+  if (result.error) restoreMutationSnapshot(store, snapshot);
+  if (!effects || (result.error && !effects.updateOnError)) return result;
+
+  try {
+    effects.updateUi();
+    if (!result.error && result.changed) effects.persist();
+  } catch (error) {
+    restoreMutationSnapshot(store, snapshot);
+    try {
+      effects.updateUi();
+    } catch {
+      // Preserve the original persistence/UI failure.
+    }
+    throw error;
+  }
+  return result;
+}
+
 export function mutate(
   store: TaskStore,
   action: Action,
   params: Params,
 ): MutationResult {
-  const snapshot = captureMutationSnapshot(store);
-  const result = mutateUnsafe(store, action, params);
-  if (result.error) restoreMutationSnapshot(store, snapshot);
-  return result;
+  return executeMutation(store, action, params);
 }
 
 export function mutateBatch(
+  store: TaskStore,
+  operations: NonNullable<Params['operations']>,
+): MutationResult {
+  return executeMutation(store, 'batch', { action: 'batch', operations });
+}
+
+function mutateBatchUnsafe(
   store: TaskStore,
   operations: NonNullable<Params['operations']>,
 ): MutationResult {
@@ -39,20 +78,17 @@ export function mutateBatch(
       error: 'operations are required for batch',
     };
 
-  const snapshot = captureMutationSnapshot(store);
   const messages: string[] = [];
   let changed = false;
   for (const operation of operations) {
     const step = mutateUnsafe(store, operation.action, operation);
     messages.push(step.error ? `error: ${step.message}` : step.message);
-    if (step.error) {
-      restoreMutationSnapshot(store, snapshot);
+    if (step.error)
       return {
         changed: false,
         message: messages.join('; '),
         error: step.error,
       };
-    }
     changed ||= step.changed;
   }
   return { changed, message: messages.join('; ') };

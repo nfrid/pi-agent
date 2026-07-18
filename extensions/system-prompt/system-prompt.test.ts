@@ -176,6 +176,63 @@ describe('prompt diagnostics helpers', () => {
   });
 });
 
+describe('prompt composition finalization', () => {
+  const occurrences = (text: string, value: string) =>
+    text.split(value).length - 1;
+
+  it('finalizes custom and generated prompts through the same shared tail', () => {
+    const common = {
+      cwd: 'C:\\work',
+      selectedTools: ['read'],
+      toolSnippets: { read: 'Read files' },
+      appendSystemPrompt: 'Appended guidance',
+      contextFiles: [{ path: '/work/AGENTS.md', content: 'Project rules' }],
+      skills: [skill('visible', '/work/visible/SKILL.md')],
+    };
+
+    const generated = buildSystemPrompt(common);
+    const custom = buildSystemPrompt({
+      ...common,
+      customPrompt: 'Custom role',
+    });
+    for (const prompt of [generated, custom]) {
+      for (const marker of [
+        'Appended guidance',
+        '<project_context>',
+        '/work/AGENTS.md',
+        '<available_skills>',
+        'Current date:',
+        'Current working directory: C:/work',
+      ]) {
+        expect(occurrences(prompt, marker), marker).toBe(1);
+      }
+      expect(prompt.indexOf('Appended guidance')).toBeLessThan(
+        prompt.indexOf('<project_context>'),
+      );
+    }
+
+    const generatedTail = generated.slice(
+      generated.indexOf('<project_context>'),
+    );
+    const customTail = custom.slice(custom.indexOf('<project_context>'));
+    expect(customTail).toBe(generatedTail);
+  });
+
+  it('omits skills when read is unavailable in either prompt branch', () => {
+    const common = {
+      cwd: '/work',
+      selectedTools: ['bash'],
+      toolSnippets: { bash: 'Run commands' },
+      skills: [skill('hidden-without-read', '/work/skill/SKILL.md')],
+    };
+
+    expect(buildSystemPrompt(common)).not.toContain('<available_skills>');
+    expect(
+      buildSystemPrompt({ ...common, customPrompt: 'Custom role' }),
+    ).not.toContain('<available_skills>');
+  });
+});
+
 describe('delegate routing prompt', () => {
   it('injects routing when delegate is available without a catalog tool call', () => {
     const prompt = buildSystemPrompt(

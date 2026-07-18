@@ -5,11 +5,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { queryViaCodexAppServer } from './app-server';
 
 let fixture = '';
-let originalPath = '';
+let originalPath: string | undefined;
 
 beforeEach(() => {
   fixture = mkdtempSync(path.join(tmpdir(), 'usage-app-server-'));
-  originalPath = process.env.PATH ?? '';
+  originalPath = process.env.PATH;
   const executable = path.join(fixture, 'codex');
   writeFileSync(
     executable,
@@ -32,11 +32,12 @@ lines.on('line', (line) => {
 `,
   );
   chmodSync(executable, 0o755);
-  process.env.PATH = `${fixture}${path.delimiter}${originalPath}`;
+  process.env.PATH = `${fixture}${path.delimiter}${originalPath ?? ''}`;
 });
 
 afterEach(() => {
-  process.env.PATH = originalPath;
+  if (originalPath === undefined) delete process.env.PATH;
+  else process.env.PATH = originalPath;
   delete process.env.FAKE_CODEX_HANG;
   rmSync(fixture, { recursive: true, force: true });
 });

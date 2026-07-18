@@ -21,13 +21,6 @@ const runtimeByApi = new WeakMap<
   { seen: Set<string>; eager: Set<string> }
 >();
 
-export function criticalRuleHashes(systemPrompt: string): Set<string> {
-  const match = systemPrompt.match(
-    /<scoped_instructions critical="true" hashes="([a-f0-9,]*)">/,
-  );
-  return new Set((match?.[1] ?? '').split(',').filter(Boolean));
-}
-
 interface Diagnostic {
   at: string;
   outcome: 'eager' | 'blocked' | 'applied' | 'rejected' | 'disabled';
@@ -48,7 +41,6 @@ function record(pi: ExtensionAPI, diagnostic: Omit<Diagnostic, 'at'>): void {
   });
 }
 
-/** Pure critical-rule composition used by diagnostics and tests. */
 export function appendEagerCriticalRules(
   systemPrompt: string,
   cwd: string,
@@ -70,7 +62,6 @@ export function appendEagerCriticalRules(
   };
 }
 
-/** Explicit final composition point called by the system-prompt owner. */
 export function finalizeScopedPrompt(
   pi: ExtensionAPI,
   systemPrompt: string,

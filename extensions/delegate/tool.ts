@@ -1,31 +1,33 @@
-import * as path from 'node:path';
 import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import { loadDelegateConfig } from './config';
-import {
-  attachIsolationSession,
-  type DependencyMode,
-  loadIsolation,
-  markIsolationRunning,
-  type PreparedIsolation,
-  prepareWritableIsolation,
-  restoreIsolationSession,
-} from './isolation';
+import { loadDelegateConfig, resolveDelegateRoute } from './config';
+import { loadIsolation } from './isolation';
 import { renderDelegateCall, renderDelegateResult } from './render';
-import { mapWithConcurrency, runDelegate } from './runner';
+import { mapWithConcurrency } from './runner';
+import { buildSessionSnapshotJsonl, resolveDelegateSession } from './session';
 import {
-  buildSessionSnapshotJsonl,
-  createDelegateSession,
-  resolveDelegateSession,
-  updateDelegateSessionRouting,
-} from './session';
+  assertDistinctContinuationTokens,
+  delegateToolResult,
+  failedLifecycleRun,
+  finalizeIsolatedRun,
+  invalidParams,
+  isolationDetails,
+  makeDetails,
+  markLifecycleFailure,
+  mergeDelegateRouteRequest,
+  writeWarnings,
+} from './supervision';
 import {
-  createRun,
-  type DelegatedRun,
-  type DelegateIsolationState,
-  type DelegateRouteState,
-} from './types';
+  cleanupFreshPreparedTask,
+  type DelegateTaskPlan,
+  type PreparedDelegateTask,
+  preflightDelegateContinuation,
+  prepareDelegateTask,
+  rollbackPreparedDelegateTasks,
+  runPreparedDelegateTask,
+} from './task-lifecycle';
+import { createRun, type DelegatedRun } from './types';
 
 const RouteSchema = Type.String({
   minLength: 1,
@@ -96,23 +98,9 @@ const DelegateParams = Type.Object({
   dependencies: Type.Optional(DependencySchema),
 });
 
-import {
-  assertDistinctContinuationTokens,
-  buildArtifactBackedHandoff,
-  discardFreshIsolation,
-  failedLifecycleRun,
-  finalizeIsolatedRun,
-  invalidParams,
-  isolationDetails,
-  makeDetails,
-  markLifecycleFailure,
-  mergeDelegateRouteRequest,
-  persistSessionRoute,
-  removeSessionSafely,
-  routingFor,
-  throwIfAllRunsFailed,
-  writeWarnings,
-} from './supervision';
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export function registerDelegateTool(pi: ExtensionAPI): void {
   pi.registerTool({
@@ -175,7 +163,7 @@ export function registerDelegateTool(pi: ExtensionAPI): void {
           return invalidParams(
             'Unknown or expired delegate continuation token.',
           );
-        const resolvedRoute = routingFor(
+        const resolvedRoute = resolveDelegateRoute(
           mergeDelegateRouteRequest(params.route, resumed?.routing),
           config,
         );
@@ -190,174 +178,87 @@ export function registerDelegateTool(pi: ExtensionAPI): void {
           return invalidParams(
             'Cannot delegate: failed to snapshot current session branch.',
           );
-        const writeRequested = params.allowWrites ?? false;
-        let allowWrites = false;
-        let isolation: PreparedIsolation | undefined;
-        const warnings: string[] = [];
-        let effectiveCwd = requestedCwd;
-        let scope = params.scope;
-        if (resumed?.isolationId) {
-          const record = loadIsolation(resumed.isolationId);
-          if (!record)
-            return invalidParams(
-              'The isolated worktree for this continuation is unavailable.',
-            );
-          isolation = restoreIsolationSession(
-            record,
-            resumed.token,
-            resumed.filePath,
-          );
-          effectiveCwd = path.join(
-            isolation.record.worktreePath,
-            isolation.record.workingDirectory,
-          );
-          scope = isolation.record.requestedScopes;
-          allowWrites = writeRequested;
-        } else if (writeRequested && resumed) {
-          warnings.push(
-            'This continuation was created read-only and cannot be elevated; running read-only.',
-          );
-        } else if (writeRequested) {
-          const prepared = await prepareWritableIsolation({
-            cwd: requestedCwd,
-            scopes: params.scope ?? [],
-            dependencyMode: params.dependencies as DependencyMode | undefined,
-          });
-          isolation = prepared.isolation;
-          if (isolation) {
-            effectiveCwd = path.join(
-              isolation.record.worktreePath,
-              isolation.record.workingDirectory,
-            );
-            allowWrites = true;
-          } else if (prepared.fallbackReason)
-            warnings.push(prepared.fallbackReason);
-        }
-        let session:
-          | NonNullable<ReturnType<typeof resolveDelegateSession>>
-          | undefined;
-        const routeChanged = Boolean(
-          resumed && params.route !== undefined && resolvedRoute.routing,
-        );
-        try {
-          session = resumed
-            ? params.route !== undefined && resolvedRoute.routing
-              ? persistSessionRoute(resumed, resolvedRoute.routing)
-              : resumed
-            : createDelegateSession({
-                cwd: effectiveCwd,
-                snapshotJsonl: snapshot ?? undefined,
-                isolationId: isolation?.record.id,
-                routing: resolvedRoute.routing,
-              });
-          if (isolation && !resumed)
-            isolation = attachIsolationSession(
-              isolation,
-              session.token,
-              session.filePath,
-            );
-        } catch (error) {
-          const cleanupWarnings: string[] = [];
-          if (!resumed && session) {
-            const warning = removeSessionSafely(session);
-            if (warning) cleanupWarnings.push(warning);
-          }
-          if (resumed && routeChanged) {
-            try {
-              updateDelegateSessionRouting(resumed.token, resumed.routing);
-            } catch (rollbackError) {
-              cleanupWarnings.push(
-                `Delegate route rollback failed for ${resumed.token}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-              );
-            }
-          }
-          if (isolation && !resumed) {
-            const cleanup = await discardFreshIsolation(isolation);
-            if (cleanup.warning) cleanupWarnings.push(cleanup.warning);
-          }
-          return invalidParams(
-            `Delegate setup failed before launch: ${error instanceof Error ? error.message : String(error)}${cleanupWarnings.length ? ` Cleanup warnings: ${cleanupWarnings.join(' ')}` : ''}`,
-          );
-        }
-        if (!session) return invalidParams('Delegate session setup failed.');
-        if (isolation) {
-          try {
-            isolation = {
-              ...isolation,
-              record: await markIsolationRunning(isolation.record.id),
-            };
-          } catch (error) {
-            const cleanupWarnings: string[] = [];
-            let retainedIsolation: DelegateIsolationState | undefined;
-            if (!resumed) {
-              const sessionWarning = removeSessionSafely(session);
-              if (sessionWarning) cleanupWarnings.push(sessionWarning);
-              const cleanup = await discardFreshIsolation(isolation);
-              if (cleanup.warning) cleanupWarnings.push(cleanup.warning);
-              retainedIsolation = cleanup.details;
-            } else {
-              retainedIsolation = isolationDetails(
-                loadIsolation(isolation.record.id) ?? isolation.record,
-              );
-            }
-            const failed = failedLifecycleRun(
-              params.task.trim(),
-              resolvedRoute.routing,
-              {
-                cwd: effectiveCwd,
-                context,
-                contextNote: params.contextNote,
-                scope,
-                writeRequested,
-                allowWrites,
-                ...(resumed ? { continuation: session.token } : {}),
-                warnings: [...warnings, ...cleanupWarnings],
-              },
-              error,
-            );
-            failed.isolation = retainedIsolation;
-            const runs = [failed];
-            const handoff = await buildArtifactBackedHandoff(pi, ctx, runs);
-            throwIfAllRunsFailed(runs, handoff);
-            return {
-              content: [{ type: 'text' as const, text: handoff }],
-              details: makeDetails('single', runs),
-            };
-          }
-        }
-        const run = await runDelegate({
-          cwd: effectiveCwd,
+
+        const plan: DelegateTaskPlan = {
           task: params.task.trim(),
+          requestedCwd,
           context,
-          sessionPath: session.filePath,
-          continuation: session.token,
-          resuming: Boolean(resumed),
           contextNote: params.contextNote,
-          scope,
+          scope: params.scope,
+          dependencyMode: params.dependencies,
+          writeRequested: params.allowWrites ?? false,
           routing: resolvedRoute.routing,
-          writeRequested,
-          allowWrites,
-          isolation,
-          timeoutMs: config.timeoutMs,
-          maxConcurrency: config.maxConcurrency,
-          signal,
-          onUpdate,
-          makeDetails: (runs) => makeDetails('single', runs),
-        });
-        run.warnings = [...(run.warnings ?? []), ...warnings];
+          resumed: resumed ?? undefined,
+          routeOverride: Boolean(resumed && params.route !== undefined),
+          snapshotJsonl: snapshot ?? undefined,
+          warnings: [],
+        };
+        let preflight: ReturnType<typeof preflightDelegateContinuation>;
         try {
-          await finalizeIsolatedRun(pi, ctx, run, isolation);
+          preflight = preflightDelegateContinuation(plan);
         } catch (error) {
-          if (isolation) await markLifecycleFailure(run, isolation, error);
+          return invalidParams(errorText(error));
+        }
+        let prepared: PreparedDelegateTask;
+        try {
+          prepared = await prepareDelegateTask(plan, preflight);
+        } catch (error) {
+          return invalidParams(
+            `Delegate setup failed before launch: ${errorText(error)}`,
+          );
+        }
+
+        let markedRunning = false;
+        let run: DelegatedRun;
+        try {
+          run = await runPreparedDelegateTask(prepared, {
+            timeoutMs: config.timeoutMs,
+            maxConcurrency: config.maxConcurrency,
+            signal,
+            onUpdate,
+            makeDetails: (runs) => makeDetails('single', runs),
+            onIsolationRunning: () => {
+              markedRunning = true;
+            },
+          });
+        } catch (error) {
+          if (!prepared.isolation || markedRunning) throw error;
+          const cleanup = !resumed
+            ? await cleanupFreshPreparedTask(prepared)
+            : {
+                warnings: [],
+                isolation: isolationDetails(
+                  loadIsolation(prepared.isolation.record.id) ??
+                    prepared.isolation.record,
+                ),
+              };
+          const failed = failedLifecycleRun(
+            plan.task,
+            plan.routing,
+            {
+              cwd: prepared.cwd,
+              context: plan.context,
+              contextNote: plan.contextNote,
+              scope: prepared.scope,
+              writeRequested: plan.writeRequested,
+              allowWrites: prepared.allowWrites,
+              ...(resumed ? { continuation: prepared.session.token } : {}),
+              warnings: [...prepared.warnings, ...cleanup.warnings],
+            },
+            error,
+          );
+          failed.isolation = cleanup.isolation;
+          return delegateToolResult(pi, ctx, 'single', [failed]);
+        }
+
+        try {
+          await finalizeIsolatedRun(pi, ctx, run, prepared.isolation);
+        } catch (error) {
+          if (prepared.isolation)
+            await markLifecycleFailure(run, prepared.isolation, error);
           else throw error;
         }
-        const runs = [run];
-        const handoff = await buildArtifactBackedHandoff(pi, ctx, runs);
-        throwIfAllRunsFailed(runs, handoff);
-        return {
-          content: [{ type: 'text' as const, text: handoff }],
-          details: makeDetails('single', runs),
-        };
+        return delegateToolResult(pi, ctx, 'single', [run]);
       }
 
       const tasks = (params.tasks ?? [])
@@ -391,7 +292,7 @@ export function registerDelegateTool(pi: ExtensionAPI): void {
           return invalidParams(
             'Unknown or expired delegate continuation token.',
           );
-        return session;
+        return session ?? undefined;
       });
       assertDistinctContinuationTokens(
         resumed.map((session) => session?.token),
@@ -406,8 +307,9 @@ export function registerDelegateTool(pi: ExtensionAPI): void {
         return invalidParams(
           'Parallel continuations reuse their original cwd, history, scope, and dependency mode; do not provide top-level replacements.',
         );
+
       const routings = tasks.map((item, index) =>
-        routingFor(
+        resolveDelegateRoute(
           mergeDelegateRouteRequest(
             item.route ?? params.route,
             resumed[index]?.routing,
@@ -426,203 +328,104 @@ export function registerDelegateTool(pi: ExtensionAPI): void {
         (item, index) =>
           resumed[index]?.cwd ?? item.cwd ?? params.cwd ?? ctx.cwd,
       );
-      const notes = tasks.map((item) => item.contextNote ?? params.contextNote);
       const scopes = tasks.map((item) => item.scope ?? params.scope);
       const writeRequests = tasks.map(
         (item) => item.allowWrites ?? params.allowWrites ?? false,
       );
       const warnings = writeWarnings(requestedCwds, writeRequests, scopes);
-      for (let i = 0; i < tasks.length; i++) {
+      for (let index = 0; index < tasks.length; index++) {
         if (
-          !resumed[i] &&
-          contexts[i] === 'branch' &&
-          !getSnapshot(requestedCwds[i])
+          !resumed[index] &&
+          contexts[index] === 'branch' &&
+          !getSnapshot(requestedCwds[index])
         )
           return invalidParams(
             'Cannot delegate: failed to snapshot current session branch.',
           );
       }
-      const cwds = [...requestedCwds];
-      const writes = writeRequests.map(() => false);
-      const isolations: Array<PreparedIsolation | undefined> = tasks.map(
-        () => undefined,
-      );
-      // Resolve every continuation before creating any fresh worktree so a bad
-      // continuation cannot strand earlier preparations.
-      for (let index = 0; index < tasks.length; index++) {
-        const resumedSession = resumed[index];
-        if (resumedSession?.isolationId) {
-          const record = loadIsolation(resumedSession.isolationId);
-          if (!record)
-            return invalidParams(
-              'The isolated worktree for a continuation is unavailable.',
-            );
-          isolations[index] = restoreIsolationSession(
-            record,
-            resumedSession.token,
-            resumedSession.filePath,
-          );
-          cwds[index] = path.join(record.worktreePath, record.workingDirectory);
-          scopes[index] = record.requestedScopes;
-          writes[index] = writeRequests[index];
-        } else if (writeRequests[index] && resumedSession) {
-          warnings[index].push(
-            'This continuation was created read-only and cannot be elevated; running read-only.',
-          );
-        }
-      }
-      const freshSessions: Array<
-        NonNullable<ReturnType<typeof resolveDelegateSession>>
-      > = [];
-      const routeRollbacks: Array<{
-        token: string;
-        routing: DelegateRouteState | undefined;
-      }> = [];
-      const sessions = [] as Array<
-        NonNullable<ReturnType<typeof resolveDelegateSession>>
-      >;
+
+      const plans: DelegateTaskPlan[] = tasks.map((item, index) => ({
+        task: item.task,
+        requestedCwd: requestedCwds[index],
+        context: contexts[index],
+        contextNote: item.contextNote ?? params.contextNote,
+        scope: scopes[index],
+        dependencyMode: item.dependencies ?? params.dependencies,
+        writeRequested: writeRequests[index],
+        routing: routings[index].routing,
+        resumed: resumed[index],
+        routeOverride: Boolean(
+          resumed[index] && (item.route ?? params.route) !== undefined,
+        ),
+        snapshotJsonl:
+          contexts[index] === 'branch'
+            ? (getSnapshot(requestedCwds[index]) ?? undefined)
+            : undefined,
+        warnings: warnings[index],
+      }));
+
+      const preflights = [] as ReturnType<
+        typeof preflightDelegateContinuation
+      >[];
       try {
-        for (let index = 0; index < tasks.length; index++) {
-          if (writeRequests[index] && !resumed[index]) {
-            const prepared = await prepareWritableIsolation({
-              cwd: requestedCwds[index],
-              scopes: scopes[index] ?? [],
-              dependencyMode: (tasks[index].dependencies ??
-                params.dependencies) as DependencyMode | undefined,
-            });
-            if (prepared.isolation) {
-              isolations[index] = prepared.isolation;
-              cwds[index] = path.join(
-                prepared.isolation.record.worktreePath,
-                prepared.isolation.record.workingDirectory,
-              );
-              writes[index] = true;
-            } else if (prepared.fallbackReason) {
-              warnings[index].push(prepared.fallbackReason);
-            }
-          }
-          const resumedSession = resumed[index];
-          const requestedRoute = tasks[index].route ?? params.route;
-          if (
-            resumedSession &&
-            requestedRoute !== undefined &&
-            routings[index].routing
-          )
-            routeRollbacks.push({
-              token: resumedSession.token,
-              routing: resumedSession.routing,
-            });
-          const session = resumedSession
-            ? requestedRoute !== undefined && routings[index].routing
-              ? persistSessionRoute(
-                  resumedSession,
-                  routings[index].routing as DelegateRouteState,
-                )
-              : resumedSession
-            : createDelegateSession({
-                cwd: cwds[index],
-                snapshotJsonl:
-                  contexts[index] === 'branch'
-                    ? (getSnapshot(requestedCwds[index]) ?? undefined)
-                    : undefined,
-                isolationId: isolations[index]?.record.id,
-                routing: routings[index].routing,
-              });
-          if (!resumedSession) freshSessions.push(session);
-          if (isolations[index] && !resumed[index])
-            isolations[index] = attachIsolationSession(
-              isolations[index] as PreparedIsolation,
-              session.token,
-              session.filePath,
-            );
-          sessions.push(session);
-        }
+        for (const plan of plans)
+          preflights.push(preflightDelegateContinuation(plan));
       } catch (error) {
-        const cleanupWarnings: string[] = [];
-        for (const session of freshSessions) {
-          const warning = removeSessionSafely(session);
-          if (warning) cleanupWarnings.push(warning);
-        }
-        for (const rollback of routeRollbacks.reverse()) {
-          try {
-            updateDelegateSessionRouting(rollback.token, rollback.routing);
-          } catch (rollbackError) {
-            cleanupWarnings.push(
-              `Delegate route rollback failed for ${rollback.token}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-            );
-          }
-        }
-        for (let index = 0; index < isolations.length; index++) {
-          const isolation = isolations[index];
-          if (!isolation || resumed[index]) continue;
-          const cleanup = await discardFreshIsolation(isolation);
-          if (cleanup.warning) cleanupWarnings.push(cleanup.warning);
-        }
+        return invalidParams(errorText(error));
+      }
+
+      const prepared: PreparedDelegateTask[] = [];
+      try {
+        for (let index = 0; index < plans.length; index++)
+          prepared.push(
+            await prepareDelegateTask(plans[index], preflights[index]),
+          );
+      } catch (error) {
+        const cleanupWarnings = await rollbackPreparedDelegateTasks(prepared);
         return invalidParams(
-          `Parallel delegate setup failed before launch: ${error instanceof Error ? error.message : String(error)}${cleanupWarnings.length ? ` Cleanup warnings: ${cleanupWarnings.join(' ')}` : ''}`,
+          `Parallel delegate setup failed before launch: ${errorText(error)}${cleanupWarnings.length ? ` Cleanup warnings: ${cleanupWarnings.join(' ')}` : ''}`,
         );
       }
-      const liveRuns = tasks.map((item, index) =>
-        createRun(item.task, routings[index].routing, {
-          cwd: cwds[index],
-          context: contexts[index],
-          contextNote: notes[index],
-          scope: scopes[index],
-          writeRequested: writeRequests[index],
-          allowWrites: writes[index],
-          continuation: sessions[index].token,
-          warnings: warnings[index],
+
+      const liveRuns = prepared.map((item) =>
+        createRun(item.plan.task, item.plan.routing, {
+          cwd: item.cwd,
+          context: item.plan.context,
+          contextNote: item.plan.contextNote,
+          scope: item.scope,
+          writeRequested: item.plan.writeRequested,
+          allowWrites: item.allowWrites,
+          continuation: item.session.token,
+          warnings: item.warnings,
         }),
       );
-      const warningText = [...new Set(warnings.flat())];
+      const warningText = [
+        ...new Set(prepared.flatMap((item) => item.warnings)),
+      ];
       const emit = () => {
         const done = liveRuns.filter((run) => run.exitCode !== -1).length;
         onUpdate?.({
           content: [
             {
               type: 'text',
-              text: `${warningText.length ? `${warningText.map((w) => `Warning: ${w}`).join('\n')}\n\n` : ''}Delegated tasks: ${done}/${liveRuns.length} complete`,
+              text: `${warningText.length ? `${warningText.map((warning) => `Warning: ${warning}`).join('\n')}\n\n` : ''}Delegated tasks: ${done}/${liveRuns.length} complete`,
             },
           ],
           details: makeDetails('parallel', [...liveRuns]),
         });
       };
       emit();
+
       const launchedFreshIsolationIds = new Set<string>();
       let runs: DelegatedRun[];
       try {
         runs = await mapWithConcurrency(
-          tasks,
+          prepared,
           config.maxConcurrency,
           async (item, index) => {
             let markedRunning = false;
             try {
-              if (isolations[index]) {
-                isolations[index] = {
-                  ...(isolations[index] as PreparedIsolation),
-                  record: await markIsolationRunning(
-                    (isolations[index] as PreparedIsolation).record.id,
-                  ),
-                };
-                markedRunning = true;
-                if (!resumed[index])
-                  launchedFreshIsolationIds.add(
-                    (isolations[index] as PreparedIsolation).record.id,
-                  );
-              }
-              const run = await runDelegate({
-                cwd: cwds[index],
-                task: item.task,
-                context: contexts[index],
-                sessionPath: sessions[index].filePath,
-                continuation: sessions[index].token,
-                resuming: Boolean(resumed[index]),
-                contextNote: notes[index],
-                scope: scopes[index],
-                routing: routings[index].routing,
-                writeRequested: writeRequests[index],
-                allowWrites: writes[index],
-                isolation: isolations[index],
+              const run = await runPreparedDelegateTask(item, {
                 timeoutMs: config.timeoutMs,
                 maxConcurrency: config.maxConcurrency,
                 signal,
@@ -631,52 +434,55 @@ export function registerDelegateTool(pi: ExtensionAPI): void {
                   if (current)
                     liveRuns[index] = {
                       ...current,
-                      warnings: warnings[index],
+                      warnings: item.warnings,
                     };
                   emit();
                 },
                 makeDetails: (items) => makeDetails('parallel', items),
+                onIsolationRunning: (isolation) => {
+                  markedRunning = true;
+                  if (!item.plan.resumed)
+                    launchedFreshIsolationIds.add(isolation.record.id);
+                },
               });
-              run.warnings = [...(run.warnings ?? []), ...warnings[index]];
-              await finalizeIsolatedRun(pi, ctx, run, isolations[index]);
+              await finalizeIsolatedRun(pi, ctx, run, item.isolation);
               liveRuns[index] = run;
               emit();
               return run;
             } catch (error) {
-              const isolation = isolations[index];
-              const cleanupWarnings: string[] = [];
-              let retainedIsolation: DelegateIsolationState | undefined;
-              if (isolation && !markedRunning && !resumed[index]) {
-                const sessionWarning = removeSessionSafely(sessions[index]);
-                if (sessionWarning) cleanupWarnings.push(sessionWarning);
-                const cleanup = await discardFreshIsolation(isolation);
-                if (cleanup.warning) cleanupWarnings.push(cleanup.warning);
-                retainedIsolation = cleanup.details;
-              } else if (isolation && !markedRunning) {
-                retainedIsolation = isolationDetails(
-                  loadIsolation(isolation.record.id) ?? isolation.record,
-                );
-              }
+              const cleanup =
+                item.isolation && !markedRunning && !item.plan.resumed
+                  ? await cleanupFreshPreparedTask(item)
+                  : {
+                      warnings: [],
+                      isolation:
+                        item.isolation && !markedRunning
+                          ? isolationDetails(
+                              loadIsolation(item.isolation.record.id) ??
+                                item.isolation.record,
+                            )
+                          : undefined,
+                    };
               const failed = failedLifecycleRun(
-                item.task,
-                routings[index].routing,
+                item.plan.task,
+                item.plan.routing,
                 {
-                  cwd: cwds[index],
-                  context: contexts[index],
-                  contextNote: notes[index],
-                  scope: scopes[index],
-                  writeRequested: writeRequests[index],
-                  allowWrites: writes[index],
-                  ...(!isolation || resumed[index] || markedRunning
-                    ? { continuation: sessions[index].token }
+                  cwd: item.cwd,
+                  context: item.plan.context,
+                  contextNote: item.plan.contextNote,
+                  scope: item.scope,
+                  writeRequested: item.plan.writeRequested,
+                  allowWrites: item.allowWrites,
+                  ...(!item.isolation || item.plan.resumed || markedRunning
+                    ? { continuation: item.session.token }
                     : {}),
-                  warnings: [...warnings[index], ...cleanupWarnings],
+                  warnings: [...item.warnings, ...cleanup.warnings],
                 },
                 error,
               );
-              if (isolation && markedRunning)
-                await markLifecycleFailure(failed, isolation, error);
-              else failed.isolation = retainedIsolation;
+              if (item.isolation && markedRunning)
+                await markLifecycleFailure(failed, item.isolation, error);
+              else failed.isolation = cleanup.isolation;
               liveRuns[index] = failed;
               emit();
               return failed;
@@ -685,29 +491,21 @@ export function registerDelegateTool(pi: ExtensionAPI): void {
         );
       } catch (error) {
         const cleanupWarnings: string[] = [];
-        for (let index = 0; index < isolations.length; index++) {
-          const isolation = isolations[index];
+        for (const item of prepared) {
           if (
-            !isolation ||
-            resumed[index] ||
-            launchedFreshIsolationIds.has(isolation.record.id)
+            !item.isolation ||
+            item.plan.resumed ||
+            launchedFreshIsolationIds.has(item.isolation.record.id)
           )
             continue;
-          const sessionWarning = removeSessionSafely(sessions[index]);
-          if (sessionWarning) cleanupWarnings.push(sessionWarning);
-          const cleanup = await discardFreshIsolation(isolation);
-          if (cleanup.warning) cleanupWarnings.push(cleanup.warning);
+          const cleanup = await cleanupFreshPreparedTask(item);
+          cleanupWarnings.push(...cleanup.warnings);
         }
         throw new Error(
-          `${error instanceof Error ? error.message : String(error)}${cleanupWarnings.length ? ` Cleanup warnings: ${cleanupWarnings.join(' ')}` : ''}`,
+          `${errorText(error)}${cleanupWarnings.length ? ` Cleanup warnings: ${cleanupWarnings.join(' ')}` : ''}`,
         );
       }
-      const handoff = await buildArtifactBackedHandoff(pi, ctx, runs);
-      throwIfAllRunsFailed(runs, handoff);
-      return {
-        content: [{ type: 'text' as const, text: handoff }],
-        details: makeDetails('parallel', runs),
-      };
+      return delegateToolResult(pi, ctx, 'parallel', runs);
     },
   });
 }

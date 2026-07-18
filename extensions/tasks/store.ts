@@ -1,4 +1,5 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { initialState } from './state';
 import type { State } from './types';
 
 export type TaskStore = {
@@ -12,7 +13,7 @@ export type TaskStore = {
 /** Runtime state owned by one task extension registration. */
 export function createTaskStore(): TaskStore {
   return {
-    state: { version: 1, nextId: 1, tasks: [] },
+    state: initialState(),
     lastCtx: undefined,
     completedPendingHide: new Set(),
     hiddenCompleted: new Set(),

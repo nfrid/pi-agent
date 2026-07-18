@@ -54,6 +54,12 @@ function textCharacters(content: unknown): number {
   );
 }
 
+const LEGACY_TODO_CONTEXT_TYPES = new Set([
+  'lean-todo-replay',
+  'lean-todo-replay-v2',
+]);
+const TODO_STATE_ENTRY_TYPE = 'lean-todo';
+
 export function summarizeContextMessages(
   messages: ReadonlyArray<{
     role: string;
@@ -75,8 +81,8 @@ export function summarizeContextMessages(
     }
     if (
       message.role === 'custom' &&
-      (message.customType === 'lean-todo-replay' ||
-        message.customType === 'lean-todo-replay-v2')
+      message.customType !== undefined &&
+      LEGACY_TODO_CONTEXT_TYPES.has(message.customType)
     ) {
       replayCount++;
       replayCharacters += textCharacters(message.content);
@@ -138,7 +144,8 @@ export function todoStateVersion(
   }>,
 ): number | undefined {
   for (const entry of [...entries].reverse()) {
-    if (entry.type !== 'custom' || entry.customType !== 'lean-todo') continue;
+    if (entry.type !== 'custom' || entry.customType !== TODO_STATE_ENTRY_TYPE)
+      continue;
     const data = entry.data;
     if (typeof data !== 'object' || data === null || !('state' in data))
       continue;

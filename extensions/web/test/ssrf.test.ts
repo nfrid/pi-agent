@@ -1,5 +1,43 @@
 import { describe, expect, it, vi } from 'vitest';
+import { validateRemoteUrl as validatePolicyUrl } from '../ssrf-policy';
 import { fetchRemoteUrl, validateRemoteUrl } from '../ssrf-protection';
+
+describe('SSRF address policy', () => {
+  it('rejects a DNS answer set containing any private address', async () => {
+    await expect(
+      validatePolicyUrl('https://example.test', {
+        lookup: async () => [
+          { address: '93.184.216.34', family: 4 },
+          { address: '10.0.0.1', family: 4 },
+        ],
+      }),
+    ).rejects.toThrow('Blocked internal address');
+  });
+
+  it('fails closed for empty and non-IP DNS answers', async () => {
+    await expect(
+      validatePolicyUrl('https://empty.test', { lookup: async () => [] }),
+    ).rejects.toThrow('no addresses returned');
+    await expect(
+      validatePolicyUrl('https://invalid.test', {
+        lookup: async () => [{ address: 'not-an-ip', family: 4 }],
+      }),
+    ).rejects.toThrow('Resolved non-IP address');
+  });
+
+  it('strictly validates configured CIDR exceptions', async () => {
+    await expect(
+      validatePolicyUrl('http://198.18.0.1', {
+        allowRanges: ['198.18.0.0/15'],
+      }),
+    ).resolves.toBeInstanceOf(URL);
+    await expect(
+      validatePolicyUrl('http://198.18.0.1', {
+        allowRanges: ['198.18.0.0/0'],
+      }),
+    ).rejects.toThrow('Invalid CIDR notation');
+  });
+});
 
 describe('SSRF protection', () => {
   it('blocks private DNS results', async () => {

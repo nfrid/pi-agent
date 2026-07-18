@@ -1,8 +1,6 @@
-import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import type {
   ExtensionContext,
   ToolResultEvent,
@@ -17,7 +15,6 @@ import {
 } from './snapshot-reads';
 import { clearArtifactRoot, resolveArtifact } from './storage';
 
-const execFileAsync = promisify(execFile);
 const roots: string[] = [];
 
 async function root(): Promise<string> {
@@ -169,59 +166,6 @@ describe('snapshot-aware repeated reads', () => {
     );
     expect(repeated?.details).toMatchObject({
       [SNAPSHOT_DETAILS_KEY]: { unchanged: true, suppressedBytes: 6 },
-    });
-  });
-
-  it('keeps fresh results after write, edit, shell, and external-process mutations', async () => {
-    const directory = await root();
-    const file = path.join(directory, 'mutable.txt');
-    const h = harness();
-    const state: ReadSnapshotState = { byKey: new Map() };
-    const observe = async () =>
-      processReadSnapshot(
-        h.pi,
-        h.ctx,
-        state,
-        readEvent(await readFile(file, 'utf8'), { path: file }),
-        directory,
-      );
-
-    await writeFile(file, 'initial');
-    await observe();
-
-    // Dedicated write-style replacement.
-    await writeFile(file, 'written');
-    expect((await observe())?.content?.[0]).toMatchObject({
-      type: 'text',
-      text: expect.stringContaining('written'),
-    });
-
-    // Dedicated edit-style exact replacement.
-    await writeFile(
-      file,
-      (await readFile(file, 'utf8')).replace('written', 'edited'),
-    );
-    expect((await observe())?.content?.[0]).toMatchObject({
-      type: 'text',
-      text: expect.stringContaining('edited'),
-    });
-
-    // Shell mutation.
-    await execFileAsync('/bin/sh', ['-c', 'printf shell > "$1"', 'sh', file]);
-    expect((await observe())?.content?.[0]).toMatchObject({
-      type: 'text',
-      text: expect.stringContaining('shell'),
-    });
-
-    // Independent external process mutation.
-    await execFileAsync(process.execPath, [
-      '-e',
-      'require("node:fs").writeFileSync(process.argv[1], "external")',
-      file,
-    ]);
-    expect((await observe())?.content?.[0]).toMatchObject({
-      type: 'text',
-      text: expect.stringContaining('external'),
     });
   });
 

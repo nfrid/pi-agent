@@ -22,7 +22,9 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-function harness() {
+function harness(
+  isFresh: (report: string, ctx: TestContext) => boolean = () => false,
+) {
   const queries: Array<{
     ctx: TestContext;
     signal: AbortSignal;
@@ -40,7 +42,7 @@ function harness() {
       return result.promise;
     },
     canRefresh: (ctx) => ctx.enabled,
-    isFresh: () => false,
+    isFresh,
     onLoading: (ctx) => loading.push(ctx.id),
     onReport: (report, ctx) => reports.push(`${ctx.id}:${report}`),
     onError: (ctx) => errors.push(ctx.id),
@@ -100,6 +102,26 @@ describe('RefreshCoordinator', () => {
     expect(h.reports).toEqual(['session:initial', 'session:settled']);
   });
 
+  it('coalesces repeated settled requests into one trailing query', async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    const ctx = { id: 'session', enabled: true };
+    void h.coordinator.sessionStart(ctx);
+
+    h.coordinator.settled(ctx);
+    await vi.advanceTimersByTimeAsync(20);
+    h.coordinator.settled(ctx);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(h.queries).toHaveLength(1);
+
+    h.queries[0]?.result.resolve('initial');
+    await flush();
+    expect(h.queries).toHaveLength(2);
+    h.queries[1]?.result.resolve('settled');
+    await flush();
+    expect(h.reports).toEqual(['session:initial', 'session:settled']);
+  });
+
   it('runs one trailing forced query and lets manual refresh await it', async () => {
     const h = harness();
     const ctx = { id: 'session', enabled: true };
@@ -141,6 +163,43 @@ describe('RefreshCoordinator', () => {
     expect(h.reports).toEqual(['new:current']);
   });
 
+  it('does not reuse a prior-model cache after generation advance', async () => {
+    const h = harness(() => true);
+    const oldModel = { id: 'old', enabled: true };
+    const newModel = { id: 'new', enabled: true };
+    const started = h.coordinator.sessionStart(oldModel);
+    h.queries[0]?.result.resolve('cached');
+    await started;
+
+    const changed = h.coordinator.modelChanged(newModel);
+    await h.coordinator.periodic(newModel);
+    expect(h.queries).toHaveLength(2);
+    expect(h.reports).toEqual(['old:cached']);
+
+    h.queries[1]?.result.resolve('current');
+    await changed;
+    expect(h.reports).toEqual(['old:cached', 'new:current']);
+  });
+
+  it('does not reuse a prior-session cache after restart', async () => {
+    const h = harness(() => true);
+    const oldSession = { id: 'old', enabled: true };
+    const newSession = { id: 'new', enabled: true };
+    const first = h.coordinator.sessionStart(oldSession);
+    h.queries[0]?.result.resolve('cached');
+    await first;
+    h.coordinator.sessionShutdown(oldSession);
+
+    const restarted = h.coordinator.sessionStart(newSession);
+    await h.coordinator.periodic(newSession);
+    expect(h.queries).toHaveLength(2);
+    expect(h.reports).toEqual(['old:cached']);
+
+    h.queries[1]?.result.resolve('current');
+    await restarted;
+    expect(h.reports).toEqual(['old:cached', 'new:current']);
+  });
+
   it('recovers after a failed query and can refresh again', async () => {
     const h = harness();
     const ctx = { id: 'session', enabled: true };
@@ -154,6 +213,33 @@ describe('RefreshCoordinator', () => {
     h.queries[1]?.result.resolve('recovered');
     await retry;
     expect(h.reports).toEqual(['session:recovered']);
+  });
+
+  it('resolves queued waiters and serializes restart behind cancelled work', async () => {
+    const h = harness();
+    const oldSession = { id: 'old', enabled: true };
+    const newSession = { id: 'new', enabled: true };
+    void h.coordinator.sessionStart(oldSession);
+    let manualDone = false;
+    const manual = h.coordinator.manual(oldSession).then(() => {
+      manualDone = true;
+    });
+
+    h.coordinator.sessionShutdown(oldSession);
+    await manual;
+    expect(manualDone).toBe(true);
+    expect(h.queries[0]?.signal.aborted).toBe(true);
+
+    const restarted = h.coordinator.sessionStart(newSession);
+    expect(h.queries).toHaveLength(1);
+    h.queries[0]?.result.resolve('stale');
+    await flush();
+    expect(h.reports).toEqual([]);
+    expect(h.queries).toHaveLength(2);
+
+    h.queries[1]?.result.resolve('current');
+    await restarted;
+    expect(h.reports).toEqual(['new:current']);
   });
 
   it('cancels settled work and suppresses in-flight completion on shutdown', async () => {

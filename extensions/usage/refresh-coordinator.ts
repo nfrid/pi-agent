@@ -70,6 +70,7 @@ export class RefreshCoordinator<Context, Report> {
 
   private advanceGeneration(): void {
     this.generation++;
+    this.cache = undefined;
     this.queryController?.abort();
     this.clearDebounce();
     if (this.trailing) {

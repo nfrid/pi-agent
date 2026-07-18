@@ -3,15 +3,11 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { EXT } from './constants';
-import { normalizeId } from './normalize';
+import { normalizeId, normalizeIds } from './normalize';
 import type { TaskStore } from './store';
 import type { SnapshotEntry, State } from './types';
 
 export const initialState = (): State => ({ version: 1, nextId: 1, tasks: [] });
-
-export function getState(store: TaskStore): State {
-  return store.state;
-}
 
 export function cloneState(store: TaskStore): State {
   return JSON.parse(JSON.stringify(store.state)) as State;
@@ -50,13 +46,7 @@ export function applySnapshot(store: TaskStore, snapshot: State): void {
     tasks: (snapshot.tasks ?? []).map((task) => ({
       ...task,
       id: normalizeId(task.id) ?? task.id,
-      dependsOn: [
-        ...new Set(
-          (task.dependsOn ?? [])
-            .map(normalizeId)
-            .filter((id): id is string => Boolean(id)),
-        ),
-      ],
+      dependsOn: normalizeIds(task.dependsOn),
       status: task.status ?? 'todo',
       createdAt: task.createdAt ?? Date.now(),
       updatedAt: task.updatedAt ?? Date.now(),

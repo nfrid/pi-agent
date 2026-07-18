@@ -6,7 +6,8 @@ import type {
   ToolResultEvent,
 } from '@earendil-works/pi-coding-agent';
 import { DEFAULT_MAX_LINES } from '@earendil-works/pi-coding-agent';
-import { putArtifact, resolveArtifact } from './storage';
+import { putArtifact } from './storage';
+import { resolveVerifiedArtifact } from './verified-resolution';
 
 export const SNAPSHOT_READS_FLAG = 'snapshot-reads';
 export const SNAPSHOT_DETAILS_KEY = 'artifacts.readSnapshot:v1';
@@ -127,10 +128,14 @@ async function priorIsExact(
   root?: string,
 ): Promise<boolean> {
   try {
-    const resolved = await resolveArtifact(ctx, prior.handle, root);
-    return (
-      resolved?.metadata.sha256 === prior.digest &&
-      sha256(resolved.bytes) === prior.digest
+    return Boolean(
+      await resolveVerifiedArtifact(
+        ctx,
+        prior.handle,
+        prior.digest,
+        undefined,
+        root,
+      ),
     );
   } catch {
     return false;

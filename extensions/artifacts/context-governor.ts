@@ -6,6 +6,10 @@ import type {
   ToolResultEvent,
 } from '@earendil-works/pi-coding-agent';
 import { resolveArtifact } from './storage';
+import {
+  type ArtifactResolver,
+  resolveVerifiedArtifact,
+} from './verified-resolution';
 
 type AgentMessage = ContextEvent['messages'][number];
 
@@ -24,7 +28,7 @@ const TRUSTED_WEB_TOOLS = new Set([
 ]);
 
 type GovernorContext = Pick<ExtensionContext, 'sessionManager'>;
-type Resolver = typeof resolveArtifact;
+type Resolver = ArtifactResolver;
 
 export interface ContextGovernorMarker {
   version: 1;
@@ -134,11 +138,13 @@ export async function markGovernorResult(
     event.content[0]?.type === 'text' ? event.content[0].text : undefined;
   if (!reference || text === undefined) return undefined;
   try {
-    const resolved = await resolver(ctx, reference.handle);
     if (
-      !resolved ||
-      resolved.metadata.sha256 !== reference.sha256 ||
-      sha256(resolved.bytes) !== reference.sha256
+      !(await resolveVerifiedArtifact(
+        ctx,
+        reference.handle,
+        reference.sha256,
+        resolver,
+      ))
     )
       return undefined;
   } catch {
@@ -278,12 +284,13 @@ export async function governContextMessages(
       }
       const verificationStarted = performance.now();
       try {
-        const artifact = await resolver(ctx, marker.handle);
-        if (
-          !artifact ||
-          artifact.metadata.sha256 !== marker.artifactSha256 ||
-          sha256(artifact.bytes) !== marker.artifactSha256
-        ) {
+        const artifact = await resolveVerifiedArtifact(
+          ctx,
+          marker.handle,
+          marker.artifactSha256,
+          resolver,
+        );
+        if (!artifact) {
           counters.failOpen += 1;
           return message;
         }
