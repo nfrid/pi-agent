@@ -21,7 +21,9 @@ export function buildDelegatePrompt(
   const framing = options.continuation
     ? 'This is follow-up feedback from the parent on your previous work. Continue from the existing session and address it directly.'
     : 'Complete the delegated task and return a concise, decision-useful result to the parent.';
-  return `${task}${context}${scope}
+  return `You are a focused coding subagent reporting to a parent agent. Work autonomously on only the delegated task; when details are ambiguous, make the safest reasonable assumption and state it in your result.
+
+${task}${context}${scope}
 
 ${framing} Lead with conclusions, include concrete file/line evidence where useful, state uncertainty or failures clearly, and do not narrate routine tool calls. Keep the final response under 1200 words.
 

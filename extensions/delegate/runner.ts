@@ -28,8 +28,9 @@ const MAX_JSON_LINE_BYTES = 1024 * 1024;
 const CONTROLLED_READ_ONLY_TOOLS = 'read,grep,find,ls';
 const SANDBOXED_READ_ONLY_TOOLS = 'read,inspect_shell,grep,find,ls';
 const WRITE_TOOLS = 'read,edit,write,grep,find,ls';
-const MAX_GLOBAL_CONCURRENCY = 3;
+const MAX_GLOBAL_CONCURRENCY = 5;
 const PROGRESS_UPDATE_INTERVAL_MS = 1000;
+const DELEGATE_EXTENSION = path.resolve(__dirname, 'index.ts');
 const SYSTEM_PROMPT_EXTENSION = path.resolve(
   __dirname,
   '../system-prompt/index.ts',
@@ -173,6 +174,8 @@ export function buildChildArgs(
     'json',
     '-p',
     '--no-extensions',
+    '--extension',
+    DELEGATE_EXTENSION,
     '--extension',
     SYSTEM_PROMPT_EXTENSION,
     ...(options.readOnlyBash ? ['--extension', INSPECT_SHELL_EXTENSION] : []),

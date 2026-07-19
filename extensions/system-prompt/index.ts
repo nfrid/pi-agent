@@ -7,12 +7,14 @@ import {
   aggregateAssistantUsage,
   formatPromptInfo,
   summarizeContextMessages,
-  todoStateVersion,
 } from './diagnostics';
-import { discoverAncestorSkillDefinitions, workspaceSkillPath } from './skills';
-import { delegateToolBoundary } from './tool-boundary';
+import { findOuterMetaSkillPath } from './skills';
 
-export { buildSystemPrompt, formatSkillsForPrompt } from './composition';
+export {
+  buildSystemPrompt,
+  filterGlobalContextFiles,
+  formatSkillsForPrompt,
+} from './composition';
 export {
   aggregateAssistantUsage,
   type ContextDiagnostics,
@@ -20,41 +22,32 @@ export {
   formatPromptInfo,
   type SizeEstimate,
   summarizeContextMessages,
-  todoStateVersion,
   type UsageDiagnostics,
 } from './diagnostics';
 export {
-  formatDelegateRoutingConfig,
-  formatDelegateRoutingPrompt,
-} from './routing';
-export {
-  discoverAncestorSkillDefinitions,
-  type SkillDefinition,
-  workspaceSkillPath,
+  findNearestGitRoot,
+  findOuterMetaSkillPath,
+  META_ROOT_MARKER,
 } from './skills';
-export { delegateToolBoundary } from './tool-boundary';
 
 const registered = new WeakSet<object>();
 
 export default function systemPrompt(pi: ExtensionAPI) {
   if (registered.has(pi)) return;
   registered.add(pi);
-  if (process.env.PI_DELEGATE_CHILD === '1')
-    pi.on('tool_call', (event, ctx) => {
-      const reason = delegateToolBoundary(event.toolName, event.input, ctx.cwd);
-      return reason ? { block: true, reason } : undefined;
-    });
   pi.on('resources_discover', (event) => {
-    const skills = workspaceSkillPath(event.cwd);
+    const skills = findOuterMetaSkillPath(event.cwd);
     return skills ? { skillPaths: [skills] } : undefined;
   });
 
   let contextCalls = 0;
   let lastContext = summarizeContextMessages([], contextCalls);
+  let lastPrompt = '';
 
   pi.on('session_start', () => {
     contextCalls = 0;
     lastContext = summarizeContextMessages([], contextCalls);
+    lastPrompt = '';
   });
 
   pi.on('context', (event) => {
@@ -67,6 +60,7 @@ export default function systemPrompt(pi: ExtensionAPI) {
       event.systemPromptOptions,
       String(ctx.mode),
     );
+    lastPrompt = rebuiltPrompt;
     return { systemPrompt: rebuiltPrompt };
   });
 
@@ -78,15 +72,13 @@ export default function systemPrompt(pi: ExtensionAPI) {
       const messages = branch
         .filter((entry) => entry.type === 'message')
         .map((entry) => entry.message);
+      const emittedPrompt =
+        lastPrompt || buildSystemPrompt(options, String(ctx.mode));
       const info = formatPromptInfo(
         options,
-        ctx.getSystemPrompt(),
+        emittedPrompt,
         lastContext,
         aggregateAssistantUsage(messages),
-        ctx.isProjectTrusted()
-          ? discoverAncestorSkillDefinitions(options.cwd)
-          : [],
-        todoStateVersion(branch),
         pi.getAllTools(),
       );
       if (ctx.hasUI) {

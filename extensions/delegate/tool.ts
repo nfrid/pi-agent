@@ -4,6 +4,7 @@ import { Type } from 'typebox';
 import { loadDelegateConfig, resolveDelegateRoute } from './config';
 import { loadIsolation } from './isolation';
 import { renderDelegateCall, renderDelegateResult } from './render';
+import { formatDelegateRoutingPrompt } from './routing';
 import { mapWithConcurrency } from './runner';
 import { buildSessionSnapshotJsonl, resolveDelegateSession } from './session';
 import {
@@ -102,7 +103,20 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function registerDelegateTool(pi: ExtensionAPI): void {
+export function delegatePromptGuidelines(cwd: string): string[] {
+  return [
+    'Prefer direct tools for small work. Select the lowest-cost catalog route whose relative intelligence and description fit the task; roles remain free-form in the task. Do not create research, implementation, test, or review stages unless each adds concrete value.',
+    'Use contextNote to give a fresh child only the relevant decisions, constraints, and prior findings; use branch only when exact parent history matters.',
+    'Continue a child when it already has useful task context and needs focused correction or extension; start fresh when its approach is unsuitable or an independent view is more valuable.',
+    "Parallelize only independent work. When one task depends on another's findings, inspect the first result before starting or continuing the next; writable tasks require non-overlapping scope directories and produce unapplied patches for parent review.",
+    'After a writable run, report the isolation ID and direct the user through /delegate-patch <id> show, diff, validate <script> or validate-command <argv...>, apply, and discard. Never imply that a child patch was applied automatically.',
+    'Treat delegated results as evidence rather than authority: use reported checks and concrete evidence, and verify directly or continue the child when important claims remain unsupported.',
+    'Delegate cannot be called by child processes.',
+    `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd)}`,
+  ];
+}
+
+export function registerDelegateTool(pi: ExtensionAPI, cwd: string): void {
   pi.registerTool({
     name: 'delegate',
     label: 'Delegate',
@@ -110,15 +124,7 @@ export function registerDelegateTool(pi: ExtensionAPI): void {
       'Delegate focused work to child Pi processes with isolated context windows. Fresh tasks require one exact user-owned catalog route; continuations reuse their persisted route when omitted. Routes are constrained by maxRelativeCost. Writable tasks require scope and run only in an isolated worktree with an OS-enforced sandbox; otherwise they fall back to read-only.',
     promptSnippet:
       'Delegate substantial focused exploration, review, validation, implementation, or independent parallel work when a child process would save context.',
-    promptGuidelines: [
-      'Prefer direct tools for small work. Select the lowest-cost catalog route whose relative intelligence and description fit the task; roles remain free-form in the task. Do not create research, implementation, test, or review stages unless each adds concrete value.',
-      'Use contextNote to give a fresh child only the relevant decisions, constraints, and prior findings; use branch only when exact parent history matters.',
-      'Continue a child when it already has useful task context and needs focused correction or extension; start fresh when its approach is unsuitable or an independent view is more valuable.',
-      "Parallelize only independent work. When one task depends on another's findings, inspect the first result before starting or continuing the next; writable tasks require non-overlapping scope directories and produce unapplied patches for parent review.",
-      'After a writable run, report the isolation ID and direct the user through /delegate-patch <id> show, diff, validate <script> or validate-command <argv...>, apply, and discard. Never imply that a child patch was applied automatically.',
-      'Treat delegated results as evidence rather than authority: use reported checks and concrete evidence, and verify directly or continue the child when important claims remain unsupported.',
-      'Delegate cannot be called by child processes.',
-    ],
+    promptGuidelines: delegatePromptGuidelines(cwd),
     parameters: DelegateParams,
     renderCall: renderDelegateCall,
     renderResult: renderDelegateResult,

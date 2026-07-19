@@ -1,26 +1,47 @@
-import type { BuildSystemPromptOptions } from '@earendil-works/pi-coding-agent';
-import { formatDelegateRoutingPrompt } from './routing';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import {
+  type BuildSystemPromptOptions,
+  formatSkillsForPrompt as formatPiSkillsForPrompt,
+  getAgentDir,
+} from '@earendil-works/pi-coding-agent';
+
+const GUIDELINES = {
+  KISS: 'Keep solutions proportionate to the problem. Prefer simple, direct designs, but use abstractions and future-proofing when they meaningfully improve clarity, robustness, reuse, or likely near-term extensibility. Avoid speculative flexibility and complexity that does not pay for itself.',
+  concise:
+    'Be concise, direct, and pragmatic. Lead with the answer or result. Skip restating the request, generic explanations, and filler. Add detail only when it materially improves correctness or usefulness.',
+
+  bash: [
+    'Prefer one composed bash call for dependent deterministic discovery, filtering, aggregation, or validation; run unrelated inspections in parallel.',
+    'Keep bash output bounded and relevant using targeted paths, filters, counts, excerpts, diffs, or compact structured summaries.',
+    'Use separate calls when results require semantic judgment, and before writes, destructive actions, or scope-expanding work; prefer dedicated read, edit, and write tools for file contents.',
+  ],
+};
 
 export function formatSkillsForPrompt(
   skills: NonNullable<BuildSystemPromptOptions['skills']>,
 ): string {
-  if (skills.length === 0) {
-    return '';
-  }
+  return formatPiSkillsForPrompt(skills);
+}
 
-  const skillEntries = skills
-    .filter((skill) => !skill.disableModelInvocation)
-    .map(
-      (skill) =>
-        `  <skill name="${escapeXml(skill.name)}" path="${escapeXml(skill.filePath)}">\n    ${escapeXml(skill.description)}\n  </skill>`,
-    )
-    .join('\n');
+export function filterGlobalContextFiles(
+  contextFiles: NonNullable<BuildSystemPromptOptions['contextFiles']>,
+  cwd: string,
+  agentDir = getAgentDir(),
+): NonNullable<BuildSystemPromptOptions['contextFiles']> {
+  const resolvedAgentDir = resolve(agentDir);
+  const fromAgentDir = relative(resolvedAgentDir, resolve(cwd));
+  const cwdIsInsideAgentDir =
+    fromAgentDir === '' ||
+    (!isAbsolute(fromAgentDir) &&
+      fromAgentDir !== '..' &&
+      !fromAgentDir.startsWith(
+        `..${process.platform === 'win32' ? '\\' : '/'}`,
+      ));
+  if (cwdIsInsideAgentDir) return contextFiles;
 
-  if (skillEntries.length === 0) {
-    return '';
-  }
-
-  return `\n\n<available_skills>\n${skillEntries}\n</available_skills>`;
+  return contextFiles.filter(
+    (file) => dirname(resolve(file.path)) !== resolvedAgentDir,
+  );
 }
 
 function escapeXml(value: string): string {
@@ -70,12 +91,6 @@ function finalizePrompt(
   return finalized;
 }
 
-const BASH_GUIDELINES = [
-  'Prefer one composed bash call for dependent deterministic discovery, filtering, aggregation, or validation; run unrelated inspections in parallel.',
-  'Keep bash output bounded and relevant using targeted paths, filters, counts, excerpts, diffs, or compact structured summaries.',
-  'Use separate calls when results require semantic judgment, and before writes, destructive actions, or scope-expanding work; prefer dedicated read, edit, and write tools for file contents.',
-];
-
 function enhanceToolSnippet(name: string, snippet: string): string {
   if (name !== 'bash') {
     return snippet;
@@ -84,51 +99,26 @@ function enhanceToolSnippet(name: string, snippet: string): string {
   return `${snippet} Prefer readable composed pipelines or temporary scripts for deterministic multi-step work, and keep stdout focused because it is added to model context.`;
 }
 
-function formatBashGuidance(): string {
-  return `\n\nBash guidance:\n${BASH_GUIDELINES.map((guideline) => `- ${guideline}`).join('\n')}`;
-}
-
 export function buildSystemPrompt(
   options: BuildSystemPromptOptions,
   mode?: string,
-  isDelegateChild = process.env.PI_DELEGATE_CHILD === '1',
 ): string {
   const {
-    customPrompt,
     selectedTools,
     toolSnippets,
     promptGuidelines,
-    appendSystemPrompt,
     cwd,
     contextFiles: providedContextFiles,
     skills: providedSkills,
   } = options;
-  const appendSection = appendSystemPrompt ? `\n\n${appendSystemPrompt}` : '';
-  const contextFiles = providedContextFiles ?? [];
+  const contextFiles = filterGlobalContextFiles(
+    providedContextFiles ?? [],
+    cwd,
+  );
   const skills = providedSkills ?? [];
   const tools = selectedTools || ['read', 'bash', 'edit', 'write'];
   const hasBash = tools.includes('bash');
   const hasRead = tools.includes('read');
-  const delegateRoutingSection =
-    !isDelegateChild && tools.includes('delegate')
-      ? formatDelegateRoutingPrompt(cwd)
-      : '';
-
-  if (customPrompt) {
-    let prompt = customPrompt;
-    if (isDelegateChild) {
-      prompt +=
-        '\n\nDelegated child context:\n- You are a focused subagent reporting to a parent agent. Complete only the delegated task and prioritize decision-useful findings over broad exploration.\n- Work autonomously without asking the user questions; when the task is ambiguous, make the safest reasonable assumption and state it in your result.';
-    }
-    if (appendSection) {
-      prompt += appendSection;
-    }
-    if (hasBash) {
-      prompt += formatBashGuidance();
-    }
-    prompt += delegateRoutingSection;
-    return finalizePrompt(prompt, contextFiles, skills, hasRead, cwd);
-  }
 
   const visibleTools = tools.filter((name) => !!toolSnippets?.[name]);
   const toolsList =
@@ -143,12 +133,18 @@ export function buildSystemPrompt(
 
   const guidelinesList: string[] = [];
   const guidelinesSet = new Set<string>();
-  const addGuideline = (guideline: string) => {
-    if (guidelinesSet.has(guideline)) {
+  const addGuidelines = (guidelines: string | string[]) => {
+    if (Array.isArray(guidelines)) {
+      guidelines.forEach((g) => {
+        addGuidelines(g);
+      });
       return;
     }
-    guidelinesSet.add(guideline);
-    guidelinesList.push(guideline);
+    if (guidelinesSet.has(guidelines)) {
+      return;
+    }
+    guidelinesSet.add(guidelines);
+    guidelinesList.push(guidelines);
   };
 
   const hasGrep = tools.includes('grep');
@@ -157,47 +153,33 @@ export function buildSystemPrompt(
 
   if (hasBash) {
     if (!hasGrep && !hasFind && !hasLs) {
-      addGuideline('Use bash for file operations like ls, rg, find');
+      addGuidelines('Use bash for file operations like ls, rg, find');
     }
-    for (const guideline of BASH_GUIDELINES) {
-      addGuideline(guideline);
-    }
+    addGuidelines(GUIDELINES.bash);
   }
 
   for (const guideline of promptGuidelines ?? []) {
     const normalized = guideline.trim();
-    if (normalized.length > 0) {
-      addGuideline(normalized);
-    }
+    if (normalized.length > 0) addGuidelines(normalized);
   }
 
   if (mode && mode !== 'tui') {
-    addGuideline(
+    addGuidelines(
       `Pi is running in ${mode} mode; avoid assuming interactive terminal UI is available.`,
     );
   }
 
-  if (isDelegateChild) {
-    addGuideline(
-      'You are a focused subagent reporting to a parent agent. Complete only the delegated task and prioritize decision-useful findings over broad exploration.',
-    );
-    addGuideline(
-      'Work autonomously without asking the user questions; when the task is ambiguous, make the safest reasonable assumption and state it in your result.',
-    );
-  }
-  addGuideline(
-    'Be concise, direct, and pragmatic. Lead with the answer or result. Skip restating the request, generic explanations, and filler. Add detail only when it materially improves correctness or usefulness.',
-  );
-  addGuideline('Show file paths clearly when working with files');
+  addGuidelines(GUIDELINES.KISS);
+  addGuidelines(GUIDELINES.concise);
+  addGuidelines('Show file paths clearly when working with files');
   const guidelines = guidelinesList
     .map((guideline) => `- ${guideline}`)
     .join('\n');
 
-  const role = isDelegateChild
-    ? 'You are a focused coding subagent operating inside pi, a coding agent harness. You complete a delegated task autonomously and return the result to a parent agent.'
-    : 'You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.';
+  const role =
+    'You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.';
 
-  let prompt = `${role}
+  const prompt = `${role}
 
 Available tools:
 ${toolsList}
@@ -206,11 +188,6 @@ In addition to the tools above, you may have access to other custom tools depend
 
 Guidelines:
 ${guidelines}`;
-
-  if (appendSection) {
-    prompt += appendSection;
-  }
-  prompt += delegateRoutingSection;
 
   return finalizePrompt(prompt, contextFiles, skills, hasRead, cwd);
 }

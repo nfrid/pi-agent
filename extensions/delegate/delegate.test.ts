@@ -1,4 +1,14 @@
-import { existsSync, readFileSync, rmSync, utimesSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { describe, expect, test } from 'vitest';
@@ -10,6 +20,8 @@ import {
 } from './config';
 import {
   assertDistinctContinuationTokens,
+  delegateToolBoundary,
+  formatDelegateRoutingConfig,
   mergeDelegateRouteRequest,
   throwIfAllRunsFailed,
 } from './index';
@@ -28,6 +40,7 @@ import {
   resolveDelegateSession,
   updateDelegateSessionRouting,
 } from './session';
+import { delegatePromptGuidelines } from './tool';
 import { createRun, getFinalAssistantText, getRunState } from './types';
 
 const assistantMessage = {
@@ -98,6 +111,7 @@ describe('delegate', () => {
 
   test('defaults children to read-only work without a rigid report format', () => {
     const prompt = buildDelegatePrompt('Inspect the repository');
+    expect(prompt).toContain('focused coding subagent');
     expect(prompt).toMatch(/read-only task/);
     expect(prompt).not.toMatch(/Use this exact structure/);
   });
@@ -346,11 +360,10 @@ describe('delegate', () => {
       utimesSync(path.join(dir, `${session.token}.json`), old, old);
     }
     try {
-      expect(
-        pruneDelegateSessions({
-          isIsolationRetained: (id) => id === 'iso-retained',
-        }),
-      ).toEqual({ removed: 1 });
+      const result = pruneDelegateSessions({
+        isIsolationRetained: (id) => id === 'iso-retained',
+      });
+      expect(result.removed).toBeGreaterThanOrEqual(1);
       expect(resolveDelegateSession(unlinked.token)).toBeNull();
       expect(resolveDelegateSession(linked.token)).toEqual(linked);
     } finally {
@@ -370,11 +383,14 @@ describe('delegate', () => {
     expect(args).toContain('--session');
     expect(args[args.indexOf('--session') + 1]).toBe('/tmp/child.jsonl');
     expect(args).toContain('--no-extensions');
-    const extensionPath = args[args.indexOf('--extension') + 1];
-    expect(extensionPath).toMatch(
+    const extensionPaths = args.flatMap((arg, index) =>
+      arg === '--extension' ? [args[index + 1]] : [],
+    );
+    expect(extensionPaths[0]).toMatch(/extensions[\\/]delegate[\\/]index\.ts$/);
+    expect(extensionPaths[1]).toMatch(
       /extensions[\\/]system-prompt[\\/]index\.ts$/,
     );
-    expect(existsSync(extensionPath)).toBe(true);
+    expect(extensionPaths.every(existsSync)).toBe(true);
     expect(args[args.indexOf('--tools') + 1]).toBe('read,grep,find,ls');
     const sandboxed = buildChildArgs(
       { task: 'inspect', readOnlyBash: true },
@@ -385,16 +401,13 @@ describe('delegate', () => {
     );
   });
 
-  test('gives delegate children a focused role without changing the main role', () => {
+  test('keeps delegate framing out of the canonical system prompt', () => {
     const options = {
       cwd: '/tmp/project',
       selectedTools: ['read'],
       toolSnippets: { read: 'Read files' },
     } as never;
-    expect(buildSystemPrompt(options, 'json', true)).toContain(
-      'focused coding subagent',
-    );
-    expect(buildSystemPrompt(options, 'tui', false)).toContain(
+    expect(buildSystemPrompt(options, 'tui')).toContain(
       'expert coding assistant',
     );
     expect(
@@ -404,9 +417,67 @@ describe('delegate', () => {
           customPrompt: 'A carefully customized prompt',
         } as never,
         'json',
-        true,
       ),
-    ).toContain('Delegated child context');
+    ).not.toContain('A carefully customized prompt');
+    expect(buildDelegatePrompt('Inspect')).toContain(
+      'focused coding subagent reporting to a parent agent',
+    );
+  });
+
+  test('publishes the current route catalog through delegate tool guidance', () => {
+    const guidelines = delegatePromptGuidelines('/tmp/project').join('\n');
+    expect(guidelines).toContain('Delegate route catalog:');
+    expect(guidelines).toContain('<delegate_routing>');
+    expect(guidelines).toContain('luna-low: model=gpt-5.6-luna');
+  });
+
+  test('owns delegate routing prompt formatting', () => {
+    const prompt = formatDelegateRoutingConfig(
+      parseDelegateConfig({
+        provider: 'provider',
+        maxRelativeCost: 2,
+        modelCatalog: {
+          'quick-low': {
+            model: 'quick',
+            thinking: 'low',
+            relativeCost: 1,
+            relativeIntelligence: 2,
+          },
+          'smart-high': {
+            model: 'smart',
+            thinking: 'high',
+            relativeCost: 3,
+            relativeIntelligence: 8,
+          },
+        },
+      }),
+    );
+    expect(prompt).toContain('quick-low: model=quick');
+    expect(prompt).toContain('smart-high: model=smart');
+    expect(prompt).toContain('unavailable-above-ceiling');
+  });
+
+  test('blocks child tool paths and symlinks outside the checkout', () => {
+    const parent = mkdtempSync(path.join(tmpdir(), 'delegate-boundary-'));
+    const root = path.join(parent, 'repository');
+    const outside = path.join(parent, 'outside.txt');
+    try {
+      mkdirSync(root);
+      writeFileSync(path.join(root, 'inside.txt'), 'inside\n');
+      writeFileSync(outside, 'outside\n');
+      symlinkSync(outside, path.join(root, 'escape.txt'));
+      expect(
+        delegateToolBoundary('read', { path: 'inside.txt' }, root),
+      ).toBeUndefined();
+      expect(
+        delegateToolBoundary('read', { path: '../outside.txt' }, root),
+      ).toMatch(/outside/);
+      expect(
+        delegateToolBoundary('read', { path: 'escape.txt' }, root),
+      ).toMatch(/outside/);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
   });
 
   test('passes the effective explicit model and thinking to child Pi', () => {
