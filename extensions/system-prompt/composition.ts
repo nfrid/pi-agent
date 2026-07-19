@@ -6,14 +6,14 @@ import {
 } from '@earendil-works/pi-coding-agent';
 
 const GUIDELINES = {
-  KISS: 'Keep solutions proportionate to the problem. Prefer simple, direct designs, but use abstractions and future-proofing when they meaningfully improve clarity, robustness, reuse, or likely near-term extensibility. Avoid speculative flexibility and complexity that does not pay for itself.',
+  KISS: 'Prefer the simplest design that solves the problem. Add structure only when it clearly pays for itself now.',
   concise:
-    'Be concise, direct, and pragmatic. Lead with the answer or result. Skip restating the request, generic explanations, and filler. Add detail only when it materially improves correctness or usefulness.',
+    'Be concise and direct. Lead with the answer. Skip restating the request and filler; add detail only when it improves correctness.',
 
   bash: [
-    'Prefer one composed bash call for dependent deterministic discovery, filtering, aggregation, or validation; run unrelated inspections in parallel.',
-    'Keep bash output bounded and relevant using targeted paths, filters, counts, excerpts, diffs, or compact structured summaries.',
-    'Use separate calls when results require semantic judgment, and before writes, destructive actions, or scope-expanding work; prefer dedicated read, edit, and write tools for file contents.',
+    'Combine related bash discovery into one pipeline; run unrelated checks in parallel.',
+    'Keep bash output bounded with targeted paths, filters, counts, excerpts, diffs, or short summaries.',
+    'Use separate calls when results need judgment, and before writes or destructive work; prefer read, edit, and write tools for file contents.',
   ],
 };
 
@@ -96,7 +96,7 @@ function enhanceToolSnippet(name: string, snippet: string): string {
     return snippet;
   }
 
-  return `${snippet} Prefer readable composed pipelines or temporary scripts for deterministic multi-step work, and keep stdout focused because it is added to model context.`;
+  return `${snippet} Prefer readable pipelines or short scripts for multi-step work; keep stdout focused because it enters model context.`;
 }
 
 export function buildSystemPrompt(
@@ -177,7 +177,7 @@ export function buildSystemPrompt(
     .join('\n');
 
   const role =
-    'You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.';
+    'You are a coding agent in pi. Help by reading files, running commands, and editing code.';
 
   const prompt = `${role}
 

@@ -84,7 +84,7 @@ describe('canonical prompt composition', () => {
       }),
       'json',
     );
-    expect(prompt).toContain('expert coding assistant');
+    expect(prompt).toContain('coding agent in pi');
     expect(prompt).toContain('CONTROLLED GUIDELINE');
     expect(prompt).toContain('Pi is running in json mode');
     expect(prompt).not.toContain('UNCONTROLLED CUSTOM PROMPT');

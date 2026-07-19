@@ -90,7 +90,7 @@ function buildInstructions(options: SearchOptions): string {
     options.numResults > 0
   ) {
     lines.push(
-      `Prefer around ${Math.min(Math.floor(options.numResults), 20)} distinct sources.`,
+      `Use up to ${Math.min(Math.floor(options.numResults), 20)} distinct sources.`,
     );
   }
 

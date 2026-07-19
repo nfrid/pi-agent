@@ -178,7 +178,7 @@ describe('cache-aware context governor', () => {
     expect(rendered.text).toContain('HEAD-');
     expect(rendered.text).toContain('-TAIL');
     expect(rendered.text).toContain(
-      `exact retrieval: artifact_retrieve handle=${handle} mode=bytes offset=0`,
+      `Exact retrieval: artifact_retrieve handle=${handle} mode=bytes offset=0`,
     );
     expect(firstCounters.reclaimedBytes).toBe(
       Buffer.byteLength(text, 'utf8') - firstCounters.retainedBytes,

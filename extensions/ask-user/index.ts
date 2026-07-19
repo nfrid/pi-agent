@@ -15,10 +15,9 @@ export default function askUser(pi: ExtensionAPI) {
     promptSnippet:
       'Ask the user a question with optional choices, optional markdown previews, and a custom-answer field',
     promptGuidelines: [
-      "Use ask_user_question when you genuinely need the user's input to continue; do not guess when a short question would resolve ambiguity.",
-      'Keep ask_user_question questions concise and include clear choices when the likely answers are known.',
-      'Add choice.preview markdown when code snippets, ASCII diagrams, mockups, or visual comparisons would help the user choose.',
-      'Prefer dead-simple ASCII diagrams in choice.preview: avoid fancy borders unless they add clarity; use short labels, arrows, and whitespace to make the comparison easy to scan.',
+      "Use ask_user_question when you need the user's input; do not guess when a short question would resolve ambiguity.",
+      'Keep questions concise and include clear choices when the likely answers are known.',
+      'Use choice.preview for short code or ASCII comparisons when it helps the user decide.',
     ],
     parameters: ParamsSchema,
     executionMode: 'sequential',

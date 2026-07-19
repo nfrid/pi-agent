@@ -3,6 +3,7 @@
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.6-sol",
   "defaultThinkingLevel": "medium",
+  "reserveTokens": 116384,
   "editorPaddingX": 1,
   "hideThinkingBlock": false,
   "quietStartup": true,
@@ -78,3 +79,4 @@
     }
   }
 }
+

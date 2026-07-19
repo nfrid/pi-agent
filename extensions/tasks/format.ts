@@ -91,7 +91,7 @@ export function todoStateText(store: TaskStore): string {
   return boundedTodoText(
     store,
     `Current todo state (${s.active} active, ${s.ready} ready, ${s.blocked} blocked, ${s.done} done).`,
-    'Prefer updating this state with the todo tool instead of free-form planning.',
+    'Update this state with the todo tool instead of free-form planning.',
   );
 }
 
@@ -100,6 +100,6 @@ export function turnSnapshotText(store: TaskStore): string {
   return boundedTodoText(
     store,
     `Todo state at the start of this user turn (${s.active} active, ${s.ready} ready, ${s.blocked} blocked, ${s.done} done).`,
-    'This snapshot is authoritative at this position. Later todo tool results and later snapshots supersede it; prefer the newest state evidence.',
+    'Later todo results and newer snapshots replace this.',
   );
 }

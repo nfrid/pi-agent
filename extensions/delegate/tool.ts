@@ -34,7 +34,7 @@ const RouteSchema = Type.String({
   minLength: 1,
   maxLength: 512,
   description:
-    'Exact route key from the user-owned delegate catalog. Required for fresh tasks; continuations reuse their persisted route when omitted.',
+    'Exact route key from the delegate catalog. Required for fresh tasks; continuations reuse their persisted route when omitted.',
 });
 const ContextSchema = StringEnum(['branch', 'fresh'] as const, {
   description:
@@ -51,7 +51,7 @@ const DependencySchema = StringEnum(['auto', 'link', 'isolated'] as const, {
 });
 const AllowWritesSchema = Type.Boolean({
   description:
-    'Request worktree-isolated edits. Fresh tasks require explicit existing scope paths; continuations must repeat true and reuse their original isolation. The returned patch is not applied automatically.',
+    'Request worktree-isolated edits. Fresh tasks require existing scope paths; continuations must repeat true and reuse their original isolation. The returned patch is not applied automatically.',
 });
 
 const TaskItem = Type.Object({
@@ -105,12 +105,12 @@ function errorText(error: unknown): string {
 
 export function delegatePromptGuidelines(cwd: string): string[] {
   return [
-    'Prefer direct tools for small work. Select the lowest-cost catalog route whose relative intelligence and description fit the task; roles remain free-form in the task. Do not create research, implementation, test, or review stages unless each adds concrete value.',
-    'Use contextNote to give a fresh child only the relevant decisions, constraints, and prior findings; use branch only when exact parent history matters.',
-    'Continue a child when it already has useful task context and needs focused correction or extension; start fresh when its approach is unsuitable or an independent view is more valuable.',
-    "Parallelize only independent work. When one task depends on another's findings, inspect the first result before starting or continuing the next; writable tasks require non-overlapping scope directories and produce unapplied patches for parent review.",
-    'After a writable run, report the isolation ID and direct the user through /delegate-patch <id> show, diff, validate <script> or validate-command <argv...>, apply, and discard. Never imply that a child patch was applied automatically.',
-    'Treat delegated results as evidence rather than authority: use reported checks and concrete evidence, and verify directly or continue the child when important claims remain unsupported.',
+    'Prefer direct tools for small work. Pick the cheapest catalog route that is smart enough; route descriptions are hints, not roles. Do not invent research/implementation/test/review stages unless each adds concrete value.',
+    'Use contextNote for the relevant decisions, constraints, and findings; use branch only when exact parent history matters.',
+    'Continue a child for focused correction or extension; start fresh when its approach is wrong or an independent view is better.',
+    "Parallelize only independent work. If one task depends on another's findings, inspect the first result before starting the next. Writable tasks need non-overlapping scopes and return unapplied patches for parent review.",
+    'After a writable run, report the isolation ID and walk the user through /delegate-patch <id> show, diff, validate <script> or validate-command <argv...>, apply, and discard. Never imply the patch was applied automatically.',
+    'Treat child results as claims to verify: trust reported checks and concrete evidence; re-check or continue the child when important claims lack support.',
     'Delegate cannot be called by child processes.',
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd)}`,
   ];
@@ -121,9 +121,9 @@ export function registerDelegateTool(pi: ExtensionAPI, cwd: string): void {
     name: 'delegate',
     label: 'Delegate',
     description:
-      'Delegate focused work to child Pi processes with isolated context windows. Fresh tasks require one exact user-owned catalog route; continuations reuse their persisted route when omitted. Routes are constrained by maxRelativeCost. Writable tasks require scope and run only in an isolated worktree with an OS-enforced sandbox; otherwise they fall back to read-only.',
+      'Delegate work to child Pi processes with isolated context. Fresh tasks need one exact catalog route; continuations reuse their persisted route when omitted. Routes respect maxRelativeCost. Writable tasks require scope and run in an isolated worktree sandbox; otherwise they are read-only.',
     promptSnippet:
-      'Delegate substantial focused exploration, review, validation, implementation, or independent parallel work when a child process would save context.',
+      'Delegate substantial exploration, review, validation, implementation, or independent parallel work when a child would save context.',
     promptGuidelines: delegatePromptGuidelines(cwd),
     parameters: DelegateParams,
     renderCall: renderDelegateCall,

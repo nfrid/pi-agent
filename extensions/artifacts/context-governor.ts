@@ -243,17 +243,9 @@ export function renderGovernedPreview(
   const retainedOriginalBytes =
     Buffer.byteLength(head, 'utf8') + Buffer.byteLength(tail, 'utf8');
   const omitted = bytes.length - retainedOriginalBytes;
-  let reclaimed = omitted;
-  let rendered = '';
-  // The decimal reclaimed value contributes to the preview size. Iterate to the
-  // stable exact value (normally two passes; bounded defensively).
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    rendered = `${head}\n\n[context governor: omitted ${omitted} UTF-8 bytes; reclaimed ${reclaimed} UTF-8 bytes; exact retrieval: ${marker.retrieval}]\n\n${tail}`;
-    const exact = bytes.length - Buffer.byteLength(rendered, 'utf8');
-    if (exact === reclaimed) break;
-    reclaimed = exact;
-  }
+  const rendered = `${head}\n\n[Truncated: omitted ${omitted} UTF-8 bytes. Exact retrieval: ${marker.retrieval}]\n\n${tail}`;
   const retainedBytes = Buffer.byteLength(rendered, 'utf8');
+  const reclaimed = bytes.length - retainedBytes;
   if (reclaimed <= 0 || retainedBytes + reclaimed !== bytes.length) {
     return { text, retainedBytes: bytes.length, reclaimedBytes: 0 };
   }

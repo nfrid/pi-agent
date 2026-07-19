@@ -11,14 +11,13 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
     name: TOOL,
     label: 'Todo',
     description:
-      'Single powerful todo/task tool with dependencies and ordered batch mutations. Keep implementation plans here; update it whenever tasks change.',
+      'Branch-local todos with dependencies and batch mutations. Use for multi-step work; update when the plan changes.',
     promptSnippet:
       'Manage the branch-local todo list with dependencies and statuses; batch known mutations into one call',
     promptGuidelines: [
-      "Use todo for real multi-step work only; do not call todo for trivial one-shot questions or just to restate the user's request.",
-      'Before each todo call, group every mutation you can already determine without inspecting an intermediate result into one batch call. Do not make consecutive todo calls when one ordered batch would suffice (for example, done T1 then start T2). Use replace only when rewriting the complete task set.',
-      'Use separate todo calls when a later mutation needs an ID or other result from the earlier call, or when you must inspect the resulting state before deciding it.',
-      'Use todo start/done/block/drop at meaningful state changes; avoid list unless the replay/widget is insufficient or the user asks.',
+      'Use todo for real multi-step work only; skip it for trivial one-shot questions or restating the request.',
+      'Batch known mutations in one call (e.g. done T1 then start T2). Split only when a later step needs a prior result. Use replace only when rewriting the complete task set.',
+      'Use start/done/block/drop at meaningful state changes; avoid list unless the widget is insufficient or the user asks.',
       'When adding dependencies, make depends_on point to prerequisite task ids; keep task text short and put context in notes.',
     ],
     parameters: paramsSchema,

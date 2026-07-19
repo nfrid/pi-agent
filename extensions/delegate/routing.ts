@@ -25,7 +25,7 @@ export function formatDelegateRoutingConfig(config: DelegateConfig): string {
     const description = compactPromptText(route.description);
     return `- ${escapeXml(route.route)}: model=${escapeXml(route.model)}; thinking=${route.thinking}; relativeCost=${route.relativeCost}; relativeIntelligence=${route.relativeIntelligence}${route.allowed ? '' : '; unavailable-above-ceiling'}${description ? `; ${escapeXml(description)}` : ''}`;
   });
-  return `<delegate_routing>\nUser-owned delegate routes. Fresh tasks must pass one exact route key; continuations reuse their persisted route when omitted. Select the lowest relativeCost whose relativeIntelligence and description fit the task. relativeIntelligence is role-neutral metadata. maxRelativeCost=${routing.maxRelativeCost}.\nCatalog routes:\n${catalog.length > 0 ? catalog.join('\n') : '- (none)'}\n</delegate_routing>`;
+  return `<delegate_routing>\nPick the cheapest catalog route that is smart enough for the task. Route descriptions are hints, not roles. Fresh tasks need an exact route key; continuations reuse their persisted route when omitted. maxRelativeCost=${routing.maxRelativeCost}.\nCatalog routes:\n${catalog.length > 0 ? catalog.join('\n') : '- (none)'}\n</delegate_routing>`;
 }
 
 export function formatDelegateRoutingPrompt(cwd: string): string {

@@ -111,7 +111,7 @@ describe('delegate', () => {
 
   test('defaults children to read-only work without a rigid report format', () => {
     const prompt = buildDelegatePrompt('Inspect the repository');
-    expect(prompt).toContain('focused coding subagent');
+    expect(prompt).toContain('coding subagent');
     expect(prompt).toMatch(/read-only task/);
     expect(prompt).not.toMatch(/Use this exact structure/);
   });
@@ -407,9 +407,7 @@ describe('delegate', () => {
       selectedTools: ['read'],
       toolSnippets: { read: 'Read files' },
     } as never;
-    expect(buildSystemPrompt(options, 'tui')).toContain(
-      'expert coding assistant',
-    );
+    expect(buildSystemPrompt(options, 'tui')).toContain('coding agent in pi');
     expect(
       buildSystemPrompt(
         {
@@ -420,7 +418,7 @@ describe('delegate', () => {
       ),
     ).not.toContain('A carefully customized prompt');
     expect(buildDelegatePrompt('Inspect')).toContain(
-      'focused coding subagent reporting to a parent agent',
+      'coding subagent reporting to a parent agent',
     );
   });
 
