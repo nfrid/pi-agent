@@ -185,7 +185,9 @@ export function buildSystemPrompt(
       'Work autonomously without asking the user questions; when the task is ambiguous, make the safest reasonable assumption and state it in your result.',
     );
   }
-  addGuideline('Be concise in your responses');
+  addGuideline(
+    'Be concise, direct, and pragmatic. Lead with the answer or result. Skip restating the request, generic explanations, and filler. Add detail only when it materially improves correctness or usefulness.',
+  );
   addGuideline('Show file paths clearly when working with files');
   const guidelines = guidelinesList
     .map((guideline) => `- ${guideline}`)
