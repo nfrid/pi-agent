@@ -2,8 +2,7 @@
 
 ## UX
 
-- replace "Working..." indicator to proper labels, like "Thinking...", "Waiting
-  for tool..." / "Waiting for tools (1/2)...", "Waiting for subagents..."
+- tba
 
 ## delegate
 
@@ -11,3 +10,7 @@
   the subagent finishes, the orchestrator gets its results same way it gets
   steering - right before its next turn. And maybe it can check on them or
   whatever.
+
+## new features
+
+- "computer use" or some sort of it
