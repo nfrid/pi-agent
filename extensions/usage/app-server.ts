@@ -1,7 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { TIMEOUT_MS } from './constants';
-import { normalizeAppServerResponse } from './normalize';
+import { normalizeAppServerResponse } from './parse';
 import type {
   AppServerResponse,
   PendingRpc,

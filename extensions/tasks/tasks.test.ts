@@ -5,18 +5,23 @@ import { Value } from 'typebox/value';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   EXACT_TODO_RESULT_PREFIX,
+  registerTodoContext,
   TODO_RESULT_ELIDED,
   TODO_SNAPSHOT_TYPE,
   type TodoContextMessages,
   transformTodoContext,
 } from './context';
-import { mutate, mutateBatch } from './core';
 import { turnSnapshotText } from './format';
-import { operationSchema, paramsSchema } from './schema';
-import { applySnapshot, cloneState, initialState } from './state';
-import { createTaskStore } from './store';
-import { registerTodoContext, registerTodoTool } from './tool';
-import { applyMutation, updateUi } from './ui-widget';
+import { operationSchema, paramsSchema } from './model';
+import { applyMutation, mutate, mutateBatch } from './mutations';
+import {
+  applySnapshot,
+  cloneState,
+  createTaskStore,
+  initialState,
+} from './store';
+import { registerTodoTool } from './tool';
+import { updateUi } from './widget';
 
 let store = createTaskStore();
 

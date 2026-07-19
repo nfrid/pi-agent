@@ -1,10 +1,15 @@
-import type { ContextEvent } from '@earendil-works/pi-coding-agent';
+import type {
+  ContextEvent,
+  ExtensionAPI,
+} from '@earendil-works/pi-coding-agent';
+import { turnSnapshotText } from './format';
 import {
   EXT,
   LEGACY_TODO_REPLAY_TYPE,
   LEGACY_TODO_SNAPSHOT_TYPE,
   TOOL,
-} from './constants';
+} from './model';
+import type { TaskStore } from './store';
 
 export const TODO_RESULT_ELIDED = '[todo tool result elided]';
 export const TODO_SNAPSHOT_TYPE = `${EXT}-turn-snapshot`;
@@ -101,4 +106,36 @@ export function transformTodoContext(
   return forceRecovery
     ? appendTodoSnapshot(transformed, snapshot, timestamp)
     : transformed;
+}
+
+export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
+  let needsRecovery = false;
+
+  pi.on('session_start', () => {
+    needsRecovery = false;
+  });
+  pi.on('session_compact', () => {
+    needsRecovery = true;
+  });
+  pi.on('session_tree', () => {
+    needsRecovery = true;
+  });
+  pi.on('before_agent_start', () => {
+    needsRecovery = false;
+    return {
+      message: {
+        customType: TODO_SNAPSHOT_TYPE,
+        content: turnSnapshotText(store),
+        display: false,
+      },
+    };
+  });
+  pi.on('context', (event) => ({
+    messages: transformTodoContext(
+      event.messages,
+      turnSnapshotText(store),
+      Date.now(),
+      needsRecovery,
+    ),
+  }));
 }

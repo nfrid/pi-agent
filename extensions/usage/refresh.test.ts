@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RefreshCoordinator } from './refresh-coordinator';
+import { RefreshCoordinator } from './refresh';
 
 interface TestContext {
   id: string;

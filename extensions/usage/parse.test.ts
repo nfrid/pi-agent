@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  normalizeAppServerResponse,
-  normalizeBackendPayload,
-} from './normalize';
+import { normalizeAppServerResponse, normalizeBackendPayload } from './parse';
 
 describe('usage normalization', () => {
   it('normalizes backend primary and additional rate limits in order', () => {

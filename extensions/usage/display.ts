@@ -2,9 +2,51 @@ import type {
   ExtensionContext,
   ThemeColor,
 } from '@earendil-works/pi-coding-agent';
-import { clampPercent } from './coerce';
-import { selectSnapshot } from './snapshot';
-import type { UsageReport } from './types';
+import { CODEX_PROVIDER_ID } from './constants';
+import { clampPercent, normalizeKey } from './parse';
+import type { PiModel, UsageReport, UsageSnapshot } from './types';
+
+export function isCodexModel(
+  model: ExtensionContext['model'],
+): model is PiModel {
+  return model?.provider === CODEX_PROVIDER_ID;
+}
+
+export function modelKeys(model: PiModel): Set<string> {
+  const keys = new Set<string>();
+  for (const raw of [model.id, model.name]) {
+    const key = normalizeKey(raw);
+    if (!key) continue;
+    keys.add(key);
+    const codexIndex = key.indexOf('codex');
+    if (codexIndex >= 0) keys.add(key.slice(codexIndex));
+  }
+  return keys;
+}
+
+export function snapshotKeys(snapshot: UsageSnapshot): string[] {
+  return [
+    normalizeKey(snapshot.limitId),
+    normalizeKey(snapshot.limitName),
+  ].filter((key): key is string => Boolean(key));
+}
+
+export function isPrimarySnapshot(snapshot: UsageSnapshot): boolean {
+  return snapshotKeys(snapshot).includes('codex');
+}
+
+export function selectSnapshot(
+  report: UsageReport,
+  model: PiModel,
+): UsageSnapshot | undefined {
+  const keys = modelKeys(model);
+  const exact = report.snapshots.find((snapshot) =>
+    snapshotKeys(snapshot).some((key) => keys.has(key)),
+  );
+  return (
+    exact ?? report.snapshots.find(isPrimarySnapshot) ?? report.snapshots[0]
+  );
+}
 
 function usageToColor(percent: number): ThemeColor {
   if (percent > 90) return 'error';

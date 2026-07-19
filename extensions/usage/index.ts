@@ -2,15 +2,14 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import { queryUsage } from './backends';
 import {
   REFRESH_INTERVAL_MS,
   SETTLED_REFRESH_DEBOUNCE_MS,
   STATUS_KEY,
 } from './constants';
-import { formatUsage } from './format';
-import { isCodexModel } from './model';
-import { queryUsage } from './query';
-import { RefreshCoordinator } from './refresh-coordinator';
+import { formatUsage, isCodexModel } from './display';
+import { RefreshCoordinator } from './refresh';
 import type { UsageReport } from './types';
 
 const registered = new WeakSet<object>();

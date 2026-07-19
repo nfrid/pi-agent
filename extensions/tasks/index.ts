@@ -1,10 +1,15 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { registerTodoCommands } from './commands';
-import { EXT } from './constants';
-import { flushCompletedPendingHide, persist, reconstruct } from './state';
-import { createTaskStore } from './store';
-import { registerTodoContext, registerTodoTool } from './tool';
-import { updateUi } from './ui-widget';
+import { registerTodoContext } from './context';
+import { EXT } from './model';
+import {
+  createTaskStore,
+  flushCompletedPendingHide,
+  persist,
+  reconstruct,
+} from './store';
+import { registerTodoTool } from './tool';
+import { registerTodoCommands } from './ui';
+import { updateUi } from './widget';
 
 const registered = new WeakSet<object>();
 

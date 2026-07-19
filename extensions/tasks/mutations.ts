@@ -1,15 +1,26 @@
-import { dashboard } from './format';
-import { findTask, newId, normalizeId, normalizeIds } from './ids';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent';
 import {
+  findTask,
+  newId,
+  normalizeId,
+  normalizeIds,
+  validateDependencyGraph,
+  validateDeps,
+} from './domain';
+import { dashboard } from './format';
+import type { Action, Params, Task } from './model';
+import {
+  bumpNextIdFromTasks,
   captureMutationSnapshot,
   forgetCompletedHide,
+  persist,
   restoreMutationSnapshot,
-} from './state';
-import type { TaskStore } from './store';
-import type { Action, Params, Task } from './types';
-import { validateDependencyGraph, validateDeps } from './validate';
-
-export { stats } from './queries';
+  type TaskStore,
+} from './store';
+import { updateUi } from './widget';
 
 export interface MutationResult {
   changed: boolean;
@@ -65,6 +76,21 @@ export function mutateBatch(
   operations: NonNullable<Params['operations']>,
 ): MutationResult {
   return executeMutation(store, 'batch', { action: 'batch', operations });
+}
+
+export function applyMutation(
+  store: TaskStore,
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  action: Action,
+  params: Params,
+  options: { updateOnError?: boolean } = {},
+): MutationResult {
+  return executeMutation(store, action, params, {
+    updateUi: () => updateUi(store, ctx),
+    persist: () => persist(store, pi),
+    updateOnError: options.updateOnError ?? true,
+  });
 }
 
 function mutateBatchUnsafe(
@@ -186,10 +212,7 @@ function mutateUnsafe(
     );
     state.tasks = tasks;
     state.nextId = 1;
-    for (const task of state.tasks) {
-      const match = /^T(\d+)$/.exec(task.id);
-      if (match) state.nextId = Math.max(state.nextId, Number(match[1]) + 1);
-    }
+    bumpNextIdFromTasks(state);
     return { changed: true, message: `replaced with ${tasks.length} tasks` };
   }
 

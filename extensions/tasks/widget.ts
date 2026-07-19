@@ -1,15 +1,8 @@
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from '@earendil-works/pi-coding-agent';
 import { truncateToWidth } from '@earendil-works/pi-tui';
-import { EXT, MAX_WIDGET_LINES } from './constants';
-import { executeMutation, type MutationResult } from './core';
+import { stats } from './domain';
 import { formatVisualTask } from './format';
-import { stats } from './queries';
-import { persist } from './state';
+import { EXT, MAX_WIDGET_LINES, type Task } from './model';
 import { type TaskStore, uiUpdatesPaused } from './store';
-import type { Action, Params, Task } from './types';
 
 function completedTaskVisible(store: TaskStore, task: Task): boolean {
   return task.status === 'done' && !store.hiddenCompleted.has(task.id);
@@ -76,19 +69,4 @@ export function updateUi(store: TaskStore, ctx = store.lastCtx): void {
       return lines.map((line) => truncateToWidth(line, width, '…'));
     },
   }));
-}
-
-export function applyMutation(
-  store: TaskStore,
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
-  action: Action,
-  params: Params,
-  options: { updateOnError?: boolean } = {},
-): MutationResult {
-  return executeMutation(store, action, params, {
-    updateUi: () => updateUi(store, ctx),
-    persist: () => persist(store, pi),
-    updateOnError: options.updateOnError ?? true,
-  });
 }

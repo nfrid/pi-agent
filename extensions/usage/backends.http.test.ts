@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { fetchWithTimeout } from './http';
+import { fetchWithTimeout } from './backends';
 
 afterEach(() => vi.unstubAllGlobals());
 

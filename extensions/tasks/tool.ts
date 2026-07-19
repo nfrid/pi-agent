@@ -1,14 +1,10 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
-import { ACTION_GLYPH, TOOL } from './constants';
-import { TODO_SNAPSHOT_TYPE, transformTodoContext } from './context';
-import { dashboard, turnSnapshotText } from './format';
-import { normalizeId } from './ids';
-import { stats } from './queries';
-import { paramsSchema } from './schema';
+import { normalizeId, stats } from './domain';
+import { dashboard } from './format';
+import { ACTION_GLYPH, paramsSchema, TOOL, type ToolDetails } from './model';
+import { applyMutation } from './mutations';
 import type { TaskStore } from './store';
-import type { ToolDetails } from './types';
-import { applyMutation } from './ui-widget';
 
 export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
   pi.registerTool<typeof paramsSchema, ToolDetails>({
@@ -86,36 +82,4 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
       );
     },
   });
-}
-
-export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
-  let needsRecovery = false;
-
-  pi.on('session_start', () => {
-    needsRecovery = false;
-  });
-  pi.on('session_compact', () => {
-    needsRecovery = true;
-  });
-  pi.on('session_tree', () => {
-    needsRecovery = true;
-  });
-  pi.on('before_agent_start', () => {
-    needsRecovery = false;
-    return {
-      message: {
-        customType: TODO_SNAPSHOT_TYPE,
-        content: turnSnapshotText(store),
-        display: false,
-      },
-    };
-  });
-  pi.on('context', (event) => ({
-    messages: transformTodoContext(
-      event.messages,
-      turnSnapshotText(store),
-      Date.now(),
-      needsRecovery,
-    ),
-  }));
 }

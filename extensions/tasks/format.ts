@@ -1,8 +1,7 @@
 import type { Theme } from '@earendil-works/pi-coding-agent';
-import { MAX_TODO_CONTEXT_CHARS, STATUS_GLYPH } from './constants';
-import { missingDeps, readyTasks, stats, unfinished } from './queries';
+import { missingDeps, readyTasks, stats, unfinished } from './domain';
+import { MAX_TODO_CONTEXT_CHARS, STATUS_GLYPH, type Task } from './model';
 import type { TaskStore } from './store';
-import type { Task } from './types';
 
 export function statusColor(
   task: Task,

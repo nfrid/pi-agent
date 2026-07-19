@@ -1,6 +1,6 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it } from 'vitest';
-import { queryViaPiAuth } from './pi-auth';
+import { queryViaPiAuth } from './backends';
 
 describe('Pi auth cancellation', () => {
   it('stops waiting for unresolved credential lookup when aborted', async () => {

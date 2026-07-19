@@ -1,10 +1,30 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { hasHeader } from './coerce';
-import { CODEX_USAGE_URL } from './constants';
-import { fetchWithTimeout } from './http';
-import { isCodexModel } from './model';
-import { normalizeBackendPayload } from './normalize';
+import { queryViaCodexAppServer } from './app-server';
+import { CODEX_USAGE_URL, TIMEOUT_MS } from './constants';
+import { isCodexModel } from './display';
+import { hasHeader, normalizeBackendPayload } from './parse';
 import type { BackendPayload, PiModel, UsageReport } from './types';
+
+export async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+  const callerSignal = init.signal;
+  const forwardAbort = () => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) forwardAbort();
+  else callerSignal?.addEventListener('abort', forwardAbort, { once: true });
+  const timer = setTimeout(
+    () => controller.abort(new Error('Usage request timed out.')),
+    TIMEOUT_MS,
+  );
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener('abort', forwardAbort);
+  }
+}
 
 async function resolvePiCodexHeaders(
   ctx: ExtensionContext,
@@ -74,4 +94,16 @@ export async function queryViaPiAuth(
     );
   }
   return normalizeBackendPayload(JSON.parse(text) as BackendPayload);
+}
+
+export async function queryUsage(
+  ctx: ExtensionContext,
+  signal: AbortSignal,
+): Promise<UsageReport> {
+  try {
+    return await queryViaPiAuth(ctx, signal);
+  } catch (error) {
+    if (signal.aborted) throw error;
+    return queryViaCodexAppServer(signal);
+  }
 }
