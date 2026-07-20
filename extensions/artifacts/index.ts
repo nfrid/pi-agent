@@ -18,6 +18,14 @@ import {
 
 const registered = new WeakSet<object>();
 
+export type { ArtifactReference } from './artifact-reference';
+export {
+  artifactRetrievalHint,
+  isArtifactRetrievalHint,
+  parseArtifactReference,
+  parseReadSnapshotReference,
+  parseToolResultArtifactReference,
+} from './artifact-reference';
 export {
   CONTEXT_GOVERNOR_DETAILS_KEY,
   CONTEXT_GOVERNOR_FLAG,

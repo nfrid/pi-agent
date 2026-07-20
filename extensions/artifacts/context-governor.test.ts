@@ -88,9 +88,16 @@ describe('cache-aware context governor', () => {
     ).toBeUndefined();
   });
 
-  it('admits only successful text results from the closed trusted set', () => {
+  it('admits any successful text result with a verified artifact reference', () => {
     for (const tool of ['web_search', 'fetch_content', 'get_search_content'])
       expect(eligibleGovernorResult(event(tool))).toBe(true);
+    expect(
+      eligibleGovernorResult(
+        event('custom_producer', 'payload', {
+          artifact: { handle, sha256: artifactSha256 },
+        }),
+      ),
+    ).toBe(true);
     expect(
       eligibleGovernorResult(
         event('read', 'read', {
@@ -101,8 +108,8 @@ describe('cache-aware context governor', () => {
         }),
       ),
     ).toBe(true);
-    for (const tool of ['delegate', 'todo', 'artifact_retrieve', 'custom'])
-      expect(eligibleGovernorResult(event(tool))).toBe(false);
+    for (const tool of ['todo', 'artifact_retrieve'])
+      expect(eligibleGovernorResult(event(tool, 'x', {}))).toBe(false);
     expect(eligibleGovernorResult({ ...event(), isError: true })).toBe(false);
     expect(
       eligibleGovernorResult({

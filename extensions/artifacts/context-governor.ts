@@ -5,6 +5,11 @@ import type {
   ExtensionContext,
   ToolResultEvent,
 } from '@earendil-works/pi-coding-agent';
+import {
+  artifactRetrievalHint,
+  isArtifactRetrievalHint,
+  parseToolResultArtifactReference,
+} from './artifact-reference';
 import { resolveArtifact } from './storage';
 import { utf8Head, utf8Tail } from './utf8-boundary';
 import {
@@ -22,11 +27,6 @@ export const CONTEXT_GOVERNOR_METRICS_ENTRY =
 export const CONTEXT_GOVERNOR_PREVIEW_BYTES = 2 * 1024;
 export const MIN_CONTEXT_GOVERNOR_PREVIEW_BYTES = 512;
 export const MAX_CONTEXT_GOVERNOR_PREVIEW_BYTES = 16 * 1024;
-const TRUSTED_WEB_TOOLS = new Set([
-  'web_search',
-  'fetch_content',
-  'get_search_content',
-]);
 
 type GovernorContext = Pick<ExtensionContext, 'sessionManager'>;
 type Resolver = ArtifactResolver;
@@ -81,40 +81,9 @@ function object(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function artifactReference(
-  event: ToolResultEvent,
-): { handle: string; sha256: string } | undefined {
-  const details = object(event.details);
-  if (!details) return undefined;
-  if (TRUSTED_WEB_TOOLS.has(event.toolName)) {
-    const artifact = object(details.artifact);
-    if (
-      typeof artifact?.handle === 'string' &&
-      typeof artifact.sha256 === 'string'
-    ) {
-      return { handle: artifact.handle, sha256: artifact.sha256 };
-    }
-    return undefined;
-  }
-  if (event.toolName === 'read') {
-    const snapshot = object(details['artifacts.readSnapshot:v1']);
-    if (
-      typeof snapshot?.handle === 'string' &&
-      typeof snapshot.digest === 'string'
-    ) {
-      return { handle: snapshot.handle, sha256: snapshot.digest };
-    }
-  }
-  return undefined;
-}
-
 /** Closed eligibility predicate: anything uncertain remains inline. */
 export function eligibleGovernorResult(event: ToolResultEvent): boolean {
-  if (
-    event.isError ||
-    (!TRUSTED_WEB_TOOLS.has(event.toolName) && event.toolName !== 'read')
-  )
-    return false;
+  if (event.isError) return false;
   if (event.content.length !== 1 || event.content[0]?.type !== 'text')
     return false;
   const details = object(event.details);
@@ -123,7 +92,7 @@ export function eligibleGovernorResult(event: ToolResultEvent): boolean {
     (typeof details?.failed === 'number' && details.failed > 0)
   )
     return false;
-  return artifactReference(event) !== undefined;
+  return parseToolResultArtifactReference(event.details) !== undefined;
 }
 
 /** Mark a result only after its session-scoped artifact is resolved and hash-verified. */
@@ -134,7 +103,7 @@ export async function markGovernorResult(
   previewBytes = CONTEXT_GOVERNOR_PREVIEW_BYTES,
 ): Promise<{ details: Record<string, unknown> } | undefined> {
   if (!eligibleGovernorResult(event)) return undefined;
-  const reference = artifactReference(event);
+  const reference = parseToolResultArtifactReference(event.details);
   const text =
     event.content[0]?.type === 'text' ? event.content[0].text : undefined;
   if (!reference || text === undefined) return undefined;
@@ -159,7 +128,7 @@ export async function markGovernorResult(
     artifactSha256: reference.sha256,
     inlineSha256: sha256(text),
     tool: event.toolName,
-    retrieval: `artifact_retrieve handle=${reference.handle} mode=lines offset=0`,
+    retrieval: artifactRetrievalHint(reference),
     originalBytes,
     previewBytes,
   };
@@ -184,10 +153,10 @@ export function parseGovernorMarker(
     typeof marker.inlineSha256 !== 'string' ||
     !/^[a-f0-9]{64}$/.test(marker.inlineSha256) ||
     typeof marker.tool !== 'string' ||
-    (!TRUSTED_WEB_TOOLS.has(marker.tool) && marker.tool !== 'read') ||
     typeof marker.retrieval !== 'string' ||
-    marker.retrieval !==
-      `artifact_retrieve handle=${marker.handle} mode=lines offset=0` ||
+    !isArtifactRetrievalHint(marker.retrieval, {
+      handle: marker.handle,
+    }) ||
     typeof marker.originalBytes !== 'number' ||
     !Number.isSafeInteger(marker.originalBytes) ||
     marker.originalBytes < 0 ||

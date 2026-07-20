@@ -4,6 +4,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import {
   type ArtifactMetadata,
+  type ArtifactReference,
   artifactProducer,
   MAX_ARTIFACT_BYTES,
 } from '../artifacts';
@@ -103,7 +104,15 @@ export async function persistWebResult(
   }
 }
 
-export function artifactDetails(artifact: ArtifactMetadata) {
+export function artifactDetails(
+  artifact: ArtifactMetadata,
+): ArtifactReference & {
+  size: number;
+  producer: ArtifactMetadata['producer'];
+  contentClass: ArtifactMetadata['contentClass'];
+  creationSource: string;
+  itemCount?: number;
+} {
   return {
     handle: artifact.handle,
     sha256: artifact.sha256,
@@ -134,9 +143,12 @@ function truncatedPreviewNotice(
   artifactHandle?: string,
   continuationAvailable = true,
 ): string {
+  const noticeBudget = MAX_INLINE_CHARS - 512;
   if (!continuationAvailable)
     return `[Content truncated: showing ${selectedChars} of ${contentLength} characters. ${CAPTURE_LIMIT_WARNING}]`;
-  return `[Content truncated: showing ${selectedChars} of ${contentLength} characters. Use get_search_content({ responseId: "${responseId}", ${selector}, offset: ${nextOffset} }) to continue.${artifactHandle ? ` Exact payload artifact (artifact_retrieve): ${artifactHandle}.` : ''}]`;
+  const base = `[Content truncated: showing ${selectedChars} of ${contentLength} characters. Use get_search_content({ responseId: "${responseId}", ${selector}, offset: ${nextOffset} }) to continue.${artifactHandle ? ` Exact payload artifact (artifact_retrieve): ${artifactHandle}.` : ''}]`;
+  if (base.length <= noticeBudget) return base;
+  return `[Content truncated: showing ${selectedChars} of ${contentLength} characters. Use get_search_content to continue.${artifactHandle ? ` Exact payload artifact (artifact_retrieve): ${artifactHandle}.` : ''}]`;
 }
 
 export function boundedPreview(
@@ -151,23 +163,19 @@ export function boundedPreview(
     return { ...page, rendered: page.text };
   }
 
-  let budget = MAX_INLINE_CHARS - 512;
-  let page = pageContent(content, { maxChars: budget });
-  let notice = '';
-  for (let iteration = 0; iteration < 3; iteration++) {
-    notice = truncatedPreviewNotice(
-      content.length,
-      responseId,
-      selector,
-      page.details.selectedChars,
-      page.details.nextOffset,
-      artifactHandle,
-      continuationAvailable,
-    );
-    budget = Math.max(2, MAX_INLINE_CHARS - notice.length - 2);
-    page = pageContent(content, { maxChars: budget });
-  }
-  notice = truncatedPreviewNotice(
+  const noticeBudget = MAX_INLINE_CHARS - 512;
+  const notice = truncatedPreviewNotice(
+    content.length,
+    responseId,
+    selector,
+    Math.min(content.length, noticeBudget),
+    noticeBudget,
+    artifactHandle,
+    continuationAvailable,
+  );
+  const budget = Math.max(2, MAX_INLINE_CHARS - notice.length - 2);
+  const page = pageContent(content, { maxChars: budget });
+  const finalNotice = truncatedPreviewNotice(
     content.length,
     responseId,
     selector,
@@ -176,5 +184,5 @@ export function boundedPreview(
     artifactHandle,
     continuationAvailable,
   );
-  return { ...page, rendered: `${page.text}\n\n${notice}` };
+  return { ...page, rendered: `${page.text}\n\n${finalNotice}` };
 }
