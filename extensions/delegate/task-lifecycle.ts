@@ -8,17 +8,14 @@ import {
   prepareWritableIsolation,
   restoreIsolationSession,
 } from './isolation';
+import { discardFreshIsolation } from './isolation-lifecycle';
+import { persistSessionRoute, removeSessionSafely } from './routing-warnings';
 import { type RunDelegateOptions, runDelegate } from './runner';
 import {
   createDelegateSession,
   type DelegateSession,
   updateDelegateSessionRouting,
 } from './session';
-import {
-  discardFreshIsolation,
-  persistSessionRoute,
-  removeSessionSafely,
-} from './supervision';
 import type {
   DelegateContext,
   DelegatedRun,

@@ -1,34 +1,15 @@
 import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import { loadDelegateConfig, resolveDelegateRoute } from './config';
-import { loadIsolation } from './isolation';
+import { loadDelegateConfig } from './config';
+import {
+  executeParallelDelegate,
+  executeSingleDelegate,
+} from './orchestration';
 import { renderDelegateCall, renderDelegateResult } from './render';
 import { formatDelegateRoutingPrompt } from './routing';
-import { mapWithConcurrency } from './runner';
-import { buildSessionSnapshotJsonl, resolveDelegateSession } from './session';
-import {
-  assertDistinctContinuationTokens,
-  delegateToolResult,
-  failedLifecycleRun,
-  finalizeIsolatedRun,
-  invalidParams,
-  isolationDetails,
-  makeDetails,
-  markLifecycleFailure,
-  mergeDelegateRouteRequest,
-  writeWarnings,
-} from './supervision';
-import {
-  cleanupFreshPreparedTask,
-  type DelegateTaskPlan,
-  type PreparedDelegateTask,
-  preflightDelegateContinuation,
-  prepareDelegateTask,
-  rollbackPreparedDelegateTasks,
-  runPreparedDelegateTask,
-} from './task-lifecycle';
-import { createRun, type DelegatedRun } from './types';
+import { buildSessionSnapshotJsonl } from './session';
+import { invalidParams } from './supervision';
 
 const RouteSchema = Type.String({
   minLength: 1,
@@ -99,10 +80,6 @@ const DelegateParams = Type.Object({
   dependencies: Type.Optional(DependencySchema),
 });
 
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 export function delegatePromptGuidelines(cwd: string): string[] {
   return [
     'Prefer direct tools for small work. Do not invent research/implementation/test/review stages unless each adds concrete value.',
@@ -132,13 +109,13 @@ export function registerDelegateTool(pi: ExtensionAPI, cwd: string): void {
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       const config = loadDelegateConfig(ctx.cwd);
       const snapshots = new Map<string, string | null>();
-      const getSnapshot = (cwd: string) => {
-        if (snapshots.has(cwd)) return snapshots.get(cwd) ?? null;
+      const getSnapshot = (targetCwd: string) => {
+        if (snapshots.has(targetCwd)) return snapshots.get(targetCwd) ?? null;
         const snapshot = buildSessionSnapshotJsonl(ctx.sessionManager, {
-          cwd,
+          cwd: targetCwd,
           excludeToolCallId: toolCallId,
         });
-        snapshots.set(cwd, snapshot);
+        snapshots.set(targetCwd, snapshot);
         return snapshot;
       };
 
@@ -151,367 +128,9 @@ export function registerDelegateTool(pi: ExtensionAPI, cwd: string): void {
           'Provide exactly one delegation mode: task or tasks.',
         );
 
-      if (hasSingle && typeof params.task === 'string') {
-        if (
-          params.continuation &&
-          (params.cwd !== undefined ||
-            params.context !== undefined ||
-            params.scope !== undefined ||
-            params.dependencies !== undefined)
-        )
-          return invalidParams(
-            'A continuation reuses its original cwd, context, scope, and dependency mode; do not provide replacements.',
-          );
-        const resumed = params.continuation
-          ? resolveDelegateSession(params.continuation)
-          : undefined;
-        if (params.continuation && !resumed)
-          return invalidParams(
-            'Unknown or expired delegate continuation token.',
-          );
-        const resolvedRoute = resolveDelegateRoute(
-          mergeDelegateRouteRequest(params.route, resumed?.routing),
-          config,
-        );
-        if (resolvedRoute.error) return invalidParams(resolvedRoute.error);
-        const requestedCwd = resumed?.cwd ?? params.cwd ?? ctx.cwd;
-        const context = resumed ? 'continuation' : (params.context ?? 'fresh');
-        const snapshot =
-          !resumed && context === 'branch'
-            ? getSnapshot(requestedCwd)
-            : undefined;
-        if (!resumed && context === 'branch' && !snapshot)
-          return invalidParams(
-            'Cannot delegate: failed to snapshot current session branch.',
-          );
-
-        const plan: DelegateTaskPlan = {
-          task: params.task.trim(),
-          requestedCwd,
-          context,
-          contextNote: params.contextNote,
-          scope: params.scope,
-          dependencyMode: params.dependencies,
-          writeRequested: params.allowWrites ?? false,
-          routing: resolvedRoute.routing,
-          resumed: resumed ?? undefined,
-          routeOverride: Boolean(resumed && params.route !== undefined),
-          snapshotJsonl: snapshot ?? undefined,
-          warnings: [],
-        };
-        let preflight: ReturnType<typeof preflightDelegateContinuation>;
-        try {
-          preflight = preflightDelegateContinuation(plan);
-        } catch (error) {
-          return invalidParams(errorText(error));
-        }
-        let prepared: PreparedDelegateTask;
-        try {
-          prepared = await prepareDelegateTask(plan, preflight);
-        } catch (error) {
-          return invalidParams(
-            `Delegate setup failed before launch: ${errorText(error)}`,
-          );
-        }
-
-        let markedRunning = false;
-        let run: DelegatedRun;
-        try {
-          run = await runPreparedDelegateTask(prepared, {
-            timeoutMs: config.timeoutMs,
-            maxConcurrency: config.maxConcurrency,
-            signal,
-            onUpdate,
-            mode: 'single',
-            onIsolationRunning: () => {
-              markedRunning = true;
-            },
-          });
-        } catch (error) {
-          if (!prepared.isolation || markedRunning) throw error;
-          const cleanup = !resumed
-            ? await cleanupFreshPreparedTask(prepared)
-            : {
-                warnings: [],
-                isolation: isolationDetails(
-                  loadIsolation(prepared.isolation.record.id) ??
-                    prepared.isolation.record,
-                ),
-              };
-          const failed = failedLifecycleRun(
-            plan.task,
-            plan.routing,
-            {
-              cwd: prepared.cwd,
-              context: plan.context,
-              contextNote: plan.contextNote,
-              scope: prepared.scope,
-              writeRequested: plan.writeRequested,
-              allowWrites: prepared.allowWrites,
-              ...(resumed ? { continuation: prepared.session.token } : {}),
-              warnings: [...prepared.warnings, ...cleanup.warnings],
-            },
-            error,
-          );
-          failed.isolation = cleanup.isolation;
-          return delegateToolResult(pi, ctx, 'single', [failed]);
-        }
-
-        try {
-          await finalizeIsolatedRun(pi, ctx, run, prepared.isolation);
-        } catch (error) {
-          if (prepared.isolation)
-            await markLifecycleFailure(run, prepared.isolation, error);
-          else throw error;
-        }
-        return delegateToolResult(pi, ctx, 'single', [run]);
-      }
-
-      const tasks = (params.tasks ?? [])
-        .map((item) => ({ ...item, task: item.task.trim() }))
-        .filter((item) => item.task);
-      if (!tasks.length)
-        return invalidParams('Parallel delegation requires a non-empty task.');
-      if (tasks.length > config.maxParallelTasks)
-        return invalidParams(
-          `Too many delegated tasks (${tasks.length}). Maximum is ${config.maxParallelTasks}.`,
-        );
-      if (params.continuation)
-        return invalidParams(
-          'For parallel delegation, set continuation on each task rather than as a shared default.',
-        );
-      const resumed = tasks.map((item) => {
-        if (
-          item.continuation &&
-          (item.cwd !== undefined ||
-            item.context !== undefined ||
-            item.scope !== undefined ||
-            item.dependencies !== undefined)
-        )
-          return invalidParams(
-            'A continuation task cannot replace cwd, context, scope, or dependency mode.',
-          );
-        const session = item.continuation
-          ? resolveDelegateSession(item.continuation)
-          : undefined;
-        if (item.continuation && !session)
-          return invalidParams(
-            'Unknown or expired delegate continuation token.',
-          );
-        return session ?? undefined;
-      });
-      assertDistinctContinuationTokens(
-        resumed.map((session) => session?.token),
-      );
-      if (
-        resumed.some(Boolean) &&
-        (params.cwd !== undefined ||
-          params.context !== undefined ||
-          params.scope !== undefined ||
-          params.dependencies !== undefined)
-      )
-        return invalidParams(
-          'Parallel continuations reuse their original cwd, history, scope, and dependency mode; do not provide top-level replacements.',
-        );
-
-      const routings = tasks.map((item, index) =>
-        resolveDelegateRoute(
-          mergeDelegateRouteRequest(
-            item.route ?? params.route,
-            resumed[index]?.routing,
-          ),
-          config,
-        ),
-      );
-      const routingError = routings.find((item) => item.error)?.error;
-      if (routingError) return invalidParams(routingError);
-      const contexts = tasks.map((item, index) =>
-        resumed[index]
-          ? ('continuation' as const)
-          : (item.context ?? params.context ?? 'fresh'),
-      );
-      const requestedCwds = tasks.map(
-        (item, index) =>
-          resumed[index]?.cwd ?? item.cwd ?? params.cwd ?? ctx.cwd,
-      );
-      const scopes = tasks.map((item) => item.scope ?? params.scope);
-      const writeRequests = tasks.map(
-        (item) => item.allowWrites ?? params.allowWrites ?? false,
-      );
-      const warnings = writeWarnings(requestedCwds, writeRequests, scopes);
-      for (let index = 0; index < tasks.length; index++) {
-        if (
-          !resumed[index] &&
-          contexts[index] === 'branch' &&
-          !getSnapshot(requestedCwds[index])
-        )
-          return invalidParams(
-            'Cannot delegate: failed to snapshot current session branch.',
-          );
-      }
-
-      const plans: DelegateTaskPlan[] = tasks.map((item, index) => ({
-        task: item.task,
-        requestedCwd: requestedCwds[index],
-        context: contexts[index],
-        contextNote: item.contextNote ?? params.contextNote,
-        scope: scopes[index],
-        dependencyMode: item.dependencies ?? params.dependencies,
-        writeRequested: writeRequests[index],
-        routing: routings[index].routing,
-        resumed: resumed[index],
-        routeOverride: Boolean(
-          resumed[index] && (item.route ?? params.route) !== undefined,
-        ),
-        snapshotJsonl:
-          contexts[index] === 'branch'
-            ? (getSnapshot(requestedCwds[index]) ?? undefined)
-            : undefined,
-        warnings: warnings[index],
-      }));
-
-      const preflights = [] as ReturnType<
-        typeof preflightDelegateContinuation
-      >[];
-      try {
-        for (const plan of plans)
-          preflights.push(preflightDelegateContinuation(plan));
-      } catch (error) {
-        return invalidParams(errorText(error));
-      }
-
-      const prepared: PreparedDelegateTask[] = [];
-      try {
-        for (let index = 0; index < plans.length; index++)
-          prepared.push(
-            await prepareDelegateTask(plans[index], preflights[index]),
-          );
-      } catch (error) {
-        const cleanupWarnings = await rollbackPreparedDelegateTasks(prepared);
-        return invalidParams(
-          `Parallel delegate setup failed before launch: ${errorText(error)}${cleanupWarnings.length ? ` Cleanup warnings: ${cleanupWarnings.join(' ')}` : ''}`,
-        );
-      }
-
-      const liveRuns = prepared.map((item) =>
-        createRun(item.plan.task, item.plan.routing, {
-          cwd: item.cwd,
-          context: item.plan.context,
-          contextNote: item.plan.contextNote,
-          scope: item.scope,
-          writeRequested: item.plan.writeRequested,
-          allowWrites: item.allowWrites,
-          continuation: item.session.token,
-          warnings: item.warnings,
-        }),
-      );
-      const warningText = [
-        ...new Set(prepared.flatMap((item) => item.warnings)),
-      ];
-      const emit = () => {
-        const done = liveRuns.filter((run) => run.exitCode !== -1).length;
-        onUpdate?.({
-          content: [
-            {
-              type: 'text',
-              text: `${warningText.length ? `${warningText.map((warning) => `Warning: ${warning}`).join('\n')}\n\n` : ''}Delegated tasks: ${done}/${liveRuns.length} complete`,
-            },
-          ],
-          details: makeDetails('parallel', [...liveRuns]),
-        });
-      };
-      emit();
-
-      const launchedFreshIsolationIds = new Set<string>();
-      let runs: DelegatedRun[];
-      try {
-        runs = await mapWithConcurrency(
-          prepared,
-          config.maxConcurrency,
-          async (item, index) => {
-            let markedRunning = false;
-            try {
-              const run = await runPreparedDelegateTask(item, {
-                timeoutMs: config.timeoutMs,
-                maxConcurrency: config.maxConcurrency,
-                signal,
-                onUpdate: (partial) => {
-                  const current = partial.details?.runs?.[0];
-                  if (current)
-                    liveRuns[index] = {
-                      ...current,
-                      warnings: item.warnings,
-                    };
-                  emit();
-                },
-                mode: 'parallel',
-                onIsolationRunning: (isolation) => {
-                  markedRunning = true;
-                  if (!item.plan.resumed)
-                    launchedFreshIsolationIds.add(isolation.record.id);
-                },
-              });
-              await finalizeIsolatedRun(pi, ctx, run, item.isolation);
-              liveRuns[index] = run;
-              emit();
-              return run;
-            } catch (error) {
-              const cleanup =
-                item.isolation && !markedRunning && !item.plan.resumed
-                  ? await cleanupFreshPreparedTask(item)
-                  : {
-                      warnings: [],
-                      isolation:
-                        item.isolation && !markedRunning
-                          ? isolationDetails(
-                              loadIsolation(item.isolation.record.id) ??
-                                item.isolation.record,
-                            )
-                          : undefined,
-                    };
-              const failed = failedLifecycleRun(
-                item.plan.task,
-                item.plan.routing,
-                {
-                  cwd: item.cwd,
-                  context: item.plan.context,
-                  contextNote: item.plan.contextNote,
-                  scope: item.scope,
-                  writeRequested: item.plan.writeRequested,
-                  allowWrites: item.allowWrites,
-                  ...(!item.isolation || item.plan.resumed || markedRunning
-                    ? { continuation: item.session.token }
-                    : {}),
-                  warnings: [...item.warnings, ...cleanup.warnings],
-                },
-                error,
-              );
-              if (item.isolation && markedRunning)
-                await markLifecycleFailure(failed, item.isolation, error);
-              else failed.isolation = cleanup.isolation;
-              liveRuns[index] = failed;
-              emit();
-              return failed;
-            }
-          },
-        );
-      } catch (error) {
-        const cleanupWarnings: string[] = [];
-        for (const item of prepared) {
-          if (
-            !item.isolation ||
-            item.plan.resumed ||
-            launchedFreshIsolationIds.has(item.isolation.record.id)
-          )
-            continue;
-          const cleanup = await cleanupFreshPreparedTask(item);
-          cleanupWarnings.push(...cleanup.warnings);
-        }
-        throw new Error(
-          `${errorText(error)}${cleanupWarnings.length ? ` Cleanup warnings: ${cleanupWarnings.join(' ')}` : ''}`,
-        );
-      }
-      return delegateToolResult(pi, ctx, 'parallel', runs);
+      const runCtx = { pi, ctx, config, signal, getSnapshot };
+      if (hasSingle) return executeSingleDelegate(runCtx, params, { onUpdate });
+      return executeParallelDelegate(runCtx, params, { onUpdate });
     },
   });
 }
