@@ -51,6 +51,7 @@ export {
   SNAPSHOT_READS_FLAG,
 } from './snapshot-reads';
 export {
+  type PutArtifactOptions,
   putArtifact,
   recoverArtifactFromEntries,
   restoreArtifacts,

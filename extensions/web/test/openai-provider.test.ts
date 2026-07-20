@@ -67,7 +67,7 @@ describe('OpenAI search transport', () => {
       return Response.json(responseOutput());
     });
     vi.stubGlobal('fetch', fetchMock);
-    const { searchWithOpenAI } = await import('../openai-search');
+    const { searchWithOpenAI } = await import('../openai-search.js');
     const result = await searchWithOpenAI('docs', {
       domainFilter: ['example.com', '-spam.com'],
     });
@@ -107,7 +107,7 @@ describe('OpenAI search transport', () => {
         })),
       },
     };
-    const { searchWithOpenAI } = await import('../openai-search');
+    const { searchWithOpenAI } = await import('../openai-search.js');
     await searchWithOpenAI('docs', {}, ctx as never);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       'https://chatgpt.com/backend-api/codex/responses',
@@ -129,7 +129,7 @@ describe('OpenAI search transport', () => {
       return Response.json(responseOutput());
     });
     vi.stubGlobal('fetch', fetchMock);
-    const { searchWithOpenAI } = await import('../openai-search');
+    const { searchWithOpenAI } = await import('../openai-search.js');
     await searchWithOpenAI('docs');
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       'https://chatgpt.com/backend-api/codex/responses',
@@ -142,7 +142,7 @@ describe('OpenAI search transport', () => {
     controller.abort(new Error('cancelled'));
     const fetchMock = vi.fn(async () => Response.json(responseOutput()));
     vi.stubGlobal('fetch', fetchMock);
-    const { searchWithOpenAI } = await import('../openai-search');
+    const { searchWithOpenAI } = await import('../openai-search.js');
     await expect(
       searchWithOpenAI('docs', { signal: controller.signal }),
     ).rejects.toThrow('cancelled');
@@ -155,7 +155,7 @@ describe('OpenAI search transport', () => {
       'fetch',
       vi.fn(async () => new Response('denied', { status: 403 })),
     );
-    const { searchWithOpenAI } = await import('../openai-search');
+    const { searchWithOpenAI } = await import('../openai-search.js');
     await expect(searchWithOpenAI('docs')).rejects.toThrow(
       'OpenAI API error 403: denied',
     );

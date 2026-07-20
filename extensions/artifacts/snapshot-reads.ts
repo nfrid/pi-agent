@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type {
   ExtensionAPI,
@@ -7,6 +6,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { DEFAULT_MAX_LINES } from '@earendil-works/pi-coding-agent';
 import { putArtifact } from './storage';
+import { sha256 } from './storage-validation';
 import { resolveVerifiedArtifact } from './verified-resolution';
 
 export const SNAPSHOT_READS_FLAG = 'snapshot-reads';
@@ -33,10 +33,6 @@ type SnapshotResult = {
   details?: unknown;
   isError?: boolean;
 };
-
-function sha256(value: Uint8Array | string): string {
-  return createHash('sha256').update(value).digest('hex');
-}
 
 /** Canonical selection identity; it deliberately describes a selection, not a file. */
 export function normalizeReadSelection(
@@ -183,8 +179,7 @@ export async function processReadSnapshot(
         mediaType: 'text/plain; charset=utf-8',
         creationSource: 'read.snapshot',
       },
-      root,
-      assertCurrent,
+      { root, assertCurrent },
     );
   } catch {
     return undefined;

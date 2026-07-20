@@ -1,0 +1,17 @@
+---
+description: Node 25 via nvm for Cursor agent shells in this repo
+alwaysApply: true
+---
+
+# Node runtime (Cursor only)
+
+Cursor agent shells often default to an old nvm Node (e.g. v18). That breaks Vitest, Biome, and `undici` here. Other harnesses usually already run Node 25 — they do not need extra nvm steps.
+
+Before `npm run check`, `npm test`, or other Node commands in this repo:
+
+```bash
+nvm use    # reads .nvmrc (25); run `nvm install` once if missing
+node -v    # should print v25.x
+```
+
+`npm run check` and `npm test` also run `check:node`, which fails fast on Node < 25.

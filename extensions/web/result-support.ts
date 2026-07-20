@@ -56,16 +56,17 @@ export async function persistWebResult(
         creationSource: `web.${data.type}`,
         itemCount: Object.keys(data).length,
       },
-      undefined,
-      assertCurrent,
-      (published) => {
-        assertCurrent();
-        pi.appendEntry(WEB_REFERENCE_TYPE, {
-          version: 1,
-          responseId: data.id,
-          resultType: data.type,
-          artifact: published,
-        });
+      {
+        assertCurrent,
+        onPublished: (published) => {
+          assertCurrent();
+          pi.appendEntry(WEB_REFERENCE_TYPE, {
+            version: 1,
+            responseId: data.id,
+            resultType: data.type,
+            artifact: published,
+          });
+        },
       },
     );
     try {

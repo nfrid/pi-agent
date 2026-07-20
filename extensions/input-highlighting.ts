@@ -1,9 +1,9 @@
 import {
   CustomEditor,
   type ExtensionAPI,
-  type ThemeColor,
 } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import { thinkingToThemeColor } from './shared/theme';
 
 const FG_CYAN = '\x1b[36m';
 const FG_MAGENTA = '\x1b[35m';
@@ -117,12 +117,6 @@ function highlightInputLine(line: string): string {
 
   highlighted += highlightPlainText(line.slice(lastIndex));
   return highlighted;
-}
-
-function thinkingToThemeColor(
-  thinking: ReturnType<ExtensionAPI['getThinkingLevel']>,
-): ThemeColor {
-  return `thinking${thinking.charAt(0).toUpperCase()}${thinking.slice(1)}` as ThemeColor;
 }
 
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI/APC escapes

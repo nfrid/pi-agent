@@ -143,7 +143,7 @@ describe('activity indicator', () => {
       'Delegating...',
       'Waiting for tools (0/2)...',
       'Delegating (1/2)...',
-      'Thinking...',
+      'Delegating...',
     ]);
   });
 

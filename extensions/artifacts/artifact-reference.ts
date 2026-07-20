@@ -1,15 +1,11 @@
-const ARTIFACT_HANDLE_RE = /^art_[A-Za-z0-9_-]{22}$/;
+import { asRecord } from '../shared/object';
+import { HANDLE_RE } from './storage-validation';
+
 const SHA256_RE = /^[a-f0-9]{64}$/;
 
 export interface ArtifactReference {
   handle: string;
   sha256: string;
-}
-
-function object(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object'
-    ? (value as Record<string, unknown>)
-    : undefined;
 }
 
 function validReference(
@@ -18,7 +14,7 @@ function validReference(
 ): ArtifactReference | undefined {
   if (
     typeof handle === 'string' &&
-    ARTIFACT_HANDLE_RE.test(handle) &&
+    HANDLE_RE.test(handle) &&
     typeof sha256 === 'string' &&
     SHA256_RE.test(sha256)
   )
@@ -30,7 +26,7 @@ function validReference(
 export function parseArtifactReference(
   details: unknown,
 ): ArtifactReference | undefined {
-  const artifact = object(object(details)?.artifact);
+  const artifact = asRecord(asRecord(details)?.artifact);
   if (!artifact) return undefined;
   return validReference(artifact.handle, artifact.sha256);
 }
@@ -40,7 +36,7 @@ export function parseReadSnapshotReference(
   details: unknown,
   key = 'artifacts.readSnapshot:v1',
 ): ArtifactReference | undefined {
-  const snapshot = object(object(details)?.[key]);
+  const snapshot = asRecord(asRecord(details)?.[key]);
   if (!snapshot) return undefined;
   return validReference(snapshot.handle, snapshot.digest);
 }

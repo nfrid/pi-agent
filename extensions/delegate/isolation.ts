@@ -5,7 +5,21 @@
  */
 export * from './isolation/credentials';
 export * from './isolation/model';
-export * from './isolation/patch-broker';
+export {
+  applyIsolationPatch,
+  isolationPatchEligibility,
+} from './isolation/patch-apply';
+export {
+  captureIsolationPatch,
+  isolationPatchBytes,
+} from './isolation/patch-capture';
+export { discardIsolation } from './isolation/patch-discard';
+export {
+  isolationValidationCommand,
+  isolationValidationScript,
+  validateIsolationCommand,
+  validateIsolationPatch,
+} from './isolation/patch-validate';
 export * from './isolation/records';
 export * from './isolation/sandbox';
 export * from './isolation/worktree';

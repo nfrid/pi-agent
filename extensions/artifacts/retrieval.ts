@@ -2,7 +2,7 @@ import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { selectTextRange } from '../shared/text-selection';
 import { resolveArtifact } from './storage';
 import { MAX_RESULT_BYTES, MAX_SEARCH_SCAN_BYTES } from './types';
-import { utf8Prefix, utf8Suffix } from './utf8-boundary';
+import { utf8Head, utf8Prefix, utf8Suffix, utf8Tail } from './utf8-boundary';
 
 export const RETRIEVAL_MODES = [
   'metadata',
@@ -180,15 +180,15 @@ export async function retrieveArtifact(
 
   if (request.mode === 'head' || request.mode === 'tail') {
     const wanted = Math.min(requestedLimit, bytes.length);
-    let start = request.mode === 'head' ? 0 : bytes.length - wanted;
-    let end = request.mode === 'head' ? wanted : bytes.length;
-    if (request.mode === 'head') {
-      while (end > start && end < bytes.length && (bytes[end] & 0xc0) === 0x80)
-        end--;
-    } else {
-      while (start < end && (bytes[start] & 0xc0) === 0x80) start++;
-    }
-    const full = bytes.subarray(start, end).toString('utf8');
+    const full =
+      request.mode === 'head'
+        ? utf8Head(bytes, wanted)
+        : utf8Tail(bytes, wanted);
+    const start =
+      request.mode === 'head'
+        ? 0
+        : bytes.length - Buffer.byteLength(full, 'utf8');
+    const end = start + Buffer.byteLength(full, 'utf8');
     const returned =
       request.mode === 'head'
         ? { ...prefix(full), omittedBytes: 0 }

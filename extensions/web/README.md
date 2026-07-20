@@ -101,6 +101,6 @@ default, including across redirects.
 
 ## Maintenance
 
-This is a local fork, not a drop-in copy of the upstream package. See
-`package.json` for exact upstream provenance and `LICENSE` for the retained MIT
-license.
+This is a local fork, not a drop-in copy of the upstream package. It is based
+on [pi-web-access](https://github.com/nicobailon/pi-web-access) v0.13.0
+(`7bdc30a`). See `LICENSE` for the retained MIT license.

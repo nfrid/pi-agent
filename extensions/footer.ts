@@ -1,4 +1,4 @@
-import type { AssistantMessage, ThinkingLevel } from '@earendil-works/pi-ai';
+import type { AssistantMessage } from '@earendil-works/pi-ai';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -6,22 +6,7 @@ import type {
   ThemeColor,
 } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
-
-type FooterInfoRenderer = {
-  priority?: number;
-  render(theme: Theme, ctx: ExtensionContext): string;
-};
-
-type FooterAdditionalInfoAPI = {
-  set(key: string, renderer: FooterInfoRenderer | undefined): void;
-  subscribe(callback: () => void): () => void;
-  render(theme: Theme, ctx: ExtensionContext): string[];
-};
-
-declare global {
-  // eslint-disable-next-line no-var
-  var piFooterAdditionalInfo: FooterAdditionalInfoAPI | undefined;
-}
+import { thinkingToThemeColor } from './shared/theme';
 
 function contextColor(percent: number | undefined): ThemeColor {
   if (percent === undefined) return 'dim';
@@ -38,12 +23,6 @@ function formatTokenCount(tokens: number): string {
     return `${Number.parseFloat((tokens / 1_000).toFixed(1))}k`;
   }
   return `${tokens}`;
-}
-
-function thinkingToThemeColor(thinking: 'off' | ThinkingLevel): ThemeColor {
-  return ('thinking' +
-    thinking.charAt(0).toUpperCase() +
-    thinking.slice(1)) as ThemeColor;
 }
 
 function joinParts(theme: Theme, width: number, parts: string[]): string {

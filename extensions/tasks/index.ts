@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { registerTodoCommands } from './commands';
 import { registerTodoContext } from './context';
 import { EXT } from './model';
 import {
@@ -8,7 +9,6 @@ import {
   reconstruct,
 } from './store';
 import { registerTodoTool } from './tool';
-import { registerTodoCommands } from './ui';
 import { updateUi } from './widget';
 
 const registered = new WeakSet<object>();

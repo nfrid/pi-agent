@@ -5,7 +5,7 @@ import {
   PARENT_HANDOFF_CAPS,
   truncateBytes,
 } from './output';
-import { buildArtifactBackedHandoff } from './supervision';
+import { buildArtifactBackedHandoff } from './tool-result';
 import { createRun, getFinalAssistantText } from './types';
 
 const assistantMessage = {

@@ -4,20 +4,19 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { type DelegateConfig, resolveDelegateRoute } from './config';
 import { loadIsolation, type PreparedIsolation } from './isolation';
-import { mapWithConcurrency } from './runner';
-import { resolveDelegateSession } from './session';
 import {
-  assertDistinctContinuationTokens,
-  delegateToolResult,
   failedLifecycleRun,
   finalizeIsolatedRun,
-  invalidParams,
   isolationDetails,
-  makeDetails,
   markLifecycleFailure,
-  mergeDelegateRouteRequest,
-  writeWarnings,
-} from './supervision';
+} from './isolation-lifecycle';
+import {
+  assertDistinctContinuationTokens,
+  invalidParams,
+} from './param-errors';
+import { mergeDelegateRouteRequest, writeWarnings } from './routing-warnings';
+import { mapWithConcurrency } from './runner';
+import { resolveDelegateSession } from './session';
 import {
   type ContinuationPreflight,
   cleanupFreshPreparedTask,
@@ -28,30 +27,9 @@ import {
   rollbackPreparedDelegateTasks,
   runPreparedDelegateTask,
 } from './task-lifecycle';
+import type { DelegateParams } from './tool';
+import { delegateToolResult, makeDetails } from './tool-result';
 import { createRun, type DelegatedRun } from './types';
-
-type DelegateParams = {
-  task?: string;
-  tasks?: Array<{
-    task: string;
-    cwd?: string;
-    route?: string;
-    context?: 'branch' | 'fresh';
-    contextNote?: string;
-    scope?: string[];
-    continuation?: string;
-    allowWrites?: boolean;
-    dependencies?: 'auto' | 'link' | 'isolated';
-  }>;
-  cwd?: string;
-  route?: string;
-  context?: 'branch' | 'fresh';
-  contextNote?: string;
-  scope?: string[];
-  continuation?: string;
-  allowWrites?: boolean;
-  dependencies?: 'auto' | 'link' | 'isolated';
-};
 
 type SnapshotLookup = (cwd: string) => string | null;
 

@@ -12,7 +12,7 @@ import {
   scrubIsolationCredentials,
 } from './isolation';
 import { buildDelegatePrompt } from './prompt';
-import { makeDetails } from './supervision';
+import { makeDetails } from './tool-result';
 import {
   createRun,
   type DelegateContext,

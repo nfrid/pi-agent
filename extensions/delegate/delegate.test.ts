@@ -18,8 +18,13 @@ import {
   parseDelegateConfig,
   resolveDelegateRoute,
 } from './config';
+import {
+  assertDistinctContinuationTokens,
+  throwIfAllRunsFailed,
+} from './param-errors';
 import { buildDelegatePrompt } from './prompt';
 import { formatDelegateRoutingConfig } from './routing';
+import { mergeDelegateRouteRequest } from './routing-warnings';
 import {
   buildChildArgs,
   mapWithConcurrency,
@@ -34,11 +39,6 @@ import {
   resolveDelegateSession,
   updateDelegateSessionRouting,
 } from './session';
-import {
-  assertDistinctContinuationTokens,
-  mergeDelegateRouteRequest,
-  throwIfAllRunsFailed,
-} from './supervision';
 import { delegatePromptGuidelines } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import { createRun, getFinalAssistantText, getRunState } from './types';

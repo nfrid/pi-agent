@@ -1,15 +1,15 @@
 import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { Type } from 'typebox';
+import { type Static, Type } from 'typebox';
 import { loadDelegateConfig } from './config';
 import {
   executeParallelDelegate,
   executeSingleDelegate,
 } from './orchestration';
+import { invalidParams } from './param-errors';
 import { renderDelegateCall, renderDelegateResult } from './render';
 import { formatDelegateRoutingPrompt } from './routing';
 import { buildSessionSnapshotJsonl } from './session';
-import { invalidParams } from './supervision';
 
 const RouteSchema = Type.String({
   minLength: 1,
@@ -61,7 +61,7 @@ const TaskItem = Type.Object({
   dependencies: Type.Optional(DependencySchema),
 });
 
-const DelegateParams = Type.Object({
+const DelegateParamsSchema = Type.Object({
   task: Type.Optional(
     Type.String({
       minLength: 1,
@@ -79,6 +79,8 @@ const DelegateParams = Type.Object({
   allowWrites: Type.Optional(AllowWritesSchema),
   dependencies: Type.Optional(DependencySchema),
 });
+
+export type DelegateParams = Static<typeof DelegateParamsSchema>;
 
 export function delegatePromptGuidelines(cwd: string): string[] {
   return [
@@ -102,7 +104,7 @@ export function registerDelegateTool(pi: ExtensionAPI, cwd: string): void {
     promptSnippet:
       'Delegate substantial exploration, review, validation, implementation, or independent parallel work when a child would save context.',
     promptGuidelines: delegatePromptGuidelines(cwd),
-    parameters: DelegateParams,
+    parameters: DelegateParamsSchema,
     renderCall: renderDelegateCall,
     renderResult: renderDelegateResult,
 

@@ -59,7 +59,11 @@ describe('web artifact fallback', () => {
       undefined,
       undefined,
     );
-    expect(result.content[0].text).toContain('get_search_content');
+    expect(result.content[0].text).toContain('fallback test');
+    expect(result.content[0].text).toContain(
+      'Exact continuation unavailable; aggregate result exceeded the persistence limit.',
+    );
+    expect(result.content[0].text).not.toContain('get_search_content');
     expect(result.details?.artifactWarning).toBe(
       'Exact artifact unavailable; continuation is limited to this session.',
     );
@@ -74,7 +78,8 @@ describe('web artifact fallback', () => {
         { responseId: result.details?.responseId, view: 'summary' },
         new AbortController().signal,
       );
-    expect(continued?.content[0].text).toContain('Response ID:');
+    expect(continued?.content[0].text).toContain('fallback test');
+    expect(continued?.details?.nextOffset).toBeGreaterThan(0);
 
     const restored = createWebResultStore();
     restored.restore({
@@ -93,10 +98,10 @@ describe('web artifact fallback', () => {
       release = resolve;
     });
     vi.mocked(artifactProducer.put).mockImplementationOnce(
-      async (_pi, _ctx, _input, _root, assertCurrent) => {
+      async (_pi, _ctx, _input, options) => {
         started();
         await gate;
-        assertCurrent?.();
+        options?.assertCurrent?.();
         return { handle: 'art_aaaaaaaaaaaaaaaaaaaaaa' } as never;
       },
     );
@@ -139,10 +144,10 @@ describe('web artifact fallback', () => {
       release = resolve;
     });
     vi.mocked(artifactProducer.put).mockImplementationOnce(
-      async (_pi, _ctx, _input, _root, assertCurrent) => {
+      async (_pi, _ctx, _input, options) => {
         started();
         await gate;
-        assertCurrent?.();
+        options?.assertCurrent?.();
         return { handle: 'art_aaaaaaaaaaaaaaaaaaaaaa' } as never;
       },
     );
@@ -201,15 +206,14 @@ describe('web artifact fallback', () => {
       );
     expect(result?.content[0].text).not.toContain('get_search_content');
     expect(result?.details?.continuationAvailable).toBe(false);
-    await expect(
-      tools
-        .get('get_search_content')
-        ?.execute(
-          'missing-after-append-failure',
-          { responseId: result?.details?.responseId },
-          new AbortController().signal,
-        ),
-    ).rejects.toThrow('No stored result');
+    const continued = await tools
+      .get('get_search_content')
+      ?.execute(
+        'same-session-after-append-failure',
+        { responseId: result?.details?.responseId, view: 'summary' },
+        new AbortController().signal,
+      );
+    expect(continued?.content[0].text).toContain('fallback append failure');
   });
 
   it('restores legacy fallback entries for older sessions', () => {

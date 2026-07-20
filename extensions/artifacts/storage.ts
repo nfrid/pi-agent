@@ -51,14 +51,21 @@ export {
   validateMetadata,
 } from './storage-validation';
 
+export interface PutArtifactOptions {
+  root?: string;
+  assertCurrent?: () => void;
+  onPublished?: (metadata: ArtifactMetadata) => void;
+}
+
 export async function putArtifact(
   pi: Pick<ExtensionAPI, 'appendEntry'>,
   ctx: Pick<ExtensionContext, 'sessionManager'>,
   input: PutArtifactInput,
-  root = artifactRoot(),
-  assertCurrent: () => void = () => {},
-  publish?: (metadata: ArtifactMetadata) => void,
+  options: PutArtifactOptions = {},
 ) {
+  const root = options.root ?? artifactRoot();
+  const assertCurrent = options.assertCurrent ?? (() => {});
+  const publish = options.onPublished;
   const bytes = validateInput(input);
   const sessionId = ctx.sessionManager.getSessionId();
   const digest = sha256(bytes);

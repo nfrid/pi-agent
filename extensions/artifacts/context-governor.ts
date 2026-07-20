@@ -1,16 +1,17 @@
-import { createHash } from 'node:crypto';
 import type {
   ContextEvent,
   ExtensionAPI,
   ExtensionContext,
   ToolResultEvent,
 } from '@earendil-works/pi-coding-agent';
+import { asRecord } from '../shared/object';
 import {
   artifactRetrievalHint,
   isArtifactRetrievalHint,
   parseToolResultArtifactReference,
 } from './artifact-reference';
 import { resolveArtifact } from './storage';
+import { sha256 } from './storage-validation';
 import { utf8Head, utf8Tail } from './utf8-boundary';
 import {
   type ArtifactResolver,
@@ -71,22 +72,12 @@ export function emptyGovernorCounters(): GovernorCounters {
   };
 }
 
-function sha256(value: Uint8Array | string): string {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-function object(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object'
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
 /** Closed eligibility predicate: anything uncertain remains inline. */
 export function eligibleGovernorResult(event: ToolResultEvent): boolean {
   if (event.isError) return false;
   if (event.content.length !== 1 || event.content[0]?.type !== 'text')
     return false;
-  const details = object(event.details);
+  const details = asRecord(event.details);
   if (
     details?.error !== undefined ||
     (typeof details?.failed === 'number' && details.failed > 0)
@@ -134,7 +125,7 @@ export async function markGovernorResult(
   };
   return {
     details: {
-      ...(object(event.details) ?? {}),
+      ...(asRecord(event.details) ?? {}),
       [CONTEXT_GOVERNOR_DETAILS_KEY]: marker,
     },
   };
@@ -143,7 +134,7 @@ export async function markGovernorResult(
 export function parseGovernorMarker(
   value: unknown,
 ): ContextGovernorMarker | undefined {
-  const marker = object(object(value)?.[CONTEXT_GOVERNOR_DETAILS_KEY]);
+  const marker = asRecord(asRecord(value)?.[CONTEXT_GOVERNOR_DETAILS_KEY]);
   if (
     marker?.version !== 1 ||
     typeof marker.handle !== 'string' ||

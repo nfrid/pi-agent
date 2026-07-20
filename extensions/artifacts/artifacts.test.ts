@@ -175,10 +175,12 @@ describe('artifact CAS and recovery', () => {
           contentClass: 'tool-output',
           creationSource: 'read.snapshot',
         },
-        directory,
-        () => {
-          checks++;
-          if (checks === 3) throw new Error('stale generation');
+        {
+          root: directory,
+          assertCurrent: () => {
+            checks++;
+            if (checks === 3) throw new Error('stale generation');
+          },
         },
       ),
     ).rejects.toThrow('stale generation');
@@ -207,7 +209,7 @@ describe('artifact CAS and recovery', () => {
         contentClass: 'binary',
         creationSource: 'web.binary',
       },
-      directory,
+      { root: directory },
     );
     const second = await putArtifact(
       one.pi,
@@ -218,7 +220,7 @@ describe('artifact CAS and recovery', () => {
         contentClass: 'binary',
         creationSource: 'tool.output',
       },
-      directory,
+      { root: directory },
     );
     expect(first.sha256).toBe(second.sha256);
     expect(first.handle).not.toBe(second.handle);
@@ -258,7 +260,7 @@ describe('artifact CAS and recovery', () => {
           contentClass: 'text',
           creationSource: 'web.one',
         },
-        directory,
+        { root: directory },
       ),
       putArtifact(
         h.pi,
@@ -269,7 +271,7 @@ describe('artifact CAS and recovery', () => {
           contentClass: 'delegate-output',
           creationSource: 'delegate.two',
         },
-        directory,
+        { root: directory },
       ),
     ]);
     expect(await resolveArtifact(h.ctx, one.handle, directory)).toBeDefined();
@@ -288,7 +290,7 @@ describe('artifact CAS and recovery', () => {
         contentClass: 'text',
         creationSource: ' Web.Search ',
       },
-      directory,
+      { root: directory },
     );
     expect(metadata).toMatchObject({
       creationSource: 'web.search',
@@ -305,7 +307,7 @@ describe('artifact CAS and recovery', () => {
           contentClass: 'text',
           creationSource: '/Users/alice/private.txt',
         },
-        directory,
+        { root: directory },
       ),
     ).rejects.toThrow('creationSource');
     expect(() => sanitizeCreationSource('https://secret.example/x')).toThrow();
@@ -324,7 +326,7 @@ describe('artifact CAS and recovery', () => {
           contentClass: 'decision' as never,
           creationSource: 'approval',
         },
-        directory,
+        { root: directory },
       ),
     ).rejects.toThrow('Disallowed');
   });
@@ -342,10 +344,11 @@ describe('artifact CAS and recovery', () => {
           contentClass: 'json',
           creationSource: 'web.linked-publication',
         },
-        directory,
-        undefined,
-        () => {
-          throw new Error('reference append failed');
+        {
+          root: directory,
+          onPublished: () => {
+            throw new Error('reference append failed');
+          },
         },
       ),
     ).rejects.toThrow('reference append failed');
@@ -369,7 +372,7 @@ describe('artifact CAS and recovery', () => {
         contentClass: 'text',
         creationSource: 'web.revoke-rollback',
       },
-      directory,
+      { root: directory },
     );
     await expect(
       revokeArtifact(
@@ -429,7 +432,7 @@ describe('artifact CAS and recovery', () => {
         contentClass: 'text',
         creationSource: 'web.recovery',
       },
-      sourceRoot,
+      { root: sourceRoot },
     );
     const recovery = source.entries[0].data as {
       metadata: Record<string, unknown>;
@@ -464,7 +467,7 @@ describe('artifact CAS and recovery', () => {
         contentClass: 'delegate-output',
         creationSource: 'delegate.kept',
       },
-      sourceRoot,
+      { root: sourceRoot },
     );
     const gone = await putArtifact(
       source.pi,
@@ -475,7 +478,7 @@ describe('artifact CAS and recovery', () => {
         contentClass: 'text',
         creationSource: 'web.gone',
       },
-      sourceRoot,
+      { root: sourceRoot },
     );
     await revokeArtifact(source.pi, source.ctx, gone.handle, sourceRoot);
     expect((source.entries.at(-1)?.data as { kind: string }).kind).toBe(
@@ -524,7 +527,7 @@ describe('artifact CAS and recovery', () => {
         contentClass: 'text',
         creationSource: 'tool.legacy',
       },
-      directory,
+      { root: directory },
     );
     h.entries.push({
       type: 'custom',
@@ -640,7 +643,7 @@ describe('bounded retrieval', () => {
         contentClass: 'markdown',
         creationSource: 'web.markdown',
       },
-      directory,
+      { root: directory },
     );
     const bytes = await retrieveArtifact(
       h.ctx,
@@ -691,7 +694,7 @@ describe('bounded retrieval', () => {
         contentClass: 'json',
         creationSource: 'tool.json',
       },
-      directory,
+      { root: directory },
     );
     expect(json.itemCount).toBe(1);
     const selected = await retrieveArtifact(
@@ -721,7 +724,7 @@ describe('bounded retrieval', () => {
         contentClass: 'text',
         creationSource: 'tool.boundaries',
       },
-      directory,
+      { root: directory },
     );
     const head = await retrieveArtifact(
       h.ctx,
@@ -754,7 +757,7 @@ describe('bounded retrieval', () => {
         contentClass: 'binary',
         creationSource: 'tool.binary',
       },
-      directory,
+      { root: directory },
     );
     await expect(
       retrieveArtifact(
@@ -787,7 +790,7 @@ describe('bounded retrieval', () => {
         contentClass: 'text',
         creationSource: 'web.context',
       },
-      directory,
+      { root: directory },
     );
     const result = await retrieveArtifact(
       h.ctx,
@@ -827,7 +830,7 @@ describe('bounded retrieval', () => {
         contentClass: 'markdown',
         creationSource: 'web.long-heading',
       },
-      directory,
+      { root: directory },
     );
     const heading = await retrieveArtifact(
       h.ctx,
@@ -850,7 +853,7 @@ describe('bounded retrieval', () => {
         contentClass: 'json',
         creationSource: 'tool.long-json',
       },
-      directory,
+      { root: directory },
     );
     const selected = await retrieveArtifact(
       h.ctx,
@@ -876,7 +879,7 @@ describe('bounded retrieval', () => {
         contentClass: 'text',
         creationSource: 'tool.large',
       },
-      directory,
+      { root: directory },
     );
     const result = await retrieveArtifact(
       h.ctx,
@@ -910,7 +913,7 @@ describe('conservative GC', () => {
           contentClass: 'text',
           creationSource: 'web.old',
         },
-        directory,
+        { root: directory },
       );
       await revokeArtifact(old.pi, old.ctx, oldArtifact.handle, directory);
       const sessions = path.join(agentDir, 'sessions');
@@ -963,7 +966,7 @@ describe('conservative GC', () => {
           contentClass: 'text',
           creationSource: 'tool.reused',
         },
-        state.directory,
+        { root: state.directory },
       );
       const gc = collectGarbage({
         agentDir: state.agentDir,
@@ -997,7 +1000,7 @@ describe('conservative GC', () => {
         contentClass: 'text',
         creationSource: 'tool.locked',
       },
-      directory,
+      { root: directory },
     );
     const sessions = path.join(agentDir, 'sessions');
     await mkdir(sessions, { recursive: true });
@@ -1039,7 +1042,7 @@ describe('conservative GC', () => {
         contentClass: 'text',
         creationSource: 'web.live',
       },
-      directory,
+      { root: directory },
     );
     const dead = await putArtifact(
       h.pi,
@@ -1050,7 +1053,7 @@ describe('conservative GC', () => {
         contentClass: 'text',
         creationSource: 'web.dead',
       },
-      directory,
+      { root: directory },
     );
     await revokeArtifact(h.pi, h.ctx, dead.handle, directory);
     const sessions = path.join(agentDir, 'sessions');

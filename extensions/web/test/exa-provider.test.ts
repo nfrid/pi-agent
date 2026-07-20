@@ -47,7 +47,7 @@ describe('Exa provider', () => {
       );
     });
     vi.stubGlobal('fetch', fetchMock);
-    const { searchWithExa } = await import('../exa');
+    const { searchWithExa } = await import('../exa.js');
     const result = await searchWithExa('test query', {
       domainFilter: ['example.com'],
       numResults: 3,
@@ -68,7 +68,7 @@ describe('Exa provider', () => {
   });
 
   it('accepts MCP JSON and preserves RPC and empty-content errors', async () => {
-    const { callExaMcp } = await import('../exa');
+    const { callExaMcp } = await import('../exa.js');
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
@@ -108,7 +108,7 @@ describe('Exa provider', () => {
       });
     });
     vi.stubGlobal('fetch', fetchMock);
-    const { searchWithExa } = await import('../exa');
+    const { searchWithExa } = await import('../exa.js');
     await expect(searchWithExa('question')).resolves.toEqual({
       answer: 'answer',
       results: [{ title: 'Docs', url: 'https://example.com', snippet: '' }],
@@ -124,7 +124,7 @@ describe('Exa provider', () => {
       async () => new Response('denied', { status: 429 }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const { searchWithExa } = await import('../exa');
+    const { searchWithExa } = await import('../exa.js');
     await expect(
       searchWithExa('question', { signal: controller.signal }),
     ).rejects.toThrow('cancelled');
@@ -158,7 +158,7 @@ describe('Exa provider', () => {
       });
     });
     vi.stubGlobal('fetch', fetchMock);
-    const { searchWithExa } = await import('../exa');
+    const { searchWithExa } = await import('../exa.js');
     const result = await searchWithExa('query', {
       numResults: 2,
       domainFilter: ['example.com', '-spam.com'],
