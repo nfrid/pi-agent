@@ -158,7 +158,7 @@ export default function artifacts(pi: ExtensionAPI): void {
     name: 'artifact_retrieve',
     label: 'Retrieve Artifact',
     description:
-      'Fetch exact bytes from an artifact handle (never a summary). Supports offset/limit and selectors.',
+      'Fetch exact bytes from an artifact handle. Supports offset/limit and selectors.',
     promptSnippet: 'Retrieve bounded exact data from an artifact handle',
     parameters: Type.Object({
       handle: Type.String({ pattern: '^art_[A-Za-z0-9_-]{22}$' }),

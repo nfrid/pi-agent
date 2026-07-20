@@ -137,7 +137,7 @@ export function buildParentHandoff(
   let prepared = runs.map((run) => prepareRun(run, perBodyCap));
   const statusSummary = parallel
     ? `Delegated tasks: ${runs.filter((run) => !isRunError(run)).length}/${runs.length} succeeded`
-    : 'Delegate handoff';
+    : `Delegated task ${runs[0] && isRunError(runs[0]) ? 'failed' : 'succeeded'}`;
   let summary = statusSummary;
 
   const envelopeBlock = (items: PreparedRun[]) =>
@@ -150,7 +150,7 @@ export function buildParentHandoff(
   const mandatoryBytes = (items: PreparedRun[]) =>
     Buffer.byteLength(`${summary}\n\n${envelopeBlock(items)}`, 'utf8');
   const mandatoryOverflowWarning =
-    'Mandatory envelope exceeds the production cap; opaque continuations and other mandatory metadata are preserved, and bodies are omitted.';
+    'Mandatory metadata exceeds the handoff size cap; continuation tokens and other mandatory metadata are preserved, and task bodies are omitted.';
   if (mandatoryBytes(prepared) > totalCap)
     summary += `\n${mandatoryOverflowWarning}`;
   const allocateBodies = (items: PreparedRun[]) => {

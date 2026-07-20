@@ -5,11 +5,14 @@ export function buildDelegatePrompt(
     contextNote?: string;
     scope?: string[];
     continuation?: boolean;
+    inspectShell?: boolean;
   } = {},
 ): string {
   const capability = options.allowWrites
-    ? 'This task runs in an isolated worktree with an OS-enforced writable scope. Change only what the task requires inside that scope, do not modify Git metadata, and report the files changed. The parent will inspect the exact patch before any application.'
-    : 'Treat this as a read-only task. Bash is available for inspection and validation, but do not use it to edit, create, delete, or move files.';
+    ? 'This task runs in an isolated worktree with an OS-enforced writable scope. Change only what the task requires inside that scope and do not modify Git metadata. You have file tools but no shell; the parent inspects the exact patch and applies it after review. End your report with a "Changed files:" line listing every file you changed.'
+    : options.inspectShell
+      ? 'Treat this as a read-only task. The inspect_shell tool runs Bash commands in a sandbox that denies writes, network, and process signals; use it for inspection, not for editing files. If you run checks, report them on a "Validation:" line.'
+      : 'Treat this as a read-only task. Only file reading and search tools are available; there is no shell.';
   const context = options.contextNote?.trim()
     ? `\n\nContext from the parent agent:\n${options.contextNote.trim()}`
     : '';

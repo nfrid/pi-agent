@@ -162,7 +162,7 @@ describe('delegate', () => {
       /not in user-owned/,
     );
     expect(resolveDelegateRoute(undefined, config).error).toMatch(
-      /requires one exact route/,
+      /requires a route key/,
     );
     expect(resolveDelegateRoute('forbidden', config).error).toMatch(
       /exceeds user-owned maximum/,
@@ -191,7 +191,7 @@ describe('delegate', () => {
           },
         },
       }).error,
-    ).toMatch(/one exact supported thinking level/);
+    ).toMatch(/thinking must be one of: off, minimal/);
     expect(
       parseDelegateConfig({
         modelCatalog: {
@@ -452,7 +452,9 @@ describe('delegate', () => {
     );
     expect(prompt).toContain('quick-low: model=quick');
     expect(prompt).toContain('smart-high: model=smart');
-    expect(prompt).toContain('unavailable-above-ceiling');
+    expect(prompt).toContain(
+      'unavailable: relativeCost exceeds maxRelativeCost',
+    );
   });
 
   test('blocks child tool paths and symlinks outside the checkout', () => {

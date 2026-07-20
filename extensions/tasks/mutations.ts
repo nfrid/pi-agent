@@ -135,8 +135,8 @@ function mutateUnsafe(
   if (action === 'batch')
     return {
       changed: false,
-      message: 'batch is handled by execute()',
-      error: 'batch is handled by execute()',
+      message: 'batch operations cannot be nested',
+      error: 'batch operations cannot be nested',
     };
 
   if (action === 'add') {

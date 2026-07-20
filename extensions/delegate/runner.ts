@@ -201,6 +201,7 @@ export function buildChildArgs(
       contextNote: options.contextNote,
       scope: options.scope,
       continuation: options.resuming,
+      inspectShell: !allowWrites && Boolean(options.readOnlyBash),
     }),
   );
   return args;

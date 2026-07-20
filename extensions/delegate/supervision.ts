@@ -238,7 +238,7 @@ export async function finalizeIsolatedRun(
     run.errorMessage = `Isolated delegate finalization failed: ${error instanceof Error ? error.message : String(error)}`;
     run.warnings = [
       ...(run.warnings ?? []),
-      'The worktree was retained for diagnosis and is not eligible for application.',
+      'The worktree was retained for diagnosis and its patch cannot be applied.',
     ];
   }
   const patch = record.patch;
@@ -266,7 +266,7 @@ export async function finalizeIsolatedRun(
   if (patch && !patch.diffCheckPassed)
     run.warnings = [
       ...(run.warnings ?? []),
-      'Patch failed diff validation and is not eligible for application.',
+      'Patch failed diff validation and cannot be applied.',
     ];
   if (patch?.requiresIsolatedDependencyValidation)
     run.warnings = [
@@ -322,12 +322,12 @@ export function writeWarnings(
       const right = scopes[j]?.filter(Boolean) ?? [];
       const warning =
         left.length === 0 || right.length === 0
-          ? `Parallel write tasks ${i + 1} and ${j + 1} share a working directory and at least one has no declared scope; coordinate changes carefully.`
+          ? `Parallel write tasks ${i + 1} and ${j + 1} share a working directory and at least one has no declared scope; their patches may conflict, so review both before applying either.`
           : scopesOverlap(
                 normalizedScopes(cwds[i], left),
                 normalizedScopes(cwds[j], right),
               )
-            ? `Parallel write tasks ${i + 1} and ${j + 1} have overlapping declared scopes; coordinate changes carefully.`
+            ? `Parallel write tasks ${i + 1} and ${j + 1} have overlapping declared scopes; their patches may conflict, so review both before applying either.`
             : undefined;
       if (warning) {
         warnings[i].push(warning);

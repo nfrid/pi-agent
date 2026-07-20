@@ -158,7 +158,7 @@ export async function markGovernorResult(
     artifactSha256: reference.sha256,
     inlineSha256: sha256(text),
     tool: event.toolName,
-    retrieval: `artifact_retrieve handle=${reference.handle} mode=bytes offset=0`,
+    retrieval: `artifact_retrieve handle=${reference.handle} mode=lines offset=0`,
     originalBytes,
     previewBytes,
   };
@@ -186,7 +186,7 @@ export function parseGovernorMarker(
     (!TRUSTED_WEB_TOOLS.has(marker.tool) && marker.tool !== 'read') ||
     typeof marker.retrieval !== 'string' ||
     marker.retrieval !==
-      `artifact_retrieve handle=${marker.handle} mode=bytes offset=0` ||
+      `artifact_retrieve handle=${marker.handle} mode=lines offset=0` ||
     typeof marker.originalBytes !== 'number' ||
     !Number.isSafeInteger(marker.originalBytes) ||
     marker.originalBytes < 0 ||

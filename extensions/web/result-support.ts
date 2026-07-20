@@ -136,7 +136,7 @@ function truncatedPreviewNotice(
 ): string {
   if (!continuationAvailable)
     return `[Content truncated: showing ${selectedChars} of ${contentLength} characters. ${CAPTURE_LIMIT_WARNING}]`;
-  return `[Content truncated: showing ${selectedChars} of ${contentLength} characters. Use get_search_content({ responseId: "${responseId}", ${selector}, offset: ${nextOffset} }) to continue.${artifactHandle ? ` Exact payload artifact: ${artifactHandle}.` : ''}]`;
+  return `[Content truncated: showing ${selectedChars} of ${contentLength} characters. Use get_search_content({ responseId: "${responseId}", ${selector}, offset: ${nextOffset} }) to continue.${artifactHandle ? ` Exact payload artifact (artifact_retrieve): ${artifactHandle}.` : ''}]`;
 }
 
 export function boundedPreview(

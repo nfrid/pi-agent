@@ -82,7 +82,7 @@ function boundedTodoText(
 ): string {
   let text = `${header}\n${guidance}\n${dashboard(store, false, 120)}`;
   if (text.length > MAX_TODO_CONTEXT_CHARS)
-    text = `${text.slice(0, MAX_TODO_CONTEXT_CHARS)}\n… todo context truncated; use todo list include_done=false if needed.`;
+    text = `${text.slice(0, MAX_TODO_CONTEXT_CHARS)}\n… todo context truncated.`;
   return text;
 }
 

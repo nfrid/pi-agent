@@ -11,13 +11,13 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
     name: TOOL,
     label: 'Todo',
     description:
-      'Branch-local todos with dependencies and batch mutations. Use for multi-step work; update when the plan changes.',
+      'Session-scoped todo list with dependencies and batch mutations. Use for multi-step work; update when the plan changes.',
     promptSnippet:
-      'Manage the branch-local todo list with dependencies and statuses; batch known mutations into one call',
+      'Manage the session todo list with dependencies and statuses; batch known mutations into one call',
     promptGuidelines: [
       'Use todo for real multi-step work only; skip it for trivial one-shot questions or restating the request.',
       'Batch known mutations in one call (e.g. done T1 then start T2). Split only when a later step needs a prior result. Use replace only when rewriting the complete task set.',
-      'Use start/done/block/drop at meaningful state changes; avoid list unless the widget is insufficient or the user asks.',
+      'Use start/done/block/drop at meaningful state changes; avoid list, since the current todo state is already provided in context, unless the user asks for it.',
       'When adding dependencies, make depends_on point to prerequisite task ids; keep task text short and put context in notes.',
     ],
     parameters: paramsSchema,
@@ -35,13 +35,13 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
         message: result.message,
         stats: stats(store),
       };
+      // The list message already is the dashboard; do not render it twice.
+      const text =
+        params.action === 'list'
+          ? result.message
+          : `${result.message}\n${dashboard(store, Boolean(params.include_done), 24)}`;
       return {
-        content: [
-          {
-            type: 'text',
-            text: `${result.message}\n${dashboard(store, Boolean(params.include_done), 24)}`,
-          },
-        ],
+        content: [{ type: 'text', text }],
         details,
       };
     },

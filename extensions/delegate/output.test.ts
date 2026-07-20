@@ -180,7 +180,7 @@ describe('output', () => {
     expect(output.match(/Truncation:/g)).toHaveLength(20);
   });
 
-  test('preserves 20 maximum-length opaque continuations within production caps', () => {
+  test('preserves 20 maximum-length opaque continuations within handoff caps', () => {
     const continuations = Array.from(
       { length: 20 },
       (_, index) => `${index.toString().padStart(2, '0')}:${'界'.repeat(509)}`,
@@ -218,7 +218,7 @@ describe('output', () => {
       aggregateMaxBytes: 4096,
     });
     expect(Buffer.byteLength(impossible, 'utf8')).toBeGreaterThan(4096);
-    expect(impossible).toContain('Mandatory envelope exceeds');
+    expect(impossible).toContain('Mandatory metadata exceeds');
     for (const continuation of continuations)
       expect(impossible).toContain(`Continuation: ${continuation}`);
   });

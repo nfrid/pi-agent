@@ -13,7 +13,7 @@ export function normalizeChoices(params: AskUserParams): UiChoice[] {
 
   if (choices.length > 0 && params.allowCustom !== false) {
     choices.push({
-      label: params.customLabel ?? 'Type something else.',
+      label: params.customLabel ?? 'Type something else',
       value: CUSTOM_VALUE,
       custom: true,
     });

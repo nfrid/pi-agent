@@ -109,7 +109,7 @@ function parseModelCatalog(raw: unknown): {
       };
     if (!isThinking(record.thinking))
       return {
-        error: `delegate.modelCatalog.${route}.thinking must be one exact supported thinking level.`,
+        error: `delegate.modelCatalog.${route}.thinking must be one of: ${THINKING_LEVELS.join(', ')}.`,
       };
     for (const metric of ['relativeCost', 'relativeIntelligence'] as const) {
       const metricValue = record[metric];
@@ -309,7 +309,7 @@ export function resolveDelegateRoute(
   if (!route)
     return {
       error:
-        'Fresh delegate routing requires one exact route from user-owned delegate.modelCatalog.',
+        'Fresh delegate routing requires a route key from user-owned delegate.modelCatalog.',
     };
   const entry = config.modelCatalog?.[route];
   if (!entry)

@@ -213,7 +213,9 @@ describe('immutable todo turn snapshots', () => {
     expect(TODO_SNAPSHOT_TYPE).toBe('lean-todo-turn-snapshot');
     const content = turnSnapshotText(store);
     expect(content).toContain('Todo state at the start of this user turn');
-    expect(content).toContain('Later todo results and newer snapshots replace this');
+    expect(content).toContain(
+      'Later todo results and newer snapshots replace this',
+    );
     expect(content).not.toContain('survives compaction/forking');
   });
 });

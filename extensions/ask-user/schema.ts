@@ -36,7 +36,7 @@ export const ParamsSchema = Type.Object({
   customLabel: Type.Optional(
     Type.String({
       description:
-        'Label for the custom-answer row. Default: Type something else.',
+        'Label for the custom-answer row. Default: "Type something else".',
     }),
   ),
 });

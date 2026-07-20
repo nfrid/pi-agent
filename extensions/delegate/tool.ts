@@ -51,7 +51,7 @@ const DependencySchema = StringEnum(['auto', 'link', 'isolated'] as const, {
 });
 const AllowWritesSchema = Type.Boolean({
   description:
-    'Request worktree-isolated edits. Fresh tasks require existing scope paths; continuations must repeat true and reuse their original isolation. The returned patch is not applied automatically.',
+    'Request worktree-isolated edits. Fresh tasks require existing scope paths; continuations must set allowWrites to true again and reuse their original isolation. The returned patch is not applied automatically.',
 });
 
 const TaskItem = Type.Object({
@@ -105,7 +105,7 @@ function errorText(error: unknown): string {
 
 export function delegatePromptGuidelines(cwd: string): string[] {
   return [
-    'Prefer direct tools for small work. Pick the cheapest catalog route that is smart enough; route descriptions are hints, not roles. Do not invent research/implementation/test/review stages unless each adds concrete value.',
+    'Prefer direct tools for small work. Do not invent research/implementation/test/review stages unless each adds concrete value.',
     'Use contextNote for the relevant decisions, constraints, and findings; use branch only when exact parent history matters.',
     'Continue a child for focused correction or extension; start fresh when its approach is wrong or an independent view is better.',
     "Parallelize only independent work. If one task depends on another's findings, inspect the first result before starting the next. Writable tasks need non-overlapping scopes and return unapplied patches for parent review.",

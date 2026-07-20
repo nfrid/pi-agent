@@ -153,7 +153,7 @@ export function buildSystemPrompt(
 
   if (hasBash) {
     if (!hasGrep && !hasFind && !hasLs) {
-      addGuidelines('Use bash for file operations like ls, rg, find');
+      addGuidelines('Use bash for listing and searching files (ls, rg, find)');
     }
     addGuidelines(GUIDELINES.bash);
   }
@@ -171,7 +171,6 @@ export function buildSystemPrompt(
 
   addGuidelines(GUIDELINES.KISS);
   addGuidelines(GUIDELINES.concise);
-  addGuidelines('Show file paths clearly when working with files');
   const guidelines = guidelinesList
     .map((guideline) => `- ${guideline}`)
     .join('\n');
@@ -183,8 +182,6 @@ export function buildSystemPrompt(
 
 Available tools:
 ${toolsList}
-
-In addition to the tools above, you may have access to other custom tools depending on the project.
 
 Guidelines:
 ${guidelines}`;

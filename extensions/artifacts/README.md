@@ -87,7 +87,7 @@ errors, images, or protected human/decision messages.
 Before every model request, the async context hook verifies both the session-scoped CAS
 artifact and its SHA-256. It changes only the cloned request, not persisted history. Long
 marked inline text gets a deterministic UTF-8-safe fixed-byte head/tail preview stating
-its exact omitted/reclaimed byte count and an exact paged `artifact_retrieve` bytes path.
+its exact omitted/reclaimed byte count and an exact paged `artifact_retrieve` lines path.
 The creation-time preview threshold is configurable with
 `--context-governor-preview-bytes` (512–16384; default 2048) and is persisted in each
 marker so later calls remain deterministic. Missing, revoked, changed, or corrupt data
