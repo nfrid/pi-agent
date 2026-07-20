@@ -41,7 +41,6 @@ export default function tasks(pi: ExtensionAPI) {
       ctx.ui.setWidget(EXT, undefined);
     }
     store.lastCtx = undefined;
-    store.uiPauseDepth = 0;
   });
 
   registerTodoContext(pi, store);

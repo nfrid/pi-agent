@@ -67,6 +67,7 @@ describe('activity indicator', () => {
     ['get_search_content', 'Retrieving search results...'],
     ['artifact_retrieve', 'Retrieving artifact...'],
     ['todo', 'Updating tasks...'],
+    ['delegate', 'Delegating...'],
   ])('uses an action label for %s', (name, expected) => {
     const batch = createToolBatch();
     batch.active.set('tool-1', { name });
@@ -115,7 +116,7 @@ describe('activity indicator', () => {
     ]);
   });
 
-  it('aggregates subagents within and across parallel delegate calls', () => {
+  it('tracks parallel delegate calls like any other tool batch', () => {
     const { ctx, handlers, messages } = setup();
     handlers.get('turn_start')?.({}, ctx);
     handlers.get('tool_execution_start')?.(
@@ -134,30 +135,14 @@ describe('activity indicator', () => {
       },
       ctx,
     );
-    handlers.get('tool_execution_update')?.(
-      {
-        toolCallId: 'delegate-many',
-        partialResult: {
-          details: {
-            runs: [
-              { state: 'success', exitCode: 0 },
-              { state: 'running', exitCode: -1 },
-              { state: 'queued', exitCode: -1 },
-            ],
-          },
-        },
-      },
-      ctx,
-    );
     handlers.get('tool_execution_end')?.({ toolCallId: 'delegate-many' }, ctx);
     handlers.get('tool_execution_end')?.({ toolCallId: 'delegate-one' }, ctx);
 
     expect(messages).toEqual([
       'Thinking...',
-      'Waiting for subagents (0/3)...',
-      'Waiting for subagents (0/4)...',
-      'Waiting for subagents (1/4)...',
-      'Waiting for subagents (3/4)...',
+      'Delegating...',
+      'Waiting for tools (0/2)...',
+      'Delegating (1/2)...',
       'Thinking...',
     ]);
   });
@@ -165,7 +150,7 @@ describe('activity indicator', () => {
   it('updates from lifecycle events and registers only once', () => {
     const { ctx, handlers, messages, pi, registrations } = setup();
     activityIndicator(pi);
-    expect(registrations).toHaveLength(8);
+    expect(registrations).toHaveLength(7);
 
     handlers.get('session_start')?.({}, ctx);
     handlers.get('message_update')?.(

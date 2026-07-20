@@ -2,7 +2,7 @@ import { truncateToWidth } from '@earendil-works/pi-tui';
 import { stats } from './domain';
 import { formatVisualTask } from './format';
 import { EXT, MAX_WIDGET_LINES, type Task } from './model';
-import { type TaskStore, uiUpdatesPaused } from './store';
+import type { TaskStore } from './store';
 
 function completedTaskVisible(store: TaskStore, task: Task): boolean {
   return task.status === 'done' && !store.hiddenCompleted.has(task.id);
@@ -24,7 +24,7 @@ function markDisplayedCompleted(store: TaskStore, tasks: Task[]): void {
 }
 
 export function updateUi(store: TaskStore, ctx = store.lastCtx): void {
-  if (uiUpdatesPaused(store) || !ctx?.hasUI) return;
+  if (!ctx?.hasUI) return;
   const s = stats(store);
   ctx.ui.setStatus(
     EXT,

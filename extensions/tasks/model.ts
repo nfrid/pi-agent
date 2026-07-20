@@ -139,24 +139,12 @@ export type ToolDetails = {
   error?: string;
 };
 
-export type TodoUiAction =
-  | { kind: 'close' }
-  | { kind: 'add' }
-  | { kind: 'edit'; id: string }
-  | { kind: 'notes'; id: string }
-  | { kind: 'deps'; id: string }
-  | { kind: 'priority'; id: string }
-  | { kind: 'status'; id: string; status: Status }
-  | { kind: 'remove'; id: string }
-  | { kind: 'clear_done' };
-
 export const EXT = 'lean-todo';
 export const TOOL = 'todo';
 export const LEGACY_TODO_SNAPSHOT_TYPE = 'lean-todo-replay-v2';
 export const LEGACY_TODO_REPLAY_TYPE = 'lean-todo-replay';
 export const MAX_TODO_CONTEXT_CHARS = 12_000;
 export const MAX_WIDGET_LINES = 12;
-export const MAX_RENDER_ITEMS = 14;
 
 export const STATUS_GLYPH: Record<Status, string> = {
   todo: '○',

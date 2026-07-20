@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RefreshCoordinator } from './refresh';
+import { createRefreshCoordinator } from './refresh-state';
 
 interface TestContext {
   id: string;
@@ -34,7 +34,7 @@ function harness(
   const errors: string[] = [];
   const clears: string[] = [];
   const loading: string[] = [];
-  const coordinator = new RefreshCoordinator<TestContext, string>({
+  const coordinator = createRefreshCoordinator<TestContext, string>({
     debounceMs: 20,
     query: (ctx, signal) => {
       const result = deferred<string>();

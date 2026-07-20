@@ -9,7 +9,7 @@ import {
   STATUS_KEY,
 } from './constants';
 import { formatUsage, isCodexModel } from './display';
-import { RefreshCoordinator } from './refresh';
+import { createRefreshCoordinator } from './refresh-state';
 import type { UsageReport } from './types';
 
 const registered = new WeakSet<object>();
@@ -28,7 +28,7 @@ export function registerUsage(
     if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
   };
 
-  const coordinator = new RefreshCoordinator<ExtensionContext, UsageReport>({
+  const coordinator = createRefreshCoordinator<ExtensionContext, UsageReport>({
     debounceMs: SETTLED_REFRESH_DEBOUNCE_MS,
     query,
     canRefresh: (ctx) => ctx.hasUI && isCodexModel(ctx.model),
