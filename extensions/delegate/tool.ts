@@ -222,7 +222,7 @@ export function registerDelegateTool(pi: ExtensionAPI, cwd: string): void {
             maxConcurrency: config.maxConcurrency,
             signal,
             onUpdate,
-            makeDetails: (runs) => makeDetails('single', runs),
+            mode: 'single',
             onIsolationRunning: () => {
               markedRunning = true;
             },
@@ -444,7 +444,7 @@ export function registerDelegateTool(pi: ExtensionAPI, cwd: string): void {
                     };
                   emit();
                 },
-                makeDetails: (items) => makeDetails('parallel', items),
+                mode: 'parallel',
                 onIsolationRunning: (isolation) => {
                   markedRunning = true;
                   if (!item.plan.resumed)

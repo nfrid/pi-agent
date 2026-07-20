@@ -5,18 +5,6 @@ import { pruneDelegateSessions } from './session';
 import { registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 
-export {
-  formatDelegateRoutingConfig,
-  formatDelegateRoutingPrompt,
-} from './routing';
-export {
-  assertDistinctContinuationTokens,
-  buildArtifactBackedHandoff,
-  mergeDelegateRouteRequest,
-  throwIfAllRunsFailed,
-} from './supervision';
-export { delegateToolBoundary } from './tool-boundary';
-
 const registered = new WeakSet<object>();
 
 /** Stable registration facade; orchestration and broker commands have separate owners. */

@@ -1,11 +1,11 @@
 import { describe, expect, test, vi } from 'vitest';
 import { parseDelegateConfig, resolveDelegateRoute } from './config';
-import { buildArtifactBackedHandoff } from './index';
 import {
   buildParentHandoff,
   PARENT_HANDOFF_CAPS,
   truncateBytes,
 } from './output';
+import { buildArtifactBackedHandoff } from './supervision';
 import { createRun, getFinalAssistantText } from './types';
 
 const assistantMessage = {

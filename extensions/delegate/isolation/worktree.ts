@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
+import { MANIFEST_NAMES } from './constants';
 import { canonical, delegateChildEnvironment, git, isInside } from './kernel';
 import { processIdentity, withIsolationLock } from './locks';
 import type {
@@ -24,16 +25,6 @@ import {
   writeIsolationRecord,
 } from './records';
 import { sandboxBackendAvailable, sandboxProfile } from './sandbox';
-
-const MANIFEST_NAMES = new Set([
-  'package.json',
-  'package-lock.json',
-  'npm-shrinkwrap.json',
-  'pnpm-lock.yaml',
-  'yarn.lock',
-  'bun.lock',
-  'bun.lockb',
-]);
 
 async function repositoryRoot(cwd: string): Promise<string> {
   const raw = String(await git(cwd, ['rev-parse', '--show-toplevel'])).trim();

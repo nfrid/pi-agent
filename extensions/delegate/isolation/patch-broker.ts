@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
+import { MANIFEST_NAMES } from './constants';
 import { git, isInside, isolationEnvironment } from './kernel';
 import {
   processIdentity,
@@ -33,15 +34,6 @@ import { sandboxProfile } from './sandbox';
 const execFileAsync = promisify(execFile);
 const SANDBOX_EXEC = '/usr/bin/sandbox-exec';
 const MAX_GIT_OUTPUT = 16 * 1024 * 1024;
-const MANIFEST_NAMES = new Set([
-  'package.json',
-  'package-lock.json',
-  'npm-shrinkwrap.json',
-  'pnpm-lock.yaml',
-  'yarn.lock',
-  'bun.lock',
-  'bun.lockb',
-]);
 
 function brokerPath(record: IsolationRecord, basename: string): string {
   if (path.basename(basename) !== basename)

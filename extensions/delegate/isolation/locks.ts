@@ -10,9 +10,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
+import { SAFE_ID } from './constants';
 import { isolationRootDir } from './records';
-
-const SAFE_ID = /^[0-9a-f-]{36}$/;
 
 export function processIdentity(pid: number): string | undefined {
   try {

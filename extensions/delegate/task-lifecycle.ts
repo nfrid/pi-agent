@@ -214,7 +214,7 @@ export async function runPreparedDelegateTask(
   prepared: PreparedDelegateTask,
   options: Pick<
     RunDelegateOptions,
-    'timeoutMs' | 'maxConcurrency' | 'signal' | 'onUpdate' | 'makeDetails'
+    'timeoutMs' | 'maxConcurrency' | 'signal' | 'onUpdate' | 'mode'
   > & {
     onIsolationRunning?: (isolation: PreparedIsolation) => void;
   },
@@ -243,7 +243,7 @@ export async function runPreparedDelegateTask(
     maxConcurrency: options.maxConcurrency,
     signal: options.signal,
     onUpdate: options.onUpdate,
-    makeDetails: options.makeDetails,
+    mode: options.mode,
   });
   run.warnings = [...(run.warnings ?? []), ...prepared.warnings];
   return run;

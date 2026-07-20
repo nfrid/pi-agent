@@ -185,7 +185,7 @@ describe('isolation lifecycle and worktree', () => {
           killGraceMs: 100,
           maxConcurrency: 1,
           signal: controller.signal,
-          makeDetails: (runs) => ({ mode: 'single', runs }),
+          mode: 'single',
         });
         expect(getRunState(run)).toBe('aborted');
         expect(

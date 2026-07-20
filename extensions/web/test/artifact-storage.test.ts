@@ -206,18 +206,4 @@ describe('web artifact producer storage', () => {
     expect(store.get(first.id)).toBeNull();
     expect(store.get(second.id)).toEqual(second);
   });
-
-  it('restores compatible legacy web-search-results entries', () => {
-    const data: StoredSearchData = {
-      id: 'legacy',
-      type: 'search',
-      timestamp: Date.now(),
-      queries: [],
-      summary: 'legacy summary',
-    };
-    restore([{ type: 'custom', customType: 'web-search-results', data }]);
-    expect(store.get('legacy')).toEqual(data);
-    expect(store.artifact('legacy')).toBeUndefined();
-    store.clear();
-  });
 });

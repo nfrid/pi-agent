@@ -34,7 +34,6 @@ export interface IsolationRecord {
   status:
     | 'prepared'
     | 'running'
-    | 'ran'
     | 'patch-ready'
     | 'no-changes'
     | 'applied'

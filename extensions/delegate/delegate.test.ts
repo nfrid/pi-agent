@@ -18,14 +18,8 @@ import {
   parseDelegateConfig,
   resolveDelegateRoute,
 } from './config';
-import {
-  assertDistinctContinuationTokens,
-  delegateToolBoundary,
-  formatDelegateRoutingConfig,
-  mergeDelegateRouteRequest,
-  throwIfAllRunsFailed,
-} from './index';
 import { buildDelegatePrompt } from './prompt';
+import { formatDelegateRoutingConfig } from './routing';
 import {
   buildChildArgs,
   mapWithConcurrency,
@@ -40,7 +34,13 @@ import {
   resolveDelegateSession,
   updateDelegateSessionRouting,
 } from './session';
+import {
+  assertDistinctContinuationTokens,
+  mergeDelegateRouteRequest,
+  throwIfAllRunsFailed,
+} from './supervision';
 import { delegatePromptGuidelines } from './tool';
+import { delegateToolBoundary } from './tool-boundary';
 import { createRun, getFinalAssistantText, getRunState } from './types';
 
 const assistantMessage = {
@@ -538,7 +538,7 @@ describe('delegate', () => {
         allowWrites: true,
         timeoutMs: 10_000,
         maxConcurrency: 1,
-        makeDetails: (runs) => ({ mode: 'single', runs }),
+        mode: 'single',
       });
       expect(run.state).toBe('error');
       expect(run.errorMessage).toMatch(/isolation proof/);

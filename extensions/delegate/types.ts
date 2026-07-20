@@ -77,7 +77,6 @@ export interface DelegateIsolationState {
   status:
     | 'prepared'
     | 'running'
-    | 'ran'
     | 'patch-ready'
     | 'no-changes'
     | 'applied'

@@ -6,6 +6,7 @@ import type {
   ToolResultEvent,
 } from '@earendil-works/pi-coding-agent';
 import { resolveArtifact } from './storage';
+import { utf8Head, utf8Tail } from './utf8-boundary';
 import {
   type ArtifactResolver,
   resolveVerifiedArtifact,
@@ -197,34 +198,6 @@ export function parseGovernorMarker(
   )
     return undefined;
   return marker as unknown as ContextGovernorMarker;
-}
-
-function utf8Head(bytes: Buffer, maximum: number): string {
-  let end = Math.min(maximum, bytes.length);
-  while (end > 0) {
-    try {
-      return new TextDecoder('utf-8', { fatal: true }).decode(
-        bytes.subarray(0, end),
-      );
-    } catch {
-      end -= 1;
-    }
-  }
-  return '';
-}
-
-function utf8Tail(bytes: Buffer, maximum: number): string {
-  let start = Math.max(0, bytes.length - maximum);
-  while (start < bytes.length) {
-    try {
-      return new TextDecoder('utf-8', { fatal: true }).decode(
-        bytes.subarray(start),
-      );
-    } catch {
-      start += 1;
-    }
-  }
-  return '';
 }
 
 /** Fixed byte policy, independent of model token use. */

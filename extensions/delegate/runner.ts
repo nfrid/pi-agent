@@ -12,6 +12,7 @@ import {
   scrubIsolationCredentials,
 } from './isolation';
 import { buildDelegatePrompt } from './prompt';
+import { makeDetails } from './supervision';
 import {
   createRun,
   type DelegateContext,
@@ -150,7 +151,7 @@ export interface RunDelegateOptions {
   readOnlyBash?: boolean;
   signal?: AbortSignal;
   onUpdate?: OnUpdate;
-  makeDetails: (runs: DelegatedRun[]) => DelegateDetails;
+  mode: DelegateDetails['mode'];
 }
 
 export function buildChildArgs(
@@ -268,7 +269,7 @@ export async function runDelegate(
     run.finishedAt = Date.now();
     options.onUpdate?.({
       content: [{ type: 'text', text: run.errorMessage }],
-      details: options.makeDetails([run]),
+      details: makeDetails(options.mode, [run]),
     });
     return run;
   }
@@ -280,7 +281,7 @@ export async function runDelegate(
   const emitUpdate = () => {
     options.onUpdate?.({
       content: [{ type: 'text', text: progressText(run) }],
-      details: options.makeDetails([run]),
+      details: makeDetails(options.mode, [run]),
     });
   };
 

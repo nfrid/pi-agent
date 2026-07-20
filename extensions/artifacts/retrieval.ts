@@ -1,6 +1,7 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { resolveArtifact } from './storage';
 import { MAX_RESULT_BYTES, MAX_SEARCH_SCAN_BYTES } from './types';
+import { utf8Prefix, utf8Suffix } from './utf8-boundary';
 
 export const RETRIEVAL_MODES = [
   'metadata',
@@ -66,25 +67,12 @@ function linesOf(text: string): Line[] {
   return lines;
 }
 
-function utf8Prefix(value: string, maximum = PAYLOAD_BYTES) {
-  const bytes = Buffer.from(value);
-  if (bytes.length <= maximum) return { text: value, bytes: bytes.length };
-  let end = maximum;
-  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
-  return { text: bytes.subarray(0, end).toString('utf8'), bytes: end };
+function prefix(value: string, maximum = PAYLOAD_BYTES) {
+  return utf8Prefix(value, maximum);
 }
 
-function utf8Suffix(value: string, maximum = PAYLOAD_BYTES) {
-  const bytes = Buffer.from(value);
-  if (bytes.length <= maximum)
-    return { text: value, bytes: bytes.length, omittedBytes: 0 };
-  let start = bytes.length - maximum;
-  while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start++;
-  return {
-    text: bytes.subarray(start).toString('utf8'),
-    bytes: bytes.length - start,
-    omittedBytes: start,
-  };
+function suffix(value: string, maximum = PAYLOAD_BYTES) {
+  return utf8Suffix(value, maximum);
 }
 
 function accounting(
@@ -202,8 +190,8 @@ export async function retrieveArtifact(
     const full = bytes.subarray(start, end).toString('utf8');
     const returned =
       request.mode === 'head'
-        ? { ...utf8Prefix(full), omittedBytes: 0 }
-        : utf8Suffix(full);
+        ? { ...prefix(full), omittedBytes: 0 }
+        : suffix(full);
     return {
       metadata,
       offset: start,
@@ -222,7 +210,7 @@ export async function retrieveArtifact(
     );
     const chosen = lines.slice(start, start + Math.min(requestedLimit, 1000));
     const full = chosen.map((line) => line.raw).join('');
-    const returned = utf8Prefix(full);
+    const returned = prefix(full);
     const sourceOffset = chosen[0]?.startByte ?? bytes.length;
     return {
       metadata,
@@ -363,7 +351,7 @@ export async function retrieveArtifact(
     throw new Error(`Unsupported retrieval mode: ${request.mode as string}`);
   }
   const selectorResultBytes = Buffer.byteLength(full);
-  const returned = utf8Prefix(full);
+  const returned = prefix(full);
   return {
     metadata,
     ...(sourceOffset === undefined ? {} : { sourceOffset }),

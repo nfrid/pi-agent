@@ -8,13 +8,13 @@ import {
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
+import { SAFE_ID } from './constants';
 import { delegateChildEnvironment } from './kernel';
 import { processIdentity } from './locks';
 import type { PreparedChildAuth, PreparedIsolation } from './model';
 import { delegateStateRoot, isolationRootDir, loadIsolation } from './records';
 
 const READ_ONLY_ROOT = 'delegate-readonly/v1';
-const SAFE_ID = /^[0-9a-f-]{36}$/;
 function readOnlyRootDir(): string {
   return path.join(delegateStateRoot(), READ_ONLY_ROOT);
 }

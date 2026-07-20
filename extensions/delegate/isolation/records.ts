@@ -9,10 +9,11 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { SAFE_ID } from './constants';
+import { isInside } from './kernel';
 import type { IsolationRecord } from './model';
 
 const ROOT = 'delegate-worktrees/v1';
-const SAFE_ID = /^[0-9a-f-]{36}$/;
 
 export function delegateStateRoot(): string {
   return (
@@ -49,21 +50,13 @@ export function writeIsolationRecord(record: IsolationRecord): void {
   renameSync(temporary, target);
 }
 
-function inside(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate);
-  return (
-    relative === '' ||
-    (!relative.startsWith('..') && !path.isAbsolute(relative))
-  );
-}
-
 function validWritablePath(worktree: string, candidate: unknown): boolean {
   if (typeof candidate !== 'string') return false;
   const resolved = path.resolve(candidate);
-  if (!inside(worktree, resolved)) return false;
+  if (!isInside(worktree, resolved)) return false;
   if (!existsSync(resolved) || !existsSync(worktree)) return true;
   try {
-    return inside(realpathSync(worktree), realpathSync(resolved));
+    return isInside(realpathSync(worktree), realpathSync(resolved));
   } catch {
     return false;
   }
@@ -84,12 +77,12 @@ function validDependencyLink(
   )
     return false;
   const linkPath = path.resolve(worktree, candidate);
-  if (!inside(worktree, linkPath)) return false;
+  if (!isInside(worktree, linkPath)) return false;
   if (!existsSync(linkPath)) return true;
   const expected = path.resolve(repositoryRoot, candidate);
   try {
     return (
-      inside(realpathSync(repositoryRoot), realpathSync(expected)) &&
+      isInside(realpathSync(repositoryRoot), realpathSync(expected)) &&
       realpathSync(linkPath) === realpathSync(expected)
     );
   } catch {
@@ -106,7 +99,6 @@ function validRecord(value: unknown, id: string): value is IsolationRecord {
   const statuses = new Set([
     'prepared',
     'running',
-    'ran',
     'patch-ready',
     'no-changes',
     'applied',
@@ -125,7 +117,7 @@ function validRecord(value: unknown, id: string): value is IsolationRecord {
     path.resolve(record.scratchPath) === scratch &&
     typeof record.workingDirectory === 'string' &&
     !path.isAbsolute(record.workingDirectory) &&
-    inside(
+    isInside(
       record.repositoryRoot,
       path.resolve(record.repositoryRoot, record.workingDirectory),
     ) &&
