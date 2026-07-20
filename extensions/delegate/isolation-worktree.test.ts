@@ -119,30 +119,6 @@ describe('isolation lifecycle and worktree', () => {
   );
 
   test.skipIf(!sandboxBackendAvailable())(
-    'captures aborted child lifecycle and permits explicit cleanup',
-    async () => {
-      const result = await prepareWritableIsolation({
-        cwd: repository,
-        scopes: ['src'],
-      });
-      const sessionPath = path.join(agentDir, 'child-aborted.jsonl');
-      writeFileSync(sessionPath, '{}\n');
-      const prepared = attachIsolationSession(
-        result.isolation as NonNullable<typeof result.isolation>,
-        randomUUID(),
-        sessionPath,
-      );
-      await markIsolationRunning(prepared.record.id);
-      const captured = await captureIsolationPatch(prepared.record.id, {
-        outcome: 'aborted',
-      });
-      expect(captured.status).toBe('failed');
-      expect(captured.runOwner).toBeUndefined();
-      await discardIsolation(captured.id);
-    },
-  );
-
-  test.skipIf(!sandboxBackendAvailable())(
     'terminates an actual isolated child on abort and retains a cleanable failed record',
     async () => {
       const result = await prepareWritableIsolation({

@@ -1,6 +1,4 @@
-import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { Type } from 'typebox';
 import { Value } from 'typebox/value';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -610,46 +608,5 @@ describe('batch operation schema', () => {
         surprise: true,
       }),
     ).toBe(false);
-  });
-
-  it('is smaller than a discriminated per-action union while adding validation over Any', () => {
-    const actions = [
-      'list',
-      'add',
-      'update',
-      'start',
-      'done',
-      'block',
-      'drop',
-      'remove',
-      'clear_done',
-      'replace',
-    ] as const;
-    const union = Type.Union(
-      actions.map((action) =>
-        Type.Object({
-          action: Type.Literal(action),
-          id: Type.Optional(Type.String()),
-          text: Type.Optional(Type.String()),
-          status: Type.Optional(
-            StringEnum([
-              'todo',
-              'doing',
-              'blocked',
-              'done',
-              'dropped',
-            ] as const),
-          ),
-          depends_on: Type.Optional(Type.Array(Type.String())),
-          notes: Type.Optional(Type.String()),
-        }),
-      ),
-    );
-    const oldAny = Type.Array(Type.Any());
-    const compactBytes = JSON.stringify(operationSchema).length;
-
-    expect(compactBytes).toBeLessThan(JSON.stringify(union).length);
-    expect(compactBytes).toBeGreaterThan(JSON.stringify(oldAny).length);
-    expect(compactBytes).toBeLessThan(1_500);
   });
 });

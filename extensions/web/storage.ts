@@ -4,13 +4,6 @@ import type { ExtractedContent } from './extract';
 import type { SearchResult } from './types';
 
 export const WEB_REFERENCE_TYPE = 'web-artifact-reference:v1';
-/** Legacy inline fallback kept only so older sessions can still restore. */
-export const WEB_FALLBACK_TYPE = 'web-search-results:v1';
-
-export interface WebFallbackEntry {
-  version: 1;
-  data: StoredSearchData;
-}
 
 export interface WebArtifactReference {
   version: 1;
@@ -64,12 +57,6 @@ export function isValidStoredData(data: unknown): data is StoredSearchData {
   return true;
 }
 
-function validFallback(data: unknown): data is WebFallbackEntry {
-  if (!data || typeof data !== 'object') return false;
-  const value = data as Record<string, unknown>;
-  return value.version === 1 && isValidStoredData(value.data);
-}
-
 function validReference(data: unknown): data is WebArtifactReference {
   if (!data || typeof data !== 'object') return false;
   const value = data as Record<string, unknown>;
@@ -111,11 +98,6 @@ export function createWebResultStore(): WebResultStore {
       const branch = ctx.sessionManager.getBranch();
       for (const entry of branch) {
         if (entry.type !== 'custom') continue;
-        if (entry.customType === WEB_FALLBACK_TYPE) {
-          if (validFallback(entry.data))
-            results.set(entry.data.data.id, entry.data.data);
-          continue;
-        }
         if (
           entry.customType !== WEB_REFERENCE_TYPE ||
           !validReference(entry.data)

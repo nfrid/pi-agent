@@ -19,7 +19,7 @@ vi.mock('../search', () => ({
 import { artifactProducer, MAX_ARTIFACT_BYTES } from '../../artifacts';
 import web from '../index';
 import { search } from '../search';
-import { createWebResultStore, WEB_FALLBACK_TYPE } from '../storage';
+import { createWebResultStore } from '../storage';
 
 type Tool = {
   execute: (
@@ -216,7 +216,7 @@ describe('web artifact fallback', () => {
     expect(continued?.content[0].text).toContain('fallback append failure');
   });
 
-  it('restores legacy fallback entries for older sessions', () => {
+  it('ignores legacy inline fallback entries', () => {
     const id = 'legacy';
     const data = {
       id,
@@ -238,13 +238,13 @@ describe('web artifact fallback', () => {
         getBranch: () => [
           {
             type: 'custom',
-            customType: WEB_FALLBACK_TYPE,
+            customType: 'web-search-results:v1',
             data: { version: 1, data },
           },
         ],
       },
     } as never);
-    expect(restored.get(id)).toEqual(data);
+    expect(restored.get(id)).toBeNull();
   });
 
   it('throws terminal tool failures instead of returning an ignored isError field', async () => {

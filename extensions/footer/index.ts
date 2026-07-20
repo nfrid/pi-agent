@@ -6,7 +6,7 @@ import type {
   ThemeColor,
 } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
-import { thinkingToThemeColor } from './shared/theme';
+import { thinkingToThemeColor } from '../shared/theme';
 
 function contextColor(percent: number | undefined): ThemeColor {
   if (percent === undefined) return 'dim';

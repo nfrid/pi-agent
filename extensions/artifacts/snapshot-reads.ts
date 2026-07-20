@@ -5,6 +5,7 @@ import type {
   ToolResultEvent,
 } from '@earendil-works/pi-coding-agent';
 import { DEFAULT_MAX_LINES } from '@earendil-works/pi-coding-agent';
+import { createLifecycleGuard } from '../shared/lifecycle-guard';
 import { putArtifact } from './storage';
 import { sha256 } from './storage-validation';
 import { resolveVerifiedArtifact } from './verified-resolution';
@@ -219,46 +220,44 @@ export function registerSnapshotReads(
 
   let state: ReadSnapshotState = { byKey: new Map() };
   let queue = Promise.resolve();
-  let generation = 0;
-  const rebuild = (ctx: ExtensionContext) => {
-    generation++;
-    state = reconstructReadSnapshots(ctx);
-  };
-  pi.on('session_start', (_event, ctx) => rebuild(ctx));
-  pi.on('session_tree', (_event, ctx) => rebuild(ctx));
-  pi.on('session_shutdown', () => {
-    generation++;
-    state = { byKey: new Map() };
+  const lifecycle = createLifecycleGuard({
+    onSessionStart: (ctx) => {
+      state = reconstructReadSnapshots(ctx);
+    },
+    onSessionTree: (ctx) => {
+      state = reconstructReadSnapshots(ctx);
+    },
+    onSessionShutdown: () => {
+      state = { byKey: new Map() };
+    },
+    boundaryError: 'Stale read snapshot lifecycle generation',
   });
+  lifecycle.register(pi);
   const transformToolResult = (
     event: Parameters<typeof processReadSnapshot>[3],
     ctx: ExtensionContext,
   ) => {
     if (pi.getFlag(SNAPSHOT_READS_FLAG) !== true || event.toolName !== 'read')
       return;
-    const scheduledGeneration = generation;
+    const scheduledGeneration = lifecycle.generation;
     const scheduledState = state;
     const guardedPi: SnapshotPi = {
       appendEntry(customType, data) {
-        if (scheduledGeneration !== generation)
-          throw new Error('Stale read snapshot lifecycle generation');
+        lifecycle.assertGeneration(scheduledGeneration);
         return pi.appendEntry(customType, data);
       },
     };
     const work = queue.then(async () => {
-      if (scheduledGeneration !== generation) return undefined;
+      if (scheduledGeneration !== lifecycle.generation) return undefined;
       const result = await processReadSnapshot(
         guardedPi,
         ctx,
         scheduledState,
         event,
         undefined,
-        () => {
-          if (scheduledGeneration !== generation)
-            throw new Error('Stale read snapshot lifecycle generation');
-        },
+        () => lifecycle.assertGeneration(scheduledGeneration),
       );
-      return scheduledGeneration === generation ? result : undefined;
+      return scheduledGeneration === lifecycle.generation ? result : undefined;
     });
     queue = work.then(
       () => undefined,
