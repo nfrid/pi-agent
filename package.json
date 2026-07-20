@@ -16,8 +16,8 @@
     "lint:fix": "biome check extensions scripts --write",
     "format": "biome format extensions scripts docs",
     "format:fix": "biome format extensions scripts docs --write",
-    "check": "npm run check:node && npm run typecheck && npm run lint && npm run format",
-    "test": "npm run check:node && vitest run",
+    "check": "node scripts/clean-npm-env.mjs sh -c \"node scripts/check-node.mjs && tsc --noEmit && biome check extensions scripts && biome format extensions scripts docs\"",
+    "test": "node scripts/clean-npm-env.mjs sh -c \"node scripts/check-node.mjs && vitest run\"",
     "session:metrics": "node scripts/session-metrics/index.mjs",
     "pi:update": "pi update && pnpm run pi:sdk-sync",
     "pi:sdk-sync": "VERSION=$(pi --version) && pnpm add -E @earendil-works/pi-ai@$VERSION @earendil-works/pi-coding-agent@$VERSION @earendil-works/pi-tui@$VERSION"

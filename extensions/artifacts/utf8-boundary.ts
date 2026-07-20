@@ -1,3 +1,10 @@
+/** Byte index safe for decoding when `maximum` may fall inside a code point. */
+export function utf8SafeEnd(bytes: Buffer, maximum: number): number {
+  let end = Math.min(maximum, bytes.length);
+  while (end > 0 && end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--;
+  return end;
+}
+
 export function utf8Head(bytes: Buffer, maximum: number): string {
   let end = Math.min(maximum, bytes.length);
   while (end > 0) {

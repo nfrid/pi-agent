@@ -2,16 +2,13 @@ import type { Dirent } from 'node:fs';
 import { readdir, readFile, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import { scanArtifactReferences } from './scan-entries';
 import {
   ArtifactRootLockError,
   artifactRoot,
   withArtifactRootLock,
 } from './storage';
-import {
-  ARTIFACT_ENTRY_TYPE,
-  type ArtifactEntry,
-  type Manifest,
-} from './types';
+import type { Manifest } from './types';
 
 const DEFAULT_GRACE_MS = 24 * 60 * 60 * 1000;
 
@@ -66,31 +63,30 @@ export async function collectGarbage(
           return { deleted: 0, retained: 0, aborted: true };
         try {
           for (const file of sessions) {
-            const handles = new Map<string, string>();
-            const lines = (await readFile(file, 'utf8'))
+            const entries = (await readFile(file, 'utf8'))
               .split('\n')
-              .filter(Boolean);
-            for (const line of lines) {
-              const entry = JSON.parse(line) as {
-                type?: string;
-                id?: string;
-                customType?: string;
-                data?: ArtifactEntry;
-              };
+              .filter(Boolean)
+              .map(
+                (line) =>
+                  JSON.parse(line) as {
+                    type?: string;
+                    id?: string;
+                    customType?: string;
+                    data?: unknown;
+                  },
+              );
+            for (const entry of entries) {
               if (entry.type === 'session' && entry.id)
                 activeSessionIds.add(entry.id);
-              if (
-                entry.type !== 'custom' ||
-                entry.customType !== ARTIFACT_ENTRY_TYPE
-              )
-                continue;
-              const data = entry.data;
-              if (data?.version !== 1) continue;
-              if (data.kind === 'purge' || data.kind === 'revoke')
-                handles.delete(data.handle);
-              else handles.set(data.metadata.handle, data.metadata.sha256);
             }
-            for (const digest of handles.values()) referenced.add(digest);
+            for (const digest of scanArtifactReferences(
+              entries as Array<{
+                type: string;
+                customType?: string;
+                data?: unknown;
+              }>,
+            ).values())
+              referenced.add(digest);
           }
           // Manifests cover an active-session flush race. Stale manifests are not roots:
           // without a deletion hook, the JSONL header scan reconciles deleted sessions.

@@ -1,7 +1,13 @@
 import { selectTextRange } from '../shared/text-selection';
 import type { ArtifactMetadata } from './types';
 import { MAX_SEARCH_SCAN_BYTES } from './types';
-import { utf8Head, utf8Prefix, utf8Suffix, utf8Tail } from './utf8-boundary';
+import {
+  utf8Head,
+  utf8Prefix,
+  utf8SafeEnd,
+  utf8Suffix,
+  utf8Tail,
+} from './utf8-boundary';
 
 export const RETRIEVAL_MODES = [
   'metadata',
@@ -256,13 +262,7 @@ function retrieveSearch(
   const { bytes, metadata } = artifact;
   assertTextual(metadata);
   const scanBytes = Math.min(bytes.length, MAX_SEARCH_SCAN_BYTES);
-  let scanEnd = scanBytes;
-  while (
-    scanEnd > 0 &&
-    scanEnd < bytes.length &&
-    (bytes[scanEnd] & 0xc0) === 0x80
-  )
-    scanEnd--;
+  const scanEnd = utf8SafeEnd(bytes, scanBytes);
   const scanLines = linesOf(bytes.subarray(0, scanEnd).toString('utf8'));
   const query = request.query ?? '';
   if (!query || query.length > 1024)

@@ -169,29 +169,27 @@ export function isRunError(run: DelegatedRun): boolean {
   return run.exitCode !== 0 || !getFinalAssistantText(run.messages).trim();
 }
 
-export function getExactFinalAssistantText(messages: Message[]): string {
+export function getFinalAssistantText(
+  messages: Message[],
+  options?: { exact?: boolean },
+): string {
+  const exact = options?.exact ?? false;
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i];
     if (message.role !== 'assistant') continue;
     const text = message.content
-      .filter((part) => part.type === 'text')
+      .filter((part) => part.type === 'text' && (exact || part.text.trim()))
       .map((part) => (part.type === 'text' ? part.text : ''))
       .join('\n');
-    if (text.trim()) return text;
+    if (exact) {
+      if (text.trim()) return text;
+    } else if (text.trim()) {
+      return text.trim();
+    }
   }
   return '';
 }
 
-export function getFinalAssistantText(messages: Message[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message.role !== 'assistant') continue;
-    const text = message.content
-      .filter((part) => part.type === 'text' && part.text.trim())
-      .map((part) => (part.type === 'text' ? part.text : ''))
-      .join('\n')
-      .trim();
-    if (text) return text;
-  }
-  return '';
+export function getExactFinalAssistantText(messages: Message[]): string {
+  return getFinalAssistantText(messages, { exact: true });
 }

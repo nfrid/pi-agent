@@ -15,3 +15,16 @@ node -v    # should print v25.x
 ```
 
 `npm run check` and `npm test` also run `check:node`, which fails fast on Node < 25.
+
+## Cursor sandbox env
+
+Agent shells inject `npm_config_devdir` and many `*CACHE*` paths under `cursor-sandbox-cache`. npm 11 warns on `devdir`, and offline installs inside macOS `sandbox-exec` can fail when those replace normal cache locations.
+
+Repo scripts run child commands through `scripts/clean-npm-env.mjs`, which strips those variables. To avoid the one remaining npm warning, invoke checks directly:
+
+```bash
+nvm use
+node scripts/clean-npm-env.mjs sh -c 'node scripts/check-node.mjs && vitest run'
+```
+
+Isolation/delegate tests use git worktrees and `sandbox-exec`; run them with full permissions, not the default sandbox.

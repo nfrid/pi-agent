@@ -1,7 +1,16 @@
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { describe, expect, test } from 'vitest';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { DelegateConfig } from './config';
+import type { PreparedIsolation } from './isolation';
+import { executeSingleDelegate } from './orchestration';
 import { buildDelegatePlans } from './plans';
+import type { PreparedDelegateTask } from './task-lifecycle';
+import * as taskLifecycle from './task-lifecycle';
+import * as toolResult from './tool-result';
+import type { DelegateRouteState } from './types';
 
 const config: DelegateConfig = {
   timeoutMs: 60_000,
@@ -19,7 +28,54 @@ const config: DelegateConfig = {
   },
 };
 
+const routing: DelegateRouteState = {
+  route: 'quick',
+  provider: 'openai-codex',
+  model: 'gpt-test',
+  thinking: 'low',
+  relativeCost: 1,
+  relativeIntelligence: 1,
+};
+
 const ctx = { cwd: '/tmp/project' } as ExtensionContext;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+function runContext() {
+  return {
+    pi: {} as ExtensionAPI,
+    ctx,
+    config,
+    getSnapshot: () => null,
+  };
+}
+
+function prepared(
+  overrides: Partial<PreparedDelegateTask> = {},
+): PreparedDelegateTask {
+  return {
+    plan: {
+      task: 'inspect',
+      requestedCwd: '/tmp/project',
+      context: 'fresh',
+      writeRequested: false,
+      routeOverride: false,
+      warnings: [],
+      routing,
+    },
+    session: {
+      token: 'tok',
+      filePath: '/tmp/delegate.jsonl',
+      cwd: '/tmp/project',
+    },
+    cwd: '/tmp/project',
+    allowWrites: false,
+    warnings: [],
+    ...overrides,
+  };
+}
 
 describe('buildDelegatePlans', () => {
   test('builds a single fresh task plan', () => {
@@ -122,5 +178,96 @@ describe('buildDelegatePlans', () => {
         () => null,
       ),
     ).toThrow('do not provide replacements');
+  });
+});
+
+describe('executeSingleDelegate lifecycle', () => {
+  test('rolls back prepared tasks when parallel setup fails', async () => {
+    const rollback = vi
+      .spyOn(taskLifecycle, 'rollbackPreparedDelegateTasks')
+      .mockResolvedValue(['cleanup warn']);
+    vi.spyOn(taskLifecycle, 'prepareDelegateTask')
+      .mockResolvedValueOnce(prepared())
+      .mockRejectedValueOnce(new Error('prepare failed'));
+
+    await expect(
+      executeSingleDelegate(
+        runContext(),
+        {
+          tasks: [
+            { task: 'one', route: 'quick' },
+            { task: 'two', route: 'quick' },
+          ],
+        },
+        {},
+      ),
+    ).rejects.toThrow(
+      'Parallel delegate setup failed before launch: prepare failed Cleanup warnings: cleanup warn',
+    );
+    expect(rollback).toHaveBeenCalledTimes(1);
+  });
+
+  test('rolls back prepared tasks when single setup fails', async () => {
+    vi.spyOn(taskLifecycle, 'rollbackPreparedDelegateTasks').mockResolvedValue(
+      [],
+    );
+    vi.spyOn(taskLifecycle, 'prepareDelegateTask').mockRejectedValue(
+      new Error('prepare failed'),
+    );
+
+    await expect(
+      executeSingleDelegate(
+        runContext(),
+        { task: 'inspect', route: 'quick' },
+        {},
+      ),
+    ).rejects.toThrow('Delegate setup failed before launch: prepare failed');
+  });
+
+  test('returns a failed lifecycle run when launch fails before isolation starts', async () => {
+    vi.spyOn(taskLifecycle, 'prepareDelegateTask').mockResolvedValue(
+      prepared({
+        isolation: {
+          record: {
+            id: 'iso-1',
+            backend: 'macos-sandbox-exec',
+            repositoryRoot: '/repo',
+            worktreePath: '/repo/.pi/worktrees/iso-1',
+            workingDirectory: '.',
+            baseHead: 'abc',
+            dependencyMode: 'link',
+            status: 'prepared',
+          },
+          profilePath: '/tmp/profile.sb',
+          env: {},
+        } as PreparedIsolation,
+      }),
+    );
+    vi.spyOn(taskLifecycle, 'runPreparedDelegateTask').mockRejectedValue(
+      new Error('spawn failed'),
+    );
+    vi.spyOn(taskLifecycle, 'cleanupFreshPreparedTask').mockResolvedValue({
+      warnings: ['discarded iso-1'],
+    });
+    const delegateToolResult = vi
+      .spyOn(toolResult, 'delegateToolResult')
+      .mockImplementation(async (_pi, _ctx, mode, runs) => ({
+        content: [{ type: 'text' as const, text: 'handoff' }],
+        details: { mode, runs },
+      }));
+
+    const result = await executeSingleDelegate(
+      runContext(),
+      { task: 'inspect', route: 'quick' },
+      {},
+    );
+
+    expect(result.details?.runs?.[0]).toMatchObject({
+      exitCode: 1,
+      state: 'error',
+      errorMessage: expect.stringContaining('spawn failed'),
+      warnings: expect.arrayContaining(['discarded iso-1']),
+    });
+    expect(delegateToolResult).toHaveBeenCalled();
   });
 });

@@ -55,3 +55,28 @@ export function recoverExpectedArtifact(
   if (!HANDLE_RE.test(expected.handle)) return undefined;
   return scanned.recovered.get(expected.handle);
 }
+
+/** Latest handle → digest map from append-only artifact entries. */
+export function scanArtifactReferences(
+  entries: Iterable<{
+    type: string;
+    customType?: string;
+    data?: unknown;
+  }>,
+): Map<string, string> {
+  const references = new Map<string, string>();
+  for (const entry of entries) {
+    if (entry.type !== 'custom' || entry.customType !== ARTIFACT_ENTRY_TYPE)
+      continue;
+    const data = entry.data as RecoveryEntry | TombstoneEntry | undefined;
+    if (data?.version !== 1) continue;
+    if (validTombstone(data)) {
+      references.delete(data.handle);
+      continue;
+    }
+    if (data.kind !== 'recovery') continue;
+    const bytes = validRecoveryBytes(data);
+    if (bytes) references.set(data.metadata.handle, data.metadata.sha256);
+  }
+  return references;
+}
