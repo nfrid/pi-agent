@@ -204,7 +204,6 @@ export function createWebSearchTool(options: {
         summary,
         id,
         'view: "summary"',
-        artifact.artifact?.handle,
         artifact.continuationAvailable,
       );
       return {

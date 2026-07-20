@@ -1,4 +1,5 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { selectTextRange } from '../shared/text-selection';
 import { resolveArtifact } from './storage';
 import { MAX_RESULT_BYTES, MAX_SEARCH_SCAN_BYTES } from './types';
 import { utf8Prefix, utf8Suffix } from './utf8-boundary';
@@ -311,23 +312,14 @@ export async function retrieveArtifact(
   if (request.mode === 'heading') {
     if (!request.heading || request.heading.length > 512)
       throw new Error('heading is required');
-    const wanted = request.heading.trim().replace(/^#{1,6}\s+/, '');
-    const index = lines.findIndex(
-      (line) =>
-        /^#{1,6}\s+/.test(line.text) &&
-        line.text.replace(/^#{1,6}\s+/, '').trim() === wanted,
-    );
-    if (index < 0) throw new Error('Markdown heading not found');
-    const level = /^#+/.exec(lines[index].text)?.[0].length ?? 6;
-    let end = index + 1;
-    while (end < lines.length) {
-      const match = /^(#{1,6})\s+/.exec(lines[end].text);
-      if (match && match[1].length <= level) break;
-      end++;
+    let selection: ReturnType<typeof selectTextRange>;
+    try {
+      selection = selectTextRange(text, { heading: request.heading });
+    } catch {
+      throw new Error('Markdown heading not found');
     }
-    const chosen = lines.slice(index, end);
-    full = chosen.map((line) => line.raw).join('');
-    sourceOffset = chosen[0].startByte;
+    full = selection.text;
+    sourceOffset = Buffer.byteLength(text.slice(0, selection.start), 'utf8');
     sourceRemaining = bytes.length - Buffer.byteLength(full);
   } else if (request.mode === 'json') {
     const parsed = JSON.parse(text) as unknown;

@@ -48,9 +48,10 @@ fetch_content({ urls: ['https://example.com/a', 'https://example.com/b'] });
 
 ### `get_search_content`
 
-Results are stored in the Pi session. Retrieve them by the returned
-`responseId`, selecting a query/page by index or exact query/URL. Page content
-from a search is available when that search used `includeContent: true`.
+Results are stored for the current session and, when artifact persistence
+succeeds, restored from the Pi session by the returned `responseId`. Retrieve
+them by `responseId`, selecting a query/page by index or exact query/URL. Page
+content from a search is available when that search used `includeContent: true`.
 
 ```ts
 get_search_content({ responseId: 'abc123', view: 'summary', offset: 30000 });

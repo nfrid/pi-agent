@@ -77,7 +77,6 @@ export function createFetchContentTool(options: {
                 result.content,
                 id,
                 'urlIndex: 0',
-                artifact.artifact?.handle,
                 artifact.continuationAvailable,
               ).rendered,
             },
@@ -120,7 +119,6 @@ export function createFetchContentTool(options: {
         renderedSummary,
         id,
         'view: "summary"',
-        artifact.artifact?.handle,
         artifact.continuationAvailable,
       );
       return {

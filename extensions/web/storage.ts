@@ -4,7 +4,7 @@ import type { ExtractedContent } from './extract';
 import type { SearchResult } from './types';
 
 export const WEB_REFERENCE_TYPE = 'web-artifact-reference:v1';
-/** Exact full-payload fallback used only when artifact persistence is unavailable. */
+/** Legacy inline fallback kept only so older sessions can still restore. */
 export const WEB_FALLBACK_TYPE = 'web-search-results:v1';
 
 export interface WebFallbackEntry {

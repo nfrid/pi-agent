@@ -11,14 +11,13 @@ import {
 import { pageContent } from './content-retrieval';
 import {
   type StoredSearchData,
-  WEB_FALLBACK_TYPE,
   WEB_REFERENCE_TYPE,
   type WebResultStore,
 } from './storage';
 
 const MAX_INLINE_CHARS = 30_000;
 const ARTIFACT_WARNING =
-  'Exact artifact unavailable; retained an in-session fallback.';
+  'Exact artifact unavailable; continuation is limited to this session.';
 const CAPTURE_LIMIT_WARNING =
   'Exact continuation unavailable; aggregate result exceeded the persistence limit.';
 
@@ -37,12 +36,7 @@ export async function persistWebResult(
 ): Promise<StoredPayload> {
   const serialized = JSON.stringify(data);
   const serializedBytes = Buffer.byteLength(serialized);
-  const fallbackBytes =
-    Buffer.byteLength('{"version":1,"data":') + serializedBytes + 1;
-  if (
-    serializedBytes > MAX_ARTIFACT_BYTES ||
-    fallbackBytes > MAX_ARTIFACT_BYTES
-  )
+  if (serializedBytes > MAX_ARTIFACT_BYTES)
     return {
       warning: CAPTURE_LIMIT_WARNING,
       continuationAvailable: false,
@@ -91,16 +85,10 @@ export async function persistWebResult(
       results.delete(data.id);
       throw error;
     }
-    try {
-      pi.appendEntry(WEB_FALLBACK_TYPE, { version: 1, data });
-      return { warning: ARTIFACT_WARNING, continuationAvailable: true };
-    } catch {
-      results.delete(data.id);
-      return {
-        warning: CAPTURE_LIMIT_WARNING,
-        continuationAvailable: false,
-      };
-    }
+    return {
+      warning: ARTIFACT_WARNING,
+      continuationAvailable: false,
+    };
   }
 }
 
@@ -140,22 +128,20 @@ function truncatedPreviewNotice(
   selector: string,
   selectedChars: number,
   nextOffset: number | null,
-  artifactHandle?: string,
   continuationAvailable = true,
 ): string {
   const noticeBudget = MAX_INLINE_CHARS - 512;
   if (!continuationAvailable)
     return `[Content truncated: showing ${selectedChars} of ${contentLength} characters. ${CAPTURE_LIMIT_WARNING}]`;
-  const base = `[Content truncated: showing ${selectedChars} of ${contentLength} characters. Use get_search_content({ responseId: "${responseId}", ${selector}, offset: ${nextOffset} }) to continue.${artifactHandle ? ` Exact payload artifact (artifact_retrieve): ${artifactHandle}.` : ''}]`;
+  const base = `[Content truncated: showing ${selectedChars} of ${contentLength} characters. Use get_search_content({ responseId: "${responseId}", ${selector}, offset: ${nextOffset} }) to continue.]`;
   if (base.length <= noticeBudget) return base;
-  return `[Content truncated: showing ${selectedChars} of ${contentLength} characters. Use get_search_content to continue.${artifactHandle ? ` Exact payload artifact (artifact_retrieve): ${artifactHandle}.` : ''}]`;
+  return `[Content truncated: showing ${selectedChars} of ${contentLength} characters. Use get_search_content to continue.]`;
 }
 
 export function boundedPreview(
   content: string,
   responseId: string,
   selector: string,
-  artifactHandle?: string,
   continuationAvailable = true,
 ): ReturnType<typeof pageContent> & { rendered: string } {
   if (content.length <= MAX_INLINE_CHARS) {
@@ -170,7 +156,6 @@ export function boundedPreview(
     selector,
     Math.min(content.length, noticeBudget),
     noticeBudget,
-    artifactHandle,
     continuationAvailable,
   );
   const budget = Math.max(2, MAX_INLINE_CHARS - notice.length - 2);
@@ -181,7 +166,6 @@ export function boundedPreview(
     selector,
     page.details.selectedChars,
     page.details.nextOffset,
-    artifactHandle,
     continuationAvailable,
   );
   return { ...page, rendered: `${page.text}\n\n${finalNotice}` };

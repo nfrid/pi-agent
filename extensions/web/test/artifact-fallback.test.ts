@@ -36,7 +36,7 @@ type Tool = {
 };
 
 describe('web artifact fallback', () => {
-  it('keeps successful output, exact continuation guidance, and restores fallback without TTL', async () => {
+  it('keeps successful output for the current session without writing fallback entries', async () => {
     const tools = new Map<string, Tool>();
     const entries: Array<{ type: string; customType?: string; data: unknown }> =
       [];
@@ -61,23 +61,26 @@ describe('web artifact fallback', () => {
     );
     expect(result.content[0].text).toContain('get_search_content');
     expect(result.details?.artifactWarning).toBe(
-      'Exact artifact unavailable; retained an in-session fallback.',
+      'Exact artifact unavailable; continuation is limited to this session.',
     );
     expect(result.details?.artifact).toBeUndefined();
-    expect(entries).toHaveLength(1);
-    expect(entries[0].customType).toBe(WEB_FALLBACK_TYPE);
-    const fallback = entries[0].data as {
-      version: number;
-      data: { id: string; timestamp: number };
-    };
-    expect(fallback.version).toBe(1);
-    fallback.data.timestamp = 1;
+    expect(result.details?.continuationAvailable).toBe(false);
+    expect(entries).toEqual([]);
+
+    const continued = await tools
+      .get('get_search_content')
+      ?.execute(
+        'same-session-continuation',
+        { responseId: result.details?.responseId, view: 'summary' },
+        new AbortController().signal,
+      );
+    expect(continued?.content[0].text).toContain('Response ID:');
 
     const restored = createWebResultStore();
     restored.restore({
       sessionManager: { getBranch: () => entries },
     } as never);
-    expect(restored.get(fallback.data.id)).toEqual(fallback.data);
+    expect(restored.get(result.details?.responseId as string)).toBeNull();
   });
 
   it('does not publish continuation state after cancellation during artifact persistence', async () => {
@@ -175,7 +178,7 @@ describe('web artifact fallback', () => {
     expect(entries).toEqual([]);
   });
 
-  it('does not advertise continuation when both artifact and fallback append fail', async () => {
+  it('does not advertise continuation when artifact publication fails before any reference entry is written', async () => {
     const tools = new Map<string, Tool>();
     web({
       on: vi.fn(),
@@ -207,6 +210,37 @@ describe('web artifact fallback', () => {
           new AbortController().signal,
         ),
     ).rejects.toThrow('No stored result');
+  });
+
+  it('restores legacy fallback entries for older sessions', () => {
+    const id = 'legacy';
+    const data = {
+      id,
+      type: 'search' as const,
+      timestamp: 1,
+      queries: [
+        {
+          query: 'fallback',
+          answer: 'ok',
+          results: [],
+          error: null,
+        },
+      ],
+      summary: 'summary',
+    };
+    const restored = createWebResultStore();
+    restored.restore({
+      sessionManager: {
+        getBranch: () => [
+          {
+            type: 'custom',
+            customType: WEB_FALLBACK_TYPE,
+            data: { version: 1, data },
+          },
+        ],
+      },
+    } as never);
+    expect(restored.get(id)).toEqual(data);
   });
 
   it('throws terminal tool failures instead of returning an ignored isError field', async () => {
