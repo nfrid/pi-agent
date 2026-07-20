@@ -1,5 +1,6 @@
 import type { Message } from '@earendil-works/pi-ai';
 import type { ArtifactMetadata } from '../artifacts';
+import type { IsolationRecord } from './isolation/model';
 
 export interface UsageStats {
   input: number;
@@ -56,43 +57,32 @@ export type DelegateRunState =
   | 'aborted'
   | 'timed-out';
 
-export interface DelegateIsolationState {
-  id: string;
-  backend: 'macos-sandbox-exec';
-  repositoryRoot: string;
-  worktreePath: string;
-  workingDirectory: string;
-  baseHead: string;
-  dependencyMode: 'link' | 'isolated';
-  runOutcome?: 'success' | 'error' | 'aborted' | 'timed-out' | 'unknown';
-  validation?: {
-    status: 'not-run' | 'passed' | 'failed';
-    script?: string;
-    scriptSha256?: string;
-    exitCode?: number;
-    outputSha256?: string;
-    validatedAt?: string;
-    reason?: string;
-  };
-  status:
-    | 'prepared'
-    | 'running'
-    | 'patch-ready'
-    | 'no-changes'
-    | 'applied'
-    | 'discarded'
-    | 'conflicted'
-    | 'failed';
-  patch?: {
-    handle?: string;
-    sha256: string;
-    size: number;
-    changedPaths: string[];
-    diffCheckPassed: boolean;
-    requiresIsolatedDependencyValidation: boolean;
-    unsafeReason?: string;
-  };
-}
+type IsolationPublicKey =
+  | 'id'
+  | 'backend'
+  | 'repositoryRoot'
+  | 'worktreePath'
+  | 'workingDirectory'
+  | 'baseHead'
+  | 'dependencyMode'
+  | 'runOutcome'
+  | 'validation'
+  | 'status';
+
+export type DelegateIsolationState = Pick<
+  IsolationRecord,
+  IsolationPublicKey
+> & {
+  patch?: NonNullable<IsolationRecord['patch']> & { handle?: string };
+};
+
+export type DelegateProgressUpdate = Parameters<
+  NonNullable<
+    Parameters<
+      typeof import('./task-lifecycle').runPreparedDelegateTask
+    >[1]['onUpdate']
+  >
+>[0];
 
 export interface DelegateRunMetadata {
   cwd?: string;

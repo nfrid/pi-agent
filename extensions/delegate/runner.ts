@@ -1,6 +1,9 @@
-import { spawn } from 'node:child_process';
 import * as path from 'node:path';
-import { processJsonLine } from './events';
+import { acquireSession, acquireSlot } from './concurrency';
+import {
+  PROGRESS_UPDATE_INTERVAL_MS,
+  spawnDelegateChild,
+} from './delegate-child';
 import {
   discardChildAuth,
   discardReadOnlySandbox,
@@ -23,14 +26,9 @@ import {
   isRunError,
 } from './types';
 
-const SIGKILL_TIMEOUT_MS = 5000;
-const MAX_STDERR_BYTES = 64 * 1024;
-const MAX_JSON_LINE_BYTES = 1024 * 1024;
 const CONTROLLED_READ_ONLY_TOOLS = 'read,grep,find,ls';
 const SANDBOXED_READ_ONLY_TOOLS = 'read,inspect_shell,grep,find,ls';
 const WRITE_TOOLS = 'read,edit,write,grep,find,ls';
-const MAX_GLOBAL_CONCURRENCY = 5;
-const PROGRESS_UPDATE_INTERVAL_MS = 1000;
 const DELEGATE_EXTENSION = path.resolve(__dirname, 'index.ts');
 const SYSTEM_PROMPT_EXTENSION = path.resolve(
   __dirname,
@@ -38,56 +36,7 @@ const SYSTEM_PROMPT_EXTENSION = path.resolve(
 );
 const INSPECT_SHELL_EXTENSION = path.resolve(__dirname, 'inspect-shell.ts');
 
-let activeRuns = 0;
-const slotWaiters: Array<() => void> = [];
-const sessionTails = new Map<string, Promise<void>>();
-
-async function acquireSession(sessionPath: string): Promise<() => void> {
-  const previous = sessionTails.get(sessionPath) ?? Promise.resolve();
-  let release!: () => void;
-  const current = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  sessionTails.set(sessionPath, current);
-  await previous;
-  return () => {
-    release();
-    if (sessionTails.get(sessionPath) === current)
-      sessionTails.delete(sessionPath);
-  };
-}
-
-async function acquireSlot(
-  signal?: AbortSignal,
-  maxConcurrency = MAX_GLOBAL_CONCURRENCY,
-): Promise<() => void> {
-  if (signal?.aborted)
-    throw new Error('Delegated task was aborted before launch.');
-  if (activeRuns < maxConcurrency) activeRuns++;
-  else {
-    await new Promise<void>((resolve, reject) => {
-      const onAbort = () => {
-        const index = slotWaiters.indexOf(onReady);
-        if (index >= 0) slotWaiters.splice(index, 1);
-        reject(new Error('Delegated task was aborted before launch.'));
-      };
-      const onReady = () => {
-        signal?.removeEventListener('abort', onAbort);
-        resolve();
-      };
-      slotWaiters.push(onReady);
-      signal?.addEventListener('abort', onAbort, { once: true });
-    });
-  }
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    const next = slotWaiters.shift();
-    if (next) next();
-    else activeRuns--;
-  };
-}
+export { mapWithConcurrency } from './concurrency';
 
 type OnUpdate = (partial: {
   content: Array<{ type: 'text'; text: string }>;
@@ -99,16 +48,6 @@ export function resolvePiSpawn(): { command: string; prefixArgs: string[] } {
   // A long-running parent may point at an older installation after Pi is upgraded,
   // causing delegates to use stale provider/model routing code.
   return { command: 'pi', prefixArgs: [] };
-}
-
-function appendTail(current: string, chunk: string, maxBytes: number): string {
-  const combined = current + chunk;
-  if (Buffer.byteLength(combined, 'utf8') <= maxBytes) return combined;
-  const prefix = '[Earlier output truncated]\n';
-  const tailBudget = Math.max(0, maxBytes - Buffer.byteLength(prefix, 'utf8'));
-  let tail = combined.slice(-tailBudget);
-  while (Buffer.byteLength(tail, 'utf8') > tailBudget) tail = tail.slice(1);
-  return prefix + tail;
 }
 
 function progressText(run: DelegatedRun): string {
@@ -275,8 +214,6 @@ export async function runDelegate(
   }
   let releaseSlot: (() => void) | undefined;
   let releaseSession: (() => void) | undefined;
-  let wasAborted = false;
-  let timedOut = false;
 
   const emitUpdate = () => {
     options.onUpdate?.({
@@ -319,126 +256,18 @@ export async function runDelegate(
             env: childAuth?.env ?? {},
           };
 
-    const exitCode = await new Promise<number>((resolve) => {
-      const isWindows = process.platform === 'win32';
-      const proc = spawn(spawnTarget.command, spawnTarget.args, {
-        cwd: spawnTarget.cwd,
-        env: {
-          PATH: process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin',
-          LANG: 'C',
-          LC_ALL: 'C',
-          ...spawnTarget.env,
-          PI_DELEGATE_CHILD: '1',
-        },
-        shell: false,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        // A detached Unix child is its own process group, allowing us to stop
-        // tools it launched as well as Pi itself.
-        detached: !isWindows,
-      });
-
-      let buffer = '';
-      let discardingLongLine = false;
-      let closed = false;
-      let settled = false;
-      let terminating = false;
-      let abortHandler: (() => void) | undefined;
-
-      const finish = (code: number) => {
-        if (settled) return;
-        settled = true;
-        if (options.signal && abortHandler)
-          options.signal.removeEventListener('abort', abortHandler);
-        resolve(code);
-      };
-
-      const terminate = (reason: 'abort' | 'timeout' = 'abort') => {
-        if (terminating || closed) return;
-        terminating = true;
-        if (reason === 'timeout') timedOut = true;
-        else if (reason === 'abort') wasAborted = true;
-        if (isWindows && proc.pid) {
-          spawn('taskkill', ['/T', '/F', '/PID', String(proc.pid)], {
-            stdio: 'ignore',
-          }).unref();
-          return;
-        }
-        if (proc.pid) {
-          try {
-            process.kill(-proc.pid, 'SIGTERM');
-          } catch {
-            proc.kill('SIGTERM');
-          }
-        }
-        setTimeout(() => {
-          if (closed || !proc.pid) return;
-          try {
-            process.kill(-proc.pid, 'SIGKILL');
-          } catch {
-            proc.kill('SIGKILL');
-          }
-        }, options.killGraceMs ?? SIGKILL_TIMEOUT_MS).unref();
-      };
-
-      const processLine = (line: string) => {
-        if (terminating || !processJsonLine(line, run)) return;
-        emitUpdate();
-      };
-
-      proc.stdout.on('data', (chunk: Buffer) => {
-        buffer += chunk.toString();
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (discardingLongLine) {
-            discardingLongLine = false;
-            continue;
-          }
-          if (Buffer.byteLength(line, 'utf8') > MAX_JSON_LINE_BYTES) {
-            run.stderr = appendTail(
-              run.stderr,
-              `\nDelegate JSON event exceeded ${MAX_JSON_LINE_BYTES} bytes and was discarded.\n`,
-              MAX_STDERR_BYTES,
-            );
-            continue;
-          }
-          processLine(line);
-        }
-        if (Buffer.byteLength(buffer, 'utf8') > MAX_JSON_LINE_BYTES) {
-          buffer = '';
-          discardingLongLine = true;
-          run.stderr = appendTail(
-            run.stderr,
-            `\nDelegate JSON event exceeded ${MAX_JSON_LINE_BYTES} bytes and was discarded.\n`,
-            MAX_STDERR_BYTES,
-          );
-        }
-      });
-
-      proc.stderr.on('data', (chunk: Buffer) => {
-        run.stderr = appendTail(run.stderr, chunk.toString(), MAX_STDERR_BYTES);
-      });
-      proc.on('close', (code) => {
-        closed = true;
-        if (buffer.trim() && !discardingLongLine) processLine(buffer);
-        finish(code ?? 1);
-      });
-      proc.on('error', (error) => {
-        run.stderr = appendTail(run.stderr, error.message, MAX_STDERR_BYTES);
-        finish(1);
-      });
-
-      const timeout = setTimeout(() => terminate('timeout'), options.timeoutMs);
-      timeout.unref();
-      proc.once('close', () => clearTimeout(timeout));
-
-      abortHandler = () => terminate('abort');
-      if (options.signal?.aborted) abortHandler();
-      else
-        options.signal?.addEventListener('abort', abortHandler, { once: true });
+    const { exitCode, wasAborted, timedOut } = await spawnDelegateChild(run, {
+      command: spawnTarget.command,
+      args: spawnTarget.args,
+      cwd: spawnTarget.cwd,
+      env: spawnTarget.env,
+      timeoutMs: options.timeoutMs,
+      killGraceMs: options.killGraceMs,
+      signal: options.signal,
+      onLine: emitUpdate,
     });
 
-    run.exitCode = wasAborted ? 130 : timedOut ? 124 : exitCode;
+    run.exitCode = exitCode;
     if (wasAborted) {
       run.stopReason = 'aborted';
       run.errorMessage = 'Delegated task was aborted.';
@@ -475,32 +304,4 @@ export async function runDelegate(
     discardChildAuth(childAuth);
   }
   return run;
-}
-
-export async function mapWithConcurrency<TIn, TOut>(
-  items: TIn[],
-  concurrency: number,
-  fn: (item: TIn, index: number) => Promise<TOut>,
-): Promise<TOut[]> {
-  const results = new Array<TOut>(items.length);
-  let next = 0;
-  let failed = false;
-  let firstError: unknown;
-  const workers = new Array(Math.max(1, Math.min(concurrency, items.length)))
-    .fill(null)
-    .map(async () => {
-      while (!failed) {
-        const index = next++;
-        if (index >= items.length) return;
-        try {
-          results[index] = await fn(items[index], index);
-        } catch (error) {
-          if (!failed) firstError = error;
-          failed = true;
-        }
-      }
-    });
-  await Promise.all(workers);
-  if (failed) throw firstError;
-  return results;
 }

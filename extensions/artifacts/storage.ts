@@ -4,6 +4,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import { recoverExpectedArtifact, scanArtifactEntries } from './scan-entries';
 import {
   artifactRoot,
   blobPath,
@@ -24,8 +25,6 @@ import {
   sha256,
   validateInput,
   validateMetadata,
-  validRecoveryBytes,
-  validTombstone,
 } from './storage-validation';
 import {
   ARTIFACT_ENTRY_TYPE,
@@ -163,28 +162,9 @@ export async function restoreArtifacts(
 ): Promise<number> {
   return withArtifactRootLock(root, async () => {
     const sessionId = ctx.sessionManager.getSessionId();
-    const recovered = new Map<
-      string,
-      { entry: RecoveryEntry; bytes: Buffer }
-    >();
-    const revoked = new Set<string>();
-    // getEntries(), deliberately not getBranch(): recovery must survive tree changes.
-    for (const entry of ctx.sessionManager.getEntries()) {
-      if (entry.type !== 'custom' || entry.customType !== ARTIFACT_ENTRY_TYPE)
-        continue;
-      const data = entry.data as RecoveryEntry | TombstoneEntry | undefined;
-      if (data?.version !== 1) continue;
-      if (validTombstone(data)) {
-        recovered.delete(data.handle);
-        revoked.add(data.handle);
-      } else if (data.kind === 'recovery') {
-        const bytes = validRecoveryBytes(data);
-        if (bytes) {
-          recovered.set(data.metadata.handle, { entry: data, bytes });
-          revoked.delete(data.metadata.handle);
-        }
-      }
-    }
+    const { recovered, revoked } = scanArtifactEntries(
+      ctx.sessionManager.getEntries(),
+    );
     const manifest: Manifest = {
       version: 1,
       sessionId,
@@ -213,23 +193,10 @@ export function recoverArtifactFromEntries(
   }>,
   expected: ArtifactMetadata,
 ): ResolvedArtifact | undefined {
-  if (!HANDLE_RE.test(expected.handle)) return undefined;
-  let recovery: { entry: RecoveryEntry; bytes: Buffer } | undefined;
-  for (const entry of entries) {
-    if (entry.type !== 'custom' || entry.customType !== ARTIFACT_ENTRY_TYPE)
-      continue;
-    const data = entry.data as RecoveryEntry | TombstoneEntry | undefined;
-    if (data?.version !== 1) continue;
-    if (validTombstone(data) && data.handle === expected.handle) {
-      recovery = undefined;
-    } else if (
-      data.kind === 'recovery' &&
-      data.metadata?.handle === expected.handle
-    ) {
-      const bytes = validRecoveryBytes(data);
-      if (bytes) recovery = { entry: data, bytes };
-    }
-  }
+  const recovery = recoverExpectedArtifact(
+    scanArtifactEntries(entries),
+    expected,
+  );
   if (!recovery) return undefined;
   try {
     validateMetadata(expected, recovery.bytes);

@@ -1,0 +1,409 @@
+import { selectTextRange } from '../shared/text-selection';
+import type { ArtifactMetadata } from './types';
+import { MAX_SEARCH_SCAN_BYTES } from './types';
+import { utf8Head, utf8Prefix, utf8Suffix, utf8Tail } from './utf8-boundary';
+
+export const RETRIEVAL_MODES = [
+  'metadata',
+  'bytes',
+  'lines',
+  'head',
+  'tail',
+  'literal',
+  'regex',
+  'heading',
+  'json',
+] as const;
+export type RetrievalMode = (typeof RETRIEVAL_MODES)[number];
+
+export interface RetrievalRequest {
+  handle: string;
+  mode: RetrievalMode;
+  offset?: number;
+  limit?: number;
+  query?: string;
+  heading?: string;
+  pointer?: string;
+  field?: string;
+  beforeLines?: number;
+  afterLines?: number;
+}
+
+const PAYLOAD_BYTES = 48 * 1024;
+const MAX_MATCHES = 100;
+const MAX_CONTEXT_LINES = 20;
+
+interface Line {
+  number: number;
+  text: string;
+  raw: string;
+  startByte: number;
+  endByte: number;
+}
+
+export interface ResolvedArtifactBytes {
+  bytes: Buffer;
+  metadata: ArtifactMetadata;
+}
+
+function linesOf(text: string): Line[] {
+  if (!text) return [];
+  const lines: Line[] = [];
+  let start = 0;
+  let startByte = 0;
+  while (start < text.length) {
+    let end = start;
+    while (end < text.length && text[end] !== '\n' && text[end] !== '\r') end++;
+    let after = end;
+    if (text[after] === '\r' && text[after + 1] === '\n') after += 2;
+    else if (text[after] === '\r' || text[after] === '\n') after++;
+    const raw = text.slice(start, after);
+    const rawBytes = Buffer.byteLength(raw);
+    lines.push({
+      number: lines.length + 1,
+      text: text.slice(start, end),
+      raw,
+      startByte,
+      endByte: startByte + rawBytes,
+    });
+    start = after;
+    startByte += rawBytes;
+  }
+  return lines;
+}
+
+function prefix(value: string, maximum = PAYLOAD_BYTES) {
+  return utf8Prefix(value, maximum);
+}
+
+function suffix(value: string, maximum = PAYLOAD_BYTES) {
+  return utf8Suffix(value, maximum);
+}
+
+function accounting(
+  totalBytes: number,
+  sourceSelectedBytes: number,
+  returnedBytes: number,
+  content: unknown,
+  sourceRemainingBytes = Math.max(0, totalBytes - sourceSelectedBytes),
+  selectorResultBytes = sourceSelectedBytes,
+) {
+  return {
+    totalBytes,
+    sourceSelectedBytes,
+    selectorResultBytes,
+    returnedBytes,
+    selectionRemainingBytes: Math.max(0, selectorResultBytes - returnedBytes),
+    sourceRemainingBytes,
+    content,
+  };
+}
+
+function safeRegex(source: string): RegExp {
+  if (!source || source.length > 256)
+    throw new Error('Regex must be 1-256 characters');
+  let inClass = false;
+  let escaped = false;
+  for (const character of source) {
+    if (escaped) {
+      if (/^[1-9]$/.test(character))
+        throw new Error('Regex backreferences are not allowed');
+      escaped = false;
+      continue;
+    }
+    if (character === '\\') escaped = true;
+    else if (character === '[') inClass = true;
+    else if (character === ']') inClass = false;
+    else if (!inClass && '()*+?{}'.includes(character))
+      throw new Error('Regex groups and repetition are not allowed');
+  }
+  if (escaped || inClass) throw new Error('Invalid regex');
+  return new RegExp(source, 'giu');
+}
+
+function decodePointer(root: unknown, pointer: string): unknown {
+  if (pointer === '') return root;
+  if (!pointer.startsWith('/'))
+    throw new Error('JSON pointer must be empty or start with /');
+  let value = root;
+  for (const raw of pointer.slice(1).split('/')) {
+    const key = raw.replace(/~1/g, '/').replace(/~0/g, '~');
+    if (
+      value === null ||
+      typeof value !== 'object' ||
+      !Object.hasOwn(value, key)
+    )
+      throw new Error(`JSON pointer not found: ${pointer}`);
+    value = (value as Record<string, unknown>)[key];
+  }
+  return value;
+}
+
+function contextCount(value: number | undefined): number {
+  return Math.min(MAX_CONTEXT_LINES, Math.max(0, Math.floor(value ?? 0)));
+}
+
+function assertTextual(metadata: ArtifactMetadata): void {
+  if (metadata.encoding !== 'utf-8')
+    throw new Error(
+      'Textual selectors reject binary artifacts; use mode="bytes" for exact base64',
+    );
+}
+
+function retrieveMetadata(
+  artifact: ResolvedArtifactBytes,
+): Record<string, unknown> {
+  const { bytes, metadata } = artifact;
+  return { metadata, ...accounting(bytes.length, 0, 0, null, bytes.length) };
+}
+
+function retrieveBytes(
+  artifact: ResolvedArtifactBytes,
+  request: RetrievalRequest,
+): Record<string, unknown> {
+  const { bytes, metadata } = artifact;
+  const requestedLimit = Math.max(1, Math.floor(request.limit ?? 200));
+  const offset = Math.min(
+    bytes.length,
+    Math.max(0, Math.floor(request.offset ?? 0)),
+  );
+  const sourceCount = Math.min(requestedLimit, bytes.length - offset);
+  const returnedCount = Math.min(sourceCount, 36 * 1024);
+  const selected = bytes.subarray(offset, offset + returnedCount);
+  return {
+    metadata,
+    offset,
+    encoding: 'base64',
+    ...accounting(
+      bytes.length,
+      sourceCount,
+      selected.length,
+      selected.toString('base64'),
+      bytes.length - sourceCount,
+    ),
+  };
+}
+
+function retrieveHeadOrTail(
+  artifact: ResolvedArtifactBytes,
+  request: RetrievalRequest,
+): Record<string, unknown> {
+  const { bytes, metadata } = artifact;
+  assertTextual(metadata);
+  const requestedLimit = Math.max(1, Math.floor(request.limit ?? 200));
+  const wanted = Math.min(requestedLimit, bytes.length);
+  const full =
+    request.mode === 'head' ? utf8Head(bytes, wanted) : utf8Tail(bytes, wanted);
+  const start =
+    request.mode === 'head'
+      ? 0
+      : bytes.length - Buffer.byteLength(full, 'utf8');
+  const end = start + Buffer.byteLength(full, 'utf8');
+  const returned =
+    request.mode === 'head'
+      ? { ...prefix(full), omittedBytes: 0 }
+      : suffix(full);
+  return {
+    metadata,
+    offset: start,
+    returnedOffset: start + returned.omittedBytes,
+    selectionTruncatedAt: request.mode === 'head' ? 'end' : 'start',
+    ...accounting(bytes.length, end - start, returned.bytes, returned.text),
+  };
+}
+
+function retrieveLines(
+  artifact: ResolvedArtifactBytes,
+  request: RetrievalRequest,
+): Record<string, unknown> {
+  const { bytes, metadata } = artifact;
+  assertTextual(metadata);
+  const requestedLimit = Math.max(1, Math.floor(request.limit ?? 200));
+  const text = bytes.toString('utf8');
+  const lines = linesOf(text);
+  const start = Math.min(
+    lines.length,
+    Math.max(0, Math.floor(request.offset ?? 0)),
+  );
+  const chosen = lines.slice(start, start + Math.min(requestedLimit, 1000));
+  const full = chosen.map((line) => line.raw).join('');
+  const returned = prefix(full);
+  const sourceOffset = chosen[0]?.startByte ?? bytes.length;
+  return {
+    metadata,
+    sourceOffset,
+    startLine: start + 1,
+    requestedLines: requestedLimit,
+    lineLimit: 1000,
+    sourceSelectedLines: chosen.length,
+    returnedCompleteLines: chosen.filter(
+      (line) => line.endByte - sourceOffset <= returned.bytes,
+    ).length,
+    remainingLines: Math.max(0, lines.length - start - chosen.length),
+    ...accounting(
+      bytes.length,
+      Buffer.byteLength(full),
+      returned.bytes,
+      returned.text,
+    ),
+  };
+}
+
+function retrieveSearch(
+  artifact: ResolvedArtifactBytes,
+  request: RetrievalRequest,
+): Record<string, unknown> {
+  const { bytes, metadata } = artifact;
+  assertTextual(metadata);
+  const scanBytes = Math.min(bytes.length, MAX_SEARCH_SCAN_BYTES);
+  let scanEnd = scanBytes;
+  while (
+    scanEnd > 0 &&
+    scanEnd < bytes.length &&
+    (bytes[scanEnd] & 0xc0) === 0x80
+  )
+    scanEnd--;
+  const scanLines = linesOf(bytes.subarray(0, scanEnd).toString('utf8'));
+  const query = request.query ?? '';
+  if (!query || query.length > 1024)
+    throw new Error('Search query must be 1-1024 characters');
+  const regex = request.mode === 'regex' ? safeRegex(query) : undefined;
+  const matched = scanLines.filter((line) => {
+    if (!regex) return line.text.includes(query);
+    regex.lastIndex = 0;
+    return regex.test(line.text);
+  });
+  const before = contextCount(request.beforeLines);
+  const after = contextCount(request.afterLines);
+  const excerpts = matched.map((match) => {
+    const first = Math.max(0, match.number - 1 - before);
+    const last = Math.min(scanLines.length, match.number + after);
+    const selected = scanLines.slice(first, last);
+    const excerpt = selected.map((line) => line.raw).join('');
+    return {
+      matchLine: match.number,
+      startLine: first + 1,
+      endLine: last,
+      sourceOffset: selected[0]?.startByte ?? match.startByte,
+      sourceSelectedBytes: Buffer.byteLength(excerpt),
+      excerpt,
+    };
+  });
+  const sourceSelectedBytes = excerpts.reduce(
+    (sum, item) => sum + item.sourceSelectedBytes,
+    0,
+  );
+  const returned: typeof excerpts = [];
+  for (const excerpt of excerpts.slice(0, MAX_MATCHES)) {
+    if (
+      Buffer.byteLength(JSON.stringify([...returned, excerpt])) > PAYLOAD_BYTES
+    )
+      break;
+    returned.push(excerpt);
+  }
+  const returnedBytes = returned.reduce(
+    (sum, item) => sum + item.sourceSelectedBytes,
+    0,
+  );
+  return {
+    metadata,
+    beforeLines: before,
+    afterLines: after,
+    scannedBytes: scanEnd,
+    unscannedBytes: bytes.length - scanEnd,
+    totalMatches: matched.length,
+    returnedMatches: returned.length,
+    matchesRemaining: matched.length - returned.length,
+    matchLimit: MAX_MATCHES,
+    ...accounting(
+      bytes.length,
+      sourceSelectedBytes,
+      returnedBytes,
+      returned,
+      bytes.length - scanEnd,
+    ),
+  };
+}
+
+function retrieveTextSelection(
+  artifact: ResolvedArtifactBytes,
+  request: RetrievalRequest,
+): Record<string, unknown> {
+  const { bytes, metadata } = artifact;
+  assertTextual(metadata);
+  const text = bytes.toString('utf8');
+  let full: string;
+  let sourceOffset: number | undefined;
+  let sourceRemaining: number;
+  let sourceSelectedForAccounting: number | undefined;
+  if (request.mode === 'heading') {
+    if (!request.heading || request.heading.length > 512)
+      throw new Error('heading is required');
+    let selection: ReturnType<typeof selectTextRange>;
+    try {
+      selection = selectTextRange(text, { heading: request.heading });
+    } catch {
+      throw new Error('Markdown heading not found');
+    }
+    full = selection.text;
+    sourceOffset = Buffer.byteLength(text.slice(0, selection.start), 'utf8');
+    sourceRemaining = bytes.length - Buffer.byteLength(full);
+  } else {
+    const parsed = JSON.parse(text) as unknown;
+    let selected =
+      request.pointer !== undefined
+        ? decodePointer(parsed, request.pointer)
+        : parsed;
+    if (request.field !== undefined) {
+      if (
+        selected === null ||
+        typeof selected !== 'object' ||
+        !Object.hasOwn(selected, request.field)
+      )
+        throw new Error(`JSON field not found: ${request.field}`);
+      selected = (selected as Record<string, unknown>)[request.field];
+    }
+    full = typeof selected === 'string' ? selected : JSON.stringify(selected);
+    sourceRemaining = 0;
+    sourceSelectedForAccounting = bytes.length;
+  }
+  const selectorResultBytes = Buffer.byteLength(full);
+  const returned = prefix(full);
+  return {
+    metadata,
+    ...(sourceOffset === undefined ? {} : { sourceOffset }),
+    ...accounting(
+      bytes.length,
+      sourceSelectedForAccounting ?? selectorResultBytes,
+      returned.bytes,
+      returned.text,
+      sourceRemaining,
+      selectorResultBytes,
+    ),
+  };
+}
+
+const handlers: Record<
+  RetrievalMode,
+  (
+    artifact: ResolvedArtifactBytes,
+    request: RetrievalRequest,
+  ) => Record<string, unknown>
+> = {
+  metadata: retrieveMetadata,
+  bytes: retrieveBytes,
+  head: retrieveHeadOrTail,
+  tail: retrieveHeadOrTail,
+  lines: retrieveLines,
+  literal: retrieveSearch,
+  regex: retrieveSearch,
+  heading: retrieveTextSelection,
+  json: retrieveTextSelection,
+};
+
+export function dispatchRetrievalMode(
+  artifact: ResolvedArtifactBytes,
+  request: RetrievalRequest,
+): Record<string, unknown> {
+  return handlers[request.mode](artifact, request);
+}

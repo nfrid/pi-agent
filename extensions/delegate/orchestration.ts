@@ -2,7 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { type DelegateConfig, resolveDelegateRoute } from './config';
+import type { DelegateConfig } from './config';
 import { loadIsolation, type PreparedIsolation } from './isolation';
 import {
   failedLifecycleRun,
@@ -10,19 +10,12 @@ import {
   isolationDetails,
   markLifecycleFailure,
 } from './isolation-lifecycle';
-import {
-  assertDistinctContinuationTokens,
-  invalidParams,
-} from './param-errors';
-import { mergeDelegateRouteRequest, writeWarnings } from './routing-warnings';
+import { invalidParams } from './param-errors';
+import { buildDelegatePlans } from './plans';
 import { mapWithConcurrency } from './runner';
-import { resolveDelegateSession } from './session';
 import {
-  type ContinuationPreflight,
   cleanupFreshPreparedTask,
-  type DelegateTaskPlan,
   type PreparedDelegateTask,
-  preflightDelegateContinuation,
   prepareDelegateTask,
   rollbackPreparedDelegateTasks,
   runPreparedDelegateTask,
@@ -42,11 +35,7 @@ type RunContext = {
 };
 
 type RunHooks = {
-  onUpdate?: (
-    partial: Parameters<
-      NonNullable<Parameters<typeof runPreparedDelegateTask>[1]['onUpdate']>
-    >[0],
-  ) => void;
+  onUpdate?: (partial: import('./types').DelegateProgressUpdate) => void;
   onIsolationRunning?: (isolation: PreparedIsolation) => void;
 };
 
@@ -142,18 +131,18 @@ async function runPreparedWithLifecycle(
 }
 
 async function preparePlans(
-  plans: DelegateTaskPlan[],
-  parallel: boolean,
-  preflights: ContinuationPreflight[],
+  built: ReturnType<typeof buildDelegatePlans>,
 ): Promise<PreparedDelegateTask[]> {
   const prepared: PreparedDelegateTask[] = [];
   try {
-    for (let index = 0; index < plans.length; index++)
-      prepared.push(await prepareDelegateTask(plans[index], preflights[index]));
+    for (let index = 0; index < built.plans.length; index++)
+      prepared.push(
+        await prepareDelegateTask(built.plans[index], built.preflights[index]),
+      );
     return prepared;
   } catch (error) {
     const cleanupWarnings = await rollbackPreparedDelegateTasks(prepared);
-    const prefix = parallel
+    const prefix = built.parallel
       ? 'Parallel delegate setup failed before launch'
       : 'Delegate setup failed before launch';
     return invalidParams(
@@ -162,188 +151,29 @@ async function preparePlans(
   }
 }
 
-export async function executeSingleDelegate(
+async function executeDelegate(
   runCtx: RunContext,
   params: DelegateParams,
   hooks: RunHooks,
 ) {
-  const { ctx, config, getSnapshot } = runCtx;
-  if (
-    params.continuation &&
-    (params.cwd !== undefined ||
-      params.context !== undefined ||
-      params.scope !== undefined ||
-      params.dependencies !== undefined)
-  )
-    return invalidParams(
-      'A continuation reuses its original cwd, context, scope, and dependency mode; do not provide replacements.',
+  const built = buildDelegatePlans(
+    params,
+    runCtx.ctx,
+    runCtx.config,
+    runCtx.getSnapshot,
+  );
+  const prepared = await preparePlans(built);
+
+  if (!built.parallel) {
+    const run = await runPreparedWithLifecycle(
+      runCtx,
+      prepared[0],
+      'single',
+      hooks,
     );
-  const resumed = params.continuation
-    ? resolveDelegateSession(params.continuation)
-    : undefined;
-  if (params.continuation && !resumed)
-    return invalidParams('Unknown or expired delegate continuation token.');
-  const resolvedRoute = resolveDelegateRoute(
-    mergeDelegateRouteRequest(params.route, resumed?.routing),
-    config,
-  );
-  if (resolvedRoute.error) return invalidParams(resolvedRoute.error);
-  const requestedCwd = resumed?.cwd ?? params.cwd ?? ctx.cwd;
-  const context = resumed ? 'continuation' : (params.context ?? 'fresh');
-  const snapshot =
-    !resumed && context === 'branch' ? getSnapshot(requestedCwd) : undefined;
-  if (!resumed && context === 'branch' && !snapshot)
-    return invalidParams(
-      'Cannot delegate: failed to snapshot current session branch.',
-    );
-
-  const task = params.task?.trim();
-  if (!task) return invalidParams('Delegate task is required.');
-
-  const plan: DelegateTaskPlan = {
-    task,
-    requestedCwd,
-    context,
-    contextNote: params.contextNote,
-    scope: params.scope,
-    dependencyMode: params.dependencies,
-    writeRequested: params.allowWrites ?? false,
-    routing: resolvedRoute.routing,
-    resumed: resumed ?? undefined,
-    routeOverride: Boolean(resumed && params.route !== undefined),
-    snapshotJsonl: snapshot ?? undefined,
-    warnings: [],
-  };
-  let preflight: ContinuationPreflight;
-  try {
-    preflight = preflightDelegateContinuation(plan);
-  } catch (error) {
-    return invalidParams(errorText(error));
-  }
-  const prepared = await preparePlans([plan], false, [preflight]);
-  const run = await runPreparedWithLifecycle(
-    runCtx,
-    prepared[0],
-    'single',
-    hooks,
-  );
-  return delegateToolResult(runCtx.pi, runCtx.ctx, 'single', [run]);
-}
-
-export async function executeParallelDelegate(
-  runCtx: RunContext,
-  params: DelegateParams,
-  hooks: RunHooks,
-) {
-  const { ctx, config, getSnapshot } = runCtx;
-  const tasks = (params.tasks ?? [])
-    .map((item) => ({ ...item, task: item.task.trim() }))
-    .filter((item) => item.task);
-  if (!tasks.length)
-    return invalidParams('Parallel delegation requires a non-empty task.');
-  if (tasks.length > config.maxParallelTasks)
-    return invalidParams(
-      `Too many delegated tasks (${tasks.length}). Maximum is ${config.maxParallelTasks}.`,
-    );
-  if (params.continuation)
-    return invalidParams(
-      'For parallel delegation, set continuation on each task rather than as a shared default.',
-    );
-
-  const resumed = tasks.map((item) => {
-    if (
-      item.continuation &&
-      (item.cwd !== undefined ||
-        item.context !== undefined ||
-        item.scope !== undefined ||
-        item.dependencies !== undefined)
-    )
-      return invalidParams(
-        'A continuation task cannot replace cwd, context, scope, or dependency mode.',
-      );
-    const session = item.continuation
-      ? resolveDelegateSession(item.continuation)
-      : undefined;
-    if (item.continuation && !session)
-      return invalidParams('Unknown or expired delegate continuation token.');
-    return session ?? undefined;
-  });
-  assertDistinctContinuationTokens(resumed.map((session) => session?.token));
-  if (
-    resumed.some(Boolean) &&
-    (params.cwd !== undefined ||
-      params.context !== undefined ||
-      params.scope !== undefined ||
-      params.dependencies !== undefined)
-  )
-    return invalidParams(
-      'Parallel continuations reuse their original cwd, history, scope, and dependency mode; do not provide top-level replacements.',
-    );
-
-  const routings = tasks.map((item, index) =>
-    resolveDelegateRoute(
-      mergeDelegateRouteRequest(
-        item.route ?? params.route,
-        resumed[index]?.routing,
-      ),
-      config,
-    ),
-  );
-  const routingError = routings.find((item) => item.error)?.error;
-  if (routingError) return invalidParams(routingError);
-
-  const contexts = tasks.map((item, index) =>
-    resumed[index]
-      ? ('continuation' as const)
-      : (item.context ?? params.context ?? 'fresh'),
-  );
-  const requestedCwds = tasks.map(
-    (item, index) => resumed[index]?.cwd ?? item.cwd ?? params.cwd ?? ctx.cwd,
-  );
-  const scopes = tasks.map((item) => item.scope ?? params.scope);
-  const writeRequests = tasks.map(
-    (item) => item.allowWrites ?? params.allowWrites ?? false,
-  );
-  const warnings = writeWarnings(requestedCwds, writeRequests, scopes);
-  for (let index = 0; index < tasks.length; index++) {
-    if (
-      !resumed[index] &&
-      contexts[index] === 'branch' &&
-      !getSnapshot(requestedCwds[index])
-    )
-      return invalidParams(
-        'Cannot delegate: failed to snapshot current session branch.',
-      );
+    return delegateToolResult(runCtx.pi, runCtx.ctx, 'single', [run]);
   }
 
-  const plans: DelegateTaskPlan[] = tasks.map((item, index) => ({
-    task: item.task,
-    requestedCwd: requestedCwds[index],
-    context: contexts[index],
-    contextNote: item.contextNote ?? params.contextNote,
-    scope: scopes[index],
-    dependencyMode: item.dependencies ?? params.dependencies,
-    writeRequested: writeRequests[index],
-    routing: routings[index].routing,
-    resumed: resumed[index],
-    routeOverride: Boolean(
-      resumed[index] && (item.route ?? params.route) !== undefined,
-    ),
-    snapshotJsonl:
-      contexts[index] === 'branch'
-        ? (getSnapshot(requestedCwds[index]) ?? undefined)
-        : undefined,
-    warnings: warnings[index],
-  }));
-
-  let preflights: ContinuationPreflight[];
-  try {
-    preflights = plans.map((plan) => preflightDelegateContinuation(plan));
-  } catch (error) {
-    return invalidParams(errorText(error));
-  }
-
-  const prepared = await preparePlans(plans, true, preflights);
   const liveRuns = prepared.map((item) =>
     createRun(item.plan.task, item.plan.routing, {
       cwd: item.cwd,
@@ -376,7 +206,7 @@ export async function executeParallelDelegate(
   try {
     runs = await mapWithConcurrency(
       prepared,
-      config.maxConcurrency,
+      runCtx.config.maxConcurrency,
       async (item, index) => {
         const run = await runPreparedWithLifecycle(runCtx, item, 'parallel', {
           onUpdate: (partial) => {
@@ -413,3 +243,6 @@ export async function executeParallelDelegate(
   }
   return delegateToolResult(runCtx.pi, runCtx.ctx, 'parallel', runs);
 }
+
+export const executeSingleDelegate = executeDelegate;
+export const executeParallelDelegate = executeDelegate;

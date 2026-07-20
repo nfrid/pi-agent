@@ -42,25 +42,31 @@ export function isolationDetails(
   record: IsolationRecord,
   handle?: string,
 ): DelegateIsolationState {
+  const {
+    id,
+    backend,
+    repositoryRoot,
+    worktreePath,
+    workingDirectory,
+    baseHead,
+    dependencyMode,
+    runOutcome,
+    validation,
+    status,
+    patch,
+  } = record;
   return {
-    id: record.id,
-    backend: record.backend,
-    repositoryRoot: record.repositoryRoot,
-    worktreePath: record.worktreePath,
-    workingDirectory: record.workingDirectory,
-    baseHead: record.baseHead,
-    dependencyMode: record.dependencyMode,
-    runOutcome: record.runOutcome,
-    validation: record.validation,
-    status: record.status,
-    ...(record.patch
-      ? {
-          patch: {
-            ...(handle ? { handle } : {}),
-            ...record.patch,
-          },
-        }
-      : {}),
+    id,
+    backend,
+    repositoryRoot,
+    worktreePath,
+    workingDirectory,
+    baseHead,
+    dependencyMode,
+    runOutcome,
+    validation,
+    status,
+    ...(patch ? { patch: { ...patch, ...(handle ? { handle } : {}) } } : {}),
   };
 }
 
