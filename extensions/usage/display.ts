@@ -73,6 +73,8 @@ function formatDurationLeft(resetsAt: number, now = Date.now()): string {
   return `${minutes}m`;
 }
 
+const DISABLE_LABELS = true;
+
 function formatUsagePart(
   label: string,
   percent: number,
@@ -80,7 +82,7 @@ function formatUsagePart(
   theme: ExtensionContext['ui']['theme'],
 ): string {
   const reset = resetsAt ? ` ^${formatDurationLeft(resetsAt)}` : '';
-  return `${theme.fg('dim', label)} ${theme.fg(
+  return `${DISABLE_LABELS ? '' : `${theme.fg('dim', label)} `}${theme.fg(
     usageToColor(percent),
     `${percent}%`,
   )}${theme.italic(theme.fg('muted', reset))}`;

@@ -23,9 +23,9 @@
     "pi:sdk-sync": "VERSION=$(pi --version) && pnpm add -E @earendil-works/pi-ai@$VERSION @earendil-works/pi-coding-agent@$VERSION @earendil-works/pi-tui@$VERSION"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.80.10",
-    "@earendil-works/pi-coding-agent": "0.80.10",
-    "@earendil-works/pi-tui": "0.80.10",
+    "@earendil-works/pi-ai": "0.81.0",
+    "@earendil-works/pi-coding-agent": "0.81.0",
+    "@earendil-works/pi-tui": "0.81.0",
     "@mozilla/readability": "^0.6.0",
     "linkedom": "^0.16.11",
     "p-limit": "^6.2.0",
