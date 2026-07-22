@@ -12,17 +12,19 @@ import {
   getMarkdownTheme,
   hasResultHeading,
   icon,
+  indexedTaskBlock,
   isolationLines,
   markdownPreview,
   modeDescription,
   RESULT_PREVIEW_CHARS,
+  runtimeLabel,
   sectionTitle,
   stateColor,
   stateLabel,
   TASK_PREVIEW_CHARS,
   type ThemeLike,
   type ToolResultLike,
-  taskText,
+  taskBlock,
   truncate,
   usage,
 } from './render-utils';
@@ -40,11 +42,7 @@ function addExpandedRun(
   const mdTheme = getMarkdownTheme();
   if (label)
     container.addChild(
-      new Text(
-        `${icon(run, fg)} ${fg('toolTitle', theme.bold(label))} ${fg(stateColor(state), `· ${stateLabel(run)}`)}`,
-        0,
-        0,
-      ),
+      new Text(`${icon(run, fg)} ${fg('toolTitle', theme.bold(label))}`, 0, 0),
     );
 
   container.addChild(new Spacer(1));
@@ -97,13 +95,6 @@ function addExpandedRun(
     container.addChild(new Text(isolation.join('\n'), 0, 0));
   }
 
-  const activities = activityLines(run, fg);
-  if (activities) {
-    container.addChild(new Spacer(1));
-    container.addChild(sectionTitle('Activity', theme));
-    container.addChild(new Text(activities, 0, 0));
-  }
-
   const final = getFinalAssistantText(run.messages).trim();
   if (!hasResultHeading(final))
     container.addChild(sectionTitle('Result', theme));
@@ -124,16 +115,19 @@ function addExpandedRun(
       ),
     );
 
+  const activities = activityLines(run, fg);
   const stats = usage(run);
-  if (stats || run.continuation) {
-    container.addChild(new Spacer(1));
-    container.addChild(sectionTitle('Usage & continuation', theme));
-    if (stats) container.addChild(new Text(fg('dim', stats), 0, 0));
-    if (run.continuation)
-      container.addChild(
-        new Text(fg('dim', `Continuation: ${run.continuation}`), 0, 0),
-      );
-  }
+  container.addChild(new Spacer(1));
+  container.addChild(sectionTitle('Runtime', theme));
+  if (activities) container.addChild(new Text(activities, 0, 0));
+  container.addChild(
+    new Text(fg(stateColor(state), capitalize(runtimeLabel(run))), 0, 0),
+  );
+  if (stats) container.addChild(new Text(fg('dim', stats), 0, 0));
+  if (run.continuation)
+    container.addChild(
+      new Text(fg('dim', `Continuation: ${run.continuation}`), 0, 0),
+    );
 }
 
 export function renderDelegateResult(
@@ -155,8 +149,8 @@ export function renderDelegateResult(
     const container = new Container();
     const title =
       details.mode === 'parallel'
-        ? `Delegate · ${succeeded}/${details.runs.length} succeeded · ${complete}/${details.runs.length} complete`
-        : `Delegate · ${stateLabel(details.runs[0])}`;
+        ? `Delegate · ${details.runs.length} subagents`
+        : 'Delegate';
     container.addChild(new Text(fg('toolTitle', theme.bold(title)), 0, 0));
     for (const [index, run] of details.runs.entries()) {
       if (index > 0) container.addChild(new Spacer(1));
@@ -181,36 +175,7 @@ export function renderDelegateResult(
         0,
       ),
     );
-    container.addChild(
-      new Text(fieldLine('Task', taskText(run.task, false), fg, 'text'), 0, 0),
-    );
-    for (const line of currentActivityLines(run, fg))
-      container.addChild(new Text(line, 0, 0));
-
-    const final = getFinalAssistantText(run.messages).trim();
-    if (final) {
-      if (!hasResultHeading(final))
-        container.addChild(sectionTitle('Result', theme));
-      container.addChild(
-        new Markdown(markdownPreview(final), 0, 0, getMarkdownTheme()),
-      );
-    } else if (['error', 'aborted', 'timed-out'].includes(state)) {
-      container.addChild(
-        new Text(
-          fieldLine(
-            'Error',
-            truncate(
-              run.errorMessage || run.stderr || stateLabel(run),
-              ACTIVITY_PREVIEW_CHARS,
-            ),
-            fg,
-            state === 'error' ? 'error' : 'warning',
-          ),
-          0,
-          0,
-        ),
-      );
-    }
+    container.addChild(taskBlock('Task', run.task, false, fg));
 
     container.addChild(
       new Text(
@@ -253,7 +218,37 @@ export function renderDelegateResult(
           0,
         ),
       );
-    const footer = [usage(run), controls([run])].filter(Boolean).join(' · ');
+
+    const final = getFinalAssistantText(run.messages).trim();
+    if (final) {
+      if (!hasResultHeading(final))
+        container.addChild(sectionTitle('Result', theme));
+      container.addChild(
+        new Markdown(markdownPreview(final), 0, 0, getMarkdownTheme()),
+      );
+    } else if (['error', 'aborted', 'timed-out'].includes(state)) {
+      container.addChild(
+        new Text(
+          fieldLine(
+            'Error',
+            truncate(
+              run.errorMessage || run.stderr || stateLabel(run),
+              ACTIVITY_PREVIEW_CHARS,
+            ),
+            fg,
+            state === 'error' ? 'error' : 'warning',
+          ),
+          0,
+          0,
+        ),
+      );
+    }
+
+    for (const line of currentActivityLines(run, fg))
+      container.addChild(new Text(line, 0, 0));
+    const footer = [runtimeLabel(run), usage(run), controls([run])]
+      .filter(Boolean)
+      .join(' · ');
     container.addChild(new Text(fg('dim', footer), 0, 0));
     return container;
   }
@@ -261,14 +256,7 @@ export function renderDelegateResult(
   const container = new Container();
   container.addChild(
     new Text(
-      `${fg('toolTitle', theme.bold('Delegate'))} ${fg(
-        succeeded === details.runs.length
-          ? 'success'
-          : complete === details.runs.length
-            ? 'warning'
-            : 'accent',
-        `· ${succeeded}/${details.runs.length} succeeded`,
-      )} ${fg('muted', `· ${complete}/${details.runs.length} complete`)}`,
+      `${fg('toolTitle', theme.bold('Delegate'))} ${fg('muted', `· ${details.runs.length} subagents`)}`,
       0,
       0,
     ),
@@ -303,19 +291,11 @@ export function renderDelegateResult(
     );
 
   for (const [index, run] of details.runs.entries()) {
-    const state = getRunState(run);
     container.addChild(
-      new Text(
-        `${fg('muted', `${index + 1}`.padStart(2))} ${icon(run, fg)} ${fg('text', taskText(run.task, false))}`,
-        0,
-        0,
-      ),
-    );
-    container.addChild(
-      new Text(
-        `${fg('dim', '     ')}${fg(stateColor(state), capitalize(stateLabel(run)))}`,
-        0,
-        0,
+      indexedTaskBlock(
+        `${fg('muted', `${index + 1}`.padStart(2))} ${icon(run, fg)} `,
+        run.task,
+        fg,
       ),
     );
     container.addChild(
@@ -335,35 +315,39 @@ export function renderDelegateResult(
         0,
       ),
     );
-    if (['queued', 'running'].includes(state)) {
-      const latest = run.activities.at(-1);
-      container.addChild(
-        new Text(
-          `${fg('dim', '     ')}${fg('muted', latest ? 'Now: ' : 'Status: ')}${
-            latest
-              ? activityLabel(
-                  {
-                    ...latest,
-                    label: truncate(latest.label, TASK_PREVIEW_CHARS),
-                  },
-                  fg,
-                )
-              : fg(
-                  'dim',
-                  state === 'queued'
-                    ? 'Waiting for a slot'
-                    : 'Starting subagent',
-                )
-          }`,
-          0,
-          0,
-        ),
-      );
-    }
+  }
+
+  // Frequently changing runtime data stays at the bottom so updates do not
+  // repaint or shift the task summaries above it.
+  for (const [index, run] of details.runs.entries()) {
+    const state = getRunState(run);
+    const latest = run.activities.at(-1);
+    const status = fg(stateColor(state), capitalize(runtimeLabel(run)));
+    const activity = ['queued', 'running'].includes(state)
+      ? latest
+        ? ` · ${activityLabel(
+            {
+              ...latest,
+              label: truncate(latest.label, TASK_PREVIEW_CHARS),
+            },
+            fg,
+          )}`
+        : fg(
+            'dim',
+            ` · ${state === 'queued' ? 'Waiting for a slot' : 'Starting subagent'}`,
+          )
+      : '';
+    container.addChild(
+      new Text(
+        `${fg('dim', `${index + 1}`.padStart(2))} ${status}${activity}`,
+        0,
+        0,
+      ),
+    );
     if (['error', 'aborted', 'timed-out'].includes(state))
       container.addChild(
         new Text(
-          `${fg('dim', '     ')}${fg(
+          `${fg('dim', '   ')}${fg(
             state === 'error' ? 'error' : 'warning',
             truncate(
               run.errorMessage || run.stderr || stateLabel(run),
@@ -375,6 +359,20 @@ export function renderDelegateResult(
         ),
       );
   }
-  container.addChild(new Text(fg('dim', controls(details.runs)), 0, 0));
+  const summary = `${succeeded}/${details.runs.length} succeeded · ${complete}/${details.runs.length} complete`;
+  container.addChild(
+    new Text(
+      fg(
+        succeeded === details.runs.length
+          ? 'success'
+          : complete === details.runs.length
+            ? 'warning'
+            : 'dim',
+        `${summary} · ${controls(details.runs)}`,
+      ),
+      0,
+      0,
+    ),
+  );
   return container;
 }

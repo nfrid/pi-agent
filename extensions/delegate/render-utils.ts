@@ -3,7 +3,13 @@ import {
   keyHint,
   type ThemeColor,
 } from '@earendil-works/pi-coding-agent';
-import { Text } from '@earendil-works/pi-tui';
+import {
+  type Component,
+  Text,
+  truncateToWidth,
+  visibleWidth,
+  wrapTextWithAnsi,
+} from '@earendil-works/pi-tui';
 import {
   type DelegateDetails,
   type DelegatedRun,
@@ -51,9 +57,66 @@ export function truncate(text: string, max: number): string {
   return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
 }
 
-export function taskText(value: unknown, expanded: boolean): string {
-  const text = String(value || '...').trim();
-  return expanded ? text : truncate(text, TASK_PREVIEW_CHARS);
+class WrappedTask implements Component {
+  constructor(
+    private readonly prefix: string,
+    private readonly value: string,
+    private readonly color: (text: string) => string,
+    private readonly expanded: boolean,
+  ) {}
+
+  render(width: number): string[] {
+    const prefixWidth = visibleWidth(this.prefix);
+    if (width <= prefixWidth)
+      return [truncateToWidth(this.prefix, Math.max(1, width), '…')];
+
+    const available = width - prefixWidth;
+    const text = this.expanded
+      ? this.value
+      : this.value.replace(/\s+/g, ' ').trim();
+    const wrapped = wrapTextWithAnsi(this.color(text), available);
+    const visible = this.expanded ? wrapped : wrapped.slice(0, 3);
+    if (!this.expanded && wrapped.length > visible.length) {
+      const last = visible.length - 1;
+      visible[last] = `${truncateToWidth(
+        visible[last] ?? '',
+        Math.max(1, available - 1),
+        '',
+      )}${this.color('…')}`;
+    }
+    const indent = ' '.repeat(prefixWidth);
+    return visible.map((line, index) =>
+      truncateToWidth(
+        `${index === 0 ? this.prefix : indent}${line}`,
+        width,
+        '',
+      ),
+    );
+  }
+
+  invalidate(): void {}
+}
+
+/** Render a task in at most three terminal lines, or without truncation when expanded. */
+export function taskBlock(
+  label: string,
+  value: unknown,
+  expanded: boolean,
+  fg: (color: ThemeColor, text: string) => string,
+): Component {
+  const text = String(value || '...').trim() || '...';
+  const prefix = fg('accent', `${label.padEnd(7)} `);
+  return new WrappedTask(prefix, text, (part) => fg('text', part), expanded);
+}
+
+/** Render an indexed task in at most three terminal lines. */
+export function indexedTaskBlock(
+  prefix: string,
+  value: unknown,
+  fg: (color: ThemeColor, text: string) => string,
+): Component {
+  const text = String(value || '...').trim() || '...';
+  return new WrappedTask(prefix, text, (part) => fg('text', part), false);
 }
 
 export function hasResultHeading(text: string): boolean {
@@ -170,7 +233,7 @@ export function isolationLines(run: DelegatedRun): string[] {
   return lines;
 }
 
-function formatDuration(run: DelegatedRun): string {
+export function formatDuration(run: DelegatedRun): string {
   const start = run.startedAt ?? run.queuedAt;
   if (!start || !Number.isFinite(start)) return '';
   const end = run.finishedAt ?? Date.now();
@@ -186,10 +249,16 @@ function formatDuration(run: DelegatedRun): string {
 
 export function stateLabel(run: DelegatedRun): string {
   const state = getRunState(run);
+  return state === 'success'
+    ? 'done'
+    : state === 'timed-out'
+      ? 'timed out'
+      : state;
+}
+
+export function runtimeLabel(run: DelegatedRun): string {
   const duration = formatDuration(run);
-  const label =
-    state === 'success' ? 'done' : state === 'timed-out' ? 'timed out' : state;
-  return duration ? `${label} • ${duration}` : label;
+  return duration ? `${stateLabel(run)} • ${duration}` : stateLabel(run);
 }
 
 export function icon(

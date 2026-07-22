@@ -50,13 +50,69 @@ describe('render', () => {
     expect(output).toContain('Parent context · Requests edits · /tmp/project');
   });
 
+  test('limits collapsed task text to exactly three terminal lines', () => {
+    const prompt = `${'important detail '.repeat(20)}TAIL-MUST-BE-HIDDEN`;
+    const lines = renderDelegateCall({ task: prompt }, theme, {
+      cwd: '/tmp/project',
+    }).render(30);
+    const modeIndex = lines.findIndex((line) => line.startsWith('Mode'));
+    expect(modeIndex).toBe(4);
+    expect(lines.slice(1, modeIndex)).toHaveLength(3);
+    expect(lines[modeIndex - 1]).toContain('…');
+    expect(lines.join('\n')).not.toContain('TAIL-MUST-BE-HIDDEN');
+  });
+
   test('shows the full delegated prompt when the call is expanded', () => {
-    const prompt = `Inspect the project and report ${'all relevant details '.repeat(20)}`;
+    const prompt = `Inspect the project and report\n${'all relevant details '.repeat(20)}\nFINAL UNIQUE LINE`;
     const component = renderDelegateCall({ task: prompt }, theme, {
       cwd: '/tmp/project',
       expanded: true,
     });
-    expect(component.render(1000).join('\n')).toContain(prompt.trim());
+    const output = component.render(1000).join('\n');
+    expect(output).toContain('Inspect the project and report');
+    expect(output).toContain('FINAL UNIQUE LINE');
+    expect(output).not.toContain('…');
+  });
+
+  test('keeps result task previews to three lines and reveals the full task', () => {
+    const prompt = `${'inspect every relevant subsystem '.repeat(20)}FINAL-TASK-DETAIL`;
+    const run = createRun(prompt, undefined, {
+      cwd: '/tmp/project',
+      context: 'fresh',
+    });
+    run.state = 'running';
+    run.startedAt = Date.now() - 65_000;
+    run.activities.push({
+      type: 'tool',
+      label: 'read /tmp/project/file.ts',
+      status: 'running',
+    });
+
+    const collapsed = renderDelegateResult(
+      { details: { mode: 'single', runs: [run] } },
+      { expanded: false },
+      theme,
+    ).render(32);
+    const modeIndex = collapsed.findIndex((line) => line.startsWith('Mode'));
+    expect(collapsed.slice(1, modeIndex)).toHaveLength(3);
+    expect(collapsed.join('\n')).not.toContain('FINAL-TASK-DETAIL');
+    expect(
+      collapsed.findIndex((line) => line.startsWith('Now')),
+    ).toBeGreaterThan(modeIndex);
+    expect(collapsed[0]).not.toContain('1m');
+    expect(collapsed.slice(modeIndex + 1).join('\n')).toContain('1m');
+
+    const expanded = renderDelegateResult(
+      { details: { mode: 'single', runs: [run] } },
+      { expanded: true },
+      theme,
+    )
+      .render(80)
+      .join('\n');
+    expect(expanded).toContain('FINAL-TASK-DETAIL');
+    expect(expanded.indexOf('Runtime')).toBeGreaterThan(
+      expanded.indexOf('Result'),
+    );
   });
 
   test('lets result details own the card after execution starts', () => {
@@ -253,8 +309,9 @@ describe('render', () => {
       'Parent note: The parser has already been ruled out.',
     );
     expect(output).toContain('Result');
-    expect(output).toContain('Usage & continuation');
+    expect(output).toContain('Runtime');
     expect(output).toContain('Continuation: child-token');
+    expect(output.indexOf('Runtime')).toBeGreaterThan(output.indexOf('Result'));
   });
 
   test('keeps the task visible without duplicating a result heading', () => {
@@ -278,7 +335,8 @@ describe('render', () => {
         theme,
       );
       const output = component.render(300).join('\n');
-      expect(output).toContain('Delegate · done');
+      expect(output).toContain('Delegate');
+      expect(output.toLowerCase()).toContain('done');
       expect(output).toContain('A unique delegated task');
       expect(output.match(/Result/g)).toHaveLength(1);
       expect(output).toContain('first');
