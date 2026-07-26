@@ -1,6 +1,35 @@
 # Extensions Refactoring Plan
 
-Status: draft for review
+Status: Phases 1–3 landed on `refactor/shared-platform`; Phases 4–6 pending the §5 decisions
+
+## Progress
+
+| Phase | State | Commit |
+|---|---|---|
+| 1 — shared runtime primitives | done | `b823137` |
+| 2 — shared UI layer | done (partial, see note) | `5158898` |
+| 3 — extension host contract | done | `44796f9` |
+| 4 — unify the job registry | not started | |
+| 5 — decouple `artifacts` | not started | |
+| 6 — scope reduction | blocked on §5 decisions | |
+
+Test count went 318 → 393. `npm run check` and `npm test` are green at each commit.
+
+**Correction to finding A6 (status glyphs).** The audit called the six glyph/color
+maps duplication. On implementation that was overstated: they are context-specific
+presentation choices drawing from a shared symbol set, and they genuinely disagree
+(`aborted` is `■`/muted in a job list but `−`/warning in a transcript; `running` is
+`●`/warning in a widget but `…`/muted inline). `tasks` uses a separate todo
+vocabulary entirely. A single table would have flattened deliberate distinctions and
+changed rendered output, so the planned `shared/ui/status.ts` was written and then
+dropped. Step 4 of Phase 2 is withdrawn, not deferred.
+
+**Deviation in Phase 2 (step 5).** `tasks/widget.ts` was left on its own
+implementation. Its widget receives a context per call rather than being attached to
+a session, has no refresh timer, and is re-set on every update — it does not have the
+hazards `createManagedWidget` exists to solve.
+
+
 Scope: `extensions/` (all 14 extensions + `extensions/shared`)
 Baseline: `npm run check` and `npm test` both pass (49 test files, 318 tests). Every phase below must keep that true.
 
