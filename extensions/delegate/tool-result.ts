@@ -2,7 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { artifactProducer } from '../artifacts';
+import { artifactProducer } from '../shared/artifacts';
 import { buildParentHandoff } from './output';
 import { throwIfAllRunsFailed } from './param-errors';
 import {

@@ -4,10 +4,9 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import {
   type ArtifactMetadata,
-  type ArtifactReference,
   artifactProducer,
   MAX_ARTIFACT_BYTES,
-} from '../artifacts';
+} from '../shared/artifacts';
 import { pageContent } from './content-retrieval';
 import {
   type StoredSearchData,
@@ -93,9 +92,9 @@ export async function persistWebResult(
   }
 }
 
-export function artifactDetails(
-  artifact: ArtifactMetadata,
-): ArtifactReference & {
+export function artifactDetails(artifact: ArtifactMetadata): {
+  handle: string;
+  sha256: string;
   size: number;
   producer: ArtifactMetadata['producer'];
   contentClass: ArtifactMetadata['contentClass'];

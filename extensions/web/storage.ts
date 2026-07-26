@@ -1,5 +1,5 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { type ArtifactMetadata, artifactConsumer } from '../artifacts';
+import { type ArtifactMetadata, artifactConsumer } from '../shared/artifacts';
 import type { ExtractedContent } from './extract';
 import type { SearchResult } from './types';
 

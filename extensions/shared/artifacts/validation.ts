@@ -1,4 +1,4 @@
-import { sha256 } from '../shared/hash';
+import { sha256 } from '../hash';
 import {
   type ArtifactMetadata,
   CONTENT_CLASSES,
@@ -8,10 +8,10 @@ import {
   type RecoveryEntry,
   SAFE_SOURCE_RE,
   TEXTUAL_CONTENT_CLASSES,
-  type TombstoneEntry,
 } from './types';
 
 export const HANDLE_RE = /^art_[A-Za-z0-9_-]{22}$/;
+const SHA256_RE = /^[a-f0-9]{64}$/;
 const MAX_RECOVERY_BASE64_CHARS = 4 * Math.ceil(MAX_ARTIFACT_BYTES / 3);
 
 export { sha256 };
@@ -26,14 +26,7 @@ export function sanitizeCreationSource(source: string): string {
     throw new Error('creationSource must be a short safe identifier');
   }
   const sanitized = source.trim().toLowerCase();
-  if (
-    !SAFE_SOURCE_RE.test(sanitized) ||
-    sanitized.includes('://') ||
-    sanitized.includes('/') ||
-    sanitized.includes('\\') ||
-    sanitized.includes('@') ||
-    sanitized.includes('%')
-  ) {
+  if (!SAFE_SOURCE_RE.test(sanitized)) {
     throw new Error('creationSource must be a sanitized safe identifier');
   }
   return sanitized;
@@ -79,18 +72,24 @@ function validateItemCount(value: unknown): number | undefined {
   return value;
 }
 
+/**
+ * Assert that metadata describes exactly these bytes.
+ *
+ * Metadata travels through the session JSONL, which can be exported, edited,
+ * and re-imported, so it is re-derived and compared rather than trusted.
+ */
 export function validateMetadata(
   metadata: unknown,
   bytes: Uint8Array,
-): asserts metadata is import('./types').ArtifactMetadata {
+): asserts metadata is ArtifactMetadata {
   if (metadata === null || typeof metadata !== 'object')
     throw new Error('Invalid artifact metadata');
   const value = metadata as Record<string, unknown>;
   if (
     typeof value.handle !== 'string' ||
-    !/^art_[A-Za-z0-9_-]{22}$/.test(value.handle) ||
+    !HANDLE_RE.test(value.handle) ||
     typeof value.sha256 !== 'string' ||
-    !/^[a-f0-9]{64}$/.test(value.sha256) ||
+    !SHA256_RE.test(value.sha256) ||
     typeof value.size !== 'number' ||
     !Number.isSafeInteger(value.size) ||
     value.size < 0 ||
@@ -105,8 +104,10 @@ export function validateMetadata(
   ) {
     throw new Error('Invalid artifact metadata');
   }
-  const source = sanitizeCreationSource(value.creationSource as string);
-  if (source !== value.creationSource)
+  if (
+    sanitizeCreationSource(value.creationSource as string) !==
+    value.creationSource
+  )
     throw new Error('Invalid creationSource');
   const textual = isTextual(value.contentClass);
   if (value.encoding !== (textual ? 'utf-8' : 'binary'))
@@ -169,62 +170,13 @@ export function validateInput(input: PutArtifactInput): Buffer {
   return bytes;
 }
 
-export function validTombstone(
-  data: RecoveryEntry | TombstoneEntry | undefined,
-): data is TombstoneEntry {
-  if (data?.version !== 1 || (data.kind !== 'revoke' && data.kind !== 'purge'))
-    return false;
-  const timestamp = data.kind === 'revoke' ? data.revokedAt : data.purgedAt;
-  return (
-    typeof data.handle === 'string' &&
-    HANDLE_RE.test(data.handle) &&
-    typeof timestamp === 'string' &&
-    Number.isFinite(Date.parse(timestamp))
-  );
-}
-
-function validBase64(value: string): boolean {
-  if (value.length % 4 !== 0) return false;
-  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
-  for (let index = 0; index < value.length - padding; index++) {
-    const code = value.charCodeAt(index);
-    if (
-      !(
-        (code >= 65 && code <= 90) ||
-        (code >= 97 && code <= 122) ||
-        (code >= 48 && code <= 57) ||
-        code === 43 ||
-        code === 47
-      )
-    )
-      return false;
-  }
-  return true;
-}
-
-export function validRecoveryBytes(data: RecoveryEntry): Buffer | undefined {
-  if (
-    typeof data.bytes !== 'string' ||
-    data.bytes.length > MAX_RECOVERY_BASE64_CHARS
-  )
-    return undefined;
-  const padding = data.bytes.endsWith('==')
-    ? 2
-    : data.bytes.endsWith('=')
-      ? 1
-      : 0;
-  const decodedBytes = (data.bytes.length / 4) * 3 - padding;
-  if (decodedBytes > MAX_ARTIFACT_BYTES || !validBase64(data.bytes))
-    return undefined;
-  const bytes = Buffer.from(data.bytes, 'base64');
-  try {
-    validateMetadata(data.metadata, bytes);
-    return bytes;
-  } catch {
-    return undefined;
-  }
-}
-
+/**
+ * Whether two metadata records describe the same artifact in every respect.
+ *
+ * A consumer holds its own copy of the metadata, read back from its own session
+ * record; a divergence in any field means the two records disagree about what
+ * the handle is, which is reason enough to refuse it.
+ */
 export function sameMetadata(
   left: ArtifactMetadata,
   right: ArtifactMetadata,
@@ -242,4 +194,20 @@ export function sameMetadata(
     left.itemCount === right.itemCount &&
     left.createdAt === right.createdAt
   );
+}
+
+/** Decode a recovery entry's transport copy, or reject it as unusable. */
+export function validRecoveryBytes(data: RecoveryEntry): Buffer | undefined {
+  if (
+    typeof data.bytes !== 'string' ||
+    data.bytes.length > MAX_RECOVERY_BASE64_CHARS
+  )
+    return undefined;
+  const bytes = Buffer.from(data.bytes, 'base64');
+  try {
+    validateMetadata(data.metadata, bytes);
+    return bytes;
+  } catch {
+    return undefined;
+  }
 }

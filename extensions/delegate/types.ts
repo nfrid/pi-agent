@@ -1,5 +1,5 @@
 import type { Message } from '@earendil-works/pi-ai';
-import type { ArtifactMetadata } from '../artifacts';
+import type { ArtifactMetadata } from '../shared/artifacts';
 import type { WorktreeSummary } from './worktree/model';
 
 export interface UsageStats {

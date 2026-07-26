@@ -5,7 +5,7 @@ const state = vi.hoisted(() => ({
   peak: 0,
   payload: '' as string,
 }));
-vi.mock('../../artifacts', () => ({
+vi.mock('../../shared/artifacts', () => ({
   MAX_ARTIFACT_BYTES: 16 * 1024 * 1024,
   artifactProducer: {
     put: vi.fn(async (_pi, _ctx, input: { bytes: string }) => {

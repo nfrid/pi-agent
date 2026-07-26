@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../artifacts', () => ({
+vi.mock('../../shared/artifacts', () => ({
   MAX_ARTIFACT_BYTES: 16 * 1024 * 1024,
   artifactProducer: {
     put: vi.fn(async () => {
@@ -16,7 +16,7 @@ vi.mock('../search', () => ({
   })),
 }));
 
-import { artifactProducer, MAX_ARTIFACT_BYTES } from '../../artifacts';
+import { artifactProducer, MAX_ARTIFACT_BYTES } from '../../shared/artifacts';
 import web from '../index';
 import { search } from '../search';
 import { createWebResultStore } from '../storage';

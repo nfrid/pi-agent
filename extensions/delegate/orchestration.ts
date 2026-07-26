@@ -103,7 +103,7 @@ async function runPreparedWithLifecycle(
   mode: 'single' | 'parallel',
   hooks: RunHooks = {},
 ): Promise<DelegatedRun> {
-  const { pi, ctx, config, signal } = runCtx;
+  const { config, signal } = runCtx;
   const parallel = mode === 'parallel';
   let markedRunning = false;
   let run: DelegatedRun;

@@ -127,32 +127,7 @@ describe('web artifact producer storage', () => {
     expect(store.artifact(data.id)).toBeUndefined();
   });
 
-  it('does not restore artifact-backed web data after handle revocation', () => {
-    const data: StoredSearchData = {
-      id: 'revoked-response',
-      type: 'fetch',
-      timestamp: 1,
-      urls: [],
-    };
-    const fixture = artifactEntries(data);
-    restore([
-      ...fixture.entries,
-      {
-        type: 'custom',
-        customType: 'artifact:v1',
-        data: {
-          version: 1,
-          kind: 'revoke',
-          handle: fixture.metadata.handle,
-          revokedAt: '2000-01-01T00:00:01.000Z',
-        },
-      },
-    ]);
-    expect(store.get(data.id)).toBeNull();
-    expect(store.artifact(data.id)).toBeUndefined();
-  });
-
-  it('ignores malformed tombstones and later malformed recoveries', () => {
+  it('keeps the good recovery when a later entry for the handle is malformed', () => {
     const data: StoredSearchData = {
       id: 'valid-before-malformed',
       type: 'fetch',
@@ -162,16 +137,7 @@ describe('web artifact producer storage', () => {
     const fixture = artifactEntries(data);
     restore([
       ...fixture.entries,
-      {
-        type: 'custom',
-        customType: 'artifact:v1',
-        data: {
-          version: 1,
-          kind: 'revoke',
-          handle: fixture.metadata.handle,
-          revokedAt: 'not-a-date',
-        },
-      },
+      { type: 'custom', customType: 'artifact:v1', data: { version: 2 } },
       {
         type: 'custom',
         customType: 'artifact:v1',

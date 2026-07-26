@@ -15,7 +15,7 @@ const metadata = {
   createdAt: '2026-01-01T00:00:00.000Z',
 };
 
-vi.mock('../../artifacts', () => ({
+vi.mock('../../shared/artifacts', () => ({
   MAX_ARTIFACT_BYTES: 16 * 1024 * 1024,
   artifactProducer: {
     put: vi.fn(

@@ -38,40 +38,19 @@ export interface ArtifactMetadata {
   createdAt: string;
 }
 
-export interface Manifest {
-  version: 1;
-  sessionId: string;
-  artifacts: Record<string, ArtifactMetadata>;
-  revoked: string[];
-  /** Read-only migration compatibility for manifests written before revocation terminology. */
-  purged?: string[];
-}
-
+/**
+ * The session-entry copy of an artifact.
+ *
+ * On-disk artifacts live beside the agent directory and can be garbage
+ * collected, exported away, or lost; this base64 copy rides along in the
+ * append-only session JSONL so a fork, replay, or import can rebuild them.
+ */
 export interface RecoveryEntry {
   version: 1;
   kind: 'recovery';
   metadata: ArtifactMetadata;
-  /** Base64 is a lossless transport copy for JSONL export/import/fork. */
   bytes: string;
 }
-
-export interface RevocationEntry {
-  version: 1;
-  kind: 'revoke';
-  handle: string;
-  revokedAt: string;
-}
-
-/** Existing append-only session records remain readable as revocations. */
-export interface LegacyPurgeEntry {
-  version: 1;
-  kind: 'purge';
-  handle: string;
-  purgedAt: string;
-}
-
-export type TombstoneEntry = RevocationEntry | LegacyPurgeEntry;
-export type ArtifactEntry = RecoveryEntry | TombstoneEntry;
 
 export interface ResolvedArtifact {
   metadata: ArtifactMetadata;

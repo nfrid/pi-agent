@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const artifacts = vi.hoisted(() => ({ payloads: [] as string[] }));
-vi.mock('../../artifacts', () => ({
+vi.mock('../../shared/artifacts', () => ({
   MAX_ARTIFACT_BYTES: 16 * 1024 * 1024,
   artifactProducer: {
     put: vi.fn(async (_pi, _ctx, input: { bytes: string }) => {

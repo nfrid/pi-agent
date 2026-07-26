@@ -1,120 +1,37 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import { defineExtension } from '../shared/runtime/extension';
-import { collectGarbage } from './gc';
 import {
+  collectGarbage,
   RETRIEVAL_MODES,
   type RetrievalRequest,
   renderRetrievalResult,
+  restoreArtifacts,
   retrieveArtifact,
-} from './retrieval';
-import { registerSnapshotReads } from './snapshot-reads';
-import {
-  putArtifact,
-  recoverArtifactFromEntries,
-  restoreArtifacts,
-  revokeArtifact,
-} from './storage';
+} from '../shared/artifacts';
+import { defineExtension } from '../shared/runtime/extension';
 
-export type { ArtifactReference } from './artifact-reference';
-export {
-  artifactRetrievalHint,
-  isArtifactRetrievalHint,
-  parseArtifactReference,
-  parseReadSnapshotReference,
-  parseToolResultArtifactReference,
-} from './artifact-reference';
-export { collectGarbage } from './gc';
-export {
-  normalizeReadSelection,
-  processReadSnapshot,
-  readSnapshotDigest,
-  readSnapshotId,
-  reconstructReadSnapshots,
-  SNAPSHOT_DETAILS_KEY,
-  SNAPSHOT_READS_FLAG,
-} from './snapshot-reads';
-export {
-  type PutArtifactOptions,
-  putArtifact,
-  recoverArtifactFromEntries,
-  restoreArtifacts,
-  revokeArtifact,
-  validateMetadata,
-} from './storage';
-export type {
-  ArtifactMetadata,
-  ContentClass,
-  ProducerClass,
-  PutArtifactInput,
-  ResolvedArtifact,
-} from './types';
-export { MAX_ARTIFACT_BYTES } from './types';
-
-/** Public producer surface. Allowlists block explicit protected labels, but cannot
- * determine what bytes mean. Every producer must still enforce protected-data policy. */
-export const artifactProducer = {
-  put: putArtifact,
-  revoke: revokeArtifact,
-} as const;
-
-/** Public read boundary for consumers of artifact-backed session entries. */
-export const artifactConsumer = {
-  recoverFromEntries: recoverArtifactFromEntries,
-} as const;
-
+/**
+ * Host registration for artifact storage. The library itself lives in
+ * `shared/artifacts` because `web` and `delegate` produce artifacts too.
+ */
 export default defineExtension('artifacts', (pi: ExtensionAPI) => {
+  // A resumed, forked, or imported session has session entries but no files;
+  // both events rebuild what the handles point at.
   pi.on('session_start', async (_event, ctx) => {
     await restoreArtifacts(ctx);
   });
   pi.on('session_tree', async (_event, ctx) => {
     await restoreArtifacts(ctx);
   });
-  registerSnapshotReads(pi);
-
-  pi.registerCommand('artifact-revoke', {
-    description:
-      'Revoke exactly one artifact handle. Recovery bytes remain in append-only session JSONL and exports.',
-    handler: async (args, ctx) => {
-      const parts = args.trim().split(/\s+/).filter(Boolean);
-      const handle = parts[0];
-      if (!handle) {
-        ctx.ui.notify('Usage: /artifact-revoke <handle>', 'error');
-        return;
-      }
-      if (parts.length !== 1) {
-        ctx.ui.notify('Usage: /artifact-revoke <handle>', 'error');
-        return;
-      }
-      const confirmed =
-        ctx.mode !== 'tui' ||
-        (await ctx.ui.confirm(
-          'Revoke artifact handle?',
-          `The handle ${handle} will become unusable. Recovery bytes remain in session JSONL and standard exports. Continue?`,
-        ));
-      if (!confirmed) {
-        ctx.ui.notify('Artifact revocation cancelled.', 'info');
-        return;
-      }
-      const revoked = await revokeArtifact(pi, ctx, handle);
-      ctx.ui.notify(
-        revoked
-          ? `Revoked artifact ${handle}; session recovery bytes were retained.`
-          : `No live artifact found for ${handle}.`,
-        revoked ? 'warning' : 'info',
-      );
-    },
-  });
 
   pi.registerCommand('artifact-gc', {
-    description:
-      'Run conservative artifact garbage collection now (never scheduled automatically).',
+    description: 'Delete stored artifacts belonging to sessions that are gone.',
     handler: async (_args, ctx) => {
       const result = await collectGarbage();
       ctx.ui.notify(
         result.aborted
-          ? 'Artifact GC aborted: session state was unreadable; nothing was deleted.'
-          : `Artifact GC complete: deleted ${result.deleted}, retained ${result.retained}.`,
+          ? 'Artifact GC aborted: session state was unreadable, so nothing was deleted.'
+          : `Artifact GC complete: deleted ${result.deleted}, kept ${result.retained}.`,
         result.aborted ? 'error' : 'info',
       );
     },
@@ -124,34 +41,40 @@ export default defineExtension('artifacts', (pi: ExtensionAPI) => {
     name: 'artifact_retrieve',
     label: 'Retrieve Artifact',
     description:
-      'Fetch exact bytes from an artifact handle. Supports offset/limit and selectors.',
+      'Read exact bytes out of an artifact handle. Modes: metadata (size, line count), lines (offset/limit), search (query with beforeLines/afterLines context), json (JSON pointer), bytes (base64 slice for binary).',
     promptSnippet: 'Retrieve bounded exact data from an artifact handle',
     parameters: Type.Object({
       handle: Type.String({ pattern: '^art_[A-Za-z0-9_-]{22}$' }),
       mode: Type.Union(RETRIEVAL_MODES.map((mode) => Type.Literal(mode))),
       offset: Type.Optional(
-        Type.Integer({ minimum: 0, maximum: 16 * 1024 * 1024 }),
+        Type.Integer({
+          minimum: 0,
+          maximum: 16 * 1024 * 1024,
+          description: 'Line number for lines, byte offset for bytes. 0-based.',
+        }),
       ),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 64 * 1024 })),
-      query: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })),
-      heading: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-      pointer: Type.Optional(Type.String({ maxLength: 2048 })),
-      field: Type.Optional(Type.String({ maxLength: 1024 })),
+      query: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: 1024,
+          description: 'Case-insensitive substring to search for.',
+        }),
+      ),
+      pointer: Type.Optional(
+        Type.String({ maxLength: 2048, description: 'RFC 6901 JSON pointer.' }),
+      ),
       beforeLines: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
       afterLines: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      try {
-        const result = await retrieveArtifact(ctx, params as RetrievalRequest);
-        return {
-          content: [
-            { type: 'text' as const, text: renderRetrievalResult(result) },
-          ],
-          details: result,
-        };
-      } catch (error) {
-        throw new Error(error instanceof Error ? error.message : String(error));
-      }
+      const result = await retrieveArtifact(ctx, params as RetrievalRequest);
+      return {
+        content: [
+          { type: 'text' as const, text: renderRetrievalResult(result) },
+        ],
+        details: result,
+      };
     },
   });
 });

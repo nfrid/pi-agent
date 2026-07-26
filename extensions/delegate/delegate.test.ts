@@ -26,12 +26,7 @@ import {
 import { buildDelegatePrompt } from './prompt';
 import { formatDelegateRoutingConfig } from './routing';
 import { mergeDelegateRouteRequest } from './routing-warnings';
-import {
-  buildChildArgs,
-  mapWithConcurrency,
-  resolvePiSpawn,
-  runDelegate,
-} from './runner';
+import { buildChildArgs, mapWithConcurrency, resolvePiSpawn } from './runner';
 import {
   buildSessionSnapshotJsonl,
   createDelegateSession,
