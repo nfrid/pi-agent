@@ -10,9 +10,9 @@ Status: Phases 1–3 landed on `refactor/shared-platform`; Phases 4–6 pending 
 | 2 — shared UI layer | done (partial, see note) | `5158898` |
 | 3 — extension host contract | done | `44796f9` |
 | 4 — unify the job registry | not started | |
-| 5 — decouple `artifacts` | not started | |
+| 5 — decouple `artifacts` | done (folded into 6b) | `9137387` |
 | 6a — drop the context governor | done | `e156054` |
-| 6b — simplify artifacts | not started | |
+| 6b — simplify artifacts | done | `9137387` |
 | 6c — worktrees replace the isolation broker | done | `442a089` |
 
 Test count went 318 → 393. `npm run check` and `npm test` are green at each commit.

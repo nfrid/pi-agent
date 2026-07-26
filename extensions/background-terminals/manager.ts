@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
-import { waitFor, withAbort } from '../shared/runtime/async';
+import { waitFor } from '../shared/runtime/async';
+import { AsyncJobRegistry, type JobRecord } from '../shared/runtime/registry';
 import { type OutputSnapshot, OutputTail } from './output';
 
 export const MAX_RUNNING = 8;
@@ -35,24 +36,17 @@ export interface StartOptions {
   readonly cwd: string;
 }
 
-interface ProcessRecord {
-  readonly id: string;
+interface ProcessRecord extends JobRecord<BackgroundStatus> {
   readonly title: string;
   readonly command: string;
   readonly cwd: string;
-  readonly createdAt: number;
   readonly child: ChildProcess;
   readonly stdout: OutputTail;
   readonly stderr: OutputTail;
-  readonly settled: Promise<void>;
-  resolveSettled: () => void;
-  status: BackgroundStatus;
-  settledAt?: number;
   exitCode?: number;
   signal?: string;
   error?: string;
   stopRequested: boolean;
-  observers: number;
 }
 
 export interface BackgroundManagerOptions {
@@ -108,27 +102,32 @@ function signalTree(
 }
 
 export class BackgroundManager {
-  private readonly records = new Map<string, ProcessRecord>();
+  private readonly registry: AsyncJobRegistry<
+    BackgroundStatus,
+    ProcessRecord,
+    BackgroundSnapshot
+  >;
   private readonly cleanupTimers = new Map<ProcessRecord, NodeJS.Timeout>();
-  private readonly onSettled?: (snapshot: BackgroundSnapshot) => void;
-  private readonly onChange?: () => void;
-  private counter = 0;
-  private disposed = false;
 
   constructor(options: BackgroundManagerOptions = {}) {
-    this.onSettled = options.onSettled;
-    this.onChange = options.onChange;
+    this.registry = new AsyncJobRegistry({
+      idPrefix: 'bg',
+      label: 'background process',
+      maxActive: MAX_RUNNING,
+      maxSettled: MAX_SETTLED,
+      isActive: (status) => status === 'running',
+      snapshot: (record) => snapshot(record),
+      capacityError: `At most ${MAX_RUNNING} background processes may run at once.`,
+      disposedError: 'Background manager is shutting down.',
+      teardown: (record) => this.terminate(record),
+      onSettled: options.onSettled,
+      onChange: options.onChange,
+    });
   }
 
   start(options: StartOptions): BackgroundSnapshot {
-    if (this.disposed) throw new Error('Background manager is shutting down.');
-    if (this.runningCount >= MAX_RUNNING) {
-      throw new Error(
-        `At most ${MAX_RUNNING} background processes may run at once.`,
-      );
-    }
+    this.registry.assertAccepting();
 
-    const id = `bg-${++this.counter}`;
     const [shell, args] = shellInvocation(options.command);
     const child = spawn(shell, args, {
       cwd: options.cwd,
@@ -137,26 +136,17 @@ export class BackgroundManager {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    let resolveSettled = () => {};
-    const settled = new Promise<void>((resolvePromise) => {
-      resolveSettled = resolvePromise;
-    });
     const record: ProcessRecord = {
-      id,
+      ...this.registry.newRecord('running'),
       title: options.title,
       command: displayCommand(options.command),
       cwd: resolve(options.cwd),
-      createdAt: Date.now(),
       child,
       stdout: new OutputTail(STDOUT_RETAINED_BYTES),
       stderr: new OutputTail(STDERR_RETAINED_BYTES),
-      status: 'running',
-      settled,
-      resolveSettled,
       stopRequested: false,
-      observers: 0,
     };
-    this.records.set(id, record);
+    this.registry.add(record);
 
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
@@ -173,70 +163,51 @@ export class BackgroundManager {
     child.once('close', (code, signal) => {
       record.exitCode ??= code ?? undefined;
       record.signal ??= signal ?? undefined;
-      const status = record.stopRequested
-        ? 'killed'
-        : record.exitCode === 0
-          ? 'done'
-          : 'failed';
-      this.settle(record, status);
+      this.settle(
+        record,
+        record.stopRequested
+          ? 'killed'
+          : record.exitCode === 0
+            ? 'done'
+            : 'failed',
+      );
     });
 
-    this.onChange?.();
-    return this.snapshot(record);
+    this.registry.changed();
+    return snapshot(record);
   }
 
   get(id: string): BackgroundSnapshot | undefined {
-    const record = this.records.get(id);
-    return record ? this.snapshot(record) : undefined;
+    return this.registry.get(id);
   }
 
   list(): BackgroundSnapshot[] {
-    return [...this.records.values()].map((record) => this.snapshot(record));
+    return this.registry.list();
   }
 
-  async peek(
+  peek(
     id: string,
     waitMs = 0,
     signal?: AbortSignal,
   ): Promise<BackgroundSnapshot> {
-    const record = this.require(id);
-    if (record.status !== 'running' || waitMs <= 0)
-      return this.snapshot(record);
-
-    record.observers++;
-    try {
-      await waitFor(record.settled, waitMs, signal);
-      return this.snapshot(record);
-    } finally {
-      record.observers--;
-    }
+    return this.registry.peek(id, waitMs, signal);
   }
 
   async stop(
     ids: readonly string[],
     signal?: AbortSignal,
   ): Promise<BackgroundSnapshot[]> {
-    const unique = [...new Set(ids)];
-    const records = unique.map((id) => this.require(id));
-    for (const record of records) record.observers++;
-
-    const stopping = Promise.all(
-      records.map((record) => this.terminate(record)),
+    const records = [...new Set(ids)].map((id) => this.registry.require(id));
+    return this.registry.observing(
+      records,
+      () => Promise.all(records.map((record) => this.terminate(record))),
+      signal,
     );
-    try {
-      return await (signal ? withAbort(stopping, signal) : stopping);
-    } finally {
-      for (const record of records) record.observers--;
-    }
   }
 
   async dispose(): Promise<void> {
-    if (this.disposed) return;
-    this.disposed = true;
-    const running = [...this.records.values()].filter(
-      (record) => record.status === 'running',
-    );
-    await Promise.all(running.map((record) => this.terminate(record)));
+    if (this.registry.disposed) return;
+    await this.registry.dispose();
     // Only groups still inside their short post-settlement cleanup window are
     // eligible here. Never signal a long-settled PID that may have been reused.
     for (const [record, timer] of this.cleanupTimers) {
@@ -244,52 +215,33 @@ export class BackgroundManager {
       signalTree(record.child, 'SIGKILL', false);
     }
     this.cleanupTimers.clear();
-    this.records.clear();
-    this.onChange?.();
   }
 
   get runningCount(): number {
-    let count = 0;
-    for (const record of this.records.values()) {
-      if (record.status === 'running') count++;
-    }
-    return count;
-  }
-
-  private require(id: string): ProcessRecord {
-    const record = this.records.get(id);
-    if (record) return record;
-    const known = [...this.records.keys()].join(', ') || 'none';
-    throw new Error(`Unknown background process "${id}". Known: ${known}.`);
+    return this.registry.activeCount;
   }
 
   private async terminate(record: ProcessRecord): Promise<BackgroundSnapshot> {
-    if (record.status !== 'running') return this.snapshot(record);
+    if (record.state !== 'running') return snapshot(record);
 
     record.stopRequested = true;
     signalTree(record.child, 'SIGTERM');
     await waitFor(record.settled, TERM_GRACE_MS);
-    if (record.status === 'running') {
+    if (record.state === 'running') {
       signalTree(record.child, 'SIGKILL');
       await waitFor(record.settled, KILL_GRACE_MS);
     }
-    if (record.status === 'running') {
+    if (record.state === 'running') {
       record.error = 'Process did not report closure after SIGKILL.';
       this.settle(record, 'killed');
     }
-    return this.snapshot(record);
+    return snapshot(record);
   }
 
   private settle(record: ProcessRecord, status: BackgroundStatus): void {
-    if (record.status !== 'running') return;
-    record.status = status;
-    record.settledAt = Date.now();
-    record.resolveSettled();
+    if (record.state !== 'running') return;
     this.scheduleTreeCleanup(record);
-    const snapshot = this.snapshot(record);
-    if (!this.disposed && record.observers === 0) this.onSettled?.(snapshot);
-    this.prune();
-    this.onChange?.();
+    this.registry.settle(record, status);
   }
 
   private scheduleTreeCleanup(record: ProcessRecord): void {
@@ -303,35 +255,22 @@ export class BackgroundManager {
     timer.unref();
     this.cleanupTimers.set(record, timer);
   }
+}
 
-  private prune(): void {
-    const settled = [...this.records.values()]
-      .filter((record) => record.status !== 'running')
-      .sort(
-        (left, right) =>
-          (left.settledAt ?? left.createdAt) -
-          (right.settledAt ?? right.createdAt),
-      );
-    for (const record of settled.slice(0, -MAX_SETTLED)) {
-      this.records.delete(record.id);
-    }
-  }
-
-  private snapshot(record: ProcessRecord): BackgroundSnapshot {
-    return {
-      id: record.id,
-      title: record.title,
-      command: record.command,
-      cwd: record.cwd,
-      pid: record.child.pid,
-      status: record.status,
-      createdAt: record.createdAt,
-      settledAt: record.settledAt,
-      exitCode: record.exitCode,
-      signal: record.signal,
-      error: record.error,
-      stdout: record.stdout.snapshot(),
-      stderr: record.stderr.snapshot(),
-    };
-  }
+function snapshot(record: ProcessRecord): BackgroundSnapshot {
+  return {
+    id: record.id,
+    title: record.title,
+    command: record.command,
+    cwd: record.cwd,
+    pid: record.child.pid,
+    status: record.state,
+    createdAt: record.createdAt,
+    settledAt: record.settledAt,
+    exitCode: record.exitCode,
+    signal: record.signal,
+    error: record.error,
+    stdout: record.stdout.snapshot(),
+    stderr: record.stderr.snapshot(),
+  };
 }
