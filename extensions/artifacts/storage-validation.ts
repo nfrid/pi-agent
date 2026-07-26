@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { sha256 } from '../shared/hash';
 import {
   type ArtifactMetadata,
   CONTENT_CLASSES,
@@ -14,9 +14,7 @@ import {
 export const HANDLE_RE = /^art_[A-Za-z0-9_-]{22}$/;
 const MAX_RECOVERY_BASE64_CHARS = 4 * Math.ceil(MAX_ARTIFACT_BYTES / 3);
 
-export function sha256(bytes: Uint8Array | string): string {
-  return createHash('sha256').update(bytes).digest('hex');
-}
+export { sha256 };
 
 export function isTextual(contentClass: string): boolean {
   return (TEXTUAL_CONTENT_CLASSES as readonly string[]).includes(contentClass);

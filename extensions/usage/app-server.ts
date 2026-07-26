@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { abortError as sharedAbortError } from '../shared/runtime/async';
 import { TIMEOUT_MS } from './constants';
 import { normalizeAppServerResponse } from './parse';
 import type {
@@ -10,11 +11,10 @@ import type {
 } from './types';
 
 const MAX_STDERR_BYTES = 64 * 1024;
+const ABORT_MESSAGE = 'Codex app-server query aborted.';
 
 function abortError(signal: AbortSignal): Error {
-  return signal.reason instanceof Error
-    ? signal.reason
-    : new Error('Codex app-server query aborted.');
+  return sharedAbortError(signal, ABORT_MESSAGE);
 }
 
 class CodexAppServerClient {

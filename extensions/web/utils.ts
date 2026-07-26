@@ -1,5 +1,8 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { abortableDelay, throwIfAborted } from '../shared/runtime/async';
+
+export { abortableDelay, throwIfAborted };
 
 export function getWebSearchConfigDir(): string {
   if (process.env.PI_CODING_AGENT_DIR) return process.env.PI_CODING_AGENT_DIR;
@@ -13,13 +16,6 @@ export function getWebSearchConfigPath(): string {
   return join(getWebSearchConfigDir(), 'web-search.json');
 }
 
-export function throwIfAborted(signal?: AbortSignal): void {
-  if (!signal?.aborted) return;
-  throw signal.reason instanceof Error
-    ? signal.reason
-    : new DOMException('Aborted', 'AbortError');
-}
-
 const TRANSIENT_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 
 function retryAfterMs(response: Response): number | null {
@@ -29,30 +25,6 @@ function retryAfterMs(response: Response): number | null {
   if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
   const date = Date.parse(value);
   return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
-}
-
-export async function abortableDelay(
-  ms: number,
-  signal?: AbortSignal,
-): Promise<void> {
-  throwIfAborted(signal);
-  await new Promise<void>((resolve, reject) => {
-    const done = () => {
-      signal?.removeEventListener('abort', aborted);
-      resolve();
-    };
-    const timer = setTimeout(done, ms);
-    const aborted = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', aborted);
-      reject(
-        signal?.reason instanceof Error
-          ? signal.reason
-          : new DOMException('Aborted', 'AbortError'),
-      );
-    };
-    signal?.addEventListener('abort', aborted, { once: true });
-  });
 }
 
 /** Fetch with a small, bounded retry budget for transient transport/server failures. */

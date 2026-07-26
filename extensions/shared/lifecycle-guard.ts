@@ -2,6 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import { throwIfAborted } from './runtime/async';
 
 export interface LifecycleGuardOptions {
   onSessionStart?: (ctx: ExtensionContext) => void;
@@ -20,17 +21,10 @@ export interface LifecycleGuard {
 const DEFAULT_BOUNDARY_ERROR =
   'Operation crossed a session lifecycle boundary.';
 
-function defaultThrowIfAborted(signal?: AbortSignal): void {
-  if (!signal?.aborted) return;
-  throw signal.reason instanceof Error
-    ? signal.reason
-    : new DOMException('Aborted', 'AbortError');
-}
-
 /** Tracks session lifecycle generation and rejects stale async work. */
 export function createLifecycleGuard(
   options: LifecycleGuardOptions = {},
-  throwIfAborted: (signal?: AbortSignal) => void = defaultThrowIfAborted,
+  assertNotAborted: (signal?: AbortSignal) => void = throwIfAborted,
 ): LifecycleGuard {
   let generation = 0;
   const boundaryError = options.boundaryError ?? DEFAULT_BOUNDARY_ERROR;
@@ -49,7 +43,7 @@ export function createLifecycleGuard(
     guard(signal?: AbortSignal) {
       const scheduled = generation;
       return () => {
-        throwIfAborted(signal);
+        assertNotAborted(signal);
         if (scheduled !== generation) throw new Error(boundaryError);
       };
     },

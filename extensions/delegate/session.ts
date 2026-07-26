@@ -4,13 +4,13 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import { atomicWriteJsonSync } from '../shared/fs/atomic';
 import type { DelegateRouteState } from './types';
 
 interface SessionSnapshotSource {
@@ -177,19 +177,9 @@ export function updateDelegateSessionRouting(
   const metadata = JSON.parse(
     readFileSync(metadataPath, 'utf8'),
   ) as DelegateSessionMetadata;
-  const temporary = `${metadataPath}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    const updated = { ...metadata, routing };
-    if (!routing) delete updated.routing;
-    writeFileSync(temporary, `${JSON.stringify(updated)}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-      flag: 'wx',
-    });
-    renameSync(temporary, metadataPath);
-  } finally {
-    rmSync(temporary, { force: true });
-  }
+  const updated = { ...metadata, routing };
+  if (!routing) delete updated.routing;
+  atomicWriteJsonSync(metadataPath, updated);
   if (routing) return { ...current, routing };
   const { routing: _routing, ...withoutRouting } = current;
   return withoutRouting;

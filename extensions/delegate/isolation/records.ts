@@ -1,14 +1,7 @@
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { atomicWriteJsonSync } from '../../shared/fs/atomic';
 import { SAFE_ID } from './constants';
 import { isInside } from './kernel';
 import type { IsolationRecord } from './model';
@@ -40,14 +33,7 @@ function recordPath(id: string): string {
 
 export function writeIsolationRecord(record: IsolationRecord): void {
   record.updatedAt = new Date().toISOString();
-  const target = recordPath(record.id);
-  mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-  const temporary = `${target}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-  });
-  renameSync(temporary, target);
+  atomicWriteJsonSync(recordPath(record.id), record, { indent: 2 });
 }
 
 function validWritablePath(worktree: string, candidate: unknown): boolean {

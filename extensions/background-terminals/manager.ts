@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
+import { waitFor, withAbort } from '../shared/runtime/async';
 import { type OutputSnapshot, OutputTail } from './output';
 
 export const MAX_RUNNING = 8;
@@ -57,64 +58,6 @@ interface ProcessRecord {
 export interface BackgroundManagerOptions {
   readonly onSettled?: (snapshot: BackgroundSnapshot) => void;
   readonly onChange?: () => void;
-}
-
-function abortError(signal: AbortSignal): Error {
-  return signal.reason instanceof Error
-    ? signal.reason
-    : new DOMException('Aborted', 'AbortError');
-}
-
-function waitFor(
-  promise: Promise<void>,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<void> {
-  if (signal?.aborted) return Promise.reject(abortError(signal));
-  if (timeoutMs <= 0) return Promise.resolve();
-
-  return new Promise((resolveWait, rejectWait) => {
-    let finished = false;
-    const finish = (error?: Error) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      if (error) rejectWait(error);
-      else resolveWait();
-    };
-    const timer = setTimeout(() => finish(), timeoutMs);
-    const onAbort = () => finish(abortError(signal as AbortSignal));
-    signal?.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      () => finish(),
-      (error: unknown) => {
-        finish(error instanceof Error ? error : new Error(String(error)));
-      },
-    );
-  });
-}
-
-function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(abortError(signal));
-  return new Promise((resolvePromise, rejectPromise) => {
-    const onAbort = () => {
-      cleanup();
-      rejectPromise(abortError(signal));
-    };
-    const cleanup = () => signal.removeEventListener('abort', onAbort);
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      (value) => {
-        cleanup();
-        resolvePromise(value);
-      },
-      (error: unknown) => {
-        cleanup();
-        rejectPromise(error);
-      },
-    );
-  });
 }
 
 function displayCommand(command: string): string {

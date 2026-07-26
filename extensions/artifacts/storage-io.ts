@@ -1,17 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import {
-  chmod,
-  link,
-  mkdir,
-  open,
-  readFile,
-  rename,
-  rm,
-  unlink,
-  writeFile,
-} from 'node:fs/promises';
+import { chmod, link, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import { atomicWriteFile, ensureDir } from '../shared/fs/atomic';
 import { sha256 } from './storage-validation';
 import type { Manifest } from './types';
 
@@ -33,28 +24,7 @@ export function manifestPath(root: string, sessionId: string): string {
   return path.join(root, 'manifests', `${sessionKey(sessionId)}.json`);
 }
 
-export async function ensureDir(dir: string): Promise<void> {
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  await chmod(dir, 0o700);
-}
-
-async function atomicReplace(
-  file: string,
-  bytes: Uint8Array | string,
-): Promise<void> {
-  await ensureDir(path.dirname(file));
-  const temporary = `${file}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
-  const descriptor = await open(temporary, 'wx', 0o600);
-  try {
-    await descriptor.writeFile(bytes);
-    await descriptor.sync();
-  } finally {
-    await descriptor.close();
-  }
-  await chmod(temporary, 0o600);
-  await rename(temporary, file);
-  await chmod(file, 0o600);
-}
+export { ensureDir };
 
 export async function putBlob(
   root: string,
@@ -119,7 +89,7 @@ export async function writeManifest(
   root: string,
   manifest: Manifest,
 ): Promise<void> {
-  await atomicReplace(
+  await atomicWriteFile(
     manifestPath(root, manifest.sessionId),
     `${JSON.stringify(manifest)}\n`,
   );
