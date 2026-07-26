@@ -4,13 +4,13 @@ import {
   loadDelegateConfig,
 } from './config';
 
+// Text content only, never attribute values: quotes and apostrophes need no
+// escaping here, and escaping them makes the prose the model reads harder.
 function escapeXml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&apos;');
+    .replaceAll('>', '&gt;');
 }
 
 function compactPromptText(value: string | undefined): string {
@@ -20,12 +20,22 @@ function compactPromptText(value: string | undefined): string {
 export function formatDelegateRoutingConfig(config: DelegateConfig): string {
   if (config.error)
     return `<delegate_routing>\nUnavailable: ${escapeXml(config.error)}\n</delegate_routing>`;
-  const routing = describeDelegateRouting(config);
-  const catalog = routing.catalog.map((route) => {
-    const description = compactPromptText(route.description);
-    return `- ${escapeXml(route.route)}: model=${escapeXml(route.model)}; thinking=${route.thinking}; relativeCost=${route.relativeCost}; relativeIntelligence=${route.relativeIntelligence}${route.allowed ? '' : '; unavailable: relativeCost exceeds maxRelativeCost'}${description ? `; ${escapeXml(description)}` : ''}`;
-  });
-  return `<delegate_routing>\nPick the cheapest catalog route that is smart enough for the task. Route descriptions are hints, not roles. Fresh tasks need an exact route key; continuations reuse their persisted route when omitted. maxRelativeCost=${routing.maxRelativeCost}.\nCatalog routes:\n${catalog.length > 0 ? catalog.join('\n') : '- (none)'}\n</delegate_routing>`;
+  const catalog = describeDelegateRouting(config).map(
+    (route) =>
+      `- ${escapeXml(route.route)}: model=${escapeXml(route.model)}; thinking=${route.thinking}; relativeCost=${route.relativeCost}\n    use for: ${escapeXml(compactPromptText(route.useFor))}\n    avoid: ${escapeXml(compactPromptText(route.avoid))}`,
+  );
+  return `<delegate_routing>
+Take the first route whose "use for" covers the task, not the strongest route that could do it. relativeCost orders the ladder and says nothing about quality. Fresh tasks need an exact route key; continuations reuse their persisted route when omitted.
+
+Climb a rung when the task spans more than one subsystem, when it states no criteria for what to check or what "done" means, or when the question is "is this right" rather than "does this specific property hold". If a route returns a result you cannot act on, retry a rung up rather than re-prompting the same one.
+
+A route persists across every continuation, so one choice usually governs several turns. When a task turns out harder than it looked, switch route on the continuation instead of pushing the current one past what it handles.
+
+Give a writable task a finish line: the acceptance criteria, or the command that decides done. With one, a cheap route is a safe bet, because its diff is verifiable. Without one the child picks its own, which is judgement work and needs a stronger route.
+
+Catalog, cheapest first:
+${catalog.length > 0 ? catalog.join('\n') : '- (none)'}
+</delegate_routing>`;
 }
 
 export function formatDelegateRoutingPrompt(cwd: string): string {

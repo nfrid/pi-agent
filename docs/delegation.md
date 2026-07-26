@@ -6,25 +6,28 @@ The delegate extension runs focused child agents using user-owned model routes. 
 
 Every fresh delegated task supplies one exact `route` key from `delegate.modelCatalog`. A continuation reuses its persisted route when omitted and may switch only by supplying another complete route key. Parallel tasks may share a top-level route or select routes independently.
 
-Each route binds one provider, model, and thinking level. `relativeCost` is used for route admission and `relativeIntelligence` is role-neutral selection guidance; neither field grants repository or tool access. `delegate.maxRelativeCost` is the hard route ceiling. Unknown and over-cost routes fail rather than silently substituting.
+Each route binds one provider, model, and thinking level. Selection is prose-driven: the orchestrator matches the task against each route's `useFor` and `avoid`, both required. `relativeCost` is the only number. It is relative usage drain rather than a quality score, and its one job is to order the catalog cheapest-first so "climb a rung" means something. Unknown routes fail rather than silently substituting.
+
+There is deliberately no quality metric. One scalar cannot separate competences that vary independently — breadth of correctness checking is a different axis from judging whether a diff overclaims — and a catalog ranked by it ends up with routes that are unreachable under "cheapest route that is good enough" while their prose insists they are the right choice.
 
 ```json
 {
   "delegate": {
-    "maxRelativeCost": 21,
     "modelCatalog": {
       "luna-medium": {
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
         "thinking": "medium",
         "relativeCost": 2,
-        "relativeIntelligence": 59,
-        "description": "Focused repository inspection and scoped coding"
+        "useFor": "Verify one named invariant over at most three named files; implement a localised change against a failing test, with the check command given.",
+        "avoid": "Open-ended review with no criteria; deciding what to look for; work spanning subsystems."
       }
     }
   }
 }
 ```
+
+Keep `useFor` and `avoid` in concrete task shapes rather than adjectives. "Strong repository understanding" cannot be matched against a task; "verify one named invariant over at most three named files" can.
 
 The compact routing table is included in the parent system prompt when the delegate tool is available. Delegated children do not receive orchestration instructions.
 

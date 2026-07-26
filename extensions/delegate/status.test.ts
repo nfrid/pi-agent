@@ -19,7 +19,6 @@ describe('delegate status store', () => {
       model: 'test-model',
       thinking: 'high',
       relativeCost: 1,
-      relativeIntelligence: 1,
     };
     run.context = 'branch';
     const [id] = store.start([run], 'foreground');

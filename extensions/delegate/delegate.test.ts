@@ -138,23 +138,17 @@ describe('delegate', () => {
     expect(prompt).toContain('follow-up feedback');
   });
 
-  test('resolves exact catalog route keys within the cost ceiling', () => {
+  test('resolves exact catalog route keys', () => {
     const config = parseDelegateConfig({
       provider: 'openai-codex',
-      maxRelativeCost: 3,
       modelCatalog: {
         precise: {
           provider: 'custom-provider',
           model: 'precise-model',
           thinking: 'high',
           relativeCost: 1.5,
-          relativeIntelligence: 3.5,
-        },
-        forbidden: {
-          model: 'expensive',
-          thinking: 'high',
-          relativeCost: 4,
-          relativeIntelligence: 5,
+          useFor: 'scoped checks',
+          avoid: 'judgement calls',
         },
       },
     });
@@ -165,7 +159,6 @@ describe('delegate', () => {
         model: 'precise-model',
         thinking: 'high',
         relativeCost: 1.5,
-        relativeIntelligence: 3.5,
       },
     });
     expect(resolveDelegateRoute('missing', config).error).toMatch(
@@ -174,14 +167,14 @@ describe('delegate', () => {
     expect(resolveDelegateRoute(undefined, config).error).toMatch(
       /requires a route key/,
     );
-    expect(resolveDelegateRoute('forbidden', config).error).toMatch(
-      /exceeds user-owned maximum/,
-    );
   });
 
   test('requires strict catalog-only configuration and positive metrics', () => {
     expect(parseDelegateConfig({ defaultEffort: 'economy' }).error).toMatch(
       /defaultEffort is not supported/,
+    );
+    expect(parseDelegateConfig({ maxRelativeCost: 3 }).error).toMatch(
+      /maxRelativeCost is not supported/,
     );
     expect(
       parseDelegateConfig({
@@ -189,7 +182,7 @@ describe('delegate', () => {
           incomplete: { model: 'x', thinking: 'low', relativeCost: 1 },
         },
       }).error,
-    ).toMatch(/relativeIntelligence must be a finite number/);
+    ).toMatch(/useFor must be non-empty text/);
     expect(
       parseDelegateConfig({
         modelCatalog: {
@@ -197,7 +190,8 @@ describe('delegate', () => {
             model: 'x',
             thinking: ['low'],
             relativeCost: 1,
-            relativeIntelligence: 2,
+            useFor: 'scoped checks',
+            avoid: 'judgement calls',
           },
         },
       }).error,
@@ -209,7 +203,8 @@ describe('delegate', () => {
             model: 'x',
             thinking: 'low',
             relativeCost: 1,
-            relativeIntelligence: 2,
+            useFor: 'scoped checks',
+            avoid: 'judgement calls',
             extra: true,
           },
         },
@@ -222,13 +217,15 @@ describe('delegate', () => {
             model: 'one',
             thinking: 'low',
             relativeCost: 1,
-            relativeIntelligence: 2,
+            useFor: 'scoped checks',
+            avoid: 'judgement calls',
           },
           ' route ': {
             model: 'two',
             thinking: 'high',
             relativeCost: 2,
-            relativeIntelligence: 3,
+            useFor: 'scoped checks',
+            avoid: 'judgement calls',
           },
         },
       }).error,
@@ -240,13 +237,15 @@ describe('delegate', () => {
             model: 'same',
             thinking: 'low',
             relativeCost: 1,
-            relativeIntelligence: 2,
+            useFor: 'scoped checks',
+            avoid: 'judgement calls',
           },
           two: {
             model: 'same',
             thinking: 'low',
             relativeCost: 2,
-            relativeIntelligence: 3,
+            useFor: 'scoped checks',
+            avoid: 'judgement calls',
           },
         },
       }).error,
@@ -260,7 +259,6 @@ describe('delegate', () => {
       model: 'model',
       thinking: 'high' as const,
       relativeCost: 1,
-      relativeIntelligence: 2,
     };
     expect(mergeDelegateRouteRequest(undefined, persisted)).toBe('original');
     expect(mergeDelegateRouteRequest('replacement', persisted)).toBe(
@@ -276,17 +274,19 @@ describe('delegate', () => {
           model: 'quick',
           thinking: 'high',
           relativeCost: 1,
-          relativeIntelligence: 3,
+          useFor: 'scoped checks',
+          avoid: 'judgement calls',
         },
         custom: {
           model: 'custom',
           thinking: 'low',
           relativeCost: 2,
-          relativeIntelligence: 4,
+          useFor: 'scoped checks',
+          avoid: 'judgement calls',
         },
       },
     });
-    expect(describeDelegateRouting(config).catalog).toEqual([
+    expect(describeDelegateRouting(config)).toEqual([
       expect.objectContaining({ route: 'quick', model: 'quick' }),
       expect.objectContaining({ route: 'custom', model: 'custom' }),
     ]);
@@ -325,7 +325,6 @@ describe('delegate', () => {
         model: 'quick',
         thinking: 'high',
         relativeCost: 1,
-        relativeIntelligence: 1,
       },
     });
     try {
@@ -441,27 +440,33 @@ describe('delegate', () => {
     const prompt = formatDelegateRoutingConfig(
       parseDelegateConfig({
         provider: 'provider',
-        maxRelativeCost: 2,
         modelCatalog: {
           'quick-low': {
             model: 'quick',
             thinking: 'low',
             relativeCost: 1,
-            relativeIntelligence: 2,
+            useFor: 'scoped checks',
+            avoid: 'judgement calls',
           },
           'smart-high': {
             model: 'smart',
             thinking: 'high',
             relativeCost: 3,
-            relativeIntelligence: 8,
+            useFor: 'scoped checks',
+            avoid: 'judgement calls',
           },
         },
       }),
     );
     expect(prompt).toContain('quick-low: model=quick');
     expect(prompt).toContain('smart-high: model=smart');
-    expect(prompt).toContain(
-      'unavailable: relativeCost exceeds maxRelativeCost',
+    expect(prompt).toContain('use for: scoped checks');
+    expect(prompt).toContain('avoid: judgement calls');
+    expect(prompt).not.toContain('relativeIntelligence');
+    expect(prompt).not.toContain('maxRelativeCost');
+    // Cheapest first: the ladder the prompt tells the orchestrator to climb.
+    expect(prompt.indexOf('quick-low')).toBeLessThan(
+      prompt.indexOf('smart-high'),
     );
   });
 
@@ -498,7 +503,6 @@ describe('delegate', () => {
           model: 'exact-model',
           thinking: 'low',
           relativeCost: 2,
-          relativeIntelligence: 3,
         },
       },
       '/tmp/child.jsonl',

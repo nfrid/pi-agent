@@ -31,14 +31,14 @@ const config: DelegateConfig = {
   timeoutMs: 60_000,
   maxParallelTasks: 2,
   maxConcurrency: 2,
-  maxRelativeCost: 3,
   provider: 'test',
   modelCatalog: {
     quick: {
       model: 'test-model',
       thinking: 'low',
       relativeCost: 1,
-      relativeIntelligence: 1,
+      useFor: 'cheap checks',
+      avoid: 'judgement calls',
     },
   },
 };
@@ -62,7 +62,6 @@ function prepared(
         model: 'test-model',
         thinking: 'low',
         relativeCost: 1,
-        relativeIntelligence: 1,
       },
     },
     session: {

@@ -9,71 +9,62 @@
   "theme": "dracula",
   "delegate": {
     "provider": "openai-codex",
-    "maxRelativeCost": 21,
     "modelCatalog": {
       "luna-low": {
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
         "thinking": "low",
         "relativeCost": 1,
-        "relativeIntelligence": 42,
-        "description": "Cheapest reasoning-capable configuration. Fast and economical, but unreliable on long-horizon implementation, difficult debugging, and recovery after a wrong approach."
+        "useFor": "Mechanical work with one deterministic answer: does this file or export exist, what does this config say, run a command and report output. Rote edits fully specified by the task \u2014 a rename in named files, a fixture update, boilerplate \u2014 where a command proves it.",
+        "avoid": "Anything needing judgement, or reading more than two or three files. Any task whose finish line is not already decided."
       },
       "luna-medium": {
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
         "thinking": "medium",
         "relativeCost": 2,
-        "relativeIntelligence": 59,
-        "description": "Large capability improvement over Luna low at modest cost. Reasonable repository understanding and scoped coding ability, but still inconsistent on autonomous multi-step implementation."
+        "useFor": "Check one named invariant or a stated checklist over a few named files; confirm a fix landed; scan a bounded diff for dead code or stale wording. Implement a localised change against a failing test or exact spec, inside one subsystem, with the check command given.",
+        "avoid": "Open-ended review with no criteria; working out what to look for; security reasoning; work spanning subsystems or likely to need a second approach."
       },
       "luna-high": {
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
         "thinking": "high",
         "relativeCost": 5,
-        "relativeIntelligence": 68,
-        "description": "Strong coding performance for the price. Capable implementation and terminal use, but relatively token-hungry, slower, and more likely to meander than stronger base models at comparable quality."
-      },
-      "luna-max": {
-        "provider": "openai-codex",
-        "model": "gpt-5.6-luna",
-        "thinking": "max",
-        "relativeCost": 7,
-        "relativeIntelligence": 75,
-        "description": "Meaningfully stronger than Luna high and competitive with more expensive models. Excellent monetary efficiency, but very high token consumption, increased latency, and less concise execution."
+        "useFor": "Scoped audits over a named file set where the criteria are given but the answer needs judgement; small design or API proposals over known files. Bounded multi-file implementation following an established pattern, with tests covering the behaviour.",
+        "avoid": "Repo-wide breadth; cross-module race, lifecycle, or concurrency reasoning. When a task outgrows this, prefer terra-high to a higher luna effort."
       },
       "terra-high": {
         "provider": "openai-codex",
         "model": "gpt-5.6-terra",
         "thinking": "high",
         "relativeCost": 8,
-        "relativeIntelligence": 72,
-        "description": "Best normal Terra configuration. Strong, balanced implementation, terminal execution, and repository understanding with better efficiency and discipline than compute-heavy Luna configurations."
+        "useFor": "The default for substantial work. Review a whole uncommitted diff against a spec or plan; audit every modified and untracked file for correctness. Implement a multi-file feature or fix in an established architecture, tests included, where the requirements are stated and a check command exists.",
+        "avoid": "Whether the work is honest or overbuilt, which is sol-medium. Breadth-wise security, drift, or race analysis, which is terra-max. Rote edits, which are cheaper above."
       },
       "terra-max": {
         "provider": "openai-codex",
         "model": "gpt-5.6-terra",
         "thinking": "max",
         "relativeCost": 13,
-        "relativeIntelligence": 77,
-        "description": "Material capability improvement over Terra high, especially for difficult implementation and persistent tool-driven work. Substantially more expensive, but the additional reasoning produces measurable gains."
+        "useFor": "Broad regression and security audits across many changed files; behavioural comparison against a git baseline; lifecycle, cancellation, and race analysis. Cross-cutting refactors and migrations with many edge cases, under strong test coverage.",
+        "avoid": "Narrow work, and anything terra-high already covers: the premium buys breadth, not depth. Rigid mechanical changes, where the extra reasoning tends to arrive as unrequested cleanup."
       },
       "sol-medium": {
         "provider": "openai-codex",
         "model": "gpt-5.6-sol",
         "thinking": "medium",
         "relativeCost": 15,
-        "relativeIntelligence": 75,
-        "description": "Sol's practical efficiency sweet spot. Strong judgment, ambiguity handling, debugging, and cross-cutting reasoning while retaining much lower latency and token usage than higher Sol efforts."
+        "useFor": "Judgement about the work rather than its correctness: does this diff overclaim, is it truthful about what it does, is it overengineered or sloppy. Strict maintainer-style review. Tasks whose criteria are unclear and have to be worked out first.",
+        "avoid": "Mechanical correctness sweeps and spec-conformance review, where terra-high is cheaper and as good. Anything with pass/fail criteria already stated."
       },
       "sol-high": {
         "provider": "openai-codex",
         "model": "gpt-5.6-sol",
         "thinking": "high",
         "relativeCost": 21,
-        "relativeIntelligence": 77,
-        "description": "Near-maximum practical Sol capability. Strong across implementation, tools, architecture, and difficult reasoning, but only moderately better than Sol medium. Higher Sol reasoning levels usually add disproportionate cost and latency."
+        "useFor": "Cross-stage integration review spanning several commits, where a missed defect is expensive and the failure could be anywhere. Reserve for when sol-medium has already looked and its result was not enough.",
+        "avoid": "Nearly everything else, on cost alone."
       }
     }
   }

@@ -20,7 +20,6 @@ const originalRoute: DelegateRouteState = {
   model: 'original-model',
   thinking: 'low',
   relativeCost: 1,
-  relativeIntelligence: 1,
 };
 
 function plan(overrides: Partial<DelegateTaskPlan> = {}): DelegateTaskPlan {

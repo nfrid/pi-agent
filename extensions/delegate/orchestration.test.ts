@@ -16,14 +16,14 @@ const config: DelegateConfig = {
   timeoutMs: 60_000,
   maxParallelTasks: 2,
   maxConcurrency: 2,
-  maxRelativeCost: 3,
   provider: 'openai-codex',
   modelCatalog: {
     quick: {
       model: 'gpt-test',
       thinking: 'low',
       relativeCost: 1,
-      relativeIntelligence: 1,
+      useFor: 'cheap checks',
+      avoid: 'judgement calls',
     },
   },
 };
@@ -34,7 +34,6 @@ const routing: DelegateRouteState = {
   model: 'gpt-test',
   thinking: 'low',
   relativeCost: 1,
-  relativeIntelligence: 1,
 };
 
 const ctx = { cwd: '/tmp/project' } as ExtensionContext;

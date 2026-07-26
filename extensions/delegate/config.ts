@@ -17,8 +17,7 @@ export const THINKING_LEVELS = [
   'max',
 ] as const;
 const SETTINGS_KEY = 'delegate';
-const DEFAULT_MAX_RELATIVE_COST = 3;
-const MAX_RELATIVE_METRIC = 1000;
+const MAX_RELATIVE_COST = 1000;
 
 export const DEFAULT_DELEGATE_RUNTIME = {
   timeoutMs: 10 * 60 * 1000,
@@ -41,7 +40,6 @@ export interface DelegateRuntimeConfig {
 export interface DelegateConfig extends DelegateRuntimeConfig {
   provider?: string;
   modelCatalog?: Record<string, DelegateModelCatalogEntry>;
-  maxRelativeCost: number;
   error?: string;
 }
 
@@ -51,9 +49,8 @@ export interface DelegateCatalogRoute {
   model: string;
   thinking: ThinkingLevel;
   relativeCost: number;
-  relativeIntelligence: number;
-  description?: string;
-  allowed: boolean;
+  useFor: string;
+  avoid: string;
 }
 
 function isThinking(value: unknown): value is ThinkingLevel {
@@ -80,8 +77,8 @@ function parseModelCatalog(raw: unknown): {
     'model',
     'thinking',
     'relativeCost',
-    'relativeIntelligence',
-    'description',
+    'useFor',
+    'avoid',
   ]);
   for (const [rawRoute, value] of Object.entries(
     raw as Record<string, unknown>,
@@ -111,16 +108,23 @@ function parseModelCatalog(raw: unknown): {
       return {
         error: `delegate.modelCatalog.${route}.thinking must be one of: ${THINKING_LEVELS.join(', ')}.`,
       };
-    for (const metric of ['relativeCost', 'relativeIntelligence'] as const) {
-      const metricValue = record[metric];
-      if (
-        typeof metricValue !== 'number' ||
-        !Number.isFinite(metricValue) ||
-        metricValue <= 0 ||
-        metricValue > MAX_RELATIVE_METRIC
-      )
+    const cost = record.relativeCost;
+    if (
+      typeof cost !== 'number' ||
+      !Number.isFinite(cost) ||
+      cost <= 0 ||
+      cost > MAX_RELATIVE_COST
+    )
+      return {
+        error: `delegate.modelCatalog.${route}.relativeCost must be a finite number greater than 0 and at most ${MAX_RELATIVE_COST}.`,
+      };
+    // Route selection is prose-driven: the orchestrator matches the task
+    // against these, so a route without both is not selectable in practice.
+    for (const field of ['useFor', 'avoid'] as const) {
+      const text = record[field];
+      if (typeof text !== 'string' || !text.trim())
         return {
-          error: `delegate.modelCatalog.${route}.${metric} must be a finite number greater than 0 and at most ${MAX_RELATIVE_METRIC}.`,
+          error: `delegate.modelCatalog.${route}.${field} must be non-empty text describing concrete task shapes.`,
         };
     }
     const pair = `${model}\0${record.thinking}`;
@@ -137,36 +141,22 @@ function parseModelCatalog(raw: unknown): {
       return {
         error: `delegate.modelCatalog.${route}.provider must be a non-empty provider ID when provided.`,
       };
-    if (
-      record.description !== undefined &&
-      (typeof record.description !== 'string' || !record.description.trim())
-    )
-      return {
-        error: `delegate.modelCatalog.${route}.description must be non-empty text when provided.`,
-      };
     const provider =
       typeof record.provider === 'string' ? record.provider.trim() : undefined;
-    const description =
-      typeof record.description === 'string'
-        ? record.description.trim().slice(0, 500)
-        : undefined;
     catalog[route] = {
       model,
       thinking: record.thinking,
-      relativeCost: record.relativeCost as number,
-      relativeIntelligence: record.relativeIntelligence as number,
+      relativeCost: cost,
+      useFor: (record.useFor as string).trim().slice(0, 600),
+      avoid: (record.avoid as string).trim().slice(0, 600),
       ...(provider ? { provider } : {}),
-      ...(description ? { description } : {}),
     };
   }
   return { catalog };
 }
 
 function defaultConfig(): DelegateConfig {
-  return {
-    ...DEFAULT_DELEGATE_RUNTIME,
-    maxRelativeCost: DEFAULT_MAX_RELATIVE_COST,
-  };
+  return { ...DEFAULT_DELEGATE_RUNTIME };
 }
 
 function parseRuntimeSetting(
@@ -200,7 +190,6 @@ export function parseDelegateConfig(raw: unknown): DelegateConfig {
   const allowedFields = new Set([
     'provider',
     'modelCatalog',
-    'maxRelativeCost',
     'timeoutMs',
     'maxParallelTasks',
     'maxConcurrency',
@@ -212,20 +201,10 @@ export function parseDelegateConfig(raw: unknown): DelegateConfig {
   const maxTasks = parseRuntimeSetting(record, 'maxParallelTasks');
   const concurrency = parseRuntimeSetting(record, 'maxConcurrency');
   const parsedCatalog = parseModelCatalog(record.modelCatalog);
-  const maxRelativeCost =
-    record.maxRelativeCost === undefined
-      ? DEFAULT_MAX_RELATIVE_COST
-      : typeof record.maxRelativeCost === 'number' &&
-          Number.isFinite(record.maxRelativeCost) &&
-          record.maxRelativeCost > 0 &&
-          record.maxRelativeCost <= MAX_RELATIVE_METRIC
-        ? record.maxRelativeCost
-        : DEFAULT_MAX_RELATIVE_COST;
   const config: DelegateConfig = {
     timeoutMs: timeout.value,
     maxParallelTasks: maxTasks.value,
     maxConcurrency: concurrency.value,
-    maxRelativeCost,
   };
   const errors = [
     timeout.error,
@@ -237,11 +216,6 @@ export function parseDelegateConfig(raw: unknown): DelegateConfig {
       ? 'delegate.provider must be a non-empty provider ID when provided.'
       : undefined,
     parsedCatalog.error,
-    record.maxRelativeCost !== undefined &&
-    maxRelativeCost === DEFAULT_MAX_RELATIVE_COST &&
-    record.maxRelativeCost !== DEFAULT_MAX_RELATIVE_COST
-      ? `delegate.maxRelativeCost must be a finite number greater than 0 and at most ${MAX_RELATIVE_METRIC}.`
-      : undefined,
   ]
     .filter(Boolean)
     .join(' ');
@@ -276,28 +250,27 @@ export function loadDelegateConfig(_cwd: string): DelegateConfig {
   return readConfigFile(path.join(getAgentDir(), 'settings.json'));
 }
 
-export function describeDelegateRouting(config: DelegateConfig): {
-  maxRelativeCost: number;
-  catalog: DelegateCatalogRoute[];
-} {
-  const catalog = Object.entries(config.modelCatalog ?? {})
-    .map(([route, entry]) => ({
-      route,
-      provider: entry.provider ?? config.provider,
-      model: entry.model,
-      thinking: entry.thinking,
-      relativeCost: entry.relativeCost,
-      relativeIntelligence: entry.relativeIntelligence,
-      description: entry.description,
-      allowed: entry.relativeCost <= config.maxRelativeCost,
-    }))
-    .sort(
-      (left, right) =>
-        left.relativeCost - right.relativeCost ||
-        right.relativeIntelligence - left.relativeIntelligence ||
-        left.route.localeCompare(right.route),
-    );
-  return { maxRelativeCost: config.maxRelativeCost, catalog };
+export function describeDelegateRouting(
+  config: DelegateConfig,
+): DelegateCatalogRoute[] {
+  return (
+    Object.entries(config.modelCatalog ?? {})
+      .map(([route, entry]) => ({
+        route,
+        provider: entry.provider ?? config.provider,
+        model: entry.model,
+        thinking: entry.thinking,
+        relativeCost: entry.relativeCost,
+        useFor: entry.useFor,
+        avoid: entry.avoid,
+      }))
+      // Cheapest first: the escalation ladder the orchestrator is told to climb.
+      .sort(
+        (left, right) =>
+          left.relativeCost - right.relativeCost ||
+          left.route.localeCompare(right.route),
+      )
+  );
 }
 
 export function resolveDelegateRoute(
@@ -316,10 +289,6 @@ export function resolveDelegateRoute(
     return {
       error: `Delegate route "${route}" is not in user-owned delegate.modelCatalog.`,
     };
-  if (entry.relativeCost > config.maxRelativeCost)
-    return {
-      error: `Delegate route "${route}" relative cost ${entry.relativeCost} exceeds user-owned maximum ${config.maxRelativeCost}.`,
-    };
   const provider = entry.provider ?? config.provider;
   if (!provider)
     return {
@@ -332,7 +301,6 @@ export function resolveDelegateRoute(
       model: entry.model,
       thinking: entry.thinking,
       relativeCost: entry.relativeCost,
-      relativeIntelligence: entry.relativeIntelligence,
     },
   };
 }

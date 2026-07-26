@@ -34,8 +34,10 @@ export interface DelegateModelCatalogEntry {
   model: string;
   thinking: ThinkingLevel;
   relativeCost: number;
-  relativeIntelligence: number;
-  description?: string;
+  /** Concrete task shapes this route handles. */
+  useFor: string;
+  /** Concrete task shapes to send elsewhere. */
+  avoid: string;
 }
 
 export interface DelegateRouteState {
@@ -44,7 +46,6 @@ export interface DelegateRouteState {
   model: string;
   thinking: ThinkingLevel;
   relativeCost: number;
-  relativeIntelligence: number;
   warning?: string;
 }
 

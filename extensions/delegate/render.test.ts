@@ -200,7 +200,6 @@ describe('render', () => {
         model: 'gpt-5.6-terra',
         thinking: 'medium',
         relativeCost: 8,
-        relativeIntelligence: 72,
       },
       {
         cwd: '/tmp/project',
@@ -250,7 +249,6 @@ describe('render', () => {
         model: 'gpt-5.6-terra',
         thinking: 'medium',
         relativeCost: 8,
-        relativeIntelligence: 72,
       },
       { cwd: '/tmp/project', context: 'fresh' },
     );

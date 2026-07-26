@@ -115,12 +115,13 @@ export type DelegateParams = Static<typeof DelegateParamsSchema>;
 export function delegatePromptGuidelines(cwd: string): string[] {
   return [
     'Give every subagent a short, specific name that describes its role or phase.',
-    'Prefer direct tools for small work. Do not invent research/implementation/test/review stages unless each adds concrete value.',
+    'Do the work yourself when finishing it is quicker than briefing it. Delegate — edits and implementation included, not only exploration and review — when the work needs more reading than its result is worth carrying, or when independent pieces can run at once. Your context is the resource that runs out first in a long session; a child spends its own. Do not invent research/implementation/test/review stages unless each adds concrete value.',
+    'Brief a writable task like a ticket: what done looks like, the command that proves it, and what to leave alone. A child that has to infer its finish line will pick one of its own.',
     'Use contextNote for the relevant decisions, constraints, and findings; use branch only when exact parent history matters.',
     'Continue a child for focused correction or extension; start fresh when its approach is wrong or an independent view is better.',
     "Parallelize only independent work. If one task depends on another's findings, inspect the first result before starting the next. Use background delegation only when foreground work can continue independently; completion is delivered automatically, so do not poll delegate_jobs. Writable tasks each get their own worktree, so they can run in parallel even on overlapping files.",
     'A writable run leaves its work as commits on the branch it reports. Integrate it yourself with ordinary git (review the diff against the reported base, then merge or cherry-pick) rather than asking the user to do it; only stop to ask when the merge is genuinely contentious.',
-    'Treat child results as claims to verify: trust reported checks and concrete evidence; re-check or continue the child when important claims lack support.',
+    'Treat child results as claims to verify: trust reported checks and concrete evidence; re-check or continue the child when important claims lack support. For a writable run, read the diff and run the check yourself before merging — a subagent can report work it did not finish, and weakening or deleting a test is a common way a task comes back "passing".',
     'Delegate cannot be called by child processes.',
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd)}`,
   ];
@@ -141,9 +142,9 @@ export function registerDelegateTool(
     name: 'delegate',
     label: 'Delegate',
     description:
-      'Delegate work to child Pi processes with their own context. Fresh tasks need one exact catalog route; continuations reuse their persisted route when omitted. Routes respect maxRelativeCost. A writable task (allowWrites) runs in its own git worktree on a fresh branch and returns that branch for you to merge; otherwise it is read-only. Set background true for independent work that should complete asynchronously.',
+      'Delegate work to child Pi processes with their own context. Fresh tasks need one exact catalog route; continuations reuse their persisted route when omitted. A writable task (allowWrites) runs in its own git worktree on a fresh branch and returns that branch for you to merge; otherwise it is read-only. Set background true for independent work that should complete asynchronously.',
     promptSnippet:
-      'Delegate substantial exploration, review, validation, implementation, or independent parallel work when a child would save context.',
+      'Hand a child implementation, exploration, review, validation, or independent parallel work whenever a subagent would save your own context.',
     promptGuidelines: delegatePromptGuidelines(cwd),
     parameters: DelegateParamsSchema,
     renderCall: renderDelegateCall,

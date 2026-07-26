@@ -145,7 +145,6 @@ describe('output', () => {
           model: 'quick',
           thinking: 'high',
           relativeCost: 1,
-          relativeIntelligence: 2,
         },
       },
     });
