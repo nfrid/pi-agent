@@ -2,6 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import { defineExtension } from '../shared/runtime/extension';
 
 export const THINKING_LABEL = 'Thinking...';
 const ASK_USER_TOOL = 'ask_user_question';
@@ -99,12 +100,7 @@ function streamedToolName(event: {
   return typeof name === 'string' ? name : undefined;
 }
 
-const registered = new WeakSet<object>();
-
-export default function activityIndicator(pi: ExtensionAPI) {
-  if (registered.has(pi)) return;
-  registered.add(pi);
-
+export default defineExtension('activity-indicator', (pi: ExtensionAPI) => {
   let batch = createToolBatch();
 
   const show = (ctx: ExtensionContext) => {
@@ -186,4 +182,4 @@ export default function activityIndicator(pi: ExtensionAPI) {
     if (ctx.hasUI) ctx.ui.setWorkingMessage();
     batch = createToolBatch();
   });
-}
+});

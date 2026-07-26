@@ -1,12 +1,13 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
+import { defineExtension } from '../shared/runtime/extension';
 import { TOOL_NAME } from './constants';
 import { normalizeChoices, resultText } from './format';
 import { ParamsSchema } from './schema';
 import type { Answer, UiResult } from './types';
 import { createQuestionDialog } from './ui';
 
-export default function askUser(pi: ExtensionAPI) {
+export default defineExtension('ask-user', (pi: ExtensionAPI) => {
   pi.registerTool<typeof ParamsSchema, Answer>({
     name: TOOL_NAME,
     label: 'Ask User',
@@ -87,4 +88,4 @@ export default function askUser(pi: ExtensionAPI) {
       );
     },
   });
-}
+});

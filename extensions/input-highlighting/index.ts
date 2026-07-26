@@ -3,6 +3,7 @@ import {
   type ExtensionAPI,
 } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import { defineExtension } from '../shared/runtime/extension';
 import { thinkingToThemeColor } from '../shared/theme';
 
 const FG_CYAN = '\x1b[36m';
@@ -84,11 +85,15 @@ function highlightPlainTextChunk(text: string): string {
     .replace(QUOTE_RE, `${FG_DIM}$1$2${RESET_DIM}`)
     .replace(LIST_RE, `$1${FG_MAGENTA}$2${RESET_FG}$3`);
 
-  return highlightMarkdownDelimiters(blockHighlighted)
-    .replace(LINK_RE, `${FG_BLUE}$1${RESET_FG}`)
-    .replace(FILE_MENTION_RE, `$1${FG_CYAN}$2${RESET_FG}`)
-    .replace(SLASH_COMMAND_RE, `$1${FG_MAGENTA}$2${RESET_FG}`)
-    .replace(TODO_RE, `${BOLD}${FG_YELLOW}$1${RESET_FG}${RESET_BOLD}`);
+  return (
+    highlightMarkdownDelimiters(blockHighlighted)
+      .replace(LINK_RE, `${FG_BLUE}$1${RESET_FG}`)
+      .replace(FILE_MENTION_RE, `$1${FG_CYAN}$2${RESET_FG}`)
+      .replace(SLASH_COMMAND_RE, `$1${FG_MAGENTA}$2${RESET_FG}`)
+      // `$&`, not `$1`: the pattern also matches an optional trailing colon, and
+      // emitting only the captured word silently deleted it from the input.
+      .replace(TODO_RE, `${BOLD}${FG_YELLOW}$&${RESET_FG}${RESET_BOLD}`)
+  );
 }
 
 function highlightPlainText(text: string): string {
@@ -105,7 +110,7 @@ function highlightPlainText(text: string): string {
   return result;
 }
 
-function highlightInputLine(line: string): string {
+export function highlightInputLine(line: string): string {
   let lastIndex = 0;
   let highlighted = '';
 
@@ -122,7 +127,7 @@ function highlightInputLine(line: string): string {
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching ANSI/APC escapes
 const ANSI_RE = /\x1b(?:\[[0-9;]*[A-Za-z]|_[\s\S]*?(?:\x07|\x1b\\))/g;
 
-function isDefaultEditorBorder(line: string): boolean {
+export function isDefaultEditorBorder(line: string): boolean {
   return /^[─ ↑↓0-9more]+$/.test(line.replace(ANSI_RE, ''));
 }
 
@@ -178,11 +183,7 @@ class HighlightEditor extends CustomEditor {
   }
 }
 
-const registered = new WeakSet<object>();
-
-export default function inputHighlighting(pi: ExtensionAPI) {
-  if (registered.has(pi)) return;
-  registered.add(pi);
+export default defineExtension('input-highlighting', (pi: ExtensionAPI) => {
   pi.on('session_start', (_event, ctx) => {
     const mode = 'mode' in ctx ? ctx.mode : 'tui';
     if (mode !== 'tui') return;
@@ -200,4 +201,4 @@ export default function inputHighlighting(pi: ExtensionAPI) {
   pi.on('session_shutdown', (_event, ctx) => {
     if (ctx.hasUI) ctx.ui.setEditorComponent(undefined);
   });
-}
+});

@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { defineExtension } from '../shared/runtime/extension';
 import { registerTodoCommands } from './commands';
 import { registerTodoContext } from './context';
 import { EXT } from './model';
@@ -11,11 +12,7 @@ import {
 import { registerTodoTool } from './tool';
 import { updateUi } from './widget';
 
-const registered = new WeakSet<object>();
-
-export default function tasks(pi: ExtensionAPI) {
-  if (registered.has(pi)) return;
-  registered.add(pi);
+export default defineExtension('tasks', (pi: ExtensionAPI) => {
   const store = createTaskStore();
 
   pi.on('session_start', (_event, ctx) => {
@@ -46,4 +43,4 @@ export default function tasks(pi: ExtensionAPI) {
   registerTodoContext(pi, store);
   registerTodoTool(pi, store);
   registerTodoCommands(pi, store);
-}
+});

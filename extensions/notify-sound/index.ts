@@ -1,13 +1,13 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { defineExtension } from '../shared/runtime/extension';
 
 const ENABLE_FOCUS_REPORTING = '\x1b[?1004h';
 const DISABLE_FOCUS_REPORTING = '\x1b[?1004l';
 const FOCUS_IN = '\x1b[I';
 const FOCUS_OUT = '\x1b[O';
 const MIN_INTERVAL_MS = 1500;
-const registered = new WeakSet<object>();
 
 const SOUND_CANDIDATES = [
   '/System/Library/Sounds/Funk.aiff',
@@ -46,9 +46,7 @@ function playSound(): void {
   process.stdout.write('\x07');
 }
 
-export default function notifySound(pi: ExtensionAPI) {
-  if (registered.has(pi)) return;
-  registered.add(pi);
+export default defineExtension('notify-sound', (pi: ExtensionAPI) => {
   let focused = true;
   let installed = false;
   let lastPlayedAt = 0;
@@ -100,4 +98,4 @@ export default function notifySound(pi: ExtensionAPI) {
     onData = undefined;
     focused = true;
   });
-}
+});

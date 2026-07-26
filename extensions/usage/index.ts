@@ -2,6 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import { defineExtension } from '../shared/runtime/extension';
 import { queryUsage } from './backends';
 import {
   REFRESH_INTERVAL_MS,
@@ -11,8 +12,6 @@ import {
 import { formatUsage, isCodexModel } from './display';
 import { createUsageRefresh } from './refresh';
 import type { UsageReport } from './types';
-
-const registered = new WeakSet<object>();
 
 export type { UsageRefresh, UsageRefreshHooks } from './refresh';
 export { createUsageRefresh } from './refresh';
@@ -79,8 +78,6 @@ export function registerUsage(
   });
 }
 
-export default function usage(pi: ExtensionAPI) {
-  if (registered.has(pi)) return;
-  registered.add(pi);
+export default defineExtension('usage', (pi: ExtensionAPI) => {
   registerUsage(pi);
-}
+});

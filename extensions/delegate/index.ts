@@ -3,6 +3,7 @@ import type {
   ExtensionUIContext,
 } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
+import { defineExtension } from '../shared/runtime/extension';
 import { createManagedWidget } from '../shared/ui/widget';
 import { loadIsolation, scrubStaleIsolationCredentials } from './isolation';
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
@@ -14,12 +15,8 @@ import { registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import { renderDelegateWidget } from './widget';
 
-const registered = new WeakSet<object>();
-
 /** Stable registration facade; orchestration and broker commands have separate owners. */
-export default function delegate(pi: ExtensionAPI) {
-  if (registered.has(pi)) return;
-  registered.add(pi);
+export default defineExtension('delegate', (pi: ExtensionAPI) => {
   const isChild = process.env.PI_DELEGATE_CHILD === '1';
 
   if (isChild) {
@@ -198,4 +195,4 @@ export default function delegate(pi: ExtensionAPI) {
   });
 
   registerDelegatePatchCommand(pi);
-}
+});

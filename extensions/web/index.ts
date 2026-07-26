@@ -1,17 +1,13 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { createLifecycleGuard } from '../shared/lifecycle-guard';
+import { defineExtension } from '../shared/runtime/extension';
 import { createFetchContentTool } from './fetch-tool';
 import { createGetSearchContentTool } from './get-content-tool';
 import { createWebSearchTool } from './search-tool';
 import { createWebResultStore } from './storage';
 import { throwIfAborted } from './utils';
 
-const registered = new WeakSet<object>();
-
-export default function web(pi: ExtensionAPI): void {
-  if (registered.has(pi)) return;
-  registered.add(pi);
-
+export default defineExtension('web', (pi: ExtensionAPI) => {
   const resultStore = createWebResultStore();
   const lifecycle = createLifecycleGuard(
     {
@@ -35,4 +31,4 @@ export default function web(pi: ExtensionAPI): void {
     }),
   );
   pi.registerTool(createGetSearchContentTool(resultStore));
-}
+});

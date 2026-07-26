@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
+import { defineExtension } from '../shared/runtime/extension';
 import { registerContextGovernor } from './context-governor';
 import { collectGarbage } from './gc';
 import {
@@ -15,8 +16,6 @@ import {
   restoreArtifacts,
   revokeArtifact,
 } from './storage';
-
-const registered = new WeakSet<object>();
 
 export type { ArtifactReference } from './artifact-reference';
 export {
@@ -90,10 +89,7 @@ export const artifactConsumer = {
   recoverFromEntries: recoverArtifactFromEntries,
 } as const;
 
-export default function artifacts(pi: ExtensionAPI): void {
-  if (registered.has(pi)) return;
-  registered.add(pi);
-
+export default defineExtension('artifacts', (pi: ExtensionAPI) => {
   pi.on('session_start', async (_event, ctx) => {
     await restoreArtifacts(ctx);
   });
@@ -197,4 +193,4 @@ export default function artifacts(pi: ExtensionAPI): void {
       }
     },
   });
-}
+});

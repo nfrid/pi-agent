@@ -4,6 +4,7 @@ import type {
   ExtensionCommandContext,
   SessionEntry,
 } from '@earendil-works/pi-coding-agent';
+import { defineExtension } from '../shared/runtime/extension';
 
 /** Hidden session marker used only to kick an idle agent turn. */
 export const CONTINUE_CUSTOM_TYPE = 'continue';
@@ -108,7 +109,7 @@ function notify(
   else console.log(message);
 }
 
-export default function continueExtension(pi: ExtensionAPI): void {
+export default defineExtension('continue', (pi: ExtensionAPI) => {
   pi.registerCommand('continue', {
     description:
       'Continue after an interruption without sending a new user message',
@@ -143,4 +144,4 @@ export default function continueExtension(pi: ExtensionAPI): void {
     if (!event.messages.some(isContinueMarker)) return;
     return { messages: prepareContinueContext(event.messages) };
   });
-}
+});

@@ -6,16 +6,17 @@ import type {
   ThemeColor,
 } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
+import { defineExtension } from '../shared/runtime/extension';
 import { thinkingToThemeColor } from '../shared/theme';
 
-function contextColor(percent: number | undefined): ThemeColor {
+export function contextColor(percent: number | undefined): ThemeColor {
   if (percent === undefined) return 'dim';
   if (percent >= 80) return 'error';
   if (percent >= 50) return 'warning';
   return 'dim';
 }
 
-function formatTokenCount(tokens: number): string {
+export function formatTokenCount(tokens: number): string {
   if (tokens >= 1_000_000) {
     return `${Number.parseFloat((tokens / 1_000_000).toFixed(1))}m`;
   }
@@ -25,7 +26,11 @@ function formatTokenCount(tokens: number): string {
   return `${tokens}`;
 }
 
-function joinParts(theme: Theme, width: number, parts: string[]): string {
+export function joinParts(
+  theme: Theme,
+  width: number,
+  parts: string[],
+): string {
   const sep = theme.fg('dim', ' • ');
   let line = parts.filter(Boolean).join(sep);
   if (visibleWidth(line) <= width) return line;
@@ -34,8 +39,6 @@ function joinParts(theme: Theme, width: number, parts: string[]): string {
   line = parts.filter(Boolean).join(' • ');
   return truncateToWidth(line, width, '…');
 }
-
-const registered = new WeakSet<object>();
 
 function getLastAssistantMessage(
   ctx: ExtensionContext,
@@ -47,9 +50,7 @@ function getLastAssistantMessage(
   }
 }
 
-export default function (pi: ExtensionAPI) {
-  if (registered.has(pi)) return;
-  registered.add(pi);
+export default defineExtension('footer', (pi: ExtensionAPI) => {
   let requestRender = () => {};
 
   const refresh = () => requestRender();
@@ -135,4 +136,4 @@ export default function (pi: ExtensionAPI) {
     requestRender = () => {};
     if (ctx.hasUI) ctx.ui.setFooter(undefined);
   });
-}
+});

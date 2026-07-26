@@ -2,6 +2,7 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from '@earendil-works/pi-coding-agent';
+import { defineExtension } from '../shared/runtime/extension';
 import { buildSystemPrompt } from './composition';
 import {
   aggregateAssistantUsage,
@@ -30,11 +31,7 @@ export {
   META_ROOT_MARKER,
 } from './skills';
 
-const registered = new WeakSet<object>();
-
-export default function systemPrompt(pi: ExtensionAPI) {
-  if (registered.has(pi)) return;
-  registered.add(pi);
+export default defineExtension('system-prompt', (pi: ExtensionAPI) => {
   pi.on('resources_discover', (event) => {
     const skills = findOuterMetaSkillPath(event.cwd);
     return skills ? { skillPaths: [skills] } : undefined;
@@ -88,4 +85,4 @@ export default function systemPrompt(pi: ExtensionAPI) {
       console.log(info);
     },
   });
-}
+});
