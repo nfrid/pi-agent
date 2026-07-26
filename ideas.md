@@ -14,4 +14,3 @@
 ## new features
 
 - "computer use" or some sort of it
-- background process run, for stuff like dev servers
