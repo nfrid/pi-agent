@@ -13,7 +13,7 @@ Status: Phases 1–3 landed on `refactor/shared-platform`; Phases 4–6 pending 
 | 5 — decouple `artifacts` | not started | |
 | 6a — drop the context governor | done | `e156054` |
 | 6b — simplify artifacts | not started | |
-| 6c — worktrees replace the isolation broker | done | |
+| 6c — worktrees replace the isolation broker | done | `442a089` |
 
 Test count went 318 → 393. `npm run check` and `npm test` are green at each commit.
 
