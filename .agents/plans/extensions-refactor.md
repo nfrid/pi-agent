@@ -253,29 +253,90 @@ makes the remaining diff small and reviewable. `delegate/jobs.test.ts` and
 12. Repoint `web/storage.ts`, `web/result-support.ts`, `delegate/tool-result.ts`,
     `delegate/isolation-lifecycle.ts`, `delegate/types.ts` at `shared/artifacts`.
 
-### Phase 6 — Scope reduction (needs decisions in §5)
+### Phase 6 — Scope reduction (decided; see §5)
 
-13. Delete or extract the context governor (C2).
-14. Collapse retrieval modes (C3) to `bytes` + `lines` + `heading`/`literal` (the last two already
-    delegate to `shared/text-selection.ts`), or keep all nine if they are actually exercised.
-15. Decide the fate of the isolation broker (C4).
-16. Consolidate the two lock implementations (A4) onto the `artifacts` semantics — sequenced last
-    because it depends on 15.
+All three §5 questions are answered. Phase 6 splits into three independent pieces.
 
-## 5. Decisions needed before Phase 6
+#### 6a. Delete the context governor
 
-These change the shape of the work and are yours to call:
+`artifacts/context-governor.ts` and its tests are removed outright, along with the
+`context-governor` flag, preview-bytes flag, metrics entry, and `/context-governor` command.
 
-- **Isolation broker (2,304 LOC, macOS-only).** Options: (a) keep and pay the maintenance cost,
-  (b) extract to a separate opt-in extension so `delegate` drops to ~5,700 LOC, (c) reduce to
-  worktree provisioning + manual patch review and drop sandbox profiles, credential scrubbing, and
-  dependency linking. **Recommendation: (b)** — it preserves the capability, makes the cost visible,
-  and lets `delegate` be reviewed as an orchestrator rather than a sandbox runtime.
-- **Context governor.** Default-off, unused, 580 LOC with tests. **Recommendation: delete**; it is
-  recoverable from git history if the idea returns.
-- **Artifacts durability tier (C1).** Is cross-process concurrent access a real requirement for a
-  single-user local config? If not, the CAS + root-locking layer can shrink substantially. If yes,
-  it stays and Phase 6.16 becomes the priority instead.
+The capability is not lost. The governor rewrote oversized tool results *after the fact*; the
+mechanism actually in use does it at source — `web/result-support.ts` returns a bounded preview
+plus a retrieval handle via `boundedPreview`/`persistWebResult`. A post-hoc rewriter behind a
+default-off flag was a second, redundant path.
+
+#### 6b. Simplify `artifacts` to its real job
+
+Artifacts exists to keep giant tool responses out of the context window. One agent, its own
+artifacts, no concurrent access. The durability tier is therefore wrong, not just heavy:
+
+- Drop the content-addressed blob store (`storage-io.ts` CAS publication, digest sharding,
+  integrity repair) in favour of plain per-session files.
+- Drop cross-process root locking (`storage-locking.ts`) entirely — there is no second writer.
+  This also retires finding A4: with the delegate lock gone too (6c), there is one lock
+  implementation left, and then none.
+- Drop `verified-resolution.ts` double-hash verification and the revocation/tombstone path.
+- Collapse the nine retrieval modes to the ones that carry weight.
+- Keep: put, resolve, bounded retrieval, session-scoped recovery from entries, and GC.
+
+Phase 5's decoupling folds in here: what survives moves to `shared/artifacts/`, so `web` and
+`delegate` stop importing a sibling extension.
+
+#### 6c. Replace isolation with seamless worktrees
+
+The premise changes from *security* to *parallel work*. The sandbox was solving a problem we do
+not have — we trust the agent — while imposing setup friction that made worktrees unpleasant.
+
+**Removed** (~2,000 LOC): `isolation/sandbox.ts`, `isolation/credentials.ts`,
+`isolation/patch-apply.ts`, `patch-capture.ts`, `patch-capture-unlocked.ts`, `patch-discard.ts`,
+`patch-validate.ts`, `isolation/locks.ts`, `patch-command.ts`, `inspect-shell.ts`, the
+`macos-sandbox-exec` backend, the 12 `PatchEligibilityCode`s, the 8-state record status machine,
+and the credential copy/scrub lifecycle.
+
+**The new model.** A writable delegate gets a git worktree on a **real named branch** it owns:
+
+```
+/repo                    abc1234 [main]
+/repo/.worktrees/fix-auth def5678 [pi/fix-auth]
+```
+
+The agent commits there. Integration is ordinary git, and — per the decision — the **orchestrator
+performs it itself** rather than handing the user a chore. The parent prompt is updated to direct
+the orchestrator to review the branch and merge, rebase, or cherry-pick it on the user's behalf,
+reporting what it did. `/delegate-patch` and the whole patch-broker vocabulary disappear.
+
+**Seamless setup** is the point, so preparation must need no per-repo hooks:
+
+- Branch + worktree created in one step, no manual `git worktree add` incantation.
+- Dependencies linked automatically (today: `node_modules` symlinks; extended to the gitignored
+  files a fresh checkout needs but git will not provide — `.env` and friends — by copy).
+- `from: 'wip' | 'head'`, defaulting to `'wip'`: the worktree inherits the parent's uncommitted
+  work (tracked diff via `git diff HEAD --binary`, plus untracked-but-not-ignored files) so the
+  agent continues from where you actually are. `'head'` starts from the last commit instead.
+  A dirty parent no longer blocks writable delegation or silently downgrades it to read-only.
+- Explicit `scope` allowlists are no longer required; the worktree is the blast radius.
+
+**Read-only delegates** lose their OS boundary and become a convention: normal `bash`, no
+`inspect_shell`. Read-only remains a useful *intent* signal, not an enforced one.
+
+Kept from the current design: worktree creation, detached-from-parent state, dependency linking,
+and the record/registry so worktrees can be listed, resumed by a continuation, and cleaned up.
+
+*Risk:* this is the one phase that is not behaviour-preserving. It is sequenced last, and the
+delegate isolation tests are rewritten against the new model rather than deleted.
+
+## 5. Decisions — resolved
+
+| Question | Decision |
+|---|---|
+| Isolation broker | Replace with seamless, branch-based worktrees for parallel work. No sandbox. Orchestrator integrates the branch itself. |
+| Dirty parent repo | `from: 'wip'` (default) inherits uncommitted work; `from: 'head'` starts clean. Never blocks. |
+| Worktree facility scope | Delegate-only for now; extract a user-facing `/worktree` later if wanted. |
+| Read-only delegates | Normal bash. `inspect_shell`, sandbox profiles, and credential scrubbing are deleted. |
+| Context governor | Delete. |
+| Artifacts durability | Single-agent, no concurrent access. Drop CAS, locking, verification, revocation. |
 
 ## 6. Sequencing and safety
 

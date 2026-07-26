@@ -1,7 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { defineExtension } from '../shared/runtime/extension';
-import { registerContextGovernor } from './context-governor';
 import { collectGarbage } from './gc';
 import {
   RETRIEVAL_MODES,
@@ -25,20 +24,6 @@ export {
   parseReadSnapshotReference,
   parseToolResultArtifactReference,
 } from './artifact-reference';
-export {
-  CONTEXT_GOVERNOR_DETAILS_KEY,
-  CONTEXT_GOVERNOR_FLAG,
-  CONTEXT_GOVERNOR_METRICS_ENTRY,
-  CONTEXT_GOVERNOR_PREVIEW_BYTES,
-  CONTEXT_GOVERNOR_PREVIEW_FLAG,
-  contextGovernorPreviewBytes,
-  eligibleGovernorResult,
-  emptyGovernorCounters,
-  governContextMessages,
-  markGovernorResult,
-  parseGovernorMarker,
-  renderGovernedPreview,
-} from './context-governor';
 export { collectGarbage } from './gc';
 export {
   normalizeReadSelection,
@@ -73,17 +58,6 @@ export const artifactProducer = {
   revoke: revokeArtifact,
 } as const;
 
-export function mergeToolResultChanges<
-  S extends Record<string, unknown>,
-  G extends Record<string, unknown>,
->(
-  snapshot: S | undefined,
-  governed: G | undefined,
-): S | G | (S & G) | undefined {
-  if (!governed) return snapshot;
-  return snapshot ? { ...snapshot, ...governed } : governed;
-}
-
 /** Public read boundary for consumers of artifact-backed session entries. */
 export const artifactConsumer = {
   recoverFromEntries: recoverArtifactFromEntries,
@@ -96,20 +70,7 @@ export default defineExtension('artifacts', (pi: ExtensionAPI) => {
   pi.on('session_tree', async (_event, ctx) => {
     await restoreArtifacts(ctx);
   });
-  const snapshotResult = registerSnapshotReads(pi, {
-    registerToolResult: false,
-  });
-  const governResult = registerContextGovernor(pi, {
-    registerToolResult: false,
-  });
-  // Encode the security-sensitive transform order in one composed hook: exact
-  // read snapshot publication must precede governor inspection.
-  pi.on('tool_result', async (event, ctx) => {
-    const snapshot = await snapshotResult(event, ctx);
-    const current = snapshot ? { ...event, ...snapshot } : event;
-    const governed = await governResult(current, ctx);
-    return mergeToolResultChanges(snapshot, governed);
-  });
+  registerSnapshotReads(pi);
 
   pi.registerCommand('artifact-revoke', {
     description:

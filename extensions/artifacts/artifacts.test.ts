@@ -14,7 +14,7 @@ import path from 'node:path';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { collectGarbage } from './gc';
-import artifacts, { mergeToolResultChanges } from './index';
+import artifacts from './index';
 import { renderRetrievalResult, retrieveArtifact } from './retrieval';
 import {
   artifactLockPath,
@@ -119,7 +119,6 @@ describe('artifact CAS and recovery', () => {
     artifacts(pi as never);
     artifacts(pi as never);
     expect(tools).toEqual([
-      'context-governor',
       'artifact-revoke',
       'artifact-gc',
       'artifact_retrieve',
@@ -130,9 +129,6 @@ describe('artifact CAS and recovery', () => {
       'session_start',
       'session_tree',
       'session_shutdown',
-      'session_start',
-      'context',
-      'agent_settled',
       'tool_result',
     ]);
     const notices: string[] = [];
@@ -144,21 +140,6 @@ describe('artifact CAS and recovery', () => {
       } as never,
     );
     expect(notices[0]).toContain('Usage: /artifact-revoke');
-  });
-
-  it('preserves snapshot content when later governor changes add details', () => {
-    expect(
-      mergeToolResultChanges(
-        {
-          content: [{ type: 'text', text: 'snapshot text' }],
-          details: { snapshot: true },
-        },
-        { details: { snapshot: true, governor: true } },
-      ),
-    ).toEqual({
-      content: [{ type: 'text', text: 'snapshot text' }],
-      details: { snapshot: true, governor: true },
-    });
   });
 
   it('rolls back manifest publication when lifecycle generation changes', async () => {
