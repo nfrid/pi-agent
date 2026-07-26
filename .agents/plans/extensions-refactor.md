@@ -1,6 +1,6 @@
 # Extensions Refactoring Plan
 
-Status: Phases 1–3 landed on `refactor/shared-platform`; Phases 4–6 pending the §5 decisions
+Status: all phases landed on `main`.
 
 ## Progress
 
@@ -9,13 +9,14 @@ Status: Phases 1–3 landed on `refactor/shared-platform`; Phases 4–6 pending 
 | 1 — shared runtime primitives | done | `b823137` |
 | 2 — shared UI layer | done (partial, see note) | `5158898` |
 | 3 — extension host contract | done | `44796f9` |
-| 4 — unify the job registry | not started | |
+| 4 — unify the job registry | done | `620bf4c` |
 | 5 — decouple `artifacts` | done (folded into 6b) | `9137387` |
 | 6a — drop the context governor | done | `e156054` |
 | 6b — simplify artifacts | done | `9137387` |
 | 6c — worktrees replace the isolation broker | done | `442a089` |
 
-Test count went 318 → 393. `npm run check` and `npm test` are green at each commit.
+Test count went 318 → 371 while total source LOC dropped, since phase 6 deleted more
+than it added. `npm run check` and `npm test` are green at each commit.
 
 **Correction to finding A6 (status glyphs).** The audit called the six glyph/color
 maps duplication. On implementation that was overstated: they are context-specific
