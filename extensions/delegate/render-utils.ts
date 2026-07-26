@@ -210,28 +210,22 @@ export function modeDescription(
   return parts.join(separator);
 }
 
-export function isolationLines(run: DelegatedRun): string[] {
-  if (!run.isolation) {
-    return run.readOnlyBoundary ? [`Boundary: ${run.readOnlyBoundary}`] : [];
-  }
+export function worktreeLines(run: DelegatedRun): string[] {
+  const worktree = run.worktree;
+  if (!worktree) return [];
   const lines = [
-    `Isolation: ${run.isolation.id}`,
-    `State: ${run.isolation.status} · ${run.isolation.backend}`,
-    `Worktree: ${compactPath(run.isolation.worktreePath)}`,
-    `Dependencies: ${run.isolation.dependencyMode}`,
+    `Branch: ${worktree.branch}`,
+    `Worktree: ${compactPath(worktree.worktreePath)}`,
+    `Base: ${worktree.baseHead.slice(0, 8)}`,
   ];
-  if (run.isolation.patch)
+  if (worktree.changedPaths?.length)
     lines.push(
-      `Patch: ${run.isolation.patch.changedPaths.length} path(s) · ${run.isolation.patch.size} bytes · sha256 ${run.isolation.patch.sha256}`,
-      ...run.isolation.patch.changedPaths.map((name) => `- ${name}`),
+      `Changed: ${worktree.changedPaths.length} path(s)`,
+      ...worktree.changedPaths.slice(0, 20).map((name) => `- ${name}`),
     );
-  if (run.isolation.validation)
-    lines.push(
-      `Validation: ${run.isolation.validation.status}${run.isolation.validation.script ? ` (${run.isolation.validation.script})` : ''}`,
-    );
-  lines.push(
-    `Actions: /delegate-patch ${run.isolation.id} show|diff|validate <script>|validate-command <argv...>|apply|discard`,
-  );
+  else lines.push('Changed: nothing was committed on this branch');
+  if (worktree.error) lines.push(`Note: ${worktree.error}`);
+  lines.push(`Integrate: git merge ${worktree.branch}`);
   return lines;
 }
 

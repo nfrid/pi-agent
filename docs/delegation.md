@@ -30,34 +30,41 @@ The compact routing table is included in the parent system prompt when the deleg
 
 ## Read-only delegates
 
-Read-only delegates receive controlled inspection tools. On supported macOS hosts, `inspect_shell` provides Bash-compatible read-only commands inside `sandbox-exec`; filesystem writes, network access, process signaling, and inherited secrets are denied. If that boundary is unavailable, Bash is omitted and controlled `read`, `grep`, `find`, and `ls` tools remain.
-
-The child model process receives only a minimal environment. Provider authentication is copied to a private mode-0600 startup directory and scrubbed when the child exits. Credential values are never exposed to child tools.
-
-Commands that require build output or repository-local cache writes should use writable isolation or parent validation rather than weakening the read-only boundary.
+A read-only delegate gets `read`, `bash`, `grep`, `find`, and `ls`, and is told in its prompt to inspect and report rather than edit. This is an intent signal, not an enforced boundary: the child has an ordinary shell and can do everything any agent with a shell can do. Use it when you want an answer, not a change.
 
 ## Writable delegates
 
-Writable execution requires `allowWrites: true` and at least one existing repository-relative `scope` path. The extension creates a detached locked Git worktree and restricts child writes to declared worktree paths and private state. Writable children receive controlled read/edit/write tools and no Bash.
+`allowWrites: true` gives the task `edit` and `write` alongside the shell, and runs it in its own git worktree on a fresh `pi/<task-name>` branch under `.worktrees/`. Parallel writable tasks therefore never collide, even on the same files — that, not security, is what the worktree is for.
 
-A continuation reuses its original worktree, working directory, route, and scope. It must repeat `allowWrites: true` to edit. Parallel writable tasks require non-overlapping scopes. If writable isolation cannot be established, the run falls back to enforceable read-only execution and reports why.
+Setup needs no per-repository hooks:
 
-`dependencies: auto` may reuse unchanged repository dependencies through a read-only filesystem boundary. Linked dependencies are detached before validation. Frozen offline installation with lifecycle scripts disabled provisions isolated dependencies when a supported lockfile exists. `dependencies: isolated` never reuses parent dependencies.
+- each package directory's `node_modules` is symlinked from the parent checkout, so nothing is reinstalled;
+- gitignored essentials (`.env` and friends) are copied in;
+- `.worktrees/` is added to `.git/info/exclude`, never to the tracked `.gitignore`;
+- checkout hooks are disabled for the worktree git creates on your behalf.
 
-After each writable run, the extension captures and hashes the cumulative binary patch against the original base, validates path and symlink safety, and retains the worktree in user state outside the target repository. It never applies a child patch automatically.
+By default (`from: 'wip'`) the parent's uncommitted work — the tracked diff plus untracked, non-ignored files — is reproduced inside the worktree, so the child sees the repository as you see it. `from: 'head'` starts from the last commit instead.
 
-## Patch lifecycle
+The child is asked to commit as it goes and told explicitly not to merge, rebase, push, or switch branches. Anything it leaves uncommitted is committed for it when the run ends, so the branch is always the complete deliverable. Injected files (the `node_modules` symlink, carried `.env`) are never committed.
+
+A continuation reuses its original worktree, working directory, route, and scope, and must repeat `allowWrites: true`. If a worktree cannot be created — no repository, or git refuses — the task still runs writably in the parent checkout and says why.
+
+`scope` is advisory in both directions now. It tells the child where the work is expected to land; nothing enforces it.
+
+## Integrating the result
+
+A finished writable run reports its branch, its base commit, and the paths it changed. The orchestrating agent integrates it with ordinary git rather than a bespoke protocol, and is expected to do so itself:
 
 ```text
-/delegate-patch list
-/delegate-patch <id-or-continuation> show
-/delegate-patch <id-or-continuation> diff
-/delegate-patch <id-or-continuation> validate <package-script>
-/delegate-patch <id-or-continuation> validate-command <executable> [args...]
-/delegate-patch <id-or-continuation> apply
-/delegate-patch <id-or-continuation> discard
+git diff <base>..<branch>      # review
+git merge <branch>             # integrate
 ```
 
-Validation binds either the exact package-script definition or exact executable argv, uses a minimal environment, denies network and process signaling, and fails if the patch changes. Apply requires a successful child, passed validation, a matching patch hash, an unchanged clean parent, isolation locks, and `git apply --check`.
+Worktrees can be inspected and cleaned up from the parent session:
 
-Concurrent lifecycle operations are locked. Explicit discard can recover a `running` worktree only when its recorded owner is demonstrably stale. A concurrent parent edit is reported as a conflict; automatic rollback never overwrites external work.
+```text
+/delegate-worktrees                              # list
+/delegate-worktrees <id-or-continuation>         # show branch, base, changed paths
+/delegate-worktrees <id-or-continuation> remove  # drop the checkout, keep the branch
+/delegate-worktrees <id-or-continuation> drop    # drop the checkout and the branch
+```

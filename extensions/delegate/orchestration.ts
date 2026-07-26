@@ -3,13 +3,6 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import type { DelegateConfig } from './config';
-import { loadIsolation, type PreparedIsolation } from './isolation';
-import {
-  failedLifecycleRun,
-  finalizeIsolatedRun,
-  isolationDetails,
-  markLifecycleFailure,
-} from './isolation-lifecycle';
 import { invalidParams } from './param-errors';
 import { buildDelegatePlans } from './plans';
 import { mapWithConcurrency } from './runner';
@@ -23,6 +16,13 @@ import {
 import type { DelegateParams } from './tool';
 import { delegateToolResult, makeDetails } from './tool-result';
 import { createRun, type DelegatedRun } from './types';
+import { loadWorktree, type PreparedWorktree } from './worktree';
+import {
+  failedLifecycleRun,
+  finalizeWorktreeRun,
+  markLifecycleFailure,
+  worktreeDetails,
+} from './worktree-lifecycle';
 
 type SnapshotLookup = (cwd: string) => string | null;
 
@@ -59,7 +59,7 @@ export function pendingRuns(
 
 type RunHooks = {
   onUpdate?: (partial: import('./types').DelegateProgressUpdate) => void;
-  onIsolationRunning?: (isolation: PreparedIsolation) => void;
+  onWorktreeRunning?: (worktree: PreparedWorktree) => void;
 };
 
 function errorText(error: unknown): string {
@@ -72,7 +72,7 @@ function continuationOnFailure(
   parallel: boolean,
 ): { continuation?: string } {
   if (parallel) {
-    if (!prepared.isolation || prepared.plan.resumed || markedRunning)
+    if (!prepared.worktree || prepared.plan.resumed || markedRunning)
       return { continuation: prepared.session.token };
     return {};
   }
@@ -85,14 +85,14 @@ async function cleanupFailedLaunch(
   markedRunning: boolean,
 ): Promise<{
   warnings: string[];
-  isolation?: ReturnType<typeof isolationDetails>;
+  worktree?: ReturnType<typeof worktreeDetails>;
 }> {
-  if (!prepared.isolation || markedRunning) return { warnings: [] };
+  if (!prepared.worktree || markedRunning) return { warnings: [] };
   if (!prepared.plan.resumed) return cleanupFreshPreparedTask(prepared);
   return {
     warnings: [],
-    isolation: isolationDetails(
-      loadIsolation(prepared.isolation.record.id) ?? prepared.isolation.record,
+    worktree: worktreeDetails(
+      loadWorktree(prepared.worktree.record.id) ?? prepared.worktree.record,
     ),
   };
 }
@@ -114,13 +114,13 @@ async function runPreparedWithLifecycle(
       signal,
       onUpdate: hooks.onUpdate,
       mode,
-      onIsolationRunning: (isolation) => {
+      onWorktreeRunning: (worktree) => {
         markedRunning = true;
-        hooks.onIsolationRunning?.(isolation);
+        hooks.onWorktreeRunning?.(worktree);
       },
     });
   } catch (error) {
-    if (!parallel && (!prepared.isolation || markedRunning)) throw error;
+    if (!parallel && (!prepared.worktree || markedRunning)) throw error;
     const cleanup = await cleanupFailedLaunch(prepared, markedRunning);
     const failed = failedLifecycleRun(
       prepared.plan.task,
@@ -138,17 +138,16 @@ async function runPreparedWithLifecycle(
       },
       error,
     );
-    if (prepared.isolation && markedRunning)
-      await markLifecycleFailure(failed, prepared.isolation, error);
-    else failed.isolation = cleanup.isolation;
+    if (prepared.worktree && markedRunning)
+      markLifecycleFailure(failed, prepared.worktree, error);
+    else failed.worktree = cleanup.worktree;
     return failed;
   }
 
   try {
-    await finalizeIsolatedRun(pi, ctx, run, prepared.isolation);
+    await finalizeWorktreeRun(run, prepared.worktree, prepared.plan.name);
   } catch (error) {
-    if (prepared.isolation)
-      await markLifecycleFailure(run, prepared.isolation, error);
+    if (prepared.worktree) markLifecycleFailure(run, prepared.worktree, error);
     else throw error;
   }
   return run;
@@ -223,7 +222,7 @@ export async function runPreparedDelegateExecution(
   };
   emit();
 
-  const launchedFreshIsolationIds = new Set<string>();
+  const launchedFreshWorktreeIds = new Set<string>();
   let runs: DelegatedRun[];
   try {
     runs = await mapWithConcurrency(
@@ -237,9 +236,9 @@ export async function runPreparedDelegateExecution(
               liveRuns[index] = { ...current, warnings: item.warnings };
             emit();
           },
-          onIsolationRunning: (isolation) => {
+          onWorktreeRunning: (worktree) => {
             if (!item.plan.resumed)
-              launchedFreshIsolationIds.add(isolation.record.id);
+              launchedFreshWorktreeIds.add(worktree.record.id);
           },
         });
         liveRuns[index] = run;
@@ -251,9 +250,9 @@ export async function runPreparedDelegateExecution(
     const cleanupWarnings: string[] = [];
     for (const item of prepared) {
       if (
-        !item.isolation ||
+        !item.worktree ||
         item.plan.resumed ||
-        launchedFreshIsolationIds.has(item.isolation.record.id)
+        launchedFreshWorktreeIds.has(item.worktree.record.id)
       )
         continue;
       const cleanup = await cleanupFreshPreparedTask(item);

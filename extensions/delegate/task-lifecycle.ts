@@ -1,14 +1,4 @@
 import * as path from 'node:path';
-import {
-  attachIsolationSession,
-  type DependencyMode,
-  loadIsolation,
-  markIsolationRunning,
-  type PreparedIsolation,
-  prepareWritableIsolation,
-  restoreIsolationSession,
-} from './isolation';
-import { discardFreshIsolation } from './isolation-lifecycle';
 import { persistSessionRoute, removeSessionSafely } from './routing-warnings';
 import { type RunDelegateOptions, runDelegate } from './runner';
 import {
@@ -19,9 +9,17 @@ import {
 import type {
   DelegateContext,
   DelegatedRun,
-  DelegateIsolationState,
   DelegateRouteState,
 } from './types';
+import {
+  attachWorktreeSession,
+  discardFreshWorktree,
+  loadWorktree,
+  type PreparedWorktree,
+  prepareWorktree,
+  restoreWorktreeSession,
+  type WorktreeBase,
+} from './worktree';
 
 export interface DelegateTaskPlan {
   name: string;
@@ -30,7 +28,7 @@ export interface DelegateTaskPlan {
   context: DelegateContext;
   contextNote?: string;
   scope?: string[];
-  dependencyMode?: DependencyMode;
+  base?: WorktreeBase;
   writeRequested: boolean;
   routing?: DelegateRouteState;
   resumed?: DelegateSession;
@@ -43,7 +41,7 @@ export interface ContinuationPreflight {
   cwd: string;
   scope?: string[];
   allowWrites: boolean;
-  isolation?: PreparedIsolation;
+  worktree?: PreparedWorktree;
   warnings: string[];
 }
 
@@ -62,19 +60,15 @@ export function preflightDelegateContinuation(
     allowWrites: false,
     warnings: [...plan.warnings],
   };
-  if (plan.resumed?.isolationId) {
-    const record = loadIsolation(plan.resumed.isolationId);
+  // A continuation cannot restate scope, so replay what the original run was
+  // told to focus on.
+  if (plan.resumed?.scope?.length) state.scope = plan.resumed.scope;
+  if (plan.resumed?.worktreeId) {
+    const record = loadWorktree(plan.resumed.worktreeId);
     if (!record)
-      throw new Error(
-        'The isolated worktree for this continuation is unavailable.',
-      );
-    state.isolation = restoreIsolationSession(
-      record,
-      plan.resumed.token,
-      plan.resumed.filePath,
-    );
+      throw new Error('The worktree for this continuation is unavailable.');
+    state.worktree = restoreWorktreeSession(record, plan.resumed.token);
     state.cwd = path.join(record.worktreePath, record.workingDirectory);
-    state.scope = record.requestedScopes;
     state.allowWrites = plan.writeRequested;
   } else if (plan.writeRequested && plan.resumed) {
     state.warnings.push(
@@ -93,20 +87,23 @@ export async function prepareDelegateTask(
   let routeRollback: { routing?: DelegateRouteState } | undefined;
   try {
     if (plan.writeRequested && !plan.resumed) {
-      const prepared = await prepareWritableIsolation({
+      const prepared = await prepareWorktree({
         cwd: plan.requestedCwd,
-        scopes: state.scope ?? [],
-        dependencyMode: plan.dependencyMode,
+        name: plan.name,
+        base: plan.base,
       });
-      if (prepared.isolation) {
-        state.isolation = prepared.isolation;
+      if (prepared.worktree) {
+        state.worktree = prepared.worktree;
         state.cwd = path.join(
-          prepared.isolation.record.worktreePath,
-          prepared.isolation.record.workingDirectory,
+          prepared.worktree.record.worktreePath,
+          prepared.worktree.record.workingDirectory,
         );
         state.allowWrites = true;
       } else if (prepared.fallbackReason) {
+        // Without a worktree the task still runs, but it writes to the parent
+        // checkout, so the caller is told why.
         state.warnings.push(prepared.fallbackReason);
+        state.allowWrites = true;
       }
     }
 
@@ -121,15 +118,12 @@ export async function prepareDelegateTask(
       session = createDelegateSession({
         cwd: state.cwd,
         snapshotJsonl: plan.snapshotJsonl,
-        isolationId: state.isolation?.record.id,
+        worktreeId: state.worktree?.record.id,
+        scope: state.scope,
         routing: plan.routing,
       });
-      if (state.isolation)
-        state.isolation = attachIsolationSession(
-          state.isolation,
-          session.token,
-          session.filePath,
-        );
+      if (state.worktree)
+        state.worktree = attachWorktreeSession(state.worktree, session.token);
     }
 
     return {
@@ -153,8 +147,8 @@ export async function prepareDelegateTask(
         );
       }
     }
-    if (state.isolation && !plan.resumed) {
-      const cleanup = await discardFreshIsolation(state.isolation);
+    if (state.worktree && !plan.resumed) {
+      const cleanup = await discardFreshWorktree(state.worktree.record.id);
       if (cleanup.warning) cleanupWarnings.push(cleanup.warning);
     }
     throw new Error(
@@ -165,17 +159,14 @@ export async function prepareDelegateTask(
 
 export async function cleanupFreshPreparedTask(
   prepared: PreparedDelegateTask,
-): Promise<{
-  warnings: string[];
-  isolation?: DelegateIsolationState;
-}> {
-  if (prepared.plan.resumed || !prepared.isolation) return { warnings: [] };
+): Promise<{ warnings: string[] }> {
+  if (prepared.plan.resumed || !prepared.worktree) return { warnings: [] };
   const warnings: string[] = [];
   const sessionWarning = removeSessionSafely(prepared.session);
   if (sessionWarning) warnings.push(sessionWarning);
-  const cleanup = await discardFreshIsolation(prepared.isolation);
+  const cleanup = await discardFreshWorktree(prepared.worktree.record.id);
   if (cleanup.warning) warnings.push(cleanup.warning);
-  return { warnings, isolation: cleanup.details };
+  return { warnings };
 }
 
 export async function rollbackPreparedDelegateTasks(
@@ -201,8 +192,8 @@ export async function rollbackPreparedDelegateTasks(
     }
   }
   for (const task of prepared) {
-    if (!task.isolation || task.plan.resumed) continue;
-    const cleanup = await discardFreshIsolation(task.isolation);
+    if (!task.worktree || task.plan.resumed) continue;
+    const cleanup = await discardFreshWorktree(task.worktree.record.id);
     if (cleanup.warning) warnings.push(cleanup.warning);
   }
   return warnings;
@@ -214,16 +205,10 @@ export async function runPreparedDelegateTask(
     RunDelegateOptions,
     'timeoutMs' | 'maxConcurrency' | 'signal' | 'onUpdate' | 'mode'
   > & {
-    onIsolationRunning?: (isolation: PreparedIsolation) => void;
+    onWorktreeRunning?: (worktree: PreparedWorktree) => void;
   },
 ): Promise<DelegatedRun> {
-  if (prepared.isolation) {
-    prepared.isolation = {
-      ...prepared.isolation,
-      record: await markIsolationRunning(prepared.isolation.record.id),
-    };
-    options.onIsolationRunning?.(prepared.isolation);
-  }
+  if (prepared.worktree) options.onWorktreeRunning?.(prepared.worktree);
   const run = await runDelegate({
     cwd: prepared.cwd,
     name: prepared.plan.name,
@@ -237,7 +222,7 @@ export async function runPreparedDelegateTask(
     routing: prepared.plan.routing,
     writeRequested: prepared.plan.writeRequested,
     allowWrites: prepared.allowWrites,
-    isolation: prepared.isolation,
+    worktree: prepared.worktree,
     timeoutMs: options.timeoutMs,
     maxConcurrency: options.maxConcurrency,
     signal: options.signal,

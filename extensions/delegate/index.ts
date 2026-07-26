@@ -5,15 +5,15 @@ import type {
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
 import { createManagedWidget } from '../shared/ui/widget';
-import { loadIsolation, scrubStaleIsolationCredentials } from './isolation';
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
-import { registerDelegatePatchCommand } from './patch-command';
 import { pruneDelegateSessions } from './session';
 import { DelegateStatusStore } from './status';
 import { registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import { renderDelegateWidget } from './widget';
+import { loadWorktree } from './worktree';
+import { registerDelegateWorktreesCommand } from './worktrees-command';
 
 /** Stable registration facade; orchestration and broker commands have separate owners. */
 export default defineExtension('delegate', (pi: ExtensionAPI) => {
@@ -105,7 +105,6 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     completionTimer.unref();
   };
 
-  scrubStaleIsolationCredentials();
   pi.on('session_start', (_event, ctx) => {
     runtimeActive = true;
     ui = ctx.hasUI ? ctx.ui : undefined;
@@ -114,7 +113,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     pendingCompletions = [];
     widget.attach(ui);
     pruneDelegateSessions({
-      isIsolationRetained: (id) => Boolean(loadIsolation(id)),
+      isWorktreeRetained: (id) => Boolean(loadWorktree(id)),
     });
     statuses = new DelegateStatusStore(syncWidget);
     jobs = new DelegateJobManager({
@@ -194,5 +193,5 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     },
   });
 
-  registerDelegatePatchCommand(pi);
+  registerDelegateWorktreesCommand(pi);
 });

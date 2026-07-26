@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
-import { sandboxBackendAvailable } from './isolation';
 import {
   createDelegateSession,
   removeDelegateSession,
@@ -12,7 +11,7 @@ import {
   prepareDelegateTask,
   rollbackPreparedDelegateTasks,
 } from './task-lifecycle';
-import { repository } from './test/isolation-fixture';
+import { repository } from './test/worktree-fixture';
 import type { DelegateRouteState } from './types';
 
 const originalRoute: DelegateRouteState = {
@@ -74,39 +73,38 @@ describe('delegate task lifecycle', () => {
     }
   });
 
-  test.skipIf(!sandboxBackendAvailable())(
-    'restores persisted isolation cwd, scope, and session ownership',
-    async () => {
-      const prepared = await prepareDelegateTask(
+  test('restores the persisted worktree, cwd, scope, and session ownership', async () => {
+    const prepared = await prepareDelegateTask(
+      plan({ scope: ['src'], writeRequested: true, base: 'head' }),
+    );
+    expect(prepared.worktree).toBeDefined();
+    expect(prepared.cwd).toBe(prepared.worktree?.record.worktreePath);
+
+    try {
+      // A continuation must land in the same worktree; otherwise the child
+      // would resume against a checkout that no longer holds its work.
+      const restored = preflightDelegateContinuation(
         plan({
-          scope: ['src'],
+          requestedCwd: '/wrong',
+          context: 'continuation',
+          scope: ['wrong'],
           writeRequested: true,
-          dependencyMode: 'isolated',
+          resumed: prepared.session,
         }),
       );
-      expect(prepared.isolation).toBeDefined();
-
-      try {
-        const restored = preflightDelegateContinuation(
-          plan({
-            requestedCwd: '/wrong',
-            context: 'continuation',
-            scope: ['wrong'],
-            writeRequested: true,
-            resumed: prepared.session,
-          }),
-        );
-        expect(restored).toMatchObject({
-          cwd: prepared.cwd,
-          scope: ['src'],
-          allowWrites: true,
-        });
-        expect(restored.isolation?.record.sessionToken).toBe(
-          prepared.session.token,
-        );
-      } finally {
-        await rollbackPreparedDelegateTasks([prepared]);
-      }
-    },
-  );
+      expect(restored).toMatchObject({
+        cwd: prepared.cwd,
+        scope: ['src'],
+        allowWrites: true,
+      });
+      expect(restored.worktree?.record.sessionToken).toBe(
+        prepared.session.token,
+      );
+      expect(restored.worktree?.record.branch).toBe(
+        prepared.worktree?.record.branch,
+      );
+    } finally {
+      await rollbackPreparedDelegateTasks([prepared]);
+    }
+  });
 });

@@ -33,15 +33,15 @@ const ContextSchema = StringEnum(['branch', 'fresh'] as const, {
 const ScopeSchema = Type.Array(Type.String({ maxLength: 4096 }), {
   maxItems: 100,
   description:
-    'Paths where work is expected. Read-only tasks treat these as guidance; writable tasks require existing paths and enforce them as OS-sandbox boundaries.',
+    'Paths where the work is expected to land. Guidance for the child, not a hard boundary.',
 });
-const DependencySchema = StringEnum(['auto', 'link', 'isolated'] as const, {
+const BaseSchema = StringEnum(['wip', 'head'] as const, {
   description:
-    'Writable worktree dependency mode. auto safely links unchanged dependencies read-only when supported; isolated never reuses them.',
+    "Where the writable task's branch starts. wip (default) carries your uncommitted changes into the worktree so the child sees the repository as you see it; head starts from the last commit instead.",
 });
 const AllowWritesSchema = Type.Boolean({
   description:
-    'Request worktree-isolated edits. Fresh tasks require existing scope paths; continuations must set allowWrites to true again and reuse their original isolation. The returned patch is not applied automatically.',
+    'Let the task edit files. It gets its own git worktree on a fresh branch, so parallel writable tasks never collide. The work lands as commits on that branch for you to merge.',
 });
 const BackgroundSchema = Type.Boolean({
   description:
@@ -79,7 +79,7 @@ const TaskItem = Type.Object({
     }),
   ),
   allowWrites: Type.Optional(AllowWritesSchema),
-  dependencies: Type.Optional(DependencySchema),
+  from: Type.Optional(BaseSchema),
 });
 
 const DelegateParamsSchema = Type.Object({
@@ -106,7 +106,7 @@ const DelegateParamsSchema = Type.Object({
   scope: Type.Optional(ScopeSchema),
   continuation: Type.Optional(Type.String({ maxLength: 512 })),
   allowWrites: Type.Optional(AllowWritesSchema),
-  dependencies: Type.Optional(DependencySchema),
+  from: Type.Optional(BaseSchema),
   background: Type.Optional(BackgroundSchema),
 });
 
@@ -118,8 +118,8 @@ export function delegatePromptGuidelines(cwd: string): string[] {
     'Prefer direct tools for small work. Do not invent research/implementation/test/review stages unless each adds concrete value.',
     'Use contextNote for the relevant decisions, constraints, and findings; use branch only when exact parent history matters.',
     'Continue a child for focused correction or extension; start fresh when its approach is wrong or an independent view is better.',
-    "Parallelize only independent work. If one task depends on another's findings, inspect the first result before starting the next. Use background delegation only when foreground work can continue independently; completion is delivered automatically, so do not poll delegate_jobs. Writable tasks need non-overlapping scopes and return unapplied patches for parent review.",
-    'After a writable run, report the isolation ID and walk the user through /delegate-patch <id> show, diff, validate <script> or validate-command <argv...>, apply, and discard. Never imply the patch was applied automatically.',
+    "Parallelize only independent work. If one task depends on another's findings, inspect the first result before starting the next. Use background delegation only when foreground work can continue independently; completion is delivered automatically, so do not poll delegate_jobs. Writable tasks each get their own worktree, so they can run in parallel even on overlapping files.",
+    'A writable run leaves its work as commits on the branch it reports. Integrate it yourself with ordinary git (review the diff against the reported base, then merge or cherry-pick) rather than asking the user to do it; only stop to ask when the merge is genuinely contentious.',
     'Treat child results as claims to verify: trust reported checks and concrete evidence; re-check or continue the child when important claims lack support.',
     'Delegate cannot be called by child processes.',
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd)}`,
@@ -141,7 +141,7 @@ export function registerDelegateTool(
     name: 'delegate',
     label: 'Delegate',
     description:
-      'Delegate work to child Pi processes with isolated context. Fresh tasks need one exact catalog route; continuations reuse their persisted route when omitted. Routes respect maxRelativeCost. Writable tasks require scope and run in an isolated worktree sandbox; otherwise they are read-only. Set background true for independent work that should complete asynchronously.',
+      'Delegate work to child Pi processes with their own context. Fresh tasks need one exact catalog route; continuations reuse their persisted route when omitted. Routes respect maxRelativeCost. A writable task (allowWrites) runs in its own git worktree on a fresh branch and returns that branch for you to merge; otherwise it is read-only. Set background true for independent work that should complete asynchronously.',
     promptSnippet:
       'Delegate substantial exploration, review, validation, implementation, or independent parallel work when a child would save context.',
     promptGuidelines: delegatePromptGuidelines(cwd),

@@ -4,16 +4,6 @@ import {
   PROGRESS_UPDATE_INTERVAL_MS,
   spawnDelegateChild,
 } from './delegate-child';
-import {
-  discardChildAuth,
-  discardReadOnlySandbox,
-  isolationSpawn,
-  type PreparedIsolation,
-  prepareChildAuth,
-  prepareReadOnlySandbox,
-  readOnlySandboxSpawn,
-  scrubIsolationCredentials,
-} from './isolation';
 import { buildDelegatePrompt } from './prompt';
 import { makeDetails } from './tool-result';
 import {
@@ -25,16 +15,17 @@ import {
   getFinalAssistantText,
   isRunError,
 } from './types';
+import { type PreparedWorktree, worktreeSummary } from './worktree';
 
-const CONTROLLED_READ_ONLY_TOOLS = 'read,grep,find,ls';
-const SANDBOXED_READ_ONLY_TOOLS = 'read,inspect_shell,grep,find,ls';
-const WRITE_TOOLS = 'read,edit,write,grep,find,ls';
+// Read-only is an intent signal, not an enforced boundary: the child still has
+// bash, so it can inspect the repository the same way any agent would.
+const READ_ONLY_TOOLS = 'read,bash,grep,find,ls';
+const WRITE_TOOLS = 'read,edit,write,bash,grep,find,ls';
 const DELEGATE_EXTENSION = path.resolve(__dirname, 'index.ts');
 const SYSTEM_PROMPT_EXTENSION = path.resolve(
   __dirname,
   '../system-prompt/index.ts',
 );
-const INSPECT_SHELL_EXTENSION = path.resolve(__dirname, 'inspect-shell.ts');
 
 export { mapWithConcurrency } from './concurrency';
 
@@ -80,7 +71,7 @@ export interface RunDelegateOptions {
   routing?: DelegateRouteState;
   allowWrites?: boolean;
   writeRequested?: boolean;
-  isolation?: PreparedIsolation;
+  worktree?: PreparedWorktree;
   contextNote?: string;
   scope?: string[];
   continuation?: string;
@@ -88,7 +79,6 @@ export interface RunDelegateOptions {
   timeoutMs: number;
   maxConcurrency: number;
   killGraceMs?: number;
-  readOnlyBash?: boolean;
   signal?: AbortSignal;
   onUpdate?: OnUpdate;
   mode: DelegateDetails['mode'];
@@ -100,16 +90,14 @@ export function buildChildArgs(
     | 'task'
     | 'routing'
     | 'allowWrites'
-    | 'isolation'
-    | 'readOnlyBash'
+    | 'worktree'
     | 'contextNote'
     | 'scope'
     | 'resuming'
   >,
   sessionPath: string,
 ): string[] {
-  const allowWrites =
-    options.allowWrites === true && Boolean(options.isolation);
+  const allowWrites = options.allowWrites === true;
   const args = [
     '--mode',
     'json',
@@ -119,16 +107,11 @@ export function buildChildArgs(
     DELEGATE_EXTENSION,
     '--extension',
     SYSTEM_PROMPT_EXTENSION,
-    ...(options.readOnlyBash ? ['--extension', INSPECT_SHELL_EXTENSION] : []),
     '--no-skills',
     '--no-prompt-templates',
     '--no-themes',
     '--tools',
-    allowWrites
-      ? WRITE_TOOLS
-      : options.readOnlyBash
-        ? SANDBOXED_READ_ONLY_TOOLS
-        : CONTROLLED_READ_ONLY_TOOLS,
+    allowWrites ? WRITE_TOOLS : READ_ONLY_TOOLS,
   ];
   args.push('--session', sessionPath);
   if (options.routing) {
@@ -142,7 +125,7 @@ export function buildChildArgs(
       contextNote: options.contextNote,
       scope: options.scope,
       continuation: options.resuming,
-      inspectShell: !allowWrites && Boolean(options.readOnlyBash),
+      branch: options.worktree?.record.branch,
     }),
   );
   return args;
@@ -152,68 +135,22 @@ export async function runDelegate(
   options: RunDelegateOptions,
 ): Promise<DelegatedRun> {
   const writeRequested = options.writeRequested ?? options.allowWrites ?? false;
-  const allowWrites =
-    options.allowWrites === true && Boolean(options.isolation);
-  const readOnlySandbox =
-    options.allowWrites !== true && !options.isolation
-      ? prepareReadOnlySandbox(options.cwd, options.sessionPath)
-      : undefined;
-  const childAuth =
-    !options.isolation && !readOnlySandbox && options.allowWrites !== true
-      ? prepareChildAuth()
-      : undefined;
+  const allowWrites = options.allowWrites === true;
   const run = createRun(options.task, options.routing, {
     name: options.name,
     cwd: options.cwd,
     context: options.context,
     allowWrites,
     writeRequested,
-    readOnlyBoundary: allowWrites
-      ? undefined
-      : readOnlySandbox
-        ? 'macos-sandbox-exec'
-        : options.isolation
-          ? 'isolated-controlled-tools'
-          : 'controlled-tools',
-    isolation: options.isolation
-      ? {
-          id: options.isolation.record.id,
-          backend: options.isolation.record.backend,
-          repositoryRoot: options.isolation.record.repositoryRoot,
-          worktreePath: options.isolation.record.worktreePath,
-          workingDirectory: options.isolation.record.workingDirectory,
-          baseHead: options.isolation.record.baseHead,
-          dependencyMode: options.isolation.record.dependencyMode,
-          status: options.isolation.record.status,
-        }
+    worktree: options.worktree
+      ? worktreeSummary(options.worktree.record)
       : undefined,
     contextNote: options.contextNote,
     scope: options.scope,
     continuation: options.continuation,
   });
-  if (
-    !allowWrites &&
-    !options.isolation &&
-    !readOnlySandbox &&
-    options.allowWrites !== true
-  )
-    run.warnings = [
-      ...(run.warnings ?? []),
-      'Read-only shell sandbox is unavailable; Bash was removed and only controlled inspection tools are enabled.',
-    ];
-  if (options.allowWrites === true && !options.isolation) {
-    run.exitCode = 1;
-    run.state = 'error';
-    run.stopReason = 'error';
-    run.errorMessage =
-      'Writable delegate execution requires a prepared isolation proof; child launch was blocked.';
-    run.finishedAt = Date.now();
-    options.onUpdate?.({
-      content: [{ type: 'text', text: run.errorMessage }],
-      details: makeDetails(options.mode, [run]),
-    });
-    return run;
-  }
+  // A writable task without a worktree still runs — it just edits the parent
+  // checkout directly, and the caller has already been warned why.
   let releaseSlot: (() => void) | undefined;
   let releaseSession: (() => void) | undefined;
 
@@ -240,23 +177,13 @@ export async function runDelegate(
     run.startedAt = Date.now();
     emitUpdate();
     const { command, prefixArgs } = resolvePiSpawn();
-    const args = buildChildArgs(
-      { ...options, readOnlyBash: Boolean(readOnlySandbox) },
-      options.sessionPath,
-    );
-    const spawnTarget = options.isolation
-      ? isolationSpawn(options.isolation, command, [...prefixArgs, ...args])
-      : readOnlySandbox
-        ? readOnlySandboxSpawn(readOnlySandbox, command, [
-            ...prefixArgs,
-            ...args,
-          ])
-        : {
-            command,
-            args: [...prefixArgs, ...args],
-            cwd: options.cwd,
-            env: childAuth?.env ?? {},
-          };
+    const args = buildChildArgs(options, options.sessionPath);
+    const spawnTarget = {
+      command,
+      args: [...prefixArgs, ...args],
+      cwd: options.cwd,
+      env: options.worktree?.env ?? {},
+    };
 
     const { exitCode, wasAborted, timedOut } = await spawnDelegateChild(run, {
       command: spawnTarget.command,
@@ -301,9 +228,6 @@ export async function runDelegate(
     emitUpdate();
     releaseSlot?.();
     releaseSession?.();
-    scrubIsolationCredentials(options.isolation);
-    discardReadOnlySandbox(readOnlySandbox);
-    discardChildAuth(childAuth);
   }
   return run;
 }

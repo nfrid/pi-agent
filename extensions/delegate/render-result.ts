@@ -13,7 +13,6 @@ import {
   hasResultHeading,
   icon,
   indexedTaskBlock,
-  isolationLines,
   markdownPreview,
   modeDescription,
   RESULT_PREVIEW_CHARS,
@@ -27,6 +26,7 @@ import {
   taskBlock,
   truncate,
   usage,
+  worktreeLines,
 } from './render-utils';
 import type { DelegatedRun, DelegateRunState } from './types';
 import { getFinalAssistantText, getRunState } from './types';
@@ -84,7 +84,9 @@ function addExpandedRun(
       new Text(
         fg(
           'muted',
-          `${run.allowWrites ? 'Enforced' : 'Advisory'} scope: ${run.scope.join(', ')}`,
+          // Scope is guidance for the child in both directions now; nothing
+          // enforces it, so the label no longer claims otherwise.
+          `Expected scope: ${run.scope.join(', ')}`,
         ),
         0,
         0,
@@ -99,11 +101,11 @@ function addExpandedRun(
   ))
     container.addChild(new Text(fg('warning', warning), 0, 0));
 
-  const isolation = isolationLines(run);
-  if (isolation.length) {
+  const worktree = worktreeLines(run);
+  if (worktree.length) {
     container.addChild(new Spacer(1));
-    container.addChild(sectionTitle('Isolation & patch', theme));
-    container.addChild(new Text(isolation.join('\n'), 0, 0));
+    container.addChild(sectionTitle('Branch', theme));
+    container.addChild(new Text(worktree.join('\n'), 0, 0));
   }
 
   const final = getFinalAssistantText(run.messages).trim();
@@ -230,15 +232,15 @@ export function renderDelegateResult(
       ...(run.warnings ?? []),
     ].filter((value): value is string => Boolean(value)))
       container.addChild(new Text(fg('warning', warning), 0, 0));
-    const isolation = isolationLines(run);
-    if (isolation.length)
+    const worktree = worktreeLines(run);
+    if (worktree.length)
       container.addChild(
         new Text(
           fieldLine(
-            'Patch',
-            isolation.slice(0, 2).join(' · '),
+            'Branch',
+            worktree.slice(0, 2).join(' · '),
             fg,
-            run.isolation?.status === 'patch-ready' ? 'warning' : 'dim',
+            run.worktree?.hasWork ? 'warning' : 'dim',
           ),
           0,
           0,

@@ -22,7 +22,9 @@ export interface DelegateSession {
   token: string;
   filePath: string;
   cwd: string;
-  isolationId?: string;
+  worktreeId?: string;
+  /** Advisory paths the parent named; replayed so continuations keep them. */
+  scope?: string[];
   routing?: DelegateRouteState;
 }
 
@@ -30,7 +32,8 @@ interface DelegateSessionMetadata {
   token: string;
   cwd: string;
   createdAt: string;
-  isolationId?: string;
+  worktreeId?: string;
+  scope?: string[];
   routing?: DelegateRouteState;
 }
 
@@ -96,7 +99,8 @@ function initialSessionJsonl(
 export function createDelegateSession(options: {
   cwd: string;
   snapshotJsonl?: string;
-  isolationId?: string;
+  worktreeId?: string;
+  scope?: string[];
   routing?: DelegateRouteState;
 }): DelegateSession {
   const token = randomUUID();
@@ -114,7 +118,8 @@ export function createDelegateSession(options: {
       token,
       cwd: options.cwd,
       createdAt,
-      ...(options.isolationId ? { isolationId: options.isolationId } : {}),
+      ...(options.worktreeId ? { worktreeId: options.worktreeId } : {}),
+      ...(options.scope?.length ? { scope: options.scope } : {}),
       ...(options.routing ? { routing: options.routing } : {}),
     };
     writeFileSync(metadataPath, `${JSON.stringify(metadata)}\n`, {
@@ -131,7 +136,8 @@ export function createDelegateSession(options: {
     token,
     filePath,
     cwd: options.cwd,
-    ...(options.isolationId ? { isolationId: options.isolationId } : {}),
+    ...(options.worktreeId ? { worktreeId: options.worktreeId } : {}),
+    ...(options.scope?.length ? { scope: options.scope } : {}),
     ...(options.routing ? { routing: options.routing } : {}),
   };
 }
@@ -155,9 +161,10 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
       token,
       filePath,
       cwd: metadata.cwd,
-      ...(typeof metadata.isolationId === 'string'
-        ? { isolationId: metadata.isolationId }
+      ...(typeof metadata.worktreeId === 'string'
+        ? { worktreeId: metadata.worktreeId }
         : {}),
+      ...(Array.isArray(metadata.scope) ? { scope: metadata.scope } : {}),
       ...(metadata.routing && typeof metadata.routing === 'object'
         ? { routing: metadata.routing }
         : {}),
@@ -192,13 +199,13 @@ export function removeDelegateSession(session: DelegateSession): void {
 }
 
 /**
- * Prune durable read-only/unlinked transcripts. Isolation-linked evidence is
- * retained with its worktree. Recently-written files are protected so another
+ * Prune durable unlinked transcripts. A transcript whose worktree still exists
+ * is retained with it. Recently-written files are protected so another
  * Pi process cannot have an active transcript removed underneath it.
  */
 export function pruneDelegateSessions(options: {
   now?: number;
-  isIsolationRetained: (id: string) => boolean;
+  isWorktreeRetained: (id: string) => boolean;
 }): { removed: number } {
   const now = options.now ?? Date.now();
   const dir = sessionDir();
@@ -216,10 +223,7 @@ export function pruneDelegateSessions(options: {
       if (!match || !TOKEN_PATTERN.test(match[1])) continue;
       const session = resolveDelegateSession(match[1]);
       if (!session) continue;
-      if (
-        session.isolationId &&
-        options.isIsolationRetained(session.isolationId)
-      )
+      if (session.worktreeId && options.isWorktreeRetained(session.worktreeId))
         continue;
       const paths = sessionPaths(session.token);
       const touchedAt = Math.max(

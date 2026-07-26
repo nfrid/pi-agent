@@ -4,13 +4,13 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { DelegateConfig } from './config';
-import type { PreparedIsolation } from './isolation';
 import { executeSingleDelegate } from './orchestration';
 import { buildDelegatePlans } from './plans';
 import type { PreparedDelegateTask } from './task-lifecycle';
 import * as taskLifecycle from './task-lifecycle';
 import * as toolResult from './tool-result';
 import type { DelegateRouteState } from './types';
+import type { PreparedWorktree } from './worktree';
 
 const config: DelegateConfig = {
   timeoutMs: 60_000,
@@ -258,30 +258,35 @@ describe('executeSingleDelegate lifecycle', () => {
     ).rejects.toThrow('Delegate setup failed before launch: prepare failed');
   });
 
-  test('returns a failed lifecycle run when launch fails before isolation starts', async () => {
+  test('returns a failed lifecycle run when launch fails before the child starts', async () => {
     vi.spyOn(taskLifecycle, 'prepareDelegateTask').mockResolvedValue(
       prepared({
-        isolation: {
+        worktree: {
           record: {
-            id: 'iso-1',
-            backend: 'macos-sandbox-exec',
+            version: 1,
+            id: 'wt-1',
             repositoryRoot: '/repo',
-            worktreePath: '/repo/.pi/worktrees/iso-1',
+            worktreePath: '/repo/.worktrees/wt-1',
             workingDirectory: '.',
+            branch: 'pi/inspect-a1b2',
             baseHead: 'abc',
-            dependencyMode: 'link',
-            status: 'prepared',
+            base: 'wip',
+            carriedWip: true,
+            dependencyLinks: [],
+            carriedFiles: [],
+            status: 'active',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z',
           },
-          profilePath: '/tmp/profile.sb',
           env: {},
-        } as PreparedIsolation,
+        } as PreparedWorktree,
       }),
     );
     vi.spyOn(taskLifecycle, 'runPreparedDelegateTask').mockRejectedValue(
       new Error('spawn failed'),
     );
     vi.spyOn(taskLifecycle, 'cleanupFreshPreparedTask').mockResolvedValue({
-      warnings: ['discarded iso-1'],
+      warnings: ['discarded wt-1'],
     });
     const delegateToolResult = vi
       .spyOn(toolResult, 'delegateToolResult')
@@ -300,7 +305,7 @@ describe('executeSingleDelegate lifecycle', () => {
       exitCode: 1,
       state: 'error',
       errorMessage: expect.stringContaining('spawn failed'),
-      warnings: expect.arrayContaining(['discarded iso-1']),
+      warnings: expect.arrayContaining(['discarded wt-1']),
     });
     expect(delegateToolResult).toHaveBeenCalled();
   });

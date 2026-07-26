@@ -89,23 +89,16 @@ function prepareRun(run: DelegatedRun, bodyCap: number): PreparedRun {
     lines.push(
       `Artifact: ${run.artifact.handle} (${run.artifact.size} bytes, sha256 ${run.artifact.sha256})`,
     );
-  if (run.readOnlyBoundary)
-    lines.push(`Read-only boundary: ${run.readOnlyBoundary}`);
-  if (run.isolation) {
+  if (run.worktree) {
     lines.push(
-      `Isolation: ${run.isolation.id} (${run.isolation.backend}, dependencies=${run.isolation.dependencyMode}, status=${run.isolation.status})`,
+      `Branch: ${run.worktree.branch} (${run.worktree.hasWork ? `${run.worktree.changedPaths?.length ?? 0} changed path(s)` : 'no changes'}, from ${run.worktree.baseHead.slice(0, 8)})`,
+      `Worktree: ${run.worktree.worktreePath}`,
+      `Integrate with: git merge ${run.worktree.branch}`,
     );
-    if (run.isolation.patch)
+    if (run.worktree.changedPaths?.length)
       lines.push(
-        `Patch: ${run.isolation.patch.changedPaths.length} path(s), ${run.isolation.patch.size} bytes, sha256 ${run.isolation.patch.sha256}${run.isolation.patch.handle ? `, artifact ${run.isolation.patch.handle}` : ''}`,
+        `Changed: ${run.worktree.changedPaths.slice(0, 20).join(', ')}${run.worktree.changedPaths.length > 20 ? ', …' : ''}`,
       );
-    if (run.isolation.validation)
-      lines.push(
-        `Patch validation: ${run.isolation.validation.status}${run.isolation.validation.script ? ` (${run.isolation.validation.script})` : ''}`,
-      );
-    lines.push(
-      `Patch actions: /delegate-patch ${run.isolation.id} show|diff|validate <script>|validate-command <argv...>|apply|discard`,
-    );
   }
   if (isRunError(run)) {
     const failure = run.errorMessage?.trim() || run.stderr.trim() || original;

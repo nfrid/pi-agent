@@ -1,6 +1,6 @@
 import type { Message } from '@earendil-works/pi-ai';
 import type { ArtifactMetadata } from '../artifacts';
-import type { IsolationRecord } from './isolation/model';
+import type { WorktreeSummary } from './worktree/model';
 
 export interface UsageStats {
   input: number;
@@ -57,25 +57,6 @@ export type DelegateRunState =
   | 'aborted'
   | 'timed-out';
 
-type IsolationPublicKey =
-  | 'id'
-  | 'backend'
-  | 'repositoryRoot'
-  | 'worktreePath'
-  | 'workingDirectory'
-  | 'baseHead'
-  | 'dependencyMode'
-  | 'runOutcome'
-  | 'validation'
-  | 'status';
-
-export type DelegateIsolationState = Pick<
-  IsolationRecord,
-  IsolationPublicKey
-> & {
-  patch?: NonNullable<IsolationRecord['patch']> & { handle?: string };
-};
-
 export type DelegateProgressUpdate = Parameters<
   NonNullable<
     Parameters<
@@ -91,15 +72,12 @@ export interface DelegateRunMetadata {
   contextNote?: string;
   allowWrites?: boolean;
   writeRequested?: boolean;
-  readOnlyBoundary?:
-    | 'macos-sandbox-exec'
-    | 'isolated-controlled-tools'
-    | 'controlled-tools';
   scope?: string[];
   continuation?: string;
   backgroundJobId?: string;
   warnings?: string[];
-  isolation?: DelegateIsolationState;
+  /** The branch holding this run's work, when it ran in its own worktree. */
+  worktree?: WorktreeSummary;
   /** Exact final assistant output, stored only when the parent handoff omits it. */
   artifact?: ArtifactMetadata;
 }

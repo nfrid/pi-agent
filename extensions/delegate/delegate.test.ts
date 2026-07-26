@@ -139,7 +139,7 @@ describe('delegate', () => {
     });
     expect(prompt).toContain('Context from the parent agent');
     expect(prompt).toContain('parser path is already ruled out');
-    expect(prompt).toContain('guidance, not a hard boundary');
+    expect(prompt).toContain('guidance rather than a hard boundary');
     expect(prompt).toContain('follow-up feedback');
   });
 
@@ -362,11 +362,11 @@ describe('delegate', () => {
     }
   });
 
-  test('prunes aged unlinked transcripts but retains isolation-linked evidence', () => {
+  test('prunes aged unlinked transcripts but retains worktree-linked evidence', () => {
     const unlinked = createDelegateSession({ cwd: '/tmp/project' });
     const linked = createDelegateSession({
       cwd: '/tmp/project',
-      isolationId: 'iso-retained',
+      worktreeId: 'wt-retained',
     });
     const dir = path.join(getAgentDir(), '.delegate-sessions');
     const old = new Date(Date.now() - DELEGATE_SESSION_MAX_AGE_MS - 1);
@@ -376,7 +376,7 @@ describe('delegate', () => {
     }
     try {
       const result = pruneDelegateSessions({
-        isIsolationRetained: (id) => id === 'iso-retained',
+        isWorktreeRetained: (id: string) => id === 'wt-retained',
       });
       expect(result.removed).toBeGreaterThanOrEqual(1);
       expect(resolveDelegateSession(unlinked.token)).toBeNull();
@@ -406,14 +406,12 @@ describe('delegate', () => {
       /extensions[\\/]system-prompt[\\/]index\.ts$/,
     );
     expect(extensionPaths.every(existsSync)).toBe(true);
-    expect(args[args.indexOf('--tools') + 1]).toBe('read,grep,find,ls');
-    const sandboxed = buildChildArgs(
-      { task: 'inspect', readOnlyBash: true },
-      '/tmp/child.jsonl',
-    );
-    expect(sandboxed[sandboxed.indexOf('--tools') + 1]).toBe(
-      'read,inspect_shell,grep,find,ls',
-    );
+    // Read-only is an intent signal, not a sandbox: the child keeps an ordinary
+    // shell so it can inspect the repository the way any agent would.
+    const tools = args[args.indexOf('--tools') + 1];
+    expect(tools).toBe('read,bash,grep,find,ls');
+    expect(tools).not.toContain('write');
+    expect(tools).not.toContain('edit');
   });
 
   test('keeps delegate framing out of the canonical system prompt', () => {
@@ -522,46 +520,36 @@ describe('delegate', () => {
     ]);
   });
 
-  test('emits controlled mutation tools only with an isolation proof', () => {
-    const blocked = buildChildArgs(
-      { task: 'implement', allowWrites: true },
-      '/tmp/child.jsonl',
-    );
-    expect(blocked[blocked.indexOf('--tools') + 1]).not.toContain('write');
-    const isolated = buildChildArgs(
+  test('gives writable tasks editing tools and names their branch in the prompt', () => {
+    const args = buildChildArgs(
       {
         task: 'implement',
         allowWrites: true,
-        isolation: { record: {}, profilePath: '', env: {} } as never,
+        worktree: {
+          record: { branch: 'pi/implement-a1b2' },
+          env: {},
+        } as never,
       },
       '/tmp/child.jsonl',
     );
-    expect(isolated[isolated.indexOf('--tools') + 1]).toContain('write');
-    expect(isolated[isolated.indexOf('--tools') + 1]).not.toContain('bash');
+    const tools = args[args.indexOf('--tools') + 1];
+    expect(tools).toContain('write');
+    expect(tools).toContain('edit');
+    expect(tools).toContain('bash');
+    const prompt = args[args.length - 1];
+    expect(prompt).toContain('pi/implement-a1b2');
+    expect(prompt).toMatch(/parent integrates this branch/);
   });
 
-  test('blocks direct writable runner calls without isolation', async () => {
-    const previousState = process.env.PI_DELEGATE_STATE_DIR;
-    const state = `/tmp/delegate-no-leak-${process.pid}-${Date.now()}`;
-    process.env.PI_DELEGATE_STATE_DIR = state;
-    try {
-      const run = await runDelegate({
-        cwd: '/tmp',
-        task: 'unsafe direct write',
-        context: 'fresh',
-        sessionPath: '/tmp/unused.jsonl',
-        allowWrites: true,
-        timeoutMs: 10_000,
-        maxConcurrency: 1,
-        mode: 'single',
-      });
-      expect(run.state).toBe('error');
-      expect(run.errorMessage).toMatch(/isolation proof/);
-      expect(existsSync(state)).toBe(false);
-    } finally {
-      if (previousState === undefined) delete process.env.PI_DELEGATE_STATE_DIR;
-      else process.env.PI_DELEGATE_STATE_DIR = previousState;
-    }
+  test('tells a worktree-less writable child it is editing the checkout directly', () => {
+    const args = buildChildArgs(
+      { task: 'implement', allowWrites: true },
+      '/tmp/child.jsonl',
+    );
+    expect(args[args.indexOf('--tools') + 1]).toContain('write');
+    expect(args[args.length - 1]).toMatch(
+      /editing the checkout directly, without a separate worktree/,
+    );
   });
 
   test('joins all text blocks in the final assistant response', () => {

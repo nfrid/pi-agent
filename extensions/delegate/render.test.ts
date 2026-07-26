@@ -157,29 +157,22 @@ describe('render', () => {
     expect(output).toContain('cancel');
   });
 
-  test('renders worktree and patch lifecycle details with actions', () => {
+  test('renders the delivered branch and how to integrate it', () => {
     const run = createRun('Implement safely', undefined, {
       cwd: '/tmp/worktree',
       context: 'fresh',
       allowWrites: true,
       scope: ['src'],
-      isolation: {
+      worktree: {
         id: '11111111-1111-1111-1111-111111111111',
-        backend: 'macos-sandbox-exec',
-        repositoryRoot: '/tmp/project',
+        branch: 'pi/implement-safely-a1b2',
         worktreePath: '/tmp/worktree',
-        workingDirectory: '',
-        baseHead: 'abc123',
-        dependencyMode: 'isolated',
-        status: 'patch-ready',
-        patch: {
-          sha256: 'a'.repeat(64),
-          size: 42,
-          changedPaths: ['src/file.ts'],
-          diffCheckPassed: true,
-          requiresIsolatedDependencyValidation: false,
-        },
-        validation: { status: 'not-run' },
+        repositoryRoot: '/tmp/project',
+        baseHead: 'abc123def456',
+        status: 'finished',
+        headCommit: 'def456abc123',
+        changedPaths: ['src/file.ts'],
+        hasWork: true,
       },
     });
     run.state = 'success';
@@ -191,11 +184,11 @@ describe('render', () => {
     )
       .render(300)
       .join('\n');
-    expect(output).toContain('Isolation & patch');
-    expect(output).toContain('State: patch-ready');
+    expect(output).toContain('Branch');
+    expect(output).toContain('pi/implement-safely-a1b2');
     expect(output).toContain('src/file.ts');
-    expect(output).toContain('/delegate-patch');
-    expect(output).toContain('Enforced scope: src');
+    expect(output).toContain('git merge pi/implement-safely-a1b2');
+    expect(output).toContain('Expected scope: src');
   });
 
   test('dims routine startup and running status', () => {
@@ -304,7 +297,7 @@ describe('render', () => {
     expect(output).toContain('Recheck the cache fix');
     expect(output).toContain('Mode');
     expect(output).toContain('Continued context · Read-only · /tmp/project');
-    expect(output).toContain('Advisory scope: src/cache');
+    expect(output).toContain('Expected scope: src/cache');
     expect(output).toContain(
       'Parent note: The parser has already been ruled out.',
     );

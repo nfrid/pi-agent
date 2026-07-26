@@ -25,7 +25,7 @@ interface TaskInput {
   scope?: string[];
   continuation?: string;
   allowWrites?: boolean;
-  dependencies?: DelegateTaskPlan['dependencyMode'];
+  from?: DelegateTaskPlan['base'];
 }
 
 interface SharedDefaults {
@@ -35,7 +35,7 @@ interface SharedDefaults {
   contextNote?: string;
   scope?: string[];
   allowWrites?: boolean;
-  dependencies?: DelegateTaskPlan['dependencyMode'];
+  from?: DelegateTaskPlan['base'];
 }
 
 export interface BuiltDelegatePlans {
@@ -54,7 +54,7 @@ function assertContinuationFields(
     cwd?: unknown;
     context?: unknown;
     scope?: unknown;
-    dependencies?: unknown;
+    from?: unknown;
   },
   message: string,
 ): void {
@@ -63,7 +63,7 @@ function assertContinuationFields(
     (fields.cwd !== undefined ||
       fields.context !== undefined ||
       fields.scope !== undefined ||
-      fields.dependencies !== undefined)
+      fields.from !== undefined)
   )
     invalidParams(message);
 }
@@ -96,7 +96,7 @@ function normalizeInputs(params: DelegateParams): {
         contextNote: params.contextNote,
         scope: params.scope,
         allowWrites: params.allowWrites,
-        dependencies: params.dependencies,
+        from: params.from,
       },
     };
   }
@@ -118,7 +118,7 @@ function normalizeInputs(params: DelegateParams): {
         scope: params.scope,
         continuation: params.continuation,
         allowWrites: params.allowWrites,
-        dependencies: params.dependencies,
+        from: params.from,
       },
     ],
     shared: {},
@@ -149,8 +149,8 @@ export function buildDelegatePlans(
       item.continuation,
       item,
       parallel
-        ? 'A continuation task cannot replace cwd, context, scope, or dependency mode.'
-        : 'A continuation reuses its original cwd, context, scope, and dependency mode; do not provide replacements.',
+        ? 'A continuation task cannot replace cwd, context, scope, or base.'
+        : 'A continuation reuses its original cwd, context, scope, and base; do not provide replacements.',
     );
     const session = item.continuation
       ? resolveDelegateSession(item.continuation)
@@ -167,10 +167,10 @@ export function buildDelegatePlans(
     (shared.cwd !== undefined ||
       shared.context !== undefined ||
       shared.scope !== undefined ||
-      shared.dependencies !== undefined)
+      shared.from !== undefined)
   )
     invalidParams(
-      'Parallel continuations reuse their original cwd, history, scope, and dependency mode; do not provide top-level replacements.',
+      'Parallel continuations reuse their original cwd, history, scope, and base; do not provide top-level replacements.',
     );
 
   const routings = inputs.map((item, index) =>
@@ -219,7 +219,7 @@ export function buildDelegatePlans(
     context: contexts[index],
     contextNote: item.contextNote ?? shared.contextNote,
     scope: scopes[index],
-    dependencyMode: item.dependencies ?? shared.dependencies,
+    base: item.from ?? shared.from,
     writeRequested: writeRequests[index],
     routing: routings[index].routing,
     resumed: resumed[index] ?? undefined,
