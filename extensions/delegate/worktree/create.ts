@@ -155,11 +155,19 @@ function carryFiles(repositoryRoot: string, worktreePath: string): string[] {
  * Reproduce the parent's uncommitted work inside the worktree: the tracked diff
  * plus any untracked files git is not ignoring. This is what lets a delegate
  * continue from where you actually are rather than from your last commit.
+ *
+ * The carry becomes its own commit. Two things depend on that: the agent starts
+ * on a clean tree, so its own commits describe only its own work, and the
+ * parent can review `carryCommit..branch` without its own uncommitted changes
+ * mixed into the diff it is judging.
+ *
+ * Called before dependencies are linked and gitignored files are copied in, so
+ * nothing injected can ride along on this commit.
  */
 async function carryWorkInProgress(
   repositoryRoot: string,
   worktreePath: string,
-): Promise<boolean> {
+): Promise<string | undefined> {
   let carried = false;
 
   const diff = (await git(repositoryRoot, ['diff', 'HEAD', '--binary'], {
@@ -191,7 +199,17 @@ async function carryWorkInProgress(
     carried = true;
   }
 
-  return carried;
+  if (!carried) return undefined;
+  await git(worktreePath, ['add', '--all']);
+  await git(worktreePath, [
+    '-c',
+    'core.hooksPath=/dev/null',
+    'commit',
+    '--no-verify',
+    '--message',
+    'Carried uncommitted parent work\n\nApplied by pi delegate so the task starts where the parent actually is.',
+  ]);
+  return await gitText(worktreePath, ['rev-parse', 'HEAD']);
 }
 
 export async function prepareWorktree(options: {
@@ -241,8 +259,10 @@ export async function prepareWorktree(options: {
       baseHead,
     ]);
 
-    const carriedWip =
-      base === 'wip' ? await carryWorkInProgress(root, worktreePath) : false;
+    const carryCommit =
+      base === 'wip'
+        ? await carryWorkInProgress(root, worktreePath)
+        : undefined;
     const dependencyLinks = linkDependencies(
       root,
       worktreePath,
@@ -260,7 +280,8 @@ export async function prepareWorktree(options: {
       branch,
       baseHead,
       base,
-      carriedWip,
+      carriedWip: Boolean(carryCommit),
+      ...(carryCommit ? { carryCommit } : {}),
       dependencyLinks,
       carriedFiles: carried,
       status: 'active',

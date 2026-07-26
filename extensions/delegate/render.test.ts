@@ -169,6 +169,7 @@ describe('render', () => {
         worktreePath: '/tmp/worktree',
         repositoryRoot: '/tmp/project',
         baseHead: 'abc123def456',
+        workBase: 'abc123def456',
         status: 'finished',
         headCommit: 'def456abc123',
         changedPaths: ['src/file.ts'],

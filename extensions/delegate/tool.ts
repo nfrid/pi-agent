@@ -120,8 +120,8 @@ export function delegatePromptGuidelines(cwd: string): string[] {
     'Use contextNote for the relevant decisions, constraints, and findings; use branch only when exact parent history matters.',
     'Continue a child for focused correction or extension; start fresh when its approach is wrong or an independent view is better.',
     "Parallelize only independent work. If one task depends on another's findings, inspect the first result before starting the next. Use background delegation only when foreground work can continue independently; completion is delivered automatically, so do not poll delegate_jobs. Writable tasks each get their own worktree, so they can run in parallel even on overlapping files.",
-    'A writable run leaves its work as commits on the branch it reports. Integrate it yourself with ordinary git (review the diff against the reported base, then merge or cherry-pick) rather than asking the user to do it; only stop to ask when the merge is genuinely contentious.',
-    'Treat child results as claims to verify: trust reported checks and concrete evidence; re-check or continue the child when important claims lack support. For a writable run, read the diff and run the check yourself before merging — a subagent can report work it did not finish, and weakening or deleting a test is a common way a task comes back "passing".',
+    'A writable run leaves its work as commits on the branch it reports. Integrate it yourself with delegate_branches (review, then merge) rather than asking the user to do it; only stop to ask when the merge is genuinely contentious.',
+    'Treat child results as claims to verify: trust reported checks and concrete evidence; re-check or continue the child when important claims lack support. For a writable run, review the diff and run the check yourself before merging — a subagent can report work it did not finish, and weakening or deleting a test is a common way a task comes back "passing".',
     'Delegate cannot be called by child processes.',
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd)}`,
   ];

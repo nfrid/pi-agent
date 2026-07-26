@@ -38,11 +38,22 @@ export interface WorktreeRecord {
   status: WorktreeStatus;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Commit holding the parent's carried uncommitted work, when there was any.
+   * The agent's own work starts here rather than at baseHead, which is what
+   * makes the two separable on review.
+   */
+  carryCommit?: string;
   /** Commit holding the agent's work, once finished. */
   headCommit?: string;
-  /** Files the agent changed relative to baseHead. */
+  /** Files the agent changed relative to workBase. */
   changedPaths?: string[];
   error?: string;
+}
+
+/** The commit the agent's own work starts from. */
+export function workBase(record: WorktreeRecord): string {
+  return record.carryCommit ?? record.baseHead;
 }
 
 export interface PreparedWorktree {
@@ -64,27 +75,29 @@ export interface WorktreeSummary {
   worktreePath: string;
   repositoryRoot: string;
   baseHead: string;
+  /** Where the agent's own work starts: the carry commit, or baseHead. */
+  workBase: string;
   status: WorktreeStatus;
   headCommit?: string;
   changedPaths?: string[];
-  /** True when the branch has commits beyond baseHead. */
+  /** True when the agent committed something of its own beyond workBase. */
   hasWork: boolean;
   error?: string;
 }
 
 export function worktreeSummary(record: WorktreeRecord): WorktreeSummary {
+  const base = workBase(record);
   return {
     id: record.id,
     branch: record.branch,
     worktreePath: record.worktreePath,
     repositoryRoot: record.repositoryRoot,
     baseHead: record.baseHead,
+    workBase: base,
     status: record.status,
     headCommit: record.headCommit,
     changedPaths: record.changedPaths,
-    hasWork: Boolean(
-      record.headCommit && record.headCommit !== record.baseHead,
-    ),
+    hasWork: Boolean(record.headCommit && record.headCommit !== base),
     error: record.error,
   };
 }

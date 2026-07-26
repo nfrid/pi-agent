@@ -91,9 +91,9 @@ function prepareRun(run: DelegatedRun, bodyCap: number): PreparedRun {
     );
   if (run.worktree) {
     lines.push(
-      `Branch: ${run.worktree.branch} (${run.worktree.hasWork ? `${run.worktree.changedPaths?.length ?? 0} changed path(s)` : 'no changes'}, from ${run.worktree.baseHead.slice(0, 8)})`,
+      `Branch: ${run.worktree.branch} (${run.worktree.hasWork ? `${run.worktree.changedPaths?.length ?? 0} changed path(s)` : 'no changes'}, from ${run.worktree.workBase.slice(0, 8)})`,
       `Worktree: ${run.worktree.worktreePath}`,
-      `Integrate with: git merge ${run.worktree.branch}`,
+      `Integrate with: delegate_branches review then merge, id ${run.worktree.id}`,
     );
     if (run.worktree.changedPaths?.length)
       lines.push(

@@ -2,34 +2,16 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from '@earendil-works/pi-coding-agent';
-import { resolveDelegateSession } from './session';
-import { listWorktrees, loadWorktree, removeWorktree } from './worktree';
+import {
+  formatBranchDetail,
+  formatBranchLine,
+  listBranchEntries,
+  resolveWorktreeRecord,
+} from './branches';
+import { branchState, removeWorktree } from './worktree';
 
 const USAGE =
   'Usage: /delegate-worktrees [list] | <continuation-token|worktree-id> [show|remove|drop]';
-
-function describe(id: string): string | undefined {
-  const session = resolveDelegateSession(id);
-  const record = loadWorktree(session?.worktreeId ?? id);
-  if (!record) return undefined;
-  const changed = record.changedPaths ?? [];
-  return [
-    `Branch:    ${record.branch}`,
-    `Worktree:  ${record.worktreePath}`,
-    `Repo:      ${record.repositoryRoot}`,
-    `Base:      ${record.baseHead.slice(0, 12)} (${record.base}${record.carriedWip ? ', carried uncommitted work' : ''})`,
-    `Status:    ${record.status}`,
-    changed.length
-      ? `Changed:   ${changed.length} path(s)\n${changed.map((name) => `  - ${name}`).join('\n')}`
-      : 'Changed:   nothing committed on this branch',
-    record.error ? `Note:      ${record.error}` : undefined,
-    '',
-    `Integrate: git merge ${record.branch}`,
-    `Discard:   /delegate-worktrees ${record.id} drop`,
-  ]
-    .filter((line): line is string => line !== undefined)
-    .join('\n');
-}
 
 /**
  * Inspect and clean up delegate worktrees. Branches are the deliverable, so
@@ -44,31 +26,29 @@ export function registerDelegateWorktreesCommand(pi: ExtensionAPI): void {
       const action = tokens[1] ?? 'show';
 
       if (identifier === 'list') {
-        const records = listWorktrees();
+        const entries = await listBranchEntries();
         ctx.ui.notify(
-          records.length
-            ? records
-                .map(
-                  (item) =>
-                    `${item.id}  ${item.status.padEnd(8)}  ${item.branch}  ${item.changedPaths?.length ?? 0} path(s)`,
-                )
-                .join('\n')
+          entries.length
+            ? entries.map(formatBranchLine).join('\n')
             : 'No delegate worktrees.',
           'info',
         );
         return;
       }
 
-      const session = resolveDelegateSession(identifier);
-      const id = session?.worktreeId ?? identifier;
-      if (!loadWorktree(id)) {
+      const record = resolveWorktreeRecord(identifier);
+      if (!record) {
         ctx.ui.notify(`No delegate worktree for ${identifier}.`, 'error');
         return;
       }
+      const id = record.id;
 
       if (action === 'show') {
-        const text = describe(identifier);
-        if (text) ctx.ui.notify(text, 'info');
+        const state = await branchState(record);
+        ctx.ui.notify(
+          `${formatBranchDetail({ record, state })}\n\nIntegrate: git merge ${record.branch}\nDiscard:   /delegate-worktrees ${id} drop`,
+          'info',
+        );
         return;
       }
 

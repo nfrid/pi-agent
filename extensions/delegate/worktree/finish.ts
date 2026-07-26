@@ -1,6 +1,6 @@
 import { existsSync, rmSync } from 'node:fs';
 import { git, gitText, splitZ } from './git';
-import type { WorktreeRecord } from './model';
+import { type WorktreeRecord, workBase } from './model';
 import {
   deleteWorktreeRecord,
   loadWorktree,
@@ -95,7 +95,7 @@ export async function finishWorktree(
           'diff',
           '--name-only',
           '-z',
-          record.baseHead,
+          workBase(record),
           record.headCommit,
         ]),
       ),

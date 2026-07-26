@@ -48,6 +48,8 @@ Setup needs no per-repository hooks:
 
 By default (`from: 'wip'`) the parent's uncommitted work — the tracked diff plus untracked, non-ignored files — is reproduced inside the worktree, so the child sees the repository as you see it. `from: 'head'` starts from the last commit instead.
 
+The carry lands as its own commit rather than as pending changes. That buys two things: the child starts on a clean tree, so its own commits describe only its own work, and the parent can be shown `carryCommit..branch` on review instead of a diff with its own uncommitted changes mixed into what it is judging. `changedPaths` counts only what the child changed, for the same reason.
+
 The child is asked to commit as it goes and told explicitly not to merge, rebase, push, or switch branches. Anything it leaves uncommitted is committed for it when the run ends, so the branch is always the complete deliverable. Injected files (the `node_modules` symlink, carried `.env`) are never committed.
 
 A continuation reuses its original worktree, working directory, route, and scope, and must repeat `allowWrites: true`. If a worktree cannot be created — no repository, or git refuses — the task still runs writably in the parent checkout and says why.
@@ -56,14 +58,20 @@ A continuation reuses its original worktree, working directory, route, and scope
 
 ## Integrating the result
 
-A finished writable run reports its branch, its base commit, and the paths it changed. The orchestrating agent integrates it with ordinary git rather than a bespoke protocol, and is expected to do so itself:
+A finished writable run reports its branch, its base commit, and the paths it changed. Nothing bespoke carries the work back: it is a git branch, and the orchestrating agent is expected to integrate it itself. The `delegate_branches` tool is the fan-in counterpart to parallel worktrees — it accepts a worktree id or a continuation token:
 
 ```text
-git diff <base>..<branch>      # review
-git merge <branch>             # integrate
+delegate_branches list                    # every branch, and whether it is merged yet
+delegate_branches review <id>             # the child's commits, stat, and diff
+delegate_branches merge <id>              # integrate into your checkout
+delegate_branches drop <id>               # delete the checkout and the branch
 ```
 
-Worktrees can be inspected and cleaned up from the parent session:
+`review` measures from the child's own starting point, so carried parent work never appears as the child's. `merge` either lands or leaves the checkout exactly as it was: a conflict is aborted rather than parked, because an agent working on from a half-merged tree makes a worse mess than one told to resolve deliberately. `drop` refuses unmerged work without `force`.
+
+One refusal is worth knowing about, because plain git reports it obscurely. With the default `from: 'wip'`, the branch contains the parent's uncommitted work, so merging it while that work is *still* uncommitted fails with a message about local changes being overwritten. `merge` names the overlapping paths and says to commit or stash them first.
+
+Ordinary git works too, and `/delegate-worktrees` inspects and cleans up from the parent session:
 
 ```text
 /delegate-worktrees                              # list

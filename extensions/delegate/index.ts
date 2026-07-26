@@ -5,6 +5,7 @@ import type {
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
 import { createManagedWidget } from '../shared/ui/widget';
+import { registerDelegateBranchesTool } from './branches-tool';
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
 import { pruneDelegateSessions } from './session';
@@ -125,6 +126,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       getDeliveryEpoch: () => deliveryEpoch,
     });
     registerDelegateJobsTool(pi, jobs);
+    registerDelegateBranchesTool(pi);
     syncWidget();
   });
 

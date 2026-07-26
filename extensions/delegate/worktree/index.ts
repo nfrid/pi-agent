@@ -19,6 +19,8 @@ export {
   removeWorktree,
 } from './finish';
 export { git, gitText, repositoryRoot } from './git';
+export type { BranchReview, BranchState, MergeOutcome } from './integrate';
+export { branchState, mergeBranch, reviewBranch } from './integrate';
 export type {
   PreparedWorktree,
   WorktreeBase,
@@ -27,7 +29,7 @@ export type {
   WorktreeStatus,
   WorktreeSummary,
 } from './model';
-export { worktreeSummary } from './model';
+export { workBase, worktreeSummary } from './model';
 export {
   deleteWorktreeRecord,
   listWorktrees,
