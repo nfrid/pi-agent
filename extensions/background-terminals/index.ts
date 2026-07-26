@@ -7,6 +7,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
+import { createManagedWidget } from '../shared/ui/widget';
 import { formatCompletion, formatPeek, formatSummary } from './format';
 import {
   BackgroundManager,
@@ -113,38 +114,30 @@ export default function backgroundTerminals(pi: ExtensionAPI): void {
 
   let manager: BackgroundManager | undefined;
   let ui: ExtensionUIContext | undefined;
-  let widgetCount = -1;
 
-  const updateWidget = (force = false) => {
-    if (!ui || !manager) return;
-    const count = manager.runningCount;
-    if (!force && count === widgetCount) return;
-    try {
-      ui.setWidget(
-        WIDGET_KEY,
-        count === 0
-          ? undefined
-          : (_tui, theme) => ({
-              invalidate() {},
-              render(width: number) {
-                const line =
-                  theme.fg('warning', '■ ') +
-                  theme.fg(
-                    'text',
-                    `${count} background process${count === 1 ? '' : 'es'} running`,
-                  ) +
-                  theme.fg('dim', ' · ') +
-                  theme.fg('accent', '/ps');
-                return [truncateToWidth(line, width, '…')];
-              },
-            }),
-      );
-      // Cache only successful registrations; transient UI failures must retry.
-      widgetCount = count;
-    } catch {
-      // UI can disappear during dialogs and session teardown.
-    }
-  };
+  const widget = createManagedWidget({
+    key: WIDGET_KEY,
+    isActive: () => (manager?.runningCount ?? 0) > 0,
+    render: (width, theme) => {
+      const count = manager?.runningCount ?? 0;
+      const line =
+        theme.fg('warning', '■ ') +
+        theme.fg(
+          'text',
+          `${count} background process${count === 1 ? '' : 'es'} running`,
+        ) +
+        theme.fg('dim', ' · ') +
+        theme.fg('accent', '/ps');
+      return [truncateToWidth(line, width, '…')];
+    },
+    onError: (error) =>
+      console.error(
+        'background-terminals: failed to update the status widget',
+        error,
+      ),
+  });
+
+  const updateWidget = () => widget.sync();
 
   const deliverCompletion = (snapshot: BackgroundSnapshot) => {
     try {
@@ -185,25 +178,19 @@ export default function backgroundTerminals(pi: ExtensionAPI): void {
   pi.on('session_start', (_event, ctx) => {
     ui = ctx.hasUI ? ctx.ui : undefined;
     manager ??= createManager();
-    widgetCount = -1;
-    updateWidget();
+    widget.attach(ui);
   });
 
   // Dialogs and occasional TUI rebuilds can drop widget components. Reassert
   // the keyed widget at stable agent boundaries even when the count is unchanged.
-  pi.on('agent_start', () => updateWidget(true));
-  pi.on('agent_settled', () => updateWidget(true));
+  pi.on('agent_start', () => widget.reassert());
+  pi.on('agent_settled', () => widget.reassert());
 
   pi.on('session_shutdown', async () => {
     const closing = manager;
     manager = undefined;
-    try {
-      ui?.setWidget(WIDGET_KEY, undefined);
-    } catch {
-      // UI can already be unavailable.
-    }
+    widget.detach();
     ui = undefined;
-    widgetCount = -1;
     await closing?.dispose();
   });
 
@@ -467,7 +454,7 @@ export default function backgroundTerminals(pi: ExtensionAPI): void {
           ctx.ui.notify(formatPeek(snapshot, 20), 'info');
         }
       } finally {
-        updateWidget(true);
+        widget.reassert();
       }
     },
   });

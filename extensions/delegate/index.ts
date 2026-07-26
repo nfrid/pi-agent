@@ -3,6 +3,7 @@ import type {
   ExtensionUIContext,
 } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
+import { createManagedWidget } from '../shared/ui/widget';
 import { loadIsolation, scrubStaleIsolationCredentials } from './isolation';
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
@@ -36,86 +37,22 @@ export default function delegate(pi: ExtensionAPI) {
   let runtimeActive = false;
   let pendingCompletions: DelegateJobSnapshot[] = [];
   let completionTimer: NodeJS.Timeout | undefined;
-  let widgetTimer: NodeJS.Timeout | undefined;
-  let widgetRefreshTimer: NodeJS.Timeout | undefined;
   let widgetDetailed = true;
-  let widgetMounted = false;
-  let requestWidgetRender = () => {};
 
   const activeStatuses = () => statuses?.list() ?? [];
 
-  const stopWidgetTimer = () => {
-    if (widgetTimer) clearInterval(widgetTimer);
-    widgetTimer = undefined;
-  };
+  // Refreshed on a timer because the rendered rows include elapsed time.
+  const widget = createManagedWidget({
+    key: 'delegate-jobs',
+    refreshMs: 1_000,
+    isActive: () => activeStatuses().length > 0,
+    render: (width, theme) =>
+      renderDelegateWidget(activeStatuses(), widgetDetailed, width, theme),
+    onError: (error) =>
+      console.error('delegate: failed to update the jobs widget', error),
+  });
 
-  const cancelWidgetRefresh = () => {
-    if (widgetRefreshTimer) clearTimeout(widgetRefreshTimer);
-    widgetRefreshTimer = undefined;
-  };
-
-  const requestWidgetRefresh = () => {
-    if (widgetRefreshTimer) return;
-    widgetRefreshTimer = setTimeout(() => {
-      widgetRefreshTimer = undefined;
-      requestWidgetRender();
-    }, 16);
-    widgetRefreshTimer.unref();
-  };
-
-  const syncWidget = () => {
-    if (!ui || !statuses) return;
-    const active = activeStatuses();
-    if (active.length === 0) {
-      stopWidgetTimer();
-      cancelWidgetRefresh();
-      requestWidgetRender = () => {};
-      if (!widgetMounted) return;
-      try {
-        ui.setWidget('delegate-jobs', undefined);
-        widgetMounted = false;
-      } catch {
-        // UI may already be unavailable during session teardown.
-      }
-      return;
-    }
-
-    if (!widgetTimer) {
-      widgetTimer = setInterval(requestWidgetRefresh, 1_000);
-      widgetTimer.unref();
-    }
-    if (widgetMounted) {
-      requestWidgetRefresh();
-      return;
-    }
-
-    try {
-      ui.setWidget('delegate-jobs', (tui, theme) => {
-        const requestRender = () => tui.requestRender();
-        requestWidgetRender = requestRender;
-        return {
-          dispose() {
-            if (requestWidgetRender === requestRender) {
-              requestWidgetRender = () => {};
-              widgetMounted = false;
-            }
-          },
-          invalidate() {},
-          render(width: number) {
-            return renderDelegateWidget(
-              activeStatuses(),
-              widgetDetailed,
-              width,
-              theme,
-            );
-          },
-        };
-      });
-      widgetMounted = true;
-    } catch {
-      // UI may already be unavailable during session teardown.
-    }
-  };
+  const syncWidget = () => widget.sync();
 
   const notifyStaleCompletion = (job: DelegateJobSnapshot) => {
     ui?.notify(
@@ -177,9 +114,8 @@ export default function delegate(pi: ExtensionAPI) {
     ui = ctx.hasUI ? ctx.ui : undefined;
     deliveryEpoch = 0;
     widgetDetailed = true;
-    widgetMounted = false;
-    requestWidgetRender = () => {};
     pendingCompletions = [];
+    widget.attach(ui);
     pruneDelegateSessions({
       isIsolationRetained: (id) => Boolean(loadIsolation(id)),
     });
@@ -199,6 +135,10 @@ export default function delegate(pi: ExtensionAPI) {
   pi.on('session_tree', () => {
     deliveryEpoch++;
   });
+  // Unlike background-terminals, this widget is not force-remounted at agent
+  // boundaries: a delegate run is live across them, and tearing the component
+  // down mid-run would discard the mounted render loop. A plain sync refreshes
+  // the existing component in place.
   pi.on('agent_start', syncWidget);
   pi.on('agent_settled', syncWidget);
   pi.on('session_shutdown', async () => {
@@ -206,21 +146,13 @@ export default function delegate(pi: ExtensionAPI) {
     if (completionTimer) clearTimeout(completionTimer);
     completionTimer = undefined;
     pendingCompletions = [];
-    stopWidgetTimer();
-    cancelWidgetRefresh();
-    requestWidgetRender = () => {};
+    widget.detach();
     const closing = jobs;
     const closingStatuses = statuses;
     jobs = undefined;
     statuses = undefined;
     await closing?.dispose();
     closingStatuses?.clear();
-    try {
-      ui?.setWidget('delegate-jobs', undefined);
-    } catch {
-      // UI may already be unavailable.
-    }
-    widgetMounted = false;
     ui = undefined;
   });
 
