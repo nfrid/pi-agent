@@ -2,19 +2,53 @@ let activeRuns = 0;
 const slotWaiters: Array<() => void> = [];
 const sessionTails = new Map<string, Promise<void>>();
 
-export async function acquireSession(sessionPath: string): Promise<() => void> {
+export async function acquireSession(
+  sessionPath: string,
+  signal?: AbortSignal,
+): Promise<() => void> {
+  if (signal?.aborted)
+    throw new Error('Delegated task was aborted before launch.');
   const previous = sessionTails.get(sessionPath) ?? Promise.resolve();
-  let release!: () => void;
+  let resolveCurrent!: () => void;
   const current = new Promise<void>((resolve) => {
-    release = resolve;
+    resolveCurrent = resolve;
   });
   sessionTails.set(sessionPath, current);
-  await previous;
-  return () => {
-    release();
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    resolveCurrent();
     if (sessionTails.get(sessionPath) === current)
       sessionTails.delete(sessionPath);
   };
+
+  if (!signal) {
+    await previous;
+    return release;
+  }
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        cleanup();
+        reject(new Error('Delegated task was aborted before launch.'));
+      };
+      const cleanup = () => signal.removeEventListener('abort', onAbort);
+      signal.addEventListener('abort', onAbort, { once: true });
+      previous.then(() => {
+        cleanup();
+        resolve();
+      });
+    });
+  } catch (error) {
+    void previous.then(release);
+    throw error;
+  }
+  if (signal.aborted) {
+    release();
+    throw new Error('Delegated task was aborted before launch.');
+  }
+  return release;
 }
 
 export async function acquireSlot(

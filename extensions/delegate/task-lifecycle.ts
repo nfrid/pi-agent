@@ -24,6 +24,7 @@ import type {
 } from './types';
 
 export interface DelegateTaskPlan {
+  name: string;
   task: string;
   requestedCwd: string;
   context: DelegateContext;
@@ -225,6 +226,7 @@ export async function runPreparedDelegateTask(
   }
   const run = await runDelegate({
     cwd: prepared.cwd,
+    name: prepared.plan.name,
     task: prepared.plan.task,
     context: prepared.plan.context,
     sessionPath: prepared.session.filePath,

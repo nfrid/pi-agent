@@ -64,7 +64,7 @@ function progressText(run: DelegatedRun): string {
             : activity.status === 'error'
               ? '×'
               : '✓';
-        return `${icon} ${activity.label}${activity.latestText ? `\n${activity.latestText}` : ''}`;
+        return `${icon} ${activity.label}`;
       })
       .join('\n');
   }
@@ -73,6 +73,7 @@ function progressText(run: DelegatedRun): string {
 
 export interface RunDelegateOptions {
   cwd: string;
+  name?: string;
   task: string;
   context: DelegateContext;
   sessionPath: string;
@@ -162,6 +163,7 @@ export async function runDelegate(
       ? prepareChildAuth()
       : undefined;
   const run = createRun(options.task, options.routing, {
+    name: options.name,
     cwd: options.cwd,
     context: options.context,
     allowWrites,
@@ -228,7 +230,7 @@ export async function runDelegate(
     : undefined;
   updateTimer?.unref();
   try {
-    releaseSession = await acquireSession(options.sessionPath);
+    releaseSession = await acquireSession(options.sessionPath, options.signal);
     if (options.signal?.aborted)
       throw new Error('Delegated task was aborted before launch.');
     releaseSlot = await acquireSlot(options.signal, options.maxConcurrency);

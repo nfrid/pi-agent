@@ -105,6 +105,15 @@ describe('events', () => {
     );
     processJsonLine(
       JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'bash-1',
+        toolName: 'bash',
+        args: { command: 'private-command --with-input' },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
         type: 'message_update',
         assistantMessageEvent: {
           type: 'thinking_delta',
@@ -146,8 +155,11 @@ describe('events', () => {
     );
     expect(run.activities.map((activity) => activity.label)).toEqual([
       'read',
+      'bash',
       'thinking',
     ]);
+    expect(run.activities[1]?.latestText).toBe('private-command --with-input');
+    expect(run.activities[2]?.latestText).toBe('private-thinking');
     expect(run.messages).toHaveLength(1);
     expect(JSON.stringify(run)).not.toContain('private-');
     expect(JSON.stringify(run)).toContain('safe handoff');

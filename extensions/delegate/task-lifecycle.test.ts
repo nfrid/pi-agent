@@ -26,6 +26,7 @@ const originalRoute: DelegateRouteState = {
 
 function plan(overrides: Partial<DelegateTaskPlan> = {}): DelegateTaskPlan {
   return {
+    name: 'Inspection agent',
     task: 'inspect',
     requestedCwd: repository,
     context: 'fresh',

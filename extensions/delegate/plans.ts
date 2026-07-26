@@ -16,6 +16,7 @@ import type { DelegateParams } from './tool';
 type SnapshotLookup = (cwd: string) => string | null;
 
 interface TaskInput {
+  name: string;
   task: string;
   cwd?: string;
   route?: string;
@@ -75,8 +76,14 @@ function normalizeInputs(params: DelegateParams): {
   const parallel = Array.isArray(params.tasks) && params.tasks.length > 0;
   if (parallel) {
     const inputs = (params.tasks ?? [])
-      .map((item) => ({ ...item, task: item.task.trim() }))
+      .map((item) => ({
+        ...item,
+        name: item.name?.trim(),
+        task: item.task.trim(),
+      }))
       .filter((item) => item.task);
+    if (inputs.some((item) => !item.name))
+      invalidParams('Every delegated task requires a subagent name.');
     if (!inputs.length)
       invalidParams('Parallel delegation requires a non-empty task.');
     return {
@@ -96,10 +103,13 @@ function normalizeInputs(params: DelegateParams): {
 
   const task = params.task?.trim();
   if (!task) invalidParams('Delegate task is required.');
+  const name = params.name?.trim();
+  if (!name) invalidParams('Delegate name is required with task.');
   return {
     parallel: false,
     inputs: [
       {
+        name,
         task,
         cwd: params.cwd,
         route: params.route,
@@ -203,6 +213,7 @@ export function buildDelegatePlans(
   }
 
   const plans: DelegateTaskPlan[] = inputs.map((item, index) => ({
+    name: item.name,
     task: item.task,
     requestedCwd: requestedCwds[index],
     context: contexts[index],

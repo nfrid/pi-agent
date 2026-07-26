@@ -50,14 +50,14 @@ describe('render', () => {
     expect(output).toContain('Parent context · Requests edits · /tmp/project');
   });
 
-  test('limits collapsed task text to exactly three terminal lines', () => {
+  test('limits collapsed task text to one terminal line', () => {
     const prompt = `${'important detail '.repeat(20)}TAIL-MUST-BE-HIDDEN`;
     const lines = renderDelegateCall({ task: prompt }, theme, {
       cwd: '/tmp/project',
     }).render(30);
     const modeIndex = lines.findIndex((line) => line.startsWith('Mode'));
-    expect(modeIndex).toBe(4);
-    expect(lines.slice(1, modeIndex)).toHaveLength(3);
+    expect(modeIndex).toBe(3);
+    expect(lines.slice(2, modeIndex)).toHaveLength(1);
     expect(lines[modeIndex - 1]).toContain('…');
     expect(lines.join('\n')).not.toContain('TAIL-MUST-BE-HIDDEN');
   });
@@ -74,7 +74,7 @@ describe('render', () => {
     expect(output).not.toContain('…');
   });
 
-  test('keeps result task previews to three lines and reveals the full task', () => {
+  test('keeps result task previews to one line and reveals the full task', () => {
     const prompt = `${'inspect every relevant subsystem '.repeat(20)}FINAL-TASK-DETAIL`;
     const run = createRun(prompt, undefined, {
       cwd: '/tmp/project',
@@ -94,7 +94,7 @@ describe('render', () => {
       theme,
     ).render(32);
     const modeIndex = collapsed.findIndex((line) => line.startsWith('Mode'));
-    expect(collapsed.slice(1, modeIndex)).toHaveLength(3);
+    expect(collapsed.slice(1, modeIndex)).toHaveLength(1);
     expect(collapsed.join('\n')).not.toContain('FINAL-TASK-DETAIL');
     expect(
       collapsed.findIndex((line) => line.startsWith('Now')),
@@ -342,6 +342,28 @@ describe('render', () => {
       expect(output).toContain('first');
       expect(output).toContain('Fresh context · Read-only · /tmp/project');
     }
+  });
+
+  test('renders background launch state as static handoff metadata', () => {
+    const runs = ['first', 'second', 'third'].map((task, index) =>
+      createRun(task, undefined, {
+        cwd: '/tmp/project',
+        context: 'fresh',
+        backgroundJobId: `dj-${index + 1}`,
+      }),
+    );
+    const component = renderDelegateResult(
+      { details: { mode: 'parallel', runs } },
+      { expanded: false },
+      theme,
+    );
+    const output = component.render(300).join('\n');
+    expect(output).toContain('1 Queued · dj-1 · Background');
+    expect(output).toContain('2 Queued · dj-2 · Background');
+    expect(output).toContain('3 Queued · dj-3 · Background');
+    expect(output).not.toContain('Waiting for a slot');
+    expect(output).not.toMatch(/Queued\s*[•·]\s*0s/);
+    expect(output).toContain('3 background jobs started');
   });
 
   test('renders partial parallel completion prominently', () => {

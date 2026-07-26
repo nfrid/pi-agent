@@ -1,0 +1,206 @@
+import { StringEnum } from '@earendil-works/pi-ai';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { Text, truncateToWidth } from '@earendil-works/pi-tui';
+import { Type } from 'typebox';
+import type { DelegateJobManager, DelegateJobSnapshot } from './jobs';
+
+const Parameters = Type.Object({
+  action: StringEnum(['list', 'peek', 'cancel'] as const, {
+    description: 'Operation to perform',
+  }),
+  id: Type.Optional(Type.String({ description: 'Job ID for peek' })),
+  ids: Type.Optional(
+    Type.Array(Type.String(), { description: 'Job IDs for cancel' }),
+  ),
+  wait_seconds: Type.Optional(
+    Type.Integer({
+      minimum: 0,
+      maximum: 120,
+      description: 'For peek, wait up to this long for settlement',
+    }),
+  ),
+});
+
+function requireText(value: string | undefined, name: string): string {
+  const text = value?.trim();
+  if (!text) throw new Error(`${name} is required.`);
+  return text;
+}
+
+function summary(job: DelegateJobSnapshot): string {
+  return `${job.id} ${job.state} — ${job.name}`;
+}
+
+function resultText(
+  content: ReadonlyArray<{ type: string; text?: string }>,
+): string {
+  return content
+    .filter((part) => part.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text)
+    .join('\n');
+}
+
+function stateDisplay(state: DelegateJobSnapshot['state']): {
+  icon: string;
+  color: 'success' | 'error' | 'warning' | 'muted';
+} {
+  if (state === 'success') return { icon: '✓', color: 'success' };
+  if (state === 'error') return { icon: '✗', color: 'error' };
+  if (state === 'aborted') return { icon: '■', color: 'muted' };
+  return { icon: '●', color: 'warning' };
+}
+
+function result(job: DelegateJobSnapshot): string {
+  if (job.handoff)
+    return `Background delegate job ${job.id} (${job.name}) ${job.state}\n\n${job.handoff}`;
+  if (job.error)
+    return `Background delegate job ${job.id} (${job.name}) ${job.state}: ${job.error}`;
+  return `${summary(job)}\nCompletion will be delivered automatically.`;
+}
+
+export function registerDelegateJobsTool(
+  pi: ExtensionAPI,
+  manager: DelegateJobManager,
+): void {
+  pi.registerTool<
+    typeof Parameters,
+    {
+      action: 'list' | 'peek' | 'cancel';
+      job?: DelegateJobSnapshot;
+      jobs?: DelegateJobSnapshot[];
+    }
+  >({
+    name: 'delegate_jobs',
+    label: 'Delegate Jobs',
+    description:
+      'Inspect and cancel asynchronous delegate jobs. Completions are delivered automatically, so do not poll. Use peek with a bounded wait only when the next step depends on a running job. Actions: list, peek, cancel.',
+    promptSnippet: 'Inspect or cancel asynchronous delegate jobs',
+    promptGuidelines: [
+      'Do not poll delegate_jobs for automatically delivered completions. Use peek with a bounded wait only when progress depends on that job.',
+    ],
+    parameters: Parameters,
+    async execute(_toolCallId, params, signal) {
+      switch (params.action) {
+        case 'list': {
+          const jobs = manager.list();
+          return {
+            content: [
+              {
+                type: 'text',
+                text:
+                  jobs.length > 0
+                    ? jobs.map(summary).join('\n')
+                    : 'No background delegate jobs.',
+              },
+            ],
+            details: { action: 'list', jobs },
+          };
+        }
+        case 'peek': {
+          const job = await manager.peek(
+            requireText(params.id, 'id'),
+            (params.wait_seconds ?? 0) * 1000,
+            signal,
+          );
+          return {
+            content: [{ type: 'text', text: result(job) }],
+            details: { action: 'peek', job },
+          };
+        }
+        case 'cancel': {
+          const ids = params.ids?.map((id) => id.trim()).filter(Boolean) ?? [];
+          if (ids.length === 0) throw new Error('ids is required.');
+          const jobs = await manager.cancel(ids, signal);
+          return {
+            content: [{ type: 'text', text: jobs.map(result).join('\n\n') }],
+            details: { action: 'cancel', jobs },
+          };
+        }
+      }
+    },
+    renderCall(args, theme, context) {
+      const action = args.action ?? '';
+      const title =
+        theme.fg('toolTitle', theme.bold('delegate_jobs')) +
+        (action ? ` ${theme.fg('muted', action)}` : '');
+      if (action === 'peek') {
+        const wait = args.wait_seconds
+          ? theme.fg('dim', ` · wait ${args.wait_seconds}s`)
+          : '';
+        return new Text(
+          `${title} ${theme.fg('accent', args.id ?? '?')}${wait}`,
+          0,
+          0,
+        );
+      }
+      if (action === 'cancel') {
+        const ids = args.ids ?? [];
+        const visible = context?.expanded ? ids : ids.slice(0, 3);
+        const suffix =
+          !context?.expanded && ids.length > visible.length
+            ? theme.fg('dim', ` +${ids.length - visible.length}`)
+            : '';
+        return new Text(
+          `${title} ${visible.map((id) => theme.fg('accent', id)).join(', ')}${suffix}`,
+          0,
+          0,
+        );
+      }
+      return new Text(title, 0, 0);
+    },
+    renderResult(toolResult, { expanded }, theme) {
+      const text = resultText(toolResult.content);
+      if (expanded) return new Text(text, 0, 0);
+      const details = toolResult.details;
+      if (!details)
+        return new Text(
+          theme.fg('error', truncateToWidth(text, 100, '…')),
+          0,
+          0,
+        );
+
+      if (details.action === 'list') {
+        const listed = details.jobs ?? [];
+        const running = listed.filter(
+          (job) => job.state === 'queued' || job.state === 'running',
+        ).length;
+        const failed = listed.filter((job) => job.state === 'error').length;
+        return new Text(
+          theme.fg('muted', `• ${listed.length} tracked`) +
+            theme.fg(running > 0 ? 'warning' : 'dim', ` · ${running} running`) +
+            (failed > 0 ? theme.fg('error', ` · ${failed} failed`) : ''),
+          0,
+          0,
+        );
+      }
+
+      if (details.action === 'peek' && details.job) {
+        const job = details.job;
+        const display = stateDisplay(job.state);
+        const preview =
+          job.handoff ?? job.error ?? job.tasks[0] ?? 'Waiting for subagent';
+        return new Text(
+          `${theme.fg(display.color, `${display.icon} ${job.id} ${job.state}`)}\n${theme.fg('dim', truncateToWidth(preview.replace(/\s+/g, ' ').trim(), 120, '…'))}`,
+          0,
+          0,
+        );
+      }
+
+      const affected = details.jobs ?? [];
+      const statuses = affected
+        .map((job) => {
+          const display = stateDisplay(job.state);
+          return theme.fg(
+            display.color,
+            `${display.icon} ${job.id} ${job.state}`,
+          );
+        })
+        .join(theme.fg('dim', ' · '));
+      return new Text(
+        statuses || theme.fg('muted', truncateToWidth(text, 100, '…')),
+        0,
+        0,
+      );
+    },
+  });
+}

@@ -13,6 +13,7 @@ import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { describe, expect, test } from 'vitest';
 import { buildSystemPrompt } from '../system-prompt';
+import { acquireSession } from './concurrency';
 import {
   describeDelegateRouting,
   parseDelegateConfig,
@@ -75,6 +76,20 @@ describe('delegate', () => {
     expect(() =>
       assertDistinctContinuationTokens(['session-a', undefined, 'session-b']),
     ).not.toThrow();
+  });
+
+  test('aborts a queued continuation session lock without blocking later waiters', async () => {
+    const path = `/tmp/delegate-lock-${Date.now()}`;
+    const releaseFirst = await acquireSession(path);
+    const controller = new AbortController();
+    const queued = acquireSession(path, controller.signal);
+    const later = acquireSession(path);
+
+    controller.abort();
+    await expect(queued).rejects.toThrow('aborted before launch');
+    releaseFirst();
+    const releaseLater = await later;
+    releaseLater();
   });
 
   test('drains started workers and stops scheduling after a worker fails', async () => {

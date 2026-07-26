@@ -34,6 +34,7 @@ export type ToolResultLike = {
 };
 
 export type DelegateCallTask = {
+  name?: unknown;
   task?: unknown;
   route?: unknown;
   cwd?: unknown;
@@ -44,6 +45,7 @@ export type DelegateCallTask = {
 
 export type DelegateCallArgs = DelegateCallTask & {
   tasks?: DelegateCallTask[];
+  background?: unknown;
 };
 
 export type RenderContextLike = {
@@ -75,7 +77,7 @@ class WrappedTask implements Component {
       ? this.value
       : this.value.replace(/\s+/g, ' ').trim();
     const wrapped = wrapTextWithAnsi(this.color(text), available);
-    const visible = this.expanded ? wrapped : wrapped.slice(0, 3);
+    const visible = this.expanded ? wrapped : wrapped.slice(0, 1);
     if (!this.expanded && wrapped.length > visible.length) {
       const last = visible.length - 1;
       visible[last] = `${truncateToWidth(
@@ -97,7 +99,7 @@ class WrappedTask implements Component {
   invalidate(): void {}
 }
 
-/** Render a task in at most three terminal lines, or without truncation when expanded. */
+/** Render a task on one truncated line, or without truncation when expanded. */
 export function taskBlock(
   label: string,
   value: unknown,
@@ -109,7 +111,7 @@ export function taskBlock(
   return new WrappedTask(prefix, text, (part) => fg('text', part), expanded);
 }
 
-/** Render an indexed task in at most three terminal lines. */
+/** Render an indexed task on one truncated line. */
 export function indexedTaskBlock(
   prefix: string,
   value: unknown,
@@ -326,9 +328,15 @@ export function sectionTitle(title: string, theme: ThemeLike): Text {
   return new Text(theme.fg('accent', theme.bold(title)), 0, 0);
 }
 
-export function controls(runs: DelegatedRun[]): string {
+export function controls(
+  runs: DelegatedRun[],
+  options: { includeCancel?: boolean } = {},
+): string {
   const hints = [keyHint('app.tools.expand', 'details')];
-  if (runs.some((run) => ['queued', 'running'].includes(getRunState(run))))
+  if (
+    options.includeCancel !== false &&
+    runs.some((run) => ['queued', 'running'].includes(getRunState(run)))
+  )
     hints.push(keyHint('app.interrupt', 'cancel'));
   return hints.join(' · ');
 }

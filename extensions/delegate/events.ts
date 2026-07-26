@@ -26,6 +26,21 @@ function pathValue(value: unknown, fallback = '.'): string {
     : fallback;
 }
 
+function compactPreview(value: unknown, max = 180): string {
+  const raw =
+    typeof value === 'string'
+      ? value
+      : (() => {
+          try {
+            return JSON.stringify(value);
+          } catch {
+            return String(value);
+          }
+        })();
+  const compact = raw.replace(/\s+/g, ' ').trim();
+  return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
+}
+
 function toolLabel(name: string, args: unknown): string {
   if (!args || typeof args !== 'object') return name;
   const a = args as Record<string, unknown>;
@@ -49,6 +64,16 @@ function toolLabel(name: string, args: unknown): string {
   }
 }
 
+function toolInputPreview(name: string, args: unknown): string | undefined {
+  if (!args || typeof args !== 'object') return undefined;
+  const a = args as Record<string, unknown>;
+  if (name === 'bash') return compactPreview(a.command ?? '');
+  if (['read', 'write', 'edit', 'ls', 'find', 'grep'].includes(name))
+    return undefined;
+  const preview = compactPreview(args);
+  return preview && preview !== '{}' ? preview : undefined;
+}
+
 function findActivity(
   run: DelegatedRun,
   id: string | undefined,
@@ -69,8 +94,18 @@ function upsertActivity(
   const existingIndex = activity.id
     ? run.activities.findIndex((existing) => existing.id === activity.id)
     : -1;
-  if (existingIndex >= 0) run.activities[existingIndex] = activity;
-  else run.activities.push(activity);
+  const existing =
+    existingIndex >= 0 ? run.activities[existingIndex] : undefined;
+  const { latestText = existing?.latestText, ...safeActivity } = activity;
+  const stored = safeActivity as DelegatedRun['activities'][number];
+  if (latestText)
+    Object.defineProperty(stored, 'latestText', {
+      value: latestText,
+      enumerable: false,
+      configurable: true,
+    });
+  if (existingIndex >= 0) run.activities[existingIndex] = stored;
+  else run.activities.push(stored);
   while (run.activities.length > MAX_ACTIVITY_COUNT) run.activities.shift();
 }
 
@@ -146,6 +181,7 @@ function updateThinkingGroup(
     type: 'thinking',
     label: 'thinking',
     status: 'running',
+    latestText: group.text,
   });
   return group;
 }
@@ -248,14 +284,17 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
       }
       return false;
     }
-    case 'tool_execution_start':
+    case 'tool_execution_start': {
+      const name = String(event.toolName || 'tool');
       upsertActivity(run, {
         id: eventId(event, 'tool'),
         type: 'tool',
-        label: toolLabel(String(event.toolName || 'tool'), event.args),
+        label: toolLabel(name, event.args),
         status: 'running',
+        latestText: toolInputPreview(name, event.args),
       });
       return true;
+    }
     case 'tool_execution_update':
       upsertActivity(run, {
         id: eventId(event, 'tool'),

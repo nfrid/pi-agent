@@ -31,6 +31,17 @@ import {
 import type { DelegatedRun, DelegateRunState } from './types';
 import { getFinalAssistantText, getRunState } from './types';
 
+function isBackgroundLaunch(run: DelegatedRun): boolean {
+  return (
+    Boolean(run.backgroundJobId) &&
+    ['queued', 'running'].includes(getRunState(run))
+  );
+}
+
+function backgroundLaunchLabel(run: DelegatedRun): string {
+  return `${capitalize(getRunState(run))} · ${run.backgroundJobId ?? '?'} · Background`;
+}
+
 function addExpandedRun(
   container: Container,
   run: DelegatedRun,
@@ -96,9 +107,14 @@ function addExpandedRun(
   }
 
   const final = getFinalAssistantText(run.messages).trim();
+  const backgroundLaunch = isBackgroundLaunch(run);
   if (!hasResultHeading(final))
     container.addChild(sectionTitle('Result', theme));
   if (final) container.addChild(new Markdown(final, 0, 0, mdTheme));
+  else if (backgroundLaunch)
+    container.addChild(
+      new Text(fg('muted', 'Running independently in the background.'), 0, 0),
+    );
   else if (['queued', 'running'].includes(state))
     container.addChild(
       new Text(fg('muted', 'Waiting for the subagent…'), 0, 0),
@@ -115,15 +131,25 @@ function addExpandedRun(
       ),
     );
 
-  const activities = activityLines(run, fg);
+  const activities = backgroundLaunch ? '' : activityLines(run, fg);
   const stats = usage(run);
   container.addChild(new Spacer(1));
   container.addChild(sectionTitle('Runtime', theme));
   if (activities) container.addChild(new Text(activities, 0, 0));
   container.addChild(
-    new Text(fg(stateColor(state), capitalize(runtimeLabel(run))), 0, 0),
+    new Text(
+      backgroundLaunch
+        ? fg('muted', backgroundLaunchLabel(run))
+        : fg(stateColor(state), capitalize(runtimeLabel(run))),
+      0,
+      0,
+    ),
   );
   if (stats) container.addChild(new Text(fg('dim', stats), 0, 0));
+  if (run.backgroundJobId)
+    container.addChild(
+      new Text(fg('accent', `Background job: ${run.backgroundJobId}`), 0, 0),
+    );
   if (run.continuation)
     container.addChild(
       new Text(fg('dim', `Continuation: ${run.continuation}`), 0, 0),
@@ -170,7 +196,7 @@ export function renderDelegateResult(
     const container = new Container();
     container.addChild(
       new Text(
-        `${icon(run, fg)} ${fg('toolTitle', theme.bold('Delegate'))} ${fg(stateColor(state), `· ${stateLabel(run)}`)}`,
+        `${icon(run, fg)} ${fg('toolTitle', theme.bold('Delegate'))} ${fg(stateColor(state), `· ${isBackgroundLaunch(run) ? backgroundLaunchLabel(run) : stateLabel(run)}`)}`,
         0,
         0,
       ),
@@ -244,24 +270,35 @@ export function renderDelegateResult(
       );
     }
 
-    for (const line of currentActivityLines(run, fg))
-      container.addChild(new Text(line, 0, 0));
-    const footer = [runtimeLabel(run), usage(run), controls([run])]
+    if (!isBackgroundLaunch(run))
+      for (const line of currentActivityLines(run, fg))
+        container.addChild(new Text(line, 0, 0));
+    const footer = (
+      isBackgroundLaunch(run)
+        ? [
+            `job ${run.backgroundJobId}`,
+            'background',
+            controls([run], { includeCancel: false }),
+          ]
+        : [runtimeLabel(run), usage(run), controls([run])]
+    )
       .filter(Boolean)
       .join(' · ');
     container.addChild(new Text(fg('dim', footer), 0, 0));
     return container;
   }
 
+  const backgroundLaunch = details.runs.every(isBackgroundLaunch);
   const container = new Container();
   container.addChild(
     new Text(
-      `${fg('toolTitle', theme.bold('Delegate'))} ${fg('muted', `· ${details.runs.length} subagents`)}`,
+      `${fg('toolTitle', theme.bold('Delegate'))} ${fg('muted', `· ${details.runs.length} subagents`)}${backgroundLaunch ? fg('warning', ' · background') : ''}`,
       0,
       0,
     ),
   );
   if (
+    !backgroundLaunch &&
     complete === details.runs.length &&
     succeeded > 0 &&
     succeeded < details.runs.length
@@ -322,24 +359,30 @@ export function renderDelegateResult(
   for (const [index, run] of details.runs.entries()) {
     const state = getRunState(run);
     const latest = run.activities.at(-1);
-    const status = fg(stateColor(state), capitalize(runtimeLabel(run)));
-    const activity = ['queued', 'running'].includes(state)
-      ? latest
-        ? ` · ${activityLabel(
-            {
-              ...latest,
-              label: truncate(latest.label, TASK_PREVIEW_CHARS),
-            },
-            fg,
-          )}`
-        : fg(
-            'dim',
-            ` · ${state === 'queued' ? 'Waiting for a slot' : 'Starting subagent'}`,
-          )
-      : '';
+    const status = fg(
+      stateColor(state),
+      isBackgroundLaunch(run)
+        ? backgroundLaunchLabel(run)
+        : capitalize(runtimeLabel(run)),
+    );
+    const activity =
+      !isBackgroundLaunch(run) && ['queued', 'running'].includes(state)
+        ? latest
+          ? ` · ${activityLabel(
+              {
+                ...latest,
+                label: truncate(latest.label, TASK_PREVIEW_CHARS),
+              },
+              fg,
+            )}`
+          : fg(
+              'dim',
+              ` · ${state === 'queued' ? 'Waiting for a slot' : 'Starting subagent'}`,
+            )
+        : '';
     container.addChild(
       new Text(
-        `${fg('dim', `${index + 1}`.padStart(2))} ${status}${activity}`,
+        `${fg('dim', `${index + 1}`.padStart(2))} ${status}${!isBackgroundLaunch(run) && run.backgroundJobId ? fg('accent', ` · ${run.backgroundJobId}`) : ''}${activity}`,
         0,
         0,
       ),
@@ -359,16 +402,20 @@ export function renderDelegateResult(
         ),
       );
   }
-  const summary = `${succeeded}/${details.runs.length} succeeded · ${complete}/${details.runs.length} complete`;
+  const summary = backgroundLaunch
+    ? `${details.runs.length} background job${details.runs.length === 1 ? '' : 's'} started`
+    : `${succeeded}/${details.runs.length} succeeded · ${complete}/${details.runs.length} complete`;
   container.addChild(
     new Text(
       fg(
-        succeeded === details.runs.length
-          ? 'success'
-          : complete === details.runs.length
-            ? 'warning'
-            : 'dim',
-        `${summary} · ${controls(details.runs)}`,
+        backgroundLaunch
+          ? 'dim'
+          : succeeded === details.runs.length
+            ? 'success'
+            : complete === details.runs.length
+              ? 'warning'
+              : 'dim',
+        `${summary} · ${controls(details.runs, { includeCancel: !backgroundLaunch })}`,
       ),
       0,
       0,

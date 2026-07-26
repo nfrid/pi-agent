@@ -57,6 +57,7 @@ function prepared(
 ): PreparedDelegateTask {
   return {
     plan: {
+      name: 'Test agent',
       task: 'inspect',
       requestedCwd: '/tmp/project',
       context: 'fresh',
@@ -80,7 +81,7 @@ function prepared(
 describe('buildDelegatePlans', () => {
   test('builds a single fresh task plan', () => {
     const built = buildDelegatePlans(
-      { task: ' inspect ', route: 'quick' },
+      { name: 'Test agent', task: ' inspect ', route: 'quick' },
       ctx,
       config,
       () => null,
@@ -92,10 +93,36 @@ describe('buildDelegatePlans', () => {
     expect(built.preflights).toHaveLength(1);
   });
 
+  test('requires a name for every subagent', () => {
+    expect(() =>
+      buildDelegatePlans(
+        { task: 'inspect', route: 'quick' },
+        ctx,
+        config,
+        () => null,
+      ),
+    ).toThrow('Delegate name is required with task.');
+    expect(() =>
+      buildDelegatePlans(
+        {
+          tasks: [{ task: 'inspect', route: 'quick' }],
+        } as never,
+        ctx,
+        config,
+        () => null,
+      ),
+    ).toThrow('Every delegated task requires a subagent name.');
+  });
+
   test('requires a branch snapshot for branch context', () => {
     expect(() =>
       buildDelegatePlans(
-        { task: 'inspect', route: 'quick', context: 'branch' },
+        {
+          name: 'Test agent',
+          task: 'inspect',
+          route: 'quick',
+          context: 'branch',
+        },
         ctx,
         config,
         () => null,
@@ -107,8 +134,9 @@ describe('buildDelegatePlans', () => {
     const built = buildDelegatePlans(
       {
         tasks: [
-          { task: 'inspect', route: 'quick' },
+          { name: 'Test agent', task: 'inspect', route: 'quick' },
           {
+            name: 'Test agent',
             task: 'implement',
             route: 'quick',
             allowWrites: true,
@@ -128,7 +156,12 @@ describe('buildDelegatePlans', () => {
 
   test('rejects an empty parallel task list', () => {
     expect(() =>
-      buildDelegatePlans({ tasks: [{ task: '   ' }] }, ctx, config, () => null),
+      buildDelegatePlans(
+        { tasks: [{ name: 'Test agent', task: '   ' }] },
+        ctx,
+        config,
+        () => null,
+      ),
     ).toThrow('Parallel delegation requires a non-empty task.');
   });
 
@@ -137,9 +170,9 @@ describe('buildDelegatePlans', () => {
       buildDelegatePlans(
         {
           tasks: [
-            { task: 'one', route: 'quick' },
-            { task: 'two', route: 'quick' },
-            { task: 'three', route: 'quick' },
+            { name: 'Test agent', task: 'one', route: 'quick' },
+            { name: 'Test agent', task: 'two', route: 'quick' },
+            { name: 'Test agent', task: 'three', route: 'quick' },
           ],
         },
         ctx,
@@ -153,7 +186,7 @@ describe('buildDelegatePlans', () => {
     expect(() =>
       buildDelegatePlans(
         {
-          tasks: [{ task: 'inspect', route: 'quick' }],
+          tasks: [{ name: 'Test agent', task: 'inspect', route: 'quick' }],
           continuation: 'token',
         },
         ctx,
@@ -169,6 +202,7 @@ describe('buildDelegatePlans', () => {
     expect(() =>
       buildDelegatePlans(
         {
+          name: 'Test agent',
           task: 'inspect',
           continuation: 'token',
           cwd: '/other',
@@ -195,8 +229,8 @@ describe('executeSingleDelegate lifecycle', () => {
         runContext(),
         {
           tasks: [
-            { task: 'one', route: 'quick' },
-            { task: 'two', route: 'quick' },
+            { name: 'Test agent', task: 'one', route: 'quick' },
+            { name: 'Test agent', task: 'two', route: 'quick' },
           ],
         },
         {},
@@ -218,7 +252,7 @@ describe('executeSingleDelegate lifecycle', () => {
     await expect(
       executeSingleDelegate(
         runContext(),
-        { task: 'inspect', route: 'quick' },
+        { name: 'Test agent', task: 'inspect', route: 'quick' },
         {},
       ),
     ).rejects.toThrow('Delegate setup failed before launch: prepare failed');
@@ -258,7 +292,7 @@ describe('executeSingleDelegate lifecycle', () => {
 
     const result = await executeSingleDelegate(
       runContext(),
-      { task: 'inspect', route: 'quick' },
+      { name: 'Test agent', task: 'inspect', route: 'quick' },
       {},
     );
 

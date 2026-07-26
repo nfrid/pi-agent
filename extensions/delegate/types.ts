@@ -85,6 +85,7 @@ export type DelegateProgressUpdate = Parameters<
 >[0];
 
 export interface DelegateRunMetadata {
+  name?: string;
   cwd?: string;
   context?: DelegateContext;
   contextNote?: string;
@@ -96,6 +97,7 @@ export interface DelegateRunMetadata {
     | 'controlled-tools';
   scope?: string[];
   continuation?: string;
+  backgroundJobId?: string;
   warnings?: string[];
   isolation?: DelegateIsolationState;
   /** Exact final assistant output, stored only when the parent handoff omits it. */
@@ -103,6 +105,7 @@ export interface DelegateRunMetadata {
 }
 
 export interface DelegatedRun extends DelegateRunMetadata {
+  name: string;
   task: string;
   exitCode: number;
   messages: Message[];
@@ -152,6 +155,7 @@ export function createRun(
     state: 'queued',
     queuedAt: Date.now(),
     ...metadata,
+    name: metadata.name?.trim() || 'Subagent',
   };
 }
 

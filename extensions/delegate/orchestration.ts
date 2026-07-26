@@ -26,13 +26,36 @@ import { createRun, type DelegatedRun } from './types';
 
 type SnapshotLookup = (cwd: string) => string | null;
 
-type RunContext = {
+export type DelegateRunContext = {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
   config: DelegateConfig;
   signal?: AbortSignal;
   getSnapshot: SnapshotLookup;
 };
+
+export interface PreparedDelegateExecution {
+  mode: 'single' | 'parallel';
+  tasks: PreparedDelegateTask[];
+}
+
+export function pendingRuns(
+  execution: PreparedDelegateExecution,
+): DelegatedRun[] {
+  return execution.tasks.map((item) =>
+    createRun(item.plan.task, item.plan.routing, {
+      name: item.plan.name,
+      cwd: item.cwd,
+      context: item.plan.context,
+      contextNote: item.plan.contextNote,
+      scope: item.scope,
+      writeRequested: item.plan.writeRequested,
+      allowWrites: item.allowWrites,
+      continuation: item.session.token,
+      warnings: item.warnings,
+    }),
+  );
+}
 
 type RunHooks = {
   onUpdate?: (partial: import('./types').DelegateProgressUpdate) => void;
@@ -75,7 +98,7 @@ async function cleanupFailedLaunch(
 }
 
 async function runPreparedWithLifecycle(
-  runCtx: RunContext,
+  runCtx: DelegateRunContext,
   prepared: PreparedDelegateTask,
   mode: 'single' | 'parallel',
   hooks: RunHooks = {},
@@ -103,6 +126,7 @@ async function runPreparedWithLifecycle(
       prepared.plan.task,
       prepared.plan.routing,
       {
+        name: prepared.plan.name,
         cwd: prepared.cwd,
         context: prepared.plan.context,
         contextNote: prepared.plan.contextNote,
@@ -151,41 +175,39 @@ async function preparePlans(
   }
 }
 
-async function executeDelegate(
-  runCtx: RunContext,
+export async function prepareDelegateExecution(
+  runCtx: DelegateRunContext,
   params: DelegateParams,
-  hooks: RunHooks,
-) {
+): Promise<PreparedDelegateExecution> {
   const built = buildDelegatePlans(
     params,
     runCtx.ctx,
     runCtx.config,
     runCtx.getSnapshot,
   );
-  const prepared = await preparePlans(built);
+  return {
+    mode: built.parallel ? 'parallel' : 'single',
+    tasks: await preparePlans(built),
+  };
+}
 
-  if (!built.parallel) {
+export async function runPreparedDelegateExecution(
+  runCtx: DelegateRunContext,
+  execution: PreparedDelegateExecution,
+  hooks: RunHooks = {},
+): Promise<DelegatedRun[]> {
+  const prepared = execution.tasks;
+  if (execution.mode === 'single') {
     const run = await runPreparedWithLifecycle(
       runCtx,
       prepared[0],
       'single',
       hooks,
     );
-    return delegateToolResult(runCtx.pi, runCtx.ctx, 'single', [run]);
+    return [run];
   }
 
-  const liveRuns = prepared.map((item) =>
-    createRun(item.plan.task, item.plan.routing, {
-      cwd: item.cwd,
-      context: item.plan.context,
-      contextNote: item.plan.contextNote,
-      scope: item.scope,
-      writeRequested: item.plan.writeRequested,
-      allowWrites: item.allowWrites,
-      continuation: item.session.token,
-      warnings: item.warnings,
-    }),
-  );
+  const liveRuns = pendingRuns(execution);
   const warningText = [...new Set(prepared.flatMap((item) => item.warnings))];
   const emit = () => {
     const done = liveRuns.filter((run) => run.exitCode !== -1).length;
@@ -241,7 +263,17 @@ async function executeDelegate(
       `${errorText(error)}${cleanupWarnings.length ? ` Cleanup warnings: ${cleanupWarnings.join(' ')}` : ''}`,
     );
   }
-  return delegateToolResult(runCtx.pi, runCtx.ctx, 'parallel', runs);
+  return runs;
+}
+
+async function executeDelegate(
+  runCtx: DelegateRunContext,
+  params: DelegateParams,
+  hooks: RunHooks,
+) {
+  const execution = await prepareDelegateExecution(runCtx, params);
+  const runs = await runPreparedDelegateExecution(runCtx, execution, hooks);
+  return delegateToolResult(runCtx.pi, runCtx.ctx, execution.mode, runs);
 }
 
 export const executeSingleDelegate = executeDelegate;

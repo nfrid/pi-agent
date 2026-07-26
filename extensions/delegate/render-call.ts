@@ -17,18 +17,27 @@ export function renderDelegateCall(
 
   const fg = theme.fg.bind(theme);
   const expanded = context?.expanded === true;
+  const background =
+    args.background === true ? fg('warning', ' · background') : '';
   const container = new Container();
 
   if (Array.isArray(args.tasks) && args.tasks.length > 0) {
     const visibleTasks = expanded ? args.tasks : args.tasks.slice(0, 3);
     container.addChild(
       new Text(
-        `${fg('toolTitle', theme.bold('Delegate'))} ${fg('muted', `· ${args.tasks.length} subagents`)}`,
+        `${fg('toolTitle', theme.bold('Delegate'))} ${fg('muted', `· ${args.tasks.length} subagents`)}${background}`,
         0,
         0,
       ),
     );
     for (const [index, task] of visibleTasks.entries()) {
+      container.addChild(
+        new Text(
+          fieldLine(`${index + 1} Name`, String(task.name || 'Subagent'), fg),
+          0,
+          0,
+        ),
+      );
       container.addChild(
         taskBlock(`${index + 1} Task`, task.task, expanded, fg),
       );
@@ -69,7 +78,12 @@ export function renderDelegateCall(
     return container;
   }
 
-  container.addChild(new Text(fg('toolTitle', theme.bold('Delegate')), 0, 0));
+  container.addChild(
+    new Text(`${fg('toolTitle', theme.bold('Delegate'))}${background}`, 0, 0),
+  );
+  container.addChild(
+    new Text(fieldLine('Name', String(args.name || 'Subagent'), fg), 0, 0),
+  );
   container.addChild(taskBlock('Task', args.task, expanded, fg));
   container.addChild(
     new Text(
