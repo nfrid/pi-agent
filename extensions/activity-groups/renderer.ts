@@ -3,7 +3,13 @@ import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
 import { stringArg, toolBaseName, toolPath, toolRole } from './grouping';
-import { composeTitle, describeTools, headersOf, isNarration } from './title';
+import {
+  composeTitle,
+  describeTools,
+  headersOf,
+  isNarration,
+  stripEmphasis,
+} from './title';
 import type {
   SequenceItem,
   SequenceOptions,
@@ -29,24 +35,36 @@ function displayPath(value: string, cwd: string): string {
     : value.replace(/\\/g, '/');
 }
 
-/** One line naming what a single tool call is touching, for the live sub-line. */
-function toolSubject(tool: ToolItem, cwd: string): string {
+/**
+ * What a single call is doing, split where the eye wants to split it: the
+ * action is the part worth reading down a column, the argument is the detail
+ * you look at only once the action has caught your attention.
+ */
+function toolSubject(
+  tool: ToolItem,
+  cwd: string,
+): { action: string; argument?: string } {
   const name = toolBaseName(tool.name);
   const target = toolPath(tool.args);
   if (name === 'bash' || name === 'inspect_shell') {
     const command = stringArg(tool.args, 'command');
-    return command
-      ? `${name === 'bash' ? 'Running' : 'Checking'} ${shortCommand(command, MAX_COMMAND_WIDTH)}`
-      : 'Running command';
+    if (!command) return { action: 'Running command' };
+    return {
+      action: name === 'bash' ? 'Running' : 'Checking',
+      argument: shortCommand(command, MAX_COMMAND_WIDTH),
+    };
   }
   const pattern = stringArg(tool.args, 'pattern');
   if (pattern && (name === 'grep' || name === 'find' || name === 'glob'))
-    return `Searching for ${pattern}${target ? ` in ${displayPath(target, cwd)}` : ''}`;
-  if (!target) return `Running ${name}`;
-  const shown = displayPath(target, cwd);
-  if (name === 'read') return `Reading ${shown}`;
-  if (name === 'ls') return `Listing ${shown}`;
-  return `${name === 'write' ? 'Writing' : 'Editing'} ${shown}`;
+    return {
+      action: 'Searching for',
+      argument: `${pattern}${target ? ` in ${displayPath(target, cwd)}` : ''}`,
+    };
+  if (!target) return { action: `Running ${name}` };
+  const argument = displayPath(target, cwd);
+  if (name === 'read') return { action: 'Reading', argument };
+  if (name === 'ls') return { action: 'Listing', argument };
+  return { action: name === 'write' ? 'Writing' : 'Editing', argument };
 }
 
 /**
@@ -166,6 +184,12 @@ export class ActivityGroupComponent implements Component {
    * sees it once and the collapsed group reads as the model's own account.
    */
   private title(tools: readonly ToolItem[], completed: boolean): string {
+    // One styled terminal line, so whatever markdown the model wrote inside
+    // its narration is unwrapped rather than printed as punctuation.
+    return stripEmphasis(this.chooseTitle(tools, completed));
+  }
+
+  private chooseTitle(tools: readonly ToolItem[], completed: boolean): string {
     const preamble = this.preamble();
     if (preamble) return preamble;
     const headers = this.sequence.items.flatMap((item) =>
@@ -250,16 +274,16 @@ export class ActivityGroupComponent implements Component {
           width,
         ),
       );
-    for (const tool of shown)
+    for (const tool of shown) {
+      const { action, argument } = toolSubject(tool, this.sequence.cwd);
+      const marked = `   ${this.theme.fg(roleColor(tool), this.stepMarker(tool))} ${this.theme.fg(tool.isError ? 'error' : 'muted', action)}`;
       lines.push(
         truncateToWidth(
-          `   ${this.theme.fg(roleColor(tool), this.stepMarker(tool))} ${this.theme.fg(
-            tool.isError ? 'error' : 'muted',
-            toolSubject(tool, this.sequence.cwd),
-          )}`,
+          argument ? `${marked} ${this.theme.fg('dim', argument)}` : marked,
           width,
         ),
       );
+    }
 
     const files = this.files(tools);
     const directory = commonDirectory(files);

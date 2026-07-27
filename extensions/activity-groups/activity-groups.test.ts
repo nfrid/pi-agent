@@ -35,6 +35,13 @@ const theme = {
   },
 } as Theme;
 
+/** Marks every colour so a test can assert what was styled how. */
+const paintedTheme = {
+  fg(color: string, text: string) {
+    return `<${color}>${text}</${color}>`;
+  },
+} as Theme;
+
 describe('activity groups renderer', () => {
   it('renders compact live and completed summaries with expandable defaults', () => {
     const renderer = createActivityGroupRenderer();
@@ -148,6 +155,60 @@ describe('activity groups renderer', () => {
     expect(output).toContain('3 earlier steps');
     expect(output).not.toContain('workflows.ts');
     expect(output).toContain('6 calls');
+    (component as unknown as { dispose(): void }).dispose();
+
+    // The action reads down the column; the argument recedes behind it.
+    const painted = createActivityGroupRenderer()(
+      sequence,
+      { streaming: false, expanded: false, defaultView: new Text('', 0, 0) },
+      paintedTheme,
+      context(),
+    );
+    if (!painted) throw new Error('renderer returned no component');
+    const styled = painted.render(200).join('\n');
+    expect(styled).toContain('<muted>Reading</muted>');
+    expect(styled).toContain('<dim>src/commands/types.ts</dim>');
+    // And a command is marked in its own colour, so the eye can find it.
+    expect(styled).toContain('<accent>⏺</accent>');
+    (painted as unknown as { dispose(): void }).dispose();
+  });
+
+  it('titles a group with the preamble that announced it', () => {
+    const component = createActivityGroupRenderer()(
+      {
+        id: 'sequence-6',
+        cwd: process.cwd(),
+        startedAt: 1000,
+        failed: false,
+        items: [
+          {
+            type: 'assistant',
+            provisional: false,
+            message: message([
+              { type: 'thinking', thinking: '**Checking the session store**' },
+              { type: 'text', text: "Now I'll check **how sessions expire**." },
+            ]),
+          },
+          {
+            type: 'tool',
+            id: 'r1',
+            name: 'read',
+            args: { path: 'src/session.ts' },
+            status: 'complete',
+            isError: false,
+          },
+        ],
+      },
+      { streaming: false, expanded: false, defaultView: new Text('', 0, 0) },
+      theme,
+      context(),
+    );
+    if (!component) throw new Error('renderer returned no component');
+    const output = component.render(100).join('\n');
+    // The model's own words to the user outrank the header it thought, and
+    // the emphasis inside them is styling, not something to print.
+    expect(output).toContain("✓ Now I'll check how sessions expire.");
+    expect(output).not.toContain('**');
     (component as unknown as { dispose(): void }).dispose();
   });
 

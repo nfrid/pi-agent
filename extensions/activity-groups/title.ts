@@ -75,6 +75,19 @@ const PAST_TENSE: Readonly<Record<string, string>> = {
   Writing: 'Wrote',
 };
 
+/**
+ * Drop inline markdown from a line that is about to be printed as a title.
+ *
+ * A title is one styled line of terminal output, not rendered markdown, so
+ * emphasis the model wrote inside its narration arrives as literal asterisks:
+ * "Now I'll check **how sessions expire**". Only paired bold and code spans
+ * are unwrapped — single `*` and `_` are left alone, since `*.ts` and
+ * `__init__.py` are far more common in this position than italics.
+ */
+export function stripEmphasis(value: string): string {
+  return value.replace(/\*\*(.+?)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+}
+
 function clean(value: string): string | undefined {
   const title = value.trim().replace(/[.…:]+$/, '');
   if (!title || title.length > MAX_TITLE_LENGTH) return undefined;

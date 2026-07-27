@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeTitle, isNarration, toPastTense } from './title';
+import { composeTitle, isNarration, stripEmphasis, toPastTense } from './title';
 
 describe('isNarration', () => {
   it('recognises a header the model wrote as text rather than thinking', () => {
@@ -38,6 +38,23 @@ describe('toPastTense', () => {
       'Quick fix for shutdown',
     );
     expect(toPastTense('')).toBe('');
+  });
+});
+
+describe('stripEmphasis', () => {
+  it('unwraps markdown a title would otherwise print as punctuation', () => {
+    expect(stripEmphasis("Now I'll check **how sessions expire**")).toBe(
+      "Now I'll check how sessions expire",
+    );
+    expect(stripEmphasis('Fixing the `resolveVerification` call')).toBe(
+      'Fixing the resolveVerification call',
+    );
+  });
+
+  it('leaves lone markers alone, since paths wear them too', () => {
+    expect(stripEmphasis('Reading src/*.ts and __init__.py')).toBe(
+      'Reading src/*.ts and __init__.py',
+    );
   });
 });
 

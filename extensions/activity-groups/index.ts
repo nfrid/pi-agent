@@ -90,6 +90,14 @@ export default defineExtension('activity-groups', (pi) => {
 
   let context: ExtensionContext | undefined;
   let uninstall: (() => void) | undefined;
+  /**
+   * Whether groups show their members, independently of Pi's own tool-output
+   * expansion. These are different questions — "what did it do" versus "what
+   * did that print" — and answering the first should not bury you in the
+   * second. Pi's flag still opens groups, since with grouping on there would
+   * otherwise be nothing for it to reveal.
+   */
+  let opened = false;
 
   const warn = (message: string) => {
     if (DEBUG) context?.ui.notify(`activity-groups: ${message}`, 'warning');
@@ -114,7 +122,7 @@ export default defineExtension('activity-groups', (pi) => {
       },
       // Idle means the agent is not streaming, so nothing can still be running.
       isBusy: () => context?.isIdle() === false,
-      isExpanded: () => context?.ui.getToolsExpanded() ?? false,
+      isExpanded: () => opened || (context?.ui.getToolsExpanded() ?? false),
       onError: (error) => {
         uninstall = undefined;
         warn(
@@ -133,6 +141,21 @@ export default defineExtension('activity-groups', (pi) => {
     context = ctx;
     // Only the interactive TUI renders these components at all.
     if (ctx.mode === 'tui') install();
+  });
+
+  pi.registerCommand('groups', {
+    description: 'Show or hide the steps inside every activity group',
+    handler: async (_args, ctx) => {
+      context = ctx;
+      if (!uninstall) {
+        ctx.ui.notify('Activity groups are off', 'warning');
+        return;
+      }
+      opened = !opened;
+      // Notifying is also what redraws the transcript, which is where the
+      // change actually shows up.
+      ctx.ui.notify(opened ? 'Groups opened' : 'Groups collapsed', 'info');
+    },
   });
 
   pi.registerCommand('activity-groups', {
