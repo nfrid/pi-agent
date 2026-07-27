@@ -91,6 +91,15 @@ describe('canonical prompt composition', () => {
     expect(prompt).not.toContain('UNCONTROLLED APPEND');
   });
 
+  it('keeps phase labels out of prompts with no transcript to print them', () => {
+    const interactive = buildSystemPrompt(options(), 'tui');
+    const headless = buildSystemPrompt(options(), 'json');
+    expect(interactive).toContain('label it');
+    expect(headless).not.toContain('label it');
+    for (const prompt of [interactive, headless])
+      expect(prompt).toContain('state the assumption in one line');
+  });
+
   it('retains official skill loading instructions and filters explicit-only skills', () => {
     const prompt = buildSystemPrompt(
       options({
