@@ -11,10 +11,10 @@ npm run session:metrics -- summarize ~/.pi/agent/sessions \
 npm run session:metrics -- compare \
   --baseline /path/to/baseline-sessions \
   --comparison /path/to/comparison-sessions \
-  --min-todo-calls 1
+  --min-delegate-calls 1
 ```
 
-Repeat `--baseline` or `--comparison` to combine multiple roots. `--limit` is applied after filtering to each side of a comparison.
+Repeat `--baseline` or `--comparison` to combine multiple roots. `--limit` is applied after filtering to each side of a comparison. `--min-todo-calls` and `--min-delegate-calls` both apply; use the latter to compare delegation-heavy cohorts.
 
 ## Output
 
@@ -23,11 +23,25 @@ The versioned JSON includes per-session aggregates, cohort totals, medians, and 
 - user and assistant turns;
 - todo calls and results;
 - compactions and elapsed ancestry time;
-- provider-reported input, output, cache-read, and cache-write usage; and
-- peak request context.
+- provider-reported input, output, cache-read, and cache-write usage;
+- peak request context; and
+- delegation counts and cost, described below.
 
-The cache-hit ratio is weighted from summed tokens as `cacheRead / (input + cacheRead + cacheWrite)`.
+## Delegation measurements
+
+These answer what delegation costs the parent's context, which is the resource an orchestrating session runs out of first.
+
+- `delegateToolCalls`, `delegateContinuationCalls`, `delegateParallelCalls` — calls made, of which continuations and parallel fans.
+- `delegatedTasks` — tasks that actually ran, summed from each result's runs.
+- `delegateRejectedCalls` — calls the tool refused before launching anything, such as invalid parameters. These are counted separately rather than as tasks, so a short refusal cannot flatter the per-task byte figure.
+- `delegateWritableTasks` — tasks that ran with writes allowed, in their own worktree.
+- `delegateHandoffBytes` — UTF-8 bytes of parent-visible handoff text, excluding the exact output preserved in artifacts and tool details.
+- `delegateTruncatedTasks` — tasks whose body was cut to fit the handoff caps, read from the envelope's truncation flag and capped at the runs present.
+
+Ratios have one definition, applied identically to a session and to a cohort, so a cohort ratio is weighted by summed totals rather than averaged from per-session ratios: `cacheHitRatio` is `cacheRead / (input + cacheRead + cacheWrite)`, `delegateHandoffBytesPerTask` is bytes over tasks, `delegateTruncationRate` is truncated over total tasks, and `delegateContinuationRate` is continuations over calls.
 
 ## Privacy and interpretation
 
-Output omits source paths, prompts, tool arguments and results, file content, and compaction summaries. Session IDs are short content hashes intended only for local correlation; they are not anonymity guarantees. Provider usage is reported as recorded, and elapsed time is wall-clock ancestry span rather than active working time.
+Output omits source paths, prompts, tool arguments and results, file content, delegated task text, handoff bodies, and compaction summaries. Session IDs are short content hashes intended only for local correlation; they are not anonymity guarantees. Provider usage is reported as recorded, and elapsed time is wall-clock ancestry span rather than active working time.
+
+Delegation figures are diagnostic evidence, not a score. A process that exited cleanly is not proof of correct work; a continuation is often a deliberate correction rather than a failure; and a cheap route is not economical if it causes parent rework. Cohorts are only comparable when the underlying task shapes are.
