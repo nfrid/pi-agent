@@ -106,7 +106,10 @@ function assistantMessage(
 
 function toolCallMessage(id: string, name: string): AssistantMessage {
   return assistantMessage([
-    { type: 'text', text: 'Reading the auth code' },
+    // Narration lives in thinking: in this repo's session logs 2616 of 2861
+    // tool-carrying messages narrate that way and only 10 also speak to the
+    // user, which is why thinking is what a group may hide.
+    { type: 'thinking', thinking: 'Reading the auth code' },
     { type: 'toolCall', id, name, arguments: {} },
   ]);
 }
@@ -353,10 +356,75 @@ describe('tool sequence shim', () => {
     for (let index = 0; index < 30; index += 1)
       turn(h, [{ name: 'read' }], `t${index}`);
 
-    // 30 reads exceed MAX_GROUP_CALLS, so they land in two groups.
+    // 30 reads are several times MAX_GROUP_CALLS, so they land in chunks.
     expect(h.render()).toEqual([
-      'group:group-1:50:done',
-      'group:group-2:10:live',
+      'group:group-1:24:done',
+      'group:group-2:24:done',
+      'group:group-3:12:live',
+    ]);
+  });
+
+  it('shows what the model said and ends the group it was narrating', () => {
+    const { renderer } = recordingRenderer();
+    const h = harness();
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    turn(h, [{ name: 'read' }], 'a');
+    const commentary = new FakeAssistant();
+    h.chat.addChild(commentary);
+    commentary.updateContent(
+      assistantMessage([
+        { type: 'text', text: 'The leak is in the shutdown path.' },
+        { type: 'toolCall', id: 'b-0', name: 'edit', arguments: {} },
+      ]),
+    );
+    const edit = new FakeTool('edit', 'b-0', {});
+    h.chat.addChild(edit);
+
+    // The commentary renders in full even though it carried a tool call, and
+    // the work that follows it is a new group led by the tool itself.
+    expect(h.render()).toEqual([
+      'group:group-1:2:done',
+      'assistant:The leak is in the shutdown path.',
+      'group:group-2:1:live',
+    ]);
+  });
+
+  it('never revives a group that has already finished', () => {
+    const { renderer } = recordingRenderer();
+    const h = harness();
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    turn(h, [{ name: 'read' }], 'a');
+    // The request ends and the group renders its checkmark.
+    h.setBusy(false);
+    expect(h.render()).toEqual(['group:group-1:2:done']);
+
+    // More work arrives. It would merge by phase, but the finished group is
+    // sealed, so it opens a new one rather than coming back to life.
+    h.setBusy(true);
+    turn(h, [{ name: 'read' }], 'b');
+    expect(h.render()).toEqual([
+      'group:group-1:2:done',
+      'group:group-2:2:live',
+    ]);
+  });
+
+  it('ends a build once it goes back to looking around', () => {
+    const { renderer } = recordingRenderer();
+    const h = harness();
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    turn(h, [{ name: 'edit' }], 'a');
+    // A couple of lookups belong to the edit that prompted them.
+    turn(h, [{ name: 'read' }, { name: 'read' }], 'b');
+    expect(h.render()).toEqual(['group:group-1:5:live']);
+
+    // A sustained run of them is the agent off finding something else out.
+    turn(h, [{ name: 'read' }, { name: 'grep' }, { name: 'read' }], 'c');
+    expect(h.render()).toEqual([
+      'group:group-1:5:done',
+      'group:group-2:4:live',
     ]);
   });
 

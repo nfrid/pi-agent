@@ -12,10 +12,14 @@
  * have broken.
  *
  * A sequence spans as many model turns as belong to one phase of work — see
- * `grouping.ts` for where the boundaries fall. Its leader, the assistant
- * message that opened the phase, renders the summary; every other member
- * renders nothing. Nothing is removed from the container, so expanding a group
- * is just replaying the members' original `render`.
+ * `grouping.ts` for where the boundaries fall. Its leader, the component that
+ * opened the phase, renders the summary; every other member renders nothing.
+ * Nothing is removed from the container, so expanding a group is just replaying
+ * the members' original `render`.
+ *
+ * What a group may hide is thinking and tool calls. Anything the model said to
+ * the user is never a member, always renders in full, and ends the group it
+ * followed.
  *
  * This reaches into host internals that carry no compatibility promise. Every
  * assumption is verified at install time and re-checked per sequence: anything
@@ -31,9 +35,9 @@ import type { Theme } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import {
   type ActivityKind,
-  type ActivityPhase,
   activityKind,
-  phaseAfter,
+  foldTurn,
+  type OpenGroup,
   startsNewGroup,
 } from './grouping';
 import type {
@@ -103,6 +107,12 @@ interface SequenceState {
   completedAt?: number;
   /** False for sequences first seen already finished (history replay): no duration. */
   everLive: boolean;
+  /**
+   * Set once the sequence has rendered as finished. Distinct from `completedAt`,
+   * which a replayed sequence never gets: what seals a group is that the user
+   * has seen it close, not that we timed it.
+   */
+  sealed: boolean;
   context: RendererContext;
 }
 
@@ -168,6 +178,16 @@ export function installToolSequenceShim(
   const isTool = (value: unknown): value is ToolComponentLike =>
     value instanceof host.toolComponent;
 
+  /**
+   * Whether the message says something to the user, as opposed to only thinking
+   * out loud. Pi renders text, thinking and tool calls from one component, so a
+   * message that speaks cannot be summarised away without eating what it said.
+   */
+  const speaks = (component: AssistantComponentLike): boolean =>
+    component.lastMessage?.content.some(
+      (content) => content.type === 'text' && content.text.trim() !== '',
+    ) ?? false;
+
   function requestRender(): void {
     if (host.requestRender) {
       host.requestRender();
@@ -212,9 +232,15 @@ export function installToolSequenceShim(
     for (const child of container.children) {
       if (isAssistant(child)) {
         close();
-        // A plain answer is a break; a message carrying tool calls opens a turn.
-        if (child.hasToolCalls) open = { members: [child], tools: [] };
-        else turns.push(undefined);
+        // Commentary is the model addressing the user. It always renders in
+        // full, and it ends the activity it was narrating — that is the beat a
+        // reader already perceives as a break, so groups should agree with it.
+        // A message that has not spoken yet opens a turn, even before its tool
+        // calls arrive: an empty component is a message still streaming in, not
+        // a boundary, and treating it as one made groups flicker shut and
+        // reopen as the model typed.
+        if (speaks(child)) turns.push(undefined);
+        else open = { members: [child], tools: [] };
         continue;
       }
       if (isTool(child)) {
@@ -239,7 +265,7 @@ export function installToolSequenceShim(
     for (const container of containers) {
       const last = container.children.at(-1);
       let open: Sequence | undefined;
-      let openPhase: ActivityPhase | undefined;
+      let openGroup: OpenGroup | undefined;
 
       const flush = () => {
         if (open) {
@@ -248,7 +274,7 @@ export function installToolSequenceShim(
           for (const member of open.members) nextBindings.set(member, open);
         }
         open = undefined;
-        openPhase = undefined;
+        openGroup = undefined;
       };
 
       for (const turn of turnsOf(container)) {
@@ -268,14 +294,14 @@ export function installToolSequenceShim(
               )
             : 'inspect';
 
-        if (
-          startsNewGroup(
-            open && openPhase
-              ? { phase: openPhase, calls: open.tools.length }
-              : undefined,
-            kind,
-          )
-        ) {
+        // A group that has already rendered its checkmark is sealed: work that
+        // arrives afterwards belongs to a new one.
+        const sealed =
+          open !== undefined && (states.get(open.id)?.sealed ?? false);
+        const current =
+          open && openGroup ? { ...openGroup, sealed } : undefined;
+
+        if (startsNewGroup(current, kind, turn.tools.length)) {
           flush();
           const leader = turn.members[0];
           if (!leader) continue;
@@ -286,13 +312,13 @@ export function installToolSequenceShim(
             tools: [...turn.tools],
             atTail: false,
           };
-          openPhase = phaseAfter(undefined, kind);
+          openGroup = foldTurn(undefined, kind, turn.tools.length);
           continue;
         }
         if (!open) continue;
         open.members.push(...turn.members);
         open.tools.push(...turn.tools);
-        openPhase = phaseAfter(openPhase, kind);
+        openGroup = foldTurn(openGroup, kind, turn.tools.length);
       }
       flush();
     }
@@ -324,6 +350,7 @@ export function installToolSequenceShim(
     const state: SequenceState = {
       startedAt: now(),
       everLive: false,
+      sealed: false,
       context: {
         state: new Map<string, unknown>(),
         requestRender,
@@ -375,8 +402,10 @@ export function installToolSequenceShim(
     if (streaming) {
       state.everLive = true;
       state.completedAt = undefined;
-    } else if (state.everLive && state.completedAt === undefined) {
-      state.completedAt = now();
+    } else {
+      state.sealed = true;
+      if (state.everLive && state.completedAt === undefined)
+        state.completedAt = now();
     }
 
     const view = renderer(

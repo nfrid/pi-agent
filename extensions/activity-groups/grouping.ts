@@ -1,15 +1,17 @@
 /**
  * Where one activity group ends and the next begins.
  *
- * Boundaries are decided by what the tools *do*, never by what the model says
- * about it. Narration is far too volatile to cut on: a single model turn often
- * emits three thinking headers for five tool calls, and the headers drift every
- * few seconds. Tool activity, by contrast, moves in recognisable phases —
- * explore, then edit, then check — and those are the beats worth showing.
+ * Boundaries come from two things: what the tools *do*, and the moments the
+ * model stops to address the user. Narration is far too volatile to cut on — a
+ * single turn often emits three thinking headers for five tool calls, and they
+ * drift every few seconds — but tool activity moves in recognisable phases
+ * (explore, then edit, then check), and commentary marks a beat a reader
+ * already perceives as a break. Commentary is handled by the shim, which is
+ * where messages are visible; everything else is decided here.
  *
- * Measured over the session logs in this repo, grouping per model turn gave a
- * median of 7 groups per user request; this rule gives 2, at a median of 6 tool
- * calls each.
+ * Measured over the session logs in this repo: grouping per model turn gave a
+ * median of 7 groups per user request; these rules give 2 (p90 5), at a median
+ * of 12 tool calls each, with 12% of groups holding 1-3 calls.
  */
 
 /** The character of a stretch of work, derived from the tools it runs. */
@@ -51,9 +53,17 @@ const VALIDATION_COMMAND =
 
 /**
  * Beyond this many calls a group stops being a summary and starts being a
- * black box, so long runs are cut into readable chunks.
+ * black box, so long runs are cut into readable chunks. This is a backstop,
+ * not a boundary rule: if groups routinely end here, the rules below are wrong.
  */
-export const MAX_GROUP_CALLS = 25;
+export const MAX_GROUP_CALLS = 12;
+
+/**
+ * How much pure looking-around a building group absorbs before it is judged to
+ * have moved on. A read or two between edits is part of making the change; a
+ * run of them is the agent going off to find something else out.
+ */
+export const MAX_IDLE_CALLS = 4;
 
 /** What a tool call does, for describing a group in plain words. */
 export type ToolRole = 'edit' | 'read' | 'search' | 'command' | 'other';
@@ -113,24 +123,49 @@ function phaseOf(kind: ActivityKind): ActivityPhase | undefined {
   return kind === 'mutate' || kind === 'validate' ? 'building' : undefined;
 }
 
-/**
- * Should the turn described by `incoming` start a new group, given the group
- * currently open? `calls` is how many tool calls that group already holds.
- */
-export function startsNewGroup(
-  open: { phase: ActivityPhase; calls: number } | undefined,
-  incoming: ActivityKind,
-): boolean {
-  if (!open) return true;
-  if (open.calls >= MAX_GROUP_CALLS) return true;
-  const phase = phaseOf(incoming);
-  return phase !== undefined && phase !== open.phase;
+/** Everything about the group currently open that a boundary depends on. */
+export interface OpenGroup {
+  phase: ActivityPhase;
+  /** Tool calls the group already holds. */
+  calls: number;
+  /** Calls run since the group last changed or checked anything. */
+  sinceChange: number;
+  /**
+   * Whether the group has already been shown to the user as finished. A
+   * finished group must never come back to life and start growing again — that
+   * is jarring to watch, and it makes the checkmark a lie. Later work opens a
+   * new group instead.
+   */
+  sealed: boolean;
 }
 
-/** The phase a group is in once `incoming` has been folded into it. */
-export function phaseAfter(
-  open: ActivityPhase | undefined,
+/**
+ * Should a turn of `calls` calls doing `incoming` start a new group, given the
+ * group currently open?
+ */
+export function startsNewGroup(
+  open: OpenGroup | undefined,
   incoming: ActivityKind,
-): ActivityPhase {
-  return phaseOf(incoming) ?? open ?? 'exploring';
+  calls: number,
+): boolean {
+  if (!open || open.sealed) return true;
+  if (open.calls >= MAX_GROUP_CALLS) return true;
+  const phase = phaseOf(incoming);
+  if (phase !== undefined) return phase !== open.phase;
+  return open.phase === 'building' && open.sinceChange + calls > MAX_IDLE_CALLS;
+}
+
+/** The open group once a turn of `calls` calls doing `incoming` joins it. */
+export function foldTurn(
+  open: OpenGroup | undefined,
+  incoming: ActivityKind,
+  calls: number,
+): OpenGroup {
+  const phase = phaseOf(incoming);
+  return {
+    phase: phase ?? open?.phase ?? 'exploring',
+    calls: (open?.calls ?? 0) + calls,
+    sinceChange: phase ? 0 : (open?.sinceChange ?? 0) + calls,
+    sealed: false,
+  };
 }
