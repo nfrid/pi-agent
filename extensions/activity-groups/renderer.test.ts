@@ -475,7 +475,7 @@ describe('activity groups renderer', () => {
     // Settled: the whole group's narration in one past-tense phrase, so a
     // group that planned something and then built it says both.
     expect(settled).toContain(
-      'Planned and implemented the delegate shutdown fix',
+      'Planned the delegate shutdown fix and implemented the shutdown guard',
     );
     // Few enough calls to show them all, so nothing is counted away.
     expect(settled).toContain('Reading extensions/delegate/jobs.ts');

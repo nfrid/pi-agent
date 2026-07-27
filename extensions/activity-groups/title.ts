@@ -200,11 +200,30 @@ const META_VERBS = new Set([
   'Weighing',
 ]);
 
+/** Past tense of one participle, in the case it was written in. */
+function pastOf(word: string): string | undefined {
+  const capitalized = word.charAt(0).toUpperCase() + word.slice(1);
+  const past =
+    IRREGULAR_PAST_TENSE[capitalized] ?? derivePastTense(capitalized);
+  if (!past) return undefined;
+  return word.charAt(0) === capitalized.charAt(0)
+    ? past
+    : past.charAt(0).toLowerCase() + past.slice(1);
+}
+
 export function toPastTense(title: string): string {
-  const [first, ...rest] = title.split(' ');
-  if (!first) return title;
-  const past = IRREGULAR_PAST_TENSE[first] ?? derivePastTense(first);
-  return past ? [past, ...rest].join(' ') : title;
+  const words = title.split(' ');
+  const past = words[0] ? pastOf(words[0]) : undefined;
+  if (!past) return title;
+  return words
+    .map((word, index) => {
+      if (index === 0) return past;
+      // A header often names two things — "Verifying the scratch edit and
+      // cleaning up" — and conjugating only the first reads as a mistake.
+      if (words[index - 1]?.toLowerCase() !== 'and') return word;
+      return pastOf(word) ?? word;
+    })
+    .join(' ');
 }
 
 /**
@@ -252,11 +271,30 @@ export function composeTitle(headers: readonly string[]): string | undefined {
   // The goal is stated by the opening header; later ones name sub-steps.
   const subject =
     first.rest || narrated.find((entry) => entry.rest)?.rest || '';
-  const verbs =
+  const opened = toPastTense(first.verb);
+  const other =
     dominant === first.verb
-      ? [toPastTense(first.verb)]
-      : [toPastTense(first.verb), toPastTense(dominant).toLowerCase()];
-  const phrase = verbs.join(' and ');
+      ? undefined
+      : narrated.find((entry) => entry.verb === dominant);
+  if (!other) return subject ? `${opened} ${subject}` : opened;
+
+  // Two distinct things the group did, each with what it was done to. Sharing
+  // one subject between them — "Planned and created temporary activity" for a
+  // group that planned the activity and created the notes — credits the second
+  // verb with the first one's work and loses what the group produced.
+  //
+  // Only when the second verb was said once, though: a verb repeated across
+  // headers is one push broken into steps, and their subjects are step labels
+  // ("Implementing T1", "Implementing T2") that name nothing on their own.
+  const spelt = `${opened} ${first.rest} and ${toPastTense(dominant).toLowerCase()} ${other.rest}`;
+  if (
+    counts.get(dominant) === 1 &&
+    first.rest &&
+    other.rest &&
+    spelt.length <= MAX_TITLE_LENGTH
+  )
+    return spelt;
+  const phrase = `${opened} and ${toPastTense(dominant).toLowerCase()}`;
   return subject ? `${phrase} ${subject}` : phrase;
 }
 

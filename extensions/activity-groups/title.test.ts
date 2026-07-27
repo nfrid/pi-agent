@@ -44,6 +44,19 @@ describe('toPastTense', () => {
     expect(toPastTense('Clarifying the rule')).toBe('Clarified the rule');
   });
 
+  it('conjugates both halves of a header that names two things', () => {
+    expect(toPastTense('Verifying the scratch edit and cleaning up')).toBe(
+      'Verified the scratch edit and cleaned up',
+    );
+    expect(toPastTense('Fixing the leak and rerunning the suite')).toBe(
+      'Fixed the leak and reran the suite',
+    );
+    // Only a participle is a verb: "and" joins two nouns just as often.
+    expect(toPastTense('Reading the parser and the tests')).toBe(
+      'Read the parser and the tests',
+    );
+  });
+
   // The table existed alongside 36 rows the rule below already produced. Each
   // row costs a reader a lookup, so it has to earn one: keeping this honest is
   // cheaper than re-deriving the whole table the next time one is added.
@@ -106,7 +119,27 @@ describe('composeTitle', () => {
         'Planning the rollout',
         'Fixing the race',
       ]),
-    ).toBe('Planned and fixed the shutdown fix');
+    ).toBe('Planned the shutdown fix and fixed the race');
+  });
+
+  it('keeps what each half of a two-part group was done to', () => {
+    expect(
+      composeTitle([
+        'Planning temporary activity',
+        'Creating disposable notes',
+      ]),
+    ).toBe('Planned temporary activity and created disposable notes');
+  });
+
+  it('falls back to one subject when the title would run long', () => {
+    expect(
+      composeTitle([
+        'Planning the migration of every session store in the repository',
+        'Rewriting the expiry handling that all of them share',
+      ]),
+    ).toBe(
+      'Planned and rewrote the migration of every session store in the repository',
+    );
   });
 
   it('borrows a subject when the opening header is bare', () => {
