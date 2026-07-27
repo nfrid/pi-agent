@@ -18,8 +18,9 @@
  * the members' original `render`.
  *
  * What a group may hide is thinking and tool calls. Anything the model said to
- * the user is never a member, always renders in full, and ends the group it
- * followed.
+ * the user always renders, and ends the group it followed: as that group's last
+ * word it shows only its speech, since the summary above already accounts for
+ * its thinking, and standing alone it renders untouched.
  *
  * This reaches into host internals that carry no compatibility promise. Every
  * assumption is verified at install time and re-checked per sequence: anything
@@ -87,8 +88,10 @@ export interface ShimHost {
   isExpanded(): boolean;
   /** Overrides the TUI handle captured from tool components. */
   requestRender?(): void;
-  /** Reports a fault that disabled grouping. */
+  /** Reports a fault that disabled grouping entirely. */
   onError?(error: unknown): void;
+  /** Reports a fault that cost one group but left the rest running. */
+  onWarn?(error: unknown): void;
   now?(): number;
 }
 
@@ -99,6 +102,8 @@ interface Sequence {
   tools: ToolComponentLike[];
   /** True when the sequence is the tail of its container, so it may still grow. */
   atTail: boolean;
+  /** Closing commentary: renders its speech rather than being hidden. */
+  speaker?: Component;
   disabled?: boolean;
 }
 
@@ -115,6 +120,12 @@ interface SequenceState {
   sealed: boolean;
   context: RendererContext;
 }
+
+/**
+ * Render faults tolerated before the shim is judged unsafe. One group can fail
+ * on its own; a fault that keeps recurring is not a one-off.
+ */
+const MAX_RENDER_FAILURES = 3;
 
 function dispose(component: Component | undefined): void {
   (component as { dispose?: () => void } | undefined)?.dispose?.();
@@ -155,6 +166,7 @@ export function installToolSequenceShim(
   let capturedUi: { requestRender(): void } | undefined;
   let dirty = true;
   let installed = true;
+  let failures = 0;
 
   /**
    * Group identity is tied to the component that leads it, not to a tool call
@@ -218,7 +230,14 @@ export function installToolSequenceShim(
    * tool components that followed it. Turns are the unit that gets merged into
    * groups; `undefined` marks a break that no group may span.
    */
-  type Turn = { members: Component[]; tools: ToolComponentLike[] } | undefined;
+  type Turn =
+    | {
+        members: Component[];
+        tools: ToolComponentLike[];
+        /** Commentary that ends this turn's group; see `turnsOf`. */
+        closer?: AssistantComponentLike;
+      }
+    | undefined;
 
   function turnsOf(container: ContainerLike): Turn[] {
     const turns: Turn[] = [];
@@ -231,16 +250,25 @@ export function installToolSequenceShim(
 
     for (const child of container.children) {
       if (isAssistant(child)) {
+        // Commentary is the model addressing the user. What it said always
+        // renders, and it ends the activity it was narrating — that is the beat
+        // a reader already perceives as a break, so groups should agree with it.
+        if (speaks(child)) {
+          // Closing a group makes it that group's last word: the summary above
+          // already carries its thinking, so only the speech is shown. Standing
+          // on its own it is an ordinary message and renders untouched, because
+          // there is no summary to carry anything for it.
+          if (open) open.closer = child;
+          else turns.push(undefined);
+          close();
+          continue;
+        }
         close();
-        // Commentary is the model addressing the user. It always renders in
-        // full, and it ends the activity it was narrating — that is the beat a
-        // reader already perceives as a break, so groups should agree with it.
         // A message that has not spoken yet opens a turn, even before its tool
         // calls arrive: an empty component is a message still streaming in, not
         // a boundary, and treating it as one made groups flicker shut and
         // reopen as the model typed.
-        if (speaks(child)) turns.push(undefined);
-        else open = { members: [child], tools: [] };
+        open = { members: [child], tools: [] };
         continue;
       }
       if (isTool(child)) {
@@ -269,7 +297,10 @@ export function installToolSequenceShim(
 
       const flush = () => {
         if (open) {
-          open.atTail = open.members.at(-1) === last;
+          // A group the model has stopped narrating is over, whatever follows
+          // it in the container: it cannot grow once something has closed it.
+          open.atTail =
+            open.speaker === undefined && open.members.at(-1) === last;
           seen.add(open.id);
           for (const member of open.members) nextBindings.set(member, open);
         }
@@ -304,21 +335,29 @@ export function installToolSequenceShim(
         if (startsNewGroup(current, kind, turn.tools.length)) {
           flush();
           const leader = turn.members[0];
-          if (!leader) continue;
-          open = {
-            id: groupId(leader),
-            members: [...turn.members],
-            leader,
-            tools: [...turn.tools],
-            atTail: false,
-          };
-          openGroup = foldTurn(undefined, kind, turn.tools.length);
-          continue;
+          if (leader) {
+            open = {
+              id: groupId(leader),
+              members: [...turn.members],
+              leader,
+              tools: [...turn.tools],
+              atTail: false,
+            };
+            openGroup = foldTurn(undefined, kind, turn.tools.length);
+          }
+        } else if (open) {
+          open.members.push(...turn.members);
+          open.tools.push(...turn.tools);
+          openGroup = foldTurn(openGroup, kind, turn.tools.length);
         }
-        if (!open) continue;
-        open.members.push(...turn.members);
-        open.tools.push(...turn.tools);
-        openGroup = foldTurn(openGroup, kind, turn.tools.length);
+
+        // The commentary that closed the turn joins the group as its last
+        // member, so its narration counts towards the title, and then ends it.
+        if (turn.closer && open) {
+          open.members.push(turn.closer);
+          open.speaker = turn.closer;
+          flush();
+        }
       }
       flush();
     }
@@ -342,6 +381,47 @@ export function installToolSequenceShim(
   function originalRenderOf(component: Component, width: number): string[] {
     if (isTool(component)) return originalToolRender.call(component, width);
     return originalAssistantRender.call(component, width);
+  }
+
+  /**
+   * Render only what a message said, leaving its thinking to the group summary
+   * above it.
+   *
+   * Pi builds one component from text, thinking and tool calls together, so the
+   * only way to show a part of it is to feed it a message with the rest removed
+   * and put the real one back afterwards. The result is cached per message and
+   * width: the swap costs one content rebuild, which is what Pi already spends
+   * on every streaming update, and this way it is not spent again per frame.
+   */
+  const speech = new WeakMap<
+    Component,
+    { message: AssistantMessage; width: number; lines: string[] }
+  >();
+
+  function renderSpeech(
+    component: AssistantComponentLike,
+    width: number,
+  ): string[] {
+    const message = component.lastMessage;
+    if (!message) return originalRenderOf(component, width);
+    const spoken = message.content.filter(
+      (content) => content.type !== 'thinking',
+    );
+    if (spoken.length === message.content.length)
+      return originalRenderOf(component, width);
+
+    const cached = speech.get(component);
+    if (cached?.message === message && cached.width === width)
+      return cached.lines;
+
+    originalUpdateContent.call(component, { ...message, content: spoken });
+    try {
+      const lines = originalAssistantRender.call(component, width);
+      speech.set(component, { message, width, lines });
+      return lines;
+    } finally {
+      originalUpdateContent.call(component, message);
+    }
   }
 
   function stateOf(sequence: Sequence): SequenceState {
@@ -442,16 +522,25 @@ export function installToolSequenceShim(
 
   function renderMember(component: Component, width: number): string[] {
     if (!installed) return originalRenderOf(component, width);
+    let sequence: Sequence | undefined;
     try {
       ensureFresh();
-      const sequence = bindings.get(component);
+      sequence = bindings.get(component);
       if (!sequence || sequence.disabled)
         return originalRenderOf(component, width);
+      if (sequence.speaker === component && isAssistant(component))
+        return renderSpeech(component, width);
       if (sequence.leader !== component) return [];
       return renderSequence(sequence, width);
     } catch (error) {
-      // A broken group must never take the transcript down with it.
-      teardown(error);
+      // One broken group must take down neither the transcript nor the whole
+      // feature: that group drops back to Pi's own rendering and the rest carry
+      // on. Only a fault that keeps recurring, or one from deriving the groups
+      // themselves, means the shim is no longer safe to run.
+      failures += 1;
+      if (sequence) sequence.disabled = true;
+      if (sequence && failures < MAX_RENDER_FAILURES) host.onWarn?.(error);
+      else teardown(error);
       return originalRenderOf(component, width);
     }
   }

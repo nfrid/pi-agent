@@ -120,6 +120,11 @@ export default defineExtension('activity-groups', (pi) => {
           `grouping disabled (${error instanceof Error ? error.message : String(error)})`,
         );
       },
+      onWarn: (error) => {
+        warn(
+          `one group fell back to plain rendering (${error instanceof Error ? error.message : String(error)})`,
+        );
+      },
     });
   };
 

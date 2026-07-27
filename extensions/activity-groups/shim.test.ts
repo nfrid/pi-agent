@@ -229,9 +229,12 @@ describe('tool sequence shim', () => {
     h.chat.addChild(answer);
     answer.updateContent(assistantMessage([{ type: 'text', text: 'Done' }]));
 
+    // The answer joins the group it concludes, so its narration counts
+    // towards the title, and closes it — the checkmark lands as soon as the
+    // model starts talking rather than waiting for the run to end.
     expect(h.render()).toEqual([
       'other',
-      'group:group-1:2:done',
+      'group:group-1:3:done',
       'assistant:Done',
     ]);
   });
@@ -384,7 +387,7 @@ describe('tool sequence shim', () => {
     // The commentary renders in full even though it carried a tool call, and
     // the work that follows it is a new group led by the tool itself.
     expect(h.render()).toEqual([
-      'group:group-1:2:done',
+      'group:group-1:3:done',
       'assistant:The leak is in the shutdown path.',
       'group:group-2:1:live',
     ]);
@@ -487,28 +490,43 @@ describe('tool sequence shim', () => {
     ]);
   });
 
-  it('falls back to stock rendering when the renderer throws', () => {
+  it('costs one group when the renderer throws, not the whole feature', () => {
     const onError = vi.fn();
-    const h = harness({ onError });
+    const onWarn = vi.fn();
+    const h = harness({ onError, onWarn });
     uninstall = installToolSequenceShim(() => {
       throw new Error('boom');
     }, h.host);
 
-    const assistant = new FakeAssistant();
-    h.chat.addChild(assistant);
-    assistant.updateContent(toolCallMessage('call-1', 'read'));
-    h.chat.addChild(new FakeTool('read', 'call-1', {}));
+    turn(h, [{ name: 'read' }], 'a');
+    // The broken group shows Pi's own rendering; grouping stays installed.
+    expect(h.render()).toEqual(['assistant:', 'tool:read']);
+    expect(onWarn).toHaveBeenCalledOnce();
+    expect(onError).not.toHaveBeenCalled();
+    expect(FakeTool.prototype.render.name).toBe('patchedToolRender');
+  });
 
-    expect(h.render()).toEqual([
-      'assistant:Reading the auth code',
-      'tool:read',
-    ]);
+  it('gives up once the faults keep coming', () => {
+    const onError = vi.fn();
+    const onWarn = vi.fn();
+    const h = harness({ onError, onWarn });
+    uninstall = installToolSequenceShim(() => {
+      throw new Error('boom');
+    }, h.host);
+
+    // Each new group fails in turn; the third is one too many.
+    for (let index = 0; index < 3; index += 1) {
+      turn(h, [{ name: 'edit' }], `e${index}`);
+      turn(
+        h,
+        [{ name: 'read' }, { name: 'read' }, { name: 'read' }],
+        `r${index}`,
+      );
+      h.render();
+    }
+
     expect(onError).toHaveBeenCalledOnce();
-    // Still stock on later renders, and the patches are gone.
-    expect(h.render()).toEqual([
-      'assistant:Reading the auth code',
-      'tool:read',
-    ]);
+    // Stock rendering from here on, and the patches are gone.
     expect(FakeTool.prototype.render.name).toBe('render');
   });
 
