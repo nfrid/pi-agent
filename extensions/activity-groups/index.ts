@@ -13,6 +13,7 @@ import {
   AssistantMessageComponent,
   type ExtensionAPI,
   type ExtensionContext,
+  type Theme,
   ToolExecutionComponent,
 } from '@earendil-works/pi-coding-agent';
 import type { Container } from '@earendil-works/pi-tui';
@@ -98,9 +99,32 @@ export default defineExtension('activity-groups', (pi) => {
    * otherwise be nothing for it to reveal.
    */
   let opened = false;
+  /** The last theme a live context handed us. See `active`. */
+  let theme: Theme | undefined;
+
+  /**
+   * Read something from the extension context, or nothing if the session it
+   * belonged to has been replaced.
+   *
+   * `/resume`, `/new` and `/fork` retire a context: every accessor on it throws
+   * from then until the next `session_start` arrives. The shim reads the
+   * context from inside `render`, so an unguarded read takes the TUI down with
+   * it — which is exactly what a stale one did. Anything that throws here has
+   * already lost its session, so the context is dropped and grouping runs on
+   * without it until the new one lands.
+   */
+  const active = <T>(read: (ctx: ExtensionContext) => T): T | undefined => {
+    if (!context) return undefined;
+    try {
+      return read(context);
+    } catch {
+      context = undefined;
+      return undefined;
+    }
+  };
 
   const notify = (message: string) =>
-    context?.ui.notify(`activity-groups: ${message}`, 'warning');
+    active((ctx) => ctx.ui.notify(`activity-groups: ${message}`, 'warning'));
 
   /**
    * A group that fell back on its own is a curiosity; grouping going away for
@@ -130,13 +154,17 @@ export default defineExtension('activity-groups', (pi) => {
       toolComponent:
         ToolExecutionComponent as unknown as ShimHost['toolComponent'],
       container: container as unknown as ShimHost['container'],
+      // A replaced session still has its transcript on screen and still has to
+      // render, so the theme it was last drawn in outlives its context.
       getTheme: () => {
-        if (!context) throw new Error('no extension context');
-        return context.ui.theme;
+        theme = active((ctx) => ctx.ui.theme) ?? theme;
+        if (!theme) throw new Error('no extension context');
+        return theme;
       },
       // Idle means the agent is not streaming, so nothing can still be running.
-      isBusy: () => context?.isIdle() === false,
-      isExpanded: () => opened || (context?.ui.getToolsExpanded() ?? false),
+      isBusy: () => active((ctx) => ctx.isIdle()) === false,
+      isExpanded: () =>
+        opened || (active((ctx) => ctx.ui.getToolsExpanded()) ?? false),
       /**
        * A live group already spins and names what it is doing, so Pi's working
        * line under it is the same sentence twice — and the two spinners beat
@@ -144,7 +172,9 @@ export default defineExtension('activity-groups', (pi) => {
        * the model is only thinking or writing an answer, that line is the only
        * sign anything is happening.
        */
-      onLiveChange: (live) => context?.ui.setWorkingVisible?.(!live),
+      onLiveChange: (live) => {
+        active((ctx) => ctx.ui.setWorkingVisible?.(!live));
+      },
       onError: (error) => {
         uninstall = undefined;
         notify(`grouping is off for this session (${reason(error)})`);
