@@ -31,6 +31,29 @@ Keep `useFor` and `avoid` in concrete task shapes rather than adjectives. "Stron
 
 The compact routing table is included in the parent system prompt when the delegate tool is available. Delegated children do not receive orchestration instructions.
 
+## The report contract
+
+A child is asked to report in named sections. Only `Outcome` and `Conclusion` are required; the rest appear when there is something to put in them, which on a small task is often none of them. Requiring all of them would buy padding from a cheap route rather than evidence.
+
+```text
+Outcome: done | partial | blocked | failed
+Conclusion: the answer, or what you completed
+Evidence: file:line, or a check and what it reported
+Validation: each command you ran, and its result
+Changed files: every file you changed
+Risks: material risks left unresolved
+Exceeded: what the task demanded that the run could not supply
+Blocked: the one question the parent must answer
+```
+
+`Outcome` exists because a process exit code cannot express it. A child that finished 60% of its task and said so honestly exits 0 exactly like one that finished, so without a stated outcome the parent has to read prose to tell the two apart, or build on partial work and find out later.
+
+`Exceeded` is how a run says it was under-resourced. It describes the shortfall — what the task demanded, not which model to use — because children never see the route catalog and cannot name a rung. The parent holds the catalog and does the mapping, which puts route diagnosis on the cheap route that discovered the problem instead of the expensive one that would otherwise infer it from a weak result. Escalate by continuing that same child on a stronger route: its session is intact, so the exploration is not paid for twice.
+
+Evidence is asked for as citations and check results rather than as a confidence rating. Models are poor confidence meters, and a claim of certainty cannot be checked, whereas `src/cache.ts:212` and a command's output can be.
+
+The parent extracts these into the handoff envelope described below. Because the envelope is allocated before any body, a section lifted into it survives truncation.
+
 ## Questions back to the parent
 
 A child that cannot settle something itself — the task contradicts what it found, or the call is the parent's to make — stops and ends its report with a `Blocked:` line holding one question. The parent answers by continuing that child, whose session, worktree, route, and scope are all intact.
@@ -38,6 +61,12 @@ A child that cannot settle something itself — the task contradicts what it fou
 There is no live channel, and this is why: while a foreground child runs, the parent is suspended inside its own tool call, so the parent's model cannot answer anything until that call returns. The only party who could answer mid-run is the user, which is a different feature and a less autonomous one. Ending the run *is* the question, and the continuation *is* the answer.
 
 `Blocked:` is extracted into the handoff envelope rather than left in the body, so it sits next to the continuation token and survives truncation — a question that reaches the parent without its answer route is no use. Everything a default and a stated assumption can cover stays a default and a stated assumption.
+
+## What the parent sees
+
+Every run contributes an envelope — status, outcome, continuation, blocker, escalation, artifact, branch, evidence, validation, risks, changed files, truncation — and then as much of its report body as the remaining budget allows. The envelope is measured first and the bodies divide what is left, so the fields the parent acts on cannot be squeezed out by a verbose report.
+
+Body truncation keeps the conclusion. Cutting from the end is right for a report that leads with its answer, but a child that narrates first would lose the one part the parent needs, so when the retained head does not already carry the whole `Conclusion:` section, that section is sent instead of the head. Exact output stays recoverable in the artifact and the child's session either way.
 
 ## Read-only delegates
 

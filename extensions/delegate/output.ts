@@ -44,26 +44,102 @@ function clip(text: string, maxBytes: number): string {
   return out + suffix;
 }
 
-function extractReportField(body: string, label: string): string | undefined {
+/** Sections of the report contract children are asked to follow. */
+const REPORT_LABELS = [
+  'Outcome',
+  'Conclusion',
+  'Evidence',
+  'Validation',
+  'Changed files',
+  'Risks',
+  'Exceeded',
+  'Blocked',
+] as const;
+
+/**
+ * Text after a section heading, or undefined when the line is not that heading.
+ * The label must be followed by a colon or the end of the line, so prose opening
+ * with the same word ("Outcomes improved…") does not read as a section.
+ */
+function headingText(line: string, label: string): string | undefined {
+  // Children write the label bare, as a heading, or bold with the colon inside
+  // the markers; normalising first keeps one pattern for all three.
+  const normalized = line
+    .trim()
+    .replace(/^#{1,6}\s+/, '')
+    .replaceAll('**', '');
+  const match = normalized.match(
+    new RegExp(`^${label}\\s*(?::\\s*(.*))?$`, 'i'),
+  );
+  return match ? (match[1] ?? '') : undefined;
+}
+
+function startsSection(line: string): boolean {
+  const trimmed = line.trim();
+  if (/^#{1,6}\s/.test(trimmed)) return true;
+  return REPORT_LABELS.some(
+    (label) => headingText(trimmed, label) !== undefined,
+  );
+}
+
+function extractReportField(
+  body: string,
+  label: string,
+  maxBytes = 120,
+): string | undefined {
   const lines = body.split(/\r?\n/);
-  const heading = new RegExp(`^(?:#{1,6}\\s*)?${label}\\s*:?\\s*(.*)$`, 'i');
   for (let index = 0; index < lines.length; index++) {
-    const match = lines[index].trim().match(heading);
-    if (!match) continue;
-    const values = match[1] ? [match[1]] : [];
+    const heading = headingText(lines[index], label);
+    if (heading === undefined) continue;
+    const values = heading ? [heading] : [];
     for (
       let next = index + 1;
       next < lines.length && values.length < 5;
       next++
     ) {
       const line = lines[next].trim();
-      if (!line || /^#{1,6}\s/.test(line)) break;
+      // A bare heading is usually followed by a blank line and then its list.
+      if (!line) {
+        if (values.length) break;
+        continue;
+      }
+      if (startsSection(line)) break;
       values.push(line.replace(/^[-*]\s+/, ''));
     }
     const value = values.join(', ').trim();
-    return value ? clip(value, 120) : undefined;
+    return value ? clip(value, maxBytes) : undefined;
   }
   return undefined;
+}
+
+/** The conclusion with its line structure intact, unlike the flattened envelope fields. */
+function conclusionSection(body: string): string | undefined {
+  const lines = body.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index++) {
+    if (headingText(lines[index], 'Conclusion') === undefined) continue;
+    // Keeps its own heading, so re-truncating an already-reduced body finds it again.
+    const collected = [lines[index].trim()];
+    for (let next = index + 1; next < lines.length; next++) {
+      if (startsSection(lines[next])) break;
+      collected.push(lines[next]);
+    }
+    const text = collected.join('\n').trim();
+    return text || undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Keeps the answer when the body has to be cut. Truncation runs from the end, so
+ * a child that narrates before concluding would otherwise lose the one part the
+ * parent needs; fall back to the conclusion alone when the head does not carry it.
+ */
+function truncateBody(original: string, maxBytes: number): string {
+  const head = truncateBytes(original, maxBytes);
+  if (head === original) return original;
+  const conclusion = conclusionSection(original);
+  if (!conclusion || head.includes(conclusion)) return head;
+  return truncateBytes(conclusion, maxBytes);
 }
 
 /** The question a child stopped on, when it ended its report with one. */
@@ -86,16 +162,24 @@ interface PreparedRun {
 
 function prepareRun(run: DelegatedRun, bodyCap: number): PreparedRun {
   const original = runBody(run);
-  const body = truncateBytes(original, bodyCap);
+  const body = truncateBody(original, bodyCap);
   const bodyTruncated = body !== original;
   const lines = [`Status: ${getRunState(run)}`];
+  // Mandatory metadata, so what the parent decides on survives body truncation.
+  // Outcome leads: the process exiting cleanly says nothing about whether the
+  // task reached its finish line.
+  const outcome = extractReportField(original, 'Outcome', 32);
+  if (outcome) lines.push(`Outcome: ${outcome}`);
   if (run.continuation) lines.push(`Continuation: ${run.continuation}`);
-  // Mandatory metadata, so a child's question survives body truncation and
-  // arrives next to the token that answers it.
-  const blocked = extractReportField(original, 'Blocked');
+  const blocked = extractReportField(original, 'Blocked', 240);
   if (blocked)
     lines.push(
       `Blocked: ${blocked} — answer it and continue this subagent; its context is intact.`,
+    );
+  const exceeded = extractReportField(original, 'Exceeded', 240);
+  if (exceeded)
+    lines.push(
+      `Exceeded: ${exceeded} — continue this subagent on a route that covers it rather than re-briefing a fresh one.`,
     );
   if (run.artifact)
     lines.push(
@@ -121,8 +205,12 @@ function prepareRun(run: DelegatedRun, bodyCap: number): PreparedRun {
   );
   if (warnings.length)
     lines.push(`Warnings: ${clip(warnings.join('; '), 120)}`);
-  const validation = extractReportField(original, 'Validation');
+  const evidence = extractReportField(original, 'Evidence', 400);
+  if (evidence) lines.push(`Evidence: ${evidence}`);
+  const validation = extractReportField(original, 'Validation', 240);
   if (validation) lines.push(`Validation: ${validation}`);
+  const risks = extractReportField(original, 'Risks', 240);
+  if (risks) lines.push(`Risks: ${risks}`);
   const changed = extractReportField(original, 'Changed files');
   if (changed) lines.push(`Changed files: ${changed}`);
   lines.push(
@@ -169,7 +257,7 @@ export function buildParentHandoff(
       if (remaining <= prefixBytes)
         return { ...item, body: '', bodyTruncated: true };
       const available = remaining - prefixBytes;
-      const body = truncateBytes(item.body, available);
+      const body = truncateBody(item.body, available);
       emitted = true;
       remaining -= prefixBytes + Buffer.byteLength(body, 'utf8');
       return {

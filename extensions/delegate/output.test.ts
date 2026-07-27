@@ -117,6 +117,141 @@ describe('output', () => {
     expect(buildParentHandoff([run])).not.toContain('Blocked:');
   });
 
+  test('lifts the contract sections the parent decides on into the envelope', () => {
+    const run = createRun('audit the cache', undefined, {
+      continuation: 'contract-token',
+    });
+    run.exitCode = 0;
+    run.state = 'success';
+    run.messages = [
+      {
+        ...assistantMessage,
+        content: [
+          {
+            type: 'text',
+            text: [
+              'Outcome: partial',
+              'Conclusion: the eviction path is wrong under concurrent reads',
+              'Evidence:',
+              '- src/cache.ts:212 drops the lock before the write',
+              '- src/cache.ts:240 assumes the entry is still present',
+              'Validation: npm test — 4 failed',
+              'Risks: the fix may change eviction order for existing callers',
+              `${'narration '.repeat(3000)}`,
+            ].join('\n\n'),
+          },
+        ],
+      } as never,
+    ];
+
+    const output = buildParentHandoff([run], {
+      ...PARENT_HANDOFF_CAPS,
+      singleMaxBytes: 2048,
+    });
+    expect(output).toContain('Outcome: partial');
+    expect(output).toContain('Evidence: src/cache.ts:212 drops the lock');
+    expect(output).toContain('src/cache.ts:240');
+    expect(output).toContain('Validation: npm test — 4 failed');
+    expect(output).toContain('Risks: the fix may change eviction order');
+    expect(output).toContain('Truncation: body truncated');
+    expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(2048);
+  });
+
+  test('routes an exceeded task back to its own continuation', () => {
+    const run = createRun('trace the cancellation path', undefined, {
+      continuation: 'exceeded-token',
+    });
+    run.exitCode = 0;
+    run.state = 'success';
+    run.messages = [
+      {
+        ...assistantMessage,
+        content: [
+          {
+            type: 'text',
+            text: '**Outcome:** partial\n\n**Exceeded:** this needs cancellation reasoning across the runner, the worktree lifecycle, and the job manager at once\n',
+          },
+        ],
+      } as never,
+    ];
+    const output = buildParentHandoff([run]);
+    expect(output).toContain('Outcome: partial');
+    expect(output).toContain('Exceeded: this needs cancellation reasoning');
+    expect(output).toContain(
+      'continue this subagent on a route that covers it',
+    );
+    expect(output).toContain('Continuation: exceeded-token');
+  });
+
+  test('keeps the conclusion when the child narrates before answering', () => {
+    const run = createRun('review the diff', undefined, {});
+    run.exitCode = 0;
+    run.state = 'success';
+    run.messages = [
+      {
+        ...assistantMessage,
+        content: [
+          {
+            type: 'text',
+            text: `${'I started by reading every caller. '.repeat(2000)}\n\nConclusion: the retry wrapper swallows AbortError, so cancellation never propagates.`,
+          },
+        ],
+      } as never,
+    ];
+    const output = buildParentHandoff([run], {
+      ...PARENT_HANDOFF_CAPS,
+      singleMaxBytes: 1024,
+    });
+    expect(output).toContain(
+      'Conclusion: the retry wrapper swallows AbortError',
+    );
+    expect(output).toContain('Truncation: body truncated');
+    expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(1024);
+  });
+
+  test('leaves a body that already carries its conclusion alone', () => {
+    const run = createRun('review the diff', undefined, {});
+    run.exitCode = 0;
+    run.state = 'success';
+    run.messages = [
+      {
+        ...assistantMessage,
+        content: [
+          {
+            type: 'text',
+            text: `Conclusion: the guard is correct.\n\n${'supporting detail '.repeat(2000)}`,
+          },
+        ],
+      } as never,
+    ];
+    const output = buildParentHandoff([run], {
+      ...PARENT_HANDOFF_CAPS,
+      singleMaxBytes: 1024,
+    });
+    expect(output).toContain('Conclusion: the guard is correct.');
+    expect(output).toContain('supporting detail');
+  });
+
+  test('does not read prose opening with a section word as a section', () => {
+    const run = createRun('summarise', undefined, {});
+    run.exitCode = 0;
+    run.state = 'success';
+    run.messages = [
+      {
+        ...assistantMessage,
+        content: [
+          {
+            type: 'text',
+            text: 'Outcomes improved after the change, and risks were reviewed throughout.',
+          },
+        ],
+      } as never,
+    ];
+    const output = buildParentHandoff([run]);
+    expect(output).not.toContain('Outcome:');
+    expect(output).not.toContain('Risks:');
+  });
+
   test('keeps successful handoff and metadata when artifact creation fails', async () => {
     const run = createRun('protected task', undefined, {
       continuation: 'continue-after-artifact-failure',
