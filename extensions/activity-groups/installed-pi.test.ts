@@ -4,8 +4,12 @@
  * The shim patches unpublished component internals, so a `pi update` can break
  * it without any change in this repo. This drives the real installed build:
  * derive `Container` from the class chain, patch, render a live sequence, then
- * uninstall and confirm stock rendering returns. Skipped when the installed
- * build cannot be located (CI, a Bun binary install, `PI_DIST` unset).
+ * uninstall and confirm stock rendering returns.
+ *
+ * A canary that cannot be found is a canary that did not sing, so not finding
+ * the build is itself reported: locally it warns, and anywhere the canary is
+ * meant to be load-bearing `PI_CANARY_REQUIRED=1` turns that into a failure.
+ * Without it a green run would otherwise imply a check that never happened.
  */
 
 import { existsSync } from 'node:fs';
@@ -22,23 +26,24 @@ const PACKAGE_ENTRY = '@earendil-works/pi-coding-agent/dist/index.js';
  * Prefer the globally installed CLI — that is the build the TUI runs — and fall
  * back to this repo's pinned copy, which still catches shape drift on upgrade.
  */
-function findInstalledPi(): string | undefined {
+function piCandidates(): string[] {
+  // An explicit pointer is the whole search: silently canarying some other
+  // build than the one asked for is worse than reporting that it is missing.
+  if (process.env.PI_DIST) return [process.env.PI_DIST];
   const globalRoots = [
     '/opt/homebrew/lib/node_modules',
     '/usr/local/lib/node_modules',
     path.join(path.dirname(process.execPath), '..', 'lib', 'node_modules'),
   ];
-  const candidates = [
-    process.env.PI_DIST,
+  return [
     ...globalRoots.map((root) => path.join(root, PACKAGE_ENTRY)),
     path.join(process.cwd(), 'node_modules', PACKAGE_ENTRY),
   ];
-  return candidates.find(
-    (candidate): candidate is string => !!candidate && existsSync(candidate),
-  );
 }
 
-const installedPi = findInstalledPi();
+const candidates = piCandidates();
+const installedPi = candidates.find((candidate) => existsSync(candidate));
+const REQUIRED = Boolean(process.env.PI_CANARY_REQUIRED);
 
 function message(
   content: AssistantMessage['content'] = [
@@ -66,6 +71,23 @@ function message(
 }
 
 const theme = { fg: (_color: string, text: string) => text } as Theme;
+
+describe('installed pi build canary', () => {
+  it('has a build to drive', () => {
+    if (installedPi) {
+      expect(existsSync(installedPi)).toBe(true);
+      return;
+    }
+    const searched = candidates.join('\n  ');
+    if (REQUIRED)
+      throw new Error(
+        `PI_CANARY_REQUIRED is set but no installed Pi build was found. Searched:\n  ${searched}`,
+      );
+    console.warn(
+      `activity-groups: no installed Pi build found, so the shim's assumptions about Pi's internals went unchecked. Searched:\n  ${searched}\nSet PI_DIST to a build, or PI_CANARY_REQUIRED=1 to make this a failure.`,
+    );
+  });
+});
 
 describe.skipIf(!installedPi)('installed pi build', () => {
   it('groups and ungroups the real interactive components', async () => {
