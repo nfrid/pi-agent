@@ -2,8 +2,8 @@ import path from 'node:path';
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
-import { stringArg, toolBaseName, toolPath } from './grouping';
-import { describeTools, headersOf, isMetaHeader, toPastTense } from './title';
+import { stringArg, toolBaseName, toolPath, toolRole } from './grouping';
+import { composeTitle, describeTools, headersOf } from './title';
 import type {
   SequenceItem,
   SequenceOptions,
@@ -15,7 +15,9 @@ type ToolItem = Extract<SequenceItem, { type: 'tool' }>;
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const SPINNER_INTERVAL_MS = 80;
-const MAX_COMMAND_WIDTH = 60;
+const MAX_COMMAND_WIDTH = 56;
+const MAX_SUMMARY_COMMAND_WIDTH = 32;
+const MAX_ACTIVITY_LINES = 3;
 
 function displayPath(value: string, cwd: string): string {
   const relative = path
@@ -33,7 +35,7 @@ function toolSubject(tool: ToolItem, cwd: string): string {
   if (name === 'bash' || name === 'inspect_shell') {
     const command = stringArg(tool.args, 'command');
     return command
-      ? `${name === 'bash' ? 'Running' : 'Checking'} ${command.split('\n')[0]?.slice(0, MAX_COMMAND_WIDTH)}`
+      ? `${name === 'bash' ? 'Running' : 'Checking'} ${shortCommand(command, MAX_COMMAND_WIDTH)}`
       : 'Running command';
   }
   const pattern = stringArg(tool.args, 'pattern');
@@ -63,6 +65,76 @@ function commonDirectory(files: readonly string[]): string | undefined {
       shared -= 1;
   const directory = first.slice(0, shared).join('/');
   return directory || undefined;
+}
+
+/** Search patterns are regexes and can be enormous; show only the head. */
+function shortPattern(value: string): string {
+  return value.length > MAX_SUMMARY_COMMAND_WIDTH
+    ? `${value.slice(0, MAX_SUMMARY_COMMAND_WIDTH)}…`
+    : value;
+}
+
+/** "a.ts, b.ts and 3 more" — a readable list that never runs away. */
+function list(values: readonly string[], limit: number): string {
+  const shown = values.slice(0, limit);
+  const extra = values.length - shown.length;
+  const joined = shown.join(', ');
+  return extra > 0 ? `${joined} and ${extra} more` : joined;
+}
+
+/**
+ * The recognisable head of a command. Agents chain shell one-liners with `&&`
+ * and pipes, and sixty characters of that is noise — what identifies the call
+ * is how it starts, so everything past the first segment is dropped.
+ */
+function shortCommand(value: string, width: number): string {
+  const head = (value.split('\n')[0] ?? value).split(/&&|\|\||[;|]/)[0]?.trim();
+  if (!head) return 'command';
+  return head.length > width ? `${head.slice(0, width).trimEnd()}…` : head;
+}
+
+/**
+ * What the group actually did, in words. A count of calls says nothing about
+ * whether the agent read the code or rewrote it, so the files it changed and
+ * the commands it ran get named — those are the parts worth scanning for.
+ * Ordered by how much they matter, and capped so a group stays a summary.
+ */
+function activityLines(
+  tools: readonly ToolItem[],
+  cwd: string,
+  limit: number,
+): string[] {
+  const byRole = <T>(role: string, pick: (tool: ToolItem) => T | undefined) => [
+    ...new Set(
+      tools
+        .filter((tool) => toolRole(tool.name) === role)
+        .map(pick)
+        .filter((value): value is T & {} => value !== undefined),
+    ),
+  ];
+
+  const edited = byRole('edit', (tool) => {
+    const target = toolPath(tool.args);
+    return target
+      ? (displayPath(target, cwd).split('/').at(-1) ?? '')
+      : undefined;
+  });
+  const commands = byRole('command', (tool) => {
+    const command = stringArg(tool.args, 'command');
+    return command
+      ? shortCommand(command, MAX_SUMMARY_COMMAND_WIDTH)
+      : undefined;
+  });
+  const searches = byRole('search', (tool) => stringArg(tool.args, 'pattern'));
+  const reads = tools.filter((tool) => toolRole(tool.name) === 'read').length;
+
+  const lines: string[] = [];
+  if (edited.length > 0) lines.push(`Edited ${list(edited, 4)}`);
+  if (commands.length > 0) lines.push(`Ran ${list(commands, 2)}`);
+  if (searches.length > 0)
+    lines.push(`Searched for ${list(searches.map(shortPattern), 2)}`);
+  if (reads > 0) lines.push(`Read ${count(reads, 'file')}`);
+  return lines.slice(0, limit);
 }
 
 function formatDuration(milliseconds: number): string {
@@ -125,17 +197,15 @@ export class ActivityGroupComponent implements Component {
 
   /**
    * Live groups are titled by the newest narration header, so the line tracks
-   * the work as it moves. Settled groups take the first header that names real
-   * work, skipping the "Planning …" preamble a phase so often opens with.
+   * the work as it moves. Settled groups compose the whole group's narration,
+   * because by then the interesting thing is what the phase amounted to.
    */
   private title(tools: readonly ToolItem[], completed: boolean): string {
     const headers = this.sequence.items.flatMap((item) =>
       item.type === 'assistant' ? headersOf(item.message) : [],
     );
-    const header = completed
-      ? (headers.find((candidate) => !isMetaHeader(candidate)) ?? headers[0])
-      : headers.at(-1);
-    if (header) return completed ? toPastTense(header) : header;
+    const title = completed ? composeTitle(headers) : headers.at(-1);
+    if (title) return title;
     const files = this.files(tools);
     return describeTools(tools, commonDirectory(files) ?? files[0], completed);
   }
@@ -188,6 +258,15 @@ export class ActivityGroupComponent implements Component {
           ),
         );
     }
+
+    // Naming what was done is the point of a collapsed group; while it is
+    // still live the sub-line above already carries the current call.
+    for (const line of activityLines(
+      tools,
+      this.sequence.cwd,
+      completed ? MAX_ACTIVITY_LINES : 1,
+    ))
+      lines.push(truncateToWidth(`   ${this.theme.fg('muted', line)}`, width));
 
     const files = this.files(tools);
     const directory = commonDirectory(files);

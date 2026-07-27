@@ -8,10 +8,9 @@
  * label. We only fall back to describing the tools when there is no narration.
  *
  * A group has two titles. While it is live the *latest* header wins, so the
- * line tracks what the agent is doing right now. Once it settles the *earliest
- * substantive* header wins: a finished group should say what it was for rather
- * than where it happened to stop, but not attribute the work to the "Planning
- * …" preamble that so often comes first.
+ * line tracks what the agent is doing right now. Once it settles, the whole
+ * group's narration is composed into one phrase — see `composeTitle` — because
+ * no single header describes a phase that planned something and then built it.
  */
 
 import type { AssistantMessage } from '@earendil-works/pi-ai';
@@ -73,28 +72,6 @@ const PAST_TENSE: Readonly<Record<string, string>> = {
   Writing: 'Wrote',
 };
 
-/**
- * Verbs that announce intent rather than work. A group very often opens with
- * "Planning repository inspection" and only then does the inspecting, and
- * labelling 25 file reads "Planned" describes the wrong thing — so a settled
- * group skips past these to the first header that names actual work.
- */
-const META_VERBS = new Set([
-  'Planning',
-  'Preparing',
-  'Considering',
-  'Deciding',
-  'Determining',
-  'Clarifying',
-  'Thinking',
-  'Weighing',
-]);
-
-export function isMetaHeader(title: string): boolean {
-  const [verb] = title.split(' ');
-  return verb !== undefined && META_VERBS.has(verb);
-}
-
 function clean(value: string): string | undefined {
   const title = value.trim().replace(/[.…:]+$/, '');
   if (!title || title.length > MAX_TITLE_LENGTH) return undefined;
@@ -122,10 +99,85 @@ export function headersOf(message: AssistantMessage): string[] {
   return headers;
 }
 
+/**
+ * Regular "-ing" to "-ed", for the long tail the table cannot enumerate:
+ * Inferring → Inferred, Aligning → Aligned, Modifying → Modified, Tracing →
+ * Traced. Irregulars stay in the table above, which is consulted first.
+ */
+function derivePastTense(verb: string): string | undefined {
+  if (!/^[A-Za-z]+ing$/.test(verb)) return undefined;
+  const stem = verb.slice(0, -3);
+  if (stem.length < 2) return undefined;
+  // The consonant doubling that "-ing" introduced is kept, because the past
+  // tense doubles it too: Inferring → Inferr → Inferred, not Infered.
+  if (/[^aeiou]y$/i.test(stem)) return `${stem.slice(0, -1)}ied`;
+  return `${stem}ed`;
+}
+
+/**
+ * Verbs that announce intent rather than work. A group may well open with one —
+ * "Planning the thing" — and saying so is honest, but planning is never what a
+ * group should be *named* for when it also went and did something.
+ */
+const META_VERBS = new Set([
+  'Planning',
+  'Preparing',
+  'Considering',
+  'Deciding',
+  'Determining',
+  'Clarifying',
+  'Thinking',
+  'Weighing',
+]);
+
 export function toPastTense(title: string): string {
   const [first, ...rest] = title.split(' ');
-  const past = first ? PAST_TENSE[first] : undefined;
+  if (!first) return title;
+  const past = PAST_TENSE[first] ?? derivePastTense(first);
   return past ? [past, ...rest].join(' ') : title;
+}
+
+/**
+ * Title a finished group from all of its narration at once.
+ *
+ * No single header describes a phase that planned something and then built it:
+ * the first header undersells it ("Planned the thing" for work that shipped),
+ * the last one is wherever the model happened to stop ("Implemented T4" when
+ * T1-T4 were the job). So the verb comes from what the group actually did —
+ * how it opened and what it spent most of its time on — and the subject from
+ * the header that named the goal, giving "Planned and implemented the thing".
+ */
+export function composeTitle(headers: readonly string[]): string | undefined {
+  const parsed = headers
+    .map((header) => {
+      const [verb = '', ...rest] = header.split(' ');
+      return { verb, rest: rest.join(' ') };
+    })
+    .filter((entry) => entry.verb);
+  const first = parsed[0];
+  if (!first) return undefined;
+
+  const counts = new Map<string, number>();
+  for (const { verb } of parsed) counts.set(verb, (counts.get(verb) ?? 0) + 1);
+  // What the group spent itself on — never "Planning", even if it said so most.
+  let dominant = first.verb;
+  for (const { verb } of parsed) {
+    if (META_VERBS.has(verb)) continue;
+    if (
+      META_VERBS.has(dominant) ||
+      (counts.get(verb) ?? 0) > (counts.get(dominant) ?? 0)
+    )
+      dominant = verb;
+  }
+
+  // The goal is stated by the opening header; later ones name sub-steps.
+  const subject = first.rest || parsed.find((entry) => entry.rest)?.rest || '';
+  const verbs =
+    dominant === first.verb
+      ? [toPastTense(first.verb)]
+      : [toPastTense(first.verb), toPastTense(dominant).toLowerCase()];
+  const phrase = verbs.join(' and ');
+  return subject ? `${phrase} ${subject}` : phrase;
 }
 
 /**

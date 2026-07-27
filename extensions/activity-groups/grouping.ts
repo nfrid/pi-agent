@@ -55,6 +55,18 @@ const VALIDATION_COMMAND =
  */
 export const MAX_GROUP_CALLS = 25;
 
+/** What a tool call does, for describing a group in plain words. */
+export type ToolRole = 'edit' | 'read' | 'search' | 'command' | 'other';
+
+export function toolRole(name: string): ToolRole {
+  const base = toolBaseName(name);
+  if (MUTATION_TOOLS.has(base)) return 'edit';
+  if (base === 'grep' || base === 'find' || base === 'glob') return 'search';
+  if (base === 'bash' || base === 'inspect_shell') return 'command';
+  if (INSPECTION_TOOLS.has(base)) return 'read';
+  return 'other';
+}
+
 export function toolBaseName(name: string): string {
   return name.split('.').at(-1) ?? name;
 }

@@ -96,6 +96,57 @@ describe('activity groups renderer', () => {
     (component as unknown as { dispose(): void }).dispose();
   });
 
+  it('says what was done, not just how many calls it took', () => {
+    const renderer = createActivityGroupRenderer();
+    const ctx = context();
+    const tool = (
+      id: string,
+      name: string,
+      args: Record<string, unknown>,
+    ): SequenceSnapshot['items'][number] => ({
+      type: 'tool',
+      id,
+      name,
+      args,
+      status: 'complete',
+      isError: false,
+    });
+    const sequence: SequenceSnapshot = {
+      id: 'sequence-5',
+      cwd: process.cwd(),
+      startedAt: 1000,
+      completedAt: 5000,
+      failed: false,
+      items: [
+        tool('e1', 'edit', { path: 'src/commands/workflows.ts' }),
+        tool('e2', 'write', { path: 'src/commands/brief.ts' }),
+        tool('r1', 'read', { path: 'src/commands/index.ts' }),
+        tool('r2', 'read', { path: 'src/commands/types.ts' }),
+        tool('g1', 'grep', { pattern: 'resolveVerification' }),
+        // Chained one-liners are noise past the first segment.
+        tool('b1', 'bash', {
+          command: 'bun test src/commands && bunx biome ci',
+        }),
+      ],
+    };
+
+    const component = renderer(
+      sequence,
+      { streaming: false, expanded: false, defaultView: new Text('', 0, 0) },
+      theme,
+      ctx,
+    );
+    if (!component) throw new Error('renderer returned no component');
+    const output = component.render(100).join('\n');
+    expect(output).toContain('Edited workflows.ts, brief.ts');
+    expect(output).toContain('Ran bun test src/commands');
+    expect(output).not.toContain('biome ci');
+    expect(output).toContain('Searched for resolveVerification');
+    // Capped at three lines, and a read count is the least worth keeping.
+    expect(output).not.toContain('Read 2 files');
+    (component as unknown as { dispose(): void }).dispose();
+  });
+
   it('omits the duration for sequences replayed from history', () => {
     const renderer = createActivityGroupRenderer();
     const ctx = context();
@@ -172,7 +223,7 @@ describe('activity groups renderer', () => {
           message: message([
             {
               type: 'thinking',
-              thinking: '**Planning repository inspection**',
+              thinking: '**Planning the delegate shutdown fix**',
             },
           ]),
           provisional: false,
@@ -191,7 +242,7 @@ describe('activity groups renderer', () => {
             {
               type: 'thinking',
               thinking:
-                'some prose\n\n**Identifying race condition in shutdown**\n\nmore prose',
+                'some prose\n\n**Implementing the shutdown guard**\n\nmore prose',
             },
           ]),
           provisional: false,
@@ -217,7 +268,7 @@ describe('activity groups renderer', () => {
     ctx.lastComponent = component;
     // Live: the newest header, so the line says what is happening right now.
     expect(component.render(100).join('\n')).toContain(
-      'Identifying race condition in shutdown',
+      'Implementing the shutdown guard',
     );
 
     renderer(
@@ -227,10 +278,13 @@ describe('activity groups renderer', () => {
       ctx,
     );
     const settled = component.render(100).join('\n');
-    // Settled: the earliest header naming real work, in past tense. The
-    // "Planning …" preamble the group opened with is skipped.
-    expect(settled).toContain('Identified race condition in shutdown');
-    expect(settled).not.toContain('Planned');
+    // Settled: the whole group's narration in one past-tense phrase, so a
+    // group that planned something and then built it says both.
+    expect(settled).toContain(
+      'Planned and implemented the delegate shutdown fix',
+    );
+    // What it actually did, not just how many calls it took.
+    expect(settled).toContain('Read 2 files');
     // The shared directory locates the group at a glance.
     expect(settled).toContain('2 files in extensions/delegate');
     (component as unknown as { dispose(): void }).dispose();

@@ -1,0 +1,69 @@
+import { describe, expect, it } from 'vitest';
+import { composeTitle, toPastTense } from './title';
+
+describe('toPastTense', () => {
+  it('uses the table for irregulars', () => {
+    expect(toPastTense('Writing the shim')).toBe('Wrote the shim');
+    expect(toPastTense('Running the suite')).toBe('Ran the suite');
+    expect(toPastTense('Reading jobs.ts')).toBe('Read jobs.ts');
+  });
+
+  it('derives the regular forms the table cannot enumerate', () => {
+    expect(toPastTense('Aligning the columns')).toBe('Aligned the columns');
+    expect(toPastTense('Modifying the parser')).toBe('Modified the parser');
+    // "-ing" already doubled the consonant and the past tense keeps it.
+    expect(toPastTense('Inferring conventions')).toBe('Inferred conventions');
+  });
+
+  it('leaves anything that is not a participle alone', () => {
+    expect(toPastTense('Quick fix for shutdown')).toBe(
+      'Quick fix for shutdown',
+    );
+    expect(toPastTense('')).toBe('');
+  });
+});
+
+describe('composeTitle', () => {
+  it('joins how a group opened with what it spent itself on', () => {
+    expect(
+      composeTitle([
+        'Planning the activity groups rework',
+        'Implementing T1',
+        'Implementing T2 and T3',
+        'Implementing T4',
+      ]),
+    ).toBe('Planned and implemented the activity groups rework');
+  });
+
+  it('does not repeat the verb when the group never changed register', () => {
+    expect(
+      composeTitle(['Inspecting authentication code', 'Inspecting the tests']),
+    ).toBe('Inspected authentication code');
+  });
+
+  it('names the group for real work rather than the intent it announced', () => {
+    // "Planning" is said twice and "Fixing" once, but planning is not what a
+    // group is *for* — the dominant verb is picked from the work.
+    expect(
+      composeTitle([
+        'Planning the shutdown fix',
+        'Planning the rollout',
+        'Fixing the race',
+      ]),
+    ).toBe('Planned and fixed the shutdown fix');
+  });
+
+  it('borrows a subject when the opening header is bare', () => {
+    expect(composeTitle(['Investigating', 'Fixing the deadlock'])).toBe(
+      'Investigated the deadlock',
+    );
+  });
+
+  it('survives narration that is only a verb', () => {
+    expect(composeTitle(['Debugging'])).toBe('Debugged');
+  });
+
+  it('has nothing to say without narration', () => {
+    expect(composeTitle([])).toBeUndefined();
+  });
+});
