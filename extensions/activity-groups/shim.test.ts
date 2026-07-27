@@ -178,6 +178,35 @@ function harness(overrides: Partial<ShimHost> = {}): Harness {
   };
 }
 
+/** Append a model turn: one assistant message plus the tools it called. */
+function turn(
+  h: Harness,
+  tools: { name: string; args?: unknown }[],
+  prefix = 't',
+): FakeTool[] {
+  const assistant = new FakeAssistant();
+  h.chat.addChild(assistant);
+  assistant.updateContent(
+    assistantMessage(
+      tools.map((tool, index) => ({
+        type: 'toolCall' as const,
+        id: `${prefix}-${index}`,
+        name: tool.name,
+        arguments: {},
+      })),
+    ),
+  );
+  return tools.map((tool, index) => {
+    const component = new FakeTool(
+      tool.name,
+      `${prefix}-${index}`,
+      tool.args ?? {},
+    );
+    h.chat.addChild(component);
+    return component;
+  });
+}
+
 afterEach(() => {
   uninstall?.();
   uninstall = undefined;
@@ -274,7 +303,12 @@ describe('tool sequence shim', () => {
     ).toEqual(['Reading the auth code', 'Reading the session store']);
   });
 
-  it('starts a new sequence when the work changes character', () => {
+  /**
+   * Where the boundaries fall is `grouping.test.ts`'s subject; what this proves
+   * is the wiring — that the components are read into a transcript the grouper
+   * can split, and that a split comes back out as two rendered groups.
+   */
+  it('renders a grouping boundary as two sequences', () => {
     const { renderer } = recordingRenderer();
     const h = harness();
     uninstall = installToolSequenceShim(renderer, h.host);
@@ -291,114 +325,6 @@ describe('tool sequence shim', () => {
     expect(h.render()).toEqual([
       'group:group-1:2:done',
       'group:group-2:2:live',
-    ]);
-  });
-
-  /** Append a model turn: one assistant message plus the tools it called. */
-  function turn(
-    h: Harness,
-    tools: { name: string; args?: unknown }[],
-    prefix = 't',
-  ): FakeTool[] {
-    const assistant = new FakeAssistant();
-    h.chat.addChild(assistant);
-    assistant.updateContent(
-      assistantMessage(
-        tools.map((tool, index) => ({
-          type: 'toolCall' as const,
-          id: `${prefix}-${index}`,
-          name: tool.name,
-          arguments: {},
-        })),
-      ),
-    );
-    return tools.map((tool, index) => {
-      const component = new FakeTool(
-        tool.name,
-        `${prefix}-${index}`,
-        tool.args ?? {},
-      );
-      h.chat.addChild(component);
-      return component;
-    });
-  }
-
-  it('merges consecutive turns of the same kind into one sequence', () => {
-    const { renderer, snapshots } = recordingRenderer();
-    const h = harness();
-    uninstall = installToolSequenceShim(renderer, h.host);
-
-    turn(h, [{ name: 'read' }, { name: 'read' }], 'a');
-    turn(h, [{ name: 'grep' }], 'b');
-    turn(h, [{ name: 'read' }], 'c');
-
-    // Three turns of exploration read as one phase, not three groups.
-    expect(h.render()).toEqual(['group:group-1:7:live']);
-    expect(
-      snapshots.at(-1)?.items.filter((item) => item.type === 'tool'),
-    ).toHaveLength(4);
-  });
-
-  it('splits when editing begins but absorbs reads back into the edit', () => {
-    const { renderer } = recordingRenderer();
-    const h = harness();
-    uninstall = installToolSequenceShim(renderer, h.host);
-
-    turn(h, [{ name: 'read' }], 'a');
-    turn(h, [{ name: 'edit' }], 'b');
-    // Looking something up mid-edit is not a new phase.
-    turn(h, [{ name: 'read' }], 'c');
-    turn(h, [{ name: 'edit' }], 'd');
-
-    expect(h.render()).toEqual([
-      'group:group-1:2:done',
-      'group:group-2:6:live',
-    ]);
-  });
-
-  it('keeps an edit and check loop in one sequence', () => {
-    const { renderer } = recordingRenderer();
-    const h = harness();
-    uninstall = installToolSequenceShim(renderer, h.host);
-
-    turn(h, [{ name: 'edit' }], 'a');
-    turn(h, [{ name: 'bash', args: { command: 'npm test' } }], 'b');
-    turn(h, [{ name: 'edit' }], 'c');
-    turn(h, [{ name: 'bash', args: { command: 'npm test' } }], 'd');
-
-    // Making a change work is one activity, however many times it loops.
-    expect(h.render()).toEqual(['group:group-1:8:live']);
-  });
-
-  it('starts a new sequence when exploration turns into editing', () => {
-    const { renderer } = recordingRenderer();
-    const h = harness();
-    uninstall = installToolSequenceShim(renderer, h.host);
-
-    turn(h, [{ name: 'read' }], 'a');
-    turn(h, [{ name: 'bash', args: { command: 'git status' } }], 'b');
-    turn(h, [{ name: 'edit' }], 'c');
-
-    // Shell commands stay connective tissue; the first edit is the boundary.
-    expect(h.render()).toEqual([
-      'group:group-1:4:done',
-      'group:group-2:2:live',
-    ]);
-  });
-
-  it('caps a long run so one group cannot swallow the transcript', () => {
-    const { renderer } = recordingRenderer();
-    const h = harness();
-    uninstall = installToolSequenceShim(renderer, h.host);
-
-    for (let index = 0; index < 30; index += 1)
-      turn(h, [{ name: 'read' }], `t${index}`);
-
-    // 30 reads are several times MAX_GROUP_CALLS, so they land in chunks.
-    expect(h.render()).toEqual([
-      'group:group-1:24:done',
-      'group:group-2:24:done',
-      'group:group-3:12:live',
     ]);
   });
 
@@ -444,24 +370,6 @@ describe('tool sequence shim', () => {
     expect(h.render()).toEqual([
       'group:group-1:2:done',
       'group:group-2:2:live',
-    ]);
-  });
-
-  it('ends a build once it goes back to looking around', () => {
-    const { renderer } = recordingRenderer();
-    const h = harness();
-    uninstall = installToolSequenceShim(renderer, h.host);
-
-    turn(h, [{ name: 'edit' }], 'a');
-    // A couple of lookups belong to the edit that prompted them.
-    turn(h, [{ name: 'read' }, { name: 'read' }], 'b');
-    expect(h.render()).toEqual(['group:group-1:5:live']);
-
-    // A sustained run of them is the agent off finding something else out.
-    turn(h, [{ name: 'read' }, { name: 'grep' }, { name: 'read' }], 'c');
-    expect(h.render()).toEqual([
-      'group:group-1:5:done',
-      'group:group-2:4:live',
     ]);
   });
 
