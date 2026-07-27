@@ -2,6 +2,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
 import { TOOL_NAME } from './constants';
+import { askThroughDialogs } from './dialogs';
 import { normalizeChoices, resultText } from './format';
 import { ParamsSchema } from './schema';
 import type { Answer, UiResult } from './types';
@@ -37,10 +38,12 @@ function registerAskUserTool(pi: ExtensionAPI): void {
         throw new Error('Cannot ask user: interactive TUI is not available.');
 
       const choices = normalizeChoices(params);
-      const result = await ctx.ui.custom<UiResult>(
-        (tui, theme, _keybindings, done) =>
-          createQuestionDialog(params, choices, tui, theme, done),
-      );
+      const result =
+        mode === 'tui'
+          ? await ctx.ui.custom<UiResult>((tui, theme, _keybindings, done) =>
+              createQuestionDialog(params, choices, tui, theme, done),
+            )
+          : await askThroughDialogs(params, choices, ctx.ui);
 
       const details: Answer = result
         ? {

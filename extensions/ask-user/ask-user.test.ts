@@ -134,6 +134,77 @@ describe('ask-user tool', () => {
     ).rejects.toThrow('interactive TUI is not available');
   });
 
+  it('collects an RPC answer through select, which the protocol supports', async () => {
+    const tool = registeredTool();
+    const select = vi.fn().mockResolvedValue('2. Rewrite it');
+    const custom = vi.fn().mockResolvedValue(undefined);
+    const result = await tool.execute(
+      'call',
+      {
+        question: 'How should we proceed?',
+        choices: [{ label: 'Patch it' }, { label: 'Rewrite it' }],
+        allowCustom: false,
+      },
+      new AbortController().signal,
+      () => {},
+      { mode: 'rpc', ui: { select, input: vi.fn(), custom } },
+    );
+
+    // custom() silently resolves undefined in RPC, so reaching it at all would
+    // report a cancellation the user never made.
+    expect(custom).not.toHaveBeenCalled();
+    expect(select).toHaveBeenCalledWith('How should we proceed?', [
+      '1. Patch it',
+      '2. Rewrite it',
+    ]);
+    expect(result.details).toMatchObject({
+      answer: 'Rewrite it',
+      choiceLabel: 'Rewrite it',
+      choiceIndex: 2,
+      cancelled: false,
+    });
+  });
+
+  it('routes an RPC custom answer to the input dialog', async () => {
+    const tool = registeredTool();
+    const select = vi.fn().mockResolvedValue('2. Type something else');
+    const input = vi.fn().mockResolvedValue('neither, revert');
+    const result = await tool.execute(
+      'call',
+      { question: 'How should we proceed?', choices: [{ label: 'Patch it' }] },
+      new AbortController().signal,
+      () => {},
+      { mode: 'rpc', ui: { select, input, custom: vi.fn() } },
+    );
+
+    expect(input).toHaveBeenCalled();
+    expect(result.details).toMatchObject({
+      answer: 'neither, revert',
+      custom: true,
+      cancelled: false,
+    });
+  });
+
+  it('reports an RPC cancellation only when the user dismissed the dialog', async () => {
+    const tool = registeredTool();
+    const result = await tool.execute(
+      'call',
+      { question: 'Continue?' },
+      new AbortController().signal,
+      () => {},
+      {
+        mode: 'rpc',
+        ui: {
+          select: vi.fn(),
+          input: vi.fn().mockResolvedValue(undefined),
+          custom: vi.fn(),
+        },
+      },
+    );
+
+    expect(result.details).toMatchObject({ answer: null, cancelled: true });
+  });
+
   it('returns a cancelled result when the dialog closes without an answer', async () => {
     const tool = registeredTool();
     const result = await tool.execute(
