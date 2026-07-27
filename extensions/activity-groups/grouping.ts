@@ -220,7 +220,8 @@ export interface ActivityGroup {
 }
 
 /** One model turn: the message that carried the calls, and the calls. */
-interface Turn {
+interface WorkTurn {
+  kind: 'turn';
   start: number;
   end: number;
   tools: ToolDescriptor[];
@@ -229,14 +230,19 @@ interface Turn {
   /** The narration this turn opened with, if any. */
   header?: string;
   /** Opened by commentary: a declared turning point. See `turnsOf`. */
-  led?: boolean;
-  /** A break no group may span. */
-  broken?: boolean;
+  led: boolean;
 }
+
+/** A point no group may span. Carries no entries of its own. */
+interface Break {
+  kind: 'break';
+}
+
+type Turn = WorkTurn | Break;
 
 function turnsOf(entries: readonly TranscriptEntry[]): Turn[] {
   const turns: Turn[] = [];
-  let open: Turn | undefined;
+  let open: WorkTurn | undefined;
 
   const close = () => {
     if (open) turns.push(open);
@@ -244,38 +250,36 @@ function turnsOf(entries: readonly TranscriptEntry[]): Turn[] {
   };
   const breakHere = () => {
     close();
-    turns.push({ start: -1, end: -1, tools: [], broken: true });
+    turns.push({ kind: 'break' });
   };
+  const openAt = (index: number, rest: Partial<WorkTurn> = {}): WorkTurn => ({
+    kind: 'turn',
+    start: index,
+    end: index,
+    tools: [],
+    led: false,
+    ...rest,
+  });
 
   const take = (entry: TranscriptEntry, index: number): void => {
     if (entry.kind === 'assistant') {
+      close();
       // Commentary is the model addressing the user, and a reader already
       // perceives it as a break, so groups agree with it. It belongs to the
       // work *below* it: a model says "now I'll check how sessions expire"
       // and then goes and does that, which makes the line the natural name
       // for what follows rather than a footnote to what came before.
-      if (entry.speaks) {
-        close();
-        open = {
-          start: index,
-          end: index,
-          tools: [],
-          header: entry.header,
-          led: true,
-        };
-        return;
-      }
-      close();
-      // A message that has not spoken yet opens a turn, even before its tool
+      //
+      // A message that has not spoken yet still opens a turn, before its tool
       // calls arrive: an empty message is one still streaming in, not a
       // boundary, and treating it as one made groups flicker shut and reopen
       // as the model typed.
-      open = { start: index, end: index, tools: [], header: entry.header };
+      open = openAt(index, { header: entry.header, led: entry.speaks });
       return;
     }
     if (entry.kind === 'tool') {
       // Tools with no preceding assistant message still form a turn.
-      open ??= { start: index, end: index, tools: [] };
+      open ??= openAt(index);
       open.end = index;
       open.firstCall ??= index;
       open.tools.push(entry);
@@ -290,6 +294,28 @@ function turnsOf(entries: readonly TranscriptEntry[]): Turn[] {
   }
   close();
   return turns;
+}
+
+/**
+ * The entries one chunk of a turn covers, where `placed` calls of it are
+ * already down and this chunk takes `take` more.
+ *
+ * The first chunk starts at the turn's leader — the message itself, so the
+ * narration belongs to the group it named — and every later one starts at the
+ * call it begins with. The last chunk runs to the turn's end, which sweeps up
+ * anything trailing the calls.
+ */
+function chunkRange(
+  turn: WorkTurn,
+  placed: number,
+  take: number,
+): { start: number; end: number } {
+  const firstCall = turn.firstCall ?? turn.start;
+  const done = placed + take >= turn.tools.length;
+  return {
+    start: placed === 0 ? turn.start : firstCall + placed,
+    end: done ? turn.end : firstCall + placed + take - 1,
+  };
 }
 
 /**
@@ -318,7 +344,7 @@ export function groupTranscript(
   };
 
   for (const turn of turnsOf(entries)) {
-    if (turn.broken) {
+    if (turn.kind === 'break') {
       flush();
       continue;
     }
@@ -339,24 +365,21 @@ export function groupTranscript(
     // more calls than a group may hold: models fire ten or twenty at once, and
     // a cap that only applied between messages let those through as one
     // unreadable block. A turn's calls are contiguous and run to its end.
-    const firstCall = turn.firstCall ?? turn.start;
     let placed = 0;
-    let cursor = turn.start;
     do {
       const remaining = turn.tools.length - placed;
       // Only the head of the turn carries its narration; a chunk split off by
       // the cap is the same announced piece of work continuing.
       const narrated = placed === 0 && turn.header !== undefined;
-      if (startsNewGroup(state, kind, remaining, narrated)) {
-        flush();
-        open = { start: cursor, end: cursor };
-      }
-      const room = MAX_GROUP_CALLS - (state?.calls ?? 0);
-      const take = Math.min(remaining, room);
-      placed += take;
-      cursor = placed < turn.tools.length ? firstCall + placed : turn.end + 1;
-      if (open) open.end = cursor - 1;
+      if (startsNewGroup(state, kind, remaining, narrated)) flush();
+      // Whatever room the group has left, which a flush has just reset to all
+      // of it — so a chunk is never empty and the loop always advances.
+      const take = Math.min(remaining, MAX_GROUP_CALLS - (state?.calls ?? 0));
+      const { start, end } = chunkRange(turn, placed, take);
+      open ??= { start, end };
+      open.end = end;
       state = foldTurn(state, kind, take);
+      placed += take;
     } while (placed < turn.tools.length);
   }
   flush();
