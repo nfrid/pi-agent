@@ -71,7 +71,7 @@ export const MAX_GROUP_CALLS = 12;
  * have moved on. A read or two between edits is part of making the change; a
  * run of them is the agent going off to find something else out.
  */
-export const MAX_IDLE_CALLS = 4;
+const MAX_IDLE_CALLS = 4;
 
 /**
  * How much work a group must already hold before a fresh piece of narration is
@@ -84,7 +84,7 @@ export const MAX_IDLE_CALLS = 4;
  * available: the model itself saying it has moved on. Below this, narration is
  * treated as commentary on work already under way.
  */
-export const MIN_NARRATED_CALLS = 5;
+const MIN_NARRATED_CALLS = 5;
 
 /** What a tool call does, for describing a group in plain words. */
 export type ToolRole = 'edit' | 'read' | 'search' | 'command' | 'other';

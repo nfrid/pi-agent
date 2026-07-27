@@ -105,8 +105,10 @@ describe.skipIf(!installedPi)('installed pi build', () => {
       'ui',
     ])
       expect(Object.hasOwn(tool, field), `tool.${field}`).toBe(true);
-    for (const field of ['lastMessage', 'hasToolCalls'])
-      expect(Object.hasOwn(assistant, field), `assistant.${field}`).toBe(true);
+    expect(
+      Object.hasOwn(assistant, 'lastMessage'),
+      'assistant.lastMessage',
+    ).toBe(true);
 
     let busy = true;
     const errors: unknown[] = [];

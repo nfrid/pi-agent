@@ -6,17 +6,18 @@
  * renderer in `renderer.ts` is written against these types only, so it runs
  * unchanged whether the host provides the hook natively or `shim.ts` fakes it
  * by patching the interactive-mode components.
+ *
+ * Only what a renderer reads is declared. A native host is free to pass more —
+ * structural typing ignores it — and the shim is spared producing fields
+ * nothing looks at.
  */
 
-import type {
-  AssistantMessage,
-  ToolResultMessage,
-} from '@earendil-works/pi-ai';
+import type { AssistantMessage } from '@earendil-works/pi-ai';
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 
 export type SequenceItem =
-  | { type: 'assistant'; message: AssistantMessage; provisional: boolean }
+  | { type: 'assistant'; message: AssistantMessage }
   | {
       type: 'tool';
       id: string;
@@ -24,7 +25,6 @@ export type SequenceItem =
       args: unknown;
       status: 'pending' | 'running' | 'complete';
       isError: boolean;
-      result?: ToolResultMessage;
     };
 
 export interface SequenceSnapshot {
@@ -46,8 +46,6 @@ export interface SequenceOptions {
 }
 
 export interface RendererContext {
-  /** Renderer-owned state retained for the lifetime of the sequence. */
-  state: Map<string, unknown>;
   /** Component returned by the previous invocation for this sequence, if any. */
   lastComponent?: Component;
   /** Schedule an interactive-mode redraw. */

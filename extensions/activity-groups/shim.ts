@@ -50,7 +50,6 @@ type ComponentClass<T> = abstract new (...args: never[]) => T;
 /** The subset of `AssistantMessageComponent` internals the shim reads. */
 interface AssistantComponentLike extends Component {
   lastMessage?: AssistantMessage;
-  hasToolCalls: boolean;
   updateContent(message: AssistantMessage): void;
 }
 
@@ -322,10 +321,7 @@ export function installToolSequenceShim(
     const state: SequenceState = {
       startedAt: now(),
       everLive: false,
-      context: {
-        state: new Map<string, unknown>(),
-        requestRender,
-      },
+      context: { requestRender },
     };
     states.set(sequence.id, state);
     return state;
@@ -345,17 +341,11 @@ export function installToolSequenceShim(
           args: member.args,
           status: toolStatus(member),
           isError: member.result?.isError ?? false,
-          result: member.result,
         });
         continue;
       }
-      if (isAssistant(member) && member.lastMessage) {
-        items.push({
-          type: 'assistant',
-          message: member.lastMessage,
-          provisional: !member.hasToolCalls,
-        });
-      }
+      if (isAssistant(member) && member.lastMessage)
+        items.push({ type: 'assistant', message: member.lastMessage });
     }
     return {
       id: sequence.id,
@@ -452,7 +442,8 @@ export function installToolSequenceShim(
     this: AssistantComponentLike,
     message: AssistantMessage,
   ) {
-    // `hasToolCalls` can flip here, which changes sequence membership.
+    // This replaces `lastMessage`, which is where the grouper reads whether the
+    // message speaks and what it narrated — so boundaries can move.
     originalUpdateContent.call(this, message);
     dirty = true;
   };

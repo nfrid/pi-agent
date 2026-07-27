@@ -9,7 +9,7 @@ import type { SequenceRenderer, SequenceSnapshot } from './types';
 /**
  * Stand-ins for Pi's interactive components, matching the shape the shim
  * patches: containers with a public `children` array, an assistant component
- * that tracks `hasToolCalls`, and a tool component with call/result state.
+ * holding its last message, and a tool component with call/result state.
  */
 class FakeContainer implements Component {
   children: Component[] = [];
@@ -31,12 +31,8 @@ class FakeContainer implements Component {
 
 class FakeAssistant extends FakeContainer {
   lastMessage: AssistantMessage | undefined;
-  hasToolCalls = false;
   updateContent(message: AssistantMessage): void {
     this.lastMessage = message;
-    this.hasToolCalls = message.content.some(
-      (content) => content.type === 'toolCall',
-    );
   }
   override render(): string[] {
     const text = this.lastMessage?.content
@@ -203,7 +199,7 @@ describe('tool sequence shim', () => {
     expect(h.render()).toEqual(['group:group-1:2:live']);
     const [snapshot] = snapshots;
     expect(snapshot?.items).toEqual([
-      expect.objectContaining({ type: 'assistant', provisional: false }),
+      expect.objectContaining({ type: 'assistant' }),
       expect.objectContaining({
         type: 'tool',
         id: 'call-1',

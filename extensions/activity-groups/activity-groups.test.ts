@@ -26,7 +26,7 @@ function message(content: AssistantMessage['content']): AssistantMessage {
 }
 
 function context(): RendererContext {
-  return { state: new Map(), requestRender() {} };
+  return { requestRender() {} };
 }
 
 const theme = {
@@ -61,7 +61,6 @@ describe('activity groups renderer', () => {
               thinking: '**Inspecting authentication code**',
             },
           ]),
-          provisional: false,
         },
         {
           type: 'tool',
@@ -184,7 +183,6 @@ describe('activity groups renderer', () => {
           items: [
             {
               type: 'assistant',
-              provisional: false,
               message: message([
                 { type: 'thinking', thinking: '**Inspecting the store**' },
                 { type: 'text', text },
@@ -313,7 +311,6 @@ describe('activity groups renderer', () => {
               thinking: '**Planning the delegate shutdown fix**',
             },
           ]),
-          provisional: false,
         },
         {
           type: 'tool',
@@ -332,7 +329,6 @@ describe('activity groups renderer', () => {
                 'some prose\n\n**Implementing the shutdown guard**\n\nmore prose',
             },
           ]),
-          provisional: false,
         },
         {
           type: 'tool',
