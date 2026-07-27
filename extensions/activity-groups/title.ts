@@ -27,51 +27,67 @@ const MAX_TITLE_LENGTH = 90;
 const PARTICIPLE = /^[A-Za-z]+ing$/;
 
 /**
- * Present participle to past tense. Deriving this morphologically gets
- * "Planned"/"Traced"/"Fixed" wrong in different ways, and the working
- * vocabulary is small and stable, so it is spelled out. Anything unlisted keeps
- * its "-ing" form, which still reads correctly next to a checkmark.
+ * Present participle to past tense, for the verbs `derivePastTense` cannot
+ * reach. Strong verbs only: every row here is one the "-ed" rule gets wrong,
+ * "Built" for "Builded" and "Ran" for "Runned". Regular verbs are derived, so
+ * adding one here is dead weight — `title.test.ts` asserts the table stays
+ * irregular.
+ *
+ * The set is closed: English stopped minting strong verbs centuries ago. What
+ * is listed is the part of it a coding agent plausibly opens a narration header
+ * with. Anything absent keeps its "-ing" form, which still reads correctly next
+ * to a checkmark.
  */
-const PAST_TENSE: Readonly<Record<string, string>> = {
-  Adding: 'Added',
-  Adjusting: 'Adjusted',
-  Analyzing: 'Analyzed',
-  Analysing: 'Analysed',
-  Assessing: 'Assessed',
+export const IRREGULAR_PAST_TENSE: Readonly<Record<string, string>> = {
+  Beginning: 'Began',
+  Binding: 'Bound',
+  Breaking: 'Broke',
+  Bringing: 'Brought',
   Building: 'Built',
-  Checking: 'Checked',
-  Clarifying: 'Clarified',
-  Committing: 'Committed',
-  Confirming: 'Confirmed',
-  Debugging: 'Debugged',
-  Deciding: 'Decided',
-  Defining: 'Defined',
-  Deploying: 'Deployed',
-  Designing: 'Designed',
-  Detecting: 'Detected',
-  Diagnosing: 'Diagnosed',
-  Editing: 'Edited',
-  Evaluating: 'Evaluated',
-  Examining: 'Examined',
-  Fixing: 'Fixed',
-  Identifying: 'Identified',
-  Implementing: 'Implemented',
-  Improving: 'Improved',
-  Inspecting: 'Inspected',
-  Investigating: 'Investigated',
-  Planning: 'Planned',
+  Casting: 'Cast',
+  Catching: 'Caught',
+  Choosing: 'Chose',
+  Cutting: 'Cut',
+  Dealing: 'Dealt',
+  Digging: 'Dug',
+  Drawing: 'Drew',
+  Feeding: 'Fed',
+  Finding: 'Found',
+  Getting: 'Got',
+  Giving: 'Gave',
+  Hiding: 'Hid',
+  Hitting: 'Hit',
+  Holding: 'Held',
+  Keeping: 'Kept',
+  Leading: 'Led',
+  Leaving: 'Left',
+  Letting: 'Let',
+  Losing: 'Lost',
+  Making: 'Made',
+  Meaning: 'Meant',
+  Overwriting: 'Overwrote',
+  Putting: 'Put',
   Reading: 'Read',
-  Refining: 'Refined',
-  Removing: 'Removed',
-  Replacing: 'Replaced',
-  Reviewing: 'Reviewed',
+  Rebuilding: 'Rebuilt',
+  Rereading: 'Reread',
+  Rerunning: 'Reran',
+  Resetting: 'Reset',
+  Rewriting: 'Rewrote',
   Running: 'Ran',
-  Searching: 'Searched',
-  Testing: 'Tested',
-  Tracing: 'Traced',
-  Updating: 'Updated',
-  Validating: 'Validated',
-  Verifying: 'Verified',
+  Seeing: 'Saw',
+  Sending: 'Sent',
+  Setting: 'Set',
+  Shutting: 'Shut',
+  Spending: 'Spent',
+  Spinning: 'Spun',
+  Splitting: 'Split',
+  Spreading: 'Spread',
+  Sticking: 'Stuck',
+  Taking: 'Took',
+  Thinking: 'Thought',
+  Throwing: 'Threw',
+  Undoing: 'Undid',
+  Understanding: 'Understood',
   Writing: 'Wrote',
 };
 
@@ -139,12 +155,12 @@ export function headersOf(message: AssistantMessage): string[] {
 }
 
 /**
- * Regular "-ing" to "-ed", for the long tail the table cannot enumerate:
- * Inferring → Inferred, Aligning → Aligned, Modifying → Modified, Tracing →
- * Traced. Irregulars stay in the table above, which is consulted first.
+ * Regular "-ing" to "-ed", which is nearly all of them: Inferring → Inferred,
+ * Aligning → Aligned, Modifying → Modified, Tracing → Traced, Planning →
+ * Planned. Strong verbs stay in the table above, which is consulted first.
  */
-function derivePastTense(verb: string): string | undefined {
-  if (!/^[A-Za-z]+ing$/.test(verb)) return undefined;
+export function derivePastTense(verb: string): string | undefined {
+  if (!PARTICIPLE.test(verb)) return undefined;
   const stem = verb.slice(0, -3);
   if (stem.length < 2) return undefined;
   // The consonant doubling that "-ing" introduced is kept, because the past
@@ -172,7 +188,7 @@ const META_VERBS = new Set([
 export function toPastTense(title: string): string {
   const [first, ...rest] = title.split(' ');
   if (!first) return title;
-  const past = PAST_TENSE[first] ?? derivePastTense(first);
+  const past = IRREGULAR_PAST_TENSE[first] ?? derivePastTense(first);
   return past ? [past, ...rest].join(' ') : title;
 }
 

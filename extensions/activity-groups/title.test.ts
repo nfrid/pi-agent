@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { composeTitle, isNarration, stripEmphasis, toPastTense } from './title';
+import {
+  composeTitle,
+  derivePastTense,
+  IRREGULAR_PAST_TENSE,
+  isNarration,
+  stripEmphasis,
+  toPastTense,
+} from './title';
 
 describe('isNarration', () => {
   it('recognises a header the model wrote as text rather than thinking', () => {
@@ -24,13 +31,27 @@ describe('toPastTense', () => {
     expect(toPastTense('Writing the shim')).toBe('Wrote the shim');
     expect(toPastTense('Running the suite')).toBe('Ran the suite');
     expect(toPastTense('Reading jobs.ts')).toBe('Read jobs.ts');
+    expect(toPastTense('Finding the leak')).toBe('Found the leak');
+    expect(toPastTense('Splitting the module')).toBe('Split the module');
   });
 
-  it('derives the regular forms the table cannot enumerate', () => {
+  it('derives everything regular, including what looks irregular', () => {
     expect(toPastTense('Aligning the columns')).toBe('Aligned the columns');
     expect(toPastTense('Modifying the parser')).toBe('Modified the parser');
     // "-ing" already doubled the consonant and the past tense keeps it.
     expect(toPastTense('Inferring conventions')).toBe('Inferred conventions');
+    expect(toPastTense('Committing the fix')).toBe('Committed the fix');
+    expect(toPastTense('Clarifying the rule')).toBe('Clarified the rule');
+  });
+
+  // The table existed alongside 36 rows the rule below already produced. Each
+  // row costs a reader a lookup, so it has to earn one: keeping this honest is
+  // cheaper than re-deriving the whole table the next time one is added.
+  it('lists nothing the regular rule already gets right', () => {
+    const derivable = Object.entries(IRREGULAR_PAST_TENSE)
+      .filter(([participle, past]) => derivePastTense(participle) === past)
+      .map(([participle]) => participle);
+    expect(derivable).toEqual([]);
   });
 
   it('leaves anything that is not a participle alone', () => {
