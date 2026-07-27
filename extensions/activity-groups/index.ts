@@ -53,6 +53,11 @@ function containerClassOf(
 /**
  * Verify the host still looks the way the shim expects before patching it.
  * A renamed method or a bundled build means we leave rendering alone.
+ *
+ * Exactly the methods the shim replaces, and nothing else. The instance fields
+ * it reads — `lastMessage`, `toolName`, `result` and the rest — are set in
+ * constructors and cannot be seen from a prototype; `installed-pi.test.ts`
+ * checks those against real instances of the installed build.
  */
 function shimIsSupported(container: typeof Container | undefined): boolean {
   if (!container) return false;
@@ -62,22 +67,17 @@ function shimIsSupported(container: typeof Container | undefined): boolean {
     !(ToolExecutionComponent.prototype instanceof container)
   )
     return false;
-  const [assistant, tool, base] = [
-    AssistantMessageComponent.prototype,
-    ToolExecutionComponent.prototype,
-    container.prototype,
-  ].map((prototype) => prototype as unknown as Record<string, unknown>);
-  return [
-    assistant?.render,
-    assistant?.updateContent,
-    tool?.render,
-    tool?.updateResult,
-    tool?.markExecutionStarted,
-    base?.render,
-    base?.addChild,
-    base?.removeChild,
-    base?.clear,
-  ].every((member) => typeof member === 'function');
+  const patched: [object, string[]][] = [
+    [AssistantMessageComponent.prototype, ['render', 'updateContent']],
+    [ToolExecutionComponent.prototype, ['render']],
+    [container.prototype, ['render', 'addChild', 'removeChild', 'clear']],
+  ];
+  return patched.every(([prototype, methods]) =>
+    methods.every(
+      (method) =>
+        typeof (prototype as Record<string, unknown>)[method] === 'function',
+    ),
+  );
 }
 
 export default defineExtension('activity-groups', (pi) => {
@@ -99,15 +99,29 @@ export default defineExtension('activity-groups', (pi) => {
    */
   let opened = false;
 
-  const warn = (message: string) => {
-    if (DEBUG) context?.ui.notify(`activity-groups: ${message}`, 'warning');
+  const notify = (message: string) =>
+    context?.ui.notify(`activity-groups: ${message}`, 'warning');
+
+  /**
+   * A group that fell back on its own is a curiosity; grouping going away for
+   * the rest of the session is something the reader is about to notice and has
+   * no other way to explain. So the first is behind PI_ACTIVITY_GROUPS_DEBUG
+   * and the second is always said out loud.
+   */
+  const debug = (message: string) => {
+    if (DEBUG) notify(message);
   };
+
+  const reason = (error: unknown) =>
+    error instanceof Error ? error.message : String(error);
 
   const install = () => {
     if (uninstall || !context) return;
     const container = containerClassOf(AssistantMessageComponent);
     if (!shimIsSupported(container)) {
-      warn('unsupported Pi build, grouping stays off');
+      notify(
+        'this Pi build is not one grouping knows how to patch, staying off',
+      );
       return;
     }
     uninstall = installToolSequenceShim(renderer, {
@@ -125,14 +139,10 @@ export default defineExtension('activity-groups', (pi) => {
       isExpanded: () => opened || (context?.ui.getToolsExpanded() ?? false),
       onError: (error) => {
         uninstall = undefined;
-        warn(
-          `grouping disabled (${error instanceof Error ? error.message : String(error)})`,
-        );
+        notify(`grouping is off for this session (${reason(error)})`);
       },
       onWarn: (error) => {
-        warn(
-          `one group fell back to plain rendering (${error instanceof Error ? error.message : String(error)})`,
-        );
+        debug(`one group fell back to plain rendering (${reason(error)})`);
       },
     });
   };
@@ -143,36 +153,50 @@ export default defineExtension('activity-groups', (pi) => {
     if (ctx.mode === 'tui') install();
   });
 
-  pi.registerCommand('groups', {
-    description: 'Show or hide the steps inside every activity group',
-    handler: async (_args, ctx) => {
-      context = ctx;
-      if (!uninstall) {
-        ctx.ui.notify('Activity groups are off', 'warning');
-        return;
-      }
-      opened = !opened;
-      // Notifying is also what redraws the transcript, which is where the
-      // change actually shows up.
-      ctx.ui.notify(opened ? 'Groups opened' : 'Groups collapsed', 'info');
-    },
-  });
-
+  /**
+   * One command, because `/groups` and `/activity-groups` did two different
+   * things under two names nothing distinguished. Bare is the daily action —
+   * open the groups to see their steps — and `on`/`off` is the rare one.
+   *
+   * Notifying is also what redraws the transcript, which is where any of this
+   * actually shows up.
+   */
   pi.registerCommand('activity-groups', {
-    description: 'Toggle collapsing tool calls into activity groups',
-    handler: async (_args, ctx) => {
+    description:
+      'Open or collapse the steps inside activity groups; "on"/"off" turns grouping itself on and off',
+    handler: async (args, ctx) => {
+      // A command can run before any session_start this extension saw.
       context = ctx;
-      if (uninstall) {
-        uninstall();
+      const action = args.trim().toLowerCase();
+
+      if (action === 'off') {
+        uninstall?.();
         uninstall = undefined;
         ctx.ui.notify('Activity groups off', 'info');
         return;
       }
-      install();
-      ctx.ui.notify(
-        uninstall ? 'Activity groups on' : 'Activity groups unavailable',
-        uninstall ? 'info' : 'warning',
-      );
+      if (action === 'on') {
+        install();
+        ctx.ui.notify(
+          uninstall ? 'Activity groups on' : 'Activity groups unavailable',
+          uninstall ? 'info' : 'warning',
+        );
+        return;
+      }
+      if (action) {
+        ctx.ui.notify(`Usage: /activity-groups [on|off]`, 'warning');
+        return;
+      }
+
+      if (!uninstall) {
+        ctx.ui.notify(
+          'Activity groups are off — /activity-groups on to enable',
+          'warning',
+        );
+        return;
+      }
+      opened = !opened;
+      ctx.ui.notify(opened ? 'Groups opened' : 'Groups collapsed', 'info');
     },
   });
 });
