@@ -31,6 +31,14 @@ Keep `useFor` and `avoid` in concrete task shapes rather than adjectives. "Stron
 
 The compact routing table is included in the parent system prompt when the delegate tool is available. Delegated children do not receive orchestration instructions.
 
+## Questions back to the parent
+
+A child that cannot settle something itself — the task contradicts what it found, or the call is the parent's to make — stops and ends its report with a `Blocked:` line holding one question. The parent answers by continuing that child, whose session, worktree, route, and scope are all intact.
+
+There is no live channel, and this is why: while a foreground child runs, the parent is suspended inside its own tool call, so the parent's model cannot answer anything until that call returns. The only party who could answer mid-run is the user, which is a different feature and a less autonomous one. Ending the run *is* the question, and the continuation *is* the answer.
+
+`Blocked:` is extracted into the handoff envelope rather than left in the body, so it sits next to the continuation token and survives truncation — a question that reaches the parent without its answer route is no use. Everything a default and a stated assumption can cover stays a default and a stated assumption.
+
 ## Read-only delegates
 
 A read-only delegate gets `read`, `bash`, `grep`, `find`, and `ls`, and is told in its prompt to inspect and report rather than edit. This is an intent signal, not an enforced boundary: the child has an ordinary shell and can do everything any agent with a shell can do. Use it when you want an answer, not a change.
