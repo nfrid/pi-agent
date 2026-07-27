@@ -4,7 +4,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
-import { createManagedWidget } from '../shared/ui/widget';
+import { createRailPanel } from '../shared/ui/rail';
 import { registerDelegateBranchesTool } from './branches-tool';
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
@@ -12,7 +12,11 @@ import { pruneDelegateSessions } from './session';
 import { DelegateStatusStore } from './status';
 import { registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
-import { renderDelegateWidget } from './widget';
+import {
+  DELEGATE_WIDGET_MAX_WIDTH,
+  DELEGATE_WIDGET_MIN_WIDTH,
+  renderDelegateWidget,
+} from './widget';
 import { loadWorktree } from './worktree';
 import { registerDelegateWorktreesCommand } from './worktrees-command';
 
@@ -40,8 +44,11 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   const activeStatuses = () => statuses?.list() ?? [];
 
   // Refreshed on a timer because the rendered rows include elapsed time.
-  const widget = createManagedWidget({
+  const widget = createRailPanel({
     key: 'delegate-jobs',
+    side: 'right',
+    maxWidth: DELEGATE_WIDGET_MAX_WIDTH,
+    minWidth: DELEGATE_WIDGET_MIN_WIDTH,
     refreshMs: 1_000,
     isActive: () => activeStatuses().length > 0,
     render: (width, theme) =>

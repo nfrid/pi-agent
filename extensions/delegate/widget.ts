@@ -11,8 +11,12 @@ import {
 import type { DelegateStatusSnapshot } from './status';
 
 export const DELEGATE_WIDGET_MAX_WIDTH = 68;
+/** Narrower than this a subagent row is name and elapsed time and nothing else. */
+export const DELEGATE_WIDGET_MIN_WIDTH = 30;
 export const DELEGATE_WIDGET_MAX_AGENTS = 4;
 const MODE_ROUTE_MAX_WIDTH = 16;
+/** Columns the name keeps before the row trades indicators away for it. */
+const MIN_NAME_WIDTH = 14;
 
 export interface DelegateWidgetTheme {
   fg(color: ThemeColor, text: string): string;
@@ -107,8 +111,12 @@ function mainLine(
     [access, elapsed].join('  '),
     elapsed,
   ];
+  // A narrow row that spends everything on indicators leaves the name as an
+  // ellipsis, which is the one thing telling the subagents apart.
+  const nameBudget = width - visibleWidth(prefix) - MIN_NAME_WIDTH - 1;
+  const budget = Math.min(tailBudget, Math.max(1, nameBudget));
   const tail =
-    candidates.find((candidate) => visibleWidth(candidate) <= tailBudget) ??
+    candidates.find((candidate) => visibleWidth(candidate) <= budget) ??
     elapsed;
   const nameWidth = Math.max(
     1,
@@ -152,6 +160,12 @@ function actionContent(status: DelegateStatusSnapshot): string {
   );
 }
 
+/** Visible width ignoring the padding a rendered markdown line carries. */
+function contentWidth(line: string): number {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: SGR escapes
+  return visibleWidth(line.replace(/\x1b\[[0-9;]*m/g, '').trimEnd());
+}
+
 function renderThinking(
   markdown: string,
   width: number,
@@ -167,8 +181,13 @@ function renderThinking(
       { color },
     ).render(Math.max(1, width));
     // The last wrapped line holds the newest words, so the preview advances
-    // with the stream instead of freezing on how the paragraph opened.
-    return rendered.filter((line) => visibleWidth(line) > 0).at(-1) ?? '';
+    // with the stream instead of freezing on how the paragraph opened. A line
+    // that has only just started wrapping would leave the row almost empty,
+    // so until it has filled up the previous, complete line is shown instead.
+    const lines = rendered.filter((line) => contentWidth(line) > 0);
+    const last = lines.at(-1) ?? '';
+    const previous = lines.at(-2);
+    return previous && contentWidth(last) * 2 < width ? previous : last;
   } catch {
     // A malformed partial markdown fragment must never break the parent TUI.
     return truncateToWidth(markdown, Math.max(1, width), '…');

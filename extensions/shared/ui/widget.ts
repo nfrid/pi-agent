@@ -84,7 +84,16 @@ export function createManagedWidget(
     if (coalesceTimer) return;
     coalesceTimer = setTimeout(() => {
       coalesceTimer = undefined;
-      requestRender();
+      try {
+        requestRender();
+      } catch (error) {
+        // This runs on a timer, outside any host call, so a throw here would
+        // be an unhandled rejection rather than a failed widget update.
+        if (!reportedError) {
+          reportedError = true;
+          onError?.(error);
+        }
+      }
     }, RENDER_COALESCE_MS);
     coalesceTimer.unref();
   };

@@ -577,7 +577,7 @@ describe('todo widget lifecycle', () => {
     expect(store.completedPendingHide.size).toBe(15);
     const pending = [...store.completedPendingHide];
     const hidden = [...store.hiddenCompleted];
-    const widget = widgetFactory?.({}, theme);
+    const widget = widgetFactory?.({ requestRender() {} }, theme);
 
     expect(widget?.render(100)).toEqual(widget?.render(100));
     expect([...store.completedPendingHide]).toEqual(pending);

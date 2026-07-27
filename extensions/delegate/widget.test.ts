@@ -269,14 +269,14 @@ describe('delegate widget', () => {
     expect(lines[1]).toContain('\u001b[');
   });
 
-  test('previews the freshest words of a wrapped thinking line', () => {
-    const lines = renderDelegateWidget(
+  const thinkingPreview = (latestText: string) =>
+    renderDelegateWidget(
       [
         status({
           activity: {
             type: 'thinking',
             label: 'thinking',
-            latestText: `${'settled ground '.repeat(20)}newest words`,
+            latestText,
             status: 'running',
           },
         }),
@@ -286,9 +286,21 @@ describe('delegate widget', () => {
       theme as never,
       5_000,
       markdownTheme,
+    )[1];
+
+  test('previews the freshest words of a wrapped thinking line', () => {
+    const line = thinkingPreview(
+      `${'settled ground '.repeat(20)}and these are the newest words to have arrived`,
     );
-    expect(lines[1]).toContain('newest words');
-    expect(lines[1]).not.toContain('settled ground settled ground');
+    expect(line).toContain('newest words');
+    expect(line).not.toContain('settled ground settled ground');
+  });
+
+  test('holds the last full line until the newest one has filled out', () => {
+    const line = thinkingPreview(`${'settled ground '.repeat(20)}fresh`);
+    expect(line).toContain('settled ground');
+    // The barely-started line would leave the row all but empty.
+    expect(line.trimEnd()).not.toMatch(/fresh$/);
   });
 
   test('falls back safely when markdown rendering fails', () => {

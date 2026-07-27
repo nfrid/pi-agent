@@ -10,7 +10,7 @@ import {
   reconstruct,
 } from './store';
 import { registerTodoTool } from './tool';
-import { updateUi } from './widget';
+import { teardownUi, updateUi } from './widget';
 
 export default defineExtension('tasks', (pi: ExtensionAPI) => {
   const store = createTaskStore();
@@ -33,10 +33,8 @@ export default defineExtension('tasks', (pi: ExtensionAPI) => {
     updateUi(store, ctx);
   });
   pi.on('session_shutdown', (_event, ctx) => {
-    if (ctx.hasUI) {
-      ctx.ui.setStatus(EXT, undefined);
-      ctx.ui.setWidget(EXT, undefined);
-    }
+    if (ctx.hasUI) ctx.ui.setStatus(EXT, undefined);
+    teardownUi();
     store.lastCtx = undefined;
   });
 
