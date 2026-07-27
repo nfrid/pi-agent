@@ -65,4 +65,37 @@ describe('delegate status store', () => {
     expect(store.list()).toEqual([]);
     expect(onChange).toHaveBeenCalledTimes(3);
   });
+
+  test('keeps the last activity that had content while the next one warms up', () => {
+    const store = new DelegateStatusStore();
+    const run = createRun('audit');
+    run.activities.push({
+      type: 'tool',
+      label: 'read src/index.ts',
+      status: 'completed',
+    });
+    const [id] = store.start([run], 'foreground');
+    expect(store.list()[0].activity).toMatchObject({
+      label: 'read src/index.ts',
+    });
+
+    // Announced before its first token arrives.
+    run.activities.push({
+      type: 'thinking',
+      label: 'thinking',
+      status: 'running',
+    });
+    store.update(id, run);
+    expect(store.list()[0].activity).toMatchObject({
+      label: 'read src/index.ts',
+    });
+
+    const thinking = run.activities.at(-1);
+    if (thinking) thinking.latestText = 'Weighing the two layouts';
+    store.update(id, run);
+    expect(store.list()[0].activity).toMatchObject({
+      type: 'thinking',
+      latestText: 'Weighing the two layouts',
+    });
+  });
 });

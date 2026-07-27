@@ -9,7 +9,6 @@ const MAX_PREVIEW_CHARS = 1000;
 type ThinkingGroup = {
   id: string;
   text: string;
-  titles: string[];
   activityIds: string[];
 };
 
@@ -156,7 +155,7 @@ function startThinkingGroup(
     if (latest) latest.status = 'completed';
   }
   const id = `${key}:group:${state.nextGroupId++}`;
-  const group = { id, text: '', titles: [], activityIds: [`${id}:0`] };
+  const group = { id, text: '', activityIds: [`${id}:0`] };
   state.active.set(key, group);
   upsertActivity(run, {
     id: group.activityIds[0],
@@ -167,21 +166,41 @@ function startThinkingGroup(
   return group;
 }
 
-function updateThinkingGroup(
+/**
+ * Thinking streams as a run of paragraphs, and only the last one is still being
+ * written. Previewing the whole accumulation runs finished paragraphs together
+ * into one wall of text that never advances, so the preview is the newest
+ * paragraph on its own.
+ */
+export function latestThinkingParagraph(text: string): string {
+  const paragraphs = text.split(/\n\s*\n/);
+  for (let index = paragraphs.length - 1; index >= 0; index--) {
+    const paragraph = paragraphs[index].trim();
+    if (paragraph) return paragraph;
+  }
+  return text.trim();
+}
+
+function writeThinkingGroup(
   run: DelegatedRun,
   event: Record<string, unknown>,
   text: string,
+  mode: 'append' | 'replace' = 'append',
 ): ThinkingGroup {
   const state = getThinkingState(run);
   const key = thinkingKey(event);
   const group = state.active.get(key) ?? startThinkingGroup(run, event);
-  group.text = `${group.text}${text}`.slice(0, MAX_PREVIEW_CHARS);
+  // Only the tail is ever shown, so the cap drops the oldest text rather than
+  // freezing the preview at the first MAX_PREVIEW_CHARS of the block.
+  group.text = (mode === 'replace' ? text : `${group.text}${text}`).slice(
+    -MAX_PREVIEW_CHARS,
+  );
   upsertActivity(run, {
     id: group.activityIds[0],
     type: 'thinking',
     label: 'thinking',
     status: 'running',
-    latestText: group.text,
+    latestText: latestThinkingParagraph(group.text),
   });
   return group;
 }
@@ -318,7 +337,7 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
         return true;
       }
       if (assistantMessageEvent?.type === 'thinking_delta') {
-        updateThinkingGroup(
+        writeThinkingGroup(
           run,
           event,
           typeof assistantMessageEvent.delta === 'string'
@@ -332,14 +351,18 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
         const key = thinkingKey(event);
         let group = state.active.get(key);
         if (!group) group = startThinkingGroup(run, event);
+        // The group only retains the tail of the block, so a complete delta
+        // stream ends with exactly what it accumulated; anything else means
+        // deltas were missed and the final content is authoritative.
         if (
           typeof assistantMessageEvent.content === 'string' &&
-          !assistantMessageEvent.content.startsWith(group.text)
+          (!group.text || !assistantMessageEvent.content.endsWith(group.text))
         )
-          group = updateThinkingGroup(
+          group = writeThinkingGroup(
             run,
             event,
             assistantMessageEvent.content,
+            'replace',
           );
         const latest = findActivity(run, group.activityIds.at(-1));
         if (latest) latest.status = 'completed';

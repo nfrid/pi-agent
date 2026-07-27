@@ -166,7 +166,9 @@ function renderThinking(
       markdownTheme ?? getMarkdownTheme(),
       { color },
     ).render(Math.max(1, width));
-    return rendered.find((line) => visibleWidth(line) > 0) ?? '';
+    // The last wrapped line holds the newest words, so the preview advances
+    // with the stream instead of freezing on how the paragraph opened.
+    return rendered.filter((line) => visibleWidth(line) > 0).at(-1) ?? '';
   } catch {
     // A malformed partial markdown fragment must never break the parent TUI.
     return truncateToWidth(markdown, Math.max(1, width), '…');

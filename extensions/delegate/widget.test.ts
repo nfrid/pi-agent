@@ -269,6 +269,28 @@ describe('delegate widget', () => {
     expect(lines[1]).toContain('\u001b[');
   });
 
+  test('previews the freshest words of a wrapped thinking line', () => {
+    const lines = renderDelegateWidget(
+      [
+        status({
+          activity: {
+            type: 'thinking',
+            label: 'thinking',
+            latestText: `${'settled ground '.repeat(20)}newest words`,
+            status: 'running',
+          },
+        }),
+      ],
+      true,
+      100,
+      theme as never,
+      5_000,
+      markdownTheme,
+    );
+    expect(lines[1]).toContain('newest words');
+    expect(lines[1]).not.toContain('settled ground settled ground');
+  });
+
   test('falls back safely when markdown rendering fails', () => {
     const brokenTheme = {
       ...markdownTheme,

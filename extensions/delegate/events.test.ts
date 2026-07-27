@@ -164,4 +164,94 @@ describe('events', () => {
     expect(JSON.stringify(run)).not.toContain('private-');
     expect(JSON.stringify(run)).toContain('safe handoff');
   });
+
+  test('previews the newest thinking paragraph instead of the whole block', () => {
+    const run = createRun('think');
+    const delta = (delta: string) =>
+      processJsonLine(
+        JSON.stringify({
+          type: 'message_update',
+          assistantMessageEvent: {
+            type: 'thinking_delta',
+            contentIndex: 0,
+            delta,
+          },
+        }),
+        run,
+      );
+    delta('Checking the widget layout.\n\n');
+    delta('Now sizing ');
+    delta('the columns.');
+
+    expect(run.activities.at(-1)?.latestText).toBe('Now sizing the columns.');
+  });
+
+  test('keeps the tail of a long thinking block rather than its opening', () => {
+    const run = createRun('think');
+    processJsonLine(
+      JSON.stringify({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'thinking_delta',
+          contentIndex: 0,
+          delta: `${'opening filler. '.repeat(200)}\n\nthe freshest sentence.`,
+        },
+      }),
+      run,
+    );
+    expect(run.activities.at(-1)?.latestText).toBe('the freshest sentence.');
+  });
+
+  test('starts a fresh preview for each consecutive thinking block', () => {
+    const run = createRun('think');
+    const send = (event: Record<string, unknown>) =>
+      processJsonLine(
+        JSON.stringify({
+          type: 'message_update',
+          assistantMessageEvent: event,
+        }),
+        run,
+      );
+    send({ type: 'thinking_start', contentIndex: 0 });
+    send({ type: 'thinking_delta', contentIndex: 0, delta: 'First block.' });
+    send({
+      type: 'thinking_end',
+      contentIndex: 0,
+      content: 'First block.',
+    });
+    send({ type: 'thinking_start', contentIndex: 0 });
+    send({ type: 'thinking_delta', contentIndex: 0, delta: 'Second block.' });
+
+    const thinking = run.activities.filter(
+      (activity) => activity.type === 'thinking',
+    );
+    expect(thinking).toHaveLength(2);
+    expect(thinking[0]).toMatchObject({
+      status: 'completed',
+      latestText: 'First block.',
+    });
+    expect(thinking[1]).toMatchObject({
+      status: 'running',
+      latestText: 'Second block.',
+    });
+  });
+
+  test('recovers the final thinking content when deltas were missed', () => {
+    const run = createRun('think');
+    processJsonLine(
+      JSON.stringify({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'thinking_end',
+          contentIndex: 0,
+          content: 'Everything arrived at once.',
+        },
+      }),
+      run,
+    );
+    expect(run.activities.at(-1)).toMatchObject({
+      status: 'completed',
+      latestText: 'Everything arrived at once.',
+    });
+  });
 });

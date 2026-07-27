@@ -24,6 +24,29 @@ export interface DelegateStatusSnapshot {
 
 interface DelegateStatusRecord extends DelegateStatusSnapshot {}
 
+function hasContent(activity: DelegatedActivity): boolean {
+  return activity.type === 'thinking'
+    ? Boolean(activity.latestText?.trim())
+    : Boolean(activity.label.trim());
+}
+
+/**
+ * A thinking block is announced before its first token arrives, and a tool call
+ * before its label is known, so the newest activity is routinely blank for a
+ * beat. Showing the last activity that had something to say keeps the row from
+ * blinking empty between steps.
+ */
+function displayActivity(
+  run: DelegatedRun,
+  previous: DelegatedActivity | undefined,
+): DelegatedActivity | undefined {
+  for (let index = run.activities.length - 1; index >= 0; index--) {
+    const activity = run.activities[index];
+    if (hasContent(activity)) return activity;
+  }
+  return previous ?? run.activities.at(-1);
+}
+
 export class DelegateStatusStore {
   private readonly records = new Map<string, DelegateStatusRecord>();
   private counter = 0;
@@ -43,7 +66,7 @@ export class DelegateStatusStore {
         route: run.routing?.route,
         context: run.context,
         allowWrites: run.allowWrites === true,
-        activity: run.activities.at(-1),
+        activity: displayActivity(run, undefined),
       });
       return id;
     });
@@ -60,7 +83,7 @@ export class DelegateStatusStore {
     record.route = run.routing?.route;
     record.context = run.context;
     record.allowWrites = run.allowWrites === true;
-    record.activity = run.activities.at(-1);
+    record.activity = displayActivity(run, record.activity);
     this.onChange();
   }
 
@@ -76,7 +99,7 @@ export class DelegateStatusStore {
       record.route = run.routing?.route;
       record.context = run.context;
       record.allowWrites = run.allowWrites === true;
-      record.activity = run.activities.at(-1);
+      record.activity = displayActivity(run, record.activity);
       changed = true;
     }
     if (changed) this.onChange();
