@@ -174,6 +174,8 @@ interface OpenGroup {
   calls: number;
   /** Calls run since the group last changed or checked anything. */
   sinceChange: number;
+  /** Opened by a header the model wrote to the reader. */
+  announced: boolean;
 }
 
 /**
@@ -189,6 +191,12 @@ function startsNewGroup(
   if (!open) return true;
   if (open.calls >= MAX_GROUP_CALLS) return true;
   if (narration && open.calls >= minCallsToCutOn(narration)) return true;
+  // A group that announced itself keeps what follows until it holds real work.
+  // The announcement said what the phase is for, and the first call it makes is
+  // as often bookkeeping — a todo update — as the work itself; cutting on the
+  // change of character there leaves the announcement alone above the work it
+  // named, which is the one thing it must never be.
+  if (open.announced && open.calls < MIN_ANNOUNCED_CALLS) return false;
   const phase = phaseOf(incoming);
   if (phase !== undefined) return phase !== open.phase;
   return open.phase === 'building' && open.sinceChange + calls > MAX_IDLE_CALLS;
@@ -199,12 +207,14 @@ function foldTurn(
   open: OpenGroup | undefined,
   incoming: ActivityKind,
   calls: number,
+  narration?: Narration,
 ): OpenGroup {
   const phase = phaseOf(incoming);
   return {
     phase: phase ?? open?.phase ?? 'exploring',
     calls: (open?.calls ?? 0) + calls,
     sinceChange: phase ? 0 : (open?.sinceChange ?? 0) + calls,
+    announced: open?.announced ?? narration === 'announced',
   };
 }
 
@@ -405,7 +415,7 @@ export function groupTranscript(
       const { start, end } = chunkRange(turn, placed, take);
       open ??= { start, end };
       open.end = end;
-      state = foldTurn(state, kind, take);
+      state = foldTurn(state, kind, take, narration);
       placed += take;
     } while (placed < turn.tools.length);
   }

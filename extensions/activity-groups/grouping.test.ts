@@ -118,6 +118,22 @@ describe('grouping a transcript', () => {
     expect(
       shape(groupTranscript([announces, ...reads(1), announces, ...reads(2)])),
     ).toEqual(['[0..4]']);
+
+    // Nor does the work an announcement named get to start without it. A phase
+    // that opens by ticking off a todo and then writes a file is one thing the
+    // model said it would do, and cutting between them stranded the line that
+    // named it above an untitled group doing the work.
+    expect(
+      shape(
+        groupTranscript([
+          announces,
+          call('todo'),
+          call('write'),
+          call('read'),
+          call('edit'),
+        ]),
+      ),
+    ).toEqual(['[0..4]']);
   });
 
   it('cuts a run that never changes character into readable chunks', () => {
