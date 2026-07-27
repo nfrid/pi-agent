@@ -27,6 +27,8 @@ export function buildDelegatePrompt(
 
 ${task}${context}${scope}
 
+You can put a question to the parent: stop where you are and end your report with a "Blocked:" line holding the single question. The parent answers by continuing you, with this session intact, so report what you already established first. Use it only for what you cannot settle yourself — the task contradicts what you found, or it turns on a decision that is the parent's to make. Anything a default and a stated assumption can cover is not a blocker.
+
 ${framing} Lead with the answer; cite files/lines when useful; note failures. Do not narrate routine tool calls. Keep the final response under 1200 words.
 
 ${capability}`;

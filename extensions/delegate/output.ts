@@ -66,6 +66,11 @@ function extractReportField(body: string, label: string): string | undefined {
   return undefined;
 }
 
+/** The question a child stopped on, when it ended its report with one. */
+export function blockedQuestion(run: DelegatedRun): string | undefined {
+  return extractReportField(getFinalAssistantText(run.messages), 'Blocked');
+}
+
 function runBody(run: DelegatedRun): string {
   const final = getFinalAssistantText(run.messages).trim();
   return (
@@ -85,6 +90,13 @@ function prepareRun(run: DelegatedRun, bodyCap: number): PreparedRun {
   const bodyTruncated = body !== original;
   const lines = [`Status: ${getRunState(run)}`];
   if (run.continuation) lines.push(`Continuation: ${run.continuation}`);
+  // Mandatory metadata, so a child's question survives body truncation and
+  // arrives next to the token that answers it.
+  const blocked = extractReportField(original, 'Blocked');
+  if (blocked)
+    lines.push(
+      `Blocked: ${blocked} — answer it and continue this subagent; its context is intact.`,
+    );
   if (run.artifact)
     lines.push(
       `Artifact: ${run.artifact.handle} (${run.artifact.size} bytes, sha256 ${run.artifact.sha256})`,

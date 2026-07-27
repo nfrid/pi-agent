@@ -1,4 +1,5 @@
 import { Container, Markdown, Spacer, Text } from '@earendil-works/pi-tui';
+import { blockedQuestion } from './output';
 import {
   ACTIVITY_PREVIEW_CHARS,
   activityLabel,
@@ -110,6 +111,12 @@ function addExpandedRun(
 
   const final = getFinalAssistantText(run.messages).trim();
   const backgroundLaunch = isBackgroundLaunch(run);
+  const blocked = blockedQuestion(run);
+  if (blocked) {
+    container.addChild(new Spacer(1));
+    container.addChild(sectionTitle('Blocked on', theme));
+    container.addChild(new Text(fg('warning', blocked), 0, 0));
+  }
   if (!hasResultHeading(final))
     container.addChild(sectionTitle('Result', theme));
   if (final) container.addChild(new Markdown(final, 0, 0, mdTheme));
@@ -241,6 +248,21 @@ export function renderDelegateResult(
             worktree.slice(0, 2).join(' · '),
             fg,
             run.worktree?.hasWork ? 'warning' : 'dim',
+          ),
+          0,
+          0,
+        ),
+      );
+
+    const blocked = blockedQuestion(run);
+    if (blocked)
+      container.addChild(
+        new Text(
+          fieldLine(
+            'Blocked',
+            truncate(blocked, RESULT_PREVIEW_CHARS),
+            fg,
+            'warning',
           ),
           0,
           0,

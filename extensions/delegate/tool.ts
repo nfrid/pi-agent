@@ -119,6 +119,7 @@ export function delegatePromptGuidelines(cwd: string): string[] {
     'Brief a writable task like a ticket: what done looks like, the command that proves it, and what to leave alone. A child that has to infer its finish line will pick one of its own.',
     'Use contextNote for the relevant decisions, constraints, and findings; use branch only when exact parent history matters.',
     'Continue a child for focused correction or extension; start fresh when its approach is wrong or an independent view is better.',
+    'A child that comes back with a "Blocked:" question is waiting on you, not failing. Answer it — from what you know, or by looking — and continue that child; re-briefing a fresh one throws away the context it already built. Decide it yourself unless it is genuinely the user\'s call.',
     "Parallelize only independent work: if one task depends on another's findings, read the first result before starting the next. Writable tasks each get their own worktree, so they can run in parallel even on overlapping files. Use background delegation when foreground work can continue meanwhile.",
     'A writable run leaves its work as commits on the branch it reports; integrate it yourself with delegate_branches rather than handing the merge to the user.',
     'Treat child results as claims to verify: trust reported checks and concrete evidence, and re-check or continue the child when an important claim has none. A subagent can report work it did not finish, and weakening a test is a common way a task comes back "passing".',

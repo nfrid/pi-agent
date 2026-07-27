@@ -81,6 +81,42 @@ describe('output', () => {
     expect(run.messages).toHaveLength(2);
   });
 
+  test("carries a child's question and its answer route past body truncation", () => {
+    const run = createRun('audit the retry path', undefined, {
+      continuation: 'continue-blocked-child',
+    });
+    run.exitCode = 0;
+    run.state = 'success';
+    run.messages = [
+      {
+        ...assistantMessage,
+        content: [
+          {
+            type: 'text',
+            text: `Read the retry path.\n\nBlocked: should a 429 retry, given the task says never retry?\n${'z'.repeat(20_000)}`,
+          },
+        ],
+      } as never,
+    ];
+
+    const handoff = buildParentHandoff([run]);
+    expect(handoff).toContain(
+      'Blocked: should a 429 retry, given the task says never retry?',
+    );
+    expect(handoff).toContain('continue this subagent');
+    // The token that answers the question has to survive with it.
+    expect(handoff).toContain('Continuation: continue-blocked-child');
+    expect(handoff).toContain('Output truncated');
+  });
+
+  test('leaves an ordinary report unblocked', () => {
+    const run = createRun('audit the retry path', undefined, {});
+    run.exitCode = 0;
+    run.state = 'success';
+    run.messages = [assistantMessage as never];
+    expect(buildParentHandoff([run])).not.toContain('Blocked:');
+  });
+
   test('keeps successful handoff and metadata when artifact creation fails', async () => {
     const run = createRun('protected task', undefined, {
       continuation: 'continue-after-artifact-failure',
