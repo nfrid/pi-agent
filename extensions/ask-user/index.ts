@@ -7,25 +7,33 @@ import { ParamsSchema } from './schema';
 import type { Answer, UiResult } from './types';
 import { createQuestionDialog } from './ui';
 
+// Registered per session rather than at load, because the tool needs a dialog:
+// outside an interactive mode it can only throw, and an unusable tool still
+// costs its description and guidelines in every prompt.
 export default defineExtension('ask-user', (pi: ExtensionAPI) => {
+  pi.on('session_start', (_event, ctx) => {
+    if (ctx.hasUI) registerAskUserTool(pi);
+  });
+});
+
+function registerAskUserTool(pi: ExtensionAPI): void {
   pi.registerTool<typeof ParamsSchema, Answer>({
     name: TOOL_NAME,
     label: 'Ask User',
     description:
-      'Ask the user a question and wait for their answer. Use for clarifying requirements or confirming a decision before proceeding.',
+      'Ask the user a question and wait for their answer. For decisions that are genuinely theirs to make, not for ambiguity you can resolve yourself.',
     promptSnippet:
       'Ask the user a question with optional choices, optional markdown previews, and a custom-answer field',
     promptGuidelines: [
-      "Use ask_user_question when you need the user's input; do not guess when a short question would resolve ambiguity.",
-      'Keep questions concise and include clear choices when the likely answers are known.',
-      'Use choice.preview for short code or ASCII comparisons when it helps the user decide.',
+      "Ask only when the answer is the user's to give — a destructive or irreversible step, or a preference the repository cannot settle. Anything you can decide, decide: pick the best reading, say what you assumed, and continue.",
+      'When you do ask, ask once and ask narrowly: one concrete question, with the likely answers as choices, and choice.preview when a short code or ASCII comparison decides it.',
     ],
     parameters: ParamsSchema,
     executionMode: 'sequential',
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const mode = 'mode' in ctx ? ctx.mode : 'tui';
-      if (mode !== 'tui')
+      if (mode !== 'tui' && mode !== 'rpc')
         throw new Error('Cannot ask user: interactive TUI is not available.');
 
       const choices = normalizeChoices(params);
@@ -88,4 +96,4 @@ export default defineExtension('ask-user', (pi: ExtensionAPI) => {
       );
     },
   });
-});
+}

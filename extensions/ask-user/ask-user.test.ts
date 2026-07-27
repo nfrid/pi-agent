@@ -96,17 +96,30 @@ describe('ask-user tool', () => {
     }>;
   };
 
-  function registeredTool(): RegisteredTool {
+  function registeredTools(hasUI: boolean): RegisteredTool[] {
     const tools: RegisteredTool[] = [];
+    let onSessionStart: ((event: unknown, ctx: unknown) => void) | undefined;
     askUser({
+      on(event: string, handler: (event: unknown, ctx: unknown) => void) {
+        if (event === 'session_start') onSessionStart = handler;
+      },
       registerTool(value: unknown) {
         tools.push(value as RegisteredTool);
       },
     } as never);
-    const tool = tools[0];
+    onSessionStart?.({}, { hasUI });
+    return tools;
+  }
+
+  function registeredTool(): RegisteredTool {
+    const tool = registeredTools(true)[0];
     if (!tool) throw new Error('ask-user tool was not registered');
     return tool;
   }
+
+  it('stays out of the prompt when no interactive UI exists', () => {
+    expect(registeredTools(false)).toHaveLength(0);
+  });
 
   it('rejects non-interactive execution', async () => {
     const tool = registeredTool();
