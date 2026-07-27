@@ -1,9 +1,9 @@
 import path from 'node:path';
-import type { Theme } from '@earendil-works/pi-coding-agent';
+import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
 import { stringArg, toolBaseName, toolPath, toolRole } from './grouping';
-import { composeTitle, describeTools, headersOf } from './title';
+import { composeTitle, describeTools, headersOf, isNarration } from './title';
 import type {
   SequenceItem,
   SequenceOptions,
@@ -16,8 +16,9 @@ type ToolItem = Extract<SequenceItem, { type: 'tool' }>;
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const SPINNER_INTERVAL_MS = 80;
 const MAX_COMMAND_WIDTH = 56;
-const MAX_SUMMARY_COMMAND_WIDTH = 32;
-const MAX_ACTIVITY_LINES = 3;
+/** How many of a group's calls stay on screen. The rest become a count. */
+const MAX_STEP_LINES = 3;
+const STEP_MARKER = '⏺';
 
 function displayPath(value: string, cwd: string): string {
   const relative = path
@@ -67,21 +68,6 @@ function commonDirectory(files: readonly string[]): string | undefined {
   return directory || undefined;
 }
 
-/** Search patterns are regexes and can be enormous; show only the head. */
-function shortPattern(value: string): string {
-  return value.length > MAX_SUMMARY_COMMAND_WIDTH
-    ? `${value.slice(0, MAX_SUMMARY_COMMAND_WIDTH)}…`
-    : value;
-}
-
-/** "a.ts, b.ts and 3 more" — a readable list that never runs away. */
-function list(values: readonly string[], limit: number): string {
-  const shown = values.slice(0, limit);
-  const extra = values.length - shown.length;
-  const joined = shown.join(', ');
-  return extra > 0 ? `${joined} and ${extra} more` : joined;
-}
-
 /**
  * The recognisable head of a command. Agents chain shell one-liners with `&&`
  * and pipes, and sixty characters of that is noise — what identifies the call
@@ -94,47 +80,21 @@ function shortCommand(value: string, width: number): string {
 }
 
 /**
- * What the group actually did, in words. A count of calls says nothing about
- * whether the agent read the code or rewrote it, so the files it changed and
- * the commands it ran get named — those are the parts worth scanning for.
- * Ordered by how much they matter, and capped so a group stays a summary.
+ * The colour a step is marked in, so a glance down the group tells reading
+ * from writing from running without reading a word of it.
  */
-function activityLines(
-  tools: readonly ToolItem[],
-  cwd: string,
-  limit: number,
-): string[] {
-  const byRole = <T>(role: string, pick: (tool: ToolItem) => T | undefined) => [
-    ...new Set(
-      tools
-        .filter((tool) => toolRole(tool.name) === role)
-        .map(pick)
-        .filter((value): value is T & {} => value !== undefined),
-    ),
-  ];
-
-  const edited = byRole('edit', (tool) => {
-    const target = toolPath(tool.args);
-    return target
-      ? (displayPath(target, cwd).split('/').at(-1) ?? '')
-      : undefined;
-  });
-  const commands = byRole('command', (tool) => {
-    const command = stringArg(tool.args, 'command');
-    return command
-      ? shortCommand(command, MAX_SUMMARY_COMMAND_WIDTH)
-      : undefined;
-  });
-  const searches = byRole('search', (tool) => stringArg(tool.args, 'pattern'));
-  const reads = tools.filter((tool) => toolRole(tool.name) === 'read').length;
-
-  const lines: string[] = [];
-  if (edited.length > 0) lines.push(`Edited ${list(edited, 4)}`);
-  if (commands.length > 0) lines.push(`Ran ${list(commands, 2)}`);
-  if (searches.length > 0)
-    lines.push(`Searched for ${list(searches.map(shortPattern), 2)}`);
-  if (reads > 0) lines.push(`Read ${count(reads, 'file')}`);
-  return lines.slice(0, limit);
+function roleColor(tool: ToolItem): ThemeColor {
+  if (tool.isError) return 'error';
+  switch (toolRole(tool.name)) {
+    case 'edit':
+      return 'warning';
+    case 'command':
+      return 'accent';
+    case 'search':
+      return 'muted';
+    default:
+      return 'dim';
+  }
 }
 
 function formatDuration(milliseconds: number): string {
@@ -199,8 +159,15 @@ export class ActivityGroupComponent implements Component {
    * Live groups are titled by the newest narration header, so the line tracks
    * the work as it moves. Settled groups compose the whole group's narration,
    * because by then the interesting thing is what the phase amounted to.
+   *
+   * A preamble outranks both. When the model announced this phase in its own
+   * words to the user — "Now I'll check how sessions expire" — that sentence
+   * *is* the group, and it is printed here rather than above, so the reader
+   * sees it once and the collapsed group reads as the model's own account.
    */
   private title(tools: readonly ToolItem[], completed: boolean): string {
+    const preamble = this.preamble();
+    if (preamble) return preamble;
     const headers = this.sequence.items.flatMap((item) =>
       item.type === 'assistant' ? headersOf(item.message) : [],
     );
@@ -208,6 +175,32 @@ export class ActivityGroupComponent implements Component {
     if (title) return title;
     const files = this.files(tools);
     return describeTools(tools, commonDirectory(files) ?? files[0], completed);
+  }
+
+  /**
+   * What the model said on its way into this phase, if it led with anything.
+   * Only the leader can carry one — commentary later in a group is a remark
+   * about work already done, not a name for it — and only its first sentence
+   * is a title, since the rest is available by expanding.
+   */
+  private preamble(): string | undefined {
+    const [leader] = this.sequence.items;
+    if (leader?.type !== 'assistant') return undefined;
+    const spoken = leader.message.content
+      .filter((content) => content.type === 'text')
+      .map((content) => content.text.trim())
+      .find((text) => text && !isNarration(text));
+    if (!spoken) return undefined;
+    const [first = ''] = spoken.split('\n');
+    return first.trim() || undefined;
+  }
+
+  /** A step is a bullet, unless it is the one currently turning. */
+  private stepMarker(tool: ToolItem): string {
+    if (tool.status === 'running' && this.options.streaming)
+      return SPINNER_FRAMES[this.spinnerFrame] ?? STEP_MARKER;
+    if (tool.isError) return '✗';
+    return tool.status === 'pending' ? '·' : STEP_MARKER;
   }
 
   private files(tools: readonly ToolItem[]): string[] {
@@ -245,28 +238,28 @@ export class ActivityGroupComponent implements Component {
       ),
     ];
 
-    if (!completed) {
-      const running = [...tools]
-        .reverse()
-        .find((tool) => tool.status !== 'pending');
-      const lastTool = running ?? tools.at(-1);
-      if (lastTool)
-        lines.push(
-          truncateToWidth(
-            `   ${this.theme.fg('muted', toolSubject(lastTool, this.sequence.cwd))}`,
-            width,
-          ),
-        );
-    }
-
-    // Naming what was done is the point of a collapsed group; while it is
-    // still live the sub-line above already carries the current call.
-    for (const line of activityLines(
-      tools,
-      this.sequence.cwd,
-      completed ? MAX_ACTIVITY_LINES : 1,
-    ))
-      lines.push(truncateToWidth(`   ${this.theme.fg('muted', line)}`, width));
+    // The point of a group is not to hide the work but to stop it running off
+    // the screen: the last few steps stay legible, one line each, and the rest
+    // are accounted for by a count that says how much was folded away.
+    const shown = tools.slice(-MAX_STEP_LINES);
+    const hidden = tools.length - shown.length;
+    if (hidden > 0)
+      lines.push(
+        truncateToWidth(
+          `   ${this.theme.fg('dim', `⋮ ${count(hidden, 'earlier step')}`)}`,
+          width,
+        ),
+      );
+    for (const tool of shown)
+      lines.push(
+        truncateToWidth(
+          `   ${this.theme.fg(roleColor(tool), this.stepMarker(tool))} ${this.theme.fg(
+            tool.isError ? 'error' : 'muted',
+            toolSubject(tool, this.sequence.cwd),
+          )}`,
+          width,
+        ),
+      );
 
     const files = this.files(tools);
     const directory = commonDirectory(files);

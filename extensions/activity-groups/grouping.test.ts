@@ -15,12 +15,9 @@ const call = (name: string, args: unknown = {}): TranscriptEntry => ({
   args,
 });
 
-/** "[0..3]" per group, with a "+" on those a commentary closed. */
+/** "[0..3]" per group. */
 const shape = (groups: readonly ActivityGroup[]): string[] =>
-  groups.map(
-    (group) =>
-      `[${group.start}..${group.end}]${group.closer === undefined ? '' : '+'}`,
-  );
+  groups.map((group) => `[${group.start}..${group.end}]`);
 
 describe('grouping a transcript', () => {
   it('gathers a turn and its calls, and leaves everything else alone', () => {
@@ -29,17 +26,20 @@ describe('grouping a transcript', () => {
     ).toEqual(['[1..3]']);
   });
 
-  it('ends a group on the commentary that narrated it', () => {
-    const groups = groupTranscript([thinks, call('read'), says, thinks]);
-    // The answer belongs to the group it concludes; the work after it is new.
-    expect(shape(groups)).toEqual(['[0..2]+', '[3..3]']);
-    expect(groups[0]?.closer).toBe(2);
+  it('ends the phase before anything the model says', () => {
+    // The answer stands outside the work it reports on, and Pi prints it as it
+    // always has; the group above it is finished the moment it is spoken.
+    expect(
+      shape(groupTranscript([thinks, call('read'), says, thinks])),
+    ).toEqual(['[0..1]', '[3..3]']);
   });
 
-  it('leaves commentary that narrated nothing ungrouped', () => {
-    expect(shape(groupTranscript([says, thinks, call('read')]))).toEqual([
-      '[1..2]',
-    ]);
+  it('makes commentary the leader of the work it introduces', () => {
+    // "Now I'll check how sessions expire", and then it goes and does that:
+    // the line names the group below rather than footnoting the one above.
+    expect(
+      shape(groupTranscript([thinks, call('read'), says, call('read')])),
+    ).toEqual(['[0..1]', '[2..3]']);
   });
 
   it('splits when the work turns from looking around to changing things', () => {

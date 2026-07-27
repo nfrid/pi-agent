@@ -96,7 +96,7 @@ describe('activity groups renderer', () => {
     (component as unknown as { dispose(): void }).dispose();
   });
 
-  it('says what was done, not just how many calls it took', () => {
+  it('keeps the last steps legible and counts away the rest', () => {
     const renderer = createActivityGroupRenderer();
     const ctx = context();
     const tool = (
@@ -138,12 +138,16 @@ describe('activity groups renderer', () => {
     );
     if (!component) throw new Error('renderer returned no component');
     const output = component.render(100).join('\n');
-    expect(output).toContain('Edited workflows.ts, brief.ts');
-    expect(output).toContain('Ran bun test src/commands');
+    // Each of the last three calls gets its own line, in the order they ran.
+    expect(output).toContain('Reading src/commands/types.ts');
+    expect(output).toContain('Searching for resolveVerification');
+    expect(output).toContain('Running bun test src/commands');
+    // Chained one-liners are noise past the first segment.
     expect(output).not.toContain('biome ci');
-    expect(output).toContain('Searched for resolveVerification');
-    // Capped at three lines, and a read count is the least worth keeping.
-    expect(output).not.toContain('Read 2 files');
+    // Everything before them is accounted for without being printed.
+    expect(output).toContain('3 earlier steps');
+    expect(output).not.toContain('workflows.ts');
+    expect(output).toContain('6 calls');
     (component as unknown as { dispose(): void }).dispose();
   });
 
@@ -283,8 +287,9 @@ describe('activity groups renderer', () => {
     expect(settled).toContain(
       'Planned and implemented the delegate shutdown fix',
     );
-    // What it actually did, not just how many calls it took.
-    expect(settled).toContain('Read 2 files');
+    // Few enough calls to show them all, so nothing is counted away.
+    expect(settled).toContain('Reading extensions/delegate/jobs.ts');
+    expect(settled).not.toContain('earlier step');
     // The shared directory locates the group at a glance.
     expect(settled).toContain('2 files in extensions/delegate');
     (component as unknown as { dispose(): void }).dispose();

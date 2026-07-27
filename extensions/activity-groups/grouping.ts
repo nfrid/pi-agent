@@ -217,12 +217,6 @@ export interface ActivityGroup {
   start: number;
   /** Index of the last entry, inclusive. */
   end: number;
-  /**
-   * Index of the commentary that closed the group, when it was closed by one.
-   * Such a group is finished by construction: whatever follows starts a new
-   * one, so a group the user has seen close can never come back to life.
-   */
-  closer?: number;
 }
 
 /** One model turn: the message that carried the calls, and the calls. */
@@ -234,8 +228,8 @@ interface Turn {
   firstCall?: number;
   /** The narration this turn opened with, if any. */
   header?: string;
-  /** Commentary that ends this turn's group; see `turnsOf`. */
-  closer?: number;
+  /** Opened by commentary: a declared turning point. See `turnsOf`. */
+  led?: boolean;
   /** A break no group may span. */
   broken?: boolean;
 }
@@ -255,17 +249,20 @@ function turnsOf(entries: readonly TranscriptEntry[]): Turn[] {
 
   const take = (entry: TranscriptEntry, index: number): void => {
     if (entry.kind === 'assistant') {
-      // Commentary is the model addressing the user. What it said always
-      // renders, and it ends the activity it was narrating — that is the beat
-      // a reader already perceives as a break, so groups should agree with it.
+      // Commentary is the model addressing the user, and a reader already
+      // perceives it as a break, so groups agree with it. It belongs to the
+      // work *below* it: a model says "now I'll check how sessions expire"
+      // and then goes and does that, which makes the line the natural name
+      // for what follows rather than a footnote to what came before.
       if (entry.speaks) {
-        // Closing a group makes it that group's last word. Standing on its own
-        // it is an ordinary message that belongs to no group at all.
-        if (open) {
-          open.closer = index;
-          open.end = index;
-          close();
-        } else breakHere();
+        close();
+        open = {
+          start: index,
+          end: index,
+          tools: [],
+          header: entry.header,
+          led: true,
+        };
         return;
       }
       close();
@@ -325,6 +322,14 @@ export function groupTranscript(
       flush();
       continue;
     }
+    // Commentary always ends the phase before it. Whether it also opens one
+    // depends on what the model did next: followed by work it leads and names
+    // that work, and followed by nothing it is just a message, left ungrouped
+    // for Pi to render as it always has.
+    if (turn.led) {
+      flush();
+      if (turn.tools.length === 0) continue;
+    }
     // A turn whose tools have not arrived yet cannot set the phase, so it
     // continues the open group rather than guessing at a new one.
     const kind: ActivityKind =
@@ -353,14 +358,6 @@ export function groupTranscript(
       if (open) open.end = cursor - 1;
       state = foldTurn(state, kind, take);
     } while (placed < turn.tools.length);
-
-    // The commentary that closed the turn joins the group as its last entry,
-    // so its narration counts towards the title, and then ends it.
-    if (turn.closer !== undefined && open) {
-      open.closer = turn.closer;
-      open.end = turn.closer;
-      flush();
-    }
   }
   flush();
   return groups;

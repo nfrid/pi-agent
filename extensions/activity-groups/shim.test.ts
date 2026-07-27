@@ -230,12 +230,12 @@ describe('tool sequence shim', () => {
     h.chat.addChild(answer);
     answer.updateContent(assistantMessage([{ type: 'text', text: 'Done' }]));
 
-    // The answer joins the group it concludes, so its narration counts
-    // towards the title, and closes it — the checkmark lands as soon as the
-    // model starts talking rather than waiting for the run to end.
+    // The answer stands outside the work it reports on and Pi renders it as
+    // it always has, but it still ends the group: the checkmark lands as soon
+    // as the model starts talking rather than waiting for the run to end.
     expect(h.render()).toEqual([
       'other',
-      'group:group-1:3:done',
+      'group:group-1:2:done',
       'assistant:Done',
     ]);
   });
@@ -406,7 +406,7 @@ describe('tool sequence shim', () => {
     ]);
   });
 
-  it('shows what the model said and ends the group it was narrating', () => {
+  it('lets a preamble lead the work it announced', () => {
     const { renderer } = recordingRenderer();
     const h = harness();
     uninstall = installToolSequenceShim(renderer, h.host);
@@ -423,12 +423,11 @@ describe('tool sequence shim', () => {
     const edit = new FakeTool('edit', 'b-0', {});
     h.chat.addChild(edit);
 
-    // The commentary renders in full even though it carried a tool call, and
-    // the work that follows it is a new group led by the tool itself.
+    // The commentary ends the group above it and leads the one below, whose
+    // title it becomes — so it is printed once, on the group's own line.
     expect(h.render()).toEqual([
-      'group:group-1:3:done',
-      'assistant:The leak is in the shutdown path.',
-      'group:group-2:1:live',
+      'group:group-1:2:done',
+      'group:group-2:2:live',
     ]);
   });
 

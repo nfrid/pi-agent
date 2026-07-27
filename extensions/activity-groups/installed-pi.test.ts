@@ -197,9 +197,10 @@ describe.skipIf(!installedPi)('installed pi build', () => {
     try {
       const collapsed = chat.render(80).join('\n');
       expect(collapsed).toContain('✓ Inspected authentication code');
-      // What the model said survives; what it thought is the summary's job.
+      // The group hides the work it stands for. The answer is in no group, so
+      // Pi renders it as it always has — including its thinking, which the
+      // group summary never claimed to account for.
       expect(collapsed).toContain('The token never expires.');
-      expect(collapsed).not.toContain('Reporting back');
       expect(collapsed).not.toContain('AUTH_FILE_BODY');
 
       expanded = true;
@@ -209,10 +210,9 @@ describe.skipIf(!installedPi)('installed pi build', () => {
           true,
         );
       const open = chat.render(80).join('\n');
-      // Expanding reveals the calls and the thinking behind the answer …
+      // Expanding reveals the calls the group was standing in for …
       expect(open).toContain('AUTH_FILE_BODY');
-      expect(open).toContain('Reporting back');
-      // … and prints the answer itself exactly once.
+      // … and never prints the answer a second time.
       expect(open.split('The token never expires.').length - 1).toBe(1);
       expect(errors).toEqual([]);
     } finally {

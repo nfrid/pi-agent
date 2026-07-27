@@ -17,13 +17,12 @@
  * Nothing is removed from the container, so expanding a group is just replaying
  * the members' original `render`.
  *
- * What a group may hide is thinking and tool calls. Anything the model said to
- * the user always renders, and ends the group it followed: as that group's last
- * word it shows only its speech, since the summary above already accounts for
- * its thinking, and expanding the group shows only the rest, so the answer is
- * never printed twice. A message whose whole text is a narration header is not
- * speech at all — see `isNarration` — because some models write their headers
- * on the text channel rather than in thinking.
+ * Anything the model says to the user ends the phase before it. What happens to
+ * the line itself depends on what came next: work below it makes it that work's
+ * preamble, so it leads the group and is printed once as its title; nothing
+ * below it makes it an ordinary message, in no group, rendered by Pi untouched.
+ * A message whose whole text is a narration header is not speech at all — see
+ * `isNarration` — because some models write headers on the text channel.
  *
  * This reaches into host internals that carry no compatibility promise. Every
  * assumption is verified at install time and re-checked per sequence: anything
@@ -100,8 +99,6 @@ interface Sequence {
   tools: ToolComponentLike[];
   /** True when the sequence is the tail of its container, so it may still grow. */
   atTail: boolean;
-  /** Closing commentary: renders its speech rather than being hidden. */
-  speaker?: Component;
   disabled?: boolean;
 }
 
@@ -286,17 +283,12 @@ export function installToolSequenceShim(
         const members = children.slice(group.start, group.end + 1);
         const leader = members[0];
         if (!leader) continue;
-        const closer =
-          group.closer === undefined ? undefined : children[group.closer];
         const sequence: Sequence = {
           id: groupId(leader),
           members,
           leader,
           tools: members.filter(isTool),
-          // A group is still growing only if it is the tail of the container
-          // and nothing has closed it. Commentary closes it, whatever follows.
-          atTail: closer === undefined && group.end === children.length - 1,
-          speaker: closer,
+          atTail: group.end === children.length - 1,
         };
         seen.add(sequence.id);
         for (const member of members) nextBindings.set(member, sequence);
@@ -322,54 +314,6 @@ export function installToolSequenceShim(
   function originalRenderOf(component: Component, width: number): string[] {
     if (isTool(component)) return originalToolRender.call(component, width);
     return originalAssistantRender.call(component, width);
-  }
-
-  /**
-   * Render one half of a message: what it said, or what it thought.
-   *
-   * Pi builds one component from text, thinking and tool calls together, so the
-   * only way to show a part of it is to feed it a message with the rest removed
-   * and put the real one back afterwards. The result is cached per message,
-   * width and half: the swap costs one content rebuild, which is what Pi
-   * already spends on every streaming update, and this way it is not spent
-   * again per frame.
-   *
-   * Both halves are needed and neither may be shown twice. Closing commentary
-   * shows its speech below the group summary that already stands for its
-   * thinking; expanding the group then has to show that thinking without
-   * repeating the speech printed underneath.
-   */
-  const partials = new WeakMap<
-    Component,
-    Map<string, { message: AssistantMessage; width: number; lines: string[] }>
-  >();
-
-  function renderPartial(
-    component: AssistantComponentLike,
-    width: number,
-    drop: 'thinking' | 'text',
-  ): string[] {
-    const message = component.lastMessage;
-    if (!message) return originalRenderOf(component, width);
-    const kept = message.content.filter((content) => content.type !== drop);
-    if (kept.length === message.content.length)
-      return originalRenderOf(component, width);
-    if (kept.length === 0) return [];
-
-    const cache = partials.get(component) ?? new Map();
-    partials.set(component, cache);
-    const cached = cache.get(drop);
-    if (cached?.message === message && cached.width === width)
-      return cached.lines;
-
-    originalUpdateContent.call(component, { ...message, content: kept });
-    try {
-      const lines = originalAssistantRender.call(component, width);
-      cache.set(drop, { message, width, lines });
-      return lines;
-    } finally {
-      originalUpdateContent.call(component, message);
-    }
   }
 
   function stateOf(sequence: Sequence): SequenceState {
@@ -445,11 +389,7 @@ export function installToolSequenceShim(
         defaultView: {
           render: (innerWidth: number) =>
             sequence.members.flatMap((member) =>
-              // The closing commentary prints its own speech below the group,
-              // so the expanded body owes only the thinking behind it.
-              member === sequence.speaker && isAssistant(member)
-                ? renderPartial(member, innerWidth, 'text')
-                : originalRenderOf(member, innerWidth),
+              originalRenderOf(member, innerWidth),
             ),
           invalidate: () => {
             for (const member of sequence.members) member.invalidate();
@@ -481,8 +421,6 @@ export function installToolSequenceShim(
       sequence = bindings.get(component);
       if (!sequence || sequence.disabled)
         return originalRenderOf(component, width);
-      if (sequence.speaker === component && isAssistant(component))
-        return renderPartial(component, width, 'thinking');
       if (sequence.leader !== component) return [];
       return renderSequence(sequence, width);
     } catch (error) {
