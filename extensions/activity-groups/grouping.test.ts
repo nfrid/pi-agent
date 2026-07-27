@@ -76,22 +76,17 @@ describe('grouping a transcript', () => {
   });
 
   it('cuts where the model says it moved on, once a group has real work', () => {
-    const narrates = (header: string): TranscriptEntry => ({
+    const narrates = (): TranscriptEntry => ({
       kind: 'assistant',
       speaks: false,
-      header,
+      narration: 'thought',
     });
     const reads = (n: number) => Array.from({ length: n }, () => call('read'));
 
     // Announcing something new after a stretch of work ends that stretch …
     expect(
       shape(
-        groupTranscript([
-          narrates('Reading the auth code'),
-          ...reads(6),
-          narrates('Checking how sessions expire'),
-          ...reads(3),
-        ]),
+        groupTranscript([narrates(), ...reads(6), narrates(), ...reads(3)]),
       ),
     ).toEqual(['[0..6]', '[7..10]']);
 
@@ -99,14 +94,30 @@ describe('grouping a transcript', () => {
     // far more often than they actually change what they are doing.
     expect(
       shape(
-        groupTranscript([
-          narrates('Reading the auth code'),
-          ...reads(2),
-          narrates('Still reading the auth code'),
-          ...reads(3),
-        ]),
+        groupTranscript([narrates(), ...reads(2), narrates(), ...reads(3)]),
       ),
     ).toEqual(['[0..6]']);
+  });
+
+  it('takes the model at its word when it announces to the reader', () => {
+    const announces: TranscriptEntry = {
+      kind: 'assistant',
+      speaks: false,
+      narration: 'announced',
+    };
+    const reads = (n: number) => Array.from({ length: n }, () => call('read'));
+
+    // A header written where the user can read it is a deliberate act — this
+    // repo asks for one at each change of direction — so two calls are enough
+    // behind it, where the same line in thinking would wait for five.
+    expect(
+      shape(groupTranscript([announces, ...reads(2), announces, ...reads(2)])),
+    ).toEqual(['[0..2]', '[3..5]']);
+
+    // One call is not yet a group, and models do announce twice in a row.
+    expect(
+      shape(groupTranscript([announces, ...reads(1), announces, ...reads(2)])),
+    ).toEqual(['[0..4]']);
   });
 
   it('cuts a run that never changes character into readable chunks', () => {

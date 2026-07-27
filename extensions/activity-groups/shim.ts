@@ -36,7 +36,11 @@ import type {
 } from '@earendil-works/pi-ai';
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
-import { groupTranscript, type TranscriptEntry } from './grouping';
+import {
+  groupTranscript,
+  type Narration,
+  type TranscriptEntry,
+} from './grouping';
 import { headersOf, isNarration } from './title';
 import type {
   RendererContext,
@@ -216,6 +220,16 @@ export function installToolSequenceShim(
         !isNarration(content.text),
     ) ?? false;
 
+  /**
+   * How the message narrated itself, if it did. A header the model wrote where
+   * the user can read it is worth more as a boundary than the same line in
+   * thinking — see `Narration` — so the channel is carried, not just the fact.
+   */
+  const narrationOf = (message: AssistantMessage): Narration | undefined => {
+    if (headersOf(message, 'text').length > 0) return 'announced';
+    return headersOf(message, 'thinking').length > 0 ? 'thought' : undefined;
+  };
+
   function requestRender(): void {
     if (host.requestRender) {
       host.requestRender();
@@ -258,8 +272,8 @@ export function installToolSequenceShim(
           speaks: speaks(child),
           // The model's own account of what it is starting, which is where a
           // group of work that nothing else distinguishes is cut.
-          header: child.lastMessage
-            ? headersOf(child.lastMessage)[0]
+          narration: child.lastMessage
+            ? narrationOf(child.lastMessage)
             : undefined,
           closesGroup,
         };

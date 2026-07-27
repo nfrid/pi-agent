@@ -88,6 +88,27 @@ const MAX_IDLE_CALLS = 4;
  */
 const MIN_NARRATED_CALLS = 5;
 
+/**
+ * The same, for narration the model wrote where the user could read it.
+ *
+ * A header in thinking is the model talking to itself and costs it nothing, so
+ * it writes them constantly. Announcing a phase to the reader is a deliberate
+ * act — this repo's system prompt asks for one at each change of direction —
+ * and it means what it says, so it needs far less work behind it to cut.
+ *
+ * Not none, though: a single call behind an announcement is too small to stand
+ * as a group of its own, and models do announce twice in a row. Such a turn
+ * joins the next one, and `composeTitle` keeps what both of them said.
+ */
+const MIN_ANNOUNCED_CALLS = 2;
+
+/** How the model narrated a turn: to itself, to the reader, or not at all. */
+export type Narration = 'thought' | 'announced';
+
+function minCallsToCutOn(narration: Narration): number {
+  return narration === 'announced' ? MIN_ANNOUNCED_CALLS : MIN_NARRATED_CALLS;
+}
+
 /** What a tool call does, for describing a group in plain words. */
 export type ToolRole = 'edit' | 'read' | 'search' | 'command' | 'other';
 
@@ -163,11 +184,11 @@ function startsNewGroup(
   open: OpenGroup | undefined,
   incoming: ActivityKind,
   calls: number,
-  narrated = false,
+  narration?: Narration,
 ): boolean {
   if (!open) return true;
   if (open.calls >= MAX_GROUP_CALLS) return true;
-  if (narrated && open.calls >= MIN_NARRATED_CALLS) return true;
+  if (narration && open.calls >= minCallsToCutOn(narration)) return true;
   const phase = phaseOf(incoming);
   if (phase !== undefined) return phase !== open.phase;
   return open.phase === 'building' && open.sinceChange + calls > MAX_IDLE_CALLS;
@@ -206,8 +227,12 @@ export type TranscriptEntry = {
   | {
       kind: 'assistant';
       speaks: boolean;
-      /** The bold line the model opened its thinking with, if it wrote one. */
-      header?: string;
+      /**
+       * Whether the model narrated this turn, and on which channel. The words
+       * are the renderer's business; all a boundary needs is that a header was
+       * written and who it was written for.
+       */
+      narration?: Narration;
     }
   | ({ kind: 'tool' } & ToolDescriptor)
   | { kind: 'other' }
@@ -229,8 +254,8 @@ interface WorkTurn {
   tools: ToolDescriptor[];
   /** Index of the first call, which the calls follow contiguously. */
   firstCall?: number;
-  /** The narration this turn opened with, if any. */
-  header?: string;
+  /** How this turn narrated itself, if it did. */
+  narration?: Narration;
   /** Opened by commentary: a declared turning point. See `turnsOf`. */
   led: boolean;
 }
@@ -276,7 +301,7 @@ function turnsOf(entries: readonly TranscriptEntry[]): Turn[] {
       // calls arrive: an empty message is one still streaming in, not a
       // boundary, and treating it as one made groups flicker shut and reopen
       // as the model typed.
-      open = openAt(index, { header: entry.header, led: entry.speaks });
+      open = openAt(index, { narration: entry.narration, led: entry.speaks });
       return;
     }
     if (entry.kind === 'tool') {
@@ -372,8 +397,8 @@ export function groupTranscript(
       const remaining = turn.tools.length - placed;
       // Only the head of the turn carries its narration; a chunk split off by
       // the cap is the same announced piece of work continuing.
-      const narrated = placed === 0 && turn.header !== undefined;
-      if (startsNewGroup(state, kind, remaining, narrated)) flush();
+      const narration = placed === 0 ? turn.narration : undefined;
+      if (startsNewGroup(state, kind, remaining, narration)) flush();
       // Whatever room the group has left, which a flush has just reset to all
       // of it — so a chunk is never empty and the loop always advances.
       const take = Math.min(remaining, MAX_GROUP_CALLS - (state?.calls ?? 0));
