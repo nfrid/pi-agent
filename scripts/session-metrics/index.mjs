@@ -5,7 +5,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const SCHEMA_VERSION = 'session-metrics/v1';
+export const SCHEMA_VERSION = 'session-metrics/v2';
 const METRIC_KEYS = [
   'userTurns',
   'assistantTurns',
@@ -18,18 +18,110 @@ const METRIC_KEYS = [
   'usageCacheRead',
   'usageCacheWrite',
   'peakRequestContext',
+  'delegateToolCalls',
+  'delegateContinuationCalls',
+  'delegateParallelCalls',
+  'delegateRejectedCalls',
+  'delegatedTasks',
+  'delegateWritableTasks',
+  'delegateTruncatedTasks',
+  'delegateHandoffBytes',
 ];
+
+function ratio(numerator, denominator) {
+  return denominator === 0 ? 0 : numerator / denominator;
+}
+
+/**
+ * Derived measurements, computed the same way for one session and for a cohort
+ * so a cohort ratio is never a mean of per-session ratios.
+ */
+const RATIO_KEYS = {
+  cacheHitRatio: (m) =>
+    ratio(
+      m.usageCacheRead,
+      m.usageInput + m.usageCacheRead + m.usageCacheWrite,
+    ),
+  delegateHandoffBytesPerTask: (m) =>
+    ratio(m.delegateHandoffBytes, m.delegatedTasks),
+  delegateTruncationRate: (m) =>
+    ratio(m.delegateTruncatedTasks, m.delegatedTasks),
+  delegateContinuationRate: (m) =>
+    ratio(m.delegateContinuationCalls, m.delegateToolCalls),
+};
+
+function withRatios(metrics) {
+  for (const [key, compute] of Object.entries(RATIO_KEYS))
+    metrics[key] = compute(metrics);
+  return metrics;
+}
 
 function finiteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
-function todoCalls(message) {
+function toolCalls(message, name) {
   if (message?.role !== 'assistant' || !Array.isArray(message.content))
-    return 0;
+    return [];
   return message.content.filter(
-    (part) => part?.type === 'toolCall' && part.name === 'todo',
+    (part) => part?.type === 'toolCall' && part.name === name,
+  );
+}
+
+/** Tool arguments are usually decoded already; some providers leave them as JSON text. */
+function toolArguments(call) {
+  const raw = call?.arguments;
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw;
+  if (typeof raw !== 'string') return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Emitted once per run envelope by the current delegate build. */
+const TRUNCATED_MARKER = 'Truncation: body truncated';
+/** The marker older handoffs left inline, before the envelope carried the flag. */
+const LEGACY_TRUNCATED_MARKER = '[Output truncated for parent context';
+
+function countOccurrences(text, marker) {
+  return text.split(marker).length - 1;
+}
+
+function resultText(message) {
+  return (Array.isArray(message.content) ? message.content : [])
+    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text)
+    .join('');
+}
+
+/**
+ * Counts what a delegate result cost the parent and how many tasks it covers.
+ * `details.runs` is authoritative: a call rejected for invalid parameters comes
+ * back as a delegate tool result with no runs, and counting it as a delegated
+ * task would understate the bytes every real task spends.
+ */
+function recordDelegateResult(metrics, message) {
+  const runs = Array.isArray(message.details?.runs) ? message.details.runs : [];
+  if (runs.length === 0) {
+    metrics.delegateRejectedCalls += 1;
+    return;
+  }
+  const text = resultText(message);
+  metrics.delegatedTasks += runs.length;
+  metrics.delegateHandoffBytes += Buffer.byteLength(text, 'utf8');
+  metrics.delegateWritableTasks += runs.filter(
+    (run) => run?.allowWrites === true,
   ).length;
+  if (message.details?.mode === 'parallel') metrics.delegateParallelCalls += 1;
+  const truncated =
+    countOccurrences(text, TRUNCATED_MARKER) ||
+    countOccurrences(text, LEGACY_TRUNCATED_MARKER);
+  metrics.delegateTruncatedTasks += Math.min(truncated, runs.length);
 }
 
 function activeAncestry(entries) {
@@ -82,7 +174,12 @@ export function parseSessionJsonl(source) {
     if (message?.role === 'user') metrics.userTurns += 1;
     if (message?.role === 'assistant') {
       metrics.assistantTurns += 1;
-      metrics.todoToolCalls += todoCalls(message);
+      metrics.todoToolCalls += toolCalls(message, 'todo').length;
+      const delegated = toolCalls(message, 'delegate');
+      metrics.delegateToolCalls += delegated.length;
+      metrics.delegateContinuationCalls += delegated.filter(
+        (call) => typeof toolArguments(call).continuation === 'string',
+      ).length;
       const usage = message.usage ?? {};
       metrics.usageInput += finiteNumber(usage.input);
       metrics.usageOutput += finiteNumber(usage.output);
@@ -97,16 +194,15 @@ export function parseSessionJsonl(source) {
     }
     if (message?.role === 'toolResult' && message.toolName === 'todo')
       metrics.todoToolResults += 1;
+    if (message?.role === 'toolResult' && message.toolName === 'delegate')
+      recordDelegateResult(metrics, message);
   }
   if (timestamps.length > 1)
     metrics.elapsedMs = Math.max(...timestamps) - Math.min(...timestamps);
 
-  const denominator =
-    metrics.usageInput + metrics.usageCacheRead + metrics.usageCacheWrite;
   return {
     sessionId: createHash('sha256').update(source).digest('hex').slice(0, 12),
-    ...metrics,
-    cacheHitRatio: denominator === 0 ? 0 : metrics.usageCacheRead / denominator,
+    ...withRatios(metrics),
     malformedLines,
   };
 }
@@ -127,15 +223,11 @@ export function aggregateSessions(sessions) {
     for (const key of METRIC_KEYS) totals[key] += session[key];
     totals.malformedLines += session.malformedLines;
   }
-  const denominator =
-    totals.usageInput + totals.usageCacheRead + totals.usageCacheWrite;
-  totals.cacheHitRatio =
-    denominator === 0 ? 0 : totals.usageCacheRead / denominator;
+  withRatios(totals);
   const medians = Object.fromEntries(
-    [...METRIC_KEYS, 'cacheHitRatio', 'malformedLines'].map((key) => [
-      key,
-      median(sessions.map((session) => session[key])),
-    ]),
+    [...METRIC_KEYS, ...Object.keys(RATIO_KEYS), 'malformedLines'].map(
+      (key) => [key, median(sessions.map((session) => session[key]))],
+    ),
   );
   return { sessionCount: sessions.length, totals, medians };
 }
@@ -164,7 +256,10 @@ export async function summarizePaths(inputs, options = {}) {
   const sessions = [];
   for (const file of files) {
     const session = parseSessionJsonl(await readFile(file, 'utf8'));
-    if (session.todoToolCalls >= (options.minTodoCalls ?? 0))
+    if (
+      session.todoToolCalls >= (options.minTodoCalls ?? 0) &&
+      session.delegateToolCalls >= (options.minDelegateCalls ?? 0)
+    )
       sessions.push(session);
   }
   const limited =
@@ -205,7 +300,7 @@ export function compareSummaries(baseline, comparison) {
 }
 
 function usage() {
-  return 'Usage: session-metrics summarize <file|dir>... [--limit N] [--min-todo-calls N]\n       session-metrics compare --baseline <file|dir> [--baseline ...] --comparison <file|dir> [--comparison ...] [--limit N] [--min-todo-calls N]';
+  return 'Usage: session-metrics summarize <file|dir>... [--limit N] [--min-todo-calls N] [--min-delegate-calls N]\n       session-metrics compare --baseline <file|dir> [--baseline ...] --comparison <file|dir> [--comparison ...] [--limit N] [--min-todo-calls N] [--min-delegate-calls N]';
 }
 
 function positiveInteger(value, flag, allowZero = false) {
@@ -219,6 +314,7 @@ export async function runCli(args) {
   const [command, ...rest] = args;
   let limit;
   let minTodoCalls = 0;
+  let minDelegateCalls = 0;
   const plain = [];
   const baseline = [];
   const comparison = [];
@@ -227,12 +323,14 @@ export async function runCli(args) {
     if (arg === '--limit') limit = positiveInteger(rest[++index], arg);
     else if (arg === '--min-todo-calls')
       minTodoCalls = positiveInteger(rest[++index], arg, true);
+    else if (arg === '--min-delegate-calls')
+      minDelegateCalls = positiveInteger(rest[++index], arg, true);
     else if (arg === '--baseline') baseline.push(rest[++index]);
     else if (arg === '--comparison') comparison.push(rest[++index]);
     else if (arg?.startsWith('--')) throw new Error(`Unknown option: ${arg}`);
     else plain.push(arg);
   }
-  const options = { limit, minTodoCalls };
+  const options = { limit, minTodoCalls, minDelegateCalls };
   if (
     command === 'summarize' &&
     plain.length > 0 &&

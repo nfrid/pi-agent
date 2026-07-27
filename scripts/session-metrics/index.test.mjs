@@ -98,6 +98,64 @@ function fixture({ todoCalls = 1, input = 10, cacheRead = 30 } = {}) {
   ].join('\n');
 }
 
+/**
+ * A session of delegate exchanges: each entry is one assistant call and the
+ * tool result it produced, chained so every one stays on the active ancestry.
+ */
+function delegateFixture(exchanges) {
+  const lines = [
+    line({
+      type: 'session',
+      id: 'header',
+      timestamp: '2026-01-01T00:00:00.000Z',
+      cwd: '/private/repo',
+    }),
+  ];
+  let parentId = null;
+  exchanges.forEach((exchange, index) => {
+    const callId = `a${index}`;
+    const resultId = `r${index}`;
+    lines.push(
+      line({
+        type: 'message',
+        id: callId,
+        parentId,
+        timestamp: `2026-01-01T00:01:${String(index).padStart(2, '0')}.000Z`,
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              name: 'delegate',
+              arguments: exchange.arguments ?? { task: 'PRIVATE TASK' },
+            },
+          ],
+          usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+        },
+      }),
+    );
+    lines.push(
+      line({
+        type: 'message',
+        id: resultId,
+        parentId: callId,
+        timestamp: `2026-01-01T00:02:${String(index).padStart(2, '0')}.000Z`,
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          content: [{ type: 'text', text: exchange.text ?? 'HANDOFF' }],
+          details: exchange.details,
+          isError: exchange.isError ?? false,
+        },
+      }),
+    );
+    parentId = resultId;
+  });
+  return lines.join('\n');
+}
+
+const singleRun = { mode: 'single', runs: [{ allowWrites: false }] };
+
 describe('parseSessionJsonl', () => {
   it('measures only the active leaf ancestry and request usage', () => {
     const result = parseSessionJsonl(fixture());
@@ -136,6 +194,142 @@ describe('parseSessionJsonl', () => {
   });
 });
 
+describe('delegate measurements', () => {
+  it('counts tasks, parent-visible bytes, and task shape from the runs that ran', () => {
+    const result = parseSessionJsonl(
+      delegateFixture([
+        { text: 'ab', details: singleRun },
+        {
+          text: 'cdef',
+          details: {
+            mode: 'parallel',
+            runs: [{ allowWrites: true }, { allowWrites: false }],
+          },
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateToolCalls: 2,
+      delegatedTasks: 3,
+      delegateParallelCalls: 1,
+      delegateWritableTasks: 1,
+      delegateHandoffBytes: 6,
+      delegateRejectedCalls: 0,
+      delegateHandoffBytesPerTask: 2,
+    });
+  });
+
+  it('measures handoff bytes in UTF-8, not characters', () => {
+    const result = parseSessionJsonl(
+      delegateFixture([{ text: 'é', details: singleRun }]),
+    );
+    expect(result.delegateHandoffBytes).toBe(2);
+  });
+
+  it('excludes rejected calls from tasks and bytes', () => {
+    const result = parseSessionJsonl(
+      delegateFixture([
+        { text: 'ab', details: singleRun },
+        // A call rejected for invalid parameters: a delegate result with no runs.
+        {
+          text: 'A continuation reuses its route.',
+          details: {},
+          isError: true,
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateToolCalls: 2,
+      delegateRejectedCalls: 1,
+      delegatedTasks: 1,
+      delegateHandoffBytes: 2,
+      delegateHandoffBytesPerTask: 2,
+    });
+  });
+
+  it('counts truncated tasks from the envelope marker, capped at the runs present', () => {
+    const twoRuns = {
+      mode: 'parallel',
+      runs: [{ allowWrites: false }, { allowWrites: false }],
+    };
+    expect(
+      parseSessionJsonl(
+        delegateFixture([
+          {
+            text: 'Truncation: body truncated\nTruncation: none',
+            details: twoRuns,
+          },
+        ]),
+      ),
+    ).toMatchObject({ delegateTruncatedTasks: 1, delegateTruncationRate: 0.5 });
+
+    expect(
+      parseSessionJsonl(
+        delegateFixture([
+          {
+            text: 'Truncation: body truncated\nTruncation: body truncated\nTruncation: body truncated',
+            details: twoRuns,
+          },
+        ]),
+      ).delegateTruncatedTasks,
+    ).toBe(2);
+  });
+
+  it('falls back to the legacy inline marker when no envelope flag is present', () => {
+    expect(
+      parseSessionJsonl(
+        delegateFixture([
+          {
+            text: 'findings\n\n[Output truncated for parent context; full output is preserved in tool details.]',
+            details: singleRun,
+          },
+        ]),
+      ).delegateTruncatedTasks,
+    ).toBe(1);
+  });
+
+  it('counts continuations, including arguments left as JSON text', () => {
+    const result = parseSessionJsonl(
+      delegateFixture([
+        { arguments: { task: 'PRIVATE TASK' }, details: singleRun },
+        {
+          arguments: { continuation: 'token', task: 'PRIVATE' },
+          details: singleRun,
+        },
+        {
+          arguments: JSON.stringify({ continuation: 'token', task: 'PRIVATE' }),
+          details: singleRun,
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateToolCalls: 3,
+      delegateContinuationCalls: 2,
+      delegateContinuationRate: 2 / 3,
+    });
+  });
+
+  it('keeps delegated task text and handoff bodies out of the output', () => {
+    const serialized = JSON.stringify(
+      parseSessionJsonl(
+        delegateFixture([
+          {
+            arguments: {
+              task: 'PRIVATE TASK',
+              contextNote: 'SECRET CONTEXT',
+              scope: ['/private/repo/src'],
+            },
+            text: 'PRIVATE HANDOFF BODY',
+            details: { mode: 'single', runs: [{ task: 'PRIVATE TASK' }] },
+          },
+        ]),
+      ),
+    );
+    for (const secret of ['PRIVATE', 'SECRET', '/private/repo'])
+      expect(serialized).not.toContain(secret);
+  });
+});
+
 describe('cohorts', () => {
   it('discovers directories and applies todo and limit filters', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'session-metrics-'));
@@ -159,6 +353,38 @@ describe('cohorts', () => {
     const filtered = await summarizePaths([directory], { minTodoCalls: 2 });
     expect(filtered.sessions).toHaveLength(1);
     expect(filtered.sessions[0].todoToolCalls).toBe(2);
+  });
+
+  it('filters on delegate calls and weights cohort ratios by totals', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'session-metrics-'));
+    temporaryDirectories.push(directory);
+    await Promise.all([
+      writeFile(join(directory, 'none.jsonl'), fixture()),
+      writeFile(
+        join(directory, 'cheap.jsonl'),
+        delegateFixture([{ text: 'ab', details: singleRun }]),
+      ),
+      writeFile(
+        join(directory, 'costly.jsonl'),
+        delegateFixture([
+          {
+            text: 'x'.repeat(30),
+            details: {
+              mode: 'parallel',
+              runs: [{ allowWrites: true }, { allowWrites: true }],
+            },
+          },
+        ]),
+      ),
+    ]);
+    const result = await summarizePaths([directory], { minDelegateCalls: 1 });
+    expect(result.cohort.sessionCount).toBe(2);
+    // 32 bytes over 3 tasks, not the mean of 2 and 15.
+    expect(result.cohort.totals.delegateHandoffBytesPerTask).toBeCloseTo(
+      32 / 3,
+    );
+    expect(result.cohort.medians.delegateHandoffBytesPerTask).toBe(8.5);
+    expect(result.cohort.totals.delegateWritableTasks).toBe(2);
   });
 
   it('computes weighted totals, medians, and comparison deltas', () => {
