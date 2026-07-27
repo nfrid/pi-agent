@@ -26,6 +26,8 @@ const METRIC_KEYS = [
   'delegateWritableTasks',
   'delegateTruncatedTasks',
   'delegateHandoffBytes',
+  'delegateBackgroundStarts',
+  'delegateBackgroundDeliveries',
 ];
 
 function ratio(numerator, denominator) {
@@ -83,6 +85,36 @@ function toolArguments(call) {
   }
 }
 
+/** The acknowledgement a background delegate call returns in place of a report. */
+const BACKGROUND_START_MARKER = /^Started \d+ background delegate job/;
+/** How a finished background job hands its report to the parent. */
+const BACKGROUND_DELIVERY_MARKER =
+  /^Background delegate job \S+ .*?\n\n(Delegated tasks?\b[\s\S]*)$/;
+/** Leads every handoff, and says how many runs it covers. */
+const HANDOFF_HEADER = /^Delegated tasks: \d+\/(\d+) succeeded/;
+
+/**
+ * Handoff bytes and task count a completed background job delivered. Background
+ * work reaches the parent as a delegate_jobs result rather than a delegate one,
+ * so without this the parent's whole background spend is invisible. A job that
+ * is delivered and then peeked at again is counted twice on purpose: the parent
+ * paid context for both copies.
+ */
+function recordBackgroundDelivery(metrics, message) {
+  const delivered = resultText(message).match(BACKGROUND_DELIVERY_MARKER);
+  if (!delivered) return;
+  const handoff = delivered[1];
+  const header = handoff.match(HANDOFF_HEADER);
+  const tasks = header ? Number(header[1]) : 1;
+  metrics.delegateBackgroundDeliveries += 1;
+  metrics.delegatedTasks += tasks;
+  metrics.delegateHandoffBytes += Buffer.byteLength(handoff, 'utf8');
+  const truncated =
+    countOccurrences(handoff, TRUNCATED_MARKER) ||
+    countOccurrences(handoff, LEGACY_TRUNCATED_MARKER);
+  metrics.delegateTruncatedTasks += Math.min(truncated, tasks);
+}
+
 /** Emitted once per run envelope by the current delegate build. */
 const TRUNCATED_MARKER = 'Truncation: body truncated';
 /** The marker older handoffs left inline, before the envelope carried the flag. */
@@ -112,6 +144,14 @@ function recordDelegateResult(metrics, message) {
     return;
   }
   const text = resultText(message);
+  // A background call returns an acknowledgement, not a report: it carries runs
+  // for the tasks it launched, but the handoff arrives later through
+  // delegate_jobs. Counting it here would charge those tasks a token receipt
+  // and then never count what they actually sent back.
+  if (BACKGROUND_START_MARKER.test(text)) {
+    metrics.delegateBackgroundStarts += 1;
+    return;
+  }
   metrics.delegatedTasks += runs.length;
   metrics.delegateHandoffBytes += Buffer.byteLength(text, 'utf8');
   metrics.delegateWritableTasks += runs.filter(
@@ -196,6 +236,8 @@ export function parseSessionJsonl(source) {
       metrics.todoToolResults += 1;
     if (message?.role === 'toolResult' && message.toolName === 'delegate')
       recordDelegateResult(metrics, message);
+    if (message?.role === 'toolResult' && message.toolName === 'delegate_jobs')
+      recordBackgroundDelivery(metrics, message);
   }
   if (timestamps.length > 1)
     metrics.elapsedMs = Math.max(...timestamps) - Math.min(...timestamps);

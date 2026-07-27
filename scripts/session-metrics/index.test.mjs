@@ -142,7 +142,7 @@ function delegateFixture(exchanges) {
         timestamp: `2026-01-01T00:02:${String(index).padStart(2, '0')}.000Z`,
         message: {
           role: 'toolResult',
-          toolName: 'delegate',
+          toolName: exchange.toolName ?? 'delegate',
           content: [{ type: 'text', text: exchange.text ?? 'HANDOFF' }],
           details: exchange.details,
           isError: exchange.isError ?? false,
@@ -286,6 +286,57 @@ describe('delegate measurements', () => {
         ]),
       ).delegateTruncatedTasks,
     ).toBe(1);
+  });
+
+  it('charges background work to its delivery rather than to its acknowledgement', () => {
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          text: 'Started 1 background delegate job: dj-1. Each subagent completion will be delivered automatically.\ndj-1 continuation: token',
+          details: singleRun,
+        },
+        {
+          toolName: 'delegate_jobs',
+          text: 'Background delegate job dj-1 (audit) done\n\nDelegated task succeeded\n\nStatus: success\nOutcome: done\nTruncation: none',
+          details: { action: 'peek' },
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateBackgroundStarts: 1,
+      delegateBackgroundDeliveries: 1,
+      delegatedTasks: 1,
+      // Only the delivered handoff, never the acknowledgement that preceded it.
+      delegateHandoffBytes: 72,
+    });
+  });
+
+  it('reads the task count of a delivered parallel job from its handoff header', () => {
+    expect(
+      parseSessionJsonl(
+        delegateFixture([
+          {
+            toolName: 'delegate_jobs',
+            text: 'Background delegate job dj-2 (fan) done\n\nDelegated tasks: 2/3 succeeded\n\nTruncation: body truncated',
+            details: { action: 'peek' },
+          },
+        ]),
+      ),
+    ).toMatchObject({ delegatedTasks: 3, delegateTruncatedTasks: 1 });
+  });
+
+  it('ignores delegate_jobs results that carry no delivered handoff', () => {
+    expect(
+      parseSessionJsonl(
+        delegateFixture([
+          {
+            toolName: 'delegate_jobs',
+            text: 'dj-1 running — audit\nCompletion will be delivered automatically.',
+            details: { action: 'peek' },
+          },
+        ]),
+      ),
+    ).toMatchObject({ delegateBackgroundDeliveries: 0, delegatedTasks: 0 });
   });
 
   it('counts continuations, including arguments left as JSON text', () => {

@@ -37,6 +37,9 @@ These answer what delegation costs the parent's context, which is the resource a
 - `delegateWritableTasks` — tasks that ran with writes allowed, in their own worktree.
 - `delegateHandoffBytes` — UTF-8 bytes of parent-visible handoff text, excluding the exact output preserved in artifacts and tool details.
 - `delegateTruncatedTasks` — tasks whose body was cut to fit the handoff caps, read from the envelope's truncation flag and capped at the runs present.
+- `delegateBackgroundStarts`, `delegateBackgroundDeliveries` — background jobs launched, and completed handoffs delivered back.
+
+Background work is charged where the parent actually pays for it. A background call returns an acknowledgement naming the job, and the report arrives later as a `delegate_jobs` result, so the acknowledgement counts as neither tasks nor bytes and the delivery counts as both. Counting the acknowledgement instead would charge a task the cost of a receipt and never count what it sent back. A job delivered once and then peeked at again counts twice, because the parent was given both copies.
 
 Ratios have one definition, applied identically to a session and to a cohort, so a cohort ratio is weighted by summed totals rather than averaged from per-session ratios: `cacheHitRatio` is `cacheRead / (input + cacheRead + cacheWrite)`, `delegateHandoffBytesPerTask` is bytes over tasks, `delegateTruncationRate` is truncated over total tasks, and `delegateContinuationRate` is continuations over calls.
 
