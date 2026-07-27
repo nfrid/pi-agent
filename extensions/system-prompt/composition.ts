@@ -10,6 +10,14 @@ const GUIDELINES = {
   concise:
     'Be concise and direct. Lead with the answer. Skip restating the request and filler; add detail only when it improves correctness.',
 
+  // A phase of work is legible to the reader only if it is announced before it
+  // starts. It also gives the transcript UI a real boundary and a name for
+  // what follows, which beats anything inferred from the tool calls.
+  narration: [
+    'Before a change of direction — a new phase of work, not each step — say in one short sentence what you are about to do, in the same message as the calls that start it.',
+    'Do not narrate individual tool calls, restate what you just said, or describe work after it is done. Most turns need no commentary at all.',
+  ],
+
   bash: [
     'Combine related bash discovery into one pipeline; run unrelated checks in parallel.',
     'Keep bash output bounded with targeted paths, filters, counts, excerpts, diffs, or short summaries.',
@@ -171,6 +179,7 @@ export function buildSystemPrompt(
 
   addGuidelines(GUIDELINES.KISS);
   addGuidelines(GUIDELINES.concise);
+  addGuidelines(GUIDELINES.narration);
   const guidelines = guidelinesList
     .map((guideline) => `- ${guideline}`)
     .join('\n');
