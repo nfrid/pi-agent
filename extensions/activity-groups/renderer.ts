@@ -8,6 +8,7 @@ import {
   describeTools,
   headersOf,
   isNarration,
+  type NarrationChannel,
   stripEmphasis,
   toPastTense,
 } from './title';
@@ -192,7 +193,17 @@ export class ActivityGroupComponent implements Component {
     );
   }
 
-  /** The model's own words for this phase, if it gave any. */
+  /**
+   * The model's own words for this phase, if it gave any, taking what it said
+   * to the reader over what it only thought.
+   *
+   * A turn commonly carries both: the model thinks "**Creating a workspace**"
+   * on its way in and then announces "**Exercising planning, file work and
+   * cleanup**". Composing the two led with the passing thought — "Created a
+   * workspace" for a group that went on to do far more — so a channel the
+   * reader was addressed on wins outright, and thinking is what titles a group
+   * that never spoke.
+   */
   private narratedTitle(completed: boolean): string | undefined {
     const preamble = this.preamble();
     // Announced in the present, reported in the past: a finished group saying
@@ -200,10 +211,15 @@ export class ActivityGroupComponent implements Component {
     // that is over. Anything that does not open on a participle — a full
     // sentence, a noun phrase — is left exactly as the model wrote it.
     if (preamble) return completed ? toPastTense(preamble) : preamble;
-    const headers = this.sequence.items.flatMap((item) =>
-      item.type === 'assistant' ? headersOf(item.message) : [],
-    );
+    const spoken = this.headers('text');
+    const headers = spoken.length > 0 ? spoken : this.headers('thinking');
     return completed ? composeTitle(headers) : headers.at(-1);
+  }
+
+  private headers(channel: NarrationChannel): string[] {
+    return this.sequence.items.flatMap((item) =>
+      item.type === 'assistant' ? headersOf(item.message, channel) : [],
+    );
   }
 
   /** The fallback for a group that narrated nothing: what its tools did. */
@@ -214,21 +230,29 @@ export class ActivityGroupComponent implements Component {
 
   /**
    * What the model said on its way into this phase, if it led with anything.
-   * Only the leader can carry one — commentary later in a group is a remark
-   * about work already done, not a name for it — and only its first sentence
-   * is a title, since the rest is available by expanding.
+   *
+   * Only what came before the group's first call can be one: a message that
+   * speaks after the work has started is a remark about work already done, not
+   * a name for it. Everything ahead of that call is the model announcing what
+   * it is off to do, whether it announced it in the message that opened the
+   * group or in a bare line before it. Only the first sentence is a title,
+   * since the rest is available by expanding.
    */
   private preamble(): string | undefined {
-    const [leader] = this.sequence.items;
-    if (leader?.type !== 'assistant') return undefined;
-    const spoken = leader.message.content
-      .filter((content) => content.type === 'text')
-      .map((content) => content.text.trim())
-      .find((text) => text && !isNarration(text));
-    if (!spoken) return undefined;
-    const [first = ''] = spoken.split('\n');
-    // A title is a label, not a sentence, so it does not end in a stop.
-    return first.trim().replace(/[.…:]+$/, '') || undefined;
+    for (const item of this.sequence.items) {
+      if (item.type === 'tool') break;
+      if (item.type !== 'assistant') continue;
+      const spoken = item.message.content
+        .filter((content) => content.type === 'text')
+        .map((content) => content.text.trim())
+        .find((text) => text && !isNarration(text));
+      if (!spoken) continue;
+      const [first = ''] = spoken.split('\n');
+      // A title is a label, not a sentence, so it does not end in a stop.
+      const title = first.trim().replace(/[.…:]+$/, '');
+      if (title) return title;
+    }
+    return undefined;
   }
 
   /** A step is a bullet, unless it is the one currently turning. */

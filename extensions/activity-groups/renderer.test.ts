@@ -232,6 +232,117 @@ describe('activity groups renderer', () => {
     });
   });
 
+  describe('choosing between what a group said and what it thought', () => {
+    const read: SequenceSnapshot['items'][number] = {
+      type: 'tool',
+      id: 'r1',
+      name: 'read',
+      args: { path: 'src/session.ts' },
+      status: 'complete',
+      isError: false,
+    };
+
+    const titleOf = (
+      items: SequenceSnapshot['items'],
+      streaming = false,
+    ): string => {
+      const component = createActivityGroupRenderer()(
+        {
+          id: 'sequence-7',
+          cwd: process.cwd(),
+          startedAt: 1000,
+          completedAt: 2000,
+          failed: false,
+          items,
+        },
+        { streaming, expanded: false, defaultView: new Text('', 0, 0) },
+        theme,
+        context(),
+      );
+      if (!component) throw new Error('renderer returned no component');
+      const [, title = ''] = component.render(100);
+      (component as unknown as { dispose(): void }).dispose();
+      return title;
+    };
+
+    it('takes the header it announced over the one it only thought', () => {
+      // Some models write their narration as text rather than in thinking, so
+      // both channels carry a header and the thought comes first. Composing
+      // the two led with the passing thought and buried the announcement.
+      const items: SequenceSnapshot['items'] = [
+        {
+          type: 'assistant',
+          message: message([
+            { type: 'thinking', thinking: '**Creating a workspace**' },
+            { type: 'text', text: '**Exercising planning and cleanup**' },
+          ]),
+        },
+        read,
+      ];
+      expect(titleOf(items, true)).toContain('Exercising planning and cleanup');
+      expect(titleOf(items)).toContain('✓ Exercised planning and cleanup');
+      expect(titleOf(items)).not.toContain('workspace');
+    });
+
+    it('still titles a silent group from its thinking', () => {
+      expect(
+        titleOf([
+          {
+            type: 'assistant',
+            message: message([
+              { type: 'thinking', thinking: '**Creating a workspace**' },
+            ]),
+          },
+          read,
+        ]),
+      ).toContain('✓ Created a workspace');
+    });
+
+    it('takes a preamble spoken after the thought that preceded it', () => {
+      // The model thought first and spoke second, in two messages, and both
+      // ended up in this group. What it said is still the name of the work.
+      expect(
+        titleOf([
+          {
+            type: 'assistant',
+            message: message([
+              { type: 'thinking', thinking: '**Planning the store rewrite**' },
+            ]),
+          },
+          {
+            type: 'assistant',
+            message: message([
+              { type: 'text', text: 'Rewriting how sessions expire' },
+            ]),
+          },
+          read,
+        ]),
+      ).toContain('✓ Rewrote how sessions expire');
+    });
+
+    it('does not name a group after a remark made once it was under way', () => {
+      // Talking after the calls have started is commentary on work already
+      // done, not an announcement of what this group is.
+      expect(
+        titleOf([
+          {
+            type: 'assistant',
+            message: message([
+              { type: 'thinking', thinking: '**Reading the session store**' },
+            ]),
+          },
+          read,
+          {
+            type: 'assistant',
+            message: message([
+              { type: 'text', text: 'That confirms the token never expires' },
+            ]),
+          },
+        ]),
+      ).toContain('✓ Read the session store');
+    });
+  });
+
   it('omits the duration for sequences replayed from history', () => {
     const renderer = createActivityGroupRenderer();
     const ctx = context();

@@ -111,7 +111,6 @@ function clean(value: string): string | undefined {
   return title;
 }
 
-/** Every narration header in a message, in the order the model wrote them. */
 /**
  * Is this text block narration rather than something said to the user?
  *
@@ -135,9 +134,24 @@ export function isNarration(text: string): boolean {
   );
 }
 
-export function headersOf(message: AssistantMessage): string[] {
+/**
+ * Which channel a header was written on. They are not equal: a header in
+ * thinking is the model talking to itself on the way in, while the same line
+ * written as text was addressed to the reader. See `headersOf`.
+ */
+export type NarrationChannel = 'text' | 'thinking';
+
+/**
+ * Every narration header in a message, in the order the model wrote them,
+ * optionally from one channel only.
+ */
+export function headersOf(
+  message: AssistantMessage,
+  channel?: NarrationChannel,
+): string[] {
   const headers: string[] = [];
   for (const content of message.content) {
+    if (channel && content.type !== channel) continue;
     const value =
       content.type === 'thinking'
         ? content.thinking
