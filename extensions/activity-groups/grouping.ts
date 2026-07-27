@@ -15,7 +15,9 @@
  * transcript always groups the same way, whether it is being watched or
  * reopened a week later — and it is what the tests measure against real logs.
  *
- * Measured over the 206 session logs in this repo: grouping per model turn gave
+ * Measured in July 2026 over the 206 session logs in this repo, by a script
+ * kept out of the tree since it reads private transcripts. The figures date
+ * the rules rather than pin them: grouping per model turn gave
  * a median of 7 groups per user request; these rules give 4.8, at a median of 6
  * calls each (p90 9), with 13% holding three calls or fewer. The cap ends 4% of
  * them, which is what a backstop should be — without the narration rule it

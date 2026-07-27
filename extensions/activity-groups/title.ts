@@ -2,7 +2,8 @@
  * Naming an activity group.
  *
  * Models narrate their own work far better than we could infer it, and they do
- * it constantly: 87% of tool-carrying turns in this repo's session logs contain
+ * it constantly: as of July 2026, 87% of tool-carrying turns in this repo's
+ * session logs contain
  * a bolded thinking header — "**Inspecting tool manager startup and tests**",
  * "**Identifying race condition in session shutdown**". Those headers are the
  * label. We only fall back to describing the tools when there is no narration.

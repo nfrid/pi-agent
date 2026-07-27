@@ -103,7 +103,7 @@ function assistantMessage(
 
 function toolCallMessage(id: string, name: string): AssistantMessage {
   return assistantMessage([
-    // Narration lives in thinking: in this repo's session logs 2616 of 2861
+    // Narration lives in thinking: as of July 2026, 2616 of this repo's 2861
     // tool-carrying messages narrate that way and only 10 also speak to the
     // user, which is why thinking is what a group may hide.
     { type: 'thinking', thinking: 'Reading the auth code' },
