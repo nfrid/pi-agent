@@ -115,14 +115,13 @@ export type DelegateParams = Static<typeof DelegateParamsSchema>;
 export function delegatePromptGuidelines(cwd: string): string[] {
   return [
     'Give every subagent a short, specific name that describes its role or phase.',
-    'Do the work yourself when finishing it is quicker than briefing it. Delegate — edits and implementation included, not only exploration and review — when the work needs more reading than its result is worth carrying, or when independent pieces can run at once. Your context is the resource that runs out first in a long session; a child spends its own. Do not invent research/implementation/test/review stages unless each adds concrete value.',
+    'Your context is the resource that runs out first; a child spends its own. Delegate — implementation and edits included, not only exploration and review — when the work needs more reading than its result is worth carrying, or when independent pieces can run at once. Do the work yourself when finishing it is quicker than briefing it, and do not invent research/implement/test/review stages that add nothing.',
     'Brief a writable task like a ticket: what done looks like, the command that proves it, and what to leave alone. A child that has to infer its finish line will pick one of its own.',
     'Use contextNote for the relevant decisions, constraints, and findings; use branch only when exact parent history matters.',
     'Continue a child for focused correction or extension; start fresh when its approach is wrong or an independent view is better.',
-    "Parallelize only independent work. If one task depends on another's findings, inspect the first result before starting the next. Use background delegation only when foreground work can continue independently; completion is delivered automatically, so do not poll delegate_jobs. Writable tasks each get their own worktree, so they can run in parallel even on overlapping files.",
-    'A writable run leaves its work as commits on the branch it reports. Integrate it yourself with delegate_branches (review, then merge) rather than asking the user to do it; only stop to ask when the merge is genuinely contentious.',
-    'Treat child results as claims to verify: trust reported checks and concrete evidence; re-check or continue the child when important claims lack support. For a writable run, review the diff and run the check yourself before merging — a subagent can report work it did not finish, and weakening or deleting a test is a common way a task comes back "passing".',
-    'Delegate cannot be called by child processes.',
+    "Parallelize only independent work: if one task depends on another's findings, read the first result before starting the next. Writable tasks each get their own worktree, so they can run in parallel even on overlapping files. Use background delegation when foreground work can continue meanwhile.",
+    'A writable run leaves its work as commits on the branch it reports; integrate it yourself with delegate_branches rather than handing the merge to the user.',
+    'Treat child results as claims to verify: trust reported checks and concrete evidence, and re-check or continue the child when an important claim has none. A subagent can report work it did not finish, and weakening a test is a common way a task comes back "passing".',
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd)}`,
   ];
 }

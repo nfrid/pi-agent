@@ -31,7 +31,7 @@ Climb a rung when the task spans more than one subsystem, when it states no crit
 
 A route persists across every continuation, so one choice usually governs several turns. When a task turns out harder than it looked, switch route on the continuation instead of pushing the current one past what it handles.
 
-Give a writable task a finish line: the acceptance criteria, or the command that decides done. With one, a cheap route is a safe bet, because its diff is verifiable. Without one the child picks its own, which is judgement work and needs a stronger route.
+A task that states its finish line — the acceptance criteria, or the command that decides done — is safe on a cheap route, because the result is verifiable. Without one, deciding what done means is judgement work and needs a stronger route.
 
 Catalog, cheapest first:
 ${catalog.length > 0 ? catalog.join('\n') : '- (none)'}
