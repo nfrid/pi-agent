@@ -373,6 +373,35 @@ describe('tool sequence shim', () => {
     ]);
   });
 
+  it('reports when a live group takes over saying what is happening', () => {
+    const { renderer } = recordingRenderer();
+    const changes: boolean[] = [];
+    const h = harness({ onLiveChange: (value) => changes.push(value) });
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    // Nothing on screen yet, so nothing to stand down for.
+    h.render();
+    expect(changes).toEqual([]);
+
+    turn(h, [{ name: 'read' }], 'a');
+    h.render();
+    h.render();
+    // Reported on the change, not on every frame.
+    expect(changes).toEqual([true]);
+
+    // The run ends: the group stops spinning and the host has its line back.
+    h.setBusy(false);
+    h.render();
+    expect(changes).toEqual([true, false]);
+
+    // And uninstalling while live hands it back too.
+    h.setBusy(true);
+    h.render();
+    uninstall?.();
+    uninstall = undefined;
+    expect(changes).toEqual([true, false, true, false]);
+  });
+
   it('stamps a duration once the tail sequence stops streaming', () => {
     const { renderer, snapshots } = recordingRenderer();
     const h = harness();

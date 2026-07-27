@@ -84,6 +84,12 @@ export interface ShimHost {
   isExpanded(): boolean;
   /** Overrides the TUI handle captured from tool components. */
   requestRender?(): void;
+  /**
+   * Reports whether a group is currently live on screen, on every change. A
+   * live group spins and names its own work, so the host can stand down
+   * whatever else it shows to say the same thing.
+   */
+  onLiveChange?(live: boolean): void;
   /** Reports a fault that disabled grouping entirely. */
   onError?(error: unknown): void;
   /** Reports a fault that cost one group but left the rest running. */
@@ -163,6 +169,15 @@ export function installToolSequenceShim(
   let dirty = true;
   let installed = true;
   let failures = 0;
+  /** Whether the last completed pass over a chat container drew a live group. */
+  let live = false;
+  let sawLive = false;
+
+  function setLive(next: boolean): void {
+    if (next === live) return;
+    live = next;
+    host.onLiveChange?.(next);
+  }
 
   /**
    * Group identity is tied to the component that leads it, not to a tool call
@@ -219,6 +234,8 @@ export function installToolSequenceShim(
     containerProto.addChild = originalAddChild;
     containerProto.removeChild = originalRemoveChild;
     containerProto.clear = originalClear;
+    // Whatever the host stood down for a live group, it has back.
+    setLive(false);
     for (const state of states.values()) dispose(state.context.lastComponent);
     states.clear();
     bindings.clear();
@@ -369,6 +386,7 @@ export function installToolSequenceShim(
     const state = stateOf(sequence);
     const streaming = sequence.atTail && host.isBusy();
     if (streaming) {
+      sawLive = true;
       state.everLive = true;
       state.completedAt = undefined;
     } else {
@@ -469,7 +487,17 @@ export function installToolSequenceShim(
       containers.add(this);
       dirty = true;
     }
-    return originalContainerRender.call(this, width);
+    if (!containers.has(this)) return originalContainerRender.call(this, width);
+    // A pass over the transcript is the one moment the answer is knowable: a
+    // group that is live says so by rendering, and one that has finished says
+    // so by not. Nothing nests here — the containers this set holds are the
+    // ones that hold messages, and messages hold no transcript of their own.
+    sawLive = false;
+    try {
+      return originalContainerRender.call(this, width);
+    } finally {
+      setLive(sawLive);
+    }
   };
   containerProto.addChild = function patchedAddChild(
     this: ContainerLike,

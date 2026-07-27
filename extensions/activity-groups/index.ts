@@ -137,6 +137,14 @@ export default defineExtension('activity-groups', (pi) => {
       // Idle means the agent is not streaming, so nothing can still be running.
       isBusy: () => context?.isIdle() === false,
       isExpanded: () => opened || (context?.ui.getToolsExpanded() ?? false),
+      /**
+       * A live group already spins and names what it is doing, so Pi's working
+       * line under it is the same sentence twice — and the two spinners beat
+       * out of step. It comes straight back the moment no group is live: while
+       * the model is only thinking or writing an answer, that line is the only
+       * sign anything is happening.
+       */
+      onLiveChange: (live) => context?.ui.setWorkingVisible?.(!live),
       onError: (error) => {
         uninstall = undefined;
         notify(`grouping is off for this session (${reason(error)})`);
