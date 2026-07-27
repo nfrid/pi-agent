@@ -256,6 +256,40 @@ function placeBlock(lines: string[], width: number): string[] {
   );
 }
 
+/** Rank for display: what is happening now, then what is about to. */
+const STATE_RANK: Record<DelegateStatusSnapshot['state'], number> = {
+  running: 0,
+  success: 1,
+  error: 1,
+  'timed-out': 1,
+  aborted: 1,
+  queued: 2,
+};
+
+/**
+ * Only a few rows fit, so the ones doing work take them. Runs that are only
+ * waiting for a slot are the first to be summarised away.
+ */
+function forDisplay(
+  statuses: readonly DelegateStatusSnapshot[],
+): DelegateStatusSnapshot[] {
+  return [...statuses].sort(
+    (a, b) => STATE_RANK[a.state] - STATE_RANK[b.state],
+  );
+}
+
+function compactSummary(statuses: readonly DelegateStatusSnapshot[]): string {
+  const count = (state: DelegateStatusSnapshot['state']) =>
+    statuses.filter((status) => status.state === state).length;
+  const running = count('running');
+  const queued = count('queued');
+  const parts = [
+    running > 0 ? `${running} running` : '',
+    queued > 0 ? `${queued} queued` : '',
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(', ') : 'finishing';
+}
+
 export function renderDelegateWidget(
   statuses: readonly DelegateStatusSnapshot[],
   detailed: boolean,
@@ -271,14 +305,16 @@ export function renderDelegateWidget(
       theme.fg('warning', '● ') +
       theme.fg(
         'text',
-        `${statuses.length} subagent${statuses.length === 1 ? '' : 's'} active`,
+        `${statuses.length} subagent${statuses.length === 1 ? '' : 's'}`,
       ) +
+      theme.fg('dim', ' · ') +
+      theme.fg('muted', compactSummary(statuses)) +
       theme.fg('dim', ' · ') +
       theme.fg('accent', '/delegates');
     return placeBlock([line], width);
   }
 
-  const visible = statuses.slice(0, DELEGATE_WIDGET_MAX_AGENTS);
+  const visible = forDisplay(statuses).slice(0, DELEGATE_WIDGET_MAX_AGENTS);
   const lines = visible.flatMap((status) => [
     mainLine(status, blockWidth, theme, now),
     actionLine(status, blockWidth, theme, markdownTheme),

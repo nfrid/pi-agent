@@ -331,6 +331,41 @@ describe('delegate widget', () => {
     ).not.toThrow();
   });
 
+  test('gives the visible rows to the subagents doing work', () => {
+    const lines = renderDelegateWidget(
+      [
+        status({ id: 'ds-1', name: 'Queued one', state: 'queued' }),
+        status({ id: 'ds-2', name: 'Queued two', state: 'queued' }),
+        status({ id: 'ds-3', name: 'Queued three', state: 'queued' }),
+        status({ id: 'ds-4', name: 'Queued four', state: 'queued' }),
+        status({ id: 'ds-5', name: 'Running late', state: 'running' }),
+      ],
+      true,
+      100,
+      theme as never,
+      5_000,
+    );
+    expect(lines[0]).toContain('Running late');
+    expect(lines.join('\n')).toContain('+1 more subagents');
+  });
+
+  test('breaks the compact line down by state', () => {
+    const [line] = renderDelegateWidget(
+      [
+        status({ id: 'ds-1', state: 'running' }),
+        status({ id: 'ds-2', state: 'running' }),
+        status({ id: 'ds-3', state: 'queued' }),
+      ],
+      false,
+      100,
+      theme as never,
+      5_000,
+    );
+    expect(line).toContain('3 subagents');
+    expect(line).toContain('2 running, 1 queued');
+    expect(line).toContain('/delegates');
+  });
+
   test('caps detailed height and summarizes hidden subagents', () => {
     const statuses = Array.from({ length: 6 }, (_, index) =>
       status({ id: `ds-${index}`, name: `Agent ${index}` }),
