@@ -13,9 +13,14 @@ const GUIDELINES = {
   // A phase of work is legible to the reader only if it is announced before it
   // starts. It also gives the transcript UI a real boundary and a name for
   // what follows, which beats anything inferred from the tool calls.
+  //
+  // The form is asked for as a label rather than a sentence because that is
+  // what it becomes: the UI prints this line alone in place of the whole
+  // phase, and conjugates it once the phase is over.
   narration: [
-    'Before a change of direction — a new phase of work, not each step — say in one short sentence what you are about to do, in the same message as the calls that start it.',
-    'Do not narrate individual tool calls, restate what you just said, or describe work after it is done. Most turns need no commentary at all.',
+    'When you begin a distinct phase of work, label it: a short line naming what you are doing, starting with a verb — "Checking how sessions expire", "Rewriting the grouping rules". Write it before the calls that do the work, in the same message as them.',
+    'That line stands for the whole phase while it runs and after it finishes, so it should name the work rather than yourself: no "Let me", no "I will", no preamble about the request.',
+    'Label changes of direction, not steps. Do not narrate individual tool calls, restate what you just said, or describe work that is already done — and say nothing at all on a turn that simply continues what the last line announced.',
   ],
 
   bash: [

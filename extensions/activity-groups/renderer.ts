@@ -9,6 +9,7 @@ import {
   headersOf,
   isNarration,
   stripEmphasis,
+  toPastTense,
 } from './title';
 import type {
   SequenceItem,
@@ -179,9 +180,9 @@ export class ActivityGroupComponent implements Component {
    * because by then the interesting thing is what the phase amounted to.
    *
    * A preamble outranks both. When the model announced this phase in its own
-   * words to the user — "Now I'll check how sessions expire" — that sentence
-   * *is* the group, and it is printed here rather than above, so the reader
-   * sees it once and the collapsed group reads as the model's own account.
+   * words to the user — "Checking how sessions expire" — that line *is* the
+   * group, and it is printed here rather than above, so the reader sees it
+   * once and the collapsed group reads as the model's own account.
    */
   private title(tools: readonly ToolItem[], completed: boolean): string {
     // One styled terminal line, so whatever markdown the model wrote inside
@@ -191,7 +192,11 @@ export class ActivityGroupComponent implements Component {
 
   private chooseTitle(tools: readonly ToolItem[], completed: boolean): string {
     const preamble = this.preamble();
-    if (preamble) return preamble;
+    // Announced in the present, reported in the past: a finished group saying
+    // "Checking how sessions expire" beside a checkmark is describing work
+    // that is over. Anything that does not open on a participle — a full
+    // sentence, a noun phrase — is left exactly as the model wrote it.
+    if (preamble) return completed ? toPastTense(preamble) : preamble;
     const headers = this.sequence.items.flatMap((item) =>
       item.type === 'assistant' ? headersOf(item.message) : [],
     );
@@ -216,7 +221,8 @@ export class ActivityGroupComponent implements Component {
       .find((text) => text && !isNarration(text));
     if (!spoken) return undefined;
     const [first = ''] = spoken.split('\n');
-    return first.trim() || undefined;
+    // A title is a label, not a sentence, so it does not end in a stop.
+    return first.trim().replace(/[.…:]+$/, '') || undefined;
   }
 
   /** A step is a bullet, unless it is the one currently turning. */

@@ -173,43 +173,65 @@ describe('activity groups renderer', () => {
     (painted as unknown as { dispose(): void }).dispose();
   });
 
-  it('titles a group with the preamble that announced it', () => {
-    const component = createActivityGroupRenderer()(
-      {
-        id: 'sequence-6',
-        cwd: process.cwd(),
-        startedAt: 1000,
-        failed: false,
-        items: [
-          {
-            type: 'assistant',
-            provisional: false,
-            message: message([
-              { type: 'thinking', thinking: '**Checking the session store**' },
-              { type: 'text', text: "Now I'll check **how sessions expire**." },
-            ]),
-          },
-          {
-            type: 'tool',
-            id: 'r1',
-            name: 'read',
-            args: { path: 'src/session.ts' },
-            status: 'complete',
-            isError: false,
-          },
-        ],
-      },
-      { streaming: false, expanded: false, defaultView: new Text('', 0, 0) },
-      theme,
-      context(),
-    );
-    if (!component) throw new Error('renderer returned no component');
-    const output = component.render(100).join('\n');
-    // The model's own words to the user outrank the header it thought, and
-    // the emphasis inside them is styling, not something to print.
-    expect(output).toContain("✓ Now I'll check how sessions expire.");
-    expect(output).not.toContain('**');
-    (component as unknown as { dispose(): void }).dispose();
+  describe('titling a group with the preamble that announced it', () => {
+    const titleOf = (text: string, streaming: boolean): string => {
+      const component = createActivityGroupRenderer()(
+        {
+          id: 'sequence-6',
+          cwd: process.cwd(),
+          startedAt: 1000,
+          failed: false,
+          items: [
+            {
+              type: 'assistant',
+              provisional: false,
+              message: message([
+                { type: 'thinking', thinking: '**Inspecting the store**' },
+                { type: 'text', text },
+              ]),
+            },
+            {
+              type: 'tool',
+              id: 'r1',
+              name: 'read',
+              args: { path: 'src/session.ts' },
+              status: 'complete',
+              isError: false,
+            },
+          ],
+        },
+        { streaming, expanded: false, defaultView: new Text('', 0, 0) },
+        theme,
+        context(),
+      );
+      if (!component) throw new Error('renderer returned no component');
+      const [, title = ''] = component.render(100);
+      (component as unknown as { dispose(): void }).dispose();
+      return title;
+    };
+
+    it('prefers what the model said over the header it thought', () => {
+      // And the emphasis inside it is styling, not something to print.
+      expect(titleOf('Checking **how sessions expire**', true)).toContain(
+        'Checking how sessions expire',
+      );
+      expect(titleOf('Checking **how sessions expire**', true)).not.toContain(
+        'Inspecting the store',
+      );
+    });
+
+    it('reports in the past once the phase is over', () => {
+      expect(titleOf('Checking how sessions expire', false)).toContain(
+        '✓ Checked how sessions expire',
+      );
+    });
+
+    it('leaves a line it cannot conjugate exactly as written', () => {
+      // A title is a label, so the full stop goes; the words do not.
+      expect(titleOf("Now I'll check how sessions expire.", false)).toContain(
+        "✓ Now I'll check how sessions expire",
+      );
+    });
   });
 
   it('omits the duration for sequences replayed from history', () => {
