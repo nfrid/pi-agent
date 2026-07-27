@@ -44,7 +44,7 @@ function message(): AssistantMessage {
   return {
     role: 'assistant',
     content: [
-      { type: 'thinking', thinking: 'Inspecting authentication code' },
+      { type: 'thinking', thinking: '**Inspecting authentication code**' },
       { type: 'toolCall', id: 'call-1', name: 'read', arguments: {} },
     ],
     api: 'anthropic',

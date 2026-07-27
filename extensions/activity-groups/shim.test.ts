@@ -196,7 +196,7 @@ describe('tool sequence shim', () => {
     h.chat.addChild(tool);
     tool.markExecutionStarted();
 
-    expect(h.render()).toEqual(['group:call-1:2:live']);
+    expect(h.render()).toEqual(['group:group-1:2:live']);
     const [snapshot] = snapshots;
     expect(snapshot?.items).toEqual([
       expect.objectContaining({ type: 'assistant', provisional: false }),
@@ -228,12 +228,12 @@ describe('tool sequence shim', () => {
 
     expect(h.render()).toEqual([
       'other',
-      'group:call-1:2:done',
+      'group:group-1:2:done',
       'assistant:Done',
     ]);
   });
 
-  it('starts a new sequence per model turn', () => {
+  it('starts a new sequence when the work changes character', () => {
     const { renderer } = recordingRenderer();
     const h = harness();
     uninstall = installToolSequenceShim(renderer, h.host);
@@ -247,7 +247,117 @@ describe('tool sequence shim', () => {
     second.updateContent(toolCallMessage('call-2', 'edit'));
     h.chat.addChild(new FakeTool('edit', 'call-2', {}));
 
-    expect(h.render()).toEqual(['group:call-1:2:done', 'group:call-2:2:live']);
+    expect(h.render()).toEqual([
+      'group:group-1:2:done',
+      'group:group-2:2:live',
+    ]);
+  });
+
+  /** Append a model turn: one assistant message plus the tools it called. */
+  function turn(
+    h: Harness,
+    tools: { name: string; args?: unknown }[],
+    prefix = 't',
+  ): FakeTool[] {
+    const assistant = new FakeAssistant();
+    h.chat.addChild(assistant);
+    assistant.updateContent(
+      assistantMessage(
+        tools.map((tool, index) => ({
+          type: 'toolCall' as const,
+          id: `${prefix}-${index}`,
+          name: tool.name,
+          arguments: {},
+        })),
+      ),
+    );
+    return tools.map((tool, index) => {
+      const component = new FakeTool(
+        tool.name,
+        `${prefix}-${index}`,
+        tool.args ?? {},
+      );
+      h.chat.addChild(component);
+      return component;
+    });
+  }
+
+  it('merges consecutive turns of the same kind into one sequence', () => {
+    const { renderer, snapshots } = recordingRenderer();
+    const h = harness();
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    turn(h, [{ name: 'read' }, { name: 'read' }], 'a');
+    turn(h, [{ name: 'grep' }], 'b');
+    turn(h, [{ name: 'read' }], 'c');
+
+    // Three turns of exploration read as one phase, not three groups.
+    expect(h.render()).toEqual(['group:group-1:7:live']);
+    expect(
+      snapshots.at(-1)?.items.filter((item) => item.type === 'tool'),
+    ).toHaveLength(4);
+  });
+
+  it('splits when editing begins but absorbs reads back into the edit', () => {
+    const { renderer } = recordingRenderer();
+    const h = harness();
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    turn(h, [{ name: 'read' }], 'a');
+    turn(h, [{ name: 'edit' }], 'b');
+    // Looking something up mid-edit is not a new phase.
+    turn(h, [{ name: 'read' }], 'c');
+    turn(h, [{ name: 'edit' }], 'd');
+
+    expect(h.render()).toEqual([
+      'group:group-1:2:done',
+      'group:group-2:6:live',
+    ]);
+  });
+
+  it('keeps an edit and check loop in one sequence', () => {
+    const { renderer } = recordingRenderer();
+    const h = harness();
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    turn(h, [{ name: 'edit' }], 'a');
+    turn(h, [{ name: 'bash', args: { command: 'npm test' } }], 'b');
+    turn(h, [{ name: 'edit' }], 'c');
+    turn(h, [{ name: 'bash', args: { command: 'npm test' } }], 'd');
+
+    // Making a change work is one activity, however many times it loops.
+    expect(h.render()).toEqual(['group:group-1:8:live']);
+  });
+
+  it('starts a new sequence when exploration turns into editing', () => {
+    const { renderer } = recordingRenderer();
+    const h = harness();
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    turn(h, [{ name: 'read' }], 'a');
+    turn(h, [{ name: 'bash', args: { command: 'git status' } }], 'b');
+    turn(h, [{ name: 'edit' }], 'c');
+
+    // Shell commands stay connective tissue; the first edit is the boundary.
+    expect(h.render()).toEqual([
+      'group:group-1:4:done',
+      'group:group-2:2:live',
+    ]);
+  });
+
+  it('caps a long run so one group cannot swallow the transcript', () => {
+    const { renderer } = recordingRenderer();
+    const h = harness();
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    for (let index = 0; index < 30; index += 1)
+      turn(h, [{ name: 'read' }], `t${index}`);
+
+    // 30 reads exceed MAX_GROUP_CALLS, so they land in two groups.
+    expect(h.render()).toEqual([
+      'group:group-1:50:done',
+      'group:group-2:10:live',
+    ]);
   });
 
   it('stamps a duration once the tail sequence stops streaming', () => {
@@ -265,7 +375,7 @@ describe('tool sequence shim', () => {
     h.advance(1500);
     tool.updateResult({ isError: false });
     h.setBusy(false);
-    expect(h.render()).toEqual(['group:call-1:2:done']);
+    expect(h.render()).toEqual(['group:group-1:2:done']);
 
     const last = snapshots.at(-1);
     expect(last?.startedAt).toBe(1000);
@@ -286,7 +396,7 @@ describe('tool sequence shim', () => {
     tool.updateResult({ isError: true });
     h.chat.addChild(tool);
 
-    expect(h.render()).toEqual(['group:call-1:2:done']);
+    expect(h.render()).toEqual(['group:group-1:2:done']);
     expect(snapshots.at(-1)).toMatchObject({ failed: true });
     expect(snapshots.at(-1)?.completedAt).toBeUndefined();
   });
@@ -303,7 +413,7 @@ describe('tool sequence shim', () => {
     h.chat.addChild(new FakeTool('read', 'call-1', {}));
 
     expect(h.render()).toEqual([
-      'group:call-1:2:live',
+      'group:group-1:2:live',
       'assistant:Reading the auth code',
       'tool:read',
     ]);

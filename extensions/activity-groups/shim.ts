@@ -11,11 +11,11 @@
  * performs on those instances keeps working — which swapping the classes would
  * have broken.
  *
- * Grouping mirrors the upstream semantics: one sequence per model turn, led by
- * the assistant message carrying the tool calls, followed by its tool
- * executions. The sequence leader renders the summary; the other members render
- * nothing. Nothing is removed from the container, so expanding a group is just
- * replaying the members' original `render`.
+ * A sequence spans as many model turns as belong to one phase of work — see
+ * `grouping.ts` for where the boundaries fall. Its leader, the assistant
+ * message that opened the phase, renders the summary; every other member
+ * renders nothing. Nothing is removed from the container, so expanding a group
+ * is just replaying the members' original `render`.
  *
  * This reaches into host internals that carry no compatibility promise. Every
  * assumption is verified at install time and re-checked per sequence: anything
@@ -29,6 +29,13 @@ import type {
 } from '@earendil-works/pi-ai';
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
+import {
+  type ActivityKind,
+  type ActivityPhase,
+  activityKind,
+  phaseAfter,
+  startsNewGroup,
+} from './grouping';
 import type {
   RendererContext,
   SequenceItem,
@@ -139,6 +146,23 @@ export function installToolSequenceShim(
   let dirty = true;
   let installed = true;
 
+  /**
+   * Group identity is tied to the component that leads it, not to a tool call
+   * id: a group is opened by an assistant message whose tools have not arrived
+   * yet, and its identity has to survive that gap so spinner and timing state
+   * are not thrown away the moment the first tool appears.
+   */
+  const groupIds = new WeakMap<Component, string>();
+  let nextGroupId = 0;
+  const groupId = (leader: Component): string => {
+    const existing = groupIds.get(leader);
+    if (existing !== undefined) return existing;
+    nextGroupId += 1;
+    const id = `group-${nextGroupId}`;
+    groupIds.set(leader, id);
+    return id;
+  };
+
   const isAssistant = (value: unknown): value is AssistantComponentLike =>
     value instanceof host.assistantComponent;
   const isTool = (value: unknown): value is ToolComponentLike =>
@@ -169,49 +193,106 @@ export function installToolSequenceShim(
     requestRender();
   }
 
+  /**
+   * One model turn: the assistant message that carried the tool calls, plus the
+   * tool components that followed it. Turns are the unit that gets merged into
+   * groups; `undefined` marks a break that no group may span.
+   */
+  type Turn = { members: Component[]; tools: ToolComponentLike[] } | undefined;
+
+  function turnsOf(container: ContainerLike): Turn[] {
+    const turns: Turn[] = [];
+    let open: Exclude<Turn, undefined> | undefined;
+
+    const close = () => {
+      if (open) turns.push(open);
+      open = undefined;
+    };
+
+    for (const child of container.children) {
+      if (isAssistant(child)) {
+        close();
+        // A plain answer is a break; a message carrying tool calls opens a turn.
+        if (child.hasToolCalls) open = { members: [child], tools: [] };
+        else turns.push(undefined);
+        continue;
+      }
+      if (isTool(child)) {
+        if (child.ui && !capturedUi) capturedUi = child.ui;
+        // Tools with no preceding assistant message still form a turn.
+        open ??= { members: [], tools: [] };
+        open.members.push(child);
+        open.tools.push(child);
+        continue;
+      }
+      close();
+      turns.push(undefined);
+    }
+    close();
+    return turns;
+  }
+
   function recompute(): void {
     const nextBindings = new Map<Component, Sequence>();
     const seen = new Set<string>();
 
     for (const container of containers) {
-      const children = container.children;
-      const last = children.at(-1);
-      let members: Component[] = [];
-      let tools: ToolComponentLike[] = [];
+      const last = container.children.at(-1);
+      let open: Sequence | undefined;
+      let openPhase: ActivityPhase | undefined;
 
       const flush = () => {
-        const first = tools[0];
-        if (first && members.length > 0) {
-          const leader = members[0] as Component;
-          const sequence: Sequence = {
-            id: first.toolCallId,
-            members,
-            leader,
-            tools,
-            atTail: members.at(-1) === last,
-          };
-          seen.add(sequence.id);
-          for (const member of members) nextBindings.set(member, sequence);
+        if (open) {
+          open.atTail = open.members.at(-1) === last;
+          seen.add(open.id);
+          for (const member of open.members) nextBindings.set(member, open);
         }
-        members = [];
-        tools = [];
+        open = undefined;
+        openPhase = undefined;
       };
 
-      for (const child of children) {
-        if (isAssistant(child)) {
-          // Each assistant message that carries tool calls opens a sequence;
-          // a plain answer closes the preceding one and renders normally.
+      for (const turn of turnsOf(container)) {
+        if (!turn) {
           flush();
-          if (child.hasToolCalls) members.push(child);
           continue;
         }
-        if (isTool(child)) {
-          if (child.ui && !capturedUi) capturedUi = child.ui;
-          members.push(child);
-          tools.push(child);
+        // A turn whose tools have not arrived yet cannot set the phase, so it
+        // continues the open group rather than guessing at a new one.
+        const kind: ActivityKind =
+          turn.tools.length > 0
+            ? activityKind(
+                turn.tools.map((tool) => ({
+                  name: tool.toolName,
+                  args: tool.args,
+                })),
+              )
+            : 'inspect';
+
+        if (
+          startsNewGroup(
+            open && openPhase
+              ? { phase: openPhase, calls: open.tools.length }
+              : undefined,
+            kind,
+          )
+        ) {
+          flush();
+          const leader = turn.members[0];
+          if (!leader) continue;
+          open = {
+            id: groupId(leader),
+            members: [...turn.members],
+            leader,
+            tools: [...turn.tools],
+            atTail: false,
+          };
+          openPhase = phaseAfter(undefined, kind);
           continue;
         }
-        flush();
+        if (!open) continue;
+        open.members.push(...turn.members);
+        open.tools.push(...turn.tools);
+        openPhase = phaseAfter(openPhase, kind);
       }
       flush();
     }

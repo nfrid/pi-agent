@@ -1,8 +1,9 @@
 import path from 'node:path';
-import type { AssistantMessage } from '@earendil-works/pi-ai';
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
+import { stringArg, toolBaseName, toolPath } from './grouping';
+import { describeTools, headersOf, isMetaHeader, toPastTense } from './title';
 import type {
   SequenceItem,
   SequenceOptions,
@@ -10,56 +11,11 @@ import type {
   SequenceSnapshot,
 } from './types';
 
-type ActivityKind = 'inspect' | 'modify' | 'validate' | 'execute' | 'work';
 type ToolItem = Extract<SequenceItem, { type: 'tool' }>;
 
-const INSPECTION_TOOLS = new Set([
-  'read',
-  'grep',
-  'find',
-  'ls',
-  'web_search',
-  'fetch_content',
-  'get_search_content',
-]);
-const MUTATION_TOOLS = new Set(['edit', 'write']);
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 const SPINNER_INTERVAL_MS = 80;
-
-const STATUS_VERBS: Readonly<Record<string, string>> = {
-  Inspecting: 'Inspected',
-  Reading: 'Read',
-  Searching: 'Searched',
-  Tracing: 'Traced',
-  Checking: 'Checked',
-  Reviewing: 'Reviewed',
-  Updating: 'Updated',
-  Editing: 'Edited',
-  Writing: 'Wrote',
-  Running: 'Ran',
-  Testing: 'Tested',
-  Validating: 'Validated',
-  Building: 'Built',
-  Implementing: 'Implemented',
-  Fixing: 'Fixed',
-  Debugging: 'Debugged',
-  Deploying: 'Deployed',
-  Committing: 'Committed',
-};
-
-function toolBaseName(name: string): string {
-  return name.split('.').at(-1) ?? name;
-}
-
-function stringArg(args: unknown, key: string): string | undefined {
-  if (!args || typeof args !== 'object' || !(key in args)) return undefined;
-  const value = (args as Record<string, unknown>)[key];
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function toolPath(args: unknown): string | undefined {
-  return stringArg(args, 'path') ?? stringArg(args, 'file_path');
-}
+const MAX_COMMAND_WIDTH = 60;
 
 function displayPath(value: string, cwd: string): string {
   const relative = path
@@ -70,72 +26,55 @@ function displayPath(value: string, cwd: string): string {
     : value.replace(/\\/g, '/');
 }
 
-function activityKind(tools: readonly ToolItem[]): ActivityKind {
-  const names = tools.map((tool) => toolBaseName(tool.name));
-  if (names.some((name) => MUTATION_TOOLS.has(name))) return 'modify';
-  if (
-    tools.some((tool) => {
-      if (toolBaseName(tool.name) !== 'bash') return false;
-      const command = stringArg(tool.args, 'command')?.toLowerCase() ?? '';
-      return /(^|\s)(test|vitest|jest|pytest|cargo test|go test|npm test|npm run (test|check|lint|typecheck)|pnpm test)(\s|$)/.test(
-        command,
-      );
-    })
-  )
-    return 'validate';
-  if (names.length > 0 && names.every((name) => INSPECTION_TOOLS.has(name)))
-    return 'inspect';
-  if (names.length > 0 && names.every((name) => name === 'bash'))
-    return 'execute';
-  return 'work';
-}
-
-function statusTitle(message: AssistantMessage): string | undefined {
-  for (const content of [...message.content].reverse()) {
-    const value =
-      content.type === 'thinking'
-        ? content.thinking
-        : content.type === 'text'
-          ? content.text
-          : undefined;
-    if (!value) continue;
-    const lines = value
-      .split('\n')
-      .map((candidate) => candidate.trim().replace(/^#+\s*/, ''));
-    for (let index = lines.length - 1; index >= 0; index -= 1) {
-      const line = lines[index];
-      if (!line || line.length > 100) continue;
-      const verb = Object.keys(STATUS_VERBS).find((candidate) =>
-        line.startsWith(`${candidate} `),
-      );
-      if (verb) return line.replace(/[.…]+$/, '');
-    }
+/** One line naming what a single tool call is touching, for the live sub-line. */
+function toolSubject(tool: ToolItem, cwd: string): string {
+  const name = toolBaseName(tool.name);
+  const target = toolPath(tool.args);
+  if (name === 'bash' || name === 'inspect_shell') {
+    const command = stringArg(tool.args, 'command');
+    return command
+      ? `${name === 'bash' ? 'Running' : 'Checking'} ${command.split('\n')[0]?.slice(0, MAX_COMMAND_WIDTH)}`
+      : 'Running command';
   }
-  return undefined;
+  const pattern = stringArg(tool.args, 'pattern');
+  if (pattern && (name === 'grep' || name === 'find' || name === 'glob'))
+    return `Searching for ${pattern}${target ? ` in ${displayPath(target, cwd)}` : ''}`;
+  if (!target) return `Running ${name}`;
+  const shown = displayPath(target, cwd);
+  if (name === 'read') return `Reading ${shown}`;
+  if (name === 'ls') return `Listing ${shown}`;
+  return `${name === 'write' ? 'Writing' : 'Editing'} ${shown}`;
 }
 
-function completedStatusTitle(title: string): string {
-  const verb = Object.keys(STATUS_VERBS).find((candidate) =>
-    title.startsWith(`${candidate} `),
-  );
-  return verb ? `${STATUS_VERBS[verb]}${title.slice(verb.length)}` : title;
-}
-
-function fallbackTitle(kind: ActivityKind, completed: boolean): string {
-  const titles: Record<ActivityKind, [string, string]> = {
-    inspect: ['Inspecting files', 'Inspected files'],
-    modify: ['Updating files', 'Updated files'],
-    validate: ['Running validation', 'Ran validation'],
-    execute: ['Running commands', 'Ran commands'],
-    work: ['Working', 'Completed tool activity'],
-  };
-  return titles[kind][completed ? 1 : 0];
+/**
+ * The directory the group's files share, when they share one. Naming the area
+ * of the tree is what makes a collapsed group locatable at a glance.
+ */
+function commonDirectory(files: readonly string[]): string | undefined {
+  if (files.length < 2) return undefined;
+  const segments = files.map((file) => file.split('/').slice(0, -1));
+  const [first = []] = segments;
+  let shared = first.length;
+  for (const other of segments)
+    while (
+      shared > 0 &&
+      other.slice(0, shared).join('/') !== first.slice(0, shared).join('/')
+    )
+      shared -= 1;
+  const directory = first.slice(0, shared).join('/');
+  return directory || undefined;
 }
 
 function formatDuration(milliseconds: number): string {
   if (milliseconds < 1000) return `${Math.max(1, Math.round(milliseconds))}ms`;
   if (milliseconds < 10_000) return `${(milliseconds / 1000).toFixed(1)}s`;
-  return `${Math.round(milliseconds / 1000)}s`;
+  const seconds = Math.round(milliseconds / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+function count(value: number, singular: string): string {
+  return `${value} ${value === 1 ? singular : `${singular}s`}`;
 }
 
 export class ActivityGroupComponent implements Component {
@@ -184,6 +123,34 @@ export class ActivityGroupComponent implements Component {
     this.timer.unref?.();
   }
 
+  /**
+   * Live groups are titled by the newest narration header, so the line tracks
+   * the work as it moves. Settled groups take the first header that names real
+   * work, skipping the "Planning …" preamble a phase so often opens with.
+   */
+  private title(tools: readonly ToolItem[], completed: boolean): string {
+    const headers = this.sequence.items.flatMap((item) =>
+      item.type === 'assistant' ? headersOf(item.message) : [],
+    );
+    const header = completed
+      ? (headers.find((candidate) => !isMetaHeader(candidate)) ?? headers[0])
+      : headers.at(-1);
+    if (header) return completed ? toPastTense(header) : header;
+    const files = this.files(tools);
+    return describeTools(tools, commonDirectory(files) ?? files[0], completed);
+  }
+
+  private files(tools: readonly ToolItem[]): string[] {
+    return [
+      ...new Set(
+        tools
+          .map((tool) => toolPath(tool.args))
+          .filter((value): value is string => value !== undefined)
+          .map((value) => displayPath(value, this.sequence.cwd)),
+      ),
+    ];
+  }
+
   render(width: number): string[] {
     const tools = this.sequence.items.filter(
       (item): item is ToolItem => item.type === 'tool',
@@ -199,73 +166,53 @@ export class ActivityGroupComponent implements Component {
       : completed
         ? 'success'
         : 'accent';
-    const intent = [...this.sequence.items]
-      .reverse()
-      .find(
-        (item): item is Extract<SequenceItem, { type: 'assistant' }> =>
-          item.type === 'assistant' && !item.provisional,
-      )?.message;
-    const liveTitle = intent ? statusTitle(intent) : undefined;
-    const title = liveTitle
-      ? completed
-        ? completedStatusTitle(liveTitle)
-        : liveTitle
-      : fallbackTitle(activityKind(tools), completed);
 
     const lines = [
       '',
       truncateToWidth(
-        ` ${this.theme.fg(color, marker)} ${this.theme.fg('text', title)}`,
+        ` ${this.theme.fg(color, marker)} ${this.theme.fg('text', this.title(tools, completed))}`,
         width,
       ),
     ];
+
     if (!completed) {
-      const lastTool = tools.at(-1);
-      if (lastTool) {
-        const rawPath = toolPath(lastTool.args);
-        const subject = rawPath
-          ? ` ${displayPath(rawPath, this.sequence.cwd)}`
-          : '';
-        const name = toolBaseName(lastTool.name);
-        const action = INSPECTION_TOOLS.has(name)
-          ? 'Reading'
-          : MUTATION_TOOLS.has(name)
-            ? 'Updating'
-            : name === 'bash'
-              ? 'Running command'
-              : `Running ${name}`;
+      const running = [...tools]
+        .reverse()
+        .find((tool) => tool.status !== 'pending');
+      const lastTool = running ?? tools.at(-1);
+      if (lastTool)
         lines.push(
           truncateToWidth(
-            `   ${this.theme.fg('muted', `${action}${subject}`)}`,
+            `   ${this.theme.fg('muted', toolSubject(lastTool, this.sequence.cwd))}`,
             width,
           ),
         );
-      }
     }
 
-    const files = new Set(
-      tools
-        .map((tool) => toolPath(tool.args))
-        .filter((value): value is string => value !== undefined),
-    );
-    const metadata = [
-      `${tools.length} ${tools.length === 1 ? 'call' : 'calls'}`,
-    ];
-    if (files.size > 0)
-      metadata.push(`${files.size} ${files.size === 1 ? 'file' : 'files'}`);
-    if (completed && this.sequence.completedAt !== undefined) {
+    const files = this.files(tools);
+    const directory = commonDirectory(files);
+    // A group opens the moment the model commits to tool calls, so it can be
+    // briefly empty while the first call is still streaming in.
+    const metadata = tools.length > 0 ? [count(tools.length, 'call')] : [];
+    if (files.length > 0)
+      metadata.push(
+        directory
+          ? `${count(files.length, 'file')} in ${directory}`
+          : count(files.length, 'file'),
+      );
+    if (completed && this.sequence.completedAt !== undefined)
       metadata.push(
         formatDuration(this.sequence.completedAt - this.sequence.startedAt),
       );
-    }
-    const failedCount = tools.filter((tool) => tool.isError).length;
-    if (failedCount > 0) metadata.push(`${failedCount} failed`);
-    lines.push(
-      truncateToWidth(
-        `   ${this.theme.fg(this.sequence.failed ? 'error' : 'muted', metadata.join(' · '))}`,
-        width,
-      ),
-    );
+    const failed = tools.filter((tool) => tool.isError).length;
+    if (failed > 0) metadata.push(`${failed} failed`);
+    if (metadata.length > 0)
+      lines.push(
+        truncateToWidth(
+          `   ${this.theme.fg(this.sequence.failed ? 'error' : 'muted', metadata.join(' · '))}`,
+          width,
+        ),
+      );
 
     if (this.options.expanded)
       lines.push(...this.options.defaultView.render(width));
