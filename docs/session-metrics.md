@@ -14,7 +14,7 @@ npm run session:metrics -- compare \
   --min-delegate-calls 1
 ```
 
-Repeat `--baseline` or `--comparison` to combine multiple roots. `--limit` is applied after filtering to each side of a comparison. `--min-todo-calls` and `--min-delegate-calls` both apply; use the latter to compare delegation-heavy cohorts.
+The JSON goes to stdout, so pass `npm run --silent` when piping it into another tool; otherwise npm's own banner lands in the stream first. Repeat `--baseline` or `--comparison` to combine multiple roots. `--limit` is applied after filtering to each side of a comparison. `--min-todo-calls` and `--min-delegate-calls` both apply; use the latter to compare delegation-heavy cohorts.
 
 ## Output
 
