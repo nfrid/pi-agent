@@ -73,6 +73,7 @@ function shimIsSupported(container: typeof Container | undefined): boolean {
     tool?.render,
     tool?.updateResult,
     tool?.markExecutionStarted,
+    base?.render,
     base?.addChild,
     base?.removeChild,
     base?.clear,

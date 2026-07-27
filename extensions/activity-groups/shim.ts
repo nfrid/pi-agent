@@ -34,13 +34,8 @@ import type {
 } from '@earendil-works/pi-ai';
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
-import {
-  type ActivityKind,
-  activityKind,
-  foldTurn,
-  type OpenGroup,
-  startsNewGroup,
-} from './grouping';
+import { groupTranscript, type TranscriptEntry } from './grouping';
+import { headersOf } from './title';
 import type {
   RendererContext,
   SequenceItem,
@@ -112,12 +107,6 @@ interface SequenceState {
   completedAt?: number;
   /** False for sequences first seen already finished (history replay): no duration. */
   everLive: boolean;
-  /**
-   * Set once the sequence has rendered as finished. Distinct from `completedAt`,
-   * which a replayed sequence never gets: what seals a group is that the user
-   * has seen it close, not that we timed it.
-   */
-  sealed: boolean;
   context: RendererContext;
 }
 
@@ -155,6 +144,7 @@ export function installToolSequenceShim(
   const originalAssistantRender = assistantProto.render;
   const originalToolRender = toolProto.render;
   const originalUpdateContent = assistantProto.updateContent;
+  const originalContainerRender = containerProto.render;
   const originalAddChild = containerProto.addChild;
   const originalRemoveChild = containerProto.removeChild;
   const originalClear = containerProto.clear;
@@ -189,6 +179,8 @@ export function installToolSequenceShim(
     value instanceof host.assistantComponent;
   const isTool = (value: unknown): value is ToolComponentLike =>
     value instanceof host.toolComponent;
+  const isGroupable = (value: unknown): boolean =>
+    isAssistant(value) || isTool(value);
 
   /**
    * Whether the message says something to the user, as opposed to only thinking
@@ -214,6 +206,7 @@ export function installToolSequenceShim(
     assistantProto.render = originalAssistantRender;
     toolProto.render = originalToolRender;
     assistantProto.updateContent = originalUpdateContent;
+    containerProto.render = originalContainerRender;
     containerProto.addChild = originalAddChild;
     containerProto.removeChild = originalRemoveChild;
     containerProto.clear = originalClear;
@@ -226,64 +219,55 @@ export function installToolSequenceShim(
   }
 
   /**
-   * One model turn: the assistant message that carried the tool calls, plus the
-   * tool components that followed it. Turns are the unit that gets merged into
-   * groups; `undefined` marks a break that no group may span.
+   * The transcript a container holds, in the shape the grouper reads. This is
+   * the only place component internals are turned into plain data; every
+   * boundary decision happens in `grouping.ts` against this.
    */
-  type Turn =
-    | {
-        members: Component[];
-        tools: ToolComponentLike[];
-        /** Commentary that ends this turn's group; see `turnsOf`. */
-        closer?: AssistantComponentLike;
-      }
-    | undefined;
-
-  function turnsOf(container: ContainerLike): Turn[] {
-    const turns: Turn[] = [];
-    let open: Exclude<Turn, undefined> | undefined;
-
-    const close = () => {
-      if (open) turns.push(open);
-      open = undefined;
-    };
-
-    for (const child of container.children) {
-      if (isAssistant(child)) {
-        // Commentary is the model addressing the user. What it said always
-        // renders, and it ends the activity it was narrating — that is the beat
-        // a reader already perceives as a break, so groups should agree with it.
-        if (speaks(child)) {
-          // Closing a group makes it that group's last word: the summary above
-          // already carries its thinking, so only the speech is shown. Standing
-          // on its own it is an ordinary message and renders untouched, because
-          // there is no summary to carry anything for it.
-          if (open) open.closer = child;
-          else turns.push(undefined);
-          close();
-          continue;
-        }
-        close();
-        // A message that has not spoken yet opens a turn, even before its tool
-        // calls arrive: an empty component is a message still streaming in, not
-        // a boundary, and treating it as one made groups flicker shut and
-        // reopen as the model typed.
-        open = { members: [child], tools: [] };
-        continue;
-      }
+  function transcriptOf(container: ContainerLike): TranscriptEntry[] {
+    return container.children.map((child) => {
+      const closesGroup = runEnds.has(child) || undefined;
+      if (isAssistant(child))
+        return {
+          kind: 'assistant' as const,
+          speaks: speaks(child),
+          // The model's own account of what it is starting, which is where a
+          // group of work that nothing else distinguishes is cut.
+          header: child.lastMessage
+            ? headersOf(child.lastMessage)[0]
+            : undefined,
+          closesGroup,
+        };
       if (isTool(child)) {
         if (child.ui && !capturedUi) capturedUi = child.ui;
-        // Tools with no preceding assistant message still form a turn.
-        open ??= { members: [], tools: [] };
-        open.members.push(child);
-        open.tools.push(child);
-        continue;
+        return {
+          kind: 'tool' as const,
+          name: child.toolName,
+          args: child.args,
+          closesGroup,
+        };
       }
-      close();
-      turns.push(undefined);
-    }
-    close();
-    return turns;
+      return { kind: 'other' as const, closesGroup };
+    });
+  }
+
+  /**
+   * Remember where a run stopped.
+   *
+   * A group that has rendered its checkmark must never start growing again —
+   * the user watched it finish, and taking that back is jarring and makes the
+   * mark a lie. Usually the next request puts a user message in the way, but
+   * nothing guarantees that, so the moment a group is drawn as finished while
+   * still at the tail is recorded as a boundary in its own right. It is the
+   * one thing about grouping only a live session knows; a session read back
+   * from disk has the user's messages to break on.
+   */
+  const runEnds = new WeakSet<Component>();
+
+  function noteRunEnd(sequence: Sequence): void {
+    const last = sequence.members.at(-1);
+    if (!last || runEnds.has(last)) return;
+    runEnds.add(last);
+    dirty = true;
   }
 
   function recompute(): void {
@@ -291,75 +275,26 @@ export function installToolSequenceShim(
     const seen = new Set<string>();
 
     for (const container of containers) {
-      const last = container.children.at(-1);
-      let open: Sequence | undefined;
-      let openGroup: OpenGroup | undefined;
-
-      const flush = () => {
-        if (open) {
-          // A group the model has stopped narrating is over, whatever follows
-          // it in the container: it cannot grow once something has closed it.
-          open.atTail =
-            open.speaker === undefined && open.members.at(-1) === last;
-          seen.add(open.id);
-          for (const member of open.members) nextBindings.set(member, open);
-        }
-        open = undefined;
-        openGroup = undefined;
-      };
-
-      for (const turn of turnsOf(container)) {
-        if (!turn) {
-          flush();
-          continue;
-        }
-        // A turn whose tools have not arrived yet cannot set the phase, so it
-        // continues the open group rather than guessing at a new one.
-        const kind: ActivityKind =
-          turn.tools.length > 0
-            ? activityKind(
-                turn.tools.map((tool) => ({
-                  name: tool.toolName,
-                  args: tool.args,
-                })),
-              )
-            : 'inspect';
-
-        // A group that has already rendered its checkmark is sealed: work that
-        // arrives afterwards belongs to a new one.
-        const sealed =
-          open !== undefined && (states.get(open.id)?.sealed ?? false);
-        const current =
-          open && openGroup ? { ...openGroup, sealed } : undefined;
-
-        if (startsNewGroup(current, kind, turn.tools.length)) {
-          flush();
-          const leader = turn.members[0];
-          if (leader) {
-            open = {
-              id: groupId(leader),
-              members: [...turn.members],
-              leader,
-              tools: [...turn.tools],
-              atTail: false,
-            };
-            openGroup = foldTurn(undefined, kind, turn.tools.length);
-          }
-        } else if (open) {
-          open.members.push(...turn.members);
-          open.tools.push(...turn.tools);
-          openGroup = foldTurn(openGroup, kind, turn.tools.length);
-        }
-
-        // The commentary that closed the turn joins the group as its last
-        // member, so its narration counts towards the title, and then ends it.
-        if (turn.closer && open) {
-          open.members.push(turn.closer);
-          open.speaker = turn.closer;
-          flush();
-        }
+      const children = container.children;
+      for (const group of groupTranscript(transcriptOf(container))) {
+        const members = children.slice(group.start, group.end + 1);
+        const leader = members[0];
+        if (!leader) continue;
+        const closer =
+          group.closer === undefined ? undefined : children[group.closer];
+        const sequence: Sequence = {
+          id: groupId(leader),
+          members,
+          leader,
+          tools: members.filter(isTool),
+          // A group is still growing only if it is the tail of the container
+          // and nothing has closed it. Commentary closes it, whatever follows.
+          atTail: closer === undefined && group.end === children.length - 1,
+          speaker: closer,
+        };
+        seen.add(sequence.id);
+        for (const member of members) nextBindings.set(member, sequence);
       }
-      flush();
     }
 
     for (const [id, state] of states) {
@@ -384,40 +319,47 @@ export function installToolSequenceShim(
   }
 
   /**
-   * Render only what a message said, leaving its thinking to the group summary
-   * above it.
+   * Render one half of a message: what it said, or what it thought.
    *
    * Pi builds one component from text, thinking and tool calls together, so the
    * only way to show a part of it is to feed it a message with the rest removed
-   * and put the real one back afterwards. The result is cached per message and
-   * width: the swap costs one content rebuild, which is what Pi already spends
-   * on every streaming update, and this way it is not spent again per frame.
+   * and put the real one back afterwards. The result is cached per message,
+   * width and half: the swap costs one content rebuild, which is what Pi
+   * already spends on every streaming update, and this way it is not spent
+   * again per frame.
+   *
+   * Both halves are needed and neither may be shown twice. Closing commentary
+   * shows its speech below the group summary that already stands for its
+   * thinking; expanding the group then has to show that thinking without
+   * repeating the speech printed underneath.
    */
-  const speech = new WeakMap<
+  const partials = new WeakMap<
     Component,
-    { message: AssistantMessage; width: number; lines: string[] }
+    Map<string, { message: AssistantMessage; width: number; lines: string[] }>
   >();
 
-  function renderSpeech(
+  function renderPartial(
     component: AssistantComponentLike,
     width: number,
+    drop: 'thinking' | 'text',
   ): string[] {
     const message = component.lastMessage;
     if (!message) return originalRenderOf(component, width);
-    const spoken = message.content.filter(
-      (content) => content.type !== 'thinking',
-    );
-    if (spoken.length === message.content.length)
+    const kept = message.content.filter((content) => content.type !== drop);
+    if (kept.length === message.content.length)
       return originalRenderOf(component, width);
+    if (kept.length === 0) return [];
 
-    const cached = speech.get(component);
+    const cache = partials.get(component) ?? new Map();
+    partials.set(component, cache);
+    const cached = cache.get(drop);
     if (cached?.message === message && cached.width === width)
       return cached.lines;
 
-    originalUpdateContent.call(component, { ...message, content: spoken });
+    originalUpdateContent.call(component, { ...message, content: kept });
     try {
       const lines = originalAssistantRender.call(component, width);
-      speech.set(component, { message, width, lines });
+      cache.set(drop, { message, width, lines });
       return lines;
     } finally {
       originalUpdateContent.call(component, message);
@@ -430,7 +372,6 @@ export function installToolSequenceShim(
     const state: SequenceState = {
       startedAt: now(),
       everLive: false,
-      sealed: false,
       context: {
         state: new Map<string, unknown>(),
         requestRender,
@@ -483,7 +424,9 @@ export function installToolSequenceShim(
       state.everLive = true;
       state.completedAt = undefined;
     } else {
-      state.sealed = true;
+      // Shown as finished while it was still the tail: this is where the run
+      // stopped, and the group closes for good.
+      if (sequence.atTail) noteRunEnd(sequence);
       if (state.everLive && state.completedAt === undefined)
         state.completedAt = now();
     }
@@ -496,7 +439,11 @@ export function installToolSequenceShim(
         defaultView: {
           render: (innerWidth: number) =>
             sequence.members.flatMap((member) =>
-              originalRenderOf(member, innerWidth),
+              // The closing commentary prints its own speech below the group,
+              // so the expanded body owes only the thinking behind it.
+              member === sequence.speaker && isAssistant(member)
+                ? renderPartial(member, innerWidth, 'text')
+                : originalRenderOf(member, innerWidth),
             ),
           invalidate: () => {
             for (const member of sequence.members) member.invalidate();
@@ -529,7 +476,7 @@ export function installToolSequenceShim(
       if (!sequence || sequence.disabled)
         return originalRenderOf(component, width);
       if (sequence.speaker === component && isAssistant(component))
-        return renderSpeech(component, width);
+        return renderPartial(component, width, 'thinking');
       if (sequence.leader !== component) return [];
       return renderSequence(sequence, width);
     } catch (error) {
@@ -564,6 +511,22 @@ export function installToolSequenceShim(
     // `hasToolCalls` can flip here, which changes sequence membership.
     originalUpdateContent.call(this, message);
     dirty = true;
+  };
+  containerProto.render = function patchedContainerRender(
+    this: ContainerLike,
+    width: number,
+  ) {
+    // A resumed session is rebuilt from disk before this extension loads, so
+    // its chat container is never seen through `addChild` and used to render
+    // with no groups at all until the next turn arrived. Recognising a
+    // container by what it holds is what makes history group exactly like live
+    // work. Once found it is a set lookup; until then it is a scan that stops
+    // at the first message, and containers that hold no messages are small.
+    if (!containers.has(this) && this.children.some(isGroupable)) {
+      containers.add(this);
+      dirty = true;
+    }
+    return originalContainerRender.call(this, width);
   };
   containerProto.addChild = function patchedAddChild(
     this: ContainerLike,

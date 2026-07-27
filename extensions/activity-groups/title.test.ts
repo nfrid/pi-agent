@@ -63,6 +63,17 @@ describe('composeTitle', () => {
     expect(composeTitle(['Debugging'])).toBe('Debugged');
   });
 
+  it('takes a header that is not a sentence at its word', () => {
+    // Models label sections as often as they narrate actions, and reading the
+    // first word of one as a verb gave "Planned and 1. fresh context retrieval".
+    expect(composeTitle(['1. Fresh context retrieval'])).toBe(
+      '1. Fresh context retrieval',
+    );
+    expect(
+      composeTitle(['Planning the rollout', '1. Fresh context retrieval']),
+    ).toBe('Planned the rollout');
+  });
+
   it('has nothing to say without narration', () => {
     expect(composeTitle([])).toBeUndefined();
   });

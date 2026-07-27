@@ -23,6 +23,9 @@ const MARKDOWN_HEADER = /^\s*#{1,6}\s+(.+?)\s*$/;
 
 const MAX_TITLE_LENGTH = 90;
 
+/** A verb a title can be built on: "Inspecting", "Fixing". */
+const PARTICIPLE = /^[A-Za-z]+ing$/;
+
 /**
  * Present participle to past tense. Deriving this morphologically gets
  * "Planned"/"Traced"/"Fixed" wrong in different ways, and the working
@@ -149,19 +152,28 @@ export function toPastTense(title: string): string {
  */
 export function composeTitle(headers: readonly string[]): string | undefined {
   const parsed = headers
+    .filter((header) => header.trim())
     .map((header) => {
-      const [verb = '', ...rest] = header.split(' ');
-      return { verb, rest: rest.join(' ') };
-    })
-    .filter((entry) => entry.verb);
-  const first = parsed[0];
-  if (!first) return undefined;
+      const [word = '', ...rest] = header.split(' ');
+      // Only a participle is a verb worth conjugating. Headers do not always
+      // start with one — "1. Fresh context retrieval" is a heading, not a
+      // sentence — and reading its first word as a verb produced titles like
+      // "Planned and 1. fresh context retrieval".
+      return PARTICIPLE.test(word)
+        ? { verb: word, rest: rest.join(' ') }
+        : { verb: '', rest: header };
+    });
+  const narrated = parsed.filter((entry) => entry.verb);
+  const first = narrated[0];
+  // Nothing to conjugate: the model's own words are still the best label.
+  if (!first) return parsed[0]?.rest;
 
   const counts = new Map<string, number>();
-  for (const { verb } of parsed) counts.set(verb, (counts.get(verb) ?? 0) + 1);
+  for (const { verb } of narrated)
+    counts.set(verb, (counts.get(verb) ?? 0) + 1);
   // What the group spent itself on — never "Planning", even if it said so most.
   let dominant = first.verb;
-  for (const { verb } of parsed) {
+  for (const { verb } of narrated) {
     if (META_VERBS.has(verb)) continue;
     if (
       META_VERBS.has(dominant) ||
@@ -171,7 +183,8 @@ export function composeTitle(headers: readonly string[]): string | undefined {
   }
 
   // The goal is stated by the opening header; later ones name sub-steps.
-  const subject = first.rest || parsed.find((entry) => entry.rest)?.rest || '';
+  const subject =
+    first.rest || narrated.find((entry) => entry.rest)?.rest || '';
   const verbs =
     dominant === first.verb
       ? [toPastTense(first.verb)]

@@ -1,17 +1,25 @@
 /**
  * Where one activity group ends and the next begins.
  *
- * Boundaries come from two things: what the tools *do*, and the moments the
- * model stops to address the user. Narration is far too volatile to cut on — a
- * single turn often emits three thinking headers for five tool calls, and they
- * drift every few seconds — but tool activity moves in recognisable phases
- * (explore, then edit, then check), and commentary marks a beat a reader
- * already perceives as a break. Commentary is handled by the shim, which is
- * where messages are visible; everything else is decided here.
+ * Boundaries come from three things: what the tools *do*, the moments the model
+ * stops to address the user, and what it announces it is about to do. Tool
+ * activity moves in recognisable phases (explore, then edit, then check);
+ * commentary marks a beat a reader already perceives as a break; and narration
+ * is the model's own account of where one piece of work ended — too eager to
+ * cut on by itself, since a single stretch of reading carries three or four
+ * headers, but the best boundary available once a group holds real work.
  *
- * Measured over the session logs in this repo: grouping per model turn gave a
- * median of 7 groups per user request; these rules give 2 (p90 5), at a median
- * of 12 tool calls each, with 12% of groups holding 1-3 calls.
+ * `groupTranscript` is the whole of it: a pure function from a transcript to
+ * groups, used unchanged for a turn arriving live and for a session replayed
+ * from disk. Keeping it pure is what makes grouping reproducible — the same
+ * transcript always groups the same way, whether it is being watched or
+ * reopened a week later — and it is what the tests measure against real logs.
+ *
+ * Measured over the 206 session logs in this repo: grouping per model turn gave
+ * a median of 7 groups per user request; these rules give 4.8, at a median of 6
+ * calls each (p90 9), with 13% holding three calls or fewer. The cap ends 4% of
+ * them, which is what a backstop should be — without the narration rule it
+ * ended 63%, because a phase of pure exploration has no other edge to find.
  */
 
 /** The character of a stretch of work, derived from the tools it runs. */
@@ -64,6 +72,19 @@ export const MAX_GROUP_CALLS = 12;
  * run of them is the agent going off to find something else out.
  */
 export const MAX_IDLE_CALLS = 4;
+
+/**
+ * How much work a group must already hold before a fresh piece of narration is
+ * allowed to end it.
+ *
+ * Models announce what they are about to do far more often than they change
+ * what they are doing — a single stretch of reading can carry three or four
+ * headers — so cutting at every one shatters the transcript. But once a group
+ * has real work in it, the next announcement is the most honest boundary
+ * available: the model itself saying it has moved on. Below this, narration is
+ * treated as commentary on work already under way.
+ */
+export const MIN_NARRATED_CALLS = 5;
 
 /** What a tool call does, for describing a group in plain words. */
 export type ToolRole = 'edit' | 'read' | 'search' | 'command' | 'other';
@@ -124,39 +145,34 @@ function phaseOf(kind: ActivityKind): ActivityPhase | undefined {
 }
 
 /** Everything about the group currently open that a boundary depends on. */
-export interface OpenGroup {
+interface OpenGroup {
   phase: ActivityPhase;
   /** Tool calls the group already holds. */
   calls: number;
   /** Calls run since the group last changed or checked anything. */
   sinceChange: number;
-  /**
-   * Whether the group has already been shown to the user as finished. A
-   * finished group must never come back to life and start growing again — that
-   * is jarring to watch, and it makes the checkmark a lie. Later work opens a
-   * new group instead.
-   */
-  sealed: boolean;
 }
 
 /**
  * Should a turn of `calls` calls doing `incoming` start a new group, given the
  * group currently open?
  */
-export function startsNewGroup(
+function startsNewGroup(
   open: OpenGroup | undefined,
   incoming: ActivityKind,
   calls: number,
+  narrated = false,
 ): boolean {
-  if (!open || open.sealed) return true;
+  if (!open) return true;
   if (open.calls >= MAX_GROUP_CALLS) return true;
+  if (narrated && open.calls >= MIN_NARRATED_CALLS) return true;
   const phase = phaseOf(incoming);
   if (phase !== undefined) return phase !== open.phase;
   return open.phase === 'building' && open.sinceChange + calls > MAX_IDLE_CALLS;
 }
 
 /** The open group once a turn of `calls` calls doing `incoming` joins it. */
-export function foldTurn(
+function foldTurn(
   open: OpenGroup | undefined,
   incoming: ActivityKind,
   calls: number,
@@ -166,6 +182,186 @@ export function foldTurn(
     phase: phase ?? open?.phase ?? 'exploring',
     calls: (open?.calls ?? 0) + calls,
     sinceChange: phase ? 0 : (open?.sinceChange ?? 0) + calls,
-    sealed: false,
   };
+}
+
+/**
+ * One entry of a transcript, in the order it was appended.
+ *
+ * This is deliberately the small common shape of a live component and a
+ * persisted session message: an assistant message either speaks to the user or
+ * only thinks, a tool call has a name and arguments, and anything else is an
+ * opaque thing no group may span.
+ */
+export type TranscriptEntry = {
+  /**
+   * Nothing after this entry may join its group. This is how a caller reports
+   * something only it can know — chiefly that the run ended here, so the group
+   * the user watched finish is finished for good.
+   */
+  closesGroup?: boolean;
+} & (
+  | {
+      kind: 'assistant';
+      speaks: boolean;
+      /** The bold line the model opened its thinking with, if it wrote one. */
+      header?: string;
+    }
+  | ({ kind: 'tool' } & ToolDescriptor)
+  | { kind: 'other' }
+);
+
+/** A run of entries that belong together, as indices into the transcript. */
+export interface ActivityGroup {
+  /** Index of the first entry, which is the group's leader. */
+  start: number;
+  /** Index of the last entry, inclusive. */
+  end: number;
+  /**
+   * Index of the commentary that closed the group, when it was closed by one.
+   * Such a group is finished by construction: whatever follows starts a new
+   * one, so a group the user has seen close can never come back to life.
+   */
+  closer?: number;
+}
+
+/** One model turn: the message that carried the calls, and the calls. */
+interface Turn {
+  start: number;
+  end: number;
+  tools: ToolDescriptor[];
+  /** Index of the first call, which the calls follow contiguously. */
+  firstCall?: number;
+  /** The narration this turn opened with, if any. */
+  header?: string;
+  /** Commentary that ends this turn's group; see `turnsOf`. */
+  closer?: number;
+  /** A break no group may span. */
+  broken?: boolean;
+}
+
+function turnsOf(entries: readonly TranscriptEntry[]): Turn[] {
+  const turns: Turn[] = [];
+  let open: Turn | undefined;
+
+  const close = () => {
+    if (open) turns.push(open);
+    open = undefined;
+  };
+  const breakHere = () => {
+    close();
+    turns.push({ start: -1, end: -1, tools: [], broken: true });
+  };
+
+  const take = (entry: TranscriptEntry, index: number): void => {
+    if (entry.kind === 'assistant') {
+      // Commentary is the model addressing the user. What it said always
+      // renders, and it ends the activity it was narrating — that is the beat
+      // a reader already perceives as a break, so groups should agree with it.
+      if (entry.speaks) {
+        // Closing a group makes it that group's last word. Standing on its own
+        // it is an ordinary message that belongs to no group at all.
+        if (open) {
+          open.closer = index;
+          open.end = index;
+          close();
+        } else breakHere();
+        return;
+      }
+      close();
+      // A message that has not spoken yet opens a turn, even before its tool
+      // calls arrive: an empty message is one still streaming in, not a
+      // boundary, and treating it as one made groups flicker shut and reopen
+      // as the model typed.
+      open = { start: index, end: index, tools: [], header: entry.header };
+      return;
+    }
+    if (entry.kind === 'tool') {
+      // Tools with no preceding assistant message still form a turn.
+      open ??= { start: index, end: index, tools: [] };
+      open.end = index;
+      open.firstCall ??= index;
+      open.tools.push(entry);
+      return;
+    }
+    breakHere();
+  };
+
+  for (const [index, entry] of entries.entries()) {
+    take(entry, index);
+    if (entry.closesGroup) breakHere();
+  }
+  close();
+  return turns;
+}
+
+/**
+ * Break a transcript into activity groups.
+ *
+ * Pure and prefix-stable: every boundary is decided from the entries before it,
+ * so appending entries can only extend the last group or open new ones. That is
+ * what makes the same function usable for a live turn and for a session
+ * replayed from disk, and what stops a finished group from rearranging itself
+ * under the reader.
+ *
+ * Entries covered by no returned group — plain commentary, anything Pi renders
+ * that is neither a message nor a call — are shown as Pi renders them.
+ */
+export function groupTranscript(
+  entries: readonly TranscriptEntry[],
+): ActivityGroup[] {
+  const groups: ActivityGroup[] = [];
+  let open: ActivityGroup | undefined;
+  let state: OpenGroup | undefined;
+
+  const flush = () => {
+    if (open) groups.push(open);
+    open = undefined;
+    state = undefined;
+  };
+
+  for (const turn of turnsOf(entries)) {
+    if (turn.broken) {
+      flush();
+      continue;
+    }
+    // A turn whose tools have not arrived yet cannot set the phase, so it
+    // continues the open group rather than guessing at a new one.
+    const kind: ActivityKind =
+      turn.tools.length > 0 ? activityKind(turn.tools) : 'inspect';
+
+    // The turn is placed a chunk at a time, because a single message can carry
+    // more calls than a group may hold: models fire ten or twenty at once, and
+    // a cap that only applied between messages let those through as one
+    // unreadable block. A turn's calls are contiguous and run to its end.
+    const firstCall = turn.firstCall ?? turn.start;
+    let placed = 0;
+    let cursor = turn.start;
+    do {
+      const remaining = turn.tools.length - placed;
+      // Only the head of the turn carries its narration; a chunk split off by
+      // the cap is the same announced piece of work continuing.
+      const narrated = placed === 0 && turn.header !== undefined;
+      if (startsNewGroup(state, kind, remaining, narrated)) {
+        flush();
+        open = { start: cursor, end: cursor };
+      }
+      const room = MAX_GROUP_CALLS - (state?.calls ?? 0);
+      const take = Math.min(remaining, room);
+      placed += take;
+      cursor = placed < turn.tools.length ? firstCall + placed : turn.end + 1;
+      if (open) open.end = cursor - 1;
+      state = foldTurn(state, kind, take);
+    } while (placed < turn.tools.length);
+
+    // The commentary that closed the turn joins the group as its last entry,
+    // so its narration counts towards the title, and then ends it.
+    if (turn.closer !== undefined && open) {
+      open.closer = turn.closer;
+      open.end = turn.closer;
+      flush();
+    }
+  }
+  flush();
+  return groups;
 }
