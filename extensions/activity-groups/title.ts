@@ -82,6 +82,29 @@ function clean(value: string): string | undefined {
 }
 
 /** Every narration header in a message, in the order the model wrote them. */
+/**
+ * Is this text block narration rather than something said to the user?
+ *
+ * Which channel a header arrives on is the model's business, not ours. Some
+ * put it in thinking; others — Codex-family models in particular — write the
+ * same line as ordinary text, so a message whose entire text is
+ * "**Creating a throwaway fixture**" is labelling the calls that follow, not
+ * addressing anyone. Reading that as speech ended a group on almost every
+ * turn, which is what shattered those sessions into single-call groups.
+ *
+ * A header mixed with prose is not this: that message really is talking.
+ */
+export function isNarration(text: string): boolean {
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return (
+    lines.length > 0 &&
+    lines.every((line) => BOLD_HEADER.test(line) || MARKDOWN_HEADER.test(line))
+  );
+}
+
 export function headersOf(message: AssistantMessage): string[] {
   const headers: string[] = [];
   for (const content of message.content) {

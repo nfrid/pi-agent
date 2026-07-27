@@ -3,6 +3,7 @@ import type { Theme } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installToolSequenceShim, type ShimHost } from './shim';
+import { headersOf } from './title';
 import type { SequenceRenderer, SequenceSnapshot } from './types';
 
 /**
@@ -237,6 +238,44 @@ describe('tool sequence shim', () => {
       'group:group-1:3:done',
       'assistant:Done',
     ]);
+  });
+
+  it('reads a header written as text as narration, not as an answer', () => {
+    const { renderer, snapshots } = recordingRenderer();
+    const h = harness();
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    // Codex-family models put the header on the text channel. Taken as speech
+    // it would close the group on every turn, leaving one call in each.
+    const first = new FakeAssistant();
+    h.chat.addChild(first);
+    first.updateContent(
+      assistantMessage([
+        { type: 'text', text: '**Reading the auth code**' },
+        { type: 'toolCall', id: 'call-1', name: 'read', arguments: {} },
+      ]),
+    );
+    h.chat.addChild(new FakeTool('read', 'call-1', {}));
+    const second = new FakeAssistant();
+    h.chat.addChild(second);
+    second.updateContent(
+      assistantMessage([
+        { type: 'text', text: '**Reading the session store**' },
+        { type: 'toolCall', id: 'call-2', name: 'read', arguments: {} },
+      ]),
+    );
+    h.chat.addChild(new FakeTool('read', 'call-2', {}));
+
+    // One group, and no line of its own for either header.
+    expect(h.render()).toEqual(['group:group-1:4:live']);
+    // Both headers stayed inside it, where the title is composed from.
+    expect(
+      snapshots
+        .at(-1)
+        ?.items.flatMap((item) =>
+          item.type === 'assistant' ? headersOf(item.message) : [],
+        ),
+    ).toEqual(['Reading the auth code', 'Reading the session store']);
   });
 
   it('starts a new sequence when the work changes character', () => {

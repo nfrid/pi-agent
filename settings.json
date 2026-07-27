@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.82.1",
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-sol",
+  "defaultModel": "gpt-5.6-terra",
   "defaultThinkingLevel": "medium",
   "editorPaddingX": 1,
   "hideThinkingBlock": false,
@@ -15,7 +15,7 @@
         "model": "gpt-5.6-luna",
         "thinking": "low",
         "relativeCost": 1,
-        "useFor": "Mechanical work with one deterministic answer: does this file or export exist, what does this config say, run a command and report output. Rote edits fully specified by the task \u2014 a rename in named files, a fixture update, boilerplate \u2014 where a command proves it.",
+        "useFor": "Mechanical work with one deterministic answer: does this file or export exist, what does this config say, run a command and report output. Rote edits fully specified by the task — a rename in named files, a fixture update, boilerplate — where a command proves it.",
         "avoid": "Anything needing judgement, or reading more than two or three files. Any task whose finish line is not already decided."
       },
       "luna-medium": {

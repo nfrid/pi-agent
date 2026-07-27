@@ -20,7 +20,10 @@
  * What a group may hide is thinking and tool calls. Anything the model said to
  * the user always renders, and ends the group it followed: as that group's last
  * word it shows only its speech, since the summary above already accounts for
- * its thinking, and standing alone it renders untouched.
+ * its thinking, and expanding the group shows only the rest, so the answer is
+ * never printed twice. A message whose whole text is a narration header is not
+ * speech at all — see `isNarration` — because some models write their headers
+ * on the text channel rather than in thinking.
  *
  * This reaches into host internals that carry no compatibility promise. Every
  * assumption is verified at install time and re-checked per sequence: anything
@@ -35,7 +38,7 @@ import type {
 import type { Theme } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { groupTranscript, type TranscriptEntry } from './grouping';
-import { headersOf } from './title';
+import { headersOf, isNarration } from './title';
 import type {
   RendererContext,
   SequenceItem,
@@ -189,7 +192,10 @@ export function installToolSequenceShim(
    */
   const speaks = (component: AssistantComponentLike): boolean =>
     component.lastMessage?.content.some(
-      (content) => content.type === 'text' && content.text.trim() !== '',
+      (content) =>
+        content.type === 'text' &&
+        content.text.trim() !== '' &&
+        !isNarration(content.text),
     ) ?? false;
 
   function requestRender(): void {
