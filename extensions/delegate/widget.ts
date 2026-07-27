@@ -153,8 +153,10 @@ function actionContent(status: DelegateStatusSnapshot): string {
   const activity = status.activity;
   if (!activity)
     return status.state === 'queued' ? 'waiting for a slot' : 'starting';
+  // A thinking block with no text yet is the very first activity of a run;
+  // later ones fall back to the previous activity before reaching here.
   if (activity.type === 'thinking')
-    return activity.latestText ? compact(activity.latestText) : '';
+    return activity.latestText ? compact(activity.latestText) : 'thinking';
   return compact(
     [activity.label, activity.latestText].filter(Boolean).join(' · '),
   );

@@ -178,4 +178,42 @@ describe('createRailPanel', () => {
     left.detach();
     expect(host.unmounts()).toHaveLength(1);
   });
+
+  // Extensions load with module caching disabled, so each one evaluates its
+  // own copy of this module. The rail is only one rail if that still holds.
+  it('shares one host widget between separately loaded copies', async () => {
+    // The query string forces a second evaluation of the module, which is
+    // what the extension loader does; TypeScript cannot resolve the specifier.
+    // @ts-expect-error cache-busting import specifier
+    const first = (await import('./rail.ts?copy=1')) as typeof import('./rail');
+    const second = (await import(
+      // @ts-expect-error cache-busting import specifier
+      './rail.ts?copy=2'
+    )) as typeof import('./rail');
+    expect(first).not.toBe(second);
+
+    const host = fakeUI();
+    const left = first.createRailPanel({
+      key: 'copy-left',
+      side: 'left',
+      isActive: () => true,
+      render: () => ['left'],
+    });
+    const right = second.createRailPanel({
+      key: 'copy-right',
+      side: 'right',
+      maxWidth: 5,
+      isActive: () => true,
+      render: () => ['right'],
+    });
+    left.attach(host.ui);
+    right.attach(host.ui);
+
+    expect(new Set(host.setWidget.mock.calls.map((call) => call[0])).size).toBe(
+      1,
+    );
+    expect(host.render(20)).toEqual([`left${' '.repeat(11)}right`]);
+    left.detach();
+    right.detach();
+  });
 });

@@ -331,6 +331,22 @@ describe('delegate widget', () => {
     ).not.toThrow();
   });
 
+  test('never renders an empty action line', () => {
+    const lines = renderDelegateWidget(
+      [
+        status({
+          activity: { type: 'thinking', label: 'thinking', status: 'running' },
+        }),
+      ],
+      true,
+      100,
+      theme as never,
+      5_000,
+      markdownTheme,
+    );
+    expect(lines[1].trim()).toBe('└ … thinking');
+  });
+
   test('gives the visible rows to the subagents doing work', () => {
     const lines = renderDelegateWidget(
       [
