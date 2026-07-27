@@ -538,6 +538,16 @@ describe('tool sequence shim', () => {
     expect(onWarn).toHaveBeenCalledOnce();
     expect(onError).not.toHaveBeenCalled();
     expect(FakeTool.prototype.render.name).toBe('patchedToolRender');
+
+    // Giving up has to outlive a regrouping. Sequences are rebuilt whenever the
+    // transcript changes, which during streaming is constantly, so a group that
+    // forgot it had failed would throw again on every render and burn through
+    // the fault budget on what is really one broken group.
+    turn(h, [{ name: 'read' }], 'b');
+    h.render();
+    h.render();
+    expect(onWarn).toHaveBeenCalledOnce();
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it('gives up once the faults keep coming', () => {
@@ -548,17 +558,20 @@ describe('tool sequence shim', () => {
       throw new Error('boom');
     }, h.host);
 
-    // Each new group fails in turn; the third is one too many.
-    for (let index = 0; index < 3; index += 1) {
-      turn(h, [{ name: 'edit' }], `e${index}`);
-      turn(
-        h,
-        [{ name: 'read' }, { name: 'read' }, { name: 'read' }],
-        `r${index}`,
-      );
-      h.render();
-    }
+    // Three groups, each breaking once: editing, then enough pure reading to
+    // count as having moved on, then editing again. A group that has already
+    // failed stays failed, so only distinct groups can drive the count up —
+    // which is the point, since a single broken group is not a pattern.
+    turn(h, [{ name: 'edit' }], 'e0');
+    turn(
+      h,
+      Array.from({ length: 5 }, () => ({ name: 'read' })),
+      'r0',
+    );
+    turn(h, [{ name: 'edit' }], 'e1');
+    h.render();
 
+    expect(onWarn).toHaveBeenCalledTimes(2);
     expect(onError).toHaveBeenCalledOnce();
     // Stock rendering from here on, and the patches are gone.
     expect(FakeTool.prototype.render.name).toBe('render');

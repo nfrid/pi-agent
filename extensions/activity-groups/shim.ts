@@ -98,14 +98,21 @@ interface Sequence {
   tools: ToolComponentLike[];
   /** True when the sequence is the tail of its container, so it may still grow. */
   atTail: boolean;
-  disabled?: boolean;
 }
 
+/**
+ * What survives a regrouping. `Sequence` objects are rebuilt from scratch every
+ * time the transcript changes, so anything that has to outlive that — timing,
+ * the renderer's component, whether this group has given up — belongs here,
+ * keyed by the group id.
+ */
 interface SequenceState {
   startedAt: number;
   completedAt?: number;
   /** False for sequences first seen already finished (history replay): no duration. */
   everLive: boolean;
+  /** Set once this group has failed or opted out: it renders as Pi would. */
+  disabled?: boolean;
   context: RendererContext;
 }
 
@@ -239,15 +246,13 @@ export function installToolSequenceShim(
             : undefined,
           closesGroup,
         };
-      if (isTool(child)) {
-        if (child.ui && !capturedUi) capturedUi = child.ui;
+      if (isTool(child))
         return {
           kind: 'tool' as const,
           name: child.toolName,
           args: child.args,
           closesGroup,
         };
-      }
       return { kind: 'other' as const, closesGroup };
     });
   }
@@ -289,6 +294,9 @@ export function installToolSequenceShim(
           tools: members.filter(isTool),
           atTail: group.end === children.length - 1,
         };
+        // Tool components carry the TUI handle, and asking for a redraw is the
+        // only way a spinner frame reaches the screen. Any of them will do.
+        capturedUi ??= sequence.tools[0]?.ui;
         seen.add(sequence.id);
         for (const member of members) nextBindings.set(member, sequence);
       }
@@ -392,7 +400,7 @@ export function installToolSequenceShim(
 
     if (!view) {
       // The renderer opted out for this sequence; show it verbatim.
-      sequence.disabled = true;
+      state.disabled = true;
       dispose(state.context.lastComponent);
       state.context.lastComponent = undefined;
       return originalRenderOf(sequence.leader, width);
@@ -409,7 +417,7 @@ export function installToolSequenceShim(
     try {
       ensureFresh();
       sequence = bindings.get(component);
-      if (!sequence || sequence.disabled)
+      if (!sequence || states.get(sequence.id)?.disabled)
         return originalRenderOf(component, width);
       if (sequence.leader !== component) return [];
       return renderSequence(sequence, width);
@@ -419,7 +427,7 @@ export function installToolSequenceShim(
       // on. Only a fault that keeps recurring, or one from deriving the groups
       // themselves, means the shim is no longer safe to run.
       failures += 1;
-      if (sequence) sequence.disabled = true;
+      if (sequence) stateOf(sequence).disabled = true;
       if (sequence && failures < MAX_RENDER_FAILURES) host.onWarn?.(error);
       else teardown(error);
       return originalRenderOf(component, width);
