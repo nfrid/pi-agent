@@ -27,8 +27,6 @@ export function buildDelegatePrompt(
 
 ${task}${context}${scope}
 
-You can put a question to the parent: stop where you are and give it as your "Blocked" question. The parent answers by continuing you, with this session intact, so report what you already established first. Use it only for what you cannot settle yourself — the task contradicts what you found, or it turns on a decision that is the parent's to make. Anything a default and a stated assumption can cover is not a blocker.
-
 ${framing}
 
 Report in these sections. Only "Outcome" and "Conclusion" are required; include another section when you have something to put in it, which on a small task may be none of them.
@@ -43,6 +41,8 @@ Exceeded: what the task demanded that you could not supply
 Blocked: the one question the parent must answer
 
 Say "partial" when you finished useful work but not the task's finish line, and say which part is missing rather than presenting it as done. Use "Exceeded" when the task needed more than you could give it — reasoning over more of the codebase than you could hold at once, or a judgement it stated no criteria for. Describe the shortfall; do not name a model or a thinking level, because you cannot see what the parent is choosing between. Give evidence rather than confidence: cite what you checked, and do not rate yourself with scores or percentages.
+
+Blocking is how you put a question to the parent: stop where you are and give it as your one "Blocked" question. The parent answers by continuing you, with this session intact, so report what you already established first. Use it only for what you cannot settle yourself — the task contradicts what you found, or it turns on a decision that is the parent's to make. Anything a default and a stated assumption can cover is not a blocker.
 
 Write for a reader who will act on this without opening your session. Do not narrate routine tool calls, and keep logs, diffs, and long explanation out of the report unless they are themselves the deliverable. Keep the final response under 800 words.
 
