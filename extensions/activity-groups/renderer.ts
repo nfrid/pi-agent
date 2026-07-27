@@ -187,10 +187,13 @@ export class ActivityGroupComponent implements Component {
   private title(tools: readonly ToolItem[], completed: boolean): string {
     // One styled terminal line, so whatever markdown the model wrote inside
     // its narration is unwrapped rather than printed as punctuation.
-    return stripEmphasis(this.chooseTitle(tools, completed));
+    return stripEmphasis(
+      this.narratedTitle(completed) ?? this.toolTitle(tools, completed),
+    );
   }
 
-  private chooseTitle(tools: readonly ToolItem[], completed: boolean): string {
+  /** The model's own words for this phase, if it gave any. */
+  private narratedTitle(completed: boolean): string | undefined {
     const preamble = this.preamble();
     // Announced in the present, reported in the past: a finished group saying
     // "Checking how sessions expire" beside a checkmark is describing work
@@ -200,8 +203,11 @@ export class ActivityGroupComponent implements Component {
     const headers = this.sequence.items.flatMap((item) =>
       item.type === 'assistant' ? headersOf(item.message) : [],
     );
-    const title = completed ? composeTitle(headers) : headers.at(-1);
-    if (title) return title;
+    return completed ? composeTitle(headers) : headers.at(-1);
+  }
+
+  /** The fallback for a group that narrated nothing: what its tools did. */
+  private toolTitle(tools: readonly ToolItem[], completed: boolean): string {
     const files = this.files(tools);
     return describeTools(tools, commonDirectory(files) ?? files[0], completed);
   }
@@ -244,11 +250,8 @@ export class ActivityGroupComponent implements Component {
     ];
   }
 
-  render(width: number): string[] {
-    const tools = this.sequence.items.filter(
-      (item): item is ToolItem => item.type === 'tool',
-    );
-    const completed = !this.options.streaming;
+  /** The group's own line: how it went, and what it was. */
+  private headline(tools: readonly ToolItem[], completed: boolean): string {
     const marker = completed
       ? this.sequence.failed
         ? '✗'
@@ -259,63 +262,74 @@ export class ActivityGroupComponent implements Component {
       : completed
         ? 'success'
         : 'accent';
+    return ` ${this.theme.fg(color, marker)} ${this.theme.fg('text', this.title(tools, completed))}`;
+  }
 
-    const lines = [
-      '',
-      truncateToWidth(
-        ` ${this.theme.fg(color, marker)} ${this.theme.fg('text', this.title(tools, completed))}`,
-        width,
-      ),
-    ];
-
-    // The point of a group is not to hide the work but to stop it running off
-    // the screen: the last few steps stay legible, one line each, and the rest
-    // are accounted for by a count that says how much was folded away.
+  /**
+   * One line per call, most recent last.
+   *
+   * The point of a group is not to hide the work but to stop it running off the
+   * screen: the last few steps stay legible and the rest are accounted for by a
+   * count that says how much was folded away.
+   */
+  private stepLines(tools: readonly ToolItem[]): string[] {
     const shown = tools.slice(-MAX_STEP_LINES);
     const hidden = tools.length - shown.length;
-    if (hidden > 0)
-      lines.push(
-        truncateToWidth(
-          `   ${this.theme.fg('dim', `⋮ ${count(hidden, 'earlier step')}`)}`,
-          width,
-        ),
-      );
+    const lines =
+      hidden > 0
+        ? [`   ${this.theme.fg('dim', `⋮ ${count(hidden, 'earlier step')}`)}`]
+        : [];
     for (const tool of shown) {
       const { action, argument } = toolSubject(tool, this.sequence.cwd);
       const marked = `   ${this.theme.fg(roleColor(tool), this.stepMarker(tool))} ${this.theme.fg(tool.isError ? 'error' : 'muted', action)}`;
       lines.push(
-        truncateToWidth(
-          argument ? `${marked} ${this.theme.fg('dim', argument)}` : marked,
-          width,
-        ),
+        argument ? `${marked} ${this.theme.fg('dim', argument)}` : marked,
       );
     }
+    return lines;
+  }
 
+  /** The tally under the group: how much, where, how long, what broke. */
+  private metadataLine(
+    tools: readonly ToolItem[],
+    completed: boolean,
+  ): string | undefined {
     const files = this.files(tools);
     const directory = commonDirectory(files);
     // A group opens the moment the model commits to tool calls, so it can be
     // briefly empty while the first call is still streaming in.
-    const metadata = tools.length > 0 ? [count(tools.length, 'call')] : [];
+    const parts = tools.length > 0 ? [count(tools.length, 'call')] : [];
     if (files.length > 0)
-      metadata.push(
+      parts.push(
         directory
           ? `${count(files.length, 'file')} in ${directory}`
           : count(files.length, 'file'),
       );
     if (completed && this.sequence.completedAt !== undefined)
-      metadata.push(
+      parts.push(
         formatDuration(this.sequence.completedAt - this.sequence.startedAt),
       );
     const failed = tools.filter((tool) => tool.isError).length;
-    if (failed > 0) metadata.push(`${failed} failed`);
-    if (metadata.length > 0)
-      lines.push(
-        truncateToWidth(
-          `   ${this.theme.fg(this.sequence.failed ? 'error' : 'muted', metadata.join(' · '))}`,
-          width,
-        ),
-      );
+    if (failed > 0) parts.push(`${failed} failed`);
+    if (parts.length === 0) return undefined;
+    return `   ${this.theme.fg(this.sequence.failed ? 'error' : 'muted', parts.join(' · '))}`;
+  }
 
+  render(width: number): string[] {
+    const tools = this.sequence.items.filter(
+      (item): item is ToolItem => item.type === 'tool',
+    );
+    const completed = !this.options.streaming;
+    const metadata = this.metadataLine(tools, completed);
+
+    const lines = [
+      '',
+      this.headline(tools, completed),
+      ...this.stepLines(tools),
+      ...(metadata ? [metadata] : []),
+    ].map((line) => truncateToWidth(line, width));
+
+    // The default view is Pi's own rendering and wraps itself.
     if (this.options.expanded)
       lines.push(...this.options.defaultView.render(width));
     return lines;
