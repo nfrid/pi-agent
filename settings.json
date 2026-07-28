@@ -39,7 +39,7 @@
         "model": "gpt-5.6-terra",
         "thinking": "high",
         "relativeCost": 8,
-        "useFor": "Substantial, bounded work with stated requirements and a clear finish line: review a specified diff or named file set against a spec or plan, or implement a multi-file feature or fix in an established architecture with tests and a check command.",
+        "useFor": "Substantial, bounded work with stated requirements and a clear finish line: review a specified diff or named file set against a spec or plan, or implement a multi-file feature or bounded transactional/lifecycle fix within one subsystem in an established architecture, with focused tests defining invariants and a check command.",
         "avoid": "Whether the work is honest or overbuilt, which is sol-medium. Breadth-wise security, drift, or race analysis, which is terra-max. Rote edits, which are cheaper above."
       },
       "terra-max": {
@@ -47,8 +47,8 @@
         "model": "gpt-5.6-terra",
         "thinking": "max",
         "relativeCost": 13,
-        "useFor": "Concrete, high-stakes reviews of a specified diff or named file set: compare behaviour with a git baseline, or check listed lifecycle, cancellation, race, regression, or security risks against an explicit checklist. Cross-cutting refactors and migrations with many edge cases, under strong test coverage, with defined stopping points.",
-        "avoid": "Unbounded whole-repo audits without a concrete diff, named file set, checklist, or stopping point; narrow work, and anything terra-high already covers. Rigid mechanical changes, where the extra reasoning tends to arrive as unrequested cleanup."
+        "useFor": "Broad, high-stakes analysis or review over a specified diff, named file set, git baseline, or explicit checklist: assess lifecycle, cancellation, race, regression, or security risks, with useful partial findings acceptable when the stopping point is defined.",
+        "avoid": "Single-run implementation that must both discover the design and land a complete fix under the default timeout; once criteria are concrete, direct bounded implementation to terra-high. Also avoid unbounded whole-repo audits without a concrete diff, named file set, baseline, checklist, or stopping point, and narrow work."
       },
       "sol-medium": {
         "provider": "openai-codex",
