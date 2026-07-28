@@ -2,8 +2,6 @@
 
 `scripts/session-metrics` reads Pi session JSONL and emits privacy-safe aggregate measurements. It follows only the active ancestry, so abandoned branches do not inflate totals.
 
-## Usage
-
 ```bash
 npm run session:metrics -- summarize ~/.pi/agent/sessions --min-delegate-calls 1
 npm run session:metrics -- compare --baseline /path/to/baseline --comparison /path/to/comparison
@@ -11,25 +9,20 @@ npm run session:metrics -- compare --baseline /path/to/baseline --comparison /pa
 
 JSON is written to stdout. `--limit` applies after filtering; `--min-todo-calls` and `--min-delegate-calls` can be combined.
 
-## Delegation semantics
+## Delegation
 
-- `delegatedTasks` and `delegateWritableTasks` count unique launched/executed runs, never a second pushed or peeked report copy.
-- `delegateBackgroundJobsLaunched` and `delegateBackgroundRunsLaunched` describe work launched. `delegateBackgroundDeliveries` and `delegateHandoffBytes` describe parent-visible report copies. A pushed report and a later peek both add delivery bytes, but not tasks.
-- `delegateParallelCalls` includes accepted parallel foreground and background launches. `delegateContinuationCalls` counts calls with either a single continuation or one or more parallel task continuations.
-- `delegateRejectedCalls` is separate from runs. `delegateTruncatedTasks` is read from handoff markers, capped to the report's task count, and deduplicated by stable run/job identity across pushed and peeked copies.
-- `delegateOutcomeDone`, `delegateOutcomePartial`, `delegateOutcomeBlocked`, and `delegateOutcomeFailed` come from the child report; `delegateOutcomeUnreported` makes historical reports without the contract visible. `delegateProcessErrors`, `delegateProcessTimeouts`, and `delegateProcessAborts` are process state, not capability outcomes.
-- `delegateArtifactReferences` and `delegateWorktreeReturns` count details supplied with a unique run. `delegateArtifactFallbacks` counts parent-visible fallback markers.
+The instrument reports delegate calls, continuations, accepted parallel calls, rejected calls, unique delegated and writable tasks, background jobs/runs launched, report deliveries, handoff bytes, truncation, report outcomes, process errors/timeouts/aborts, and artifact/worktree indicators.
+
+Background completion facts come from producer details: automatic deliveries use `details.jobs`, while `delegate_jobs peek` uses `details.job`. A pushed report and a later peek each add their complete delivered text to `delegateHandoffBytes`, but stable job/run identities prevent either copy from adding another execution, outcome, truncation, or routing record. Current reports use `Delegated results: N run(s)` and `Truncation: original report truncated`; older markers remain readable. The display delimiter `\n\n---\n\n` is never parsed because parallel handoffs use it internally. Older messages without details receive only a one-report fallback.
 
 ## Routing and ratios
 
-`routes` contains only `routedTasks`: unique runs with a route **and recorded child usage**. Each route reports tasks, turns, input/output usage, cost, and relative cost. There is no `computeUnits` field because the delegate runtime does not produce one.
+`routes` contains unique `routedTasks`: runs with both a route and recorded child usage. Each route reports tasks, turns, input/output usage, cost, and relative cost. `childTurnsPerTask` and `childCostPerTask` divide by `routedTasks`, not all delegated tasks or report copies.
 
-`childTurnsPerTask` and `childCostPerTask` divide child spend by `routedTasks`, not by every delivered handoff or older unrouted run. Cohort ratios are always recomputed from summed totals: they are not averages of session ratios. `delegateEscalationRate` is escalations over all continuation calls, including parallel continuations; each continuation is compared only with the returned run at its task position, so fresh parallel siblings cannot change that comparison.
-
-Other ratios are `cacheHitRatio`, `delegateHandoffBytesPerTask`, `delegateTruncationRate`, and `delegateContinuationRate`.
+Other ratios are `cacheHitRatio`, `delegateHandoffBytesPerTask`, `delegateTruncationRate`, and `delegateContinuationRate`. Cohort ratios are recomputed from summed totals, never averaged from per-session ratios.
 
 ## Privacy and interpretation
 
-Output omits paths, prompts, tool arguments/results, task text, handoff bodies, and compaction summaries. Short session hashes are local correlation IDs, not anonymity guarantees. Provider usage is reported as recorded; elapsed time is wall-clock active-ancestry span.
+Output omits paths, prompts, tool arguments/results, task text, handoff bodies, and compaction summaries. Short session hashes are local correlation IDs, not anonymity guarantees. Provider usage is reported as recorded; elapsed time is the active-ancestry wall-clock span.
 
-Metrics describe cost and observed reporting, not correctness. Compare cohorts only when task shapes are comparable.
+Metrics describe observed cost and reporting, not correctness. Compare cohorts only when task shapes are comparable.

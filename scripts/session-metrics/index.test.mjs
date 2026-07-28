@@ -264,7 +264,7 @@ describe('delegate measurements', () => {
     });
   });
 
-  it('counts truncated tasks from the envelope marker, capped at the runs present', () => {
+  it('counts current truncated-report markers, capped at the runs present', () => {
     const twoRuns = {
       mode: 'parallel',
       runs: [{ allowWrites: false }, { allowWrites: false }],
@@ -273,17 +273,23 @@ describe('delegate measurements', () => {
       parseSessionJsonl(
         delegateFixture([
           {
-            text: 'Truncation: body truncated\nTruncation: none',
+            text: 'Outcome: partial\nTruncation: original report truncated\nTruncation: none',
             details: twoRuns,
           },
         ]),
       ),
-    ).toMatchObject({ delegateTruncatedTasks: 1, delegateTruncationRate: 0.5 });
+    ).toMatchObject({
+      delegateTruncatedTasks: 1,
+      delegateTruncationRate: 0.5,
+      delegateOutcomePartial: 1,
+    });
 
     expect(
       parseSessionJsonl(
         delegateFixture([
           {
+            // Historical reports retain the former marker without changing
+            // current-report accounting.
             text: 'Truncation: body truncated\nTruncation: body truncated\nTruncation: body truncated',
             details: twoRuns,
           },
@@ -305,7 +311,10 @@ describe('delegate measurements', () => {
     ).toBe(1);
   });
 
-  it('charges background work to its delivery rather than to its acknowledgement', () => {
+  it('charges background work to its complete delivery rather than to its acknowledgement', () => {
+    const handoff =
+      'Delegated results: 1 run\n\nStatus: success\nOutcome: done\nTruncation: none';
+    const delivered = `Background delegate job dj-1 (audit) success\n\n${handoff}`;
     const result = parseSessionJsonl(
       delegateFixture([
         {
@@ -314,8 +323,11 @@ describe('delegate measurements', () => {
         },
         {
           toolName: 'delegate_jobs',
-          text: 'Background delegate job dj-1 (audit) done\n\nDelegated task succeeded\n\nStatus: success\nOutcome: done\nTruncation: none',
-          details: { action: 'peek' },
+          text: delivered,
+          details: {
+            action: 'peek',
+            job: { id: 'dj-1', state: 'success', handoff, runs: [{}] },
+          },
         },
       ]),
     );
@@ -324,28 +336,60 @@ describe('delegate measurements', () => {
       delegateBackgroundRunsLaunched: 1,
       delegateBackgroundDeliveries: 1,
       delegatedTasks: 1,
-      // Only the delivered handoff, never the acknowledgement that preceded it.
-      delegateHandoffBytes: 72,
+      delegateOutcomeDone: 1,
+      // The parent receives the complete tool result, including its job label.
+      delegateHandoffBytes: Buffer.byteLength(delivered, 'utf8'),
     });
   });
 
-  it('reads the task count of a delivered parallel job from its handoff header', () => {
+  it('uses snapshot runs instead of reconstructing parallel work from text', () => {
+    const handoff =
+      'Delegated results: 3 runs\n\nOutcome: partial\nTruncation: original report truncated';
     expect(
       parseSessionJsonl(
         delegateFixture([
           {
             toolName: 'delegate_jobs',
-            text: 'Background delegate job dj-2 (fan) done\n\nDelegated tasks: 2/3 succeeded\n\nTruncation: body truncated',
-            details: { action: 'peek' },
+            text: `Background delegate job dj-2 (fan) success\n\n${handoff}`,
+            details: {
+              action: 'peek',
+              job: {
+                id: 'dj-2',
+                state: 'success',
+                handoff,
+                runs: [
+                  {
+                    routing: { route: 'quick', relativeCost: 1 },
+                    usage: { turns: 3 },
+                  },
+                  {},
+                  {},
+                ],
+              },
+            },
           },
         ]),
       ),
-    ).toMatchObject({ delegatedTasks: 3, delegateTruncatedTasks: 1 });
+    ).toMatchObject({
+      delegatedTasks: 3,
+      delegateTruncatedTasks: 1,
+      delegateOutcomePartial: 1,
+      routedTasks: 1,
+      childTurns: 3,
+    });
   });
 
-  it('counts a background completion pushed to the parent as a steering message', () => {
-    const handoff =
-      'Delegated task succeeded\n\nStatus: success\nOutcome: done\nTruncation: none';
+  it('counts an automatic parallel delivery from details.jobs without splitting its text', () => {
+    const first =
+      'Delegated results: 1 run\n\nOutcome: done\n\n---\n\n### Task 2 output\nEvidence retained\nTruncation: none';
+    const second =
+      'Delegated results: 1 run\n\nOutcome: partial\nTruncation: none';
+    // This is the real automatic producer shape. The parallel handoff and the
+    // automatic batch both use this delimiter, so it is not a protocol boundary.
+    const delivered = [
+      `# Background delegate job dj-1 (audit) success\n\n${first}`,
+      `# Background delegate job dj-2 (fan) success\n\n${second}`,
+    ].join('\n\n---\n\n');
     const result = parseSessionJsonl(
       delegateFixture([
         {
@@ -354,53 +398,95 @@ describe('delegate measurements', () => {
         },
         {
           customType: 'delegate-job-result',
-          content: [
-            `# Background delegate job dj-1 (audit) success\n\n${handoff}`,
-            `# Background delegate job dj-2 (fan) success\n\nDelegated tasks: 2/2 succeeded\n\nTruncation: none`,
-          ].join('\n\n---\n\n'),
+          content: delivered,
+          details: {
+            jobs: [
+              { id: 'dj-1', state: 'success', handoff: first, runs: [{}] },
+              { id: 'dj-2', state: 'success', handoff: second, runs: [{}] },
+            ],
+          },
         },
       ]),
     );
     expect(result).toMatchObject({
       delegateBackgroundJobsLaunched: 2,
       delegateBackgroundRunsLaunched: 2,
-      // Two jobs finished together and were delivered in one message.
       delegateBackgroundDeliveries: 2,
-      delegatedTasks: 3,
+      delegatedTasks: 2,
+      delegateOutcomeDone: 1,
+      delegateOutcomePartial: 1,
+      delegateHandoffBytes: Buffer.byteLength(delivered, 'utf8'),
     });
-    expect(result.delegateHandoffBytes).toBeGreaterThan(
-      Buffer.byteLength(handoff, 'utf8'),
-    );
   });
 
-  it('deduplicates a truncated background task delivered by push and peek', () => {
-    const job = { id: 'dj-1', runs: [{}] };
+  it('deduplicates push and peek executions while retaining every delivered byte', () => {
     const handoff =
-      '# Background delegate job dj-1 (audit) success\n\nDelegated task succeeded\n\nTruncation: body truncated';
+      'Delegated results: 1 run\n\nOutcome: failed\nTruncation: original report truncated';
+    const job = {
+      id: 'dj-1',
+      state: 'error',
+      handoff,
+      runs: [
+        {
+          state: 'error',
+          routing: { route: 'quick', relativeCost: 1 },
+          usage: { turns: 2 },
+        },
+      ],
+    };
+    const pushed = `# Background delegate job dj-1 (audit) error\n\n${handoff}`;
+    const peeked = `Background delegate job dj-1 (audit) error\n\n${handoff}`;
     const result = parseSessionJsonl(
       delegateFixture([
         {
           text: 'Started 1 background delegate job: dj-1.',
-          details: { runs: [{}] },
+          details: { runs: [{ backgroundJobId: 'dj-1' }] },
         },
         {
           customType: 'delegate-job-result',
-          content: handoff,
+          content: pushed,
           details: { jobs: [job] },
         },
         {
           toolName: 'delegate_jobs',
-          text: handoff,
-          details: { jobs: [job] },
+          text: peeked,
+          details: { action: 'peek', job },
         },
       ]),
     );
     expect(result).toMatchObject({
       delegatedTasks: 1,
       delegateBackgroundDeliveries: 2,
+      delegateHandoffBytes:
+        Buffer.byteLength(pushed, 'utf8') + Buffer.byteLength(peeked, 'utf8'),
       delegateTruncatedTasks: 1,
-      delegateTruncationRate: 1,
-      delegateOutcomeUnreported: 1,
+      delegateOutcomeFailed: 1,
+      delegateProcessErrors: 1,
+      routedTasks: 1,
+      childTurns: 2,
+    });
+  });
+
+  it('recognizes current and historical background reports without details', () => {
+    const current =
+      '# Background delegate job dj-current (audit) success\n\nDelegated results: 1 run\n\nOutcome: done\nTruncation: original report truncated';
+    const historical =
+      '# Background delegate job dj-old (audit) success\n\nDelegated task succeeded\n\nOutcome: partial\nTruncation: body truncated';
+    const result = parseSessionJsonl(
+      delegateFixture([
+        { customType: 'delegate-job-result', content: current },
+        { customType: 'delegate-job-result', content: historical },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateBackgroundDeliveries: 2,
+      delegatedTasks: 2,
+      delegateTruncatedTasks: 2,
+      delegateOutcomeDone: 1,
+      delegateOutcomePartial: 1,
+      delegateHandoffBytes:
+        Buffer.byteLength(current, 'utf8') +
+        Buffer.byteLength(historical, 'utf8'),
     });
   });
 
@@ -482,6 +568,8 @@ describe('delegate measurements', () => {
   it('bills a background job to its route once however often it is reported', () => {
     const job = {
       id: 'dj-1',
+      state: 'success',
+      handoff: 'Delegated results: 1 run\n\nStatus: success',
       runs: [
         {
           routing: { route: 'terra-max', relativeCost: 13 },
@@ -503,13 +591,13 @@ describe('delegate measurements', () => {
         {
           customType: 'delegate-job-result',
           content:
-            '# Background delegate job dj-1 (audit) success\n\nDelegated task succeeded\n\nStatus: success',
+            '# Background delegate job dj-1 (audit) success\n\nDelegated results: 1 run\n\nStatus: success',
           details: { jobs: [job] },
         },
         {
           toolName: 'delegate_jobs',
-          text: 'Background delegate job dj-1 (audit) success\n\nDelegated task succeeded\n\nStatus: success',
-          details: { jobs: [job] },
+          text: 'Background delegate job dj-1 (audit) success\n\nDelegated results: 1 run\n\nStatus: success',
+          details: { action: 'peek', job },
         },
       ]),
     );
@@ -518,96 +606,6 @@ describe('delegate measurements', () => {
     expect(result.delegateBackgroundDeliveries).toBe(2);
     expect(result.routes['terra-max'].tasks).toBe(1);
     expect(result.childTurns).toBe(9);
-  });
-
-  it('counts a continuation onto a costlier route as an escalation', () => {
-    const first = {
-      details: {
-        runs: [
-          {
-            continuation: 'token',
-            routing: { route: 'luna-low', relativeCost: 1 },
-            usage: {},
-          },
-        ],
-      },
-    };
-    const resumed = (route, relativeCost) => ({
-      arguments: { continuation: 'token' },
-      details: {
-        runs: [{ continuation: 'token', routing: { route, relativeCost } }],
-      },
-    });
-
-    expect(
-      parseSessionJsonl(delegateFixture([first, resumed('terra-high', 8)])),
-    ).toMatchObject({
-      delegateEscalatedCalls: 1,
-      delegateDeescalatedCalls: 0,
-      delegateEscalationRate: 1,
-    });
-
-    // Resuming on the route it was already on is the default, and is neither.
-    expect(
-      parseSessionJsonl(delegateFixture([first, resumed('luna-low', 1)])),
-    ).toMatchObject({
-      delegateEscalatedCalls: 0,
-      delegateDeescalatedCalls: 0,
-    });
-
-    // The second task is fresh. Its route must not be compared to the cheap
-    // continuation at position zero.
-    expect(
-      parseSessionJsonl(
-        delegateFixture([
-          first,
-          {
-            arguments: {
-              tasks: [
-                { continuation: 'token', task: 'PRIVATE' },
-                { task: 'PRIVATE' },
-              ],
-            },
-            details: {
-              mode: 'parallel',
-              runs: [
-                {
-                  continuation: 'token',
-                  routing: { route: 'luna-low', relativeCost: 1 },
-                  usage: {},
-                },
-                {
-                  routing: { route: 'terra-max', relativeCost: 13 },
-                  usage: {},
-                },
-              ],
-            },
-          },
-        ]),
-      ),
-    ).toMatchObject({
-      delegateEscalatedCalls: 0,
-      delegateDeescalatedCalls: 0,
-    });
-
-    expect(
-      parseSessionJsonl(
-        delegateFixture([
-          {
-            details: {
-              runs: [
-                {
-                  continuation: 'token',
-                  routing: { route: 'terra-max', relativeCost: 13 },
-                  usage: {},
-                },
-              ],
-            },
-          },
-          resumed('luna-low', 1),
-        ]),
-      ),
-    ).toMatchObject({ delegateDeescalatedCalls: 1, delegateEscalatedCalls: 0 });
   });
 
   it('counts parallel continuations as calls, including arguments left as JSON text', () => {
@@ -629,9 +627,6 @@ describe('delegate measurements', () => {
       delegateContinuationCalls: 1,
       delegateContinuationRate: 1 / 2,
     });
-
-    // A parallel continuation participates in the escalation denominator too.
-    expect(parallel.delegateEscalationRate).toBe(0);
 
     const result = parseSessionJsonl(
       delegateFixture([
@@ -682,6 +677,8 @@ describe('delegate measurements', () => {
   it('counts background launches and executions once while charging repeated reports', () => {
     const job = {
       id: 'dj-1',
+      state: 'error',
+      handoff: 'Delegated results: 1 run\n\nOutcome: failed',
       runs: [
         {
           allowWrites: true,
@@ -700,13 +697,13 @@ describe('delegate measurements', () => {
         {
           customType: 'delegate-job-result',
           content:
-            '# Background delegate job dj-1 (audit) error\n\nDelegated task succeeded\n\nOutcome: failed',
+            '# Background delegate job dj-1 (audit) error\n\nDelegated results: 1 run\n\nOutcome: failed',
           details: { jobs: [job] },
         },
         {
           toolName: 'delegate_jobs',
-          text: '# Background delegate job dj-1 (audit) error\n\nDelegated task succeeded\n\nOutcome: failed',
-          details: { jobs: [job] },
+          text: '# Background delegate job dj-1 (audit) error\n\nDelegated results: 1 run\n\nOutcome: failed',
+          details: { action: 'peek', job },
         },
       ]),
     );
