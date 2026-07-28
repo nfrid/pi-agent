@@ -332,8 +332,7 @@ describe('delegate', () => {
         },
       },
     });
-    expect(fingerprintDelegateConfig(secret)).not.toContain('provider');
-    expect(fingerprintDelegateConfig(secret)).not.toContain('apiKey');
+    expect(fingerprintDelegateConfig(secret)).toMatch(/^[a-f0-9]{12}$/);
   });
 
   test('describes only explicit catalog routes', () => {

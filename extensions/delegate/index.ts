@@ -7,7 +7,6 @@ import { defineExtension } from '../shared/runtime/extension';
 import { createRailPanel } from '../shared/ui/rail';
 import { registerDelegateBranchesTool } from './branches-tool';
 import {
-  type DelegateConfig,
   delegateRouteCount,
   fingerprintDelegateConfig,
   getDelegateSettingsPath,
@@ -26,6 +25,9 @@ import {
 } from './widget';
 import { loadWorktree } from './worktree';
 import { registerDelegateWorktreesCommand } from './worktrees-command';
+
+export const DELEGATES_COMMAND_DESCRIPTION =
+  'Toggle detailed subagent status or inspect delegate config';
 
 /** Stable registration facade; orchestration and broker commands have separate owners. */
 export default defineExtension('delegate', (pi: ExtensionAPI) => {
@@ -49,7 +51,6 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   let widgetDetailed = true;
   let promptSnapshot:
     | {
-        config: DelegateConfig;
         fingerprint: string;
         routeCount: number;
         loadedAt: string;
@@ -132,7 +133,6 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   pi.on('session_start', (event, ctx) => {
     const promptConfig = loadDelegateConfig(ctx.cwd);
     promptSnapshot = {
-      config: promptConfig,
       fingerprint: fingerprintDelegateConfig(promptConfig),
       routeCount: delegateRouteCount(promptConfig),
       loadedAt: new Date().toISOString(),
@@ -218,7 +218,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   );
 
   pi.registerCommand('delegates', {
-    description: 'Toggle detailed subagent status or inspect delegate config',
+    description: DELEGATES_COMMAND_DESCRIPTION,
     handler: async (args, ctx) => {
       const argument = args.trim();
       if (argument === 'config') {
@@ -226,13 +226,27 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         const current = loadDelegateConfig(ctx.cwd);
         const currentFingerprint = fingerprintDelegateConfig(current);
         const currentRouteCount = delegateRouteCount(current);
-        const same = snapshot?.fingerprint === currentFingerprint;
+        const comparison = snapshot
+          ? snapshot.fingerprint === currentFingerprint
+            ? 'same'
+            : 'differs'
+          : 'unavailable';
+        const guidance = snapshot
+          ? comparison === 'same'
+            ? 'Prompt guidance is current.'
+            : '/reload refreshes prompt guidance.'
+          : '/reload establishes/refreshes prompt guidance.';
         const sourcePath = (() => {
           try {
-            const command = pi
+            const matching = pi
               .getCommands()
-              .find((entry) => entry.name === 'delegates');
-            const sourcePath = command?.sourceInfo?.path;
+              .filter(
+                (entry) =>
+                  entry.name === 'delegates' &&
+                  entry.description === DELEGATES_COMMAND_DESCRIPTION,
+              );
+            if (matching.length !== 1) return 'unknown';
+            const sourcePath = matching[0]?.sourceInfo?.path;
             return typeof sourcePath === 'string' && sourcePath.trim()
               ? sourcePath
               : 'unknown';
@@ -244,8 +258,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
           `Settings path: ${getDelegateSettingsPath()}`,
           `Prompt-loaded: fingerprint=${snapshot?.fingerprint ?? 'unknown'}; routes=${snapshot?.routeCount ?? 'unknown'}; time=${snapshot?.loadedAt ?? 'unknown'}; lifecycle=session_start (reason=${snapshot?.reason ?? 'unknown'})`,
           `Current settings: fingerprint=${currentFingerprint}; routes=${currentRouteCount}`,
-          `Comparison: ${same ? 'same' : 'differs'}`,
-          `Guidance: ${same ? 'Prompt guidance is current.' : '/reload refreshes prompt guidance.'} Delegate execution currently re-reads settings on demand.`,
+          `Comparison: ${comparison}`,
+          `Guidance: ${guidance} Delegate execution currently re-reads settings on demand.`,
           `Extension source: ${sourcePath}`,
         ].join('\n');
         if (ctx.hasUI) ctx.ui.notify(report, 'info');
