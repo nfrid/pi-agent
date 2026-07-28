@@ -101,11 +101,9 @@ delegate_branches merge <id>              # integrate into your checkout
 delegate_branches drop <id>               # delete the checkout and the branch
 ```
 
-`review` measures from the child's own starting point, so carried parent work never appears as the child's. `merge` either lands or leaves the checkout exactly as it was: a conflict is aborted rather than parked, because an agent working on from a half-merged tree makes a worse mess than one told to resolve deliberately. `drop` refuses unmerged work without `force`.
+`review` measures from the child's own starting point, so carried parent work never appears as the child's. `merge` integrates only the child's commits after `workBase`, not the carry snapshot. For `from: 'wip'`, it therefore preserves non-overlapping dirty parent state while refusing to proceed when a child-edited path is also dirty in the parent. It either lands or leaves the checkout exactly as it was: a conflict is aborted rather than parked, because an agent working on from a half-merged tree makes a worse mess than one told to resolve deliberately. `drop` refuses unmerged work without `force`.
 
-One refusal is worth knowing about, because plain git reports it obscurely. With the default `from: 'wip'`, the branch contains the parent's uncommitted work, so merging it while that work is *still* uncommitted fails with a message about local changes being overwritten. `merge` names the overlapping paths and says to commit or stash them first.
-
-Ordinary git works too, and `/delegate-worktrees` inspects and cleans up from the parent session:
+`/delegate-worktrees` inspects and cleans up from the parent session:
 
 ```text
 /delegate-worktrees                              # list
