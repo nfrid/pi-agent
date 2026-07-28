@@ -1,8 +1,14 @@
-import { existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { git, repository } from './test/worktree-fixture';
-import { createRun } from './types';
+import { continuationRecoveryNote, createRun } from './types';
 import {
   attachWorktreeSession,
   discardFreshWorktree,
@@ -209,6 +215,27 @@ describe('finishing a worktree', () => {
     expect(recovered.worktree?.error).toBe(timedOut.error);
     expect(recovered.worktree?.runOutcome).toBe('timed-out');
     expect(recovered.warnings).toBeUndefined();
+  });
+
+  test('clears an old outcome when the worktree disappears during recovery', async () => {
+    const worktree = await prepared();
+    await finishWorktree(worktree.record.id, {
+      taskName: 'Slow task',
+      outcome: 'timed-out',
+    });
+    rmSync(worktree.record.worktreePath, { recursive: true, force: true });
+
+    const recovered = createRun('Recover the task', undefined, {
+      context: 'continuation',
+    });
+    recovered.state = 'success';
+    recovered.exitCode = 0;
+    await finalizeWorktreeRun(recovered, worktree, 'Recover the task');
+
+    expect(recovered.worktree?.runOutcome).toBeUndefined();
+    expect(recovered.worktree?.error).toMatch(/directory disappeared/);
+    expect(recovered.warnings).toContain(recovered.worktree?.error);
+    expect(continuationRecoveryNote(recovered)).toBeUndefined();
   });
 
   test('reports no work when the agent changed nothing', async () => {

@@ -79,6 +79,7 @@ export async function finishWorktree(
   if (!record) throw new Error(`Unknown worktree ${id}`);
   if (!existsSync(record.worktreePath)) {
     record.status = 'removed';
+    record.runOutcome = undefined;
     record.error = 'The worktree directory disappeared before it was finished.';
     writeWorktreeRecord(record);
     return record;
@@ -113,6 +114,7 @@ export async function finishWorktree(
     }
   } catch (error) {
     record.status = 'finished';
+    record.runOutcome = undefined;
     record.error = `Could not settle the worktree branch: ${error instanceof Error ? error.message : String(error)}`;
   }
   writeWorktreeRecord(record);
