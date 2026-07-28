@@ -162,10 +162,7 @@ function recordBackgroundDelivery(state, text, jobs = []) {
       handoff,
       'Exact output artifact unavailable',
     );
-    const truncated =
-      countOccurrences(handoff, TRUNCATED_MARKER) ||
-      countOccurrences(handoff, LEGACY_TRUNCATED_MARKER);
-    state.metrics.delegateTruncatedTasks += Math.min(truncated, taskCount);
+    recordTruncatedTasks(state, ids, handoff);
     // A completion can be retained after its launch entry is absent from the
     // active ancestry. Stable per-job identities make either path count once.
     recordExecution(state, runs, ids, handoff);
@@ -180,6 +177,18 @@ const LEGACY_TRUNCATED_MARKER = '[Output truncated for parent context';
 
 function countOccurrences(text, marker) {
   return text.split(marker).length - 1;
+}
+
+/** A repeated pushed/peeked handoff must not inflate a unique-task rate. */
+function recordTruncatedTasks(state, ids, text) {
+  const truncated =
+    countOccurrences(text, TRUNCATED_MARKER) ||
+    countOccurrences(text, LEGACY_TRUNCATED_MARKER);
+  for (const id of ids.slice(0, truncated)) {
+    if (state.truncatedRuns.has(id)) continue;
+    state.truncatedRuns.add(id);
+    state.metrics.delegateTruncatedTasks += 1;
+  }
 }
 
 function resultText(message) {
@@ -233,10 +242,7 @@ function recordDelegateResult(state, message, executionNumber) {
     text,
     'Exact output artifact unavailable',
   );
-  const truncated =
-    countOccurrences(text, TRUNCATED_MARKER) ||
-    countOccurrences(text, LEGACY_TRUNCATED_MARKER);
-  metrics.delegateTruncatedTasks += Math.min(truncated, runs.length);
+  recordTruncatedTasks(state, ids, text);
   return { runs, background: false };
 }
 
@@ -336,29 +342,40 @@ function recordRouting(state, runs, ids) {
  * quality rather than on the children.
  */
 function recordEscalation(state, runs) {
-  const tokens = state.pendingContinuationCalls.shift() ?? [];
-  const known = tokens
-    .map((token) => state.routeByContinuation.get(token))
-    .filter((cost) => cost !== undefined);
-  if (known.length === 0 || runs.length === 0) return;
-  // A parallel call cannot be matched task-to-task from the transcript, so the
-  // comparison is call-level: the costliest route it resumed against the
-  // costliest it landed on. One escalation per call, never per task.
-  const before = Math.max(...known);
-  const after = Math.max(
-    ...runs.map((run) => finiteNumber(run?.routing?.relativeCost)),
+  const continuations = state.pendingContinuationCalls.shift() ?? [];
+  const comparisons = continuations
+    .map(({ token, index }) => {
+      const before = state.routeByContinuation.get(token);
+      const routing = runs[index]?.routing;
+      return before === undefined || !routing
+        ? undefined
+        : { before, after: finiteNumber(routing.relativeCost) };
+    })
+    .filter((comparison) => comparison !== undefined);
+  if (comparisons.length === 0) return;
+  // Calls remain the unit, but task positions ensure a fresh parallel task
+  // cannot change the route comparison for a resumed sibling.
+  const before = Math.max(
+    ...comparisons.map((comparison) => comparison.before),
   );
+  const after = Math.max(...comparisons.map((comparison) => comparison.after));
   if (after > before) state.metrics.delegateEscalatedCalls += 1;
   if (after < before) state.metrics.delegateDeescalatedCalls += 1;
 }
 
-/** Every continuation token a call is resuming, single or parallel. */
-function continuationTokens(call) {
+/** Continuation tokens paired with their result position, single or parallel. */
+function continuationEntries(call) {
   const args = toolArguments(call);
   const tasks = Array.isArray(args.tasks) ? args.tasks : [];
-  return [args.continuation, ...tasks.map((task) => task?.continuation)].filter(
-    (token) => typeof token === 'string',
-  );
+  if (tasks.length)
+    return tasks.flatMap((task, index) =>
+      typeof task?.continuation === 'string'
+        ? [{ token: task.continuation, index }]
+        : [],
+    );
+  return typeof args.continuation === 'string'
+    ? [{ token: args.continuation, index: 0 }]
+    : [];
 }
 
 function activeAncestry(entries) {
@@ -407,6 +424,7 @@ export function parseSessionJsonl(source) {
     executedRuns: new Set(),
     indicatedRuns: new Set(),
     billedRuns: new Set(),
+    truncatedRuns: new Set(),
     routeByContinuation: new Map(),
     pendingContinuationCalls: [],
   };
@@ -433,10 +451,10 @@ export function parseSessionJsonl(source) {
       const delegated = toolCalls(message, 'delegate');
       metrics.delegateToolCalls += delegated.length;
       metrics.delegateContinuationCalls += delegated.filter(
-        (call) => continuationTokens(call).length > 0,
+        (call) => continuationEntries(call).length > 0,
       ).length;
       for (const call of delegated)
-        state.pendingContinuationCalls.push(continuationTokens(call));
+        state.pendingContinuationCalls.push(continuationEntries(call));
       const usage = message.usage ?? {};
       metrics.usageInput += finiteNumber(usage.input);
       metrics.usageOutput += finiteNumber(usage.output);

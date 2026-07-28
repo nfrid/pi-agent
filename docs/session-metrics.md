@@ -16,7 +16,7 @@ JSON is written to stdout. `--limit` applies after filtering; `--min-todo-calls`
 - `delegatedTasks` and `delegateWritableTasks` count unique launched/executed runs, never a second pushed or peeked report copy.
 - `delegateBackgroundJobsLaunched` and `delegateBackgroundRunsLaunched` describe work launched. `delegateBackgroundDeliveries` and `delegateHandoffBytes` describe parent-visible report copies. A pushed report and a later peek both add delivery bytes, but not tasks.
 - `delegateParallelCalls` includes accepted parallel foreground and background launches. `delegateContinuationCalls` counts calls with either a single continuation or one or more parallel task continuations.
-- `delegateRejectedCalls` is separate from runs. `delegateTruncatedTasks` is read from handoff markers and is capped to the report's task count.
+- `delegateRejectedCalls` is separate from runs. `delegateTruncatedTasks` is read from handoff markers, capped to the report's task count, and deduplicated by stable run/job identity across pushed and peeked copies.
 - `delegateOutcomeDone`, `delegateOutcomePartial`, `delegateOutcomeBlocked`, and `delegateOutcomeFailed` come from the child report; `delegateOutcomeUnreported` makes historical reports without the contract visible. `delegateProcessErrors`, `delegateProcessTimeouts`, and `delegateProcessAborts` are process state, not capability outcomes.
 - `delegateArtifactReferences` and `delegateWorktreeReturns` count details supplied with a unique run. `delegateArtifactFallbacks` counts parent-visible fallback markers.
 
@@ -24,7 +24,7 @@ JSON is written to stdout. `--limit` applies after filtering; `--min-todo-calls`
 
 `routes` contains only `routedTasks`: unique runs with a route **and recorded child usage**. Each route reports tasks, turns, input/output usage, cost, and relative cost. There is no `computeUnits` field because the delegate runtime does not produce one.
 
-`childTurnsPerTask` and `childCostPerTask` divide child spend by `routedTasks`, not by every delivered handoff or older unrouted run. Cohort ratios are always recomputed from summed totals: they are not averages of session ratios. `delegateEscalationRate` is escalations over all continuation calls, including parallel continuations; a call without enough route history remains in that denominator rather than silently changing its meaning.
+`childTurnsPerTask` and `childCostPerTask` divide child spend by `routedTasks`, not by every delivered handoff or older unrouted run. Cohort ratios are always recomputed from summed totals: they are not averages of session ratios. `delegateEscalationRate` is escalations over all continuation calls, including parallel continuations; each continuation is compared only with the returned run at its task position, so fresh parallel siblings cannot change that comparison.
 
 Other ratios are `cacheHitRatio`, `delegateHandoffBytesPerTask`, `delegateTruncationRate`, and `delegateContinuationRate`.
 

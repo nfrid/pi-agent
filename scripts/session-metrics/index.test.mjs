@@ -373,6 +373,37 @@ describe('delegate measurements', () => {
     );
   });
 
+  it('deduplicates a truncated background task delivered by push and peek', () => {
+    const job = { id: 'dj-1', runs: [{}] };
+    const handoff =
+      '# Background delegate job dj-1 (audit) success\n\nDelegated task succeeded\n\nTruncation: body truncated';
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          text: 'Started 1 background delegate job: dj-1.',
+          details: { runs: [{}] },
+        },
+        {
+          customType: 'delegate-job-result',
+          content: handoff,
+          details: { jobs: [job] },
+        },
+        {
+          toolName: 'delegate_jobs',
+          text: handoff,
+          details: { jobs: [job] },
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegatedTasks: 1,
+      delegateBackgroundDeliveries: 2,
+      delegateTruncatedTasks: 1,
+      delegateTruncationRate: 1,
+      delegateOutcomeUnreported: 1,
+    });
+  });
+
   it('ignores delegate_jobs results that carry no delivered handoff', () => {
     expect(
       parseSessionJsonl(
@@ -519,6 +550,41 @@ describe('delegate measurements', () => {
     // Resuming on the route it was already on is the default, and is neither.
     expect(
       parseSessionJsonl(delegateFixture([first, resumed('luna-low', 1)])),
+    ).toMatchObject({
+      delegateEscalatedCalls: 0,
+      delegateDeescalatedCalls: 0,
+    });
+
+    // The second task is fresh. Its route must not be compared to the cheap
+    // continuation at position zero.
+    expect(
+      parseSessionJsonl(
+        delegateFixture([
+          first,
+          {
+            arguments: {
+              tasks: [
+                { continuation: 'token', task: 'PRIVATE' },
+                { task: 'PRIVATE' },
+              ],
+            },
+            details: {
+              mode: 'parallel',
+              runs: [
+                {
+                  continuation: 'token',
+                  routing: { route: 'luna-low', relativeCost: 1 },
+                  usage: {},
+                },
+                {
+                  routing: { route: 'terra-max', relativeCost: 13 },
+                  usage: {},
+                },
+              ],
+            },
+          },
+        ]),
+      ),
     ).toMatchObject({
       delegateEscalatedCalls: 0,
       delegateDeescalatedCalls: 0,
