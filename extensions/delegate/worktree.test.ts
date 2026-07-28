@@ -139,6 +139,7 @@ describe('finishing a worktree', () => {
     });
 
     expect(record.status).toBe('finished');
+    expect(record.runOutcome).toBeUndefined();
     expect(record.changedPaths).toEqual(['src/value.txt']);
     expect(record.headCommit).not.toBe(record.baseHead);
     // Nothing tracked is left pending; the injected node_modules symlink stays
@@ -185,6 +186,7 @@ describe('finishing a worktree', () => {
     });
     expect(record.changedPaths).toContain('src/partial.txt');
     expect(record.error).toMatch(/ended with error/);
+    expect(record.runOutcome).toBe('error');
     expect(worktreeSummary(record).hasWork).toBe(true);
   });
 
@@ -202,7 +204,10 @@ describe('finishing a worktree', () => {
     await finalizeWorktreeRun(recovered, worktree, 'Recovered task');
 
     expect(timedOut.error).toMatch(/timed out/);
+    expect(timedOut.runOutcome).toBe('timed-out');
+    expect(loadWorktree(worktree.record.id)?.runOutcome).toBe('timed-out');
     expect(recovered.worktree?.error).toBe(timedOut.error);
+    expect(recovered.worktree?.runOutcome).toBe('timed-out');
     expect(recovered.warnings).toBeUndefined();
   });
 

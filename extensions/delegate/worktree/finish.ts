@@ -104,11 +104,13 @@ export async function finishWorktree(
       ),
     );
     record.status = 'finished';
-    if (options.outcome !== 'success' && !record.error)
+    if (options.outcome !== 'success' && !record.error) {
+      record.runOutcome = options.outcome;
       record.error =
         options.outcome === 'timed-out'
           ? 'The delegate run timed out; the branch holds whatever work was completed.'
           : `The delegate run ended with ${options.outcome}; the branch holds whatever work was completed.`;
+    }
   } catch (error) {
     record.status = 'finished';
     record.error = `Could not settle the worktree branch: ${error instanceof Error ? error.message : String(error)}`;

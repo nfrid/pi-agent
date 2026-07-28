@@ -26,6 +26,7 @@ export type {
   WorktreeBase,
   WorktreePreparation,
   WorktreeRecord,
+  WorktreeRunOutcome,
   WorktreeStatus,
   WorktreeSummary,
 } from './model';
