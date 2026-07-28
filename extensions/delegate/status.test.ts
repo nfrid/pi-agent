@@ -92,6 +92,19 @@ describe('delegate status store', () => {
     expect(store.list()).toEqual([]);
   });
 
+  test('does not replace a specific terminal run state with its aggregate job state', () => {
+    const store = new DelegateStatusStore();
+    const run = createRun('audit');
+    const [id] = store.start([run], 'background');
+    store.setJobId(id, 'dj-1');
+
+    run.state = 'timed-out';
+    store.update(id, run);
+    store.settleJobs([{ id: 'dj-1', state: 'error' }]);
+
+    expect(store.list()[0]?.state).toBe('timed-out');
+  });
+
   test('requires explicit inspection before a stale background completion can be acknowledged', () => {
     const store = new DelegateStatusStore();
     const run = createRun('audit');

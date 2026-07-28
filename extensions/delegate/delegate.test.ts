@@ -186,6 +186,20 @@ describe('delegate', () => {
     );
   });
 
+  test('starts all admitted work by default while keeping a finite ceiling', () => {
+    expect(parseDelegateConfig({})).toMatchObject({
+      maxParallelTasks: 6,
+      maxConcurrency: 20,
+    });
+    const atCeiling = parseDelegateConfig({ maxConcurrency: 20 });
+    expect(atCeiling.maxConcurrency).toBe(20);
+    expect(atCeiling.error).toBeUndefined();
+    expect(parseDelegateConfig({ maxConcurrency: 21 })).toMatchObject({
+      maxConcurrency: 20,
+      error: expect.stringContaining('between 1 and 20'),
+    });
+  });
+
   test('requires strict catalog-only configuration and positive metrics', () => {
     expect(parseDelegateConfig({ defaultEffort: 'economy' }).error).toMatch(
       /defaultEffort is not supported/,

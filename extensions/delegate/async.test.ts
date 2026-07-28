@@ -238,13 +238,13 @@ describe('async delegate extension', () => {
       { requestRender: vi.fn() },
       { fg: (_color, text) => text },
     );
-    expect(widget?.render(100).join('\n')).toContain('finalizing');
+    expect(widget?.render(100).join('\n')).toContain('done');
 
     // The completion was queued during an existing turn, so that turn's
     // assistant message cannot acknowledge a result it never received.
     handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
     handlers.get('agent_settled')?.({}, ctx);
-    expect(widget?.render(100).join('\n')).toContain('finalizing');
+    expect(widget?.render(100).join('\n')).toContain('done');
 
     handlers.get('turn_start')?.({}, ctx);
     handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);

@@ -23,13 +23,13 @@ const MAX_RELATIVE_COST = 1000;
 export const DEFAULT_DELEGATE_RUNTIME = {
   timeoutMs: 10 * 60 * 1000,
   maxParallelTasks: 6,
-  maxConcurrency: 3,
+  maxConcurrency: 20,
 } as const;
 
 const RUNTIME_LIMITS = {
   timeoutMs: { min: 10_000, max: 60 * 60 * 1000 },
   maxParallelTasks: { min: 1, max: 20 },
-  maxConcurrency: { min: 1, max: 10 },
+  maxConcurrency: { min: 1, max: 20 },
 } as const;
 
 export interface DelegateRuntimeConfig {

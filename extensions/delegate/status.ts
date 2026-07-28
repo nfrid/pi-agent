@@ -153,7 +153,7 @@ export class DelegateStatusStore {
       const record = [...this.records.values()].find(
         (candidate) => candidate.jobId === job.id,
       );
-      if (!record || record.state === job.state) continue;
+      if (!record || isSettled(record.state)) continue;
       record.state = job.state;
       changed = true;
     }

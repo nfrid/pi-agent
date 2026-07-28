@@ -44,7 +44,7 @@ function stateStyle(status: DelegateStatusSnapshot): {
     case 'running':
       return { icon: '●', color: 'warning' };
     case 'success':
-      return { icon: '✓', detail: 'finalizing', color: 'success' };
+      return { icon: '✓', detail: 'done', color: 'success' };
     case 'error':
       return { icon: '×', detail: 'failed', color: 'error' };
     case 'timed-out':
