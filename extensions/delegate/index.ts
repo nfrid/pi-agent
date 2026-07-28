@@ -52,6 +52,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   let promptSnapshot:
     | {
         fingerprint: string;
+        valid: boolean;
+        error?: string;
         routeCount: number;
         loadedAt: string;
         reason: string;
@@ -134,6 +136,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const promptConfig = loadDelegateConfig(ctx.cwd);
     promptSnapshot = {
       fingerprint: fingerprintDelegateConfig(promptConfig),
+      valid: !promptConfig.error,
+      ...(promptConfig.error ? { error: promptConfig.error } : {}),
       routeCount: delegateRouteCount(promptConfig),
       loadedAt: new Date().toISOString(),
       reason: event.reason ?? 'unknown',
@@ -226,16 +230,23 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         const current = loadDelegateConfig(ctx.cwd);
         const currentFingerprint = fingerprintDelegateConfig(current);
         const currentRouteCount = delegateRouteCount(current);
+        const currentValid = !current.error;
         const comparison = snapshot
           ? snapshot.fingerprint === currentFingerprint
             ? 'same'
             : 'differs'
           : 'unavailable';
         const guidance = snapshot
-          ? comparison === 'same'
-            ? 'Prompt guidance is current.'
-            : '/reload refreshes prompt guidance.'
+          ? !snapshot.valid || !currentValid
+            ? '/reload refreshes prompt guidance. Delegate routing/execution is unavailable.'
+            : comparison === 'same'
+              ? 'Prompt guidance is current.'
+              : '/reload refreshes prompt guidance.'
           : '/reload establishes/refreshes prompt guidance.';
+        const conciseError = (error: string | undefined) =>
+          error ? error.replace(/\s+/g, ' ').slice(0, 240) : undefined;
+        const promptError = conciseError(snapshot?.error);
+        const currentError = conciseError(current.error);
         const sourcePath = (() => {
           try {
             const matching = pi
@@ -256,8 +267,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         })();
         const report = [
           `Settings path: ${getDelegateSettingsPath()}`,
-          `Prompt-loaded: fingerprint=${snapshot?.fingerprint ?? 'unknown'}; routes=${snapshot?.routeCount ?? 'unknown'}; time=${snapshot?.loadedAt ?? 'unknown'}; lifecycle=session_start (reason=${snapshot?.reason ?? 'unknown'})`,
-          `Current settings: fingerprint=${currentFingerprint}; routes=${currentRouteCount}`,
+          `Prompt-loaded: fingerprint=${snapshot?.fingerprint ?? 'unknown'}; valid=${snapshot ? (snapshot.valid ? 'yes' : 'no') : 'unknown'}; routes=${snapshot?.routeCount ?? 'unknown'}${promptError ? `; error=${promptError}` : ''}; time=${snapshot?.loadedAt ?? 'unknown'}; lifecycle=session_start (reason=${snapshot?.reason ?? 'unknown'})`,
+          `Current settings: fingerprint=${currentFingerprint}; valid=${currentValid ? 'yes' : 'no'}; routes=${currentRouteCount}${currentError ? `; error=${currentError}` : ''}`,
           `Comparison: ${comparison}`,
           `Guidance: ${guidance} Delegate execution currently re-reads settings on demand.`,
           `Extension source: ${sourcePath}`,

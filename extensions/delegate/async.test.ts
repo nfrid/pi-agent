@@ -427,6 +427,26 @@ describe('async delegate extension', () => {
         sourceInfo: { path: '/extensions/delegate/index.ts' },
       },
     ]);
+    const invalidConfig: DelegateConfig = {
+      ...config,
+      error: 'delegate.timeoutMs must be an integer between 10000 and 3600000.',
+    };
+    configLoader.mockReturnValue(invalidConfig);
+    handlers.get('session_start')?.({}, ctx);
+    await commands.get('delegates')?.handler('config', ctx);
+    expect(notify.mock.calls[0]?.[0]).toContain('Comparison: same');
+    expect(notify.mock.calls[0]?.[0]).toContain('valid=no');
+    expect(notify.mock.calls[0]?.[0]).toContain(
+      'Current settings: fingerprint=',
+    );
+    expect(notify.mock.calls[0]?.[0]).toContain('valid=no; routes=');
+    expect(notify.mock.calls[0]?.[0]).toContain(
+      'Delegate routing/execution is unavailable.',
+    );
+    expect(notify.mock.calls[0]?.[0]).not.toContain(
+      'Prompt guidance is current.',
+    );
+    notify.mockClear();
     configLoader.mockReturnValue({ ...config, timeoutMs: 120_000 });
     await commands.get('delegates')?.handler('config', ctx);
     expect(notify).toHaveBeenCalledWith(
