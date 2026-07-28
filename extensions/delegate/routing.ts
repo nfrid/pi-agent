@@ -38,6 +38,9 @@ ${catalog.length > 0 ? catalog.join('\n') : '- (none)'}
 </delegate_routing>`;
 }
 
-export function formatDelegateRoutingPrompt(cwd: string): string {
-  return formatDelegateRoutingConfig(loadDelegateConfig(cwd));
+export function formatDelegateRoutingPrompt(
+  cwd: string,
+  config?: DelegateConfig,
+): string {
+  return formatDelegateRoutingConfig(config ?? loadDelegateConfig(cwd));
 }

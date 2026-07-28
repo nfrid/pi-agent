@@ -5,7 +5,7 @@ import type {
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { DelegateConfig } from './config';
 import * as configModule from './config';
-import delegate from './index';
+import delegate, { DELEGATES_COMMAND_DESCRIPTION } from './index';
 import * as sessionModule from './session';
 import type { PreparedDelegateTask } from './task-lifecycle';
 import * as taskLifecycle from './task-lifecycle';
@@ -316,7 +316,9 @@ describe('async delegate extension', () => {
   });
 
   test('shows live activity and suppresses delivery after tree navigation', async () => {
-    vi.spyOn(configModule, 'loadDelegateConfig').mockReturnValue(config);
+    const configLoader = vi
+      .spyOn(configModule, 'loadDelegateConfig')
+      .mockReturnValue(config);
     vi.spyOn(taskLifecycle, 'prepareDelegateTask').mockResolvedValue(
       prepared(),
     );
@@ -352,6 +354,13 @@ describe('async delegate extension', () => {
     const sendMessage = vi.fn();
     const notify = vi.fn();
     const setWidget = vi.fn();
+    const getCommands = vi.fn(() => [
+      {
+        name: 'delegates',
+        description: DELEGATES_COMMAND_DESCRIPTION,
+        sourceInfo: { path: '/extensions/delegate/index.ts' },
+      },
+    ]);
     const pi = {
       on(event: string, handler: Handler) {
         handlers.set(event, handler);
@@ -369,6 +378,7 @@ describe('async delegate extension', () => {
       },
       registerMessageRenderer: vi.fn(),
       sendMessage,
+      getCommands,
     } as unknown as ExtensionAPI;
     const ctx = {
       cwd: '/tmp/project',
@@ -379,7 +389,61 @@ describe('async delegate extension', () => {
     } as unknown as ExtensionContext;
 
     delegate(pi);
+    await commands.get('delegates')?.handler('config', ctx);
+    expect(notify.mock.calls[0]?.[0]).toContain('Comparison: unavailable');
+    expect(notify.mock.calls[0]?.[0]).toContain(
+      '/reload establishes/refreshes prompt guidance',
+    );
+    notify.mockClear();
     handlers.get('session_start')?.({}, ctx);
+    await commands.get('delegates')?.handler('config', ctx);
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining('Comparison: same'),
+      'info',
+    );
+    expect(notify.mock.calls[0]?.[0]).toContain(
+      'Extension source: /extensions/delegate/index.ts',
+    );
+    getCommands.mockReturnValue([
+      {
+        name: 'delegates',
+        description: DELEGATES_COMMAND_DESCRIPTION,
+        sourceInfo: { path: '/one.ts' },
+      },
+      {
+        name: 'delegates',
+        description: DELEGATES_COMMAND_DESCRIPTION,
+        sourceInfo: { path: '/two.ts' },
+      },
+    ]);
+    notify.mockClear();
+    await commands.get('delegates')?.handler('config', ctx);
+    expect(notify.mock.calls[0]?.[0]).toContain('Extension source: unknown');
+    notify.mockClear();
+    getCommands.mockReturnValue([
+      {
+        name: 'delegates',
+        description: DELEGATES_COMMAND_DESCRIPTION,
+        sourceInfo: { path: '/extensions/delegate/index.ts' },
+      },
+    ]);
+    configLoader.mockReturnValue({ ...config, timeoutMs: 120_000 });
+    await commands.get('delegates')?.handler('config', ctx);
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining('Comparison: differs'),
+      'info',
+    );
+    expect(notify.mock.calls[0]?.[0]).toContain(
+      '/reload refreshes prompt guidance',
+    );
+    notify.mockClear();
+    await commands.get('delegates')?.handler('unexpected', ctx);
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining('Unknown /delegates argument'),
+      'error',
+    );
+    notify.mockClear();
+    configLoader.mockReturnValue(config);
     await tools.get('delegate')?.execute(
       'call-1',
       {

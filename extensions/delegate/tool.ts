@@ -1,7 +1,7 @@
 import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { type Static, Type } from 'typebox';
-import { loadDelegateConfig } from './config';
+import { type DelegateConfig, loadDelegateConfig } from './config';
 import type { DelegateJobManager } from './jobs';
 import {
   pendingRuns,
@@ -112,7 +112,10 @@ const DelegateParamsSchema = Type.Object({
 
 export type DelegateParams = Static<typeof DelegateParamsSchema>;
 
-export function delegatePromptGuidelines(cwd: string): string[] {
+export function delegatePromptGuidelines(
+  cwd: string,
+  config?: DelegateConfig,
+): string[] {
   return [
     'Give every subagent a short, specific name that describes its role or phase.',
     'Your context is the resource that runs out first; a child spends its own. Delegate — implementation and edits included, not only exploration and review — when the work needs more reading than its result is worth carrying, or when independent pieces can run at once. Do the work yourself when finishing it is quicker than briefing it, and do not invent research/implement/test/review stages that add nothing.',
@@ -123,7 +126,7 @@ export function delegatePromptGuidelines(cwd: string): string[] {
     "Parallelize only independent work: if one task depends on another's findings, read the first result before starting the next. Writable tasks each get their own worktree, so they can run in parallel even on overlapping files. Use background delegation when foreground work can continue meanwhile.",
     'A writable run leaves its work as commits on the branch it reports; integrate it yourself with delegate_branches rather than handing the merge to the user.',
     'Treat child results as claims to verify: trust reported checks and concrete evidence, and re-check or continue the child when an important claim has none. A subagent can report work it did not finish, and weakening a test is a common way a task comes back "passing".',
-    `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd)}`,
+    `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd, config)}`,
   ];
 }
 
@@ -137,6 +140,7 @@ export function registerDelegateTool(
   pi: ExtensionAPI,
   cwd: string,
   backgroundRuntime?: DelegateBackgroundRuntime,
+  promptConfig?: DelegateConfig,
 ): void {
   pi.registerTool({
     name: 'delegate',
@@ -145,7 +149,7 @@ export function registerDelegateTool(
       'Delegate work to child Pi processes with their own context. Fresh tasks need one exact catalog route; continuations reuse their persisted route and capability when omitted. A writable task (allowWrites) runs in its own git worktree on a fresh branch and returns that branch for you to merge; otherwise it is read-only. Set background true for independent work that should complete asynchronously.',
     promptSnippet:
       'Hand a child implementation, exploration, review, validation, or independent parallel work whenever a subagent would save your own context.',
-    promptGuidelines: delegatePromptGuidelines(cwd),
+    promptGuidelines: delegatePromptGuidelines(cwd, promptConfig),
     parameters: DelegateParamsSchema,
     renderCall: renderDelegateCall,
     renderResult: renderDelegateResult,
