@@ -32,7 +32,7 @@ import { registerDelegateWorktreesCommand } from './worktrees-command';
 export const DELEGATES_COMMAND_DESCRIPTION =
   'Toggle detailed subagent status or inspect delegate config';
 
-const COMPLETION_WAVE_GRACE_MS = 2_000;
+const COMPLETION_WAVE_GRACE_MS = 5_000;
 const COMPLETION_WAVE_BURST_MS = 50;
 
 type CompletionState = Extract<
