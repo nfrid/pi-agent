@@ -34,8 +34,78 @@ async function paths(cwd: string, args: string[]): Promise<string[]> {
   return splitZ(String(await git(cwd, args)));
 }
 
+interface ValidWorkRange {
+  valid: true;
+  range: string;
+  carried: boolean;
+}
+
+interface InvalidWorkRange {
+  valid: false;
+  error: string;
+}
+
+type WorkRangeResult = ValidWorkRange | InvalidWorkRange;
+
 function workRange(record: WorktreeRecord): string {
   return `${workBase(record)}..${record.branch}`;
+}
+
+function unsafeCarryRange(
+  record: WorktreeRecord,
+  detail: string,
+): InvalidWorkRange {
+  return {
+    valid: false,
+    error: `Cannot safely inspect or integrate ${record.branch}: ${detail}. Refusing to use it as a child-only range; inspect it with: git log --oneline ${record.branch}`,
+  };
+}
+
+/**
+ * The carry commit is the integration boundary for child-only work. A
+ * rewritten branch can make `carry..branch` mean an unrelated commit set, so
+ * never pass that range to review or cherry-pick until Git confirms it.
+ */
+async function workRangeFor(
+  root: string,
+  record: WorktreeRecord,
+): Promise<WorkRangeResult> {
+  if (!record.carryCommit) {
+    if (record.carriedWip)
+      return unsafeCarryRange(
+        record,
+        'the record says parent WIP was carried but no carry commit was recorded',
+      );
+    return { valid: true, range: workRange(record), carried: false };
+  }
+
+  const base = workBase(record);
+  if (
+    !(await succeeds(root, [
+      'rev-parse',
+      '--verify',
+      '--quiet',
+      `${base}^{commit}`,
+    ]))
+  )
+    return unsafeCarryRange(
+      record,
+      `its recorded carry/work base ${base.slice(0, 12)} no longer resolves`,
+    );
+  if (
+    !(await succeeds(root, [
+      'merge-base',
+      '--is-ancestor',
+      base,
+      record.branch,
+    ]))
+  )
+    return unsafeCarryRange(
+      record,
+      `its recorded carry/work base ${base.slice(0, 12)} is not an ancestor of the branch`,
+    );
+
+  return { valid: true, range: workRange(record), carried: true };
 }
 
 /**
@@ -56,6 +126,10 @@ async function carriedWorkIsApplied(
   return !output.split('\n').some((line) => line.startsWith('+ '));
 }
 
+async function hasTaskCommits(root: string, range: string): Promise<boolean> {
+  return (await gitText(root, ['rev-list', '--count', range])) !== '0';
+}
+
 export async function branchState(
   record: WorktreeRecord,
 ): Promise<BranchState> {
@@ -64,11 +138,13 @@ export async function branchState(
     !(await succeeds(root, ['rev-parse', '--verify', '--quiet', record.branch]))
   )
     return 'gone';
+  const range = await workRangeFor(root, record);
+  if (!range.valid) return 'unmerged';
   if (
     await succeeds(root, ['merge-base', '--is-ancestor', record.branch, 'HEAD'])
   )
     return 'merged';
-  return record.carryCommit && (await carriedWorkIsApplied(root, record))
+  return range.carried && (await carriedWorkIsApplied(root, record))
     ? 'merged'
     : 'unmerged';
 }
@@ -84,6 +160,8 @@ async function dirtyPaths(root: string): Promise<string[]> {
 
 export interface BranchReview {
   state: BranchState;
+  /** Why the recorded task range could not be inspected safely. */
+  error?: string;
   /** The agent's own commits, excluding any carried parent work. */
   log: string;
   stat: string;
@@ -103,11 +181,20 @@ export async function reviewBranch(
   const state = await branchState(record);
   if (state === 'gone')
     return { state, log: '', stat: '', diff: '', truncated: false };
-  const range = workRange(record);
+  const range = await workRangeFor(root, record);
+  if (!range.valid)
+    return {
+      state,
+      error: range.error,
+      log: '',
+      stat: '',
+      diff: '',
+      truncated: false,
+    };
   const [log, stat, full] = await Promise.all([
-    gitText(root, ['log', '--oneline', '--no-decorate', range]),
-    gitText(root, ['diff', '--stat', range]),
-    gitText(root, ['diff', range]),
+    gitText(root, ['log', '--oneline', '--no-decorate', range.range]),
+    gitText(root, ['diff', '--stat', range.range]),
+    gitText(root, ['diff', range.range]),
   ]);
   const truncated = full.length > MAX_REVIEW_DIFF_CHARS;
   return {
@@ -148,10 +235,22 @@ export async function mergeBranch(
       merged: false,
       reason: `Branch ${record.branch} no longer exists.`,
     };
+
+  const range = await workRangeFor(root, record);
+  if (!range.valid)
+    return {
+      merged: false,
+      reason: range.error,
+    };
+  if (range.carried && !(await hasTaskCommits(root, range.range)))
+    return {
+      merged: false,
+      reason: `${record.branch} has no task commits to merge beyond ${workBase(record).slice(0, 12)}.`,
+    };
   if (state === 'merged')
     return {
       merged: false,
-      reason: record.carryCommit
+      reason: range.carried
         ? `${record.branch}'s task commits are already applied to HEAD; there is nothing to merge.`
         : `${record.branch} is already an ancestor of HEAD; there is nothing to merge.`,
     };
@@ -175,10 +274,9 @@ export async function mergeBranch(
         'The repository is mid-cherry-pick. Finish or abort that cherry-pick before integrating delegated work.',
     };
 
-  const range = workRange(record);
   const [dirty, incoming] = await Promise.all([
     dirtyPaths(root),
-    paths(root, ['diff', '--name-only', '-z', range]),
+    paths(root, ['diff', '--name-only', '-z', range.range]),
   ]);
   const blockedPaths = incoming.filter((file) => dirty.includes(file));
   if (blockedPaths.length > 0)
@@ -188,12 +286,12 @@ export async function mergeBranch(
       reason: `These paths are uncommitted here and also changed by the task on ${record.branch}: commit or stash them first.`,
     };
 
-  const cherryPick = Boolean(record.carryCommit);
+  const cherryPick = range.carried;
   try {
     await git(
       root,
       cherryPick
-        ? ['cherry-pick', '--no-edit', range]
+        ? ['cherry-pick', '--no-edit', range.range]
         : ['merge', '--no-ff', '--no-edit', record.branch],
     );
     return { merged: true, commit: await gitText(root, ['rev-parse', 'HEAD']) };
@@ -204,13 +302,35 @@ export async function mergeBranch(
       '--diff-filter=U',
       '-z',
     ]).catch(() => []);
-    await git(
-      root,
-      cherryPick ? ['cherry-pick', '--abort'] : ['merge', '--abort'],
-    ).catch(() => undefined);
+    const abortCommand = cherryPick
+      ? ['cherry-pick', '--abort']
+      : ['merge', '--abort'];
+    let abortFailed = false;
+    let abortError: unknown;
+    try {
+      await git(root, abortCommand);
+    } catch (cleanupError) {
+      abortFailed = true;
+      abortError = cleanupError;
+    }
+
     const command = cherryPick
-      ? `git cherry-pick ${range}`
+      ? `git cherry-pick ${range.range}`
       : `git merge ${record.branch}`;
+    if (abortFailed) {
+      const operation = cherryPick ? 'cherry-pick' : 'merge';
+      const abort = cherryPick
+        ? 'git cherry-pick --abort'
+        : 'git merge --abort';
+      const continueCommand = cherryPick
+        ? 'git cherry-pick --continue'
+        : 'git merge --continue';
+      return {
+        merged: false,
+        conflicted,
+        reason: `Integration ${conflicted.length ? 'conflicted' : 'failed'}, and cleanup failed: ${abortError instanceof Error ? abortError.message : String(abortError)}. Your checkout may still be mid-${operation}; inspect it with: git status. Then run ${abort}, or resolve and run ${continueCommand}.`,
+      };
+    }
     return {
       merged: false,
       conflicted,

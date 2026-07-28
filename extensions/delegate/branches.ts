@@ -78,6 +78,8 @@ export function formatReview(
 ): string {
   if (review.state === 'gone')
     return `Branch ${record.branch} no longer exists.`;
+  if (review.error)
+    return `${record.branch} (${review.state})\n\n${review.error}`;
   if (!review.log)
     return `${record.branch} (${review.state}) has no commits of its own beyond ${workBase(record).slice(0, 12)}; the task committed nothing.`;
   return [
