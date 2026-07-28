@@ -105,7 +105,10 @@ export async function finishWorktree(
       ),
     );
     record.status = 'finished';
-    if (options.outcome !== 'success' && !record.error) {
+    if (options.outcome !== 'success') {
+      // A continuation may have left an earlier harness-generated error on the
+      // record. Replace it so the persisted outcome describes this attempt,
+      // rather than retaining stale diagnostics indefinitely.
       record.runOutcome = options.outcome;
       record.error =
         options.outcome === 'timed-out'

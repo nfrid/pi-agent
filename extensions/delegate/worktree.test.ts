@@ -20,6 +20,7 @@ import {
   restoreWorktreeSession,
   worktreeSummary,
 } from './worktree';
+import { writeWorktreeRecord } from './worktree/records';
 import { finalizeWorktreeRun } from './worktree-lifecycle';
 
 async function prepared(
@@ -196,12 +197,29 @@ describe('finishing a worktree', () => {
     expect(worktreeSummary(record).hasWork).toBe(true);
   });
 
-  test('retains a timeout record when a continuation later settles the branch', async () => {
+  test('keeps the latest failed attempt through repeated continuation and recovery', async () => {
     const worktree = await prepared();
     const timedOut = await finishWorktree(worktree.record.id, {
       taskName: 'Slow task',
       outcome: 'timed-out',
     });
+    const failedContinuation = createRun('Failed continuation', undefined, {
+      context: 'continuation',
+    });
+    failedContinuation.state = 'error';
+    failedContinuation.exitCode = 1;
+    await finalizeWorktreeRun(
+      failedContinuation,
+      worktree,
+      'Failed continuation',
+    );
+
+    expect(timedOut.error).toMatch(/timed out/);
+    expect(timedOut.runOutcome).toBe('timed-out');
+    expect(failedContinuation.worktree?.runOutcome).toBe('error');
+    expect(failedContinuation.worktree?.error).toMatch(/ended with error/);
+    expect(loadWorktree(worktree.record.id)?.runOutcome).toBe('error');
+
     const recovered = createRun('Recovered task', undefined, {
       context: 'continuation',
     });
@@ -209,12 +227,37 @@ describe('finishing a worktree', () => {
     recovered.exitCode = 0;
     await finalizeWorktreeRun(recovered, worktree, 'Recovered task');
 
-    expect(timedOut.error).toMatch(/timed out/);
-    expect(timedOut.runOutcome).toBe('timed-out');
-    expect(loadWorktree(worktree.record.id)?.runOutcome).toBe('timed-out');
-    expect(recovered.worktree?.error).toBe(timedOut.error);
-    expect(recovered.worktree?.runOutcome).toBe('timed-out');
+    expect(recovered.worktree?.error).toMatch(/ended with error/);
+    expect(recovered.worktree?.runOutcome).toBe('error');
+    expect(continuationRecoveryNote(recovered)).toBe(
+      'Earlier attempt ended with error; this continuation completed on the same branch.',
+    );
     expect(recovered.warnings).toBeUndefined();
+  });
+
+  test('keeps legacy error-only records visible to a successful continuation', async () => {
+    const worktree = await prepared();
+    await finishWorktree(worktree.record.id, {
+      taskName: 'Failed task',
+      outcome: 'error',
+    });
+    const legacy = loadWorktree(worktree.record.id);
+    if (!legacy) throw new Error('finished worktree was not persisted');
+    legacy.runOutcome = undefined;
+    writeWorktreeRecord(legacy);
+
+    const recovered = createRun('Recovered task', undefined, {
+      context: 'continuation',
+    });
+    recovered.state = 'success';
+    recovered.exitCode = 0;
+    await finalizeWorktreeRun(recovered, worktree, 'Recovered task');
+
+    expect(recovered.worktree?.runOutcome).toBeUndefined();
+    expect(recovered.worktree?.error).toMatch(/ended with error/);
+    expect(continuationRecoveryNote(recovered)).toBe(
+      'Earlier attempt ended with error; this continuation completed on the same branch.',
+    );
   });
 
   test('clears an old outcome when the worktree disappears during recovery', async () => {
