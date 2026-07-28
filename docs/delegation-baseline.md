@@ -27,9 +27,9 @@ Restated twice as the instrument was corrected. `07e22be` stopped charging each 
 
 ## The caps do not bind
 
-`PARENT_HANDOFF_CAPS` allows 12 KiB for a single result, 8 KiB per task in a parallel fan, and 50 KiB aggregate. Nothing in this cohort reached any of them: the largest single result is 9,734 B and the largest parallel aggregate is 26,078 B, and the one truncated task in 422 is the whole of the truncation rate.
+At the time of capture `PARENT_HANDOFF_CAPS` allowed 12 KiB for a single result, 8 KiB per task in a parallel fan, and 50 KiB aggregate. Nothing in this cohort reached any of them: the largest single result is 9,734 B and the largest parallel aggregate is 26,078 B, and the one truncated task in 422 is the whole of the truncation rate.
 
-Lowering the single cap to 6 KiB would clip 4.2% of single results and remove 1.0% of all handoff bytes. So the caps are a guardrail against a pathological run, not an economy lever, and a cap change alone cannot produce a material reduction in what delegation costs the parent.
+The caps have since moved to 6 / 4 / 16 KiB. Against this corpus that clips 4.2% of single results for 1.0% of all handoff bytes, and 13.1% of parallel fans for 4.8%. The aggregate is the binding one, and a cap change alone still cannot produce a material reduction in what delegation costs the parent.
 
 Handoff volume is instead set by how much children choose to write. Reducing it is a report-contract problem: denser reports, with the decision-relevant fields in the envelope where truncation cannot reach them.
 

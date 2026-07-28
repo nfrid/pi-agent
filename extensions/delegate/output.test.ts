@@ -370,9 +370,9 @@ describe('output', () => {
 
   test('uses fixed production parent handoff caps', () => {
     expect(PARENT_HANDOFF_CAPS).toEqual({
-      singleMaxBytes: 12 * 1024,
-      aggregateMaxBytes: 50 * 1024,
-      perTaskMaxBytes: 8 * 1024,
+      singleMaxBytes: 6 * 1024,
+      aggregateMaxBytes: 16 * 1024,
+      perTaskMaxBytes: 4 * 1024,
     });
   });
 
@@ -419,7 +419,7 @@ describe('output', () => {
     expect(output.match(/Truncation:/g)).toHaveLength(20);
   });
 
-  test('preserves 20 maximum-length opaque continuations within handoff caps', () => {
+  test('preserves every continuation when the envelope alone outgrows the cap', () => {
     const continuations = Array.from(
       { length: 20 },
       (_, index) => `${index.toString().padStart(2, '0')}:${'界'.repeat(509)}`,
@@ -445,21 +445,42 @@ describe('output', () => {
       ];
       return run;
     });
+    // 20 tokens at their maximum length outrun the aggregate cap on their own.
+    // Metadata is mandatory, so the handoff overflows rather than dropping a
+    // continuation the parent would need to resume the task.
     const output = buildParentHandoff(runs);
-    expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(
+    expect(Buffer.byteLength(output, 'utf8')).toBeGreaterThan(
       PARENT_HANDOFF_CAPS.aggregateMaxBytes,
     );
+    expect(output).toContain('Mandatory metadata exceeds');
     for (const continuation of continuations)
       expect(output).toContain(`Continuation: ${continuation}`);
 
-    const impossible = buildParentHandoff(runs, {
-      ...PARENT_HANDOFF_CAPS,
-      aggregateMaxBytes: 4096,
+    // A fan of the same width with ordinary tokens and ordinary reports has
+    // room to spare, so the overflow above is the pathological case it looks
+    // like and not the shape of a normal parallel handoff.
+    const ordinary = Array.from({ length: 20 }, (_, index) => {
+      const run = createRun(`task ${index + 1}`, undefined, {
+        continuation: `019fa7a1-f481-75f5-a837-95f6bd24fc${index.toString().padStart(2, '0')}`,
+      });
+      run.exitCode = 0;
+      run.state = 'success';
+      run.messages = [
+        {
+          ...assistantMessage,
+          content: [
+            {
+              type: 'text',
+              text: `Outcome: done\n\nConclusion: task ${index + 1} is fine\n\nEvidence:\n- src/module-${index}.ts:12 guards the path`,
+            },
+          ],
+        } as never,
+      ];
+      return run;
     });
-    expect(Buffer.byteLength(impossible, 'utf8')).toBeGreaterThan(4096);
-    expect(impossible).toContain('Mandatory metadata exceeds');
-    for (const continuation of continuations)
-      expect(impossible).toContain(`Continuation: ${continuation}`);
+    expect(
+      Buffer.byteLength(buildParentHandoff(ordinary), 'utf8'),
+    ).toBeLessThanOrEqual(PARENT_HANDOFF_CAPS.aggregateMaxBytes);
   });
 
   test('keeps failure, validation, and changed-file evidence in the envelope', () => {

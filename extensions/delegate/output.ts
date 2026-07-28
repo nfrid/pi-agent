@@ -5,10 +5,19 @@ import {
   isRunError,
 } from './types';
 
+/**
+ * A bound on what a handoff can cost, not an economy lever. Measured over 422
+ * delegated tasks, the previous 12/50/8 KiB caps never once bound. These clip
+ * 4.2% of single results for 1.0% of bytes, and 13.1% of parallel fans for 4.8%
+ * — so the aggregate is the one that actually bites, and it bites the wide fans
+ * that dominate the context tail. That is affordable because the envelope is
+ * allocated before bodies: what a clip removes is prose, never the outcome,
+ * evidence, or continuation token the parent acts on.
+ */
 export const PARENT_HANDOFF_CAPS = {
-  singleMaxBytes: 12 * 1024,
-  aggregateMaxBytes: 50 * 1024,
-  perTaskMaxBytes: 8 * 1024,
+  singleMaxBytes: 6 * 1024,
+  aggregateMaxBytes: 16 * 1024,
+  perTaskMaxBytes: 4 * 1024,
 } as const;
 
 export interface ParentHandoffCaps {
