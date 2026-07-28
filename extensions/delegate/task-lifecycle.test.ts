@@ -72,11 +72,12 @@ describe('delegate task lifecycle', () => {
     }
   });
 
-  test('restores the persisted worktree, cwd, scope, and session ownership', async () => {
+  test('restores a writable continuation in its persisted worktree', async () => {
     const prepared = await prepareDelegateTask(
       plan({ scope: ['src'], writeRequested: true, base: 'head' }),
     );
     expect(prepared.worktree).toBeDefined();
+    expect(prepared.session.allowWrites).toBe(true);
     expect(prepared.cwd).toBe(prepared.worktree?.record.worktreePath);
 
     try {
@@ -87,7 +88,10 @@ describe('delegate task lifecycle', () => {
           requestedCwd: '/wrong',
           context: 'continuation',
           scope: ['wrong'],
+          // Omission inherits the session capability rather than making a
+          // writable continuation read-only.
           writeRequested: true,
+          allowWritesExplicit: false,
           resumed: prepared.session,
         }),
       );

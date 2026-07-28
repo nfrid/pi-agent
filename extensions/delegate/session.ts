@@ -23,6 +23,8 @@ export interface DelegateSession {
   filePath: string;
   cwd: string;
   worktreeId?: string;
+  /** The original task capability; continuations inherit it when omitted. */
+  allowWrites?: boolean;
   /** Advisory paths the parent named; replayed so continuations keep them. */
   scope?: string[];
   routing?: DelegateRouteState;
@@ -33,6 +35,7 @@ interface DelegateSessionMetadata {
   cwd: string;
   createdAt: string;
   worktreeId?: string;
+  allowWrites?: boolean;
   scope?: string[];
   routing?: DelegateRouteState;
 }
@@ -100,6 +103,7 @@ export function createDelegateSession(options: {
   cwd: string;
   snapshotJsonl?: string;
   worktreeId?: string;
+  allowWrites?: boolean;
   scope?: string[];
   routing?: DelegateRouteState;
 }): DelegateSession {
@@ -119,6 +123,7 @@ export function createDelegateSession(options: {
       cwd: options.cwd,
       createdAt,
       ...(options.worktreeId ? { worktreeId: options.worktreeId } : {}),
+      allowWrites: options.allowWrites ?? false,
       ...(options.scope?.length ? { scope: options.scope } : {}),
       ...(options.routing ? { routing: options.routing } : {}),
     };
@@ -137,6 +142,7 @@ export function createDelegateSession(options: {
     filePath,
     cwd: options.cwd,
     ...(options.worktreeId ? { worktreeId: options.worktreeId } : {}),
+    allowWrites: options.allowWrites ?? false,
     ...(options.scope?.length ? { scope: options.scope } : {}),
     ...(options.routing ? { routing: options.routing } : {}),
   };
@@ -163,6 +169,9 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
       cwd: metadata.cwd,
       ...(typeof metadata.worktreeId === 'string'
         ? { worktreeId: metadata.worktreeId }
+        : {}),
+      ...(typeof metadata.allowWrites === 'boolean'
+        ? { allowWrites: metadata.allowWrites }
         : {}),
       ...(Array.isArray(metadata.scope) ? { scope: metadata.scope } : {}),
       ...(metadata.routing && typeof metadata.routing === 'object'

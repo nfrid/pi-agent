@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { DelegateConfig } from './config';
 import { executeSingleDelegate } from './orchestration';
 import { buildDelegatePlans } from './plans';
+import { createDelegateSession, removeDelegateSession } from './session';
 import type { PreparedDelegateTask } from './task-lifecycle';
 import * as taskLifecycle from './task-lifecycle';
 import * as toolResult from './tool-result';
@@ -195,6 +196,103 @@ describe('buildDelegatePlans', () => {
     ).toThrow(
       'For parallel delegation, set continuation on each task rather than as a shared default.',
     );
+  });
+
+  test('inherits a writable continuation capability when allowWrites is omitted', () => {
+    const session = createDelegateSession({
+      cwd: '/tmp/project',
+      allowWrites: true,
+      routing,
+    });
+    try {
+      const built = buildDelegatePlans(
+        { name: 'Test agent', task: 'continue', continuation: session.token },
+        ctx,
+        config,
+        () => null,
+      );
+      expect(built.plans[0]).toMatchObject({
+        context: 'continuation',
+        writeRequested: true,
+        allowWritesExplicit: false,
+      });
+      expect(built.preflights[0]).toMatchObject({ allowWrites: true });
+    } finally {
+      removeDelegateSession(session);
+    }
+  });
+
+  test('inherits a read-only continuation capability when allowWrites is omitted', () => {
+    const session = createDelegateSession({
+      cwd: '/tmp/project',
+      allowWrites: false,
+      routing,
+    });
+    try {
+      const built = buildDelegatePlans(
+        { name: 'Test agent', task: 'continue', continuation: session.token },
+        ctx,
+        config,
+        () => null,
+      );
+      expect(built.plans[0]).toMatchObject({
+        writeRequested: false,
+        allowWritesExplicit: false,
+      });
+      expect(built.preflights[0]).toMatchObject({ allowWrites: false });
+    } finally {
+      removeDelegateSession(session);
+    }
+  });
+
+  test('rejects elevating a read-only continuation', () => {
+    const session = createDelegateSession({
+      cwd: '/tmp/project',
+      allowWrites: false,
+      routing,
+    });
+    try {
+      expect(() =>
+        buildDelegatePlans(
+          {
+            name: 'Test agent',
+            task: 'continue',
+            continuation: session.token,
+            allowWrites: true,
+          },
+          ctx,
+          config,
+          () => null,
+        ),
+      ).toThrow('cannot change allowWrites from read-only to writable');
+    } finally {
+      removeDelegateSession(session);
+    }
+  });
+
+  test('rejects demoting a writable continuation', () => {
+    const session = createDelegateSession({
+      cwd: '/tmp/project',
+      allowWrites: true,
+      routing,
+    });
+    try {
+      expect(() =>
+        buildDelegatePlans(
+          {
+            name: 'Test agent',
+            task: 'continue',
+            continuation: session.token,
+            allowWrites: false,
+          },
+          ctx,
+          config,
+          () => null,
+        ),
+      ).toThrow('cannot change allowWrites from writable to read-only');
+    } finally {
+      removeDelegateSession(session);
+    }
   });
 
   test('rejects continuation field replacements on single tasks', () => {

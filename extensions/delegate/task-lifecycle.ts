@@ -30,6 +30,8 @@ export interface DelegateTaskPlan {
   scope?: string[];
   base?: WorktreeBase;
   writeRequested: boolean;
+  /** Whether this invocation explicitly supplied allowWrites. */
+  allowWritesExplicit?: boolean;
   routing?: DelegateRouteState;
   resumed?: DelegateSession;
   routeOverride: boolean;
@@ -63,17 +65,27 @@ export function preflightDelegateContinuation(
   // A continuation cannot restate scope, so replay what the original run was
   // told to focus on.
   if (plan.resumed?.scope?.length) state.scope = plan.resumed.scope;
-  if (plan.resumed?.worktreeId) {
-    const record = loadWorktree(plan.resumed.worktreeId);
-    if (!record)
-      throw new Error('The worktree for this continuation is unavailable.');
-    state.worktree = restoreWorktreeSession(record, plan.resumed.token);
-    state.cwd = path.join(record.worktreePath, record.workingDirectory);
-    state.allowWrites = plan.writeRequested;
-  } else if (plan.writeRequested && plan.resumed) {
-    state.warnings.push(
-      'This continuation was created read-only and cannot be elevated; running read-only.',
-    );
+  if (plan.resumed) {
+    // Worktree-linked sessions created before capability persistence were
+    // writable, so preserve that behavior for their continuations.
+    const originalAllowWrites =
+      plan.resumed.allowWrites ?? Boolean(plan.resumed.worktreeId);
+    if (
+      plan.allowWritesExplicit &&
+      plan.writeRequested !== originalAllowWrites
+    ) {
+      throw new Error(
+        `A continuation cannot change allowWrites from ${originalAllowWrites ? 'writable' : 'read-only'} to ${plan.writeRequested ? 'writable' : 'read-only'}. Omit allowWrites to reuse the original capability.`,
+      );
+    }
+    state.allowWrites = originalAllowWrites;
+    if (plan.resumed.worktreeId) {
+      const record = loadWorktree(plan.resumed.worktreeId);
+      if (!record)
+        throw new Error('The worktree for this continuation is unavailable.');
+      state.worktree = restoreWorktreeSession(record, plan.resumed.token);
+      state.cwd = path.join(record.worktreePath, record.workingDirectory);
+    }
   }
   return state;
 }
@@ -119,6 +131,7 @@ export async function prepareDelegateTask(
         cwd: state.cwd,
         snapshotJsonl: plan.snapshotJsonl,
         worktreeId: state.worktree?.record.id,
+        allowWrites: state.allowWrites,
         scope: state.scope,
         routing: plan.routing,
       });

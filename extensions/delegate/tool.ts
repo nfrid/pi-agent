@@ -41,7 +41,7 @@ const BaseSchema = StringEnum(['wip', 'head'] as const, {
 });
 const AllowWritesSchema = Type.Boolean({
   description:
-    'Let the task edit files. It gets its own git worktree on a fresh branch, so parallel writable tasks never collide. The work lands as commits on that branch for you to merge.',
+    'Let a fresh task edit files in its own git worktree and branch. A continuation inherits its original capability when omitted; changing it explicitly is rejected.',
 });
 const BackgroundSchema = Type.Boolean({
   description:
@@ -142,7 +142,7 @@ export function registerDelegateTool(
     name: 'delegate',
     label: 'Delegate',
     description:
-      'Delegate work to child Pi processes with their own context. Fresh tasks need one exact catalog route; continuations reuse their persisted route when omitted. A writable task (allowWrites) runs in its own git worktree on a fresh branch and returns that branch for you to merge; otherwise it is read-only. Set background true for independent work that should complete asynchronously.',
+      'Delegate work to child Pi processes with their own context. Fresh tasks need one exact catalog route; continuations reuse their persisted route and capability when omitted. A writable task (allowWrites) runs in its own git worktree on a fresh branch and returns that branch for you to merge; otherwise it is read-only. Set background true for independent work that should complete asynchronously.',
     promptSnippet:
       'Hand a child implementation, exploration, review, validation, or independent parallel work whenever a subagent would save your own context.',
     promptGuidelines: delegatePromptGuidelines(cwd),

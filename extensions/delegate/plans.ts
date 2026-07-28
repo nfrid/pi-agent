@@ -194,9 +194,17 @@ export function buildDelegatePlans(
     (item, index) => resumed[index]?.cwd ?? item.cwd ?? shared.cwd ?? ctx.cwd,
   );
   const scopes = inputs.map((item) => item.scope ?? shared.scope);
-  const writeRequests = inputs.map(
-    (item) => item.allowWrites ?? shared.allowWrites ?? false,
+  const writeRequestExplicit = inputs.map(
+    (item) =>
+      item.allowWrites !== undefined || shared.allowWrites !== undefined,
   );
+  const writeRequests = inputs.map((item, index) => {
+    const requested = item.allowWrites ?? shared.allowWrites;
+    if (requested !== undefined) return requested;
+    // Continuations preserve their original capability. Sessions written
+    // before capability persistence infer writable from their worktree.
+    return resumed[index]?.allowWrites ?? Boolean(resumed[index]?.worktreeId);
+  });
   const warnings = parallel
     ? writeWarnings(requestedCwds, writeRequests, scopes)
     : inputs.map(() => [] as string[]);
@@ -221,6 +229,7 @@ export function buildDelegatePlans(
     scope: scopes[index],
     base: item.from ?? shared.from,
     writeRequested: writeRequests[index],
+    allowWritesExplicit: writeRequestExplicit[index],
     routing: routings[index].routing,
     resumed: resumed[index] ?? undefined,
     routeOverride: Boolean(
