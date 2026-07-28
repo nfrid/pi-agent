@@ -207,29 +207,27 @@ export function registerDelegateTool(
               route: item.plan.routing?.route,
               allowWrites: item.allowWrites,
               execute: async (jobSignal) => {
-                try {
-                  const runs = await runPreparedDelegateExecution(
-                    { ...runCtx, signal: jobSignal },
-                    { mode: 'single', tasks: [item] },
-                    {
-                      onUpdate: (partial) => {
-                        const run = partial.details?.runs?.[0];
-                        if (run && statusIds?.[index])
-                          backgroundRuntime.statuses.update(
-                            statusIds[index],
-                            run,
-                          );
-                      },
+                const runs = await runPreparedDelegateExecution(
+                  { ...runCtx, signal: jobSignal },
+                  { mode: 'single', tasks: [item] },
+                  {
+                    onUpdate: (partial) => {
+                      const run = partial.details?.runs?.[0];
+                      if (run && statusIds?.[index])
+                        backgroundRuntime.statuses.update(
+                          statusIds[index],
+                          run,
+                        );
                     },
-                  );
-                  return {
-                    runs,
-                    handoff: await buildArtifactBackedHandoff(pi, ctx, runs),
-                  };
-                } finally {
-                  if (statusIds?.[index])
-                    backgroundRuntime.statuses.finish([statusIds[index]]);
-                }
+                  },
+                );
+                const run = runs[0];
+                if (run && statusIds?.[index])
+                  backgroundRuntime.statuses.update(statusIds[index], run);
+                return {
+                  runs,
+                  handoff: await buildArtifactBackedHandoff(pi, ctx, runs),
+                };
               },
             })),
           );
@@ -265,21 +263,21 @@ export function registerDelegateTool(
         };
       }
 
-      try {
-        const runs = await runPreparedDelegateExecution(runCtx, execution, {
-          onUpdate: (partial) => {
-            if (statusIds)
-              backgroundRuntime?.statuses.updateMany(
-                statusIds,
-                partial.details?.runs ?? [],
-              );
-            onUpdate?.(partial);
-          },
-        });
-        return delegateToolResult(pi, ctx, execution.mode, runs);
-      } finally {
-        if (statusIds) backgroundRuntime?.statuses.finish(statusIds);
+      const runs = await runPreparedDelegateExecution(runCtx, execution, {
+        onUpdate: (partial) => {
+          if (statusIds)
+            backgroundRuntime?.statuses.updateMany(
+              statusIds,
+              partial.details?.runs ?? [],
+            );
+          onUpdate?.(partial);
+        },
+      });
+      if (statusIds) {
+        backgroundRuntime?.statuses.updateMany(statusIds, runs);
+        backgroundRuntime?.statuses.resultEntered(statusIds);
       }
+      return delegateToolResult(pi, ctx, execution.mode, runs);
     },
   });
 }

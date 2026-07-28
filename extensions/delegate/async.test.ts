@@ -140,6 +140,7 @@ describe('async delegate extension', () => {
     const handlers = new Map<string, Handler>();
     const tools = new Map<string, RegisteredTool>();
     const sendMessage = vi.fn();
+    const setWidget = vi.fn();
     const registerMessageRenderer = vi.fn();
     const pi = {
       on(event: string, handler: Handler) {
@@ -154,8 +155,9 @@ describe('async delegate extension', () => {
     } as unknown as ExtensionAPI;
     const ctx = {
       cwd: '/tmp/project',
-      hasUI: false,
-      mode: 'print',
+      hasUI: true,
+      mode: 'tui',
+      ui: { setWidget },
       sessionManager: {
         getHeader: () => ({
           type: 'session',
@@ -224,6 +226,23 @@ describe('async delegate extension', () => {
       deliverAs: 'steer',
       triggerTurn: true,
     });
+    const widgetFactory = setWidget.mock.calls.find(
+      (call) => typeof call[1] === 'function',
+    )?.[1] as
+      | ((
+          tui: unknown,
+          theme: { fg: (color: string, text: string) => string },
+        ) => { render: (width: number) => string[] })
+      | undefined;
+    const widget = widgetFactory?.(
+      { requestRender: vi.fn() },
+      { fg: (_color, text) => text },
+    );
+    expect(widget?.render(100).join('\n')).toContain('finalizing');
+
+    handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
+    handlers.get('agent_settled')?.({}, ctx);
+    expect(widget?.render(100)).toEqual([]);
 
     const peek = await tools
       .get('delegate_jobs')
@@ -575,6 +594,33 @@ describe('async delegate extension', () => {
     });
     finish(successfulRun());
     await foreground;
+    handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
+    handlers.get('agent_settled')?.({}, ctx);
+    const afterAcknowledgment =
+      widgetFactory?.(
+        { requestRender: vi.fn() },
+        { fg: (_color, text: string) => text },
+      ).render(100) ?? [];
+    expect(afterAcknowledgment.join('\n')).not.toContain('Foreground audit');
+    expect(afterAcknowledgment.join('\n')).toContain('Subagent');
+
+    await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-peek-stale',
+        { action: 'peek', id: 'dj-1' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
+    handlers.get('agent_settled')?.({}, ctx);
+    expect(
+      widgetFactory?.(
+        { requestRender: vi.fn() },
+        { fg: (_color, text) => text },
+      ).render(100),
+    ).toEqual([]);
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 });

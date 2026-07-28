@@ -61,6 +61,7 @@ function result(job: DelegateJobSnapshot): string {
 export function registerDelegateJobsTool(
   pi: ExtensionAPI,
   manager: DelegateJobManager,
+  onResultEntered: (jobs: readonly DelegateJobSnapshot[]) => void = () => {},
 ): void {
   pi.registerTool<
     typeof Parameters,
@@ -102,6 +103,8 @@ export function registerDelegateJobsTool(
             (params.wait_seconds ?? 0) * 1000,
             signal,
           );
+          if (job.state !== 'queued' && job.state !== 'running')
+            onResultEntered([job]);
           return {
             content: [{ type: 'text', text: result(job) }],
             details: { action: 'peek', job },
@@ -111,6 +114,7 @@ export function registerDelegateJobsTool(
           const ids = params.ids?.map((id) => id.trim()).filter(Boolean) ?? [];
           if (ids.length === 0) throw new Error('ids is required.');
           const jobs = await manager.cancel(ids, signal);
+          onResultEntered(jobs);
           return {
             content: [{ type: 'text', text: jobs.map(result).join('\n\n') }],
             details: { action: 'cancel', jobs },
