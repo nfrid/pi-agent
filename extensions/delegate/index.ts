@@ -1,8 +1,9 @@
 import type {
   ExtensionAPI,
   ExtensionUIContext,
+  ThemeColor,
 } from '@earendil-works/pi-coding-agent';
-import { Text, truncateToWidth } from '@earendil-works/pi-tui';
+import { Text } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
 import { createRailPanel } from '../shared/ui/rail';
 import { registerDelegateBranchesTool } from './branches-tool';
@@ -18,9 +19,11 @@ import { pruneDelegateSessions } from './session';
 import { DelegateStatusStore } from './status';
 import { registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
+import { type DelegateRunState, getRunState } from './types';
 import {
   DELEGATE_WIDGET_MAX_WIDTH,
   DELEGATE_WIDGET_MIN_WIDTH,
+  formatElapsed,
   renderDelegateWidget,
 } from './widget';
 import { loadWorktree } from './worktree';
@@ -28,6 +31,80 @@ import { registerDelegateWorktreesCommand } from './worktrees-command';
 
 export const DELEGATES_COMMAND_DESCRIPTION =
   'Toggle detailed subagent status or inspect delegate config';
+
+type CompletionState = Extract<
+  DelegateRunState,
+  'success' | 'error' | 'timed-out' | 'aborted'
+>;
+
+function completionState(job: DelegateJobSnapshot): CompletionState {
+  const run = job.runs?.[0];
+  const state = run ? getRunState(run) : job.state;
+  if (state === 'timed-out' || state === 'aborted' || state === 'error')
+    return state;
+  return 'success';
+}
+
+function completionStyle(state: CompletionState): {
+  icon: string;
+  color: ThemeColor;
+  label: string;
+} {
+  if (state === 'error') return { icon: '✗', color: 'error', label: 'failed' };
+  if (state === 'timed-out')
+    return { icon: '◷', color: 'warning', label: 'timed out' };
+  if (state === 'aborted')
+    return { icon: '■', color: 'warning', label: 'aborted' };
+  return { icon: '✓', color: 'success', label: 'finished' };
+}
+
+function jobDuration(job: DelegateJobSnapshot): string {
+  return job.settledAt
+    ? formatElapsed(job.startedAt ?? job.createdAt, job.settledAt)
+    : '';
+}
+
+function completionSummary(
+  jobs: readonly DelegateJobSnapshot[],
+  expanded: boolean,
+  theme: { fg(color: ThemeColor, text: string): string },
+): string {
+  if (jobs.length === 0)
+    return theme.fg('muted', 'Background subagent finished');
+  const states = jobs.map(completionState);
+  const dominant = states.includes('error')
+    ? 'error'
+    : states.includes('timed-out')
+      ? 'timed-out'
+      : states.includes('aborted')
+        ? 'aborted'
+        : 'success';
+  const style = completionStyle(dominant);
+  const duration = formatElapsed(
+    Math.min(...jobs.map((job) => job.startedAt ?? job.createdAt)),
+    Math.max(...jobs.map((job) => job.settledAt ?? job.createdAt)),
+  );
+  const counts = (state: CompletionState) =>
+    states.filter((candidate) => candidate === state).length;
+  const outcome = [
+    counts('success') ? `${counts('success')} succeeded` : '',
+    counts('error') ? `${counts('error')} failed` : '',
+    counts('timed-out') ? `${counts('timed-out')} timed out` : '',
+    counts('aborted') ? `${counts('aborted')} aborted` : '',
+  ].filter(Boolean);
+  const title =
+    jobs.length === 1
+      ? `${theme.fg('muted', 'Background subagent')} ${theme.fg('text', jobs[0].name)} ${theme.fg('dim', `· ${completionStyle(states[0]).label} · ${duration}`)}`
+      : `${theme.fg('text', `${jobs.length} background subagents finished`)}${outcome.length > 1 || dominant !== 'success' ? theme.fg('dim', ` · ${outcome.join(', ')}`) : ''}${theme.fg('dim', ` · ${duration}`)}`;
+  if (!expanded) return `${theme.fg(style.color, style.icon)} ${title}`;
+  const rows = jobs.map((job) => {
+    const state = completionState(job);
+    const row = completionStyle(state);
+    const metadata = [job.id, job.route, jobDuration(job)].filter(Boolean);
+    return `  ${theme.fg(row.color, row.icon)} ${theme.fg('text', job.name)} ${theme.fg('dim', `· ${row.label}${metadata.length ? ` · ${metadata.join(' · ')}` : ''}`)}`;
+  });
+  return [`${theme.fg(style.color, style.icon)} ${title}`, ...rows].join('\n');
+}
 
 /** Stable registration facade; orchestration and broker commands have separate owners. */
 export default defineExtension('delegate', (pi: ExtensionAPI) => {
@@ -213,22 +290,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       const details = (message.details ?? {}) as {
         jobs?: DelegateJobSnapshot[];
       };
-      const completed = details.jobs ?? [];
-      const failed = completed.some((job) => job.state === 'error');
-      const aborted = completed.some((job) => job.state === 'aborted');
-      const color = failed ? 'error' : aborted ? 'warning' : 'success';
-      const marker = failed ? '✗ ' : aborted ? '■ ' : '✓ ';
-      const content =
-        typeof message.content === 'string' ? message.content : '';
       return new Text(
-        theme.fg(color, marker) +
-          theme.fg(
-            'muted',
-            expanded
-              ? content
-              : truncateToWidth(content.replace(/\s+/g, ' ').trim(), 140, '…'),
-          ),
-        0,
+        completionSummary(details.jobs ?? [], expanded, theme),
+        1,
         0,
       );
     },

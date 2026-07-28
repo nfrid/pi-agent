@@ -178,11 +178,23 @@ describe('async delegate extension', () => {
           theme: { fg: (color: string, text: string) => string },
         ) => { render: (width: number) => string[] })
       | undefined;
+    const completedJob = {
+      id: 'dj-1',
+      cohortId: 'dc-1',
+      name: 'Independent inspection',
+      mode: 'single',
+      state: 'success',
+      tasks: ['inspect'],
+      createdAt: 1_000,
+      startedAt: 2_000,
+      settledAt: 7_000,
+      route: 'quick',
+    };
     const compactCompletion =
       completionRenderer?.(
         {
           content: `First line\n\n${'long output '.repeat(40)}`,
-          details: { jobs: [{ state: 'success' }] },
+          details: { jobs: [completedJob] },
         },
         { expanded: false },
         { fg: (_color, text) => text },
@@ -190,7 +202,81 @@ describe('async delegate extension', () => {
         .render(200)
         .join('\n') ?? '';
     expect(compactCompletion.split('\n')).toHaveLength(1);
-    expect(compactCompletion).toContain('…');
+    expect(compactCompletion).toContain(
+      '✓ Background subagent Independent inspection · finished · 5s',
+    );
+    expect(compactCompletion).not.toContain('First line');
+    expect(compactCompletion.startsWith(' ')).toBe(true);
+
+    const expandedCompletion =
+      completionRenderer?.(
+        {
+          content: 'hidden handoff',
+          details: {
+            jobs: [
+              completedJob,
+              {
+                ...completedJob,
+                id: 'dj-2',
+                name: 'Second inspection',
+                state: 'error',
+              },
+            ],
+          },
+        },
+        { expanded: true },
+        { fg: (_color, text) => text },
+      )
+        .render(200)
+        .join('\n') ?? '';
+    expect(expandedCompletion).toContain(
+      '2 background subagents finished · 1 succeeded, 1 failed',
+    );
+    expect(expandedCompletion).toContain('dj-1 · quick · 5s');
+    expect(expandedCompletion).toContain('Second inspection');
+    expect(expandedCompletion).not.toContain('hidden handoff');
+
+    const failedBatch =
+      completionRenderer?.(
+        {
+          content: 'hidden failures',
+          details: {
+            jobs: [
+              { ...completedJob, state: 'error' },
+              { ...completedJob, id: 'dj-2', state: 'error' },
+            ],
+          },
+        },
+        { expanded: false },
+        { fg: (_color, text) => text },
+      )
+        .render(200)
+        .join('\n') ?? '';
+    expect(failedBatch).toContain(
+      '✗ 2 background subagents finished · 2 failed',
+    );
+
+    const timedOutCompletion =
+      completionRenderer?.(
+        {
+          content: 'hidden timeout',
+          details: {
+            jobs: [
+              {
+                ...completedJob,
+                state: 'error',
+                runs: [{ state: 'timed-out' }],
+              },
+            ],
+          },
+        },
+        { expanded: false },
+        { fg: (_color, text) => text },
+      )
+        .render(200)
+        .join('\n') ?? '';
+    expect(timedOutCompletion).toContain('◷');
+    expect(timedOutCompletion).toContain('timed out');
 
     handlers.get('session_start')?.({}, ctx);
     const delegateTool = tools.get('delegate');
