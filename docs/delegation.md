@@ -66,6 +66,8 @@ There is no live channel, and this is why: while a foreground child runs, the pa
 
 Every run contributes an envelope — status, outcome, continuation, blocker, escalation, artifact, branch, evidence, validation, risks, changed files, truncation — and then as much of its report body as the remaining budget allows. The envelope is measured first and the bodies divide what is left, so the fields the parent acts on cannot be squeezed out by a verbose report.
 
+A section the envelope carries in full is then dropped from the body. The parent is shown both, so without this every lifted field arrives twice and the repetition competes with the report for the byte budget. Only a whole lift qualifies: a field clipped to fit, or a section longer than the field takes, still has something left to say and stays in the body. `Conclusion` is never lifted, so it is never dropped.
+
 Body truncation keeps the conclusion. Cutting from the end is right for a report that leads with its answer, but a child that narrates first would lose the one part the parent needs, so when the retained head does not already carry the whole `Conclusion:` section, that section is sent instead of the head. Exact output stays recoverable in the artifact and the child's session either way.
 
 ## Read-only delegates

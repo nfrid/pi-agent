@@ -157,6 +157,75 @@ describe('output', () => {
     expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(2048);
   });
 
+  test('sends a lifted section once, not in the envelope and again in the body', () => {
+    const run = createRun('audit the download path', undefined, {});
+    run.exitCode = 0;
+    run.state = 'success';
+    run.messages = [
+      {
+        ...assistantMessage,
+        content: [
+          {
+            type: 'text',
+            text: [
+              '## Outcome',
+              'done',
+              '## Conclusion',
+              'filenames collide on case-insensitive filesystems',
+              '## Evidence',
+              '- src/download.ts:46 writes without an existence check',
+              '## Risks',
+              'no runtime behaviour was exercised',
+            ].join('\n\n'),
+          },
+        ],
+      } as never,
+    ];
+    const output = buildParentHandoff([run]);
+
+    expect(output).toContain('Evidence: src/download.ts:46 writes');
+    expect(output).toContain('Risks: no runtime behaviour was exercised');
+    // The conclusion is the body's job, and is never lifted away from it.
+    expect(output).toContain(
+      'filenames collide on case-insensitive filesystems',
+    );
+    for (const lifted of ['## Evidence', '## Risks', '## Outcome'])
+      expect(output).not.toContain(lifted);
+    expect(
+      output.match(/no runtime behaviour was exercised/g) ?? [],
+    ).toHaveLength(1);
+  });
+
+  test('keeps a section the envelope could only carry part of', () => {
+    const run = createRun('audit every caller', undefined, {});
+    run.exitCode = 0;
+    run.state = 'success';
+    run.messages = [
+      {
+        ...assistantMessage,
+        content: [
+          {
+            type: 'text',
+            text: [
+              'Conclusion: eight callers skip the guard',
+              'Risks:',
+              ...Array.from(
+                { length: 8 },
+                (_, index) =>
+                  `- caller ${index} was not re-checked after the fix`,
+              ),
+            ].join('\n'),
+          },
+        ],
+      } as never,
+    ];
+    const output = buildParentHandoff([run]);
+
+    expect(output).toContain('Risks: caller 0 was not re-checked');
+    // Eight lines outrun the field, so the body still owes the parent the rest.
+    expect(output).toContain('caller 7 was not re-checked');
+  });
+
   test('routes an exceeded task back to its own continuation', () => {
     const run = createRun('trace the cancellation path', undefined, {
       continuation: 'exceeded-token',

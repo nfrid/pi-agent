@@ -82,21 +82,26 @@ function startsSection(line: string): boolean {
   );
 }
 
-function extractReportField(
-  body: string,
+/** Most content lines an envelope field carries before the rest is left to the body. */
+const MAX_FIELD_LINES = 5;
+
+interface ReportSection {
+  /** Line index of the heading, and of the first line past the section. */
+  from: number;
+  to: number;
+  values: string[];
+}
+
+function findSection(
+  lines: string[],
   label: string,
-  maxBytes = 120,
-): string | undefined {
-  const lines = body.split(/\r?\n/);
+): ReportSection | undefined {
   for (let index = 0; index < lines.length; index++) {
     const heading = headingText(lines[index], label);
     if (heading === undefined) continue;
     const values = heading ? [heading] : [];
-    for (
-      let next = index + 1;
-      next < lines.length && values.length < 5;
-      next++
-    ) {
+    let to = index + 1;
+    for (let next = index + 1; next < lines.length; next++) {
       const line = lines[next].trim();
       // A bare heading is usually followed by a blank line and then its list.
       if (!line) {
@@ -105,11 +110,61 @@ function extractReportField(
       }
       if (startsSection(line)) break;
       values.push(line.replace(/^[-*]\s+/, ''));
+      to = next + 1;
     }
-    const value = values.join(', ').trim();
-    return value ? clip(value, maxBytes) : undefined;
+    return { from: index, to, values };
   }
   return undefined;
+}
+
+function fieldValue(section: ReportSection): string {
+  return section.values.slice(0, MAX_FIELD_LINES).join(', ').trim();
+}
+
+function extractReportField(
+  body: string,
+  label: string,
+  maxBytes = 120,
+): string | undefined {
+  const section = findSection(body.split(/\r?\n/), label);
+  if (!section) return undefined;
+  const value = fieldValue(section);
+  return value ? clip(value, maxBytes) : undefined;
+}
+
+/**
+ * Whether the envelope field carries the section entire, so the body's copy is
+ * pure repetition. A section clipped to fit, or longer than the field takes,
+ * still has something left to say.
+ */
+function liftedWhole(section: ReportSection, maxBytes: number): boolean {
+  if (section.values.length > MAX_FIELD_LINES) return false;
+  const flat = fieldValue(section).replace(/\s+/g, ' ').trim();
+  return Boolean(flat) && Buffer.byteLength(flat, 'utf8') <= maxBytes;
+}
+
+/**
+ * Drops sections the envelope already carries in full. The parent is shown the
+ * envelope and the body together, so without this every lifted field arrives
+ * twice and the repetition competes with the report for the byte budget.
+ */
+function stripLiftedSections(
+  body: string,
+  lifted: ReadonlyArray<[string, number]>,
+): string {
+  const lines = body.split(/\r?\n/);
+  const drop = new Set<number>();
+  for (const [label, maxBytes] of lifted) {
+    const section = findSection(lines, label);
+    if (!section || !liftedWhole(section, maxBytes)) continue;
+    for (let index = section.from; index < section.to; index++) drop.add(index);
+  }
+  if (drop.size === 0) return body;
+  return lines
+    .filter((_, index) => !drop.has(index))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /** The conclusion with its line structure intact, unlike the flattened envelope fields. */
@@ -160,10 +215,24 @@ interface PreparedRun {
   bodyTruncated: boolean;
 }
 
+/** Envelope fields lifted from the report, and the bytes each is allowed. */
+const LIFTED_FIELDS: ReadonlyArray<[string, number]> = [
+  ['Outcome', 32],
+  ['Blocked', 240],
+  ['Exceeded', 240],
+  ['Evidence', 400],
+  ['Validation', 240],
+  ['Risks', 240],
+  ['Changed files', 120],
+];
+
 function prepareRun(run: DelegatedRun, bodyCap: number): PreparedRun {
   const original = runBody(run);
-  const body = truncateBody(original, bodyCap);
-  const bodyTruncated = body !== original;
+  // Fields come from the untouched report; the body then drops what they carry
+  // whole, so the budget is spent on what the envelope could not take.
+  const reported = stripLiftedSections(original, LIFTED_FIELDS);
+  const body = truncateBody(reported, bodyCap);
+  const bodyTruncated = body !== reported;
   const lines = [`Status: ${getRunState(run)}`];
   // Mandatory metadata, so what the parent decides on survives body truncation.
   // Outcome leads: the process exiting cleanly says nothing about whether the
