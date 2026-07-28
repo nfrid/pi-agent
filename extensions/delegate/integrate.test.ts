@@ -102,23 +102,53 @@ describe('merging a delegate branch', () => {
     expect((await mergeBranch(record)).reason).toMatch(/already an ancestor/);
   });
 
-  test('refuses when the parent still holds the work the branch carried', async () => {
+  test('integrates only task work while carried parent work stays dirty', async () => {
     parentWip();
+    writeFileSync(path.join(repository, 'src', 'carried.txt'), 'carried\n');
     const record = await delegated({
-      write: (worktreePath) =>
-        writeFileSync(path.join(worktreePath, 'src', 'added.txt'), 'task\n'),
+      write: (worktreePath) => {
+        // `from: wip` gives the child both kinds of parent work.
+        expect(
+          readFileSync(path.join(worktreePath, 'src', 'value.txt'), 'utf8'),
+        ).toBe('parent edit\n');
+        expect(
+          readFileSync(path.join(worktreePath, 'src', 'carried.txt'), 'utf8'),
+        ).toBe('carried\n');
+        writeFileSync(path.join(worktreePath, 'src', 'added.txt'), 'task\n');
+      },
     });
-    const outcome = await mergeBranch(record);
-    expect(outcome.merged).toBe(false);
-    expect(outcome.blockedPaths).toEqual(['src/value.txt']);
-    expect(outcome.reason).toMatch(/carries your uncommitted work/);
 
-    // Committing the parent's side is all it takes; nothing was lost.
-    git(repository, ['commit', '-aqm', 'parent work']);
-    expect((await mergeBranch(record)).merged).toBe(true);
+    const beforeMerge = git(repository, ['status', '--porcelain']);
+    expect(beforeMerge).toContain(' M src/value.txt');
+    expect(beforeMerge).toContain('?? src/carried.txt');
+
+    const review = await reviewBranch(record);
+    expect(review.diff).toContain('src/added.txt');
+    expect(review.diff).not.toContain('parent edit');
+    expect(review.diff).not.toContain('src/carried.txt');
+
+    const outcome = await mergeBranch(record);
+    expect(outcome.merged).toBe(true);
     expect(
       readFileSync(path.join(repository, 'src', 'added.txt'), 'utf8'),
     ).toBe('task\n');
+    expect(
+      readFileSync(path.join(repository, 'src', 'value.txt'), 'utf8'),
+    ).toBe('parent edit\n');
+    expect(
+      readFileSync(path.join(repository, 'src', 'carried.txt'), 'utf8'),
+    ).toBe('carried\n');
+    // The task commit was copied, not a merge of the carry snapshot: parent
+    // work remains uncommitted and the untracked carry remains untracked.
+    expect(git(repository, ['status', '--porcelain'])).toBe(beforeMerge);
+    expect(git(repository, ['show', 'HEAD:src/value.txt'])).toBe('one\n');
+    expect(() =>
+      git(repository, ['ls-files', '--error-unmatch', 'src/carried.txt']),
+    ).toThrow();
+    expect(git(repository, ['diff', '--name-only', '--diff-filter=U'])).toBe(
+      '',
+    );
+    expect(await branchState(record)).toBe('merged');
   });
 
   test('aborts a conflicting merge and leaves the checkout as it was', async () => {
