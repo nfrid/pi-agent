@@ -135,7 +135,7 @@ function prepareRun(run: DelegatedRun): PreparedRun {
     );
   if (run.worktree) {
     lines.push(
-      `Branch: ${run.worktree.branch} (${run.worktree.hasWork ? `${run.worktree.changedPaths?.length ?? 0} changed path(s)` : 'no changes'}, from ${run.worktree.workBase.slice(0, 8)})`,
+      `Branch: ${run.worktree.branch} (${run.worktree.status === 'active' ? 'changes pending finalization' : run.worktree.hasWork ? `${run.worktree.changedPaths?.length ?? 0} changed path(s)` : 'no changes'}, from ${run.worktree.workBase.slice(0, 8)})`,
       `Worktree: ${run.worktree.worktreePath}`,
       `Integrate with: delegate_branches review then merge, id ${run.worktree.id}`,
     );

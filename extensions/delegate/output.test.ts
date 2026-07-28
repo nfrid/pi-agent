@@ -126,6 +126,26 @@ describe('output', () => {
     expect(handoff).toContain('Conclusion: complete');
   });
 
+  test('describes active worktree changes as pending finalization', () => {
+    const handoff = buildParentHandoff([
+      reportedRun('Outcome: done\nConclusion: audit running', {
+        worktree: {
+          id: '11111111-1111-1111-1111-111111111111',
+          branch: 'pi/audit-a1b2',
+          worktreePath: '/tmp/worktree',
+          repositoryRoot: '/tmp/project',
+          baseHead: 'abc123def456',
+          workBase: 'abc123def456',
+          status: 'active',
+          hasWork: false,
+        },
+      }),
+    ]);
+
+    expect(handoff).toContain('changes pending finalization');
+    expect(handoff).not.toContain('Branch: pi/audit-a1b2 (no changes');
+  });
+
   test('reports a recovered continuation without warning about its prior run', () => {
     const handoff = buildParentHandoff([
       reportedRun('Outcome: done\nConclusion: completed the recovery', {

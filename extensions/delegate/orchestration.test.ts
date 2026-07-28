@@ -344,6 +344,33 @@ describe('buildDelegatePlans', () => {
     }
   });
 
+  test('rejects changing a writable worktree continuation to shared isolation', () => {
+    const session = createDelegateSession({
+      cwd: '/tmp/project',
+      allowWrites: true,
+      isolation: 'worktree',
+      worktreeId: 'missing-worktree',
+      routing,
+    });
+    try {
+      expect(() =>
+        buildDelegatePlans(
+          {
+            name: 'Test agent',
+            task: 'continue',
+            continuation: session.token,
+            isolation: 'shared',
+          },
+          ctx,
+          config,
+          () => null,
+        ),
+      ).toThrow('cannot change isolation from worktree to shared');
+    } finally {
+      removeDelegateSession(session);
+    }
+  });
+
   test('inherits immutable worktree isolation on continuation', () => {
     const session = createDelegateSession({
       cwd: '/tmp/project',

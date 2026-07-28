@@ -226,7 +226,9 @@ export function worktreeLines(run: DelegatedRun): string[] {
     `Worktree: ${compactPath(worktree.worktreePath)}`,
     `Base: ${worktree.baseHead.slice(0, 8)}`,
   ];
-  if (worktree.changedPaths?.length)
+  if (worktree.status === 'active')
+    lines.push('Changed: changes pending finalization');
+  else if (worktree.changedPaths?.length)
     lines.push(
       `Changed: ${worktree.changedPaths.length} path(s)`,
       ...worktree.changedPaths.slice(0, 20).map((name) => `- ${name}`),

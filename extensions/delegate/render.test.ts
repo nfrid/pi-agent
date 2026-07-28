@@ -280,6 +280,37 @@ describe('render', () => {
     }
   });
 
+  test('describes active worktree changes as pending finalization', () => {
+    const run = createRun('Audit the repository', undefined, {
+      cwd: '/tmp/worktree',
+      context: 'fresh',
+      allowWrites: false,
+      isolation: 'worktree',
+      worktree: {
+        id: '11111111-1111-1111-1111-111111111111',
+        branch: 'pi/audit-a1b2',
+        worktreePath: '/tmp/worktree',
+        repositoryRoot: '/tmp/project',
+        baseHead: 'abc123def456',
+        workBase: 'abc123def456',
+        status: 'active',
+        hasWork: false,
+      },
+    });
+    const output = renderDelegateResult(
+      { details: { mode: 'single', runs: [run] } },
+      { expanded: true },
+      theme,
+    )
+      .render(300)
+      .join('\n');
+
+    expect(output).toContain('Changed: changes pending finalization');
+    expect(output).not.toContain(
+      'Changed: nothing was committed on this branch',
+    );
+  });
+
   test('organizes expanded output into explicit sections', () => {
     const run = createRun('Recheck the cache fix', undefined, {
       cwd: '/tmp/project',
