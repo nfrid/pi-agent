@@ -13,7 +13,7 @@ JSON is written to stdout. `--limit` applies after filtering; `--min-todo-calls`
 
 The instrument reports delegate calls, continuations, accepted parallel calls, rejected calls, unique delegated and writable tasks, background jobs/runs launched, report deliveries, handoff bytes, truncation, report outcomes, process errors/timeouts/aborts, and artifact/worktree indicators.
 
-Background completion facts come from producer details: automatic deliveries use `details.jobs`, while `delegate_jobs peek` uses `details.job`. A pushed report and a later peek each add their complete delivered text to `delegateHandoffBytes`, but stable job/run identities prevent either copy from adding another execution, outcome, truncation, or routing record. The display delimiter `\n\n---\n\n` is never parsed because parallel handoffs use it internally. Older messages without details receive only a one-report fallback.
+Background completion facts come from producer details: automatic deliveries use `details.jobs`, while `delegate_jobs peek` uses `details.job`. A pushed report and a later peek each add their complete delivered text to `delegateHandoffBytes`, but stable job/run identities prevent either copy from adding another execution, outcome, truncation, or routing record. Current reports use `Delegated results: N run(s)` and `Truncation: original report truncated`; older markers remain readable. The display delimiter `\n\n---\n\n` is never parsed because parallel handoffs use it internally. Older messages without details receive only a one-report fallback.
 
 ## Routing and ratios
 

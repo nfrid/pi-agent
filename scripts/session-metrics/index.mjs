@@ -110,7 +110,7 @@ function toolArguments(call) {
 const BACKGROUND_START_MARKER = /^Started \d+ background delegate job/;
 /** How a finished background job hands its report to the parent. */
 const BACKGROUND_DELIVERY_MARKER =
-  /^#?\s*Background delegate job (\S+) .*?\n\n(Delegated tasks?\b[\s\S]*)$/;
+  /^#?\s*Background delegate job (\S+) .*?\n\n((?:Delegated results:\s*\d+\s+runs?|Delegated tasks?\b)[\s\S]*)$/;
 
 /** Counts an execution once; its report may be pushed and later peeked again. */
 function recordExecution(state, runs, ids, text = '', indicators = true) {
@@ -199,9 +199,12 @@ function recordDeliveredText(state, text, deliveries) {
 }
 
 /** Emitted once per run envelope by the current delegate build. */
-const TRUNCATED_MARKER = 'Truncation: body truncated';
-/** The marker older handoffs left inline, before the envelope carried the flag. */
-const LEGACY_TRUNCATED_MARKER = '[Output truncated for parent context';
+const TRUNCATED_MARKER = 'Truncation: original report truncated';
+/** Markers emitted by earlier report contracts, retained for old transcripts. */
+const LEGACY_TRUNCATED_MARKERS = [
+  'Truncation: body truncated',
+  '[Output truncated for parent context',
+];
 
 function countOccurrences(text, marker) {
   return text.split(marker).length - 1;
@@ -209,9 +212,10 @@ function countOccurrences(text, marker) {
 
 /** A repeated pushed/peeked handoff must not inflate a unique-task rate. */
 function recordTruncatedTasks(state, ids, text) {
-  const truncated =
-    countOccurrences(text, TRUNCATED_MARKER) ||
-    countOccurrences(text, LEGACY_TRUNCATED_MARKER);
+  const truncated = Math.max(
+    countOccurrences(text, TRUNCATED_MARKER),
+    ...LEGACY_TRUNCATED_MARKERS.map((marker) => countOccurrences(text, marker)),
+  );
   for (const id of ids.slice(0, truncated)) {
     if (state.truncatedRuns.has(id)) continue;
     state.truncatedRuns.add(id);
