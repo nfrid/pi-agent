@@ -271,6 +271,47 @@ describe('buildDelegatePlans', () => {
     }
   });
 
+  test('rejects unchanged writable/shared values on migrated continuations', () => {
+    const requests: Array<{
+      allowWrites?: boolean;
+      isolation?: 'shared';
+    }> = [
+      { allowWrites: true },
+      { isolation: 'shared' },
+      { allowWrites: true, isolation: 'shared' },
+    ];
+    for (const request of requests) {
+      const session = createDelegateSession({
+        cwd: '/tmp/project',
+        allowWrites: true,
+        routing,
+      });
+      try {
+        const metadataPath = session.filePath.replace(/\.jsonl$/, '.json');
+        const metadata = JSON.parse(readFileSync(metadataPath, 'utf8')) as {
+          isolation?: unknown;
+        };
+        delete metadata.isolation;
+        writeFileSync(metadataPath, `${JSON.stringify(metadata)}\n`);
+        expect(() =>
+          buildDelegatePlans(
+            {
+              name: 'Test agent',
+              task: 'continue',
+              continuation: session.token,
+              ...request,
+            },
+            ctx,
+            config,
+            () => null,
+          ),
+        ).toThrow('Writable delegates require worktree isolation');
+      } finally {
+        removeDelegateSession(session);
+      }
+    }
+  });
+
   test('inherits a read-only continuation capability when allowWrites is omitted', () => {
     const session = createDelegateSession({
       cwd: '/tmp/project',
