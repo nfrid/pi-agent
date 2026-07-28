@@ -18,11 +18,11 @@ A draft is not a write authorization. First present no more than **three** draft
 For each candidate:
 
 1. Verify it was observed in the current task or follows directly from deterministic evidence already collected.
-2. State the behavior, impact, evidence, and smallest useful outcome. Label assumptions; do not turn guesses into facts.
+2. State the behavior, impact, evidence, smallest useful outcome, and compact context: source session/task shape, route/attempt/outcome when relevant, observed cost or rework, and confidence/recurrence. Label assumptions; do not turn guesses into facts.
 3. Skip one-off mistakes, preferences, speculative solutions, duplicates, and low-signal friction.
 4. Present the drafts together and wait for explicit approval. Never write raw transcripts or unapproved drafts.
 
-After approval, copy `../../feedback/REPORT_TEMPLATE.md` into `../../feedback/inbox/YYYY-MM-DD-HHMM-<kind>-<short-slug>.md` using UTC time. Fill it with concise evidence and set `Approval: user-approved`. Scan existing report titles only for an obvious duplicate; do not start a separate investigation. Keep the approved report local and mention its path in the completion summary.
+After approval, file the report where the likely fix belongs: use this repository's `../../feedback/inbox/` for Pi agent/tooling and local workflow issues, or `~/job/.agents/feedback/inbox/` for MyGig workspace workflow issues. If an observation spans both, keep one canonical report and cross-link the other existing artifact rather than duplicate it; do not silently write to the other workspace. Fill the template with concise evidence and set `Approval: user-approved`. Scan existing report titles only for an obvious duplicate; do not start a separate investigation. Mention the approved report path in the completion summary.
 
 ## Triage
 
@@ -33,10 +33,11 @@ For each report, choose `triaged`, `duplicate`, or `parked`. For an actionable g
 - the verified **baseline** and its evidence;
 - a falsifiable **hypothesis**;
 - **guardrails** and non-goals;
-- acceptance criteria; and
-- an **evaluation window** and an initially pending result.
+- acceptance criteria;
+- **validation** commands or inspection against the baseline and guardrails; and
+- an **evaluation window** with a pending result, later choosing `keep`, `revise`, `revert`, or `insufficient evidence`.
 
-Update the source report's status and ticket link, and keep the ticket's source links pointed back to all reports. This relative-link pair is required; leave source reports in place. Keep ownership local to this repository.
+Update the source report's status and ticket link, and keep the ticket's source links pointed back to all reports. This relative-link pair is required; leave source reports in place. Keep ownership with the workspace where the likely fix belongs.
 
 Triage, ticket creation, and ticket approval are different actions. Creating or approving a ticket does not authorize implementation; implementation needs a separate explicit request. Do not create external tickets or sync systems.
 
@@ -46,4 +47,4 @@ When a separately approved ticket is implemented, record the merged change but s
 
 ## Boundaries
 
-Do not add a taxonomy, archive, database, external synchronization, automatic route edits, or raw-transcript storage. Keep all artifacts under `.agents/feedback/`, and keep the process concise and operational.
+Do not add a taxonomy, archive, database, external synchronization, automatic route edits, or raw-transcript storage. Keep each artifact in the feedback directory of its owning workspace, and keep the process concise and operational.

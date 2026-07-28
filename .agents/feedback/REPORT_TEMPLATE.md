@@ -7,6 +7,13 @@
 - **Owner:** <local maintainer, role, or team>
 - **Ticket:** —
 
+## Context
+
+- **Source session/task shape:** <brief shape, not a transcript>
+- **Route / attempt / outcome:** <when relevant>
+- **Observed cost / rework:** <what it cost or made someone repeat>
+- **Confidence / recurrence:** <confidence and observed or likely recurrence>
+
 ## What happened
 
 <!-- Describe the concrete behavior or missing capability. -->

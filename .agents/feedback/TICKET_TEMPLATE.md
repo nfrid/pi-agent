@@ -42,10 +42,14 @@
 
 - [ ] <Observable outcome>
 
+## Validation
+
+<!-- List focused commands, inspection, or comparison against the baseline that demonstrates the acceptance criteria and guardrails. -->
+
 ## Evaluation
 
 - **Window:** not started
-- **Result:** pending
+- **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 <!-- After an approved implementation merges, keep Status as evaluation-pending until the window ends and Result is recorded. -->
 

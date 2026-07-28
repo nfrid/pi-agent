@@ -1,6 +1,6 @@
 # Repository-local workflow feedback
 
-This is a small, repository-local way to turn observed workflow friction into proposed improvements. It is not a product tracker and does not write anywhere outside this repository.
+This is the Pi repository's small, local way to turn observed Pi workflow friction into proposed improvements. It is not a product tracker. File each observation where the likely fix belongs; see ownership below.
 
 ## Operating rules
 
@@ -13,15 +13,15 @@ This is a small, repository-local way to turn observed workflow friction into pr
 
 ## Ownership and links
 
-The feedback directory is owned by this repository's maintainers. Use a local owner (a maintainer, role, or team in this repository), not an external tracker or product-repository owner. Keep source material here, even when an improvement affects another local file.
+File feedback where the likely fix belongs: Pi agent/tooling or this repository's workflow goes in `.agents/feedback/`; MyGig workspace workflow goes in `~/job/.agents/feedback/`. Each location has local ownership by that workspace's maintainers. When an observation spans both, keep one canonical report at the likely-fix location and cross-link to the other workspace's existing report or ticket instead of duplicating it. Do not silently write to the other workspace.
 
-Use relative Markdown links for the only cross-link: once a ticket exists, its source report must link to that ticket and the ticket must link back to every source report. A report with no ticket uses `—`. Do not delete source reports to hide the history.
+Within a workspace, use relative Markdown links for the cross-link: once a ticket exists, its source report must link to that ticket and the ticket must link back to every source report. A report with no ticket uses `—`. Do not delete source reports to hide the history.
 
 ## Layout
 
 - `REPORT_TEMPLATE.md` — concise, user-approved observation format
-- `inbox/` — approved reports awaiting triage
+- `inbox/` — approved reports for this workspace awaiting triage
 - `TICKET_TEMPLATE.md` — decision-ready local proposal
-- `tickets/` — proposed and evaluated local tickets
+- `tickets/` — proposed and evaluated local tickets for this workspace
 
 Do not add a taxonomy, archive, database, external synchronization, automatic route edits, or transcript store. Keep the workflow useful without creating process work.
