@@ -142,9 +142,7 @@ describe('merging a delegate branch', () => {
     // work remains uncommitted and the untracked carry remains untracked.
     expect(git(repository, ['status', '--porcelain'])).toBe(beforeMerge);
     expect(git(repository, ['show', 'HEAD:src/value.txt'])).toBe('one\n');
-    expect(() =>
-      git(repository, ['ls-files', '--error-unmatch', 'src/carried.txt']),
-    ).toThrow();
+    expect(git(repository, ['ls-files', 'src/carried.txt'])).toBe('');
     expect(git(repository, ['diff', '--name-only', '--diff-filter=U'])).toBe(
       '',
     );
