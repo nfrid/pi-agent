@@ -392,7 +392,7 @@ describe('async delegate extension', () => {
     await commands.get('delegates')?.handler('config', ctx);
     expect(notify.mock.calls[0]?.[0]).toContain('Comparison: unavailable');
     expect(notify.mock.calls[0]?.[0]).toContain(
-      '/reload establishes/refreshes prompt guidance',
+      '/reload establishes prompt guidance',
     );
     notify.mockClear();
     handlers.get('session_start')?.({}, ctx);
@@ -441,7 +441,7 @@ describe('async delegate extension', () => {
     );
     expect(notify.mock.calls[0]?.[0]).toContain('valid=no; routes=');
     expect(notify.mock.calls[0]?.[0]).toContain(
-      'Delegate routing/execution is unavailable.',
+      'Fix current settings before delegating; delegate execution is unavailable with current settings.',
     );
     expect(notify.mock.calls[0]?.[0]).not.toContain(
       'Prompt guidance is current.',
@@ -450,17 +450,14 @@ describe('async delegate extension', () => {
     configLoader.mockReturnValue(config);
     await commands.get('delegates')?.handler('config', ctx);
     expect(notify.mock.calls[0]?.[0]).toContain(
-      'Prompt route guidance is unavailable; delegate execution is available from current settings.',
-    );
-    expect(notify.mock.calls[0]?.[0]).not.toContain(
-      'execution is unavailable',
+      '/reload refreshes prompt guidance. Delegate execution re-reads current settings on demand.',
     );
     notify.mockClear();
     handlers.get('session_start')?.({}, ctx);
     configLoader.mockReturnValue(invalidConfig);
     await commands.get('delegates')?.handler('config', ctx);
     expect(notify.mock.calls[0]?.[0]).toContain(
-      'Delegate execution is unavailable.',
+      'Fix current settings before delegating; delegate execution is unavailable with current settings.',
     );
     expect(notify.mock.calls[0]?.[0]).not.toContain(
       'Prompt guidance is current',
