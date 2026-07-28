@@ -84,42 +84,8 @@ describe('DelegateJobManager', () => {
       },
     ]);
     expect(jobs.map((job) => job.id)).toEqual(['dj-1', 'dj-2']);
-    expect(jobs[0]?.cohortId).toBe(jobs[1]?.cohortId);
     expect(jobs.map((job) => job.tasks)).toEqual([['first'], ['second']]);
     await vi.waitFor(() => expect(manager.runningCount).toBe(0));
-    await manager.dispose();
-  });
-
-  test('delivers only unobserved members once an observed member settles', async () => {
-    let finishObserved!: (result: DelegateJobResult) => void;
-    let finishUnobserved!: (result: DelegateJobResult) => void;
-    const onSettled = vi.fn();
-    const manager = new DelegateJobManager({ onSettled });
-    const [observed, unobserved] = manager.startMany([
-      {
-        mode: 'single',
-        tasks: ['observed'],
-        execute: () =>
-          new Promise<DelegateJobResult>((resolve) => {
-            finishObserved = resolve;
-          }),
-      },
-      {
-        mode: 'single',
-        tasks: ['unobserved'],
-        execute: () =>
-          new Promise<DelegateJobResult>((resolve) => {
-            finishUnobserved = resolve;
-          }),
-      },
-    ]);
-    const waiting = manager.peek(observed.id, 1_000);
-    finishUnobserved(successfulResult('unobserved'));
-    finishObserved(successfulResult('observed'));
-    await waiting;
-    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledOnce());
-    expect(onSettled.mock.calls[0]?.[0]).toHaveLength(1);
-    expect(onSettled.mock.calls[0]?.[0][0]?.id).toBe(unobserved.id);
     await manager.dispose();
   });
 

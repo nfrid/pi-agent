@@ -180,7 +180,6 @@ describe('async delegate extension', () => {
       | undefined;
     const completedJob = {
       id: 'dj-1',
-      cohortId: 'dc-1',
       name: 'Independent inspection',
       mode: 'single',
       state: 'success',
@@ -350,7 +349,7 @@ describe('async delegate extension', () => {
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
-  test('delivers a staggered three-job batch once after its cohort settles', async () => {
+  test('delivers staggered jobs in partial completion waves', async () => {
     vi.spyOn(configModule, 'loadDelegateConfig').mockReturnValue({
       ...config,
       maxParallelTasks: 3,
@@ -429,8 +428,12 @@ describe('async delegate extension', () => {
       content: [{ type: 'text', text: 'Second finding.' }],
     } as never;
     finishes.get('second')?.(second);
-    await new Promise((resolve) => setTimeout(resolve, 75));
-    expect(sendMessage).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    expect(sendMessage.mock.calls[0]?.[0].content).toContain('First finding.');
+    expect(sendMessage.mock.calls[0]?.[0].content).toContain('Second finding.');
+    expect(sendMessage.mock.calls[0]?.[0].content).not.toContain(
+      'Third finding.',
+    );
 
     const third = successfulRun();
     third.task = 'third';
@@ -439,10 +442,8 @@ describe('async delegate extension', () => {
       content: [{ type: 'text', text: 'Third finding.' }],
     } as never;
     finishes.get('third')?.(third);
-    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
-    expect(sendMessage.mock.calls[0]?.[0].content).toContain('First finding.');
-    expect(sendMessage.mock.calls[0]?.[0].content).toContain('Second finding.');
-    expect(sendMessage.mock.calls[0]?.[0].content).toContain('Third finding.');
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+    expect(sendMessage.mock.calls[1]?.[0].content).toContain('Third finding.');
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 

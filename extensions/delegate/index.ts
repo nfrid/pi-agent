@@ -32,6 +32,9 @@ import { registerDelegateWorktreesCommand } from './worktrees-command';
 export const DELEGATES_COMMAND_DESCRIPTION =
   'Toggle detailed subagent status or inspect delegate config';
 
+const COMPLETION_WAVE_GRACE_MS = 2_000;
+const COMPLETION_WAVE_BURST_MS = 50;
+
 type CompletionState = Extract<
   DelegateRunState,
   'success' | 'error' | 'timed-out' | 'aborted'
@@ -125,6 +128,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   let runtimeActive = false;
   let pendingCompletions: DelegateJobSnapshot[] = [];
   let completionTimer: NodeJS.Timeout | undefined;
+  let completionFlushAt: number | undefined;
   let widgetDetailed = true;
   let promptSnapshot:
     | {
@@ -165,6 +169,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
 
   const flushCompletions = () => {
     completionTimer = undefined;
+    completionFlushAt = undefined;
     if (!runtimeActive || pendingCompletions.length === 0) return;
     const queued = pendingCompletions;
     pendingCompletions = [];
@@ -199,16 +204,26 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     }
   };
 
-  const queueCompletions = (jobs: readonly DelegateJobSnapshot[]) => {
+  const queueCompletion = (job: DelegateJobSnapshot) => {
     if (!runtimeActive) return;
-    statuses?.settleJobs(jobs);
-    const completed = jobs.filter((job) => job.deliveryEpoch === deliveryEpoch);
-    const stale = jobs.filter((job) => job.deliveryEpoch !== deliveryEpoch);
-    if (stale.length > 0) notifyStaleCompletions(stale);
-    pendingCompletions.push(...completed);
-    if (completed.length === 0) return;
-    if (completionTimer) return;
-    completionTimer = setTimeout(flushCompletions, 50);
+    statuses?.settleJobs([job]);
+    if (job.deliveryEpoch !== deliveryEpoch) {
+      notifyStaleCompletions([job]);
+      return;
+    }
+    pendingCompletions.push(job);
+    // Give the first result a short grace period for siblings, then deliver
+    // whatever is ready. A second result (or the final active job) closes the
+    // wave promptly without waiting for the whole original batch.
+    const delay =
+      pendingCompletions.length >= 2 || jobs?.runningCount === 0
+        ? COMPLETION_WAVE_BURST_MS
+        : COMPLETION_WAVE_GRACE_MS;
+    const flushAt = Date.now() + delay;
+    if (completionFlushAt !== undefined && completionFlushAt <= flushAt) return;
+    if (completionTimer) clearTimeout(completionTimer);
+    completionFlushAt = flushAt;
+    completionTimer = setTimeout(flushCompletions, delay);
     completionTimer.unref();
   };
 
@@ -227,13 +242,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     deliveryEpoch = 0;
     widgetDetailed = true;
     pendingCompletions = [];
+    completionFlushAt = undefined;
     widget.attach(ui);
     pruneDelegateSessions({
       isWorktreeRetained: (id) => Boolean(loadWorktree(id)),
     });
     statuses = new DelegateStatusStore(syncWidget);
     jobs = new DelegateJobManager({
-      onSettled: queueCompletions,
+      onSettled: queueCompletion,
     });
     registerDelegateTool(
       pi,
@@ -273,6 +289,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     runtimeActive = false;
     if (completionTimer) clearTimeout(completionTimer);
     completionTimer = undefined;
+    completionFlushAt = undefined;
     pendingCompletions = [];
     widget.detach();
     const closing = jobs;

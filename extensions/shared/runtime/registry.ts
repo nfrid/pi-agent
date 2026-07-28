@@ -33,8 +33,6 @@ export interface AsyncJobRegistryOptions<
   /** Stop one active record and resolve once it has settled. */
   teardown: (record: TRecord) => Promise<unknown>;
   onSettled?: (snapshot: TSnapshot) => void;
-  /** Called after an observer stops watching a record. */
-  onObserversChanged?: () => void;
   onChange?: () => void;
 }
 
@@ -146,7 +144,6 @@ export class AsyncJobRegistry<
       return await (signal ? withAbort(result, signal) : result);
     } finally {
       for (const record of records) record.observers--;
-      this.options.onObserversChanged?.();
     }
   }
 
