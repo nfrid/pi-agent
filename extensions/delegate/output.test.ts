@@ -157,6 +157,41 @@ describe('output', () => {
     expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(2048);
   });
 
+  test('lifts evidence past Markdown blank lines even when no body fits', () => {
+    const run = createRun('audit the evidence', undefined, {});
+    run.exitCode = 0;
+    run.state = 'success';
+    run.messages = [
+      {
+        ...assistantMessage,
+        content: [
+          {
+            type: 'text',
+            text: [
+              'Outcome: partial',
+              'Evidence:',
+              '- src/first.ts:10 establishes the first condition',
+              '',
+              '- src/later.ts:42 preserves the later citation',
+              '',
+              'Conclusion: the body must not be needed for either citation',
+            ].join('\n'),
+          },
+        ],
+      } as never,
+    ];
+
+    // The envelope alone exceeds this deliberately tiny cap, so allocation
+    // omits the body while mandatory evidence remains parent-visible.
+    const output = buildParentHandoff([run], {
+      ...PARENT_HANDOFF_CAPS,
+      singleMaxBytes: 1,
+    });
+    expect(output).toContain('Evidence: src/first.ts:10');
+    expect(output).toContain('src/later.ts:42 preserves the later citation');
+    expect(output).not.toContain('Output\nConclusion:');
+  });
+
   test('sends a lifted section once, not in the envelope and again in the body', () => {
     const run = createRun('audit the download path', undefined, {});
     run.exitCode = 0;

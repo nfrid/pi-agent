@@ -1,38 +1,36 @@
 # Delegation baseline
 
-Captured 2026-07-28 from `sessions/`, before any change to the handoff contract or caps. Reproduce with:
+Point-in-time aggregate captured 2026-07-28 with `session-metrics/v3`. The frozen, privacy-safe evidence is [`delegation-metrics-2026-07-28.json`](delegation-metrics-2026-07-28.json). It is an aggregate record, not a raw session dump and not a promise that a mutable `sessions/` directory can reproduce this historical capture.
+
+The capture used:
 
 ```bash
 npm run --silent session:metrics -- summarize sessions --min-delegate-calls 1
 ```
 
-Cohort: 59 sessions with at least one delegate call, 329 calls, 422 tasks that ran.
+A later run measures the files present then; use it for a new point in time, not to restate this one.
 
-Restated twice as the instrument was corrected. `07e22be` stopped charging each background acknowledgement with tasks it had not yet done, and started counting the report the job later delivered. The follow-up caught the larger half of the same blind spot: a finished background job is normally *pushed* to the parent as a steering message, and only reaches a `delegate_jobs` result when the parent peeks — so the main delivery path was still invisible. The summarize command reports cohort totals; the per-result percentiles below come from a separate pass over the same corpus applying the same counting rules.
+## Cohort
 
-## What a handoff costs the parent today
+59 sessions had at least one delegate call: 331 calls, 418 unique delegated runs, and 19 rejected calls. Fourteen background jobs/runs were launched. Their 21 parent-visible deliveries include repeated push/peek copies where applicable; those copies add handoff bytes but do not add executed tasks.
 
 | Measurement | Value |
-| --- | --- |
-| Handoff bytes per task (cohort) | 2,421 B |
-| Single-result bytes | p50 1,333 B, p90 4,815 B, p99 7,368 B, max 9,734 B |
-| Parallel aggregate bytes | p50 6,756 B, p90 20,453 B, max 26,078 B |
-| Truncation rate | 0.24% (1 task of 422) |
-| Continuation rate | 29.8% of calls |
-| Parallel calls | 60 of 329 |
-| Writable tasks | 18 of 422 |
-| Rejected calls (no run launched) | 19 |
-| Background jobs started / delivered | 10 / 21 |
-| Handoff tokens as a share of peak request context | p50 3.4%, p90 18.2%, max 23.0% |
+| --- | ---: |
+| Handoff bytes per unique task | 2,455 B |
+| Handoff bytes | 1,026,024 B |
+| Truncation rate | 0.24% (1 of 418) |
+| Continuation rate | 32.3% (107 of 331 calls) |
+| Parallel calls | 62 |
+| Writable tasks | 18 |
+| Background jobs/runs launched | 14 / 14 |
+| Background report deliveries | 21 |
+| Process errors / timeouts / aborts | 10 / 11 / 2 |
+| Reported outcomes done / partial / blocked / failed | 1 / 0 / 0 / 0 |
+| Outcome unreported | 417 |
+| Artifact references / worktree returns | 3 / 3 |
 
-## The caps do not bind
+The outcome contract was absent from almost all reports in this capture. That makes the process counters useful failure signals, but it does **not** establish a capability or success rate. Future cohorts should reduce `delegateOutcomeUnreported` before using outcome counts to judge delegation quality.
 
-At the time of capture `PARENT_HANDOFF_CAPS` allowed 12 KiB for a single result, 8 KiB per task in a parallel fan, and 50 KiB aggregate. Nothing in this cohort reached any of them: the largest single result is 9,734 B and the largest parallel aggregate is 26,078 B, and the one truncated task in 422 is the whole of the truncation rate.
+## Interpretation
 
-The caps have since moved to 6 / 4 / 16 KiB. Against this corpus that clips 4.2% of single results for 1.0% of all handoff bytes, and 13.1% of parallel fans for 4.8%. The aggregate is the binding one, and a cap change alone still cannot produce a material reduction in what delegation costs the parent.
-
-Handoff volume is instead set by how much children choose to write. Reducing it is a report-contract problem: denser reports, with the decision-relevant fields in the envelope where truncation cannot reach them.
-
-## Reading these numbers later
-
-A comparison cohort is only meaningful against similar task shapes. Continuations are frequently deliberate corrections rather than failures, and a clean exit is not evidence of correct work. The share-of-context figures convert bytes to tokens at a flat 4 bytes per token and are indicative only.
+Handoff volume measures parent context received, including repeated background deliveries. It is not child runtime cost. Cost and routing coverage are in [`delegation-routing.md`](delegation-routing.md). The frozen record supports no claim about cap percentile behavior or causal effects from changing caps, so those claims are intentionally omitted.

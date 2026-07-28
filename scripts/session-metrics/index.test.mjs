@@ -121,6 +121,7 @@ function delegateFixture(exchanges) {
           type: 'custom_message',
           customType: exchange.customType,
           content: exchange.content,
+          details: exchange.details,
           id,
           parentId,
           timestamp: `2026-01-01T00:03:${String(index).padStart(2, '0')}.000Z`,
@@ -319,7 +320,8 @@ describe('delegate measurements', () => {
       ]),
     );
     expect(result).toMatchObject({
-      delegateBackgroundStarts: 1,
+      delegateBackgroundJobsLaunched: 1,
+      delegateBackgroundRunsLaunched: 1,
       delegateBackgroundDeliveries: 1,
       delegatedTasks: 1,
       // Only the delivered handoff, never the acknowledgement that preceded it.
@@ -360,7 +362,8 @@ describe('delegate measurements', () => {
       ]),
     );
     expect(result).toMatchObject({
-      delegateBackgroundStarts: 1,
+      delegateBackgroundJobsLaunched: 2,
+      delegateBackgroundRunsLaunched: 2,
       // Two jobs finished together and were delivered in one message.
       delegateBackgroundDeliveries: 2,
       delegatedTasks: 3,
@@ -406,7 +409,6 @@ describe('delegate measurements', () => {
                 output: 90,
                 turns: 8,
                 cost: 4,
-                computeUnits: 40,
               }),
             ],
           },
@@ -431,7 +433,6 @@ describe('delegate measurements', () => {
         turns: 3,
         usageInput: 150,
         usageOutput: 15,
-        computeUnits: 0,
         cost: 0.75,
         relativeCost: 1,
       },
@@ -440,7 +441,6 @@ describe('delegate measurements', () => {
         turns: 8,
         usageInput: 900,
         usageOutput: 90,
-        computeUnits: 40,
         cost: 4,
         relativeCost: 8,
       },
@@ -544,7 +544,146 @@ describe('delegate measurements', () => {
     ).toMatchObject({ delegateDeescalatedCalls: 1, delegateEscalatedCalls: 0 });
   });
 
-  it('counts continuations, including arguments left as JSON text', () => {
+  it('counts parallel continuations as calls, including arguments left as JSON text', () => {
+    const parallel = parseSessionJsonl(
+      delegateFixture([
+        { details: singleRun },
+        {
+          arguments: {
+            tasks: [
+              { continuation: 'one', task: 'PRIVATE' },
+              { continuation: 'two', task: 'PRIVATE' },
+            ],
+          },
+          details: { mode: 'parallel', runs: [{}, {}] },
+        },
+      ]),
+    );
+    expect(parallel).toMatchObject({
+      delegateContinuationCalls: 1,
+      delegateContinuationRate: 1 / 2,
+    });
+
+    // A parallel continuation participates in the escalation denominator too.
+    expect(parallel.delegateEscalationRate).toBe(0);
+
+    const result = parseSessionJsonl(
+      delegateFixture([
+        { arguments: { task: 'PRIVATE TASK' }, details: singleRun },
+        {
+          arguments: { continuation: 'token', task: 'PRIVATE' },
+          details: singleRun,
+        },
+        {
+          arguments: JSON.stringify({ continuation: 'token', task: 'PRIVATE' }),
+          details: singleRun,
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateToolCalls: 3,
+      delegateContinuationCalls: 2,
+      delegateContinuationRate: 2 / 3,
+    });
+  });
+
+  it('counts outcomes and return indicators once per execution', () => {
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          text: 'Outcome: partial\nArtifact: art_safe\nExact output artifact unavailable',
+          details: {
+            runs: [
+              {
+                state: 'timed-out',
+                artifact: { handle: 'art_safe' },
+                worktree: { branch: 'delegate/task' },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateOutcomePartial: 1,
+      delegateProcessTimeouts: 1,
+      delegateArtifactReferences: 1,
+      delegateArtifactFallbacks: 1,
+      delegateWorktreeReturns: 1,
+    });
+  });
+
+  it('counts background launches and executions once while charging repeated reports', () => {
+    const job = {
+      id: 'dj-1',
+      runs: [
+        {
+          allowWrites: true,
+          state: 'error',
+          routing: { route: 'quick', relativeCost: 1 },
+          usage: { turns: 2, cost: 3 },
+        },
+      ],
+    };
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          text: 'Started 1 background delegate job: dj-1.',
+          details: { mode: 'parallel', runs: [{ allowWrites: true }] },
+        },
+        {
+          customType: 'delegate-job-result',
+          content:
+            '# Background delegate job dj-1 (audit) error\n\nDelegated task succeeded\n\nOutcome: failed',
+          details: { jobs: [job] },
+        },
+        {
+          toolName: 'delegate_jobs',
+          text: '# Background delegate job dj-1 (audit) error\n\nDelegated task succeeded\n\nOutcome: failed',
+          details: { jobs: [job] },
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateBackgroundJobsLaunched: 1,
+      delegateBackgroundRunsLaunched: 1,
+      delegateBackgroundDeliveries: 2,
+      delegateParallelCalls: 1,
+      delegatedTasks: 1,
+      delegateWritableTasks: 1,
+      delegateOutcomeFailed: 1,
+      delegateProcessErrors: 1,
+      routedTasks: 1,
+      childTurns: 2,
+      childCost: 3,
+    });
+  });
+
+  it('excludes legacy unrouted tasks from child spend per-task ratios', () => {
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          details: {
+            runs: [
+              {
+                routing: { route: 'quick', relativeCost: 1 },
+                usage: { turns: 4, cost: 2 },
+              },
+            ],
+          },
+        },
+        { details: { runs: [{}] } },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegatedTasks: 2,
+      routedTasks: 1,
+      childTurnsPerTask: 4,
+      childCostPerTask: 2,
+    });
+  });
+
+  it('keeps delegated task text and handoff bodies out of the output', () => {
     const result = parseSessionJsonl(
       delegateFixture([
         { arguments: { task: 'PRIVATE TASK' }, details: singleRun },

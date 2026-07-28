@@ -112,11 +112,9 @@ function findSection(
     let to = index + 1;
     for (let next = index + 1; next < lines.length; next++) {
       const line = lines[next].trim();
-      // A bare heading is usually followed by a blank line and then its list.
-      if (!line) {
-        if (values.length) break;
-        continue;
-      }
+      // Markdown often separates list items or paragraphs with blank lines.
+      // They do not end a labelled section; only another heading does.
+      if (!line) continue;
       if (startsSection(line)) break;
       values.push(line.replace(/^[-*]\s+/, ''));
       to = next + 1;
