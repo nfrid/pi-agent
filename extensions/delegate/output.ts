@@ -1,23 +1,15 @@
 import {
   type DelegatedRun,
-  getFinalAssistantText,
+  getExactFinalAssistantText,
   getRunState,
   isRunError,
 } from './types';
 
-/**
- * A bound on what a handoff can cost, not an economy lever. Measured over 422
- * delegated tasks, the previous 12/50/8 KiB caps never once bound. These clip
- * 4.2% of single results for 1.0% of bytes, and 13.1% of parallel fans for 4.8%
- * — so the aggregate is the one that actually bites, and it bites the wide fans
- * that dominate the context tail. That is affordable because the envelope is
- * allocated before bodies: what a clip removes is prose, never the outcome,
- * evidence, or continuation token the parent acts on.
- */
+/** Safety bounds for parent-visible delegated reports. */
 export const PARENT_HANDOFF_CAPS = {
-  singleMaxBytes: 6 * 1024,
-  aggregateMaxBytes: 16 * 1024,
-  perTaskMaxBytes: 4 * 1024,
+  singleMaxBytes: 12 * 1024,
+  aggregateMaxBytes: 50 * 1024,
+  perTaskMaxBytes: 8 * 1024,
 } as const;
 
 export interface ParentHandoffCaps {
@@ -53,26 +45,9 @@ function clip(text: string, maxBytes: number): string {
   return out + suffix;
 }
 
-/** Sections of the report contract children are asked to follow. */
-const REPORT_LABELS = [
-  'Outcome',
-  'Conclusion',
-  'Evidence',
-  'Validation',
-  'Changed files',
-  'Risks',
-  'Exceeded',
-  'Blocked',
-] as const;
+const REPORT_LABELS = ['Outcome', 'Conclusion', 'Evidence', 'Risks', 'Blocked'];
 
-/**
- * Text after a section heading, or undefined when the line is not that heading.
- * The label must be followed by a colon or the end of the line, so prose opening
- * with the same word ("Outcomes improved…") does not read as a section.
- */
 function headingText(line: string, label: string): string | undefined {
-  // Children write the label bare, as a heading, or bold with the colon inside
-  // the markers; normalising first keeps one pattern for all three.
   const normalized = line
     .trim()
     .replace(/^#{1,6}\s+/, '')
@@ -91,171 +66,67 @@ function startsSection(line: string): boolean {
   );
 }
 
-/** Most content lines an envelope field carries before the rest is left to the body. */
-const MAX_FIELD_LINES = 5;
-
-interface ReportSection {
-  /** Line index of the heading, and of the first line past the section. */
-  from: number;
-  to: number;
-  values: string[];
-}
-
-function findSection(
-  lines: string[],
+function extractReportField(
+  report: string,
   label: string,
-): ReportSection | undefined {
+  maxBytes: number,
+): string | undefined {
+  const lines = report.split(/\r?\n/);
   for (let index = 0; index < lines.length; index++) {
     const heading = headingText(lines[index], label);
     if (heading === undefined) continue;
     const values = heading ? [heading] : [];
-    let to = index + 1;
     for (let next = index + 1; next < lines.length; next++) {
       const line = lines[next].trim();
-      // Markdown often separates list items or paragraphs with blank lines.
-      // They do not end a labelled section; only another heading does.
-      if (!line) continue;
       if (startsSection(line)) break;
-      values.push(line.replace(/^[-*]\s+/, ''));
-      to = next + 1;
+      if (line) values.push(line.replace(/^[-*]\s+/, ''));
     }
-    return { from: index, to, values };
+    const value = values.join(', ').trim();
+    return value ? clip(value, maxBytes) : undefined;
   }
   return undefined;
-}
-
-function fieldValue(section: ReportSection): string {
-  return section.values.slice(0, MAX_FIELD_LINES).join(', ').trim();
-}
-
-function extractReportField(
-  body: string,
-  label: string,
-  maxBytes = 120,
-): string | undefined {
-  const section = findSection(body.split(/\r?\n/), label);
-  if (!section) return undefined;
-  const value = fieldValue(section);
-  return value ? clip(value, maxBytes) : undefined;
-}
-
-/**
- * Whether the envelope field carries the section entire, so the body's copy is
- * pure repetition. A section clipped to fit, or longer than the field takes,
- * still has something left to say.
- */
-function liftedWhole(section: ReportSection, maxBytes: number): boolean {
-  if (section.values.length > MAX_FIELD_LINES) return false;
-  const flat = fieldValue(section).replace(/\s+/g, ' ').trim();
-  return Boolean(flat) && Buffer.byteLength(flat, 'utf8') <= maxBytes;
-}
-
-/**
- * Drops sections the envelope already carries in full. The parent is shown the
- * envelope and the body together, so without this every lifted field arrives
- * twice and the repetition competes with the report for the byte budget.
- */
-function stripLiftedSections(
-  body: string,
-  lifted: ReadonlyArray<[string, number]>,
-): string {
-  const lines = body.split(/\r?\n/);
-  const drop = new Set<number>();
-  for (const [label, maxBytes] of lifted) {
-    const section = findSection(lines, label);
-    if (!section || !liftedWhole(section, maxBytes)) continue;
-    for (let index = section.from; index < section.to; index++) drop.add(index);
-  }
-  if (drop.size === 0) return body;
-  return lines
-    .filter((_, index) => !drop.has(index))
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-/** The conclusion with its line structure intact, unlike the flattened envelope fields. */
-function conclusionSection(body: string): string | undefined {
-  const lines = body.split(/\r?\n/);
-  for (let index = 0; index < lines.length; index++) {
-    if (headingText(lines[index], 'Conclusion') === undefined) continue;
-    // Keeps its own heading, so re-truncating an already-reduced body finds it again.
-    const collected = [lines[index].trim()];
-    for (let next = index + 1; next < lines.length; next++) {
-      if (startsSection(lines[next])) break;
-      collected.push(lines[next]);
-    }
-    const text = collected.join('\n').trim();
-    return text || undefined;
-  }
-  return undefined;
-}
-
-/**
- * Keeps the answer when the body has to be cut. Truncation runs from the end, so
- * a child that narrates before concluding would otherwise lose the one part the
- * parent needs; fall back to the conclusion alone when the head does not carry it.
- */
-function truncateBody(original: string, maxBytes: number): string {
-  const head = truncateBytes(original, maxBytes);
-  if (head === original) return original;
-  const conclusion = conclusionSection(original);
-  if (!conclusion || head.includes(conclusion)) return head;
-  return truncateBytes(conclusion, maxBytes);
 }
 
 /** The question a child stopped on, when it ended its report with one. */
 export function blockedQuestion(run: DelegatedRun): string | undefined {
-  return extractReportField(getFinalAssistantText(run.messages), 'Blocked');
-}
-
-function runBody(run: DelegatedRun): string {
-  const final = getFinalAssistantText(run.messages).trim();
-  return (
-    final || run.errorMessage?.trim() || run.stderr.trim() || '(no output)'
+  return extractReportField(
+    getExactFinalAssistantText(run.messages),
+    'Blocked',
+    240,
   );
 }
 
-interface PreparedRun {
-  envelope: string;
-  body: string;
-  bodyTruncated: boolean;
+function runBody(run: DelegatedRun): {
+  text: string;
+  originalReport?: string;
+} {
+  const originalReport = getExactFinalAssistantText(run.messages);
+  if (originalReport) return { text: originalReport, originalReport };
+  return {
+    text: run.errorMessage?.trim() || run.stderr.trim() || '(no output)',
+  };
 }
 
-/** Envelope fields lifted from the report, and the bytes each is allowed. */
-const LIFTED_FIELDS: ReadonlyArray<[string, number]> = [
-  ['Outcome', 32],
-  ['Blocked', 240],
-  ['Exceeded', 240],
-  ['Evidence', 400],
-  ['Validation', 240],
-  ['Risks', 240],
-  ['Changed files', 120],
-];
+interface PreparedRun {
+  run: DelegatedRun;
+  envelope: string;
+  originalBody: string;
+  originalReport?: string;
+  body: string;
+}
 
-function prepareRun(run: DelegatedRun, bodyCap: number): PreparedRun {
-  const original = runBody(run);
-  // Fields come from the untouched report; the body then drops what they carry
-  // whole, so the budget is spent on what the envelope could not take.
-  const reported = stripLiftedSections(original, LIFTED_FIELDS);
-  const body = truncateBody(reported, bodyCap);
-  const bodyTruncated = body !== reported;
-  const lines = [`Status: ${getRunState(run)}`];
-  // Mandatory metadata, so what the parent decides on survives body truncation.
-  // Outcome leads: the process exiting cleanly says nothing about whether the
-  // task reached its finish line.
-  const outcome = extractReportField(original, 'Outcome', 32);
-  if (outcome) lines.push(`Outcome: ${outcome}`);
+function prepareRun(run: DelegatedRun): PreparedRun {
+  const { text: originalBody, originalReport } = runBody(run);
+  const lines = [
+    `Status: ${getRunState(run)}`,
+    `Outcome: ${extractReportField(originalBody, 'Outcome', 32) ?? '(not reported)'}`,
+    `Conclusion: ${extractReportField(originalBody, 'Conclusion', 600) ?? '(not reported)'}`,
+  ];
   if (run.continuation) lines.push(`Continuation: ${run.continuation}`);
-  const blocked = extractReportField(original, 'Blocked', 240);
+  const blocked = extractReportField(originalBody, 'Blocked', 240);
   if (blocked)
     lines.push(
       `Blocked: ${blocked} — answer it and continue this subagent; its context is intact.`,
-    );
-  const exceeded = extractReportField(original, 'Exceeded', 240);
-  if (exceeded)
-    lines.push(
-      `Exceeded: ${exceeded} — continue this subagent on a route that covers it rather than re-briefing a fresh one.`,
     );
   if (run.artifact)
     lines.push(
@@ -273,7 +144,8 @@ function prepareRun(run: DelegatedRun, bodyCap: number): PreparedRun {
       );
   }
   if (isRunError(run)) {
-    const failure = run.errorMessage?.trim() || run.stderr.trim() || original;
+    const failure =
+      run.errorMessage?.trim() || run.stderr.trim() || originalBody;
     lines.push(`Failure: ${clip(failure, 120)}`);
   }
   const warnings = [run.routing?.warning, ...(run.warnings ?? [])].filter(
@@ -281,95 +153,115 @@ function prepareRun(run: DelegatedRun, bodyCap: number): PreparedRun {
   );
   if (warnings.length)
     lines.push(`Warnings: ${clip(warnings.join('; '), 120)}`);
-  const evidence = extractReportField(original, 'Evidence', 400);
+  const evidence = extractReportField(originalBody, 'Evidence', 400);
   if (evidence) lines.push(`Evidence: ${evidence}`);
-  const validation = extractReportField(original, 'Validation', 240);
-  if (validation) lines.push(`Validation: ${validation}`);
-  const risks = extractReportField(original, 'Risks', 240);
+  const risks = extractReportField(originalBody, 'Risks', 240);
   if (risks) lines.push(`Risks: ${risks}`);
-  const changed = extractReportField(original, 'Changed files');
-  if (changed) lines.push(`Changed files: ${changed}`);
-  lines.push(
-    `Truncation: ${bodyTruncated ? 'body truncated; full details preserved' : 'none'}`,
-  );
-  return { envelope: lines.join('\n'), body, bodyTruncated };
+  lines.push('Truncation: none');
+  return {
+    run,
+    envelope: lines.join('\n'),
+    originalBody,
+    originalReport,
+    body: '',
+  };
 }
 
-/** Builds parent-visible text while keeping every run's mandatory metadata ahead of all bodies. */
-export function buildParentHandoff(
+function withTruncationMarker(item: PreparedRun): PreparedRun {
+  const truncated = item.body !== item.originalBody;
+  return {
+    ...item,
+    envelope: item.envelope.replace(
+      /Truncation: (?:none|original report truncated)/,
+      `Truncation: ${truncated ? 'original report truncated' : 'none'}`,
+    ),
+  };
+}
+
+function envelopeBlock(items: PreparedRun[], parallel: boolean): string {
+  return items
+    .map(
+      (item, index) =>
+        `${parallel ? `## Task ${index + 1}\n` : ''}${item.envelope}`,
+    )
+    .join('\n\n');
+}
+
+function allocateBodies(
+  items: PreparedRun[],
+  summary: string,
+  totalCap: number,
+  perBodyCap: number,
+  parallel: boolean,
+): PreparedRun[] {
+  let remaining = Math.max(
+    0,
+    totalCap -
+      Buffer.byteLength(
+        `${summary}\n\n${envelopeBlock(items, parallel)}`,
+        'utf8',
+      ),
+  );
+  let emitted = false;
+  return items.map((item, index) => {
+    const prefix = `${emitted ? '\n\n---\n\n' : '\n\n'}${
+      parallel ? `### Task ${index + 1} output\n` : 'Output\n'
+    }`;
+    const prefixBytes = Buffer.byteLength(prefix, 'utf8');
+    if (!item.originalBody || remaining <= prefixBytes)
+      return { ...item, body: '' };
+    const available = Math.min(perBodyCap, remaining - prefixBytes);
+    const body = truncateBytes(item.originalBody, available);
+    emitted = true;
+    remaining -= prefixBytes + Buffer.byteLength(body, 'utf8');
+    return { ...item, body };
+  });
+}
+
+export interface ParentHandoffResult {
+  text: string;
+  /** Runs whose exact final report was omitted or truncated from the handoff body. */
+  truncatedOriginalReports: ReadonlySet<DelegatedRun>;
+}
+
+/** Builds a bounded handoff with every envelope allocated before report bodies. */
+export function buildParentHandoffResult(
   runs: DelegatedRun[],
   caps: ParentHandoffCaps = PARENT_HANDOFF_CAPS,
-): string {
+): ParentHandoffResult {
   const parallel = runs.length > 1;
   const totalCap = parallel ? caps.aggregateMaxBytes : caps.singleMaxBytes;
   const perBodyCap = parallel ? caps.perTaskMaxBytes : caps.singleMaxBytes;
-  let prepared = runs.map((run) => prepareRun(run, perBodyCap));
-  const statusSummary = parallel
-    ? `Delegated tasks: ${runs.filter((run) => !isRunError(run)).length}/${runs.length} succeeded`
-    : `Delegated task ${runs[0] && isRunError(runs[0]) ? 'failed' : 'succeeded'}`;
-  let summary = statusSummary;
+  const summary = `Delegated results: ${runs.length} run(s)`;
+  let prepared = runs.map(prepareRun);
 
-  const envelopeBlock = (items: PreparedRun[]) =>
-    items
-      .map(
-        (item, index) =>
-          `${parallel ? `## Task ${index + 1}\n` : ''}${item.envelope}`,
-      )
-      .join('\n\n');
-  const mandatoryBytes = (items: PreparedRun[]) =>
-    Buffer.byteLength(`${summary}\n\n${envelopeBlock(items)}`, 'utf8');
-  const mandatoryOverflowWarning =
-    'Mandatory metadata exceeds the handoff size cap; continuation tokens and other mandatory metadata are preserved, and task bodies are omitted.';
-  if (mandatoryBytes(prepared) > totalCap)
-    summary += `\n${mandatoryOverflowWarning}`;
-  const allocateBodies = (items: PreparedRun[]) => {
-    let remaining = Math.max(0, totalCap - mandatoryBytes(items));
-    let emitted = false;
-    return items.map((item, index) => {
-      const prefix = `${emitted ? '\n\n---\n\n' : '\n\n'}${
-        parallel ? `### Task ${index + 1} output\n` : 'Output\n'
-      }`;
-      const prefixBytes = Buffer.byteLength(prefix, 'utf8');
-      if (remaining <= prefixBytes)
-        return { ...item, body: '', bodyTruncated: true };
-      const available = remaining - prefixBytes;
-      const body = truncateBody(item.body, available);
-      emitted = true;
-      remaining -= prefixBytes + Buffer.byteLength(body, 'utf8');
-      return {
-        ...item,
-        body,
-        bodyTruncated: item.bodyTruncated || body !== item.body,
-      };
-    });
-  };
-  const markTruncation = (items: PreparedRun[]) =>
-    items.map((item) => ({
-      ...item,
-      envelope: item.envelope.replace(
-        /Truncation: (?:none|body truncated; full details preserved)/,
-        item.bodyTruncated
-          ? 'Truncation: body truncated; full details preserved'
-          : 'Truncation: none',
-      ),
-    }));
+  // Markers add bytes to the mandatory envelope, so allocate once to discover
+  // them and again against their final size.
+  prepared = allocateBodies(
+    prepared,
+    summary,
+    totalCap,
+    perBodyCap,
+    parallel,
+  ).map(withTruncationMarker);
+  prepared = allocateBodies(
+    prepared,
+    summary,
+    totalCap,
+    perBodyCap,
+    parallel,
+  ).map(withTruncationMarker);
 
-  // A second allocation accounts for the longer mandatory truncation markers.
-  prepared = allocateBodies(prepared);
-  prepared = allocateBodies(markTruncation(prepared));
-  prepared = markTruncation(prepared);
-  if (mandatoryBytes(prepared) > totalCap) {
-    if (!summary.includes(mandatoryOverflowWarning))
-      summary += `\n${mandatoryOverflowWarning}`;
-    prepared = markTruncation(
-      prepared.map((item) => ({
-        ...item,
-        body: '',
-        bodyTruncated: true,
-      })),
-    );
+  const mandatory = `${summary}\n\n${envelopeBlock(prepared, parallel)}`;
+  const overflow = Buffer.byteLength(mandatory, 'utf8') > totalCap;
+  const overflowWarning =
+    'Mandatory metadata exceeds the handoff size cap; task bodies are omitted.';
+  if (overflow) {
+    prepared = prepared
+      .map((item) => ({ ...item, body: '' }))
+      .map(withTruncationMarker);
   }
-  const envelopes = envelopeBlock(prepared);
+  const envelopes = envelopeBlock(prepared, parallel);
   const bodies = prepared
     .map((item, index) =>
       item.body
@@ -378,5 +270,24 @@ export function buildParentHandoff(
     )
     .filter(Boolean)
     .join('\n\n---\n\n');
-  return `${summary}\n\n${envelopes}${bodies ? `\n\n${bodies}` : ''}`;
+  const text = `${summary}${overflow ? `\n${overflowWarning}` : ''}\n\n${envelopes}${bodies ? `\n\n${bodies}` : ''}`;
+  return {
+    text,
+    truncatedOriginalReports: new Set(
+      prepared
+        .filter(
+          (item) =>
+            item.originalReport !== undefined &&
+            item.body !== item.originalReport,
+        )
+        .map((item) => item.run),
+    ),
+  };
+}
+
+export function buildParentHandoff(
+  runs: DelegatedRun[],
+  caps: ParentHandoffCaps = PARENT_HANDOFF_CAPS,
+): string {
+  return buildParentHandoffResult(runs, caps).text;
 }

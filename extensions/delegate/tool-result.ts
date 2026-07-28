@@ -3,7 +3,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { artifactProducer } from '../shared/artifacts';
-import { buildParentHandoff } from './output';
+import { buildParentHandoffResult } from './output';
 import { throwIfAllRunsFailed } from './param-errors';
 import {
   type DelegateDetails,
@@ -24,14 +24,19 @@ export async function buildArtifactBackedHandoff(
   runs: DelegatedRun[],
   put = artifactProducer.put,
 ): Promise<string> {
-  let handoff = buildParentHandoff(runs);
+  let result = buildParentHandoffResult(runs);
   const failedRuns = new Set<DelegatedRun>();
   for (let pass = 0; pass < runs.length; pass++) {
     let changed = false;
     for (const run of runs) {
-      if (run.artifact || failedRuns.has(run)) continue;
+      if (
+        run.artifact ||
+        failedRuns.has(run) ||
+        !result.truncatedOriginalReports.has(run)
+      )
+        continue;
       const exact = getExactFinalAssistantText(run.messages);
-      if (!exact || handoff.includes(exact)) continue;
+      if (!exact) continue;
       try {
         run.artifact = await put(pi, ctx, {
           bytes: exact,
@@ -51,9 +56,9 @@ export async function buildArtifactBackedHandoff(
       }
     }
     if (!changed) break;
-    handoff = buildParentHandoff(runs);
+    result = buildParentHandoffResult(runs);
   }
-  return handoff;
+  return result.text;
 }
 
 export async function delegateToolResult(
