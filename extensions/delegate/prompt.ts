@@ -1,3 +1,9 @@
+function formatRuntime(timeoutMs: number): string {
+  if (timeoutMs < 60_000)
+    return `${Math.max(1, Math.round(timeoutMs / 1000))} seconds`;
+  return `${Math.max(1, Math.round(timeoutMs / 60_000))} minutes`;
+}
+
 export function buildDelegatePrompt(
   task: string,
   options: {
@@ -5,6 +11,8 @@ export function buildDelegatePrompt(
     contextNote?: string;
     scope?: string[];
     continuation?: boolean;
+    /** Configured maximum runtime for this delegated run, in milliseconds. */
+    timeoutMs?: number;
     /** Branch of the worktree this task runs in, when it has one. */
     branch?: string;
   } = {},
@@ -23,11 +31,17 @@ export function buildDelegatePrompt(
   const framing = options.continuation
     ? 'This is follow-up feedback from the parent on your previous work. Continue from the existing session and address it directly.'
     : 'Return a short result the parent can act on.';
+  const runtime =
+    options.timeoutMs !== undefined &&
+    Number.isFinite(options.timeoutMs) &&
+    options.timeoutMs > 0
+      ? `\n\nThis run has a maximum runtime of approximately ${formatRuntime(options.timeoutMs)}; reserve time to return partial findings.`
+      : '';
   return `You are a coding subagent reporting to a parent agent. Work only on the delegated task. If something is unclear, pick one reasonable default and say what you assumed.
 
 ${task}${context}${scope}
 
-${framing}
+${framing}${runtime}
 
 Report in these sections. Only "Outcome" and "Conclusion" are required; include another section when you have something to put in it, which on a small task may be none of them.
 

@@ -94,7 +94,7 @@ export function buildChildArgs(
     | 'contextNote'
     | 'scope'
     | 'resuming'
-  >,
+  > & { timeoutMs?: number },
   sessionPath: string,
 ): string[] {
   const allowWrites = options.allowWrites === true;
@@ -125,6 +125,7 @@ export function buildChildArgs(
       contextNote: options.contextNote,
       scope: options.scope,
       continuation: options.resuming,
+      timeoutMs: options.timeoutMs,
       branch: options.worktree?.record.branch,
     }),
   );
