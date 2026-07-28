@@ -384,6 +384,166 @@ describe('delegate measurements', () => {
     ).toMatchObject({ delegateBackgroundDeliveries: 0, delegatedTasks: 0 });
   });
 
+  it('charges what a child spent to the route that ran it', () => {
+    const run = (route, relativeCost, usage) => ({
+      routing: { route, relativeCost },
+      usage,
+    });
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          details: {
+            mode: 'parallel',
+            runs: [
+              run('luna-low', 1, {
+                input: 100,
+                output: 10,
+                turns: 2,
+                cost: 0.5,
+              }),
+              run('terra-high', 8, {
+                input: 900,
+                output: 90,
+                turns: 8,
+                cost: 4,
+                computeUnits: 40,
+              }),
+            ],
+          },
+        },
+        {
+          details: {
+            runs: [
+              run('luna-low', 1, {
+                input: 50,
+                output: 5,
+                turns: 1,
+                cost: 0.25,
+              }),
+            ],
+          },
+        },
+      ]),
+    );
+    expect(result.routes).toEqual({
+      'luna-low': {
+        tasks: 2,
+        turns: 3,
+        usageInput: 150,
+        usageOutput: 15,
+        computeUnits: 0,
+        cost: 0.75,
+        relativeCost: 1,
+      },
+      'terra-high': {
+        tasks: 1,
+        turns: 8,
+        usageInput: 900,
+        usageOutput: 90,
+        computeUnits: 40,
+        cost: 4,
+        relativeCost: 8,
+      },
+    });
+    expect(result).toMatchObject({ childTurns: 11, childCost: 4.75 });
+  });
+
+  it('bills a background job to its route once however often it is reported', () => {
+    const job = {
+      id: 'dj-1',
+      runs: [
+        {
+          routing: { route: 'terra-max', relativeCost: 13 },
+          usage: { turns: 9 },
+        },
+      ],
+    };
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          text: 'Started 1 background delegate job: dj-1.',
+          // The acknowledgement's run has not spent anything yet.
+          details: {
+            runs: [
+              { routing: { route: 'terra-max', relativeCost: 13 }, usage: {} },
+            ],
+          },
+        },
+        {
+          customType: 'delegate-job-result',
+          content:
+            '# Background delegate job dj-1 (audit) success\n\nDelegated task succeeded\n\nStatus: success',
+          details: { jobs: [job] },
+        },
+        {
+          toolName: 'delegate_jobs',
+          text: 'Background delegate job dj-1 (audit) success\n\nDelegated task succeeded\n\nStatus: success',
+          details: { jobs: [job] },
+        },
+      ]),
+    );
+    // Delivered and then peeked at: two handoffs the parent paid context for,
+    // but only one child run to bill.
+    expect(result.delegateBackgroundDeliveries).toBe(2);
+    expect(result.routes['terra-max'].tasks).toBe(1);
+    expect(result.childTurns).toBe(9);
+  });
+
+  it('counts a continuation onto a costlier route as an escalation', () => {
+    const first = {
+      details: {
+        runs: [
+          {
+            continuation: 'token',
+            routing: { route: 'luna-low', relativeCost: 1 },
+            usage: {},
+          },
+        ],
+      },
+    };
+    const resumed = (route, relativeCost) => ({
+      arguments: { continuation: 'token' },
+      details: {
+        runs: [{ continuation: 'token', routing: { route, relativeCost } }],
+      },
+    });
+
+    expect(
+      parseSessionJsonl(delegateFixture([first, resumed('terra-high', 8)])),
+    ).toMatchObject({
+      delegateEscalatedCalls: 1,
+      delegateDeescalatedCalls: 0,
+      delegateEscalationRate: 1,
+    });
+
+    // Resuming on the route it was already on is the default, and is neither.
+    expect(
+      parseSessionJsonl(delegateFixture([first, resumed('luna-low', 1)])),
+    ).toMatchObject({
+      delegateEscalatedCalls: 0,
+      delegateDeescalatedCalls: 0,
+    });
+
+    expect(
+      parseSessionJsonl(
+        delegateFixture([
+          {
+            details: {
+              runs: [
+                {
+                  continuation: 'token',
+                  routing: { route: 'terra-max', relativeCost: 13 },
+                  usage: {},
+                },
+              ],
+            },
+          },
+          resumed('luna-low', 1),
+        ]),
+      ),
+    ).toMatchObject({ delegateDeescalatedCalls: 1, delegateEscalatedCalls: 0 });
+  });
+
   it('counts continuations, including arguments left as JSON text', () => {
     const result = parseSessionJsonl(
       delegateFixture([

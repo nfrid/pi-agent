@@ -28,6 +28,13 @@ const METRIC_KEYS = [
   'delegateHandoffBytes',
   'delegateBackgroundStarts',
   'delegateBackgroundDeliveries',
+  'delegateEscalatedCalls',
+  'delegateDeescalatedCalls',
+  'childTurns',
+  'childUsageInput',
+  'childUsageOutput',
+  'childComputeUnits',
+  'childCost',
 ];
 
 function ratio(numerator, denominator) {
@@ -50,6 +57,12 @@ const RATIO_KEYS = {
     ratio(m.delegateTruncatedTasks, m.delegatedTasks),
   delegateContinuationRate: (m) =>
     ratio(m.delegateContinuationCalls, m.delegateToolCalls),
+  // Of the calls that resumed earlier work, the share that needed a costlier
+  // route to do it. High means the first route is being picked too cheaply.
+  delegateEscalationRate: (m) =>
+    ratio(m.delegateEscalatedCalls, m.delegateContinuationCalls),
+  childTurnsPerTask: (m) => ratio(m.childTurns, m.delegatedTasks),
+  childCostPerTask: (m) => ratio(m.childCost, m.delegatedTasks),
 };
 
 function withRatios(metrics) {
@@ -169,6 +182,91 @@ function recordDelegateResult(metrics, message) {
   metrics.delegateTruncatedTasks += Math.min(truncated, runs.length);
 }
 
+/** Per-route counters, created on first sight so absent routes stay absent. */
+function routeBucket(routes, name) {
+  routes[name] ??= {
+    tasks: 0,
+    turns: 0,
+    usageInput: 0,
+    usageOutput: 0,
+    computeUnits: 0,
+    cost: 0,
+    relativeCost: 0,
+  };
+  return routes[name];
+}
+
+/**
+ * What a child actually spent, charged to the route that ran it. Usage lives on
+ * the run rather than in the child's own session file, so this needs only the
+ * parent transcript. A run is recorded once: background jobs are keyed by id, so
+ * a job that is delivered and then peeked at does not bill its route twice —
+ * unlike handoff bytes, the child ran only once however often it is reported.
+ */
+function recordRouting(state, runs, jobId) {
+  if (jobId !== undefined) {
+    if (state.billedJobs.has(jobId)) return;
+    state.billedJobs.add(jobId);
+  }
+  for (const run of runs) {
+    const routing = run?.routing;
+    if (!routing || typeof routing.route !== 'string') continue;
+    const usage = run.usage ?? {};
+    const bucket = routeBucket(state.routes, routing.route);
+    bucket.tasks += 1;
+    bucket.turns += finiteNumber(usage.turns);
+    bucket.usageInput += finiteNumber(usage.input);
+    bucket.usageOutput += finiteNumber(usage.output);
+    bucket.computeUnits += finiteNumber(usage.computeUnits);
+    bucket.cost += finiteNumber(usage.cost);
+    bucket.relativeCost = finiteNumber(routing.relativeCost);
+    state.metrics.childTurns += finiteNumber(usage.turns);
+    state.metrics.childUsageInput += finiteNumber(usage.input);
+    state.metrics.childUsageOutput += finiteNumber(usage.output);
+    state.metrics.childComputeUnits += finiteNumber(usage.computeUnits);
+    state.metrics.childCost += finiteNumber(usage.cost);
+    // Remember what this run cost so a call that resumes it can be compared.
+    if (typeof run.continuation === 'string')
+      state.routeByContinuation.set(
+        run.continuation,
+        finiteNumber(routing.relativeCost),
+      );
+  }
+}
+
+/**
+ * Whether resuming a task moved it to a costlier route. The parent is told what
+ * fell short, never which route to use, so a move here is the parent's own
+ * judgement about the first choice — which makes the rate a read on routing
+ * quality rather than on the children.
+ */
+function recordEscalation(state, runs) {
+  const tokens = state.pendingContinuations;
+  state.pendingContinuations = [];
+  const known = tokens
+    .map((token) => state.routeByContinuation.get(token))
+    .filter((cost) => cost !== undefined);
+  if (known.length === 0 || runs.length === 0) return;
+  // A parallel call cannot be matched task-to-task from the transcript, so the
+  // comparison is call-level: the costliest route it resumed against the
+  // costliest it landed on. One escalation per call, never per task.
+  const before = Math.max(...known);
+  const after = Math.max(
+    ...runs.map((run) => finiteNumber(run?.routing?.relativeCost)),
+  );
+  if (after > before) state.metrics.delegateEscalatedCalls += 1;
+  if (after < before) state.metrics.delegateDeescalatedCalls += 1;
+}
+
+/** Every continuation token a call is resuming, single or parallel. */
+function continuationTokens(call) {
+  const args = toolArguments(call);
+  const tasks = Array.isArray(args.tasks) ? args.tasks : [];
+  return [args.continuation, ...tasks.map((task) => task?.continuation)].filter(
+    (token) => typeof token === 'string',
+  );
+}
+
 function activeAncestry(entries) {
   const byId = new Map(
     entries
@@ -209,6 +307,13 @@ export function parseSessionJsonl(source) {
 
   const active = activeAncestry(entries);
   const metrics = Object.fromEntries(METRIC_KEYS.map((key) => [key, 0]));
+  const state = {
+    metrics,
+    routes: {},
+    billedJobs: new Set(),
+    routeByContinuation: new Map(),
+    pendingContinuations: [],
+  };
   const timestamps = [];
   for (const entry of active) {
     const timestamp = Date.parse(entry.timestamp ?? entry.message?.timestamp);
@@ -216,8 +321,11 @@ export function parseSessionJsonl(source) {
     if (entry.type === 'compaction') metrics.compactions += 1;
     // A finished background job is pushed to the parent as a steering message,
     // outside the tool-result stream its `delegate` call belonged to.
-    if (entry.customType === 'delegate-job-result')
+    if (entry.customType === 'delegate-job-result') {
       recordBackgroundDelivery(metrics, entry.content ?? '');
+      for (const job of entry.details?.jobs ?? [])
+        recordRouting(state, job?.runs ?? [], job?.id);
+    }
     if (entry.type !== 'message') continue;
     const message = entry.message;
     if (message?.role === 'user') metrics.userTurns += 1;
@@ -229,6 +337,8 @@ export function parseSessionJsonl(source) {
       metrics.delegateContinuationCalls += delegated.filter(
         (call) => typeof toolArguments(call).continuation === 'string',
       ).length;
+      for (const call of delegated)
+        state.pendingContinuations.push(...continuationTokens(call));
       const usage = message.usage ?? {};
       metrics.usageInput += finiteNumber(usage.input);
       metrics.usageOutput += finiteNumber(usage.output);
@@ -243,10 +353,25 @@ export function parseSessionJsonl(source) {
     }
     if (message?.role === 'toolResult' && message.toolName === 'todo')
       metrics.todoToolResults += 1;
-    if (message?.role === 'toolResult' && message.toolName === 'delegate')
+    if (message?.role === 'toolResult' && message.toolName === 'delegate') {
       recordDelegateResult(metrics, message);
-    if (message?.role === 'toolResult' && message.toolName === 'delegate_jobs')
+      const runs = Array.isArray(message.details?.runs)
+        ? message.details.runs
+        : [];
+      recordEscalation(state, runs);
+      // A background acknowledgement's runs have not spent anything yet; they
+      // are billed when the finished job is delivered.
+      if (!BACKGROUND_START_MARKER.test(resultText(message)))
+        recordRouting(state, runs);
+    }
+    if (
+      message?.role === 'toolResult' &&
+      message.toolName === 'delegate_jobs'
+    ) {
       recordBackgroundDelivery(metrics, resultText(message));
+      for (const job of message.details?.jobs ?? [])
+        recordRouting(state, job?.runs ?? [], job?.id);
+    }
   }
   if (timestamps.length > 1)
     metrics.elapsedMs = Math.max(...timestamps) - Math.min(...timestamps);
@@ -254,6 +379,7 @@ export function parseSessionJsonl(source) {
   return {
     sessionId: createHash('sha256').update(source).digest('hex').slice(0, 12),
     ...withRatios(metrics),
+    routes: state.routes,
     malformedLines,
   };
 }
@@ -265,6 +391,24 @@ function median(values) {
   return sorted.length % 2
     ? sorted[middle]
     : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+/**
+ * Route buckets merged across sessions. Kept beside the numeric totals rather
+ * than inside them: `compare` subtracts totals key by key, and a route present
+ * in one cohort and absent from the other has no meaningful difference.
+ */
+function mergeRoutes(sessions) {
+  const routes = {};
+  for (const session of sessions)
+    for (const [name, bucket] of Object.entries(session.routes ?? {})) {
+      const target = routeBucket(routes, name);
+      for (const [key, value] of Object.entries(bucket))
+        target[key] = key === 'relativeCost' ? value : target[key] + value;
+    }
+  return Object.fromEntries(
+    Object.entries(routes).sort((a, b) => b[1].tasks - a[1].tasks),
+  );
 }
 
 export function aggregateSessions(sessions) {
@@ -280,7 +424,12 @@ export function aggregateSessions(sessions) {
       (key) => [key, median(sessions.map((session) => session[key]))],
     ),
   );
-  return { sessionCount: sessions.length, totals, medians };
+  return {
+    sessionCount: sessions.length,
+    totals,
+    medians,
+    routes: mergeRoutes(sessions),
+  };
 }
 
 async function discover(input) {

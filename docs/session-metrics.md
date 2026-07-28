@@ -41,7 +41,21 @@ These answer what delegation costs the parent's context, which is the resource a
 
 Background work is charged where the parent actually pays for it. A background call returns an acknowledgement naming the job, and the report arrives later — pushed as a `delegate-job-result` steering message when the job finishes, or returned by a `delegate_jobs peek` the parent asks for. The acknowledgement counts as neither tasks nor bytes; each delivery counts as both, by either route. Several jobs finishing together are delivered in one message, and are counted separately. Counting the acknowledgement instead would charge a task the cost of a receipt and never count what it sent back. A job delivered once and then peeked at again counts twice, because the parent was given both copies.
 
-Ratios have one definition, applied identically to a session and to a cohort, so a cohort ratio is weighted by summed totals rather than averaged from per-session ratios: `cacheHitRatio` is `cacheRead / (input + cacheRead + cacheWrite)`, `delegateHandoffBytesPerTask` is bytes over tasks, `delegateTruncationRate` is truncated over total tasks, and `delegateContinuationRate` is continuations over calls.
+## Routing measurements
+
+These answer a different question: not what delegation costs the parent's context, but what it costs to run, and whether work is landing on the right rung of the catalog.
+
+- `routes` — a per-route breakdown of `tasks`, `turns`, `usageInput`, `usageOutput`, `computeUnits`, `cost`, and the catalog's `relativeCost`. It sits beside the numeric totals rather than inside them, because `compare` subtracts totals key by key and a route present in one cohort and absent from the other has no meaningful difference.
+- `childTurns`, `childUsageInput`, `childUsageOutput`, `childComputeUnits`, `childCost` — the same spend summed across routes, with `childTurnsPerTask` and `childCostPerTask` derived from it.
+- `delegateEscalatedCalls`, `delegateDeescalatedCalls` — continuations that resumed a task on a costlier or cheaper route than it was running on, with `delegateEscalationRate` over all continuation calls.
+
+Child spend comes from the run records in the parent transcript, so no child session files are read. A run is billed once: background jobs are keyed by job id, so a job delivered and then peeked at bills its route a single time. That is the opposite of the handoff-byte rule above, and deliberately so — the parent paid context for both copies, but the child only ever ran once.
+
+Escalation is judged per call, not per task. A parallel call cannot be matched task-to-task from the transcript, so it compares the costliest route it resumed against the costliest it landed on. Only routes count, never models: a continuation that omits `route` reuses the persisted one, so a difference here is always the parent deliberately re-routing.
+
+## Ratios
+
+Ratios have one definition, applied identically to a session and to a cohort, so a cohort ratio is weighted by summed totals rather than averaged from per-session ratios: `cacheHitRatio` is `cacheRead / (input + cacheRead + cacheWrite)`, `delegateHandoffBytesPerTask` is bytes over tasks, `delegateTruncationRate` is truncated over total tasks, `delegateContinuationRate` is continuations over calls, and `delegateEscalationRate` is escalations over continuation calls.
 
 ## Privacy and interpretation
 
