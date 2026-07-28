@@ -263,16 +263,22 @@ export function registerDelegateTool(
         };
       }
 
-      const runs = await runPreparedDelegateExecution(runCtx, execution, {
-        onUpdate: (partial) => {
-          if (statusIds)
-            backgroundRuntime?.statuses.updateMany(
-              statusIds,
-              partial.details?.runs ?? [],
-            );
-          onUpdate?.(partial);
-        },
-      });
+      let runs: Awaited<ReturnType<typeof runPreparedDelegateExecution>>;
+      try {
+        runs = await runPreparedDelegateExecution(runCtx, execution, {
+          onUpdate: (partial) => {
+            if (statusIds)
+              backgroundRuntime?.statuses.updateMany(
+                statusIds,
+                partial.details?.runs ?? [],
+              );
+            onUpdate?.(partial);
+          },
+        });
+      } catch (error) {
+        if (statusIds) backgroundRuntime?.statuses.finish(statusIds);
+        throw error;
+      }
       if (statusIds) {
         backgroundRuntime?.statuses.updateMany(statusIds, runs);
         backgroundRuntime?.statuses.resultEntered(statusIds);

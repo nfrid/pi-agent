@@ -183,6 +183,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   // down mid-run would discard the mounted render loop. A plain sync refreshes
   // the existing component in place.
   pi.on('agent_start', syncWidget);
+  pi.on('turn_start', () => statuses?.parentTurnStarted());
   pi.on('message_end', (event) => {
     if (event.message.role === 'assistant') statuses?.parentAssistantMessage();
   });

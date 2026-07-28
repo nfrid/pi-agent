@@ -240,6 +240,13 @@ describe('async delegate extension', () => {
     );
     expect(widget?.render(100).join('\n')).toContain('finalizing');
 
+    // The completion was queued during an existing turn, so that turn's
+    // assistant message cannot acknowledge a result it never received.
+    handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
+    handlers.get('agent_settled')?.({}, ctx);
+    expect(widget?.render(100).join('\n')).toContain('finalizing');
+
+    handlers.get('turn_start')?.({}, ctx);
     handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
     handlers.get('agent_settled')?.({}, ctx);
     expect(widget?.render(100)).toEqual([]);
@@ -594,6 +601,7 @@ describe('async delegate extension', () => {
     });
     finish(successfulRun());
     await foreground;
+    handlers.get('turn_start')?.({}, ctx);
     handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
     handlers.get('agent_settled')?.({}, ctx);
     const afterAcknowledgment =
@@ -613,8 +621,32 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
+    handlers.get('turn_start')?.({}, ctx);
     handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
     handlers.get('agent_settled')?.({}, ctx);
+    expect(
+      widgetFactory?.(
+        { requestRender: vi.fn() },
+        { fg: (_color, text) => text },
+      ).render(100),
+    ).toEqual([]);
+
+    vi.spyOn(taskLifecycle, 'runPreparedDelegateTask').mockRejectedValueOnce(
+      new Error('unexpected delegate failure'),
+    );
+    await expect(
+      tools.get('delegate')?.execute(
+        'call-failing-foreground',
+        {
+          name: 'Failing foreground audit',
+          task: 'fail unexpectedly',
+          route: 'quick',
+        },
+        undefined,
+        undefined,
+        ctx,
+      ),
+    ).rejects.toThrow('unexpected delegate failure');
     expect(
       widgetFactory?.(
         { requestRender: vi.fn() },

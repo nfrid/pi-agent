@@ -25,7 +25,9 @@ export interface DelegateStatusSnapshot {
 interface DelegateStatusRecord extends DelegateStatusSnapshot {
   /** The completion has been returned or delivered into the parent context. */
   resultEntered: boolean;
-  /** The parent produced an assistant message after that result was available. */
+  /** A later parent turn began after the result became available. */
+  turnStarted: boolean;
+  /** The parent produced an assistant message in that later turn. */
   assistantResponded: boolean;
 }
 
@@ -77,6 +79,7 @@ export class DelegateStatusStore {
         allowWrites: run.allowWrites === true,
         activity: displayActivity(run, undefined),
         resultEntered: false,
+        turnStarted: false,
         assistantResponded: false,
       });
       return id;
@@ -165,13 +168,19 @@ export class DelegateStatusStore {
     this.resultEntered(ids);
   }
 
-  parentAssistantMessage(): void {
+  parentTurnStarted(): void {
     for (const record of this.records.values()) {
-      if (record.resultEntered) record.assistantResponded = true;
+      if (record.resultEntered) record.turnStarted = true;
     }
   }
 
-  /** Acknowledge only after the parent finished a response following the result. */
+  parentAssistantMessage(): void {
+    for (const record of this.records.values()) {
+      if (record.turnStarted) record.assistantResponded = true;
+    }
+  }
+
+  /** Acknowledge only after the parent finished a later response to the result. */
   acknowledgeSettled(): void {
     const ids = [...this.records.values()]
       .filter((record) => record.resultEntered && record.assistantResponded)
@@ -183,6 +192,7 @@ export class DelegateStatusStore {
     return [...this.records.values()].map((record) => {
       const {
         resultEntered: _resultEntered,
+        turnStarted: _turnStarted,
         assistantResponded: _assistantResponded,
         ...snapshot
       } = record;

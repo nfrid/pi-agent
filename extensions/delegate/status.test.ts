@@ -66,7 +66,7 @@ describe('delegate status store', () => {
     expect(onChange).toHaveBeenCalledTimes(3);
   });
 
-  test('acknowledges a settled result only after a parent response and settlement', () => {
+  test('acknowledges a settled result only after a later parent turn responds and settles', () => {
     const store = new DelegateStatusStore();
     const run = createRun('audit');
     const [id] = store.start([run], 'foreground');
@@ -80,6 +80,13 @@ describe('delegate status store', () => {
     store.acknowledgeSettled();
     expect(store.list()).toHaveLength(1);
 
+    // An assistant message from the turn that was already in progress did
+    // not receive this result in provider context.
+    store.parentAssistantMessage();
+    store.acknowledgeSettled();
+    expect(store.list()).toHaveLength(1);
+
+    store.parentTurnStarted();
     store.parentAssistantMessage();
     store.acknowledgeSettled();
     expect(store.list()).toEqual([]);
@@ -98,6 +105,7 @@ describe('delegate status store', () => {
     expect(store.list()).toHaveLength(1);
 
     store.jobResultEntered(['dj-1']);
+    store.parentTurnStarted();
     store.parentAssistantMessage();
     store.acknowledgeSettled();
     expect(store.list()).toEqual([]);
