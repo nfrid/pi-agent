@@ -264,8 +264,11 @@ describe('async delegate extension', () => {
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
-  test('creates and settles one background job per batch subagent', async () => {
-    vi.spyOn(configModule, 'loadDelegateConfig').mockReturnValue(config);
+  test('delivers a staggered three-job batch once after its cohort settles', async () => {
+    vi.spyOn(configModule, 'loadDelegateConfig').mockReturnValue({
+      ...config,
+      maxParallelTasks: 3,
+    });
     vi.spyOn(taskLifecycle, 'prepareDelegateTask').mockImplementation(
       async (plan) => prepared(plan.task, `token-${plan.task}`),
     );
@@ -306,6 +309,7 @@ describe('async delegate extension', () => {
         tasks: [
           { name: 'First agent', task: 'first', route: 'quick' },
           { name: 'Second agent', task: 'second', route: 'quick' },
+          { name: 'Third agent', task: 'third', route: 'quick' },
         ],
         background: true,
       },
@@ -314,7 +318,7 @@ describe('async delegate extension', () => {
       ctx,
     );
     expect(launch?.content[0]?.text).toContain(
-      'Started 2 background delegate jobs: dj-1, dj-2',
+      'Started 3 background delegate jobs: dj-1, dj-2, dj-3',
     );
 
     const first = successfulRun();
@@ -324,13 +328,13 @@ describe('async delegate extension', () => {
       content: [{ type: 'text', text: 'First finding.' }],
     } as never;
     finishes.get('first')?.(first);
-    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
-    expect(sendMessage.mock.calls[0]?.[0].content).toContain('First finding.');
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(sendMessage).not.toHaveBeenCalled();
 
     const listed = await tools
       .get('delegate_jobs')
       ?.execute('call-list', { action: 'list' }, undefined, undefined, ctx);
-    expect((listed?.details as { jobs?: unknown[] })?.jobs).toHaveLength(2);
+    expect((listed?.details as { jobs?: unknown[] })?.jobs).toHaveLength(3);
 
     const second = successfulRun();
     second.task = 'second';
@@ -339,8 +343,20 @@ describe('async delegate extension', () => {
       content: [{ type: 'text', text: 'Second finding.' }],
     } as never;
     finishes.get('second')?.(second);
-    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
-    expect(sendMessage.mock.calls[1]?.[0].content).toContain('Second finding.');
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    const third = successfulRun();
+    third.task = 'third';
+    third.messages[0] = {
+      ...third.messages[0],
+      content: [{ type: 'text', text: 'Third finding.' }],
+    } as never;
+    finishes.get('third')?.(third);
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    expect(sendMessage.mock.calls[0]?.[0].content).toContain('First finding.');
+    expect(sendMessage.mock.calls[0]?.[0].content).toContain('Second finding.');
+    expect(sendMessage.mock.calls[0]?.[0].content).toContain('Third finding.');
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
