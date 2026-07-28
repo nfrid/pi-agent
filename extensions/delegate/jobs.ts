@@ -19,6 +19,8 @@ export interface DelegateJobResult {
 
 export interface DelegateJobSnapshot {
   id: string;
+  /** Jobs started by one startMany call share this cohort. */
+  cohortId: string;
   name: string;
   mode: DelegateDetails['mode'];
   state: DelegateJobState;
@@ -35,6 +37,7 @@ export interface DelegateJobSnapshot {
 }
 
 interface DelegateJobRecord extends JobRecord<DelegateJobState> {
+  cohortId: string;
   name: string;
   mode: DelegateDetails['mode'];
   tasks: string[];
@@ -50,7 +53,7 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
 }
 
 export interface DelegateJobManagerOptions {
-  onSettled?: (snapshot: DelegateJobSnapshot) => void;
+  onSettled?: (snapshots: DelegateJobSnapshot[]) => void;
   onChange?: () => void;
 }
 
@@ -78,6 +81,12 @@ function aggregateState(
 
 /** Background delegate runs: started as promises, cancelled by aborting them. */
 export class DelegateJobManager {
+  private readonly cohorts = new Map<
+    string,
+    { ids: string[]; pending: Map<string, DelegateJobSnapshot> }
+  >();
+  private cohortCounter = 0;
+  private readonly onSettled: DelegateJobManagerOptions['onSettled'];
   private readonly registry: AsyncJobRegistry<
     DelegateJobState,
     DelegateJobRecord,
@@ -85,6 +94,7 @@ export class DelegateJobManager {
   >;
 
   constructor(options: DelegateJobManagerOptions = {}) {
+    this.onSettled = options.onSettled;
     this.registry = new AsyncJobRegistry({
       idPrefix: 'dj',
       label: 'delegate job',
@@ -100,7 +110,8 @@ export class DelegateJobManager {
         );
         await record.settled;
       },
-      onSettled: options.onSettled,
+      onSettled: (snapshot) => this.handleSettled(snapshot),
+      onObserversChanged: () => this.flushCohorts(),
       onChange: options.onChange,
     });
   }
@@ -112,9 +123,12 @@ export class DelegateJobManager {
 
   startMany(options: DelegateJobStartOptions[]): DelegateJobSnapshot[] {
     this.registry.assertAccepting(options.length);
+    if (options.length === 0) return [];
+    const cohortId = `dc-${++this.cohortCounter}`;
     const records = options.map(
       (item): DelegateJobRecord => ({
         ...this.registry.newRecord('queued'),
+        cohortId,
         name: item.name?.trim() || 'Subagent',
         mode: item.mode,
         tasks: [...item.tasks],
@@ -125,6 +139,10 @@ export class DelegateJobManager {
         execute: item.execute,
       }),
     );
+    this.cohorts.set(cohortId, {
+      ids: records.map((record) => record.id),
+      pending: new Map(),
+    });
     for (const record of records) this.registry.add(record);
     this.registry.changed();
     for (const record of records) void this.run(record);
@@ -166,10 +184,40 @@ export class DelegateJobManager {
 
   async dispose(): Promise<void> {
     await this.registry.dispose();
+    this.cohorts.clear();
   }
 
   get runningCount(): number {
     return this.registry.activeCount;
+  }
+
+  private handleSettled(snapshot: DelegateJobSnapshot): void {
+    const cohort = this.cohorts.get(snapshot.cohortId);
+    if (!cohort) return;
+    cohort.pending.set(snapshot.id, snapshot);
+    this.flushCohort(snapshot.cohortId);
+  }
+
+  private flushCohorts(): void {
+    for (const cohortId of this.cohorts.keys()) this.flushCohort(cohortId);
+  }
+
+  private flushCohort(cohortId: string): void {
+    const cohort = this.cohorts.get(cohortId);
+    if (!cohort) return;
+    const active = new Set(
+      this.registry
+        .list()
+        .filter((job) => job.cohortId === cohortId)
+        .filter((job) => job.state === 'queued' || job.state === 'running')
+        .map((job) => job.id),
+    );
+    if (active.size > 0) return;
+    const settled = cohort.ids
+      .map((id) => cohort.pending.get(id))
+      .filter((job): job is DelegateJobSnapshot => job !== undefined);
+    this.cohorts.delete(cohortId);
+    if (settled.length > 0) this.onSettled?.(settled);
   }
 
   private async run(record: DelegateJobRecord): Promise<void> {
@@ -193,6 +241,7 @@ export class DelegateJobManager {
 function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
   return {
     id: record.id,
+    cohortId: record.cohortId,
     name: record.name,
     mode: record.mode,
     state: record.state,

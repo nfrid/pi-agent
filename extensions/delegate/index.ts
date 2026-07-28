@@ -78,9 +78,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
 
   const syncWidget = () => widget.sync();
 
-  const notifyStaleCompletion = (job: DelegateJobSnapshot) => {
+  const notifyStaleCompletions = (jobs: readonly DelegateJobSnapshot[]) => {
+    const ids = jobs.map((job) => job.id).join(', ');
     ui?.notify(
-      `Delegate job ${job.id} finished on another conversation branch; use delegate_jobs peek to inspect it.`,
+      `Delegate job${jobs.length === 1 ? '' : 's'} ${ids} finished on another conversation branch; use delegate_jobs peek to inspect ${jobs.length === 1 ? 'it' : 'them'}.`,
       'info',
     );
   };
@@ -93,8 +94,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const completed = queued.filter(
       (job) => job.deliveryEpoch === deliveryEpoch,
     );
-    for (const job of queued)
-      if (job.deliveryEpoch !== deliveryEpoch) notifyStaleCompletion(job);
+    const stale = queued.filter((job) => job.deliveryEpoch !== deliveryEpoch);
+    if (stale.length > 0) notifyStaleCompletions(stale);
     if (completed.length === 0) return;
     const content = completed
       .map((job) => {
@@ -121,14 +122,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     }
   };
 
-  const queueCompletion = (job: DelegateJobSnapshot) => {
+  const queueCompletions = (jobs: readonly DelegateJobSnapshot[]) => {
     if (!runtimeActive) return;
-    statuses?.settleJobs([job]);
-    if (job.deliveryEpoch !== deliveryEpoch) {
-      notifyStaleCompletion(job);
-      return;
-    }
-    pendingCompletions.push(job);
+    statuses?.settleJobs(jobs);
+    const completed = jobs.filter((job) => job.deliveryEpoch === deliveryEpoch);
+    const stale = jobs.filter((job) => job.deliveryEpoch !== deliveryEpoch);
+    if (stale.length > 0) notifyStaleCompletions(stale);
+    pendingCompletions.push(...completed);
+    if (completed.length === 0) return;
     if (completionTimer) return;
     completionTimer = setTimeout(flushCompletions, 50);
     completionTimer.unref();
@@ -155,7 +156,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     });
     statuses = new DelegateStatusStore(syncWidget);
     jobs = new DelegateJobManager({
-      onSettled: queueCompletion,
+      onSettled: queueCompletions,
     });
     registerDelegateTool(
       pi,
