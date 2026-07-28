@@ -1,7 +1,7 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    exclude: ['**/node_modules/**', '**/.git/**', '**/.worktrees/**'],
+    exclude: [...configDefaults.exclude, '**/.worktrees/**'],
   },
 });
