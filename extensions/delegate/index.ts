@@ -236,13 +236,17 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
             ? 'same'
             : 'differs'
           : 'unavailable';
-        const guidance = snapshot
-          ? !snapshot.valid || !currentValid
-            ? '/reload refreshes prompt guidance. Delegate routing/execution is unavailable.'
-            : comparison === 'same'
-              ? 'Prompt guidance is current.'
-              : '/reload refreshes prompt guidance.'
-          : '/reload establishes/refreshes prompt guidance.';
+        const guidance = !currentValid
+          ? snapshot
+            ? '/reload refreshes prompt guidance. Delegate execution is unavailable.'
+            : '/reload establishes/refreshes prompt guidance. Delegate execution is unavailable.'
+          : !snapshot
+            ? '/reload establishes/refreshes prompt guidance. Delegate execution is available from current settings.'
+            : !snapshot.valid
+              ? '/reload refreshes prompt guidance. Prompt route guidance is unavailable; delegate execution is available from current settings.'
+              : comparison === 'same'
+                ? 'Prompt guidance is current; delegate execution is available.'
+                : '/reload refreshes prompt guidance. Delegate execution is available from current settings.';
         const conciseError = (error: string | undefined) =>
           error ? error.replace(/\s+/g, ' ').slice(0, 240) : undefined;
         const promptError = conciseError(snapshot?.error);
@@ -270,7 +274,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
           `Prompt-loaded: fingerprint=${snapshot?.fingerprint ?? 'unknown'}; valid=${snapshot ? (snapshot.valid ? 'yes' : 'no') : 'unknown'}; routes=${snapshot?.routeCount ?? 'unknown'}${promptError ? `; error=${promptError}` : ''}; time=${snapshot?.loadedAt ?? 'unknown'}; lifecycle=session_start (reason=${snapshot?.reason ?? 'unknown'})`,
           `Current settings: fingerprint=${currentFingerprint}; valid=${currentValid ? 'yes' : 'no'}; routes=${currentRouteCount}${currentError ? `; error=${currentError}` : ''}`,
           `Comparison: ${comparison}`,
-          `Guidance: ${guidance} Delegate execution currently re-reads settings on demand.`,
+          `Guidance: ${guidance}`, 
           `Extension source: ${sourcePath}`,
         ].join('\n');
         if (ctx.hasUI) ctx.ui.notify(report, 'info');

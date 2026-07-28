@@ -447,6 +447,25 @@ describe('async delegate extension', () => {
       'Prompt guidance is current.',
     );
     notify.mockClear();
+    configLoader.mockReturnValue(config);
+    await commands.get('delegates')?.handler('config', ctx);
+    expect(notify.mock.calls[0]?.[0]).toContain(
+      'Prompt route guidance is unavailable; delegate execution is available from current settings.',
+    );
+    expect(notify.mock.calls[0]?.[0]).not.toContain(
+      'execution is unavailable',
+    );
+    notify.mockClear();
+    handlers.get('session_start')?.({}, ctx);
+    configLoader.mockReturnValue(invalidConfig);
+    await commands.get('delegates')?.handler('config', ctx);
+    expect(notify.mock.calls[0]?.[0]).toContain(
+      'Delegate execution is unavailable.',
+    );
+    expect(notify.mock.calls[0]?.[0]).not.toContain(
+      'Prompt guidance is current',
+    );
+    notify.mockClear();
     configLoader.mockReturnValue({ ...config, timeoutMs: 120_000 });
     await commands.get('delegates')?.handler('config', ctx);
     expect(notify).toHaveBeenCalledWith(
