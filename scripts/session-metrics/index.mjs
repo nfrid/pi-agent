@@ -149,10 +149,12 @@ function deliveredJobs(details) {
 }
 
 function isSettledJob(job) {
+  // A terminal state alone is not a parent-visible delivery: cancel can return
+  // snapshots for jobs that were still running (or were merely cancelled).
+  // Only a handoff or error is evidence that this job produced delivered work.
   return (
-    typeof job?.handoff === 'string' ||
-    typeof job?.error === 'string' ||
-    ['success', 'error', 'aborted'].includes(job?.state)
+    (typeof job?.handoff === 'string' && job.handoff.length > 0) ||
+    (typeof job?.error === 'string' && job.error.length > 0)
   );
 }
 
@@ -478,7 +480,7 @@ export function parseSessionJsonl(source) {
     if (
       message?.role === 'toolResult' &&
       message.toolName === 'delegate_jobs' &&
-      message.details?.action === 'peek'
+      ['peek', 'cancel'].includes(message.details?.action)
     )
       recordBackgroundDelivery(state, resultText(message), message.details);
   }
