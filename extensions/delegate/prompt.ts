@@ -1,7 +1,7 @@
 function formatRuntime(timeoutMs: number): string {
-  if (timeoutMs < 60_000)
-    return `${Math.max(1, Math.round(timeoutMs / 1000))} seconds`;
-  return `${Math.max(1, Math.round(timeoutMs / 60_000))} minutes`;
+  if (timeoutMs < 2 * 60_000)
+    return `${Math.max(1, Math.floor(timeoutMs / 1000))} seconds`;
+  return `${Math.max(1, Math.floor(timeoutMs / 60_000))} minutes`;
 }
 
 export function buildDelegatePrompt(

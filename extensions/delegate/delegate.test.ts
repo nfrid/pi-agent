@@ -147,7 +147,7 @@ describe('delegate', () => {
       timeoutMs: 90_000,
     });
     expect(prompt).toContain(
-      'maximum runtime of approximately 2 minutes; reserve time to return partial findings.',
+      'maximum runtime of approximately 90 seconds; reserve time to return partial findings.',
     );
     expect(prompt).toContain('stop early and return partial findings');
   });
