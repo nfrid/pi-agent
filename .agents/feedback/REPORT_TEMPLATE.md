@@ -1,31 +1,27 @@
-# <Short problem or opportunity>
+# HF-YYYYMMDD: <short harness behavior or capability>
 
-- **Kind:** bug | feature
 - **Status:** new
-- **Approval:** user-approved
-- **Observed:** YYYY-MM-DD
-- **Owner:** <local maintainer, role, or team>
+- **Observed date:** YYYY-MM-DD
+- **Source cwd/repo:** <working directory and repository>
+- **Task shape:** <brief task shape, not a transcript>
+- **Harness component:** <route, capability, skill, tool, or other harness component>
+- **Route / attempt / outcome:** <when relevant>
+- **Observed cost / rework:** <what it cost, blocked, or made someone repeat>
+- **Recurrence / confidence:** <observed or likely recurrence and confidence>
 - **Ticket:** —
 
-## Context
+## Behavior
 
-- **Source session/task shape:** <brief shape, not a transcript>
-- **Route / attempt / outcome:** <when relevant>
-- **Observed cost / rework:** <what it cost or made someone repeat>
-- **Confidence / recurrence:** <confidence and observed or likely recurrence>
+<!-- Describe the concrete harness behavior or missing capability. -->
 
-## What happened
-
-<!-- Describe the concrete behavior or missing capability. -->
-
-## Why it matters
+## Impact
 
 <!-- State the recurring cost, risk, confusion, or blocked capability. -->
 
 ## Evidence
 
-<!-- Put deterministic evidence first: concise commands, paths, messages, or task context. No secrets or large logs. Distinguish facts from assumptions. -->
+<!-- Put deterministic evidence first: concise commands, paths, messages, or task context. No secrets, raw transcripts, or large logs; distinguish facts from assumptions. -->
 
-## Smallest useful improvement
+## Smallest improvement
 
-<!-- Optional. State an outcome, not an unverified design. -->
+<!-- State the smallest useful outcome, not an unverified design. -->

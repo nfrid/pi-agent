@@ -1,28 +1,27 @@
-# WF-YYYYMMDD: <Decision-ready improvement title>
+# HFM-YYYYMMDD: <decision-ready harness improvement>
 
 - **Status:** proposed
 - **Approval:** not approved
 - **Created:** YYYY-MM-DD
-- **Owner:** <local maintainer, role, or team>
 - **Source reports:** <relative links to reports in `../inbox/`>
 
-<!-- A ticket stored in `tickets/` must link back to every source using a relative `../inbox/file.md` link. -->
+<!-- Proposal and implementation approval are separate decisions. A proposed ticket does not authorize implementation. -->
 
 ## Problem
 
-<!-- Synthesize the verified problem and who or what it affects. -->
+<!-- Synthesize the verified Pi harness behavior or capability gap and what it affects. -->
 
 ## Baseline
 
-<!-- Record the current behavior and starting measure, with focused evidence. This is the comparison point for evaluation. -->
+<!-- Record current harness behavior and starting measures, with focused evidence. This is the comparison point for evaluation. -->
 
 ## Hypothesis
 
-<!-- If <change>, then <observable outcome>, because <reason>. Mark assumptions. -->
+<!-- If <harness change>, then <observable outcome>, because <reason>. Mark assumptions. -->
 
 ## Guardrails
 
-<!-- State what must not regress, what remains out of scope, and any rollback/safety boundary. -->
+<!-- State what must not regress, what remains out of scope, and any rollback or safety boundary. -->
 
 ## Options considered
 
@@ -31,7 +30,7 @@
 
 ## Recommendation
 
-<!-- Recommend the smallest useful change and explain why. -->
+<!-- Recommend the smallest useful harness change and explain why. -->
 
 ## Scope
 
@@ -40,20 +39,21 @@
 
 ## Acceptance criteria
 
-- [ ] <Observable outcome>
+- [ ] <Observable harness outcome>
 
 ## Validation
 
-<!-- List focused commands, inspection, or comparison against the baseline that demonstrates the acceptance criteria and guardrails. -->
+<!-- List focused commands, inspection, or comparison against the baseline and guardrails. -->
 
 ## Evaluation
 
 - **Window:** not started
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
-<!-- After an approved implementation merges, keep Status as evaluation-pending until the window ends and Result is recorded. -->
+<!-- After approved implementation, keep Status as evaluation-pending until the window ends and a result is recorded. -->
 
 ## Implementation and resolution
 
+- **Approved implementation:** —
 - **Merged change:** —
 - **Resolution:** pending evaluation
