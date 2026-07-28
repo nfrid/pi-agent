@@ -46,7 +46,7 @@ export function registerDelegateWorktreesCommand(pi: ExtensionAPI): void {
       if (action === 'show') {
         const state = await branchState(record);
         ctx.ui.notify(
-          `${formatBranchDetail({ record, state })}\n\nIntegrate: git merge ${record.branch}\nDiscard:   /delegate-worktrees ${id} drop`,
+          `${formatBranchDetail({ record, state })}\n\nReview:    delegate_branches review ${id}\nIntegrate: delegate_branches merge ${id}\nDiscard:   /delegate-worktrees ${id} drop`,
           'info',
         );
         return;

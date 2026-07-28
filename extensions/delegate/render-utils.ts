@@ -225,7 +225,10 @@ export function worktreeLines(run: DelegatedRun): string[] {
     );
   else lines.push('Changed: nothing was committed on this branch');
   if (worktree.error) lines.push(`Note: ${worktree.error}`);
-  lines.push(`Integrate: git merge ${worktree.branch}`);
+  lines.push(
+    `Review:    delegate_branches review ${worktree.id}`,
+    `Integrate: delegate_branches merge ${worktree.id}`,
+  );
   return lines;
 }
 

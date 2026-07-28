@@ -188,7 +188,13 @@ describe('render', () => {
     expect(output).toContain('Branch');
     expect(output).toContain('pi/implement-safely-a1b2');
     expect(output).toContain('src/file.ts');
-    expect(output).toContain('git merge pi/implement-safely-a1b2');
+    expect(output).toContain(
+      'delegate_branches review 11111111-1111-1111-1111-111111111111',
+    );
+    expect(output).toContain(
+      'delegate_branches merge 11111111-1111-1111-1111-111111111111',
+    );
+    expect(output).not.toContain('git merge pi/implement-safely-a1b2');
     expect(output).toContain('Expected scope: src');
   });
 
