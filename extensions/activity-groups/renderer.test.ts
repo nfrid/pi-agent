@@ -448,6 +448,16 @@ describe('activity groups renderer', () => {
     expect(renderOutcome([reorderedArgs, reorderedSuccess])).toContain('✓');
   });
 
+  it('keeps the historical lint failure after an edit retry resolves it', () => {
+    const output = renderOutcome([
+      toolItem('lint-1', 'bash', { command: 'npm run lint' }, true),
+      toolItem('edit-1', 'edit', { path: 'src/index.ts' }, false),
+      toolItem('lint-2', 'bash', { command: 'npm run lint' }, false),
+    ]);
+    expect(output).toContain('✓');
+    expect(output).toContain('1 failed');
+  });
+
   it('keeps failures prominent', () => {
     const renderer = createActivityGroupRenderer();
     const component = renderer(
