@@ -5,7 +5,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const SCHEMA_VERSION = 'session-metrics/v3';
+export const SCHEMA_VERSION = 'session-metrics/v4';
 const METRIC_KEYS = [
   'userTurns',
   'assistantTurns',
@@ -29,8 +29,6 @@ const METRIC_KEYS = [
   'delegateBackgroundJobsLaunched',
   'delegateBackgroundRunsLaunched',
   'delegateBackgroundDeliveries',
-  'delegateEscalatedCalls',
-  'delegateDeescalatedCalls',
   'delegateOutcomeDone',
   'delegateOutcomePartial',
   'delegateOutcomeBlocked',
@@ -69,10 +67,6 @@ const RATIO_KEYS = {
     ratio(m.delegateTruncatedTasks, m.delegatedTasks),
   delegateContinuationRate: (m) =>
     ratio(m.delegateContinuationCalls, m.delegateToolCalls),
-  // Of the calls that resumed earlier work, the share that needed a costlier
-  // route to do it. High means the first route is being picked too cheaply.
-  delegateEscalationRate: (m) =>
-    ratio(m.delegateEscalatedCalls, m.delegateContinuationCalls),
   // Child spend is only comparable to executions whose routing record also
   // carried usage. Legacy runs and repeated report deliveries are excluded.
   childTurnsPerTask: (m) => ratio(m.childTurns, m.routedTasks),
@@ -117,10 +111,6 @@ const BACKGROUND_START_MARKER = /^Started \d+ background delegate job/;
 /** How a finished background job hands its report to the parent. */
 const BACKGROUND_DELIVERY_MARKER =
   /^#?\s*Background delegate job (\S+) .*?\n\n(Delegated tasks?\b[\s\S]*)$/;
-/** Separates the jobs when several finish together and are delivered as one. */
-const BACKGROUND_DELIVERY_SEPARATOR = '\n\n---\n\n';
-/** Leads every handoff, and says how many runs it covers. */
-const HANDOFF_HEADER = /^Delegated tasks: \d+\/(\d+) succeeded/;
 
 /** Counts an execution once; its report may be pushed and later peeked again. */
 function recordExecution(state, runs, ids, text = '', indicators = true) {
@@ -139,35 +129,73 @@ function recordExecution(state, runs, ids, text = '', indicators = true) {
   }
 }
 
-/** Handoff copies cost context every time, but never create another execution. */
-function recordBackgroundDelivery(state, text, jobs = []) {
-  const byId = new Map(
-    jobs
-      .filter((job) => typeof job?.id === 'string')
-      .map((job) => [job.id, job]),
-  );
-  for (const segment of text.split(BACKGROUND_DELIVERY_SEPARATOR)) {
-    const delivered = segment.match(BACKGROUND_DELIVERY_MARKER);
-    if (!delivered) continue;
-    const [, jobId, handoff] = delivered;
-    const header = handoff.match(HANDOFF_HEADER);
-    const taskCount = header ? Number(header[1]) : 1;
-    const runs = Array.isArray(byId.get(jobId)?.runs)
-      ? byId.get(jobId).runs
-      : Array.from({ length: taskCount }, () => ({}));
-    const ids = runs.map((_, index) => `${jobId}:${index}`);
-    state.metrics.delegateBackgroundDeliveries += 1;
-    state.metrics.delegateHandoffBytes += Buffer.byteLength(handoff, 'utf8');
-    state.metrics.delegateArtifactFallbacks += countOccurrences(
-      handoff,
-      'Exact output artifact unavailable',
+/** The current producers use `jobs` for automatic delivery and `job` for peek. */
+function deliveredJobs(details) {
+  if (Array.isArray(details?.jobs))
+    return details.jobs.filter(
+      (job) =>
+        job &&
+        typeof job === 'object' &&
+        !Array.isArray(job) &&
+        typeof job.id === 'string',
     );
+  if (
+    details?.job &&
+    typeof details.job === 'object' &&
+    typeof details.job.id === 'string'
+  )
+    return [details.job];
+  return [];
+}
+
+function isSettledJob(job) {
+  return (
+    typeof job?.handoff === 'string' ||
+    typeof job?.error === 'string' ||
+    ['success', 'error', 'aborted'].includes(job?.state)
+  );
+}
+
+/**
+ * Handoff copies cost context every time they enter the parent transcript, but
+ * job/run facts are keyed by their stable job identity. Do not parse the text
+ * into jobs: parallel handoffs themselves may contain the display separator.
+ */
+function recordBackgroundDelivery(state, text, details) {
+  const jobs = deliveredJobs(details).filter(isSettledJob);
+  if (jobs.length === 0) {
+    // Older transcripts have no details. One header is enough to identify one
+    // report, but cannot honestly reconstruct a parallel fan from its text.
+    const legacy = text.match(BACKGROUND_DELIVERY_MARKER);
+    if (!legacy) return;
+    const [, jobId, handoff] = legacy;
+    recordDeliveredText(state, text, 1);
+    const ids = [`${jobId}:0`];
     recordTruncatedTasks(state, ids, handoff);
-    // A completion can be retained after its launch entry is absent from the
-    // active ancestry. Stable per-job identities make either path count once.
+    recordExecution(state, [{}], ids, handoff);
+    return;
+  }
+
+  recordDeliveredText(state, text, jobs.length);
+  for (const job of jobs) {
+    const runs = Array.isArray(job.runs) && job.runs.length ? job.runs : [job];
+    const ids = runs.map((_, index) => `${job.id}:${index}`);
+    // Snapshot handoff is authoritative for per-run report facts. The full
+    // delivered text is deliberately used only for parent-context bytes.
+    const handoff = typeof job.handoff === 'string' ? job.handoff : '';
+    recordTruncatedTasks(state, ids, handoff);
     recordExecution(state, runs, ids, handoff);
     recordRouting(state, runs, ids);
   }
+}
+
+function recordDeliveredText(state, text, deliveries) {
+  state.metrics.delegateBackgroundDeliveries += deliveries;
+  state.metrics.delegateHandoffBytes += Buffer.byteLength(text, 'utf8');
+  state.metrics.delegateArtifactFallbacks += countOccurrences(
+    text,
+    'Exact output artifact unavailable',
+  );
 }
 
 /** Emitted once per run envelope by the current delegate build. */
@@ -304,11 +332,6 @@ function recordRouting(state, runs, ids) {
   for (let index = 0; index < runs.length; index += 1) {
     const run = runs[index];
     const routing = run?.routing;
-    if (typeof run?.continuation === 'string' && routing)
-      state.routeByContinuation.set(
-        run.continuation,
-        finiteNumber(routing.relativeCost),
-      );
     const usage = run?.usage ?? {};
     // A route name without recorded usage is not an executed routing sample.
     if (
@@ -333,34 +356,6 @@ function recordRouting(state, runs, ids) {
     state.metrics.childUsageOutput += finiteNumber(usage.output);
     state.metrics.childCost += finiteNumber(usage.cost);
   }
-}
-
-/**
- * Whether resuming a task moved it to a costlier route. The parent is told what
- * fell short, never which route to use, so a move here is the parent's own
- * judgement about the first choice — which makes the rate a read on routing
- * quality rather than on the children.
- */
-function recordEscalation(state, runs) {
-  const continuations = state.pendingContinuationCalls.shift() ?? [];
-  const comparisons = continuations
-    .map(({ token, index }) => {
-      const before = state.routeByContinuation.get(token);
-      const routing = runs[index]?.routing;
-      return before === undefined || !routing
-        ? undefined
-        : { before, after: finiteNumber(routing.relativeCost) };
-    })
-    .filter((comparison) => comparison !== undefined);
-  if (comparisons.length === 0) return;
-  // Calls remain the unit, but task positions ensure a fresh parallel task
-  // cannot change the route comparison for a resumed sibling.
-  const before = Math.max(
-    ...comparisons.map((comparison) => comparison.before),
-  );
-  const after = Math.max(...comparisons.map((comparison) => comparison.after));
-  if (after > before) state.metrics.delegateEscalatedCalls += 1;
-  if (after < before) state.metrics.delegateDeescalatedCalls += 1;
 }
 
 /** Continuation tokens paired with their result position, single or parallel. */
@@ -425,8 +420,6 @@ export function parseSessionJsonl(source) {
     indicatedRuns: new Set(),
     billedRuns: new Set(),
     truncatedRuns: new Set(),
-    routeByContinuation: new Map(),
-    pendingContinuationCalls: [],
   };
   let delegateResultNumber = 0;
   const timestamps = [];
@@ -437,11 +430,7 @@ export function parseSessionJsonl(source) {
     // A finished background job is pushed to the parent as a steering message,
     // outside the tool-result stream its `delegate` call belonged to.
     if (entry.customType === 'delegate-job-result')
-      recordBackgroundDelivery(
-        state,
-        entry.content ?? '',
-        entry.details?.jobs ?? [],
-      );
+      recordBackgroundDelivery(state, entry.content ?? '', entry.details);
     if (entry.type !== 'message') continue;
     const message = entry.message;
     if (message?.role === 'user') metrics.userTurns += 1;
@@ -453,8 +442,6 @@ export function parseSessionJsonl(source) {
       metrics.delegateContinuationCalls += delegated.filter(
         (call) => continuationEntries(call).length > 0,
       ).length;
-      for (const call of delegated)
-        state.pendingContinuationCalls.push(continuationEntries(call));
       const usage = message.usage ?? {};
       metrics.usageInput += finiteNumber(usage.input);
       metrics.usageOutput += finiteNumber(usage.output);
@@ -475,7 +462,6 @@ export function parseSessionJsonl(source) {
         message,
         delegateResultNumber++,
       );
-      recordEscalation(state, result.runs);
       if (!result.background)
         recordRouting(
           state,
@@ -485,12 +471,12 @@ export function parseSessionJsonl(source) {
           ),
         );
     }
-    if (message?.role === 'toolResult' && message.toolName === 'delegate_jobs')
-      recordBackgroundDelivery(
-        state,
-        resultText(message),
-        message.details?.jobs ?? [],
-      );
+    if (
+      message?.role === 'toolResult' &&
+      message.toolName === 'delegate_jobs' &&
+      message.details?.action === 'peek'
+    )
+      recordBackgroundDelivery(state, resultText(message), message.details);
   }
   if (timestamps.length > 1)
     metrics.elapsedMs = Math.max(...timestamps) - Math.min(...timestamps);
