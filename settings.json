@@ -31,7 +31,7 @@
         "model": "gpt-5.6-luna",
         "thinking": "high",
         "relativeCost": 5,
-        "useFor": "Scoped audits over a named file set where the criteria are given but the answer needs judgement; small design or API proposals over known files. Bounded multi-file implementation following an established pattern, with tests covering the behaviour.",
+        "useFor": "Focused regression reviews over a named file set where the criteria are given but the answer needs judgement; small design or API proposals over known files. Bounded multi-file implementation following an established pattern, with tests covering the behaviour.",
         "avoid": "Repo-wide breadth; cross-module race, lifecycle, or concurrency reasoning. When a task outgrows this, prefer terra-high to a higher luna effort."
       },
       "terra-high": {
@@ -39,7 +39,7 @@
         "model": "gpt-5.6-terra",
         "thinking": "high",
         "relativeCost": 8,
-        "useFor": "The default for substantial work. Review a whole uncommitted diff against a spec or plan; audit every modified and untracked file for correctness. Implement a multi-file feature or fix in an established architecture, tests included, where the requirements are stated and a check command exists.",
+        "useFor": "Substantial, bounded work with stated requirements and a clear finish line: review a specified diff or named file set against a spec or plan, or implement a multi-file feature or fix in an established architecture with tests and a check command.",
         "avoid": "Whether the work is honest or overbuilt, which is sol-medium. Breadth-wise security, drift, or race analysis, which is terra-max. Rote edits, which are cheaper above."
       },
       "terra-max": {
@@ -47,15 +47,15 @@
         "model": "gpt-5.6-terra",
         "thinking": "max",
         "relativeCost": 13,
-        "useFor": "Broad regression and security audits across many changed files; behavioural comparison against a git baseline; lifecycle, cancellation, and race analysis. Cross-cutting refactors and migrations with many edge cases, under strong test coverage.",
-        "avoid": "Narrow work, and anything terra-high already covers: the premium buys breadth, not depth. Rigid mechanical changes, where the extra reasoning tends to arrive as unrequested cleanup."
+        "useFor": "Concrete, high-stakes reviews of a specified diff or named file set: compare behaviour with a git baseline, or check listed lifecycle, cancellation, race, regression, or security risks against an explicit checklist. Cross-cutting refactors and migrations with many edge cases, under strong test coverage, with defined stopping points.",
+        "avoid": "Unbounded whole-repo audits without a concrete diff, named file set, checklist, or stopping point; narrow work, and anything terra-high already covers. Rigid mechanical changes, where the extra reasoning tends to arrive as unrequested cleanup."
       },
       "sol-medium": {
         "provider": "openai-codex",
         "model": "gpt-5.6-sol",
         "thinking": "medium",
         "relativeCost": 15,
-        "useFor": "Judgement about the work rather than its correctness: does this diff overclaim, is it truthful about what it does, is it overengineered or sloppy. Strict maintainer-style review. Tasks whose criteria are unclear and have to be worked out first.",
+        "useFor": "Judgement about the work rather than its correctness: does this diff overclaim, is it truthful about what it does, is the complexity earned, or is it overengineered or sloppy. Strict maintainer-style review. Tasks whose criteria are unclear and have to be worked out first.",
         "avoid": "Mechanical correctness sweeps and spec-conformance review, where terra-high is cheaper and as good. Anything with pass/fail criteria already stated."
       },
       "sol-high": {
