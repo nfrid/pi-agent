@@ -312,6 +312,46 @@ describe('render', () => {
     expect(output.indexOf('Runtime')).toBeGreaterThan(output.indexOf('Result'));
   });
 
+  test('shows a successful continuation as recovery, not a current error', () => {
+    const run = createRun('Finish the implementation', undefined, {
+      cwd: '/tmp/worktree',
+      context: 'continuation',
+      allowWrites: true,
+      continuation: 'child-token',
+      worktree: {
+        id: '11111111-1111-1111-1111-111111111111',
+        branch: 'pi/finish-implementation-a1b2',
+        worktreePath: '/tmp/worktree',
+        repositoryRoot: '/tmp/project',
+        baseHead: 'abc123def456',
+        workBase: 'abc123def456',
+        status: 'finished',
+        headCommit: 'def456abc123',
+        changedPaths: ['src/file.ts'],
+        hasWork: true,
+        error:
+          'The delegate run timed out; the branch holds whatever work was completed.',
+      },
+    });
+    run.state = 'success';
+    run.exitCode = 0;
+    run.messages = [assistantMessage as never];
+
+    for (const expanded of [false, true]) {
+      const output = renderDelegateResult(
+        { details: { mode: 'single', runs: [run] } },
+        { expanded },
+        theme,
+      )
+        .render(300)
+        .join('\n');
+      expect(output).toContain(
+        'Earlier attempt timed out; this continuation completed on the same branch.',
+      );
+      expect(output).not.toContain('The delegate run timed out');
+    }
+  });
+
   test('keeps the task visible without duplicating a result heading', () => {
     const run = createRun('A unique delegated task', undefined, {
       cwd: '/tmp/project',
