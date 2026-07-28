@@ -33,14 +33,11 @@ Report in these sections. Only "Outcome" and "Conclusion" are required; include 
 
 Outcome: done | partial | blocked | failed
 Conclusion: the answer, or what you completed
-Evidence: file:line, or a check and what it reported
-Validation: each command you ran, and its result
-Changed files: every file you changed
+Evidence: file:line, checks run and what they reported
 Risks: material risks you did not resolve
-Exceeded: what the task demanded that you could not supply
 Blocked: the one question the parent must answer
 
-Say "partial" when you finished useful work but not the task's finish line, and say which part is missing rather than presenting it as done. Use "Exceeded" when the task needed more than you could give it — reasoning over more of the codebase than you could hold at once, or a judgement it stated no criteria for. Describe the shortfall; do not name a model or a thinking level, because you cannot see what the parent is choosing between. Give evidence rather than confidence: cite what you checked, and do not rate yourself with scores or percentages.
+Say "partial" when you finished useful work but not the task's finish line, and say which part is missing rather than presenting it as done. For broad work, stop early and return partial findings rather than spending the whole runtime without a report. Give evidence rather than confidence: cite what you checked, and do not rate yourself with scores or percentages.
 
 Blocking is how you put a question to the parent: stop where you are and give it as your one "Blocked" question. The parent answers by continuing you, with this session intact, so report what you already established first. Use it only for what you cannot settle yourself — the task contradicts what you found, or it turns on a decision that is the parent's to make. Anything a default and a stated assumption can cover is not a blocker.
 

@@ -38,21 +38,16 @@ A child is asked to report in named sections. Only `Outcome` and `Conclusion` ar
 ```text
 Outcome: done | partial | blocked | failed
 Conclusion: the answer, or what you completed
-Evidence: file:line, or a check and what it reported
-Validation: each command you ran, and its result
-Changed files: every file you changed
+Evidence: file:line, checks run and what they reported
 Risks: material risks left unresolved
-Exceeded: what the task demanded that the run could not supply
 Blocked: the one question the parent must answer
 ```
 
 `Outcome` exists because a process exit code cannot express it. A child that finished 60% of its task and said so honestly exits 0 exactly like one that finished, so without a stated outcome the parent has to read prose to tell the two apart, or build on partial work and find out later.
 
-`Exceeded` is how a run says it was under-resourced. It describes the shortfall — what the task demanded, not which model to use — because children never see the route catalog and cannot name a rung. The parent holds the catalog and does the mapping, which puts route diagnosis on the cheap route that discovered the problem instead of the expensive one that would otherwise infer it from a weak result. Escalate by continuing that same child on a stronger route: its session is intact, so the exploration is not paid for twice.
+Evidence holds both citations and validation. Models are poor confidence meters, and a claim of certainty cannot be checked, whereas `src/cache.ts:212` and a command's output can be. Changed paths come from worktree metadata, not a child report.
 
-Evidence is asked for as citations and check results rather than as a confidence rating. Models are poor confidence meters, and a claim of certainty cannot be checked, whereas `src/cache.ts:212` and a command's output can be.
-
-The parent extracts these into the handoff envelope described below. Because the envelope is allocated before any body, a section lifted into it survives truncation.
+For broad work, a child should stop early and return partial findings rather than consume its whole runtime without a report. The parent extracts the bounded outcome, conclusion, evidence, risks, and blocker into the handoff envelope before allocating any body, so these fields survive truncation.
 
 ## Questions back to the parent
 
@@ -64,11 +59,11 @@ There is no live channel, and this is why: while a foreground child runs, the pa
 
 ## What the parent sees
 
-Every run contributes an envelope — status, outcome, continuation, blocker, escalation, artifact, branch, evidence, validation, risks, changed files, truncation — and then as much of its report body as the remaining budget allows. The envelope is measured first and the bodies divide what is left, so the fields the parent acts on cannot be squeezed out by a verbose report.
+Every run contributes an envelope — process status, outcome, conclusion, continuation, blocker, artifact, worktree metadata, evidence, risks, and truncation — before any report body is allocated. The original child report is then appended as the body and straightforwardly byte-truncated if necessary. Small duplication between the envelope and body is intentional: it keeps the handoff simple and preserves the original report when it fits.
 
-A section the envelope carries in full is then dropped from the body. The parent is shown both, so without this every lifted field arrives twice and the repetition competes with the report for the byte budget. Only a whole lift qualifies: a field clipped to fit, or a section longer than the field takes, still has something left to say and stays in the body. `Conclusion` is never lifted, so it is never dropped.
+The safety bounds are 12 KiB for one result, 8 KiB per task in parallel, and 50 KiB for a parallel aggregate. They bound parent context; they do not promise savings. If mandatory envelopes alone exceed a bound, bodies are omitted rather than dropping conclusions, continuations, or other metadata.
 
-Body truncation keeps the conclusion. Cutting from the end is right for a report that leads with its answer, but a child that narrates first would lose the one part the parent needs, so when the retained head does not already carry the whole `Conclusion:` section, that section is sent instead of the head. Exact output stays recoverable in the artifact and the child's session either way.
+An exact-output artifact is created only when the parent handoff genuinely omits or truncates that original report. A report that fits does not get an artifact merely because its fields also appear in the envelope.
 
 ## Read-only delegates
 
