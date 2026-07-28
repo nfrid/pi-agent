@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
@@ -244,10 +245,55 @@ function readConfigFile(settingsPath: string): DelegateConfig {
   }
 }
 
+export function getDelegateSettingsPath(): string {
+  return path.join(getAgentDir(), 'settings.json');
+}
+
+/**
+ * A stable JSON representation used only for diagnostics. Keep this explicit:
+ * settings may contain credentials and unrelated configuration that must never
+ * affect (or appear in) the delegate fingerprint.
+ */
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, entry]) => [key, canonicalize(entry)]),
+    );
+  }
+  return value;
+}
+
+export function fingerprintDelegateConfig(config: DelegateConfig): string {
+  const effective = {
+    validity: config.error
+      ? { valid: false, error: config.error }
+      : { valid: true },
+    defaults: DEFAULT_DELEGATE_RUNTIME,
+    provider: config.provider ?? null,
+    catalog: config.modelCatalog ?? null,
+    runtime: {
+      timeoutMs: config.timeoutMs,
+      maxParallelTasks: config.maxParallelTasks,
+      maxConcurrency: config.maxConcurrency,
+    },
+  };
+  return createHash('sha256')
+    .update(JSON.stringify(canonicalize(effective)))
+    .digest('hex')
+    .slice(0, 12);
+}
+
 export function loadDelegateConfig(_cwd: string): DelegateConfig {
   // Model routing is user-owned. Do not let a repository silently choose which
   // subscription/provider delegated work consumes.
-  return readConfigFile(path.join(getAgentDir(), 'settings.json'));
+  return readConfigFile(getDelegateSettingsPath());
+}
+
+export function delegateRouteCount(config: DelegateConfig): number {
+  return Object.keys(config.modelCatalog ?? {}).length;
 }
 
 export function describeDelegateRouting(

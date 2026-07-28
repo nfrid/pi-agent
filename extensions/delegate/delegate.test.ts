@@ -16,6 +16,7 @@ import { buildSystemPrompt } from '../system-prompt';
 import { acquireSession } from './concurrency';
 import {
   describeDelegateRouting,
+  fingerprintDelegateConfig,
   parseDelegateConfig,
   resolveDelegateRoute,
 } from './config';
@@ -278,6 +279,61 @@ describe('delegate', () => {
     expect(mergeDelegateRouteRequest('replacement', persisted)).toBe(
       'replacement',
     );
+  });
+
+  test('fingerprints only the normalized effective config', () => {
+    const first = parseDelegateConfig({
+      provider: ' provider ',
+      timeoutMs: 60_000,
+      modelCatalog: {
+        quick: {
+          model: ' model ',
+          thinking: 'low',
+          relativeCost: 1,
+          useFor: ' scoped checks ',
+          avoid: ' judgement calls ',
+        },
+      },
+    });
+    const reordered = parseDelegateConfig({
+      modelCatalog: {
+        quick: {
+          avoid: 'judgement calls',
+          useFor: 'scoped checks',
+          relativeCost: 1,
+          thinking: 'low',
+          model: 'model',
+        },
+      },
+      timeoutMs: 60_000,
+      provider: 'provider',
+    });
+    expect(fingerprintDelegateConfig(first)).toBe(
+      fingerprintDelegateConfig(reordered),
+    );
+    expect(
+      fingerprintDelegateConfig(
+        parseDelegateConfig({
+          provider: 'provider',
+          timeoutMs: 60_001,
+        }),
+      ),
+    ).not.toBe(fingerprintDelegateConfig(first));
+
+    const secret = parseDelegateConfig({
+      provider: 'provider',
+      modelCatalog: {
+        quick: {
+          model: 'model',
+          thinking: 'low',
+          relativeCost: 1,
+          useFor: 'checks',
+          avoid: 'judgement calls',
+        },
+      },
+    });
+    expect(fingerprintDelegateConfig(secret)).not.toContain('provider');
+    expect(fingerprintDelegateConfig(secret)).not.toContain('apiKey');
   });
 
   test('describes only explicit catalog routes', () => {

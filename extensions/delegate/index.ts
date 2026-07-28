@@ -6,6 +6,13 @@ import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
 import { createRailPanel } from '../shared/ui/rail';
 import { registerDelegateBranchesTool } from './branches-tool';
+import {
+  type DelegateConfig,
+  delegateRouteCount,
+  fingerprintDelegateConfig,
+  getDelegateSettingsPath,
+  loadDelegateConfig,
+} from './config';
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
 import { pruneDelegateSessions } from './session';
@@ -40,6 +47,15 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   let pendingCompletions: DelegateJobSnapshot[] = [];
   let completionTimer: NodeJS.Timeout | undefined;
   let widgetDetailed = true;
+  let promptSnapshot:
+    | {
+        config: DelegateConfig;
+        fingerprint: string;
+        routeCount: number;
+        loadedAt: string;
+        reason: string;
+      }
+    | undefined;
 
   const activeStatuses = () => statuses?.list() ?? [];
 
@@ -113,7 +129,15 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     completionTimer.unref();
   };
 
-  pi.on('session_start', (_event, ctx) => {
+  pi.on('session_start', (event, ctx) => {
+    const promptConfig = loadDelegateConfig(ctx.cwd);
+    promptSnapshot = {
+      config: promptConfig,
+      fingerprint: fingerprintDelegateConfig(promptConfig),
+      routeCount: delegateRouteCount(promptConfig),
+      loadedAt: new Date().toISOString(),
+      reason: event.reason ?? 'unknown',
+    };
     runtimeActive = true;
     ui = ctx.hasUI ? ctx.ui : undefined;
     deliveryEpoch = 0;
@@ -127,11 +151,16 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     jobs = new DelegateJobManager({
       onSettled: queueCompletion,
     });
-    registerDelegateTool(pi, ctx.cwd, {
-      manager: jobs,
-      statuses,
-      getDeliveryEpoch: () => deliveryEpoch,
-    });
+    registerDelegateTool(
+      pi,
+      ctx.cwd,
+      {
+        manager: jobs,
+        statuses,
+        getDeliveryEpoch: () => deliveryEpoch,
+      },
+      promptConfig,
+    );
     registerDelegateJobsTool(pi, jobs);
     registerDelegateBranchesTool(pi);
     syncWidget();
@@ -189,8 +218,46 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   );
 
   pi.registerCommand('delegates', {
-    description: 'Toggle detailed subagent status',
-    handler: async (_args, ctx) => {
+    description: 'Toggle detailed subagent status or inspect delegate config',
+    handler: async (args, ctx) => {
+      const argument = args.trim();
+      if (argument === 'config') {
+        const snapshot = promptSnapshot;
+        const current = loadDelegateConfig(ctx.cwd);
+        const currentFingerprint = fingerprintDelegateConfig(current);
+        const currentRouteCount = delegateRouteCount(current);
+        const same = snapshot?.fingerprint === currentFingerprint;
+        const sourcePath = (() => {
+          try {
+            const command = pi
+              .getCommands()
+              .find((entry) => entry.name === 'delegates');
+            const sourcePath = command?.sourceInfo?.path;
+            return typeof sourcePath === 'string' && sourcePath.trim()
+              ? sourcePath
+              : 'unknown';
+          } catch {
+            return 'unknown';
+          }
+        })();
+        const report = [
+          `Settings path: ${getDelegateSettingsPath()}`,
+          `Prompt-loaded: fingerprint=${snapshot?.fingerprint ?? 'unknown'}; routes=${snapshot?.routeCount ?? 'unknown'}; time=${snapshot?.loadedAt ?? 'unknown'}; lifecycle=session_start (reason=${snapshot?.reason ?? 'unknown'})`,
+          `Current settings: fingerprint=${currentFingerprint}; routes=${currentRouteCount}`,
+          `Comparison: ${same ? 'same' : 'differs'}`,
+          `Guidance: ${same ? 'Prompt guidance is current.' : '/reload refreshes prompt guidance.'} Delegate execution currently re-reads settings on demand.`,
+          `Extension source: ${sourcePath}`,
+        ].join('\n');
+        if (ctx.hasUI) ctx.ui.notify(report, 'info');
+        else console.log(report);
+        return;
+      }
+      if (argument) {
+        const message = `Unknown /delegates argument "${argument}". Use /delegates for the widget toggle or /delegates config for configuration diagnostics.`;
+        if (ctx.hasUI) ctx.ui.notify(message, 'error');
+        else console.error(message);
+        return;
+      }
       widgetDetailed = !widgetDetailed;
       syncWidget();
       if (!ctx.hasUI)

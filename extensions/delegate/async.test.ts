@@ -316,7 +316,9 @@ describe('async delegate extension', () => {
   });
 
   test('shows live activity and suppresses delivery after tree navigation', async () => {
-    vi.spyOn(configModule, 'loadDelegateConfig').mockReturnValue(config);
+    const configLoader = vi
+      .spyOn(configModule, 'loadDelegateConfig')
+      .mockReturnValue(config);
     vi.spyOn(taskLifecycle, 'prepareDelegateTask').mockResolvedValue(
       prepared(),
     );
@@ -380,6 +382,29 @@ describe('async delegate extension', () => {
 
     delegate(pi);
     handlers.get('session_start')?.({}, ctx);
+    await commands.get('delegates')?.handler('config', ctx);
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining('Comparison: same'),
+      'info',
+    );
+    notify.mockClear();
+    configLoader.mockReturnValue({ ...config, timeoutMs: 120_000 });
+    await commands.get('delegates')?.handler('config', ctx);
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining('Comparison: differs'),
+      'info',
+    );
+    expect(notify.mock.calls[0]?.[0]).toContain(
+      '/reload refreshes prompt guidance',
+    );
+    notify.mockClear();
+    await commands.get('delegates')?.handler('unexpected', ctx);
+    expect(notify).toHaveBeenCalledWith(
+      expect.stringContaining('Unknown /delegates argument'),
+      'error',
+    );
+    notify.mockClear();
+    configLoader.mockReturnValue(config);
     await tools.get('delegate')?.execute(
       'call-1',
       {
