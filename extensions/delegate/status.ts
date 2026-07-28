@@ -22,7 +22,18 @@ export interface DelegateStatusSnapshot {
   activity?: DelegatedActivity;
 }
 
-interface DelegateStatusRecord extends DelegateStatusSnapshot {}
+interface DelegateStatusRecord extends DelegateStatusSnapshot {
+  /** The completion has been returned or delivered into the parent context. */
+  resultEntered: boolean;
+  /** A later parent turn began after the result became available. */
+  turnStarted: boolean;
+  /** The parent produced an assistant message in that later turn. */
+  assistantResponded: boolean;
+}
+
+function isSettled(state: DelegateRunState): boolean {
+  return state !== 'queued' && state !== 'running';
+}
 
 function hasContent(activity: DelegatedActivity): boolean {
   return activity.type === 'thinking'
@@ -67,6 +78,9 @@ export class DelegateStatusStore {
         context: run.context,
         allowWrites: run.allowWrites === true,
         activity: displayActivity(run, undefined),
+        resultEntered: false,
+        turnStarted: false,
+        assistantResponded: false,
       });
       return id;
     });
@@ -112,22 +126,86 @@ export class DelegateStatusStore {
     this.onChange();
   }
 
+  /** Remove statuses that were created for work which could not be started. */
   finish(ids: readonly string[]): void {
     let changed = false;
     for (const id of ids) changed = this.records.delete(id) || changed;
     if (changed) this.onChange();
   }
 
+  /** Record that a settled result is now available to the parent agent. */
+  resultEntered(ids: readonly string[]): void {
+    let changed = false;
+    for (const id of ids) {
+      const record = this.records.get(id);
+      if (!record || !isSettled(record.state) || record.resultEntered) continue;
+      record.resultEntered = true;
+      changed = true;
+    }
+    if (changed) this.onChange();
+  }
+
+  /** Reconcile a background job that settled without a final run update. */
+  settleJobs(jobs: readonly { id: string; state: DelegateRunState }[]): void {
+    let changed = false;
+    for (const job of jobs) {
+      if (!isSettled(job.state)) continue;
+      const record = [...this.records.values()].find(
+        (candidate) => candidate.jobId === job.id,
+      );
+      if (!record || record.state === job.state) continue;
+      record.state = job.state;
+      changed = true;
+    }
+    if (changed) this.onChange();
+  }
+
+  /** Record explicit inspection of settled background jobs in this branch. */
+  jobResultEntered(jobs: readonly string[]): void {
+    const ids = [...this.records.values()]
+      .filter((record) => record.jobId && jobs.includes(record.jobId))
+      .map((record) => record.id);
+    this.resultEntered(ids);
+  }
+
+  parentTurnStarted(): void {
+    for (const record of this.records.values()) {
+      if (record.resultEntered) record.turnStarted = true;
+    }
+  }
+
+  parentAssistantMessage(): void {
+    for (const record of this.records.values()) {
+      if (record.turnStarted) record.assistantResponded = true;
+    }
+  }
+
+  /** Acknowledge only after the parent finished a later response to the result. */
+  acknowledgeSettled(): void {
+    const ids = [...this.records.values()]
+      .filter((record) => record.resultEntered && record.assistantResponded)
+      .map((record) => record.id);
+    this.finish(ids);
+  }
+
   list(): DelegateStatusSnapshot[] {
-    return [...this.records.values()].map((record) => ({
-      ...record,
-      activity: record.activity
-        ? {
-            ...record.activity,
-            latestText: record.activity.latestText,
-          }
-        : undefined,
-    }));
+    return [...this.records.values()].map((record) => {
+      const {
+        resultEntered: _resultEntered,
+        turnStarted: _turnStarted,
+        assistantResponded: _assistantResponded,
+        ...snapshot
+      } = record;
+      return {
+        ...snapshot,
+        activity: record.activity
+          ? {
+              ...record.activity,
+              latestText: record.activity.latestText,
+            }
+          : undefined,
+      };
+    });
   }
 
   clear(): void {

@@ -347,7 +347,7 @@ describe('delegate widget', () => {
     expect(lines[1].trim()).toBe('└ … thinking');
   });
 
-  test('gives the visible rows to the subagents doing work', () => {
+  test('shows every tracked subagent with active work first', () => {
     const lines = renderDelegateWidget(
       [
         status({ id: 'ds-1', name: 'Queued one', state: 'queued' }),
@@ -362,7 +362,8 @@ describe('delegate widget', () => {
       5_000,
     );
     expect(lines[0]).toContain('Running late');
-    expect(lines.join('\n')).toContain('+1 more subagents');
+    expect(lines.join('\n')).toContain('Queued four');
+    expect(lines).toHaveLength(10);
   });
 
   test('breaks the compact line down by state', () => {
@@ -382,18 +383,23 @@ describe('delegate widget', () => {
     expect(line).toContain('/delegates');
   });
 
-  test('caps detailed height and summarizes hidden subagents', () => {
-    const statuses = Array.from({ length: 6 }, (_, index) =>
-      status({ id: `ds-${index}`, name: `Agent ${index}` }),
-    );
+  test('uses one compact line for settled subagents', () => {
     const lines = renderDelegateWidget(
-      statuses,
+      [
+        status({ id: 'ds-running', name: 'Still working' }),
+        status({ id: 'ds-success', name: 'Ready to review', state: 'success' }),
+        status({ id: 'ds-error', name: 'Failed review', state: 'error' }),
+      ],
       true,
       100,
       theme as never,
       5_000,
     );
-    expect(lines).toHaveLength(9);
-    expect(lines.at(-1)).toContain('+2 more subagents');
+    expect(lines).toHaveLength(4);
+    expect(lines[0]).toContain('Still working');
+    expect(lines[1]).toContain('starting');
+    expect(lines[2]).toContain('Ready to review');
+    expect(lines[3]).toContain('Failed review');
+    expect(lines.slice(2).join('\n')).not.toContain('└');
   });
 });

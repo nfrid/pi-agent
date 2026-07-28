@@ -66,6 +66,51 @@ describe('delegate status store', () => {
     expect(onChange).toHaveBeenCalledTimes(3);
   });
 
+  test('acknowledges a settled result only after a later parent turn responds and settles', () => {
+    const store = new DelegateStatusStore();
+    const run = createRun('audit');
+    const [id] = store.start([run], 'foreground');
+
+    store.resultEntered([id]);
+    expect(store.list()).toHaveLength(1);
+
+    run.state = 'success';
+    store.update(id, run);
+    store.resultEntered([id]);
+    store.acknowledgeSettled();
+    expect(store.list()).toHaveLength(1);
+
+    // An assistant message from the turn that was already in progress did
+    // not receive this result in provider context.
+    store.parentAssistantMessage();
+    store.acknowledgeSettled();
+    expect(store.list()).toHaveLength(1);
+
+    store.parentTurnStarted();
+    store.parentAssistantMessage();
+    store.acknowledgeSettled();
+    expect(store.list()).toEqual([]);
+  });
+
+  test('requires explicit inspection before a stale background completion can be acknowledged', () => {
+    const store = new DelegateStatusStore();
+    const run = createRun('audit');
+    run.state = 'success';
+    const [id] = store.start([run], 'background');
+    store.setJobId(id, 'dj-1');
+
+    // A stale notification never enters the active branch's context.
+    store.parentAssistantMessage();
+    store.acknowledgeSettled();
+    expect(store.list()).toHaveLength(1);
+
+    store.jobResultEntered(['dj-1']);
+    store.parentTurnStarted();
+    store.parentAssistantMessage();
+    store.acknowledgeSettled();
+    expect(store.list()).toEqual([]);
+  });
+
   test('keeps the last activity that had content while the next one warms up', () => {
     const store = new DelegateStatusStore();
     const run = createRun('audit');

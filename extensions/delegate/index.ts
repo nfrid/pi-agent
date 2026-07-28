@@ -115,6 +115,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         },
         { deliverAs: 'steer', triggerTurn: true },
       );
+      statuses?.jobResultEntered(completed.map((job) => job.id));
     } catch (error) {
       console.error('delegate: failed to deliver background completion', error);
     }
@@ -122,6 +123,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
 
   const queueCompletion = (job: DelegateJobSnapshot) => {
     if (!runtimeActive) return;
+    statuses?.settleJobs([job]);
     if (job.deliveryEpoch !== deliveryEpoch) {
       notifyStaleCompletion(job);
       return;
@@ -165,7 +167,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       },
       promptConfig,
     );
-    registerDelegateJobsTool(pi, jobs);
+    registerDelegateJobsTool(pi, jobs, (completed) => {
+      statuses?.settleJobs(completed);
+      statuses?.jobResultEntered(completed.map((job) => job.id));
+    });
     registerDelegateBranchesTool(pi);
     syncWidget();
   });
@@ -178,7 +183,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   // down mid-run would discard the mounted render loop. A plain sync refreshes
   // the existing component in place.
   pi.on('agent_start', syncWidget);
-  pi.on('agent_settled', syncWidget);
+  pi.on('turn_start', () => statuses?.parentTurnStarted());
+  pi.on('message_end', (event) => {
+    if (event.message.role === 'assistant') statuses?.parentAssistantMessage();
+  });
+  pi.on('agent_settled', () => {
+    statuses?.acknowledgeSettled();
+    syncWidget();
+  });
   pi.on('session_shutdown', async () => {
     runtimeActive = false;
     if (completionTimer) clearTimeout(completionTimer);

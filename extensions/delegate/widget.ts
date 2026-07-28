@@ -13,7 +13,6 @@ import type { DelegateStatusSnapshot } from './status';
 export const DELEGATE_WIDGET_MAX_WIDTH = 68;
 /** Narrower than this a subagent row is name and elapsed time and nothing else. */
 export const DELEGATE_WIDGET_MIN_WIDTH = 30;
-export const DELEGATE_WIDGET_MAX_AGENTS = 4;
 const MODE_ROUTE_MAX_WIDTH = 16;
 /** Columns the name keeps before the row trades indicators away for it. */
 const MIN_NAME_WIDTH = 14;
@@ -268,10 +267,7 @@ const STATE_RANK: Record<DelegateStatusSnapshot['state'], number> = {
   queued: 2,
 };
 
-/**
- * Only a few rows fit, so the ones doing work take them. Runs that are only
- * waiting for a slot are the first to be summarised away.
- */
+/** Keep active work first while retaining every tracked subagent. */
 function forDisplay(
   statuses: readonly DelegateStatusSnapshot[],
 ): DelegateStatusSnapshot[] {
@@ -316,14 +312,11 @@ export function renderDelegateWidget(
     return placeBlock([line], width);
   }
 
-  const visible = forDisplay(statuses).slice(0, DELEGATE_WIDGET_MAX_AGENTS);
-  const lines = visible.flatMap((status) => [
-    mainLine(status, blockWidth, theme, now),
-    actionLine(status, blockWidth, theme, markdownTheme),
-  ]);
-  if (statuses.length > visible.length)
-    lines.push(
-      theme.fg('dim', `+${statuses.length - visible.length} more subagents`),
-    );
+  const lines = forDisplay(statuses).flatMap((status) => {
+    const main = mainLine(status, blockWidth, theme, now);
+    return status.state === 'queued' || status.state === 'running'
+      ? [main, actionLine(status, blockWidth, theme, markdownTheme)]
+      : [main];
+  });
   return placeBlock(lines, width);
 }
