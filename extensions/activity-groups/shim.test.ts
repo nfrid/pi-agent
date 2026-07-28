@@ -425,6 +425,29 @@ describe('tool sequence shim', () => {
     expect(last?.items.at(-1)).toMatchObject({ status: 'complete' });
   });
 
+  it('produces retry-aware aggregate outcomes in snapshots', () => {
+    const { renderer, snapshots } = recordingRenderer();
+    const h = harness();
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    const [lint, edit, retry] = turn(
+      h,
+      [
+        { name: 'bash', args: { command: 'npm run lint' } },
+        { name: 'edit', args: { path: 'src/index.ts' } },
+        { name: 'bash', args: { command: 'npm run lint' } },
+      ],
+      'retry',
+    );
+    lint?.updateResult({ isError: true });
+    edit?.updateResult({ isError: false });
+    retry?.updateResult({ isError: false });
+    h.setBusy(false);
+
+    h.render();
+    expect(snapshots.at(-1)).toMatchObject({ failed: false });
+  });
+
   it('reports failures and omits timing for sequences replayed from history', () => {
     const { renderer, snapshots } = recordingRenderer();
     const h = harness();

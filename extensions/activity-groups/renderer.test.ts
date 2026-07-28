@@ -42,6 +42,36 @@ const paintedTheme = {
   },
 } as Theme;
 
+function toolItem(
+  id: string,
+  name: string,
+  args: unknown,
+  isError: boolean,
+): SequenceSnapshot['items'][number] {
+  return { type: 'tool', id, name, args, status: 'complete', isError };
+}
+
+function renderOutcome(items: SequenceSnapshot['items']): string {
+  const component = createActivityGroupRenderer()(
+    {
+      id: 'retry-sequence',
+      cwd: process.cwd(),
+      startedAt: 1000,
+      completedAt: 2000,
+      // Deliberately stale: aggregate outcome must come from the items.
+      failed: true,
+      items,
+    },
+    { streaming: false, expanded: false, defaultView: new Text('', 0, 0) },
+    theme,
+    context(),
+  );
+  if (!component) throw new Error('renderer returned no component');
+  const output = component.render(100).join('\n');
+  (component as unknown as { dispose(): void }).dispose();
+  return output;
+}
+
 describe('activity groups renderer', () => {
   it('renders compact live and completed summaries with expandable defaults', () => {
     const renderer = createActivityGroupRenderer();
@@ -372,6 +402,50 @@ describe('activity groups renderer', () => {
     expect(output).toContain('1 call · 1 file');
     expect(output).not.toMatch(/\dms|\ds\b/);
     (component as unknown as { dispose(): void }).dispose();
+  });
+
+  it('resolves failures by ordered tool-call signature', () => {
+    const failed = toolItem(
+      'lint-1',
+      'bash',
+      { command: 'npm run lint' },
+      true,
+    );
+    const sameArgs = toolItem(
+      'lint-2',
+      'bash',
+      { command: 'npm run lint' },
+      false,
+    );
+    const reorderedArgs = toolItem(
+      'lint-3',
+      'edit',
+      { path: 'src/index.ts', content: 'updated' },
+      true,
+    );
+    const reorderedSuccess = toolItem(
+      'lint-4',
+      'edit',
+      { content: 'updated', path: 'src/index.ts' },
+      false,
+    );
+
+    // An unrelated success does not clear the failed signature.
+    expect(
+      renderOutcome([
+        failed,
+        toolItem('other', 'bash', { command: 'npm test' }, false),
+      ]),
+    ).toContain('✗');
+    // A retry clears it, while the historical tally remains visible.
+    expect(renderOutcome([failed, sameArgs])).toContain('✓');
+    expect(renderOutcome([failed, sameArgs])).toContain('1 failed');
+    // Repeated failures still represent one unresolved signature.
+    expect(renderOutcome([failed, failed, sameArgs])).toContain('✓');
+    expect(renderOutcome([failed, failed, sameArgs])).toContain('2 failed');
+    // A later failure reopens a signature, and object key order is irrelevant.
+    expect(renderOutcome([sameArgs, failed])).toContain('✗');
+    expect(renderOutcome([reorderedArgs, reorderedSuccess])).toContain('✓');
   });
 
   it('keeps failures prominent', () => {

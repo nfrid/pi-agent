@@ -3,6 +3,7 @@ import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth } from '@earendil-works/pi-tui';
 import { stringArg, toolBaseName, toolPath, toolRole } from './grouping';
+import { hasUnresolvedToolFailure } from './outcome';
 import {
   composeTitle,
   describeTools,
@@ -275,17 +276,17 @@ export class ActivityGroupComponent implements Component {
   }
 
   /** The group's own line: how it went, and what it was. */
-  private headline(tools: readonly ToolItem[], completed: boolean): string {
+  private headline(
+    tools: readonly ToolItem[],
+    completed: boolean,
+    failed: boolean,
+  ): string {
     const marker = completed
-      ? this.sequence.failed
+      ? failed
         ? '✗'
         : '✓'
       : SPINNER_FRAMES[this.spinnerFrame];
-    const color = this.sequence.failed
-      ? 'error'
-      : completed
-        ? 'success'
-        : 'accent';
+    const color = failed ? 'error' : completed ? 'success' : 'accent';
     return ` ${this.theme.fg(color, marker)} ${this.theme.fg('text', this.title(tools, completed))}`;
   }
 
@@ -317,6 +318,7 @@ export class ActivityGroupComponent implements Component {
   private metadataLine(
     tools: readonly ToolItem[],
     completed: boolean,
+    failed: boolean,
   ): string | undefined {
     const files = this.files(tools);
     const directory = commonDirectory(files);
@@ -333,10 +335,10 @@ export class ActivityGroupComponent implements Component {
       parts.push(
         formatDuration(this.sequence.completedAt - this.sequence.startedAt),
       );
-    const failed = tools.filter((tool) => tool.isError).length;
-    if (failed > 0) parts.push(`${failed} failed`);
+    const historicalFailed = tools.filter((tool) => tool.isError).length;
+    if (historicalFailed > 0) parts.push(`${historicalFailed} failed`);
     if (parts.length === 0) return undefined;
-    return `   ${this.theme.fg(this.sequence.failed ? 'error' : 'muted', parts.join(' · '))}`;
+    return `   ${this.theme.fg(failed ? 'error' : 'muted', parts.join(' · '))}`;
   }
 
   render(width: number): string[] {
@@ -344,11 +346,12 @@ export class ActivityGroupComponent implements Component {
       (item): item is ToolItem => item.type === 'tool',
     );
     const completed = !this.options.streaming;
-    const metadata = this.metadataLine(tools, completed);
+    const failed = hasUnresolvedToolFailure(tools);
+    const metadata = this.metadataLine(tools, completed, failed);
 
     const lines = [
       '',
-      this.headline(tools, completed),
+      this.headline(tools, completed, failed),
       ...this.stepLines(tools),
       ...(metadata ? [metadata] : []),
     ].map((line) => truncateToWidth(line, width));
