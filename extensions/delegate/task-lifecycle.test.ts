@@ -29,6 +29,7 @@ function plan(overrides: Partial<DelegateTaskPlan> = {}): DelegateTaskPlan {
     requestedCwd: repository,
     context: 'fresh',
     writeRequested: false,
+    isolation: 'shared',
     routeOverride: false,
     warnings: [],
     ...overrides,
@@ -72,9 +73,44 @@ describe('delegate task lifecycle', () => {
     }
   });
 
+  test('fails closed when requested worktree setup is unavailable', async () => {
+    await expect(
+      prepareDelegateTask(
+        plan({
+          requestedCwd: '/tmp/not-a-delegate-repository',
+          isolation: 'worktree',
+        }),
+      ),
+    ).rejects.toThrow(/Worktree unavailable/);
+  });
+
+  test('prepares an isolated read-only task in a worktree', async () => {
+    const prepared = await prepareDelegateTask(
+      plan({ isolation: 'worktree', base: 'head' }),
+    );
+    try {
+      expect(prepared.allowWrites).toBe(false);
+      expect(prepared.isolation).toBe('worktree');
+      expect(prepared.worktree).toBeDefined();
+      expect(prepared.cwd).toBe(prepared.worktree?.record.worktreePath);
+      expect(prepared.session).toMatchObject({
+        isolation: 'worktree',
+        allowWrites: false,
+        worktreeId: prepared.worktree?.record.id,
+      });
+    } finally {
+      await rollbackPreparedDelegateTasks([prepared]);
+    }
+  });
+
   test('restores a writable continuation in its persisted worktree', async () => {
     const prepared = await prepareDelegateTask(
-      plan({ scope: ['src'], writeRequested: true, base: 'head' }),
+      plan({
+        scope: ['src'],
+        writeRequested: true,
+        isolation: 'worktree',
+        base: 'head',
+      }),
     );
     expect(prepared.worktree).toBeDefined();
     expect(prepared.session.allowWrites).toBe(true);

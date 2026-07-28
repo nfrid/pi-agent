@@ -11,6 +11,7 @@ import {
   type DelegateContext,
   type DelegateDetails,
   type DelegatedRun,
+  type DelegateIsolation,
   type DelegateRouteState,
   getFinalAssistantText,
   isRunError,
@@ -71,6 +72,7 @@ export interface RunDelegateOptions {
   routing?: DelegateRouteState;
   allowWrites?: boolean;
   writeRequested?: boolean;
+  isolation: DelegateIsolation;
   worktree?: PreparedWorktree;
   contextNote?: string;
   scope?: string[];
@@ -143,6 +145,7 @@ export async function runDelegate(
     context: options.context,
     allowWrites,
     writeRequested,
+    isolation: options.isolation,
     worktree: options.worktree
       ? worktreeSummary(options.worktree.record)
       : undefined,
@@ -150,8 +153,6 @@ export async function runDelegate(
     scope: options.scope,
     continuation: options.continuation,
   });
-  // A writable task without a worktree still runs — it just edits the parent
-  // checkout directly, and the caller has already been warned why.
   let releaseSlot: (() => void) | undefined;
   let releaseSession: (() => void) | undefined;
 

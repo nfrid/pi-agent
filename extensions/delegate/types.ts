@@ -50,6 +50,8 @@ export interface DelegateRouteState {
 }
 
 export type DelegateContext = 'branch' | 'fresh' | 'continuation';
+/** Whether a delegate shares the parent checkout or receives a worktree. */
+export type DelegateIsolation = 'shared' | 'worktree';
 export type DelegateRunState =
   | 'queued'
   | 'running'
@@ -73,6 +75,8 @@ export interface DelegateRunMetadata {
   contextNote?: string;
   allowWrites?: boolean;
   writeRequested?: boolean;
+  /** Effective workspace isolation, independent from write capability. */
+  isolation?: DelegateIsolation;
   scope?: string[];
   continuation?: string;
   backgroundJobId?: string;

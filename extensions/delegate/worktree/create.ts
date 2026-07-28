@@ -222,7 +222,7 @@ export async function prepareWorktree(options: {
     root = await repositoryRoot(options.cwd);
   } catch (error) {
     return {
-      fallbackReason: `Worktree unavailable: ${error instanceof Error ? error.message : String(error)}. Running in the parent checkout without one.`,
+      fallbackReason: `Worktree unavailable: ${error instanceof Error ? error.message : String(error)}.`,
     };
   }
 
@@ -293,7 +293,7 @@ export async function prepareWorktree(options: {
   } catch (error) {
     await cleanupFailedPreparation(root, worktreePath, branch);
     return {
-      fallbackReason: `Worktree setup failed: ${error instanceof Error ? error.message : String(error)}. Running in the parent checkout without one.`,
+      fallbackReason: `Worktree setup failed: ${error instanceof Error ? error.message : String(error)}.`,
     };
   }
 }

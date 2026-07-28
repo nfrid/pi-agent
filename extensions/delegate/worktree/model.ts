@@ -67,7 +67,7 @@ export interface PreparedWorktree {
 
 export interface WorktreePreparation {
   worktree?: PreparedWorktree;
-  /** Why a worktree could not be prepared. The run continues without one. */
+  /** Why a requested worktree could not be prepared. Callers fail closed. */
   fallbackReason?: string;
 }
 

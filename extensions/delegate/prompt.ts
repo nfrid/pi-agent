@@ -18,10 +18,10 @@ export function buildDelegatePrompt(
   } = {},
 ): string {
   const capability = options.allowWrites
-    ? options.branch
-      ? `You are working in your own git worktree on branch ${options.branch}, isolated from the user's checkout and from other agents. Edit freely; you cannot disturb anyone else's work. Commit as you go with clear messages — the branch is how your work reaches the parent, and anything left uncommitted is committed for you under a generic message. Do not merge, rebase, push, or switch branches: the parent integrates this branch.`
-      : 'You are editing the checkout directly, without a separate worktree. Change only what the task requires and leave unrelated files alone.'
-    : 'Treat this as a read-only task: inspect and report, do not edit files. You have a shell for inspection — use it for reading, searching, and running checks rather than for making changes.';
+    ? `You are working in your own git worktree on branch ${options.branch ?? '(unknown)'}, isolated from the user's checkout and from other agents. Edit freely; you cannot disturb anyone else's work. Commit as you go with clear messages — the branch is how your work reaches the parent, and anything left uncommitted is committed for you under a generic message. Do not merge, rebase, push, or switch branches: the parent integrates this branch.`
+    : options.branch
+      ? `Treat this as a read-only task in an isolated git worktree on branch ${options.branch}: inspect and report, do not edit files. The snapshot remains reviewable, but it will normally contain no changes. You have a shell for inspection — use it for reading, searching, and running checks rather than for making changes.`
+      : 'Treat this as a read-only task in the shared checkout: inspect and report, do not edit files. You have a shell for inspection — use it for reading, searching, and running checks rather than for making changes.';
   const context = options.contextNote?.trim()
     ? `\n\nContext from the parent agent:\n${options.contextNote.trim()}`
     : '';

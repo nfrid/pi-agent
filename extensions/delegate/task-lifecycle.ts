@@ -9,6 +9,7 @@ import {
 import type {
   DelegateContext,
   DelegatedRun,
+  DelegateIsolation,
   DelegateRouteState,
 } from './types';
 import {
@@ -30,8 +31,12 @@ export interface DelegateTaskPlan {
   scope?: string[];
   base?: WorktreeBase;
   writeRequested: boolean;
+  /** Effective workspace isolation, independent from write capability. */
+  isolation: DelegateIsolation;
   /** Whether this invocation explicitly supplied allowWrites. */
   allowWritesExplicit?: boolean;
+  /** Whether this invocation explicitly supplied isolation. */
+  isolationExplicit?: boolean;
   routing?: DelegateRouteState;
   resumed?: DelegateSession;
   routeOverride: boolean;
@@ -43,6 +48,7 @@ export interface ContinuationPreflight {
   cwd: string;
   scope?: string[];
   allowWrites: boolean;
+  isolation: DelegateIsolation;
   worktree?: PreparedWorktree;
   warnings: string[];
 }
@@ -59,7 +65,8 @@ export function preflightDelegateContinuation(
   const state: ContinuationPreflight = {
     cwd: plan.requestedCwd,
     scope: plan.scope,
-    allowWrites: false,
+    allowWrites: plan.writeRequested,
+    isolation: plan.isolation,
     warnings: [...plan.warnings],
   };
   // A continuation cannot restate scope, so replay what the original run was
@@ -79,7 +86,16 @@ export function preflightDelegateContinuation(
       );
     }
     state.allowWrites = originalAllowWrites;
-    if (plan.resumed.worktreeId) {
+    const originalIsolation = plan.resumed.isolation;
+    if (plan.isolationExplicit && plan.isolation !== originalIsolation) {
+      throw new Error(
+        `A continuation cannot change isolation from ${originalIsolation} to ${plan.isolation}. Omit isolation to reuse the original workspace mode.`,
+      );
+    }
+    state.isolation = originalIsolation;
+    if (originalIsolation === 'worktree') {
+      if (!plan.resumed.worktreeId)
+        throw new Error('The worktree for this continuation is unavailable.');
       const record = loadWorktree(plan.resumed.worktreeId);
       if (!record)
         throw new Error('The worktree for this continuation is unavailable.');
@@ -98,25 +114,21 @@ export async function prepareDelegateTask(
   let session: DelegateSession | undefined;
   let routeRollback: { routing?: DelegateRouteState } | undefined;
   try {
-    if (plan.writeRequested && !plan.resumed) {
+    if (plan.isolation === 'worktree' && !plan.resumed) {
       const prepared = await prepareWorktree({
         cwd: plan.requestedCwd,
         name: plan.name,
         base: plan.base,
       });
-      if (prepared.worktree) {
-        state.worktree = prepared.worktree;
-        state.cwd = path.join(
-          prepared.worktree.record.worktreePath,
-          prepared.worktree.record.workingDirectory,
+      if (!prepared.worktree)
+        throw new Error(
+          prepared.fallbackReason ?? 'Worktree setup failed before launch.',
         );
-        state.allowWrites = true;
-      } else if (prepared.fallbackReason) {
-        // Without a worktree the task still runs, but it writes to the parent
-        // checkout, so the caller is told why.
-        state.warnings.push(prepared.fallbackReason);
-        state.allowWrites = true;
-      }
+      state.worktree = prepared.worktree;
+      state.cwd = path.join(
+        prepared.worktree.record.worktreePath,
+        prepared.worktree.record.workingDirectory,
+      );
     }
 
     if (plan.resumed) {
@@ -132,6 +144,7 @@ export async function prepareDelegateTask(
         snapshotJsonl: plan.snapshotJsonl,
         worktreeId: state.worktree?.record.id,
         allowWrites: state.allowWrites,
+        isolation: state.isolation,
         scope: state.scope,
         routing: plan.routing,
       });
@@ -235,6 +248,7 @@ export async function runPreparedDelegateTask(
     routing: prepared.plan.routing,
     writeRequested: prepared.plan.writeRequested,
     allowWrites: prepared.allowWrites,
+    isolation: prepared.isolation,
     worktree: prepared.worktree,
     timeoutMs: options.timeoutMs,
     maxConcurrency: options.maxConcurrency,

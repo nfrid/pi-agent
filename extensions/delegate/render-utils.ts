@@ -41,6 +41,7 @@ export type DelegateCallTask = {
   cwd?: unknown;
   context?: unknown;
   allowWrites?: unknown;
+  isolation?: unknown;
   continuation?: unknown;
 };
 
@@ -187,6 +188,7 @@ export function modeDescription(
     context?: unknown;
     continuation?: unknown;
     allowWrites?: unknown;
+    isolation?: unknown;
     cwd?: unknown;
     route?: unknown;
     requestedMode?: boolean;
@@ -204,6 +206,11 @@ export function modeDescription(
           : 'Can edit'
         : 'Read-only',
     ),
+    ...(values.isolation === 'worktree'
+      ? [fg('dim', 'Isolated worktree')]
+      : values.isolation === 'shared'
+        ? [fg('dim', 'Shared checkout')]
+        : []),
     fg('dim', compactPath(values.cwd)),
   ];
   if (typeof values.route === 'string' && values.route)

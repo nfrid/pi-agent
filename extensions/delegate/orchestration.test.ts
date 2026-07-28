@@ -62,6 +62,7 @@ function prepared(
       requestedCwd: '/tmp/project',
       context: 'fresh',
       writeRequested: false,
+      isolation: 'shared',
       routeOverride: false,
       warnings: [],
       routing,
@@ -70,11 +71,13 @@ function prepared(
       token: 'tok',
       filePath: '/tmp/delegate.jsonl',
       cwd: '/tmp/project',
+      isolation: 'shared',
     },
     cwd: '/tmp/project',
     allowWrites: false,
     warnings: [],
     ...overrides,
+    isolation: overrides.isolation ?? 'shared',
   };
 }
 
@@ -91,6 +94,49 @@ describe('buildDelegatePlans', () => {
     expect(built.plans[0]?.task).toBe('inspect');
     expect(built.plans[0]?.context).toBe('fresh');
     expect(built.preflights).toHaveLength(1);
+  });
+
+  test('defaults fresh capability and isolation independently', () => {
+    const build = (params: Record<string, unknown>) =>
+      buildDelegatePlans(
+        { name: 'Test agent', task: 'inspect', route: 'quick', ...params },
+        ctx,
+        config,
+        () => null,
+      ).plans[0];
+    expect(build({})).toMatchObject({
+      writeRequested: false,
+      isolation: 'shared',
+    });
+    expect(build({ allowWrites: true })).toMatchObject({
+      writeRequested: true,
+      isolation: 'worktree',
+    });
+    expect(build({ isolation: 'worktree' })).toMatchObject({
+      writeRequested: false,
+      isolation: 'worktree',
+    });
+    expect(build({ allowWrites: false, isolation: 'shared' })).toMatchObject({
+      writeRequested: false,
+      isolation: 'shared',
+    });
+  });
+
+  test('rejects writable shared delegates and base selection on shared delegates', () => {
+    for (const params of [
+      { allowWrites: true, isolation: 'shared' as const },
+      { from: 'head' as const },
+    ])
+      expect(() =>
+        buildDelegatePlans(
+          { name: 'Test agent', task: 'inspect', route: 'quick', ...params },
+          ctx,
+          config,
+          () => null,
+        ),
+      ).toThrow(
+        /(?:Writable delegates require worktree|from requires worktree)/,
+      );
   });
 
   test('requires a name for every subagent', () => {
@@ -290,6 +336,33 @@ describe('buildDelegatePlans', () => {
           () => null,
         ),
       ).toThrow('cannot change allowWrites from writable to read-only');
+    } finally {
+      removeDelegateSession(session);
+    }
+  });
+
+  test('inherits immutable worktree isolation on continuation', () => {
+    const session = createDelegateSession({
+      cwd: '/tmp/project',
+      allowWrites: false,
+      isolation: 'worktree',
+      worktreeId: 'missing-worktree',
+      routing,
+    });
+    try {
+      expect(() =>
+        buildDelegatePlans(
+          {
+            name: 'Test agent',
+            task: 'continue',
+            continuation: session.token,
+            isolation: 'shared',
+          },
+          ctx,
+          config,
+          () => null,
+        ),
+      ).toThrow('cannot change isolation from worktree to shared');
     } finally {
       removeDelegateSession(session);
     }

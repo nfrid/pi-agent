@@ -109,13 +109,13 @@ describe('worktree preparation', () => {
     ).toBe('one\n');
   });
 
-  test('falls back with a reason outside a repository', async () => {
+  test('reports setup failure outside a repository', async () => {
     const preparation = await prepareWorktree({
       cwd: path.dirname(repository),
       name: 'No repo here',
     });
     expect(preparation.worktree).toBeUndefined();
-    expect(preparation.fallbackReason).toMatch(/parent checkout/);
+    expect(preparation.fallbackReason).toMatch(/Worktree unavailable/);
   });
 });
 

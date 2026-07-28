@@ -54,6 +54,7 @@ function prepared(
       requestedCwd: '/tmp/project',
       context: 'fresh',
       writeRequested: false,
+      isolation: 'shared',
       routeOverride: false,
       warnings: [],
       routing: {
@@ -68,9 +69,11 @@ function prepared(
       token,
       filePath: '/tmp/delegate.jsonl',
       cwd: '/tmp/project',
+      isolation: 'shared',
     },
     cwd: '/tmp/project',
     allowWrites: false,
+    isolation: 'shared',
     warnings: [],
   };
 }

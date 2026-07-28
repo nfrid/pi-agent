@@ -75,6 +75,7 @@ function addExpandedRun(
           continuation:
             run.context === 'continuation' ? run.continuation : undefined,
           allowWrites: run.allowWrites,
+          isolation: run.isolation,
           cwd: run.cwd,
           route: run.routing?.route,
         },
@@ -229,6 +230,7 @@ export function renderDelegateResult(
               continuation:
                 run.context === 'continuation' ? run.continuation : undefined,
               allowWrites: run.allowWrites,
+              isolation: run.isolation,
               cwd: run.cwd,
               route: run.routing?.route,
             },
@@ -379,6 +381,7 @@ export function renderDelegateResult(
             continuation:
               run.context === 'continuation' ? run.continuation : undefined,
             allowWrites: run.allowWrites,
+            isolation: run.isolation,
             cwd: run.cwd,
             route: run.routing?.route,
           },

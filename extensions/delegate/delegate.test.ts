@@ -34,6 +34,7 @@ import {
   createDelegateSession,
   DELEGATE_SESSION_MAX_AGE_MS,
   pruneDelegateSessions,
+  removeDelegateSession,
   resolveDelegateSession,
   updateDelegateSessionRouting,
 } from './session';
@@ -438,6 +439,31 @@ describe('delegate', () => {
     }
   });
 
+  test('migrates legacy session isolation from its worktree link', () => {
+    const shared = createDelegateSession({ cwd: '/tmp/project' });
+    const isolated = createDelegateSession({
+      cwd: '/tmp/project',
+      worktreeId: 'legacy-worktree',
+    });
+    try {
+      for (const session of [shared, isolated]) {
+        const metadataPath = session.filePath.replace(/\.jsonl$/, '.json');
+        const metadata = JSON.parse(readFileSync(metadataPath, 'utf8')) as {
+          isolation?: unknown;
+        };
+        delete metadata.isolation;
+        writeFileSync(metadataPath, `${JSON.stringify(metadata)}\n`);
+      }
+      expect(resolveDelegateSession(shared.token)?.isolation).toBe('shared');
+      expect(resolveDelegateSession(isolated.token)?.isolation).toBe(
+        'worktree',
+      );
+    } finally {
+      removeDelegateSession(shared);
+      removeDelegateSession(isolated);
+    }
+  });
+
   test('prunes aged unlinked transcripts but retains worktree-linked evidence', () => {
     const unlinked = createDelegateSession({ cwd: '/tmp/project' });
     const linked = createDelegateSession({
@@ -632,15 +658,14 @@ describe('delegate', () => {
     expect(prompt).toMatch(/parent integrates this branch/);
   });
 
-  test('tells a worktree-less writable child it is editing the checkout directly', () => {
+  test('does not tell a writable child to edit the shared checkout', () => {
     const args = buildChildArgs(
       { task: 'implement', allowWrites: true },
       '/tmp/child.jsonl',
     );
     expect(args[args.indexOf('--tools') + 1]).toContain('write');
-    expect(args[args.length - 1]).toMatch(
-      /editing the checkout directly, without a separate worktree/,
-    );
+    expect(args[args.length - 1]).toMatch(/own git worktree/);
+    expect(args[args.length - 1]).not.toMatch(/editing the checkout directly/);
   });
 
   test('joins all text blocks in the final assistant response', () => {

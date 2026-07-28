@@ -11,7 +11,7 @@ import {
 import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { atomicWriteJsonSync } from '../shared/fs/atomic';
-import type { DelegateRouteState } from './types';
+import type { DelegateIsolation, DelegateRouteState } from './types';
 
 interface SessionSnapshotSource {
   getHeader: () => unknown;
@@ -25,6 +25,8 @@ export interface DelegateSession {
   worktreeId?: string;
   /** The original task capability; continuations inherit it when omitted. */
   allowWrites?: boolean;
+  /** The original workspace mode; continuations reuse its checkout. */
+  isolation: DelegateIsolation;
   /** Advisory paths the parent named; replayed so continuations keep them. */
   scope?: string[];
   routing?: DelegateRouteState;
@@ -36,6 +38,7 @@ interface DelegateSessionMetadata {
   createdAt: string;
   worktreeId?: string;
   allowWrites?: boolean;
+  isolation?: DelegateIsolation;
   scope?: string[];
   routing?: DelegateRouteState;
 }
@@ -104,6 +107,7 @@ export function createDelegateSession(options: {
   snapshotJsonl?: string;
   worktreeId?: string;
   allowWrites?: boolean;
+  isolation?: DelegateIsolation;
   scope?: string[];
   routing?: DelegateRouteState;
 }): DelegateSession {
@@ -124,6 +128,8 @@ export function createDelegateSession(options: {
       createdAt,
       ...(options.worktreeId ? { worktreeId: options.worktreeId } : {}),
       allowWrites: options.allowWrites ?? false,
+      isolation:
+        options.isolation ?? (options.worktreeId ? 'worktree' : 'shared'),
       ...(options.scope?.length ? { scope: options.scope } : {}),
       ...(options.routing ? { routing: options.routing } : {}),
     };
@@ -143,6 +149,8 @@ export function createDelegateSession(options: {
     cwd: options.cwd,
     ...(options.worktreeId ? { worktreeId: options.worktreeId } : {}),
     allowWrites: options.allowWrites ?? false,
+    isolation:
+      options.isolation ?? (options.worktreeId ? 'worktree' : 'shared'),
     ...(options.scope?.length ? { scope: options.scope } : {}),
     ...(options.routing ? { routing: options.routing } : {}),
   };
@@ -173,6 +181,14 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
       ...(typeof metadata.allowWrites === 'boolean'
         ? { allowWrites: metadata.allowWrites }
         : {}),
+      // Sessions from before isolation persistence used a worktree exactly
+      // when they carried a worktree id.
+      isolation:
+        metadata.isolation === 'worktree' || metadata.isolation === 'shared'
+          ? metadata.isolation
+          : typeof metadata.worktreeId === 'string'
+            ? 'worktree'
+            : 'shared',
       ...(Array.isArray(metadata.scope) ? { scope: metadata.scope } : {}),
       ...(metadata.routing && typeof metadata.routing === 'object'
         ? { routing: metadata.routing }

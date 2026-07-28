@@ -25,6 +25,7 @@ interface TaskInput {
   scope?: string[];
   continuation?: string;
   allowWrites?: boolean;
+  isolation?: DelegateTaskPlan['isolation'];
   from?: DelegateTaskPlan['base'];
 }
 
@@ -35,6 +36,7 @@ interface SharedDefaults {
   contextNote?: string;
   scope?: string[];
   allowWrites?: boolean;
+  isolation?: DelegateTaskPlan['isolation'];
   from?: DelegateTaskPlan['base'];
 }
 
@@ -96,6 +98,7 @@ function normalizeInputs(params: DelegateParams): {
         contextNote: params.contextNote,
         scope: params.scope,
         allowWrites: params.allowWrites,
+        isolation: params.isolation,
         from: params.from,
       },
     };
@@ -118,6 +121,7 @@ function normalizeInputs(params: DelegateParams): {
         scope: params.scope,
         continuation: params.continuation,
         allowWrites: params.allowWrites,
+        isolation: params.isolation,
         from: params.from,
       },
     ],
@@ -205,6 +209,33 @@ export function buildDelegatePlans(
     // before capability persistence infer writable from their worktree.
     return resumed[index]?.allowWrites ?? Boolean(resumed[index]?.worktreeId);
   });
+  const isolationExplicit = inputs.map(
+    (item) => item.isolation !== undefined || shared.isolation !== undefined,
+  );
+  const isolations = inputs.map((item, index) => {
+    const requested = item.isolation ?? shared.isolation;
+    if (requested !== undefined) return requested;
+    if (resumed[index]) return resumed[index].isolation;
+    return writeRequests[index] ? 'worktree' : 'shared';
+  });
+  for (let index = 0; index < inputs.length; index++) {
+    if (
+      !resumed[index] &&
+      writeRequests[index] &&
+      isolations[index] === 'shared'
+    )
+      invalidParams(
+        'Writable delegates require worktree isolation; shared writable delegates are not supported.',
+      );
+    if (
+      !resumed[index] &&
+      (inputs[index].from !== undefined || shared.from !== undefined) &&
+      isolations[index] === 'shared'
+    )
+      invalidParams(
+        'from requires worktree isolation; it cannot be used with a shared delegate.',
+      );
+  }
   const warnings = parallel
     ? writeWarnings(requestedCwds, writeRequests, scopes)
     : inputs.map(() => [] as string[]);
@@ -229,7 +260,9 @@ export function buildDelegatePlans(
     scope: scopes[index],
     base: item.from ?? shared.from,
     writeRequested: writeRequests[index],
+    isolation: isolations[index],
     allowWritesExplicit: writeRequestExplicit[index],
+    isolationExplicit: isolationExplicit[index],
     routing: routings[index].routing,
     resumed: resumed[index] ?? undefined,
     routeOverride: Boolean(
