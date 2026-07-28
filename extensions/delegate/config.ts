@@ -227,16 +227,27 @@ export function parseDelegateConfig(raw: unknown): DelegateConfig {
   return config;
 }
 
+export function parseDelegateSettings(
+  raw: unknown,
+  settingsPath: string,
+): DelegateConfig {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return {
+      ...defaultConfig(),
+      error: `Could not parse delegate configuration at ${settingsPath}.`,
+    };
+  const nested = (raw as Record<string, unknown>)[SETTINGS_KEY];
+  if (nested === undefined) return defaultConfig();
+  return parseDelegateConfig(nested);
+}
+
 function readConfigFile(settingsPath: string): DelegateConfig {
   if (!existsSync(settingsPath)) return defaultConfig();
   try {
-    const raw = JSON.parse(readFileSync(settingsPath, 'utf8')) as Record<
-      string,
-      unknown
-    >;
-    const nested = raw[SETTINGS_KEY];
-    if (nested === undefined) return defaultConfig();
-    return parseDelegateConfig(nested);
+    return parseDelegateSettings(
+      JSON.parse(readFileSync(settingsPath, 'utf8')) as unknown,
+      settingsPath,
+    );
   } catch {
     return {
       ...defaultConfig(),

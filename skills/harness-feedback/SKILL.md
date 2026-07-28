@@ -38,5 +38,7 @@ new`. Write no more than three reports.
 ## Hard boundaries
 
 This skill captures reports only. It must not triage reports, create tickets,
-approve work, implement fixes, commit, alter routing, or modify the current
-project.
+approve work, implement fixes, commit, or alter routing. Its only permitted
+write is a new report in the fixed canonical inbox, including when the harness
+repository itself is the current project; it must not modify any other
+current-project file.

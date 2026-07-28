@@ -18,6 +18,7 @@ import {
   describeDelegateRouting,
   fingerprintDelegateConfig,
   parseDelegateConfig,
+  parseDelegateSettings,
   resolveDelegateRoute,
 } from './config';
 import {
@@ -279,6 +280,18 @@ describe('delegate', () => {
     expect(mergeDelegateRouteRequest('replacement', persisted)).toBe(
       'replacement',
     );
+  });
+
+  test('rejects a malformed settings root instead of reporting valid defaults', () => {
+    for (const malformed of [[], 'text', 42, null]) {
+      const config = parseDelegateSettings(malformed, '/tmp/settings.json');
+      expect(config.error).toBe(
+        'Could not parse delegate configuration at /tmp/settings.json.',
+      );
+    }
+    expect(
+      parseDelegateSettings({ unrelated: true }, '/tmp/settings.json').error,
+    ).toBeUndefined();
   });
 
   test('fingerprints only the normalized effective config', () => {
