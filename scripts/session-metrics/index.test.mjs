@@ -504,6 +504,55 @@ describe('delegate measurements', () => {
     ).toMatchObject({ delegateBackgroundDeliveries: 0, delegatedTasks: 0 });
   });
 
+  it('counts a completed cancel handoff but not a cancelled job without one', () => {
+    const completedHandoff =
+      'Delegated results: 1 run\n\nOutcome: done\nTruncation: none';
+    const cancelled =
+      'Background delegate job dj-cancelled (slow audit) cancelled\nCompletion will be delivered automatically.';
+    const text = [
+      `Background delegate job dj-completed (audit) success\n\n${completedHandoff}`,
+      cancelled,
+    ].join('\n\n');
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          text: 'Started 2 background delegate jobs: dj-completed, dj-cancelled.',
+          details: { mode: 'parallel', runs: [{}, {}] },
+        },
+        {
+          toolName: 'delegate_jobs',
+          text,
+          details: {
+            action: 'cancel',
+            jobs: [
+              {
+                id: 'dj-completed',
+                state: 'success',
+                handoff: completedHandoff,
+                runs: [
+                  {
+                    routing: { route: 'quick', relativeCost: 1 },
+                    usage: { turns: 2 },
+                  },
+                ],
+              },
+              { id: 'dj-cancelled', state: 'cancelled', runs: [{}] },
+            ],
+          },
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateBackgroundDeliveries: 1,
+      // Both jobs were launched; only the completed one is delivered by cancel.
+      delegatedTasks: 2,
+      delegateOutcomeDone: 1,
+      routedTasks: 1,
+      childTurns: 2,
+      delegateHandoffBytes: Buffer.byteLength(text, 'utf8'),
+    });
+  });
+
   it('charges what a child spent to the route that ran it', () => {
     const run = (route, relativeCost, usage) => ({
       routing: { route, relativeCost },
