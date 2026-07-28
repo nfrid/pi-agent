@@ -1,10 +1,11 @@
+import { readFileSync, writeFileSync } from 'node:fs';
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { DelegateConfig } from './config';
-import { executeSingleDelegate } from './orchestration';
+import { executeSingleDelegate, pendingRuns } from './orchestration';
 import { buildDelegatePlans } from './plans';
 import { createDelegateSession, removeDelegateSession } from './session';
 import type { PreparedDelegateTask } from './task-lifecycle';
@@ -244,25 +245,27 @@ describe('buildDelegatePlans', () => {
     );
   });
 
-  test('inherits a writable continuation capability when allowWrites is omitted', () => {
+  test('rejects a migrated writable shared continuation', () => {
     const session = createDelegateSession({
       cwd: '/tmp/project',
       allowWrites: true,
       routing,
     });
     try {
-      const built = buildDelegatePlans(
-        { name: 'Test agent', task: 'continue', continuation: session.token },
-        ctx,
-        config,
-        () => null,
-      );
-      expect(built.plans[0]).toMatchObject({
-        context: 'continuation',
-        writeRequested: true,
-        allowWritesExplicit: false,
-      });
-      expect(built.preflights[0]).toMatchObject({ allowWrites: true });
+      const metadataPath = session.filePath.replace(/\.jsonl$/, '.json');
+      const metadata = JSON.parse(readFileSync(metadataPath, 'utf8')) as {
+        isolation?: unknown;
+      };
+      delete metadata.isolation;
+      writeFileSync(metadataPath, `${JSON.stringify(metadata)}\n`);
+      expect(() =>
+        buildDelegatePlans(
+          { name: 'Test agent', task: 'continue', continuation: session.token },
+          ctx,
+          config,
+          () => null,
+        ),
+      ).toThrow('Writable delegates require worktree isolation');
     } finally {
       removeDelegateSession(session);
     }
@@ -382,6 +385,44 @@ describe('buildDelegatePlans', () => {
         () => null,
       ),
     ).toThrow('do not provide replacements');
+  });
+});
+
+describe('pending delegate runs', () => {
+  test('exposes prepared worktree identity before an isolated child launches', () => {
+    const worktree: PreparedWorktree = {
+      record: {
+        version: 1,
+        id: 'wt-readonly',
+        repositoryRoot: '/repo',
+        worktreePath: '/repo/.worktrees/audit',
+        workingDirectory: '.',
+        branch: 'pi/audit',
+        baseHead: 'abc12345',
+        base: 'head',
+        carriedWip: false,
+        dependencyLinks: [],
+        carriedFiles: [],
+        status: 'active',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      env: {},
+    };
+    const task = prepared({
+      isolation: 'worktree',
+      worktree,
+    });
+    const run = pendingRuns({ mode: 'single', tasks: [task] })[0];
+    expect(run).toMatchObject({
+      allowWrites: false,
+      isolation: 'worktree',
+      worktree: {
+        id: 'wt-readonly',
+        branch: 'pi/audit',
+        worktreePath: '/repo/.worktrees/audit',
+      },
+    });
   });
 });
 

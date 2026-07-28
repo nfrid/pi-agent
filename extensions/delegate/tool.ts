@@ -37,7 +37,7 @@ const ScopeSchema = Type.Array(Type.String({ maxLength: 4096 }), {
 });
 const BaseSchema = StringEnum(['wip', 'head'] as const, {
   description:
-    "Where the writable task's branch starts. wip (default) carries your uncommitted changes into the worktree so the child sees the repository as you see it; head starts from the last commit instead.",
+    "Where a worktree-isolated task's branch starts. wip (default) carries your uncommitted changes into the worktree so the child sees the repository as you see it; head starts from the last commit instead.",
 });
 const AllowWritesSchema = Type.Boolean({
   description:

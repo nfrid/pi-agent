@@ -16,7 +16,11 @@ import {
 import type { DelegateParams } from './tool';
 import { delegateToolResult, makeDetails } from './tool-result';
 import { createRun, type DelegatedRun } from './types';
-import { loadWorktree, type PreparedWorktree } from './worktree';
+import {
+  loadWorktree,
+  type PreparedWorktree,
+  worktreeSummary,
+} from './worktree';
 import {
   failedLifecycleRun,
   finalizeWorktreeRun,
@@ -52,6 +56,9 @@ export function pendingRuns(
       writeRequested: item.plan.writeRequested,
       allowWrites: item.allowWrites,
       isolation: item.isolation,
+      worktree: item.worktree
+        ? worktreeSummary(item.worktree.record)
+        : undefined,
       continuation: item.session.token,
       warnings: item.warnings,
     }),

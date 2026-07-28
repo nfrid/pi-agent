@@ -100,6 +100,8 @@ export function buildChildArgs(
   sessionPath: string,
 ): string[] {
   const allowWrites = options.allowWrites === true;
+  if (allowWrites && !options.worktree)
+    throw new Error('Writable delegates require a prepared worktree.');
   const args = [
     '--mode',
     'json',

@@ -658,14 +658,13 @@ describe('delegate', () => {
     expect(prompt).toMatch(/parent integrates this branch/);
   });
 
-  test('does not tell a writable child to edit the shared checkout', () => {
-    const args = buildChildArgs(
-      { task: 'implement', allowWrites: true },
-      '/tmp/child.jsonl',
-    );
-    expect(args[args.indexOf('--tools') + 1]).toContain('write');
-    expect(args[args.length - 1]).toMatch(/own git worktree/);
-    expect(args[args.length - 1]).not.toMatch(/editing the checkout directly/);
+  test('refuses to build a writable child launch without a worktree', () => {
+    expect(() =>
+      buildChildArgs(
+        { task: 'implement', allowWrites: true },
+        '/tmp/child.jsonl',
+      ),
+    ).toThrow('Writable delegates require a prepared worktree');
   });
 
   test('joins all text blocks in the final assistant response', () => {

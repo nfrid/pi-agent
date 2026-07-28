@@ -219,10 +219,16 @@ export function buildDelegatePlans(
     return writeRequests[index] ? 'worktree' : 'shared';
   });
   for (let index = 0; index < inputs.length; index++) {
+    // A migrated writable session with no worktree is a direct-parent-write
+    // legacy record. Reject it too: no effective writable shared run may
+    // launch. A requested capability change still reaches continuation
+    // preflight so it receives its precise immutable-capability error.
+    const inheritedWritable =
+      resumed[index]?.allowWrites ?? Boolean(resumed[index]?.worktreeId);
     if (
-      !resumed[index] &&
       writeRequests[index] &&
-      isolations[index] === 'shared'
+      isolations[index] === 'shared' &&
+      (!resumed[index] || inheritedWritable)
     )
       invalidParams(
         'Writable delegates require worktree isolation; shared writable delegates are not supported.',
