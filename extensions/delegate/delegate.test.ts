@@ -131,11 +131,25 @@ describe('delegate', () => {
       contextNote: 'The parser path is already ruled out.',
       scope: ['src/cache', 'tests/cache'],
       continuation: true,
+      timeoutMs: 10 * 60 * 1000,
     });
     expect(prompt).toContain('Context from the parent agent');
     expect(prompt).toContain('parser path is already ruled out');
     expect(prompt).toContain('guidance rather than a hard boundary');
     expect(prompt).toContain('follow-up feedback');
+    expect(prompt).toContain(
+      'maximum runtime of approximately 10 minutes; reserve time to return partial findings.',
+    );
+  });
+
+  test('includes the configured runtime guidance for fresh prompts', () => {
+    const prompt = buildDelegatePrompt('Inspect the repository', {
+      timeoutMs: 90_000,
+    });
+    expect(prompt).toContain(
+      'maximum runtime of approximately 90 seconds; reserve time to return partial findings.',
+    );
+    expect(prompt).toContain('stop early and return partial findings');
   });
 
   test('resolves exact catalog route keys', () => {
@@ -385,6 +399,16 @@ describe('delegate', () => {
 
   test('resolves delegate children through PATH instead of a stale parent script', () => {
     expect(resolvePiSpawn()).toEqual({ command: 'pi', prefixArgs: [] });
+  });
+
+  test('passes the configured timeout into the child prompt', () => {
+    const args = buildChildArgs(
+      { task: 'inspect', timeoutMs: 10 * 60 * 1000 },
+      '/tmp/child.jsonl',
+    );
+    expect(args.at(-1)).toContain(
+      'maximum runtime of approximately 10 minutes; reserve time to return partial findings.',
+    );
   });
 
   test('uses persistent, minimal, read-only children with the system prompt extension', () => {
