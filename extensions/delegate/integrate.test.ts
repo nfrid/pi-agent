@@ -16,10 +16,15 @@ import * as worktreeGit from './worktree/git';
 
 async function delegated(options: {
   name?: string;
+  base?: 'wip' | 'head';
   write?: (worktreePath: string) => void;
 }): Promise<WorktreeRecord> {
   const name = options.name ?? 'Do the thing';
-  const preparation = await prepareWorktree({ cwd: repository, name });
+  const preparation = await prepareWorktree({
+    cwd: repository,
+    name,
+    base: options.base,
+  });
   const worktree = preparation.worktree;
   if (!worktree)
     throw new Error(preparation.fallbackReason ?? 'preparation failed');
@@ -216,6 +221,77 @@ describe('merging a delegate branch', () => {
       merged: false,
       reason: expect.stringMatching(/not an ancestor/),
     });
+    expect(git(repository, ['status', '--porcelain'])).toBe(beforeMerge);
+    expect(existsSync(path.join(repository, 'src', 'force-moved.txt'))).toBe(
+      false,
+    );
+  });
+
+  test('refuses a missing normal base without reviewing or merging it', async () => {
+    const record = await delegated({
+      base: 'head',
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'task.txt'), 'task\n'),
+    });
+    record.baseHead = '0'.repeat(40);
+    const beforeMerge = git(repository, ['status', '--porcelain']);
+
+    expect(await branchState(record)).toBe('unmerged');
+    const review = await reviewBranch(record);
+    expect(review).toMatchObject({
+      state: 'unmerged',
+      error: expect.stringMatching(/recorded base .*no longer resolves/),
+      log: '',
+      stat: '',
+      diff: '',
+    });
+    expect(review.error).not.toMatch(/carry|child-only/i);
+    await expect(mergeBranch(record)).resolves.toMatchObject({
+      merged: false,
+      reason: expect.stringMatching(/recorded base .*no longer resolves/),
+    });
+    expect(git(repository, ['status', '--porcelain'])).toBe(beforeMerge);
+    expect(existsSync(path.join(repository, 'src', 'task.txt'))).toBe(false);
+  });
+
+  test('refuses a force-moved normal branch before attempting a merge', async () => {
+    const record = await delegated({
+      base: 'head',
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'task.txt'), 'task\n'),
+    });
+    const tree = git(record.worktreePath, ['write-tree']).trim();
+    const unrelated = git(record.worktreePath, [
+      'commit-tree',
+      tree,
+      '-m',
+      'unrelated root',
+    ]).trim();
+    git(record.worktreePath, ['reset', '--hard', unrelated]);
+    writeFileSync(
+      path.join(record.worktreePath, 'src', 'force-moved.txt'),
+      'unrelated\n',
+    );
+    git(record.worktreePath, ['add', 'src/force-moved.txt']);
+    git(record.worktreePath, ['commit', '-m', 'force moved branch']);
+    const beforeMerge = git(repository, ['status', '--porcelain']);
+
+    expect(await branchState(record)).toBe('unmerged');
+    const review = await reviewBranch(record);
+    expect(review).toMatchObject({
+      state: 'unmerged',
+      error: expect.stringMatching(/recorded base .*not an ancestor/),
+      log: '',
+      stat: '',
+      diff: '',
+    });
+    expect(review.error).not.toMatch(/carry|child-only/i);
+    const outcome = await mergeBranch(record);
+    expect(outcome).toMatchObject({
+      merged: false,
+      reason: expect.stringMatching(/recorded base .*not an ancestor/),
+    });
+    expect(outcome.reason).not.toMatch(/cleanup failed|unchanged/);
     expect(git(repository, ['status', '--porcelain'])).toBe(beforeMerge);
     expect(existsSync(path.join(repository, 'src', 'force-moved.txt'))).toBe(
       false,

@@ -51,35 +51,39 @@ function workRange(record: WorktreeRecord): string {
   return `${workBase(record)}..${record.branch}`;
 }
 
-function unsafeCarryRange(
+function unsafeWorkRange(
   record: WorktreeRecord,
   detail: string,
+  carried: boolean,
 ): InvalidWorkRange {
+  const scope = carried
+    ? 'it as a child-only range'
+    : 'the recorded task range';
   return {
     valid: false,
-    error: `Cannot safely inspect or integrate ${record.branch}: ${detail}. Refusing to use it as a child-only range; inspect it with: git log --oneline ${record.branch}`,
+    error: `Cannot safely inspect or integrate ${record.branch}: ${detail}. Refusing to use ${scope}; inspect it with: git log --oneline ${record.branch}`,
   };
 }
 
 /**
- * The carry commit is the integration boundary for child-only work. A
- * rewritten branch can make `carry..branch` mean an unrelated commit set, so
- * never pass that range to review or cherry-pick until Git confirms it.
+ * A rewritten branch can make its recorded base range mean an unrelated commit
+ * set, so never pass that range to review, merge, or cherry-pick until Git
+ * confirms the base still resolves and is an ancestor of the branch.
  */
 async function workRangeFor(
   root: string,
   record: WorktreeRecord,
 ): Promise<WorkRangeResult> {
-  if (!record.carryCommit) {
-    if (record.carriedWip)
-      return unsafeCarryRange(
-        record,
-        'the record says parent WIP was carried but no carry commit was recorded',
-      );
-    return { valid: true, range: workRange(record), carried: false };
-  }
+  const carried = Boolean(record.carryCommit);
+  if (!carried && record.carriedWip)
+    return unsafeWorkRange(
+      record,
+      'the record says parent WIP was carried but no carry commit was recorded',
+      true,
+    );
 
   const base = workBase(record);
+  const label = carried ? 'carry/work base' : 'base';
   if (
     !(await succeeds(root, [
       'rev-parse',
@@ -88,9 +92,10 @@ async function workRangeFor(
       `${base}^{commit}`,
     ]))
   )
-    return unsafeCarryRange(
+    return unsafeWorkRange(
       record,
-      `its recorded carry/work base ${base.slice(0, 12)} no longer resolves`,
+      `its recorded ${label} ${base.slice(0, 12)} no longer resolves`,
+      carried,
     );
   if (
     !(await succeeds(root, [
@@ -100,12 +105,13 @@ async function workRangeFor(
       record.branch,
     ]))
   )
-    return unsafeCarryRange(
+    return unsafeWorkRange(
       record,
-      `its recorded carry/work base ${base.slice(0, 12)} is not an ancestor of the branch`,
+      `its recorded ${label} ${base.slice(0, 12)} is not an ancestor of the branch`,
+      carried,
     );
 
-  return { valid: true, range: workRange(record), carried: true };
+  return { valid: true, range: workRange(record), carried };
 }
 
 /**
