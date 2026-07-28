@@ -140,8 +140,9 @@ describe('output', () => {
           workBase: 'abc123def456',
           status: 'finished',
           hasWork: true,
+          runOutcome: 'timed-out',
           error:
-            'The delegate run timed out; the branch holds whatever work was completed.',
+            'The delegate run ended with error; the branch holds whatever work was completed.',
         },
       }),
     ]);
@@ -150,6 +151,55 @@ describe('output', () => {
       'Note: Earlier attempt timed out; this continuation completed on the same branch.',
     );
     expect(handoff).not.toContain('Warnings: The delegate run timed out');
+  });
+
+  test('does not treat a settlement error as recovery evidence', () => {
+    const run = reportedRun(
+      'Outcome: done\nConclusion: completed the recovery',
+      {
+        context: 'continuation',
+        worktree: {
+          id: '11111111-1111-1111-1111-111111111111',
+          branch: 'pi/recovery-a1b2',
+          worktreePath: '/tmp/worktree',
+          repositoryRoot: '/tmp/project',
+          baseHead: 'abc123def456',
+          workBase: 'abc123def456',
+          status: 'finished',
+          hasWork: true,
+          error: 'Could not settle the worktree branch: git failed.',
+        },
+      },
+    );
+
+    expect(buildParentHandoff([run])).not.toContain(
+      'Earlier attempt timed out; this continuation completed on the same branch.',
+    );
+  });
+
+  test('recovers a successful legacy continuation from its exact error prose', () => {
+    const run = reportedRun(
+      'Outcome: done\nConclusion: completed the recovery',
+      {
+        context: 'continuation',
+        worktree: {
+          id: '11111111-1111-1111-1111-111111111111',
+          branch: 'pi/recovery-a1b2',
+          worktreePath: '/tmp/worktree',
+          repositoryRoot: '/tmp/project',
+          baseHead: 'abc123def456',
+          workBase: 'abc123def456',
+          status: 'finished',
+          hasWork: true,
+          error:
+            'The delegate run timed out; the branch holds whatever work was completed.',
+        },
+      },
+    );
+
+    expect(buildParentHandoff([run])).toContain(
+      'Note: Earlier attempt timed out; this continuation completed on the same branch.',
+    );
   });
 
   test('keeps a repeated continuation failure as the current outcome', () => {

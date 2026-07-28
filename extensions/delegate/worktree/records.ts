@@ -60,7 +60,11 @@ function validRecord(value: unknown, id: string): value is WorktreeRecord {
     !path.isAbsolute(record.workingDirectory) &&
     (record.status === 'active' ||
       record.status === 'finished' ||
-      record.status === 'removed')
+      record.status === 'removed') &&
+    (record.runOutcome === undefined ||
+      record.runOutcome === 'timed-out' ||
+      record.runOutcome === 'aborted' ||
+      record.runOutcome === 'error')
   );
 }
 

@@ -14,6 +14,7 @@ export type WorktreeBase =
   | 'head';
 
 export type WorktreeStatus = 'active' | 'finished' | 'removed';
+export type WorktreeRunOutcome = 'timed-out' | 'aborted' | 'error';
 
 export interface WorktreeRecord {
   version: 1;
@@ -49,6 +50,8 @@ export interface WorktreeRecord {
   /** Files the agent changed relative to workBase. */
   changedPaths?: string[];
   error?: string;
+  /** The retained terminal outcome that caused this branch to be kept. */
+  runOutcome?: WorktreeRunOutcome;
 }
 
 /** The commit the agent's own work starts from. */
@@ -83,6 +86,8 @@ export interface WorktreeSummary {
   /** True when the agent committed something of its own beyond workBase. */
   hasWork: boolean;
   error?: string;
+  /** The retained terminal outcome that caused this branch to be kept. */
+  runOutcome?: WorktreeRunOutcome;
 }
 
 export function worktreeSummary(record: WorktreeRecord): WorktreeSummary {
@@ -99,5 +104,6 @@ export function worktreeSummary(record: WorktreeRecord): WorktreeSummary {
     changedPaths: record.changedPaths,
     hasWork: Boolean(record.headCommit && record.headCommit !== base),
     error: record.error,
+    runOutcome: record.runOutcome,
   };
 }
