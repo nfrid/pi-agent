@@ -26,8 +26,7 @@ both `../../.agents/feedback/README.md` and
 `../../.agents/feedback/REPORT_TEMPLATE.md` completely before writing. These
 resolve to the canonical store at `~/.pi/agent/.agents/feedback/`; its fixed
 inbox is `~/.pi/agent/.agents/feedback/inbox/`, even when the current directory
-is another repository. Follow the README and template for report fields, with
-this skill's invocation authorization supplying `Approval: user-approved`.
+is another repository. Follow the README and template for report fields.
 
 Before each write, inspect only existing inbox report titles for an obvious
 duplicate. Do not investigate, triage, or compare beyond that title scan. Skip
@@ -40,5 +39,4 @@ new`. Write no more than three reports.
 
 This skill captures reports only. It must not triage reports, create tickets,
 approve work, implement fixes, commit, alter routing, or modify the current
-project. Those actions belong to the local `harness-maintenance` skill in the
-harness repository and require their own request or approval as applicable.
+project.
