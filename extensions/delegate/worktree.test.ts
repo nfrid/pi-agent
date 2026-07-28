@@ -2,6 +2,7 @@ import { existsSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { git, repository } from './test/worktree-fixture';
+import { createRun } from './types';
 import {
   attachWorktreeSession,
   discardFreshWorktree,
@@ -13,6 +14,7 @@ import {
   restoreWorktreeSession,
   worktreeSummary,
 } from './worktree';
+import { finalizeWorktreeRun } from './worktree-lifecycle';
 
 async function prepared(
   options: { name?: string; base?: 'wip' | 'head' } = {},
@@ -184,6 +186,24 @@ describe('finishing a worktree', () => {
     expect(record.changedPaths).toContain('src/partial.txt');
     expect(record.error).toMatch(/ended with error/);
     expect(worktreeSummary(record).hasWork).toBe(true);
+  });
+
+  test('retains a timeout record when a continuation later settles the branch', async () => {
+    const worktree = await prepared();
+    const timedOut = await finishWorktree(worktree.record.id, {
+      taskName: 'Slow task',
+      outcome: 'timed-out',
+    });
+    const recovered = createRun('Recovered task', undefined, {
+      context: 'continuation',
+    });
+    recovered.state = 'success';
+    recovered.exitCode = 0;
+    await finalizeWorktreeRun(recovered, worktree, 'Recovered task');
+
+    expect(timedOut.error).toMatch(/timed out/);
+    expect(recovered.worktree?.error).toBe(timedOut.error);
+    expect(recovered.warnings).toBeUndefined();
   });
 
   test('reports no work when the agent changed nothing', async () => {

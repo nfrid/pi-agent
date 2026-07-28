@@ -30,7 +30,11 @@ import {
   worktreeLines,
 } from './render-utils';
 import type { DelegatedRun, DelegateRunState } from './types';
-import { getFinalAssistantText, getRunState } from './types';
+import {
+  continuationRecoveryNote,
+  getFinalAssistantText,
+  getRunState,
+} from './types';
 
 function isBackgroundLaunch(run: DelegatedRun): boolean {
   return (
@@ -108,6 +112,9 @@ function addExpandedRun(
     container.addChild(sectionTitle('Branch', theme));
     container.addChild(new Text(worktree.join('\n'), 0, 0));
   }
+  const recoveryNote = continuationRecoveryNote(run);
+  if (recoveryNote)
+    container.addChild(new Text(fg('muted', recoveryNote), 0, 0));
 
   const final = getFinalAssistantText(run.messages).trim();
   const backgroundLaunch = isBackgroundLaunch(run);
@@ -252,6 +259,11 @@ export function renderDelegateResult(
           0,
           0,
         ),
+      );
+    const recoveryNote = continuationRecoveryNote(run);
+    if (recoveryNote)
+      container.addChild(
+        new Text(fieldLine('Note', recoveryNote, fg, 'dim'), 0, 0),
       );
 
     const blocked = blockedQuestion(run);
@@ -424,6 +436,11 @@ export function renderDelegateResult(
           0,
           0,
         ),
+      );
+    const recoveryNote = continuationRecoveryNote(run);
+    if (recoveryNote)
+      container.addChild(
+        new Text(`${fg('dim', '   ')}${fg('dim', recoveryNote)}`, 0, 0),
       );
   }
   const summary = backgroundLaunch

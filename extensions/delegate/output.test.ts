@@ -126,6 +126,60 @@ describe('output', () => {
     expect(handoff).toContain('Conclusion: complete');
   });
 
+  test('reports a recovered continuation without warning about its prior run', () => {
+    const handoff = buildParentHandoff([
+      reportedRun('Outcome: done\nConclusion: completed the recovery', {
+        context: 'continuation',
+        continuation: 'continue-recovered-child',
+        worktree: {
+          id: '11111111-1111-1111-1111-111111111111',
+          branch: 'pi/recovery-a1b2',
+          worktreePath: '/tmp/worktree',
+          repositoryRoot: '/tmp/project',
+          baseHead: 'abc123def456',
+          workBase: 'abc123def456',
+          status: 'finished',
+          hasWork: true,
+          error:
+            'The delegate run timed out; the branch holds whatever work was completed.',
+        },
+      }),
+    ]);
+
+    expect(handoff).toContain(
+      'Note: Earlier attempt timed out; this continuation completed on the same branch.',
+    );
+    expect(handoff).not.toContain('Warnings: The delegate run timed out');
+  });
+
+  test('keeps a repeated continuation failure as the current outcome', () => {
+    const run = createRun('retry the recovery', undefined, {
+      context: 'continuation',
+      worktree: {
+        id: '11111111-1111-1111-1111-111111111111',
+        branch: 'pi/recovery-a1b2',
+        worktreePath: '/tmp/worktree',
+        repositoryRoot: '/tmp/project',
+        baseHead: 'abc123def456',
+        workBase: 'abc123def456',
+        status: 'finished',
+        hasWork: true,
+        error:
+          'The delegate run timed out; the branch holds whatever work was completed.',
+      },
+    });
+    run.state = 'error';
+    run.exitCode = 1;
+    run.errorMessage = 'Latest continuation failed its checks.';
+
+    const handoff = buildParentHandoff([run]);
+    expect(handoff).toContain('Status: error');
+    expect(handoff).toContain(
+      'Failure: Latest continuation failed its checks.',
+    );
+    expect(handoff).not.toContain('this continuation completed');
+  });
+
   test('does not artifact a fitting structured report', async () => {
     const exact =
       'Outcome: done\nConclusion: the guard is correct\nEvidence: src/guard.ts:10\nRisks: none';

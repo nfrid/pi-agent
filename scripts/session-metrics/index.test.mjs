@@ -723,6 +723,36 @@ describe('delegate measurements', () => {
     });
   });
 
+  it('counts a recovered continuation as its current successful execution', () => {
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          text: 'Outcome: partial',
+          details: {
+            runs: [{ state: 'timed-out', exitCode: 124, allowWrites: true }],
+          },
+        },
+        {
+          arguments: { task: 'PRIVATE TASK', continuation: 'token' },
+          text: 'Outcome: done\nNote: Earlier attempt timed out; this continuation completed on the same branch.',
+          details: {
+            runs: [{ state: 'success', exitCode: 0, allowWrites: true }],
+          },
+        },
+      ]),
+    );
+
+    expect(result).toMatchObject({
+      delegateToolCalls: 2,
+      delegateContinuationCalls: 1,
+      delegatedTasks: 2,
+      delegateProcessTimeouts: 1,
+      delegateProcessErrors: 0,
+      delegateOutcomePartial: 1,
+      delegateOutcomeDone: 1,
+    });
+  });
+
   it('counts background launches and executions once while charging repeated reports', () => {
     const job = {
       id: 'dj-1',

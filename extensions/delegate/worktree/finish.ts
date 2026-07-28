@@ -70,7 +70,10 @@ async function commitPendingWork(
  */
 export async function finishWorktree(
   id: string,
-  options: { taskName: string; outcome: 'success' | 'error' | 'aborted' },
+  options: {
+    taskName: string;
+    outcome: 'success' | 'error' | 'aborted' | 'timed-out';
+  },
 ): Promise<WorktreeRecord> {
   const record = loadWorktree(id);
   if (!record) throw new Error(`Unknown worktree ${id}`);
@@ -102,7 +105,10 @@ export async function finishWorktree(
     );
     record.status = 'finished';
     if (options.outcome !== 'success' && !record.error)
-      record.error = `The delegate run ended with ${options.outcome}; the branch holds whatever work was completed.`;
+      record.error =
+        options.outcome === 'timed-out'
+          ? 'The delegate run timed out; the branch holds whatever work was completed.'
+          : `The delegate run ended with ${options.outcome}; the branch holds whatever work was completed.`;
   } catch (error) {
     record.status = 'finished';
     record.error = `Could not settle the worktree branch: ${error instanceof Error ? error.message : String(error)}`;

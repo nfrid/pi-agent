@@ -1,4 +1,5 @@
 import {
+  continuationRecoveryNote,
   type DelegatedRun,
   getExactFinalAssistantText,
   getRunState,
@@ -148,6 +149,8 @@ function prepareRun(run: DelegatedRun): PreparedRun {
       run.errorMessage?.trim() || run.stderr.trim() || originalBody;
     lines.push(`Failure: ${clip(failure, 120)}`);
   }
+  const recoveryNote = continuationRecoveryNote(run);
+  if (recoveryNote) lines.push(`Note: ${recoveryNote}`);
   const warnings = [run.routing?.warning, ...(run.warnings ?? [])].filter(
     (item): item is string => Boolean(item),
   );

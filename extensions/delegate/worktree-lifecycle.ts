@@ -1,4 +1,5 @@
 import {
+  continuationRecoveryNote,
   createRun,
   type DelegatedRun,
   type DelegateRouteState,
@@ -64,14 +65,17 @@ export async function finalizeWorktreeRun(
   if (!worktree) return;
   const state = getRunState(run);
   const outcome =
-    state === 'success' ? 'success' : state === 'aborted' ? 'aborted' : 'error';
+    state === 'success' || state === 'aborted' || state === 'timed-out'
+      ? state
+      : 'error';
   try {
     const record = await finishWorktree(worktree.record.id, {
       taskName,
       outcome,
     });
     run.worktree = worktreeSummary(record);
-    if (record.error) run.warnings = [...(run.warnings ?? []), record.error];
+    if (record.error && !continuationRecoveryNote(run))
+      run.warnings = [...(run.warnings ?? []), record.error];
   } catch (error) {
     run.warnings = [
       ...(run.warnings ?? []),

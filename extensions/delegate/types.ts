@@ -152,6 +152,28 @@ export function isRunError(run: DelegatedRun): boolean {
   return run.exitCode !== 0 || !getFinalAssistantText(run.messages).trim();
 }
 
+/**
+ * A worktree records a prior terminal run so its partial branch remains
+ * reviewable. A successful continuation is a new attempt, not that failure.
+ */
+export function continuationRecoveryNote(
+  run: DelegatedRun,
+): string | undefined {
+  if (
+    run.context !== 'continuation' ||
+    getRunState(run) !== 'success' ||
+    !run.worktree?.error
+  )
+    return undefined;
+  if (/^The delegate run timed out;/.test(run.worktree.error))
+    return 'Earlier attempt timed out; this continuation completed on the same branch.';
+  if (/^The delegate run ended with aborted;/.test(run.worktree.error))
+    return 'Earlier attempt was aborted; this continuation completed on the same branch.';
+  if (/^The delegate run ended with error;/.test(run.worktree.error))
+    return 'Earlier attempt ended with error; this continuation completed on the same branch.';
+  return undefined;
+}
+
 export function getFinalAssistantText(
   messages: Message[],
   options?: { exact?: boolean },

@@ -11,6 +11,7 @@ import {
   wrapTextWithAnsi,
 } from '@earendil-works/pi-tui';
 import {
+  continuationRecoveryNote,
   type DelegateDetails,
   type DelegatedRun,
   type DelegateRunState,
@@ -224,7 +225,8 @@ export function worktreeLines(run: DelegatedRun): string[] {
       ...worktree.changedPaths.slice(0, 20).map((name) => `- ${name}`),
     );
   else lines.push('Changed: nothing was committed on this branch');
-  if (worktree.error) lines.push(`Note: ${worktree.error}`);
+  if (worktree.error && !continuationRecoveryNote(run))
+    lines.push(`Note: ${worktree.error}`);
   lines.push(
     `Review:    delegate_branches review ${worktree.id}`,
     `Integrate: delegate_branches merge ${worktree.id}`,
