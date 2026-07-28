@@ -113,6 +113,22 @@ function delegateFixture(exchanges) {
   ];
   let parentId = null;
   exchanges.forEach((exchange, index) => {
+    // A pushed background completion is not a call and has no result to pair.
+    if (exchange.customType) {
+      const id = `c${index}`;
+      lines.push(
+        line({
+          type: 'custom_message',
+          customType: exchange.customType,
+          content: exchange.content,
+          id,
+          parentId,
+          timestamp: `2026-01-01T00:03:${String(index).padStart(2, '0')}.000Z`,
+        }),
+      );
+      parentId = id;
+      return;
+    }
     const callId = `a${index}`;
     const resultId = `r${index}`;
     lines.push(
@@ -323,6 +339,35 @@ describe('delegate measurements', () => {
         ]),
       ),
     ).toMatchObject({ delegatedTasks: 3, delegateTruncatedTasks: 1 });
+  });
+
+  it('counts a background completion pushed to the parent as a steering message', () => {
+    const handoff =
+      'Delegated task succeeded\n\nStatus: success\nOutcome: done\nTruncation: none';
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          text: 'Started 2 background delegate jobs: dj-1, dj-2.',
+          details: { mode: 'parallel', runs: [{}, {}] },
+        },
+        {
+          customType: 'delegate-job-result',
+          content: [
+            `# Background delegate job dj-1 (audit) success\n\n${handoff}`,
+            `# Background delegate job dj-2 (fan) success\n\nDelegated tasks: 2/2 succeeded\n\nTruncation: none`,
+          ].join('\n\n---\n\n'),
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateBackgroundStarts: 1,
+      // Two jobs finished together and were delivered in one message.
+      delegateBackgroundDeliveries: 2,
+      delegatedTasks: 3,
+    });
+    expect(result.delegateHandoffBytes).toBeGreaterThan(
+      Buffer.byteLength(handoff, 'utf8'),
+    );
   });
 
   it('ignores delegate_jobs results that carry no delivered handoff', () => {

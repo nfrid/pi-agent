@@ -89,30 +89,35 @@ function toolArguments(call) {
 const BACKGROUND_START_MARKER = /^Started \d+ background delegate job/;
 /** How a finished background job hands its report to the parent. */
 const BACKGROUND_DELIVERY_MARKER =
-  /^Background delegate job \S+ .*?\n\n(Delegated tasks?\b[\s\S]*)$/;
+  /^#?\s*Background delegate job \S+ .*?\n\n(Delegated tasks?\b[\s\S]*)$/;
+/** Separates the jobs when several finish together and are delivered as one. */
+const BACKGROUND_DELIVERY_SEPARATOR = '\n\n---\n\n';
 /** Leads every handoff, and says how many runs it covers. */
 const HANDOFF_HEADER = /^Delegated tasks: \d+\/(\d+) succeeded/;
 
 /**
  * Handoff bytes and task count a completed background job delivered. Background
- * work reaches the parent as a delegate_jobs result rather than a delegate one,
- * so without this the parent's whole background spend is invisible. A job that
- * is delivered and then peeked at again is counted twice on purpose: the parent
- * paid context for both copies.
+ * work never returns through the `delegate` call that started it, so without
+ * this the parent's whole background spend is invisible. It arrives by two
+ * routes — a steering message the extension pushes when the job finishes, and a
+ * `delegate_jobs peek` the parent asks for — and both are counted, because a job
+ * delivered and then peeked at costs the parent context for both copies.
  */
-function recordBackgroundDelivery(metrics, message) {
-  const delivered = resultText(message).match(BACKGROUND_DELIVERY_MARKER);
-  if (!delivered) return;
-  const handoff = delivered[1];
-  const header = handoff.match(HANDOFF_HEADER);
-  const tasks = header ? Number(header[1]) : 1;
-  metrics.delegateBackgroundDeliveries += 1;
-  metrics.delegatedTasks += tasks;
-  metrics.delegateHandoffBytes += Buffer.byteLength(handoff, 'utf8');
-  const truncated =
-    countOccurrences(handoff, TRUNCATED_MARKER) ||
-    countOccurrences(handoff, LEGACY_TRUNCATED_MARKER);
-  metrics.delegateTruncatedTasks += Math.min(truncated, tasks);
+function recordBackgroundDelivery(metrics, text) {
+  for (const segment of text.split(BACKGROUND_DELIVERY_SEPARATOR)) {
+    const delivered = segment.match(BACKGROUND_DELIVERY_MARKER);
+    if (!delivered) continue;
+    const handoff = delivered[1];
+    const header = handoff.match(HANDOFF_HEADER);
+    const tasks = header ? Number(header[1]) : 1;
+    metrics.delegateBackgroundDeliveries += 1;
+    metrics.delegatedTasks += tasks;
+    metrics.delegateHandoffBytes += Buffer.byteLength(handoff, 'utf8');
+    const truncated =
+      countOccurrences(handoff, TRUNCATED_MARKER) ||
+      countOccurrences(handoff, LEGACY_TRUNCATED_MARKER);
+    metrics.delegateTruncatedTasks += Math.min(truncated, tasks);
+  }
 }
 
 /** Emitted once per run envelope by the current delegate build. */
@@ -209,6 +214,10 @@ export function parseSessionJsonl(source) {
     const timestamp = Date.parse(entry.timestamp ?? entry.message?.timestamp);
     if (Number.isFinite(timestamp)) timestamps.push(timestamp);
     if (entry.type === 'compaction') metrics.compactions += 1;
+    // A finished background job is pushed to the parent as a steering message,
+    // outside the tool-result stream its `delegate` call belonged to.
+    if (entry.customType === 'delegate-job-result')
+      recordBackgroundDelivery(metrics, entry.content ?? '');
     if (entry.type !== 'message') continue;
     const message = entry.message;
     if (message?.role === 'user') metrics.userTurns += 1;
@@ -237,7 +246,7 @@ export function parseSessionJsonl(source) {
     if (message?.role === 'toolResult' && message.toolName === 'delegate')
       recordDelegateResult(metrics, message);
     if (message?.role === 'toolResult' && message.toolName === 'delegate_jobs')
-      recordBackgroundDelivery(metrics, message);
+      recordBackgroundDelivery(metrics, resultText(message));
   }
   if (timestamps.length > 1)
     metrics.elapsedMs = Math.max(...timestamps) - Math.min(...timestamps);
