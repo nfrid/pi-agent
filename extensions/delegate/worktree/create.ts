@@ -119,10 +119,10 @@ function linkDependencies(
   return links;
 }
 
-async function packageDirectories(repositoryRoot: string): Promise<string[]> {
+async function packageDirectories(worktreePath: string): Promise<string[]> {
   const files = splitZ(
     String(
-      await git(repositoryRoot, [
+      await git(worktreePath, [
         'ls-files',
         '-z',
         '--',
@@ -266,7 +266,7 @@ export async function prepareWorktree(options: {
     const dependencyLinks = linkDependencies(
       root,
       worktreePath,
-      await packageDirectories(root),
+      await packageDirectories(worktreePath),
     );
     const carried = carryFiles(root, worktreePath);
 

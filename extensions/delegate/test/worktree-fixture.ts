@@ -1,5 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach } from 'vitest';
@@ -10,6 +16,8 @@ const originalStateDir = process.env.PI_DELEGATE_STATE_DIR;
 export let root: string;
 export let agentDir: string;
 export let repository: string;
+
+export const carriedWipPackage = path.join('packages', 'carried-wip');
 
 function restoreEnv(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
@@ -56,6 +64,34 @@ beforeEach(() => {
   git(repository, ['add', '.']);
   git(repository, ['commit', '-qm', 'fixture']);
 });
+
+/** Create an untracked package with an executable available through its deps. */
+export function createCarriedWipPackage(): void {
+  const packageRoot = path.join(repository, carriedWipPackage);
+  mkdirSync(path.join(packageRoot, 'node_modules', '.bin'), {
+    recursive: true,
+  });
+  mkdirSync(path.join(packageRoot, 'node_modules', 'wip-dependency'));
+  mkdirSync(path.join(packageRoot, 'src'));
+  writeFileSync(
+    path.join(packageRoot, 'package.json'),
+    '{"name":"carried-wip","private":true,"scripts":{"check":"wip-check"}}\n',
+  );
+  writeFileSync(
+    path.join(packageRoot, 'src', 'value.ts'),
+    'export const value = 1;\n',
+  );
+  writeFileSync(
+    path.join(packageRoot, 'node_modules', 'wip-dependency', 'index.js'),
+    'module.exports = "dependency available";\n',
+  );
+  const check = path.join(packageRoot, 'node_modules', '.bin', 'wip-check');
+  writeFileSync(
+    check,
+    '#!/usr/bin/env node\nprocess.stdout.write(require("../wip-dependency") + "\\n");\n',
+  );
+  chmodSync(check, 0o755);
+}
 
 afterEach(() => {
   restoreEnv('PI_CODING_AGENT_DIR', originalAgentDir);
