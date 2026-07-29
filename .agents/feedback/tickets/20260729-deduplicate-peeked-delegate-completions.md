@@ -66,10 +66,10 @@ When `delegate_jobs` returns terminal results through `peek` or `cancel`, remove
 
 - **2026-07-29:** The user reported no noticed duplicate or missing delegate completions before controlled evaluation.
 - **2026-07-29:** Focused delegate, lifecycle, and rendering tests passed (78 tests). One background job returned by a waiting terminal peek produced no automatic copy; a nonterminal peek preserved later automatic delivery.
-- **2026-07-29:** A live terminal peek reproduced a remaining send-before-entry ordering: the peek returned job `dj-3` in full, then the already queued automatic custom message entered the session 1 ms later with the same stable job ID. Privacy-safe session metrics recorded 2 terminal-peek deliveries, 3 automatic deliveries, and 1 stable-ID overlap across 5 launched background jobs. Follow-up `2d6bf02` prevents a terminal inspection from repeating a handoff whose automatic steer is already queued but not yet in context, while preserving retained full results after the automatic message enters. This is evidence for revision, not a final result before the evaluation window closes.
+- **2026-07-29:** A live terminal peek reproduced a remaining send-before-entry ordering: the peek returned job `dj-3` in full, then the already queued automatic custom message entered the session 1 ms later with the same stable job ID. Privacy-safe session metrics recorded 2 terminal-peek deliveries, 3 automatic deliveries, and 1 stable-ID overlap across 5 launched background jobs. Follow-up `2d6bf02` prevents a terminal inspection from repeating a handoff whose automatic steer is already queued but not yet in context, while preserving retained full results after the automatic message enters. Reviewer follow-up `b42c293` restores explicit inspection if asynchronous steer dispatch fails and the parent settles without the custom message entering context. This is evidence for revision, not a final result before the evaluation window closes.
 
 ## Implementation and resolution
 
 - **Approved implementation:** Remove terminal peek/cancel results from queued current-epoch completion waves, with focused ordering and sibling tests; approved 2026-07-29.
-- **Merged change:** `c0f7964` (implementation `e0ce4a3`); evaluation fix `2d6bf02` (implementation `60b265c`)
+- **Merged change:** `c0f7964` (implementation `e0ce4a3`); evaluation fixes `2d6bf02` (implementation `60b265c`) and `b42c293`
 - **Resolution:** pending evaluation
