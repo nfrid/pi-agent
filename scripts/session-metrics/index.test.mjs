@@ -470,6 +470,39 @@ describe('delegate measurements', () => {
     });
   });
 
+  it('does not count automatic-queued guidance as a peek delivery or overlap', () => {
+    const handoff = 'Delegated results: 1 run\n\nOutcome: done';
+    const job = { id: 'dj-queued', state: 'success', handoff, runs: [{}] };
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          text: 'Started 1 background delegate job: dj-queued.',
+          details: { runs: [{ backgroundJobId: 'dj-queued' }] },
+        },
+        {
+          toolName: 'delegate_jobs',
+          text: 'Automatic result for dj-queued is already queued and will enter context shortly.',
+          details: {
+            action: 'peek',
+            delivery: 'automatic-queued',
+            job,
+          },
+        },
+        {
+          customType: 'delegate-job-result',
+          content: `# Background delegate job dj-queued (audit) success\n\n${handoff}`,
+          details: { jobs: [job] },
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateBackgroundDeliveries: 1,
+      delegateBackgroundAutomaticDeliveries: 1,
+      delegateBackgroundPeekDeliveries: 0,
+      delegateBackgroundDeliveryOverlaps: 0,
+    });
+  });
+
   it('counts strict unknown-tool-argument blocks without emitting names', () => {
     const serialized = JSON.stringify(
       parseSessionJsonl(

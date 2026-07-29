@@ -62,6 +62,8 @@ export function registerDelegateJobsTool(
   pi: ExtensionAPI,
   manager: DelegateJobManager,
   onResultEntered: (jobs: readonly DelegateJobSnapshot[]) => void = () => {},
+  isAutomaticDeliveryQueued: (job: DelegateJobSnapshot) => boolean = () =>
+    false,
 ): void {
   pi.registerTool<
     typeof Parameters,
@@ -103,21 +105,62 @@ export function registerDelegateJobsTool(
             (params.wait_seconds ?? 0) * 1000,
             signal,
           );
-          if (job.state !== 'queued' && job.state !== 'running')
+          const automaticQueued = isAutomaticDeliveryQueued(job);
+          if (
+            !automaticQueued &&
+            job.state !== 'queued' &&
+            job.state !== 'running'
+          )
             onResultEntered([job]);
           return {
-            content: [{ type: 'text', text: result(job) }],
-            details: { action: 'peek', job },
+            content: [
+              {
+                type: 'text',
+                text: automaticQueued
+                  ? `Automatic result for ${job.id} is already queued and will enter context shortly.`
+                  : result(job),
+              },
+            ],
+            details: {
+              action: 'peek',
+              job,
+              ...(automaticQueued ? { delivery: 'automatic-queued' } : {}),
+            },
           };
         }
         case 'cancel': {
           const ids = params.ids?.map((id) => id.trim()).filter(Boolean) ?? [];
           if (ids.length === 0) throw new Error('ids is required.');
           const jobs = await manager.cancel(ids, signal);
-          onResultEntered(jobs);
+          const automaticQueuedIds = new Set(
+            jobs.filter(isAutomaticDeliveryQueued).map((job) => job.id),
+          );
+          onResultEntered(
+            jobs.filter((job) => !automaticQueuedIds.has(job.id)),
+          );
           return {
-            content: [{ type: 'text', text: jobs.map(result).join('\n\n') }],
-            details: { action: 'cancel', jobs },
+            content: [
+              {
+                type: 'text',
+                text: jobs
+                  .map((job) =>
+                    automaticQueuedIds.has(job.id)
+                      ? `Automatic result for ${job.id} is already queued and will enter context shortly.`
+                      : result(job),
+                  )
+                  .join('\n\n'),
+              },
+            ],
+            details: {
+              action: 'cancel',
+              jobs,
+              ...(automaticQueuedIds.size > 0
+                ? {
+                    delivery: 'automatic-queued',
+                    automaticQueuedJobIds: [...automaticQueuedIds],
+                  }
+                : {}),
+            },
           };
         }
       }

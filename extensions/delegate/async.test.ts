@@ -390,6 +390,9 @@ describe('async delegate extension', () => {
     handlers.get('agent_settled')?.({}, ctx);
     expect(widget?.render(100)).toEqual([]);
 
+    handlers.get('context')?.({
+      messages: [sendMessage.mock.calls[0]?.[0]],
+    });
     const peek = await tools
       .get('delegate_jobs')
       ?.execute(
@@ -403,7 +406,7 @@ describe('async delegate extension', () => {
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
-  test('removes terminal peeked and cancelled jobs from a queued completion wave', async () => {
+  test('removes pre-flush terminal results but suppresses a queued automatic handoff', async () => {
     vi.useFakeTimers();
     const { ctx, finish, handlers, sendMessage, tools } = createAsyncHarness();
     const launch = await tools.get('delegate')?.execute(
@@ -460,6 +463,50 @@ describe('async delegate extension', () => {
       jobs: [{ id: 'dj-3' }],
     });
 
+    // sendMessage has accepted the steer, but its custom message has not yet
+    // entered context. A terminal peek must not duplicate the handoff.
+    const queuedPeek = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-queued-peek',
+        { action: 'peek', id: 'dj-3' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(queuedPeek?.content[0]?.text).toContain('already queued');
+    expect(queuedPeek?.content[0]?.text).not.toContain('third finding');
+    expect(queuedPeek?.details).toMatchObject({
+      action: 'peek',
+      delivery: 'automatic-queued',
+      job: {
+        id: 'dj-3',
+        state: 'success',
+        handoff: expect.stringContaining('third finding.'),
+      },
+    });
+    const queuedCancel = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-queued-cancel',
+        { action: 'cancel', ids: ['dj-3'] },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(queuedCancel?.content[0]?.text).toContain('already queued');
+    expect(queuedCancel?.details).toMatchObject({
+      action: 'cancel',
+      delivery: 'automatic-queued',
+      automaticQueuedJobIds: ['dj-3'],
+      jobs: [
+        { id: 'dj-3', handoff: expect.stringContaining('third finding.') },
+      ],
+    });
+
+    handlers.get('context')?.({
+      messages: [sendMessage.mock.calls[0]?.[0]],
+    });
     const deliveredPeek = await tools
       .get('delegate_jobs')
       ?.execute(
@@ -469,10 +516,50 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
+    expect(deliveredPeek?.content[0]?.text).toContain('third finding.');
     expect(deliveredPeek?.details).toMatchObject({
       action: 'peek',
       job: { id: 'dj-3', state: 'success' },
     });
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('rolls back queued delivery state when sendMessage throws', async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { ctx, finish, handlers, sendMessage, tools } = createAsyncHarness();
+    sendMessage.mockImplementation(() => {
+      throw new Error('send failed');
+    });
+    await tools.get('delegate')?.execute(
+      'call-failed-send',
+      {
+        name: 'First agent',
+        task: 'first',
+        route: 'quick',
+        background: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    finish('first');
+    await vi.advanceTimersByTimeAsync(50);
+    const peek = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-after-failed-send',
+        { action: 'peek', id: 'dj-1' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(peek?.content[0]?.text).toContain('first finding.');
+    expect(peek?.details).not.toHaveProperty('delivery');
+    expect(error).toHaveBeenCalledWith(
+      'delegate: failed to deliver background completion',
+      expect.any(Error),
+    );
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
