@@ -1,7 +1,8 @@
 # HFM-20260729: Add explicit Bash cwd support
 
-- **Status:** proposed
+- **Status:** parked
 - **Approval:** not approved
+- **Decision:** Parked 2026-07-29; the safe `cd` workaround and strict unknown-argument rejection do not justify a local Bash override on one incident
 - **Created:** 2026-07-29
 - **Source reports:** [HF-20260729: Bash silently ignores an unsupported workdir parameter](../inbox/20260729T103914Z-bash-ignores-workdir.md)
 
@@ -34,7 +35,9 @@ If Bash declares an optional `cwd` argument and resolves it before execution, th
 
 ## Recommendation
 
-After strict tool validation has been evaluated, register a local Bash override that adds one optional `cwd` property while delegating execution to Pi's exported Bash tool implementation. Resolve relative paths against the session cwd and instantiate/delegate to the Bash implementation with the selected directory. Preserve the built-in renderer and result shape rather than reimplementing command execution.
+Do not implement a local Bash override now. Strict unknown-argument validation removes the dangerous silent-execution failure, and explicit `cd <path> && ...` corrected the only observed incident. A same-name override would expand the public tool contract, require custom rendering to expose a non-default cwd, and risk drifting from Pi's configured Bash behavior.
+
+Reconsider after strict validation has completed its evaluation and at least three independent tasks show cwd-specific retries or wrong-directory near misses despite actionable rejection, with evidence that explicit `cd` creates meaningful quoting, composition, or operational cost. Upstream `cwd` support would lower that threshold. If revived locally, use the public `createBashToolDefinition` API and forward the extension execution context so session environment metadata is preserved.
 
 ## Scope
 
@@ -60,11 +63,11 @@ After strict tool validation has been evaluated, register a local Bash override 
 
 ## Evaluation
 
-- **Window:** not started; proposed window is the first 30 Bash calls using `cwd`, or 14 days after merge, whichever is later
+- **Window:** not started; no implementation while parked
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 ## Implementation and resolution
 
 - **Approved implementation:** —
 - **Merged change:** —
-- **Resolution:** pending evaluation
+- **Resolution:** parked 2026-07-29; reconsider only at the evidence threshold above or when upstream support changes the maintenance cost
