@@ -1,8 +1,8 @@
 # HFM-20260729: Reject undeclared tool arguments
 
-- **Status:** proposed
-- **Approval:** not approved
-- **Decision:** deferred on 2026-07-29 — owned by the host harness/tool router
+- **Status:** approved
+- **Approval:** approved 2026-07-29
+- **Decision:** implement strict top-level validation for all tools in the upstream Pi validation boundary
 - **Created:** 2026-07-29
 - **Source reports:** [HF-20260729: Bash silently ignores an unsupported workdir parameter](../inbox/20260729T103914Z-bash-ignores-workdir.md)
 
@@ -33,12 +33,12 @@ If tool-call validation rejects undeclared object properties before execution, t
 
 ## Recommendation
 
-Defer implementation in this checkout. The built-in Bash schema and pre-dispatch argument validation are supplied by the installed Pi packages, while this repository only consumes those packages. Route the change to the host harness / `pi-ai` validation owner: enforce rejection of undeclared tool-call properties at that shared boundary, while preserving schemas that explicitly allow additional properties. Consider a separate `cwd` addition only if user demand remains after strict errors make the mismatch visible.
+Implement the change in `/Users/nfrid/.pi/pi-mono`, which owns `packages/ai/src/utils/validation.ts` and the built-in tool schemas consumed by this checkout. Make top-level tool argument objects strict for all tools: reject properties not declared by the schema before execution, while preserving schemas that explicitly allow additional properties. Return the mismatch as a normal tool validation error so the agent can correct the call. Bash `cwd` support is tracked separately in [HFM-20260729: Add explicit Bash cwd support](20260729-add-bash-cwd-support.md).
 
 ## Scope
 
-- **In:** Upstream validation of unknown top-level properties in tool arguments; an actionable error before tool execution; compatibility coverage for valid calls.
-- **Out:** Editing installed dependencies in this checkout, adding Bash cwd support, accepting aliases, changing command execution semantics, or validating arbitrary nested command content.
+- **In:** Upstream validation of unknown top-level properties in every tool's arguments; an actionable pre-execution tool error; an explicit opt-in for schemas that allow additional properties; compatibility coverage for valid calls.
+- **Out:** Editing installed dependencies in this checkout, adding Bash cwd support, accepting aliases, or changing command execution semantics.
 
 ## Acceptance criteria
 
@@ -49,9 +49,10 @@ Defer implementation in this checkout. The built-in Bash schema and pre-dispatch
 
 ## Validation
 
-- Add a tool-boundary test with a side-effecting Bash stub and assert the stub is not invoked when `workdir` is supplied.
-- Add or retain positive tests for valid Bash arguments and at least one other registered tool.
-- Run `npm run check`.
+- Add upstream `packages/ai` validation tests for unknown properties, valid calls, and explicitly permissive schemas.
+- Add a tool-loop test with a side-effecting stub and assert execution does not begin when an unknown property is supplied.
+- Run the focused upstream tests and `/Users/nfrid/.pi/pi-mono/npm run check`.
+- After an upstream release, update this checkout's pinned Pi packages and reproduce the original Bash call.
 - During the evaluation window, inspect harness validation errors for unknown-property failures and any valid-call regressions; compare with the baseline of one silent wrong-directory execution.
 
 ## Evaluation
@@ -61,6 +62,6 @@ Defer implementation in this checkout. The built-in Bash schema and pre-dispatch
 
 ## Implementation and resolution
 
-- **Approved implementation:** —
+- **Approved implementation:** Enforce strict top-level argument validation for all tools in upstream Pi, preserving explicit additional-property schemas and returning a recoverable pre-execution tool error; approved 2026-07-29.
 - **Merged change:** —
 - **Resolution:** pending evaluation
