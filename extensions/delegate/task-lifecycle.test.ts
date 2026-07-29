@@ -298,6 +298,7 @@ describe('delegate task lifecycle', () => {
     sameCompleted.exitCode = 0;
     await finalizeWorktreeRun(sameCompleted, same.worktree, 'same review');
     expect(sameCompleted.worktree?.snapshot).toBe(true);
+    expect(existsSync(same.worktree?.record.worktreePath ?? '')).toBe(false);
     writeFileSync(
       path.join(repository, 'src', 'value.txt'),
       'new parent WIP\n',
@@ -317,6 +318,13 @@ describe('delegate task lifecycle', () => {
     expect(refreshed.snapshotNotice).toMatch(
       /prior source observations may be stale/,
     );
+    expect(resolveDelegateSession(initial.session.token)?.cwd).toBe(
+      refreshed.cwd,
+    );
+    const refreshedSessionHeader = JSON.parse(
+      readFileSync(refreshed.session.filePath, 'utf8').split(/\r?\n/)[0],
+    ) as { cwd?: unknown };
+    expect(refreshedSessionHeader.cwd).toBe(refreshed.cwd);
     const refreshedCompleted = createRun('refreshed review', undefined, {
       allowWrites: false,
     });

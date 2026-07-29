@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
-import { atomicWriteJsonSync } from '../shared/fs/atomic';
+import { atomicWriteFileSync, atomicWriteJsonSync } from '../shared/fs/atomic';
 import type { DelegateIsolation, DelegateRouteState } from './types';
 
 interface SessionSnapshotSource {
@@ -206,11 +206,45 @@ export function updateDelegateSessionWorktree(
 ): DelegateSession | null {
   const current = resolveDelegateSession(token);
   if (!current) return null;
-  const { metadataPath } = sessionPaths(token);
+  const { filePath, metadataPath } = sessionPaths(token);
   const metadata = JSON.parse(
     readFileSync(metadataPath, 'utf8'),
   ) as DelegateSessionMetadata;
-  atomicWriteJsonSync(metadataPath, { ...metadata, worktreeId, cwd });
+  const previousJsonl = readFileSync(filePath, 'utf8');
+  const entries = previousJsonl
+    .split(/\r?\n/)
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line) as unknown);
+  const headerIndex = entries.findIndex(
+    (entry) =>
+      entry !== null &&
+      typeof entry === 'object' &&
+      (entry as { type?: unknown }).type === 'session',
+  );
+  if (headerIndex < 0)
+    throw new Error('Cannot update delegate session: session has no header.');
+  const header = entries[headerIndex] as Record<string, unknown>;
+  entries[headerIndex] = { ...header, cwd };
+  const updatedJsonl = `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`;
+
+  // Pi validates the session header's cwd before it starts the child. Keep it
+  // synchronized with our routing metadata when a snapshot gets a replacement
+  // checkout. If metadata persistence fails, restore the transcript so a
+  // failed refresh leaves both durable session views on the old checkout.
+  atomicWriteFileSync(filePath, updatedJsonl);
+  try {
+    atomicWriteJsonSync(metadataPath, { ...metadata, worktreeId, cwd });
+  } catch (error) {
+    try {
+      atomicWriteFileSync(filePath, previousJsonl);
+    } catch (rollbackError) {
+      throw new Error(
+        `Could not update delegate session metadata and could not restore its transcript: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
   return { ...current, worktreeId, cwd };
 }
 
