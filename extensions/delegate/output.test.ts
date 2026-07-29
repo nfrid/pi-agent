@@ -146,6 +146,31 @@ describe('output', () => {
     expect(handoff).not.toContain('Branch: pi/audit-a1b2 (no changes');
   });
 
+  test('guides retired read-only snapshots without integration instructions', () => {
+    const handoff = buildParentHandoff([
+      reportedRun('Outcome: done\nConclusion: review complete', {
+        allowWrites: false,
+        worktree: {
+          id: '11111111-1111-1111-1111-111111111111',
+          branch: 'pi/audit-a1b2',
+          worktreePath: '/tmp/worktree',
+          repositoryRoot: '/tmp/project',
+          baseHead: 'abc123def456',
+          workBase: 'abc123def456',
+          status: 'finished',
+          hasWork: false,
+          snapshot: true,
+        },
+      }),
+    ]);
+
+    expect(handoff).toContain('Read-only snapshot:');
+    expect(handoff).toContain('refresh wip or head');
+    expect(handoff).toContain('fresh delegate');
+    expect(handoff).not.toContain('Integrate with:');
+    expect(handoff).not.toContain('Branch: pi/audit-a1b2');
+  });
+
   test('reports a recovered continuation without warning about its prior run', () => {
     const handoff = buildParentHandoff([
       reportedRun('Outcome: done\nConclusion: completed the recovery', {

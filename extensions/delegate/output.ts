@@ -134,11 +134,18 @@ function prepareRun(run: DelegatedRun): PreparedRun {
       `Artifact: ${run.artifact.handle} (${run.artifact.size} bytes, sha256 ${run.artifact.sha256})`,
     );
   if (run.worktree) {
-    lines.push(
-      `Branch: ${run.worktree.branch} (${run.worktree.status === 'active' ? 'changes pending finalization' : run.worktree.hasWork ? `${run.worktree.changedPaths?.length ?? 0} changed path(s)` : 'no changes'}, from ${run.worktree.workBase.slice(0, 8)})`,
-      `Worktree: ${run.worktree.worktreePath}`,
-      `Integrate with: delegate_branches review then merge, id ${run.worktree.id}`,
-    );
+    if (run.worktree.snapshot) {
+      lines.push(
+        `Read-only snapshot: ${run.worktree.workBase.slice(0, 8)} (checkout retired)`,
+        `Continue: omit refresh to rehydrate this exact snapshot; use refresh wip or head for targeted verification. A refreshed continuation is not independent review; use a fresh delegate for that.`,
+      );
+    } else {
+      lines.push(
+        `Branch: ${run.worktree.branch} (${run.worktree.status === 'active' ? 'changes pending finalization' : run.worktree.hasWork ? `${run.worktree.changedPaths?.length ?? 0} changed path(s)` : 'no changes'}, from ${run.worktree.workBase.slice(0, 8)})`,
+        `Worktree: ${run.worktree.worktreePath}`,
+        `Integrate with: delegate_branches review then merge, id ${run.worktree.id}`,
+      );
+    }
     if (run.worktree.changedPaths?.length)
       lines.push(
         `Changed: ${run.worktree.changedPaths.slice(0, 20).join(', ')}${run.worktree.changedPaths.length > 20 ? ', …' : ''}`,

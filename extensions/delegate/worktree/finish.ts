@@ -1,9 +1,11 @@
-import { existsSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import * as path from 'node:path';
 import { git, gitText, splitZ } from './git';
 import { type WorktreeRecord, workBase } from './model';
 import {
   deleteWorktreeRecord,
   loadWorktree,
+  snapshotFilesDir,
   writeWorktreeRecord,
 } from './records';
 
@@ -128,6 +130,38 @@ export async function finishWorktree(
  * Remove a worktree checkout. The branch survives by default — it holds the
  * work — unless the caller asks for it to go too.
  */
+/** Retire a clean read-only checkout while retaining its branch as a lightweight snapshot ref. */
+export async function retireWorktreeSnapshot(
+  id: string,
+): Promise<WorktreeRecord> {
+  const record = loadWorktree(id);
+  if (!record) throw new Error(`Unknown worktree ${id}`);
+  // Ignored projections are outside the Git ref. Preserve only the existing
+  // bounded allowlist so a same-snapshot continuation sees the same files.
+  for (const relative of record.carriedFiles) {
+    const source = path.join(record.worktreePath, relative);
+    const target = path.join(snapshotFilesDir(record.id), relative);
+    if (!existsSync(source)) continue;
+    mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+    copyFileSync(source, target);
+  }
+  if (existsSync(record.worktreePath)) {
+    await git(record.repositoryRoot, [
+      'worktree',
+      'remove',
+      '--force',
+      record.worktreePath,
+    ]);
+  }
+  await git(record.repositoryRoot, ['worktree', 'prune']).catch(
+    () => undefined,
+  );
+  record.status = 'finished';
+  record.snapshot = true;
+  writeWorktreeRecord(record);
+  return record;
+}
+
 export async function removeWorktree(
   id: string,
   options: { deleteBranch?: boolean } = {},

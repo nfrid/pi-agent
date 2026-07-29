@@ -9,6 +9,7 @@ import {
   finishWorktree,
   loadWorktree,
   type PreparedWorktree,
+  retireWorktreeSnapshot,
   type WorktreeRecord,
   type WorktreeSummary,
   worktreeSummary,
@@ -73,9 +74,17 @@ export async function finalizeWorktreeRun(
       taskName,
       outcome,
     });
-    run.worktree = worktreeSummary(record);
-    if (record.error && !continuationRecoveryNote(run))
-      run.warnings = [...(run.warnings ?? []), record.error];
+    const cleanReadOnlySnapshot =
+      state === 'success' &&
+      !run.allowWrites &&
+      !record.error &&
+      !worktreeSummary(record).hasWork;
+    const settled = cleanReadOnlySnapshot
+      ? await retireWorktreeSnapshot(record.id)
+      : record;
+    run.worktree = worktreeSummary(settled);
+    if (settled.error && !continuationRecoveryNote(run))
+      run.warnings = [...(run.warnings ?? []), settled.error];
   } catch (error) {
     run.warnings = [
       ...(run.warnings ?? []),

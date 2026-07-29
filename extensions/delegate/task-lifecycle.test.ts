@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import * as path from 'node:path';
 import { describe, expect, test } from 'vitest';
 import {
   createDelegateSession,
@@ -13,6 +14,9 @@ import {
 } from './task-lifecycle';
 import { repository } from './test/worktree-fixture';
 import type { DelegateRouteState } from './types';
+import { createRun } from './types';
+import { removeWorktree } from './worktree';
+import { finalizeWorktreeRun } from './worktree-lifecycle';
 
 const originalRoute: DelegateRouteState = {
   route: 'original',
@@ -101,6 +105,92 @@ describe('delegate task lifecycle', () => {
     } finally {
       await rollbackPreparedDelegateTasks([prepared]);
     }
+  });
+
+  test('rejects snapshot refresh for a writable continuation', async () => {
+    const writable = await prepareDelegateTask(
+      plan({ isolation: 'worktree', writeRequested: true }),
+    );
+    try {
+      expect(() =>
+        preflightDelegateContinuation(
+          plan({
+            context: 'continuation',
+            writeRequested: true,
+            isolation: 'worktree',
+            refresh: 'wip',
+            resumed: writable.session,
+          }),
+        ),
+      ).toThrow(/read-only worktree continuation/);
+    } finally {
+      await rollbackPreparedDelegateTasks([writable]);
+    }
+  });
+
+  test('rehydrates a retired read-only snapshot and refreshes from WIP or HEAD', async () => {
+    writeFileSync(path.join(repository, 'src', 'value.txt'), 'original WIP\n');
+    const initial = await prepareDelegateTask(
+      plan({ isolation: 'worktree', base: 'wip' }),
+    );
+    if (!initial.worktree) throw new Error('missing initial worktree');
+    const completed = createRun('review', undefined, { allowWrites: false });
+    completed.state = 'success';
+    completed.exitCode = 0;
+    await finalizeWorktreeRun(completed, initial.worktree, 'review');
+    expect(existsSync(initial.worktree.record.worktreePath)).toBe(false);
+    writeFileSync(path.join(repository, '.env'), 'SECRET=new-parent-value\n');
+
+    const same = await prepareDelegateTask(
+      plan({
+        context: 'continuation',
+        writeRequested: false,
+        isolation: 'worktree',
+        resumed: initial.session,
+      }),
+    );
+    expect(readFileSync(path.join(same.cwd, 'src', 'value.txt'), 'utf8')).toBe(
+      'original WIP\n',
+    );
+    expect(readFileSync(path.join(same.cwd, '.env'), 'utf8')).toBe(
+      'SECRET=local\n',
+    );
+    writeFileSync(
+      path.join(repository, 'src', 'value.txt'),
+      'new parent WIP\n',
+    );
+    const refreshed = await prepareDelegateTask(
+      plan({
+        context: 'continuation',
+        writeRequested: false,
+        isolation: 'worktree',
+        refresh: 'wip',
+        resumed: same.session,
+      }),
+    );
+    expect(
+      readFileSync(path.join(refreshed.cwd, 'src', 'value.txt'), 'utf8'),
+    ).toBe('new parent WIP\n');
+    expect(refreshed.snapshotNotice).toMatch(
+      /prior source observations may be stale/,
+    );
+    const fromHead = await prepareDelegateTask(
+      plan({
+        context: 'continuation',
+        writeRequested: false,
+        isolation: 'worktree',
+        refresh: 'head',
+        resumed: refreshed.session,
+      }),
+    );
+    expect(
+      readFileSync(path.join(fromHead.cwd, 'src', 'value.txt'), 'utf8'),
+    ).toBe('one\n');
+
+    await removeWorktree(fromHead.worktree?.record.id ?? '', {
+      deleteBranch: true,
+    });
+    removeDelegateSession(fromHead.session);
   });
 
   test('restores a writable continuation in its persisted worktree', async () => {

@@ -26,6 +26,7 @@ import {
   prepareWorktree,
   removeWorktree,
   restoreWorktreeSession,
+  retireWorktreeSnapshot,
   worktreeSummary,
 } from './worktree';
 import { writeWorktreeRecord } from './worktree/records';
@@ -361,6 +362,23 @@ describe('finishing a worktree', () => {
     });
     expect(record.changedPaths).toEqual([]);
     expect(worktreeSummary(record).hasWork).toBe(false);
+  });
+
+  test('retires a successful clean read-only run as a resumable snapshot', async () => {
+    writeFileSync(path.join(repository, 'src', 'value.txt'), 'parent WIP\n');
+    const worktree = await prepared({ name: 'Snapshot review' });
+    const run = createRun('Snapshot review', undefined, { allowWrites: false });
+    run.state = 'success';
+    run.exitCode = 0;
+    await finalizeWorktreeRun(run, worktree, 'Snapshot review');
+
+    expect(run.worktree?.snapshot).toBe(true);
+    expect(existsSync(worktree.record.worktreePath)).toBe(false);
+    expect(loadWorktree(worktree.record.id)?.snapshot).toBe(true);
+    expect(
+      git(repository, ['branch', '--list', worktree.record.branch]),
+    ).toContain(worktree.record.branch);
+    await retireWorktreeSnapshot(worktree.record.id);
   });
 });
 

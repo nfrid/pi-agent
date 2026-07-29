@@ -47,6 +47,11 @@ const IsolationSchema = StringEnum(['shared', 'worktree'] as const, {
   description:
     'Workspace mode. Fresh read-only tasks default to shared and writable tasks to worktree. Read-only worktrees are supported; writable shared tasks are rejected. Continuations inherit this when omitted and cannot change it explicitly.',
 });
+const RefreshSchema = StringEnum(['wip', 'head'] as const, {
+  description:
+    'Continuation-only snapshot selector. For a read-only isolated continuation, wip recreates from the parent’s current tracked and untracked work; head recreates from current HEAD only. Omit to continue the original snapshot.',
+});
+
 const BackgroundSchema = Type.Boolean({
   description:
     'Run asynchronously and return a job ID immediately after setup. Completion is delivered automatically.',
@@ -85,6 +90,7 @@ const TaskItem = Type.Object({
   allowWrites: Type.Optional(AllowWritesSchema),
   isolation: Type.Optional(IsolationSchema),
   from: Type.Optional(BaseSchema),
+  refresh: Type.Optional(RefreshSchema),
 });
 
 const DelegateParamsSchema = Type.Object({
@@ -113,6 +119,7 @@ const DelegateParamsSchema = Type.Object({
   allowWrites: Type.Optional(AllowWritesSchema),
   isolation: Type.Optional(IsolationSchema),
   from: Type.Optional(BaseSchema),
+  refresh: Type.Optional(RefreshSchema),
   background: Type.Optional(BackgroundSchema),
 });
 
@@ -128,7 +135,7 @@ export function delegatePromptGuidelines(
     'Brief a writable task like a ticket: what done looks like, the command that proves it, and what to leave alone. A child that has to infer its finish line will pick one of its own.',
     'Isolation and write capability are separate: fresh read-only work defaults to the shared checkout, while writable work defaults to a worktree. Choose read-only worktree isolation for long audits when parent changes may overlap; after fixing audit findings, use a fresh isolated delegate to review those fixes.',
     'Use contextNote for the relevant decisions, constraints, and findings; use branch only when exact parent history matters.',
-    'Continue a child for focused correction or extension; start fresh when its approach is wrong or an independent view is better.',
+    'Continue a read-only isolated child without refresh to revisit the same snapshot, or use refresh wip/head for targeted verification after fixes; a refreshed continuation preserves context but is not independent evidence. Start a fresh delegate for an independent regression review.',
     'A child that comes back with a "Blocked:" question is waiting on you, not failing. Answer it — from what you know, or by looking — and continue that child; re-briefing a fresh one throws away the context it already built. Decide it yourself unless it is genuinely the user\'s call.',
     "Parallelize only independent work: if one task depends on another's findings, read the first result before starting the next. Worktree-isolated tasks each get their own checkout, so writable tasks can run in parallel even on overlapping files. Use background delegation when foreground work can continue meanwhile.",
     'A writable run leaves its work as commits on the branch it reports; integrate it yourself with delegate_branches rather than handing the merge to the user.',

@@ -1,6 +1,7 @@
 import { initTheme, type ThemeColor } from '@earendil-works/pi-coding-agent';
 import { describe, expect, test } from 'vitest';
 import { renderDelegateCall, renderDelegateResult } from './render';
+import { worktreeLines } from './render-utils';
 import { createRun } from './types';
 
 initTheme('dark', false);
@@ -17,6 +18,28 @@ const assistantMessage = {
 };
 
 describe('render', () => {
+  test('renders retired read-only snapshots without branch actions', () => {
+    const lines = worktreeLines(
+      createRun('audit', undefined, {
+        allowWrites: false,
+        worktree: {
+          id: '11111111-1111-1111-1111-111111111111',
+          branch: 'pi/audit',
+          worktreePath: '/tmp/audit',
+          repositoryRoot: '/tmp/project',
+          baseHead: 'abc123def456',
+          workBase: 'abc123def456',
+          status: 'finished',
+          hasWork: false,
+          snapshot: true,
+        },
+      }),
+    );
+    expect(lines.join('\n')).toContain('Read-only snapshot');
+    expect(lines.join('\n')).toContain('fresh delegate');
+    expect(lines.join('\n')).not.toContain('delegate_branches');
+  });
+
   test('renders catalog routes', () => {
     const call = renderDelegateCall(
       { task: 'inspect', route: 'quick' },

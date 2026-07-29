@@ -122,7 +122,7 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
         }
         case 'drop': {
           const state = await branchState(record);
-          if (state === 'unmerged' && !params.force)
+          if (state === 'unmerged' && !params.force && !record.snapshot)
             throw new Error(
               `${record.branch} is not merged; its commits would be lost. Review or merge it first, or pass force true.`,
             );

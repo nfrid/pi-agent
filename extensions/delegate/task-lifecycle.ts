@@ -5,6 +5,7 @@ import {
   createDelegateSession,
   type DelegateSession,
   updateDelegateSessionRouting,
+  updateDelegateSessionWorktree,
 } from './session';
 import type {
   DelegateContext,
@@ -18,8 +19,11 @@ import {
   loadWorktree,
   type PreparedWorktree,
   prepareWorktree,
+  rehydrateWorktreeSession,
+  removeWorktree,
   restoreWorktreeSession,
   type WorktreeBase,
+  type WorktreeRecord,
 } from './worktree';
 
 export interface DelegateTaskPlan {
@@ -30,6 +34,8 @@ export interface DelegateTaskPlan {
   contextNote?: string;
   scope?: string[];
   base?: WorktreeBase;
+  /** Explicit source for a read-only continuation replacement snapshot. */
+  refresh?: WorktreeBase;
   writeRequested: boolean;
   /** Effective workspace isolation, independent from write capability. */
   isolation: DelegateIsolation;
@@ -50,6 +56,8 @@ export interface ContinuationPreflight {
   allowWrites: boolean;
   isolation: DelegateIsolation;
   worktree?: PreparedWorktree;
+  refreshSource?: WorktreeRecord;
+  snapshotNotice?: string;
   warnings: string[];
 }
 
@@ -99,8 +107,19 @@ export function preflightDelegateContinuation(
       const record = loadWorktree(plan.resumed.worktreeId);
       if (!record)
         throw new Error('The worktree for this continuation is unavailable.');
-      state.worktree = restoreWorktreeSession(record, plan.resumed.token);
-      state.cwd = path.join(record.worktreePath, record.workingDirectory);
+      if (plan.refresh) {
+        if (originalAllowWrites)
+          throw new Error(
+            'refresh is only available on a read-only worktree continuation.',
+          );
+        state.refreshSource = record;
+        state.cwd = path.join(record.repositoryRoot, record.workingDirectory);
+      } else {
+        state.worktree = record.snapshot
+          ? { record, env: { PI_DELEGATE_WORKTREE: record.id } }
+          : restoreWorktreeSession(record, plan.resumed.token);
+        state.cwd = path.join(record.worktreePath, record.workingDirectory);
+      }
     }
   }
   return state;
@@ -112,6 +131,8 @@ export async function prepareDelegateTask(
 ): Promise<PreparedDelegateTask> {
   const state = { ...preflight, warnings: [...preflight.warnings] };
   let session: DelegateSession | undefined;
+  let replacement: PreparedWorktree | undefined;
+  let replacementSessionMapped = false;
   let routeRollback: { routing?: DelegateRouteState } | undefined;
   try {
     if (plan.isolation === 'worktree' && !plan.resumed) {
@@ -131,13 +152,57 @@ export async function prepareDelegateTask(
       );
     }
 
+    if (plan.resumed && state.refreshSource && plan.refresh) {
+      const prepared = await prepareWorktree({
+        cwd: state.cwd,
+        name: plan.name,
+        base: plan.refresh,
+      });
+      if (!prepared.worktree)
+        throw new Error(
+          prepared.fallbackReason ??
+            'Worktree refresh setup failed before launch.',
+        );
+      replacement = attachWorktreeSession(
+        prepared.worktree,
+        plan.resumed.token,
+      );
+      const refreshedCwd = path.join(
+        replacement.record.worktreePath,
+        replacement.record.workingDirectory,
+      );
+      const refreshedSession = updateDelegateSessionWorktree(
+        plan.resumed.token,
+        replacement.record.id,
+        refreshedCwd,
+      );
+      if (!refreshedSession)
+        throw new Error('The delegate session disappeared during refresh.');
+      session = refreshedSession;
+      replacementSessionMapped = true;
+      state.worktree = replacement;
+      state.cwd = refreshedCwd;
+      state.snapshotNotice = `Workspace snapshot changed from ${state.refreshSource.headCommit?.slice(0, 12) ?? state.refreshSource.baseHead.slice(0, 12)} to ${replacement.record.carryCommit?.slice(0, 12) ?? replacement.record.baseHead.slice(0, 12)} (${plan.refresh}). Re-read relevant files: prior source observations may be stale.`;
+    } else if (plan.resumed && state.worktree?.record.snapshot) {
+      state.worktree = await rehydrateWorktreeSession(
+        state.worktree.record,
+        plan.resumed.token,
+      );
+      state.cwd = path.join(
+        state.worktree.record.worktreePath,
+        state.worktree.record.workingDirectory,
+      );
+    }
+
     if (plan.resumed) {
       if (plan.routeOverride && plan.routing) {
         routeRollback = { routing: plan.resumed.routing };
-        session = persistSessionRoute(plan.resumed, plan.routing);
+        session = persistSessionRoute(session ?? plan.resumed, plan.routing);
       } else {
-        session = plan.resumed;
+        session ??= plan.resumed;
       }
+      if (state.refreshSource)
+        await removeWorktree(state.refreshSource.id, { deleteBranch: true });
     } else {
       session = createDelegateSession({
         cwd: state.cwd,
@@ -164,6 +229,22 @@ export async function prepareDelegateTask(
       const warning = removeSessionSafely(session);
       if (warning) cleanupWarnings.push(warning);
     }
+    if (plan.resumed && replacementSessionMapped && state.refreshSource) {
+      try {
+        updateDelegateSessionWorktree(
+          plan.resumed.token,
+          state.refreshSource.id,
+          path.join(
+            state.refreshSource.worktreePath,
+            state.refreshSource.workingDirectory,
+          ),
+        );
+      } catch (rollbackError) {
+        cleanupWarnings.push(
+          `Delegate snapshot rollback failed for ${plan.resumed.token}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        );
+      }
+    }
     if (plan.resumed && routeRollback) {
       try {
         updateDelegateSessionRouting(plan.resumed.token, routeRollback.routing);
@@ -173,7 +254,10 @@ export async function prepareDelegateTask(
         );
       }
     }
-    if (state.worktree && !plan.resumed) {
+    if (replacement) {
+      const cleanup = await discardFreshWorktree(replacement.record.id);
+      if (cleanup.warning) cleanupWarnings.push(cleanup.warning);
+    } else if (state.worktree && !plan.resumed) {
       const cleanup = await discardFreshWorktree(state.worktree.record.id);
       if (cleanup.warning) cleanupWarnings.push(cleanup.warning);
     }
@@ -243,7 +327,9 @@ export async function runPreparedDelegateTask(
     sessionPath: prepared.session.filePath,
     continuation: prepared.session.token,
     resuming: Boolean(prepared.plan.resumed),
-    contextNote: prepared.plan.contextNote,
+    contextNote: [prepared.plan.contextNote, prepared.snapshotNotice]
+      .filter((item): item is string => Boolean(item?.trim()))
+      .join('\n\n'),
     scope: prepared.scope,
     routing: prepared.plan.routing,
     writeRequested: prepared.plan.writeRequested,
