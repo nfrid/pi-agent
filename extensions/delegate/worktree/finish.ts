@@ -170,23 +170,24 @@ export async function removeWorktree(
   if (!record) return;
 
   if (existsSync(record.worktreePath)) {
-    await git(record.repositoryRoot, [
-      'worktree',
-      'remove',
-      '--force',
-      record.worktreePath,
-    ]).catch(() => {
+    try {
+      await git(record.repositoryRoot, [
+        'worktree',
+        'remove',
+        '--force',
+        record.worktreePath,
+      ]);
+    } catch {
+      // Keep the record until pruning confirms Git no longer references the
+      // checkout; deleting only the directory is not successful cleanup.
       rmSync(record.worktreePath, { recursive: true, force: true });
-    });
+    }
   }
-  await git(record.repositoryRoot, ['worktree', 'prune']).catch(
-    () => undefined,
-  );
-  if (options.deleteBranch) {
-    await git(record.repositoryRoot, ['branch', '-D', record.branch]).catch(
-      () => undefined,
-    );
-  }
+  await git(record.repositoryRoot, ['worktree', 'prune']);
+  if (options.deleteBranch)
+    // Do not delete the record when this fails: it is the retry handle for the
+    // still-live ref, especially for a superseded snapshot.
+    await git(record.repositoryRoot, ['branch', '-D', record.branch]);
   deleteWorktreeRecord(id);
 }
 

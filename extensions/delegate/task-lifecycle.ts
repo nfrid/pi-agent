@@ -164,6 +164,13 @@ export async function prepareDelegateTask(
       );
     }
 
+    // Apply a route override before a snapshot switch so every operation
+    // after the session mapping is best-effort cleanup only.
+    if (plan.resumed && plan.routeOverride && plan.routing) {
+      routeRollback = { routing: plan.resumed.routing };
+      session = persistSessionRoute(plan.resumed, plan.routing);
+    }
+
     if (plan.resumed && state.refreshSource && plan.refresh) {
       const prepared = await prepareWorktree({
         cwd: state.cwd,
@@ -208,14 +215,16 @@ export async function prepareDelegateTask(
     }
 
     if (plan.resumed) {
-      if (plan.routeOverride && plan.routing) {
-        routeRollback = { routing: plan.resumed.routing };
-        session = persistSessionRoute(session ?? plan.resumed, plan.routing);
-      } else {
-        session ??= plan.resumed;
+      session ??= plan.resumed;
+      if (state.refreshSource) {
+        try {
+          await removeWorktree(state.refreshSource.id, { deleteBranch: true });
+        } catch (cleanupError) {
+          state.warnings.push(
+            `Could not clean superseded read-only snapshot ${state.refreshSource.id}; it was retained for retry: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+          );
+        }
       }
-      if (state.refreshSource)
-        await removeWorktree(state.refreshSource.id, { deleteBranch: true });
     } else {
       session = createDelegateSession({
         cwd: state.cwd,
@@ -242,23 +251,7 @@ export async function prepareDelegateTask(
       const warning = removeSessionSafely(session);
       if (warning) cleanupWarnings.push(warning);
     }
-    if (plan.resumed && replacementSessionMapped && state.refreshSource) {
-      try {
-        updateDelegateSessionWorktree(
-          plan.resumed.token,
-          state.refreshSource.id,
-          path.join(
-            state.refreshSource.worktreePath,
-            state.refreshSource.workingDirectory,
-          ),
-        );
-      } catch (rollbackError) {
-        cleanupWarnings.push(
-          `Delegate snapshot rollback failed for ${plan.resumed.token}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-        );
-      }
-    }
-    if (plan.resumed && routeRollback) {
+    if (plan.resumed && routeRollback && !replacementSessionMapped) {
       try {
         updateDelegateSessionRouting(plan.resumed.token, routeRollback.routing);
       } catch (rollbackError) {
@@ -267,7 +260,7 @@ export async function prepareDelegateTask(
         );
       }
     }
-    if (replacement) {
+    if (replacement && !replacementSessionMapped) {
       const cleanup = await discardFreshWorktree(replacement.record.id);
       if (cleanup.warning) cleanupWarnings.push(cleanup.warning);
     } else if (state.worktree && !plan.resumed) {

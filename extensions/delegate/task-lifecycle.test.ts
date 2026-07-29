@@ -219,6 +219,51 @@ describe('delegate task lifecycle', () => {
     }
   });
 
+  test('keeps the replacement authoritative when superseded cleanup fails', async () => {
+    const initial = await prepareDelegateTask(plan({ isolation: 'worktree' }));
+    if (!initial.worktree) throw new Error('missing initial worktree');
+    const completed = createRun('review', undefined, { allowWrites: false });
+    completed.state = 'success';
+    completed.exitCode = 0;
+    await finalizeWorktreeRun(completed, initial.worktree, 'review');
+    const oldId = initial.worktree.record.id;
+    const remove = vi
+      .spyOn(worktree, 'removeWorktree')
+      .mockRejectedValueOnce(new Error('injected old cleanup failure'));
+
+    try {
+      const refreshed = await prepareDelegateTask(
+        plan({
+          context: 'continuation',
+          writeRequested: false,
+          isolation: 'worktree',
+          refresh: 'wip',
+          resumed: initial.session,
+        }),
+      );
+      const newId = refreshed.worktree?.record.id;
+      expect(newId).toBeDefined();
+      expect(newId).not.toBe(oldId);
+      expect(resolveDelegateSession(initial.session.token)?.worktreeId).toBe(
+        newId,
+      );
+      expect(loadWorktree(newId ?? '')?.sessionToken).toBe(
+        initial.session.token,
+      );
+      expect(existsSync(refreshed.cwd)).toBe(true);
+      expect(loadWorktree(oldId)?.snapshot).toBe(true);
+      expect(refreshed.warnings?.join('\n')).toMatch(
+        /superseded read-only snapshot.*retained for retry/,
+      );
+    } finally {
+      remove.mockRestore();
+      const current = resolveDelegateSession(initial.session.token)?.worktreeId;
+      if (current) await removeWorktree(current, { deleteBranch: true });
+      await removeWorktree(oldId, { deleteBranch: true });
+      removeDelegateSession(initial.session);
+    }
+  });
+
   test('rehydrates a retired read-only snapshot and refreshes from WIP or HEAD', async () => {
     writeFileSync(path.join(repository, 'src', 'value.txt'), 'original WIP\n');
     const initial = await prepareDelegateTask(

@@ -397,6 +397,25 @@ describe('cleaning up', () => {
     expect(loadWorktree(worktree.record.id)).toBeUndefined();
   });
 
+  test('retains its record when branch deletion fails so cleanup can retry', async () => {
+    const worktree = await prepared({ name: 'Retry branch cleanup' });
+    const actualBranch = worktree.record.branch;
+    const corrupt = loadWorktree(worktree.record.id);
+    if (!corrupt) throw new Error('missing worktree record');
+    corrupt.branch = 'pi/missing-branch';
+    writeWorktreeRecord(corrupt);
+
+    await expect(
+      removeWorktree(worktree.record.id, { deleteBranch: true }),
+    ).rejects.toThrow();
+    expect(loadWorktree(worktree.record.id)).toBeDefined();
+
+    corrupt.branch = actualBranch;
+    writeWorktreeRecord(corrupt);
+    await removeWorktree(worktree.record.id, { deleteBranch: true });
+    expect(loadWorktree(worktree.record.id)).toBeUndefined();
+  });
+
   test('discarding an unstarted worktree takes the branch too', async () => {
     const worktree = await prepared({ name: 'Never ran' });
     expect(await discardFreshWorktree(worktree.record.id)).toEqual({});
