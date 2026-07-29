@@ -1,6 +1,6 @@
 ---
 name: harness-feedback
-description: Capture up to three high-signal Pi harness-friction reports when explicitly invoked by the user.
+description: Capture up to three actionable Pi harness-friction reports when explicitly invoked by the user.
 ---
 
 # Harness feedback
@@ -17,6 +17,18 @@ invocation; do not ask for a second confirmation. Keep observations grounded in
 this task/session, separate facts from assumptions, and omit preferences,
 speculation, and low-signal one-off mistakes. Never copy raw transcripts,
 secrets, credentials, private data, or large logs.
+
+Capture only friction or capability gaps whose evidence supports a concrete
+harness change. Every report must identify behavior worth changing and a
+smallest useful improvement. Do not create reports merely to confirm that a
+route, tool, prompt, skill, or runtime behavior worked as intended.
+
+If delegates were used in the current task, compare only the exercised routes
+with their `use for` and `avoid` descriptions before choosing reports. Capture a
+route-description report only when a concrete mismatch caused or risked a poor
+selection, unnecessary escalation, rework, or an unsuitable result. Do not
+report positive fit, and do not evaluate routes or `avoid` claims that the task
+did not exercise.
 
 ## Fixed canonical store
 
