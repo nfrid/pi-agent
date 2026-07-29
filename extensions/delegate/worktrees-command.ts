@@ -14,8 +14,8 @@ const USAGE =
   'Usage: /delegate-worktrees [list] | <continuation-token|worktree-id> [show|remove|drop]';
 
 /**
- * Inspect and clean up delegate worktrees. Branches are the deliverable, so
- * `remove` takes only the checkout away; `drop` throws the branch out too.
+ * Inspect and clean up delegate worktrees. Writable branches are deliverable;
+ * retired read-only snapshots are resumed or dropped rather than integrated.
  */
 export function registerDelegateWorktreesCommand(pi: ExtensionAPI): void {
   pi.registerCommand('delegate-worktrees', {
@@ -45,8 +45,11 @@ export function registerDelegateWorktreesCommand(pi: ExtensionAPI): void {
 
       if (action === 'show') {
         const state = await branchState(record);
+        const detail = formatBranchDetail({ record, state });
         ctx.ui.notify(
-          `${formatBranchDetail({ record, state })}\n\nReview:    delegate_branches review ${id}\nIntegrate: delegate_branches merge ${id}\nDiscard:   /delegate-worktrees ${id} drop`,
+          record.snapshot
+            ? `${detail}\nDrop:     /delegate-worktrees ${id} drop`
+            : `${detail}\n\nReview:    delegate_branches review ${id}\nIntegrate: delegate_branches merge ${id}\nDiscard:   /delegate-worktrees ${id} drop`,
           'info',
         );
         return;

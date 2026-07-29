@@ -43,6 +43,13 @@ function changedCount(record: WorktreeRecord): string {
 }
 
 export function formatBranchLine({ record, state }: BranchEntry): string {
+  if (record.snapshot)
+    return [
+      record.id,
+      'snapshot'.padEnd(8),
+      record.status.padEnd(8),
+      'read-only snapshot (checkout retired)',
+    ].join('  ');
   return [
     record.id,
     state.padEnd(8),
@@ -52,7 +59,17 @@ export function formatBranchLine({ record, state }: BranchEntry): string {
   ].join('  ');
 }
 
+export function snapshotGuidance(record: WorktreeRecord): string {
+  return [
+    `Read-only snapshot: ${workBase(record).slice(0, 12)} (checkout retired)`,
+    'Continue with its continuation token without refresh to rehydrate this exact source.',
+    'Use refresh wip or head only for targeted verification; it is not independent review.',
+    `Drop: delegate_branches drop ${record.id}`,
+  ].join('\n');
+}
+
 export function formatBranchDetail({ record, state }: BranchEntry): string {
+  if (record.snapshot) return snapshotGuidance(record);
   const changed = record.changedPaths ?? [];
   return [
     `Branch:    ${record.branch} (${state})`,

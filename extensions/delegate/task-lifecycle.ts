@@ -101,6 +101,13 @@ export function preflightDelegateContinuation(
       );
     }
     state.isolation = originalIsolation;
+    if (
+      plan.refresh &&
+      (originalAllowWrites || originalIsolation !== 'worktree')
+    )
+      throw new Error(
+        'refresh is only available on a read-only worktree continuation.',
+      );
     if (originalIsolation === 'worktree') {
       if (!plan.resumed.worktreeId)
         throw new Error('The worktree for this continuation is unavailable.');
@@ -108,9 +115,14 @@ export function preflightDelegateContinuation(
       if (!record)
         throw new Error('The worktree for this continuation is unavailable.');
       if (plan.refresh) {
-        if (originalAllowWrites)
+        if (
+          !record.snapshot ||
+          record.status !== 'finished' ||
+          record.error ||
+          record.runOutcome
+        )
           throw new Error(
-            'refresh is only available on a read-only worktree continuation.',
+            'refresh requires a clean retired read-only snapshot; diagnostic worktrees remain available for recovery.',
           );
         state.refreshSource = record;
         state.cwd = path.join(record.repositoryRoot, record.workingDirectory);
@@ -163,10 +175,11 @@ export async function prepareDelegateTask(
           prepared.fallbackReason ??
             'Worktree refresh setup failed before launch.',
         );
-      replacement = attachWorktreeSession(
-        prepared.worktree,
-        plan.resumed.token,
-      );
+      // Retain the prepared resource before attaching its session. If that
+      // write fails, catch cleanup removes this replacement without touching
+      // the old snapshot or its session mapping.
+      replacement = prepared.worktree;
+      replacement = attachWorktreeSession(replacement, plan.resumed.token);
       const refreshedCwd = path.join(
         replacement.record.worktreePath,
         replacement.record.workingDirectory,

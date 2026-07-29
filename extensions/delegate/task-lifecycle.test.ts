@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import {
   createDelegateSession,
   removeDelegateSession,
@@ -15,7 +15,13 @@ import {
 import { repository } from './test/worktree-fixture';
 import type { DelegateRouteState } from './types';
 import { createRun } from './types';
-import { removeWorktree } from './worktree';
+import * as worktree from './worktree';
+import {
+  finishWorktree,
+  listWorktrees,
+  loadWorktree,
+  removeWorktree,
+} from './worktree';
 import { finalizeWorktreeRun } from './worktree-lifecycle';
 
 const originalRoute: DelegateRouteState = {
@@ -107,7 +113,26 @@ describe('delegate task lifecycle', () => {
     }
   });
 
-  test('rejects snapshot refresh for a writable continuation', async () => {
+  test('rejects snapshot refresh for shared and writable continuations', async () => {
+    const shared = createDelegateSession({
+      cwd: repository,
+      allowWrites: false,
+      isolation: 'shared',
+    });
+    try {
+      expect(() =>
+        preflightDelegateContinuation(
+          plan({
+            context: 'continuation',
+            refresh: 'wip',
+            resumed: shared,
+          }),
+        ),
+      ).toThrow(/read-only worktree continuation/);
+    } finally {
+      removeDelegateSession(shared);
+    }
+
     const writable = await prepareDelegateTask(
       plan({ isolation: 'worktree', writeRequested: true }),
     );
@@ -125,6 +150,72 @@ describe('delegate task lifecycle', () => {
       ).toThrow(/read-only worktree continuation/);
     } finally {
       await rollbackPreparedDelegateTasks([writable]);
+    }
+  });
+
+  test('keeps diagnostic read-only worktrees authoritative and rejects refresh', async () => {
+    const initial = await prepareDelegateTask(plan({ isolation: 'worktree' }));
+    if (!initial.worktree) throw new Error('missing initial worktree');
+    await finishWorktree(initial.worktree.record.id, {
+      taskName: 'failed review',
+      outcome: 'error',
+    });
+
+    expect(() =>
+      preflightDelegateContinuation(
+        plan({
+          context: 'continuation',
+          writeRequested: false,
+          isolation: 'worktree',
+          refresh: 'wip',
+          resumed: initial.session,
+        }),
+      ),
+    ).toThrow(/clean retired read-only snapshot/);
+    expect(loadWorktree(initial.worktree.record.id)?.error).toMatch(
+      /ended with error/,
+    );
+    expect(existsSync(initial.worktree.record.worktreePath)).toBe(true);
+
+    await removeWorktree(initial.worktree.record.id, { deleteBranch: true });
+    removeDelegateSession(initial.session);
+  });
+
+  test('cleans a replacement when session attachment fails without repointing a snapshot', async () => {
+    const initial = await prepareDelegateTask(plan({ isolation: 'worktree' }));
+    if (!initial.worktree) throw new Error('missing initial worktree');
+    const completed = createRun('review', undefined, { allowWrites: false });
+    completed.state = 'success';
+    completed.exitCode = 0;
+    await finalizeWorktreeRun(completed, initial.worktree, 'review');
+    const oldId = initial.worktree.record.id;
+    const attach = vi
+      .spyOn(worktree, 'attachWorktreeSession')
+      .mockImplementationOnce(() => {
+        throw new Error('injected attach failure');
+      });
+
+    try {
+      await expect(
+        prepareDelegateTask(
+          plan({
+            context: 'continuation',
+            writeRequested: false,
+            isolation: 'worktree',
+            refresh: 'wip',
+            resumed: initial.session,
+          }),
+        ),
+      ).rejects.toThrow(/injected attach failure/);
+      expect(resolveDelegateSession(initial.session.token)?.worktreeId).toBe(
+        oldId,
+      );
+      expect(loadWorktree(oldId)?.snapshot).toBe(true);
+      expect(listWorktrees().map((record) => record.id)).toEqual([oldId]);
+    } finally {
+      attach.mockRestore();
+      await removeWorktree(oldId, { deleteBranch: true });
+      removeDelegateSession(initial.session);
     }
   });
 
@@ -155,6 +246,13 @@ describe('delegate task lifecycle', () => {
     expect(readFileSync(path.join(same.cwd, '.env'), 'utf8')).toBe(
       'SECRET=local\n',
     );
+    const sameCompleted = createRun('same snapshot review', undefined, {
+      allowWrites: false,
+    });
+    sameCompleted.state = 'success';
+    sameCompleted.exitCode = 0;
+    await finalizeWorktreeRun(sameCompleted, same.worktree, 'same review');
+    expect(sameCompleted.worktree?.snapshot).toBe(true);
     writeFileSync(
       path.join(repository, 'src', 'value.txt'),
       'new parent WIP\n',
@@ -174,6 +272,17 @@ describe('delegate task lifecycle', () => {
     expect(refreshed.snapshotNotice).toMatch(
       /prior source observations may be stale/,
     );
+    const refreshedCompleted = createRun('refreshed review', undefined, {
+      allowWrites: false,
+    });
+    refreshedCompleted.state = 'success';
+    refreshedCompleted.exitCode = 0;
+    await finalizeWorktreeRun(
+      refreshedCompleted,
+      refreshed.worktree,
+      'refreshed review',
+    );
+    expect(refreshedCompleted.worktree?.snapshot).toBe(true);
     const fromHead = await prepareDelegateTask(
       plan({
         context: 'continuation',
