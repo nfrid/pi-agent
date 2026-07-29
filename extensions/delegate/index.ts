@@ -34,6 +34,9 @@ export const DELEGATES_COMMAND_DESCRIPTION =
 
 const COMPLETION_WAVE_GRACE_MS = 5_000;
 const COMPLETION_WAVE_BURST_MS = 50;
+const AUTOMATIC_DELIVERY_STATE_LIMIT = 256;
+
+type AutomaticDeliveryState = 'queued' | 'entered';
 
 type CompletionState = Extract<
   DelegateRunState,
@@ -127,6 +130,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   let deliveryEpoch = 0;
   let runtimeActive = false;
   let pendingCompletions: DelegateJobSnapshot[] = [];
+  // sendMessage can queue a steer while the parent is still active. Keep this
+  // separate from pendingCompletions, whose wave is already flushed by then.
+  const automaticDeliveryStates = new Map<string, AutomaticDeliveryState>();
   let completionTimer: NodeJS.Timeout | undefined;
   let completionFlushAt: number | undefined;
   let widgetDetailed = true;
@@ -142,6 +148,52 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     | undefined;
 
   const activeStatuses = () => statuses?.list() ?? [];
+
+  const trimAutomaticDeliveryStates = () => {
+    while (automaticDeliveryStates.size > AUTOMATIC_DELIVERY_STATE_LIMIT) {
+      const entered = [...automaticDeliveryStates].find(
+        ([, state]) => state === 'entered',
+      );
+      const oldest = entered ?? automaticDeliveryStates.entries().next().value;
+      if (oldest) automaticDeliveryStates.delete(oldest[0]);
+    }
+  };
+
+  const queueAutomaticDelivery = (jobs: readonly DelegateJobSnapshot[]) => {
+    for (const job of jobs) automaticDeliveryStates.set(job.id, 'queued');
+    trimAutomaticDeliveryStates();
+  };
+
+  const rollbackAutomaticDelivery = (jobs: readonly DelegateJobSnapshot[]) => {
+    for (const job of jobs) {
+      if (automaticDeliveryStates.get(job.id) === 'queued')
+        automaticDeliveryStates.delete(job.id);
+    }
+  };
+
+  const automaticDeliveryQueued = (job: DelegateJobSnapshot) =>
+    automaticDeliveryStates.get(job.id) === 'queued';
+
+  const markAutomaticDeliveriesEntered = (messages: readonly unknown[]) => {
+    for (const message of messages) {
+      const candidate = message as {
+        customType?: unknown;
+        details?: { jobs?: unknown };
+      };
+      if (candidate.customType !== 'delegate-job-result') continue;
+      const jobs = candidate.details?.jobs;
+      if (!Array.isArray(jobs)) continue;
+      for (const job of jobs) {
+        const id =
+          job && typeof job === 'object' && typeof job.id === 'string'
+            ? job.id
+            : undefined;
+        if (id && automaticDeliveryStates.get(id) === 'queued')
+          automaticDeliveryStates.set(id, 'entered');
+      }
+    }
+    trimAutomaticDeliveryStates();
+  };
 
   // Refreshed on a timer because the rendered rows include elapsed time.
   const widget = createRailPanel({
@@ -188,6 +240,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         return `# Background delegate job ${job.id} (${job.name}) ${job.state}\n\n${body}`;
       })
       .join('\n\n---\n\n');
+    queueAutomaticDelivery(completed);
     try {
       pi.sendMessage(
         {
@@ -200,6 +253,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       );
       statuses?.jobResultEntered(completed.map((job) => job.id));
     } catch (error) {
+      rollbackAutomaticDelivery(completed);
       console.error('delegate: failed to deliver background completion', error);
     }
   };
@@ -242,6 +296,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     deliveryEpoch = 0;
     widgetDetailed = true;
     pendingCompletions = [];
+    automaticDeliveryStates.clear();
     completionFlushAt = undefined;
     widget.attach(ui);
     pruneDelegateSessions({
@@ -261,24 +316,35 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       },
       promptConfig,
     );
-    registerDelegateJobsTool(pi, jobs, (completed) => {
-      const entered = new Set(
-        completed
-          .filter((job) => job.deliveryEpoch === deliveryEpoch)
-          .map((job) => job.id),
-      );
-      pendingCompletions = pendingCompletions.filter(
-        (job) => job.deliveryEpoch !== deliveryEpoch || !entered.has(job.id),
-      );
-      statuses?.settleJobs(completed);
-      statuses?.jobResultEntered(completed.map((job) => job.id));
-    });
+    registerDelegateJobsTool(
+      pi,
+      jobs,
+      (completed) => {
+        const entered = new Set(
+          completed
+            .filter((job) => job.deliveryEpoch === deliveryEpoch)
+            .map((job) => job.id),
+        );
+        pendingCompletions = pendingCompletions.filter(
+          (job) => job.deliveryEpoch !== deliveryEpoch || !entered.has(job.id),
+        );
+        statuses?.settleJobs(completed);
+        statuses?.jobResultEntered(completed.map((job) => job.id));
+      },
+      automaticDeliveryQueued,
+    );
     registerDelegateBranchesTool(pi);
     syncWidget();
   });
 
   pi.on('session_tree', () => {
     deliveryEpoch++;
+    automaticDeliveryStates.clear();
+  });
+  pi.on('context', (event) => {
+    // A queued steer cannot be retracted. Once it is in context, later peeks
+    // intentionally return the retained full result again.
+    markAutomaticDeliveriesEntered(event.messages);
   });
   // Unlike background-terminals, this widget is not force-remounted at agent
   // boundaries: a delegate run is live across them, and tearing the component
@@ -299,6 +365,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     completionTimer = undefined;
     completionFlushAt = undefined;
     pendingCompletions = [];
+    automaticDeliveryStates.clear();
     widget.detach();
     const closing = jobs;
     const closingStatuses = statuses;

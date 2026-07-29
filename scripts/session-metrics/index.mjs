@@ -162,6 +162,16 @@ function isSettledJob(job) {
   );
 }
 
+/** A terminal tool result can retain a snapshot while its automatic steer waits. */
+function automaticQueuedJobIds(details) {
+  if (details?.delivery !== 'automatic-queued') return new Set();
+  if (Array.isArray(details.automaticQueuedJobIds))
+    return new Set(
+      details.automaticQueuedJobIds.filter((id) => typeof id === 'string'),
+    );
+  return new Set(deliveredJobs(details).map((job) => job.id));
+}
+
 /**
  * Handoff copies cost context every time they enter the parent transcript, but
  * job/run facts are keyed by their stable job identity. Do not parse the text
@@ -193,7 +203,10 @@ function recordDeliverySource(state, source, ids) {
 }
 
 function recordBackgroundDelivery(state, text, details, source) {
-  const jobs = deliveredJobs(details).filter(isSettledJob);
+  const suppressed = automaticQueuedJobIds(details);
+  const jobs = deliveredJobs(details).filter(
+    (job) => isSettledJob(job) && !suppressed.has(job.id),
+  );
   if (jobs.length === 0) {
     // Older transcripts have no details. One header is enough to identify one
     // report, but cannot honestly reconstruct a parallel fan from its text.
