@@ -11,7 +11,7 @@
 
 ## Baseline
 
-The observed task needed to run a package check under `/Users/nfrid/job/kibana-logs`. Bash did not declare a cwd argument, and an attempted `workdir` property was silently ignored. An explicit `cd kibana-logs && ...` succeeded. Strict unknown-argument validation is tracked separately and should make the unsupported property fail safely, but it will not provide structured cwd selection. Current upstream built-in Bash accepts `command` and `timeout` and receives a fixed cwd when its tool definition is created.
+The observed task needed to run a package check under `/Users/nfrid/job/kibana-logs`. Bash did not declare a cwd argument, and an attempted `workdir` property was silently ignored. An explicit `cd kibana-logs && ...` succeeded. Strict unknown-argument validation is tracked separately and now makes the unsupported property fail safely, but it does not provide structured cwd selection. The installed built-in Bash accepts `command` and `timeout` and receives a fixed cwd when its tool definition is created.
 
 ## Hypothesis
 
@@ -34,7 +34,7 @@ If Bash declares an optional `cwd` argument and resolves it before execution, th
 
 ## Recommendation
 
-After strict tool validation has landed and been evaluated, add one optional `cwd` property to the built-in Bash schema and execution path. Resolve relative paths against the session cwd, pass the resolved directory to command execution, and expose the selected cwd in call rendering where applicable.
+After strict tool validation has been evaluated, register a local Bash override that adds one optional `cwd` property while delegating execution to Pi's exported Bash tool implementation. Resolve relative paths against the session cwd and instantiate/delegate to the Bash implementation with the selected directory. Preserve the built-in renderer and result shape rather than reimplementing command execution.
 
 ## Scope
 
@@ -52,10 +52,10 @@ After strict tool validation has landed and been evaluated, add one optional `cw
 
 ## Validation
 
-- Add built-in Bash tests for default, absolute, relative, missing, and non-directory cwd behavior.
-- Assert the execution adapter receives the resolved cwd and is not invoked for invalid targets.
-- Add or update rendering snapshots for a non-default cwd.
-- Run the focused upstream Bash tests and `/Users/nfrid/.pi/pi-mono/npm run check`.
+- Add local override tests for default, absolute, relative, missing, and non-directory cwd behavior.
+- Assert the delegated Bash implementation receives the resolved cwd and is not invoked for invalid targets.
+- Confirm inherited rendering and the built-in result shape remain intact.
+- Run the focused extension tests and `npm run check`.
 - During the evaluation window, compare wrong-directory retries with the baseline incident and inspect cwd-related validation failures.
 
 ## Evaluation
