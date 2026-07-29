@@ -10,6 +10,7 @@
 export {
   attachWorktreeSession,
   prepareWorktree,
+  rehydrateWorktreeSession,
   restoreWorktreeSession,
   WORKTREE_DIR,
 } from './create';
@@ -17,6 +18,7 @@ export {
   discardFreshWorktree,
   finishWorktree,
   removeWorktree,
+  retireWorktreeSnapshot,
 } from './finish';
 export { git, gitText, repositoryRoot } from './git';
 export type { BranchReview, BranchState, MergeOutcome } from './integrate';

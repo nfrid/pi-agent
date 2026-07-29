@@ -27,6 +27,7 @@ interface TaskInput {
   allowWrites?: boolean;
   isolation?: DelegateTaskPlan['isolation'];
   from?: DelegateTaskPlan['base'];
+  refresh?: DelegateTaskPlan['refresh'];
 }
 
 interface SharedDefaults {
@@ -38,6 +39,7 @@ interface SharedDefaults {
   allowWrites?: boolean;
   isolation?: DelegateTaskPlan['isolation'];
   from?: DelegateTaskPlan['base'];
+  refresh?: DelegateTaskPlan['refresh'];
 }
 
 export interface BuiltDelegatePlans {
@@ -100,6 +102,7 @@ function normalizeInputs(params: DelegateParams): {
         allowWrites: params.allowWrites,
         isolation: params.isolation,
         from: params.from,
+        refresh: params.refresh,
       },
     };
   }
@@ -123,6 +126,7 @@ function normalizeInputs(params: DelegateParams): {
         allowWrites: params.allowWrites,
         isolation: params.isolation,
         from: params.from,
+        refresh: params.refresh,
       },
     ],
     shared: {},
@@ -171,7 +175,8 @@ export function buildDelegatePlans(
     (shared.cwd !== undefined ||
       shared.context !== undefined ||
       shared.scope !== undefined ||
-      shared.from !== undefined)
+      shared.from !== undefined ||
+      shared.refresh !== undefined)
   )
     invalidParams(
       'Parallel continuations reuse their original cwd, history, scope, and base; do not provide top-level replacements.',
@@ -269,6 +274,13 @@ export function buildDelegatePlans(
       );
   }
 
+  for (let index = 0; index < inputs.length; index++) {
+    if ((inputs[index].refresh ?? shared.refresh) && !resumed[index])
+      invalidParams(
+        'refresh is only available on a read-only worktree continuation.',
+      );
+  }
+
   const plans: DelegateTaskPlan[] = inputs.map((item, index) => ({
     name: item.name,
     task: item.task,
@@ -277,6 +289,7 @@ export function buildDelegatePlans(
     contextNote: item.contextNote ?? shared.contextNote,
     scope: scopes[index],
     base: item.from ?? shared.from,
+    refresh: item.refresh ?? shared.refresh,
     writeRequested: writeRequests[index],
     isolation: isolations[index],
     allowWritesExplicit: writeRequestExplicit[index],

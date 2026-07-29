@@ -27,6 +27,11 @@ export function worktreeRecordDir(id: string): string {
   return path.join(worktreeRootDir(), id);
 }
 
+/** Private retained copies of allowed ignored-file projections for snapshots. */
+export function snapshotFilesDir(id: string): string {
+  return path.join(worktreeRecordDir(id), 'snapshot-files');
+}
+
 function recordPath(id: string): string {
   return path.join(worktreeRecordDir(id), 'record.json');
 }

@@ -23,7 +23,7 @@ import type {
   WorktreePreparation,
   WorktreeRecord,
 } from './model';
-import { writeWorktreeRecord } from './records';
+import { snapshotFilesDir, writeWorktreeRecord } from './records';
 
 /** Worktrees live beside the repository so `git worktree list` reads naturally. */
 const WORKTREE_DIR = '.worktrees';
@@ -149,6 +149,20 @@ function carryFiles(repositoryRoot: string, worktreePath: string): string[] {
     }
   }
   return carried;
+}
+
+/** Restore the ignored-file projections captured with a retired snapshot. */
+function restoreSnapshotFiles(record: WorktreeRecord): string[] {
+  const restored: string[] = [];
+  for (const relative of record.carriedFiles) {
+    const source = path.join(snapshotFilesDir(record.id), relative);
+    const target = path.join(record.worktreePath, relative);
+    if (!existsSync(source) || existsSync(target)) continue;
+    mkdirSync(path.dirname(target), { recursive: true });
+    copyFileSync(source, target);
+    restored.push(relative);
+  }
+  return restored;
 }
 
 /**
@@ -337,6 +351,50 @@ export function restoreWorktreeSession(
   if (record.status === 'removed')
     throw new Error('This worktree has already been removed.');
   return { record, env: { PI_DELEGATE_WORKTREE: record.id } };
+}
+
+export async function rehydrateWorktreeSession(
+  record: WorktreeRecord,
+  token: string,
+): Promise<PreparedWorktree> {
+  if (existsSync(record.worktreePath))
+    return restoreWorktreeSession(record, token);
+  if (record.sessionToken && record.sessionToken !== token)
+    throw new Error('This worktree belongs to another delegate session.');
+  if (record.status === 'removed')
+    throw new Error('This worktree has already been removed.');
+  try {
+    mkdirSync(path.dirname(record.worktreePath), { recursive: true });
+    await git(record.repositoryRoot, [
+      '-c',
+      'core.hooksPath=/dev/null',
+      'worktree',
+      'add',
+      record.worktreePath,
+      record.branch,
+    ]);
+    record.dependencyLinks = linkDependencies(
+      record.repositoryRoot,
+      record.worktreePath,
+      await packageDirectories(record.worktreePath),
+    );
+    record.carriedFiles = record.snapshot
+      ? restoreSnapshotFiles(record)
+      : carryFiles(record.repositoryRoot, record.worktreePath);
+    record.status = 'active';
+    delete record.snapshot;
+    writeWorktreeRecord(record);
+    return { record, env: { PI_DELEGATE_WORKTREE: record.id } };
+  } catch (error) {
+    await cleanupFailedPreparation(
+      record.repositoryRoot,
+      record.worktreePath,
+      undefined,
+    );
+    throw new Error(
+      `Could not rehydrate the worktree snapshot: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 export { isInside, WORKTREE_DIR };

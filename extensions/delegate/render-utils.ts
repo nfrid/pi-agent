@@ -221,6 +221,12 @@ export function modeDescription(
 export function worktreeLines(run: DelegatedRun): string[] {
   const worktree = run.worktree;
   if (!worktree) return [];
+  if (worktree.snapshot)
+    return [
+      `Read-only snapshot: ${worktree.workBase.slice(0, 8)} (checkout retired)`,
+      'Continue without refresh for this exact source, or refresh wip/head for targeted verification.',
+      'A refreshed continuation is not independent review; use a fresh delegate for that.',
+    ];
   const lines = [
     `Branch: ${worktree.branch}`,
     `Worktree: ${compactPath(worktree.worktreePath)}`,

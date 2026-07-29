@@ -26,9 +26,10 @@ import {
   prepareWorktree,
   removeWorktree,
   restoreWorktreeSession,
+  retireWorktreeSnapshot,
   worktreeSummary,
 } from './worktree';
-import { writeWorktreeRecord } from './worktree/records';
+import { snapshotFilesDir, writeWorktreeRecord } from './worktree/records';
 import { finalizeWorktreeRun } from './worktree-lifecycle';
 
 async function prepared(
@@ -362,6 +363,23 @@ describe('finishing a worktree', () => {
     expect(record.changedPaths).toEqual([]);
     expect(worktreeSummary(record).hasWork).toBe(false);
   });
+
+  test('retires a successful clean read-only run as a resumable snapshot', async () => {
+    writeFileSync(path.join(repository, 'src', 'value.txt'), 'parent WIP\n');
+    const worktree = await prepared({ name: 'Snapshot review' });
+    const run = createRun('Snapshot review', undefined, { allowWrites: false });
+    run.state = 'success';
+    run.exitCode = 0;
+    await finalizeWorktreeRun(run, worktree, 'Snapshot review');
+
+    expect(run.worktree?.snapshot).toBe(true);
+    expect(existsSync(worktree.record.worktreePath)).toBe(false);
+    expect(loadWorktree(worktree.record.id)?.snapshot).toBe(true);
+    expect(
+      git(repository, ['branch', '--list', worktree.record.branch]),
+    ).toContain(worktree.record.branch);
+    await retireWorktreeSnapshot(worktree.record.id);
+  });
 });
 
 describe('cleaning up', () => {
@@ -377,6 +395,44 @@ describe('cleaning up', () => {
       git(repository, ['branch', '--list', worktree.record.branch]),
     ).toContain('pi/keep-the-branch');
     expect(loadWorktree(worktree.record.id)).toBeUndefined();
+  });
+
+  test('retains its record when branch deletion fails so cleanup can retry', async () => {
+    const worktree = await prepared({ name: 'Retry branch cleanup' });
+    const actualBranch = worktree.record.branch;
+    const corrupt = loadWorktree(worktree.record.id);
+    if (!corrupt) throw new Error('missing worktree record');
+    corrupt.branch = git(repository, [
+      'rev-parse',
+      '--abbrev-ref',
+      'HEAD',
+    ]).trim();
+    writeWorktreeRecord(corrupt);
+
+    await expect(
+      removeWorktree(worktree.record.id, { deleteBranch: true }),
+    ).rejects.toThrow();
+    expect(loadWorktree(worktree.record.id)).toBeDefined();
+
+    corrupt.branch = actualBranch;
+    writeWorktreeRecord(corrupt);
+    await removeWorktree(worktree.record.id, { deleteBranch: true });
+    expect(loadWorktree(worktree.record.id)).toBeUndefined();
+  });
+
+  test('retries stale snapshot cleanup when its branch is already gone', async () => {
+    const worktree = await prepared({ name: 'Retry missing snapshot branch' });
+    await finishWorktree(worktree.record.id, {
+      taskName: 'Retry missing snapshot branch',
+      outcome: 'success',
+    });
+    await retireWorktreeSnapshot(worktree.record.id);
+    expect(existsSync(snapshotFilesDir(worktree.record.id))).toBe(true);
+    git(repository, ['branch', '-D', worktree.record.branch]);
+
+    await removeWorktree(worktree.record.id, { deleteBranch: true });
+    expect(loadWorktree(worktree.record.id)).toBeUndefined();
+    expect(existsSync(snapshotFilesDir(worktree.record.id))).toBe(false);
   });
 
   test('discarding an unstarted worktree takes the branch too', async () => {

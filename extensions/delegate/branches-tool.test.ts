@@ -7,6 +7,7 @@ import { repository } from './test/worktree-fixture';
 import {
   finishWorktree,
   prepareWorktree,
+  retireWorktreeSnapshot,
   type WorktreeRecord,
 } from './worktree';
 
@@ -90,6 +91,26 @@ describe('delegate_branches', () => {
       body(await tool.execute('c3', { action: 'drop', id: record.id })),
     ).toContain('Dropped');
     expect(existsSync(record.worktreePath)).toBe(false);
+  });
+
+  test('guides retired snapshots instead of reviewing or merging them', async () => {
+    const tool = captureTool();
+    writeFileSync(path.join(repository, 'src', 'value.txt'), 'parent WIP\n');
+    const record = await delegated('Snapshot audit');
+    await retireWorktreeSnapshot(record.id);
+
+    const review = body(
+      await tool.execute('c1', { action: 'review', id: record.id }),
+    );
+    expect(review).toContain('Read-only snapshot:');
+    expect(review).toContain('Continue');
+    expect(review).not.toContain('Branch:');
+    await expect(
+      tool.execute('c2', { action: 'merge', id: record.id }),
+    ).rejects.toThrow(/not integration work/);
+    expect(
+      body(await tool.execute('c3', { action: 'drop', id: record.id })),
+    ).toContain('Dropped');
   });
 
   test('refuses to drop unmerged work unless forced', async () => {

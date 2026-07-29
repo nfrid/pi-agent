@@ -14,6 +14,10 @@ This is the canonical feedback store for Pi harness behavior and capabilities. R
 
 The local `harness-maintenance` skill handles triage, ticket preparation, separately approved implementation, and evaluation. Keep proposal and implementation approval separate; a report is not a ticket and a ticket is not implementation authorization.
 
+## Delegate review snapshots
+
+A successful unchanged read-only delegate in worktree isolation is retained as a resumable Git snapshot, not an integration branch. Its checkout is retired automatically; continue it without a refresh selector to recreate the exact original source (including its carried WIP snapshot). For targeted verification after fixes, a read-only continuation can explicitly refresh from current `wip` or `head`; a refreshed continuation preserves the reviewer's context but is not independent evidence. Use a fresh delegate for an independent regression review. Writable delegate branches and failed, aborted, timed-out, lifecycle-error, or changed read-only worktrees retain their existing review and recovery lifecycle.
+
 ## Layout and links
 
 - [`REPORT_TEMPLATE.md`](REPORT_TEMPLATE.md) — concise harness observation

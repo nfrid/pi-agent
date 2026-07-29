@@ -52,6 +52,8 @@ export interface WorktreeRecord {
   error?: string;
   /** The retained terminal outcome that caused this branch to be kept. */
   runOutcome?: WorktreeRunOutcome;
+  /** A clean read-only snapshot whose checkout was retired but whose ref remains resumable. */
+  snapshot?: boolean;
 }
 
 /** The commit the agent's own work starts from. */
@@ -88,6 +90,8 @@ export interface WorktreeSummary {
   error?: string;
   /** The retained terminal outcome that caused this branch to be kept. */
   runOutcome?: WorktreeRunOutcome;
+  /** True when this is a retired, resumable read-only snapshot rather than integration work. */
+  snapshot?: boolean;
 }
 
 export function worktreeSummary(record: WorktreeRecord): WorktreeSummary {
@@ -105,5 +109,6 @@ export function worktreeSummary(record: WorktreeRecord): WorktreeSummary {
     hasWork: Boolean(record.headCommit && record.headCommit !== base),
     error: record.error,
     runOutcome: record.runOutcome,
+    snapshot: record.snapshot,
   };
 }

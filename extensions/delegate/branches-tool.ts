@@ -20,7 +20,7 @@ import {
 const Parameters = Type.Object({
   action: StringEnum(['list', 'review', 'merge', 'drop'] as const, {
     description:
-      "list every delegate branch and whether it is merged; review shows the task's commits and full diff; merge integrates it into your checkout; drop deletes the checkout and the branch.",
+      'List writable delegate branches and retired read-only snapshots. review and merge apply only to writable branches; snapshots can be continued or dropped. drop deletes the checkout and retained ref.',
   }),
   id: Type.Optional(
     Type.String({
@@ -54,11 +54,11 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
     description:
       "Review and integrate the branches writable delegate tasks leave behind. review gives you the task's commits and diff measured from its own starting point, so your carried uncommitted work is not mixed in. merge either lands cleanly or leaves your checkout untouched. Actions: list, review, merge, drop.",
     promptSnippet:
-      'Review, merge, or drop the branches left by writable delegate tasks',
+      'Review or merge writable delegate branches; continue or drop retired read-only snapshots',
     promptGuidelines: [
       'After a writable run, review its branch before merging, and run the check the task was given yourself. A branch that merges cleanly can still be wrong.',
       'Merge sibling branches one at a time, reviewing between them: parallel tasks never collide in their worktrees, but their merges can.',
-      'Drop a branch once its work is merged, so list stays a picture of what is still outstanding.',
+      'Drop a branch once its work is merged, so list stays a picture of what is still outstanding. A retired read-only snapshot is not mergeable: continue it for the same source or targeted refresh, or drop it when no longer needed.',
     ],
     parameters: Parameters,
     async execute(_toolCallId, params) {
@@ -91,6 +91,16 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
 
       switch (params.action) {
         case 'review': {
+          if (record.snapshot)
+            return {
+              ...text(
+                formatBranchDetail({
+                  record,
+                  state: await branchState(record),
+                }),
+              ),
+              details: { action: 'review' as const },
+            };
           const review = await reviewBranch(record);
           const entry: BranchEntry = { record, state: review.state };
           return {
@@ -101,6 +111,10 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
           };
         }
         case 'merge': {
+          if (record.snapshot)
+            throw new Error(
+              'A retired read-only snapshot is not integration work and cannot be merged. Continue it or drop it instead.',
+            );
           const outcome = await mergeBranch(record);
           const detail = [
             outcome.blockedPaths?.length
@@ -122,7 +136,7 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
         }
         case 'drop': {
           const state = await branchState(record);
-          if (state === 'unmerged' && !params.force)
+          if (state === 'unmerged' && !params.force && !record.snapshot)
             throw new Error(
               `${record.branch} is not merged; its commits would be lost. Review or merge it first, or pass force true.`,
             );

@@ -199,6 +199,21 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
   }
 }
 
+export function updateDelegateSessionWorktree(
+  token: string,
+  worktreeId: string,
+  cwd: string,
+): DelegateSession | null {
+  const current = resolveDelegateSession(token);
+  if (!current) return null;
+  const { metadataPath } = sessionPaths(token);
+  const metadata = JSON.parse(
+    readFileSync(metadataPath, 'utf8'),
+  ) as DelegateSessionMetadata;
+  atomicWriteJsonSync(metadataPath, { ...metadata, worktreeId, cwd });
+  return { ...current, worktreeId, cwd };
+}
+
 export function updateDelegateSessionRouting(
   token: string,
   routing: DelegateRouteState | undefined,
