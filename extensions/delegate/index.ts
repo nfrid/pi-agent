@@ -262,6 +262,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       promptConfig,
     );
     registerDelegateJobsTool(pi, jobs, (completed) => {
+      const entered = new Set(
+        completed
+          .filter((job) => job.deliveryEpoch === deliveryEpoch)
+          .map((job) => job.id),
+      );
+      pendingCompletions = pendingCompletions.filter(
+        (job) => job.deliveryEpoch !== deliveryEpoch || !entered.has(job.id),
+      );
       statuses?.settleJobs(completed);
       statuses?.jobResultEntered(completed.map((job) => job.id));
     });
