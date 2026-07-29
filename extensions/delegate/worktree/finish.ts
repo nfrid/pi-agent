@@ -162,6 +162,20 @@ export async function retireWorktreeSnapshot(
   return record;
 }
 
+async function branchExists(record: WorktreeRecord): Promise<boolean> {
+  try {
+    await git(record.repositoryRoot, [
+      'show-ref',
+      '--verify',
+      '--quiet',
+      `refs/heads/${record.branch}`,
+    ]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function removeWorktree(
   id: string,
   options: { deleteBranch?: boolean } = {},
@@ -184,10 +198,15 @@ export async function removeWorktree(
     }
   }
   await git(record.repositoryRoot, ['worktree', 'prune']);
-  if (options.deleteBranch)
-    // Do not delete the record when this fails: it is the retry handle for the
-    // still-live ref, especially for a superseded snapshot.
-    await git(record.repositoryRoot, ['branch', '-D', record.branch]);
+  if (options.deleteBranch && (await branchExists(record))) {
+    try {
+      await git(record.repositoryRoot, ['branch', '-D', record.branch]);
+    } catch (error) {
+      // A concurrent successful deletion is safe to treat as complete. Other
+      // failures retain the record as the retry handle for the live ref.
+      if (await branchExists(record)) throw error;
+    }
+  }
   deleteWorktreeRecord(id);
 }
 
