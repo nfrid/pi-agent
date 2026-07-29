@@ -121,7 +121,61 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
+
+function createAsyncHarness() {
+  vi.spyOn(configModule, 'loadDelegateConfig').mockReturnValue({
+    ...config,
+    maxParallelTasks: 3,
+  });
+  vi.spyOn(taskLifecycle, 'prepareDelegateTask').mockImplementation(
+    async (plan) => prepared(plan.task, `token-${plan.task}`),
+  );
+  const finishes = new Map<string, (run: DelegatedRun) => void>();
+  vi.spyOn(taskLifecycle, 'runPreparedDelegateTask').mockImplementation(
+    (item) =>
+      new Promise<DelegatedRun>((resolve) => {
+        finishes.set(item.plan.task, resolve);
+      }),
+  );
+
+  const handlers = new Map<string, Handler>();
+  const tools = new Map<string, RegisteredTool>();
+  const sendMessage = vi.fn();
+  const pi = {
+    on(event: string, handler: Handler) {
+      handlers.set(event, handler);
+    },
+    registerTool(tool: RegisteredTool) {
+      tools.set(tool.name, tool);
+    },
+    registerCommand: vi.fn(),
+    registerMessageRenderer: vi.fn(),
+    sendMessage,
+  } as unknown as ExtensionAPI;
+  const ctx = {
+    cwd: '/tmp/project',
+    hasUI: false,
+    mode: 'print',
+    sessionManager: { getHeader: () => ({}), getBranch: () => [] },
+  } as unknown as ExtensionContext;
+
+  delegate(pi);
+  handlers.get('session_start')?.({}, ctx);
+  const finish = (task: string) => {
+    const run = successfulRun();
+    run.task = task;
+    run.messages[0] = {
+      ...run.messages[0],
+      content: [{ type: 'text', text: `${task} finding.` }],
+    } as never;
+    const resolve = finishes.get(task);
+    if (!resolve) throw new Error(`No delegate running task ${task}.`);
+    resolve(run);
+  };
+  return { ctx, finish, handlers, sendMessage, tools };
+}
 
 describe('async delegate extension', () => {
   test('returns a job immediately and steers its completion later', async () => {
@@ -346,6 +400,143 @@ describe('async delegate extension', () => {
         ctx,
       );
     expect(peek?.content[0]?.text).toContain('Background finding.');
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('removes terminal peeked and cancelled jobs from a queued completion wave', async () => {
+    vi.useFakeTimers();
+    const { ctx, finish, handlers, sendMessage, tools } = createAsyncHarness();
+    const launch = await tools.get('delegate')?.execute(
+      'call-batch',
+      {
+        tasks: [
+          { name: 'First agent', task: 'first', route: 'quick' },
+          { name: 'Second agent', task: 'second', route: 'quick' },
+          { name: 'Third agent', task: 'third', route: 'quick' },
+        ],
+        background: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(launch?.content[0]?.text).toContain('dj-1, dj-2, dj-3');
+
+    finish('first');
+    finish('second');
+    finish('third');
+    await vi.advanceTimersByTimeAsync(0);
+
+    const peek = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-peek',
+        { action: 'peek', id: 'dj-1' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(peek?.details).toMatchObject({
+      action: 'peek',
+      job: { id: 'dj-1' },
+    });
+    const cancelled = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-cancel',
+        { action: 'cancel', ids: ['dj-2'] },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(cancelled?.details).toMatchObject({
+      action: 'cancel',
+      jobs: [{ id: 'dj-2', state: 'success' }],
+    });
+
+    await vi.advanceTimersByTimeAsync(50);
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(sendMessage.mock.calls[0]?.[0].details).toMatchObject({
+      jobs: [{ id: 'dj-3' }],
+    });
+
+    const deliveredPeek = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-delivered-peek',
+        { action: 'peek', id: 'dj-3' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(deliveredPeek?.details).toMatchObject({
+      action: 'peek',
+      job: { id: 'dj-3', state: 'success' },
+    });
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('keeps automatic delivery for nonterminal peeks but not waiting peeks', async () => {
+    vi.useFakeTimers();
+    const { ctx, finish, handlers, sendMessage, tools } = createAsyncHarness();
+    await tools.get('delegate')?.execute(
+      'call-first',
+      {
+        name: 'First agent',
+        task: 'first',
+        route: 'quick',
+        background: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const nonterminal = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-nonterminal-peek',
+        { action: 'peek', id: 'dj-1' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(nonterminal?.details).toMatchObject({
+      action: 'peek',
+      job: { id: 'dj-1', state: 'running' },
+    });
+    finish('first');
+    await vi.advanceTimersByTimeAsync(50);
+    expect(sendMessage.mock.calls[0]?.[0].details).toMatchObject({
+      jobs: [{ id: 'dj-1' }],
+    });
+
+    await tools.get('delegate')?.execute(
+      'call-second',
+      {
+        name: 'Second agent',
+        task: 'second',
+        route: 'quick',
+        background: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const waiting = tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-waiting-peek',
+        { action: 'peek', id: 'dj-2', wait_seconds: 1 },
+        undefined,
+        undefined,
+        ctx,
+      );
+    finish('second');
+    await expect(waiting).resolves.toMatchObject({
+      details: { action: 'peek', job: { id: 'dj-2', state: 'success' } },
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(sendMessage).toHaveBeenCalledOnce();
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
