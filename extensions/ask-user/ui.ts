@@ -109,11 +109,22 @@ export function createQuestionDialog(
         ? theme.fg('dim', ` ${PREVIEW_MARKER}`)
         : '';
       const label = `${i + 1}. ${choice.label}${choice.custom && typing ? ' ✎' : ''}`;
-      add(
-        prefix + theme.fg(isSelected ? 'accent' : 'text', label) + hasPreview,
+      const labelIndent = width > 2 ? '  ' : '';
+      const labelLines = wrapTextWithAnsi(
+        theme.fg(isSelected ? 'accent' : 'text', label) + hasPreview,
+        Math.max(1, width - labelIndent.length),
       );
-      if (choice.description)
-        add(`     ${theme.fg('muted', choice.description)}`);
+      for (const [lineIndex, line] of labelLines.entries())
+        add(`${lineIndex === 0 && labelIndent ? prefix : labelIndent}${line}`);
+      if (choice.description) {
+        const descriptionIndent = width > 5 ? '     ' : '';
+        const descriptionWidth = Math.max(1, width - descriptionIndent.length);
+        for (const line of wrapTextWithAnsi(
+          theme.fg('muted', choice.description),
+          descriptionWidth,
+        ))
+          add(`${descriptionIndent}${line}`);
+      }
     }
     return out;
   }
@@ -126,16 +137,29 @@ export function createQuestionDialog(
   }
 
   function renderPreview(preview: string, width: number): string[] {
-    const innerWidth = Math.max(1, width - 4);
-    const rendered = renderMarkdownPreview(preview, innerWidth);
+    const boxed = width >= 5;
+    const innerWidth = Math.max(1, boxed ? width - 4 : width);
+    const rendered = renderMarkdownPreview(preview, innerWidth).flatMap(
+      (line) => wrapTextWithAnsi(line, innerWidth),
+    );
     const maxPreviewRows = 30;
     const body = rendered.slice(0, maxPreviewRows);
     const hidden = rendered.length - body.length;
+    if (!boxed) {
+      if (hidden === 0) return body;
+      return [
+        ...body,
+        ...wrapTextWithAnsi(
+          theme.fg('dim', `… ${hidden} more line${hidden === 1 ? '' : 's'}`),
+          innerWidth,
+        ),
+      ];
+    }
     const rows = [theme.fg('accent', `╭${'─'.repeat(innerWidth + 2)}╮`)];
     for (const line of body) {
       rows.push(
         theme.fg('accent', '│ ') +
-          padToWidth(truncateToWidth(line, innerWidth, '…'), innerWidth) +
+          padToWidth(line, innerWidth) +
           theme.fg('accent', ' │'),
       );
     }
@@ -184,13 +208,17 @@ export function createQuestionDialog(
           add(`${l}   ${right[i] ?? ''}`);
         }
       } else {
+        const previewIndent = width > 1 ? ' ' : '';
         const preview = previewText
-          ? renderPreview(previewText, width - 2)
+          ? renderPreview(
+              previewText,
+              Math.max(1, width - previewIndent.length),
+            )
           : [];
         for (const line of renderOptions(width)) add(line);
         if (preview.length > 0) {
           add();
-          for (const line of preview) add(` ${line}`);
+          for (const line of preview) add(`${previewIndent}${line}`);
         }
       }
       add();

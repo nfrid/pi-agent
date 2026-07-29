@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
-import { truncateToWidth } from '@earendil-works/pi-tui';
+import { truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
 import { stringArg, toolBaseName, toolPath, toolRole } from './grouping';
 import { hasUnresolvedToolFailure } from './outcome';
 import {
@@ -275,19 +275,29 @@ export class ActivityGroupComponent implements Component {
     ];
   }
 
-  /** The group's own line: how it went, and what it was. */
-  private headline(
+  /** The group's own lines: how it went, and what it was. */
+  private headlineLines(
     tools: readonly ToolItem[],
     completed: boolean,
     failed: boolean,
-  ): string {
+    width: number,
+  ): string[] {
     const marker = completed
       ? failed
         ? '✗'
         : '✓'
       : SPINNER_FRAMES[this.spinnerFrame];
     const color = failed ? 'error' : completed ? 'success' : 'accent';
-    return ` ${this.theme.fg(color, marker)} ${this.theme.fg('text', this.title(tools, completed))}`;
+    const showPrefix = width > 3;
+    const prefix = showPrefix ? ` ${this.theme.fg(color, marker)} ` : '';
+    const indent = showPrefix ? '   ' : '';
+    const titleLines = wrapTextWithAnsi(
+      this.theme.fg('text', this.title(tools, completed)),
+      Math.max(1, width - indent.length),
+    );
+    return titleLines.map((line, index) =>
+      truncateToWidth(`${index === 0 ? prefix : indent}${line}`, width),
+    );
   }
 
   /**
@@ -315,11 +325,12 @@ export class ActivityGroupComponent implements Component {
   }
 
   /** The tally under the group: how much, where, how long, what broke. */
-  private metadataLine(
+  private metadataLines(
     tools: readonly ToolItem[],
     completed: boolean,
     failed: boolean,
-  ): string | undefined {
+    width: number,
+  ): string[] {
     const files = this.files(tools);
     const directory = commonDirectory(files);
     // A group opens the moment the model commits to tool calls, so it can be
@@ -337,8 +348,12 @@ export class ActivityGroupComponent implements Component {
       );
     const historicalFailed = tools.filter((tool) => tool.isError).length;
     if (historicalFailed > 0) parts.push(`${historicalFailed} failed`);
-    if (parts.length === 0) return undefined;
-    return `   ${this.theme.fg(failed ? 'error' : 'muted', parts.join(' · '))}`;
+    if (parts.length === 0) return [];
+    const indent = width > 3 ? '   ' : '';
+    return wrapTextWithAnsi(
+      this.theme.fg(failed ? 'error' : 'muted', parts.join(' · ')),
+      Math.max(1, width - indent.length),
+    ).map((line) => truncateToWidth(`${indent}${line}`, width));
   }
 
   render(width: number): string[] {
@@ -347,13 +362,13 @@ export class ActivityGroupComponent implements Component {
     );
     const completed = !this.options.streaming;
     const failed = hasUnresolvedToolFailure(tools);
-    const metadata = this.metadataLine(tools, completed, failed);
+    const metadata = this.metadataLines(tools, completed, failed, width);
 
     const lines = [
       '',
-      this.headline(tools, completed, failed),
+      ...this.headlineLines(tools, completed, failed, width),
       ...this.stepLines(tools),
-      ...(metadata ? [metadata] : []),
+      ...metadata,
     ].map((line) => truncateToWidth(line, width));
 
     // The default view is Pi's own rendering and wraps itself.

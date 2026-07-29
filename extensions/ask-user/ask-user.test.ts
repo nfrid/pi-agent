@@ -1,5 +1,5 @@
 import { initTheme } from '@earendil-works/pi-coding-agent';
-import { Markdown } from '@earendil-works/pi-tui';
+import { Markdown, visibleWidth } from '@earendil-works/pi-tui';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import askUser from './index';
 import { createQuestionDialog } from './ui';
@@ -43,9 +43,52 @@ describe('ask-user UI', () => {
     );
     expect(renderMarkdown).toHaveBeenCalledOnce();
 
+    const narrow = dialog('Preview text').render(2);
+    expect(narrow.join('').replaceAll(/\s/g, '')).toContain('Previewtext');
+    expect(narrow.every((line) => visibleWidth(line) <= 2)).toBe(true);
+
     renderMarkdown.mockClear();
     dialog().render(120);
     expect(renderMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('wraps option labels and descriptions instead of truncating them', () => {
+    const question = createQuestionDialog(
+      { question: 'Choose one' },
+      [
+        {
+          label: 'A deliberately detailed option label that stays readable',
+          value: 'option',
+          description:
+            'Preserve this valuable explanation across every rendered line',
+        },
+      ],
+      { requestRender: vi.fn() } as never,
+      theme as never,
+      vi.fn(),
+    );
+
+    const lines = question.render(32);
+    const renderedText = lines.map((line) => line.trim()).join(' ');
+    expect(renderedText).toContain(
+      'A deliberately detailed option label that stays readable',
+    );
+    expect(renderedText).toContain(
+      'Preserve this valuable explanation across every rendered line',
+    );
+    expect(lines.filter((line) => line.startsWith('     '))).toHaveLength(3);
+    expect(lines).not.toContain(expect.stringContaining('…'));
+    expect(lines.every((line) => visibleWidth(line) <= 32)).toBe(true);
+
+    const narrow = question.render(2);
+    const narrowText = narrow.join('').replaceAll(/\s/g, '');
+    expect(narrowText).toContain(
+      '1.Adeliberatelydetailedoptionlabelthatstaysreadable',
+    );
+    expect(narrowText).toContain(
+      'Preservethisvaluableexplanationacrosseveryrenderedline',
+    );
+    expect(narrow.every((line) => visibleWidth(line) <= 2)).toBe(true);
   });
 
   it('invalidates the cached preview when selection changes', () => {

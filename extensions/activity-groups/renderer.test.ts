@@ -1,6 +1,6 @@
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import type { Theme } from '@earendil-works/pi-coding-agent';
-import { Text } from '@earendil-works/pi-tui';
+import { Text, visibleWidth } from '@earendil-works/pi-tui';
 import { describe, expect, it } from 'vitest';
 import { createActivityGroupRenderer } from './renderer';
 import type { RendererContext, SequenceSnapshot } from './types';
@@ -129,6 +129,91 @@ describe('activity groups renderer', () => {
     expect(completedOutput).toContain('Inspected authentication code');
     expect(completedOutput).toContain('1.3s');
     expect(completedOutput).toContain('ORIGINAL_DETAILS');
+    (component as unknown as { dispose(): void }).dispose();
+  });
+
+  it('wraps long titles instead of discarding their detail', () => {
+    const component = createActivityGroupRenderer()(
+      {
+        id: 'long-title',
+        cwd: process.cwd(),
+        startedAt: 1000,
+        completedAt: 2000,
+        failed: false,
+        items: [
+          {
+            type: 'assistant',
+            message: message([
+              {
+                type: 'text',
+                text: 'Checking how sessions expire across refreshes and reconnects',
+              },
+            ]),
+          },
+          toolItem('read-1', 'read', { path: 'src/session.ts' }, false),
+        ],
+      },
+      { streaming: false, expanded: false, defaultView: new Text('', 0, 0) },
+      theme,
+      context(),
+    );
+    if (!component) throw new Error('renderer returned no component');
+
+    const lines = component.render(32);
+    expect(lines.map((line) => line.trim()).join(' ')).toContain(
+      'Checked how sessions expire across refreshes and reconnects',
+    );
+    expect(lines.filter((line) => line.startsWith('   '))).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('across refreshes and'),
+        expect.stringContaining('reconnects'),
+      ]),
+    );
+    expect(lines).not.toContain(expect.stringContaining('…'));
+    expect(lines.every((line) => line.length <= 32)).toBe(true);
+
+    const narrow = component.render(2);
+    expect(narrow.join('').replaceAll(/\s/g, '')).toContain(
+      'Checkedhowsessionsexpireacrossrefreshesandreconnects',
+    );
+    expect(narrow.every((line) => visibleWidth(line) <= 2)).toBe(true);
+    (component as unknown as { dispose(): void }).dispose();
+  });
+
+  it('wraps long location metadata without losing the path', () => {
+    const component = createActivityGroupRenderer()(
+      {
+        id: 'long-location',
+        cwd: process.cwd(),
+        startedAt: 1000,
+        completedAt: 2000,
+        failed: false,
+        items: [
+          toolItem(
+            'read-1',
+            'read',
+            { path: 'src/a-very-long-directory-name/one.ts' },
+            false,
+          ),
+          toolItem(
+            'read-2',
+            'read',
+            { path: 'src/a-very-long-directory-name/two.ts' },
+            false,
+          ),
+        ],
+      },
+      { streaming: false, expanded: false, defaultView: new Text('', 0, 0) },
+      theme,
+      context(),
+    );
+    if (!component) throw new Error('renderer returned no component');
+
+    const lines = component.render(32);
+    expect(lines.join('').replaceAll(/\s/g, '')).toContain(
+      '2calls·2filesinsrc/a-very-long-directory-name',
+    );
+    expect(lines.every((line) => visibleWidth(line) <= 32)).toBe(true);
     (component as unknown as { dispose(): void }).dispose();
   });
 
