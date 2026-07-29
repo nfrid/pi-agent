@@ -1,6 +1,6 @@
 # HFM-20260729: Detach and refresh read-only review snapshots
 
-- **Status:** approved
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-07-29
 - **Created:** 2026-07-29
 - **Source reports:** [HF-20260729: Read-only review worktrees are presented as integration branches](../inbox/20260729T125701Z-read-only-review-branch-cleanup.md)
@@ -75,18 +75,18 @@ Prefer a lightweight retained Git ref plus on-demand checkout over keeping a phy
 
 ## Acceptance criteria
 
-- [ ] After a successful read-only worktree run with no task-authored changes or settlement error, its physical checkout is automatically removed and no integration branch is presented to the parent.
-- [ ] The child session remains continuable after checkout retirement.
-- [ ] A continuation with no refresh selector recreates the exact original source snapshot, including WIP carry semantics and the existing allowed dependency/file projections.
-- [ ] A read-only continuation can explicitly refresh from the parent repository's current WIP and sees fixes made since the previous run.
-- [ ] A read-only continuation can explicitly refresh from current HEAD without receiving uncommitted parent changes.
-- [ ] A refreshed child receives an unambiguous notice that its source snapshot changed and that prior file observations may be stale.
-- [ ] Refresh preparation is atomic: if replacement preparation fails, the session can still continue from its previous snapshot and no partial replacement becomes authoritative.
-- [ ] Superseded checkout and snapshot resources are cleaned after a successful refresh; the current lightweight snapshot remains explicitly droppable without `force` when it contains no task-authored work.
-- [ ] Writable continuations reject refresh requests and retain existing branch review, merge, recovery, and forced-drop behavior.
-- [ ] Failed, aborted, timed-out, lifecycle-error, or unexpectedly changed read-only worktrees are retained with diagnostic guidance rather than automatically deleted.
-- [ ] Parent handoffs and expanded rendering for retired read-only reviews omit `delegate_branches review`/`merge` instructions and explain same-snapshot continuation versus refreshed targeted verification.
-- [ ] Delegate guidance identifies a fresh delegate—not refreshed continuation—as the independent regression-review path.
+- [x] After a successful read-only worktree run with no task-authored changes or settlement error, its physical checkout is automatically removed and no integration branch is presented to the parent.
+- [x] The child session remains continuable after checkout retirement.
+- [x] A continuation with no refresh selector recreates the exact original source snapshot, including WIP carry semantics and the existing allowed dependency/file projections.
+- [x] A read-only continuation can explicitly refresh from the parent repository's current WIP and sees fixes made since the previous run.
+- [x] A read-only continuation can explicitly refresh from current HEAD without receiving uncommitted parent changes.
+- [x] A refreshed child receives an unambiguous notice that its source snapshot changed and that prior file observations may be stale.
+- [x] Refresh preparation is atomic: if replacement preparation fails, the session can still continue from its previous snapshot and no partial replacement becomes authoritative.
+- [x] Superseded checkout and snapshot resources are cleaned after a successful refresh; the current lightweight snapshot remains explicitly droppable without `force` when it contains no task-authored work.
+- [x] Writable continuations reject refresh requests and retain existing branch review, merge, recovery, and forced-drop behavior.
+- [x] Failed, aborted, timed-out, lifecycle-error, or unexpectedly changed read-only worktrees are retained with diagnostic guidance rather than automatically deleted.
+- [x] Parent handoffs and expanded rendering for retired read-only reviews omit `delegate_branches review`/`merge` instructions and explain same-snapshot continuation versus refreshed targeted verification.
+- [x] Delegate guidance identifies a fresh delegate—not refreshed continuation—as the independent regression-review path.
 
 ## Validation
 
@@ -102,7 +102,7 @@ Prefer a lightweight retained Git ref plus on-demand checkout over keeping a phy
 
 ## Evaluation
 
-- **Window:** Starts after merged implementation; ends after 20 successful clean read-only review runs including at least 5 same-snapshot continuations and 5 refreshed continuations, or 2026-08-19, whichever is later
+- **Window:** Started 2026-07-29; ends after 20 successful clean read-only review runs including at least 5 same-snapshot continuations and 5 refreshed continuations, or 2026-08-19, whichever is later
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 Compare against the baseline of one retained clean checkout, one misleading integration prompt, and one forced manual drop in one observed review. Track retained clean checkouts, misleading integration actions, continuation restoration failures, refresh failures, leaked snapshot resources, and cases where agents incorrectly describe refreshed continuation as independent review.
@@ -110,5 +110,5 @@ Compare against the baseline of one retained clean checkout, one misleading inte
 ## Implementation and resolution
 
 - **Approved implementation:** Detach successful unchanged read-only child context from its physical checkout; retain and rehydrate the exact snapshot by default; add an explicit atomic refresh to current parent WIP or HEAD for read-only continuations; preserve writable and diagnostic-retention behavior; update lifecycle guidance and focused tests. Approved 2026-07-29.
-- **Merged change:** —
-- **Resolution:** pending implementation and evaluation
+- **Merged change:** `ddb4db1` (implementation `cef9534`, fixes `294f30f`, `87cf855`, `4c7ebf5`)
+- **Resolution:** pending evaluation
