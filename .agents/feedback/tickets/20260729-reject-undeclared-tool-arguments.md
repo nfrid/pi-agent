@@ -2,6 +2,7 @@
 
 - **Status:** proposed
 - **Approval:** not approved
+- **Decision:** deferred on 2026-07-29 — owned by the host harness/tool router
 - **Created:** 2026-07-29
 - **Source reports:** [HF-20260729: Bash silently ignores an unsupported workdir parameter](../inbox/20260729T103914Z-bash-ignores-workdir.md)
 
@@ -32,12 +33,12 @@ If tool-call validation rejects undeclared object properties before execution, t
 
 ## Recommendation
 
-Enforce rejection of undeclared tool-call properties at the shared validation boundary, with a focused compatibility check across registered tools. Consider a separate `cwd` addition only if user demand remains after strict errors make the mismatch visible.
+Defer implementation in this checkout. The built-in Bash schema and pre-dispatch argument validation are supplied by the installed Pi packages, while this repository only consumes those packages. Route the change to the host harness / `pi-ai` validation owner: enforce rejection of undeclared tool-call properties at that shared boundary, while preserving schemas that explicitly allow additional properties. Consider a separate `cwd` addition only if user demand remains after strict errors make the mismatch visible.
 
 ## Scope
 
-- **In:** Validation of unknown top-level properties in tool arguments; an actionable error before tool execution; compatibility coverage for valid calls.
-- **Out:** Adding Bash cwd support, accepting aliases, changing command execution semantics, or validating arbitrary nested command content.
+- **In:** Upstream validation of unknown top-level properties in tool arguments; an actionable error before tool execution; compatibility coverage for valid calls.
+- **Out:** Editing installed dependencies in this checkout, adding Bash cwd support, accepting aliases, changing command execution semantics, or validating arbitrary nested command content.
 
 ## Acceptance criteria
 
