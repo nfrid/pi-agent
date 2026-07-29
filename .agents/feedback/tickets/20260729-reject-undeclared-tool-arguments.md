@@ -59,6 +59,11 @@ Implement a local `tool_call` extension gate that looks up each built-in or cust
 - **Window:** Started 2026-07-29; ends after 30 blocked unknown-property calls, or 2026-08-12, whichever is later
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
+### Observations
+
+- **2026-07-29:** A live Bash call with undeclared `workdir` was rejected with the expected actionable error before execution; its `/tmp` side-effect marker was absent. Privacy-safe session metrics recorded 1 exact strict unknown-argument block. Focused schema/gate tests passed as part of the 78-test evaluation run.
+- **2026-07-29:** Merged `9e810a4` adds offline aggregate telemetry for strict unknown-argument blocks without emitting tool or argument names. The evaluation count is 1 of 30; no valid-call regression has been observed.
+
 ## Implementation and resolution
 
 - **Approved implementation:** Enforce strict top-level argument validation for all tools with a local pre-execution extension gate, preserving explicit additional-property schemas and returning an actionable block reason; approved 2026-07-29.

@@ -107,8 +107,13 @@ Prefer a lightweight retained Git ref plus on-demand checkout over keeping a phy
 
 Compare against the baseline of one retained clean checkout, one misleading integration prompt, and one forced manual drop in one observed review. Track retained clean checkouts, misleading integration actions, continuation restoration failures, refresh failures, leaked snapshot resources, and cases where agents incorrectly describe refreshed continuation as independent review.
 
+### Observations
+
+- **2026-07-29:** A disposable untracked WIP package was reviewed in a real read-only worktree. The checkout retired automatically, the handoff used snapshot guidance without integration instructions, and a same-snapshot continuation restored the exact source and dependency projection. This accounts for 2 successful clean runs, including 1 same-snapshot continuation.
+- **2026-07-29:** The first live WIP refresh failed before child execution because the persisted Pi session header still named the retired checkout. The diagnostic worktree was retained and later removed after inspection. Follow-up `4fe3984` synchronizes the persisted session cwd and adds the retired → same-snapshot → WIP-refresh regression case; focused lifecycle/worktree tests passed (31 tests), including HEAD exclusion. A refreshed live run must still be repeated after the extension runtime reloads, so the refreshed-continuation count remains 0.
+
 ## Implementation and resolution
 
 - **Approved implementation:** Detach successful unchanged read-only child context from its physical checkout; retain and rehydrate the exact snapshot by default; add an explicit atomic refresh to current parent WIP or HEAD for read-only continuations; preserve writable and diagnostic-retention behavior; update lifecycle guidance and focused tests. Approved 2026-07-29.
-- **Merged change:** `ddb4db1` (implementation `cef9534`, fixes `294f30f`, `87cf855`, `4c7ebf5`)
+- **Merged change:** `ddb4db1` (implementation `cef9534`, fixes `294f30f`, `87cf855`, `4c7ebf5`); evaluation fix `4fe3984`
 - **Resolution:** pending evaluation

@@ -61,6 +61,10 @@ Run package-manifest discovery against the prepared worktree after the optional 
 - **Window:** Started 2026-07-29; ends after 10 isolated reviews of WIP packages, or 2026-08-19, whichever is later
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
+### Observations
+
+- **2026-07-29:** One real isolated review received a disposable untracked WIP package, read its carried source, and ran an executable through the parent package's projected `node_modules` (`dependency-link-ok`). `git status --short` was clean, so the injected dependency link was not task-authored work. The equivalent HEAD exclusion remains covered by passing focused tests; 1 of 10 required operational WIP-package reviews is complete.
+
 ## Implementation and resolution
 
 - **Approved implementation:** Discover package directories from the prepared worktree after WIP carry while sourcing dependency links from the parent root, with WIP-versus-HEAD and commit-exclusion tests; approved 2026-07-29.
