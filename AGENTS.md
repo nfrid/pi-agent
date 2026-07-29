@@ -13,3 +13,5 @@ Use fix scripts when appropriate:
 
 - `npm run lint:fix`
 - `npm run format:fix`
+
+Use Conventional Commits for every commit message (for example, `fix(delegate): deduplicate queued completions` or `docs(feedback): record ticket decision`).
