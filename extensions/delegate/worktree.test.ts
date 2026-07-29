@@ -1,13 +1,21 @@
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { git, repository } from './test/worktree-fixture';
+import {
+  carriedWipPackage,
+  createCarriedWipPackage,
+  git,
+  repository,
+} from './test/worktree-fixture';
 import { continuationRecoveryNote, createRun } from './types';
 import {
   attachWorktreeSession,
@@ -107,6 +115,70 @@ describe('worktree preparation', () => {
         'utf8',
       ),
     ).toBe('one\n');
+  });
+
+  test('links dependencies for carried WIP packages without leaking them into HEAD', async () => {
+    createCarriedWipPackage();
+    const wip = await prepared({ name: 'Check carried package' });
+    const head = await prepared({ name: 'Check HEAD package', base: 'head' });
+    const dependencyLink = path.join(carriedWipPackage, 'node_modules');
+    const wipPackage = path.join(wip.record.worktreePath, carriedWipPackage);
+    const headPackage = path.join(head.record.worktreePath, carriedWipPackage);
+
+    expect(wip.record.dependencyLinks).toContain(dependencyLink);
+    expect(
+      lstatSync(path.join(wipPackage, 'node_modules')).isSymbolicLink(),
+    ).toBe(true);
+    expect(readlinkSync(path.join(wipPackage, 'node_modules'))).toBe(
+      path.join(repository, dependencyLink),
+    );
+    expect(
+      execFileSync(path.join(wipPackage, 'node_modules', '.bin', 'wip-check'), {
+        encoding: 'utf8',
+      }).trim(),
+    ).toBe('dependency available');
+    expect(existsSync(path.join(headPackage, 'package.json'))).toBe(false);
+    expect(head.record.dependencyLinks).not.toContain(dependencyLink);
+    expect(existsSync(path.join(headPackage, 'node_modules'))).toBe(false);
+
+    writeFileSync(
+      path.join(wipPackage, 'src', 'value.ts'),
+      'export const value = 2;\n',
+    );
+    const record = await finishWorktree(wip.record.id, {
+      taskName: 'Check carried package',
+      outcome: 'success',
+    });
+    expect(
+      git(repository, [
+        'log',
+        '--format=',
+        '--name-only',
+        `${record.baseHead}..${record.headCommit}`,
+      ]),
+    ).not.toContain(dependencyLink);
+
+    await removeWorktree(wip.record.id);
+    expect(existsSync(path.join(wipPackage, 'node_modules'))).toBe(false);
+  });
+
+  test('skips missing parent dependencies without installing them', async () => {
+    const packageDirectory = path.join('packages', 'without-dependencies');
+    mkdirSync(path.join(repository, packageDirectory), { recursive: true });
+    writeFileSync(
+      path.join(repository, packageDirectory, 'package.json'),
+      '{"name":"without-dependencies","private":true}\n',
+    );
+    git(repository, ['add', packageDirectory]);
+    git(repository, ['commit', '-qm', 'add package without dependencies']);
+
+    const worktree = await prepared({ name: 'No dependency install' });
+    const dependencyLink = path.join(packageDirectory, 'node_modules');
+    expect(worktree.record.dependencyLinks).not.toContain(dependencyLink);
+    expect(
+      existsSync(path.join(worktree.record.worktreePath, dependencyLink)),
+    ).toBe(false);
+    expect(existsSync(path.join(repository, dependencyLink))).toBe(false);
   });
 
   test('reports setup failure outside a repository', async () => {
