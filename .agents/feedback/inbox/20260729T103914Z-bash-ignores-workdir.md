@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** A Bash call included `workdir: /Users/nfrid/job/kibana-logs`; the tool accepted the call but executed from `/Users/nfrid/job`.
 - **Observed cost / rework:** The package install/check ran against the wrong directory, failed with `Script not found "check"`, and had to be repeated with an explicit `cd`.
 - **Recurrence / confidence:** Observed once directly; high confidence and likely recurrent when tool interfaces differ on cwd support.
-- **Ticket:** [HFM-20260729: Reject undeclared tool arguments](../tickets/20260729-reject-undeclared-tool-arguments.md)
+- **Tickets:** [HFM-20260729: Reject undeclared tool arguments](../tickets/20260729-reject-undeclared-tool-arguments.md); [HFM-20260729: Add explicit Bash cwd support](../tickets/20260729-add-bash-cwd-support.md)
 
 ## Behavior
 
