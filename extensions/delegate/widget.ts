@@ -33,6 +33,15 @@ export function formatElapsed(startedAt: number, now = Date.now()): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+function elapsedTime(status: DelegateStatusSnapshot, now: number): string {
+  if (status.startedAt === undefined) return formatElapsed(now, now);
+  const finished =
+    status.state === 'queued' || status.state === 'running'
+      ? now
+      : (status.finishedAt ?? status.startedAt);
+  return formatElapsed(status.startedAt, finished);
+}
+
 function stateStyle(status: DelegateStatusSnapshot): {
   icon: string;
   detail?: string;
@@ -99,7 +108,7 @@ function mainLine(
 ): string {
   const state = stateStyle(status);
   const prefix = `${theme.fg(state.color, state.icon)} `;
-  const elapsed = theme.fg('dim', formatElapsed(status.createdAt, now));
+  const elapsed = theme.fg('dim', elapsedTime(status, now));
   const access = accessIndicator(status, theme);
   const detail = state.detail ? theme.fg('dim', state.detail) : '';
   const mode = modeIndicator(status, theme);

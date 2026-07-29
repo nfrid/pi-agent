@@ -97,8 +97,42 @@ describe('delegate widget', () => {
       expect(visibleWidth(line)).toBeLessThanOrEqual(width);
     }
     expect(short[0]).toContain('Phase 5 review');
-    expect(short[0]).toContain('1m 5s');
+    expect(short[0]).toContain('1m 4s');
     expect(long.join('\n')).not.toContain('HIDDEN-TAIL');
+  });
+
+  test('counts only active runtime and freezes it after completion', () => {
+    const queued = renderDelegateWidget(
+      [status({ state: 'queued', startedAt: undefined })],
+      true,
+      100,
+      theme as never,
+      60_000,
+    )[0];
+    const running = renderDelegateWidget(
+      [status({ startedAt: 20_000 })],
+      true,
+      100,
+      theme as never,
+      60_000,
+    )[0];
+    const settled = renderDelegateWidget(
+      [
+        status({
+          state: 'success',
+          startedAt: 20_000,
+          finishedAt: 45_000,
+        }),
+      ],
+      true,
+      100,
+      theme as never,
+      90_000,
+    )[0];
+
+    expect(queued).toMatch(/0s$/);
+    expect(running).toMatch(/40s$/);
+    expect(settled).toMatch(/done.*25s$/);
   });
 
   test('shows compact route, context, and access indicators', () => {
@@ -149,7 +183,7 @@ describe('delegate widget', () => {
       theme as never,
       5_000,
     );
-    expect(narrow[0]).toMatch(/4s$/);
+    expect(narrow[0]).toMatch(/3s$/);
     expect(narrow[0]).not.toContain('\n');
     expect(visibleWidth(narrow[0])).toBeLessThanOrEqual(20);
   });

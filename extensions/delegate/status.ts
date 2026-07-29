@@ -15,6 +15,7 @@ export interface DelegateStatusSnapshot {
   state: DelegateRunState;
   createdAt: number;
   startedAt?: number;
+  finishedAt?: number;
   jobId?: string;
   route?: string;
   context?: DelegateContext;
@@ -74,6 +75,7 @@ export class DelegateStatusStore {
         state: getRunState(run),
         createdAt: run.queuedAt ?? Date.now(),
         startedAt: run.startedAt,
+        finishedAt: run.finishedAt,
         route: run.routing?.route,
         context: run.context,
         allowWrites: run.allowWrites === true,
@@ -94,6 +96,7 @@ export class DelegateStatusStore {
     record.name = run.name;
     record.state = getRunState(run);
     record.startedAt = run.startedAt;
+    record.finishedAt = run.finishedAt;
     record.route = run.routing?.route;
     record.context = run.context;
     record.allowWrites = run.allowWrites === true;
@@ -110,6 +113,7 @@ export class DelegateStatusStore {
       record.name = run.name;
       record.state = getRunState(run);
       record.startedAt = run.startedAt;
+      record.finishedAt = run.finishedAt;
       record.route = run.routing?.route;
       record.context = run.context;
       record.allowWrites = run.allowWrites === true;
@@ -146,7 +150,13 @@ export class DelegateStatusStore {
   }
 
   /** Reconcile a background job that settled without a final run update. */
-  settleJobs(jobs: readonly { id: string; state: DelegateRunState }[]): void {
+  settleJobs(
+    jobs: readonly {
+      id: string;
+      state: DelegateRunState;
+      settledAt?: number;
+    }[],
+  ): void {
     let changed = false;
     for (const job of jobs) {
       if (!isSettled(job.state)) continue;
@@ -155,6 +165,7 @@ export class DelegateStatusStore {
       );
       if (!record || isSettled(record.state)) continue;
       record.state = job.state;
+      record.finishedAt = job.settledAt ?? Date.now();
       changed = true;
     }
     if (changed) this.onChange();
