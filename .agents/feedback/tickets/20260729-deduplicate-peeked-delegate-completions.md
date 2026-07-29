@@ -65,5 +65,5 @@ When `delegate_jobs` returns terminal results through `peek` or `cancel`, remove
 ## Implementation and resolution
 
 - **Approved implementation:** Remove terminal peek/cancel results from queued current-epoch completion waves, with focused ordering and sibling tests; approved 2026-07-29.
-- **Merged change:** `fc1cbef` (implementation `a96028c`)
+- **Merged change:** `c0f7964` (implementation `e0ce4a3`)
 - **Resolution:** pending evaluation

@@ -64,5 +64,5 @@ Run package-manifest discovery against the prepared worktree after the optional 
 ## Implementation and resolution
 
 - **Approved implementation:** Discover package directories from the prepared worktree after WIP carry while sourcing dependency links from the parent root, with WIP-versus-HEAD and commit-exclusion tests; approved 2026-07-29.
-- **Merged change:** `1046c24` (implementation `15a4969`)
+- **Merged change:** `2360871` (implementation `a0787fc`)
 - **Resolution:** pending evaluation
