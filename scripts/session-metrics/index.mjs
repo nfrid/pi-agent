@@ -5,7 +5,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const SCHEMA_VERSION = 'session-metrics/v4';
+export const SCHEMA_VERSION = 'session-metrics/v5';
 const METRIC_KEYS = [
   'userTurns',
   'assistantTurns',
@@ -29,6 +29,10 @@ const METRIC_KEYS = [
   'delegateBackgroundJobsLaunched',
   'delegateBackgroundRunsLaunched',
   'delegateBackgroundDeliveries',
+  'delegateBackgroundAutomaticDeliveries',
+  'delegateBackgroundPeekDeliveries',
+  'delegateBackgroundDeliveryOverlaps',
+  'unknownToolArgumentBlocks',
   'delegateOutcomeDone',
   'delegateOutcomePartial',
   'delegateOutcomeBlocked',
@@ -163,7 +167,32 @@ function isSettledJob(job) {
  * job/run facts are keyed by their stable job identity. Do not parse the text
  * into jobs: parallel handoffs themselves may contain the display separator.
  */
-function recordBackgroundDelivery(state, text, details) {
+function recordDeliverySource(state, source, ids) {
+  if (source === 'automatic') {
+    state.metrics.delegateBackgroundAutomaticDeliveries += ids.length;
+    for (const id of ids) {
+      state.automaticDeliveryIds.add(id);
+      if (state.peekDeliveryIds.has(id) && !state.overlapDeliveryIds.has(id)) {
+        state.overlapDeliveryIds.add(id);
+        state.metrics.delegateBackgroundDeliveryOverlaps += 1;
+      }
+    }
+  } else if (source === 'peek') {
+    state.metrics.delegateBackgroundPeekDeliveries += ids.length;
+    for (const id of ids) {
+      state.peekDeliveryIds.add(id);
+      if (
+        state.automaticDeliveryIds.has(id) &&
+        !state.overlapDeliveryIds.has(id)
+      ) {
+        state.overlapDeliveryIds.add(id);
+        state.metrics.delegateBackgroundDeliveryOverlaps += 1;
+      }
+    }
+  }
+}
+
+function recordBackgroundDelivery(state, text, details, source) {
   const jobs = deliveredJobs(details).filter(isSettledJob);
   if (jobs.length === 0) {
     // Older transcripts have no details. One header is enough to identify one
@@ -172,6 +201,7 @@ function recordBackgroundDelivery(state, text, details) {
     if (!legacy) return;
     const [, jobId, handoff] = legacy;
     recordDeliveredText(state, text, 1);
+    recordDeliverySource(state, source, [jobId]);
     const ids = [`${jobId}:0`];
     recordTruncatedTasks(state, ids, handoff);
     recordExecution(state, [{}], ids, handoff);
@@ -179,6 +209,11 @@ function recordBackgroundDelivery(state, text, details) {
   }
 
   recordDeliveredText(state, text, jobs.length);
+  recordDeliverySource(
+    state,
+    source,
+    jobs.map((job) => job.id),
+  );
   for (const job of jobs) {
     const runs = Array.isArray(job.runs) && job.runs.length ? job.runs : [job];
     const ids = runs.map((_, index) => `${job.id}:${index}`);
@@ -226,10 +261,21 @@ function recordTruncatedTasks(state, ids, text) {
 }
 
 function resultText(message) {
+  if (typeof message.content === 'string') return message.content;
   return (Array.isArray(message.content) ? message.content : [])
     .filter((part) => part?.type === 'text' && typeof part.text === 'string')
     .map((part) => part.text)
     .join('');
+}
+
+const UNKNOWN_TOOL_ARGUMENT_BLOCK =
+  /^Tool "[^"\r\n]+" does not support argument "[^"\r\n]+"\. Remove it and retry\.$/;
+
+function isUnknownToolArgumentBlock(message) {
+  return (
+    message?.isError === true &&
+    UNKNOWN_TOOL_ARGUMENT_BLOCK.test(resultText(message))
+  );
 }
 
 /**
@@ -426,6 +472,9 @@ export function parseSessionJsonl(source) {
     indicatedRuns: new Set(),
     billedRuns: new Set(),
     truncatedRuns: new Set(),
+    automaticDeliveryIds: new Set(),
+    peekDeliveryIds: new Set(),
+    overlapDeliveryIds: new Set(),
   };
   let delegateResultNumber = 0;
   const timestamps = [];
@@ -436,7 +485,12 @@ export function parseSessionJsonl(source) {
     // A finished background job is pushed to the parent as a steering message,
     // outside the tool-result stream its `delegate` call belonged to.
     if (entry.customType === 'delegate-job-result')
-      recordBackgroundDelivery(state, entry.content ?? '', entry.details);
+      recordBackgroundDelivery(
+        state,
+        entry.content ?? '',
+        entry.details,
+        'automatic',
+      );
     if (entry.type !== 'message') continue;
     const message = entry.message;
     if (message?.role === 'user') metrics.userTurns += 1;
@@ -462,6 +516,8 @@ export function parseSessionJsonl(source) {
     }
     if (message?.role === 'toolResult' && message.toolName === 'todo')
       metrics.todoToolResults += 1;
+    if (message?.role === 'toolResult' && isUnknownToolArgumentBlock(message))
+      metrics.unknownToolArgumentBlocks += 1;
     if (message?.role === 'toolResult' && message.toolName === 'delegate') {
       const result = recordDelegateResult(
         state,
@@ -482,7 +538,12 @@ export function parseSessionJsonl(source) {
       message.toolName === 'delegate_jobs' &&
       ['peek', 'cancel'].includes(message.details?.action)
     )
-      recordBackgroundDelivery(state, resultText(message), message.details);
+      recordBackgroundDelivery(
+        state,
+        resultText(message),
+        message.details,
+        message.details.action === 'peek' ? 'peek' : undefined,
+      );
   }
   if (timestamps.length > 1)
     metrics.elapsedMs = Math.max(...timestamps) - Math.min(...timestamps);

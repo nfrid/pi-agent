@@ -457,6 +457,9 @@ describe('delegate measurements', () => {
     expect(result).toMatchObject({
       delegatedTasks: 1,
       delegateBackgroundDeliveries: 2,
+      delegateBackgroundAutomaticDeliveries: 1,
+      delegateBackgroundPeekDeliveries: 1,
+      delegateBackgroundDeliveryOverlaps: 1,
       delegateHandoffBytes:
         Buffer.byteLength(pushed, 'utf8') + Buffer.byteLength(peeked, 'utf8'),
       delegateTruncatedTasks: 1,
@@ -465,6 +468,36 @@ describe('delegate measurements', () => {
       routedTasks: 1,
       childTurns: 2,
     });
+  });
+
+  it('counts strict unknown-tool-argument blocks without emitting names', () => {
+    const serialized = JSON.stringify(
+      parseSessionJsonl(
+        delegateFixture([
+          {
+            toolName: 'bash',
+            text: 'Tool "bash" does not support argument "workdir". Remove it and retry.',
+            details: {},
+            isError: true,
+          },
+          {
+            toolName: 'bash',
+            text: 'Tool "bash" does not support argument "workdir". Remove it and retry.',
+            details: {},
+            isError: false,
+          },
+          {
+            toolName: 'bash',
+            text: 'Tool "bash" arguments do not match its declared schema.',
+            details: {},
+            isError: true,
+          },
+        ]),
+      ),
+    );
+    expect(JSON.parse(serialized).unknownToolArgumentBlocks).toBe(1);
+    expect(serialized).not.toContain('bash');
+    expect(serialized).not.toContain('workdir');
   });
 
   it('recognizes current and historical background reports without details', () => {
@@ -868,6 +901,41 @@ describe('delegate measurements', () => {
 });
 
 describe('cohorts', () => {
+  it('aggregates source-specific background delivery counts and overlaps', () => {
+    const handoff = 'Delegated results: 1 run\n\nOutcome: done';
+    const job = {
+      id: 'dj-cohort',
+      state: 'success',
+      handoff,
+      runs: [{}],
+    };
+    const session = parseSessionJsonl(
+      delegateFixture([
+        {
+          text: 'Started 1 background delegate job: dj-cohort.',
+          details: { runs: [{ backgroundJobId: 'dj-cohort' }] },
+        },
+        {
+          customType: 'delegate-job-result',
+          content: `# Background delegate job dj-cohort (audit) success\n\n${handoff}`,
+          details: { jobs: [job] },
+        },
+        {
+          toolName: 'delegate_jobs',
+          text: `Background delegate job dj-cohort (audit) success\n\n${handoff}`,
+          details: { action: 'peek', job },
+        },
+      ]),
+    );
+    const cohort = aggregateSessions([session]);
+    expect(cohort.totals).toMatchObject({
+      delegateBackgroundAutomaticDeliveries: 1,
+      delegateBackgroundPeekDeliveries: 1,
+      delegateBackgroundDeliveryOverlaps: 1,
+    });
+    expect(cohort.medians.delegateBackgroundDeliveryOverlaps).toBe(1);
+  });
+
   it('discovers directories and applies todo and limit filters', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'session-metrics-'));
     temporaryDirectories.push(directory);
