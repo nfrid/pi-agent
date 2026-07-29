@@ -1,6 +1,6 @@
 # HFM-20260729: Link dependencies for carried WIP packages
 
-- **Status:** proposed
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-07-29
 - **Created:** 2026-07-29
 - **Source reports:** [HF-20260729: Read-only review worktrees cannot run dependency-backed checks](../inbox/20260729T103916Z-readonly-worktree-dependencies.md)
@@ -42,11 +42,11 @@ Run package-manifest discovery against the prepared worktree after the optional 
 
 ## Acceptance criteria
 
-- [ ] A WIP worktree for an untracked package with an existing parent `node_modules` receives a usable dependency link at that package path.
-- [ ] The equivalent `from: head` worktree does not receive the untracked package or dependency link.
-- [ ] Tracked package dependency linking continues to work.
-- [ ] Missing parent dependencies remain a nonfatal condition and trigger no install.
-- [ ] Injected dependency links remain absent from delegate commits and are cleaned up with the worktree.
+- [x] A WIP worktree for an untracked package with an existing parent `node_modules` receives a usable dependency link at that package path.
+- [x] The equivalent `from: head` worktree does not receive the untracked package or dependency link.
+- [x] Tracked package dependency linking continues to work.
+- [x] Missing parent dependencies remain a nonfatal condition and trigger no install.
+- [x] Injected dependency links remain absent from delegate commits and are cleaned up with the worktree.
 
 ## Validation
 
@@ -58,11 +58,11 @@ Run package-manifest discovery against the prepared worktree after the optional 
 
 ## Evaluation
 
-- **Window:** First 10 isolated reviews of WIP packages, or 21 days after merge, whichever is later
+- **Window:** Started 2026-07-29; ends after 10 isolated reviews of WIP packages, or 2026-08-19, whichever is later
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 ## Implementation and resolution
 
 - **Approved implementation:** Discover package directories from the prepared worktree after WIP carry while sourcing dependency links from the parent root, with WIP-versus-HEAD and commit-exclusion tests; approved 2026-07-29.
-- **Merged change:** —
+- **Merged change:** `1046c24` (implementation `15a4969`)
 - **Resolution:** pending evaluation
