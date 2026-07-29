@@ -1,8 +1,8 @@
 # HFM-20260729: Reject undeclared tool arguments
 
-- **Status:** approved
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-07-29
-- **Decision:** implement strict top-level validation for all tools in the upstream Pi validation boundary
+- **Decision:** enforce strict top-level validation locally with a pre-execution extension gate
 - **Created:** 2026-07-29
 - **Source reports:** [HF-20260729: Bash silently ignores an unsupported workdir parameter](../inbox/20260729T103914Z-bash-ignores-workdir.md)
 
@@ -33,35 +33,34 @@ If tool-call validation rejects undeclared object properties before execution, t
 
 ## Recommendation
 
-Implement the change in `/Users/nfrid/.pi/pi-mono`, which owns `packages/ai/src/utils/validation.ts` and the built-in tool schemas consumed by this checkout. Make top-level tool argument objects strict for all tools: reject properties not declared by the schema before execution, while preserving schemas that explicitly allow additional properties. Return the mismatch as a normal tool validation error so the agent can correct the call. Bash `cwd` support is tracked separately in [HFM-20260729: Add explicit Bash cwd support](20260729-add-bash-cwd-support.md).
+Implement a local `tool_call` extension gate that looks up each built-in or custom tool through `pi.getAllTools()`, compiles its root schema as closed unless the schema explicitly defines additional-property behavior, and blocks unsupported arguments before execution. This avoids an upstream fork while applying one rule to every dynamically registered tool. Return an actionable block reason so the agent can correct the call. Bash `cwd` support is tracked separately in [HFM-20260729: Add explicit Bash cwd support](20260729-add-bash-cwd-support.md).
 
 ## Scope
 
-- **In:** Upstream validation of unknown top-level properties in every tool's arguments; an actionable pre-execution tool error; an explicit opt-in for schemas that allow additional properties; compatibility coverage for valid calls.
-- **Out:** Editing installed dependencies in this checkout, adding Bash cwd support, accepting aliases, or changing command execution semantics.
+- **In:** Local pre-execution validation of unknown top-level properties in every registered tool's arguments; an actionable block reason; explicit additional-property schemas; dynamic-tool and valid-call coverage.
+- **Out:** Upstream Pi changes, editing installed dependencies, recursive nested-object strictness, adding Bash cwd support, accepting aliases, or changing command execution semantics.
 
 ## Acceptance criteria
 
-- [ ] A `functions.bash` call containing undeclared `workdir` is rejected before the command starts.
-- [ ] The error names `workdir` as unsupported (and identifies Bash directly or through the failed tool call).
-- [ ] Existing calls containing only declared arguments continue to execute unchanged.
-- [ ] A representative non-Bash tool also rejects an undeclared top-level property, or the ticket records why enforcement must remain Bash-specific.
+- [x] A `functions.bash` call containing undeclared `workdir` is rejected before the command starts.
+- [x] The error names `workdir` as unsupported (and identifies Bash directly or through the failed tool call).
+- [x] Existing calls containing only declared arguments continue to execute unchanged.
+- [x] A dynamically registered non-Bash tool also rejects an undeclared top-level property.
 
 ## Validation
 
-- Add upstream `packages/ai` validation tests for unknown properties, valid calls, and explicitly permissive schemas.
-- Add a tool-loop test with a side-effecting stub and assert execution does not begin when an unknown property is supplied.
-- Run the focused upstream tests and `/Users/nfrid/.pi/pi-mono/npm run check`.
-- After an upstream release, update this checkout's pinned Pi packages and reproduce the original Bash call.
-- During the evaluation window, inspect harness validation errors for unknown-property failures and any valid-call regressions; compare with the baseline of one silent wrong-directory execution.
+- Cover TypeBox and plain schemas, records, unions/intersections, explicitly permissive and typed additional properties, and unchanged nested-object behavior.
+- Register the extension against a mock runtime with a side-effecting dispatcher and assert blocked calls do not execute, valid calls do, and dynamically added custom tools are covered.
+- Run `npm exec vitest run extensions/tool-argument-validation/index.test.ts` and `npm run check`.
+- During the evaluation window, inspect blocked unknown-property calls and any valid-call regressions; compare with the baseline of one silent wrong-directory execution.
 
 ## Evaluation
 
-- **Window:** First 14 days or 30 tool validation failures after merge, whichever is later
+- **Window:** Started 2026-07-29; ends after 30 blocked unknown-property calls, or 2026-08-12, whichever is later
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 ## Implementation and resolution
 
-- **Approved implementation:** Enforce strict top-level argument validation for all tools in upstream Pi, preserving explicit additional-property schemas and returning a recoverable pre-execution tool error; approved 2026-07-29.
-- **Merged change:** —
+- **Approved implementation:** Enforce strict top-level argument validation for all tools with a local pre-execution extension gate, preserving explicit additional-property schemas and returning an actionable block reason; approved 2026-07-29.
+- **Merged change:** `405f2e3`
 - **Resolution:** pending evaluation
