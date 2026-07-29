@@ -1,6 +1,6 @@
 # HFM-20260729: Deduplicate peeked delegate completions
 
-- **Status:** proposed
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-07-29
 - **Created:** 2026-07-29
 - **Source reports:** [HF-20260729: Delegate completion is delivered twice after a settling peek](../inbox/20260729T103915Z-duplicate-delegate-completion.md)
@@ -43,12 +43,12 @@ When `delegate_jobs` returns terminal results through `peek` or `cancel`, remove
 
 ## Acceptance criteria
 
-- [ ] A job that settles while a bounded peek is waiting is returned by the peek and is not queued for automatic delivery.
-- [ ] A job that queues automatic delivery and is then returned by a terminal peek before the timer flush is removed from that wave.
-- [ ] A nonterminal peek does not prevent the eventual automatic completion.
-- [ ] Inspecting one job does not suppress uninspected siblings in the same completion wave.
-- [ ] A result already delivered automatically remains available to a later explicit peek.
-- [ ] Stale-branch completion behavior remains covered and unchanged.
+- [x] A job that settles while a bounded peek is waiting is returned by the peek and is not queued for automatic delivery.
+- [x] A job that queues automatic delivery and is then returned by a terminal peek before the timer flush is removed from that wave.
+- [x] A nonterminal peek does not prevent the eventual automatic completion.
+- [x] Inspecting one job does not suppress uninspected siblings in the same completion wave.
+- [x] A result already delivered automatically remains available to a later explicit peek.
+- [x] Stale-branch completion behavior remains covered and unchanged.
 
 ## Validation
 
@@ -59,11 +59,11 @@ When `delegate_jobs` returns terminal results through `peek` or `cancel`, remove
 
 ## Evaluation
 
-- **Window:** First 30 background jobs inspected with `peek`, or 14 days after merge, whichever is later
+- **Window:** Started 2026-07-29; ends after 30 background jobs inspected with `peek`, or 2026-08-12, whichever is later
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 ## Implementation and resolution
 
 - **Approved implementation:** Remove terminal peek/cancel results from queued current-epoch completion waves, with focused ordering and sibling tests; approved 2026-07-29.
-- **Merged change:** —
+- **Merged change:** `fc1cbef` (implementation `a96028c`)
 - **Resolution:** pending evaluation
