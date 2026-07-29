@@ -563,6 +563,42 @@ describe('async delegate extension', () => {
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
+  test('restores explicit inspection when an accepted steer never enters context', async () => {
+    vi.useFakeTimers();
+    const { ctx, finish, handlers, tools } = createAsyncHarness();
+    await tools.get('delegate')?.execute(
+      'call-lost-steer',
+      {
+        name: 'First agent',
+        task: 'first',
+        route: 'quick',
+        background: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    finish('first');
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Production sendMessage reports asynchronous dispatch failure internally.
+    // With no queued continuation left, agent_settled is the observable signal
+    // that the automatic custom message will not enter context.
+    handlers.get('agent_settled')?.({}, ctx);
+    const peek = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-after-lost-steer',
+        { action: 'peek', id: 'dj-1' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(peek?.content[0]?.text).toContain('first finding.');
+    expect(peek?.details).not.toHaveProperty('delivery');
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
   test('keeps automatic delivery for nonterminal peeks but not waiting peeks', async () => {
     vi.useFakeTimers();
     const { ctx, finish, handlers, sendMessage, tools } = createAsyncHarness();

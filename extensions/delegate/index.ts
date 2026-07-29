@@ -174,6 +174,12 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   const automaticDeliveryQueued = (job: DelegateJobSnapshot) =>
     automaticDeliveryStates.get(job.id) === 'queued';
 
+  const clearUnenteredAutomaticDeliveries = () => {
+    for (const [id, state] of automaticDeliveryStates) {
+      if (state === 'queued') automaticDeliveryStates.delete(id);
+    }
+  };
+
   const markAutomaticDeliveriesEntered = (messages: readonly unknown[]) => {
     for (const message of messages) {
       const candidate = message as {
@@ -356,6 +362,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     if (event.message.role === 'assistant') statuses?.parentAssistantMessage();
   });
   pi.on('agent_settled', () => {
+    // A successfully queued steer prevents settlement until it enters context.
+    // If the parent settles first, dispatch failed asynchronously and explicit
+    // inspection must remain able to return the retained handoff.
+    clearUnenteredAutomaticDeliveries();
     statuses?.acknowledgeSettled();
     syncWidget();
   });
