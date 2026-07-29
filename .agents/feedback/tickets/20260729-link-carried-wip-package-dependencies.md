@@ -1,7 +1,7 @@
 # HFM-20260729: Link dependencies for carried WIP packages
 
 - **Status:** proposed
-- **Approval:** not approved
+- **Approval:** approved 2026-07-29
 - **Created:** 2026-07-29
 - **Source reports:** [HF-20260729: Read-only review worktrees cannot run dependency-backed checks](../inbox/20260729T103916Z-readonly-worktree-dependencies.md)
 
@@ -15,7 +15,7 @@ Multiple isolated review delegates received the uncommitted `kibana-logs` packag
 
 ## Hypothesis
 
-If worktree preparation discovers package directories from the effective WIP snapshot, including untracked non-ignored manifests, then isolated delegates reviewing new packages will find the parent package's installed `node_modules` and run the same dependency-backed checks, because dependency linking will include directories currently omitted by `git ls-files`.
+If worktree preparation discovers package directories from the prepared worktree after WIP carry, then isolated delegates reviewing new packages will find the parent package's installed `node_modules` and run the same dependency-backed checks, because the query sees exactly the manifests present in the child snapshot while links still source dependencies from the parent checkout.
 
 ## Guardrails
 
@@ -33,7 +33,7 @@ If worktree preparation discovers package directories from the effective WIP sna
 
 ## Recommendation
 
-Extend dependency discovery for `from: wip` to include untracked, non-ignored package manifests that will be carried into the worktree, then reuse the existing parent-to-worktree `node_modules` symlink path. Keep `from: head` restricted to tracked manifests.
+Run package-manifest discovery against the prepared worktree after the optional WIP carry, then reuse the existing parent-root-to-worktree `node_modules` symlink path. This makes `from: wip` include carried manifests and makes `from: head` reflect only manifests in HEAD without separate filtering rules.
 
 ## Scope
 
@@ -63,6 +63,6 @@ Extend dependency discovery for `from: wip` to include untracked, non-ignored pa
 
 ## Implementation and resolution
 
-- **Approved implementation:** —
+- **Approved implementation:** Discover package directories from the prepared worktree after WIP carry while sourcing dependency links from the parent root, with WIP-versus-HEAD and commit-exclusion tests; approved 2026-07-29.
 - **Merged change:** —
 - **Resolution:** pending evaluation
