@@ -1,7 +1,7 @@
 # HFM-20260729: Deduplicate peeked delegate completions
 
 - **Status:** proposed
-- **Approval:** not approved
+- **Approval:** approved 2026-07-29
 - **Created:** 2026-07-29
 - **Source reports:** [HF-20260729: Delegate completion is delivered twice after a settling peek](../inbox/20260729T103915Z-duplicate-delegate-completion.md)
 
@@ -15,7 +15,7 @@ The report records one job whose complete handoff was returned by a bounded `pee
 
 ## Hypothesis
 
-If explicit inspection of a terminal job atomically marks its automatic completion as consumed, including removal from any pending completion wave, then each job handoff will enter the parent context at most once, because both settlement orderings share one delivery state keyed by job ID.
+If a terminal `peek` or `cancel` removes that job ID from a completion wave that is queued but not yet flushed, then the queued automatic copy will not enter the parent context after the tool result, because JavaScript processes the inspection callback and timer flush serially. The existing observer mechanism already suppresses automatic queueing when a bounded peek is waiting at the moment of settlement.
 
 ## Guardrails
 
@@ -23,17 +23,18 @@ If explicit inspection of a terminal job atomically marks its automatic completi
 - A nonterminal peek must not suppress later completion.
 - Preserve stale-branch notifications and batched/partial completion waves for other jobs.
 - Deduplicate by stable job ID, not by handoff text.
-- Keep terminal results available for later inspection even after delivery; suppress only duplicate context injection.
+- Keep terminal results available for later inspection even after delivery; suppress only a queued automatic copy when explicit inspection wins the race.
+- If automatic delivery has already occurred, a later explicit peek still returns the retained result; changing that behavior is out of scope.
 
 ## Options considered
 
-1. **Track consumed job IDs in the completion coordinator:** Covers settlement-before-peek and peek-before-settlement orderings and can filter pending waves, but adds lifecycle state that must be pruned.
-2. **Remove matching jobs only from `pendingCompletions` on terminal peek:** Small and directly addresses the observed timer race, but may miss a completion already entering the send path.
+1. **Remove matching jobs from `pendingCompletions` on terminal peek or cancel:** Directly addresses the observed timer race without adding durable lifecycle state; a timer flush already running cannot interleave with the callback.
+2. **Track consumed job IDs in the completion coordinator:** Can express a broader once-only policy, but adds state and pruning without improving the serial pre-flush race covered here.
 3. **Document that peek may duplicate delivery:** No implementation risk, but retains the context cost and violates the tool guidance that bounded waiting is supported.
 
 ## Recommendation
 
-Use one job-ID-based consumed/delivered state in the completion coordinator. Mark a terminal result consumed when it is returned by `peek` or `cancel`, filter it from pending automatic waves, and mark automatic delivery through the same state.
+When `delegate_jobs` returns terminal results through `peek` or `cancel`, remove those current-epoch job IDs from `pendingCompletions` before the timer can flush. Reuse the existing observer suppression for jobs that settle while a bounded peek is already waiting; do not add a second durable delivery-state registry.
 
 ## Scope
 
@@ -42,10 +43,11 @@ Use one job-ID-based consumed/delivered state in the completion coordinator. Mar
 
 ## Acceptance criteria
 
-- [ ] A job that settles while a bounded peek is waiting enters the parent context once.
-- [ ] A job that settles and queues automatic delivery immediately before a terminal peek enters the parent context once.
+- [ ] A job that settles while a bounded peek is waiting is returned by the peek and is not queued for automatic delivery.
+- [ ] A job that queues automatic delivery and is then returned by a terminal peek before the timer flush is removed from that wave.
 - [ ] A nonterminal peek does not prevent the eventual automatic completion.
-- [ ] Consuming one job does not suppress unconsumed siblings in the same completion wave.
+- [ ] Inspecting one job does not suppress uninspected siblings in the same completion wave.
+- [ ] A result already delivered automatically remains available to a later explicit peek.
 - [ ] Stale-branch completion behavior remains covered and unchanged.
 
 ## Validation
@@ -62,6 +64,6 @@ Use one job-ID-based consumed/delivered state in the completion coordinator. Mar
 
 ## Implementation and resolution
 
-- **Approved implementation:** —
+- **Approved implementation:** Remove terminal peek/cancel results from queued current-epoch completion waves, with focused ordering and sibling tests; approved 2026-07-29.
 - **Merged change:** —
 - **Resolution:** pending evaluation
