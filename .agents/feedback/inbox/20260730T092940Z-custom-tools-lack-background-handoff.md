@@ -1,6 +1,6 @@
 # HF-20260730: Long-running custom tools lack a reusable background handoff
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-07-30
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Add a slow external-model consultation capability that should be rare, cancellable, and able to finish while Pi continues other work.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** A synchronous custom tool safely wrapped the external CLI but blocked the agent turn; background behavior would have required a separate job manager. The capability was ultimately moved to an explicit skill that delegates execution to the existing background-process tool.
 - **Observed cost / rework:** Substantive extension lifecycle, subprocess, cancellation, output-boundary, and test code was built and then removed after live use showed that foreground latency dominated the experience.
 - **Recurrence / confidence:** Likely for external reviewers, remote jobs, and other slow custom tools; high confidence from repeated live consultations taking tens of seconds while the tool call blocked.
-- **Ticket:** —
+- **Ticket:** [HFM-20260730: Reuse the background lifecycle for custom tools](../tickets/20260730-reuse-background-lifecycle-for-custom-tools.md)
 
 ## Behavior
 

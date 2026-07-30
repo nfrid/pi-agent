@@ -1,6 +1,6 @@
 # HF-20260730: Bundled skill scripts require manual absolute-path construction
 
-- **Status:** new
+- **Status:** parked
 - **Observed date:** 2026-07-30
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Replace a rarely used extension with an explicitly invoked global skill that launches a bundled helper in the background.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** A `scripts/run.sh` helper was bundled beside `SKILL.md`; Pi disclosed the skill base directory, but the agent still had to construct and shell-quote its absolute path because background commands run from the project and skill scripts are not added to `PATH`.
 - **Observed cost / rework:** The helper indirection added path-resolution instructions and invocation complexity, leading to a second redesign that considered inlining the full command in `SKILL.md`.
 - **Recurrence / confidence:** Likely for any portable skill with executable helpers; high confidence from Pi's documented expansion behavior and the exercised background invocation.
-- **Ticket:** —
+- **Ticket:** [HFM-20260730: Support skill-relative helper execution](../tickets/20260730-support-skill-relative-helper-execution.md)
 
 ## Behavior
 
