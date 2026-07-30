@@ -1,6 +1,6 @@
 # HF-20260729: Review snapshot evaluation counts are not measurable
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-07-29
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Evaluate pending harness tickets against operational run-count thresholds
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Real read-only WIP review and same-snapshot continuation succeeded; counts had to be reconstructed and recorded manually
 - **Observed cost / rework:** Manual tracking was required for clean review runs, same-snapshot continuations, refresh attempts, and WIP dependency projections
 - **Recurrence / confidence:** Applies to every run-count evaluation window using these lifecycle distinctions; high confidence
-- **Ticket:** —
+- **Ticket:** [HFM-20260730: Measure read-only review lifecycle outcomes](../tickets/20260730-measure-readonly-review-lifecycle.md)
 
 ## Behavior
 

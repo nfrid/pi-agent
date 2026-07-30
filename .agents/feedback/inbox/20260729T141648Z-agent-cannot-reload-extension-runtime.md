@@ -1,6 +1,6 @@
 # HF-20260729: Agent cannot reload extension runtime after updating it
 
-- **Status:** new
+- **Status:** parked
 - **Observed date:** 2026-07-29
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Implement and live-verify fixes to Pi delegate extensions during an evaluation session
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Parent merged delegate extension fixes; focused tests passed, but the active session continued using the pre-change extension instance
 - **Observed cost / rework:** Blocked same-session live verification of the refreshed-snapshot and completion-race fixes; required deferring operational checks until a manual reload or new session
 - **Recurrence / confidence:** Deterministic for extension self-updates in an active session; high confidence
-- **Ticket:** —
+- **Ticket:** [HFM-20260730: Enable agent-requested runtime reload](../tickets/20260730-enable-agent-requested-runtime-reload.md)
 
 ## Behavior
 
