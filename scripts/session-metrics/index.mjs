@@ -5,7 +5,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const SCHEMA_VERSION = 'session-metrics/v5';
+export const SCHEMA_VERSION = 'session-metrics/v6';
 const METRIC_KEYS = [
   'userTurns',
   'assistantTurns',
@@ -44,6 +44,18 @@ const METRIC_KEYS = [
   'delegateArtifactReferences',
   'delegateArtifactFallbacks',
   'delegateWorktreeReturns',
+  'delegateCleanReadOnlySnapshotRetirements',
+  'delegateSameSnapshotContinuations',
+  'delegateWipRefreshAttempts',
+  'delegateWipRefreshSuccesses',
+  'delegateWipRefreshFailures',
+  'delegateHeadRefreshAttempts',
+  'delegateHeadRefreshSuccesses',
+  'delegateHeadRefreshFailures',
+  'delegateWipPackageReviewAttempts',
+  'delegateWipPackageReviewSuccessfulNonzeroDependencyProjections',
+  'delegateWipPackageReviewZeroLinkProjections',
+  'delegateWipPackageReviewFailedDependencyProjections',
   'routedTasks',
   'childTurns',
   'childUsageInput',
@@ -235,6 +247,9 @@ function recordBackgroundDelivery(state, text, details, source) {
     const handoff = typeof job.handoff === 'string' ? job.handoff : '';
     recordTruncatedTasks(state, ids, handoff);
     recordExecution(state, runs, ids, handoff);
+    const entries = state.backgroundLifecycleEntries.get(job.id) ?? [];
+    for (let index = 0; index < runs.length; index += 1)
+      recordLifecycleRun(state, ids[index], entries[index], runs[index]);
     recordRouting(state, runs, ids);
   }
 }
@@ -302,11 +317,22 @@ function backgroundJobIds(text) {
   return matched ? matched[1].split(', ').filter(Boolean) : [];
 }
 
-function recordDelegateResult(state, message, executionNumber) {
+function recordDelegateResult(state, message, executionNumber, entries = []) {
   const { metrics } = state;
   const runs = Array.isArray(message.details?.runs) ? message.details.runs : [];
+  const stableCallId =
+    typeof message.toolCallId === 'string' ? message.toolCallId : undefined;
   if (runs.length === 0) {
     metrics.delegateRejectedCalls += 1;
+    if (stableCallId)
+      for (let index = 0; index < entries.length; index += 1)
+        recordLifecycleRun(
+          state,
+          `${stableCallId}:${index}`,
+          entries[index],
+          undefined,
+          true,
+        );
     return { runs, background: false };
   }
   const text = resultText(message);
@@ -316,20 +342,27 @@ function recordDelegateResult(state, message, executionNumber) {
     const jobIds = backgroundJobIds(text);
     metrics.delegateBackgroundJobsLaunched += jobIds.length || runs.length;
     metrics.delegateBackgroundRunsLaunched += runs.length;
-    recordExecution(
-      state,
-      runs,
-      runs.map(
-        (run, index) =>
-          `${run?.backgroundJobId ?? jobIds[index] ?? `launch:${executionNumber}:${index}`}:0`,
-      ),
-      '',
-      false,
+    const ids = runs.map(
+      (run, index) =>
+        `${run?.backgroundJobId ?? jobIds[index] ?? `launch:${executionNumber}:${index}`}:0`,
     );
+    recordExecution(state, runs, ids, '', false);
+    for (let index = 0; index < runs.length; index += 1) {
+      const jobId = runs[index]?.backgroundJobId ?? jobIds[index];
+      if (jobId && stableCallId)
+        state.backgroundLifecycleEntries.set(jobId, [entries[index] ?? {}]);
+    }
     return { runs, background: true };
   }
-  const ids = runs.map((_, index) => `foreground:${executionNumber}:${index}`);
+  const ids = runs.map((_, index) =>
+    stableCallId
+      ? `${stableCallId}:${index}`
+      : `foreground:${executionNumber}:${index}`,
+  );
   recordExecution(state, runs, ids, text);
+  if (stableCallId)
+    for (let index = 0; index < runs.length; index += 1)
+      recordLifecycleRun(state, ids[index], entries[index], runs[index]);
   metrics.delegateHandoffBytes += Buffer.byteLength(text, 'utf8');
   metrics.delegateArtifactFallbacks += countOccurrences(
     text,
@@ -438,6 +471,100 @@ function continuationEntries(call) {
     : [];
 }
 
+function lifecycleEntries(call) {
+  const args = toolArguments(call);
+  const tasks =
+    Array.isArray(args.tasks) && args.tasks.length ? args.tasks : [args];
+  return tasks.map((task) => ({
+    continuation: typeof task?.continuation === 'string',
+    refresh:
+      task?.refresh === 'wip' || task?.refresh === 'head'
+        ? task.refresh
+        : undefined,
+  }));
+}
+
+function hasLifecycleMetadata(worktree) {
+  return (
+    worktree &&
+    (worktree.snapshotBase === 'wip' || worktree.snapshotBase === 'head') &&
+    [
+      'carriedFileCount',
+      'dependencyProjectionCandidateCount',
+      'dependencyLinkCount',
+    ].every((key) => Number.isInteger(worktree[key]) && worktree[key] >= 0)
+  );
+}
+
+function successfulRun(run) {
+  return (
+    run?.state === 'success' ||
+    (run?.exitCode === 0 &&
+      run?.stopReason !== 'error' &&
+      run?.stopReason !== 'aborted')
+  );
+}
+
+/** Record bounded lifecycle facts once per stable run identity. */
+function recordLifecycleRun(state, id, entry, run, failedResult = false) {
+  if (!entry || state.lifecycleRuns.has(id)) return;
+  const successful = !failedResult && successfulRun(run);
+  const worktree = run?.worktree;
+  const metadata = hasLifecycleMetadata(worktree);
+  const cleanReadOnlySnapshot =
+    successful &&
+    metadata &&
+    run?.allowWrites === false &&
+    worktree.snapshot === true &&
+    worktree.status === 'finished' &&
+    worktree.hasWork === false &&
+    !worktree.error &&
+    !worktree.runOutcome;
+  state.lifecycleRuns.add(id);
+  if (cleanReadOnlySnapshot)
+    state.metrics.delegateCleanReadOnlySnapshotRetirements += 1;
+
+  if (entry.refresh) {
+    const prefix =
+      entry.refresh === 'wip' ? 'delegateWipRefresh' : 'delegateHeadRefresh';
+    if (
+      !successful &&
+      !failedResult &&
+      run?.state === undefined &&
+      run?.exitCode === undefined
+    )
+      return;
+    state.metrics[`${prefix}Attempts`] += 1;
+    state.metrics[`${prefix}${successful ? 'Successes' : 'Failures'}`] += 1;
+
+    if (entry.refresh === 'wip') {
+      // Every correlated WIP refresh has one mutually exclusive package-review
+      // outcome. Successful legacy results lack bounded projection metadata, so
+      // they remain unavailable rather than being invented as zero-link runs.
+      if (successful && !metadata) return;
+      state.metrics.delegateWipPackageReviewAttempts += 1;
+      if (!successful)
+        state.metrics.delegateWipPackageReviewFailedDependencyProjections += 1;
+      else if (worktree.dependencyLinkCount > 0)
+        state.metrics.delegateWipPackageReviewSuccessfulNonzeroDependencyProjections += 1;
+      else state.metrics.delegateWipPackageReviewZeroLinkProjections += 1;
+    }
+    return;
+  }
+
+  if (
+    entry.continuation &&
+    successful &&
+    metadata &&
+    worktree.snapshot === true &&
+    worktree.status === 'finished' &&
+    worktree.hasWork === false &&
+    !worktree.error &&
+    !worktree.runOutcome
+  )
+    state.metrics.delegateSameSnapshotContinuations += 1;
+}
+
 function activeAncestry(entries) {
   const byId = new Map(
     entries
@@ -488,6 +615,9 @@ export function parseSessionJsonl(source) {
     automaticDeliveryIds: new Set(),
     peekDeliveryIds: new Set(),
     overlapDeliveryIds: new Set(),
+    lifecycleRuns: new Set(),
+    delegateLifecycleEntries: new Map(),
+    backgroundLifecycleEntries: new Map(),
   };
   let delegateResultNumber = 0;
   const timestamps = [];
@@ -512,6 +642,9 @@ export function parseSessionJsonl(source) {
       metrics.todoToolCalls += toolCalls(message, 'todo').length;
       const delegated = toolCalls(message, 'delegate');
       metrics.delegateToolCalls += delegated.length;
+      for (const call of delegated)
+        if (typeof call.id === 'string')
+          state.delegateLifecycleEntries.set(call.id, lifecycleEntries(call));
       metrics.delegateContinuationCalls += delegated.filter(
         (call) => continuationEntries(call).length > 0,
       ).length;
@@ -536,13 +669,18 @@ export function parseSessionJsonl(source) {
         state,
         message,
         delegateResultNumber++,
+        typeof message.toolCallId === 'string'
+          ? (state.delegateLifecycleEntries.get(message.toolCallId) ?? [])
+          : [],
       );
       if (!result.background)
         recordRouting(
           state,
           result.runs,
-          result.runs.map(
-            (_, index) => `foreground:${delegateResultNumber - 1}:${index}`,
+          result.runs.map((_, index) =>
+            typeof message.toolCallId === 'string'
+              ? `${message.toolCallId}:${index}`
+              : `foreground:${delegateResultNumber - 1}:${index}`,
           ),
         );
     }

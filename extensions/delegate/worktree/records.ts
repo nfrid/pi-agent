@@ -76,7 +76,11 @@ function validRecord(value: unknown, id: string): value is WorktreeRecord {
 export function loadWorktree(id: string): WorktreeRecord | undefined {
   try {
     const parsed = JSON.parse(readFileSync(recordPath(id), 'utf8')) as unknown;
-    return validRecord(parsed, id) ? parsed : undefined;
+    if (!validRecord(parsed, id)) return undefined;
+    // Records created before lifecycle metrics did not retain this bounded
+    // count. Preserve their operational behavior while reporting zero.
+    parsed.dependencyProjectionCandidateCount ??= 0;
+    return parsed;
   } catch {
     return undefined;
   }

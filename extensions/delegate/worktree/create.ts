@@ -101,12 +101,15 @@ function linkDependencies(
   repositoryRoot: string,
   worktreePath: string,
   packageDirs: string[],
-): string[] {
+): { links: string[]; candidateCount: number } {
   const links: string[] = [];
+  let candidateCount = 0;
   for (const directory of packageDirs.slice(0, MAX_LINKED_PACKAGE_DIRS)) {
     const source = path.join(repositoryRoot, directory, 'node_modules');
     const target = path.join(worktreePath, directory, 'node_modules');
-    if (!existsSync(source) || existsSync(target)) continue;
+    if (!existsSync(source)) continue;
+    candidateCount += 1;
+    if (existsSync(target)) continue;
     try {
       mkdirSync(path.dirname(target), { recursive: true });
       symlinkSync(source, target, 'dir');
@@ -116,7 +119,7 @@ function linkDependencies(
       // install. Never fail preparation over one link.
     }
   }
-  return links;
+  return { links, candidateCount };
 }
 
 async function packageDirectories(worktreePath: string): Promise<string[]> {
@@ -277,7 +280,7 @@ export async function prepareWorktree(options: {
       base === 'wip'
         ? await carryWorkInProgress(root, worktreePath)
         : undefined;
-    const dependencyLinks = linkDependencies(
+    const dependencies = linkDependencies(
       root,
       worktreePath,
       await packageDirectories(worktreePath),
@@ -296,7 +299,8 @@ export async function prepareWorktree(options: {
       base,
       carriedWip: Boolean(carryCommit),
       ...(carryCommit ? { carryCommit } : {}),
-      dependencyLinks,
+      dependencyLinks: dependencies.links,
+      dependencyProjectionCandidateCount: dependencies.candidateCount,
       carriedFiles: carried,
       status: 'active',
       createdAt: now,
@@ -373,11 +377,13 @@ export async function rehydrateWorktreeSession(
       record.worktreePath,
       record.branch,
     ]);
-    record.dependencyLinks = linkDependencies(
+    const dependencies = linkDependencies(
       record.repositoryRoot,
       record.worktreePath,
       await packageDirectories(record.worktreePath),
     );
+    record.dependencyLinks = dependencies.links;
+    record.dependencyProjectionCandidateCount = dependencies.candidateCount;
     record.carriedFiles = record.snapshot
       ? restoreSnapshotFiles(record)
       : carryFiles(record.repositoryRoot, record.worktreePath);

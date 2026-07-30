@@ -163,6 +163,23 @@ describe('worktree preparation', () => {
     expect(existsSync(path.join(wipPackage, 'node_modules'))).toBe(false);
   });
 
+  test('exposes only bounded lifecycle metadata in worktree summaries', async () => {
+    createCarriedWipPackage();
+    const worktree = await prepared({ name: 'Bounded summary' });
+    const summary = worktreeSummary(worktree.record);
+
+    expect(summary).toMatchObject({
+      snapshotBase: 'wip',
+      carriedFileCount: expect.any(Number),
+      dependencyProjectionCandidateCount: expect.any(Number),
+      dependencyLinkCount: expect.any(Number),
+    });
+    expect(summary.dependencyProjectionCandidateCount).toBeGreaterThan(0);
+    expect(summary.dependencyLinkCount).toBeGreaterThan(0);
+    expect(Object.keys(summary)).not.toContain('carriedFiles');
+    expect(Object.keys(summary)).not.toContain('dependencyLinks');
+  });
+
   test('skips missing parent dependencies without installing them', async () => {
     const packageDirectory = path.join('packages', 'without-dependencies');
     mkdirSync(path.join(repository, packageDirectory), { recursive: true });

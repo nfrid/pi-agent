@@ -34,6 +34,8 @@ export interface WorktreeRecord {
   carriedWip: boolean;
   /** Paths symlinked from the parent, relative to the worktree root. */
   dependencyLinks: string[];
+  /** Number of package dependency projections considered during preparation. */
+  dependencyProjectionCandidateCount: number;
   /** Gitignored files copied in from the parent, relative to the worktree root. */
   carriedFiles: string[];
   status: WorktreeStatus;
@@ -92,6 +94,13 @@ export interface WorktreeSummary {
   runOutcome?: WorktreeRunOutcome;
   /** True when this is a retired, resumable read-only snapshot rather than integration work. */
   snapshot?: boolean;
+  /** Bounded source selector, safe to include in aggregate lifecycle metrics. */
+  snapshotBase?: WorktreeBase;
+  /** Counts only; the operational carried-file names remain internal. */
+  carriedFileCount?: number;
+  /** Counts only; package names and dependency paths remain internal. */
+  dependencyProjectionCandidateCount?: number;
+  dependencyLinkCount?: number;
 }
 
 export function worktreeSummary(record: WorktreeRecord): WorktreeSummary {
@@ -110,5 +119,12 @@ export function worktreeSummary(record: WorktreeRecord): WorktreeSummary {
     error: record.error,
     runOutcome: record.runOutcome,
     snapshot: record.snapshot,
+    snapshotBase: record.base,
+    carriedFileCount: record.carriedFiles.length,
+    dependencyProjectionCandidateCount:
+      typeof record.dependencyProjectionCandidateCount === 'number'
+        ? record.dependencyProjectionCandidateCount
+        : 0,
+    dependencyLinkCount: record.dependencyLinks.length,
   };
 }

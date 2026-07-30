@@ -143,6 +143,7 @@ function delegateFixture(exchanges) {
           content: [
             {
               type: 'toolCall',
+              id: `delegate-${index}`,
               name: 'delegate',
               arguments: exchange.arguments ?? { task: 'PRIVATE TASK' },
             },
@@ -159,6 +160,7 @@ function delegateFixture(exchanges) {
         timestamp: `2026-01-01T00:02:${String(index).padStart(2, '0')}.000Z`,
         message: {
           role: 'toolResult',
+          toolCallId: exchange.toolCallId ?? `delegate-${index}`,
           toolName: exchange.toolName ?? 'delegate',
           content: [{ type: 'text', text: exchange.text ?? 'HANDOFF' }],
           details: exchange.details,
@@ -439,6 +441,11 @@ describe('delegate measurements', () => {
     const result = parseSessionJsonl(
       delegateFixture([
         {
+          arguments: {
+            task: 'PRIVATE',
+            continuation: 'wip-token',
+            refresh: 'wip',
+          },
           text: 'Started 1 background delegate job: dj-1.',
           details: { runs: [{ backgroundJobId: 'dj-1' }] },
         },
@@ -467,6 +474,10 @@ describe('delegate measurements', () => {
       delegateProcessErrors: 1,
       routedTasks: 1,
       childTurns: 2,
+      delegateWipRefreshAttempts: 1,
+      delegateWipRefreshFailures: 1,
+      delegateWipPackageReviewAttempts: 1,
+      delegateWipPackageReviewFailedDependencyProjections: 1,
     });
   });
 
@@ -786,6 +797,166 @@ describe('delegate measurements', () => {
       delegateArtifactReferences: 1,
       delegateArtifactFallbacks: 1,
       delegateWorktreeReturns: 1,
+    });
+  });
+
+  it('measures clean snapshot retirement, continuations, and refresh outcomes by stable IDs', () => {
+    const snapshot = (base, links = 0) => ({
+      status: 'finished',
+      snapshot: true,
+      snapshotBase: base,
+      hasWork: false,
+      carriedFileCount: 0,
+      dependencyProjectionCandidateCount: links,
+      dependencyLinkCount: links,
+    });
+    const success = (worktree) => ({
+      allowWrites: false,
+      state: 'success',
+      exitCode: 0,
+      worktree,
+    });
+    const failed = { allowWrites: false, state: 'error', exitCode: 1 };
+    const result = parseSessionJsonl(
+      delegateFixture([
+        { details: { runs: [success(snapshot('head'))] } },
+        {
+          arguments: { task: 'PRIVATE', continuation: 'same-token' },
+          details: { runs: [success(snapshot('head'))] },
+        },
+        {
+          arguments: {
+            task: 'PRIVATE',
+            continuation: 'wip-token',
+            refresh: 'wip',
+          },
+          details: { runs: [success(snapshot('wip', 2))] },
+        },
+        {
+          arguments: {
+            task: 'PRIVATE',
+            continuation: 'head-token',
+            refresh: 'head',
+          },
+          details: { runs: [failed] },
+        },
+        {
+          arguments: {
+            task: 'PRIVATE',
+            continuation: 'wip-preflight',
+            refresh: 'wip',
+          },
+          details: {},
+          isError: true,
+        },
+        {
+          arguments: {
+            task: 'PRIVATE',
+            continuation: 'wip-zero',
+            refresh: 'wip',
+          },
+          details: { runs: [success(snapshot('wip'))] },
+        },
+        {
+          arguments: {
+            task: 'PRIVATE',
+            continuation: 'wip-failed',
+            refresh: 'wip',
+          },
+          details: { runs: [failed] },
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateCleanReadOnlySnapshotRetirements: 4,
+      delegateSameSnapshotContinuations: 1,
+      delegateWipRefreshAttempts: 4,
+      delegateWipRefreshSuccesses: 2,
+      delegateWipRefreshFailures: 2,
+      delegateHeadRefreshAttempts: 1,
+      delegateHeadRefreshSuccesses: 0,
+      delegateHeadRefreshFailures: 1,
+      delegateWipPackageReviewAttempts: 4,
+      delegateWipPackageReviewSuccessfulNonzeroDependencyProjections: 1,
+      delegateWipPackageReviewZeroLinkProjections: 1,
+      delegateWipPackageReviewFailedDependencyProjections: 2,
+    });
+  });
+
+  it('requires a matching tool-call ID and excludes legacy, writable, changed, and failed runs', () => {
+    const lifecycleMetadata = {
+      status: 'finished',
+      snapshotBase: 'head',
+      carriedFileCount: 0,
+      dependencyProjectionCandidateCount: 0,
+      dependencyLinkCount: 0,
+    };
+    const result = parseSessionJsonl(
+      delegateFixture([
+        {
+          arguments: { task: 'PRIVATE', continuation: 'token', refresh: 'wip' },
+          toolCallId: 'another-call',
+          details: {
+            runs: [
+              {
+                allowWrites: false,
+                state: 'success',
+                exitCode: 0,
+                worktree: { snapshot: true },
+              },
+            ],
+          },
+        },
+        {
+          details: {
+            runs: [
+              {
+                allowWrites: true,
+                state: 'success',
+                exitCode: 0,
+                worktree: {
+                  ...lifecycleMetadata,
+                  snapshot: true,
+                  hasWork: false,
+                },
+              },
+            ],
+          },
+        },
+        {
+          details: {
+            runs: [
+              {
+                allowWrites: false,
+                state: 'success',
+                exitCode: 0,
+                worktree: { ...lifecycleMetadata, hasWork: true },
+              },
+            ],
+          },
+        },
+        {
+          details: {
+            runs: [
+              {
+                allowWrites: false,
+                state: 'error',
+                exitCode: 1,
+                worktree: {
+                  ...lifecycleMetadata,
+                  snapshot: true,
+                  hasWork: false,
+                },
+              },
+            ],
+          },
+        },
+      ]),
+    );
+    expect(result).toMatchObject({
+      delegateCleanReadOnlySnapshotRetirements: 0,
+      delegateWipRefreshAttempts: 0,
+      delegateWipPackageReviewAttempts: 0,
     });
   });
 
