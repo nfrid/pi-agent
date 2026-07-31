@@ -8,6 +8,12 @@ import { getRunState } from './types';
 
 export type DelegateStatusKind = 'foreground' | 'background';
 
+export interface DelegateStatusTiming {
+  state: DelegateRunState;
+  startedAt?: number;
+  finishedAt?: number;
+}
+
 export interface DelegateStatusSnapshot {
   id: string;
   name: string;
@@ -21,9 +27,15 @@ export interface DelegateStatusSnapshot {
   context?: DelegateContext;
   allowWrites: boolean;
   activity?: DelegatedActivity;
+  /** Invocation count within one continuation lineage. */
+  runCount?: number;
+  /** Every invocation retained for aggregate elapsed-time rendering. */
+  runs?: DelegateStatusTiming[];
 }
 
 interface DelegateStatusRecord extends DelegateStatusSnapshot {
+  /** Stable child-session identity shared by fresh and continued invocations. */
+  lineageId: string;
   /** The completion has been returned or delivered into the parent context. */
   resultEntered: boolean;
   /** A later parent turn began after the result became available. */
@@ -70,6 +82,7 @@ export class DelegateStatusStore {
       const id = `ds-${++this.counter}`;
       this.records.set(id, {
         id,
+        lineageId: run.continuation ?? id,
         name: run.name,
         kind,
         state: getRunState(run),
@@ -193,26 +206,66 @@ export class DelegateStatusStore {
 
   /** Acknowledge only after the parent finished a later response to the result. */
   acknowledgeSettled(): void {
-    const ids = [...this.records.values()]
-      .filter((record) => record.resultEntered && record.assistantResponded)
-      .map((record) => record.id);
+    const lineages = new Map<string, DelegateStatusRecord[]>();
+    for (const record of this.records.values()) {
+      const records = lineages.get(record.lineageId) ?? [];
+      records.push(record);
+      lineages.set(record.lineageId, records);
+    }
+    const ids = [...lineages.values()]
+      .filter((records) =>
+        records.every(
+          (record) =>
+            isSettled(record.state) &&
+            record.resultEntered &&
+            record.assistantResponded,
+        ),
+      )
+      .flatMap((records) => records.map((record) => record.id));
     this.finish(ids);
   }
 
   list(): DelegateStatusSnapshot[] {
-    return [...this.records.values()].map((record) => {
+    const lineages = new Map<string, DelegateStatusRecord[]>();
+    for (const record of this.records.values()) {
+      const records = lineages.get(record.lineageId) ?? [];
+      records.push(record);
+      lineages.set(record.lineageId, records);
+    }
+
+    return [...lineages.values()].map((records) => {
+      const ordered = [...records].sort(
+        (left, right) => left.createdAt - right.createdAt,
+      );
+      const current =
+        [...ordered].reverse().find((record) => record.state === 'running') ??
+        [...ordered].reverse().find((record) => record.state === 'queued') ??
+        ordered.at(-1);
+      if (!current)
+        throw new Error('Delegate status lineage unexpectedly has no runs.');
       const {
+        lineageId: _lineageId,
         resultEntered: _resultEntered,
         turnStarted: _turnStarted,
         assistantResponded: _assistantResponded,
+        runCount: _runCount,
+        runs: _runs,
         ...snapshot
-      } = record;
+      } = current;
       return {
         ...snapshot,
-        activity: record.activity
+        id: ordered[0].id,
+        createdAt: ordered[0].createdAt,
+        runCount: ordered.length,
+        runs: ordered.map((record) => ({
+          state: record.state,
+          startedAt: record.startedAt,
+          finishedAt: record.finishedAt,
+        })),
+        activity: current.activity
           ? {
-              ...record.activity,
-              latestText: record.activity.latestText,
+              ...current.activity,
+              latestText: current.activity.latestText,
             }
           : undefined,
       };

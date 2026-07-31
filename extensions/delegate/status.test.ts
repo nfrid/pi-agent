@@ -124,6 +124,56 @@ describe('delegate status store', () => {
     expect(store.list()).toEqual([]);
   });
 
+  test('groups continuations into one lineage until its latest run is acknowledged', () => {
+    const store = new DelegateStatusStore();
+    const first = createRun('initial', undefined, {
+      name: 'Implementation',
+      continuation: 'child-token',
+    });
+    first.startedAt = 1_000;
+    first.finishedAt = 301_000;
+    first.state = 'success';
+    const [firstId] = store.start([first], 'foreground');
+    store.resultEntered([firstId]);
+    store.parentTurnStarted();
+    store.parentAssistantMessage();
+
+    const continued = createRun('continue', undefined, {
+      name: 'Implementation follow-up',
+      continuation: 'child-token',
+      context: 'continuation',
+    });
+    continued.startedAt = 400_000;
+    continued.state = 'running';
+    const [continuedId] = store.start([continued], 'foreground');
+
+    expect(store.list()).toMatchObject([
+      {
+        id: firstId,
+        name: 'Implementation follow-up',
+        state: 'running',
+        context: 'continuation',
+        runCount: 2,
+        runs: [
+          { state: 'success', startedAt: 1_000, finishedAt: 301_000 },
+          { state: 'running', startedAt: 400_000 },
+        ],
+      },
+    ]);
+
+    store.acknowledgeSettled();
+    expect(store.list()).toHaveLength(1);
+
+    continued.state = 'success';
+    continued.finishedAt = 580_000;
+    store.update(continuedId, continued);
+    store.resultEntered([continuedId]);
+    store.parentTurnStarted();
+    store.parentAssistantMessage();
+    store.acknowledgeSettled();
+    expect(store.list()).toEqual([]);
+  });
+
   test('keeps the last activity that had content while the next one warms up', () => {
     const store = new DelegateStatusStore();
     const run = createRun('audit');

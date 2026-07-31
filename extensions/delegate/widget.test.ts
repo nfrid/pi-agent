@@ -135,6 +135,30 @@ describe('delegate widget', () => {
     expect(settled).toMatch(/done.*25s$/);
   });
 
+  test('shows a continuation lineage as one run count with aggregate runtime', () => {
+    const [line] = renderDelegateWidget(
+      [
+        status({
+          context: 'continuation',
+          runCount: 3,
+          runs: [
+            { state: 'success', startedAt: 1_000, finishedAt: 301_000 },
+            { state: 'success', startedAt: 400_000, finishedAt: 580_000 },
+            { state: 'running', startedAt: 600_000 },
+          ],
+        }),
+      ],
+      true,
+      100,
+      theme as never,
+      720_000,
+    );
+
+    expect(line).toContain('run 3');
+    expect(line).toMatch(/10m 0s$/);
+    expect(line).not.toContain('/cont/');
+  });
+
   test('shows compact route, context, and access indicators', () => {
     const readOnly = renderDelegateWidget(
       [

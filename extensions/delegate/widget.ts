@@ -25,15 +25,30 @@ function compact(text: string): string {
   return text.replace(/\p{C}/gu, ' ').replace(/\s+/g, ' ').trim();
 }
 
-export function formatElapsed(startedAt: number, now = Date.now()): string {
-  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+function formatDuration(durationMs: number): string {
+  const seconds = Math.max(0, Math.floor(durationMs / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+export function formatElapsed(startedAt: number, now = Date.now()): string {
+  return formatDuration(now - startedAt);
+}
+
 function elapsedTime(status: DelegateStatusSnapshot, now: number): string {
+  if (status.runs)
+    return formatDuration(
+      status.runs.reduce((total, run) => {
+        if (run.startedAt === undefined) return total;
+        const finished =
+          run.state === 'queued' || run.state === 'running'
+            ? now
+            : (run.finishedAt ?? run.startedAt);
+        return total + Math.max(0, finished - run.startedAt);
+      }, 0),
+    );
   if (status.startedAt === undefined) return formatElapsed(now, now);
   const finished =
     status.state === 'queued' || status.state === 'running'
@@ -77,6 +92,8 @@ function contextIndicator(
   status: DelegateStatusSnapshot,
   theme: DelegateWidgetTheme,
 ): string {
+  if ((status.runCount ?? 1) > 1)
+    return theme.fg('accent', `run ${status.runCount}`);
   if (status.context === 'branch') return theme.fg('warning', 'branch');
   if (status.context === 'continuation') return theme.fg('accent', 'cont');
   if (status.context === 'fresh') return theme.fg('muted', 'fresh');
