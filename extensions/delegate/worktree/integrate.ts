@@ -13,6 +13,8 @@ import { type WorktreeRecord, workBase } from './model';
 
 const MAX_REVIEW_DIFF_CHARS = 60_000;
 
+export type BranchReviewMode = 'full' | 'incremental';
+
 export type BranchState =
   /** No delegate work from this branch remains to apply to HEAD. */
   | 'merged'
@@ -166,6 +168,7 @@ async function dirtyPaths(root: string): Promise<string[]> {
 
 export interface BranchReview {
   state: BranchState;
+  mode: BranchReviewMode;
   /** Why the recorded task range could not be inspected safely. */
   error?: string;
   /** The agent's own commits, excluding any carried parent work. */
@@ -175,40 +178,144 @@ export interface BranchReview {
   truncated: boolean;
 }
 
+export interface BranchReviewOptions {
+  mode?: BranchReviewMode;
+  /** Convenience form for callers that expose the tool's boolean selector. */
+  incremental?: boolean;
+}
+
+function reviewMode(
+  options?: BranchReviewMode | BranchReviewOptions,
+): BranchReviewMode {
+  if (options === 'incremental') return 'incremental';
+  if (options && typeof options === 'object') {
+    if (options.incremental) return 'incremental';
+    if (options.mode) return options.mode;
+  }
+  return 'full';
+}
+
+interface UnintegratedTaskPatch {
+  commit: string;
+  log: string;
+  stat: string;
+  diff: string;
+}
+
+/**
+ * Compare task commits by patch identity rather than commit identity. This is
+ * what makes a carried-WIP branch continue to review correctly after its task
+ * commits were cherry-picked into the parent with new hashes.
+ */
+async function unintegratedTaskCommits(
+  root: string,
+  record: WorktreeRecord,
+): Promise<string[]> {
+  const output = await gitText(root, [
+    'cherry',
+    'HEAD',
+    record.branch,
+    workBase(record),
+  ]);
+  return output
+    .split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter((parts) => parts[0] === '+' && Boolean(parts[1]))
+    .map((parts) => parts[1]);
+}
+
+async function taskPatch(
+  root: string,
+  commit: string,
+): Promise<UnintegratedTaskPatch> {
+  const parent = `${commit}^`;
+  const [log, stat, diff] = await Promise.all([
+    gitText(root, ['show', '-s', '--format=%h %s', commit]),
+    gitText(root, [
+      'diff',
+      '--no-ext-diff',
+      '--no-color',
+      '--stat',
+      parent,
+      commit,
+    ]),
+    gitText(root, ['diff', '--no-ext-diff', '--no-color', parent, commit]),
+  ]);
+  return { commit, log, stat, diff };
+}
+
+function boundedReviewDiff(diff: string): {
+  diff: string;
+  truncated: boolean;
+} {
+  const truncated = diff.length > MAX_REVIEW_DIFF_CHARS;
+  return {
+    diff: truncated ? diff.slice(0, MAX_REVIEW_DIFF_CHARS) : diff,
+    truncated,
+  };
+}
+
 /**
  * Everything needed to judge the work in one call: the agent's commits, what
  * they touched, and the diff — measured from the carry commit, so the parent is
  * never shown its own uncommitted changes as if the agent had written them.
+ *
+ * The optional incremental view keeps that recorded-range validation, then
+ * compares each task commit to the current parent HEAD by patch identity. It
+ * renders only the still-unrepresented task patches, so advancing or dirty
+ * parent work cannot be attributed to the delegate.
  */
 export async function reviewBranch(
   record: WorktreeRecord,
+  options?: BranchReviewMode | BranchReviewOptions,
 ): Promise<BranchReview> {
+  const mode = reviewMode(options);
   const root = record.repositoryRoot;
   const state = await branchState(record);
   if (state === 'gone')
-    return { state, log: '', stat: '', diff: '', truncated: false };
+    return { state, mode, log: '', stat: '', diff: '', truncated: false };
   const range = await workRangeFor(root, record);
   if (!range.valid)
     return {
       state,
+      mode,
       error: range.error,
       log: '',
       stat: '',
       diff: '',
       truncated: false,
     };
+
+  if (mode === 'incremental') {
+    const commits = await unintegratedTaskCommits(root, record);
+    if (commits.length === 0)
+      return { state, mode, log: '', stat: '', diff: '', truncated: false };
+    const patches = await Promise.all(
+      commits.map((commit) => taskPatch(root, commit)),
+    );
+    const bounded = boundedReviewDiff(
+      patches.map((patch) => patch.diff).join('\n'),
+    );
+    return {
+      state,
+      mode,
+      log: patches.map((patch) => patch.log).join('\n'),
+      stat: patches.map((patch) => patch.stat).join('\n'),
+      ...bounded,
+    };
+  }
+
   const [log, stat, full] = await Promise.all([
     gitText(root, ['log', '--oneline', '--no-decorate', range.range]),
     gitText(root, ['diff', '--stat', range.range]),
-    gitText(root, ['diff', range.range]),
+    gitText(root, ['diff', '--no-ext-diff', '--no-color', range.range]),
   ]);
-  const truncated = full.length > MAX_REVIEW_DIFF_CHARS;
   return {
     state,
+    mode,
     log,
     stat,
-    diff: truncated ? full.slice(0, MAX_REVIEW_DIFF_CHARS) : full,
-    truncated,
+    ...boundedReviewDiff(full),
   };
 }
 

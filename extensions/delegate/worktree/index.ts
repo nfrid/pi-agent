@@ -21,7 +21,13 @@ export {
   retireWorktreeSnapshot,
 } from './finish';
 export { git, gitText, repositoryRoot } from './git';
-export type { BranchReview, BranchState, MergeOutcome } from './integrate';
+export type {
+  BranchReview,
+  BranchReviewMode,
+  BranchReviewOptions,
+  BranchState,
+  MergeOutcome,
+} from './integrate';
 export { branchState, mergeBranch, reviewBranch } from './integrate';
 export type {
   PreparedWorktree,

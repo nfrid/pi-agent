@@ -22,6 +22,12 @@ const Parameters = Type.Object({
     description:
       'List writable delegate branches and retired read-only snapshots. review and merge apply only to writable branches; snapshots can be continued or dropped. drop deletes the checkout and retained ref.',
   }),
+  incremental: Type.Optional(
+    Type.Boolean({
+      description:
+        'For review only, show task commits not represented in the current parent HEAD by patch identity. Omit or set false for the full recorded-range audit view.',
+    }),
+  ),
   id: Type.Optional(
     Type.String({
       maxLength: 512,
@@ -39,6 +45,7 @@ const Parameters = Type.Object({
 
 type BranchesDetails = {
   action: 'list' | 'review' | 'merge' | 'drop';
+  reviewMode?: 'full' | 'incremental';
   entries?: Array<{ id: string; branch: string; state: string }>;
   merged?: boolean;
 };
@@ -52,16 +59,19 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
     name: 'delegate_branches',
     label: 'Delegate Branches',
     description:
-      "Review and integrate the branches writable delegate tasks leave behind. review gives you the task's commits and diff measured from its own starting point, so your carried uncommitted work is not mixed in. merge either lands cleanly or leaves your checkout untouched. Actions: list, review, merge, drop.",
+      "Review and integrate the branches writable delegate tasks leave behind. review gives you the task's commits and diff measured from its own starting point by default; set incremental: true to show only task patches not represented in current parent HEAD. merge either lands cleanly or leaves your checkout untouched. Actions: list, review, merge, drop.",
     promptSnippet:
       'Review or merge writable delegate branches; continue or drop retired read-only snapshots',
     promptGuidelines: [
       'After a writable run, review its branch before merging, and run the check the task was given yourself. A branch that merges cleanly can still be wrong.',
+      'For a continued branch after integration, use review with incremental: true to inspect only task patches not represented in current HEAD; omit it for the full recorded-range audit.',
       'Merge sibling branches one at a time, reviewing between them: parallel tasks never collide in their worktrees, but their merges can.',
       'Drop a branch once its work is merged, so list stays a picture of what is still outstanding. A retired read-only snapshot is not mergeable: continue it for the same source or targeted refresh, or drop it when no longer needed.',
     ],
     parameters: Parameters,
     async execute(_toolCallId, params) {
+      if (params.incremental && params.action !== 'review')
+        throw new Error('incremental is only valid for review.');
       if (params.action === 'list') {
         const entries = await listBranchEntries();
         return {
@@ -101,13 +111,18 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
               ),
               details: { action: 'review' as const },
             };
-          const review = await reviewBranch(record);
+          const review = await reviewBranch(record, {
+            mode: params.incremental ? 'incremental' : 'full',
+          });
           const entry: BranchEntry = { record, state: review.state };
           return {
             ...text(
               `${formatBranchDetail(entry)}\n\n${formatReview(record, review)}`,
             ),
-            details: { action: 'review' as const },
+            details: {
+              action: 'review' as const,
+              reviewMode: review.mode,
+            },
           };
         }
         case 'merge': {
@@ -152,8 +167,13 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
       const title =
         theme.fg('toolTitle', theme.bold('delegate_branches')) +
         (args.action ? ` ${theme.fg('muted', args.action)}` : '');
+      const selector = args.incremental
+        ? ` ${theme.fg('muted', 'incremental')}`
+        : '';
       return new Text(
-        args.id ? `${title} ${theme.fg('accent', args.id)}` : title,
+        args.id
+          ? `${title}${selector} ${theme.fg('accent', args.id)}`
+          : `${title}${selector}`,
         0,
         0,
       );
