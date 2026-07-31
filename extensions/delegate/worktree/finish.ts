@@ -88,6 +88,27 @@ export async function finishWorktree(
   }
 
   try {
+    // A continuation is allowed to append commits, but it must not replace
+    // the previously recorded branch history. Check before committing pending
+    // edits so a reset followed by unrelated work cannot overwrite the
+    // persisted provenance that integration uses for its safety check.
+    if (record.headCommit) {
+      try {
+        await git(record.worktreePath, [
+          'merge-base',
+          '--is-ancestor',
+          record.headCommit,
+          'HEAD',
+        ]);
+      } catch {
+        record.status = 'finished';
+        record.error = `Could not settle the worktree branch: its previously recorded head ${record.headCommit.slice(0, 12)} is not an ancestor of the current branch; refusing to replace lifecycle provenance.`;
+        if (options.outcome !== 'success') record.runOutcome = options.outcome;
+        writeWorktreeRecord(record);
+        return record;
+      }
+    }
+
     // Even a failed or aborted run may have produced useful partial work, so
     // the branch is settled regardless of outcome.
     await commitPendingWork(record, options.taskName);

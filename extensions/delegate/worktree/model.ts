@@ -47,7 +47,11 @@ export interface WorktreeRecord {
    * makes the two separable on review.
    */
   carryCommit?: string;
-  /** Commit holding the agent's work, once finished. */
+  /**
+   * Latest branch tip recorded by lifecycle finalization. Integration checks
+   * that this persisted provenance remains an ancestor before reviewing or
+   * merging, while continuations may append commits after it.
+   */
   headCommit?: string;
   /** Files the agent changed relative to workBase. */
   changedPaths?: string[];

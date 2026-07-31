@@ -12,6 +12,12 @@ import { git, gitText, splitZ } from './git';
 import { type WorktreeRecord, workBase } from './model';
 
 const MAX_REVIEW_DIFF_CHARS = 60_000;
+// Keep the complete review bounded even when a branch has a large commit
+// history or many changed paths. The diff keeps its historical 60k cap;
+// log/stat get their own deterministic caps so no single section can make the
+// tool result unbounded.
+const MAX_REVIEW_LOG_CHARS = 20_000;
+const MAX_REVIEW_STAT_CHARS = 20_000;
 
 export type BranchReviewMode = 'full' | 'incremental';
 
@@ -112,6 +118,41 @@ async function workRangeFor(
       `its recorded ${label} ${base.slice(0, 12)} is not an ancestor of the branch`,
       carried,
     );
+
+  // `base..branch` is still unsafe after a reset back to base followed by an
+  // unrelated replacement: base remains an ancestor of that replacement. A
+  // finished record's last known branch tip is the lifecycle provenance that
+  // distinguishes a legitimate continuation (which descends from it) from a
+  // rewritten branch. Keep this check after base validation so malformed or
+  // missing bases retain the more useful existing diagnostic.
+  if (record.headCommit) {
+    if (
+      !(await succeeds(root, [
+        'rev-parse',
+        '--verify',
+        '--quiet',
+        `${record.headCommit}^{commit}`,
+      ]))
+    )
+      return unsafeWorkRange(
+        record,
+        `its previously recorded head ${record.headCommit.slice(0, 12)} no longer resolves`,
+        carried,
+      );
+    if (
+      !(await succeeds(root, [
+        'merge-base',
+        '--is-ancestor',
+        record.headCommit,
+        record.branch,
+      ]))
+    )
+      return unsafeWorkRange(
+        record,
+        `its previously recorded head ${record.headCommit.slice(0, 12)} is not an ancestor of the branch`,
+        carried,
+      );
+  }
 
   return { valid: true, range: workRange(record), carried };
 }
@@ -244,14 +285,36 @@ async function taskPatch(
   return { commit, log, stat, diff };
 }
 
-function boundedReviewDiff(diff: string): {
+function boundedReviewText(
+  text: string,
+  maxChars: number,
+): { text: string; truncated: boolean } {
+  const truncated = text.length > maxChars;
+  return {
+    text: truncated ? text.slice(0, maxChars) : text,
+    truncated,
+  };
+}
+
+function boundedReviewOutput(
+  log: string,
+  stat: string,
+  diff: string,
+): {
+  log: string;
+  stat: string;
   diff: string;
   truncated: boolean;
 } {
-  const truncated = diff.length > MAX_REVIEW_DIFF_CHARS;
+  const boundedLog = boundedReviewText(log, MAX_REVIEW_LOG_CHARS);
+  const boundedStat = boundedReviewText(stat, MAX_REVIEW_STAT_CHARS);
+  const boundedDiff = boundedReviewText(diff, MAX_REVIEW_DIFF_CHARS);
   return {
-    diff: truncated ? diff.slice(0, MAX_REVIEW_DIFF_CHARS) : diff,
-    truncated,
+    log: boundedLog.text,
+    stat: boundedStat.text,
+    diff: boundedDiff.text,
+    truncated:
+      boundedLog.truncated || boundedStat.truncated || boundedDiff.truncated,
   };
 }
 
@@ -293,15 +356,14 @@ export async function reviewBranch(
     const patches = await Promise.all(
       commits.map((commit) => taskPatch(root, commit)),
     );
-    const bounded = boundedReviewDiff(
-      patches.map((patch) => patch.diff).join('\n'),
-    );
     return {
       state,
       mode,
-      log: patches.map((patch) => patch.log).join('\n'),
-      stat: patches.map((patch) => patch.stat).join('\n'),
-      ...bounded,
+      ...boundedReviewOutput(
+        patches.map((patch) => patch.log).join('\n'),
+        patches.map((patch) => patch.stat).join('\n'),
+        patches.map((patch) => patch.diff).join('\n'),
+      ),
     };
   }
 
@@ -313,9 +375,7 @@ export async function reviewBranch(
   return {
     state,
     mode,
-    log,
-    stat,
-    ...boundedReviewDiff(full),
+    ...boundedReviewOutput(log, stat, full),
   };
 }
 

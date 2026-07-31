@@ -107,8 +107,8 @@ export function formatReview(
       : `${workBase(record).slice(0, 12)}..${record.branch}`;
   const truncation = review.truncated
     ? review.mode === 'incremental'
-      ? `\n[diff truncated — rerun delegate_branches review ${record.id} with incremental: true]`
-      : `\n[diff truncated — read the rest with: git -C ${record.repositoryRoot} diff ${workBase(record)}..${record.branch}]`
+      ? `\n[review truncated — log/stat/diff output is bounded; inspect the complete task branch with: git -C ${record.repositoryRoot} log --oneline ${workBase(record)}..${record.branch}]`
+      : `\n[review truncated — log/stat/diff output is bounded; inspect the complete review with: git -C ${record.repositoryRoot} log --oneline ${workBase(record)}..${record.branch} and git -C ${record.repositoryRoot} diff ${workBase(record)}..${record.branch}]`
     : '';
   return [
     `${record.branch} (${review.state}), ${range}`,
