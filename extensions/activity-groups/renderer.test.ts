@@ -348,6 +348,14 @@ describe('activity groups renderer', () => {
       );
     });
 
+    it('completes an action announced after the problem statement', () => {
+      const preamble = "There's an issue here. Fixing it";
+      expect(titleOf(preamble, true)).toContain(preamble);
+      expect(titleOf(preamble, false)).toContain(
+        "✓ There's an issue here. Fixed it",
+      );
+    });
+
     it('leaves a line it cannot conjugate exactly as written', () => {
       // A title is a label, so the full stop goes; the words do not.
       expect(titleOf("Now I'll check how sessions expire.", false)).toContain(

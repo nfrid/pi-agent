@@ -27,6 +27,8 @@ const MAX_TITLE_LENGTH = 90;
 
 /** A verb a title can be built on: "Inspecting", "Fixing". */
 const PARTICIPLE = /^[A-Za-z]+ing$/;
+/** A word that may open the title, a new sentence, or a joined action. */
+const CLAUSE_OPENING = /(^|[.!?;:]\s*|(?:^|\s)(?:and|и)\s+)([\p{L}]+)/giu;
 
 /**
  * Drop inline markdown from a line that is about to be printed as a title.
@@ -146,19 +148,24 @@ function pastOf(word: string): string | undefined {
 }
 
 export function toPastTense(title: string): string {
-  const words = title.split(' ');
-  const past = words[0] ? pastOf(words[0]) : undefined;
-  if (!past) return title;
-  return words
-    .map((word, index) => {
-      if (index === 0) return past;
-      // A header often names two things — "Verifying the scratch edit and
-      // cleaning up" — and conjugating only the first reads as a mistake.
-      const conjunction = words[index - 1]?.toLowerCase();
-      if (conjunction !== 'and' && conjunction !== 'и') return word;
-      return pastOf(word) ?? word;
-    })
-    .join(' ');
+  let completedLaterClause = false;
+  const completed = title.replace(
+    CLAUSE_OPENING,
+    (match, prefix: string, word: string) => {
+      const past = pastOf(word);
+      if (!past) return match;
+      // A header may first state the problem and only then name the action:
+      // "There's a leak. Fixing it". That action is just as complete as one
+      // which opened the title. Conjunctions cover "Verifying and cleaning".
+      if (prefix) completedLaterClause = true;
+      return `${prefix}${past}`;
+    },
+  );
+  // This exact copula is safe to agree with a later completed action. Leave
+  // contractions alone: "There's" can mean either "There is" or "There has".
+  return completedLaterClause
+    ? completed.replace(/^There is\b/, 'There was')
+    : completed;
 }
 
 /**

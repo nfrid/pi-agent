@@ -85,6 +85,21 @@ describe('toPastTense', () => {
       expect(toPastTense(present)).toBe(past);
   });
 
+  it('completes actions at the start of later sentences and clauses', () => {
+    expect(toPastTense("There's an issue here. Fixing it")).toBe(
+      "There's an issue here. Fixed it",
+    );
+    expect(toPastTense('There is an issue. Fixing it')).toBe(
+      'There was an issue. Fixed it',
+    );
+    expect(toPastTense('The parser leaks; Fixing its cleanup')).toBe(
+      'The parser leaks; Fixed its cleanup',
+    );
+    expect(toPastTense('Есть проблема. Исправляю обработчик')).toBe(
+      'Есть проблема. Исправил обработчик',
+    );
+  });
+
   it('conjugates Russian actions joined by и', () => {
     expect(toPastTense('Проверяю изменения и запускаю тесты')).toBe(
       'Проверил изменения и запустил тесты',
