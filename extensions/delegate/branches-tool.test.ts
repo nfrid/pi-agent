@@ -75,6 +75,38 @@ describe('delegate_branches', () => {
     });
   });
 
+  test('bounds a large changed-path list while showing omission evidence', async () => {
+    const tool = captureTool();
+    const preparation = await prepareWorktree({
+      cwd: repository,
+      name: 'Many changed paths',
+    });
+    const worktree = preparation.worktree;
+    if (!worktree)
+      throw new Error(preparation.fallbackReason ?? 'preparation failed');
+    for (let index = 0; index < 120; index += 1)
+      writeFileSync(
+        path.join(
+          worktree.record.worktreePath,
+          'src',
+          `${'evidence-path-'.repeat(8)}${index}.txt`,
+        ),
+        'work\n',
+      );
+    const record = await finishWorktree(worktree.record.id, {
+      taskName: 'Many changed paths',
+      outcome: 'success',
+    });
+
+    const response = body(
+      await tool.execute('c1', { action: 'review', id: record.id }),
+    );
+    expect(response).toContain('Changed:   120 paths');
+    expect(response).toContain('… and 80 more paths (path list bounded)');
+    expect(response).toContain('evidence-path-');
+    expect(response.length).toBeLessThan(100_000);
+  });
+
   test('reviews, merges, then drops', async () => {
     const tool = captureTool();
     const record = await delegated('Full cycle', 'src/added.txt');
