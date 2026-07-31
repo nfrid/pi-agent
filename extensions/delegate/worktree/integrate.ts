@@ -258,11 +258,37 @@ async function unintegratedTaskCommits(
     record.branch,
     workBase(record),
   ]);
-  return output
+  const unintegrated = new Set(
+    output
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/))
+      .filter((parts) => parts[0] === '+' && Boolean(parts[1]))
+      .map((parts) => parts[1]),
+  );
+  if (unintegrated.size === 0) return [];
+
+  // `git cherry` reports patch identity, but its output order is an
+  // implementation detail of the log walk. Feed integration (and review)
+  // commits in the branch's original oldest-to-newest order instead.
+  const originalOrder = (
+    await gitText(root, [
+      'rev-list',
+      '--reverse',
+      `${workBase(record)}..${record.branch}`,
+    ])
+  )
     .split('\n')
-    .map((line) => line.trim().split(/\s+/))
-    .filter((parts) => parts[0] === '+' && Boolean(parts[1]))
-    .map((parts) => parts[1]);
+    .filter(Boolean);
+  return originalOrder.filter((commit) => unintegrated.has(commit));
+}
+
+async function taskPaths(root: string, commits: string[]): Promise<string[]> {
+  const changed = await Promise.all(
+    commits.map((commit) =>
+      paths(root, ['diff', '--name-only', '-z', `${commit}^`, commit]),
+    ),
+  );
+  return [...new Set(changed.flat())];
 }
 
 async function taskPatch(
@@ -395,8 +421,9 @@ export interface MergeOutcome {
  * Either integration lands or the checkout is left exactly as it was: a
  * conflict is aborted rather than parked, because an agent that continues
  * working from a half-merged tree makes a worse mess than one told to resolve
- * deliberately. A carried branch cherry-picks only `workBase..branch`; a
- * normal branch keeps the ordinary no-fast-forward merge.
+ * deliberately. A carried branch cherry-picks only unintegrated task patches
+ * from `workBase..branch`; a normal branch keeps the ordinary no-fast-forward
+ * merge.
  */
 export async function mergeBranch(
   record: WorktreeRecord,
@@ -427,6 +454,19 @@ export async function mergeBranch(
         ? `${record.branch}'s task commits are already applied to HEAD; there is nothing to merge.`
         : `${record.branch} is already an ancestor of HEAD; there is nothing to merge.`,
     };
+
+  // A carried branch may have already had some of its task patches applied to
+  // HEAD (with different commit IDs). Only the remaining patch-identities are
+  // safe to cherry-pick; replaying the whole range would stop on an empty
+  // pick before reaching a continuation.
+  const taskCommits = range.carried
+    ? await unintegratedTaskCommits(root, record)
+    : [];
+  if (range.carried && taskCommits.length === 0)
+    return {
+      merged: false,
+      reason: `${record.branch}'s task commits are already applied to HEAD; there is nothing to merge.`,
+    };
   if (await succeeds(root, ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']))
     return {
       merged: false,
@@ -449,7 +489,9 @@ export async function mergeBranch(
 
   const [dirty, incoming] = await Promise.all([
     dirtyPaths(root),
-    paths(root, ['diff', '--name-only', '-z', range.range]),
+    range.carried
+      ? taskPaths(root, taskCommits)
+      : paths(root, ['diff', '--name-only', '-z', range.range]),
   ]);
   const blockedPaths = incoming.filter((file) => dirty.includes(file));
   if (blockedPaths.length > 0)
@@ -464,7 +506,7 @@ export async function mergeBranch(
     await git(
       root,
       cherryPick
-        ? ['cherry-pick', '--no-edit', range.range]
+        ? ['cherry-pick', '--no-edit', ...taskCommits]
         : ['merge', '--no-ff', '--no-edit', record.branch],
     );
     return { merged: true, commit: await gitText(root, ['rev-parse', 'HEAD']) };
@@ -488,7 +530,7 @@ export async function mergeBranch(
     }
 
     const command = cherryPick
-      ? `git cherry-pick ${range.range}`
+      ? `git cherry-pick ${taskCommits.join(' ')}`
       : `git merge ${record.branch}`;
     if (abortFailed) {
       const operation = cherryPick ? 'cherry-pick' : 'merge';
