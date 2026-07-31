@@ -1,6 +1,6 @@
 # HF-20260731: Displayed read-only snapshot ID cannot be dropped
 
-- **Status:** new
+- **Status:** duplicate
 - **Observed date:** 2026-07-31
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent` (local Pi agent configuration repository)
 - **Task shape:** Independent read-only review of a localized TypeScript change, followed by snapshot cleanup
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** `luna-high`, read-only worktree isolation, successful review; cleanup with the displayed snapshot ID failed
 - **Observed cost / rework:** One failed cleanup call and uncertainty about which retained identifier the lifecycle tool accepts
 - **Recurrence / confidence:** Observed once with deterministic identifiers; high confidence in the interface mismatch
-- **Ticket:** —
+- **Ticket:** [HFM-20260729: Detach and refresh read-only review snapshots](../tickets/20260729-detach-and-refresh-readonly-review-snapshots.md)
 
 ## Behavior
 

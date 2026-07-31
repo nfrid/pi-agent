@@ -1,6 +1,6 @@
 # HF-20260730: Todo starts a task whose dependency is unfinished
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-07-30
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent` harness repository
 - **Task shape:** Multi-phase ticket review with explicit todo dependencies
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Parent called `todo start` for a task that depended on an unfinished task; the mutation succeeded and rendered the task as both `doing` and waiting on its dependency
 - **Observed cost / rework:** The plan entered a contradictory state, so dependency ordering had to remain enforced manually rather than by the task tool
 - **Recurrence / confidence:** Observed once directly; likely whenever `start` or a batch start targets a task with unmet dependencies
-- **Ticket:** —
+- **Ticket:** [HFM-20260731: Enforce todo dependencies when starting tasks](../tickets/20260731-enforce-todo-start-dependencies.md)
 
 ## Behavior
 

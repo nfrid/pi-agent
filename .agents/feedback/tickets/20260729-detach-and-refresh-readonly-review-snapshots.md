@@ -3,7 +3,7 @@
 - **Status:** evaluation-pending
 - **Approval:** approved 2026-07-29
 - **Created:** 2026-07-29
-- **Source reports:** [HF-20260729: Read-only review worktrees are presented as integration branches](../inbox/20260729T125701Z-read-only-review-branch-cleanup.md)
+- **Source reports:** [HF-20260729: Read-only review worktrees are presented as integration branches](../inbox/20260729T125701Z-read-only-review-branch-cleanup.md); [HF-20260731: Displayed read-only snapshot ID cannot be dropped](../inbox/20260731T064843Z-read-only-snapshot-id-cannot-be-dropped.md)
 
 <!-- Proposal and implementation approval are separate decisions. This ticket was approved only for the implementation recorded below. -->
 
@@ -111,6 +111,7 @@ Compare against the baseline of one retained clean checkout, one misleading inte
 
 - **2026-07-29:** A disposable untracked WIP package was reviewed in a real read-only worktree. The checkout retired automatically, the handoff used snapshot guidance without integration instructions, and a same-snapshot continuation restored the exact source and dependency projection. This accounts for 2 successful clean runs, including 1 same-snapshot continuation.
 - **2026-07-29:** The first live WIP refresh failed before child execution because the persisted Pi session header still named the retired checkout. The diagnostic worktree was retained and later removed after inspection. Follow-up `4fe3984` synchronizes the persisted session cwd and adds the retired → same-snapshot → WIP-refresh regression case; focused lifecycle/worktree tests passed (31 tests), including HEAD exclusion. A refreshed live run must still be repeated after the extension runtime reloads, so the refreshed-continuation count remains 0.
+- **2026-07-31 triage evidence:** A successful unchanged read-only review displayed snapshot ID `bfd62193`, but `delegate_branches drop` rejected that identifier with `No delegate worktree or continuation for bfd62193`; the handoff also displayed a separate continuation token without identifying it as the cleanup key. This is linked as duplicate/regression evidence for the accepted droppable-snapshot outcome. No evaluation result is assigned by this triage.
 
 ## Implementation and resolution
 
