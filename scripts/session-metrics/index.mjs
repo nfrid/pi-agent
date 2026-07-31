@@ -4,8 +4,9 @@ import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { aggregateEpisodeCohorts, deriveEpisodes } from './episodes.mjs';
 
-export const SCHEMA_VERSION = 'session-metrics/v6';
+export const SCHEMA_VERSION = 'session-metrics/v7';
 const METRIC_KEYS = [
   'userTurns',
   'assistantTurns',
@@ -587,7 +588,7 @@ function activeAncestry(entries) {
   return active.reverse();
 }
 
-export function parseSessionJsonl(source) {
+export function parseSessionJsonl(source, options = {}) {
   const lines = source.split(/\r?\n/);
   const entries = [];
   let malformedLines = 0;
@@ -699,12 +700,22 @@ export function parseSessionJsonl(source) {
   if (timestamps.length > 1)
     metrics.elapsedMs = Math.max(...timestamps) - Math.min(...timestamps);
 
-  return {
+  const episodeRecords = deriveEpisodes(active);
+  const result = {
     sessionId: createHash('sha256').update(source).digest('hex').slice(0, 12),
     ...withRatios(metrics),
     routes: state.routes,
     malformedLines,
+    episodeCohorts: aggregateEpisodeCohorts(episodeRecords),
   };
+  // Keep full records available to aggregateSessions without making them part
+  // of the default JSON output. `--episodes` is the explicit opt-in surface.
+  Object.defineProperty(result, '__episodeRecords', {
+    value: episodeRecords,
+    enumerable: false,
+  });
+  if (options.includeEpisodes === true) result.episodes = episodeRecords;
+  return result;
 }
 
 function median(values) {
@@ -752,6 +763,9 @@ export function aggregateSessions(sessions) {
     totals,
     medians,
     routes: mergeRoutes(sessions),
+    episodeCohorts: aggregateEpisodeCohorts(
+      sessions.flatMap((session) => session.__episodeRecords ?? []),
+    ),
   };
 }
 
@@ -778,7 +792,9 @@ export async function summarizePaths(inputs, options = {}) {
   const files = [...new Set(discovered)].sort();
   const sessions = [];
   for (const file of files) {
-    const session = parseSessionJsonl(await readFile(file, 'utf8'));
+    const session = parseSessionJsonl(await readFile(file, 'utf8'), {
+      includeEpisodes: options.includeEpisodes === true,
+    });
     if (
       session.todoToolCalls >= (options.minTodoCalls ?? 0) &&
       session.delegateToolCalls >= (options.minDelegateCalls ?? 0)
@@ -823,7 +839,7 @@ export function compareSummaries(baseline, comparison) {
 }
 
 function usage() {
-  return 'Usage: session-metrics summarize <file|dir>... [--limit N] [--min-todo-calls N] [--min-delegate-calls N]\n       session-metrics compare --baseline <file|dir> [--baseline ...] --comparison <file|dir> [--comparison ...] [--limit N] [--min-todo-calls N] [--min-delegate-calls N]';
+  return 'Usage: session-metrics summarize <file|dir>... [--limit N] [--min-todo-calls N] [--min-delegate-calls N] [--episodes]\n       session-metrics compare --baseline <file|dir> [--baseline ...] --comparison <file|dir> [--comparison ...] [--limit N] [--min-todo-calls N] [--min-delegate-calls N] [--episodes]';
 }
 
 function positiveInteger(value, flag, allowZero = false) {
@@ -838,6 +854,7 @@ export async function runCli(args) {
   let limit;
   let minTodoCalls = 0;
   let minDelegateCalls = 0;
+  let includeEpisodes = false;
   const plain = [];
   const baseline = [];
   const comparison = [];
@@ -848,12 +865,14 @@ export async function runCli(args) {
       minTodoCalls = positiveInteger(rest[++index], arg, true);
     else if (arg === '--min-delegate-calls')
       minDelegateCalls = positiveInteger(rest[++index], arg, true);
+    else if (arg === '--episodes' || arg === '--include-episodes')
+      includeEpisodes = true;
     else if (arg === '--baseline') baseline.push(rest[++index]);
     else if (arg === '--comparison') comparison.push(rest[++index]);
     else if (arg?.startsWith('--')) throw new Error(`Unknown option: ${arg}`);
     else plain.push(arg);
   }
-  const options = { limit, minTodoCalls, minDelegateCalls };
+  const options = { limit, minTodoCalls, minDelegateCalls, includeEpisodes };
   if (
     command === 'summarize' &&
     plain.length > 0 &&
