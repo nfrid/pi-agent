@@ -16,6 +16,7 @@
 
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { activityKind, type ToolDescriptor, toolBaseName } from './grouping';
+import { IRREGULAR_PAST_TENSE, META_VERBS, RUSSIAN_PAST_TENSE } from './verbs';
 
 /** Bolded thinking headers, the dominant form. */
 const BOLD_HEADER = /^\s*\*{2}(.+?)\*{2}\s*$/;
@@ -26,71 +27,6 @@ const MAX_TITLE_LENGTH = 90;
 
 /** A verb a title can be built on: "Inspecting", "Fixing". */
 const PARTICIPLE = /^[A-Za-z]+ing$/;
-
-/**
- * Present participle to past tense, for the verbs `derivePastTense` cannot
- * reach. Strong verbs only: every row here is one the "-ed" rule gets wrong,
- * "Built" for "Builded" and "Ran" for "Runned". Regular verbs are derived, so
- * adding one here is dead weight — `title.test.ts` asserts the table stays
- * irregular.
- *
- * The set is closed: English stopped minting strong verbs centuries ago. What
- * is listed is the part of it a coding agent plausibly opens a narration header
- * with. Anything absent keeps its "-ing" form, which still reads correctly next
- * to a checkmark.
- */
-export const IRREGULAR_PAST_TENSE: Readonly<Record<string, string>> = {
-  Beginning: 'Began',
-  Binding: 'Bound',
-  Breaking: 'Broke',
-  Bringing: 'Brought',
-  Building: 'Built',
-  Casting: 'Cast',
-  Catching: 'Caught',
-  Choosing: 'Chose',
-  Cutting: 'Cut',
-  Dealing: 'Dealt',
-  Digging: 'Dug',
-  Drawing: 'Drew',
-  Feeding: 'Fed',
-  Finding: 'Found',
-  Getting: 'Got',
-  Giving: 'Gave',
-  Hiding: 'Hid',
-  Hitting: 'Hit',
-  Holding: 'Held',
-  Keeping: 'Kept',
-  Leading: 'Led',
-  Leaving: 'Left',
-  Letting: 'Let',
-  Losing: 'Lost',
-  Making: 'Made',
-  Meaning: 'Meant',
-  Overwriting: 'Overwrote',
-  Putting: 'Put',
-  Reading: 'Read',
-  Rebuilding: 'Rebuilt',
-  Rereading: 'Reread',
-  Rerunning: 'Reran',
-  Resetting: 'Reset',
-  Rewriting: 'Rewrote',
-  Running: 'Ran',
-  Seeing: 'Saw',
-  Sending: 'Sent',
-  Setting: 'Set',
-  Shutting: 'Shut',
-  Spending: 'Spent',
-  Spinning: 'Spun',
-  Splitting: 'Split',
-  Spreading: 'Spread',
-  Sticking: 'Stuck',
-  Taking: 'Took',
-  Thinking: 'Thought',
-  Throwing: 'Threw',
-  Undoing: 'Undid',
-  Understanding: 'Understood',
-  Writing: 'Wrote',
-};
 
 /**
  * Drop inline markdown from a line that is about to be printed as a title.
@@ -172,7 +108,7 @@ export function headersOf(
 /**
  * Regular "-ing" to "-ed", which is nearly all of them: Inferring → Inferred,
  * Aligning → Aligned, Modifying → Modified, Tracing → Traced, Planning →
- * Planned. Strong verbs stay in the table above, which is consulted first.
+ * Planned. Strong verbs stay in the table in `verbs.ts`, consulted first.
  */
 export function derivePastTense(verb: string): string | undefined {
   if (!PARTICIPLE.test(verb)) return undefined;
@@ -184,29 +120,27 @@ export function derivePastTense(verb: string): string | undefined {
   return `${stem}ed`;
 }
 
-/**
- * Verbs that announce intent rather than work. A group may well open with one —
- * "Planning the thing" — and saying so is honest, but planning is never what a
- * group should be *named* for when it also went and did something.
- */
-const META_VERBS = new Set([
-  'Planning',
-  'Preparing',
-  'Considering',
-  'Deciding',
-  'Determining',
-  'Clarifying',
-  'Thinking',
-  'Weighing',
-]);
+function capitalized(word: string): string {
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
 
-/** Past tense of one participle, in the case it was written in. */
+function isRussianVerb(word: string): boolean {
+  return capitalized(word) in RUSSIAN_PAST_TENSE;
+}
+
+function isMetaVerb(word: string): boolean {
+  return META_VERBS.has(capitalized(word));
+}
+
+/** Past tense of one recognised narration verb, in the case it was written in. */
 function pastOf(word: string): string | undefined {
-  const capitalized = word.charAt(0).toUpperCase() + word.slice(1);
+  const normalized = capitalized(word);
   const past =
-    IRREGULAR_PAST_TENSE[capitalized] ?? derivePastTense(capitalized);
+    RUSSIAN_PAST_TENSE[normalized] ??
+    IRREGULAR_PAST_TENSE[normalized] ??
+    derivePastTense(normalized);
   if (!past) return undefined;
-  return word.charAt(0) === capitalized.charAt(0)
+  return word.charAt(0) === normalized.charAt(0)
     ? past
     : past.charAt(0).toLowerCase() + past.slice(1);
 }
@@ -220,7 +154,8 @@ export function toPastTense(title: string): string {
       if (index === 0) return past;
       // A header often names two things — "Verifying the scratch edit and
       // cleaning up" — and conjugating only the first reads as a mistake.
-      if (words[index - 1]?.toLowerCase() !== 'and') return word;
+      const conjunction = words[index - 1]?.toLowerCase();
+      if (conjunction !== 'and' && conjunction !== 'и') return word;
       return pastOf(word) ?? word;
     })
     .join(' ');
@@ -241,11 +176,11 @@ export function composeTitle(headers: readonly string[]): string | undefined {
     .filter((header) => header.trim())
     .map((header) => {
       const [word = '', ...rest] = header.split(' ');
-      // Only a participle is a verb worth conjugating. Headers do not always
-      // start with one — "1. Fresh context retrieval" is a heading, not a
+      // Only a recognised narration form is a verb worth conjugating. Headers
+      // do not always start with one — "1. Fresh context retrieval" is a
       // sentence — and reading its first word as a verb produced titles like
       // "Planned and 1. fresh context retrieval".
-      return PARTICIPLE.test(word)
+      return pastOf(word)
         ? { verb: word, rest: rest.join(' ') }
         : { verb: '', rest: header };
     });
@@ -254,15 +189,21 @@ export function composeTitle(headers: readonly string[]): string | undefined {
   // Nothing to conjugate: the model's own words are still the best label.
   if (!first) return parsed[0]?.rest;
 
+  // Do not splice two languages into one phrase when a model switches midway
+  // through a group. The opening narration determines the title's language.
+  const russian = isRussianVerb(first.verb);
+  const sameLanguage = narrated.filter(
+    ({ verb }) => isRussianVerb(verb) === russian,
+  );
   const counts = new Map<string, number>();
-  for (const { verb } of narrated)
+  for (const { verb } of sameLanguage)
     counts.set(verb, (counts.get(verb) ?? 0) + 1);
   // What the group spent itself on — never "Planning", even if it said so most.
   let dominant = first.verb;
-  for (const { verb } of narrated) {
-    if (META_VERBS.has(verb)) continue;
+  for (const { verb } of sameLanguage) {
+    if (isMetaVerb(verb)) continue;
     if (
-      META_VERBS.has(dominant) ||
+      isMetaVerb(dominant) ||
       (counts.get(verb) ?? 0) > (counts.get(dominant) ?? 0)
     )
       dominant = verb;
@@ -270,12 +211,12 @@ export function composeTitle(headers: readonly string[]): string | undefined {
 
   // The goal is stated by the opening header; later ones name sub-steps.
   const subject =
-    first.rest || narrated.find((entry) => entry.rest)?.rest || '';
+    first.rest || sameLanguage.find((entry) => entry.rest)?.rest || '';
   const opened = toPastTense(first.verb);
   const other =
     dominant === first.verb
       ? undefined
-      : narrated.find((entry) => entry.verb === dominant);
+      : sameLanguage.find((entry) => entry.verb === dominant);
   if (!other) return subject ? `${opened} ${subject}` : opened;
 
   // Two distinct things the group did, each with what it was done to. Sharing
@@ -286,7 +227,8 @@ export function composeTitle(headers: readonly string[]): string | undefined {
   // Only when the second verb was said once, though: a verb repeated across
   // headers is one push broken into steps, and their subjects are step labels
   // ("Implementing T1", "Implementing T2") that name nothing on their own.
-  const spelt = `${opened} ${first.rest} and ${toPastTense(dominant).toLowerCase()} ${other.rest}`;
+  const conjunction = russian ? 'и' : 'and';
+  const spelt = `${opened} ${first.rest} ${conjunction} ${toPastTense(dominant).toLowerCase()} ${other.rest}`;
   if (
     counts.get(dominant) === 1 &&
     first.rest &&
@@ -294,7 +236,7 @@ export function composeTitle(headers: readonly string[]): string | undefined {
     spelt.length <= MAX_TITLE_LENGTH
   )
     return spelt;
-  const phrase = `${opened} and ${toPastTense(dominant).toLowerCase()}`;
+  const phrase = `${opened} ${conjunction} ${toPastTense(dominant).toLowerCase()}`;
   return subject ? `${phrase} ${subject}` : phrase;
 }
 

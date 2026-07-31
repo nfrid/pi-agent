@@ -339,6 +339,15 @@ describe('activity groups renderer', () => {
       );
     });
 
+    it('completes Russian preambles only after the phase settles', () => {
+      expect(titleOf('Реализую поддержку русского', true)).toContain(
+        'Реализую поддержку русского',
+      );
+      expect(titleOf('Реализую поддержку русского', false)).toContain(
+        '✓ Реализовал поддержку русского',
+      );
+    });
+
     it('leaves a line it cannot conjugate exactly as written', () => {
       // A title is a label, so the full stop goes; the words do not.
       expect(titleOf("Now I'll check how sessions expire.", false)).toContain(
