@@ -158,6 +158,85 @@ describe('incremental delegate review', () => {
     expect(incremental.log).not.toContain('Carried uncommitted parent work');
   });
 
+  test('merges only a carried continuation after the initial patch was applied', async () => {
+    parentWip();
+    const record = await delegated({
+      name: 'Carried initial task',
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'task.txt'), 'task\n'),
+    });
+    expect((await mergeBranch(record)).merged).toBe(true);
+
+    // This parent edit overlaps the already-integrated patch. It must not
+    // block a later continuation that touches a different path.
+    writeFileSync(
+      path.join(repository, 'src', 'task.txt'),
+      'parent revision\n',
+    );
+    writeFileSync(
+      path.join(record.worktreePath, 'src', 'continuation.txt'),
+      'continuation\n',
+    );
+    const continued = await finishWorktree(record.id, {
+      taskName: 'Carried continuation',
+      outcome: 'success',
+    });
+
+    const outcome = await mergeBranch(continued);
+    expect(outcome.merged).toBe(true);
+    expect(git(repository, ['show', '-s', '--format=%s', 'HEAD']).trim()).toBe(
+      'Carried continuation',
+    );
+    expect(git(repository, ['show', 'HEAD:src/task.txt'])).toBe('task\n');
+    expect(readFileSync(path.join(repository, 'src', 'task.txt'), 'utf8')).toBe(
+      'parent revision\n',
+    );
+    expect(
+      readFileSync(path.join(repository, 'src', 'continuation.txt'), 'utf8'),
+    ).toBe('continuation\n');
+    expect(git(repository, ['status', '--porcelain'])).toContain(
+      ' M src/task.txt',
+    );
+
+    const noOp = await mergeBranch(continued);
+    expect(noOp).toMatchObject({
+      merged: false,
+      reason: expect.stringMatching(/already applied to HEAD/),
+    });
+  });
+
+  test('checks dirty overlap only against an unintegrated carried continuation', async () => {
+    parentWip();
+    const record = await delegated({
+      name: 'Carried dirty continuation',
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'task.txt'), 'task\n'),
+    });
+    expect((await mergeBranch(record)).merged).toBe(true);
+
+    writeFileSync(
+      path.join(record.worktreePath, 'src', 'continuation.txt'),
+      'continuation\n',
+    );
+    const continued = await finishWorktree(record.id, {
+      taskName: 'Carried conflicting continuation',
+      outcome: 'success',
+    });
+    writeFileSync(
+      path.join(repository, 'src', 'continuation.txt'),
+      'parent edit\n',
+    );
+
+    const outcome = await mergeBranch(continued);
+    expect(outcome).toMatchObject({
+      merged: false,
+      blockedPaths: ['src/continuation.txt'],
+    });
+    expect(git(repository, ['status', '--porcelain'])).toContain(
+      '?? src/continuation.txt',
+    );
+  });
+
   test('reports a clear no-delta result after all task patches are integrated', async () => {
     const record = await delegated({
       write: (worktreePath) =>
