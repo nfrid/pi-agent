@@ -351,6 +351,10 @@ describe('async delegate extension', () => {
     expect(launch?.content[0]?.text).toContain(
       'Started 1 background delegate job: dj-1',
     );
+    expect(launch?.content[0]?.text).toContain(
+      'Continue independent work; if none remains, end the turn.',
+    );
+    expect(launch?.content[0]?.text).not.toContain('peek to wait');
     expect(launch?.content[0]?.text).toContain('continuation-token');
     expect(sendMessage).not.toHaveBeenCalled();
 

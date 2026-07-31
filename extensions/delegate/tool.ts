@@ -137,7 +137,7 @@ export function delegatePromptGuidelines(
     'Use contextNote for the relevant decisions, constraints, and findings; use branch only when exact parent history matters.',
     'Continue a read-only isolated child without refresh to revisit the same snapshot, or use refresh wip/head for targeted verification after fixes; a refreshed continuation preserves context but is not independent evidence. Start a fresh delegate for an independent regression review.',
     'A child that comes back with a "Blocked:" question is waiting on you, not failing. Answer it — from what you know, or by looking — and continue that child; re-briefing a fresh one throws away the context it already built. Decide it yourself unless it is genuinely the user\'s call.',
-    "Parallelize only independent work: if one task depends on another's findings, read the first result before starting the next. Worktree-isolated tasks each get their own checkout, so writable tasks can run in parallel even on overlapping files. Use background delegation when foreground work can continue meanwhile.",
+    "Parallelize only independent work: if one task depends on another's findings, read the first result before starting the next. Worktree-isolated tasks each get their own checkout, so writable tasks can run in parallel even on overlapping files. Use background delegation when foreground work can continue meanwhile; use foreground delegation when the next parent action must await the result.",
     'A writable run leaves its work as commits on the branch it reports; integrate it yourself with delegate_branches rather than handing the merge to the user.',
     'Treat child results as claims to verify: trust reported checks and concrete evidence, and re-check or continue the child when an important claim has none. A subagent can report work it did not finish, and weakening a test is a common way a task comes back "passing".',
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd, config)}`,
@@ -263,7 +263,7 @@ export function registerDelegateTool(
           content: [
             {
               type: 'text' as const,
-              text: `Started ${jobs.length} background delegate ${jobs.length === 1 ? 'job' : 'jobs'}: ${jobs.map((job) => job.id).join(', ')}. Each subagent completion will be delivered automatically; use delegate_jobs peek to wait or inspect.\n${jobLines.join('\n')}`.trim(),
+              text: `Started ${jobs.length} background delegate ${jobs.length === 1 ? 'job' : 'jobs'}: ${jobs.map((job) => job.id).join(', ')}. Each subagent completion will be delivered automatically. Continue independent work; if none remains, end the turn. Use delegate_jobs peek only for deliberate inspection or a decision-changing bounded timeout.\n${jobLines.join('\n')}`.trim(),
             },
           ],
           details: makeDetails(execution.mode, initialRuns),

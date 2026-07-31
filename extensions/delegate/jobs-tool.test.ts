@@ -14,6 +14,8 @@ interface ThemeLike {
 }
 
 interface RegisteredTool {
+  description: string;
+  promptGuidelines: string[];
   execute: (
     id: string,
     params: { action: 'list' | 'peek' | 'cancel'; id?: string },
@@ -42,6 +44,28 @@ const theme: ThemeLike = {
 };
 
 describe('delegate_jobs rendering', () => {
+  test('tells the agent to yield instead of peeking merely to wait', async () => {
+    const manager = new DelegateJobManager();
+    let tool: RegisteredTool | undefined;
+    const pi = {
+      registerTool(definition: RegisteredTool) {
+        tool = definition;
+      },
+    } as unknown as ExtensionAPI;
+
+    registerDelegateJobsTool(pi, manager);
+
+    expect(tool?.description).toContain('end the turn');
+    expect(tool?.description).toContain('once when a bounded timeout changes');
+    expect(tool?.promptGuidelines.join('\n')).toContain(
+      'Do not call delegate_jobs peek merely to wait or keep the turn open.',
+    );
+    expect(tool?.promptGuidelines.join('\n')).toContain(
+      'never repeat it to poll',
+    );
+    await manager.dispose();
+  });
+
   test('uses colored compact previews and preserves full expanded output', async () => {
     const manager = new DelegateJobManager();
     const longTail = `END-${'x'.repeat(300)}`;

@@ -76,10 +76,10 @@ export function registerDelegateJobsTool(
     name: 'delegate_jobs',
     label: 'Delegate Jobs',
     description:
-      'Inspect and cancel asynchronous delegate jobs. Completions are delivered automatically, so do not poll. Use peek with a bounded wait only when the next step depends on a running job. Actions: list, peek, cancel.',
+      'Inspect and cancel asynchronous delegate jobs. Completions are delivered automatically. Do not use peek merely to wait: if no independent work remains, end the turn and automatic delivery will resume the agent. Use peek only for deliberate inspection or once when a bounded timeout changes the next action. Actions: list, peek, cancel.',
     promptSnippet: 'Inspect or cancel asynchronous delegate jobs',
     promptGuidelines: [
-      'Do not poll delegate_jobs for automatically delivered completions. Use peek with a bounded wait only when progress depends on that job.',
+      'If no independent work remains, end the turn; automatic completion will resume you. Do not call delegate_jobs peek merely to wait or keep the turn open. Use peek only for deliberate inspection or once when a bounded timeout will change your next action, and never repeat it to poll.',
     ],
     parameters: Parameters,
     async execute(_toolCallId, params, signal) {
