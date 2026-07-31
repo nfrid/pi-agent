@@ -159,5 +159,5 @@ Keep only if parsing completes without privacy violations or manual repair, stru
 ## Implementation and resolution
 
 - **Approved implementation:** Option 3, automatic offline episode derivation with the boundaries, bilingual classifier, privacy constraints, validation thresholds, and evaluation window above; approved by the user on 2026-07-30
-- **Merged change:** `76c6261` (implementation `e1acaf6 feat(session-metrics): derive task outcome episodes`)
+- **Merged change:** `76c6261` (implementation `e1acaf6 feat(session-metrics): derive task outcome episodes`); review fix `204a258` (implementation `dac27cb fix(session-metrics): harden episode regressions`)
 - **Resolution:** pending evaluation

@@ -67,5 +67,5 @@ Compare with the baseline of two repeated full reviews requiring manual Git rang
 ## Implementation and resolution
 
 - **Approved implementation:** Add an explicit incremental `delegate_branches review` selector that shows only task patches not represented in current parent HEAD, using patch identity for carried branches; preserve the existing full review as the default/audit view and do not automatically append both diffs. Approved 2026-07-31.
-- **Merged change:** `2a179b1` (implementation `ba67ed8 feat(delegate): add incremental branch review`)
+- **Merged change:** `2a179b1` (implementation `ba67ed8 feat(delegate): add incremental branch review`); review fix `e85e2cd` (implementation `e983778 fix(delegate): harden branch review provenance and bounds`)
 - **Resolution:** pending evaluation
