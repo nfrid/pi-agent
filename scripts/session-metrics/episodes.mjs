@@ -118,8 +118,19 @@ function toolCalls(entry) {
           ? part.id
           : `episode-call-${entry.__episodeIndex}-${partIndex}`,
       entryIndex: entry.__episodeIndex,
+      partIndex,
       timestamp: timestampOf(entry),
     }));
+}
+
+function compareCallOrder(left, right) {
+  if (left.entryIndex !== right.entryIndex)
+    return left.entryIndex - right.entryIndex;
+  return (left.partIndex ?? 0) - (right.partIndex ?? 0);
+}
+
+function callAfter(left, right) {
+  return compareCallOrder(left, right) > 0;
 }
 
 function successfulResult(result) {
@@ -189,12 +200,19 @@ function hasRevisionCue(text) {
 
 function hasExplicitCorrection(text) {
   return (
-    /\b(?:please\s+)?(?:fix|correct|repair|amend|revert|rollback|retry)\b/.test(
+    /\b(?:please\s+)?(?:fix|repair|amend|revert|rollback|retry)\b/.test(text) ||
+    /\b(?:please\s+)?correct\s+(?:it|this|that|the\s+(?:result|change|changes|implementation|code|error|errors|bug|issue))\b/.test(
       text,
     ) ||
     /\b(?:исправь|исправить|почини|починить|поправь|переделай|откати|повтори)\b/.test(
       text,
     )
+  );
+}
+
+function hasPositiveVerificationCue(text) {
+  return /\b(?:the\s+result\s+is\s+correct|no\s+errors?(?:\s+now)?|looks\s+good)\b/.test(
+    text,
   );
 }
 
@@ -246,18 +264,31 @@ export function classifyDispositionDetail(input) {
 
   const question = isQuestion(text);
   const conditional = isConditional(text);
-  const revision = hasRevisionCue(text) || hasExplicitCorrection(text);
+  const explicitCorrection = hasExplicitCorrection(text);
+  const positiveVerification = hasPositiveVerificationCue(text);
+  const revision =
+    explicitCorrection ||
+    (hasRevisionCue(text) &&
+      (!positiveVerification ||
+        /\b(?:still|yet|again|failed|failure|bug|broken|regression|wrong|fix|fixes|fixed|correction|amend|amended|revert|rollback|retry|repair|doesn't work|not working|does not work|fails|failing)\b/.test(
+          text,
+        )));
   // A confirmed correction remains a correction even when it is phrased as a
   // request. Conditional future failures are not confirmed failures.
   if (
     revision &&
-    (!question || hasExplicitCorrection(text)) &&
+    (!question || explicitCorrection) &&
     (!conditional || /\b(?:still|yet)\b|не работает|ошибк/.test(text))
   )
     return { disposition: 'revise', language };
 
   const negated = hasNegation(text);
-  if (!question && !conditional && !negated && hasAcceptanceCue(text))
+  if (
+    !question &&
+    !conditional &&
+    (!negated || positiveVerification) &&
+    (hasAcceptanceCue(text) || positiveVerification)
+  )
     return { disposition: 'accepted', language };
   if (!question && !conditional && !negated && hasAdvanceCue(text))
     return { disposition: 'advance', language };
@@ -498,12 +529,15 @@ function nextUserIndex(entries, index) {
   return entries.length;
 }
 
-function makeTodoEpoch(start, state, reason) {
+function makeTodoEpoch(start, state, reason, startCall) {
   return {
     start,
     end: undefined,
     plan: undefined,
     state: cloneState(state),
+    startCall,
+    endCall: undefined,
+    endCallExclusive: false,
     closeIndex: undefined,
     closeReason: reason,
   };
@@ -518,18 +552,21 @@ function deriveTodo(entries, callResults) {
   let parsedStateSeen = false;
   let explicitEmpty = false;
   let planHint;
+  let epochCount = 0;
 
-  const close = (index, outcome, reason) => {
+  const close = (index, outcome, reason, call, endCallExclusive = false) => {
     if (!current) return;
     current.closeIndex = index;
     current.plan = outcome;
     current.closeReason = reason;
     current.end = index;
+    current.endCall = call;
+    current.endCallExclusive = endCallExclusive;
     epochs.push(current);
     current = undefined;
   };
 
-  const observe = (next, index, reason, action) => {
+  const observe = (next, index, reason, action, call) => {
     const beforeActive = hasUnfinished(state);
     const afterActive = hasUnfinished(next);
     const changed = taskSignature(state) !== taskSignature(next);
@@ -539,12 +576,21 @@ function deriveTodo(entries, callResults) {
     if (!changed && !action && !beforeActive && !afterActive) return;
 
     if (current && action === 'replace' && beforeActive && changed) {
-      close(index, 'superseded', reason);
+      // The replacement call belongs to the new plan. The old epoch ends
+      // immediately before it, even when both calls share one assistant entry.
+      close(index, 'superseded', reason, call, true);
     } else if (current && beforeActive && !afterActive) {
-      close(index, terminalOutcome(next, action ?? reason), reason);
+      close(index, terminalOutcome(next, action ?? reason), reason, call);
     }
-    if (!current && afterActive)
-      current = makeTodoEpoch(priorUserIndex(entries, index), next, reason);
+    if (!current && afterActive) {
+      current = makeTodoEpoch(
+        priorUserIndex(entries, index),
+        next,
+        reason,
+        epochCount > 0 ? call : undefined,
+      );
+      epochCount += 1;
+    }
     if (!current && !afterActive && next.available) {
       planHint = terminalOutcome(next, action ?? reason) ?? planHint;
     }
@@ -582,7 +628,7 @@ function deriveTodo(entries, callResults) {
           continue;
         }
         const next = applyTodoAction(state, action, operation, nextId);
-        observe(next, index, action, action);
+        observe(next, index, action, action, call);
       }
     }
   }
@@ -644,7 +690,7 @@ function isDeliveryCall(call) {
   return undefined;
 }
 
-function makeValidationFacet(calls, results, mutationTimes) {
+function makeValidationFacet(calls, results, mutationCalls) {
   const attempts = Object.fromEntries(
     VALIDATION_KINDS.map((kind) => [kind, 0]),
   );
@@ -673,33 +719,52 @@ function makeValidationFacet(calls, results, mutationTimes) {
     VALIDATION_KINDS.map((kind) => [kind, 0]),
   );
   for (const failed of failedAttempts) {
-    const later = calls.find(
-      (candidate) =>
-        candidate.timestamp >= failed.time &&
-        validationKinds(candidate).includes(failed.kinds[0]) &&
-        successfulResult(results.get(candidate.id)),
-    );
-    if (later)
-      for (const kind of failed.kinds)
-        retryCount[kind] = (retryCount[kind] ?? 0) + 1;
+    // A multi-kind command contributes an independent retry for each kind.
+    // Do not let a successful test clear a failed lint in the same command.
+    for (const kind of failed.kinds) {
+      const later = calls.find(
+        (candidate) =>
+          callAfter(candidate, failed.call) &&
+          validationKinds(candidate).includes(kind) &&
+          successfulResult(results.get(candidate.id)),
+      );
+      if (later) retryCount[kind] += 1;
+    }
   }
+  const unresolvedFailure = failedAttempts.some((failed) =>
+    failed.kinds.some(
+      (kind) =>
+        !calls.some(
+          (candidate) =>
+            callAfter(candidate, failed.call) &&
+            validationKinds(candidate).includes(kind) &&
+            successfulResult(results.get(candidate.id)),
+        ),
+    ),
+  );
   const lastSuccessful = successfulTimes.at(-1);
-  const lastMutation = mutationTimes.at(-1);
+  const lastMutation = mutationCalls.at(-1);
   const hasAttempts = Object.values(attempts).some((value) => value > 0);
   const hasSuccess = successfulTimes.length > 0;
   let status = 'not observed';
-  if (hasAttempts && !hasSuccess) status = 'failed';
+  if (hasAttempts && (unresolvedFailure || !hasSuccess)) status = 'failed';
   else if (
     hasSuccess &&
-    lastMutation !== undefined &&
-    lastSuccessful.time <= lastMutation
+    lastMutation &&
+    !callAfter(lastSuccessful.call, lastMutation)
   )
     status = 'stale-after-later-mutation';
   else if (hasSuccess) status = 'passed';
   const aggregateToExplicitCorrection =
     failedAttempts.some((failed) => failed.kinds.includes('check')) &&
-    successfulTimes.some((success) =>
-      success.kinds.some((kind) => kind !== 'check'),
+    failedAttempts.some(
+      (failed) =>
+        failed.kinds.includes('check') &&
+        successfulTimes.some(
+          (success) =>
+            callAfter(success.call, failed.call) &&
+            success.kinds.some((kind) => kind !== 'check'),
+        ),
     );
   return {
     status,
@@ -860,8 +925,10 @@ function makeBucket(records, dimension, value) {
     blockedPlans: planCounts['blocked-censored'],
     droppedPlans: planCounts['dropped-only'] + planCounts['mixed-terminal'],
     noTodoPlans: planCounts.absent,
-    unknownDisposition: dispositionCounts.unknown,
-    unknownDispositionDenominator: dispositionCounts.unknown,
+    unknownDisposition: count(
+      (record) => record.reactionObserved && record.disposition === 'unknown',
+    ),
+    unknownDispositionDenominator: reactionObserved,
     missingDisposition: episodes - reactionObserved,
     unknownLanguage: count((record) => record.language === 'unknown'),
     missingLanguage: count(
@@ -1040,9 +1107,17 @@ function deriveEpisodeRecord(entries, epoch, context) {
     Math.min(epoch.end ?? entries.length - 1, entries.length - 1),
   );
   const scopedEntries = entries.slice(start, end + 1);
-  const calls = context.calls.filter(
-    (call) => call.entryIndex >= start && call.entryIndex <= end,
-  );
+  const calls = context.calls.filter((call) => {
+    if (call.entryIndex < start || call.entryIndex > end) return false;
+    if (epoch.startCall && compareCallOrder(call, epoch.startCall) < 0)
+      return false;
+    if (epoch.endCall) {
+      const comparison = compareCallOrder(call, epoch.endCall);
+      if (comparison > 0) return false;
+      if (epoch.endCallExclusive && comparison === 0) return false;
+    }
+    return true;
+  });
   const results = new Map(
     calls
       .map((call) => [call.id, context.results.get(call.id)])
@@ -1059,7 +1134,7 @@ function deriveEpisodeRecord(entries, epoch, context) {
   const mutationTimes = successfulMutations
     .map((call) => call.timestamp)
     .filter((time) => time !== undefined);
-  const validation = makeValidationFacet(calls, results, mutationTimes);
+  const validation = makeValidationFacet(calls, results, successfulMutations);
   const delivery = deliveryFacet(calls, results);
   const delegate = delegateFacet(scopedEntries, calls, results);
   const items = toolItems(calls, results);
@@ -1100,41 +1175,10 @@ function deriveEpisodeRecord(entries, epoch, context) {
       lastAssistant.__episodeIndex === lastMeaningfulEntry.__episodeIndex &&
       lastAssistantCalls === 0,
   );
-  const operational = timedOut
-    ? 'timed-out'
-    : aborted
-      ? 'aborted'
-      : unresolved
-        ? 'unresolved-tool-failure'
-        : terminalResponse
-          ? 'inferred-settled'
-          : delegate.failures.length
-            ? 'failed'
-            : 'censored';
-  const firstTime = timestampOf(entries[start]);
-  const lastMutation = mutationTimes.at(-1);
-  const successfulValidationTime = validation.successfulTimes
-    .map((item) => item.time)
-    .filter((time) => time !== undefined)
-    .at(-1);
-  const finalMutationValidated =
-    lastMutation !== undefined &&
-    successfulValidationTime !== undefined &&
-    successfulValidationTime > lastMutation;
-  const observedVerification =
-    operational === 'inferred-settled' &&
-    lastMutation !== undefined &&
-    validation.successfulTimes.some(
-      (item) => item.time !== undefined && item.time > lastMutation,
-    );
-  const shape = shapeOf(
-    calls,
-    validation,
-    successfulMutations.length,
-    delivery.commitAttempts + delivery.mergeAttempts + delivery.pushAttempts,
-    calls.filter((call) => TOOL_BASE(call.name) === 'delegate').length,
-  );
   const firstFailure = delegate.failures.at(0);
+  const firstFailureCall = firstFailure
+    ? calls.find((call) => call.id === firstFailure.id)
+    : undefined;
   const parentEntries = firstFailure
     ? scopedEntries.filter(
         (entry) =>
@@ -1144,8 +1188,52 @@ function deriveEpisodeRecord(entries, epoch, context) {
       )
     : [];
   const parentToolCalls = firstFailure
-    ? calls.filter((call) => call.entryIndex > firstFailure.index).length
+    ? calls.filter((call) =>
+        firstFailureCall
+          ? callAfter(call, firstFailureCall)
+          : call.entryIndex > firstFailure.index,
+      ).length
     : 0;
+  // A timed-out child remains visible in recovery failures, but successful
+  // parent work and a terminal response settle the episode operationally.
+  const recoveredAfterDelegateFailure = Boolean(
+    firstFailure && terminalResponse && parentToolCalls > 0 && !unresolved,
+  );
+  const operational = recoveredAfterDelegateFailure
+    ? 'inferred-settled'
+    : timedOut
+      ? 'timed-out'
+      : aborted
+        ? 'aborted'
+        : unresolved
+          ? 'unresolved-tool-failure'
+          : terminalResponse
+            ? 'inferred-settled'
+            : delegate.failures.length
+              ? 'failed'
+              : 'censored';
+  const firstTime = timestampOf(entries[start]);
+  const successfulValidation = validation.successfulTimes.at(-1);
+  const successfulValidationTime = successfulValidation?.time;
+  const lastMutationCall = successfulMutations.at(-1);
+  const finalMutationValidated = Boolean(
+    lastMutationCall &&
+      successfulValidation?.call &&
+      callAfter(successfulValidation.call, lastMutationCall),
+  );
+  const observedVerification =
+    operational === 'inferred-settled' &&
+    lastMutationCall !== undefined &&
+    validation.successfulTimes.some((item) =>
+      callAfter(item.call, lastMutationCall),
+    );
+  const shape = shapeOf(
+    calls,
+    validation,
+    successfulMutations.length,
+    delivery.commitAttempts + delivery.mergeAttempts + delivery.pushAttempts,
+    calls.filter((call) => TOOL_BASE(call.name) === 'delegate').length,
+  );
   const recovery = {
     delegateProviderFailures: delegate.failures.length,
     parentTurnsAfterFailure: parentEntries.length,
@@ -1175,9 +1263,9 @@ function deriveEpisodeRecord(entries, epoch, context) {
     : undefined;
   const phaseDurationMs =
     successfulMutations.length > 0 &&
-    successfulValidationTime !== undefined &&
+    successfulValidation?.call &&
     delivery.lastSuccessTime !== undefined &&
-    successfulValidationTime >= mutationTimes[0] &&
+    callAfter(successfulValidation.call, successfulMutations[0]) &&
     delivery.lastSuccessTime >= successfulValidationTime
       ? durationFrom(firstTime, delivery.lastSuccessTime)
       : undefined;
@@ -1219,11 +1307,8 @@ function deriveEpisodeRecord(entries, epoch, context) {
       successful: successfulMutations.length,
       firstSuccessful: successfulMutations.length > 0,
       laterMutationsFollowedValidation: successfulMutations.some((call) =>
-        validation.successfulTimes.some(
-          (validationCall) =>
-            validationCall.time !== undefined &&
-            call.timestamp !== undefined &&
-            validationCall.time < call.timestamp,
+        validation.successfulTimes.some((validationCall) =>
+          callAfter(call, validationCall.call),
         ),
       ),
       finalMutationValidated,
@@ -1270,9 +1355,10 @@ function prepareIntervals(entries, todo) {
     const interval = intervals[index];
     const nextEpoch = intervals[index + 1];
     const nextUser = nextUserIndex(entries, interval.end);
-    const maxEnd = nextEpoch
-      ? Math.min(nextEpoch.start - 1, nextUser - 1)
-      : nextUser - 1;
+    const maxEnd =
+      nextEpoch && nextEpoch.start > interval.start
+        ? Math.min(nextEpoch.start - 1, nextUser - 1)
+        : nextUser - 1;
     if (nextUser < entries.length)
       interval.end = Math.max(interval.start, maxEnd);
     else interval.end = entries.length - 1;
