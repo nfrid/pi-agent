@@ -6,9 +6,13 @@ The delegate extension runs focused child agents using user-owned model routes. 
 
 Every fresh delegated task supplies one exact `route` key from `delegate.modelCatalog`. A continuation reuses its persisted route when omitted and may switch only by supplying another complete route key. Parallel tasks may share a top-level route or select routes independently.
 
-Each route binds one provider, model, and thinking level. Selection is prose-driven: the orchestrator matches the task against each route's `useFor` and `avoid`, both required. `relativeCost` is the only number. It is relative usage drain rather than a quality score, and its one job is to order the catalog cheapest-first so "climb a rung" means something. Unknown routes fail rather than silently substituting.
+Each route binds one provider, model, and thinking level. Selection is prose-driven: the orchestrator matches the task against each route's `useFor` and `avoid`, both required. `relativeCost` is the only number. It is a usage-drain prior rather than a quality score, and it orders the displayed catalog cheapest-first; it is not a global escalation ladder. Unknown routes fail rather than silently substituting.
 
-There is deliberately no quality metric. One scalar cannot separate competences that vary independently — breadth of correctness checking is a different axis from judging whether a diff overclaims — and a catalog ranked by it ends up with routes that are unreachable under "cheapest route that is good enough" while their prose insists they are the right choice.
+Choose a service class before an effort level. The configured catalog uses Luna for value/background work, Terra for interactive work with an explicit wall-clock objective, and Sol for maintainer judgement. Escalate effort within that class. Crossing from Luna to Terra is a latency decision, not the automatic next step after a difficult Luna task; crossing to Sol means the task needs judgement about what good work is, not merely more compute.
+
+Configured relative costs are workload-shaped priors, not universal constants. Replace them with comparable local usage or credit measurements when enough routed tasks have accumulated; provider-reported actual cost remains the authoritative session metric.
+
+There is deliberately no quality metric. One scalar cannot separate competences that vary independently — cost versus latency, breadth of correctness checking, and judging whether a diff overclaims are different axes. A catalog globally ranked by supposed quality would make routes unreachable under "cheapest route that is good enough" while their prose insists they are the right choice.
 
 ```json
 {
@@ -18,9 +22,9 @@ There is deliberately no quality metric. One scalar cannot separate competences 
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
         "thinking": "medium",
-        "relativeCost": 2,
-        "useFor": "Verify one named invariant over at most three named files; implement a localised change against a failing test, with the check command given.",
-        "avoid": "Open-ended review with no criteria; deciding what to look for; work spanning subsystems."
+        "relativeCost": 3,
+        "useFor": "Value/background work: verify one named invariant over at most three named files, or implement a localized change against a failing test with the check command given.",
+        "avoid": "Open-ended review, an explicit foreground deadline, deciding what to look for, or work spanning subsystems."
       }
     }
   }

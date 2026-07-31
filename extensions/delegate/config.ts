@@ -321,7 +321,7 @@ export function describeDelegateRouting(
         useFor: entry.useFor,
         avoid: entry.avoid,
       }))
-      // Cheapest first: the escalation ladder the orchestrator is told to climb.
+      // Cheapest first exposes usage drain without implying quality order.
       .sort(
         (left, right) =>
           left.relativeCost - right.relativeCost ||

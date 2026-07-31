@@ -594,9 +594,18 @@ describe('delegate', () => {
     expect(prompt).toContain('smart-high: model=smart');
     expect(prompt).toContain('use for: scoped checks');
     expect(prompt).toContain('avoid: judgement calls');
+    expect(prompt).toContain(
+      "Choose the task's service class before choosing an effort level",
+    );
+    expect(prompt).toContain(
+      'not a quality score or a global escalation ladder',
+    );
     expect(prompt).not.toContain('relativeIntelligence');
     expect(prompt).not.toContain('maxRelativeCost');
-    // Cheapest first: the ladder the prompt tells the orchestrator to climb.
+    expect(prompt).not.toContain('Luna');
+    expect(prompt).not.toContain('Terra');
+    expect(prompt).not.toContain('Sol');
+    // Cheapest first exposes cost without turning it into an escalation ladder.
     expect(prompt.indexOf('quick-low')).toBeLessThan(
       prompt.indexOf('smart-high'),
     );

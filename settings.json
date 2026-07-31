@@ -9,62 +9,87 @@
   "theme": "dracula",
   "delegate": {
     "provider": "openai-codex",
+    "timeoutMs": 1800000,
     "modelCatalog": {
       "luna-low": {
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
         "thinking": "low",
         "relativeCost": 1,
-        "useFor": "Mechanical work with one deterministic answer: does this file or export exist, what does this config say, run a command and report output. Rote edits fully specified by the task — a rename in named files, a fixture update, boilerplate — where a command proves it.",
-        "avoid": "Anything needing judgement, or reading more than two or three files. Any task whose finish line is not already decided."
+        "useFor": "Value/background work that is fully mechanical with one deterministic answer: a named-file lookup, exact rename, generated fixture, or command-and-report task with an exact verifier.",
+        "avoid": "Discovery, judgement, or any task whose finish line is not already decided."
       },
       "luna-medium": {
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
         "thinking": "medium",
-        "relativeCost": 2,
-        "useFor": "Check one named invariant or a stated checklist over a few named files; confirm a fix landed; scan a bounded diff for dead code or stale wording. Implement a localised change against a failing test or exact spec, inside one subsystem, with the check command given.",
-        "avoid": "Open-ended review with no criteria; working out what to look for; security reasoning; work spanning subsystems or likely to need a second approach."
+        "relativeCost": 3,
+        "useFor": "Value/background work with a failing test or exact specification: check one named invariant, confirm a fix, or implement a localized change inside one subsystem and a few files.",
+        "avoid": "Open-ended review, cross-subsystem work, security reasoning, or choosing the design and finish line."
       },
       "luna-high": {
         "provider": "openai-codex",
         "model": "gpt-5.6-luna",
         "thinking": "high",
-        "relativeCost": 5,
-        "useFor": "Focused regression reviews over a named file set where the criteria are given but the answer needs judgement; small design or API proposals over known files. Bounded multi-file implementation following an established pattern, with tests covering the behaviour.",
-        "avoid": "Repo-wide breadth; cross-module race, lifecycle, or concurrency reasoning. When a task outgrows this, prefer terra-high to a higher luna effort."
+        "relativeCost": 11,
+        "useFor": "Default bounded value/background implementation or review where the architecture, scope, acceptance criteria, and relevant files are known; established-pattern multi-file work fits here.",
+        "avoid": "A short wall-clock deadline, open-ended judgement, broad high-stakes review, or work likely to require sustained exploration across subsystems."
+      },
+      "luna-xhigh": {
+        "provider": "openai-codex",
+        "model": "gpt-5.6-luna",
+        "thinking": "xhigh",
+        "relativeCost": 21,
+        "useFor": "Difficult value/background implementation, diagnosis, or regression review spanning multiple files or subsystems, with explicit acceptance criteria and no sub-ten-minute requirement.",
+        "avoid": "Foreground work blocking the parent on a deadline, unclear criteria that require maintainer judgement, or unbounded repository-wide review."
+      },
+      "terra-medium": {
+        "provider": "openai-codex",
+        "model": "gpt-5.6-terra",
+        "thinking": "medium",
+        "relativeCost": 32,
+        "useFor": "Interactive bounded multi-file work with an explicit roughly five-minute objective, especially when a foreground delegate blocks the parent.",
+        "avoid": "Background or parallel work without urgency, mechanical tasks, quality-first work with no deadline, or broad difficult analysis."
+      },
+      "luna-max": {
+        "provider": "openai-codex",
+        "model": "gpt-5.6-luna",
+        "thinking": "max",
+        "relativeCost": 42,
+        "useFor": "Quality-first value/background work after Luna xhigh is insufficient, or difficult bounded tasks where extra exploration and verification justify a substantially longer run.",
+        "avoid": "Short deadlines, interactive foreground work, tasks without a bounded finish line, or assuming more reasoning replaces Sol-style judgement."
       },
       "terra-high": {
         "provider": "openai-codex",
         "model": "gpt-5.6-terra",
         "thinking": "high",
-        "relativeCost": 8,
-        "useFor": "Substantial, bounded work with stated requirements and a clear finish line: review a specified diff or named file set against a spec or plan, or implement a multi-file feature or bounded transactional/lifecycle fix within one subsystem in an established architecture, with focused tests defining invariants and a check command.",
-        "avoid": "Whether the work is honest or overbuilt, which is sol-medium. Breadth-wise security, drift, or race analysis, which is terra-max. Rote edits, which are cheaper above."
-      },
-      "terra-max": {
-        "provider": "openai-codex",
-        "model": "gpt-5.6-terra",
-        "thinking": "max",
-        "relativeCost": 13,
-        "useFor": "Broad, high-stakes analysis or review over a specified diff, named file set, git baseline, or explicit checklist: assess lifecycle, cancellation, race, regression, or security risks, with useful partial findings acceptable when the stopping point is defined.",
-        "avoid": "Single-run implementation that must both discover the design and land a complete fix under the default timeout; once criteria are concrete, direct bounded implementation to terra-high. Also avoid unbounded whole-repo audits without a concrete diff, named file set, baseline, checklist, or stopping point, and narrow work."
+        "relativeCost": 63,
+        "useFor": "Interactive hard repository work with explicit criteria when the parent needs an actionable result in roughly six to eight minutes; use it as the deadline alternative to Luna xhigh.",
+        "avoid": "Background value optimization, rote edits, open-ended maintainer judgement, or choosing it merely because Luna high was insufficient."
       },
       "sol-medium": {
         "provider": "openai-codex",
         "model": "gpt-5.6-sol",
         "thinking": "medium",
-        "relativeCost": 15,
-        "useFor": "Judgement about the work rather than its correctness: does this diff overclaim, is it truthful about what it does, is the complexity earned, or is it overengineered or sloppy. Strict maintainer-style review. Tasks whose criteria are unclear and have to be worked out first.",
-        "avoid": "Mechanical correctness sweeps and spec-conformance review, where terra-high is cheaper and as good. Anything with pass/fail criteria already stated."
+        "relativeCost": 75,
+        "useFor": "Judgement about the work rather than a generic strength escalation: decide whether a diff overclaims, whether complexity is earned, or what completion should mean when criteria are unclear. Strict maintainer-style review.",
+        "avoid": "Mechanical correctness sweeps, implementation against explicit acceptance criteria, or any task adequately served by a Luna value route or Terra deadline route."
+      },
+      "terra-xhigh": {
+        "provider": "openai-codex",
+        "model": "gpt-5.6-terra",
+        "thinking": "xhigh",
+        "relativeCost": 118,
+        "useFor": "Difficult interactive work with explicit criteria and a roughly ten-to-twelve-minute objective; also use for a specifically requested experimental comparison on React or TypeScript semantic/refactoring work.",
+        "avoid": "Generic background quality escalation, claiming a proven React specialization, broad security or race review without a local evaluation, or work where Luna max latency is acceptable."
       },
       "sol-high": {
         "provider": "openai-codex",
         "model": "gpt-5.6-sol",
         "thinking": "high",
-        "relativeCost": 21,
-        "useFor": "Cross-stage integration review spanning several commits, where a missed defect is expensive and the failure could be anywhere. Reserve for when sol-medium has already looked and its result was not enough.",
-        "avoid": "Nearly everything else, on cost alone."
+        "relativeCost": 105,
+        "useFor": "Cross-stage integration review spanning several commits where a missed defect is expensive and the failure could be anywhere. Reserve for when Sol medium has already looked and its result was not enough.",
+        "avoid": "Generic hard implementation, deadline routing, or any task with an explicit pass/fail criterion that a cheaper branch can verify."
       }
     }
   }
