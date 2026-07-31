@@ -16,6 +16,7 @@ interface RegisteredTool {
     id: string,
     params: {
       action: 'list' | 'review' | 'merge' | 'drop';
+      incremental?: boolean;
       id?: string;
       force?: boolean;
     },
@@ -91,6 +92,43 @@ describe('delegate_branches', () => {
       body(await tool.execute('c3', { action: 'drop', id: record.id })),
     ).toContain('Dropped');
     expect(existsSync(record.worktreePath)).toBe(false);
+  });
+
+  test('selects an incremental review without changing the full default', async () => {
+    const tool = captureTool();
+    const record = await delegated('Initial task', 'src/initial.txt');
+    expect(
+      body(await tool.execute('c1', { action: 'merge', id: record.id })),
+    ).toMatch(/^Merged /);
+    writeFileSync(
+      path.join(record.worktreePath, 'src', 'follow-up.txt'),
+      'follow-up\n',
+    );
+    await finishWorktree(record.id, {
+      taskName: 'Follow-up fix',
+      outcome: 'success',
+    });
+
+    const full = body(
+      await tool.execute('c2', { action: 'review', id: record.id }),
+    );
+    const incremental = await tool.execute('c3', {
+      action: 'review',
+      id: record.id,
+      incremental: true,
+    });
+    expect(full).toContain('src/initial.txt');
+    const incrementalBody = body(incremental);
+    const incrementalReview = incrementalBody.slice(
+      incrementalBody.indexOf('\n\n') + 2,
+    );
+    expect(incrementalReview).toContain('incremental task delta');
+    expect(incrementalReview).toContain('src/follow-up.txt');
+    expect(incrementalReview).not.toContain('src/initial.txt');
+    expect(incremental.details).toMatchObject({
+      action: 'review',
+      reviewMode: 'incremental',
+    });
   });
 
   test('guides retired snapshots instead of reviewing or merging them', async () => {

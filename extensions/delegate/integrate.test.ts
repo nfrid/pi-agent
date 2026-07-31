@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
+import { formatReview } from './branches';
 import { git, repository } from './test/worktree-fixture';
 import {
   branchState,
@@ -89,6 +90,120 @@ describe('separating carried parent work from the task own work', () => {
     const record = await delegated({});
     const review = await reviewBranch(record);
     expect(review.log).toBe('');
+  });
+});
+
+describe('incremental delegate review', () => {
+  test('keeps the full review default and isolates a continuation fix', async () => {
+    const record = await delegated({
+      name: 'Initial task',
+      write: (worktreePath) =>
+        writeFileSync(
+          path.join(worktreePath, 'src', 'initial.txt'),
+          'initial task\n',
+        ),
+    });
+    expect((await reviewBranch(record)).mode).toBe('full');
+    expect((await mergeBranch(record)).merged).toBe(true);
+
+    writeFileSync(
+      path.join(record.worktreePath, 'src', 'continuation.txt'),
+      'continuation fix\n',
+    );
+    const continued = await finishWorktree(record.id, {
+      taskName: 'Continuation fix',
+      outcome: 'success',
+    });
+    const full = await reviewBranch(continued);
+    const incremental = await reviewBranch(continued, 'incremental');
+
+    expect(full.diff).toContain('initial task');
+    expect(full.diff).toContain('continuation fix');
+    expect(incremental.mode).toBe('incremental');
+    expect(incremental.log).toContain('Continuation fix');
+    expect(incremental.diff).toContain('continuation fix');
+    expect(incremental.diff).not.toContain('initial task');
+  });
+
+  test('uses patch identity for carried work and excludes the carry commit', async () => {
+    parentWip();
+    const record = await delegated({
+      name: 'Carried task',
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'task.txt'), 'task\n'),
+    });
+    expect((await mergeBranch(record)).merged).toBe(true);
+    expect(await branchState(record)).toBe('merged');
+
+    writeFileSync(
+      path.join(record.worktreePath, 'src', 'follow-up.txt'),
+      'follow-up\n',
+    );
+    const continued = await finishWorktree(record.id, {
+      taskName: 'Carried follow-up',
+      outcome: 'success',
+    });
+    const incremental = await reviewBranch(continued, {
+      incremental: true,
+    });
+
+    expect(incremental.diff).toContain('follow-up.txt');
+    expect(incremental.diff).not.toContain('parent edit');
+    expect(incremental.diff).not.toContain('src/task.txt');
+    expect(incremental.log).toContain('Carried follow-up');
+    expect(incremental.log).not.toContain('Carried uncommitted parent work');
+  });
+
+  test('reports a clear no-delta result after all task patches are integrated', async () => {
+    const record = await delegated({
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'done.txt'), 'done\n'),
+    });
+    expect((await mergeBranch(record)).merged).toBe(true);
+    const review = await reviewBranch(record, 'incremental');
+
+    expect(review.log).toBe('');
+    expect(review.diff).toBe('');
+    expect(formatReview(record, review)).toMatch(
+      /no unintegrated task delta relative to current HEAD/i,
+    );
+  });
+
+  test('never attributes advancing or dirty parent work to the delegate', async () => {
+    const record = await delegated({
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'task.txt'), 'delegate\n'),
+    });
+    writeFileSync(path.join(repository, 'src', 'parent-only.txt'), 'parent\n');
+    git(repository, ['add', 'src/parent-only.txt']);
+    git(repository, ['commit', '-m', 'unrelated parent advance']);
+    writeFileSync(path.join(repository, 'src', 'dirty-only.txt'), 'dirty\n');
+
+    const incremental = await reviewBranch(record, 'incremental');
+    expect(incremental.diff).toContain('src/task.txt');
+    expect(incremental.diff).not.toContain('parent-only.txt');
+    expect(incremental.diff).not.toContain('dirty-only.txt');
+    expect(incremental.diff).not.toContain('unrelated parent advance');
+  });
+
+  test('uses the same deterministic bound for incremental diffs', async () => {
+    const record = await delegated({
+      name: 'Large task',
+      write: (worktreePath) =>
+        writeFileSync(
+          path.join(worktreePath, 'src', 'large.txt'),
+          'x'.repeat(70_000),
+        ),
+    });
+    const first = await reviewBranch(record, 'incremental');
+    const second = await reviewBranch(record, 'incremental');
+
+    expect(first.truncated).toBe(true);
+    expect(first.diff).toHaveLength(60_000);
+    expect(second).toMatchObject({
+      truncated: true,
+      diff: first.diff,
+    });
   });
 });
 
@@ -286,6 +401,15 @@ describe('merging a delegate branch', () => {
       diff: '',
     });
     expect(review.error).not.toMatch(/carry|child-only/i);
+    const incremental = await reviewBranch(record, 'incremental');
+    expect(incremental).toMatchObject({
+      mode: 'incremental',
+      state: 'unmerged',
+      error: expect.stringMatching(/recorded base .*not an ancestor/),
+      log: '',
+      stat: '',
+      diff: '',
+    });
     const outcome = await mergeBranch(record);
     expect(outcome).toMatchObject({
       merged: false,

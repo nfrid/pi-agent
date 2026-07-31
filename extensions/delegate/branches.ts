@@ -97,19 +97,28 @@ export function formatReview(
     return `Branch ${record.branch} no longer exists.`;
   if (review.error)
     return `${record.branch} (${review.state})\n\n${review.error}`;
+  if (review.mode === 'incremental' && !review.log)
+    return `${record.branch} (${review.state}) has no unintegrated task delta relative to current HEAD.`;
   if (!review.log)
     return `${record.branch} (${review.state}) has no commits of its own beyond ${workBase(record).slice(0, 12)}; the task committed nothing.`;
+  const range =
+    review.mode === 'incremental'
+      ? `incremental task delta relative to current HEAD (patch-aware)`
+      : `${workBase(record).slice(0, 12)}..${record.branch}`;
+  const truncation = review.truncated
+    ? review.mode === 'incremental'
+      ? `\n[diff truncated — rerun delegate_branches review ${record.id} with incremental: true]`
+      : `\n[diff truncated — read the rest with: git -C ${record.repositoryRoot} diff ${workBase(record)}..${record.branch}]`
+    : '';
   return [
-    `${record.branch} (${review.state}), ${workBase(record).slice(0, 12)}..${record.branch}`,
+    `${record.branch} (${review.state}), ${range}`,
     '',
     review.log,
     '',
     review.stat,
     '',
     review.diff,
-    review.truncated
-      ? `\n[diff truncated — read the rest with: git -C ${record.repositoryRoot} diff ${workBase(record)}..${record.branch}]`
-      : '',
+    truncation,
   ]
     .join('\n')
     .trimEnd();
