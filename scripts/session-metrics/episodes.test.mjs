@@ -144,12 +144,23 @@ describe('deterministic bilingual disposition classification', () => {
     ['I approve this.', 'accepted'],
     ['Looks good, but it still fails.', 'revise'],
     ['Please implement it and run the tests.', 'advance'],
+    ['What changed? Please commit it.', 'advance'],
+    ['Should we explain first? Commit it.', 'advance'],
+    ['Can you explain? Commit and push.', 'advance'],
+    ['Что изменилось? Продолжай.', 'advance'],
     ['What must I approve before we proceed?', 'inquiry'],
+    ['What should I approve before we proceed?', 'inquiry'],
+    ['Can you commit this?', 'inquiry'],
+    ['If tests pass, should we commit?', 'inquiry'],
+    ['What changed? If tests pass, commit it.', 'inquiry'],
+    ["What changed? Please don't commit it.", 'inquiry'],
+    ['What changed, please commit it.', 'inquiry'],
     ['одобряю', 'accepted'],
     ['одобрено', 'accepted'],
     ['годится', 'accepted'],
     ['приступайте', 'advance'],
     ['продолжайте, коммитьте и пушьте', 'advance'],
+    ['Что изменилось? Commit and push.', 'advance'],
     ['всё ещё не работает, исправь', 'revise'],
     ['по-хорошему это надо обсудить', 'unknown'],
     ['lgtm, коммит и пуш', 'accepted'],
@@ -175,6 +186,12 @@ describe('deterministic bilingual disposition classification', () => {
   it('reports mixed and unknown language without retaining text', () => {
     expect(classifyDispositionDetail('LGTM, коммит и пуш')).toEqual({
       disposition: 'accepted',
+      language: 'mixed',
+    });
+    expect(
+      classifyDispositionDetail('Что изменилось? Commit and push.'),
+    ).toEqual({
+      disposition: 'advance',
       language: 'mixed',
     });
     expect(classifyDispositionDetail('???')).toEqual({

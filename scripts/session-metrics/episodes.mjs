@@ -261,7 +261,7 @@ function hasAdvanceCue(text) {
     /\b(?:commit and push|merge and push|implement (?:it|this)|proceed with|go ahead with)\b/.test(
       text,
     ) ||
-    /^(?:приступ\p{L}*|продолж\p{L}*|начин\p{L}*|переход\p{L}*|делай\p{L}*|сделай\p{L}*|реализ\p{L}*|тестир\p{L}*|проверь\p{L}*|коммить\p{L}*|закоммить\p{L}*|пуш\p{L}*|запуш\p{L}*|слей\p{L}*|вливай\p{L}*|двигайся дальше)(?:[.!,:;]?\s|$)/u.test(
+    /^(?:приступ\p{L}*|продолж\p{L}*|начин\p{L}*|переход\p{L}*|делай\p{L}*|сделай\p{L}*|реализ\p{L}*|тестир\p{L}*|проверь\p{L}*|коммить\p{L}*|закоммить\p{L}*|пуш\p{L}*|запуш\p{L}*|слей\p{L}*|вливай\p{L}*|двигайся дальше)(?:[.!,:;]?(?:\s|$))/u.test(
       text,
     ) ||
     /\b(?:коммить и пушь|закоммить и запушь|приступай к)\b/.test(text)
@@ -272,6 +272,23 @@ function hasNewTaskCue(text) {
   return /\b(?:new task|different task|separate task|another task|unrelated|новая задача|другая задача|отдельная задача|другая работа)\b/.test(
     text,
   );
+}
+
+// An advance cue only overrides a question when it occupies its own
+// sentence/clause. Commas are intentionally not boundaries because they can
+// join an ambiguous question and instruction.
+function hasSeparateImperativeAdvance(text) {
+  const clauses = text.split(/(?<=[.!?؟;])\s+|\n+/);
+  if (clauses.length < 2) return false;
+  return clauses.some((clause) => {
+    const candidate = clause.trim();
+    return (
+      !isQuestion(candidate) &&
+      !isConditional(candidate) &&
+      !hasNegation(candidate) &&
+      hasAdvanceCue(candidate)
+    );
+  });
 }
 
 /**
@@ -312,6 +329,8 @@ export function classifyDispositionDetail(input) {
   )
     return { disposition: 'accepted', language };
   if (!question && !conditional && !negated && hasAdvanceCue(text))
+    return { disposition: 'advance', language };
+  if (question && hasSeparateImperativeAdvance(text))
     return { disposition: 'advance', language };
   if (question) return { disposition: 'inquiry', language };
   if (hasNewTaskCue(text)) return { disposition: 'new-task', language };
