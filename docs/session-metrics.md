@@ -17,6 +17,8 @@ Background completion facts come from producer details: automatic deliveries use
 
 Unknown-argument blocks are recognized only when `isError` is true and the result text has the strict `Tool "…" does not support argument "…". Remove it and retry.` shape. Tool and argument names are never emitted.
 
+Read-only review lifecycle counters cover clean snapshot retirements, same-snapshot continuations, WIP/HEAD refresh attempts and outcomes, and WIP package-review projection outcomes. Package-review attempts are partitioned into successful nonzero-link, zero-link, and failed-projection counts. Worktree summaries used for this correlation expose only the bounded snapshot base plus numeric carried-file, projection-candidate, and dependency-link counts; legacy results without these fields remain parseable.
+
 ## Routing and ratios
 
 `routes` contains unique `routedTasks`: runs with both a route and recorded child usage. Each route reports tasks, turns, input/output usage, cost, and relative cost. `childTurnsPerTask` and `childCostPerTask` divide by `routedTasks`, not all delegated tasks or report copies.

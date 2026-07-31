@@ -1,6 +1,6 @@
 # HFM-20260731: Enforce todo dependencies when starting tasks
 
-- **Status:** approved
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-07-31
 - **Created:** 2026-07-31
 - **Source reports:** [HF-20260730: Todo starts a task whose dependency is unfinished](../inbox/20260730T122243Z-todo-starts-blocked-dependent-task.md)
@@ -58,7 +58,7 @@ Add focused tests in `extensions/tasks/tasks.test.ts` for direct start, multiple
 
 ## Evaluation
 
-- **Window:** After approved implementation, the first 20 dependency-bearing start attempts or 2026-08-31, whichever is later
+- **Window:** Started 2026-07-31; the first 20 dependency-bearing start attempts or 2026-08-31, whichever is later
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 Compare with the baseline contradictory start. Keep only if no blocked start enters `doing`, every rejection names the blockers, and no valid start requires manual recovery. Record `insufficient evidence` if no dependency-bearing starts occur.
@@ -66,5 +66,5 @@ Compare with the baseline contradictory start. Keep only if no blocked start ent
 ## Implementation and resolution
 
 - **Approved implementation:** Reject direct and batched `start` operations when any declared dependency is not `done`; name every blocker, preserve atomic batch rollback, and leave broader status-transition enforcement out of scope. Approved 2026-07-31.
-- **Merged change:** —
+- **Merged change:** `2b5549a` (implementation `ec39211 fix(tasks): enforce dependencies before starting`)
 - **Resolution:** pending evaluation

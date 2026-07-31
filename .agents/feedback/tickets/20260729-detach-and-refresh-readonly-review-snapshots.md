@@ -116,5 +116,5 @@ Compare against the baseline of one retained clean checkout, one misleading inte
 ## Implementation and resolution
 
 - **Approved implementation:** Detach successful unchanged read-only child context from its physical checkout; retain and rehydrate the exact snapshot by default; add an explicit atomic refresh to current parent WIP or HEAD for read-only continuations; preserve writable and diagnostic-retention behavior; update lifecycle guidance and focused tests. Approved 2026-07-29.
-- **Merged change:** `ddb4db1` (implementation `cef9534`, fixes `294f30f`, `87cf855`, `4c7ebf5`); evaluation fix `4fe3984`
+- **Merged change:** `ddb4db1` (implementation `cef9534`, fixes `294f30f`, `87cf855`, `4c7ebf5`); evaluation fixes `4fe3984` and `13b857f` (implementation `5f813a3 fix(delegate): expose droppable snapshot record ids`)
 - **Resolution:** pending evaluation

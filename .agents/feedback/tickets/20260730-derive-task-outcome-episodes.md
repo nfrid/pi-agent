@@ -1,6 +1,6 @@
 # HFM-20260730: Derive task outcome episodes automatically
 
-- **Status:** approved
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-07-30
 - **Created:** 2026-07-30
 - **Source reports:** [HF-20260730: Measure end-to-end task outcomes, not only harness events](../inbox/20260730T095735Z-task-outcome-benchmark.md)
@@ -151,7 +151,7 @@ Expose per-episode privacy-safe records only behind an explicit JSON option; def
 
 ## Evaluation
 
-- **Window:** After approved implementation, the first 50 automatically derived eligible episodes spanning English and Russian, evaluated no earlier than 2026-08-20; no user recording or filing required
+- **Window:** Started 2026-07-31; the first 50 automatically derived eligible episodes spanning English and Russian, evaluated no earlier than 2026-08-20; no user recording or filing required
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 Keep only if parsing completes without privacy violations or manual repair, structural invariants hold, and at least 30% of eligible immediate follow-up reactions receive a non-`unknown` disposition while preserving every per-label historical precision threshold. The predeclared workflow comparison is failure-affected episodes versus no-failure episodes within the same structural-shape and language buckets: if the window contains at least 10 failure-affected and 20 matched no-failure episodes, report median time-to-observed-verification and revision-rate deltas. A median time increase of at least 25% or revision increase of at least 10 percentage points triggers a separate routing-reliability proposal; a smaller difference records no routing change. Revise language rules if Russian or mixed-language unknown/error rates materially exceed English after controlling for structural shape. Record `insufficient evidence` if the episode, label, language, or comparison cohort minimum is not reached. This ticket does not itself authorize route or prompt changes.
@@ -159,5 +159,5 @@ Keep only if parsing completes without privacy violations or manual repair, stru
 ## Implementation and resolution
 
 - **Approved implementation:** Option 3, automatic offline episode derivation with the boundaries, bilingual classifier, privacy constraints, validation thresholds, and evaluation window above; approved by the user on 2026-07-30
-- **Merged change:** —
+- **Merged change:** `76c6261` (implementation `e1acaf6 feat(session-metrics): derive task outcome episodes`)
 - **Resolution:** pending evaluation

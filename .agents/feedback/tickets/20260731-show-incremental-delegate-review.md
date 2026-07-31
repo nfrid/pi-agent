@@ -1,6 +1,6 @@
 # HFM-20260731: Show the unintegrated delta in delegate review
 
-- **Status:** approved
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-07-31
 - **Created:** 2026-07-31
 - **Source reports:** [HF-20260731: Follow-up delegate review cannot isolate the unmerged delta](../inbox/20260731T085515Z-delegate-incremental-review.md)
@@ -59,7 +59,7 @@ Extend delegate integration/review fixtures with ordinary and carried branches, 
 
 ## Evaluation
 
-- **Window:** After approved implementation, the first 10 post-integration continuation reviews or 2026-09-30, whichever is later
+- **Window:** Started 2026-07-31; the first 10 post-integration continuation reviews or 2026-09-30, whichever is later
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 Compare with the baseline of two repeated full reviews requiring manual Git ranges. Keep only if every qualifying review isolates the actual unintegrated delta without omitting a pending patch or attributing parent work to the delegate. Record `insufficient evidence` if fewer than 3 qualifying reviews occur.
@@ -67,5 +67,5 @@ Compare with the baseline of two repeated full reviews requiring manual Git rang
 ## Implementation and resolution
 
 - **Approved implementation:** Add an explicit incremental `delegate_branches review` selector that shows only task patches not represented in current parent HEAD, using patch identity for carried branches; preserve the existing full review as the default/audit view and do not automatically append both diffs. Approved 2026-07-31.
-- **Merged change:** —
+- **Merged change:** `2a179b1` (implementation `ba67ed8 feat(delegate): add incremental branch review`)
 - **Resolution:** pending evaluation
