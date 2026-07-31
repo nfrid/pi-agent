@@ -117,6 +117,10 @@ describe('incremental delegate review', () => {
     const full = await reviewBranch(continued);
     const incremental = await reviewBranch(continued, 'incremental');
 
+    // Updating the persisted head for a continuation remains safe after the
+    // original branch was integrated into the parent.
+    expect(full.error).toBeUndefined();
+    expect(incremental.error).toBeUndefined();
     expect(full.diff).toContain('initial task');
     expect(full.diff).toContain('continuation fix');
     expect(incremental.mode).toBe('incremental');
@@ -205,6 +209,55 @@ describe('incremental delegate review', () => {
       diff: first.diff,
     });
   });
+
+  test('bounds log and stat as well as diff in both review modes', async () => {
+    const record = await delegated({
+      name: 'Many long review entries',
+      write: (worktreePath) => {
+        for (let index = 0; index < 300; index += 1) {
+          const file = `src/${'long-path-'.repeat(12)}${index}.txt`;
+          writeFileSync(path.join(worktreePath, file), `${'x'.repeat(400)}\n`);
+          git(worktreePath, ['add', file]);
+          git(worktreePath, [
+            'commit',
+            '-qm',
+            `${'long commit subject '.repeat(12)}${index}`,
+          ]);
+        }
+      },
+    });
+    const full = await reviewBranch(record);
+    expect(full.log).toHaveLength(20_000);
+    expect(full.stat).toHaveLength(20_000);
+    expect(full.diff).toHaveLength(60_000);
+    expect(full.truncated).toBe(true);
+    expect(formatReview(record, full)).toContain('[review truncated');
+
+    expect((await mergeBranch(record)).merged).toBe(true);
+    for (let index = 0; index < 300; index += 1) {
+      const file = `src/continuation-${'long-path-'.repeat(12)}${index}.txt`;
+      writeFileSync(
+        path.join(record.worktreePath, file),
+        `${'y'.repeat(400)}\n`,
+      );
+      git(record.worktreePath, ['add', file]);
+      git(record.worktreePath, [
+        'commit',
+        '-qm',
+        `${'continuation subject '.repeat(12)}${index}`,
+      ]);
+    }
+    const continued = await finishWorktree(record.id, {
+      taskName: 'Continuation after review',
+      outcome: 'success',
+    });
+    const incremental = await reviewBranch(continued, 'incremental');
+    expect(incremental.log.length).toBeLessThanOrEqual(20_000);
+    expect(incremental.stat.length).toBeLessThanOrEqual(20_000);
+    expect(incremental.diff.length).toBeLessThanOrEqual(60_000);
+    expect(incremental.truncated).toBe(true);
+    expect(formatReview(continued, incremental)).toContain('[review truncated');
+  }, 30_000);
 });
 
 describe('merging a delegate branch', () => {
@@ -307,13 +360,13 @@ describe('merging a delegate branch', () => {
     expect(existsSync(path.join(repository, 'src', 'task.txt'))).toBe(false);
   });
 
-  test('refuses a force-moved carried branch instead of cherry-picking it', async () => {
+  test('refuses a carried reset-to-carry replacement instead of cherry-picking it', async () => {
     parentWip();
     const record = await delegated({
       write: (worktreePath) =>
         writeFileSync(path.join(worktreePath, 'src', 'task.txt'), 'task\n'),
     });
-    git(record.worktreePath, ['reset', '--hard', record.baseHead]);
+    git(record.worktreePath, ['reset', '--hard', workBase(record)]);
     writeFileSync(
       path.join(record.worktreePath, 'src', 'force-moved.txt'),
       'unrelated\n',
@@ -326,7 +379,9 @@ describe('merging a delegate branch', () => {
     const review = await reviewBranch(record);
     expect(review).toMatchObject({
       state: 'unmerged',
-      error: expect.stringMatching(/not an ancestor/),
+      error: expect.stringMatching(
+        /previously recorded head .*not an ancestor/,
+      ),
       log: '',
       stat: '',
       diff: '',
@@ -334,10 +389,70 @@ describe('merging a delegate branch', () => {
     const outcome = await mergeBranch(record);
     expect(outcome).toMatchObject({
       merged: false,
-      reason: expect.stringMatching(/not an ancestor/),
+      reason: expect.stringMatching(
+        /previously recorded head .*not an ancestor/,
+      ),
     });
     expect(git(repository, ['status', '--porcelain'])).toBe(beforeMerge);
     expect(existsSync(path.join(repository, 'src', 'force-moved.txt'))).toBe(
+      false,
+    );
+  });
+
+  test('refuses a normal reset-to-base replacement instead of merging it', async () => {
+    const record = await delegated({
+      base: 'head',
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'task.txt'), 'task\n'),
+    });
+    git(record.worktreePath, ['reset', '--hard', record.baseHead]);
+    writeFileSync(
+      path.join(record.worktreePath, 'src', 'force-moved.txt'),
+      'unrelated\n',
+    );
+    git(record.worktreePath, ['add', 'src/force-moved.txt']);
+    git(record.worktreePath, ['commit', '-m', 'force moved branch']);
+
+    expect(await branchState(record)).toBe('unmerged');
+    const review = await reviewBranch(record);
+    expect(review.error).toMatch(/previously recorded head .*not an ancestor/);
+    expect(review.log).toBe('');
+    const outcome = await mergeBranch(record);
+    expect(outcome.merged).toBe(false);
+    expect(outcome.reason).toMatch(
+      /previously recorded head .*not an ancestor/,
+    );
+    expect(existsSync(path.join(repository, 'src', 'force-moved.txt'))).toBe(
+      false,
+    );
+  });
+
+  test('refuses a reset during continuation before replacing recorded provenance', async () => {
+    const record = await delegated({
+      base: 'head',
+      write: (worktreePath) =>
+        writeFileSync(path.join(worktreePath, 'src', 'task.txt'), 'task\n'),
+    });
+    expect((await mergeBranch(record)).merged).toBe(true);
+    git(record.worktreePath, ['reset', '--hard', record.baseHead]);
+    writeFileSync(
+      path.join(record.worktreePath, 'src', 'replacement.txt'),
+      'unrelated\n',
+    );
+    const continued = await finishWorktree(record.id, {
+      taskName: 'Rewritten continuation',
+      outcome: 'success',
+    });
+
+    expect(continued.headCommit).toBe(record.headCommit);
+    expect(continued.error).toMatch(
+      /previously recorded head .*not an ancestor/,
+    );
+    expect((await reviewBranch(continued)).error).toMatch(
+      /previously recorded head .*not an ancestor/,
+    );
+    expect((await mergeBranch(continued)).merged).toBe(false);
+    expect(existsSync(path.join(repository, 'src', 'replacement.txt'))).toBe(
       false,
     );
   });
