@@ -78,6 +78,67 @@ function transcript(build) {
   return lines(values);
 }
 
+function sameTimestampBurst(calls, reaction = 'Looks good') {
+  const values = [
+    { type: 'session', id: 'session', timestamp: '2026-01-01T00:00:00.000Z' },
+    {
+      type: 'message',
+      id: 'u-1',
+      parentId: null,
+      timestamp: '2026-01-01T00:00:01.000Z',
+      message: { role: 'user', content: 'Do the work' },
+    },
+  ];
+  const assistantId = 'a-burst';
+  values.push({
+    type: 'message',
+    id: assistantId,
+    parentId: 'u-1',
+    timestamp: '2026-01-01T00:00:02.000Z',
+    message: {
+      role: 'assistant',
+      content: calls.map(({ name, args }, index) => ({
+        type: 'toolCall',
+        id: `burst-call-${index}`,
+        name,
+        arguments: args,
+      })),
+    },
+  });
+  let parentId = assistantId;
+  calls.forEach(({ name }, index) => {
+    const resultId = `burst-result-${index}`;
+    values.push({
+      type: 'message',
+      id: resultId,
+      parentId,
+      timestamp: '2026-01-01T00:00:02.000Z',
+      message: {
+        role: 'toolResult',
+        toolCallId: `burst-call-${index}`,
+        toolName: name,
+        content: 'ok',
+      },
+    });
+    parentId = resultId;
+  });
+  values.push({
+    type: 'message',
+    id: 'a-answer',
+    parentId,
+    timestamp: '2026-01-01T00:00:03.000Z',
+    message: { role: 'assistant', content: 'Done.' },
+  });
+  values.push({
+    type: 'message',
+    id: 'u-reaction',
+    parentId: 'a-answer',
+    timestamp: '2026-01-01T00:00:04.000Z',
+    message: { role: 'user', content: reaction },
+  });
+  return lines(values);
+}
+
 describe('deterministic bilingual disposition classification', () => {
   it.each([
     ['I approve this.', 'accepted'],
@@ -92,6 +153,9 @@ describe('deterministic bilingual disposition classification', () => {
     ['всё ещё не работает, исправь', 'revise'],
     ['по-хорошему это надо обсудить', 'unknown'],
     ['lgtm, коммит и пуш', 'accepted'],
+    ['The result is correct', 'accepted'],
+    ['No errors now, looks good', 'accepted'],
+    ['The result is correct, please fix it', 'revise'],
     ['Если тест упадет, исправь', 'unknown'],
     ['Не одобряю это', 'unknown'],
   ])('classifies %s as %s', (text, expected) => {
@@ -276,6 +340,157 @@ describe('retry-aware session episode facets', () => {
       disposition: 'revise',
     });
     expect(parsed.episodes[0].shape).toBe('mutation-unvalidated');
+  });
+
+  it('does not erase a failed lint with an unrelated successful test', () => {
+    const source = transcript(({ user, tool, answer }) => {
+      user('Validate the change');
+      tool('write', { path: 'src/a.ts', content: 'change' });
+      tool('bash', { command: 'npm run lint' }, { error: true });
+      tool('bash', { command: 'npm test' });
+      answer('Done.');
+    });
+    const episode = parseSessionJsonl(source, { includeEpisodes: true })
+      .episodes[0];
+    expect(episode.validation).toMatchObject({
+      status: 'failed',
+      retries: { lint: 0, test: 0 },
+    });
+  });
+
+  it('counts retries independently for every validation kind', () => {
+    const source = transcript(({ user, tool, answer }) => {
+      user('Validate all checks');
+      tool('write', { path: 'src/a.ts', content: 'change' });
+      tool('bash', { command: 'npm run lint && npm test' }, { error: true });
+      tool('bash', { command: 'npm run lint' });
+      answer('Done.');
+    });
+    const episode = parseSessionJsonl(source, { includeEpisodes: true })
+      .episodes[0];
+    expect(episode.validation).toMatchObject({
+      attempts: { lint: 2, test: 1 },
+      retries: { lint: 1, test: 0 },
+      status: 'failed',
+    });
+  });
+
+  it('requires a later explicit validation for aggregate correction', () => {
+    const before = transcript(({ user, tool, answer }) => {
+      user('Validate the change');
+      tool('write', { path: 'src/a.ts', content: 'change' });
+      tool('bash', { command: 'npm run lint' });
+      tool('bash', { command: 'npm run check' }, { error: true });
+      answer('Done.');
+    });
+    expect(
+      parseSessionJsonl(before, { includeEpisodes: true }).episodes[0]
+        .validation.aggregateToExplicitCorrection,
+    ).toBe(false);
+
+    const after = transcript(({ user, tool, answer }) => {
+      user('Validate the change');
+      tool('write', { path: 'src/a.ts', content: 'change' });
+      tool('bash', { command: 'npm run check' }, { error: true });
+      tool('bash', { command: 'npm run lint' });
+      answer('Done.');
+    });
+    expect(
+      parseSessionJsonl(after, { includeEpisodes: true }).episodes[0].validation
+        .aggregateToExplicitCorrection,
+    ).toBe(true);
+  });
+
+  it('uses call order when mutation and validation share a timestamp', () => {
+    const source = sameTimestampBurst([
+      { name: 'write', args: { path: 'src/a.ts', content: 'change' } },
+      { name: 'bash', args: { command: 'npm test' } },
+    ]);
+    expect(
+      parseSessionJsonl(source, { includeEpisodes: true }).episodes[0],
+    ).toMatchObject({
+      operational: 'inferred-settled',
+      observedVerification: true,
+      shape: 'mutation-validated',
+      mutation: { finalMutationValidated: true },
+      validation: { status: 'passed' },
+    });
+  });
+
+  it('assigns same-entry todo calls to deterministic epoch boundaries', () => {
+    const source = sameTimestampBurst([
+      {
+        name: 'todo',
+        args: {
+          action: 'replace',
+          tasks: [{ id: 'T1', status: 'todo' }],
+        },
+      },
+      { name: 'write', args: { path: 'src/a.ts', content: 'change' } },
+      { name: 'bash', args: { command: 'npm test' } },
+      { name: 'todo', args: { action: 'done', id: 'T1' } },
+      {
+        name: 'todo',
+        args: {
+          action: 'replace',
+          tasks: [{ id: 'T2', status: 'todo' }],
+        },
+      },
+    ]);
+    const episodes = parseSessionJsonl(source, {
+      includeEpisodes: true,
+    }).episodes;
+    expect(episodes.map((episode) => episode.plan)).toEqual([
+      'all-done',
+      'active-censored',
+    ]);
+    expect(episodes[0]).toMatchObject({
+      mutation: { successful: 1 },
+      validation: { attempts: { test: 1 } },
+    });
+    expect(episodes[1]).toMatchObject({
+      mutation: { successful: 0 },
+      validation: { attempts: { test: 0 } },
+    });
+  });
+
+  it('keeps delegate timeout as a failure facet after parent recovery', () => {
+    const source = transcript(({ user, tool, answer }) => {
+      user('Recover timed-out work');
+      tool('delegate', {
+        details: { runs: [{ state: 'timed-out', exitCode: 124 }] },
+      });
+      tool('write', { path: 'src/a.ts', content: 'change' });
+      tool('bash', { command: 'npm test' });
+      answer('Recovered.');
+      user('Looks good');
+    });
+    expect(
+      parseSessionJsonl(source, { includeEpisodes: true }).episodes[0],
+    ).toMatchObject({
+      operational: 'inferred-settled',
+      observedVerification: true,
+      recovery: { delegateProviderFailures: 1, reachedSettled: true },
+    });
+  });
+
+  it('separates unknown reactions from missing reactions in denominators', () => {
+    const source = transcript(({ user, tool, answer }) => {
+      user('First task');
+      tool('read', { path: 'src/a.ts' });
+      answer('Done.');
+      user('???');
+      user('Second task');
+      tool('read', { path: 'src/b.ts' });
+      answer('Done.');
+    });
+    const cohort = parseSessionJsonl(source, { includeEpisodes: true })
+      .episodeCohorts.all;
+    expect(cohort).toMatchObject({
+      unknownDisposition: 1,
+      unknownDispositionDenominator: 1,
+      missingDisposition: 1,
+    });
   });
 
   it('connects delegate/provider failure to parent recovery and verification', () => {
