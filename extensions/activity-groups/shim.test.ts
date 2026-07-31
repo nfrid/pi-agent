@@ -353,6 +353,45 @@ describe('tool sequence shim', () => {
     ]);
   });
 
+  it('does not flash grouped thinking while a preamble awaits its tool call', () => {
+    const { renderer } = recordingRenderer();
+    const h = harness();
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    const assistant = new FakeAssistant();
+    h.chat.addChild(assistant);
+    assistant.updateContent(
+      assistantMessage([
+        { type: 'thinking', thinking: 'First private step.' },
+        { type: 'thinking', thinking: 'Second private step.' },
+      ]),
+    );
+    expect(h.render()).toEqual(['group:group-1:1:live']);
+
+    // Text streams before the toolCall content block. It is temporarily plain
+    // speech, but the thinking already represented by the live group must not
+    // burst back into the transcript during that gap.
+    assistant.updateContent(
+      assistantMessage([
+        { type: 'thinking', thinking: 'First private step.' },
+        { type: 'thinking', thinking: 'Second private step.' },
+        { type: 'text', text: 'Editing the shutdown path.' },
+      ]),
+    );
+    expect(h.render()).toEqual(['assistant:Editing the shutdown path.']);
+
+    assistant.updateContent(
+      assistantMessage([
+        { type: 'thinking', thinking: 'First private step.' },
+        { type: 'thinking', thinking: 'Second private step.' },
+        { type: 'text', text: 'Editing the shutdown path.' },
+        { type: 'toolCall', id: 'edit-1', name: 'edit', arguments: {} },
+      ]),
+    );
+    h.chat.addChild(new FakeTool('edit', 'edit-1', {}));
+    expect(h.render()).toEqual(['group:group-1:2:live']);
+  });
+
   it('never revives a group that has already finished', () => {
     const { renderer } = recordingRenderer();
     const h = harness();

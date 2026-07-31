@@ -169,6 +169,16 @@ export function installToolSequenceShim(
   const now = () => host.now?.() ?? Date.now();
   const containers = new Set<ContainerLike>();
   const bindings = new Map<Component, Sequence>();
+  /**
+   * Assistants that just changed from hidden group content into speech.
+   *
+   * A preamble's text arrives before its tool-call block. In that brief gap the
+   * grouper correctly treats the message as ordinary speech, but Pi's stock
+   * renderer would also replay every thinking block that the live group had
+   * hidden. Remember the transition so the preamble can stream on its own
+   * without flashing those blocks before the tool component joins the group.
+   */
+  const hideTransitionThinking = new WeakSet<AssistantComponentLike>();
   const states = new Map<string, SequenceState>();
   let capturedUi: { requestRender(): void } | undefined;
   let dirty = true;
@@ -355,6 +365,25 @@ export function installToolSequenceShim(
     return originalAssistantRender.call(component, width);
   }
 
+  /** Render an assistant's visible speech without replaying hidden thinking. */
+  function renderWithoutThinking(
+    component: AssistantComponentLike,
+    width: number,
+  ): string[] {
+    const message = component.lastMessage;
+    if (!message) return originalAssistantRender.call(component, width);
+    const visible = {
+      ...message,
+      content: message.content.filter((content) => content.type !== 'thinking'),
+    };
+    originalUpdateContent.call(component, visible);
+    try {
+      return originalAssistantRender.call(component, width);
+    } finally {
+      originalUpdateContent.call(component, message);
+    }
+  }
+
   function stateOf(sequence: Sequence): SequenceState {
     const existing = states.get(sequence.id);
     if (existing) return existing;
@@ -450,8 +479,15 @@ export function installToolSequenceShim(
     try {
       ensureFresh();
       sequence = bindings.get(component);
-      if (!sequence || states.get(sequence.id)?.disabled)
+      if (!sequence || states.get(sequence.id)?.disabled) {
+        if (
+          isAssistant(component) &&
+          hideTransitionThinking.has(component) &&
+          host.isBusy()
+        )
+          return renderWithoutThinking(component, width);
         return originalRenderOf(component, width);
+      }
       if (sequence.leader !== component) return [];
       return renderSequence(sequence, width);
     } catch (error) {
@@ -485,7 +521,9 @@ export function installToolSequenceShim(
   ) {
     // This replaces `lastMessage`, which is where the grouper reads whether the
     // message speaks and what it narrated — so boundaries can move.
+    const wasGrouped = bindings.has(this);
     originalUpdateContent.call(this, message);
+    if (wasGrouped && speaks(this)) hideTransitionThinking.add(this);
     dirty = true;
   };
   containerProto.render = function patchedContainerRender(
