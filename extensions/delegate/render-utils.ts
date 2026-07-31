@@ -223,7 +223,8 @@ export function worktreeLines(run: DelegatedRun): string[] {
   if (!worktree) return [];
   if (worktree.snapshot)
     return [
-      `Read-only snapshot: ${worktree.workBase.slice(0, 8)} (checkout retired)`,
+      `Read-only snapshot: ${worktree.id} (checkout retired)`,
+      `Cleanup: delegate_branches drop ${worktree.id}`,
       'Continue without refresh for this exact source, or refresh wip/head for targeted verification.',
       'A refreshed continuation is not independent review; use a fresh delegate for that.',
     ];

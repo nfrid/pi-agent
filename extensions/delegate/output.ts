@@ -136,7 +136,8 @@ function prepareRun(run: DelegatedRun): PreparedRun {
   if (run.worktree) {
     if (run.worktree.snapshot) {
       lines.push(
-        `Read-only snapshot: ${run.worktree.workBase.slice(0, 8)} (checkout retired)`,
+        `Read-only snapshot: ${run.worktree.id} (checkout retired)`,
+        `Cleanup: delegate_branches drop ${run.worktree.id}`,
         `Continue: omit refresh to rehydrate this exact snapshot; use refresh wip or head for targeted verification. A refreshed continuation is not independent review; use a fresh delegate for that.`,
       );
     } else {
