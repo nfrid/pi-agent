@@ -155,6 +155,8 @@ describe('deterministic bilingual disposition classification', () => {
     ['lgtm, коммит и пуш', 'accepted'],
     ['The result is correct', 'accepted'],
     ['No errors now, looks good', 'accepted'],
+    ['No errors, but I do not approve this.', 'unknown'],
+    ['Everything is correct.', 'unknown'],
     ['The result is correct, please fix it', 'revise'],
     ['Если тест упадет, исправь', 'unknown'],
     ['Не одобряю это', 'unknown'],
@@ -451,6 +453,27 @@ describe('retry-aware session episode facets', () => {
     expect(episodes[1]).toMatchObject({
       mutation: { successful: 0 },
       validation: { attempts: { test: 0 } },
+    });
+  });
+
+  it('does not settle timeout followed only by another failed delegate', () => {
+    const source = transcript(({ user, tool, answer }) => {
+      user('Recover timed-out work');
+      tool('delegate', {
+        details: { runs: [{ state: 'timed-out', exitCode: 124 }] },
+      });
+      tool(
+        'delegate',
+        { details: { runs: [{ state: 'error', exitCode: 1 }] } },
+        { error: true },
+      );
+      answer('Unable to recover.');
+    });
+    expect(
+      parseSessionJsonl(source, { includeEpisodes: true }).episodes[0],
+    ).toMatchObject({
+      operational: 'timed-out',
+      recovery: { delegateProviderFailures: 2, reachedSettled: false },
     });
   });
 

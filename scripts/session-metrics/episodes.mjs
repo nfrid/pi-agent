@@ -189,7 +189,7 @@ function hasNegation(text) {
 
 function hasRevisionCue(text) {
   return (
-    /\b(?:still|yet|again|error|errors|failed|failure|bug|broken|regression|wrong|fix|fixes|fixed|correct|correction|amend|amended|revert|rollback|retry|repair|doesn't work|not working|does not work|fails|failing)\b/.test(
+    /\b(?:still|yet|again|error|errors|failed|failure|bug|broken|regression|wrong|fix|fixes|fixed|correction|amend|amended|revert|rollback|retry|repair|doesn't work|not working|does not work|fails|failing)\b/.test(
       text,
     ) ||
     /(?:все еще|все еше|по-прежнему|ошибк\w*|не работает|слом\w*|исправ\w*|почин\w*|поправ\w*|передел\w*|откат\w*|регресс\w*)/.test(
@@ -213,6 +213,14 @@ function hasExplicitCorrection(text) {
 function hasPositiveVerificationCue(text) {
   return /\b(?:the\s+result\s+is\s+correct|no\s+errors?(?:\s+now)?|looks\s+good)\b/.test(
     text,
+  );
+}
+
+function hasExplicitApprovalNegation(text) {
+  return (
+    /\b(?:do not|don't|cannot|can't|never)\s+(?:approve|accept|agree)\b/.test(
+      text,
+    ) || /(?:^|\s)не\s+(?:одобр|принима|соглас)/.test(text)
   );
 }
 
@@ -283,9 +291,11 @@ export function classifyDispositionDetail(input) {
     return { disposition: 'revise', language };
 
   const negated = hasNegation(text);
+  const explicitApprovalNegation = hasExplicitApprovalNegation(text);
   if (
     !question &&
     !conditional &&
+    !explicitApprovalNegation &&
     (!negated || positiveVerification) &&
     (hasAcceptanceCue(text) || positiveVerification)
   )
@@ -1196,8 +1206,27 @@ function deriveEpisodeRecord(entries, epoch, context) {
     : 0;
   // A timed-out child remains visible in recovery failures, but successful
   // parent work and a terminal response settle the episode operationally.
+  const successfulParentToolCalls = firstFailure
+    ? calls.filter((call) => {
+        if (
+          TOOL_BASE(call.name) === 'delegate' ||
+          TOOL_BASE(call.name) === 'todo'
+        )
+          return false;
+        if (
+          firstFailureCall
+            ? !callAfter(call, firstFailureCall)
+            : call.entryIndex <= firstFailure.index
+        )
+          return false;
+        return successfulResult(results.get(call.id));
+      })
+    : [];
   const recoveredAfterDelegateFailure = Boolean(
-    firstFailure && terminalResponse && parentToolCalls > 0 && !unresolved,
+    firstFailure &&
+      terminalResponse &&
+      successfulParentToolCalls.length > 0 &&
+      !unresolved,
   );
   const operational = recoveredAfterDelegateFailure
     ? 'inferred-settled'
