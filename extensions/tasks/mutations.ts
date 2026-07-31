@@ -4,6 +4,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import {
   findTask,
+  missingDeps,
   newId,
   normalizeId,
   normalizeIds,
@@ -264,6 +265,11 @@ function mutateUnsafe(
     forgetCompletedHide(store, [task.id]);
     task.status = 'done';
   } else if (action === 'start') {
+    const blockers = missingDeps(store, task);
+    if (blockers.length) {
+      const message = `cannot start ${task.id}; waiting on ${blockers.join(', ')}`;
+      return { changed: false, message, error: message };
+    }
     forgetCompletedHide(store, [task.id]);
     task.status = 'doing';
   } else if (action === 'block') {

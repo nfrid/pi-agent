@@ -274,6 +274,97 @@ describe('atomic todo mutations', () => {
     expect(other.state.tasks[0]?.text).toBe('second');
   });
 
+  it('rejects a direct start with every unfinished dependency named', () => {
+    expect(
+      mutate(store, 'replace', {
+        action: 'replace',
+        tasks: [
+          { id: 'T1', text: 'first', status: 'doing' },
+          { id: 'T2', text: 'second', status: 'todo' },
+          { id: 'T3', text: 'third', depends_on: ['T1', 'T2'] },
+        ],
+      }),
+    ).toMatchObject({ changed: true });
+    const before = cloneState(store);
+
+    const result = mutate(store, 'start', { action: 'start', id: 'T3' });
+
+    expect(result).toEqual({
+      changed: false,
+      message: 'cannot start T3; waiting on T1, T2',
+      error: 'cannot start T3; waiting on T1, T2',
+    });
+    expect(cloneState(store)).toEqual(before);
+  });
+
+  it('starts a task after every dependency is done', () => {
+    mutate(store, 'replace', {
+      action: 'replace',
+      tasks: [
+        { id: 'T1', text: 'prerequisite', status: 'done' },
+        { id: 'T2', text: 'dependent', depends_on: ['T1'] },
+      ],
+    });
+
+    expect(mutate(store, 'start', { action: 'start', id: 'T2' })).toEqual({
+      changed: true,
+      message: 'start T2',
+    });
+    expect(store.state.tasks.find((task) => task.id === 'T2')?.status).toBe(
+      'doing',
+    );
+  });
+
+  it('keeps a dropped dependency from satisfying start', () => {
+    mutate(store, 'replace', {
+      action: 'replace',
+      tasks: [
+        { id: 'T1', text: 'dropped', status: 'dropped' },
+        { id: 'T2', text: 'dependent', depends_on: ['T1'] },
+      ],
+    });
+
+    const result = mutate(store, 'start', { action: 'start', id: 'T2' });
+
+    expect(result.error).toBe('cannot start T2; waiting on T1');
+    expect(store.state.tasks.find((task) => task.id === 'T2')?.status).toBe(
+      'todo',
+    );
+  });
+
+  it('starts tasks without dependencies', () => {
+    expect(
+      mutate(store, 'add', { action: 'add', id: 'T1', text: 'independent' }),
+    ).toMatchObject({ changed: true });
+
+    expect(mutate(store, 'start', { action: 'start', id: 'T1' })).toEqual({
+      changed: true,
+      message: 'start T1',
+    });
+  });
+
+  it('rolls back earlier batch operations when start has blockers', () => {
+    mutate(store, 'replace', {
+      action: 'replace',
+      tasks: [
+        { id: 'T1', text: 'prerequisite' },
+        { id: 'T2', text: 'dependent', depends_on: ['T1'] },
+      ],
+    });
+    const before = cloneState(store);
+
+    const result = mutateBatch(store, [
+      { action: 'update', id: 'T1', text: 'changed before failure' },
+      { action: 'start', id: 'T2' },
+    ]);
+
+    expect(result).toMatchObject({
+      changed: false,
+      error: 'cannot start T2; waiting on T1',
+    });
+    expect(cloneState(store)).toEqual(before);
+  });
+
   it('rolls back fields changed before invalid dependency validation', () => {
     expect(
       mutate(store, 'add', { action: 'add', id: 'T1', text: 'original' }),
