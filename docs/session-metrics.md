@@ -28,3 +28,60 @@ Other ratios are `cacheHitRatio`, `delegateHandoffBytesPerTask`, `delegateTrunca
 Output omits paths, prompts, tool arguments/results, task text, handoff bodies, and compaction summaries. Short session hashes are local correlation IDs, not anonymity guarantees. Provider usage is reported as recorded; elapsed time is the active-ancestry wall-clock span.
 
 Metrics describe observed cost and reporting, not correctness. Compare cohorts only when task shapes are comparable.
+
+## Task outcome episodes
+
+The schema is `session-metrics/v7`. In addition to the existing metrics, every
+session has an aggregate `episodeCohorts` object with `all`, `byShape`, and
+`byLanguage` buckets. Shapes are only tool-pattern observations:
+`analysis-only`, `mutation-unvalidated`, `mutation-validated`, `operations`,
+and `other`. Language buckets are `english`, `russian`, `mixed`, and
+`unknown`; a missing immediate reaction remains unknown rather than being
+inferred from task text.
+
+Episodes are derived only from the active ancestry. A persisted todo epoch
+starts when unfinished work appears and remains open through steering and
+follow-up turns. `done`, `dropped`, `blocked`, `replace`, `remove`, and
+`clear_done` have distinct handling: only `all-done` is plan completion;
+`dropped-only`, `mixed-terminal`, `superseded`, and `removed` are not
+completion. A blocked or unfinished leaf is observation-censored. Sessions
+without a reconstructable todo state use a no-todo agent-run fallback; it
+reports `absent` or `unavailable`, never a fabricated plan result. Terminal
+assistant text is evidence for `inferred-settled`; a tool-use tail is
+`censored`.
+
+Validation facets count attempts and retries independently for lint, test,
+typecheck, format, and aggregate check. A successful validation before a later
+successful mutation is `stale-after-later-mutation`. Commit, amend, merge, and
+push attempts are correlated with their results. Delegate/provider failures
+remain separate from parent recovery effort, which counts later parent turns
+and tool calls and may connect to inferred settlement or observed verification.
+These are operational proxies, not semantic correctness judgements.
+
+Disposition classification is local and deterministic. Only the immediate
+next active-ancestry user turn is considered; inquiry or ambiguous turns are
+never skipped. Rules support English, Russian, and mixed messages with
+`revise` taking precedence over acceptance, then `accepted`, `advance`,
+`inquiry`, `new-task`, and `unknown`. Phrase shape, negation, interrogatives,
+and conditionals prevent traps such as approval questions, `по-хорошему`, and
+conditional future failures from becoming approval or advancement.
+
+Per-episode records are intentionally opt-in:
+
+```bash
+npm run session:metrics -- summarize ~/.pi/agent/sessions --episodes
+npm run session:metrics -- compare --baseline ./before --comparison ./after --episodes
+```
+
+Without `--episodes`, output is aggregate-only. With it, each session includes
+an `episodes` array identified only by a one-based per-export `ordinal`. Records
+contain bounded enums, counts, durations, booleans, language buckets, and
+missing/unknown denominators. They do not contain prompts, task or user text,
+paths, filenames, tool arguments/results, commands, branches, remotes,
+transcript bodies, ticket IDs, or new stable identifiers. The existing
+documented top-level local `sessionId` is unchanged and is not an episode ID.
+
+This is offline derivation from existing JSONL; it adds no runtime event stream,
+form, prompt, model judge, or external classifier. Historical two-reviewer
+holdout evidence and the post-implementation 50-episode evaluation remain
+pending; this implementation does not fabricate those results.
