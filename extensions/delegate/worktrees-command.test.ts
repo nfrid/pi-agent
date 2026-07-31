@@ -70,7 +70,7 @@ test('show gives continuation and drop guidance for retired snapshots', async ()
   await handler(record.id, ctx);
 
   expect(message).toContain('Read-only snapshot:');
-  expect(message).toContain('Drop:');
+  expect(message).toContain(`Cleanup: delegate_branches drop ${record.id}`);
   expect(message).not.toContain('delegate_branches review');
   expect(message).not.toContain('delegate_branches merge');
 });

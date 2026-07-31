@@ -140,14 +140,20 @@ describe('delegate_branches', () => {
     const review = body(
       await tool.execute('c1', { action: 'review', id: record.id }),
     );
-    expect(review).toContain('Read-only snapshot:');
+    expect(review).toContain(`Read-only snapshot: ${record.id}`);
+    expect(review).toContain(`Cleanup: delegate_branches drop ${record.id}`);
+    expect(review).not.toContain('abc123');
     expect(review).toContain('Continue');
     expect(review).not.toContain('Branch:');
     await expect(
       tool.execute('c2', { action: 'merge', id: record.id }),
     ).rejects.toThrow(/not integration work/);
+    const displayedId = review.match(
+      /Cleanup: delegate_branches drop ([^\s]+)/,
+    )?.[1];
+    expect(displayedId).toBe(record.id);
     expect(
-      body(await tool.execute('c3', { action: 'drop', id: record.id })),
+      body(await tool.execute('c3', { action: 'drop', id: displayedId })),
     ).toContain('Dropped');
   });
 

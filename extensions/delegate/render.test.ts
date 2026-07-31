@@ -35,9 +35,14 @@ describe('render', () => {
         },
       }),
     );
-    expect(lines.join('\n')).toContain('Read-only snapshot');
+    expect(lines.join('\n')).toContain(
+      'Read-only snapshot: 11111111-1111-1111-1111-111111111111 (checkout retired)',
+    );
+    expect(lines.join('\n')).toContain(
+      'Cleanup: delegate_branches drop 11111111-1111-1111-1111-111111111111',
+    );
     expect(lines.join('\n')).toContain('fresh delegate');
-    expect(lines.join('\n')).not.toContain('delegate_branches');
+    expect(lines.join('\n')).not.toContain('abc123de (checkout retired)');
   });
 
   test('renders catalog routes', () => {

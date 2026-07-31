@@ -164,9 +164,15 @@ describe('output', () => {
       }),
     ]);
 
-    expect(handoff).toContain('Read-only snapshot:');
+    expect(handoff).toContain(
+      'Read-only snapshot: 11111111-1111-1111-1111-111111111111 (checkout retired)',
+    );
+    expect(handoff).toContain(
+      'Cleanup: delegate_branches drop 11111111-1111-1111-1111-111111111111',
+    );
     expect(handoff).toContain('refresh wip or head');
     expect(handoff).toContain('fresh delegate');
+    expect(handoff).not.toContain('abc123de (checkout retired)');
     expect(handoff).not.toContain('Integrate with:');
     expect(handoff).not.toContain('Branch: pi/audit-a1b2');
   });

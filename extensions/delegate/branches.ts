@@ -61,10 +61,10 @@ export function formatBranchLine({ record, state }: BranchEntry): string {
 
 export function snapshotGuidance(record: WorktreeRecord): string {
   return [
-    `Read-only snapshot: ${workBase(record).slice(0, 12)} (checkout retired)`,
+    `Read-only snapshot: ${record.id} (checkout retired)`,
+    `Cleanup: delegate_branches drop ${record.id}`,
     'Continue with its continuation token without refresh to rehydrate this exact source.',
     'Use refresh wip or head only for targeted verification; it is not independent review.',
-    `Drop: delegate_branches drop ${record.id}`,
   ].join('\n');
 }
 
