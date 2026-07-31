@@ -189,7 +189,7 @@ function hasNegation(text) {
 
 function hasRevisionCue(text) {
   return (
-    /\b(?:still|yet|again|error|errors|failed|failure|bug|broken|regression|wrong|fix|fixes|fixed|correction|amend|amended|revert|rollback|retry|repair|doesn't work|not working|does not work|fails|failing)\b/.test(
+    /\b(?:still|yet|again|(?<!no )errors?|failed|failure|bug|broken|regression|wrong|correction|amend|amended|revert|rollback|retry|repair|doesn't work|not working|does not work|fails|failing)\b/.test(
       text,
     ) ||
     /(?:все еще|все еше|по-прежнему|ошибк\w*|не работает|слом\w*|исправ\w*|почин\w*|поправ\w*|передел\w*|откат\w*|регресс\w*)/.test(
@@ -200,7 +200,9 @@ function hasRevisionCue(text) {
 
 function hasExplicitCorrection(text) {
   return (
-    /\b(?:please\s+)?(?:fix|repair|amend|revert|rollback|retry)\b/.test(text) ||
+    /\b(?:please\s+)?(?:fix|repair|amend|revert|rollback|retry)\s+(?:it|this|that|the\s+(?:result|change|changes|implementation|code|error|errors|bug|issue))\b/.test(
+      text,
+    ) ||
     /\b(?:please\s+)?correct\s+(?:it|this|that|the\s+(?:result|change|changes|implementation|code|error|errors|bug|issue))\b/.test(
       text,
     ) ||
@@ -211,8 +213,21 @@ function hasExplicitCorrection(text) {
 }
 
 function hasPositiveVerificationCue(text) {
-  return /\b(?:the\s+result\s+is\s+correct|no\s+errors?(?:\s+now)?|looks\s+good)\b/.test(
-    text,
+  return (
+    /\b(?:the\s+result\s+is\s+correct|no\s+errors?(?:\s+now)?|looks\s+good)\b/.test(
+      text,
+    ) ||
+    /\b(?:(?:the|this|that|your|a)\s+)?(?:fix|solution|change|implementation|code)\s+(?:is\s+(?:correct|right|working|successful)|works?(?:\s+(?:correctly|well|as\s+expected))?|worked(?:\s+as\s+expected)?)\b/.test(
+      text,
+    )
+  );
+}
+
+function hasDisagreementCue(text) {
+  return (
+    /\b(?:reject|rejects|rejected|disagree|disagrees|disagreed|disagreement|object)\b/.test(
+      text,
+    ) || /(?:^|\s)не\s+(?:одобр|принима|соглас)/.test(text)
   );
 }
 
@@ -274,13 +289,7 @@ export function classifyDispositionDetail(input) {
   const conditional = isConditional(text);
   const explicitCorrection = hasExplicitCorrection(text);
   const positiveVerification = hasPositiveVerificationCue(text);
-  const revision =
-    explicitCorrection ||
-    (hasRevisionCue(text) &&
-      (!positiveVerification ||
-        /\b(?:still|yet|again|failed|failure|bug|broken|regression|wrong|fix|fixes|fixed|correction|amend|amended|revert|rollback|retry|repair|doesn't work|not working|does not work|fails|failing)\b/.test(
-          text,
-        )));
+  const revision = explicitCorrection || hasRevisionCue(text);
   // A confirmed correction remains a correction even when it is phrased as a
   // request. Conditional future failures are not confirmed failures.
   if (
@@ -292,10 +301,12 @@ export function classifyDispositionDetail(input) {
 
   const negated = hasNegation(text);
   const explicitApprovalNegation = hasExplicitApprovalNegation(text);
+  const disagreement = hasDisagreementCue(text);
   if (
     !question &&
     !conditional &&
     !explicitApprovalNegation &&
+    !disagreement &&
     (!negated || positiveVerification) &&
     (hasAcceptanceCue(text) || positiveVerification)
   )
