@@ -1,6 +1,6 @@
 # HF-20260730: Long-running custom tools lack a reusable background handoff
 
-- **Status:** triaged
+- **Status:** parked
 - **Observed date:** 2026-07-30
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Add a slow external-model consultation capability that should be rare, cancellable, and able to finish while Pi continues other work.

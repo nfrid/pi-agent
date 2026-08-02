@@ -1,9 +1,10 @@
 # HFM-20260730: Reuse the background lifecycle for custom tools
 
-- **Status:** proposed
+- **Status:** parked
 - **Approval:** not approved
 - **Created:** 2026-07-30
 - **Source reports:** [HF-20260730: Long-running custom tools lack a reusable background handoff](../inbox/20260730T092940Z-custom-tools-lack-background-handoff.md)
+- **Decision:** Parked 2026-08-02 until a new typed custom tool has a concrete background-mode requirement; the current skill-driven background path is sufficient
 
 <!-- Proposal and implementation approval are separate decisions. A proposed ticket does not authorize implementation. -->
 
@@ -42,9 +43,9 @@ If local custom tools can submit a structured executable request to the existing
 
 ## Recommendation
 
-Prototype option 3 behind a narrow internal API shared by harness extensions. Refactor process start so the existing generic background tool can retain shell mode while trusted custom tools submit executable and argument arrays without shell interpolation. Keep one `BackgroundManager` instance and one completion path; do not create a generic task framework. Document the handoff point: once registration returns a job ID, the background manager owns cancellation and settlement, while pre-registration aborts remain owned by the calling tool.
+Keep option 1 and park the broker. Reconsider option 3 when a new typed custom tool has a concrete need to return before a long-running operation settles and the generic skill/background-command path would materially lose validation, safety, or usability. Use that real integration as the representative fixture and acceptance case rather than building a broker speculatively.
 
-If the required coupling cannot survive extension reload and shutdown without duplicate managers or lost completions, stop and park for option 4 rather than broadening the local runtime architecture.
+If reconsidered, retain the narrow structured executable/args/cwd/title contract, one `BackgroundManager`, and the ownership boundary described above. If the required coupling cannot survive extension reload and shutdown without duplicate managers or lost completions, stop and wait for a Pi-native API rather than broadening the local runtime architecture.
 
 ## Scope
 
