@@ -200,9 +200,13 @@ export function reconcileLiveEvent(entries: readonly unknown[], event: Dashboard
   const nestedReplacement = isMessage
     ? { type: 'message', message: payload }
     : { ...tool, type: 'toolCall', name: tool.toolName ?? tool.name ?? 'tool', arguments: tool.arguments ?? tool.args };
+  const toolWrapper = { type: 'tool', tool: { ...tool, name: tool.toolName ?? tool.name } };
   const found = entries.some((entry) => containsStableId(entry, id));
-  if (found) return entries.map((entry) => replaceStable(entry, id, nestedReplacement));
-  return [...entries, isMessage ? nestedReplacement : { type: 'tool', tool: { ...tool, name: tool.toolName ?? tool.name } }];
+  if (found) return entries.map((entry) => {
+    if (!isMessage && entry && typeof entry === 'object' && (entry as Record<string, unknown>).type === 'tool' && containsStableId(entry, id)) return toolWrapper;
+    return replaceStable(entry, id, nestedReplacement);
+  });
+  return [...entries, isMessage ? nestedReplacement : toolWrapper];
 }
 
 function SessionView({ id, snapshot, lastEvent, reconnectNonce }: { id: string; snapshot: BrowserSnapshot; lastEvent?: DashboardEvent; reconnectNonce: number }) {

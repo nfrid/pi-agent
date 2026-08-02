@@ -19,6 +19,9 @@ describe('active transcript reconciliation', () => {
     const appended = reconcileLiveEvent(updated, { type: 'tool.started', sessionId: 's1', tool: { toolCallId: 't2', toolName: 'bash', args: { command: 'pwd' } } }, 's1');
     expect(appended).toHaveLength(2);
     expect(JSON.stringify(appended[1])).toContain('"name":"bash"');
+    const finished = reconcileLiveEvent(appended, { type: 'tool.finished', sessionId: 's1', tool: { toolCallId: 't2', toolName: 'bash', result: 'ok' } }, 's1');
+    expect(finished).toHaveLength(2);
+    expect(finished[1]).toMatchObject({ type: 'tool', tool: { name: 'bash', result: 'ok' } });
   });
 
   it('ignores events from the previous session', () => {
