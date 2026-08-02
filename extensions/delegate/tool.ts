@@ -94,7 +94,7 @@ const NameSchema = Type.String({
   minLength: 1,
   maxLength: 120,
   description:
-    'Short human-readable subagent name shown in status UI, such as "Phase 5 review" or "Audit for regressions".',
+    'Required for fresh batch items; valid new-format continuation items inherit it when omitted. Short human-readable subagent name shown in status UI, such as "Phase 5 review" or "Audit for regressions".',
 });
 
 const TaskItem = Type.Object({
@@ -195,7 +195,7 @@ export function registerDelegateTool(
     name: 'delegate',
     label: 'Delegate',
     description:
-      'Delegate work to child Pi processes with their own context. Fresh tasks need one exact catalog route; continuations reuse persisted route, write capability, and isolation when omitted. Fresh writable tasks default to an isolated git worktree; fresh read-only tasks default to the shared checkout, or may explicitly use a worktree snapshot. Writable shared tasks are rejected. Use handoffFrom with a prior delegate-output artifact handle when a new child deliberately needs exact upstream evidence; the bytes stay out of the parent-visible result. Set background true for independent work that should complete asynchronously.',
+      'Delegate work to child Pi processes with their own context. Fresh tasks and fresh batch items require a name; continuations with persisted names may omit it. Fresh tasks need one exact catalog route; continuations reuse persisted route, write capability, and isolation when omitted. Fresh writable tasks default to an isolated git worktree; fresh read-only tasks default to the shared checkout, or may explicitly use a worktree snapshot. Writable shared tasks are rejected. Use handoffFrom with a prior delegate-output artifact handle when a new child deliberately needs exact upstream evidence; the bytes stay out of the parent-visible result. Set background true for independent work that should complete asynchronously.',
     promptSnippet:
       'Hand a child implementation, exploration, review, validation, or independent parallel work whenever a subagent would save your own context.',
     promptGuidelines: delegatePromptGuidelines(cwd, promptConfig),
