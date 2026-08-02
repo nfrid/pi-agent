@@ -40,7 +40,12 @@ import {
 } from './session';
 import { delegatePromptGuidelines } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
-import { createRun, getFinalAssistantText, getRunState } from './types';
+import {
+  createRun,
+  getFinalAssistantText,
+  getRunState,
+  normalizeDelegateRun,
+} from './types';
 
 const assistantMessage = {
   role: 'assistant',
@@ -739,8 +744,9 @@ describe('delegate', () => {
       allowWrites: true,
     });
     expect(getRunState(run)).toBe('queued');
-    expect(getRunState({ ...run, state: undefined, exitCode: 124 })).toBe(
-      'timed-out',
-    );
+    expect(getRunState({ ...run, exitCode: 124 })).toBe('queued');
+    expect(
+      normalizeDelegateRun({ ...run, state: undefined, exitCode: 124 }),
+    ).toMatchObject({ state: 'timed-out', exitCode: 124 });
   });
 });

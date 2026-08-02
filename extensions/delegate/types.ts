@@ -99,7 +99,8 @@ export interface DelegatedRun extends DelegateRunMetadata {
   model?: string;
   routing?: DelegateRouteState;
   activities: DelegatedActivity[];
-  state?: DelegateRunState;
+  /** Canonical lifecycle state for every current/internal run. */
+  state: DelegateRunState;
   queuedAt?: number;
   startedAt?: number;
   finishedAt?: number;
@@ -109,6 +110,19 @@ export interface DelegateDetails {
   mode: 'single' | 'parallel';
   runs: DelegatedRun[];
 }
+
+/**
+ * Tool details written before lifecycle state became canonical. Keep this
+ * shape at the loading/rendering boundary only; current code uses
+ * DelegatedRun with a required state.
+ */
+export type LegacyDelegatedRun = Omit<DelegatedRun, 'state'> & {
+  state?: DelegateRunState;
+};
+
+export type LegacyDelegateDetails = Omit<DelegateDetails, 'runs'> & {
+  runs: LegacyDelegatedRun[];
+};
 
 export function emptyUsage(): UsageStats {
   return {
@@ -142,18 +156,49 @@ export function createRun(
   };
 }
 
+/** Return the canonical state; diagnostics never replace it. */
 export function getRunState(run: DelegatedRun): DelegateRunState {
+  return run.state;
+}
+
+export function isRunError(run: DelegatedRun): boolean {
+  return (
+    run.state === 'error' ||
+    run.state === 'aborted' ||
+    run.state === 'timed-out'
+  );
+}
+
+function inferLegacyRunState(run: LegacyDelegatedRun): DelegateRunState {
   if (run.state) return run.state;
   if (run.exitCode === -1) return 'running';
   if (run.stopReason === 'aborted') return 'aborted';
   if (run.exitCode === 124) return 'timed-out';
-  return isRunError(run) ? 'error' : 'success';
+  if (
+    run.stopReason === 'error' ||
+    run.stopReason === 'aborted' ||
+    run.exitCode !== 0 ||
+    !getFinalAssistantText(run.messages).trim()
+  )
+    return 'error';
+  return 'success';
 }
 
-export function isRunError(run: DelegatedRun): boolean {
-  if (run.exitCode === -1) return false;
-  if (run.stopReason === 'error' || run.stopReason === 'aborted') return true;
-  return run.exitCode !== 0 || !getFinalAssistantText(run.messages).trim();
+/** Normalize old persisted tool details before they enter current code. */
+export function normalizeDelegateRun(run: LegacyDelegatedRun): DelegatedRun {
+  return run.state
+    ? (run as DelegatedRun)
+    : { ...run, state: inferLegacyRunState(run) };
+}
+
+export function normalizeDelegateDetails(
+  details: LegacyDelegateDetails,
+): DelegateDetails {
+  if (details.runs.every((run) => run.state)) return details as DelegateDetails;
+  return {
+    ...details,
+    runs: details.runs.map(normalizeDelegateRun),
+  };
 }
 
 /**

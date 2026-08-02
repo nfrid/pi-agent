@@ -16,6 +16,8 @@ import {
   type DelegatedRun,
   type DelegateRunState,
   getRunState,
+  type LegacyDelegateDetails,
+  normalizeDelegateDetails,
 } from './types';
 
 export const TASK_PREVIEW_CHARS = 220;
@@ -31,7 +33,8 @@ export type ThemeLike = {
 
 export type ToolResultLike = {
   content?: unknown;
-  details?: DelegateDetails;
+  /** Host-rendered results may still contain pre-state persisted details. */
+  details?: LegacyDelegateDetails;
 };
 
 export type DelegateCallTask = {
@@ -389,7 +392,9 @@ export function currentActivityLines(
 export function getDetails(
   toolResult: ToolResultLike,
 ): DelegateDetails | undefined {
-  return toolResult.details;
+  return toolResult.details
+    ? normalizeDelegateDetails(toolResult.details)
+    : undefined;
 }
 
 export function fallbackText(toolResult: ToolResultLike): string {

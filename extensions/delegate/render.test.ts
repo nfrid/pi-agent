@@ -18,6 +18,19 @@ const assistantMessage = {
 };
 
 describe('render', () => {
+  test('normalizes legacy result state before rendering', () => {
+    const run = createRun('legacy result');
+    const legacyRun = { ...run, state: undefined, exitCode: 124 };
+    const output = renderDelegateResult(
+      { details: { mode: 'single', runs: [legacyRun] } },
+      { expanded: false },
+      theme,
+    )
+      .render(200)
+      .join('\n');
+    expect(output).toContain('timed out');
+  });
+
   test('renders retired read-only snapshots without branch actions', () => {
     const lines = worktreeLines(
       createRun('audit', undefined, {

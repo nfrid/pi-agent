@@ -1,4 +1,4 @@
-import { type DelegatedRun, isRunError } from './types';
+import { type DelegatedRun, type DelegateRunState, isRunError } from './types';
 
 export function invalidParams(message: string): never {
   throw new Error(message);
@@ -22,9 +22,10 @@ export function throwIfAllRunsFailed(
   runs: DelegatedRun[],
   handoff: string,
 ): void {
+  const unsettled: DelegateRunState[] = ['queued', 'running'];
   if (
     runs.length > 0 &&
-    runs.every((run) => run.exitCode !== -1 && isRunError(run))
+    runs.every((run) => !unsettled.includes(run.state) && isRunError(run))
   )
     throw new Error(handoff);
 }
