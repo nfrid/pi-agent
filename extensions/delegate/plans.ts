@@ -7,7 +7,7 @@ import {
 } from './param-errors';
 import { DELEGATE_HANDOFF_PROMPT_SUFFIX } from './prompt';
 import { mergeDelegateRouteRequest, writeWarnings } from './routing-warnings';
-import { resolveDelegateSession } from './session';
+import { type DelegateSession, resolveDelegateSession } from './session';
 import {
   type ContinuationPreflight,
   type DelegateTaskPlan,
@@ -59,10 +59,33 @@ interface SharedDefaults {
   handoffFrom?: DelegateHandoffInput;
 }
 
+interface DerivedTask {
+  input: TaskInput;
+  resumed?: DelegateSession;
+  routing?: DelegateTaskPlan['routing'];
+  routingError?: string;
+  context: DelegateTaskPlan['context'];
+  requestedCwd: string;
+  scope?: string[];
+  writeRequestExplicit: boolean;
+  writeRequested: boolean;
+  isolationExplicit: boolean;
+  isolation: DelegateTaskPlan['isolation'];
+  warnings: string[];
+}
+
+type NamedDerivedTask = Omit<DerivedTask, 'input'> & {
+  input: NamedTaskInput;
+};
+
+export interface BuiltDelegateTask {
+  plan: DelegateTaskPlan;
+  preflight: ContinuationPreflight;
+}
+
 export interface BuiltDelegatePlans {
   parallel: boolean;
-  plans: DelegateTaskPlan[];
-  preflights: ContinuationPreflight[];
+  tasks: BuiltDelegateTask[];
 }
 
 function errorText(error: unknown): string {
@@ -103,6 +126,18 @@ function normalizeInputs(params: DelegateParams): {
 } {
   const parallel = Array.isArray(params.tasks) && params.tasks.length > 0;
   if (parallel) {
+    const shared: SharedDefaults = {
+      cwd: params.cwd,
+      route: params.route,
+      context: params.context,
+      contextNote: params.contextNote,
+      scope: params.scope,
+      allowWrites: params.allowWrites,
+      isolation: params.isolation,
+      from: params.from,
+      refresh: params.refresh,
+      handoffFrom: params.handoffFrom,
+    };
     const inputs = (params.tasks ?? [])
       .map((item) => ({
         ...item,
@@ -112,32 +147,16 @@ function normalizeInputs(params: DelegateParams): {
       .filter((item) => item.task);
     if (!inputs.length)
       invalidParams('Parallel delegation requires a non-empty task.');
-    return {
-      parallel: true,
-      inputs,
-      shared: {
-        cwd: params.cwd,
-        route: params.route,
-        context: params.context,
-        contextNote: params.contextNote,
-        scope: params.scope,
-        allowWrites: params.allowWrites,
-        isolation: params.isolation,
-        from: params.from,
-        refresh: params.refresh,
-        handoffFrom: params.handoffFrom,
-      },
-    };
+    return { parallel: true, inputs, shared };
   }
 
   const task = params.task?.trim();
   if (!task) invalidParams('Delegate task is required.');
-  const name = params.name?.trim();
   return {
     parallel: false,
     inputs: [
       {
-        name,
+        name: params.name?.trim(),
         task,
         cwd: params.cwd,
         route: params.route,
@@ -175,28 +194,46 @@ export function buildDelegatePlans(
       );
   }
 
-  const resumed = unnamedInputs.map((item) => {
+  // Every subsequent derivation operates on this task object. This keeps the
+  // input, continuation, route, capability, plan, and preflight together.
+  let tasks: DerivedTask[] = unnamedInputs.map((input) => ({
+    input,
+    context: 'fresh',
+    requestedCwd: ctx.cwd,
+    writeRequestExplicit: false,
+    writeRequested: false,
+    isolationExplicit: false,
+    isolation: 'shared',
+    warnings: [],
+  }));
+
+  tasks = tasks.map((task) => {
+    const { input } = task;
     assertContinuationFields(
-      item.continuation,
-      item,
+      input.continuation,
+      input,
       parallel
         ? 'A continuation task cannot replace cwd, context, scope, or base.'
         : 'A continuation reuses its original cwd, context, scope, and base; do not provide replacements.',
     );
-    const session = item.continuation
-      ? resolveDelegateSession(item.continuation)
+    const resumed = input.continuation
+      ? resolveDelegateSession(input.continuation)
       : undefined;
-    if (item.continuation && !session)
+    if (input.continuation && !resumed)
       invalidParams('Unknown or expired delegate continuation token.');
-    return session;
+    return { ...task, resumed: resumed ?? undefined };
   });
-  assertDistinctContinuationTokens(resumed.map((session) => session?.token));
+  assertDistinctContinuationTokens(tasks.map((task) => task.resumed?.token));
 
-  const inputs: NamedTaskInput[] = unnamedInputs.map((item, index) => {
-    if (item.name) return item as NamedTaskInput;
-    const inheritedName = resumed[index]?.name;
-    if (inheritedName) return { ...item, name: inheritedName };
-    if (resumed[index])
+  let namedTasks: NamedDerivedTask[] = tasks.map((task) => {
+    const name = task.input.name;
+    if (name) return { ...task, input: { ...task.input, name } };
+    if (task.resumed?.name)
+      return {
+        ...task,
+        input: { ...task.input, name: task.resumed.name },
+      };
+    if (task.resumed)
       return invalidParams(
         'This delegate continuation uses legacy metadata without a persisted display name; supply name explicitly to continue it.',
       );
@@ -209,7 +246,7 @@ export function buildDelegatePlans(
 
   if (
     parallel &&
-    resumed.some(Boolean) &&
+    namedTasks.some((task) => task.resumed) &&
     (shared.cwd !== undefined ||
       shared.context !== undefined ||
       shared.scope !== undefined ||
@@ -220,139 +257,154 @@ export function buildDelegatePlans(
       'Parallel continuations reuse their original cwd, history, scope, and base; do not provide top-level replacements.',
     );
 
-  const routings = inputs.map((item, index) =>
-    resolveDelegateRoute(
+  namedTasks = namedTasks.map((task) => {
+    const result = resolveDelegateRoute(
       mergeDelegateRouteRequest(
-        item.route ?? shared.route,
-        resumed[index]?.routing,
+        task.input.route ?? shared.route,
+        task.resumed?.routing,
       ),
       config,
-    ),
-  );
-  const routingError = routings.find((item) => item.error)?.error;
+    );
+    return {
+      ...task,
+      routing: result.routing,
+      routingError: result.error,
+    };
+  });
+  const routingError = namedTasks.find(
+    (task) => task.routingError,
+  )?.routingError;
   if (routingError) invalidParams(routingError);
 
-  const contexts = inputs.map((item, index) =>
-    resumed[index]
-      ? ('continuation' as const)
-      : (item.context ?? shared.context ?? 'fresh'),
-  );
-  const requestedCwds = inputs.map(
-    (item, index) => resumed[index]?.cwd ?? item.cwd ?? shared.cwd ?? ctx.cwd,
-  );
-  const scopes = inputs.map((item) => item.scope ?? shared.scope);
-  const writeRequestExplicit = inputs.map(
-    (item) =>
-      item.allowWrites !== undefined || shared.allowWrites !== undefined,
-  );
-  const writeRequests = inputs.map((item, index) => {
-    const requested = item.allowWrites ?? shared.allowWrites;
-    if (requested !== undefined) return requested;
-    // Continuations preserve their original capability. Sessions written
-    // before capability persistence infer writable from their worktree.
-    return resumed[index]?.allowWrites ?? Boolean(resumed[index]?.worktreeId);
+  namedTasks = namedTasks.map((task) => ({
+    ...task,
+    context: task.resumed
+      ? 'continuation'
+      : (task.input.context ?? shared.context ?? 'fresh'),
+    requestedCwd: task.resumed?.cwd ?? task.input.cwd ?? shared.cwd ?? ctx.cwd,
+    scope: task.input.scope ?? shared.scope,
+  }));
+
+  namedTasks = namedTasks.map((task) => {
+    const writeRequestExplicit =
+      task.input.allowWrites !== undefined || shared.allowWrites !== undefined;
+    const requested = task.input.allowWrites ?? shared.allowWrites;
+    const writeRequested =
+      requested ??
+      task.resumed?.allowWrites ??
+      Boolean(task.resumed?.worktreeId);
+    const isolationExplicit =
+      task.input.isolation !== undefined || shared.isolation !== undefined;
+    const isolation =
+      task.input.isolation ??
+      shared.isolation ??
+      (task.resumed ? task.resumed.isolation : undefined) ??
+      (writeRequested ? 'worktree' : 'shared');
+    return {
+      ...task,
+      writeRequestExplicit,
+      writeRequested,
+      isolationExplicit,
+      isolation,
+    };
   });
-  const isolationExplicit = inputs.map(
-    (item) => item.isolation !== undefined || shared.isolation !== undefined,
-  );
-  const isolations = inputs.map((item, index) => {
-    const requested = item.isolation ?? shared.isolation;
-    if (requested !== undefined) return requested;
-    if (resumed[index]) return resumed[index].isolation;
-    return writeRequests[index] ? 'worktree' : 'shared';
-  });
-  for (let index = 0; index < inputs.length; index++) {
+
+  for (const task of namedTasks) {
     // A migrated writable session with no worktree is a direct-parent-write
     // legacy record. Reject inherited or unchanged restated values. Only an
     // actual requested change reaches continuation preflight for its precise
     // immutable-field error.
     const inheritedWritable =
-      resumed[index]?.allowWrites ?? Boolean(resumed[index]?.worktreeId);
+      task.resumed?.allowWrites ?? Boolean(task.resumed?.worktreeId);
     const changesInheritedMode =
-      Boolean(resumed[index]) &&
-      ((writeRequestExplicit[index] &&
-        writeRequests[index] !== inheritedWritable) ||
-        (isolationExplicit[index] &&
-          isolations[index] !== resumed[index]?.isolation));
+      Boolean(task.resumed) &&
+      ((task.writeRequestExplicit &&
+        task.writeRequested !== inheritedWritable) ||
+        (task.isolationExplicit && task.isolation !== task.resumed?.isolation));
     const inheritedWritableShared =
-      Boolean(resumed[index]) &&
+      Boolean(task.resumed) &&
       inheritedWritable &&
-      resumed[index]?.isolation === 'shared' &&
+      task.resumed?.isolation === 'shared' &&
       !changesInheritedMode;
     if (
-      (!resumed[index] &&
-        writeRequests[index] &&
-        isolations[index] === 'shared') ||
+      (!task.resumed && task.writeRequested && task.isolation === 'shared') ||
       inheritedWritableShared
     )
       invalidParams(
         'Writable delegates require worktree isolation; shared writable delegates are not supported.',
       );
     if (
-      !resumed[index] &&
-      (inputs[index].from !== undefined || shared.from !== undefined) &&
-      isolations[index] === 'shared'
+      !task.resumed &&
+      (task.input.from !== undefined || shared.from !== undefined) &&
+      task.isolation === 'shared'
     )
       invalidParams(
         'from requires worktree isolation; it cannot be used with a shared delegate.',
       );
   }
-  const warnings = parallel
-    ? writeWarnings(requestedCwds, writeRequests, scopes)
-    : inputs.map(() => [] as string[]);
 
-  for (let index = 0; index < inputs.length; index++) {
+  if (parallel) writeWarnings(namedTasks);
+
+  for (const task of namedTasks) {
     if (
-      !resumed[index] &&
-      contexts[index] === 'branch' &&
-      !getSnapshot(requestedCwds[index])
+      !task.resumed &&
+      task.context === 'branch' &&
+      !getSnapshot(task.requestedCwd)
     )
       invalidParams(
         'Cannot delegate: failed to snapshot current session branch.',
       );
   }
 
-  for (let index = 0; index < inputs.length; index++) {
-    if ((inputs[index].refresh ?? shared.refresh) && !resumed[index])
+  for (const task of namedTasks) {
+    if ((task.input.refresh ?? shared.refresh) !== undefined && !task.resumed)
       invalidParams(
         'refresh is only available on a read-only worktree continuation.',
       );
   }
 
-  const plans: DelegateTaskPlan[] = inputs.map((item, index) => ({
-    name: item.name,
-    task: item.task,
-    requestedCwd: requestedCwds[index],
-    context: contexts[index],
-    contextNote: item.contextNote ?? shared.contextNote,
-    scope: scopes[index],
-    base: item.from ?? shared.from,
-    refresh: item.refresh ?? shared.refresh,
-    handoffFrom: normalizeHandoffFrom(item.handoffFrom ?? shared.handoffFrom),
-    writeRequested: writeRequests[index],
-    isolation: isolations[index],
-    allowWritesExplicit: writeRequestExplicit[index],
-    isolationExplicit: isolationExplicit[index],
-    routing: routings[index].routing,
-    resumed: resumed[index] ?? undefined,
-    routeOverride: Boolean(
-      resumed[index] && (item.route ?? shared.route) !== undefined,
-    ),
-    snapshotJsonl:
-      contexts[index] === 'branch'
-        ? (getSnapshot(requestedCwds[index]) ?? undefined)
-        : undefined,
-    warnings: parallel ? warnings[index] : [],
+  const builtTasks = namedTasks.map((task) => ({
+    ...task,
+    plan: {
+      name: task.input.name,
+      task: task.input.task,
+      requestedCwd: task.requestedCwd,
+      context: task.context,
+      contextNote: task.input.contextNote ?? shared.contextNote,
+      scope: task.scope,
+      base: task.input.from ?? shared.from,
+      refresh: task.input.refresh ?? shared.refresh,
+      handoffFrom: normalizeHandoffFrom(
+        task.input.handoffFrom ?? shared.handoffFrom,
+      ),
+      writeRequested: task.writeRequested,
+      isolation: task.isolation,
+      allowWritesExplicit: task.writeRequestExplicit,
+      isolationExplicit: task.isolationExplicit,
+      routing: task.routing,
+      resumed: task.resumed,
+      routeOverride: Boolean(
+        task.resumed && (task.input.route ?? shared.route) !== undefined,
+      ),
+      snapshotJsonl:
+        task.context === 'branch'
+          ? (getSnapshot(task.requestedCwd) ?? undefined)
+          : undefined,
+      warnings: task.warnings,
+    } satisfies DelegateTaskPlan,
   }));
 
-  let preflights: ContinuationPreflight[];
+  let preparedTasks: BuiltDelegateTask[];
   try {
-    preflights = plans.map((plan) => preflightDelegateContinuation(plan));
+    preparedTasks = builtTasks.map(({ plan }) => ({
+      plan,
+      preflight: preflightDelegateContinuation(plan),
+    }));
   } catch (error) {
     invalidParams(errorText(error));
   }
 
-  return { parallel, plans, preflights };
+  return { parallel, tasks: preparedTasks };
 }
 
 function handoffError(ref: DelegateHandoffFrom, reason: string): never {
@@ -362,19 +414,20 @@ function handoffError(ref: DelegateHandoffFrom, reason: string): never {
 /** Resolve parent-owned artifacts before any child setup or launch occurs. */
 export async function resolveDelegateHandoffs(
   ctx: ExtensionContext,
-  plans: DelegateTaskPlan[],
+  tasks: BuiltDelegateTask[],
   resolver: typeof resolveArtifact = resolveArtifact,
-): Promise<DelegateTaskPlan[]> {
+): Promise<BuiltDelegateTask[]> {
   let aggregatePromptBytes = 0;
-  const resolved: DelegateTaskPlan[] = [];
-  for (const plan of plans) {
+  const resolved: BuiltDelegateTask[] = [];
+  for (const task of tasks) {
+    const plan = task.plan;
     const refs = plan.handoffFrom
       ? Array.isArray(plan.handoffFrom)
         ? plan.handoffFrom
         : [plan.handoffFrom]
       : undefined;
     if (!refs?.length) {
-      resolved.push(plan);
+      resolved.push(task);
       continue;
     }
     if (refs.length > 4) {
@@ -440,8 +493,11 @@ export async function resolveDelegateHandoffs(
       );
     }
     resolved.push({
-      ...plan,
-      handoffText: framed.join('\n\n'),
+      ...task,
+      plan: {
+        ...plan,
+        handoffText: framed.join('\n\n'),
+      },
     });
   }
   return resolved;

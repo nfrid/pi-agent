@@ -14,7 +14,6 @@ import {
   type DelegateIsolation,
   type DelegateRouteState,
   getFinalAssistantText,
-  isRunError,
 } from './types';
 import { type PreparedWorktree, worktreeSummary } from './worktree';
 
@@ -218,8 +217,16 @@ export async function runDelegate(
       run.errorMessage =
         run.stderr.trim() || `Child Pi exited with code ${exitCode}.`;
     }
-    if (run.state === 'running')
-      run.state = isRunError(run) ? 'error' : 'success';
+    if (run.state === 'running') {
+      // Finalize the canonical state once; exitCode/stopReason remain
+      // diagnostics after this transition rather than a render-time fallback.
+      const failed =
+        run.stopReason === 'error' ||
+        run.stopReason === 'aborted' ||
+        run.exitCode !== 0 ||
+        !getFinalAssistantText(run.messages).trim();
+      run.state = failed ? 'error' : 'success';
+    }
   } catch (error) {
     const aborted = options.signal?.aborted ?? false;
     run.exitCode = aborted ? 130 : 1;

@@ -49,33 +49,40 @@ export function scopesOverlap(a: string[], b: string[]): boolean {
   );
 }
 
-export function writeWarnings(
-  cwds: string[],
-  writeModes: boolean[],
-  scopes: Array<string[] | undefined>,
-): string[][] {
-  const warnings = scopes.map(() => [] as string[]);
-  for (let i = 0; i < scopes.length; i++) {
-    if (!writeModes[i]) continue;
-    for (let j = i + 1; j < scopes.length; j++) {
-      if (!writeModes[j] || path.resolve(cwds[i]) !== path.resolve(cwds[j]))
+export interface WriteWarningTask {
+  requestedCwd: string;
+  writeRequested: boolean;
+  scope?: string[];
+  warnings: string[];
+}
+
+/** Attach pairwise warnings directly to their task records. */
+export function writeWarnings(tasks: WriteWarningTask[]): void {
+  for (const [leftIndex, leftTask] of tasks.entries()) {
+    if (!leftTask.writeRequested) continue;
+    for (const [rightIndex, rightTask] of tasks.entries()) {
+      if (
+        rightIndex <= leftIndex ||
+        !rightTask.writeRequested ||
+        path.resolve(leftTask.requestedCwd) !==
+          path.resolve(rightTask.requestedCwd)
+      )
         continue;
-      const left = scopes[i]?.filter(Boolean) ?? [];
-      const right = scopes[j]?.filter(Boolean) ?? [];
+      const left = leftTask.scope?.filter(Boolean) ?? [];
+      const right = rightTask.scope?.filter(Boolean) ?? [];
       const warning =
         left.length === 0 || right.length === 0
-          ? `Parallel write tasks ${i + 1} and ${j + 1} share a working directory and at least one has no declared scope; their patches may conflict, so review both before applying either.`
+          ? `Parallel write tasks ${leftIndex + 1} and ${rightIndex + 1} share a working directory and at least one has no declared scope; their patches may conflict, so review both before applying either.`
           : scopesOverlap(
-                normalizedScopes(cwds[i], left),
-                normalizedScopes(cwds[j], right),
+                normalizedScopes(leftTask.requestedCwd, left),
+                normalizedScopes(rightTask.requestedCwd, right),
               )
-            ? `Parallel write tasks ${i + 1} and ${j + 1} have overlapping declared scopes; their patches may conflict, so review both before applying either.`
+            ? `Parallel write tasks ${leftIndex + 1} and ${rightIndex + 1} have overlapping declared scopes; their patches may conflict, so review both before applying either.`
             : undefined;
       if (warning) {
-        warnings[i].push(warning);
-        warnings[j].push(warning);
+        leftTask.warnings.push(warning);
+        rightTask.warnings.push(warning);
       }
     }
   }
-  return warnings;
 }
