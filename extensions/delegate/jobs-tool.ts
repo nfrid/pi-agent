@@ -1,5 +1,8 @@
 import { StringEnum } from '@earendil-works/pi-ai';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
 import type { DelegateJobManager, DelegateJobSnapshot } from './jobs';
@@ -82,7 +85,13 @@ export function registerDelegateJobsTool(
       'If no independent work remains, end the turn; automatic completion will resume you. Do not call delegate_jobs peek merely to wait or keep the turn open. Use peek only for deliberate inspection or once when a bounded timeout will change your next action, and never repeat it to poll.',
     ],
     parameters: Parameters,
-    async execute(_toolCallId, params, signal) {
+    async execute(
+      _toolCallId,
+      params,
+      signal,
+      _onUpdate,
+      ctx: ExtensionContext,
+    ) {
       switch (params.action) {
         case 'list': {
           const jobs = manager.list();
@@ -100,11 +109,12 @@ export function registerDelegateJobsTool(
           };
         }
         case 'peek': {
-          const job = await manager.peek(
+          let job = await manager.peek(
             requireText(params.id, 'id'),
             (params.wait_seconds ?? 0) * 1000,
             signal,
           );
+          job = await manager.materialize(job.id, ctx);
           const automaticQueued = isAutomaticDeliveryQueued(job);
           if (
             !automaticQueued &&

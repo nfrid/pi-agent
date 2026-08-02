@@ -15,7 +15,7 @@ import { buildSessionSnapshotJsonl } from './session';
 import type { DelegateStatusStore } from './status';
 import { rollbackPreparedDelegateTasks } from './task-lifecycle';
 import {
-  buildArtifactBackedHandoff,
+  buildSessionBoundArtifactBackedHandoff,
   delegateToolResult,
   makeDetails,
 } from './tool-result';
@@ -238,6 +238,19 @@ export function registerDelegateTool(
       if (params.background) {
         if (!backgroundRuntime)
           throw new Error('Background delegate runtime is unavailable.');
+        const launchSessionId = ctx.sessionManager.getSessionId();
+        const materializeHandoff = async (
+          materializeCtx: typeof ctx,
+          runs: import('./types').DelegatedRun[],
+        ) => ({
+          runs,
+          handoff: await buildSessionBoundArtifactBackedHandoff(
+            pi,
+            materializeCtx,
+            launchSessionId,
+            runs,
+          ),
+        });
         let jobs: ReturnType<DelegateJobManager['startMany']>;
         try {
           jobs = backgroundRuntime.manager.startMany(
@@ -266,11 +279,9 @@ export function registerDelegateTool(
                 const run = runs[0];
                 if (run && statusIds?.[index])
                   backgroundRuntime.statuses.update(statusIds[index], run);
-                return {
-                  runs,
-                  handoff: await buildArtifactBackedHandoff(pi, ctx, runs),
-                };
+                return materializeHandoff(ctx, runs);
               },
+              materialize: materializeHandoff,
             })),
           );
         } catch (error) {

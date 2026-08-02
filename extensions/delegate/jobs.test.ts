@@ -69,6 +69,30 @@ describe('DelegateJobManager', () => {
     await manager.dispose();
   });
 
+  test('re-materializes a retained result on deliberate inspection', async () => {
+    const materialize = vi.fn(async (_ctx, runs) => ({
+      runs,
+      handoff: 'published exact report',
+    }));
+    const manager = new DelegateJobManager();
+    const started = manager.start({
+      mode: 'single',
+      tasks: ['inspect'],
+      execute: async () => successfulResult(),
+      materialize,
+    });
+    await vi.waitFor(() => expect(manager.runningCount).toBe(0));
+
+    const inspected = await manager.materialize(
+      started.id,
+      { sessionManager: { getSessionId: () => 'session-one' } } as never,
+    );
+    expect(materialize).toHaveBeenCalledOnce();
+    expect(inspected.handoff).toBe('published exact report');
+    expect(inspected.runs?.[0]?.messages).toHaveLength(1);
+    await manager.dispose();
+  });
+
   test('starts a batch atomically as independent jobs', async () => {
     const manager = new DelegateJobManager();
     const jobs = manager.startMany([

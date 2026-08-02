@@ -1,8 +1,17 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import {
+  artifactProducer,
+  putArtifact,
+  resolveArtifact,
+  restoreArtifacts,
+} from '../shared/artifacts';
 import type { DelegateConfig } from './config';
 import * as configModule from './config';
 import delegate, { DELEGATES_COMMAND_DESCRIPTION } from './index';
@@ -26,6 +35,8 @@ interface RegisteredTool {
 }
 
 type Handler = (...args: unknown[]) => unknown;
+
+let artifactRoot: string;
 
 const config: DelegateConfig = {
   timeoutMs: 60_000,
@@ -114,14 +125,35 @@ function successfulRun(): DelegatedRun {
 }
 
 beforeEach(() => {
+  artifactRoot = mkdtempSync(path.join(tmpdir(), 'pi-delegate-async-'));
+  vi.spyOn(artifactProducer, 'put').mockImplementation(
+    async (_pi, _ctx, input) => ({
+      handle: `art_${'a'.repeat(22)}`,
+      sha256: 'a'.repeat(64),
+      size: Buffer.from(input.bytes).length,
+      producer: 'delegate',
+      contentClass: 'delegate-output',
+      creationSource: 'delegate.result',
+      encoding: 'utf-8',
+      lineCount: 1,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }),
+  );
   vi.spyOn(sessionModule, 'pruneDelegateSessions').mockReturnValue({
     removed: 0,
   });
 });
 
+function useRealArtifactPublication(): void {
+  vi.mocked(artifactProducer.put).mockImplementation((pi, ctx, input) =>
+    putArtifact(pi, ctx, input, { root: artifactRoot }),
+  );
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
+  rmSync(artifactRoot, { recursive: true, force: true });
 });
 
 function createAsyncHarness() {
@@ -143,6 +175,8 @@ function createAsyncHarness() {
   const handlers = new Map<string, Handler>();
   const tools = new Map<string, RegisteredTool>();
   const sendMessage = vi.fn();
+  const entries: Array<{ type: string; customType?: string; data?: unknown }> =
+    [];
   const pi = {
     on(event: string, handler: Handler) {
       handlers.set(event, handler);
@@ -153,12 +187,20 @@ function createAsyncHarness() {
     registerCommand: vi.fn(),
     registerMessageRenderer: vi.fn(),
     sendMessage,
+    appendEntry(customType: string, data: unknown) {
+      entries.push({ type: 'custom', customType, data });
+    },
   } as unknown as ExtensionAPI;
   const ctx = {
     cwd: '/tmp/project',
     hasUI: false,
     mode: 'print',
-    sessionManager: { getHeader: () => ({}), getBranch: () => [] },
+    sessionManager: {
+      getSessionId: () => 'parent',
+      getEntries: () => entries,
+      getHeader: () => ({}),
+      getBranch: () => [],
+    },
   } as unknown as ExtensionContext;
 
   delegate(pi);
@@ -196,6 +238,11 @@ describe('async delegate extension', () => {
     const sendMessage = vi.fn();
     const setWidget = vi.fn();
     const registerMessageRenderer = vi.fn();
+    const entries: Array<{
+      type: string;
+      customType?: string;
+      data?: unknown;
+    }> = [];
     const pi = {
       on(event: string, handler: Handler) {
         handlers.set(event, handler);
@@ -206,6 +253,9 @@ describe('async delegate extension', () => {
       registerCommand: vi.fn(),
       registerMessageRenderer,
       sendMessage,
+      appendEntry(customType: string, data: unknown) {
+        entries.push({ type: 'custom', customType, data });
+      },
     } as unknown as ExtensionAPI;
     const ctx = {
       cwd: '/tmp/project',
@@ -213,6 +263,8 @@ describe('async delegate extension', () => {
       mode: 'tui',
       ui: { setWidget },
       sessionManager: {
+        getSessionId: () => 'parent',
+        getEntries: () => entries,
         getHeader: () => ({
           type: 'session',
           version: 4,
@@ -224,6 +276,7 @@ describe('async delegate extension', () => {
       },
     } as unknown as ExtensionContext;
 
+    useRealArtifactPublication();
     delegate(pi);
     const completionRenderer = registerMessageRenderer.mock.calls[0]?.[1] as
       | ((
@@ -407,6 +460,24 @@ describe('async delegate extension', () => {
         ctx,
       );
     expect(peek?.content[0]?.text).not.toContain('Background finding.');
+    const peekDetails = peek?.details as {
+      job?: {
+        runs?: Array<{ artifact?: { handle?: string; size?: number } }>;
+      };
+    };
+    const handle = peekDetails.job?.runs?.[0]?.artifact?.handle;
+    expect(handle).toBeDefined();
+    expect(entries).toHaveLength(1);
+    rmSync(artifactRoot, { recursive: true, force: true });
+    expect(
+      await resolveArtifact(ctx, handle as string, artifactRoot),
+    ).toBeUndefined();
+    expect(await restoreArtifacts(ctx, artifactRoot)).toBe(1);
+    expect(
+      (
+        await resolveArtifact(ctx, handle as string, artifactRoot)
+      )?.bytes.toString(),
+    ).toBe('Background finding.');
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
@@ -691,6 +762,11 @@ describe('async delegate extension', () => {
     const handlers = new Map<string, Handler>();
     const tools = new Map<string, RegisteredTool>();
     const sendMessage = vi.fn();
+    const entries: Array<{
+      type: string;
+      customType?: string;
+      data?: unknown;
+    }> = [];
     const pi = {
       on(event: string, handler: Handler) {
         handlers.set(event, handler);
@@ -701,12 +777,20 @@ describe('async delegate extension', () => {
       registerCommand: vi.fn(),
       registerMessageRenderer: vi.fn(),
       sendMessage,
+      appendEntry(customType: string, data: unknown) {
+        entries.push({ type: 'custom', customType, data });
+      },
     } as unknown as ExtensionAPI;
     const ctx = {
       cwd: '/tmp/project',
       hasUI: false,
       mode: 'print',
-      sessionManager: { getHeader: () => ({}), getBranch: () => [] },
+      sessionManager: {
+        getSessionId: () => 'parent',
+        getEntries: () => entries,
+        getHeader: () => ({}),
+        getBranch: () => [],
+      },
     } as unknown as ExtensionContext;
 
     delegate(pi);
@@ -815,6 +899,12 @@ describe('async delegate extension', () => {
     const sendMessage = vi.fn();
     const notify = vi.fn();
     const setWidget = vi.fn();
+    const entries: Array<{
+      type: string;
+      customType?: string;
+      data?: unknown;
+    }> = [];
+    let sessionId = 'parent';
     const getCommands = vi.fn(() => [
       {
         name: 'delegates',
@@ -840,15 +930,24 @@ describe('async delegate extension', () => {
       registerMessageRenderer: vi.fn(),
       sendMessage,
       getCommands,
+      appendEntry(customType: string, data: unknown) {
+        entries.push({ type: 'custom', customType, data });
+      },
     } as unknown as ExtensionAPI;
     const ctx = {
       cwd: '/tmp/project',
       hasUI: true,
       mode: 'tui',
       ui: { notify, setWidget },
-      sessionManager: { getHeader: () => ({}), getBranch: () => [] },
+      sessionManager: {
+        getSessionId: () => sessionId,
+        getEntries: () => entries,
+        getHeader: () => ({}),
+        getBranch: () => [],
+      },
     } as unknown as ExtensionContext;
 
+    useRealArtifactPublication();
     delegate(pi);
     await commands.get('delegates')?.handler('config', ctx);
     expect(notify.mock.calls[0]?.[0]).toContain('Comparison: unavailable');
@@ -998,11 +1097,14 @@ describe('async delegate extension', () => {
     expect(compactLine).not.toContain('inspect independently');
     expect(notify).not.toHaveBeenCalled();
 
+    sessionId = 'branch';
+    handlers.get('session_tree')?.({}, ctx);
     finish(successfulRun());
     await new Promise((resolve) => setTimeout(resolve, 0));
-    handlers.get('session_tree')?.({}, ctx);
     await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce());
     expect(sendMessage).not.toHaveBeenCalled();
+    expect(entries).toHaveLength(0);
+
     expect(notify.mock.calls[0]?.[0]).toContain('another conversation branch');
 
     await commands.get('delegates')?.handler('', ctx);
@@ -1043,6 +1145,23 @@ describe('async delegate extension', () => {
       ).render(100) ?? [];
     expect(afterAcknowledgment.join('\n')).not.toContain('Foreground audit');
     expect(afterAcknowledgment.join('\n')).toContain('Subagent');
+
+    sessionId = 'parent';
+    const entriesBeforeInspected = entries.length;
+    const inspected = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-stale-peek',
+        { action: 'peek', id: 'dj-1' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(inspected?.details).toMatchObject({
+      action: 'peek',
+      job: { runs: [{ artifact: { contentClass: 'delegate-output' } }] },
+    });
+    expect(entries).toHaveLength(entriesBeforeInspected + 1);
 
     await tools
       .get('delegate_jobs')

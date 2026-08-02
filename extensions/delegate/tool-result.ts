@@ -18,6 +18,9 @@ export function makeDetails(
   return { mode, runs };
 }
 
+export const EXACT_OUTPUT_ARTIFACT_WARNING =
+  'Exact output artifact unavailable; child session remains authoritative.';
+
 export async function buildArtifactBackedHandoff(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
@@ -45,11 +48,16 @@ export async function buildArtifactBackedHandoff(
           mediaType: 'text/plain; charset=utf-8',
           creationSource: 'delegate.result',
         });
+        run.warnings = (run.warnings ?? []).filter(
+          (warning) => warning !== EXACT_OUTPUT_ARTIFACT_WARNING,
+        );
         changed = true;
       } catch {
         run.warnings = [
-          ...(run.warnings ?? []),
-          'Exact output artifact unavailable; child session remains authoritative.',
+          ...(run.warnings ?? []).filter(
+            (warning) => warning !== EXACT_OUTPUT_ARTIFACT_WARNING,
+          ),
+          EXACT_OUTPUT_ARTIFACT_WARNING,
         ];
         failedRuns.add(run);
         changed = true;
@@ -59,6 +67,30 @@ export async function buildArtifactBackedHandoff(
     result = buildParentHandoffResult(runs);
   }
   return result.text;
+}
+
+/** Publish only while the parent is still on the session that launched the job. */
+export async function buildSessionBoundArtifactBackedHandoff(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  launchSessionId: string,
+  runs: DelegatedRun[],
+): Promise<string> {
+  const put = async (
+    putPi: Parameters<typeof artifactProducer.put>[0],
+    putCtx: Parameters<typeof artifactProducer.put>[1],
+    input: Parameters<typeof artifactProducer.put>[2],
+  ) => {
+    const assertLaunchSession = () => {
+      if (putCtx.sessionManager.getSessionId() !== launchSessionId)
+        throw new Error('The delegate launch session is no longer current.');
+    };
+    assertLaunchSession();
+    return artifactProducer.put(putPi, putCtx, input, {
+      assertCurrent: assertLaunchSession,
+    });
+  };
+  return buildArtifactBackedHandoff(pi, ctx, runs, put);
 }
 
 export async function delegateToolResult(

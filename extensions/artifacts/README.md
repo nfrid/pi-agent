@@ -42,7 +42,9 @@ decisions, and credentials out of artifacts.
 `delegate` stores every exact final assistant report that the compact parent-visible
 handoff omits — never task text, context, stderr, or transcripts. A parent may deliberately
 forward a bounded textual `delegate-output` artifact to a later child; availability is not
-an instruction to retrieve it.
+an instruction to retrieve it. Background delegate completions retain the exact report for
+later deliberate inspection when session navigation made immediate publication stale; they
+do not append recovery entries to a different branch.
 
 ## Retrieving
 

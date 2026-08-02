@@ -1,3 +1,4 @@
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { AsyncJobRegistry, type JobRecord } from '../shared/runtime/registry';
 import type { DelegateDetails, DelegatedRun } from './types';
 import { getRunState, isRunError } from './types';
@@ -16,6 +17,11 @@ export interface DelegateJobResult {
   runs: DelegatedRun[];
   handoff: string;
 }
+
+export type DelegateJobMaterializer = (
+  ctx: ExtensionContext,
+  runs: DelegatedRun[],
+) => Promise<DelegateJobResult>;
 
 export interface DelegateJobSnapshot {
   id: string;
@@ -47,6 +53,8 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
   allowWrites?: boolean;
   controller: AbortController;
   execute: (signal: AbortSignal) => Promise<DelegateJobResult>;
+  materialize?: DelegateJobMaterializer;
+  materializing?: Promise<void>;
 }
 
 export interface DelegateJobManagerOptions {
@@ -59,6 +67,7 @@ export interface DelegateJobStartOptions {
   mode: DelegateDetails['mode'];
   tasks: string[];
   execute: (signal: AbortSignal) => Promise<DelegateJobResult>;
+  materialize?: DelegateJobMaterializer;
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
@@ -123,6 +132,7 @@ export class DelegateJobManager {
         allowWrites: item.allowWrites,
         controller: new AbortController(),
         execute: item.execute,
+        materialize: item.materialize,
       }),
     );
     for (const record of records) this.registry.add(record);
@@ -145,6 +155,37 @@ export class DelegateJobManager {
     signal?: AbortSignal,
   ): Promise<DelegateJobSnapshot> {
     return this.registry.peek(id, waitMs, signal);
+  }
+
+  async materialize(
+    id: string,
+    ctx: ExtensionContext,
+  ): Promise<DelegateJobSnapshot> {
+    const record = this.registry.require(id);
+    if (
+      !record.materialize ||
+      !record.runs ||
+      record.state === 'queued' ||
+      record.state === 'running'
+    )
+      return snapshot(record);
+
+    if (!record.materializing) {
+      const work = (async () => {
+        const result = await record.materialize?.(ctx, record.runs ?? []);
+        if (!result) return;
+        record.runs = result.runs;
+        record.handoff = result.handoff;
+        this.registry.changed();
+      })();
+      record.materializing = work;
+      try {
+        await work;
+      } finally {
+        if (record.materializing === work) record.materializing = undefined;
+      }
+    } else await record.materializing;
+    return snapshot(record);
   }
 
   async cancel(
