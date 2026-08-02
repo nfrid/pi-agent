@@ -1,0 +1,21 @@
+{
+  "name": "@pi-dashboard/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pi-dashboard/protocol": "workspace:*",
+    "web-push": "^3.6.7",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13"
+  }
+}

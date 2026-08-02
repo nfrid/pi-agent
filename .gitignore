@@ -1,4 +1,8 @@
 node_modules
+dist/
+apps/dashboard-web/dist/
+test-results/
+playwright-report/
 auth.json
 trust.json
 models-store.json

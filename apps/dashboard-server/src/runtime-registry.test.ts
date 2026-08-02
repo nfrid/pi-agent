@@ -1,0 +1,104 @@
+import { PassThrough } from 'node:stream';
+import { type RuntimeSnapshot, serializeFrame } from '@pi-dashboard/protocol';
+import { describe, expect, it } from 'vitest';
+import { RuntimeRegistry } from './runtime-registry.js';
+
+const snapshot: RuntimeSnapshot = {
+  runtimeId: 'runtime-1',
+  ownership: 'managed',
+  pid: 10,
+  cwd: '/tmp/project',
+  liveState: 'idle',
+  session: { id: 'session-1', entries: [] },
+  pendingInteractions: [],
+};
+
+function eventually<T>(read: () => T | undefined): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + 500;
+    const tick = () => {
+      const value = read();
+      if (value !== undefined) resolve(value);
+      else if (Date.now() > deadline) reject(new Error('timed out'));
+      else setTimeout(tick, 1);
+    };
+    tick();
+  });
+}
+
+describe('runtime registry', () => {
+  it('registers full snapshots, serializes commands, and ignores duplicate events', async () => {
+    const registry = new RuntimeRegistry({
+      expectedToken: (_id, token) => token === 'one',
+    });
+    const bridge = new PassThrough();
+    const frames: string[] = [];
+    bridge.on('data', (chunk) => {
+      frames.push(...String(chunk).split('\n').filter(Boolean));
+    });
+    registry.accept(bridge as never);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          token: 'one',
+          snapshot,
+        },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    expect(registry.isOnline('runtime-1')).toBe(true);
+
+    const commandPromise = registry.sendCommand('runtime-1', {
+      type: 'prompt',
+      text: 'hello',
+    });
+    const command = await eventually(() =>
+      frames
+        .map((line) => {
+          try {
+            return JSON.parse(line) as {
+              kind?: string;
+              command?: { id: string };
+            };
+          } catch {
+            return undefined;
+          }
+        })
+        .find((frame) => frame?.kind === 'command'),
+    );
+    if (!command.command?.id) throw new Error('command was not sent');
+    bridge.write(
+      serializeFrame({
+        kind: 'ack',
+        id: command.command.id,
+        ok: true,
+        result: { accepted: true },
+      }),
+    );
+    await expect(commandPromise).resolves.toEqual({ accepted: true });
+
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 2,
+        event: { type: 'runtime.stateChanged', state: 'working' },
+      }),
+    );
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 2,
+        event: { type: 'runtime.stateChanged', state: 'idle' },
+      }),
+    );
+    await eventually(() =>
+      registry.get('runtime-1')?.liveState === 'working' ? true : undefined,
+    );
+    expect(registry.get('runtime-1')?.liveState).toBe('working');
+    bridge.destroy();
+  });
+});

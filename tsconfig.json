@@ -10,5 +10,11 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["extensions/**/*.ts"]
+  "include": [
+    "extensions/**/*.ts",
+    "packages/dashboard-protocol/src/**/*.ts",
+    "packages/activity-model/src/**/*.ts",
+    "apps/dashboard-server/src/**/*.ts"
+  ],
+  "exclude": ["apps/dashboard-web/**", "**/dist/**"]
 }
