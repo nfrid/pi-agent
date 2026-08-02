@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./usage-app-server": {
+      "types": "./src/usage-app-server.ts",
+      "default": "./dist/usage-app-server.js"
     }
   },
   "scripts": {

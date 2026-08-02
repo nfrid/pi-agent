@@ -90,7 +90,10 @@ export class TmuxAdapter {
     name?: string;
     runtimeId: string;
     socketPath: string;
-    token: string;
+    /** `token` is retained for callers written before credential split. */
+    token?: string;
+    launchToken?: string;
+    identityToken?: string;
     sessionFile?: string;
     model?: { provider: string; model: string; thinking?: string };
   }): Promise<ManagedPlacement> {
@@ -104,10 +107,15 @@ export class TmuxAdapter {
     const cwd = realpathSync.native(
       path.resolve(input.workspace.canonicalPath),
     );
+    const launchToken = input.launchToken ?? input.token;
+    if (!launchToken) throw new Error('Managed launch credential is missing.');
+    const identityToken = input.identityToken ?? launchToken;
     const env = [
       `PI_DASHBOARD_RUNTIME_ID=${input.runtimeId}`,
       `PI_DASHBOARD_SOCKET=${input.socketPath}`,
-      `PI_DASHBOARD_TOKEN=${input.token}`,
+      `PI_DASHBOARD_TOKEN=${launchToken}`,
+      `PI_DASHBOARD_LAUNCH_TOKEN=${launchToken}`,
+      `PI_DASHBOARD_IDENTITY_TOKEN=${identityToken}`,
     ];
     const piArgs = ['--approve'];
     if (input.sessionFile) piArgs.push('--session', input.sessionFile);

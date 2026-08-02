@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -29,7 +31,9 @@ type CommandHandler = (command: BridgeCommand) => Promise<unknown>;
 
 export interface BridgeClientOptions {
   socketPath: string;
+  /** Legacy launch token, retained for managed first hello. */
   token?: string;
+  identityToken?: string;
   runtimeId: string;
   snapshot: () => RuntimeSnapshot;
   handleCommand: CommandHandler;
@@ -102,6 +106,7 @@ export class BridgeClient {
         type: 'runtime.hello',
         protocolVersion: PROTOCOL_VERSION,
         token: this.options.token,
+        identityToken: this.options.identityToken,
         snapshot: this.options.snapshot(),
       });
       // A daemon restart gets a complete interaction set, not only events
@@ -250,8 +255,11 @@ export interface RemoteControlRuntime {
 export function createRemoteControlRuntime(
   pi: ExtensionAPI,
 ): RemoteControlRuntime | undefined {
-  const socketPath = process.env.PI_DASHBOARD_SOCKET;
-  if (!socketPath) return undefined;
+  // This extension is globally loaded. A missing daemon is a normal offline
+  // condition, not a reason to make Pi startup fail.
+  const socketPath =
+    process.env.PI_DASHBOARD_SOCKET ??
+    path.join(os.homedir(), '.pi', 'agent', 'dashboard', 'bridge.sock');
   const runtimeId =
     process.env.PI_DASHBOARD_RUNTIME_ID || `runtime-${randomUUID()}`;
   const ownership = process.env.PI_DASHBOARD_RUNTIME_ID
@@ -262,7 +270,9 @@ export function createRemoteControlRuntime(
   let lastError: string | undefined;
   const client = new BridgeClient({
     socketPath,
-    token: process.env.PI_DASHBOARD_TOKEN,
+    token:
+      process.env.PI_DASHBOARD_LAUNCH_TOKEN ?? process.env.PI_DASHBOARD_TOKEN,
+    identityToken: process.env.PI_DASHBOARD_IDENTITY_TOKEN,
     runtimeId,
     broker,
     snapshot: () => {

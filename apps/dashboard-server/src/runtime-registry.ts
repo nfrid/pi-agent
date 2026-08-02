@@ -38,7 +38,11 @@ export type RegistryChange =
   | { kind: 'offline'; snapshot: RuntimeSnapshot };
 
 export interface RuntimeRegistryOptions {
-  expectedToken?: (runtimeId: string, token: string | undefined) => boolean;
+  expectedToken?: (
+    runtimeId: string,
+    launchToken: string | undefined,
+    identityToken: string | undefined,
+  ) => boolean;
   allowExternalWithoutToken?: boolean;
   onChange?: (change: RegistryChange) => void;
 }
@@ -97,8 +101,11 @@ export class RuntimeRegistry {
           )
             return reject();
           const tokenOk =
-            this.options.expectedToken?.(snapshot.runtimeId, hello.token) ??
-            false;
+            this.options.expectedToken?.(
+              snapshot.runtimeId,
+              hello.token,
+              hello.identityToken,
+            ) ?? false;
           if (
             !tokenOk &&
             !(

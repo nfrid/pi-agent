@@ -2,6 +2,7 @@ import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import WebSocket from 'ws';
 import { createDashboardServer } from './http.js';
 
 let server: Awaited<ReturnType<typeof createDashboardServer>> | undefined;
@@ -11,6 +12,30 @@ afterEach(async () => {
 });
 
 describe('dashboard HTTP boundary', () => {
+  it('authenticates WebSocket clients in the first message, not the URL', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-ws-'));
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const origin = `http://127.0.0.1:${server.port}`;
+    const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws`, {
+      headers: { Origin: origin },
+    });
+    const message = new Promise<string>((resolve, reject) => {
+      socket.once('message', (value) => resolve(String(value)));
+      socket.once('error', reject);
+    });
+    await new Promise<void>((resolve) => socket.once('open', () => resolve()));
+    socket.send(JSON.stringify({ type: 'auth', token: 'test-token' }));
+    await expect(message).resolves.toContain('snapshot');
+    socket.close();
+  });
+
   it('requires auth/origin, supports CORS preflight, and returns an authoritative snapshot', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-http-'));
     server = await createDashboardServer({

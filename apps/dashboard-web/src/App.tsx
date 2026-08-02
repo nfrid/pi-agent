@@ -9,6 +9,7 @@ function dashboardToken(): string | undefined {
 }
 
 type SessionResponse = { metadata: SessionIndexEntry; entries: unknown[] };
+type DashboardEvent = { type?: string; runtimeId?: string; event?: { type?: string; sessionId?: string; message?: unknown; tool?: unknown } };
 type AppError = Error & { code?: string };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -19,9 +20,11 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-function useDashboard(): { snapshot: BrowserSnapshot | undefined; error: string | undefined; refresh: () => Promise<void> } {
+function useDashboard(): { snapshot: BrowserSnapshot | undefined; error: string | undefined; refresh: () => Promise<void>; lastEvent: DashboardEvent | undefined; reconnectNonce: number } {
   const [snapshot, setSnapshot] = useState<BrowserSnapshot>();
   const [error, setError] = useState<string>();
+  const [lastEvent, setLastEvent] = useState<DashboardEvent>();
+  const [reconnectNonce, setReconnectNonce] = useState(0);
   const refresh = useCallback(async () => {
     try { setSnapshot(await api<BrowserSnapshot>('/api/snapshot')); setError(undefined); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
@@ -30,19 +33,26 @@ function useDashboard(): { snapshot: BrowserSnapshot | undefined; error: string 
     void refresh();
     const url = new URL(`${base || window.location.origin}/ws`);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    const token = dashboardToken();
-    if (token) url.searchParams.set('token', token);
     let socket: WebSocket | undefined;
     let timer: number | undefined;
     let stopped = false;
     const connect = () => {
       if (stopped) return;
       socket = new WebSocket(url);
+      socket.onopen = () => {
+        setReconnectNonce((value) => value + 1);
+        void refresh();
+        const token = dashboardToken();
+        if (token) socket?.send(JSON.stringify({ type: 'auth', token }));
+      };
       socket.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data) as { type?: string; snapshot?: BrowserSnapshot };
           if (message.type === 'snapshot' && message.snapshot) setSnapshot(message.snapshot);
-          else void refresh();
+          else {
+            setLastEvent(message as DashboardEvent);
+            void refresh();
+          }
         } catch { void refresh(); }
       };
       socket.onclose = () => { if (!stopped) { timer = window.setTimeout(() => { void refresh(); connect(); }, 1000); } };
@@ -51,7 +61,7 @@ function useDashboard(): { snapshot: BrowserSnapshot | undefined; error: string 
     connect();
     return () => { stopped = true; if (timer) window.clearTimeout(timer); socket?.close(); };
   }, [refresh]);
-  return { snapshot, error, refresh };
+  return { snapshot, error, refresh, lastEvent, reconnectNonce };
 }
 
 function navigate(pathname: string): void { window.history.pushState({}, '', pathname); window.dispatchEvent(new PopStateEvent('popstate')); }
@@ -77,7 +87,7 @@ export default function App() {
   const route = useRoute();
   const dashboard = useDashboard();
   if (!dashboard.snapshot) return dashboard.error?.includes('Authentication') ? <AuthPrompt /> : <main className="shell centered"><h1>Pi Dashboard</h1><p className="error">{dashboard.error ?? 'Connecting…'}</p><button onClick={() => void dashboard.refresh()}>Retry</button></main>;
-  const content = route[0] === 'sessions' && route[1] ? <SessionView id={route[1]} snapshot={dashboard.snapshot} />
+  const content = route[0] === 'sessions' && route[1] ? <SessionView id={route[1]} snapshot={dashboard.snapshot} lastEvent={dashboard.lastEvent} reconnectNonce={dashboard.reconnectNonce} />
     : route[0] === 'workspaces' && route[1] ? <WorkspaceView id={route[1]} snapshot={dashboard.snapshot} />
       : route[0] === 'runtimes' && route[1] ? <RuntimeView id={route[1]} snapshot={dashboard.snapshot} />
         : route[0] === 'new' ? <LaunchView snapshot={dashboard.snapshot} />
@@ -141,11 +151,71 @@ function WorkspaceView({ id, snapshot }: { id: string; snapshot: BrowserSnapshot
 function SessionRow({ session }: { session: SessionIndexEntry }) { return <button className="session-row" onClick={() => navigate(`/sessions/${encodeURIComponent(session.id)}`)}><span><strong>{session.name ?? session.id.slice(0, 8)}</strong><small>{session.cwd}</small></span><span className="muted">{new Date(session.updatedAt).toLocaleDateString()}</span></button>; }
 function Back() { return <button className="back" onClick={() => navigate('/')}>← Dashboard</button>; }
 
-function SessionView({ id, snapshot }: { id: string; snapshot: BrowserSnapshot }) {
+function containsStableId(value: unknown, id: string): boolean {
+  if (!value || typeof value !== 'object') return false;
+  if (stableId(value) === id) return true;
+  return Array.isArray(value)
+    ? value.some((item) => containsStableId(item, id))
+    : Object.values(value as Record<string, unknown>).some((item) => containsStableId(item, id));
+}
+
+function stableId(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  for (const key of ['id', 'messageId', 'toolCallId', 'callId'])
+    if (typeof record[key] === 'string' && record[key]) return record[key] as string;
+  for (const key of ['message', 'tool', 'content']) {
+    const nested = stableId(record[key]);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+function replaceStable(value: unknown, id: string, replacement: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  if (stableId(value) === id) return replacement;
+  if (Array.isArray(value)) return value.map((item) => replaceStable(item, id, replacement));
+  const record = value as Record<string, unknown>;
+  let changed = false;
+  const next: Record<string, unknown> = { ...record };
+  for (const [key, item] of Object.entries(record)) {
+    const replaced = replaceStable(item, id, replacement);
+    changed ||= replaced !== item;
+    next[key] = replaced;
+  }
+  return changed ? next : value;
+}
+
+/** Merge a live bridge item by its Pi-stable id, never by array position. */
+export function reconcileLiveEvent(entries: readonly unknown[], event: DashboardEvent['event'], sessionId: string): unknown[] {
+  if (!event?.sessionId || event.sessionId !== sessionId) return [...entries];
+  const envelope = event.message ?? event.tool;
+  const payload = envelope && typeof envelope === 'object'
+    ? ((envelope as Record<string, unknown>).message ?? (envelope as Record<string, unknown>).tool ?? envelope)
+    : envelope;
+  const id = stableId(envelope) ?? stableId(payload);
+  if (!payload || !id) return [...entries];
+  const replacement = event.type?.startsWith('message.') ? { type: 'message', message: payload } : { type: 'tool', tool: payload };
+  const found = entries.some((entry) => containsStableId(entry, id));
+  return found ? entries.map((entry) => replaceStable(entry, id, replacement)) : [...entries, replacement];
+}
+
+function SessionView({ id, snapshot, lastEvent, reconnectNonce }: { id: string; snapshot: BrowserSnapshot; lastEvent?: DashboardEvent; reconnectNonce: number }) {
   const [data, setData] = useState<SessionResponse>();
   const [error, setError] = useState<string>();
   const runtime = snapshot.runtimes.find((item) => item.session.id === id);
-  useEffect(() => { let active = true; void api<SessionResponse>(`/api/sessions/${encodeURIComponent(id)}`).then((value) => active && setData(value)).catch((cause) => active && setError(cause instanceof Error ? cause.message : String(cause))); return () => { active = false; }; }, [id]);
+  useEffect(() => { let active = true; void api<SessionResponse>(`/api/sessions/${encodeURIComponent(id)}`).then((value) => active && setData(value)).catch((cause) => active && setError(cause instanceof Error ? cause.message : String(cause))); return () => { active = false; }; }, [id, reconnectNonce]);
+  useEffect(() => {
+    const event = lastEvent?.event;
+    if (!event || !data) return;
+    if (event.type === 'agent.settled' || event.type === 'runtime.hello') {
+      let active = true;
+      void api<SessionResponse>(`/api/sessions/${encodeURIComponent(id)}`).then((value) => active && setData(value)).catch(() => undefined);
+      return () => { active = false; };
+    }
+    if (event.type?.startsWith('message.') || event.type?.startsWith('tool.'))
+      setData((current) => current ? { ...current, entries: reconcileLiveEvent(current.entries, event, id) } : current);
+  }, [lastEvent, id]);
   if (!data) return <section><Back /><p>{error ?? 'Loading session…'}</p></section>;
   return <section className="session-page"><Back /><div className="session-heading"><div><p className="eyebrow">Session</p><h1>{data.metadata.name ?? id.slice(0, 12)}</h1><p className="muted">{data.metadata.cwd} · {runtime ? runtime.liveState : 'dormant'}</p></div>{runtime && <RuntimeActions runtime={runtime} />}</div>{runtime?.pendingInteractions.map((interaction) => <InteractionCard key={interaction.id} interaction={interaction} />)}<Transcript entries={data.entries} /><Composer runtime={runtime} sessionId={id} /></section>;
 }
@@ -165,6 +235,11 @@ function toTranscriptEntries(rawEntries: readonly unknown[]): TranscriptEntry[] 
   for (const raw of rawEntries) {
     if (!raw || typeof raw !== 'object') { result.push({ kind: 'other' }); continue; }
     const entry = raw as Record<string, unknown>;
+    if (entry.type === 'tool') {
+      const tool = entry.tool && typeof entry.tool === 'object' ? entry.tool as Record<string, unknown> : entry;
+      result.push({ kind: 'tool', name: typeof tool.name === 'string' ? tool.name : 'tool', args: tool.arguments ?? tool.args });
+      continue;
+    }
     if (entry.type !== 'message' || !entry.message || typeof entry.message !== 'object') { result.push({ kind: 'other' }); continue; }
     const message = entry.message as Record<string, unknown>;
     if (message.role === 'assistant') {

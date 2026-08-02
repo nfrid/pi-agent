@@ -72,12 +72,16 @@ class DashboardServerImpl implements DashboardServer {
   private readonly pushConfigured: boolean;
   private readonly http: http.Server;
   private readonly bridge: net.Server;
-  private readonly wss = new WebSocketServer({ noServer: true });
+  private readonly wss = new WebSocketServer({
+    noServer: true,
+    maxPayload: 2048,
+  });
   private readonly clients = new Set<WebSocket>();
   private workspaces: WorkspaceTarget[] = [];
   private usageSnapshot: unknown;
   private revision = 0;
   private started = false;
+  private readonly goodbyeRuntimes = new Set<string>();
 
   constructor(options: DashboardServerOptions = {}) {
     this.host = options.host ?? process.env.PI_DASHBOARD_HOST ?? '127.0.0.1';
@@ -124,8 +128,8 @@ class DashboardServerImpl implements DashboardServer {
       options.registry ??
       new RuntimeRegistry({
         allowExternalWithoutToken: true,
-        expectedToken: (runtimeId, token) =>
-          manager.expectedToken(runtimeId, token),
+        expectedToken: (runtimeId, launchToken, identityToken) =>
+          manager.expectedToken(runtimeId, launchToken, identityToken),
         onChange: (change) => this.onRegistryChange(change),
       });
     this.manager = manager = new RuntimeManager(
@@ -151,11 +155,43 @@ class DashboardServerImpl implements DashboardServer {
       this.handleUpgrade(request, socket, head);
     });
     this.wss.on('connection', (client) => {
-      this.clients.add(client);
-      client.once('close', () => this.clients.delete(client));
-      client.send(
-        JSON.stringify({ type: 'snapshot', snapshot: this.snapshot() }),
+      // Authentication is a bounded first message, never a URL query value.
+      // Browsers cannot set Authorization during a WebSocket upgrade.
+      const timer = setTimeout(
+        () => client.close(1008, 'Authentication required.'),
+        5_000,
       );
+      const authenticate = (raw: import('ws').RawData) => {
+        clearTimeout(timer);
+        client.off('message', authenticate);
+        let token: string;
+        try {
+          const message = JSON.parse(String(raw)) as {
+            type?: unknown;
+            token?: unknown;
+          };
+          if (
+            message.type !== 'auth' ||
+            typeof message.token !== 'string' ||
+            message.token.length > 512
+          )
+            throw new Error('invalid');
+          token = message.token;
+        } catch {
+          client.close(1008, 'Authentication required.');
+          return;
+        }
+        if (!safeTokenEqual(token, this.token)) {
+          client.close(1008, 'Authentication required.');
+          return;
+        }
+        this.clients.add(client);
+        client.once('close', () => this.clients.delete(client));
+        client.send(
+          JSON.stringify({ type: 'snapshot', snapshot: this.snapshot() }),
+        );
+      };
+      client.on('message', authenticate);
     });
   }
 
@@ -466,14 +502,9 @@ class DashboardServerImpl implements DashboardServer {
       socket.destroy();
       return;
     }
-    const bearer = request.headers.authorization?.startsWith('Bearer ')
-      ? request.headers.authorization.slice(7)
-      : undefined;
-    const token = url.searchParams.get('token') ?? bearer;
-    if (!safeTokenEqual(token, this.token)) {
-      socket.destroy();
-      return;
-    }
+    // Upgrade authentication is completed by the first WebSocket message.
+    // Do not accept query-string or upgrade-header tokens: URLs are routinely
+    // logged by browsers, proxies, analytics and reverse proxies.
     this.wss.handleUpgrade(request, socket, head, (client) =>
       this.wss.emit('connection', client, request),
     );
@@ -532,6 +563,30 @@ class DashboardServerImpl implements DashboardServer {
   private onRegistryChange(change: RegistryChange): void {
     this.metadata.saveRuntime(change.snapshot);
     this.manager.onRegistryChange(change);
+    if (change.kind === 'offline') {
+      const runtimeId = change.snapshot.runtimeId;
+      if (!this.goodbyeRuntimes.delete(runtimeId)) {
+        const kind =
+          change.snapshot.liveState === 'failed' ? 'failed' : 'runtime-exited';
+        const notification: NotificationEvent = {
+          id: `${kind}-${runtimeId}-${change.snapshot.lastSeenAt ?? Date.now()}`,
+          kind,
+          runtimeId,
+          sessionId: change.snapshot.session.id,
+          title:
+            kind === 'failed'
+              ? 'Pi runtime failed'
+              : 'Pi runtime disconnected unexpectedly',
+          body:
+            change.snapshot.lastError ??
+            change.snapshot.session.name ??
+            change.snapshot.cwd,
+          createdAt: Date.now(),
+        };
+        this.metadata.addNotification(notification);
+        void this.push.notify(notification).catch(() => undefined);
+      }
+    }
     if (change.kind === 'event') {
       const event = change.event;
       if (event.type === 'interaction.resolved') {
@@ -540,6 +595,8 @@ class DashboardServerImpl implements DashboardServer {
           .clearWaiting?.(change.snapshot.runtimeId)
           .catch(() => undefined);
       }
+      if (event.type === 'runtime.goodbye')
+        this.goodbyeRuntimes.add(change.snapshot.runtimeId);
       const shouldNotify =
         event.type === 'interaction.requested' ||
         event.type === 'runtime.goodbye' ||

@@ -2,15 +2,20 @@ import path from 'node:path';
 import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
-import { stringArg, toolBaseName, toolPath, toolRole } from './grouping';
-import { hasUnresolvedToolFailure } from './outcome';
+import {
+  stringArg,
+  toolBaseName,
+  toolPath,
+  toolRole,
+} from '../../packages/activity-model/src/grouping';
 import {
   describeTools,
   headersOf,
   isNarration,
   type NarrationChannel,
   stripEmphasis,
-} from './title';
+} from '../../packages/activity-model/src/title';
+import { hasUnresolvedToolFailure } from './outcome';
 import type {
   SequenceItem,
   SequenceOptions,

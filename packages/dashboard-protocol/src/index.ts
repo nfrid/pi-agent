@@ -1,4 +1,5 @@
 /** Framework-independent wire types for the Pi bridge and dashboard browser API. */
+export { queryViaCodexAppServer } from './usage-app-server.js';
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME_BYTES = 512 * 1024;
@@ -67,7 +68,10 @@ export type BridgeEvent =
   | {
       type: 'runtime.hello';
       protocolVersion: number;
+      /** One-time credential issued for a managed launch. */
       token?: string;
+      /** Stable credential used by this runtime on every reconnect. */
+      identityToken?: string;
       snapshot: RuntimeSnapshot;
     }
   | {

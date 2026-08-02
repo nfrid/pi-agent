@@ -113,6 +113,21 @@ describe('ask-user UI', () => {
     expect(renderMarkdown).toHaveBeenCalledTimes(2);
   });
 
+  it('closes the local presenter when broker cancellation wins', () => {
+    const done = vi.fn();
+    const question = createQuestionDialog(
+      { question: 'Choose one' },
+      [{ label: 'Yes', value: 'yes' }],
+      { requestRender: vi.fn() } as never,
+      theme as never,
+      done,
+    );
+    question.cancel();
+    question.cancel();
+    expect(done).toHaveBeenCalledOnce();
+    expect(done).toHaveBeenCalledWith(null);
+  });
+
   it('backs out of custom input before cancelling the question', () => {
     const done = vi.fn();
     const question = createQuestionDialog(

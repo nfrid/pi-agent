@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import type { WorkspaceTarget } from '@pi-dashboard/protocol';
 import { validateStartRuntimeRequest } from '@pi-dashboard/protocol';
-import type { MetadataStore } from './metadata.js';
+import {
+  credentialHash,
+  type ManagedLaunchRecord,
+  type MetadataStore,
+} from './metadata.js';
 import type { RegistryChange, RuntimeRegistry } from './runtime-registry.js';
 import { sanitizeDisplayName } from './security.js';
 import type { SessionIndex } from './session-index.js';
@@ -10,7 +14,10 @@ import type { ManagedPlacement, TmuxAdapter } from './tmux.js';
 
 interface LaunchRecord {
   runtimeId: string;
-  token: string;
+  /** Launch authorization is consumed on the first successful hello. */
+  launchToken: string;
+  /** Runtime identity survives reconnects and daemon restarts. */
+  identityToken: string;
   workspace: WorkspaceTarget;
   placement: ManagedPlacement;
   initialPrompt?: string;
@@ -31,24 +38,78 @@ export class RuntimeManager {
     private readonly sessions: SessionIndex,
     private readonly metadata: MetadataStore,
     private readonly socketPath: string,
-  ) {}
+  ) {
+    // Recover ownership and placement before accepting a reconnect. Raw
+    // credentials are never restored; only their hashes live in SQLite.
+    for (const record of metadata.managedLaunches()) {
+      this.launches.set(record.runtimeId, this.restoreLaunch(record));
+    }
+  }
+
+  private restoreLaunch(record: ManagedLaunchRecord): LaunchRecord {
+    // The daemon can validate the identity hash from metadata. The launch
+    // record intentionally has no usable raw token after a daemon restart.
+    return {
+      runtimeId: record.runtimeId,
+      launchToken: '',
+      identityToken: '',
+      workspace: this.workspaces.get(record.workspaceId) ?? {
+        id: record.workspaceId,
+        name: record.workspaceId,
+        path: '',
+        canonicalPath: '',
+        source: 'directory',
+        active: false,
+      },
+      placement: record.placement,
+      createdAt: record.launchedAt,
+    };
+  }
 
   setWorkspaces(workspaces: readonly WorkspaceTarget[]): void {
     this.workspaces.clear();
     for (const workspace of workspaces)
       this.workspaces.set(workspace.id, workspace);
+    for (const launch of this.launches.values()) {
+      const workspace = this.workspaces.get(launch.workspace.id);
+      if (workspace) launch.workspace = workspace;
+    }
   }
 
-  expectedToken(runtimeId: string, token: string | undefined): boolean {
-    const record = this.tokens.get(token ?? '');
+  expectedToken(
+    runtimeId: string,
+    launchToken: string | undefined,
+    identityToken: string | undefined,
+  ): boolean {
+    const launch = this.tokens.get(launchToken ?? '');
     if (
-      !record ||
-      record.runtimeId !== runtimeId ||
-      record.expiresAt < Date.now()
-    )
-      return false;
-    this.tokens.delete(token ?? '');
-    return true;
+      launch &&
+      launch.runtimeId === runtimeId &&
+      launch.expiresAt >= Date.now()
+    ) {
+      this.tokens.delete(launchToken ?? '');
+      this.metadata.consumeLaunchCredential(runtimeId);
+      return true;
+    }
+    const persisted = this.metadata
+      .managedLaunches()
+      .find((item) => item.runtimeId === runtimeId);
+    // Identity is an ongoing runtime credential; unlike launch authorization it
+    // must remain valid after a socket churn or daemon restart.
+    if (
+      persisted &&
+      !persisted.launchConsumed &&
+      launchToken &&
+      persisted.launchTokenHash === credentialHash(launchToken)
+    ) {
+      this.metadata.consumeLaunchCredential(runtimeId);
+      return true;
+    }
+    return Boolean(
+      persisted &&
+        identityToken &&
+        persisted.identityTokenHash === credentialHash(identityToken),
+    );
   }
 
   activeWorkspaces(): WorkspaceTarget[] {
@@ -96,8 +157,9 @@ export class RuntimeManager {
       sessionFile = session.file;
     }
     const runtimeId = `runtime-${randomUUID()}`;
-    const token = randomUUID();
-    this.tokens.set(token, { runtimeId, expiresAt: Date.now() + 60_000 });
+    const launchToken = randomUUID();
+    const identityToken = randomUUID();
+    this.tokens.set(launchToken, { runtimeId, expiresAt: Date.now() + 60_000 });
     try {
       const placement = await this.tmux.newManagedWindow({
         workspace,
@@ -107,23 +169,29 @@ export class RuntimeManager {
         ),
         runtimeId,
         socketPath: this.socketPath,
-        token,
+        launchToken,
+        identityToken,
         sessionFile,
         model: request.model,
       });
       const launch: LaunchRecord = {
         runtimeId,
-        token,
+        launchToken,
+        identityToken,
         workspace,
         placement,
         initialPrompt: request.initialPrompt,
         createdAt: Date.now(),
       };
       this.launches.set(runtimeId, launch);
-      this.metadata.recordManagedLaunch(runtimeId, workspace.id, placement);
+      this.metadata.recordManagedLaunch(runtimeId, workspace.id, placement, {
+        identityToken,
+        launchToken,
+        launchConsumed: !this.tokens.has(launchToken),
+      });
       return { runtimeId, placement };
     } catch (error) {
-      this.tokens.delete(token);
+      this.tokens.delete(launchToken);
       throw error;
     }
   }

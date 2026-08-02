@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -13,6 +14,26 @@ export interface PushSubscriptionRecord {
   subscription: unknown;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface ManagedLaunchRecord {
+  runtimeId: string;
+  workspaceId: string;
+  placement: {
+    tmuxSession: string;
+    tmuxWindowId: string;
+    tmuxPaneId: string;
+    displayTarget: string;
+  };
+  identityTokenHash: string;
+  launchTokenHash: string;
+  launchConsumed: boolean;
+  launchedAt: number;
+  stoppedAt?: number;
+}
+
+export function credentialHash(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }
 
 /** Dashboard metadata only. Transcript/session contents never enter SQLite. */
@@ -37,11 +58,31 @@ export class MetadataStore {
       CREATE TABLE IF NOT EXISTS workspace (id TEXT PRIMARY KEY, path TEXT NOT NULL, canonical_path TEXT NOT NULL, name TEXT NOT NULL, source TEXT NOT NULL, active INTEGER NOT NULL, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS runtime (id TEXT PRIMARY KEY, ownership TEXT NOT NULL, session_id TEXT, cwd TEXT NOT NULL, state TEXT NOT NULL, online INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, snapshot_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS session_index (id TEXT PRIMARY KEY, file TEXT NOT NULL UNIQUE, cwd TEXT NOT NULL, workspace_id TEXT, name TEXT, updated_at INTEGER NOT NULL, entry_count INTEGER);
-      CREATE TABLE IF NOT EXISTS managed_launch (runtime_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, tmux_session TEXT NOT NULL, tmux_window_id TEXT NOT NULL, tmux_pane_id TEXT NOT NULL, launched_at INTEGER NOT NULL, stopped_at INTEGER);
+      CREATE TABLE IF NOT EXISTS managed_launch (runtime_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, tmux_session TEXT NOT NULL, tmux_window_id TEXT NOT NULL, tmux_pane_id TEXT NOT NULL, launched_at INTEGER NOT NULL, stopped_at INTEGER, identity_token_hash TEXT, launch_token_hash TEXT, launch_consumed INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS interaction (id TEXT PRIMARY KEY, runtime_id TEXT, session_id TEXT, status TEXT NOT NULL, updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS notification (id TEXT PRIMARY KEY, kind TEXT NOT NULL, runtime_id TEXT, session_id TEXT, title TEXT NOT NULL, body TEXT NOT NULL, created_at INTEGER NOT NULL, read_at INTEGER);
       CREATE TABLE IF NOT EXISTS push_subscription (endpoint TEXT PRIMARY KEY, subscription_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
     `);
+    // Add credential columns to databases created by the first dashboard build.
+    const columns = new Set(
+      (
+        this.db.prepare('PRAGMA table_info(managed_launch)').all() as Array<{
+          name: string;
+        }>
+      ).map((row) => row.name),
+    );
+    if (!columns.has('identity_token_hash'))
+      this.db.exec(
+        'ALTER TABLE managed_launch ADD COLUMN identity_token_hash TEXT',
+      );
+    if (!columns.has('launch_token_hash'))
+      this.db.exec(
+        'ALTER TABLE managed_launch ADD COLUMN launch_token_hash TEXT',
+      );
+    if (!columns.has('launch_consumed'))
+      this.db.exec(
+        'ALTER TABLE managed_launch ADD COLUMN launch_consumed INTEGER NOT NULL DEFAULT 0',
+      );
   }
 
   saveWorkspace(workspace: WorkspaceTarget): void {
@@ -100,11 +141,17 @@ export class MetadataStore {
       tmuxSession: string;
       tmuxWindowId: string;
       tmuxPaneId: string;
+      displayTarget?: string;
+    },
+    credentials: {
+      identityToken: string;
+      launchToken: string;
+      launchConsumed?: boolean;
     },
   ): void {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO managed_launch (runtime_id,workspace_id,tmux_session,tmux_window_id,tmux_pane_id,launched_at,stopped_at) VALUES (?,?,?,?,?,?,NULL)`,
+        `INSERT OR REPLACE INTO managed_launch (runtime_id,workspace_id,tmux_session,tmux_window_id,tmux_pane_id,launched_at,stopped_at,identity_token_hash,launch_token_hash,launch_consumed) VALUES (?,?,?,?,?,?,NULL,?,?,?)`,
       )
       .run(
         runtimeId,
@@ -113,7 +160,42 @@ export class MetadataStore {
         placement.tmuxWindowId,
         placement.tmuxPaneId,
         Date.now(),
+        credentialHash(credentials.identityToken),
+        credentialHash(credentials.launchToken),
+        ...(credentials.launchConsumed ? [1] : [0]),
       );
+  }
+
+  managedLaunches(): ManagedLaunchRecord[] {
+    return (
+      this.db
+        .prepare(
+          'SELECT runtime_id as runtimeId,workspace_id as workspaceId,tmux_session as tmuxSession,tmux_window_id as tmuxWindowId,tmux_pane_id as tmuxPaneId,launched_at as launchedAt,stopped_at as stoppedAt,identity_token_hash as identityTokenHash,launch_token_hash as launchTokenHash,launch_consumed as launchConsumed FROM managed_launch WHERE stopped_at IS NULL',
+        )
+        .all() as Array<Record<string, unknown>>
+    ).map((row) => ({
+      runtimeId: String(row.runtimeId),
+      workspaceId: String(row.workspaceId),
+      placement: {
+        tmuxSession: String(row.tmuxSession),
+        tmuxWindowId: String(row.tmuxWindowId),
+        tmuxPaneId: String(row.tmuxPaneId),
+        displayTarget: `${row.tmuxSession}:${row.tmuxWindowId}`,
+      },
+      identityTokenHash: String(row.identityTokenHash ?? ''),
+      launchTokenHash: String(row.launchTokenHash ?? ''),
+      launchConsumed: Number(row.launchConsumed) === 1,
+      launchedAt: Number(row.launchedAt),
+      ...(row.stoppedAt == null ? {} : { stoppedAt: Number(row.stoppedAt) }),
+    }));
+  }
+
+  consumeLaunchCredential(runtimeId: string): void {
+    this.db
+      .prepare(
+        'UPDATE managed_launch SET launch_consumed=1 WHERE runtime_id=? AND stopped_at IS NULL',
+      )
+      .run(runtimeId);
   }
 
   markManagedStopped(runtimeId: string): void {

@@ -1,5 +1,17 @@
+import { createHash } from 'node:crypto';
 import type { NotificationEvent } from '@pi-dashboard/protocol';
 import type { MetadataStore } from './metadata.js';
+
+/** Web Push topic is capped at 32 UTF-8 bytes by the protocol. */
+export function notificationTopic(
+  kind: string,
+  runtimeId: string | undefined,
+  id: string,
+): string {
+  const input = `${kind}:${runtimeId ?? ''}:${kind === 'waiting' ? 'waiting' : id}`;
+  const digest = createHash('sha256').update(input).digest('base64url');
+  return `${kind.slice(0, 7)}-${digest.slice(0, 24)}`.slice(0, 32);
+}
 
 export interface PushSender {
   notify(event: NotificationEvent): Promise<void>;
@@ -42,7 +54,7 @@ export async function createPushSender(
               }),
               {
                 TTL: 60,
-                topic: `${event.kind}-${event.runtimeId ?? event.id}`,
+                topic: notificationTopic(event.kind, event.runtimeId, event.id),
               },
             );
           } catch (error) {
@@ -64,7 +76,14 @@ export async function createPushSender(
             await module.default?.sendNotification(
               subscription.subscription as never,
               JSON.stringify({ clear: true, runtimeId }),
-              { TTL: 60, topic: `waiting-${runtimeId}` },
+              {
+                TTL: 60,
+                topic: notificationTopic(
+                  'waiting',
+                  runtimeId,
+                  `waiting:${runtimeId}`,
+                ),
+              },
             );
           } catch {
             // A stale/temporarily unavailable push endpoint is handled on the next notification.
