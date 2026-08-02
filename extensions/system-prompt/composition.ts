@@ -24,11 +24,11 @@ const GUIDELINES = {
   //
   // The form is asked for as a label rather than a sentence because that is
   // what it becomes: the UI prints this line alone in place of the whole
-  // phase, and conjugates it once the phase is over. Interactive modes only:
-  // a delegated child has no transcript, so there the label is pure cost.
+  // phase. Interactive modes only: a delegated child has no transcript, so
+  // there the label is pure cost.
   narration: [
-    'When you begin a distinct phase of work, label it: a short line naming what you are doing, starting with a verb — "Checking how sessions expire", "Rewriting the grouping rules". Write it before the calls that do the work, in the same message as them.',
-    'The line stands for the whole phase, so name the work rather than yourself: no "Let me", no preamble. Label changes of direction, not steps — never individual tool calls, never work already done, and nothing at all on a turn that continues what the last line announced.',
+    'When you begin a distinct phase of work, write a short preamble naming its concrete outcome and scope, starting with a verb ending in -ing — "Verifying session-expiry handling in the auth middleware", "Simplifying activity-group titles and updating their tests". Write it before the calls that do the work, in the same message as them.',
+    'Make the preamble specific and useful rather than generic process narration: name the result or area, not yourself; avoid "Let me", "Thinking", "Working", "Inspecting files", and individual tool calls. Label changes of direction, not steps, and write nothing on a turn that continues the last announced phase.',
   ],
 
   bash: [

@@ -160,7 +160,7 @@ describe.skipIf(!installedPi)('installed pi build', () => {
       tool.updateResult({ content: [{ type: 'text', text: 'ok' }] });
       busy = false;
       const done = chat.render(80).join('\n');
-      expect(done).toContain('✓ Inspected authentication code');
+      expect(done).toContain('✓ Inspecting authentication code');
       expect(errors).toEqual([]);
     } finally {
       stop();
@@ -220,7 +220,7 @@ describe.skipIf(!installedPi)('installed pi build', () => {
     } satisfies ShimHost);
     try {
       const collapsed = chat.render(80).join('\n');
-      expect(collapsed).toContain('✓ Inspected authentication code');
+      expect(collapsed).toContain('✓ Inspecting authentication code');
       // The group hides the work it stands for. The answer is in no group, so
       // Pi renders it as it always has — including its thinking, which the
       // group summary never claimed to account for.

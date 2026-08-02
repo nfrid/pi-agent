@@ -8,15 +8,14 @@
  * "**Identifying race condition in session shutdown**". Those headers are the
  * label. We only fall back to describing the tools when there is no narration.
  *
- * A group has two titles. While it is live the *latest* header wins, so the
- * line tracks what the agent is doing right now. Once it settles, the whole
- * group's narration is composed into one phrase — see `composeTitle` — because
- * no single header describes a phase that planned something and then built it.
+ * A group's title is the model's own wording. While it is live and once it
+ * settles, the latest header wins; an announced preamble takes precedence over
+ * thinking headers. We do not conjugate or compose model narration: preserving
+ * the original wording keeps the label specific and avoids invented grammar.
  */
 
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { activityKind, type ToolDescriptor, toolBaseName } from './grouping';
-import { IRREGULAR_PAST_TENSE, META_VERBS, RUSSIAN_PAST_TENSE } from './verbs';
 
 /** Bolded thinking headers, the dominant form. */
 const BOLD_HEADER = /^\s*\*{2}(.+?)\*{2}\s*$/;
@@ -24,11 +23,6 @@ const BOLD_HEADER = /^\s*\*{2}(.+?)\*{2}\s*$/;
 const MARKDOWN_HEADER = /^\s*#{1,6}\s+(.+?)\s*$/;
 
 const MAX_TITLE_LENGTH = 90;
-
-/** A verb a title can be built on: "Inspecting", "Fixing". */
-const PARTICIPLE = /^[A-Za-z]+ing$/;
-/** A word that may open the title, a new sentence, or a joined action. */
-const CLAUSE_OPENING = /(^|[.!?;:]\s*|(?:^|\s)(?:and|и)\s+)([\p{L}]+)/giu;
 
 /**
  * Drop inline markdown from a line that is about to be printed as a title.
@@ -105,146 +99,6 @@ export function headersOf(
     }
   }
   return headers;
-}
-
-/**
- * Regular "-ing" to "-ed", which is nearly all of them: Inferring → Inferred,
- * Aligning → Aligned, Modifying → Modified, Tracing → Traced, Planning →
- * Planned. Strong verbs stay in the table in `verbs.ts`, consulted first.
- */
-export function derivePastTense(verb: string): string | undefined {
-  if (!PARTICIPLE.test(verb)) return undefined;
-  const stem = verb.slice(0, -3);
-  if (stem.length < 2) return undefined;
-  // The consonant doubling that "-ing" introduced is kept, because the past
-  // tense doubles it too: Inferring → Inferr → Inferred, not Infered.
-  if (/[^aeiou]y$/i.test(stem)) return `${stem.slice(0, -1)}ied`;
-  return `${stem}ed`;
-}
-
-function capitalized(word: string): string {
-  return word.charAt(0).toUpperCase() + word.slice(1);
-}
-
-function isRussianVerb(word: string): boolean {
-  return capitalized(word) in RUSSIAN_PAST_TENSE;
-}
-
-function isMetaVerb(word: string): boolean {
-  return META_VERBS.has(capitalized(word));
-}
-
-/** Past tense of one recognised narration verb, in the case it was written in. */
-function pastOf(word: string): string | undefined {
-  const normalized = capitalized(word);
-  const past =
-    RUSSIAN_PAST_TENSE[normalized] ??
-    IRREGULAR_PAST_TENSE[normalized] ??
-    derivePastTense(normalized);
-  if (!past) return undefined;
-  return word.charAt(0) === normalized.charAt(0)
-    ? past
-    : past.charAt(0).toLowerCase() + past.slice(1);
-}
-
-export function toPastTense(title: string): string {
-  let completedLaterClause = false;
-  const completed = title.replace(
-    CLAUSE_OPENING,
-    (match, prefix: string, word: string) => {
-      const past = pastOf(word);
-      if (!past) return match;
-      // A header may first state the problem and only then name the action:
-      // "There's a leak. Fixing it". That action is just as complete as one
-      // which opened the title. Conjunctions cover "Verifying and cleaning".
-      if (prefix) completedLaterClause = true;
-      return `${prefix}${past}`;
-    },
-  );
-  // This exact copula is safe to agree with a later completed action. Leave
-  // contractions alone: "There's" can mean either "There is" or "There has".
-  return completedLaterClause
-    ? completed.replace(/^There is\b/, 'There was')
-    : completed;
-}
-
-/**
- * Title a finished group from all of its narration at once.
- *
- * No single header describes a phase that planned something and then built it:
- * the first header undersells it ("Planned the thing" for work that shipped),
- * the last one is wherever the model happened to stop ("Implemented T4" when
- * T1-T4 were the job). So the verb comes from what the group actually did —
- * how it opened and what it spent most of its time on — and the subject from
- * the header that named the goal, giving "Planned and implemented the thing".
- */
-export function composeTitle(headers: readonly string[]): string | undefined {
-  const parsed = headers
-    .filter((header) => header.trim())
-    .map((header) => {
-      const [word = '', ...rest] = header.split(' ');
-      // Only a recognised narration form is a verb worth conjugating. Headers
-      // do not always start with one — "1. Fresh context retrieval" is a
-      // sentence — and reading its first word as a verb produced titles like
-      // "Planned and 1. fresh context retrieval".
-      return pastOf(word)
-        ? { verb: word, rest: rest.join(' ') }
-        : { verb: '', rest: header };
-    });
-  const narrated = parsed.filter((entry) => entry.verb);
-  const first = narrated[0];
-  // Nothing to conjugate: the model's own words are still the best label.
-  if (!first) return parsed[0]?.rest;
-
-  // Do not splice two languages into one phrase when a model switches midway
-  // through a group. The opening narration determines the title's language.
-  const russian = isRussianVerb(first.verb);
-  const sameLanguage = narrated.filter(
-    ({ verb }) => isRussianVerb(verb) === russian,
-  );
-  const counts = new Map<string, number>();
-  for (const { verb } of sameLanguage)
-    counts.set(verb, (counts.get(verb) ?? 0) + 1);
-  // What the group spent itself on — never "Planning", even if it said so most.
-  let dominant = first.verb;
-  for (const { verb } of sameLanguage) {
-    if (isMetaVerb(verb)) continue;
-    if (
-      isMetaVerb(dominant) ||
-      (counts.get(verb) ?? 0) > (counts.get(dominant) ?? 0)
-    )
-      dominant = verb;
-  }
-
-  // The goal is stated by the opening header; later ones name sub-steps.
-  const subject =
-    first.rest || sameLanguage.find((entry) => entry.rest)?.rest || '';
-  const opened = toPastTense(first.verb);
-  const other =
-    dominant === first.verb
-      ? undefined
-      : sameLanguage.find((entry) => entry.verb === dominant);
-  if (!other) return subject ? `${opened} ${subject}` : opened;
-
-  // Two distinct things the group did, each with what it was done to. Sharing
-  // one subject between them — "Planned and created temporary activity" for a
-  // group that planned the activity and created the notes — credits the second
-  // verb with the first one's work and loses what the group produced.
-  //
-  // Only when the second verb was said once, though: a verb repeated across
-  // headers is one push broken into steps, and their subjects are step labels
-  // ("Implementing T1", "Implementing T2") that name nothing on their own.
-  const conjunction = russian ? 'и' : 'and';
-  const spelt = `${opened} ${first.rest} ${conjunction} ${toPastTense(dominant).toLowerCase()} ${other.rest}`;
-  if (
-    counts.get(dominant) === 1 &&
-    first.rest &&
-    other.rest &&
-    spelt.length <= MAX_TITLE_LENGTH
-  )
-    return spelt;
-  const phrase = `${opened} ${conjunction} ${toPastTense(dominant).toLowerCase()}`;
-  return subject ? `${phrase} ${subject}` : phrase;
 }
 
 /**

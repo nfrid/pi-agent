@@ -126,7 +126,7 @@ describe('activity groups renderer', () => {
     );
     expect(sameComponent).toBe(component);
     const completedOutput = component.render(100).join('\n');
-    expect(completedOutput).toContain('Inspected authentication code');
+    expect(completedOutput).toContain('Inspecting authentication code');
     expect(completedOutput).toContain('1.3s');
     expect(completedOutput).toContain('ORIGINAL_DETAILS');
     (component as unknown as { dispose(): void }).dispose();
@@ -216,7 +216,7 @@ describe('activity groups renderer', () => {
 
     const lines = component.render(32);
     expect(lines.map((line) => line.trim()).join(' ')).toContain(
-      'Checked how sessions expire across refreshes and reconnects',
+      'Checking how sessions expire across refreshes and reconnects',
     );
     expect(lines.filter((line) => line.startsWith('   '))).toEqual(
       expect.arrayContaining([
@@ -229,7 +229,7 @@ describe('activity groups renderer', () => {
 
     const narrow = component.render(2);
     expect(narrow.join('').replaceAll(/\s/g, '')).toContain(
-      'Checkedhowsessionsexpireacrossrefreshesandreconnects',
+      'Checkinghowsessionsexpireacrossrefreshesandreconnects',
     );
     expect(narrow.every((line) => visibleWidth(line) <= 2)).toBe(true);
     (component as unknown as { dispose(): void }).dispose();
@@ -388,30 +388,25 @@ describe('activity groups renderer', () => {
       );
     });
 
-    it('reports in the past once the phase is over', () => {
+    it('keeps the original preamble wording after the phase settles', () => {
       expect(titleOf('Checking how sessions expire', false)).toContain(
-        '✓ Checked how sessions expire',
+        '✓ Checking how sessions expire',
       );
     });
 
-    it('completes Russian preambles only after the phase settles', () => {
-      expect(titleOf('Реализую поддержку русского', true)).toContain(
-        'Реализую поддержку русского',
-      );
-      expect(titleOf('Реализую поддержку русского', false)).toContain(
-        '✓ Реализовал поддержку русского',
-      );
+    it('keeps non-English preambles unchanged', () => {
+      const preamble = 'Реализую поддержку русского';
+      expect(titleOf(preamble, true)).toContain(preamble);
+      expect(titleOf(preamble, false)).toContain(`✓ ${preamble}`);
     });
 
-    it('completes an action announced after the problem statement', () => {
+    it('keeps an action announced after the problem statement unchanged', () => {
       const preamble = "There's an issue here. Fixing it";
       expect(titleOf(preamble, true)).toContain(preamble);
-      expect(titleOf(preamble, false)).toContain(
-        "✓ There's an issue here. Fixed it",
-      );
+      expect(titleOf(preamble, false)).toContain(`✓ ${preamble}`);
     });
 
-    it('leaves a line it cannot conjugate exactly as written', () => {
+    it('keeps a non-participle line exactly as written', () => {
       // A title is a label, so the full stop goes; the words do not.
       expect(titleOf("Now I'll check how sessions expire.", false)).toContain(
         "✓ Now I'll check how sessions expire",
@@ -467,7 +462,7 @@ describe('activity groups renderer', () => {
         read,
       ];
       expect(titleOf(items, true)).toContain('Exercising planning and cleanup');
-      expect(titleOf(items)).toContain('✓ Exercised planning and cleanup');
+      expect(titleOf(items)).toContain('✓ Exercising planning and cleanup');
       expect(titleOf(items)).not.toContain('workspace');
     });
 
@@ -482,7 +477,7 @@ describe('activity groups renderer', () => {
           },
           read,
         ]),
-      ).toContain('✓ Created a workspace');
+      ).toContain('✓ Creating a workspace');
     });
 
     it('takes a preamble spoken after the thought that preceded it', () => {
@@ -504,7 +499,7 @@ describe('activity groups renderer', () => {
           },
           read,
         ]),
-      ).toContain('✓ Rewrote how sessions expire');
+      ).toContain('✓ Rewriting how sessions expire');
     });
 
     it('does not name a group after a remark made once it was under way', () => {
@@ -526,7 +521,7 @@ describe('activity groups renderer', () => {
             ]),
           },
         ]),
-      ).toContain('✓ Read the session store');
+      ).toContain('✓ Reading the session store');
     });
   });
 
@@ -713,11 +708,9 @@ describe('activity groups renderer', () => {
       ctx,
     );
     const settled = component.render(100).join('\n');
-    // Settled: the whole group's narration in one past-tense phrase, so a
-    // group that planned something and then built it says both.
-    expect(settled).toContain(
-      'Planned the delegate shutdown fix and implemented the shutdown guard',
-    );
+    // Settled groups keep the latest model-authored header rather than
+    // synthesizing a summary from earlier narration.
+    expect(settled).toContain('Implementing the shutdown guard');
     // Few enough calls to show them all, so nothing is counted away.
     expect(settled).toContain('Reading extensions/delegate/jobs.ts');
     expect(settled).not.toContain('earlier step');
