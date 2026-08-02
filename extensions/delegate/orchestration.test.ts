@@ -613,12 +613,11 @@ describe('delegate handoff artifacts', () => {
       ),
     ).rejects.toThrow('at most 4 artifacts');
 
-    const plans = [plan(['report-0', 'report-1', 'report-2', 'report-3'])];
     await expect(
       resolveDelegateHandoffs(
         ctx,
-        plans,
-        async (_ctx, handle) =>
+        [plan('framed-large', ['x'.repeat(120)])],
+        async () =>
           ({
             metadata: {
               producer: 'delegate',
@@ -626,13 +625,30 @@ describe('delegate handoff artifacts', () => {
               encoding: 'utf-8',
             },
             bytes: Buffer.from(
-              handle === 'report-3'
-                ? 'last'
-                : 'x'.repeat(DELEGATE_HANDOFF_CAPS.perItemMaxBytes),
+              'x'.repeat(DELEGATE_HANDOFF_CAPS.perItemMaxBytes - 1),
             ),
           }) as never,
       ),
-    ).rejects.toThrow('aggregate forwarded text exceeds');
+    ).rejects.toThrow('actual framed prompt bytes');
+
+    const plans = [plan(['report-0', 'report-1', 'report-2', 'report-3'])];
+    await expect(
+      resolveDelegateHandoffs(
+        ctx,
+        plans,
+        async (_ctx, _handle) =>
+          ({
+            metadata: {
+              producer: 'delegate',
+              contentClass: 'delegate-output',
+              encoding: 'utf-8',
+            },
+            bytes: Buffer.from(
+              'x'.repeat(DELEGATE_HANDOFF_CAPS.perItemMaxBytes - 400),
+            ),
+          }) as never,
+      ),
+    ).rejects.toThrow('actual forwarded prompt bytes exceed');
   });
 });
 

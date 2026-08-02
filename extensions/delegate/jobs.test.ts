@@ -83,10 +83,9 @@ describe('DelegateJobManager', () => {
     });
     await vi.waitFor(() => expect(manager.runningCount).toBe(0));
 
-    const inspected = await manager.materialize(
-      started.id,
-      { sessionManager: { getSessionId: () => 'session-one' } } as never,
-    );
+    const inspected = await manager.materialize(started.id, {
+      sessionManager: { getSessionId: () => 'session-one' },
+    } as never);
     expect(materialize).toHaveBeenCalledOnce();
     expect(inspected.handoff).toBe('published exact report');
     expect(inspected.runs?.[0]?.messages).toHaveLength(1);
