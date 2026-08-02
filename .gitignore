@@ -3,6 +3,8 @@ dist/
 apps/dashboard-web/dist/
 test-results/
 playwright-report/
+/dashboard/
+.env.dashboard
 auth.json
 trust.json
 models-store.json

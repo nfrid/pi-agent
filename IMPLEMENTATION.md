@@ -22,7 +22,13 @@ pnpm run workspace:test
 pnpm run workspace:build
 ```
 
-Start the daemon after building:
+For local development, copy `.env.dashboard.example` to `.env.dashboard`, set a private token, then start both services with one command:
+
+```sh
+pnpm dashboard:dev
+```
+
+Use `pnpm dashboard:daemon` or `pnpm dashboard:web` to run only one side. The private `.env.dashboard` file is gitignored; root environment variables override values from it. For a production daemon after building:
 
 ```sh
 pnpm --filter @pi-dashboard/server build

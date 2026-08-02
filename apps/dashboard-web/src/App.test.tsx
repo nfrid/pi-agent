@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { reconcileLiveEvent } from './App';
+import { asBrowserSnapshot, reconcileLiveEvent } from './App';
+
+describe('dashboard snapshots', () => {
+  it('rejects runtime snapshots and defaults optional browser collections', () => {
+    expect(asBrowserSnapshot({ runtimeId: 'runtime-1' })).toBeUndefined();
+    expect(asBrowserSnapshot({ revision: 1, runtimes: [], workspaces: [], sessions: [] })).toMatchObject({ unread: [] });
+  });
+});
 
 describe('active transcript reconciliation', () => {
   it('updates a live item by stable id without appending duplicates', () => {

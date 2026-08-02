@@ -10,5 +10,8 @@ export default defineConfig({
       '@pi-dashboard/activity-model': path.resolve(__dirname, '../../packages/activity-model/src/index.ts'),
     },
   },
-  server: { host: '127.0.0.1', port: 4174 },
+  server: {
+    host: '127.0.0.1',
+    port: Number(process.env.PI_DASHBOARD_WEB_PORT ?? 4174),
+  },
 });

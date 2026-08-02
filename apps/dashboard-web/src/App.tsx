@@ -12,6 +12,20 @@ type SessionResponse = { metadata: SessionIndexEntry; entries: unknown[] };
 type DashboardEvent = { type?: string; runtimeId?: string; event?: { type?: string; sessionId?: string; message?: unknown; tool?: unknown } };
 type AppError = Error & { code?: string };
 
+export function asBrowserSnapshot(value: unknown): BrowserSnapshot | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const snapshot = value as Partial<BrowserSnapshot>;
+  if (!Array.isArray(snapshot.runtimes) || !Array.isArray(snapshot.workspaces) || !Array.isArray(snapshot.sessions)) return undefined;
+  return {
+    ...snapshot,
+    revision: typeof snapshot.revision === 'number' ? snapshot.revision : 0,
+    runtimes: snapshot.runtimes,
+    workspaces: snapshot.workspaces,
+    sessions: snapshot.sessions,
+    unread: Array.isArray(snapshot.unread) ? snapshot.unread : [],
+  } as BrowserSnapshot;
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = dashboardToken();
   const response = await fetch(`${base}${path}`, { ...init, headers: { 'content-type': 'application/json', ...(token ? { 'x-dashboard-token': token } : {}), ...(init?.headers ?? {}) } });
@@ -26,7 +40,12 @@ function useDashboard(): { snapshot: BrowserSnapshot | undefined; error: string 
   const [lastEvent, setLastEvent] = useState<DashboardEvent>();
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const refresh = useCallback(async () => {
-    try { setSnapshot(await api<BrowserSnapshot>('/api/snapshot')); setError(undefined); }
+    try {
+      const next = asBrowserSnapshot(await api<unknown>('/api/snapshot'));
+      if (!next) throw new Error('Dashboard returned an invalid snapshot.');
+      setSnapshot(next);
+      setError(undefined);
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   }, []);
   useEffect(() => {
@@ -35,6 +54,7 @@ function useDashboard(): { snapshot: BrowserSnapshot | undefined; error: string 
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     let socket: WebSocket | undefined;
     let timer: number | undefined;
+    let connectTimer: number | undefined;
     let stopped = false;
     const connect = () => {
       if (stopped) return;
@@ -47,10 +67,11 @@ function useDashboard(): { snapshot: BrowserSnapshot | undefined; error: string 
       };
       socket.onmessage = (event) => {
         try {
-          const message = JSON.parse(event.data) as { type?: string; snapshot?: BrowserSnapshot };
-          if (message.type === 'snapshot' && message.snapshot) setSnapshot(message.snapshot);
+          const message = JSON.parse(event.data) as { type?: string; snapshot?: unknown };
+          const next = message.type === 'snapshot' ? asBrowserSnapshot(message.snapshot) : undefined;
+          if (next) setSnapshot(next);
           else {
-            setLastEvent(message as DashboardEvent);
+            if (message.type !== 'snapshot') setLastEvent(message as DashboardEvent);
             void refresh();
           }
         } catch { void refresh(); }
@@ -58,8 +79,20 @@ function useDashboard(): { snapshot: BrowserSnapshot | undefined; error: string 
       socket.onclose = () => { if (!stopped) { timer = window.setTimeout(() => { void refresh(); connect(); }, 1000); } };
       socket.onerror = () => socket?.close();
     };
-    connect();
-    return () => { stopped = true; if (timer) window.clearTimeout(timer); socket?.close(); };
+    // Delay initial connection by one task so React Strict Mode can complete its
+    // development-only mount/unmount probe without closing a CONNECTING socket.
+    connectTimer = window.setTimeout(connect, 0);
+    return () => {
+      stopped = true;
+      if (timer) window.clearTimeout(timer);
+      if (connectTimer) window.clearTimeout(connectTimer);
+      if (socket?.readyState === WebSocket.OPEN) socket.close();
+      else if (socket) {
+        socket.onopen = () => socket?.close();
+        socket.onerror = null;
+        socket.onclose = null;
+      }
+    };
   }, [refresh]);
   return { snapshot, error, refresh, lastEvent, reconnectNonce };
 }
