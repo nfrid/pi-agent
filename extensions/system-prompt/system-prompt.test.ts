@@ -96,9 +96,10 @@ describe('canonical prompt composition', () => {
     const headless = buildSystemPrompt(options(), 'json');
     expect(interactive).toContain('concrete outcome and scope');
     expect(interactive).toContain(
-      'Verifying session-expiry handling in the auth middleware',
+      'natural ongoing-action form for the language',
     );
-    expect(headless).not.toContain('concrete outcome and scope');
+    expect(interactive).toContain('in English, use a verb ending in -ing');
+    expect(headless).not.toContain('natural ongoing-action form');
     for (const prompt of [interactive, headless])
       expect(prompt).toContain('state the assumption in one line');
   });
