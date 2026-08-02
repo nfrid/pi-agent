@@ -244,6 +244,7 @@ export interface RemoteControlRuntime {
   readonly runtimeId: string;
   readonly client: BridgeClient;
   setContext(ctx: ExtensionContext): void;
+  isCurrent(ctx: ExtensionContext): boolean;
 }
 
 export function createRemoteControlRuntime(
@@ -347,10 +348,12 @@ export function createRemoteControlRuntime(
     context = ctx;
     lastError = undefined;
   };
-  return { runtimeId, client, setContext };
+  const isCurrent = (ctx: ExtensionContext) => context === ctx;
+  return { runtimeId, client, setContext, isCurrent };
 }
 
 function emitState(runtime: RemoteControlRuntime, ctx: ExtensionContext): void {
+  if (!runtime.isCurrent(ctx)) return;
   runtime.client.sendEvent({
     type: 'runtime.stateChanged',
     state: liveState(ctx, getInteractionBroker()),
@@ -374,6 +377,13 @@ function onTransportEvent(
 export default defineExtension('remote-control', (pi) => {
   const runtime = createRemoteControlRuntime(pi);
   if (!runtime) return;
+  const onCurrentTransportEvent = (
+    event: string,
+    handler: (value: unknown, ctx: ExtensionContext) => void,
+  ) =>
+    onTransportEvent(pi, event, (value, ctx) => {
+      if (runtime.isCurrent(ctx)) handler(value, ctx);
+    });
 
   pi.on('session_start', (_event, ctx) => {
     runtime.setContext(ctx);
@@ -390,12 +400,8 @@ export default defineExtension('remote-control', (pi) => {
       session: sessionSnapshot(ctx),
     });
   });
-  pi.on('agent_start', (_event, ctx) => {
-    runtime.setContext(ctx);
-    emitState(runtime, ctx);
-  });
+  pi.on('agent_start', (_event, ctx) => emitState(runtime, ctx));
   pi.on('agent_settled', (_event, ctx) => {
-    runtime.setContext(ctx);
     emitState(runtime, ctx);
     runtime.client.sendEvent({
       type: 'agent.settled',
@@ -403,58 +409,59 @@ export default defineExtension('remote-control', (pi) => {
     });
   });
   pi.on('agent_end', (_event, ctx) => emitState(runtime, ctx));
-  onTransportEvent(pi, 'message_start', (event, ctx) =>
+  onCurrentTransportEvent('message_start', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'message.started',
       sessionId: ctx.sessionManager.getSessionId(),
       message: jsonSafe(event),
     }),
   );
-  onTransportEvent(pi, 'message_update', (event, ctx) =>
+  onCurrentTransportEvent('message_update', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'message.updated',
       sessionId: ctx.sessionManager.getSessionId(),
       message: jsonSafe(event),
     }),
   );
-  onTransportEvent(pi, 'message_end', (event, ctx) =>
+  onCurrentTransportEvent('message_end', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'message.finished',
       sessionId: ctx.sessionManager.getSessionId(),
       message: jsonSafe(event),
     }),
   );
-  onTransportEvent(pi, 'tool_execution_start', (event, ctx) =>
+  onCurrentTransportEvent('tool_execution_start', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'tool.started',
       sessionId: ctx.sessionManager.getSessionId(),
       tool: jsonSafe(event),
     }),
   );
-  onTransportEvent(pi, 'tool_execution_update', (event, ctx) =>
+  onCurrentTransportEvent('tool_execution_update', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'tool.updated',
       sessionId: ctx.sessionManager.getSessionId(),
       tool: jsonSafe(event),
     }),
   );
-  onTransportEvent(pi, 'tool_execution_end', (event, ctx) =>
+  onCurrentTransportEvent('tool_execution_end', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'tool.finished',
       sessionId: ctx.sessionManager.getSessionId(),
       tool: jsonSafe(event),
     }),
   );
-  onTransportEvent(pi, 'model_select', (_event, ctx) =>
+  onCurrentTransportEvent('model_select', (_event, ctx) =>
     emitState(runtime, ctx),
   );
-  onTransportEvent(pi, 'thinking_level_select', (_event, ctx) =>
+  onCurrentTransportEvent('thinking_level_select', (_event, ctx) =>
     emitState(runtime, ctx),
   );
-  onTransportEvent(pi, 'queue_update', (_event, ctx) =>
+  onCurrentTransportEvent('queue_update', (_event, ctx) =>
     emitState(runtime, ctx),
   );
   pi.on('session_shutdown', (_event, ctx) => {
+    if (!runtime.isCurrent(ctx)) return;
     runtime.client.sendEvent({ type: 'runtime.goodbye' });
     runtime.client.stop();
     runtime.setContext(ctx);

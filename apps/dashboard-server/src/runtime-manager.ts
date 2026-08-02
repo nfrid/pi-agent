@@ -131,33 +131,50 @@ export class RuntimeManager {
   async stop(runtimeId: string, force = false): Promise<void> {
     const snapshot = this.registry.get(runtimeId);
     if (!snapshot) throw new Error('Unknown runtime.');
+    if (snapshot.ownership === 'external' && force)
+      throw new Error(
+        'Force-stop is only available for dashboard-managed runtimes.',
+      );
     const launch = this.launches.get(runtimeId);
-    if (snapshot.ownership === 'managed' && !force) {
+    if (snapshot.ownership === 'external') {
+      await this.registry.sendCommand(runtimeId, { type: 'shutdown' });
+      return;
+    }
+    if (!force) {
       try {
         await this.registry.sendCommand(runtimeId, { type: 'shutdown' });
       } catch {
         /* bridge may already be gone; cleanup remains bounded */
       }
-      const deadline = Date.now() + 5_000;
-      while (this.registry.isOnline(runtimeId) && Date.now() < deadline)
+      const gracefulDeadline = Date.now() + 5_000;
+      while (this.registry.isOnline(runtimeId) && Date.now() < gracefulDeadline)
         await new Promise((resolve) => setTimeout(resolve, 100));
-    } else if (snapshot.ownership === 'external' && !force) {
-      await this.registry.sendCommand(runtimeId, { type: 'shutdown' });
-      return;
     }
-    if (snapshot.ownership === 'managed' && snapshot.pid && force) {
-      try {
-        process.kill(snapshot.pid, 'SIGTERM');
-      } catch {
-        /* already exited */
-      }
-    }
+    if (this.registry.isOnline(runtimeId) && snapshot.pid)
+      this.signalManagedProcess(snapshot.pid, 'SIGTERM');
+    const termDeadline = Date.now() + (force ? 500 : 2_000);
+    while (this.registry.isOnline(runtimeId) && Date.now() < termDeadline)
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    if (this.registry.isOnline(runtimeId) && snapshot.pid)
+      this.signalManagedProcess(snapshot.pid, 'SIGKILL');
     if (launch) {
       await this.tmux
         .killManagedWindow(launch.placement)
         .catch(() => undefined);
       this.metadata.markManagedStopped(runtimeId);
       this.launches.delete(runtimeId);
+    }
+  }
+
+  private signalManagedProcess(pid: number, signal: NodeJS.Signals): void {
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      try {
+        process.kill(pid, signal);
+      } catch {
+        /* already exited */
+      }
     }
   }
 

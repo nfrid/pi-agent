@@ -133,7 +133,11 @@ export class RuntimeRegistry {
     socket.on('data', onData);
     socket.once('close', () => {
       socket.off('data', onData);
-      if (record?.socket === socket) {
+      if (
+        record &&
+        this.runtimes.get(record.snapshot.runtimeId) === record &&
+        record.socket === socket
+      ) {
         record.socket = undefined;
         record.snapshot = {
           ...record.snapshot,
@@ -213,6 +217,7 @@ export class RuntimeRegistry {
     record: RuntimeRecord,
     frame: ReturnType<typeof parseFrame>,
   ): void {
+    if (this.runtimes.get(record.snapshot.runtimeId) !== record) return;
     if (frame.kind === 'ack') {
       const pending = record.pending.get(frame.id);
       if (!pending) return;

@@ -2,6 +2,9 @@
   "name": "@pi-dashboard/server",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=25"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {

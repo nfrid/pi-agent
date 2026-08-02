@@ -7,6 +7,10 @@ self.addEventListener('fetch', (event) => {
 });
 self.addEventListener('push', (event) => {
   const data = event.data?.json?.() || {};
+  if (data.clear && data.runtimeId) {
+    event.waitUntil(self.registration.getNotifications({ tag: `waiting-${data.runtimeId}` }).then((notifications) => notifications.forEach((notification) => notification.close())));
+    return;
+  }
   event.waitUntil(self.registration.showNotification(data.title || 'Pi Dashboard', { body: data.body || 'Pi needs attention', tag: data.kind && data.runtimeId ? `${data.kind}-${data.runtimeId}` : 'pi-dashboard', data: { url: data.url || '/' } }));
 });
 self.addEventListener('notificationclick', (event) => { event.notification.close(); event.waitUntil(clients.openWindow(event.notification.data?.url || '/')); });

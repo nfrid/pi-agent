@@ -2,13 +2,17 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { groupTranscript, type TranscriptEntry } from '@pi-dashboard/activity-model';
 import type { BrowserSnapshot, RuntimeSnapshot, SessionIndexEntry, StartRuntimeRequest, WorkspaceTarget } from '@pi-dashboard/protocol';
 
-const token = import.meta.env.VITE_DASHBOARD_TOKEN as string | undefined;
 const base = (import.meta.env.VITE_DASHBOARD_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+
+function dashboardToken(): string | undefined {
+  try { return localStorage.getItem('pi-dashboard-token') ?? undefined; } catch { return undefined; }
+}
 
 type SessionResponse = { metadata: SessionIndexEntry; entries: unknown[] };
 type AppError = Error & { code?: string };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = dashboardToken();
   const response = await fetch(`${base}${path}`, { ...init, headers: { 'content-type': 'application/json', ...(token ? { 'x-dashboard-token': token } : {}), ...(init?.headers ?? {}) } });
   const body: unknown = await response.json().catch(() => ({}));
   if (!response.ok) { const error = new Error((body as { error?: string }).error ?? `Request failed (${response.status})`) as AppError; Object.assign(error, body); throw error; }
@@ -26,6 +30,7 @@ function useDashboard(): { snapshot: BrowserSnapshot | undefined; error: string 
     void refresh();
     const url = new URL(`${base || window.location.origin}/ws`);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    const token = dashboardToken();
     if (token) url.searchParams.set('token', token);
     let socket: WebSocket | undefined;
     let timer: number | undefined;
@@ -57,10 +62,21 @@ function useRoute(): string[] {
   return pathname.split('/').filter(Boolean);
 }
 
+function AuthPrompt() {
+  const [value, setValue] = useState('');
+  const save = (event: FormEvent) => {
+    event.preventDefault();
+    if (!value.trim()) return;
+    localStorage.setItem('pi-dashboard-token', value.trim());
+    window.location.reload();
+  };
+  return <main className="shell centered"><h1>Pi Dashboard</h1><p>Enter the browser token printed by the dashboard daemon.</p><form className="auth-form" onSubmit={save}><input aria-label="Dashboard token" type="password" value={value} onChange={(event) => setValue(event.target.value)} autoComplete="current-password" /><button type="submit">Connect</button></form></main>;
+}
+
 export default function App() {
   const route = useRoute();
   const dashboard = useDashboard();
-  if (!dashboard.snapshot) return <main className="shell centered"><h1>Pi Dashboard</h1><p className="error">{dashboard.error ?? 'Connecting…'}</p><button onClick={() => void dashboard.refresh()}>Retry</button></main>;
+  if (!dashboard.snapshot) return dashboard.error?.includes('Authentication') ? <AuthPrompt /> : <main className="shell centered"><h1>Pi Dashboard</h1><p className="error">{dashboard.error ?? 'Connecting…'}</p><button onClick={() => void dashboard.refresh()}>Retry</button></main>;
   const content = route[0] === 'sessions' && route[1] ? <SessionView id={route[1]} snapshot={dashboard.snapshot} />
     : route[0] === 'workspaces' && route[1] ? <WorkspaceView id={route[1]} snapshot={dashboard.snapshot} />
       : route[0] === 'runtimes' && route[1] ? <RuntimeView id={route[1]} snapshot={dashboard.snapshot} />
@@ -72,7 +88,30 @@ export default function App() {
 function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
   const working = snapshot.runtimes.filter((runtime) => runtime.online !== false && runtime.liveState === 'working').length;
   const waiting = snapshot.runtimes.filter((runtime) => runtime.online !== false && runtime.liveState === 'waiting').length;
-  return <header className="topbar"><button className="brand" onClick={() => navigate('/')}>PI AGENT</button><span className="header-stat">{working} working</span><span className="header-stat warning-text">{waiting} waiting</span><button className="header-action" onClick={() => navigate('/new')}>+ Agent</button></header>;
+  return <header className="topbar"><button className="brand" onClick={() => navigate('/')}>PI AGENT</button><span className="header-stat">{working} working</span><span className="header-stat warning-text">{waiting} waiting</span><PushButton /><button className="header-action" onClick={() => navigate('/new')}>+ Agent</button></header>;
+}
+
+function PushButton() {
+  const [status, setStatus] = useState<'off' | 'on' | 'unavailable'>('off');
+  const enable = async () => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) { setStatus('unavailable'); return; }
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+    const keyResponse = await api<{ publicKey: string | null }>('/api/push/vapid-public-key');
+    if (!keyResponse.publicKey) { setStatus('unavailable'); return; }
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeVapidKey(keyResponse.publicKey) });
+    await api('/api/push/subscribe', { method: 'POST', body: JSON.stringify(subscription.toJSON()) });
+    setStatus('on');
+  };
+  return <button className="push-button" onClick={() => void enable().catch(() => setStatus('unavailable'))}>{status === 'on' ? 'Notifications on' : status === 'unavailable' ? 'Push unavailable' : 'Enable notifications'}</button>;
+}
+
+function decodeVapidKey(value: string): ArrayBuffer {
+  const padded = `${value}${'='.repeat((4 - value.length % 4) % 4)}`.replace(/-/g, '+').replace(/_/g, '/');
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return bytes.buffer as ArrayBuffer;
 }
 
 function Dashboard({ snapshot }: { snapshot: BrowserSnapshot }) {
@@ -166,7 +205,7 @@ function Composer({ runtime }: { runtime: RuntimeSnapshot | undefined; sessionId
   return <form className="composer" onSubmit={(event) => void submit(event)}><div className="composer-mode">{runtime.liveState === 'working' && <><button type="button" className={mode === 'followUp' ? 'selected' : ''} onClick={() => setMode('followUp')}>Follow-up</button><button type="button" className={mode === 'steer' ? 'selected' : ''} onClick={() => setMode('steer')}>Steer</button></>}{runtime.liveState === 'idle' && <span>Prompt</span>}{runtime.liveState === 'waiting' && <span>Answer above</span>}</div><textarea value={text} disabled={disabled} onChange={(event) => setText(event.target.value)} placeholder={disabled ? 'Agent is waiting for input' : 'Message Pi…'} rows={3} /><button type="submit" disabled={disabled || !text.trim()}>Send</button></form>;
 }
 
-function RuntimeView({ id, snapshot }: { id: string; snapshot: BrowserSnapshot }) { const runtime = snapshot.runtimes.find((item) => item.runtimeId === id); return <section><Back /><h1>Runtime diagnostics</h1>{runtime ? <div className="diagnostics"><p>Ownership: <strong>{runtime.ownership}</strong></p><p>PID: {runtime.pid}</p><p>Bridge: {runtime.online === false ? 'offline' : 'connected'}</p><p>Session: {runtime.session.id}</p><p>tmux: {runtime.tmux?.displayTarget ?? 'not reported'}</p><pre>{JSON.stringify(runtime, null, 2)}</pre></div> : <p>Unknown runtime.</p>}</section>; }
+function RuntimeView({ id, snapshot }: { id: string; snapshot: BrowserSnapshot }) { const runtime = snapshot.runtimes.find((item) => item.runtimeId === id); return <section><Back /><h1>Runtime diagnostics</h1>{runtime ? <div className="diagnostics"><p>Ownership: <strong>{runtime.ownership}</strong></p><p>PID: {runtime.pid}</p><p>Bridge: {runtime.online === false ? 'offline' : 'connected'}</p><p>Session: {runtime.session.id}</p><p>tmux: {runtime.tmux?.displayTarget ?? 'not reported'}</p><button onClick={() => navigate(`/sessions/${encodeURIComponent(runtime.session.id)}`)}>Open session</button><pre>{JSON.stringify(runtime, null, 2)}</pre></div> : <p>Unknown runtime.</p>}</section>; }
 
 function LaunchView({ snapshot }: { snapshot: BrowserSnapshot }) {
   const [workspaceId, setWorkspaceId] = useState(snapshot.workspaces.find((item) => item.active)?.id ?? '');

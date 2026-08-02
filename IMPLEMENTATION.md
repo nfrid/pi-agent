@@ -29,7 +29,7 @@ pnpm --filter @pi-dashboard/server build
 node apps/dashboard-server/dist/index.js
 ```
 
-The daemon prints a per-install browser token. Build the web app with `VITE_DASHBOARD_URL` (when server and web are on different origins) and `VITE_DASHBOARD_TOKEN`, then serve `apps/dashboard-web/dist` over HTTPS. For local development, run `pnpm --filter @pi-dashboard/web dev` and include its origin in `PI_DASHBOARD_ORIGINS`.
+The daemon prints a per-install browser token. Build the web app with `VITE_DASHBOARD_URL` only when server and web are on different origins, then serve `apps/dashboard-web/dist` over HTTPS. The PWA never embeds the auth token in its build: on first load it asks for the printed token and keeps it in browser local storage. For local development, run `pnpm --filter @pi-dashboard/web dev` and include its origin in `PI_DASHBOARD_ORIGINS`.
 
 A Pi process registers when the extension is loaded and these variables are present:
 
@@ -53,7 +53,9 @@ Dashboard launches use `tmux new-window -d -P` with a fixed `pi` argv, an absolu
 | `PI_DASHBOARD_VAPID_PUBLIC_KEY`, `PI_DASHBOARD_VAPID_PRIVATE_KEY`, `PI_DASHBOARD_VAPID_SUBJECT` | optional Web Push configuration |
 | `PI_DASHBOARD_NOTIFY_SETTLED=1` | opt in to noisier settled notifications |
 
-Do not put the generated token in a public URL. The HTTP API requires an exact allow-listed `Origin` and bearer/`x-dashboard-token`; state-changing requests require an origin. WebSocket upgrades require the same origin and token. The Unix socket is mode 0600 and frames are bounded; managed registration tokens expire after one minute and are consumed once. Workspace/session launch inputs are IDs from trusted indexes, never arbitrary paths or flags. External runtimes can be controlled but their tmux windows are never removed by dashboard stop.
+Do not put the generated token in a public URL. The HTTP API requires an exact allow-listed `Origin` and bearer/`x-dashboard-token`; state-changing requests require an origin. WebSocket upgrades require the same origin and token. The Unix socket is mode 0600 and frames are bounded; managed registration tokens expire after one minute and are consumed once. Workspace/session launch inputs are IDs from trusted indexes, never arbitrary paths or flags. External runtimes can be controlled but their tmux windows are never removed by dashboard stop. Force-stop is rejected for external runtimes; managed stop requests graceful shutdown, bounded SIGTERM/SIGKILL fallback, then removes only its own window.
+
+The dashboard has an explicit **Enable notifications** action. It requests browser permission only after that click, fetches the public VAPID key from authenticated `/api/push/vapid-public-key`, and stores the resulting subscription in SQLite. Waiting push notifications use stable `waiting-<runtime>` tags; resolving an interaction sends a tagged clear notification and marks the in-app event read. Missing VAPID configuration leaves in-app unread events and control paths working.
 
 ## macOS launchd and Tailscale Serve
 

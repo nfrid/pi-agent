@@ -3,6 +3,7 @@ import type { MetadataStore } from './metadata.js';
 
 export interface PushSender {
   notify(event: NotificationEvent): Promise<void>;
+  clearWaiting?(runtimeId: string): Promise<void>;
   close?(): void;
 }
 
@@ -18,6 +19,9 @@ export async function createPushSender(
     return {
       async notify() {
         /* not configured; in-app events remain */
+      },
+      async clearWaiting() {
+        /* push is optional */
       },
     };
   try {
@@ -54,10 +58,26 @@ export async function createPushSender(
             .prepare('DELETE FROM push_subscription WHERE endpoint=?')
             .run(endpoint);
       },
+      async clearWaiting(runtimeId) {
+        for (const subscription of metadata.pushSubscriptions()) {
+          try {
+            await module.default?.sendNotification(
+              subscription.subscription as never,
+              JSON.stringify({ clear: true, runtimeId }),
+              { TTL: 60, topic: `waiting-${runtimeId}` },
+            );
+          } catch {
+            // A stale/temporarily unavailable push endpoint is handled on the next notification.
+          }
+        }
+      },
     };
   } catch {
     return {
       async notify() {
+        /* optional dependency/configuration failure */
+      },
+      async clearWaiting() {
         /* optional dependency/configuration failure */
       },
     };

@@ -286,6 +286,13 @@ class DashboardServerImpl implements DashboardServer {
         return this.json(response, 200, { workspaces: this.workspaces });
       if (request.method === 'GET' && url.pathname === '/api/usage')
         return this.handleUsage(response);
+      if (
+        request.method === 'GET' &&
+        url.pathname === '/api/push/vapid-public-key'
+      )
+        return this.json(response, 200, {
+          publicKey: process.env.PI_DASHBOARD_VAPID_PUBLIC_KEY ?? null,
+        });
       if (request.method === 'GET' && url.pathname.startsWith('/api/sessions/'))
         return this.handleSession(
           response,
@@ -527,8 +534,12 @@ class DashboardServerImpl implements DashboardServer {
     this.manager.onRegistryChange(change);
     if (change.kind === 'event') {
       const event = change.event;
-      if (event.type === 'interaction.resolved')
+      if (event.type === 'interaction.resolved') {
         this.metadata.clearWaitingNotifications(change.snapshot.runtimeId);
+        void this.push
+          .clearWaiting?.(change.snapshot.runtimeId)
+          .catch(() => undefined);
+      }
       const shouldNotify =
         event.type === 'interaction.requested' ||
         event.type === 'runtime.goodbye' ||
