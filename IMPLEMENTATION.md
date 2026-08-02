@@ -78,7 +78,7 @@ If the web server is separate from the daemon, set `PI_DASHBOARD_ORIGINS` to its
 
 The bridge sends a full snapshot on every connection, sequence-checks events, reconnects with bounded backoff, and serializes commands with acknowledgements. The browser refetches `/api/snapshot` after reconnect. Session indexing is rebuildable from Pi headers and incrementally invalidated; malformed historical files are skipped. Push, usage, Sesh refresh, and metrics-like history failures are isolated from control.
 
-Unit/integration coverage includes protocol rejection/size bounds, shared activity grouping, first-answer-wins broker behavior, Sesh normalization, argv-safe tmux placement, security boundaries, and session index rebuild. Real Pi/tmux/Sesh and browser-device push tests are opt-in and are not run by normal CI because they require a user's tmux server, credentials, and HTTPS secure context. Playwright is not installed in the base repository; the mobile browser path is validated by the production Vite build and should be exercised with the team's existing browser harness before deployment.
+Unit/integration coverage includes protocol rejection/size bounds, shared activity grouping, first-answer-wins broker behavior, bridge broker transport, Sesh normalization, argv-safe tmux placement, HTTP auth/CORS, security boundaries, and session index rebuild. The checked-in Playwright mobile test mocks the snapshot API and verifies the dashboard and launch route; run it with `pnpm --filter @pi-dashboard/web test:e2e` after installing the Chromium browser. Real Pi/tmux/Sesh registration, managed lifecycle, and browser-device push delivery remain opt-in because they require a user's tmux server, credentials, and HTTPS secure context.
 
 ## Deliberate v1 limits
 
