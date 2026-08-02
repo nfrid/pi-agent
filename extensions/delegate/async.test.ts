@@ -362,7 +362,7 @@ describe('async delegate extension', () => {
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
     expect(sendMessage.mock.calls[0]?.[0]).toMatchObject({
       customType: 'delegate-job-result',
-      content: expect.stringContaining('Background finding.'),
+      content: expect.stringContaining('Delegated results: 1 run(s)'),
       display: true,
     });
     expect(sendMessage.mock.calls[0]?.[1]).toEqual({
@@ -406,7 +406,7 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(peek?.content[0]?.text).toContain('Background finding.');
+    expect(peek?.content[0]?.text).not.toContain('Background finding.');
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 
@@ -486,7 +486,7 @@ describe('async delegate extension', () => {
       job: {
         id: 'dj-3',
         state: 'success',
-        handoff: expect.stringContaining('third finding.'),
+        handoff: expect.stringContaining('Truncation: original report omitted'),
       },
     });
     const queuedCancel = await tools
@@ -504,7 +504,12 @@ describe('async delegate extension', () => {
       delivery: 'automatic-queued',
       automaticQueuedJobIds: ['dj-3'],
       jobs: [
-        { id: 'dj-3', handoff: expect.stringContaining('third finding.') },
+        {
+          id: 'dj-3',
+          handoff: expect.stringContaining(
+            'Truncation: original report omitted',
+          ),
+        },
       ],
     });
 
@@ -520,7 +525,7 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(deliveredPeek?.content[0]?.text).toContain('third finding.');
+    expect(deliveredPeek?.content[0]?.text).not.toContain('third finding.');
     expect(deliveredPeek?.details).toMatchObject({
       action: 'peek',
       job: { id: 'dj-3', state: 'success' },
@@ -558,7 +563,7 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(peek?.content[0]?.text).toContain('first finding.');
+    expect(peek?.content[0]?.text).not.toContain('first finding.');
     expect(peek?.details).not.toHaveProperty('delivery');
     expect(error).toHaveBeenCalledWith(
       'delegate: failed to deliver background completion',
@@ -598,7 +603,7 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    expect(peek?.content[0]?.text).toContain('first finding.');
+    expect(peek?.content[0]?.text).not.toContain('first finding.');
     expect(peek?.details).not.toHaveProperty('delivery');
     await handlers.get('session_shutdown')?.({}, ctx);
   });
@@ -747,8 +752,12 @@ describe('async delegate extension', () => {
     } as never;
     finishes.get('second')?.(second);
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
-    expect(sendMessage.mock.calls[0]?.[0].content).toContain('First finding.');
-    expect(sendMessage.mock.calls[0]?.[0].content).toContain('Second finding.');
+    expect(sendMessage.mock.calls[0]?.[0].content).not.toContain(
+      'First finding.',
+    );
+    expect(sendMessage.mock.calls[0]?.[0].content).not.toContain(
+      'Second finding.',
+    );
     expect(sendMessage.mock.calls[0]?.[0].content).not.toContain(
       'Third finding.',
     );
@@ -761,7 +770,9 @@ describe('async delegate extension', () => {
     } as never;
     finishes.get('third')?.(third);
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
-    expect(sendMessage.mock.calls[1]?.[0].content).toContain('Third finding.');
+    expect(sendMessage.mock.calls[1]?.[0].content).not.toContain(
+      'Third finding.',
+    );
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 

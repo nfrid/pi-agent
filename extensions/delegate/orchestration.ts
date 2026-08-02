@@ -4,7 +4,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { DelegateConfig } from './config';
 import { invalidParams } from './param-errors';
-import { buildDelegatePlans } from './plans';
+import { buildDelegatePlans, resolveDelegateHandoffs } from './plans';
 import { mapWithConcurrency } from './runner';
 import {
   cleanupFreshPreparedTask,
@@ -193,9 +193,10 @@ export async function prepareDelegateExecution(
     runCtx.config,
     runCtx.getSnapshot,
   );
+  const plans = await resolveDelegateHandoffs(runCtx.ctx, built.plans);
   return {
     mode: built.parallel ? 'parallel' : 'single',
-    tasks: await preparePlans(built),
+    tasks: await preparePlans({ ...built, plans }),
   };
 }
 

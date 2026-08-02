@@ -36,6 +36,10 @@ export interface DelegateTaskPlan {
   base?: WorktreeBase;
   /** Explicit source for a read-only continuation replacement snapshot. */
   refresh?: WorktreeBase;
+  /** Parent-owned artifact reference resolved before child setup. */
+  handoffFrom?: import('./tool').DelegateHandoffFrom;
+  /** Resolved artifact text, kept out of run details. */
+  handoffText?: string;
   writeRequested: boolean;
   /** Effective workspace isolation, independent from write capability. */
   isolation: DelegateIsolation;
@@ -336,6 +340,7 @@ export async function runPreparedDelegateTask(
     contextNote: [prepared.plan.contextNote, prepared.snapshotNotice]
       .filter((item): item is string => Boolean(item?.trim()))
       .join('\n\n'),
+    handoffText: prepared.plan.handoffText,
     scope: prepared.scope,
     routing: prepared.plan.routing,
     writeRequested: prepared.plan.writeRequested,

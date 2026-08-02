@@ -32,7 +32,7 @@ export async function buildArtifactBackedHandoff(
       if (
         run.artifact ||
         failedRuns.has(run) ||
-        !result.truncatedOriginalReports.has(run)
+        !result.omittedOriginalReports.has(run)
       )
         continue;
       const exact = getExactFinalAssistantText(run.messages);

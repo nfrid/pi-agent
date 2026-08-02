@@ -75,6 +75,8 @@ export interface RunDelegateOptions {
   isolation: DelegateIsolation;
   worktree?: PreparedWorktree;
   contextNote?: string;
+  /** Resolved upstream evidence, never included in parent-visible run details. */
+  handoffText?: string;
   scope?: string[];
   continuation?: string;
   resuming?: boolean;
@@ -94,6 +96,7 @@ export function buildChildArgs(
     | 'allowWrites'
     | 'worktree'
     | 'contextNote'
+    | 'handoffText'
     | 'scope'
     | 'resuming'
   > & { timeoutMs?: number },
@@ -127,6 +130,7 @@ export function buildChildArgs(
     buildDelegatePrompt(options.task, {
       allowWrites,
       contextNote: options.contextNote,
+      handoffText: options.handoffText,
       scope: options.scope,
       continuation: options.resuming,
       timeoutMs: options.timeoutMs,

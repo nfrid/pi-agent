@@ -39,8 +39,10 @@ cannot tell what bytes mean: every producer must still keep user messages, appro
 decisions, and credentials out of artifacts.
 
 `web` persists every response so `get_search_content` survives a session resume.
-`delegate` stores only the final assistant bytes that its bounded parent handoff had to
-omit — never task text, context, stderr, or transcripts.
+`delegate` stores every exact final assistant report that the compact parent-visible
+handoff omits — never task text, context, stderr, or transcripts. A parent may deliberately
+forward a bounded textual `delegate-output` artifact to a later child; availability is not
+an instruction to retrieve it.
 
 ## Retrieving
 

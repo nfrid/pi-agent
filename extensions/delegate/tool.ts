@@ -52,6 +52,25 @@ const RefreshSchema = StringEnum(['wip', 'head'] as const, {
     'Continuation-only snapshot selector. For a read-only isolated continuation, wip recreates from the parent’s current tracked and untracked work; head recreates from current HEAD only. Omit to continue the original snapshot.',
 });
 
+const HandoffFromSchema = Type.Object({
+  handle: Type.String({
+    minLength: 1,
+    maxLength: 64,
+    pattern: '^art_[A-Za-z0-9_-]{22}$',
+    description: 'Artifact handle from a prior delegate result in this session',
+  }),
+  label: Type.Optional(
+    Type.String({
+      minLength: 1,
+      maxLength: 120,
+      description:
+        'Optional label for the upstream evidence in the child prompt',
+    }),
+  ),
+});
+
+export type DelegateHandoffFrom = Static<typeof HandoffFromSchema>;
+
 const BackgroundSchema = Type.Boolean({
   description:
     'Run asynchronously and return a job ID immediately after setup. Completion is delivered automatically.',
@@ -91,6 +110,7 @@ const TaskItem = Type.Object({
   isolation: Type.Optional(IsolationSchema),
   from: Type.Optional(BaseSchema),
   refresh: Type.Optional(RefreshSchema),
+  handoffFrom: Type.Optional(HandoffFromSchema),
 });
 
 const DelegateParamsSchema = Type.Object({
@@ -120,6 +140,7 @@ const DelegateParamsSchema = Type.Object({
   isolation: Type.Optional(IsolationSchema),
   from: Type.Optional(BaseSchema),
   refresh: Type.Optional(RefreshSchema),
+  handoffFrom: Type.Optional(HandoffFromSchema),
   background: Type.Optional(BackgroundSchema),
 });
 
@@ -134,12 +155,12 @@ export function delegatePromptGuidelines(
     'Your context is the resource that runs out first; a child spends its own. Delegate — implementation and edits included, not only exploration and review — when the work needs more reading than its result is worth carrying, or when independent pieces can run at once. Do the work yourself when finishing it is quicker than briefing it, and do not invent research/implement/test/review stages that add nothing.',
     'Brief a writable task like a ticket: what done looks like, the command that proves it, and what to leave alone. A child that has to infer its finish line will pick one of its own.',
     'Isolation and write capability are separate: fresh read-only work defaults to the shared checkout, while writable work defaults to a worktree. Choose read-only worktree isolation for long audits when parent changes may overlap; after fixing audit findings, use a fresh isolated delegate to review those fixes.',
-    'Use contextNote for the relevant decisions, constraints, and findings; use branch only when exact parent history matters.',
+    'Own delegation deliberately: keep task decomposition, final decisions, and user-facing synthesis with yourself. Preserve parent context by forwarding only the decisions and evidence a child needs, not the whole conversation; use contextNote for relevant decisions, constraints, and findings, and use branch only when exact parent history matters. Small, tightly coupled work is often faster and safer to do yourself.',
     'Continue a read-only isolated child without refresh to revisit the same snapshot, or use refresh wip/head for targeted verification after fixes; a refreshed continuation preserves context but is not independent evidence. Start a fresh delegate for an independent regression review.',
     'A child that comes back with a "Blocked:" question is waiting on you, not failing. Answer it — from what you know, or by looking — and continue that child; re-briefing a fresh one throws away the context it already built. Decide it yourself unless it is genuinely the user\'s call.',
     "Parallelize only independent work: if one task depends on another's findings, read the first result before starting the next. Worktree-isolated tasks each get their own checkout, so writable tasks can run in parallel even on overlapping files. Use background delegation when foreground work can continue meanwhile; use foreground delegation when the next parent action must await the result.",
-    'A writable run leaves its work as commits on the branch it reports; integrate it yourself with delegate_branches rather than handing the merge to the user.',
-    'Treat child results as claims to verify: trust reported checks and concrete evidence, and re-check or continue the child when an important claim has none. A subagent can report work it did not finish, and weakening a test is a common way a task comes back "passing".',
+    'A writable run leaves its work as commits on the branch it reports; integrate it yourself with delegate_branches rather than handing the merge to the user. A delegate-output artifact being available is not an instruction to retrieve it: use the compact envelope unless exact upstream wording would change a decision, and then use handoffFrom (or artifact retrieval) deliberately.',
+    'Supervise proportionally: inspect and verify high-risk or consequential work, while letting routine bounded work return a compact report. Treat child results as claims to verify: trust reported checks and concrete evidence, and re-check or continue the child when an important claim has none. A subagent can report work it did not finish, and weakening a test is a common way a task comes back "passing".',
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd, config)}`,
   ];
 }
@@ -160,7 +181,7 @@ export function registerDelegateTool(
     name: 'delegate',
     label: 'Delegate',
     description:
-      'Delegate work to child Pi processes with their own context. Fresh tasks need one exact catalog route; continuations reuse persisted route, write capability, and isolation when omitted. Fresh writable tasks default to an isolated git worktree; fresh read-only tasks default to the shared checkout, or may explicitly use a worktree snapshot. Writable shared tasks are rejected. Set background true for independent work that should complete asynchronously.',
+      'Delegate work to child Pi processes with their own context. Fresh tasks need one exact catalog route; continuations reuse persisted route, write capability, and isolation when omitted. Fresh writable tasks default to an isolated git worktree; fresh read-only tasks default to the shared checkout, or may explicitly use a worktree snapshot. Writable shared tasks are rejected. Use handoffFrom with a prior delegate-output artifact handle when a new child deliberately needs exact upstream evidence; the bytes stay out of the parent-visible result. Set background true for independent work that should complete asynchronously.',
     promptSnippet:
       'Hand a child implementation, exploration, review, validation, or independent parallel work whenever a subagent would save your own context.',
     promptGuidelines: delegatePromptGuidelines(cwd, promptConfig),

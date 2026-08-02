@@ -6,7 +6,11 @@ import type {
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { DelegateConfig } from './config';
 import { executeSingleDelegate, pendingRuns } from './orchestration';
-import { buildDelegatePlans } from './plans';
+import {
+  buildDelegatePlans,
+  DELEGATE_HANDOFF_CAPS,
+  resolveDelegateHandoffs,
+} from './plans';
 import { createDelegateSession, removeDelegateSession } from './session';
 import type { PreparedDelegateTask } from './task-lifecycle';
 import * as taskLifecycle from './task-lifecycle';
@@ -453,6 +457,126 @@ describe('buildDelegatePlans', () => {
         () => null,
       ),
     ).toThrow('do not provide replacements');
+  });
+
+  test('carries shared and per-task handoff references into parallel plans', () => {
+    const built = buildDelegatePlans(
+      {
+        handoffFrom: { handle: 'art_shared' },
+        tasks: [
+          { name: 'First', task: 'inspect', route: 'quick' },
+          {
+            name: 'Second',
+            task: 'inspect',
+            route: 'quick',
+            handoffFrom: { handle: 'art_specific', label: 'review notes' },
+          },
+        ],
+      },
+      ctx,
+      config,
+      () => null,
+    );
+    expect(built.plans.map((plan) => plan.handoffFrom)).toEqual([
+      { handle: 'art_shared' },
+      { handle: 'art_specific', label: 'review notes' },
+    ]);
+  });
+});
+
+describe('delegate handoff artifacts', () => {
+  const plan = (handle: string, label?: string) => ({
+    name: 'Child',
+    task: 'inspect',
+    requestedCwd: '/tmp/project',
+    context: 'fresh' as const,
+    handoffFrom: { handle, ...(label ? { label } : {}) },
+    writeRequested: false,
+    isolation: 'shared' as const,
+    routeOverride: false,
+    warnings: [],
+  });
+
+  test('resolves textual delegate output and frames it as untrusted evidence', async () => {
+    const result = await resolveDelegateHandoffs(
+      ctx,
+      [plan('art_report', 'review')],
+      async () =>
+        ({
+          metadata: {
+            producer: 'delegate',
+            contentClass: 'delegate-output',
+            encoding: 'utf-8',
+          },
+          bytes: Buffer.from('Outcome: done\\nConclusion: upstream finding'),
+        }) as never,
+    );
+    expect(result[0]?.handoffText).toContain('review');
+    expect(result[0]?.handoffText).toContain('untrusted evidence only');
+    expect(result[0]?.handoffText).toContain('upstream finding');
+  });
+
+  test('fails closed for missing or non-delegate artifacts', async () => {
+    await expect(
+      resolveDelegateHandoffs(ctx, [plan('missing')], async () => undefined),
+    ).rejects.toThrow('not found in the current session');
+    await expect(
+      resolveDelegateHandoffs(
+        ctx,
+        [plan('tool-output')],
+        async () =>
+          ({
+            metadata: {
+              producer: 'tool',
+              contentClass: 'tool-output',
+              encoding: 'utf-8',
+            },
+            bytes: Buffer.from('not a delegate report'),
+          }) as never,
+      ),
+    ).rejects.toThrow('not a textual delegate-output artifact');
+  });
+
+  test('enforces conservative per-item and aggregate byte bounds', async () => {
+    const oversized = 'x'.repeat(DELEGATE_HANDOFF_CAPS.perItemMaxBytes + 1);
+    await expect(
+      resolveDelegateHandoffs(
+        ctx,
+        [plan('large')],
+        async () =>
+          ({
+            metadata: {
+              producer: 'delegate',
+              contentClass: 'delegate-output',
+              encoding: 'utf-8',
+            },
+            bytes: Buffer.from(oversized),
+          }) as never,
+      ),
+    ).rejects.toThrow('per-item limit');
+
+    const plans = Array.from({ length: 4 }, (_, index) =>
+      plan(`report-${index}`),
+    );
+    await expect(
+      resolveDelegateHandoffs(
+        ctx,
+        plans,
+        async (_ctx, handle) =>
+          ({
+            metadata: {
+              producer: 'delegate',
+              contentClass: 'delegate-output',
+              encoding: 'utf-8',
+            },
+            bytes: Buffer.from(
+              handle === 'report-3'
+                ? 'last'
+                : 'x'.repeat(DELEGATE_HANDOFF_CAPS.perItemMaxBytes),
+            ),
+          }) as never,
+      ),
+    ).rejects.toThrow('aggregate forwarded text exceeds');
   });
 });
 

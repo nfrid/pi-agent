@@ -281,11 +281,17 @@ describe('output', () => {
     expect(handoff).not.toContain('this continuation completed');
   });
 
-  test('does not artifact a fitting structured report', async () => {
+  test('artifacts every exact report and keeps the parent result envelope-only', async () => {
     const exact =
       'Outcome: done\nConclusion: the guard is correct\nEvidence: src/guard.ts:10\nRisks: none';
     const run = reportedRun(exact);
-    const put = vi.fn();
+    const persisted: string[] = [];
+    const put = vi.fn(
+      async (_pi: unknown, _ctx: unknown, input: { bytes: string }) => {
+        persisted.push(input.bytes);
+        return { ...artifact(), size: Buffer.byteLength(input.bytes) };
+      },
+    );
 
     const handoff = await buildArtifactBackedHandoff(
       {} as never,
@@ -294,12 +300,16 @@ describe('output', () => {
       put as never,
     );
 
-    expect(put).not.toHaveBeenCalled();
-    expect(run.artifact).toBeUndefined();
-    expect(handoff).toContain(`Output\n${exact}`);
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(persisted).toEqual([exact]);
+    expect(run.artifact?.handle).toBe(artifact().handle);
+    expect(handoff).toContain(`Artifact: ${artifact().handle}`);
+    expect(handoff).toContain('Truncation: original report omitted');
+    expect(handoff).not.toContain(`Output\n${exact}`);
+    expect(handoff).not.toContain(exact);
   });
 
-  test('artifacts an original report genuinely truncated from the handoff', async () => {
+  test('preserves the exact omitted report in the output artifact', async () => {
     const exact = `Outcome: done\nConclusion: complete\n\n${'🙂'.repeat(10_000)}`;
     const run = reportedRun(exact);
     const persisted: string[] = [];

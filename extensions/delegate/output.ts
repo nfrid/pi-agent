@@ -6,10 +6,11 @@ import {
   isRunError,
 } from './types';
 
-/** Safety bounds for parent-visible delegated reports. */
+/** Safety bounds for parent-visible delegated envelopes. */
 export const PARENT_HANDOFF_CAPS = {
   singleMaxBytes: 12 * 1024,
   aggregateMaxBytes: 50 * 1024,
+  /** Retained for compatibility; exact reports are no longer inline. */
   perTaskMaxBytes: 8 * 1024,
 } as const;
 
@@ -22,7 +23,7 @@ export interface ParentHandoffCaps {
 export function truncateBytes(text: string, maxBytes: number): string {
   if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
   const suffix =
-    '\n\n[Output truncated for parent context; full output is preserved in tool details.]';
+    '\n\n[Output truncated for parent context; full output is preserved in the delegate-output artifact.]';
   const suffixBytes = Buffer.byteLength(suffix, 'utf8');
   if (maxBytes <= suffixBytes) {
     let marker = suffix;
@@ -113,7 +114,6 @@ interface PreparedRun {
   envelope: string;
   originalBody: string;
   originalReport?: string;
-  body: string;
 }
 
 function prepareRun(run: DelegatedRun): PreparedRun {
@@ -174,17 +174,15 @@ function prepareRun(run: DelegatedRun): PreparedRun {
     envelope: lines.join('\n'),
     originalBody,
     originalReport,
-    body: '',
   };
 }
 
 function withTruncationMarker(item: PreparedRun): PreparedRun {
-  const truncated = item.body !== item.originalBody;
   return {
     ...item,
     envelope: item.envelope.replace(
-      /Truncation: (?:none|original report truncated)/,
-      `Truncation: ${truncated ? 'original report truncated' : 'none'}`,
+      /Truncation: none/,
+      `Truncation: ${item.originalReport ? 'original report omitted' : 'none'}`,
     ),
   };
 }
@@ -198,101 +196,38 @@ function envelopeBlock(items: PreparedRun[], parallel: boolean): string {
     .join('\n\n');
 }
 
-function allocateBodies(
-  items: PreparedRun[],
-  summary: string,
-  totalCap: number,
-  perBodyCap: number,
-  parallel: boolean,
-): PreparedRun[] {
-  let remaining = Math.max(
-    0,
-    totalCap -
-      Buffer.byteLength(
-        `${summary}\n\n${envelopeBlock(items, parallel)}`,
-        'utf8',
-      ),
-  );
-  let emitted = false;
-  return items.map((item, index) => {
-    const prefix = `${emitted ? '\n\n---\n\n' : '\n\n'}${
-      parallel ? `### Task ${index + 1} output\n` : 'Output\n'
-    }`;
-    const prefixBytes = Buffer.byteLength(prefix, 'utf8');
-    if (!item.originalBody || remaining <= prefixBytes)
-      return { ...item, body: '' };
-    const available = Math.min(perBodyCap, remaining - prefixBytes);
-    const body = truncateBytes(item.originalBody, available);
-    emitted = true;
-    remaining -= prefixBytes + Buffer.byteLength(body, 'utf8');
-    return { ...item, body };
-  });
-}
-
 export interface ParentHandoffResult {
   text: string;
-  /** Runs whose exact final report was omitted or truncated from the handoff body. */
+  /** Runs whose exact final report is omitted from the parent-visible envelope. */
+  omittedOriginalReports: ReadonlySet<DelegatedRun>;
+  /** @deprecated Use omittedOriginalReports; retained for continuation compatibility. */
   truncatedOriginalReports: ReadonlySet<DelegatedRun>;
 }
 
-/** Builds a bounded handoff with every envelope allocated before report bodies. */
+/** Builds a bounded envelope; exact final reports are never copied inline. */
 export function buildParentHandoffResult(
   runs: DelegatedRun[],
   caps: ParentHandoffCaps = PARENT_HANDOFF_CAPS,
 ): ParentHandoffResult {
   const parallel = runs.length > 1;
   const totalCap = parallel ? caps.aggregateMaxBytes : caps.singleMaxBytes;
-  const perBodyCap = parallel ? caps.perTaskMaxBytes : caps.singleMaxBytes;
   const summary = `Delegated results: ${runs.length} run(s)`;
-  let prepared = runs.map(prepareRun);
-
-  // Markers add bytes to the mandatory envelope, so allocate once to discover
-  // them and again against their final size.
-  prepared = allocateBodies(
-    prepared,
-    summary,
-    totalCap,
-    perBodyCap,
-    parallel,
-  ).map(withTruncationMarker);
-  prepared = allocateBodies(
-    prepared,
-    summary,
-    totalCap,
-    perBodyCap,
-    parallel,
-  ).map(withTruncationMarker);
-
+  const prepared = runs.map(prepareRun).map(withTruncationMarker);
   const mandatory = `${summary}\n\n${envelopeBlock(prepared, parallel)}`;
   const overflow = Buffer.byteLength(mandatory, 'utf8') > totalCap;
   const overflowWarning =
-    'Mandatory metadata exceeds the handoff size cap; task bodies are omitted.';
-  if (overflow) {
-    prepared = prepared
-      .map((item) => ({ ...item, body: '' }))
-      .map(withTruncationMarker);
-  }
+    'Mandatory metadata exceeds the handoff size cap; exact reports remain artifact-only.';
   const envelopes = envelopeBlock(prepared, parallel);
-  const bodies = prepared
-    .map((item, index) =>
-      item.body
-        ? `${parallel ? `### Task ${index + 1} output\n` : 'Output\n'}${item.body}`
-        : '',
-    )
-    .filter(Boolean)
-    .join('\n\n---\n\n');
-  const text = `${summary}${overflow ? `\n${overflowWarning}` : ''}\n\n${envelopes}${bodies ? `\n\n${bodies}` : ''}`;
+  const text = `${summary}${overflow ? `\n${overflowWarning}` : ''}\n\n${envelopes}`;
+  const omittedOriginalReports = new Set(
+    prepared
+      .filter((item) => item.originalReport !== undefined)
+      .map((item) => item.run),
+  );
   return {
     text,
-    truncatedOriginalReports: new Set(
-      prepared
-        .filter(
-          (item) =>
-            item.originalReport !== undefined &&
-            item.body !== item.originalReport,
-        )
-        .map((item) => item.run),
-    ),
+    omittedOriginalReports,
+    truncatedOriginalReports: omittedOriginalReports,
   };
 }
 
