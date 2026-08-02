@@ -291,8 +291,12 @@ export class ActivityGroupComponent implements Component {
     const showPrefix = width > 3;
     const prefix = showPrefix ? ` ${this.theme.fg(color, marker)} ` : '';
     const indent = showPrefix ? '   ' : '';
+    // Before the first call arrives this is only the model's changing thought,
+    // not an activity-group title yet. Keep white text reserved for titles of
+    // established groups so the transient state is visually unambiguous.
+    const titleColor = !completed && tools.length === 0 ? 'muted' : 'text';
     const titleLines = wrapTextWithAnsi(
-      this.theme.fg('text', this.title(tools, completed)),
+      this.theme.fg(titleColor, this.title(tools, completed)),
       Math.max(1, width - indent.length),
     );
     return titleLines.map((line, index) =>

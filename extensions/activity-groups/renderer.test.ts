@@ -132,6 +132,61 @@ describe('activity groups renderer', () => {
     (component as unknown as { dispose(): void }).dispose();
   });
 
+  it('mutes a changing thought until the group has its first tool', () => {
+    const renderer = createActivityGroupRenderer();
+    const ctx = context();
+    const thought: SequenceSnapshot = {
+      id: 'forming-group',
+      cwd: process.cwd(),
+      startedAt: 1000,
+      failed: false,
+      items: [
+        {
+          type: 'assistant',
+          message: message([
+            { type: 'thinking', thinking: '**Inspecting the renderer**' },
+          ]),
+        },
+      ],
+    };
+
+    const component = renderer(
+      thought,
+      { streaming: true, expanded: false, defaultView: new Text('', 0, 0) },
+      paintedTheme,
+      ctx,
+    );
+    if (!component) throw new Error('renderer returned no component');
+    ctx.lastComponent = component;
+    expect(component.render(200).join('\n')).toContain(
+      '<muted>Inspecting the renderer</muted>',
+    );
+
+    renderer(
+      {
+        ...thought,
+        items: [
+          ...thought.items,
+          {
+            type: 'tool',
+            id: 'read-1',
+            name: 'read',
+            args: { path: 'extensions/activity-groups/renderer.ts' },
+            status: 'running',
+            isError: false,
+          },
+        ],
+      },
+      { streaming: true, expanded: false, defaultView: new Text('', 0, 0) },
+      paintedTheme,
+      ctx,
+    );
+    const established = component.render(200).join('\n');
+    expect(established).toContain('<text>Inspecting the renderer</text>');
+    expect(established).not.toContain('<muted>Inspecting the renderer</muted>');
+    (component as unknown as { dispose(): void }).dispose();
+  });
+
   it('wraps long titles instead of discarding their detail', () => {
     const component = createActivityGroupRenderer()(
       {
