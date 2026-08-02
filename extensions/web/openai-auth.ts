@@ -1,6 +1,9 @@
-import { existsSync, readFileSync } from 'node:fs';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { getWebSearchConfigPath } from './utils';
+import {
+  getWebSearchConfigPath,
+  loadWebSearchConfig,
+  normalizeApiKey,
+} from './utils';
 
 export const OPENAI_CONFIG_PATH = getWebSearchConfigPath();
 
@@ -21,33 +24,11 @@ const AUTH_MODEL_CANDIDATES = [
   },
 ] as const;
 
-interface WebSearchConfig {
-  openaiApiKey?: unknown;
-}
-
 export interface OpenAIAuth {
   provider: 'openai-codex' | 'openai';
   apiKey: string;
   model: string;
   headers: Record<string, string>;
-}
-
-function loadConfig(): WebSearchConfig {
-  if (!existsSync(OPENAI_CONFIG_PATH)) return {};
-
-  const raw = readFileSync(OPENAI_CONFIG_PATH, 'utf-8');
-  try {
-    return JSON.parse(raw) as WebSearchConfig;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to parse ${OPENAI_CONFIG_PATH}: ${message}`);
-  }
-}
-
-function normalizeApiKey(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -110,7 +91,7 @@ export async function resolveOpenAIAuth(
 
   const apiKey =
     normalizeApiKey(process.env.OPENAI_API_KEY) ??
-    normalizeApiKey(loadConfig().openaiApiKey);
+    normalizeApiKey(loadWebSearchConfig(OPENAI_CONFIG_PATH).openaiApiKey);
   return apiKey
     ? { provider: 'openai', apiKey, model: 'gpt-5.4', headers: {} }
     : undefined;

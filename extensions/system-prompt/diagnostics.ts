@@ -27,8 +27,14 @@ export interface UsageDiagnostics {
   peakContext: number;
 }
 
+export function estimateSizeFromCharacterCount(
+  characters: number,
+): SizeEstimate {
+  return { characters, tokens: Math.ceil(characters / 4) };
+}
+
 export function estimateSize(value: string): SizeEstimate {
-  return { characters: value.length, tokens: Math.ceil(value.length / 4) };
+  return estimateSizeFromCharacterCount(value.length);
 }
 
 function textCharacters(content: unknown): number {
@@ -71,11 +77,11 @@ export function summarizeContextMessages(
     messages: messages.length,
     retainedToolResults: {
       count: toolCount,
-      ...estimateSize('x'.repeat(toolCharacters)),
+      ...estimateSizeFromCharacterCount(toolCharacters),
     },
     customMessages: {
       count: customCount,
-      ...estimateSize('x'.repeat(customCharacters)),
+      ...estimateSizeFromCharacterCount(customCharacters),
     },
   };
 }
