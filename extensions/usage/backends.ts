@@ -1,4 +1,5 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { withAbort } from '../shared/runtime/async';
 import { queryViaCodexAppServer } from './app-server';
 import { CODEX_USAGE_URL, TIMEOUT_MS } from './constants';
 import { isCodexModel } from './display';
@@ -57,29 +58,11 @@ async function resolvePiCodexHeaders(
   return undefined;
 }
 
-function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  signal.throwIfAborted();
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener('abort', onAbort);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener('abort', onAbort);
-        reject(error);
-      },
-    );
-  });
-}
-
 export async function queryViaPiAuth(
   ctx: ExtensionContext,
   signal: AbortSignal,
 ): Promise<UsageReport> {
-  const headers = await abortable(resolvePiCodexHeaders(ctx), signal);
+  const headers = await withAbort(resolvePiCodexHeaders(ctx), signal);
   signal.throwIfAborted();
   if (!headers) throw new Error('No Pi Codex auth available.');
 

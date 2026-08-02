@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { abortableDelay, throwIfAborted } from '../shared/runtime/async';
@@ -14,6 +15,34 @@ export function getWebSearchConfigDir(): string {
 
 export function getWebSearchConfigPath(): string {
   return join(getWebSearchConfigDir(), 'web-search.json');
+}
+
+export interface WebSearchConfig {
+  exaApiKey?: unknown;
+  openaiApiKey?: unknown;
+  ssrf?: { allowRanges?: unknown };
+}
+
+export function loadWebSearchConfig(
+  path = getWebSearchConfigPath(),
+  options: { ignoreMalformed?: boolean } = {},
+): WebSearchConfig {
+  if (!existsSync(path)) return {};
+
+  const raw = readFileSync(path, 'utf8');
+  try {
+    return JSON.parse(raw) as WebSearchConfig;
+  } catch (error) {
+    if (options.ignoreMalformed && error instanceof SyntaxError) return {};
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to parse ${path}: ${message}`);
+  }
+}
+
+export function normalizeApiKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 const TRANSIENT_STATUSES = new Set([408, 429, 500, 502, 503, 504]);

@@ -9,7 +9,7 @@ const MAX_PREVIEW_CHARS = 1000;
 type ThinkingGroup = {
   id: string;
   text: string;
-  activityIds: string[];
+  activityId: string;
 };
 
 type ThinkingRunState = {
@@ -151,14 +151,14 @@ function startThinkingGroup(
   const key = thinkingKey(event);
   const previous = state.active.get(key);
   if (previous) {
-    const latest = findActivity(run, previous.activityIds.at(-1));
+    const latest = findActivity(run, previous.activityId);
     if (latest) latest.status = 'completed';
   }
   const id = `${key}:group:${state.nextGroupId++}`;
-  const group = { id, text: '', activityIds: [`${id}:0`] };
+  const group = { id, text: '', activityId: `${id}:0` };
   state.active.set(key, group);
   upsertActivity(run, {
-    id: group.activityIds[0],
+    id: group.activityId,
     type: 'thinking',
     label: 'thinking',
     status: 'running',
@@ -196,7 +196,7 @@ function writeThinkingGroup(
     -MAX_PREVIEW_CHARS,
   );
   upsertActivity(run, {
-    id: group.activityIds[0],
+    id: group.activityId,
     type: 'thinking',
     label: 'thinking',
     status: 'running',
@@ -364,7 +364,7 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
             assistantMessageEvent.content,
             'replace',
           );
-        const latest = findActivity(run, group.activityIds.at(-1));
+        const latest = findActivity(run, group.activityId);
         if (latest) latest.status = 'completed';
         state.active.delete(key);
         return true;

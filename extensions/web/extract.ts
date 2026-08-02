@@ -1,4 +1,3 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import pLimit from 'p-limit';
@@ -12,6 +11,7 @@ import {
 import {
   fetchWithRetry,
   getWebSearchConfigPath,
+  loadWebSearchConfig,
   readResponseTextLimited,
   throwIfAborted,
 } from './utils';
@@ -39,26 +39,18 @@ export interface ExtractOptions {
 
 export function loadSsrfAllowRanges(): string[] {
   const path = getWebSearchConfigPath();
-  if (!existsSync(path)) return [];
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
-      ssrf?: { allowRanges?: unknown };
-    };
-    const value = parsed.ssrf?.allowRanges;
-    if (value === undefined) return [];
-    if (
-      !Array.isArray(value) ||
-      value.some((entry) => typeof entry !== 'string')
-    ) {
-      throw new Error(
-        `ssrf.allowRanges in ${path} must be an array of CIDR strings`,
-      );
-    }
-    return value.map((entry) => (entry as string).trim()).filter(Boolean);
-  } catch (error) {
-    if (error instanceof SyntaxError) return [];
-    throw error;
+  const parsed = loadWebSearchConfig(path, { ignoreMalformed: true });
+  const value = parsed.ssrf?.allowRanges;
+  if (value === undefined) return [];
+  if (
+    !Array.isArray(value) ||
+    value.some((entry) => typeof entry !== 'string')
+  ) {
+    throw new Error(
+      `ssrf.allowRanges in ${path} must be an array of CIDR strings`,
+    );
   }
+  return value.map((entry) => (entry as string).trim()).filter(Boolean);
 }
 
 function errorMessage(error: unknown): string {
