@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   ExtensionAPI,
@@ -172,17 +172,48 @@ function scanRecoveryEntries(
 }
 
 /**
- * Rebuild this session's artifact files from its recovery entries.
+ * Rebuild this session's artifact files from its valid recovery entries and
+ * remove stale sidecars that are no longer authorized by the current branch.
  *
  * Runs on session start and on tree changes, so a resumed, forked, or imported
  * session finds its handles live even though nothing was written to disk here.
  */
+async function removeStaleSidecars(
+  root: string,
+  sessionId: string,
+  recovered: Map<string, ResolvedArtifact>,
+): Promise<void> {
+  const directory = sessionDirectory(root, sessionId);
+  let names: string[];
+  try {
+    names = await readdir(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  const staleHandles = new Set<string>();
+  for (const name of names) {
+    const match = /^(art_[A-Za-z0-9_-]{22})\.(?:json|bin)$/.exec(name);
+    if (match && !recovered.has(match[1])) staleHandles.add(match[1]);
+  }
+  await Promise.all(
+    [...staleHandles].map(async (handle) => {
+      const paths = artifactPaths(root, sessionId, handle);
+      await Promise.all([
+        rm(paths.metadata, { force: true }),
+        rm(paths.bytes, { force: true }),
+      ]);
+    }),
+  );
+}
+
 export async function restoreArtifacts(
   ctx: SessionContext,
   root = artifactRoot(),
 ): Promise<number> {
   const sessionId = ctx.sessionManager.getSessionId();
   const recovered = scanRecoveryEntries(ctx.sessionManager.getEntries());
+  await removeStaleSidecars(root, sessionId, recovered);
   for (const artifact of recovered.values())
     await writeArtifact(root, sessionId, artifact.metadata, artifact.bytes);
   return recovered.size;

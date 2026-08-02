@@ -309,6 +309,26 @@ describe('output', () => {
     expect(handoff).not.toContain(exact);
   });
 
+  test('uses a bounded inline fallback when artifact publication fails', async () => {
+    const exact =
+      'Outcome: partial\nConclusion: the report is still available inline\nEvidence: child-check\nRisks: publication failed';
+    const run = reportedRun(exact);
+    const put = vi.fn().mockRejectedValue(new Error('artifact unavailable'));
+
+    const handoff = await buildArtifactBackedHandoff(
+      {} as never,
+      {} as never,
+      [run],
+      put as never,
+    );
+
+    expect(handoff).toContain('Inline fallback (artifact unavailable)');
+    expect(handoff).toContain(exact);
+    expect(handoff).not.toContain('Artifact:');
+    expect(handoff).toContain('Warnings: Exact output artifact unavailable');
+    expect(run.artifact).toBeUndefined();
+  });
+
   test('preserves the exact omitted report in the output artifact', async () => {
     const exact = `Outcome: done\nConclusion: complete\n\n${'🙂'.repeat(10_000)}`;
     const run = reportedRun(exact);

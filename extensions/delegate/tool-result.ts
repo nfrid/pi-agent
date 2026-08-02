@@ -64,7 +64,9 @@ export async function buildArtifactBackedHandoff(
       }
     }
     if (!changed) break;
-    result = buildParentHandoffResult(runs);
+    result = buildParentHandoffResult(runs, undefined, {
+      inlineFallbackRuns: failedRuns,
+    });
   }
   return result.text;
 }
@@ -76,6 +78,15 @@ export async function buildSessionBoundArtifactBackedHandoff(
   launchSessionId: string,
   runs: DelegatedRun[],
 ): Promise<string> {
+  if (ctx.sessionManager.getSessionId() !== launchSessionId) {
+    // A stale branch may still inspect the retained job. Never expose an
+    // artifact handle owned by the launch session on that branch; retain the
+    // original runs so a later inspection on the owner can publish/use it.
+    const safeRuns = runs.map((run) => ({ ...run, artifact: undefined }));
+    return buildArtifactBackedHandoff(pi, ctx, safeRuns, async () => {
+      throw new Error('The delegate launch session is no longer current.');
+    });
+  }
   const put = async (
     putPi: Parameters<typeof artifactProducer.put>[0],
     putCtx: Parameters<typeof artifactProducer.put>[1],
@@ -98,11 +109,21 @@ export async function delegateToolResult(
   ctx: ExtensionContext,
   mode: DelegateDetails['mode'],
   runs: DelegatedRun[],
+  launchSessionId = ctx.sessionManager.getSessionId(),
 ) {
-  const handoff = await buildArtifactBackedHandoff(pi, ctx, runs);
+  const handoff = await buildSessionBoundArtifactBackedHandoff(
+    pi,
+    ctx,
+    launchSessionId,
+    runs,
+  );
   throwIfAllRunsFailed(runs, handoff);
+  const visibleRuns =
+    ctx.sessionManager.getSessionId() === launchSessionId
+      ? runs
+      : runs.map((run) => ({ ...run, artifact: undefined }));
   return {
     content: [{ type: 'text' as const, text: handoff }],
-    details: makeDetails(mode, runs),
+    details: makeDetails(mode, visibleRuns),
   };
 }

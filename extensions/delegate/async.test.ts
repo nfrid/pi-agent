@@ -238,6 +238,7 @@ describe('async delegate extension', () => {
     const sendMessage = vi.fn();
     const setWidget = vi.fn();
     const registerMessageRenderer = vi.fn();
+    let sessionId = 'parent';
     const entries: Array<{
       type: string;
       customType?: string;
@@ -263,7 +264,7 @@ describe('async delegate extension', () => {
       mode: 'tui',
       ui: { setWidget },
       sessionManager: {
-        getSessionId: () => 'parent',
+        getSessionId: () => sessionId,
         getEntries: () => entries,
         getHeader: () => ({
           type: 'session',
@@ -468,6 +469,40 @@ describe('async delegate extension', () => {
     const handle = peekDetails.job?.runs?.[0]?.artifact?.handle;
     expect(handle).toBeDefined();
     expect(entries).toHaveLength(1);
+
+    sessionId = 'foreign';
+    handlers.get('session_tree')?.({}, ctx);
+    const foreignPeek = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-foreign-peek',
+        { action: 'peek', id: 'dj-1' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(foreignPeek?.content[0]?.text).not.toContain(`Artifact: ${handle}`);
+    expect(
+      (
+        foreignPeek?.details as {
+          job?: { runs?: Array<{ artifact?: unknown }> };
+        }
+      ).job?.runs?.[0]?.artifact,
+    ).toBeUndefined();
+    expect(entries).toHaveLength(1);
+
+    sessionId = 'parent';
+    const ownerPeek = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-owner-peek',
+        { action: 'peek', id: 'dj-1' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(ownerPeek?.content[0]?.text).toContain(`Artifact: ${handle}`);
+
     rmSync(artifactRoot, { recursive: true, force: true });
     expect(
       await resolveArtifact(ctx, handle as string, artifactRoot),
@@ -1107,6 +1142,7 @@ describe('async delegate extension', () => {
 
     expect(notify.mock.calls[0]?.[0]).toContain('another conversation branch');
 
+    sessionId = 'parent';
     await commands.get('delegates')?.handler('', ctx);
     const foreground = tools.get('delegate')?.execute(
       'call-foreground',
@@ -1133,8 +1169,13 @@ describe('async delegate extension', () => {
       expect(output.join('\n')).toContain('inspect independently agent');
       expect(output.join('\n')).toContain('bash npm test -- --changed');
     });
+    sessionId = 'branch';
     finish(successfulRun());
-    await foreground;
+    const foregroundResult = await foreground;
+    expect(foregroundResult?.content[0]?.text).toContain(
+      'Inline fallback (artifact unavailable)',
+    );
+    expect(entries).toHaveLength(0);
     handlers.get('turn_start')?.({}, ctx);
     handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
     handlers.get('agent_settled')?.({}, ctx);
@@ -1145,6 +1186,26 @@ describe('async delegate extension', () => {
       ).render(100) ?? [];
     expect(afterAcknowledgment.join('\n')).not.toContain('Foreground audit');
     expect(afterAcknowledgment.join('\n')).toContain('Subagent');
+
+    const crossBranch = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-cross-branch-peek',
+        { action: 'peek', id: 'dj-1' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(crossBranch?.content[0]?.text).not.toContain('Artifact:');
+    expect(crossBranch?.details).toMatchObject({
+      action: 'peek',
+      job: { runs: [{ task: 'inspect independently' }] },
+    });
+    const crossBranchJob = (
+      crossBranch?.details as { job?: { runs?: Array<{ artifact?: unknown }> } }
+    ).job;
+    expect(crossBranchJob?.runs?.[0]?.artifact).toBeUndefined();
+    expect(entries).toHaveLength(0);
 
     sessionId = 'parent';
     const entriesBeforeInspected = entries.length;

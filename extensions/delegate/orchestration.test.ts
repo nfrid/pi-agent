@@ -42,7 +42,10 @@ const routing: DelegateRouteState = {
   relativeCost: 1,
 };
 
-const ctx = { cwd: '/tmp/project' } as ExtensionContext;
+const ctx = {
+  cwd: '/tmp/project',
+  sessionManager: { getSessionId: () => 'test-session' },
+} as ExtensionContext;
 
 afterEach(() => {
   vi.restoreAllMocks();

@@ -33,6 +33,8 @@ type SnapshotLookup = (cwd: string) => string | null;
 export type DelegateRunContext = {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
+  /** Session owning the invocation, captured before preparation can await. */
+  launchSessionId?: string;
   config: DelegateConfig;
   signal?: AbortSignal;
   getSnapshot: SnapshotLookup;
@@ -282,7 +284,15 @@ async function executeDelegate(
 ) {
   const execution = await prepareDelegateExecution(runCtx, params);
   const runs = await runPreparedDelegateExecution(runCtx, execution, hooks);
-  return delegateToolResult(runCtx.pi, runCtx.ctx, execution.mode, runs);
+  const launchSessionId =
+    runCtx.launchSessionId ?? runCtx.ctx.sessionManager.getSessionId();
+  return delegateToolResult(
+    runCtx.pi,
+    runCtx.ctx,
+    execution.mode,
+    runs,
+    launchSessionId,
+  );
 }
 
 export const executeSingleDelegate = executeDelegate;

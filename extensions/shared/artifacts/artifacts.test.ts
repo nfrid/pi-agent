@@ -197,6 +197,22 @@ describe('recovering artifacts from session entries', () => {
     ).toBe('carried across\n');
   });
 
+  test('removes sidecars with no valid recovery entry during restore', async () => {
+    const h = harness();
+    const current = await put(h, { bytes: 'current' });
+    const stale = await put(h, { bytes: 'stale' });
+    h.entries.pop();
+
+    expect(
+      (await resolveArtifact(h.ctx, stale.handle, root))?.bytes.toString(),
+    ).toBe('stale');
+    expect(await restoreArtifacts(h.ctx, root)).toBe(1);
+    expect(
+      (await resolveArtifact(h.ctx, current.handle, root))?.bytes.toString(),
+    ).toBe('current');
+    expect(await resolveArtifact(h.ctx, stale.handle, root)).toBeUndefined();
+  });
+
   test('resolves a consumer reference straight from the entries', async () => {
     const h = harness();
     const metadata = await put(h, { bytes: 'held by a consumer' });
@@ -219,6 +235,7 @@ describe('recovering artifacts from session entries', () => {
       Buffer.from('rewritten').toString('base64');
     expect(recoverArtifactFromEntries(h.entries, metadata)).toBeUndefined();
     expect(await restoreArtifacts(h.ctx, root)).toBe(0);
+    expect(await resolveArtifact(h.ctx, metadata.handle, root)).toBeUndefined();
   });
 });
 

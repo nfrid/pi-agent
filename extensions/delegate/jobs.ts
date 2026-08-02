@@ -14,8 +14,11 @@ export type DelegateJobState =
   | 'aborted';
 
 export interface DelegateJobResult {
+  /** Runs safe to expose in the retained job snapshot. */
   runs: DelegatedRun[];
   handoff: string;
+  /** Original runs retained for a later owner-session materialization retry. */
+  retainedRuns?: DelegatedRun[];
 }
 
 export type DelegateJobMaterializer = (
@@ -46,6 +49,8 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
   tasks: string[];
   startedAt?: number;
   runs?: DelegatedRun[];
+  /** A branch-safe view; the retained runs stay private for retry. */
+  snapshotRuns?: DelegatedRun[];
   handoff?: string;
   error?: string;
   deliveryEpoch?: number;
@@ -174,7 +179,11 @@ export class DelegateJobManager {
       const work = (async () => {
         const result = await record.materialize?.(ctx, record.runs ?? []);
         if (!result) return;
-        record.runs = result.runs;
+        record.runs = result.retainedRuns ?? result.runs;
+        record.snapshotRuns =
+          result.retainedRuns && result.retainedRuns !== result.runs
+            ? result.runs
+            : undefined;
         record.handoff = result.handoff;
         this.registry.changed();
       })();
@@ -220,7 +229,11 @@ export class DelegateJobManager {
     let state: DelegateJobState;
     try {
       const result = await record.execute(record.controller.signal);
-      record.runs = result.runs;
+      record.runs = result.retainedRuns ?? result.runs;
+      record.snapshotRuns =
+        result.retainedRuns && result.retainedRuns !== result.runs
+          ? result.runs
+          : undefined;
       record.handoff = result.handoff;
       state = aggregateState(result.runs, record.controller.signal.aborted);
     } catch (error) {
@@ -241,7 +254,7 @@ function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
     createdAt: record.createdAt,
     startedAt: record.startedAt,
     settledAt: record.settledAt,
-    runs: record.runs ? [...record.runs] : undefined,
+    runs: (record.snapshotRuns ?? record.runs)?.map((run) => ({ ...run })),
     handoff: record.handoff,
     error: record.error,
     deliveryEpoch: record.deliveryEpoch,

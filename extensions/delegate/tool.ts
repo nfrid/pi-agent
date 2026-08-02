@@ -225,7 +225,15 @@ export function registerDelegateTool(
           'Provide exactly one delegation mode: task or tasks.',
         );
 
-      const runCtx = { pi, ctx, config, signal, getSnapshot };
+      const launchSessionId = ctx.sessionManager.getSessionId();
+      const runCtx = {
+        pi,
+        ctx,
+        config,
+        signal,
+        getSnapshot,
+        launchSessionId,
+      };
       if (params.background && !backgroundRuntime)
         throw new Error('Background delegate runtime is unavailable.');
       const execution = await prepareDelegateExecution(runCtx, params);
@@ -238,19 +246,26 @@ export function registerDelegateTool(
       if (params.background) {
         if (!backgroundRuntime)
           throw new Error('Background delegate runtime is unavailable.');
-        const launchSessionId = ctx.sessionManager.getSessionId();
         const materializeHandoff = async (
           materializeCtx: typeof ctx,
           runs: import('./types').DelegatedRun[],
-        ) => ({
-          runs,
-          handoff: await buildSessionBoundArtifactBackedHandoff(
+        ) => {
+          const handoff = await buildSessionBoundArtifactBackedHandoff(
             pi,
             materializeCtx,
             launchSessionId,
             runs,
-          ),
-        });
+          );
+          const ownerSession =
+            materializeCtx.sessionManager.getSessionId() === launchSessionId;
+          return {
+            runs: ownerSession
+              ? runs
+              : runs.map((run) => ({ ...run, artifact: undefined })),
+            retainedRuns: runs,
+            handoff,
+          };
+        };
         let jobs: ReturnType<DelegateJobManager['startMany']>;
         try {
           jobs = backgroundRuntime.manager.startMany(
@@ -336,7 +351,7 @@ export function registerDelegateTool(
         backgroundRuntime?.statuses.updateMany(statusIds, runs);
         backgroundRuntime?.statuses.resultEntered(statusIds);
       }
-      return delegateToolResult(pi, ctx, execution.mode, runs);
+      return delegateToolResult(pi, ctx, execution.mode, runs, launchSessionId);
     },
   });
 }

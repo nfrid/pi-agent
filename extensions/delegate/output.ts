@@ -23,7 +23,7 @@ export interface ParentHandoffCaps {
 export function truncateBytes(text: string, maxBytes: number): string {
   if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text;
   const suffix =
-    '\n\n[Output truncated for parent context; full output is preserved in the delegate-output artifact.]';
+    '\n\n[Output truncated for parent context; the full report remains in the child session.]';
   const suffixBytes = Buffer.byteLength(suffix, 'utf8');
   if (maxBytes <= suffixBytes) {
     let marker = suffix;
@@ -114,9 +114,11 @@ interface PreparedRun {
   envelope: string;
   originalBody: string;
   originalReport?: string;
+  inlineFallbackBody?: string;
+  body?: string;
 }
 
-function prepareRun(run: DelegatedRun): PreparedRun {
+function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
   const { text: originalBody, originalReport } = runBody(run);
   const lines = [
     `Status: ${getRunState(run)}`,
@@ -174,6 +176,9 @@ function prepareRun(run: DelegatedRun): PreparedRun {
     envelope: lines.join('\n'),
     originalBody,
     originalReport,
+    ...(inlineFallback && originalReport
+      ? { inlineFallbackBody: originalBody }
+      : {}),
   };
 }
 
@@ -204,21 +209,54 @@ export interface ParentHandoffResult {
   truncatedOriginalReports: ReadonlySet<DelegatedRun>;
 }
 
-/** Builds a bounded envelope; exact final reports are never copied inline. */
+/** Builds a bounded envelope; exact final reports are never copied inline unless artifact publication failed. */
 export function buildParentHandoffResult(
   runs: DelegatedRun[],
   caps: ParentHandoffCaps = PARENT_HANDOFF_CAPS,
+  options: { inlineFallbackRuns?: ReadonlySet<DelegatedRun> } = {},
 ): ParentHandoffResult {
   const parallel = runs.length > 1;
   const totalCap = parallel ? caps.aggregateMaxBytes : caps.singleMaxBytes;
   const summary = `Delegated results: ${runs.length} run(s)`;
-  const prepared = runs.map(prepareRun).map(withTruncationMarker);
+  let prepared = runs
+    .map((run) =>
+      prepareRun(run, options.inlineFallbackRuns?.has(run) ?? false),
+    )
+    .map(withTruncationMarker);
   const mandatory = `${summary}\n\n${envelopeBlock(prepared, parallel)}`;
   const overflow = Buffer.byteLength(mandatory, 'utf8') > totalCap;
-  const overflowWarning =
-    'Mandatory metadata exceeds the handoff size cap; exact reports remain artifact-only.';
+  const fallbackCap = parallel ? caps.perTaskMaxBytes : caps.singleMaxBytes;
+  let remaining = Math.max(0, totalCap - Buffer.byteLength(mandatory, 'utf8'));
+  let emittedFallback = false;
+  prepared = prepared.map((item, index) => {
+    if (!item.inlineFallbackBody || remaining <= 0)
+      return { ...item, body: '' };
+    const prefix = `${emittedFallback ? '\n\n---\n\n' : '\n\n'}${
+      parallel
+        ? `### Task ${index + 1} inline fallback (artifact unavailable)\n`
+        : 'Inline fallback (artifact unavailable)\n'
+    }`;
+    const prefixBytes = Buffer.byteLength(prefix, 'utf8');
+    if (remaining <= prefixBytes) return { ...item, body: '' };
+    const available = Math.min(fallbackCap, remaining - prefixBytes);
+    const body = truncateBytes(item.inlineFallbackBody, available);
+    emittedFallback = true;
+    remaining -= prefixBytes + Buffer.byteLength(body, 'utf8');
+    return { ...item, body };
+  });
+  const fallbackBlocks = prepared
+    .map((item, index) =>
+      item.body
+        ? `${parallel ? `### Task ${index + 1} inline fallback (artifact unavailable)\n` : 'Inline fallback (artifact unavailable)\n'}${item.body}`
+        : '',
+    )
+    .filter(Boolean)
+    .join('\n\n---\n\n');
+  const overflowWarning = options.inlineFallbackRuns?.size
+    ? 'Mandatory metadata exceeds the handoff size cap; inline fallbacks may not fit and the child session remains authoritative.'
+    : 'Mandatory metadata exceeds the handoff size cap; exact reports remain artifact-only.';
   const envelopes = envelopeBlock(prepared, parallel);
-  const text = `${summary}${overflow ? `\n${overflowWarning}` : ''}\n\n${envelopes}`;
+  const text = `${summary}${overflow ? `\n${overflowWarning}` : ''}\n\n${envelopes}${fallbackBlocks ? `\n\n${fallbackBlocks}` : ''}`;
   const omittedOriginalReports = new Set(
     prepared
       .filter((item) => item.originalReport !== undefined)
