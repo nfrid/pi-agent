@@ -11,6 +11,16 @@ describe('active transcript reconciliation', () => {
     expect(JSON.stringify(twice)).toContain('done!');
   });
 
+  it('keeps live tools renderable when updating nested and new calls', () => {
+    const entries = [{ type: 'message', message: { id: 'm1', role: 'assistant', content: [{ type: 'toolCall', toolCallId: 't1', name: 'read' }] } }];
+    const updated = reconcileLiveEvent(entries, { type: 'tool.updated', sessionId: 's1', tool: { toolCallId: 't1', toolName: 'read', args: { path: 'a.ts' } } }, 's1');
+    expect(JSON.stringify(updated)).toContain('"type":"toolCall"');
+    expect(JSON.stringify(updated)).toContain('"name":"read"');
+    const appended = reconcileLiveEvent(updated, { type: 'tool.started', sessionId: 's1', tool: { toolCallId: 't2', toolName: 'bash', args: { command: 'pwd' } } }, 's1');
+    expect(appended).toHaveLength(2);
+    expect(JSON.stringify(appended[1])).toContain('"name":"bash"');
+  });
+
   it('ignores events from the previous session', () => {
     const entries = [{ type: 'message', message: { id: 'm1' } }];
     expect(reconcileLiveEvent(entries, { type: 'message.updated', sessionId: 'old', message: { id: 'old' } }, 'new')).toEqual(entries);

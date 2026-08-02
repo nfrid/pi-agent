@@ -12,13 +12,31 @@ function abortError(signal: AbortSignal): Error {
     ? signal.reason
     : new Error('Codex app-server query aborted.');
 }
-function normalize(value: unknown): UsageReport {
+export function normalizeUsageResponse(value: unknown): UsageReport {
   const root =
     value && typeof value === 'object'
       ? (value as Record<string, unknown>)
       : {};
+  const snapshots = new Map<string, Record<string, unknown>>();
+  const add = (raw: unknown, fallbackId: string) => {
+    if (!raw || typeof raw !== 'object') return;
+    const item = raw as Record<string, unknown>;
+    const primary = item.primary ?? item.primary_window;
+    const secondary = item.secondary ?? item.secondary_window;
+    if (!primary && !secondary) return;
+    const limitId =
+      typeof item.limitId === 'string' ? item.limitId : fallbackId;
+    snapshots.set(limitId, {
+      ...snapshots.get(limitId),
+      limitId,
+      ...(typeof item.limitName === 'string'
+        ? { limitName: item.limitName }
+        : {}),
+      ...(primary ? { primary } : {}),
+      ...(secondary ? { secondary } : {}),
+    });
+  };
   const limits = root.rateLimits ?? root.rate_limits;
-  const snapshots: unknown[] = [];
   if (limits && typeof limits === 'object') {
     const record = limits as Record<string, unknown>;
     if (
@@ -26,26 +44,19 @@ function normalize(value: unknown): UsageReport {
       'secondary' in record ||
       'primary_window' in record ||
       'secondary_window' in record
-    ) {
-      snapshots.push({
-        limitId: 'codex',
-        primary: record.primary ?? record.primary_window,
-        secondary: record.secondary ?? record.secondary_window,
-      });
-    } else {
-      for (const [limitId, raw] of Object.entries(record)) {
-        if (!raw || typeof raw !== 'object') continue;
-        const item = raw as Record<string, unknown>;
-        const primary = item.primary ?? item.primary_window;
-        const secondary = item.secondary ?? item.secondary_window;
-        if (primary || secondary)
-          snapshots.push({ limitId, primary, secondary });
-      }
-    }
+    )
+      add(record, 'codex');
+    else for (const [limitId, raw] of Object.entries(record)) add(raw, limitId);
   }
-  if (!snapshots.length)
+  const byId = root.rateLimitsByLimitId;
+  if (byId && typeof byId === 'object')
+    for (const [limitId, raw] of Object.entries(
+      byId as Record<string, unknown>,
+    ))
+      add(raw, limitId);
+  if (!snapshots.size)
     throw new Error('Codex app-server returned no rate-limit windows.');
-  return { capturedAt: Date.now(), snapshots };
+  return { capturedAt: Date.now(), snapshots: [...snapshots.values()] };
 }
 
 export async function queryViaCodexAppServer(
@@ -65,6 +76,12 @@ export async function queryViaCodexAppServer(
     for (const item of pending.values()) item.reject(error);
     pending.clear();
   };
+  child.once('error', (error) =>
+    fail(new Error(`Could not start codex app-server: ${error.message}`)),
+  );
+  child.stdin.on('error', (error) =>
+    fail(new Error(`codex app-server input failed: ${error.message}`)),
+  );
   const timer = setTimeout(() => {
     child.kill();
     fail(new Error('Timed out waiting for codex app-server.'));
@@ -126,7 +143,7 @@ export async function queryViaCodexAppServer(
       },
     });
     child.stdin.write(`${JSON.stringify({ method: 'initialized' })}\n`);
-    return normalize(await request('account/rateLimits/read'));
+    return normalizeUsageResponse(await request('account/rateLimits/read'));
   } finally {
     clearTimeout(timer);
     signal.removeEventListener('abort', onAbort);

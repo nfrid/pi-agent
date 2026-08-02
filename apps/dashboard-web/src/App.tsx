@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { groupTranscript, type TranscriptEntry } from '@pi-dashboard/activity-model';
+import { describeTools, groupTranscript, type TranscriptEntry as ActivityTranscriptEntry } from '@pi-dashboard/activity-model';
 import type { BrowserSnapshot, RuntimeSnapshot, SessionIndexEntry, StartRuntimeRequest, WorkspaceTarget } from '@pi-dashboard/protocol';
 
 const base = (import.meta.env.VITE_DASHBOARD_URL as string | undefined)?.replace(/\/$/, '') ?? '';
@@ -195,9 +195,14 @@ export function reconcileLiveEvent(entries: readonly unknown[], event: Dashboard
     : envelope;
   const id = stableId(envelope) ?? stableId(payload);
   if (!payload || !id) return [...entries];
-  const replacement = event.type?.startsWith('message.') ? { type: 'message', message: payload } : { type: 'tool', tool: payload };
+  const isMessage = event.type?.startsWith('message.');
+  const tool = payload as Record<string, unknown>;
+  const nestedReplacement = isMessage
+    ? { type: 'message', message: payload }
+    : { ...tool, type: 'toolCall', name: tool.toolName ?? tool.name ?? 'tool', arguments: tool.arguments ?? tool.args };
   const found = entries.some((entry) => containsStableId(entry, id));
-  return found ? entries.map((entry) => replaceStable(entry, id, replacement)) : [...entries, replacement];
+  if (found) return entries.map((entry) => replaceStable(entry, id, nestedReplacement));
+  return [...entries, isMessage ? nestedReplacement : { type: 'tool', tool: { ...tool, name: tool.toolName ?? tool.name } }];
 }
 
 function SessionView({ id, snapshot, lastEvent, reconnectNonce }: { id: string; snapshot: BrowserSnapshot; lastEvent?: DashboardEvent; reconnectNonce: number }) {
@@ -230,17 +235,19 @@ function InteractionCard({ interaction }: { interaction: RuntimeSnapshot['pendin
   return <div className="interaction"><p className="eyebrow">Waiting for input</p><h2>{interaction.question}</h2><div className="choices">{interaction.choices.filter((choice) => !choice.custom).map((choice) => <button key={choice.value} onClick={() => void submit(choice.value)}>{choice.label}<small>{choice.description}</small></button>)}</div>{interaction.allowCustom && <form onSubmit={(event) => { event.preventDefault(); if (answer.trim()) void submit(answer.trim()); }}><input value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={interaction.customLabel ?? 'Type an answer'} /><button type="submit">Answer</button></form>}<button className="link-button" onClick={() => void api(`/api/interactions/${encodeURIComponent(interaction.id)}/cancel`, { method: 'POST', body: '{}' })}>Cancel</button></div>;
 }
 
-function toTranscriptEntries(rawEntries: readonly unknown[]): TranscriptEntry[] {
-  const result: TranscriptEntry[] = [];
+interface TranscriptModelItem { entry: ActivityTranscriptEntry; raw: unknown }
+
+function toTranscriptEntries(rawEntries: readonly unknown[]): TranscriptModelItem[] {
+  const result: TranscriptModelItem[] = [];
   for (const raw of rawEntries) {
-    if (!raw || typeof raw !== 'object') { result.push({ kind: 'other' }); continue; }
+    if (!raw || typeof raw !== 'object') { result.push({ entry: { kind: 'other' }, raw }); continue; }
     const entry = raw as Record<string, unknown>;
     if (entry.type === 'tool') {
       const tool = entry.tool && typeof entry.tool === 'object' ? entry.tool as Record<string, unknown> : entry;
-      result.push({ kind: 'tool', name: typeof tool.name === 'string' ? tool.name : 'tool', args: tool.arguments ?? tool.args });
+      result.push({ entry: { kind: 'tool', name: typeof tool.name === 'string' ? tool.name : typeof tool.toolName === 'string' ? tool.toolName : 'tool', args: tool.arguments ?? tool.args }, raw });
       continue;
     }
-    if (entry.type !== 'message' || !entry.message || typeof entry.message !== 'object') { result.push({ kind: 'other' }); continue; }
+    if (entry.type !== 'message' || !entry.message || typeof entry.message !== 'object') { result.push({ entry: { kind: 'other' }, raw }); continue; }
     const message = entry.message as Record<string, unknown>;
     if (message.role === 'assistant') {
       const content = Array.isArray(message.content) ? message.content : [];
@@ -248,22 +255,22 @@ function toTranscriptEntries(rawEntries: readonly unknown[]): TranscriptEntry[] 
       for (const item of content) {
         if (!item || typeof item !== 'object') continue;
         const part = item as Record<string, unknown>;
-        if (part.type === 'toolCall' || part.type === 'tool_call') result.push({ kind: 'tool', name: typeof part.name === 'string' ? part.name : 'tool', args: part.arguments ?? part.args });
+        if (part.type === 'toolCall' || part.type === 'tool_call') result.push({ entry: { kind: 'tool', name: typeof part.name === 'string' ? part.name : 'tool', args: part.arguments ?? part.args }, raw: part });
         else if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) spoke = true;
       }
-      result.push({ kind: 'assistant', speaks: spoke });
-    } else if (message.role === 'user') result.push({ kind: 'other' });
-    else result.push({ kind: 'other' });
+      result.push({ entry: { kind: 'assistant', speaks: spoke }, raw });
+    } else result.push({ entry: { kind: 'other' }, raw });
   }
   return result;
 }
 
 function Transcript({ entries }: { entries: unknown[] }) {
-  const modelEntries = useMemo(() => toTranscriptEntries(entries), [entries]);
+  const items = useMemo(() => toTranscriptEntries(entries), [entries]);
+  const modelEntries = useMemo(() => items.map((item) => item.entry), [items]);
   const groups = useMemo(() => groupTranscript(modelEntries), [modelEntries]);
   const [open, setOpen] = useState<Set<number>>(new Set());
   const groupByStart = new Map(groups.map((group) => [group.start, group]));
-  return <div className="transcript"><h2>Activity</h2>{modelEntries.map((entry, index) => { const group = groupByStart.get(index); if (group) { const expanded = open.has(group.start); return <div className="activity-group" key={`group-${group.start}`}><button onClick={() => setOpen((current) => { const next = new Set(current); expanded ? next.delete(group.start) : next.add(group.start); return next; })}><span>●</span><strong>{entry.kind === 'tool' ? 'Agent work' : 'Agent activity'}</strong><small>{group.end - group.start + 1} steps · {expanded ? 'collapse' : 'expand'}</small></button>{expanded && <div>{entries.slice(group.start, group.end + 1).map((raw, offset) => <TranscriptEntry key={offset} raw={raw} />)}</div>}</div>; } return <TranscriptEntry key={index} raw={entries[index]} />; })}</div>;
+  return <div className="transcript"><h2>Activity</h2>{items.map((item, index) => { const group = groupByStart.get(index); if (group) { const expanded = open.has(group.start); const tools = modelEntries.slice(group.start, group.end + 1).filter((entry): entry is Extract<ActivityTranscriptEntry, { kind: 'tool' }> => entry.kind === 'tool'); const title = describeTools(tools, undefined, true); return <div className="activity-group" key={`group-${group.start}`}><button onClick={() => setOpen((current) => { const next = new Set(current); expanded ? next.delete(group.start) : next.add(group.start); return next; })}><span>●</span><strong>{title}</strong><small>{group.end - group.start + 1} steps · {expanded ? 'collapse' : 'expand'}</small></button>{expanded && <div>{items.slice(group.start, group.end + 1).map((child, offset) => <TranscriptEntry key={offset} raw={child.raw} />)}</div>}</div>; } return <TranscriptEntry key={index} raw={item.raw} />; })}</div>;
 }
 
 function TranscriptEntry({ raw }: { raw: unknown }) { const text = JSON.stringify(raw, null, 2); return <details className="transcript-entry"><summary>{typeof raw === 'object' && raw && 'type' in raw ? String((raw as { type?: unknown }).type) : 'entry'}</summary><pre>{text}</pre></details>; }
