@@ -166,6 +166,115 @@ describe('buildDelegatePlans', () => {
         () => null,
       ),
     ).toThrow('Every delegated task requires a subagent name.');
+    expect(() =>
+      buildDelegatePlans(
+        {
+          task: 'inspect',
+          route: 'quick',
+          continuation: '00000000-0000-4000-8000-000000000000',
+        },
+        ctx,
+        config,
+        () => null,
+      ),
+    ).toThrow('Unknown or expired delegate continuation token.');
+  });
+
+  test('inherits persisted continuation names and preserves explicit overrides', () => {
+    const session = createDelegateSession({
+      cwd: '/tmp/project',
+      name: 'Original agent',
+      routing,
+    });
+    try {
+      expect(
+        buildDelegatePlans(
+          { task: 'continue', continuation: session.token },
+          ctx,
+          config,
+          () => null,
+        ).plans[0],
+      ).toMatchObject({ name: 'Original agent' });
+      expect(
+        buildDelegatePlans(
+          {
+            name: 'Override agent',
+            task: 'continue differently',
+            continuation: session.token,
+          },
+          ctx,
+          config,
+          () => null,
+        ).plans[0],
+      ).toMatchObject({ name: 'Override agent' });
+    } finally {
+      removeDelegateSession(session);
+    }
+  });
+
+  test('inherits names per item in mixed continuation batches', () => {
+    const session = createDelegateSession({
+      cwd: '/tmp/project',
+      name: 'Continued agent',
+      routing,
+    });
+    try {
+      const built = buildDelegatePlans(
+        {
+          tasks: [
+            { task: 'continue', continuation: session.token },
+            { name: 'Fresh agent', task: 'inspect fresh', route: 'quick' },
+          ],
+        },
+        ctx,
+        config,
+        () => null,
+      );
+      expect(built.plans.map((plan) => plan.name)).toEqual([
+        'Continued agent',
+        'Fresh agent',
+      ]);
+    } finally {
+      removeDelegateSession(session);
+    }
+  });
+
+  test('requires an explicit name for legacy continuation metadata', () => {
+    const session = createDelegateSession({
+      cwd: '/tmp/project',
+      name: 'Legacy original',
+      routing,
+    });
+    const metadataPath = session.filePath.replace(/\.jsonl$/, '.json');
+    try {
+      const metadata = JSON.parse(readFileSync(metadataPath, 'utf8')) as {
+        name?: unknown;
+      };
+      delete metadata.name;
+      writeFileSync(metadataPath, `${JSON.stringify(metadata)}\n`);
+      expect(() =>
+        buildDelegatePlans(
+          { task: 'continue', continuation: session.token },
+          ctx,
+          config,
+          () => null,
+        ),
+      ).toThrow(/legacy metadata.*supply name/);
+      expect(
+        buildDelegatePlans(
+          {
+            name: 'Compatibility override',
+            task: 'continue explicitly',
+            continuation: session.token,
+          },
+          ctx,
+          config,
+          () => null,
+        ).plans[0]?.name,
+      ).toBe('Compatibility override');
+    } finally {
+      removeDelegateSession(session);
+    }
   });
 
   test('requires a branch snapshot for branch context', () => {

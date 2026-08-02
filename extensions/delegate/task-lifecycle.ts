@@ -233,6 +233,7 @@ export async function prepareDelegateTask(
     } else {
       session = createDelegateSession({
         cwd: state.cwd,
+        name: plan.name,
         snapshotJsonl: plan.snapshotJsonl,
         worktreeId: state.worktree?.record.id,
         allowWrites: state.allowWrites,

@@ -53,6 +53,10 @@ describe('delegate task lifecycle', () => {
       routing: originalRoute,
     });
     const fresh = await prepareDelegateTask(plan());
+    expect(fresh.session.name).toBe('Inspection agent');
+    expect(resolveDelegateSession(fresh.session.token)?.name).toBe(
+      'Inspection agent',
+    );
     const override: DelegateRouteState = {
       ...originalRoute,
       route: 'override',
