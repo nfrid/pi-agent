@@ -55,8 +55,16 @@ describe('delegate_jobs rendering', () => {
 
     registerDelegateJobsTool(pi, manager);
 
-    expect(tool?.description).toContain('end the turn');
+    expect(tool?.description).toContain(
+      'briefly tell the user you are waiting for the background delegate and will resume automatically, then end the turn',
+    );
+    expect(tool?.description).not.toContain(
+      'if no independent work remains, end the turn',
+    );
     expect(tool?.description).toContain('once when a bounded timeout changes');
+    expect(tool?.promptGuidelines.join('\n')).toContain(
+      'briefly tell the user you are waiting for the background delegate and will resume automatically, then end the turn',
+    );
     expect(tool?.promptGuidelines.join('\n')).toContain(
       'Do not call delegate_jobs peek merely to wait or keep the turn open.',
     );

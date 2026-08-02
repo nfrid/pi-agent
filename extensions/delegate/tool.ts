@@ -325,7 +325,7 @@ export function registerDelegateTool(
           content: [
             {
               type: 'text' as const,
-              text: `Started ${jobs.length} background delegate ${jobs.length === 1 ? 'job' : 'jobs'}: ${jobs.map((job) => job.id).join(', ')}. Each subagent completion will be delivered automatically. Continue independent work; if none remains, end the turn. Use delegate_jobs peek only for deliberate inspection or a decision-changing bounded timeout.\n${jobLines.join('\n')}`.trim(),
+              text: `Started ${jobs.length} background delegate ${jobs.length === 1 ? 'job' : 'jobs'}: ${jobs.map((job) => job.id).join(', ')}. Each subagent completion will be delivered automatically. Continue independent work; if none remains, briefly tell the user you are waiting for the background delegate and will resume automatically, then end the turn. Use delegate_jobs peek only for deliberate inspection or a decision-changing bounded timeout.\n${jobLines.join('\n')}`.trim(),
             },
           ],
           details: makeDetails(execution.mode, initialRuns),
