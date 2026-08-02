@@ -76,5 +76,5 @@ Persist the fresh run's normalized display name in delegate session metadata. Du
 ## Implementation and resolution
 
 - **Approved implementation:** Persist fresh delegate display names and inherit them when valid new-format continuations omit `name`, with explicit overrides and legacy compatibility behavior; approved 2026-08-02.
-- **Merged change:** `c0e4764` (implementation `c1bdba5`)
+- **Merged change:** `c0e4764` (implementation `c1bdba5`); review fix `dbbeb44`
 - **Resolution:** pending evaluation
