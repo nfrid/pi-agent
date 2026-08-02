@@ -20,7 +20,6 @@ export {
   aggregateAssistantUsage,
   type ContextDiagnostics,
   estimateSize,
-  estimateSizeFromCharacterCount,
   formatPromptInfo,
   type SizeEstimate,
   summarizeContextMessages,

@@ -27,9 +27,7 @@ export interface UsageDiagnostics {
   peakContext: number;
 }
 
-export function estimateSizeFromCharacterCount(
-  characters: number,
-): SizeEstimate {
+function estimateSizeFromCharacterCount(characters: number): SizeEstimate {
   return { characters, tokens: Math.ceil(characters / 4) };
 }
 
