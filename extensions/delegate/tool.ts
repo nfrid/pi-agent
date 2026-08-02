@@ -52,7 +52,7 @@ const RefreshSchema = StringEnum(['wip', 'head'] as const, {
     'Continuation-only snapshot selector. For a read-only isolated continuation, wip recreates from the parent’s current tracked and untracked work; head recreates from current HEAD only. Omit to continue the original snapshot.',
 });
 
-const HandoffFromSchema = Type.Object({
+const HandoffArtifactSchema = Type.Object({
   handle: Type.String({
     minLength: 1,
     maxLength: 64,
@@ -69,7 +69,21 @@ const HandoffFromSchema = Type.Object({
   ),
 });
 
-export type DelegateHandoffFrom = Static<typeof HandoffFromSchema>;
+const HandoffFromListSchema = Type.Array(HandoffArtifactSchema, {
+  minItems: 1,
+  maxItems: 4,
+  description: 'Ordered prior delegate-output artifacts to forward',
+});
+
+// Accept the original object form as a one-item shorthand while making the
+// ordered array form explicit for children that need several upstream reports.
+const HandoffFromSchema = Type.Union([
+  HandoffArtifactSchema,
+  HandoffFromListSchema,
+]);
+
+export type DelegateHandoffFrom = Static<typeof HandoffArtifactSchema>;
+export type DelegateHandoffInput = Static<typeof HandoffFromSchema>;
 
 const BackgroundSchema = Type.Boolean({
   description:
@@ -158,7 +172,7 @@ export function delegatePromptGuidelines(
     'Own delegation deliberately: keep task decomposition, final decisions, and user-facing synthesis with yourself. Preserve parent context by forwarding only the decisions and evidence a child needs, not the whole conversation; use contextNote for relevant decisions, constraints, and findings, and use branch only when exact parent history matters. Small, tightly coupled work is often faster and safer to do yourself.',
     'Continue a read-only isolated child without refresh to revisit the same snapshot, or use refresh wip/head for targeted verification after fixes; a refreshed continuation preserves context but is not independent evidence. Start a fresh delegate for an independent regression review.',
     'A child that comes back with a "Blocked:" question is waiting on you, not failing. Answer it — from what you know, or by looking — and continue that child; re-briefing a fresh one throws away the context it already built. Decide it yourself unless it is genuinely the user\'s call.',
-    "Parallelize only independent work: if one task depends on another's findings, read the first result before starting the next. Worktree-isolated tasks each get their own checkout, so writable tasks can run in parallel even on overlapping files. Use background delegation when foreground work can continue meanwhile; use foreground delegation when the next parent action must await the result.",
+    "Parallelize only independent work: if one task depends on another's findings, inspect enough of the compact prerequisite envelope to confirm its outcome, relevant conclusion/evidence, assumptions, and risks; use handoffFrom only when exact upstream detail is needed. Worktree-isolated tasks each get their own checkout, so writable tasks can run in parallel even on overlapping files. Use background delegation when foreground work can continue meanwhile; use foreground delegation when the next parent action must await the result.",
     'A writable run leaves its work as commits on the branch it reports; integrate it yourself with delegate_branches rather than handing the merge to the user. A delegate-output artifact being available is not an instruction to retrieve it: use the compact envelope unless exact upstream wording would change a decision, and then use handoffFrom (or artifact retrieval) deliberately.',
     'Supervise proportionally: inspect and verify high-risk or consequential work, while letting routine bounded work return a compact report. Treat child results as claims to verify: trust reported checks and concrete evidence, and re-check or continue the child when an important claim has none. A subagent can report work it did not finish, and weakening a test is a common way a task comes back "passing".',
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd, config)}`,

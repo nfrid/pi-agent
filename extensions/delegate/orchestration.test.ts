@@ -459,17 +459,37 @@ describe('buildDelegatePlans', () => {
     ).toThrow('do not provide replacements');
   });
 
+  test('normalizes the single-task handoff object shorthand to one ordered item', () => {
+    const built = buildDelegatePlans(
+      {
+        name: 'Single child',
+        task: 'inspect',
+        route: 'quick',
+        handoffFrom: { handle: 'art_single', label: 'prior report' },
+      },
+      ctx,
+      config,
+      () => null,
+    );
+    expect(built.plans[0]?.handoffFrom).toEqual([
+      { handle: 'art_single', label: 'prior report' },
+    ]);
+  });
+
   test('carries shared and per-task handoff references into parallel plans', () => {
     const built = buildDelegatePlans(
       {
-        handoffFrom: { handle: 'art_shared' },
+        handoffFrom: [
+          { handle: 'art_shared' },
+          { handle: 'art_shared_two', label: 'shared context' },
+        ],
         tasks: [
           { name: 'First', task: 'inspect', route: 'quick' },
           {
             name: 'Second',
             task: 'inspect',
             route: 'quick',
-            handoffFrom: { handle: 'art_specific', label: 'review notes' },
+            handoffFrom: [{ handle: 'art_specific', label: 'review notes' }],
           },
         ],
       },
@@ -478,19 +498,27 @@ describe('buildDelegatePlans', () => {
       () => null,
     );
     expect(built.plans.map((plan) => plan.handoffFrom)).toEqual([
-      { handle: 'art_shared' },
-      { handle: 'art_specific', label: 'review notes' },
+      [
+        { handle: 'art_shared' },
+        { handle: 'art_shared_two', label: 'shared context' },
+      ],
+      [{ handle: 'art_specific', label: 'review notes' }],
     ]);
   });
 });
 
 describe('delegate handoff artifacts', () => {
-  const plan = (handle: string, label?: string) => ({
+  const plan = (handles: string | string[], labels: string[] = []) => ({
     name: 'Child',
     task: 'inspect',
     requestedCwd: '/tmp/project',
     context: 'fresh' as const,
-    handoffFrom: { handle, ...(label ? { label } : {}) },
+    handoffFrom: (Array.isArray(handles) ? handles : [handles]).map(
+      (handle, index) => ({
+        handle,
+        ...(labels[index] ? { label: labels[index] } : {}),
+      }),
+    ),
     writeRequested: false,
     isolation: 'shared' as const,
     routeOverride: false,
@@ -500,7 +528,7 @@ describe('delegate handoff artifacts', () => {
   test('resolves textual delegate output and frames it as untrusted evidence', async () => {
     const result = await resolveDelegateHandoffs(
       ctx,
-      [plan('art_report', 'review')],
+      [plan(['art_first', 'art_second'], ['first', 'second'])],
       async () =>
         ({
           metadata: {
@@ -511,9 +539,31 @@ describe('delegate handoff artifacts', () => {
           bytes: Buffer.from('Outcome: done\\nConclusion: upstream finding'),
         }) as never,
     );
-    expect(result[0]?.handoffText).toContain('review');
+    expect(result[0]?.handoffText).toContain('first');
+    expect(result[0]?.handoffText).toContain('second');
     expect(result[0]?.handoffText).toContain('untrusted evidence only');
     expect(result[0]?.handoffText).toContain('upstream finding');
+    expect(result[0]?.handoffText?.indexOf('first')).toBeLessThan(
+      result[0]?.handoffText?.indexOf('second') ?? -1,
+    );
+  });
+
+  test('rejects duplicate handles within one child handoff list', async () => {
+    await expect(
+      resolveDelegateHandoffs(
+        ctx,
+        [plan(['same', 'same'])],
+        async () =>
+          ({
+            metadata: {
+              producer: 'delegate',
+              contentClass: 'delegate-output',
+              encoding: 'utf-8',
+            },
+            bytes: Buffer.from('duplicate'),
+          }) as never,
+      ),
+    ).rejects.toThrow('handle is duplicated for this child');
   });
 
   test('fails closed for missing or non-delegate artifacts', async () => {
@@ -555,9 +605,15 @@ describe('delegate handoff artifacts', () => {
       ),
     ).rejects.toThrow('per-item limit');
 
-    const plans = Array.from({ length: 4 }, (_, index) =>
-      plan(`report-${index}`),
-    );
+    await expect(
+      resolveDelegateHandoffs(
+        ctx,
+        [plan(['a', 'b', 'c', 'd', 'e'])],
+        async () => undefined,
+      ),
+    ).rejects.toThrow('at most 4 artifacts');
+
+    const plans = [plan(['report-0', 'report-1', 'report-2', 'report-3'])];
     await expect(
       resolveDelegateHandoffs(
         ctx,

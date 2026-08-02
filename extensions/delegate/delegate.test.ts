@@ -576,6 +576,12 @@ describe('delegate', () => {
   test('publishes the current route catalog through delegate tool guidance', () => {
     const guidelines = delegatePromptGuidelines('/tmp/project').join('\n');
     expect(guidelines).toContain('Delegate route catalog:');
+    expect(guidelines).toContain(
+      'inspect enough of the compact prerequisite envelope',
+    );
+    expect(guidelines).toContain(
+      'use handoffFrom only when exact upstream detail',
+    );
     expect(guidelines).toContain('<delegate_routing>');
     expect(guidelines).toContain('luna-low: model=gpt-5.6-luna');
   });

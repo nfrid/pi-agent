@@ -7,6 +7,7 @@ import {
   updateDelegateSessionRouting,
   updateDelegateSessionWorktree,
 } from './session';
+import type { DelegateHandoffFrom } from './tool';
 import type {
   DelegateContext,
   DelegatedRun,
@@ -37,7 +38,7 @@ export interface DelegateTaskPlan {
   /** Explicit source for a read-only continuation replacement snapshot. */
   refresh?: WorktreeBase;
   /** Parent-owned artifact reference resolved before child setup. */
-  handoffFrom?: import('./tool').DelegateHandoffFrom;
+  handoffFrom?: DelegateHandoffFrom[];
   /** Resolved artifact text, kept out of run details. */
   handoffText?: string;
   writeRequested: boolean;
