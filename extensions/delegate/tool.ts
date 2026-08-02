@@ -271,6 +271,7 @@ export function registerDelegateTool(
           jobs = backgroundRuntime.manager.startMany(
             execution.tasks.map((item, index) => ({
               name: item.plan.name,
+              ownerSessionId: launchSessionId,
               mode: 'single' as const,
               tasks: [item.plan.task],
               deliveryEpoch: backgroundRuntime.getDeliveryEpoch(),

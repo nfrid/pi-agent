@@ -44,7 +44,9 @@ handoff omits — never task text, context, stderr, or transcripts. A parent may
 forward a bounded textual `delegate-output` artifact to a later child; availability is not
 an instruction to retrieve it. Background delegate completions retain the exact report for
 later deliberate inspection when session navigation made immediate publication stale; they
-do not append recovery entries to a different branch.
+do not append recovery entries to a different branch. Retained `delegate_jobs` list, peek, and
+cancel results redact owner-session handoffs and artifact handles on other branches; only the
+owner session can see the materialized handle and exact handoff.
 
 ## Retrieving
 

@@ -502,6 +502,75 @@ describe('async delegate extension', () => {
         ctx,
       );
     expect(ownerPeek?.content[0]?.text).toContain(`Artifact: ${handle}`);
+    expect(ownerPeek?.content[0]?.text).toContain(
+      'Delegated results: 1 run(s)',
+    );
+
+    sessionId = 'foreign';
+    handlers.get('session_tree')?.({}, ctx);
+    const foreignList = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-foreign-list',
+        { action: 'list' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    const foreignListedJob = (
+      foreignList?.details as {
+        jobs?: Array<{
+          runs?: Array<{ artifact?: unknown }>;
+          handoff?: string;
+        }>;
+      }
+    ).jobs?.[0];
+    expect(foreignListedJob?.runs?.[0]?.artifact).toBeUndefined();
+    expect(foreignListedJob?.handoff).toBeUndefined();
+
+    const foreignCancelled = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-foreign-cancel',
+        { action: 'cancel', ids: ['dj-1'] },
+        undefined,
+        undefined,
+        ctx,
+      );
+    expect(foreignCancelled?.content[0]?.text).not.toContain(
+      'Delegated results: 1 run(s)',
+    );
+    const foreignCancelledJob = (
+      foreignCancelled?.details as {
+        jobs?: Array<{
+          runs?: Array<{ artifact?: unknown }>;
+          handoff?: string;
+        }>;
+      }
+    ).jobs?.[0];
+    expect(foreignCancelledJob?.runs?.[0]?.artifact).toBeUndefined();
+    expect(foreignCancelledJob?.handoff).toBeUndefined();
+
+    sessionId = 'parent';
+    const ownerList = await tools
+      .get('delegate_jobs')
+      ?.execute(
+        'call-owner-list',
+        { action: 'list' },
+        undefined,
+        undefined,
+        ctx,
+      );
+    const ownerListedJob = (
+      ownerList?.details as {
+        jobs?: Array<{
+          runs?: Array<{ artifact?: { handle?: string } }>;
+          handoff?: string;
+        }>;
+      }
+    ).jobs?.[0];
+    expect(ownerListedJob?.runs?.[0]?.artifact?.handle).toBe(handle);
+    expect(ownerListedJob?.handoff).toContain('Delegated results: 1 run(s)');
 
     rmSync(artifactRoot, { recursive: true, force: true });
     expect(

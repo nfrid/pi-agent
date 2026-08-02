@@ -94,7 +94,7 @@ export function registerDelegateJobsTool(
     ) {
       switch (params.action) {
         case 'list': {
-          const jobs = manager.list();
+          const jobs = manager.list(ctx);
           return {
             content: [
               {
@@ -113,6 +113,7 @@ export function registerDelegateJobsTool(
             requireText(params.id, 'id'),
             (params.wait_seconds ?? 0) * 1000,
             signal,
+            ctx,
           );
           job = await manager.materialize(job.id, ctx);
           const automaticQueued = isAutomaticDeliveryQueued(job);
@@ -141,7 +142,7 @@ export function registerDelegateJobsTool(
         case 'cancel': {
           const ids = params.ids?.map((id) => id.trim()).filter(Boolean) ?? [];
           if (ids.length === 0) throw new Error('ids is required.');
-          const jobs = await manager.cancel(ids, signal);
+          const jobs = await manager.cancel(ids, signal, ctx);
           const automaticQueuedIds = new Set(
             jobs.filter(isAutomaticDeliveryQueued).map((job) => job.id),
           );

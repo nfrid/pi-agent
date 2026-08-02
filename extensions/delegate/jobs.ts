@@ -48,6 +48,7 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
   mode: DelegateDetails['mode'];
   tasks: string[];
   startedAt?: number;
+  ownerSessionId?: string;
   runs?: DelegatedRun[];
   /** A branch-safe view; the retained runs stay private for retry. */
   snapshotRuns?: DelegatedRun[];
@@ -69,6 +70,8 @@ export interface DelegateJobManagerOptions {
 
 export interface DelegateJobStartOptions {
   name?: string;
+  /** Session whose branch owns artifact publication and exact handoff text. */
+  ownerSessionId?: string;
   mode: DelegateDetails['mode'];
   tasks: string[];
   execute: (signal: AbortSignal) => Promise<DelegateJobResult>;
@@ -130,6 +133,7 @@ export class DelegateJobManager {
       (item): DelegateJobRecord => ({
         ...this.registry.newRecord('queued'),
         name: item.name?.trim() || 'Subagent',
+        ownerSessionId: item.ownerSessionId,
         mode: item.mode,
         tasks: [...item.tasks],
         deliveryEpoch: item.deliveryEpoch,
@@ -146,20 +150,25 @@ export class DelegateJobManager {
     return records.map((record) => snapshot(record));
   }
 
-  get(id: string): DelegateJobSnapshot | undefined {
-    return this.registry.get(id);
+  get(id: string, ctx?: ExtensionContext): DelegateJobSnapshot | undefined {
+    const job = this.registry.get(id);
+    return job ? this.visibleSnapshot(job, ctx) : undefined;
   }
 
-  list(): DelegateJobSnapshot[] {
-    return this.registry.list();
+  list(ctx?: ExtensionContext): DelegateJobSnapshot[] {
+    return this.registry.list().map((job) => this.visibleSnapshot(job, ctx));
   }
 
-  peek(
+  async peek(
     id: string,
     waitMs = 0,
     signal?: AbortSignal,
+    ctx?: ExtensionContext,
   ): Promise<DelegateJobSnapshot> {
-    return this.registry.peek(id, waitMs, signal);
+    return this.visibleSnapshot(
+      await this.registry.peek(id, waitMs, signal),
+      ctx,
+    );
   }
 
   async materialize(
@@ -173,7 +182,7 @@ export class DelegateJobManager {
       record.state === 'queued' ||
       record.state === 'running'
     )
-      return snapshot(record);
+      return this.visibleSnapshot(snapshot(record), ctx);
 
     if (!record.materializing) {
       const work = (async () => {
@@ -194,12 +203,13 @@ export class DelegateJobManager {
         if (record.materializing === work) record.materializing = undefined;
       }
     } else await record.materializing;
-    return snapshot(record);
+    return this.visibleSnapshot(snapshot(record), ctx);
   }
 
   async cancel(
     ids: readonly string[],
     signal?: AbortSignal,
+    ctx?: ExtensionContext,
   ): Promise<DelegateJobSnapshot[]> {
     const records = [...new Set(ids)].map((id) => this.registry.require(id));
     return this.registry.observing(
@@ -208,7 +218,9 @@ export class DelegateJobManager {
         for (const record of records)
           record.controller.abort(new Error('Delegate job was cancelled.'));
         await Promise.all(records.map((record) => record.settled));
-        return records.map((record) => snapshot(record));
+        return records.map((record) =>
+          this.visibleSnapshot(snapshot(record), ctx),
+        );
       },
       signal,
     );
@@ -220,6 +232,29 @@ export class DelegateJobManager {
 
   get runningCount(): number {
     return this.registry.activeCount;
+  }
+
+  private visibleSnapshot(
+    job: DelegateJobSnapshot,
+    ctx?: ExtensionContext,
+  ): DelegateJobSnapshot {
+    const ownerSessionId = this.registryOwnerSessionId(job.id);
+    if (
+      !ctx ||
+      !ownerSessionId ||
+      ctx.sessionManager.getSessionId() === ownerSessionId
+    )
+      return job;
+    const runs = job.runs?.map((run) => {
+      const { artifact: _artifact, ...safeRun } = run;
+      return safeRun;
+    });
+    const { handoff: _handoff, ...safeJob } = job;
+    return { ...safeJob, runs };
+  }
+
+  private registryOwnerSessionId(id: string): string | undefined {
+    return this.registry.require(id).ownerSessionId;
   }
 
   private async run(record: DelegateJobRecord): Promise<void> {
