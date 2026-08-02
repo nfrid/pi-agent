@@ -2,7 +2,6 @@ import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import pLimit from 'p-limit';
 import TurndownService from 'turndown';
-import { extractRSCContent } from './rsc-extract';
 import {
   fetchRemoteUrl,
   type Lookup,
@@ -189,9 +188,6 @@ async function extractViaHttp(
         };
       }
     }
-    const rsc = extractRSCContent(text);
-    if (rsc)
-      return { url, title: rsc.title, content: rsc.content, error: null };
     return {
       url,
       title: article?.title ?? '',

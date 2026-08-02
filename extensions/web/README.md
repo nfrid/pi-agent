@@ -10,8 +10,8 @@ This fork intentionally supports only:
   Pi's existing OpenAI/Codex login.
 - **Exa search** through `EXA_API_KEY`, `exaApiKey` in config, or Exa's keyless
   hosted MCP endpoint.
-- Readable HTTP(S) page extraction with Readability, Next.js RSC parsing, and a
-  Jina Reader fallback.
+- Readable HTTP(S) page extraction with Readability and a Jina Reader fallback
+  for dynamic pages.
 
 It does not include the upstream curator UI, Gemini/browser-cookie access,
 Brave, Parallel, Tavily, Perplexity, videos/YouTube, PDFs, or GitHub cloning.
