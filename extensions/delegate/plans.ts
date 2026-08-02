@@ -60,7 +60,7 @@ interface SharedDefaults {
 }
 
 interface DerivedTask {
-  input: NamedTaskInput;
+  input: TaskInput;
   resumed?: DelegateSession;
   routing?: DelegateTaskPlan['routing'];
   routingError?: string;
@@ -74,10 +74,18 @@ interface DerivedTask {
   warnings: string[];
 }
 
+type NamedDerivedTask = Omit<DerivedTask, 'input'> & {
+  input: NamedTaskInput;
+};
+
+export interface BuiltDelegateTask {
+  plan: DelegateTaskPlan;
+  preflight: ContinuationPreflight;
+}
+
 export interface BuiltDelegatePlans {
   parallel: boolean;
-  plans: DelegateTaskPlan[];
-  preflights: ContinuationPreflight[];
+  tasks: BuiltDelegateTask[];
 }
 
 function errorText(error: unknown): string {
@@ -189,7 +197,7 @@ export function buildDelegatePlans(
   // Every subsequent derivation operates on this task object. This keeps the
   // input, continuation, route, capability, plan, and preflight together.
   let tasks: DerivedTask[] = unnamedInputs.map((input) => ({
-    input: input as NamedTaskInput,
+    input,
     context: 'fresh',
     requestedCwd: ctx.cwd,
     writeRequestExplicit: false,
@@ -217,10 +225,14 @@ export function buildDelegatePlans(
   });
   assertDistinctContinuationTokens(tasks.map((task) => task.resumed?.token));
 
-  tasks = tasks.map((task) => {
-    if (task.input.name) return task;
+  let namedTasks: NamedDerivedTask[] = tasks.map((task) => {
+    const name = task.input.name;
+    if (name) return { ...task, input: { ...task.input, name } };
     if (task.resumed?.name)
-      return { ...task, input: { ...task.input, name: task.resumed.name } };
+      return {
+        ...task,
+        input: { ...task.input, name: task.resumed.name },
+      };
     if (task.resumed)
       return invalidParams(
         'This delegate continuation uses legacy metadata without a persisted display name; supply name explicitly to continue it.',
@@ -234,7 +246,7 @@ export function buildDelegatePlans(
 
   if (
     parallel &&
-    tasks.some((task) => task.resumed) &&
+    namedTasks.some((task) => task.resumed) &&
     (shared.cwd !== undefined ||
       shared.context !== undefined ||
       shared.scope !== undefined ||
@@ -245,7 +257,7 @@ export function buildDelegatePlans(
       'Parallel continuations reuse their original cwd, history, scope, and base; do not provide top-level replacements.',
     );
 
-  tasks = tasks.map((task) => {
+  namedTasks = namedTasks.map((task) => {
     const result = resolveDelegateRoute(
       mergeDelegateRouteRequest(
         task.input.route ?? shared.route,
@@ -259,10 +271,12 @@ export function buildDelegatePlans(
       routingError: result.error,
     };
   });
-  const routingError = tasks.find((task) => task.routingError)?.routingError;
+  const routingError = namedTasks.find(
+    (task) => task.routingError,
+  )?.routingError;
   if (routingError) invalidParams(routingError);
 
-  tasks = tasks.map((task) => ({
+  namedTasks = namedTasks.map((task) => ({
     ...task,
     context: task.resumed
       ? 'continuation'
@@ -271,7 +285,7 @@ export function buildDelegatePlans(
     scope: task.input.scope ?? shared.scope,
   }));
 
-  tasks = tasks.map((task) => {
+  namedTasks = namedTasks.map((task) => {
     const writeRequestExplicit =
       task.input.allowWrites !== undefined || shared.allowWrites !== undefined;
     const requested = task.input.allowWrites ?? shared.allowWrites;
@@ -295,7 +309,7 @@ export function buildDelegatePlans(
     };
   });
 
-  for (const task of tasks) {
+  for (const task of namedTasks) {
     // A migrated writable session with no worktree is a direct-parent-write
     // legacy record. Reject inherited or unchanged restated values. Only an
     // actual requested change reaches continuation preflight for its precise
@@ -329,9 +343,9 @@ export function buildDelegatePlans(
       );
   }
 
-  if (parallel) writeWarnings(tasks);
+  if (parallel) writeWarnings(namedTasks);
 
-  for (const task of tasks) {
+  for (const task of namedTasks) {
     if (
       !task.resumed &&
       task.context === 'branch' &&
@@ -342,14 +356,14 @@ export function buildDelegatePlans(
       );
   }
 
-  for (const task of tasks) {
+  for (const task of namedTasks) {
     if ((task.input.refresh ?? shared.refresh) !== undefined && !task.resumed)
       invalidParams(
         'refresh is only available on a read-only worktree continuation.',
       );
   }
 
-  const builtTasks = tasks.map((task) => ({
+  const builtTasks = namedTasks.map((task) => ({
     ...task,
     plan: {
       name: task.input.name,
@@ -380,10 +394,7 @@ export function buildDelegatePlans(
     } satisfies DelegateTaskPlan,
   }));
 
-  let preparedTasks: Array<{
-    plan: DelegateTaskPlan;
-    preflight: ContinuationPreflight;
-  }>;
+  let preparedTasks: BuiltDelegateTask[];
   try {
     preparedTasks = builtTasks.map(({ plan }) => ({
       plan,
@@ -393,11 +404,7 @@ export function buildDelegatePlans(
     invalidParams(errorText(error));
   }
 
-  return {
-    parallel,
-    plans: preparedTasks.map((task) => task.plan),
-    preflights: preparedTasks.map((task) => task.preflight),
-  };
+  return { parallel, tasks: preparedTasks };
 }
 
 function handoffError(ref: DelegateHandoffFrom, reason: string): never {
@@ -407,19 +414,20 @@ function handoffError(ref: DelegateHandoffFrom, reason: string): never {
 /** Resolve parent-owned artifacts before any child setup or launch occurs. */
 export async function resolveDelegateHandoffs(
   ctx: ExtensionContext,
-  plans: DelegateTaskPlan[],
+  tasks: BuiltDelegateTask[],
   resolver: typeof resolveArtifact = resolveArtifact,
-): Promise<DelegateTaskPlan[]> {
+): Promise<BuiltDelegateTask[]> {
   let aggregatePromptBytes = 0;
-  const resolved: DelegateTaskPlan[] = [];
-  for (const plan of plans) {
+  const resolved: BuiltDelegateTask[] = [];
+  for (const task of tasks) {
+    const plan = task.plan;
     const refs = plan.handoffFrom
       ? Array.isArray(plan.handoffFrom)
         ? plan.handoffFrom
         : [plan.handoffFrom]
       : undefined;
     if (!refs?.length) {
-      resolved.push(plan);
+      resolved.push(task);
       continue;
     }
     if (refs.length > 4) {
@@ -485,8 +493,11 @@ export async function resolveDelegateHandoffs(
       );
     }
     resolved.push({
-      ...plan,
-      handoffText: framed.join('\n\n'),
+      ...task,
+      plan: {
+        ...plan,
+        handoffText: framed.join('\n\n'),
+      },
     });
   }
   return resolved;

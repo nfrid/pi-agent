@@ -4,7 +4,11 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { DelegateConfig } from './config';
 import { invalidParams } from './param-errors';
-import { buildDelegatePlans, resolveDelegateHandoffs } from './plans';
+import {
+  type BuiltDelegateTask,
+  buildDelegatePlans,
+  resolveDelegateHandoffs,
+} from './plans';
 import { mapWithConcurrency } from './runner';
 import {
   cleanupFreshPreparedTask,
@@ -165,18 +169,17 @@ async function runPreparedWithLifecycle(
 }
 
 async function preparePlans(
-  built: ReturnType<typeof buildDelegatePlans>,
+  built: BuiltDelegateTask[],
+  parallel: boolean,
 ): Promise<PreparedDelegateTask[]> {
   const prepared: PreparedDelegateTask[] = [];
   try {
-    for (let index = 0; index < built.plans.length; index++)
-      prepared.push(
-        await prepareDelegateTask(built.plans[index], built.preflights[index]),
-      );
+    for (const task of built)
+      prepared.push(await prepareDelegateTask(task.plan, task.preflight));
     return prepared;
   } catch (error) {
     const cleanupWarnings = await rollbackPreparedDelegateTasks(prepared);
-    const prefix = built.parallel
+    const prefix = parallel
       ? 'Parallel delegate setup failed before launch'
       : 'Delegate setup failed before launch';
     return invalidParams(
@@ -195,10 +198,10 @@ export async function prepareDelegateExecution(
     runCtx.config,
     runCtx.getSnapshot,
   );
-  const plans = await resolveDelegateHandoffs(runCtx.ctx, built.plans);
+  const tasks = await resolveDelegateHandoffs(runCtx.ctx, built.tasks);
   return {
     mode: built.parallel ? 'parallel' : 'single',
-    tasks: await preparePlans({ ...built, plans }),
+    tasks: await preparePlans(tasks, built.parallel),
   };
 }
 

@@ -12,8 +12,11 @@ import {
   resolveDelegateHandoffs,
 } from './plans';
 import { createDelegateSession, removeDelegateSession } from './session';
-import type { PreparedDelegateTask } from './task-lifecycle';
 import * as taskLifecycle from './task-lifecycle';
+import {
+  type PreparedDelegateTask,
+  preflightDelegateContinuation,
+} from './task-lifecycle';
 import * as toolResult from './tool-result';
 import type { DelegateRouteState } from './types';
 import type { PreparedWorktree } from './worktree';
@@ -98,10 +101,10 @@ describe('buildDelegatePlans', () => {
       () => null,
     );
     expect(built.parallel).toBe(false);
-    expect(built.plans).toHaveLength(1);
-    expect(built.plans[0]?.task).toBe('inspect');
-    expect(built.plans[0]?.context).toBe('fresh');
-    expect(built.preflights).toHaveLength(1);
+    expect(built.tasks).toHaveLength(1);
+    expect(built.tasks[0]?.plan.task).toBe('inspect');
+    expect(built.tasks[0]?.plan.context).toBe('fresh');
+    expect(built.tasks[0]?.preflight).toBeDefined();
   });
 
   test('defaults fresh capability and isolation independently', () => {
@@ -111,7 +114,7 @@ describe('buildDelegatePlans', () => {
         ctx,
         config,
         () => null,
-      ).plans[0];
+      ).tasks[0]?.plan;
     expect(build({})).toMatchObject({
       writeRequested: false,
       isolation: 'shared',
@@ -193,7 +196,7 @@ describe('buildDelegatePlans', () => {
           ctx,
           config,
           () => null,
-        ).plans[0],
+        ).tasks[0]?.plan,
       ).toMatchObject({ name: 'Original agent' });
       expect(
         buildDelegatePlans(
@@ -205,7 +208,7 @@ describe('buildDelegatePlans', () => {
           ctx,
           config,
           () => null,
-        ).plans[0],
+        ).tasks[0]?.plan,
       ).toMatchObject({ name: 'Override agent' });
     } finally {
       removeDelegateSession(session);
@@ -230,7 +233,7 @@ describe('buildDelegatePlans', () => {
         config,
         () => null,
       );
-      expect(built.plans.map((plan) => plan.name)).toEqual([
+      expect(built.tasks.map(({ plan }) => plan.name)).toEqual([
         'Continued agent',
         'Fresh agent',
       ]);
@@ -270,7 +273,7 @@ describe('buildDelegatePlans', () => {
           ctx,
           config,
           () => null,
-        ).plans[0]?.name,
+        ).tasks[0]?.plan.name,
       ).toBe('Compatibility override');
     } finally {
       removeDelegateSession(session);
@@ -293,17 +296,23 @@ describe('buildDelegatePlans', () => {
     ).toThrow('failed to snapshot current session branch.');
   });
 
-  test('builds parallel plans and attaches write warnings', () => {
+  test('builds parallel plans and attaches matching write warnings', () => {
     const built = buildDelegatePlans(
       {
         tasks: [
-          { name: 'Test agent', task: 'inspect', route: 'quick' },
           {
-            name: 'Test agent',
-            task: 'implement',
+            name: 'First writer',
+            task: 'inspect',
             route: 'quick',
             allowWrites: true,
             scope: ['/tmp/project/src'],
+          },
+          {
+            name: 'Second writer',
+            task: 'implement',
+            route: 'quick',
+            allowWrites: true,
+            scope: ['/tmp/project/src/lib'],
           },
         ],
       },
@@ -311,10 +320,16 @@ describe('buildDelegatePlans', () => {
       config,
       () => '{"messages":[]}',
     );
+    const warning =
+      'Parallel write tasks 1 and 2 have overlapping declared scopes; their patches may conflict, so review both before applying either.';
     expect(built.parallel).toBe(true);
-    expect(built.plans).toHaveLength(2);
-    expect(built.plans[1]?.writeRequested).toBe(true);
-    expect(built.preflights).toHaveLength(2);
+    expect(built.tasks).toHaveLength(2);
+    expect(built.tasks[0]?.plan.writeRequested).toBe(true);
+    expect(built.tasks[1]?.plan.writeRequested).toBe(true);
+    expect(built.tasks[0]?.plan.warnings).toEqual([warning]);
+    expect(built.tasks[1]?.plan.warnings).toEqual([warning]);
+    expect(built.tasks[0]?.preflight).toBeDefined();
+    expect(built.tasks[1]?.preflight).toBeDefined();
   });
 
   test('rejects an empty parallel task list', () => {
@@ -441,11 +456,11 @@ describe('buildDelegatePlans', () => {
         config,
         () => null,
       );
-      expect(built.plans[0]).toMatchObject({
+      expect(built.tasks[0]?.plan).toMatchObject({
         writeRequested: false,
         allowWritesExplicit: false,
       });
-      expect(built.preflights[0]).toMatchObject({ allowWrites: false });
+      expect(built.tasks[0]?.preflight).toMatchObject({ allowWrites: false });
     } finally {
       removeDelegateSession(session);
     }
@@ -583,7 +598,7 @@ describe('buildDelegatePlans', () => {
       config,
       () => null,
     );
-    expect(built.plans[0]?.handoffFrom).toEqual([
+    expect(built.tasks[0]?.plan.handoffFrom).toEqual([
       { handle: 'art_single', label: 'prior report' },
     ]);
   });
@@ -609,7 +624,7 @@ describe('buildDelegatePlans', () => {
       config,
       () => null,
     );
-    expect(built.plans.map((plan) => plan.handoffFrom)).toEqual([
+    expect(built.tasks.map(({ plan }) => plan.handoffFrom)).toEqual([
       [
         { handle: 'art_shared' },
         { handle: 'art_shared_two', label: 'shared context' },
@@ -620,22 +635,28 @@ describe('buildDelegatePlans', () => {
 });
 
 describe('delegate handoff artifacts', () => {
-  const plan = (handles: string | string[], labels: string[] = []) => ({
-    name: 'Child',
-    task: 'inspect',
-    requestedCwd: '/tmp/project',
-    context: 'fresh' as const,
-    handoffFrom: (Array.isArray(handles) ? handles : [handles]).map(
-      (handle, index) => ({
-        handle,
-        ...(labels[index] ? { label: labels[index] } : {}),
-      }),
-    ),
-    writeRequested: false,
-    isolation: 'shared' as const,
-    routeOverride: false,
-    warnings: [],
-  });
+  const plan = (handles: string | string[], labels: string[] = []) => {
+    const delegatePlan = {
+      name: 'Child',
+      task: 'inspect',
+      requestedCwd: '/tmp/project',
+      context: 'fresh' as const,
+      handoffFrom: (Array.isArray(handles) ? handles : [handles]).map(
+        (handle, index) => ({
+          handle,
+          ...(labels[index] ? { label: labels[index] } : {}),
+        }),
+      ),
+      writeRequested: false,
+      isolation: 'shared' as const,
+      routeOverride: false,
+      warnings: [],
+    };
+    return {
+      plan: delegatePlan,
+      preflight: preflightDelegateContinuation(delegatePlan),
+    };
+  };
 
   test('resolves textual delegate output and frames it as untrusted evidence', async () => {
     const result = await resolveDelegateHandoffs(
@@ -651,12 +672,12 @@ describe('delegate handoff artifacts', () => {
           bytes: Buffer.from('Outcome: done\\nConclusion: upstream finding'),
         }) as never,
     );
-    expect(result[0]?.handoffText).toContain('first');
-    expect(result[0]?.handoffText).toContain('second');
-    expect(result[0]?.handoffText).toContain('untrusted evidence only');
-    expect(result[0]?.handoffText).toContain('upstream finding');
-    expect(result[0]?.handoffText?.indexOf('first')).toBeLessThan(
-      result[0]?.handoffText?.indexOf('second') ?? -1,
+    expect(result[0]?.plan.handoffText).toContain('first');
+    expect(result[0]?.plan.handoffText).toContain('second');
+    expect(result[0]?.plan.handoffText).toContain('untrusted evidence only');
+    expect(result[0]?.plan.handoffText).toContain('upstream finding');
+    expect(result[0]?.plan.handoffText?.indexOf('first')).toBeLessThan(
+      result[0]?.plan.handoffText?.indexOf('second') ?? -1,
     );
   });
 
