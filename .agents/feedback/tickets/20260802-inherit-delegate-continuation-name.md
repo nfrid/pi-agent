@@ -1,6 +1,6 @@
 # HFM-20260802: Inherit delegate continuation display names
 
-- **Status:** approved
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-08-02
 - **Created:** 2026-08-02
 - **Source reports:** [HF-20260802: Delegate continuation requires repeating the subagent name](../inbox/20260802T103852Z-delegate-continuation-requires-name.md)
@@ -70,11 +70,11 @@ Persist the fresh run's normalized display name in delegate session metadata. Du
 
 ## Evaluation
 
-- **Window:** After an approved merged implementation, until 20 continuation calls using newly created tokens have completed or 2026-08-16, whichever is later; include at least 5 batched continuation items and 3 explicit overrides.
+- **Window:** Started 2026-08-02; ends after 20 continuation calls using newly created tokens have completed or 2026-08-16, whichever is later; include at least 5 batched continuation items and 3 explicit overrides.
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 ## Implementation and resolution
 
 - **Approved implementation:** Persist fresh delegate display names and inherit them when valid new-format continuations omit `name`, with explicit overrides and legacy compatibility behavior; approved 2026-08-02.
-- **Merged change:** —
+- **Merged change:** `c0e4764` (implementation `c1bdba5`)
 - **Resolution:** pending evaluation

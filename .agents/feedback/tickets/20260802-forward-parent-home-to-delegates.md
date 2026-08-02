@@ -1,6 +1,6 @@
 # HFM-20260802: Forward the parent HOME to delegates
 
-- **Status:** approved
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-08-02
 - **Created:** 2026-08-02
 - **Source reports:** [HF-20260802: Delegate sandbox exposes an unwritable HOME](../inbox/20260802T103953Z-delegate-home-unwritable.md)
@@ -75,11 +75,11 @@ At the child-spawn boundary, set `HOME` to the parent's nonempty `process.env.HO
 
 ## Evaluation
 
-- **Window:** After an approved merged implementation, until 20 delegate attempts have completed or 2026-08-16, whichever is later; include at least 5 read-only worktrees, 5 writable worktrees, and 3 tools that consume home-relative configuration or user-local paths.
+- **Window:** Started 2026-08-02; ends after 20 delegate attempts have completed or 2026-08-16, whichever is later; include at least 5 read-only worktrees, 5 writable worktrees, and 3 tools that consume home-relative configuration or user-local paths.
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 ## Implementation and resolution
 
 - **Approved implementation:** Forward the parent's effective HOME at the delegate child-spawn boundary, retain the existing environment allowlist, and use Node's `homedir()` only when parent HOME is absent or empty; approved 2026-08-02.
-- **Merged change:** —
+- **Merged change:** `c0e4764` (implementation `c1bdba5`)
 - **Resolution:** pending evaluation
