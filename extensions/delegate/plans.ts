@@ -27,7 +27,7 @@ export const DELEGATE_HANDOFF_CAPS = {
 } as const;
 
 interface TaskInput {
-  name: string;
+  name?: string;
   task: string;
   cwd?: string;
   route?: string;
@@ -40,6 +40,10 @@ interface TaskInput {
   from?: DelegateTaskPlan['base'];
   refresh?: DelegateTaskPlan['refresh'];
   handoffFrom?: DelegateHandoffInput;
+}
+
+interface NamedTaskInput extends TaskInput {
+  name: string;
 }
 
 interface SharedDefaults {
@@ -106,8 +110,6 @@ function normalizeInputs(params: DelegateParams): {
         task: item.task.trim(),
       }))
       .filter((item) => item.task);
-    if (inputs.some((item) => !item.name))
-      invalidParams('Every delegated task requires a subagent name.');
     if (!inputs.length)
       invalidParams('Parallel delegation requires a non-empty task.');
     return {
@@ -131,7 +133,6 @@ function normalizeInputs(params: DelegateParams): {
   const task = params.task?.trim();
   if (!task) invalidParams('Delegate task is required.');
   const name = params.name?.trim();
-  if (!name) invalidParams('Delegate name is required with task.');
   return {
     parallel: false,
     inputs: [
@@ -161,20 +162,20 @@ export function buildDelegatePlans(
   config: DelegateConfig,
   getSnapshot: SnapshotLookup,
 ): BuiltDelegatePlans {
-  const { parallel, inputs, shared } = normalizeInputs(params);
+  const { parallel, inputs: unnamedInputs, shared } = normalizeInputs(params);
 
   if (parallel) {
     if (params.continuation)
       invalidParams(
         'For parallel delegation, set continuation on each task rather than as a shared default.',
       );
-    if (inputs.length > config.maxParallelTasks)
+    if (unnamedInputs.length > config.maxParallelTasks)
       invalidParams(
-        `Too many delegated tasks (${inputs.length}). Maximum is ${config.maxParallelTasks}.`,
+        `Too many delegated tasks (${unnamedInputs.length}). Maximum is ${config.maxParallelTasks}.`,
       );
   }
 
-  const resumed = inputs.map((item) => {
+  const resumed = unnamedInputs.map((item) => {
     assertContinuationFields(
       item.continuation,
       item,
@@ -190,6 +191,21 @@ export function buildDelegatePlans(
     return session;
   });
   assertDistinctContinuationTokens(resumed.map((session) => session?.token));
+
+  const inputs: NamedTaskInput[] = unnamedInputs.map((item, index) => {
+    if (item.name) return item as NamedTaskInput;
+    const inheritedName = resumed[index]?.name;
+    if (inheritedName) return { ...item, name: inheritedName };
+    if (resumed[index])
+      return invalidParams(
+        'This delegate continuation uses legacy metadata without a persisted display name; supply name explicitly to continue it.',
+      );
+    return invalidParams(
+      parallel
+        ? 'Every delegated task requires a subagent name.'
+        : 'Delegate name is required with task.',
+    );
+  });
 
   if (
     parallel &&

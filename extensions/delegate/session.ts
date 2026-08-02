@@ -22,6 +22,8 @@ export interface DelegateSession {
   token: string;
   filePath: string;
   cwd: string;
+  /** The original fresh-run display name; absent only on legacy metadata. */
+  name?: string;
   worktreeId?: string;
   /** The original task capability; continuations inherit it when omitted. */
   allowWrites?: boolean;
@@ -36,6 +38,8 @@ interface DelegateSessionMetadata {
   token: string;
   cwd: string;
   createdAt: string;
+  /** Persisted for new sessions so continuations can omit their name. */
+  name?: string;
   worktreeId?: string;
   allowWrites?: boolean;
   isolation?: DelegateIsolation;
@@ -104,6 +108,8 @@ function initialSessionJsonl(
 /** Create a durable child session and return its opaque continuation token. */
 export function createDelegateSession(options: {
   cwd: string;
+  /** Fresh delegate display name; omitted only by legacy-session fixtures. */
+  name?: string;
   snapshotJsonl?: string;
   worktreeId?: string;
   allowWrites?: boolean;
@@ -115,6 +121,7 @@ export function createDelegateSession(options: {
   const createdAt = new Date().toISOString();
   const dir = sessionDir();
   const { filePath, metadataPath } = sessionPaths(token);
+  const name = options.name?.trim();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   try {
     writeFileSync(
@@ -126,6 +133,7 @@ export function createDelegateSession(options: {
       token,
       cwd: options.cwd,
       createdAt,
+      ...(name ? { name } : {}),
       ...(options.worktreeId ? { worktreeId: options.worktreeId } : {}),
       allowWrites: options.allowWrites ?? false,
       isolation:
@@ -147,6 +155,7 @@ export function createDelegateSession(options: {
     token,
     filePath,
     cwd: options.cwd,
+    ...(name ? { name } : {}),
     ...(options.worktreeId ? { worktreeId: options.worktreeId } : {}),
     allowWrites: options.allowWrites ?? false,
     isolation:
@@ -175,6 +184,9 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
       token,
       filePath,
       cwd: metadata.cwd,
+      ...(typeof metadata.name === 'string' && metadata.name.trim()
+        ? { name: metadata.name.trim() }
+        : {}),
       ...(typeof metadata.worktreeId === 'string'
         ? { worktreeId: metadata.worktreeId }
         : {}),

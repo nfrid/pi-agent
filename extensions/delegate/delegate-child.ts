@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
 import { processJsonLine } from './events';
 import type { DelegatedRun } from './types';
 
@@ -38,6 +39,39 @@ export interface SpawnChildResult {
   timedOut: boolean;
 }
 
+/** Resolve the parent home without broadening the child environment allowlist. */
+export function effectiveDelegateHome(): string {
+  const configured = process.env.HOME;
+  if (configured?.trim()) return configured;
+
+  // Node's POSIX homedir() consults HOME, so remove an explicitly empty value
+  // while resolving the system fallback and restore it before returning.
+  const hadHome = Object.hasOwn(process.env, 'HOME');
+  if (hadHome) delete process.env.HOME;
+  let fallback: string;
+  try {
+    fallback = homedir();
+  } finally {
+    if (hadHome) process.env.HOME = configured;
+  }
+  if (!fallback.trim() || fallback === '/')
+    throw new Error('Could not determine a usable delegate HOME directory.');
+  return fallback;
+}
+
+export function buildDelegateChildEnvironment(
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin',
+    LANG: 'C',
+    LC_ALL: 'C',
+    ...env,
+    HOME: effectiveDelegateHome(),
+    PI_DELEGATE_CHILD: '1',
+  };
+}
+
 /** Spawn a detached Pi child and stream JSON events into the run record. */
 export async function spawnDelegateChild(
   run: DelegatedRun,
@@ -50,13 +84,7 @@ export async function spawnDelegateChild(
     const isWindows = process.platform === 'win32';
     const proc = spawn(options.command, options.args, {
       cwd: options.cwd,
-      env: {
-        PATH: process.env.PATH ?? '/usr/bin:/bin:/usr/sbin:/sbin',
-        LANG: 'C',
-        LC_ALL: 'C',
-        ...options.env,
-        PI_DELEGATE_CHILD: '1',
-      },
+      env: buildDelegateChildEnvironment(options.env),
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: !isWindows,

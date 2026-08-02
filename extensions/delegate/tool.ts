@@ -98,7 +98,7 @@ const NameSchema = Type.String({
 });
 
 const TaskItem = Type.Object({
-  name: NameSchema,
+  name: Type.Optional(NameSchema),
   task: Type.String({
     minLength: 1,
     maxLength: 32 * 1024,
@@ -133,7 +133,7 @@ const DelegateParamsSchema = Type.Object({
       minLength: 1,
       maxLength: 120,
       description:
-        'Required with task. Short human-readable subagent name shown in status UI.',
+        'Required for fresh tasks; valid new-format continuations inherit it when omitted. Short human-readable subagent name shown in status UI.',
     }),
   ),
   task: Type.Optional(

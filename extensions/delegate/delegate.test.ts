@@ -428,6 +428,7 @@ describe('delegate', () => {
   test('creates durable opaque sessions with revalidatable resource routing', () => {
     const session = createDelegateSession({
       cwd: '/tmp/project',
+      name: 'Original agent',
       routing: {
         route: 'quick-high',
         provider: 'openai-codex',
@@ -438,6 +439,9 @@ describe('delegate', () => {
     });
     try {
       expect(resolveDelegateSession(session.token)).toEqual(session);
+      expect(resolveDelegateSession(session.token)?.name).toBe(
+        'Original agent',
+      );
       const updatedRouting = {
         ...session.routing,
         route: 'quick-low',
