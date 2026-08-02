@@ -1,6 +1,6 @@
 # HFM-20260802: Announce background-delegate waiting before yielding
 
-- **Status:** approved
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-08-02
 - **Created:** 2026-08-02
 - **Source reports:** [HF-20260802: Background delegate waiting emits an empty assistant final](../inbox/20260802T120154Z-background-delegate-empty-final.md)
@@ -49,11 +49,11 @@ Implement option 1. When no independent work remains, tell the user once that in
 
 ## Acceptance criteria
 
-- [ ] Background delegate launch guidance tells the parent to emit one concise user-visible waiting status when no independent work remains, then end the turn.
-- [ ] Guidance says the task is still pending and will resume automatically; it does not instruct the parent to claim the overall task is done.
-- [ ] Guidance continues to prohibit `delegate_jobs peek` merely to wait and preserves deliberate-inspection and decision-changing-timeout uses.
-- [ ] Automatic completion behavior and existing lifecycle tests remain unchanged.
-- [ ] Focused tests reject the prior bare “end the turn” guidance and assert the new waiting-status requirement.
+- [x] Background delegate launch guidance tells the parent to emit one concise user-visible waiting status when no independent work remains, then end the turn.
+- [x] Guidance says the task is still pending and will resume automatically; it does not instruct the parent to claim the overall task is done.
+- [x] Guidance continues to prohibit `delegate_jobs peek` merely to wait and preserves deliberate-inspection and decision-changing-timeout uses.
+- [x] Automatic completion behavior and existing lifecycle tests remain unchanged.
+- [x] Focused tests reject the prior bare “end the turn” guidance and assert the new waiting-status requirement.
 
 ## Validation
 
@@ -63,11 +63,15 @@ Implement option 1. When no independent work remains, tell the user once that in
 
 ## Evaluation
 
-- **Window:** not started. After approved implementation, 20 intentional background yields including at least 5 batched yields and 5 failure/cancel/timeout cases, or 2026-08-16, whichever is later
+- **Window:** Started 2026-08-02; ends after 20 intentional background yields including at least 5 batched yields and 5 failure/cancel/timeout cases, or 2026-08-16, whichever is later
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
+
+### Observations
+
+- **2026-08-02:** Focused delegate guidance tests passed (9 tests), and the full repository check passed (66 files, 679 tests). Evaluation begins with the source baseline of 1 visible blank response in 1 observed intentional background yield.
 
 ## Implementation and resolution
 
 - **Approved implementation:** Revise background-delegate guidance so that when no independent work remains, the parent emits one concise user-visible waiting status and ends the turn. Preserve automatic completion and no-poll behavior; do not implement host-level message suppression. Approved 2026-08-02.
-- **Merged change:** —
+- **Merged change:** `4989891`
 - **Resolution:** pending evaluation
