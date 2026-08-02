@@ -94,8 +94,12 @@ describe('canonical prompt composition', () => {
   it('keeps phase labels out of prompts with no transcript to print them', () => {
     const interactive = buildSystemPrompt(options(), 'tui');
     const headless = buildSystemPrompt(options(), 'json');
-    expect(interactive).toContain('label it');
-    expect(headless).not.toContain('label it');
+    expect(interactive).toContain('concrete outcome and scope');
+    expect(interactive).toContain(
+      'natural ongoing-action form for the language',
+    );
+    expect(interactive).toContain('in English, use a verb ending in -ing');
+    expect(headless).not.toContain('natural ongoing-action form');
     for (const prompt of [interactive, headless])
       expect(prompt).toContain('state the assumption in one line');
   });

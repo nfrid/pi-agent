@@ -98,7 +98,7 @@ const MIN_NARRATED_CALLS = 5;
  *
  * Not none, though: a single call behind an announcement is too small to stand
  * as a group of its own, and models do announce twice in a row. Such a turn
- * joins the next one, and `composeTitle` keeps what both of them said.
+ * joins the next one, while the renderer keeps the latest useful label.
  */
 const MIN_ANNOUNCED_CALLS = 2;
 

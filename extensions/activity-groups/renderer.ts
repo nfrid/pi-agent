@@ -5,13 +5,11 @@ import { truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
 import { stringArg, toolBaseName, toolPath, toolRole } from './grouping';
 import { hasUnresolvedToolFailure } from './outcome';
 import {
-  composeTitle,
   describeTools,
   headersOf,
   isNarration,
   type NarrationChannel,
   stripEmphasis,
-  toPastTense,
 } from './title';
 import type {
   SequenceItem,
@@ -177,20 +175,18 @@ export class ActivityGroupComponent implements Component {
   }
 
   /**
-   * Live groups are titled by the newest narration header, so the line tracks
-   * the work as it moves. Settled groups compose the whole group's narration,
-   * because by then the interesting thing is what the phase amounted to.
-   *
-   * A preamble outranks both. When the model announced this phase in its own
-   * words to the user — "Checking how sessions expire" — that line *is* the
-   * group, and it is printed here rather than above, so the reader sees it
-   * once and the collapsed group reads as the model's own account.
+   * Groups use the model's latest narration header, both live and settled, so
+   * the label stays in the model's original words. A preamble outranks headers:
+   * when the model announced this phase to the reader — "Checking how sessions
+   * expire" — that line *is* the group, and it is printed here rather than
+   * above, so the reader sees it once and the collapsed group reads as the
+   * model's own account.
    */
   private title(tools: readonly ToolItem[], completed: boolean): string {
     // One styled terminal line, so whatever markdown the model wrote inside
     // its narration is unwrapped rather than printed as punctuation.
     return stripEmphasis(
-      this.narratedTitle(completed) ?? this.toolTitle(tools, completed),
+      this.narratedTitle() ?? this.toolTitle(tools, completed),
     );
   }
 
@@ -205,16 +201,15 @@ export class ActivityGroupComponent implements Component {
    * reader was addressed on wins outright, and thinking is what titles a group
    * that never spoke.
    */
-  private narratedTitle(completed: boolean): string | undefined {
+  private narratedTitle(): string | undefined {
     const preamble = this.preamble();
-    // Announced in the present, reported in the past: a finished group saying
-    // "Checking how sessions expire" beside a checkmark is describing work
-    // that is over. Anything that does not open on a participle — a full
-    // sentence, a noun phrase — is left exactly as the model wrote it.
-    if (preamble) return completed ? toPastTense(preamble) : preamble;
+    // Keep the model's original wording after the group settles. A label may
+    // be a participle, a sentence, or another language; inventing a completed
+    // form would risk changing what the phase actually says.
+    if (preamble) return preamble;
     const spoken = this.headers('text');
     const headers = spoken.length > 0 ? spoken : this.headers('thinking');
-    return completed ? composeTitle(headers) : headers.at(-1);
+    return headers.at(-1);
   }
 
   private headers(channel: NarrationChannel): string[] {

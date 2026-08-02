@@ -293,7 +293,7 @@ describe('tool sequence shim', () => {
 
     // One group, and no line of its own for either header.
     expect(h.render()).toEqual(['group:group-1:4:live']);
-    // Both headers stayed inside it, where the title is composed from.
+    // Both headers stayed inside it; the renderer uses the latest useful one.
     expect(
       snapshots
         .at(-1)
