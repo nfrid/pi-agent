@@ -3,8 +3,11 @@ import type {
   ExtensionUIContext,
   ThemeColor,
 } from '@earendil-works/pi-coding-agent';
-import { Text } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
+import {
+  type BackgroundCompletionCard,
+  renderBackgroundCompletion,
+} from '../shared/ui/background-completion';
 import { createRailPanel } from '../shared/ui/rail';
 import { registerDelegateBranchesTool } from './branches-tool';
 import {
@@ -70,13 +73,15 @@ function jobDuration(job: DelegateJobSnapshot): string {
     : '';
 }
 
-function completionSummary(
+function completionCard(
   jobs: readonly DelegateJobSnapshot[],
-  expanded: boolean,
-  theme: { fg(color: ThemeColor, text: string): string },
-): string {
+): BackgroundCompletionCard {
   if (jobs.length === 0)
-    return theme.fg('muted', 'Background subagent finished');
+    return {
+      icon: '✓',
+      color: 'success',
+      title: [{ text: 'Background subagent finished', color: 'muted' }],
+    };
   const states = jobs.map(completionState);
   const dominant = states.includes('error')
     ? 'error'
@@ -100,16 +105,45 @@ function completionSummary(
   ].filter(Boolean);
   const title =
     jobs.length === 1
-      ? `${theme.fg('muted', 'Background subagent')} ${theme.fg('text', jobs[0].name)} ${theme.fg('dim', `· ${completionStyle(states[0]).label} · ${duration}`)}`
-      : `${theme.fg('text', `${jobs.length} background subagents finished`)}${outcome.length > 1 || dominant !== 'success' ? theme.fg('dim', ` · ${outcome.join(', ')}`) : ''}${theme.fg('dim', ` · ${duration}`)}`;
-  if (!expanded) return `${theme.fg(style.color, style.icon)} ${title}`;
-  const rows = jobs.map((job) => {
-    const state = completionState(job);
-    const row = completionStyle(state);
-    const metadata = [job.id, job.route, jobDuration(job)].filter(Boolean);
-    return `  ${theme.fg(row.color, row.icon)} ${theme.fg('text', job.name)} ${theme.fg('dim', `· ${row.label}${metadata.length ? ` · ${metadata.join(' · ')}` : ''}`)}`;
-  });
-  return [`${theme.fg(style.color, style.icon)} ${title}`, ...rows].join('\n');
+      ? [
+          { text: 'Background subagent ', color: 'muted' as const },
+          { text: jobs[0].name, color: 'text' as const },
+          {
+            text: ` · ${completionStyle(states[0]).label} · ${duration}`,
+            color: 'dim' as const,
+          },
+        ]
+      : [
+          {
+            text: `${jobs.length} background subagents finished`,
+            color: 'text' as const,
+          },
+          {
+            text: `${outcome.length > 1 || dominant !== 'success' ? ` · ${outcome.join(', ')}` : ''} · ${duration}`,
+            color: 'dim' as const,
+          },
+        ];
+  return {
+    icon: style.icon,
+    color: style.color,
+    title,
+    rows: jobs.map((job) => {
+      const state = completionState(job);
+      const row = completionStyle(state);
+      const metadata = [job.id, job.route, jobDuration(job)].filter(Boolean);
+      return {
+        icon: row.icon,
+        color: row.color,
+        segments: [
+          { text: job.name, color: 'text' },
+          {
+            text: ` · ${row.label}${metadata.length ? ` · ${metadata.join(' · ')}` : ''}`,
+            color: 'dim',
+          },
+        ],
+      };
+    }),
+  };
 }
 
 /** Stable registration facade; orchestration and broker commands have separate owners. */
@@ -388,14 +422,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
 
   pi.registerMessageRenderer(
     'delegate-job-result',
-    (message, { expanded }, theme) => {
+    (message, { expanded, outputPad }, theme) => {
       const details = (message.details ?? {}) as {
         jobs?: DelegateJobSnapshot[];
       };
-      return new Text(
-        completionSummary(details.jobs ?? [], expanded, theme),
-        1,
-        0,
+      return renderBackgroundCompletion(
+        completionCard(details.jobs ?? []),
+        { expanded, outputPad },
+        theme,
       );
     },
   );

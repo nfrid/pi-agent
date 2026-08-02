@@ -1,5 +1,9 @@
 import type { ExtensionAPI, Theme } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
+import {
+  type BackgroundCompletionCard,
+  renderBackgroundCompletion,
+} from '../shared/ui/background-completion';
 import type { BackgroundStatus } from './manager';
 import { type BackgroundToolDetails, RESULT_MESSAGE_TYPE } from './schema';
 
@@ -152,27 +156,67 @@ export function renderBackgroundResult(
   );
 }
 
+interface BackgroundCompletionDetails {
+  readonly id?: string;
+  readonly title?: string;
+  readonly status?: BackgroundStatus;
+  readonly exitCode?: number;
+  readonly signal?: string;
+  readonly duration?: string;
+  readonly outcome?: string;
+}
+
+function completionCard(
+  details: BackgroundCompletionDetails,
+): BackgroundCompletionCard {
+  const status = details.status;
+  const style =
+    status === 'failed'
+      ? { icon: '✗', color: 'error' as const, label: 'failed' }
+      : status === 'killed'
+        ? { icon: '■', color: 'warning' as const, label: 'stopped' }
+        : { icon: '✓', color: 'success' as const, label: 'finished' };
+  const metadata = [style.label, details.duration].filter(Boolean).join(' · ');
+  const outcome =
+    details.signal ??
+    (details.exitCode !== undefined ? `exit ${details.exitCode}` : undefined) ??
+    details.outcome;
+  return {
+    icon: style.icon,
+    color: style.color,
+    title: [
+      { text: 'Background process ', color: 'muted' },
+      { text: details.title ?? details.id ?? 'finished', color: 'text' },
+      ...(metadata
+        ? ([{ text: ` · ${metadata}`, color: 'dim' }] as const)
+        : []),
+    ],
+    rows: details.id
+      ? [
+          {
+            icon: style.icon,
+            color: style.color,
+            segments: [
+              { text: details.id, color: 'accent' },
+              ...(outcome
+                ? ([{ text: ` · ${outcome}`, color: 'dim' }] as const)
+                : []),
+            ],
+          },
+        ]
+      : undefined,
+  };
+}
+
 export function registerBackgroundMessageRenderer(pi: ExtensionAPI): void {
   pi.registerMessageRenderer(
     RESULT_MESSAGE_TYPE,
-    (message, { expanded }, theme) => {
-      const details = (message.details ?? {}) as {
-        status?: BackgroundStatus;
-      };
-      const failed = details.status === 'failed';
-      const stopped = details.status === 'killed';
-      const icon = failed ? '✗' : stopped ? '■' : '✓';
-      const color = failed ? 'error' : stopped ? 'muted' : 'success';
-      const content =
-        typeof message.content === 'string' ? message.content : '';
-      return new Text(
-        theme.fg(color, `${icon} `) +
-          theme.fg(
-            'muted',
-            expanded ? content : truncateToWidth(content, 120, '…'),
-          ),
-        0,
-        0,
+    (message, { expanded, outputPad }, theme) => {
+      const details = (message.details ?? {}) as BackgroundCompletionDetails;
+      return renderBackgroundCompletion(
+        completionCard(details),
+        { expanded, outputPad },
+        theme,
       );
     },
   );

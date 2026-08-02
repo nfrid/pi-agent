@@ -6,7 +6,7 @@ import { truncateToWidth } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
 import { createManagedWidget } from '../shared/ui/widget';
 import { registerBackgroundCommands } from './commands';
-import { formatCompletion } from './format';
+import { exitDescription, formatCompletion, formatDuration } from './format';
 import { BackgroundManager, type BackgroundSnapshot } from './manager';
 import { registerBackgroundMessageRenderer } from './renderers';
 import { RESULT_MESSAGE_TYPE, WIDGET_KEY } from './schema';
@@ -53,6 +53,8 @@ export default defineExtension(
               status: snapshot.status,
               exitCode: snapshot.exitCode,
               signal: snapshot.signal,
+              duration: formatDuration(snapshot),
+              outcome: exitDescription(snapshot),
             },
           },
           { deliverAs: 'steer', triggerTurn: true },

@@ -95,6 +95,61 @@ describe('background terminals extension', () => {
     await handlers.get('session_shutdown')?.({});
   });
 
+  it('renders automatic completions as padded status cards', () => {
+    let completionRenderer:
+      | ((
+          message: { content: string; details?: Record<string, unknown> },
+          options: { expanded: boolean; outputPad: number },
+          theme: ThemeLike,
+        ) => Renderable)
+      | undefined;
+    const pi = {
+      on: vi.fn(),
+      registerTool: vi.fn(),
+      registerCommand: vi.fn(),
+      registerMessageRenderer: vi.fn(
+        (_type: string, renderer: typeof completionRenderer) => {
+          completionRenderer = renderer;
+        },
+      ),
+    } as unknown as ExtensionAPI;
+    const theme: ThemeLike = {
+      fg: (color, text) => `<${color}>${text}</${color}>`,
+      bold: (text) => text,
+    };
+
+    backgroundTerminals(pi);
+    const message = {
+      content:
+        'Background process bg-1 completed. Use background peek to inspect it.',
+      details: {
+        id: 'bg-1',
+        title: 'production build',
+        status: 'done',
+        exitCode: 0,
+        duration: '4s',
+        outcome: 'exit 0',
+      },
+    };
+    const compact =
+      completionRenderer?.(message, { expanded: false, outputPad: 1 }, theme)
+        .render(160)
+        .join('\n') ?? '';
+    expect(compact).toContain(
+      '<success>✓</success> <muted>Background process </muted><text>production build</text><dim> · finished · 4s</dim>',
+    );
+    expect(compact.startsWith(' ')).toBe(true);
+    expect(compact).not.toContain('Use background peek');
+    expect(compact).not.toContain('bg-1');
+
+    const expanded =
+      completionRenderer?.(message, { expanded: true, outputPad: 1 }, theme)
+        .render(160)
+        .join('\n') ?? '';
+    expect(expanded).toContain('<accent>bg-1</accent><dim> · exit 0</dim>');
+    expect(expanded).not.toContain('Use background peek');
+  });
+
   it('reasserts a colored widget at agent boundaries', async () => {
     const handlers = new Map<string, Handler>();
     let tool: RegisteredTool | undefined;
