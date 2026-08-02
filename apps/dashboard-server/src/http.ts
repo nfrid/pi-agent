@@ -321,7 +321,7 @@ class DashboardServerImpl implements DashboardServer {
       if (request.method === 'GET' && url.pathname === '/api/workspaces')
         return this.json(response, 200, { workspaces: this.workspaces });
       if (request.method === 'GET' && url.pathname === '/api/usage')
-        return this.handleUsage(response);
+        return await this.handleUsage(response);
       if (
         request.method === 'GET' &&
         url.pathname === '/api/push/vapid-public-key'
@@ -330,30 +330,40 @@ class DashboardServerImpl implements DashboardServer {
           publicKey: process.env.PI_DASHBOARD_VAPID_PUBLIC_KEY ?? null,
         });
       if (request.method === 'GET' && url.pathname.startsWith('/api/sessions/'))
-        return this.handleSession(
+        return await this.handleSession(
           response,
           decodeURIComponent(url.pathname.slice('/api/sessions/'.length)),
         );
       if (request.method === 'POST' && url.pathname === '/api/runtimes/start')
-        return this.handleStart(request, response);
+        return await this.handleStart(request, response);
       const commandMatch = url.pathname.match(
         /^\/api\/runtimes\/([^/]+)\/command$/,
       );
       if (request.method === 'POST' && commandMatch)
-        return this.handleCommand(commandMatch[1], request, response);
+        return await this.handleCommand(commandMatch[1], request, response);
       const stopMatch = url.pathname.match(/^\/api\/runtimes\/([^/]+)\/stop$/);
       if (request.method === 'POST' && stopMatch)
-        return this.handleStop(stopMatch[1], request, response);
+        return await this.handleStop(stopMatch[1], request, response);
       const answerMatch = url.pathname.match(
         /^\/api\/interactions\/([^/]+)\/answer$/,
       );
       if (request.method === 'POST' && answerMatch)
-        return this.handleInteraction(answerMatch[1], request, response, false);
+        return await this.handleInteraction(
+          answerMatch[1],
+          request,
+          response,
+          false,
+        );
       const cancelMatch = url.pathname.match(
         /^\/api\/interactions\/([^/]+)\/cancel$/,
       );
       if (request.method === 'POST' && cancelMatch)
-        return this.handleInteraction(cancelMatch[1], request, response, true);
+        return await this.handleInteraction(
+          cancelMatch[1],
+          request,
+          response,
+          true,
+        );
       const readMatch = url.pathname.match(
         /^\/api\/notifications\/([^/]+)\/read$/,
       );
@@ -363,7 +373,7 @@ class DashboardServerImpl implements DashboardServer {
         return this.json(response, 200, { ok: true });
       }
       if (request.method === 'POST' && url.pathname === '/api/push/subscribe')
-        return this.handlePushSubscribe(request, response);
+        return await this.handlePushSubscribe(request, response);
       return this.json(response, 404, { error: 'Not found.' });
     } catch (error) {
       const status =
@@ -447,8 +457,27 @@ class DashboardServerImpl implements DashboardServer {
   ): Promise<void> {
     if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
       return this.json(response, 400, { error: 'Invalid session id.' });
-    const result = await this.sessions.readEntries(id);
-    return this.json(response, 200, result);
+    try {
+      const result = await this.sessions.readEntries(id);
+      return this.json(response, 200, result);
+    } catch (error) {
+      const runtime = this.registry
+        .snapshots()
+        .find((item) => item.session.id === id && item.online !== false);
+      if (!runtime) throw error;
+      return this.json(response, 200, {
+        metadata: {
+          id,
+          file: runtime.session.file ?? '',
+          cwd: runtime.cwd,
+          name: runtime.session.name,
+          updatedAt: runtime.lastSeenAt ?? Date.now(),
+          activeRuntimeId: runtime.runtimeId,
+          entryCount: runtime.session.entries.length,
+        },
+        entries: runtime.session.entries,
+      });
+    }
   }
 
   private async handleUsage(response: http.ServerResponse): Promise<void> {

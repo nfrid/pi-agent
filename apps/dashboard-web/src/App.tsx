@@ -9,6 +9,13 @@ function dashboardToken(): string | undefined {
 }
 
 type SessionResponse = { metadata: SessionIndexEntry; entries: unknown[] };
+export function asSessionResponse(value: unknown): SessionResponse | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const response = value as Partial<SessionResponse>;
+  const metadata = response.metadata as Partial<SessionIndexEntry> | undefined;
+  if (!metadata || typeof metadata.id !== 'string' || typeof metadata.cwd !== 'string' || !Array.isArray(response.entries)) return undefined;
+  return { metadata: metadata as SessionIndexEntry, entries: response.entries };
+}
 type DashboardEvent = { type?: string; runtimeId?: string; event?: { type?: string; sessionId?: string; message?: unknown; tool?: unknown } };
 type AppError = Error & { code?: string };
 
@@ -246,13 +253,26 @@ function SessionView({ id, snapshot, lastEvent, reconnectNonce }: { id: string; 
   const [data, setData] = useState<SessionResponse>();
   const [error, setError] = useState<string>();
   const runtime = snapshot.runtimes.find((item) => item.session.id === id);
-  useEffect(() => { let active = true; void api<SessionResponse>(`/api/sessions/${encodeURIComponent(id)}`).then((value) => active && setData(value)).catch((cause) => active && setError(cause instanceof Error ? cause.message : String(cause))); return () => { active = false; }; }, [id, reconnectNonce]);
+  useEffect(() => {
+    let active = true;
+    void api<unknown>(`/api/sessions/${encodeURIComponent(id)}`)
+      .then((value) => {
+        const next = asSessionResponse(value);
+        if (!next) throw new Error('Dashboard returned invalid session data.');
+        if (active) { setData(next); setError(undefined); }
+      })
+      .catch((cause) => active && setError(cause instanceof Error ? cause.message : String(cause)));
+    return () => { active = false; };
+  }, [id, reconnectNonce]);
   useEffect(() => {
     const event = lastEvent?.event;
     if (!event || !data) return;
     if (event.type === 'agent.settled' || event.type === 'runtime.hello') {
       let active = true;
-      void api<SessionResponse>(`/api/sessions/${encodeURIComponent(id)}`).then((value) => active && setData(value)).catch(() => undefined);
+      void api<unknown>(`/api/sessions/${encodeURIComponent(id)}`).then((value) => {
+        const next = asSessionResponse(value);
+        if (active && next) setData(next);
+      }).catch(() => undefined);
       return () => { active = false; };
     }
     if (event.type?.startsWith('message.') || event.type?.startsWith('tool.'))

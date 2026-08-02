@@ -91,6 +91,7 @@ export class SessionIndex {
     const indexed = this.files.get(id);
     if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
       throw new Error('Unknown session.');
+    const { header: _header, ...metadata } = indexed;
     const text = await fs.readFile(indexed.file, 'utf8');
     if (Buffer.byteLength(text) > 8 * 1024 * 1024)
       throw new Error('Session is too large to open remotely.');
@@ -103,7 +104,7 @@ export class SessionIndex {
         /* tolerate a partial final line */
       }
     }
-    return { metadata: this.get(id) as SessionIndexEntry, entries };
+    return { metadata, entries };
   }
 
   close(): void {

@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { asBrowserSnapshot, reconcileLiveEvent } from './App';
+import { asBrowserSnapshot, asSessionResponse, reconcileLiveEvent } from './App';
 
 describe('dashboard snapshots', () => {
+  it('rejects malformed session responses before rendering', () => {
+    expect(asSessionResponse({ entries: [] })).toBeUndefined();
+    expect(asSessionResponse({ metadata: { id: 's1', cwd: '/tmp' }, entries: [] })).toMatchObject({ metadata: { id: 's1' } });
+  });
+
   it('rejects runtime snapshots and defaults optional browser collections', () => {
     expect(asBrowserSnapshot({ runtimeId: 'runtime-1' })).toBeUndefined();
     expect(asBrowserSnapshot({ revision: 1, runtimes: [], workspaces: [], sessions: [] })).toMatchObject({ unread: [] });
