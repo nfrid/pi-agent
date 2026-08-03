@@ -332,6 +332,7 @@ export function useDashboard(): DashboardState {
   const eventRevisions = useRef(new Set<number>());
   const eventRevisionOrder = useRef<number[]>([]);
   const liveDisconnected = useRef(false);
+  const authoritativeSocketServerId = useRef<string | undefined>(undefined);
 
   const acceptSnapshot = useCallback((next: BrowserSnapshot): void => {
     if (acceptedServerId.current !== next.serverId) {
@@ -364,6 +365,11 @@ export function useDashboard(): DashboardState {
       // A request issued before a daemon transition can complete after the new
       // websocket is authoritative. Never roll the UI back to that retired
       // server generation.
+      if (
+        authoritativeSocketServerId.current !== undefined &&
+        authoritativeSocketServerId.current !== next.serverId
+      )
+        return;
       if (
         acceptedServerId.current !== requestServerId &&
         acceptedServerId.current !== next.serverId
@@ -470,6 +476,7 @@ export function useDashboard(): DashboardState {
       if (!token) return;
       setConnectionState('connecting');
       const candidate = new WebSocket(url);
+      let candidateServerId: string | undefined;
       socket = candidate;
       candidate.onopen = () => {
         if (stopped || socket !== candidate) return;
@@ -490,7 +497,24 @@ export function useDashboard(): DashboardState {
               : undefined;
           if (message.type === 'snapshot' && !next)
             throw new Error('Invalid snapshot');
+          if (
+            message.serverId !== undefined &&
+            next !== undefined &&
+            message.serverId !== next.serverId
+          )
+            return;
+          const envelopeServerId = message.serverId ?? next?.serverId;
+          if (
+            candidateServerId !== undefined &&
+            envelopeServerId !== undefined &&
+            envelopeServerId !== candidateServerId
+          )
+            return;
           if (next) {
+            if (candidateServerId === undefined) {
+              candidateServerId = next.serverId;
+              authoritativeSocketServerId.current = next.serverId;
+            } else if (next.serverId !== candidateServerId) return;
             liveDisconnected.current = false;
             acceptSnapshot(next);
             retryDelay = RECONNECT_MIN_MS;
@@ -507,6 +531,11 @@ export function useDashboard(): DashboardState {
             if (message.snapshot) {
               const eventSnapshot = asBrowserSnapshot(message.snapshot);
               if (!eventSnapshot) throw new Error('Invalid event snapshot');
+              if (
+                candidateServerId !== undefined &&
+                eventSnapshot.serverId !== candidateServerId
+              )
+                return;
               acceptSnapshot(eventSnapshot);
             }
             queueEvent(eventMessage);
@@ -520,6 +549,8 @@ export function useDashboard(): DashboardState {
       candidate.onclose = () => {
         if (socket !== candidate) return;
         socket = undefined;
+        if (authoritativeSocketServerId.current === candidateServerId)
+          authoritativeSocketServerId.current = undefined;
         scheduleReconnect();
       };
       candidate.onerror = () => candidate.close();
@@ -564,6 +595,7 @@ export function useDashboard(): DashboardState {
       if (resyncTimer) window.clearTimeout(resyncTimer);
       const activeSocket = socket;
       socket = undefined;
+      authoritativeSocketServerId.current = undefined;
       if (activeSocket) {
         activeSocket.onmessage = null;
         activeSocket.onerror = null;

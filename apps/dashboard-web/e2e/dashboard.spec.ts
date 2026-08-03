@@ -85,15 +85,33 @@ test('live transport contains malformed data and reconnects without breaking the
       send(value: string) {
         const message = JSON.parse(value) as { type?: string };
         if (message.type !== 'auth') return;
+        const generation = sockets.indexOf(this) + 1;
         this.emit({
           type: 'snapshot',
           snapshot: {
-            serverId: 'server-live',
+            serverId: `server-${generation}`,
             revision: 1,
             runtimes: [],
-            workspaces: [],
+            workspaces: [
+              {
+                id: `workspace-${generation}`,
+                name: `Live generation ${generation}`,
+                path: '/tmp',
+                canonicalPath: '/tmp',
+                source: 'directory',
+                active: false,
+              },
+            ],
             sessions: [],
-            unread: [],
+            unread: [
+              {
+                id: `generation-${generation}`,
+                kind: 'settled',
+                title: `Live generation ${generation}`,
+                body: 'Generation marker',
+                createdAt: generation,
+              },
+            ],
           },
         });
       }
@@ -114,6 +132,7 @@ test('live transport contains malformed data and reconnects without breaking the
       dashboardLiveTest: {
         count: () => sockets.length,
         current: () => sockets.at(-1),
+        first: () => sockets[0],
       },
     });
   });
@@ -124,12 +143,29 @@ test('live transport contains malformed data and reconnects without breaking the
     route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        serverId: 'server-live',
+        serverId: 'server-1',
         revision: 1,
         runtimes: [],
-        workspaces: [],
+        workspaces: [
+          {
+            id: 'workspace-1',
+            name: 'Live generation 1',
+            path: '/tmp',
+            canonicalPath: '/tmp',
+            source: 'directory',
+            active: false,
+          },
+        ],
         sessions: [],
-        unread: [],
+        unread: [
+          {
+            id: 'generation-1',
+            kind: 'settled',
+            title: 'Live generation 1',
+            body: 'Generation marker',
+            createdAt: 1,
+          },
+        ],
       }),
     }),
   );
@@ -184,6 +220,57 @@ test('live transport contains malformed data and reconnects without breaking the
     )
     .toBeGreaterThan(1);
   await expect(page.getByRole('status')).toHaveCount(0);
+  const liveGeneration = await page.evaluate(() =>
+    (
+      window as unknown as {
+        dashboardLiveTest: { count(): number };
+      }
+    ).dashboardLiveTest.count(),
+  );
+  await page.waitForTimeout(200);
+  await expect(
+    page.getByText(`Live generation ${liveGeneration}`),
+  ).toBeVisible();
+  await page.evaluate(() => {
+    (
+      window as unknown as {
+        dashboardLiveTest: { first(): { emit(value: unknown): void } };
+      }
+    ).dashboardLiveTest
+      .first()
+      .emit({
+        type: 'snapshot',
+        snapshot: {
+          serverId: 'server-1',
+          revision: 99,
+          runtimes: [],
+          workspaces: [
+            {
+              id: 'stale',
+              name: 'ROLLED BACK',
+              path: '/tmp',
+              canonicalPath: '/tmp',
+              source: 'directory',
+              active: false,
+            },
+          ],
+          sessions: [],
+          unread: [
+            {
+              id: 'stale',
+              kind: 'settled',
+              title: 'ROLLED BACK',
+              body: 'Stale generation marker',
+              createdAt: 99,
+            },
+          ],
+        },
+      });
+  });
+  await expect(
+    page.getByText(`Live generation ${liveGeneration}`),
+  ).toBeVisible();
+  await expect(page.getByText('ROLLED BACK')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
 });
 

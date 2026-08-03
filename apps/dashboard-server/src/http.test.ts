@@ -271,15 +271,16 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
     });
   });
 
-  it('contains non-serializable optional provider data without poisoning live snapshots', async () => {
+  it('contains invalid or oversized provider data without poisoning live snapshots', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-usage-'));
+    let usageValue: unknown = { invalid: 1n };
     server = await createDashboardServer({
       port: 0,
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
       sessionDir: path.join(root, 'sessions'),
       sesh: { list: async () => [] },
-      usage: { get: async () => ({ invalid: 1n }) },
+      usage: { get: async () => usageValue },
     });
     await server.start();
     const headers = { 'x-dashboard-token': 'test-token' };
@@ -288,6 +289,14 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
     });
     expect(usage.status).toBe(200);
     expect(await usage.json()).toMatchObject({ error: expect.any(String) });
+    usageValue = { oversized: 'x'.repeat(300_000) };
+    const oversized = await fetch(`http://127.0.0.1:${server.port}/api/usage`, {
+      headers,
+    });
+    expect(oversized.status).toBe(200);
+    expect(await oversized.json()).toMatchObject({
+      error: 'Usage payload exceeds the dashboard size limit.',
+    });
     const snapshot = await fetch(
       `http://127.0.0.1:${server.port}/api/snapshot`,
       { headers },

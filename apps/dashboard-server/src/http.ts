@@ -31,6 +31,7 @@ import { CodexUsageProvider, type UsageProvider } from './usage.js';
 
 const MAX_BODY = 512 * 1024;
 const MAX_WS_BUFFER = 1024 * 1024;
+const MAX_USAGE_BYTES = 256 * 1024;
 const WS_HEARTBEAT_MS = 30_000;
 const WS_PATH = '/ws';
 
@@ -614,7 +615,12 @@ class DashboardServerImpl implements DashboardServer {
       const usage = await this.usage.get();
       // Usage is an optional provider boundary. Reject values that cannot be
       // represented on the wire instead of poisoning every future snapshot.
-      JSON.stringify(usage);
+      const serialized = JSON.stringify(usage);
+      if (
+        serialized === undefined ||
+        Buffer.byteLength(serialized) > MAX_USAGE_BYTES
+      )
+        throw new Error('Usage payload exceeds the dashboard size limit.');
       this.usageSnapshot = usage;
       this.changed();
       return this.json(response, 200, { usage: this.usageSnapshot });
@@ -856,7 +862,11 @@ class DashboardServerImpl implements DashboardServer {
 
   private sendClient(client: WebSocket, text: string): boolean {
     if (client.readyState !== client.OPEN) return false;
-    if (client.bufferedAmount >= MAX_WS_BUFFER) {
+    const bytes = Buffer.byteLength(text);
+    if (
+      bytes > MAX_WS_BUFFER ||
+      client.bufferedAmount + bytes > MAX_WS_BUFFER
+    ) {
       this.clients.delete(client);
       client.terminate();
       return false;

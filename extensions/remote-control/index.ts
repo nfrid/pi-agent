@@ -471,8 +471,13 @@ export class BridgeClient {
     if (
       this.outboundQueue.length >= BRIDGE_WRITE_QUEUE_LIMIT ||
       this.outboundBytes + bytes > BRIDGE_WRITE_QUEUE_BYTES
-    )
+    ) {
+      // State and interaction events are replayable on reconnect but cannot be
+      // silently lost while a socket still appears healthy. Streaming deltas
+      // may be dropped because the next update/session refresh supersedes them.
+      if (!droppable) socket.destroy();
       return false;
+    }
     this.outboundQueue.push({ socket, data, droppable });
     this.outboundBytes += bytes;
     this.pumpOutbound(socket);

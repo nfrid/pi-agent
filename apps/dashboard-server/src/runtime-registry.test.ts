@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { type RuntimeSnapshot, serializeFrame } from '@pi-dashboard/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RuntimeRegistry } from './runtime-registry.js';
 
 const snapshot: RuntimeSnapshot = {
@@ -172,6 +172,31 @@ describe('runtime registry', () => {
       replacementFrames.some((line) => line.includes('"kind":"command"')),
     ).toBe(false);
     replacement.destroy();
+  });
+
+  it('recycles a connection when backpressure outlives the command timeout', async () => {
+    const registry = new RuntimeRegistry({
+      expectedToken: () => true,
+      commandTimeoutMs: 10,
+    });
+    const bridge = new PassThrough();
+    registry.accept(bridge as never);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    vi.spyOn(bridge, 'write').mockReturnValue(false);
+    const first = registry.sendCommand('runtime-1', { type: 'abort' });
+    const queued = registry.sendCommand('runtime-1', { type: 'abort' });
+    await expect(first).rejects.toThrow(
+      'Runtime command acknowledgement timed out.',
+    );
+    await expect(queued).rejects.toThrow('Runtime bridge disconnected.');
+    expect(bridge.destroyed).toBe(true);
   });
 
   it('rejects commands beyond the finite per-runtime queue', async () => {

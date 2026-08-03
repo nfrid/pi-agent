@@ -57,6 +57,7 @@ export interface RuntimeRegistryOptions {
     identityToken: string | undefined,
   ) => boolean;
   allowExternalWithoutToken?: boolean;
+  commandTimeoutMs?: number;
   onChange?: (change: RegistryChange) => void;
 }
 
@@ -298,8 +299,13 @@ export class RuntimeRegistry {
       const result = await new Promise<unknown>((resolve, reject) => {
         const timer = setTimeout(() => {
           current.pending.delete(command.id);
+          // If the kernel never drained, keeping this connection would leave
+          // the queue permanently blocked while heartbeats still mark it live.
+          // Reconnect to restore a known writable generation.
+          if (record.writeBlocked && record.socket === connection)
+            connection.destroy();
           reject(new Error('Runtime command acknowledgement timed out.'));
-        }, ACK_TIMEOUT_MS);
+        }, this.options.commandTimeoutMs ?? ACK_TIMEOUT_MS);
         current.pending.set(command.id, {
           resolve: (value) => {
             clearTimeout(timer);

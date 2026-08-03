@@ -370,6 +370,40 @@ describe('remote-control bridge', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('reconnects rather than silently dropping an interaction on backpressure', () => {
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      handleCommand: async () => ({ accepted: true }),
+    });
+    const socket = new net.Socket();
+    const write = vi.spyOn(socket, 'write').mockReturnValue(false);
+    const destroy = vi.spyOn(socket, 'destroy');
+    Reflect.set(client, 'socket', socket);
+    expect(client.sendEvent({ type: 'runtime.heartbeat', state: 'idle' })).toBe(
+      true,
+    );
+    expect(write).toHaveBeenCalledOnce();
+    for (let index = 0; index < 128; index += 1)
+      client.sendEvent({ type: 'runtime.stateChanged', state: 'idle' });
+    expect(
+      client.sendEvent({
+        type: 'interaction.requested',
+        interaction: {
+          id: 'interaction-backpressure',
+          type: 'ask_user',
+          question: 'Still there?',
+          choices: [],
+          allowCustom: true,
+          createdAt: Date.now(),
+        },
+      }),
+    ).toBe(false);
+    expect(destroy).toHaveBeenCalled();
+    client.stop();
+  });
+
   it('skips cyclic and oversized event payloads without closing the bridge', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'pi-bridge-payload-limit-'),
