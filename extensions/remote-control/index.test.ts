@@ -2,13 +2,17 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent';
 import { describe, expect, it } from 'vitest';
 import {
   type RuntimeSnapshot,
   serializeFrame,
 } from '../../packages/dashboard-protocol/src/index';
 import { InteractionBroker } from '../ask-user/broker';
-import { BridgeClient } from './index';
+import { BridgeClient, createRemoteControlRuntime } from './index';
 
 const snapshot: RuntimeSnapshot = {
   runtimeId: 'runtime-test',
@@ -34,6 +38,79 @@ function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe('remote-control bridge', () => {
+  it('reconnects from a cached snapshot without touching a replaced session context', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-bridge-stale-'));
+    const socketPath = path.join(directory, 'bridge.sock');
+    const previousSocket = process.env.PI_DASHBOARD_SOCKET;
+    process.env.PI_DASHBOARD_SOCKET = socketPath;
+    const received: Array<Record<string, unknown>> = [];
+    const server = net.createServer((socket) => {
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk) => {
+        for (const line of String(chunk).split('\n').filter(Boolean))
+          received.push(JSON.parse(line) as Record<string, unknown>);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    let stale = false;
+    const active = <T>(value: T): T => {
+      if (stale)
+        throw new Error(
+          'This extension ctx is stale after session replacement or reload.',
+        );
+      return value;
+    };
+    const manager = {
+      getBranch: () => active([]),
+      getSessionId: () => active('session-current'),
+      getSessionFile: () => active('/tmp/session.jsonl'),
+      getSessionName: () => active('Current session'),
+      getCwd: () => active('/tmp/project'),
+      getLeafId: () => active(undefined),
+    };
+    const context = {
+      get cwd() {
+        return active('/tmp/project');
+      },
+      get model() {
+        return active(undefined);
+      },
+      get thinkingLevel() {
+        return active('off');
+      },
+      sessionManager: manager,
+      getContextUsage: () =>
+        active({ tokens: 10, contextWindow: 1_000, percent: 1 }),
+      isIdle: () => active(true),
+    } as unknown as ExtensionContext;
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    expect(runtime).toBeDefined();
+    runtime?.setContext(context);
+    runtime?.clearContext(context);
+    stale = true;
+    runtime?.client.start();
+    await waitFor(() =>
+      received.some(
+        (frame) =>
+          (frame.event as { type?: string } | undefined)?.type ===
+          'runtime.hello',
+      ),
+    );
+    const hello = received.find(
+      (frame) =>
+        (frame.event as { type?: string } | undefined)?.type ===
+        'runtime.hello',
+    );
+    expect(hello).toMatchObject({
+      event: { snapshot: { session: { id: 'unknown' } } },
+    });
+    runtime?.client.stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (previousSocket === undefined) delete process.env.PI_DASHBOARD_SOCKET;
+    else process.env.PI_DASHBOARD_SOCKET = previousSocket;
+    await rm(directory, { recursive: true, force: true });
+  });
+
   it('sends a full hello and acknowledges serialized daemon commands', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-bridge-'));
     const socketPath = path.join(directory, 'bridge.sock');

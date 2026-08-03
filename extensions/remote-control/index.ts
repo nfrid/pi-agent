@@ -102,12 +102,19 @@ export class BridgeClient {
     socket.setEncoding('utf8');
     socket.once('connect', () => {
       this.reconnectDelay = RECONNECT_MIN_MS;
+      let snapshot: RuntimeSnapshot;
+      try {
+        snapshot = this.options.snapshot();
+      } catch {
+        socket.destroy();
+        return;
+      }
       this.sendEvent({
         type: 'runtime.hello',
         protocolVersion: PROTOCOL_VERSION,
         token: this.options.token,
         identityToken: this.options.identityToken,
-        snapshot: this.options.snapshot(),
+        snapshot,
       });
       // A daemon restart gets a complete interaction set, not only events
       // emitted after this connection was established.
@@ -249,6 +256,7 @@ export interface RemoteControlRuntime {
   readonly runtimeId: string;
   readonly client: BridgeClient;
   setContext(ctx: ExtensionContext): void;
+  clearContext(ctx: ExtensionContext): void;
   isCurrent(ctx: ExtensionContext): boolean;
 }
 
@@ -268,6 +276,38 @@ export function createRemoteControlRuntime(
   const broker = getInteractionBroker();
   let context: ExtensionContext | undefined;
   let lastError: string | undefined;
+  const unavailableSnapshot = (): RuntimeSnapshot => ({
+    runtimeId,
+    ownership,
+    pid: process.pid,
+    cwd: process.cwd(),
+    liveState: 'idle',
+    session: { id: 'unknown', entries: [] },
+    pendingInteractions: broker.list().map(interactionSnapshot),
+    lastError,
+  });
+  let cachedSnapshot = unavailableSnapshot();
+  const snapshotFrom = (ctx: ExtensionContext): RuntimeSnapshot => {
+    const usage = ctx.getContextUsage();
+    return {
+      runtimeId,
+      ownership,
+      pid: process.pid,
+      cwd: ctx.cwd,
+      liveState: liveState(ctx, broker),
+      session: sessionSnapshot(ctx),
+      model: modelSnapshot(ctx),
+      contextUsage: usage
+        ? {
+            tokens: usage.tokens,
+            contextWindow: usage.contextWindow,
+            percent: usage.percent,
+          }
+        : undefined,
+      pendingInteractions: broker.list().map(interactionSnapshot),
+      lastError,
+    };
+  };
   const client = new BridgeClient({
     socketPath,
     token:
@@ -275,38 +315,10 @@ export function createRemoteControlRuntime(
     identityToken: process.env.PI_DASHBOARD_IDENTITY_TOKEN,
     runtimeId,
     broker,
-    snapshot: () => {
-      if (!context) {
-        return {
-          runtimeId,
-          ownership,
-          pid: process.pid,
-          cwd: process.cwd(),
-          liveState: 'idle',
-          session: { id: 'unknown', entries: [] },
-          pendingInteractions: broker.list().map(interactionSnapshot),
-        };
-      }
-      const usage = context.getContextUsage();
-      return {
-        runtimeId,
-        ownership,
-        pid: process.pid,
-        cwd: context.cwd,
-        liveState: liveState(context, broker),
-        session: sessionSnapshot(context),
-        model: modelSnapshot(context),
-        contextUsage: usage
-          ? {
-              tokens: usage.tokens,
-              contextWindow: usage.contextWindow,
-              percent: usage.percent,
-            }
-          : undefined,
-        pendingInteractions: broker.list().map(interactionSnapshot),
-        lastError,
-      };
-    },
+    // Socket callbacks run outside Pi's extension event dispatch. Returning a
+    // cache keeps reconnects from dereferencing a context that was invalidated
+    // by session replacement or extension reload.
+    snapshot: () => cachedSnapshot,
     handleCommand: async (command) => {
       if (!context) throw new Error('Pi session is not ready.');
       switch (command.type) {
@@ -355,14 +367,29 @@ export function createRemoteControlRuntime(
   });
 
   const setContext = (ctx: ExtensionContext) => {
-    context = ctx;
-    lastError = undefined;
+    try {
+      lastError = undefined;
+      const next = snapshotFrom(ctx);
+      context = ctx;
+      cachedSnapshot = next;
+    } catch (error) {
+      context = undefined;
+      lastError = error instanceof Error ? error.message : String(error);
+      cachedSnapshot = unavailableSnapshot();
+    }
+  };
+  const clearContext = (ctx: ExtensionContext) => {
+    if (context !== ctx) return;
+    context = undefined;
+    cachedSnapshot = unavailableSnapshot();
   };
   const isCurrent = (ctx: ExtensionContext) => context === ctx;
-  return { runtimeId, client, setContext, isCurrent };
+  return { runtimeId, client, setContext, clearContext, isCurrent };
 }
 
 function emitState(runtime: RemoteControlRuntime, ctx: ExtensionContext): void {
+  if (!runtime.isCurrent(ctx)) return;
+  runtime.setContext(ctx);
   if (!runtime.isCurrent(ctx)) return;
   runtime.client.sendEvent({
     type: 'runtime.stateChanged',
@@ -392,11 +419,14 @@ export default defineExtension('remote-control', (pi) => {
     handler: (value: unknown, ctx: ExtensionContext) => void,
   ) =>
     onTransportEvent(pi, event, (value, ctx) => {
+      if (!runtime.isCurrent(ctx)) return;
+      runtime.setContext(ctx);
       if (runtime.isCurrent(ctx)) handler(value, ctx);
     });
 
   pi.on('session_start', (_event, ctx) => {
     runtime.setContext(ctx);
+    if (!runtime.isCurrent(ctx)) return;
     runtime.client.start();
     runtime.client.sendEvent({
       type: 'session.snapshot',
@@ -405,6 +435,7 @@ export default defineExtension('remote-control', (pi) => {
   });
   pi.on('session_info_changed', (_event, ctx) => {
     runtime.setContext(ctx);
+    if (!runtime.isCurrent(ctx)) return;
     runtime.client.sendEvent({
       type: 'session.changed',
       session: sessionSnapshot(ctx),
@@ -413,6 +444,7 @@ export default defineExtension('remote-control', (pi) => {
   pi.on('agent_start', (_event, ctx) => emitState(runtime, ctx));
   pi.on('agent_settled', (_event, ctx) => {
     emitState(runtime, ctx);
+    if (!runtime.isCurrent(ctx)) return;
     runtime.client.sendEvent({
       type: 'agent.settled',
       sessionId: ctx.sessionManager.getSessionId(),
@@ -470,10 +502,12 @@ export default defineExtension('remote-control', (pi) => {
   onCurrentTransportEvent('queue_update', (_event, ctx) =>
     emitState(runtime, ctx),
   );
-  pi.on('session_shutdown', (_event, ctx) => {
-    if (!runtime.isCurrent(ctx)) return;
-    runtime.client.sendEvent({ type: 'runtime.goodbye' });
-    runtime.client.stop();
-    runtime.setContext(ctx);
+  pi.on('session_shutdown', (event, ctx) => {
+    const tearsDownExtension =
+      event.reason === 'quit' || event.reason === 'reload';
+    if (tearsDownExtension && runtime.isCurrent(ctx))
+      runtime.client.sendEvent({ type: 'runtime.goodbye' });
+    runtime.clearContext(ctx);
+    if (tearsDownExtension) runtime.client.stop();
   });
 });
