@@ -38,6 +38,7 @@ export function createQuestionDialog(
 ) {
   let selected = 0;
   let typing = choices.length === 0;
+  let finished = false;
   let cachedWidth: number | undefined;
   let cachedLines: string[] | undefined;
   const editor = new Editor(tui, editorTheme(theme));
@@ -48,15 +49,21 @@ export function createQuestionDialog(
     tui.requestRender();
   };
 
+  const finish = (result: UiResult): void => {
+    if (finished) return;
+    finished = true;
+    done(result);
+  };
+
   editor.onSubmit = (value) => {
     const answer = value.trim();
-    if (answer) done({ answer, custom: true });
+    if (answer) finish({ answer, custom: true });
   };
 
   function handleInput(data: string): void {
     if (typing) {
       if (matchesKey(data, Key.escape)) {
-        if (choices.length === 0) done(null);
+        if (choices.length === 0) finish(null);
         else {
           typing = false;
           editor.setText('');
@@ -87,7 +94,7 @@ export function createQuestionDialog(
         refresh();
         return;
       }
-      done({
+      finish({
         answer: choice.value,
         choiceLabel: choice.label,
         choiceIndex: selected + 1,
@@ -95,7 +102,7 @@ export function createQuestionDialog(
       });
       return;
     }
-    if (matchesKey(data, Key.escape)) done(null);
+    if (matchesKey(data, Key.escape)) finish(null);
   }
 
   function renderOptions(width: number): string[] {
@@ -243,5 +250,10 @@ export function createQuestionDialog(
     return lines;
   }
 
-  return { handleInput, invalidate: refresh, render };
+  return {
+    handleInput,
+    invalidate: refresh,
+    render,
+    cancel: () => finish(null),
+  };
 }

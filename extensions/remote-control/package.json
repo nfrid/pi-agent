@@ -1,0 +1,10 @@
+{
+  "name": "@pi-dashboard/remote-control",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "./index.ts",
+  "dependencies": {
+    "@pi-dashboard/protocol": "workspace:*"
+  }
+}

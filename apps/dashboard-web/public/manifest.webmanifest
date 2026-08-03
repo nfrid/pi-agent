@@ -1,0 +1,9 @@
+{
+  "name": "Remote Pi Dashboard",
+  "short_name": "Pi Dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#111827",
+  "background_color": "#f8fafc",
+  "icons": []
+}

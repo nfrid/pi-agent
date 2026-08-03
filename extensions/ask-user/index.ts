@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
+import { getInteractionBroker } from './broker';
 import { TOOL_NAME } from './constants';
 import { askThroughDialogs } from './dialogs';
 import { normalizeChoices, resultText } from './format';
@@ -38,12 +39,32 @@ function registerAskUserTool(pi: ExtensionAPI): void {
         throw new Error('Cannot ask user: interactive TUI is not available.');
 
       const choices = normalizeChoices(params);
-      const result =
-        mode === 'tui'
-          ? await ctx.ui.custom<UiResult>((tui, theme, _keybindings, done) =>
-              createQuestionDialog(params, choices, tui, theme, done),
-            )
-          : await askThroughDialogs(params, choices, ctx.ui);
+      let cancelLocal: (() => void) | undefined;
+      const result = await getInteractionBroker().request(
+        {
+          type: 'ask_user',
+          question: params.question,
+          choices,
+          allowCustom: params.allowCustom !== false,
+          customLabel: params.customLabel,
+        },
+        () =>
+          mode === 'tui'
+            ? ctx.ui.custom<UiResult>((tui, theme, _keybindings, done) => {
+                const dialog = createQuestionDialog(
+                  params,
+                  choices,
+                  tui,
+                  theme,
+                  done,
+                );
+                cancelLocal = dialog.cancel;
+                return dialog;
+              })
+            : askThroughDialogs(params, choices, ctx.ui),
+        mode === 'tui' ? () => cancelLocal?.() : undefined,
+        ctx.sessionManager?.getSessionId(),
+      );
 
       const details: Answer = result
         ? {

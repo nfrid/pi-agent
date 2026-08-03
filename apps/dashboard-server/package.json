@@ -1,0 +1,27 @@
+{
+  "name": "@pi-dashboard/server",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=25"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pi-dashboard/codex-usage": "workspace:*",
+    "@pi-dashboard/protocol": "workspace:*",
+    "web-push": "^3.6.7",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.23.4"
+  }
+}
