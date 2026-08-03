@@ -28,6 +28,11 @@ import { defineExtension } from '../shared/runtime/extension';
 const RECONNECT_MIN_MS = 250;
 const RECONNECT_MAX_MS = 10_000;
 const MAX_LINE_BYTES = 512 * 1024;
+const MAX_JSON_PAYLOAD_BYTES = 460_000;
+export const BRIDGE_COMMAND_QUEUE_LIMIT = 64;
+const BRIDGE_WRITE_QUEUE_LIMIT = 128;
+const BRIDGE_WRITE_QUEUE_BYTES = 1 * 1024 * 1024;
+const HEARTBEAT_INTERVAL_MS = 5_000;
 
 type CommandHandler = (command: BridgeCommand) => Promise<unknown>;
 
@@ -205,10 +210,22 @@ export class BridgeClient {
   private socket: net.Socket | undefined;
   private stopped = false;
   private reconnectTimer: NodeJS.Timeout | undefined;
+  private heartbeatTimer: NodeJS.Timeout | undefined;
   private reconnectDelay = RECONNECT_MIN_MS;
   private buffer = '';
   private seq = 0;
-  private commandTail = Promise.resolve();
+  private commandQueue: Array<{
+    command: BridgeCommand;
+    socket: net.Socket;
+  }> = [];
+  private commandRunning = false;
+  private outboundQueue: Array<{
+    socket: net.Socket;
+    data: string;
+    droppable: boolean;
+  }> = [];
+  private outboundBytes = 0;
+  private writeBlocked = false;
   private unsubscribeBroker: (() => void) | undefined;
 
   constructor(private readonly options: BridgeClientOptions) {
@@ -237,8 +254,11 @@ export class BridgeClient {
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
+    this.stopHeartbeat();
     this.unsubscribeBroker?.();
     this.unsubscribeBroker = undefined;
+    this.commandQueue = [];
+    this.clearOutboundQueue();
     this.socket?.destroy();
     this.socket = undefined;
   }
@@ -246,19 +266,26 @@ export class BridgeClient {
   sendEvent(event: BridgeEvent): boolean {
     const socket = this.socket;
     if (!socket || socket.destroyed || !socket.writable) return false;
+    let data: string;
     try {
-      socket.write(serializeFrame({ kind: 'event', event, seq: ++this.seq }));
-      return true;
+      data = serializeFrame({ kind: 'event', event, seq: ++this.seq });
     } catch {
-      socket.destroy();
+      // Optional provider payloads are not allowed to turn into a malformed
+      // frame, and a serialization failure must not tear down the bridge.
       return false;
     }
+    return this.enqueueOutbound(
+      socket,
+      data,
+      event.type === 'message.updated' || event.type === 'tool.updated',
+    );
   }
 
   private connect(): void {
     if (this.stopped || this.socket) return;
     const socket = net.createConnection(this.options.socketPath);
     this.socket = socket;
+    this.clearOutboundQueue();
     socket.setEncoding('utf8');
     socket.once('connect', () => {
       this.reconnectDelay = RECONNECT_MIN_MS;
@@ -269,23 +296,38 @@ export class BridgeClient {
         socket.destroy();
         return;
       }
-      this.sendEvent({
+      // The broker is authoritative at reconnect time. A cached snapshot can
+      // still contain a question resolved while this bridge was offline.
+      const interactions = this.options.broker?.list() ?? [];
+      snapshot = {
+        ...snapshot,
+        ...(this.options.broker
+          ? { pendingInteractions: interactions }
+          : undefined),
+      };
+      const helloSent = this.sendEvent({
         type: 'runtime.hello',
         protocolVersion: PROTOCOL_VERSION,
         token: this.options.token,
         identityToken: this.options.identityToken,
         snapshot,
       });
+      if (!helloSent) return;
       // A daemon restart gets a complete interaction set, not only events
       // emitted after this connection was established.
-      for (const interaction of this.options.broker?.list() ?? []) {
+      for (const interaction of interactions)
         this.sendEvent({ type: 'interaction.requested', interaction });
-      }
+      this.startHeartbeat(socket);
     });
     socket.on('data', (chunk: string) => this.onData(socket, chunk));
     socket.once('error', () => socket.destroy());
     socket.once('close', () => {
       if (this.socket !== socket) return;
+      this.stopHeartbeat();
+      this.commandQueue = this.commandQueue.filter(
+        (item) => item.socket !== socket,
+      );
+      this.clearOutboundQueue();
       this.socket = undefined;
       this.buffer = '';
       this.scheduleReconnect();
@@ -320,24 +362,43 @@ export class BridgeClient {
   }
 
   private enqueue(command: BridgeCommand, socket: net.Socket): void {
-    this.commandTail = this.commandTail
-      .then(async () => {
+    if (
+      this.commandQueue.length + (this.commandRunning ? 1 : 0) >=
+      BRIDGE_COMMAND_QUEUE_LIMIT
+    ) {
+      this.sendAck(socket, command.id, false, 'Command queue is full.');
+      return;
+    }
+    this.commandQueue.push({ command, socket });
+    this.pumpCommands();
+  }
+
+  private pumpCommands(): void {
+    if (this.commandRunning) return;
+    const item = this.commandQueue.shift();
+    if (!item) return;
+    this.commandRunning = true;
+    void (async () => {
+      try {
         // Commands received on a replaced generation are abandoned rather than
         // replayed. Replaying could duplicate a prompt after a daemon retry.
-        if (socket !== this.socket || socket.destroyed) return;
+        if (item.socket !== this.socket || item.socket.destroyed) return;
         try {
-          const result = await this.options.handleCommand(command);
-          this.sendAck(socket, command.id, true, result);
+          const result = await this.options.handleCommand(item.command);
+          this.sendAck(item.socket, item.command.id, true, result);
         } catch (error) {
           this.sendAck(
-            socket,
-            command.id,
+            item.socket,
+            item.command.id,
             false,
             error instanceof Error ? error.message : String(error),
           );
         }
-      })
-      .catch(() => undefined);
+      } finally {
+        this.commandRunning = false;
+        this.pumpCommands();
+      }
+    })();
   }
 
   private sendAck(
@@ -358,14 +419,22 @@ export class BridgeClient {
     ok: boolean,
     result?: unknown,
   ): void {
-    if (ok) this.sendRaw(socket, { kind: 'ack', id, ok: true, result });
-    else
+    if (ok) {
+      this.sendRaw(socket, {
+        kind: 'ack',
+        id,
+        ok: true,
+        result: result === undefined ? undefined : jsonSafe(result),
+      });
+    } else {
+      const error = String(result ?? 'Command failed.').slice(0, 1_000);
       this.sendRaw(socket, {
         kind: 'ack',
         id,
         ok: false,
-        error: String(result ?? 'Command failed.'),
+        error: error || 'Command failed.',
       });
+    }
   }
 
   private sendRaw(
@@ -373,11 +442,112 @@ export class BridgeClient {
     frame: Parameters<typeof serializeFrame>[0],
   ): void {
     if (socket !== this.socket || socket.destroyed || !socket.writable) return;
+    let data: string;
     try {
-      socket.write(serializeFrame(frame));
+      data = serializeFrame(frame);
     } catch {
-      socket.destroy();
+      // A bad optional result is dropped rather than producing an invalid
+      // frame or disconnecting a healthy bridge.
+      return;
     }
+    this.enqueueOutbound(socket, data, false);
+  }
+
+  private enqueueOutbound(
+    socket: net.Socket,
+    data: string,
+    droppable: boolean,
+  ): boolean {
+    if (socket !== this.socket || socket.destroyed || !socket.writable)
+      return false;
+    const bytes = Buffer.byteLength(data);
+    if (bytes > BRIDGE_WRITE_QUEUE_BYTES) return false;
+    if (
+      this.outboundQueue.length >= BRIDGE_WRITE_QUEUE_LIMIT ||
+      this.outboundBytes + bytes > BRIDGE_WRITE_QUEUE_BYTES
+    ) {
+      this.dropQueuedStreaming();
+    }
+    if (
+      this.outboundQueue.length >= BRIDGE_WRITE_QUEUE_LIMIT ||
+      this.outboundBytes + bytes > BRIDGE_WRITE_QUEUE_BYTES
+    )
+      return false;
+    this.outboundQueue.push({ socket, data, droppable });
+    this.outboundBytes += bytes;
+    this.pumpOutbound(socket);
+    return true;
+  }
+
+  private dropQueuedStreaming(): void {
+    if (!this.outboundQueue.some((item) => item.droppable)) return;
+    this.outboundQueue = this.outboundQueue.filter((item) => {
+      if (!item.droppable) return true;
+      this.outboundBytes -= Buffer.byteLength(item.data);
+      return false;
+    });
+  }
+
+  private pumpOutbound(socket: net.Socket): void {
+    if (
+      socket !== this.socket ||
+      socket.destroyed ||
+      !socket.writable ||
+      this.writeBlocked
+    )
+      return;
+    while (this.outboundQueue.length > 0) {
+      const item = this.outboundQueue.shift();
+      if (!item) return;
+      this.outboundBytes -= Buffer.byteLength(item.data);
+      if (item.socket !== socket) continue;
+      try {
+        const accepted = socket.write(item.data);
+        if (!accepted) {
+          this.writeBlocked = true;
+          socket.once('drain', () => {
+            if (this.socket !== socket) return;
+            this.writeBlocked = false;
+            this.pumpOutbound(socket);
+          });
+          return;
+        }
+      } catch {
+        socket.destroy();
+        return;
+      }
+    }
+  }
+
+  private clearOutboundQueue(): void {
+    this.outboundQueue = [];
+    this.outboundBytes = 0;
+    this.writeBlocked = false;
+  }
+
+  private startHeartbeat(socket: net.Socket): void {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.socket !== socket || socket.destroyed) {
+        this.stopHeartbeat();
+        return;
+      }
+      try {
+        this.sendEvent({
+          type: 'runtime.heartbeat',
+          state: this.options.snapshot().liveState,
+        });
+      } catch {
+        // The next heartbeat or a normal event will retry; no context is
+        // dereferenced by the timer beyond this bounded snapshot read.
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+    this.heartbeatTimer.unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
   }
 
   private scheduleReconnect(): void {
@@ -392,13 +562,16 @@ export class BridgeClient {
   }
 }
 
-function jsonSafe(value: unknown, max = 480_000): unknown {
+function jsonSafe(value: unknown, max = MAX_JSON_PAYLOAD_BYTES): unknown {
   try {
     const text = JSON.stringify(value);
-    if (!text || Buffer.byteLength(text) > max) return undefined;
+    if (!text || Buffer.byteLength(text) > max) return null;
     return JSON.parse(text) as unknown;
   } catch {
-    return undefined;
+    // Event schemas require the payload key to be present. Null is a valid,
+    // bounded representation for an optional provider object that cannot be
+    // cloned (for example, a cyclic or oversized value).
+    return null;
   }
 }
 
@@ -412,7 +585,7 @@ function sessionSnapshot(ctx: ExtensionContext): SessionSnapshot {
     title: deriveSessionTitle(entries),
     cwd: manager.getCwd(),
     leafId: manager.getLeafId() ?? undefined,
-    entries: (jsonSafe(entries) as readonly unknown[] | undefined) ?? [],
+    entries: (jsonSafe(entries) as readonly unknown[] | null) ?? [],
   };
 }
 

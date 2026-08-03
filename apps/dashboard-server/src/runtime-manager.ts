@@ -261,6 +261,7 @@ export class RuntimeManager {
       await this.registry
         .sendCommand(runtimeId, { type: 'shutdown' })
         .catch(() => undefined);
+      this.initialPrompts.delete(runtimeId);
       this.registry.forget(runtimeId);
       return;
     }
@@ -289,6 +290,7 @@ export class RuntimeManager {
         this.metadata.markManagedStopped(runtimeId);
       }
     } finally {
+      this.initialPrompts.delete(runtimeId);
       if (launch) this.launches.delete(runtimeId);
       this.registry.forget(runtimeId);
     }
@@ -315,6 +317,19 @@ export class RuntimeManager {
   private dispatchInitialPrompt(runtimeId: string): void {
     const pending = this.initialPrompts.get(runtimeId);
     if (!pending || pending.sent) return;
+    // Do not consume the prompt merely because tmux launch completed before
+    // the bridge hello. The registry callback will retry this unsent prompt
+    // once the runtime is actually online.
+    const isOnline = (
+      this.registry as RuntimeRegistry & {
+        isOnline?: (id: string) => boolean;
+      }
+    ).isOnline;
+    if (isOnline && !isOnline.call(this.registry, runtimeId)) return;
+
+    // Deliberate at-most-once delivery: once a command is handed to the
+    // registry, an ACK loss is indistinguishable from a processed model turn.
+    // Never reset this bit on rejection or reconnect.
     pending.sent = true;
     void Promise.resolve()
       .then(() =>
@@ -328,8 +343,8 @@ export class RuntimeManager {
           this.initialPrompts.delete(runtimeId);
       })
       .catch(() => {
-        if (this.initialPrompts.get(runtimeId) === pending)
-          pending.sent = false;
+        // Keep the attempted prompt recorded. Retrying here could duplicate a
+        // turn when the bridge processed it but its acknowledgement was lost.
       });
   }
 

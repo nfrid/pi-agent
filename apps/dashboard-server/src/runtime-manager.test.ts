@@ -129,6 +129,51 @@ describe('managed runtime launch safety', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it('does not resend an initial prompt after an acknowledgement loss', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-once-'));
+    const sendCommand = vi
+      .fn()
+      .mockRejectedValue(new Error('acknowledgement lost'));
+    let runtimeId = '';
+    const manager = new RuntimeManager(
+      {
+        snapshots: () => [],
+        sendCommand,
+      } as never,
+      {
+        hasSession: async () => true,
+        newManagedWindow: async ({ runtimeId: id }: { runtimeId: string }) => {
+          runtimeId = id;
+          return {
+            tmuxSession: 'sesh',
+            tmuxWindowId: '@1',
+            tmuxPaneId: '%1',
+            displayTarget: 'sesh:@1',
+          };
+        },
+      } as never,
+      {} as never,
+      {
+        managedLaunches: () => [],
+        recordManagedLaunch: vi.fn(),
+      } as never,
+      '/tmp/bridge.sock',
+    );
+    manager.setWorkspaces([workspace(root)]);
+    await manager.launch({
+      workspaceId: 'workspace-1',
+      initialPrompt: 'run once',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    manager.onRegistryChange({
+      kind: 'registered',
+      snapshot: { ...runtime('reconnected'), runtimeId },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sendCommand).toHaveBeenCalledOnce();
+    await rm(root, { recursive: true, force: true });
+  });
+
   it('rolls back the tmux window if metadata persistence fails', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-rollback-'));
     const placement = {

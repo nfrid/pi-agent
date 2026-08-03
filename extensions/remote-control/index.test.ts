@@ -317,6 +317,120 @@ describe('remote-control bridge', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('rebuilds reconnect hello interactions from the live broker', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-bridge-reconnect-state-'),
+    );
+    const socketPath = path.join(directory, 'bridge.sock');
+    const broker = new InteractionBroker();
+    const helloSnapshots: Array<RuntimeSnapshot> = [];
+    let connections = 0;
+    const server = net.createServer((socket) => {
+      connections += 1;
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk) => {
+        for (const line of String(chunk).split('\n').filter(Boolean)) {
+          const frame = JSON.parse(line) as {
+            event?: { type?: string; snapshot?: RuntimeSnapshot };
+          };
+          if (frame.event?.type !== 'runtime.hello' || !frame.event.snapshot)
+            continue;
+          helloSnapshots.push(frame.event.snapshot);
+          if (connections === 1) socket.destroy();
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    const pendingPromise = broker.request(
+      {
+        type: 'ask_user',
+        question: 'Continue?',
+        choices: [{ label: 'Yes', value: 'yes' }],
+        allowCustom: false,
+      },
+      () => new Promise<null>(() => undefined),
+    );
+    const interaction = broker.list()[0];
+    if (!interaction) throw new Error('interaction was not created');
+    const client = new BridgeClient({
+      socketPath,
+      runtimeId: 'runtime-test',
+      snapshot: () => ({ ...snapshot, pendingInteractions: [interaction] }),
+      broker,
+      handleCommand: async () => ({ accepted: true }),
+    });
+    client.start();
+    await waitFor(() => helloSnapshots.length >= 1);
+    broker.cancel(interaction.id);
+    await expect(pendingPromise).resolves.toBeNull();
+    await waitFor(() => helloSnapshots.length >= 2);
+    expect(helloSnapshots[1]?.pendingInteractions).toEqual([]);
+    client.stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('skips cyclic and oversized event payloads without closing the bridge', async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-bridge-payload-limit-'),
+    );
+    const socketPath = path.join(directory, 'bridge.sock');
+    let connection: net.Socket | undefined;
+    const received: Array<Record<string, unknown>> = [];
+    const server = net.createServer((socket) => {
+      connection = socket;
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk) => {
+        for (const line of String(chunk).split('\n').filter(Boolean))
+          received.push(JSON.parse(line) as Record<string, unknown>);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    const client = new BridgeClient({
+      socketPath,
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      handleCommand: async () => ({ accepted: true }),
+    });
+    client.start();
+    await waitFor(() =>
+      received.some(
+        (frame) =>
+          (frame.event as { type?: string } | undefined)?.type ===
+          'runtime.hello',
+      ),
+    );
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(
+      client.sendEvent({
+        type: 'message.started',
+        sessionId: 'session-test',
+        message: cyclic,
+      }),
+    ).toBe(false);
+    expect(
+      client.sendEvent({
+        type: 'tool.finished',
+        sessionId: 'session-test',
+        tool: 'x'.repeat(600_000),
+      }),
+    ).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(connection?.destroyed).toBe(false);
+    expect(
+      received.filter(
+        (frame) =>
+          (frame.event as { type?: string } | undefined)?.type !==
+          'runtime.hello',
+      ),
+    ).toHaveLength(0);
+    client.stop();
+    connection?.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  });
+
   it('announces broker questions and resolves them through a daemon command', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'pi-bridge-broker-'),

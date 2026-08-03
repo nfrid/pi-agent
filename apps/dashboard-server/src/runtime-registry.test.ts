@@ -174,6 +174,36 @@ describe('runtime registry', () => {
     replacement.destroy();
   });
 
+  it('rejects commands beyond the finite per-runtime queue', async () => {
+    const registry = new RuntimeRegistry({ expectedToken: () => true });
+    const bridge = new PassThrough();
+    registry.accept(bridge as never);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+
+    const promises = Array.from({ length: 80 }, () =>
+      registry.sendCommand('runtime-1', { type: 'abort' }),
+    );
+    const settled = Promise.allSettled(promises);
+    bridge.destroy();
+    const results = await settled;
+    expect(
+      results.filter(
+        (result) =>
+          result.status === 'rejected' &&
+          result.reason instanceof Error &&
+          result.reason.message === 'Runtime command queue is full.',
+      ).length,
+    ).toBeGreaterThan(0);
+    bridge.destroy();
+  });
+
   it('registers full snapshots, serializes commands, and ignores duplicate events', async () => {
     const registry = new RuntimeRegistry({
       expectedToken: (_id, token) => token === 'one',

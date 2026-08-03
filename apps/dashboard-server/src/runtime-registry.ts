@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'node:net';
 import {
+  type BridgeCommand,
   type BridgeEvent,
   parseFrame,
   type RuntimeSnapshot,
@@ -11,6 +12,15 @@ import {
 const MAX_BUFFER = 1024 * 1024;
 const ACK_TIMEOUT_MS = 15_000;
 const PRE_HELLO_TIMEOUT_MS = 5_000;
+export const RUNTIME_COMMAND_QUEUE_LIMIT = 64;
+export const RUNTIME_HEARTBEAT_TIMEOUT_MS = 30_000;
+
+type QueuedCommand = {
+  command: BridgeCommand;
+  connection: Socket;
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+};
 
 type RuntimeRecord = {
   snapshot: RuntimeSnapshot;
@@ -25,7 +35,9 @@ type RuntimeRecord = {
       timer: NodeJS.Timeout;
     }
   >;
-  commandTail: Promise<void>;
+  commandQueue: QueuedCommand[];
+  commandRunning: boolean;
+  writeBlocked: boolean;
 };
 
 export type RegistryChange =
@@ -77,6 +89,7 @@ export class RuntimeRegistry {
     }, PRE_HELLO_TIMEOUT_MS);
     helloTimer.unref?.();
     socket.setEncoding('utf8');
+    socket.once('timeout', () => socket.destroy());
     const onData = (chunk: string) => {
       buffer += chunk;
       if (Buffer.byteLength(buffer) > MAX_BUFFER) return reject();
@@ -126,7 +139,10 @@ export class RuntimeRegistry {
           if (old?.socket && old.socket !== socket) old.socket.destroy();
           clearTimeout(helloTimer);
           try {
-            socket.setTimeout(0);
+            // Bridges emit runtime.heartbeat independently of model work. Keep
+            // the idle deadline enabled after hello so half-open sockets are
+            // removed without treating a long model turn as a failure.
+            socket.setTimeout(RUNTIME_HEARTBEAT_TIMEOUT_MS);
           } catch {
             /* best effort */
           }
@@ -136,7 +152,9 @@ export class RuntimeRegistry {
             buffer: '',
             lastSeq: frame.seq,
             pending: new Map(),
-            commandTail: Promise.resolve(),
+            commandQueue: [],
+            commandRunning: false,
+            writeBlocked: false,
           };
           this.runtimes.set(snapshot.runtimeId, record);
           helloSeen = true;
@@ -156,11 +174,15 @@ export class RuntimeRegistry {
       socket.off('data', onData);
       if (!record) return;
       if (record.socket === socket) record.socket = undefined;
+      const disconnected = new Error('Runtime bridge disconnected.');
       for (const pending of record.pending.values()) {
         clearTimeout(pending.timer);
-        pending.reject(new Error('Runtime bridge disconnected.'));
+        pending.reject(disconnected);
       }
       record.pending.clear();
+      for (const queued of record.commandQueue) queued.reject(disconnected);
+      record.commandQueue = [];
+      record.writeBlocked = false;
       if (this.runtimes.get(record.snapshot.runtimeId) === record) {
         record.snapshot = {
           ...record.snapshot,
@@ -179,11 +201,15 @@ export class RuntimeRegistry {
     if (tombstone) this.forgotten.add(runtimeId);
     if (!record) return undefined;
     this.runtimes.delete(runtimeId);
+    const removed = new Error('Runtime was removed.');
     for (const pending of record.pending.values()) {
       clearTimeout(pending.timer);
-      pending.reject(new Error('Runtime was removed.'));
+      pending.reject(removed);
     }
     record.pending.clear();
+    for (const queued of record.commandQueue) queued.reject(removed);
+    record.commandQueue = [];
+    record.writeBlocked = false;
     record.socket?.destroy();
     return record.snapshot;
   }
@@ -195,62 +221,118 @@ export class RuntimeRegistry {
       return Promise.reject(new Error('Runtime is offline.'));
     if (!input || typeof input !== 'object' || Array.isArray(input))
       return Promise.reject(new Error('Invalid command.'));
-    const command = validateBridgeCommand({
-      ...(input as Record<string, unknown>),
-      id: randomUUID(),
-    });
-    let resolveResult!: (value: unknown) => void;
-    let rejectResult!: (error: Error) => void;
+    let command: BridgeCommand;
+    try {
+      command = validateBridgeCommand({
+        ...(input as Record<string, unknown>),
+        id: randomUUID(),
+      });
+    } catch (error) {
+      return Promise.reject(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+    if (
+      record.commandQueue.length + (record.commandRunning ? 1 : 0) >=
+      RUNTIME_COMMAND_QUEUE_LIMIT
+    )
+      return Promise.reject(new Error('Runtime command queue is full.'));
     const promise = new Promise<unknown>((resolve, reject) => {
-      resolveResult = resolve;
-      rejectResult = reject;
+      record.commandQueue.push({
+        command,
+        connection,
+        resolve,
+        reject,
+      });
     });
-    record.commandTail = record.commandTail
-      .then(async () => {
-        const current = this.runtimes.get(runtimeId);
-        // A queued command belongs to the connection that was current when the
-        // browser requested it. Never move it to a replacement socket.
-        if (
-          current !== record ||
-          record.socket !== connection ||
-          connection.destroyed
-        )
-          throw new Error('Runtime bridge connection was replaced.');
-        const result = await new Promise<unknown>((resolve, reject) => {
-          const timer = setTimeout(() => {
-            current.pending.delete(command.id);
-            reject(new Error('Runtime command acknowledgement timed out.'));
-          }, ACK_TIMEOUT_MS);
-          current.pending.set(command.id, {
-            resolve: (value) => {
-              clearTimeout(timer);
-              resolve(value);
-            },
-            reject: (error) => {
-              clearTimeout(timer);
-              reject(error);
-            },
-            timer,
-          });
-          try {
-            connection.write(serializeFrame({ kind: 'command', command }));
-          } catch (error) {
-            current.pending.delete(command.id);
-            clearTimeout(timer);
-            reject(error instanceof Error ? error : new Error(String(error)));
-          }
-        });
-        resolveResult(result);
-      })
-      .then(undefined, rejectResult)
-      .catch(() => undefined);
+    this.pumpCommands(runtimeId, record);
     return promise;
   }
 
   close(): void {
-    for (const record of this.runtimes.values()) record.socket?.destroy();
+    const closed = new Error('Runtime registry closed.');
+    for (const record of this.runtimes.values()) {
+      for (const pending of record.pending.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(closed);
+      }
+      record.pending.clear();
+      for (const queued of record.commandQueue) queued.reject(closed);
+      record.commandQueue = [];
+      record.writeBlocked = false;
+      record.socket?.destroy();
+    }
     this.runtimes.clear();
     this.forgotten.clear();
+  }
+
+  private pumpCommands(runtimeId: string, record: RuntimeRecord): void {
+    if (record.commandRunning || record.writeBlocked) return;
+    const queued = record.commandQueue.shift();
+    if (!queued) return;
+    record.commandRunning = true;
+    void this.executeCommand(runtimeId, record, queued).finally(() => {
+      record.commandRunning = false;
+      this.pumpCommands(runtimeId, record);
+    });
+  }
+
+  private async executeCommand(
+    runtimeId: string,
+    record: RuntimeRecord,
+    queued: QueuedCommand,
+  ): Promise<void> {
+    const { connection, command } = queued;
+    const current = this.runtimes.get(runtimeId);
+    // A queued command belongs to the connection that was current when the
+    // browser requested it. Never move it to a replacement socket.
+    if (
+      current !== record ||
+      record.socket !== connection ||
+      connection.destroyed
+    ) {
+      queued.reject(new Error('Runtime bridge connection was replaced.'));
+      return;
+    }
+    try {
+      const result = await new Promise<unknown>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          current.pending.delete(command.id);
+          reject(new Error('Runtime command acknowledgement timed out.'));
+        }, ACK_TIMEOUT_MS);
+        current.pending.set(command.id, {
+          resolve: (value) => {
+            clearTimeout(timer);
+            resolve(value);
+          },
+          reject: (error) => {
+            clearTimeout(timer);
+            reject(error);
+          },
+          timer,
+        });
+        try {
+          const accepted = connection.write(
+            serializeFrame({ kind: 'command', command }),
+          );
+          if (!accepted) {
+            record.writeBlocked = true;
+            connection.once('drain', () => {
+              if (record.socket !== connection) return;
+              record.writeBlocked = false;
+              this.pumpCommands(runtimeId, record);
+            });
+          }
+        } catch (error) {
+          current.pending.delete(command.id);
+          clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+      queued.resolve(result);
+    } catch (error) {
+      queued.reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   private handleFrame(
