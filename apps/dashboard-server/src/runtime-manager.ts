@@ -281,14 +281,17 @@ export class RuntimeManager {
       await new Promise((resolve) => setTimeout(resolve, 100));
     if (this.registry.isOnline(runtimeId) && this.safePid(snapshot.pid))
       this.signalManagedProcess(snapshot.pid, 'SIGKILL');
-    if (launch) {
-      await this.tmux
-        .killManagedWindow(launch.placement)
-        .catch(() => undefined);
-      this.metadata.markManagedStopped(runtimeId);
-      this.launches.delete(runtimeId);
+    try {
+      if (launch) {
+        await this.tmux
+          .killManagedWindow(launch.placement)
+          .catch(() => undefined);
+        this.metadata.markManagedStopped(runtimeId);
+      }
+    } finally {
+      if (launch) this.launches.delete(runtimeId);
+      this.registry.forget(runtimeId);
     }
-    this.registry.forget(runtimeId);
   }
 
   private signalManagedProcess(pid: number, signal: NodeJS.Signals): void {
@@ -313,8 +316,13 @@ export class RuntimeManager {
     const pending = this.initialPrompts.get(runtimeId);
     if (!pending || pending.sent) return;
     pending.sent = true;
-    void this.registry
-      .sendCommand(runtimeId, { type: 'prompt', text: pending.text })
+    void Promise.resolve()
+      .then(() =>
+        this.registry.sendCommand(runtimeId, {
+          type: 'prompt',
+          text: pending.text,
+        }),
+      )
       .then(() => {
         if (this.initialPrompts.get(runtimeId) === pending)
           this.initialPrompts.delete(runtimeId);

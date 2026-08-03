@@ -88,10 +88,9 @@ function AuthPrompt() {
 export default function App() {
   const route = useRoute();
   const dashboard = useDashboard();
+  if (dashboard.error?.includes('Authentication')) return <AuthPrompt />;
   if (!dashboard.snapshot)
-    return dashboard.error?.includes('Authentication') ? (
-      <AuthPrompt />
-    ) : (
+    return (
       <main className="shell centered">
         <h1>Pi Dashboard</h1>
         <p className="error">{dashboard.error ?? 'Connecting…'}</p>

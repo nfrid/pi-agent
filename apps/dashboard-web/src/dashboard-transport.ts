@@ -64,6 +64,8 @@ export function asBrowserSnapshot(value: unknown): BrowserSnapshot | undefined {
     return undefined;
   return {
     ...snapshot,
+    serverId:
+      typeof snapshot.serverId === 'string' ? snapshot.serverId : 'legacy',
     revision: typeof snapshot.revision === 'number' ? snapshot.revision : 0,
     runtimes: snapshot.runtimes,
     workspaces: snapshot.workspaces,
@@ -128,14 +130,23 @@ export function useDashboard(): DashboardState {
   const latestResponse = useRef(0);
   const usageRequestSerial = useRef(0);
   const latestUsageResponse = useRef(0);
+  const acceptedServerId = useRef<string | undefined>(undefined);
   const acceptedRevision = useRef(-1);
   const eventRevisions = useRef(new Set<number>());
 
   const acceptSnapshot = useCallback((next: BrowserSnapshot): void => {
+    if (acceptedServerId.current !== next.serverId) {
+      acceptedServerId.current = next.serverId;
+      acceptedRevision.current = -1;
+      eventRevisions.current.clear();
+      setEvents([]);
+    }
     if (!shouldAcceptRevision(acceptedRevision.current, next.revision)) return;
     acceptedRevision.current = next.revision;
     setSnapshot((current) =>
-      current && !shouldAcceptRevision(current.revision, next.revision)
+      current &&
+      current.serverId === next.serverId &&
+      !shouldAcceptRevision(current.revision, next.revision)
         ? current
         : next,
     );
@@ -192,10 +203,13 @@ export function useDashboard(): DashboardState {
     let stopped = false;
     const queueEvent = (event: DashboardEvent): void => {
       if (typeof event.revision === 'number') {
-        // A snapshot response may overtake an event from an older revision.
-        // Its state already includes that event, so replaying it would regress
-        // a transcript even though the websocket itself is ordered.
-        if (event.revision < acceptedRevision.current) return;
+        const eventType = event.event?.type;
+        const transcriptDelta =
+          eventType?.startsWith('message.') || eventType?.startsWith('tool.');
+        // State snapshots do not contain transcripts, so an HTTP snapshot may
+        // overtake a transcript delta without making that delta redundant.
+        if (!transcriptDelta && event.revision < acceptedRevision.current)
+          return;
         if (eventRevisions.current.has(event.revision)) return;
         eventRevisions.current.add(event.revision);
       }

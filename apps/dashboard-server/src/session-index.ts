@@ -1,4 +1,4 @@
-import { promises as fs, statSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type {
   SessionIndexEntry,
@@ -37,6 +37,8 @@ export class SessionIndex {
   private readonly fileIds = new Map<string, string>();
   private watcher?: ReturnType<typeof import('node:fs').watch>;
   private watcherRetry?: NodeJS.Timeout;
+  private readonly scheduled = new Map<string, NodeJS.Timeout>();
+  private readonly indexing = new Map<string, Promise<void>>();
   private workspaces: readonly WorkspaceTarget[] = [];
   constructor(
     private readonly sessionDir: string,
@@ -84,9 +86,10 @@ export class SessionIndex {
     if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
       throw new Error('Unknown session.');
     const { header: _header, ...metadata } = indexed;
-    const text = await fs.readFile(indexed.file, 'utf8');
-    if (Buffer.byteLength(text) > 8 * 1024 * 1024)
+    const stat = await fs.stat(indexed.file);
+    if (stat.size > 8 * 1024 * 1024)
       throw new Error('Session is too large to open remotely.');
+    const text = await fs.readFile(indexed.file, 'utf8');
     const entries: unknown[] = [];
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
@@ -104,6 +107,8 @@ export class SessionIndex {
     this.watcher = undefined;
     if (this.watcherRetry) clearTimeout(this.watcherRetry);
     this.watcherRetry = undefined;
+    for (const timer of this.scheduled.values()) clearTimeout(timer);
+    this.scheduled.clear();
   }
 
   private async ensureWatcher(): Promise<void> {
@@ -119,10 +124,7 @@ export class SessionIndex {
             return;
           }
           const file = path.resolve(this.sessionDir, String(filename));
-          if (file.endsWith('.jsonl'))
-            void this.indexFile(file, this.workspaces).catch(() =>
-              this.removeFile(file),
-            );
+          if (file.endsWith('.jsonl')) this.scheduleIndex(file);
           else void this.rebuild(this.workspaces);
         },
       );
@@ -145,6 +147,24 @@ export class SessionIndex {
       void this.ensureWatcher();
     }, 1_000);
     this.watcherRetry.unref?.();
+  }
+
+  private scheduleIndex(file: string): void {
+    const existing = this.scheduled.get(file);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.scheduled.delete(file);
+      const previous = this.indexing.get(file) ?? Promise.resolve();
+      const next = previous
+        .then(() => this.indexFile(file, this.workspaces))
+        .catch(() => this.removeFile(file))
+        .finally(() => {
+          if (this.indexing.get(file) === next) this.indexing.delete(file);
+        });
+      this.indexing.set(file, next);
+    }, 50);
+    timer.unref?.();
+    this.scheduled.set(file, timer);
   }
 
   private async findJsonl(directory: string): Promise<string[]> {
@@ -176,13 +196,24 @@ export class SessionIndex {
     const resolved = path.resolve(file);
     if (!within(root, resolved) || !resolved.endsWith('.jsonl')) return;
     try {
-      const text = await fs.readFile(resolved, 'utf8');
-      const first = text.split('\n').find((line) => line.trim());
+      const handle = await fs.open(resolved, 'r');
+      let first: string | undefined;
+      try {
+        const buffer = Buffer.alloc(64 * 1024);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        first = buffer
+          .subarray(0, bytesRead)
+          .toString('utf8')
+          .split('\n')
+          .find((line) => line.trim());
+      } finally {
+        await handle.close();
+      }
       if (!first) return this.removeFile(resolved);
       const header = JSON.parse(first) as Record<string, unknown>;
       if (header.type !== 'session' || typeof header.cwd !== 'string')
         return this.removeFile(resolved);
-      const stat = statSync(resolved);
+      const stat = await fs.stat(resolved);
       const id =
         typeof header.id === 'string' ? header.id : this.idForPath(resolved);
       const previous = this.files.get(id);
@@ -195,7 +226,6 @@ export class SessionIndex {
         workspaceId: workspaceFor(header.cwd, workspaces),
         name: typeof header.name === 'string' ? header.name : undefined,
         updatedAt: stat.mtimeMs,
-        entryCount: text.split('\n').filter((line) => line.trim()).length,
         header,
       };
       this.files.set(id, entry);

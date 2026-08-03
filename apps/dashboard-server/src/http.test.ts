@@ -14,6 +14,22 @@ afterEach(async () => {
 });
 
 describe('dashboard HTTP boundary', () => {
+  it('keeps the generated browser token stable across daemon restarts', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-token-'));
+    const options = {
+      port: 0,
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    };
+    server = await createDashboardServer(options);
+    const token = server.token;
+    await server.start();
+    await server.stop();
+    server = await createDashboardServer(options);
+    expect(server.token).toBe(token);
+  });
+
   it('authenticates WebSocket clients in the first message, not the URL', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-ws-'));
     server = await createDashboardServer({
@@ -111,6 +127,20 @@ describe('dashboard HTTP boundary', () => {
       (update.snapshot as { revision: number }).revision,
     );
     expect(update.revision).toBeGreaterThan(registrationSnapshot.revision);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 3,
+        event: {
+          type: 'message.updated',
+          sessionId: 'revision-session',
+          message: { id: 'message-1', role: 'assistant' },
+        },
+      }),
+    );
+    const transcriptDelta = await waitForMessage();
+    expect(transcriptDelta.type).toBe('event');
+    expect(transcriptDelta.snapshot).toBeUndefined();
     await server.refreshWorkspaces();
     expect(server.snapshot().revision).toBeGreaterThan(
       update.revision as number,

@@ -73,5 +73,11 @@ describe('dashboard protocol', () => {
       validateStartRuntimeRequest({ workspaceId: '../etc' }),
     ).not.toThrow();
     expect(() => validateStartRuntimeRequest({ workspaceId: '' })).toThrow();
+    expect(() =>
+      validateStartRuntimeRequest({
+        workspaceId: 'w',
+        initialPrompt: 'x'.repeat(100_001),
+      }),
+    ).toThrow('initial prompt');
   });
 });

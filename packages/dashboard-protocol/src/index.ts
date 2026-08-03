@@ -121,7 +121,9 @@ export type BridgeFrame =
   | { kind: 'ack'; id: string; ok: false; error: string };
 
 export interface BrowserSnapshot {
-  /** Monotonically increasing server state revision. */
+  /** Changes whenever the dashboard daemon process restarts. */
+  serverId: string;
+  /** Monotonically increasing state revision within one server process. */
   revision: number;
   runtimes: readonly RuntimeSnapshot[];
   workspaces: readonly WorkspaceTarget[];
@@ -314,7 +316,7 @@ export function validateStartRuntimeRequest(
     throw new Error('Invalid runtime name.');
   if (
     value.initialPrompt !== undefined &&
-    typeof value.initialPrompt !== 'string'
+    !nonEmptyString(value.initialPrompt, 100_000)
   )
     throw new Error('Invalid initial prompt.');
   if (

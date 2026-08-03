@@ -59,8 +59,8 @@ describe('session index', () => {
     expect(index.list()[0]).toMatchObject({
       id: 'session-id',
       file,
-      entryCount: 2,
     });
+    expect(index.list()[0]?.entryCount).toBeUndefined();
     await expect(index.readEntries('not-known')).rejects.toThrow(
       'Unknown session',
     );

@@ -1,5 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import {
+  chmodSync,
+  promises as fs,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
@@ -23,7 +29,37 @@ import { TmuxAdapter } from './tmux.js';
 import { CodexUsageProvider, type UsageProvider } from './usage.js';
 
 const MAX_BODY = 512 * 1024;
+const MAX_WS_BUFFER = 1024 * 1024;
 const WS_PATH = '/ws';
+
+function loadOrCreateToken(stateDir: string): string {
+  const file = path.join(stateDir, 'browser-token');
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  try {
+    const existing = readFileSync(file, 'utf8').trim();
+    if (existing.length >= 32 && existing.length <= 512) return existing;
+  } catch {
+    /* create below */
+  }
+  const token = randomBytes(32).toString('base64url');
+  try {
+    writeFileSync(file, `${token}\n`, { encoding: 'utf8', mode: 0o600 });
+    chmodSync(file, 0o600);
+    return token;
+  } catch {
+    const existing = readFileSync(file, 'utf8').trim();
+    if (existing.length >= 32 && existing.length <= 512) return existing;
+    throw new Error('Could not create a stable dashboard browser token.');
+  }
+}
+
+function isTranscriptEvent(change: RegistryChange): boolean {
+  return (
+    change.kind === 'event' &&
+    (change.event.type.startsWith('message.') ||
+      change.event.type.startsWith('tool.'))
+  );
+}
 
 export interface DashboardServerOptions {
   host?: string;
@@ -79,6 +115,7 @@ class DashboardServerImpl implements DashboardServer {
   private readonly clients = new Set<WebSocket>();
   private workspaces: WorkspaceTarget[] = [];
   private usageSnapshot: unknown;
+  private readonly serverId = randomBytes(12).toString('base64url');
   private revision = 0;
   private started = false;
 
@@ -92,7 +129,7 @@ class DashboardServerImpl implements DashboardServer {
     this.token =
       options.authToken ??
       process.env.PI_DASHBOARD_AUTH_TOKEN ??
-      randomBytes(32).toString('base64url');
+      loadOrCreateToken(this.stateDir);
     this.socketPath =
       options.socketPath ??
       process.env.PI_DASHBOARD_SOCKET ??
@@ -263,6 +300,7 @@ class DashboardServerImpl implements DashboardServer {
         .map((runtime) => [runtime.session.id, runtime.runtimeId]),
     );
     return {
+      serverId: this.serverId,
       revision: this.revision,
       // Transcripts are served by the session endpoint and reconciled from
       // typed bridge events. Repeating them in every dashboard snapshot makes
@@ -606,7 +644,7 @@ class DashboardServerImpl implements DashboardServer {
   }
 
   private onRegistryChange(change: RegistryChange): void {
-    this.metadata.saveRuntime(change.snapshot);
+    if (!isTranscriptEvent(change)) this.metadata.saveRuntime(change.snapshot);
     this.manager.onRegistryChange(change);
     if (change.kind === 'offline') {
       const runtimeId = change.snapshot.runtimeId;
@@ -676,7 +714,7 @@ class DashboardServerImpl implements DashboardServer {
             type: 'event',
             event: change.event,
             runtimeId: change.runtimeId,
-            snapshot: change.snapshot,
+            ...(isTranscriptEvent(change) ? {} : { snapshot: change.snapshot }),
           }
         : { type: 'snapshot', snapshot: this.snapshot() },
     );
@@ -710,6 +748,11 @@ class DashboardServerImpl implements DashboardServer {
 
   private sendClient(client: WebSocket, text: string): boolean {
     if (client.readyState !== client.OPEN) return false;
+    if (client.bufferedAmount > MAX_WS_BUFFER) {
+      this.clients.delete(client);
+      client.terminate();
+      return false;
+    }
     try {
       client.send(text, (error) => {
         if (!error) return;
