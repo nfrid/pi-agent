@@ -85,7 +85,16 @@ describe('runtime registry', () => {
       serializeFrame({
         kind: 'event',
         seq: 2,
-        event: { type: 'runtime.stateChanged', state: 'working' },
+        event: {
+          type: 'runtime.stateChanged',
+          state: 'working',
+          snapshot: {
+            session: {
+              id: 'session-1',
+              entries: [{ type: 'message', id: 'live-entry' }],
+            },
+          },
+        },
       }),
     );
     bridge.write(
@@ -98,7 +107,10 @@ describe('runtime registry', () => {
     await eventually(() =>
       registry.get('runtime-1')?.liveState === 'working' ? true : undefined,
     );
-    expect(registry.get('runtime-1')?.liveState).toBe('working');
+    expect(registry.get('runtime-1')).toMatchObject({
+      liveState: 'working',
+      session: { entries: [{ id: 'live-entry' }] },
+    });
     bridge.destroy();
   });
 });

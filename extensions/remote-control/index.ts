@@ -258,6 +258,8 @@ export interface RemoteControlRuntime {
   setContext(ctx: ExtensionContext): void;
   clearContext(ctx: ExtensionContext): void;
   isCurrent(ctx: ExtensionContext): boolean;
+  setLiveState(state: RuntimeLiveState): void;
+  snapshot(): RuntimeSnapshot;
 }
 
 export function createRemoteControlRuntime(
@@ -275,6 +277,7 @@ export function createRemoteControlRuntime(
     : 'external';
   const broker = getInteractionBroker();
   let context: ExtensionContext | undefined;
+  let currentSessionId: string | undefined;
   let lastError: string | undefined;
   const unavailableSnapshot = (): RuntimeSnapshot => ({
     runtimeId,
@@ -371,20 +374,42 @@ export function createRemoteControlRuntime(
       lastError = undefined;
       const next = snapshotFrom(ctx);
       context = ctx;
+      currentSessionId = next.session.id;
       cachedSnapshot = next;
     } catch (error) {
       context = undefined;
+      currentSessionId = undefined;
       lastError = error instanceof Error ? error.message : String(error);
       cachedSnapshot = unavailableSnapshot();
     }
   };
+  const snapshot = () => cachedSnapshot;
+  const setLiveState = (state: RuntimeLiveState) => {
+    cachedSnapshot = { ...cachedSnapshot, liveState: state };
+  };
+  const isCurrent = (ctx: ExtensionContext) => {
+    if (!currentSessionId) return false;
+    try {
+      return ctx.sessionManager.getSessionId() === currentSessionId;
+    } catch {
+      return false;
+    }
+  };
   const clearContext = (ctx: ExtensionContext) => {
-    if (context !== ctx) return;
+    if (!isCurrent(ctx) && context !== ctx) return;
     context = undefined;
+    currentSessionId = undefined;
     cachedSnapshot = unavailableSnapshot();
   };
-  const isCurrent = (ctx: ExtensionContext) => context === ctx;
-  return { runtimeId, client, setContext, clearContext, isCurrent };
+  return {
+    runtimeId,
+    client,
+    setContext,
+    clearContext,
+    isCurrent,
+    setLiveState,
+    snapshot,
+  };
 }
 
 function emitState(runtime: RemoteControlRuntime, ctx: ExtensionContext): void {
@@ -394,6 +419,7 @@ function emitState(runtime: RemoteControlRuntime, ctx: ExtensionContext): void {
   runtime.client.sendEvent({
     type: 'runtime.stateChanged',
     state: liveState(ctx, getInteractionBroker()),
+    snapshot: runtime.snapshot(),
   });
 }
 
@@ -439,6 +465,17 @@ export default defineExtension('remote-control', (pi) => {
     runtime.client.sendEvent({
       type: 'session.changed',
       session: sessionSnapshot(ctx),
+    });
+  });
+  pi.on('before_agent_start', (_event, ctx) => {
+    if (!runtime.isCurrent(ctx)) return;
+    runtime.setContext(ctx);
+    if (!runtime.isCurrent(ctx)) return;
+    runtime.setLiveState('working');
+    runtime.client.sendEvent({
+      type: 'runtime.stateChanged',
+      state: 'working',
+      snapshot: runtime.snapshot(),
     });
   });
   pi.on('agent_start', (_event, ctx) => emitState(runtime, ctx));

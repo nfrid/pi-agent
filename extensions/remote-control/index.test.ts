@@ -86,7 +86,12 @@ describe('remote-control bridge', () => {
     const runtime = createRemoteControlRuntime({} as ExtensionAPI);
     expect(runtime).toBeDefined();
     runtime?.setContext(context);
-    runtime?.clearContext(context);
+    const equivalentContext = {
+      ...context,
+      sessionManager: manager,
+    } as unknown as ExtensionContext;
+    expect(runtime?.isCurrent(equivalentContext)).toBe(true);
+    runtime?.clearContext(equivalentContext);
     stale = true;
     runtime?.client.start();
     await waitFor(() =>
