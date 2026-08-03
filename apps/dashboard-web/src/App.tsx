@@ -26,6 +26,7 @@ import {
   type SessionResponse,
   useDashboard,
 } from './dashboard-transport';
+import { Markdown } from './Markdown';
 import {
   headersOf,
   isNarration,
@@ -1089,8 +1090,8 @@ function Transcript({ entries }: { entries: unknown[] }) {
               </button>
               {visibleLead && (
                 <div className="activity-lead">
-                  <span>assistant</span>
-                  {visibleLead}
+                  <span className="message-role">assistant</span>
+                  <Markdown>{visibleLead}</Markdown>
                 </div>
               )}
               {expanded && (
@@ -1124,7 +1125,7 @@ function TranscriptEntry({
     return (
       <article className={`message-bubble message-${item.role}`}>
         <span className="message-role">{item.role}</span>
-        <div>{item.text}</div>
+        <Markdown>{item.text}</Markdown>
       </article>
     );
   const raw = item.raw;

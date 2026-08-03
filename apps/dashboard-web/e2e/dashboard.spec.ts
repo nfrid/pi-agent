@@ -130,7 +130,12 @@ test('dense mobile session keeps conversation and activity readable', async ({
             type: 'message',
             message: {
               role: 'user',
-              content: [{ type: 'text', text: 'Check the dashboard.' }],
+              content: [
+                {
+                  type: 'text',
+                  text: '**Check** the [dashboard](https://example.com).',
+                },
+              ],
             },
           },
           {
@@ -157,12 +162,29 @@ test('dense mobile session keeps conversation and activity readable', async ({
               isError: false,
             },
           },
+          {
+            type: 'message',
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'text',
+                  text: 'Result: **ready** with `inline code`.',
+                },
+              ],
+            },
+          },
         ],
       }),
     }),
   );
   await page.goto('/sessions/s1');
-  await expect(page.getByText('Check the dashboard.')).toBeVisible();
+  await expect(page.getByText('Check', { exact: true })).toBeVisible();
+  const userLink = page.getByRole('link', { name: 'dashboard' });
+  await expect(userLink).toHaveAttribute('href', 'https://example.com');
+  await expect(userLink).toHaveAttribute('target', '_blank');
+  await expect(page.getByText('ready', { exact: true })).toBeVisible();
+  await expect(page.getByText('inline code', { exact: true })).toBeVisible();
   const activity = page.getByRole('button', {
     name: /Checking the mobile transcript.*1 tool/,
   });
