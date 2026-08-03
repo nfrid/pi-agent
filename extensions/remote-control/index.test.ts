@@ -15,6 +15,7 @@ import { InteractionBroker } from '../ask-user/broker';
 import {
   BridgeClient,
   createRemoteControlRuntime,
+  dispatchDashboardCommand,
   dispatchDashboardInput,
   expandDashboardInput,
 } from './index';
@@ -123,6 +124,14 @@ describe('dashboard input dispatch', () => {
     await dispatchDashboardInput(pi, context, '/name Dashboard session');
     expect(setSessionName).toHaveBeenCalledWith('Dashboard session');
     await expect(
+      dispatchDashboardCommand(pi, context, new InteractionBroker(), {
+        id: 'rename-1',
+        type: 'setSessionName',
+        name: 'Bridge name',
+      }),
+    ).resolves.toEqual({ accepted: true });
+    expect(setSessionName).toHaveBeenLastCalledWith('Bridge name');
+    await expect(
       dispatchDashboardInput(pi, context, '/custom value'),
     ).rejects.toThrow('not available through the dashboard yet');
     await expect(
@@ -183,7 +192,13 @@ describe('remote-control bridge', () => {
       return value;
     };
     const manager = {
-      getBranch: () => active([]),
+      getBranch: () =>
+        active([
+          {
+            type: 'message',
+            message: { role: 'user', content: '  inspect   title  ' },
+          },
+        ]),
       getSessionId: () => active('session-current'),
       getSessionFile: () => active('/tmp/session.jsonl'),
       getSessionName: () => active('Current session'),
@@ -208,6 +223,7 @@ describe('remote-control bridge', () => {
     const runtime = createRemoteControlRuntime({} as ExtensionAPI);
     expect(runtime).toBeDefined();
     runtime?.setContext(context);
+    expect(runtime?.snapshot().session.title).toBe('inspect title');
     const equivalentContext = {
       ...context,
       sessionManager: manager,

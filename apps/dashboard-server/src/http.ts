@@ -14,6 +14,7 @@ import {
   type BrowserSnapshot,
   type NotificationEvent,
   validateBridgeCommand,
+  validateSessionRenameRequest,
   validateStartRuntimeRequest,
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
@@ -310,10 +311,21 @@ class DashboardServerImpl implements DashboardServer {
         session: { ...runtime.session, entries: [] },
       })),
       workspaces: this.workspaces,
-      sessions: this.sessions.list().map((session) => ({
-        ...session,
-        activeRuntimeId: activeSessions.get(session.id),
-      })),
+      sessions: this.sessions.list().map((session) => {
+        const runtime = liveRuntimes.find(
+          (item) => item.session.id === session.id && item.online !== false,
+        );
+        return {
+          ...session,
+          ...(runtime?.session.name !== undefined
+            ? { name: runtime.session.name }
+            : {}),
+          ...(runtime?.session.title !== undefined
+            ? { title: runtime.session.title }
+            : {}),
+          activeRuntimeId: activeSessions.get(session.id),
+        };
+      }),
       usage: this.usageSnapshot,
       unread: this.metadata.unreadNotifications(),
     };
@@ -382,6 +394,15 @@ class DashboardServerImpl implements DashboardServer {
         return this.json(response, 200, {
           publicKey: process.env.PI_DASHBOARD_VAPID_PUBLIC_KEY ?? null,
         });
+      const sessionNameMatch = url.pathname.match(
+        /^\/api\/sessions\/([^/]+)\/name$/,
+      );
+      if (request.method === 'POST' && sessionNameMatch)
+        return await this.handleSessionRename(
+          request,
+          response,
+          decodeURIComponent(sessionNameMatch[1]),
+        );
       if (request.method === 'GET' && url.pathname.startsWith('/api/sessions/'))
         return await this.handleSession(
           response,
@@ -505,19 +526,56 @@ class DashboardServerImpl implements DashboardServer {
     return this.json(response, 200, { ok: true, result });
   }
 
+  private async handleSessionRename(
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+    id: string,
+  ): Promise<void> {
+    if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
+      return this.json(response, 400, { error: 'Invalid session id.' });
+    const { name } = validateSessionRenameRequest(await this.body(request));
+    const runtime = this.registry
+      .snapshots()
+      .find((item) => item.session.id === id && item.online !== false);
+    if (runtime) {
+      const result = await this.registry.sendCommand(runtime.runtimeId, {
+        type: 'setSessionName',
+        name,
+      });
+      this.changed();
+      return this.json(response, 200, { ok: true, result });
+    }
+    const metadata = await this.sessions.rename(id, name);
+    this.changed();
+    return this.json(response, 200, { ok: true, metadata });
+  }
+
   private async handleSession(
     response: http.ServerResponse,
     id: string,
   ): Promise<void> {
     if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
       return this.json(response, 400, { error: 'Invalid session id.' });
+    const runtime = this.registry
+      .snapshots()
+      .find((item) => item.session.id === id && item.online !== false);
     try {
       const result = await this.sessions.readEntries(id);
-      return this.json(response, 200, result);
+      if (!runtime) return this.json(response, 200, result);
+      return this.json(response, 200, {
+        ...result,
+        metadata: {
+          ...result.metadata,
+          ...(runtime.session.name !== undefined
+            ? { name: runtime.session.name }
+            : {}),
+          ...(runtime.session.title !== undefined
+            ? { title: runtime.session.title }
+            : {}),
+          activeRuntimeId: runtime.runtimeId,
+        },
+      });
     } catch (error) {
-      const runtime = this.registry
-        .snapshots()
-        .find((item) => item.session.id === id && item.online !== false);
       if (!runtime) throw error;
       return this.json(response, 200, {
         metadata: {
@@ -525,6 +583,7 @@ class DashboardServerImpl implements DashboardServer {
           file: runtime.session.file ?? '',
           cwd: runtime.cwd,
           name: runtime.session.name,
+          title: runtime.session.title,
           updatedAt: runtime.lastSeenAt ?? Date.now(),
           activeRuntimeId: runtime.runtimeId,
           entryCount: runtime.session.entries.length,

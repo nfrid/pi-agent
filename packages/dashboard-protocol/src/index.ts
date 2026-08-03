@@ -31,7 +31,10 @@ export interface InteractionSnapshot {
 export interface SessionSnapshot {
   id: string;
   file?: string;
+  /** Explicit Pi session_info name, when one exists. */
   name?: string;
+  /** Deterministic fallback derived from the first user message. */
+  title?: string;
   cwd?: string;
   leafId?: string;
   entries: readonly unknown[];
@@ -107,6 +110,7 @@ export type BridgeCommand =
   | (BridgeCommandBase & { type: 'abort' | 'shutdown' })
   | (BridgeCommandBase & { type: 'setModel'; provider: string; model: string })
   | (BridgeCommandBase & { type: 'setThinking'; level: string })
+  | (BridgeCommandBase & { type: 'setSessionName'; name: string })
   | (BridgeCommandBase & {
       type: 'interaction.answer';
       interactionId: string;
@@ -159,10 +163,65 @@ export interface SessionIndexEntry {
   file: string;
   cwd: string;
   workspaceId?: string;
+  /** Explicit Pi session_info name, when one exists. */
   name?: string;
+  /** Deterministic fallback derived from the first user message. */
+  title?: string;
   updatedAt: number;
   activeRuntimeId?: string;
   entryCount?: number;
+}
+
+export const SESSION_TITLE_MAX_LENGTH = 96;
+export const SESSION_NAME_MAX_LENGTH = 512;
+
+/**
+ * Normalize a user message into a compact, stable dashboard title. Keeping
+ * this in the wire package makes live and indexed sessions render identically.
+ */
+export function normalizeSessionTitle(value: string): string | undefined {
+  const normalized = [...value.normalize('NFKC')]
+    .map((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127 ? ' ' : character;
+    })
+    .join('')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  if (!normalized) return undefined;
+  const characters = [...normalized];
+  return characters.length <= SESSION_TITLE_MAX_LENGTH
+    ? normalized
+    : `${characters.slice(0, SESSION_TITLE_MAX_LENGTH - 1).join('')}…`;
+}
+
+function textFromMessageContent(content: unknown): string | undefined {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (!isRecord(part) || typeof part.text !== 'string') return '';
+      return part.text;
+    })
+    .filter(Boolean)
+    .join(' ');
+  return text || undefined;
+}
+
+/** Return the first non-empty user message title in Pi session entries. */
+export function deriveSessionTitle(
+  entries: readonly unknown[],
+): string | undefined {
+  for (const entry of entries) {
+    if (!isRecord(entry) || entry.type !== 'message') continue;
+    const message = isRecord(entry.message) ? entry.message : entry;
+    if (message.role !== 'user') continue;
+    const text = textFromMessageContent(message.content);
+    const title = text ? normalizeSessionTitle(text) : undefined;
+    if (title) return title;
+  }
+  return undefined;
 }
 
 export interface NotificationEvent {
@@ -216,6 +275,18 @@ export function isRuntimeLiveState(value: unknown): value is RuntimeLiveState {
   );
 }
 
+export function validateSessionName(value: unknown): string {
+  if (!safeIdentifier(value, SESSION_NAME_MAX_LENGTH))
+    throw new Error('Invalid session name.');
+  return value.trim();
+}
+
+export function validateSessionRenameRequest(value: unknown): { name: string } {
+  if (!isRecord(value) || !onlyKeys(value, new Set(['name'])))
+    throw new Error('Invalid session rename request.');
+  return { name: validateSessionName(value.name) };
+}
+
 export function validateBridgeCommand(value: unknown): BridgeCommand {
   if (
     !isRecord(value) ||
@@ -242,6 +313,11 @@ export function validateBridgeCommand(value: unknown): BridgeCommand {
     if (!safeIdentifier(value.level, 64))
       throw new Error('Invalid thinking level.');
     return { id: value.id, type, level: value.level };
+  }
+  if (type === 'setSessionName') {
+    if (!onlyKeys(value, new Set(['id', 'type', 'name'])))
+      throw new Error('Invalid session name command.');
+    return { id: value.id, type, name: validateSessionName(value.name) };
   }
   if (type === 'interaction.answer' || type === 'interaction.cancel') {
     if (!nonEmptyString(value.interactionId, 128))
@@ -371,6 +447,7 @@ const sessionSnapshotKeys = new Set([
   'id',
   'file',
   'name',
+  'title',
   'cwd',
   'leafId',
   'entries',
@@ -403,7 +480,10 @@ function isSessionSnapshot(value: unknown): value is SessionSnapshot {
     return false;
   return (
     (value.file === undefined || nonEmptyString(value.file, 4096)) &&
-    (value.name === undefined || nonEmptyString(value.name, 512)) &&
+    (value.name === undefined ||
+      nonEmptyString(value.name, SESSION_NAME_MAX_LENGTH)) &&
+    (value.title === undefined ||
+      nonEmptyString(value.title, SESSION_TITLE_MAX_LENGTH)) &&
     (value.cwd === undefined || nonEmptyString(value.cwd, 4096)) &&
     (value.leafId === undefined || safeIdentifier(value.leafId, 256))
   );

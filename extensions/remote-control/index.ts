@@ -10,6 +10,7 @@ import type {
 import {
   type BridgeCommand,
   type BridgeEvent,
+  deriveSessionTitle,
   type InteractionSnapshot,
   PROTOCOL_VERSION,
   parseFrame,
@@ -408,6 +409,7 @@ function sessionSnapshot(ctx: ExtensionContext): SessionSnapshot {
     id: manager.getSessionId(),
     file: manager.getSessionFile(),
     name: manager.getSessionName(),
+    title: deriveSessionTitle(entries),
     cwd: manager.getCwd(),
     leafId: manager.getLeafId() ?? undefined,
     entries: (jsonSafe(entries) as readonly unknown[] | undefined) ?? [],
@@ -436,6 +438,60 @@ function interactionSnapshot(
   interaction: ReturnType<InteractionBroker['list']>[number],
 ): InteractionSnapshot {
   return interaction;
+}
+
+export async function dispatchDashboardCommand(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  broker: InteractionBroker,
+  command: BridgeCommand,
+): Promise<unknown> {
+  switch (command.type) {
+    case 'prompt':
+      if (!ctx.isIdle())
+        throw new Error('Agent is working; choose steer or follow-up.');
+      return dispatchDashboardInput(pi, ctx, command.text);
+    case 'steer':
+    case 'followUp':
+      return {
+        ...(await dispatchDashboardInput(
+          pi,
+          ctx,
+          command.text,
+          command.type === 'steer' ? 'steer' : 'followUp',
+        )),
+        mode: command.type,
+      };
+    case 'abort':
+      ctx.abort();
+      return { accepted: true };
+    case 'shutdown':
+      ctx.shutdown();
+      return { accepted: true };
+    case 'setModel': {
+      const model = ctx.modelRegistry.find(command.provider, command.model);
+      if (!model) throw new Error('Requested model is not available.');
+      if (!(await pi.setModel(model)))
+        throw new Error('Model authentication is unavailable.');
+      return { accepted: true };
+    }
+    case 'setThinking':
+      pi.setThinkingLevel(command.level as never);
+      return { accepted: true };
+    case 'setSessionName':
+      pi.setSessionName(command.name);
+      return { accepted: true };
+    case 'interaction.answer':
+      if (!broker.answer(command.interactionId, command.answer))
+        throw new Error(
+          'Interaction is already resolved or the answer is invalid.',
+        );
+      return { accepted: true };
+    case 'interaction.cancel':
+      if (!broker.cancel(command.interactionId))
+        throw new Error('Interaction is already resolved.');
+      return { accepted: true };
+  }
 }
 
 export interface RemoteControlRuntime {
@@ -511,52 +567,7 @@ export function createRemoteControlRuntime(
     snapshot: () => cachedSnapshot,
     handleCommand: async (command) => {
       if (!context) throw new Error('Pi session is not ready.');
-      switch (command.type) {
-        case 'prompt':
-          if (!context.isIdle())
-            throw new Error('Agent is working; choose steer or follow-up.');
-          return dispatchDashboardInput(pi, context, command.text);
-        case 'steer':
-        case 'followUp':
-          return {
-            ...(await dispatchDashboardInput(
-              pi,
-              context,
-              command.text,
-              command.type === 'steer' ? 'steer' : 'followUp',
-            )),
-            mode: command.type,
-          };
-        case 'abort':
-          context.abort();
-          return { accepted: true };
-        case 'shutdown':
-          context.shutdown();
-          return { accepted: true };
-        case 'setModel': {
-          const model = context.modelRegistry.find(
-            command.provider,
-            command.model,
-          );
-          if (!model) throw new Error('Requested model is not available.');
-          if (!(await pi.setModel(model)))
-            throw new Error('Model authentication is unavailable.');
-          return { accepted: true };
-        }
-        case 'setThinking':
-          pi.setThinkingLevel(command.level as never);
-          return { accepted: true };
-        case 'interaction.answer':
-          if (!broker.answer(command.interactionId, command.answer))
-            throw new Error(
-              'Interaction is already resolved or the answer is invalid.',
-            );
-          return { accepted: true };
-        case 'interaction.cancel':
-          if (!broker.cancel(command.interactionId))
-            throw new Error('Interaction is already resolved.');
-          return { accepted: true };
-      }
+      return dispatchDashboardCommand(pi, context, broker, command);
     },
   });
 

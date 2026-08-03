@@ -30,7 +30,7 @@ export type DashboardEvent = {
     message?: unknown;
     tool?: unknown;
     interaction?: unknown;
-    session?: { id?: string };
+    session?: { id?: string; name?: string; title?: string };
   };
 };
 

@@ -6,6 +6,7 @@ import {
   formatContextTokens,
   isNearPageBottom,
   reconcileLiveEvent,
+  sessionDisplayTitle,
   shouldShowActivityLead,
   toTranscriptEntries,
 } from './App';
@@ -28,6 +29,24 @@ describe('dashboard snapshots', () => {
         sessions: [],
       }),
     ).toMatchObject({ unread: [] });
+  });
+});
+
+describe('session titles', () => {
+  it('prefers custom names, then normalized titles, then a non-UUID fallback', () => {
+    expect(sessionDisplayTitle({ name: 'Custom name', title: 'Prompt' })).toBe(
+      'Custom name',
+    );
+    expect(sessionDisplayTitle({ title: 'Prompt' })).toBe('Prompt');
+    expect(
+      sessionDisplayTitle({}, [
+        {
+          type: 'message',
+          message: { role: 'user', content: '  first   request  ' },
+        },
+      ]),
+    ).toBe('first request');
+    expect(sessionDisplayTitle({})).toBe('Untitled session');
   });
 });
 

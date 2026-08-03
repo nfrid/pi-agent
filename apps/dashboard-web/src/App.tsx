@@ -3,12 +3,13 @@ import {
   describeTools,
   groupTranscript,
 } from '@pi-dashboard/activity-model';
-import type {
-  BrowserSnapshot,
-  RuntimeSnapshot,
-  SessionIndexEntry,
-  StartRuntimeRequest,
-  WorkspaceTarget,
+import {
+  type BrowserSnapshot,
+  deriveSessionTitle,
+  type RuntimeSnapshot,
+  type SessionIndexEntry,
+  type StartRuntimeRequest,
+  type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import {
   type FormEvent,
@@ -44,6 +45,18 @@ export {
   asSessionResponse,
 } from './dashboard-transport';
 export { reconcileLiveEvent, toTranscriptEntries } from './transcript';
+
+export function sessionDisplayTitle(
+  session: { name?: string; title?: string },
+  entries: readonly unknown[] = [],
+): string {
+  return (
+    session.name ??
+    session.title ??
+    deriveSessionTitle(entries) ??
+    'Untitled session'
+  );
+}
 
 function navigate(pathname: string): void {
   window.history.pushState({}, '', pathname);
@@ -516,6 +529,7 @@ function UsagePanel({ usage, error }: { usage: unknown; error?: string }) {
 
 function RuntimeCard({ runtime }: { runtime: RuntimeSnapshot }) {
   const status = runtime.online === false ? 'offline' : runtime.liveState;
+  const title = sessionDisplayTitle(runtime.session, runtime.session.entries);
   const glyph =
     status === 'working'
       ? '●'
@@ -533,7 +547,7 @@ function RuntimeCard({ runtime }: { runtime: RuntimeSnapshot }) {
     <button
       type="button"
       className={`runtime-card ${status}`}
-      aria-label={`${runtime.session.name ?? runtime.session.id} ${status}`}
+      aria-label={`${title} ${status}`}
       onClick={() =>
         navigate(`/sessions/${encodeURIComponent(runtime.session.id)}`)
       }
@@ -542,9 +556,7 @@ function RuntimeCard({ runtime }: { runtime: RuntimeSnapshot }) {
         <span className="status-glyph">{glyph}</span>
       </span>
       <span className="runtime-main">
-        <strong>
-          {runtime.session.name ?? runtime.session.id.slice(0, 8)}
-        </strong>
+        <strong>{title}</strong>
         <span>
           <b>{status}</b> · {model}
         </span>
@@ -616,7 +628,7 @@ function SessionRow({ session }: { session: SessionIndexEntry }) {
       onClick={() => navigate(`/sessions/${encodeURIComponent(session.id)}`)}
     >
       <span>
-        <strong>{session.name ?? session.id.slice(0, 8)}</strong>
+        <strong>{sessionDisplayTitle(session)}</strong>
         <small>{session.cwd}</small>
       </span>
       <span className="muted">
@@ -735,6 +747,27 @@ function SessionView({
         navigate(`/sessions/${encodeURIComponent(changedSessionId)}`);
         return;
       }
+      if (event.type === 'session.changed' && changedSessionId === id && data) {
+        if (seenEventsRef.current.has(queued)) continue;
+        seenEventsRef.current.add(queued);
+        setData((current) =>
+          current
+            ? {
+                ...current,
+                metadata: {
+                  ...current.metadata,
+                  ...(event.session?.name !== undefined
+                    ? { name: event.session.name }
+                    : {}),
+                  ...(event.session?.title !== undefined
+                    ? { title: event.session.title }
+                    : {}),
+                },
+              }
+            : current,
+        );
+        continue;
+      }
       if (!data || seenEventsRef.current.has(queued)) continue;
       seenEventsRef.current.add(queued);
       const captureBottomState = () => {
@@ -787,7 +820,7 @@ function SessionView({
       <div className="session-heading">
         <div>
           <p className="eyebrow">Session</p>
-          <h1>{data.metadata.name ?? id.slice(0, 12)}</h1>
+          <h1>{sessionDisplayTitle(data.metadata, data.entries)}</h1>
           <p className="muted">
             {data.metadata.cwd} ·{' '}
             {runtime
@@ -797,7 +830,20 @@ function SessionView({
               : 'dormant'}
           </p>
         </div>
-        {runtime && <RuntimeActions runtime={runtime} />}
+        <div className="session-heading-actions">
+          <SessionRename
+            id={id}
+            initialName={data.metadata.name}
+            onRenamed={(name) =>
+              setData((current) =>
+                current
+                  ? { ...current, metadata: { ...current.metadata, name } }
+                  : current,
+              )
+            }
+          />
+          {runtime && <RuntimeActions runtime={runtime} />}
+        </div>
       </div>
       {runtimeError && (
         <div className="error notice" role="alert">
@@ -810,6 +856,60 @@ function SessionView({
       <Transcript entries={data.entries} />
       <Composer runtime={runtime} sessionId={id} />
     </section>
+  );
+}
+
+function SessionRename({
+  id,
+  initialName,
+  onRenamed,
+}: {
+  id: string;
+  initialName?: string;
+  onRenamed: (name: string) => void;
+}) {
+  const [name, setName] = useState(initialName ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  useEffect(() => setName(initialName ?? ''), [initialName]);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const value = name.trim();
+    if (!value || busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await api(`/api/sessions/${encodeURIComponent(id)}/name`, {
+        method: 'POST',
+        body: JSON.stringify({ name: value }),
+      });
+      onRenamed(value);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="session-rename" onSubmit={(event) => void submit(event)}>
+      <label htmlFor="session-name">Name</label>
+      <input
+        id="session-name"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        placeholder="Session name"
+        maxLength={512}
+        disabled={busy}
+      />
+      <button type="submit" disabled={busy || !name.trim()}>
+        {busy ? 'Saving…' : 'Rename'}
+      </button>
+      {error && (
+        <span className="error" role="alert">
+          {error}
+        </span>
+      )}
+    </form>
   );
 }
 
@@ -1395,7 +1495,7 @@ function LaunchView({ snapshot }: { snapshot: BrowserSnapshot }) {
             <option value="">New session</option>
             {sessions.map((session) => (
               <option value={session.id} key={session.id}>
-                {session.name ?? session.id.slice(0, 10)}
+                {sessionDisplayTitle(session)}
               </option>
             ))}
           </select>
