@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -221,6 +221,53 @@ describe('dashboard HTTP boundary', () => {
       (await fetch(`http://127.0.0.1:${server.port}/api/health`)).status,
     ).toBe(200);
     bridge.destroy();
+  });
+
+  it('renames a dormant indexed session through the authenticated API', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-rename-http-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'dormant.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'dormant-id', cwd: '/tmp' })}
+${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 'dormant request' } })}
+`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const origin = `http://127.0.0.1:${server.port}`;
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/dormant-id/name`,
+      {
+        method: 'POST',
+        headers: {
+          Origin: origin,
+          'x-dashboard-token': 'test-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ name: 'Renamed dormant' }),
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      metadata: { id: 'dormant-id', name: 'Renamed dormant' },
+    });
+    expect(
+      await readFile(path.join(sessionDir, 'dormant.jsonl'), 'utf8'),
+    ).toContain('"type":"session_info"');
+    expect(server.snapshot().sessions[0]).toMatchObject({
+      id: 'dormant-id',
+      name: 'Renamed dormant',
+    });
   });
 
   it('requires auth/origin, supports CORS preflight, and returns an authoritative snapshot', async () => {

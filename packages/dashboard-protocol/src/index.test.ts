@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  deriveSessionTitle,
   isBridgeEvent,
   MAX_FRAME_BYTES,
   parseFrame,
   serializeFrame,
   validateBridgeCommand,
+  validateSessionRenameRequest,
   validateStartRuntimeRequest,
 } from './index.js';
 
@@ -22,6 +24,48 @@ describe('dashboard protocol', () => {
       validateBridgeCommand({ id: 'x', type: 'exec', command: 'rm -rf /' }),
     ).toThrow();
     expect(() => parseFrame('x'.repeat(MAX_FRAME_BYTES + 1))).toThrow(/size/);
+  });
+
+  it('validates rename commands and derives bounded first-user titles', () => {
+    expect(
+      validateBridgeCommand({
+        id: 'x',
+        type: 'setSessionName',
+        name: ' Dashboard ',
+      }),
+    ).toEqual({ id: 'x', type: 'setSessionName', name: 'Dashboard' });
+    expect(() =>
+      validateBridgeCommand({
+        id: 'x',
+        type: 'setSessionName',
+        name: 'Dashboard',
+        extra: true,
+      }),
+    ).toThrow();
+    expect(validateSessionRenameRequest({ name: '  Renamed  ' })).toEqual({
+      name: 'Renamed',
+    });
+    expect(() => validateSessionRenameRequest({ name: 'x\n' })).toThrow();
+    const title = deriveSessionTitle([
+      { type: 'session', id: 's' },
+      {
+        type: 'message',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: '  fix\n  the   dashboard  ' }],
+        },
+      },
+    ]);
+    expect(title).toBe('fix the dashboard');
+    expect(
+      deriveSessionTitle([
+        { type: 'message', message: { role: 'assistant', content: 'nope' } },
+        {
+          type: 'message',
+          message: { role: 'user', content: 'x'.repeat(200) },
+        },
+      ]),
+    ).toHaveLength(96);
   });
 
   it('strictly validates each bridge event variant', () => {

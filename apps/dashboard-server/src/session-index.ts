@@ -1,13 +1,19 @@
-import { promises as fs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { createReadStream, promises as fs } from 'node:fs';
 import path from 'node:path';
-import type {
-  SessionIndexEntry,
-  WorkspaceTarget,
+import readline from 'node:readline';
+import {
+  deriveSessionTitle,
+  isRecord,
+  type SessionIndexEntry,
+  validateSessionName,
+  type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import type { MetadataStore } from './metadata.js';
 
 interface IndexedFile extends SessionIndexEntry {
   header: Record<string, unknown>;
+  lastEntryId?: string;
 }
 
 function within(root: string, file: string): boolean {
@@ -68,14 +74,18 @@ export class SessionIndex {
   list(workspaceId?: string): SessionIndexEntry[] {
     return [...this.files.values()]
       .filter((file) => !workspaceId || file.workspaceId === workspaceId)
-      .map(({ header: _header, ...entry }) => entry)
+      .map(({ header: _header, lastEntryId: _lastEntryId, ...entry }) => entry)
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   get(id: string): SessionIndexEntry | undefined {
     const entry = this.files.get(id);
     if (!entry) return undefined;
-    const { header: _header, ...publicEntry } = entry;
+    const {
+      header: _header,
+      lastEntryId: _lastEntryId,
+      ...publicEntry
+    } = entry;
     return publicEntry;
   }
 
@@ -85,7 +95,7 @@ export class SessionIndex {
     const indexed = this.files.get(id);
     if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
       throw new Error('Unknown session.');
-    const { header: _header, ...metadata } = indexed;
+    const { header: _header, lastEntryId: _lastEntryId, ...metadata } = indexed;
     const stat = await fs.stat(indexed.file);
     if (stat.size > 8 * 1024 * 1024)
       throw new Error('Session is too large to open remotely.');
@@ -100,6 +110,29 @@ export class SessionIndex {
       }
     }
     return { metadata, entries };
+  }
+
+  /** Rename a known dormant session by appending a normal Pi session_info entry. */
+  async rename(id: string, name: string): Promise<SessionIndexEntry> {
+    const indexed = this.files.get(id);
+    if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
+      throw new Error('Unknown session.');
+    const safeName = validateSessionName(name);
+    const entry = {
+      type: 'session_info',
+      id: randomUUID(),
+      parentId: indexed.lastEntryId ?? null,
+      timestamp: new Date().toISOString(),
+      name: safeName,
+    };
+    // appendFile uses O_APPEND so one JSONL entry is not overwritten by a
+    // concurrent Pi append. Re-index from disk so latest-name semantics apply.
+    await fs.appendFile(indexed.file, `${JSON.stringify(entry)}\n`, 'utf8');
+    await this.indexFile(indexed.file, this.workspaces);
+    const renamed = this.files.get(id);
+    if (!renamed) throw new Error('Session disappeared while renaming.');
+    const { header: _header, lastEntryId: _lastEntryId, ...metadata } = renamed;
+    return metadata;
   }
 
   close(): void {
@@ -196,22 +229,52 @@ export class SessionIndex {
     const resolved = path.resolve(file);
     if (!within(root, resolved) || !resolved.endsWith('.jsonl')) return;
     try {
-      const handle = await fs.open(resolved, 'r');
-      let first: string | undefined;
+      const input = createReadStream(resolved, { encoding: 'utf8' });
+      const lines = readline.createInterface({ input, crlfDelay: Infinity });
+      let header: Record<string, unknown> | undefined;
+      let name: string | undefined;
+      let sawSessionInfo = false;
+      let firstUserEntry: unknown;
+      let lastEntryId: string | undefined;
       try {
-        const buffer = Buffer.alloc(64 * 1024);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        first = buffer
-          .subarray(0, bytesRead)
-          .toString('utf8')
-          .split('\n')
-          .find((line) => line.trim());
+        for await (const line of lines) {
+          if (!line.trim()) continue;
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(line) as unknown;
+          } catch {
+            // A partial final write must not erase an otherwise valid session.
+            continue;
+          }
+          if (!header) {
+            if (!isRecord(parsed) || parsed.type !== 'session')
+              return this.removeFile(resolved);
+            header = parsed;
+            continue;
+          }
+          if (!isRecord(parsed)) continue;
+          if (typeof parsed.id === 'string') lastEntryId = parsed.id;
+          if (parsed.type === 'session_info') {
+            sawSessionInfo = true;
+            name =
+              typeof parsed.name === 'string'
+                ? parsed.name.trim() || undefined
+                : undefined;
+          }
+          if (
+            firstUserEntry === undefined &&
+            parsed.type === 'message' &&
+            isRecord(parsed.message) &&
+            parsed.message.role === 'user'
+          ) {
+            firstUserEntry = parsed;
+          }
+        }
       } finally {
-        await handle.close();
+        lines.close();
+        input.destroy();
       }
-      if (!first) return this.removeFile(resolved);
-      const header = JSON.parse(first) as Record<string, unknown>;
-      if (header.type !== 'session' || typeof header.cwd !== 'string')
+      if (!header || typeof header.cwd !== 'string')
         return this.removeFile(resolved);
       const stat = await fs.stat(resolved);
       const id =
@@ -224,9 +287,13 @@ export class SessionIndex {
         file: resolved,
         cwd: header.cwd,
         workspaceId: workspaceFor(header.cwd, workspaces),
-        name: typeof header.name === 'string' ? header.name : undefined,
+        ...(sawSessionInfo && name ? { name } : {}),
+        title: deriveSessionTitle(
+          firstUserEntry === undefined ? [] : [firstUserEntry],
+        ),
         updatedAt: stat.mtimeMs,
         header,
+        lastEntryId,
       };
       this.files.set(id, entry);
       this.fileIds.set(resolved, id);
