@@ -25,6 +25,7 @@ import {
   api,
   asSessionResponse,
   type DashboardEvent,
+  multipartApi,
   type SessionResponse,
   useDashboard,
 } from './dashboard-transport';
@@ -1262,6 +1263,64 @@ async function postCommand(
   });
 }
 
+async function postCommandWithImages(
+  runtimeId: string,
+  command: Record<string, unknown>,
+  images: readonly File[],
+): Promise<void> {
+  const body = new FormData();
+  body.append('command', JSON.stringify(command));
+  for (const image of images) body.append('images', image, image.name);
+  await multipartApi(
+    `/api/runtimes/${encodeURIComponent(runtimeId)}/command`,
+    body,
+  );
+}
+
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+export const MAX_IMAGE_ATTACHMENTS = 4;
+export const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+export const MAX_IMAGE_TOTAL_SIZE = 12 * 1024 * 1024;
+
+type ImageAttachment = { file: File; previewUrl: string };
+
+export function runtimeSupportsImages(runtime: RuntimeSnapshot): boolean {
+  const model = runtime.model as
+    | (RuntimeSnapshot['model'] & { supportsImages?: boolean })
+    | undefined;
+  return model?.supportsImages !== false;
+}
+
+export function addImageAttachments(
+  existing: readonly File[],
+  incoming: readonly File[],
+): { accepted: File[]; error?: string } {
+  const accepted: File[] = [];
+  let totalSize = existing.reduce((total, file) => total + file.size, 0);
+  let error: string | undefined;
+  for (const file of incoming) {
+    if (!IMAGE_TYPES.includes(file.type as (typeof IMAGE_TYPES)[number])) {
+      error ??= `${file.name} is not a PNG, JPEG, or WebP image.`;
+      continue;
+    }
+    if (file.size > MAX_IMAGE_SIZE) {
+      error ??= `${file.name} is larger than the 5 MiB image limit.`;
+      continue;
+    }
+    if (existing.length + accepted.length >= MAX_IMAGE_ATTACHMENTS) {
+      error ??= `You can attach up to ${MAX_IMAGE_ATTACHMENTS} images.`;
+      continue;
+    }
+    if (totalSize + file.size > MAX_IMAGE_TOTAL_SIZE) {
+      error ??= 'Attached images exceed the 12 MiB total limit.';
+      continue;
+    }
+    accepted.push(file);
+    totalSize += file.size;
+  }
+  return { accepted, ...(error ? { error } : {}) };
+}
+
 function Composer({
   runtime,
 }: {
@@ -1270,6 +1329,10 @@ function Composer({
 }) {
   const [text, setText] = useState('');
   const [mode, setMode] = useState<'prompt' | 'steer' | 'followUp'>('prompt');
+  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const attachmentsRef = useRef<ImageAttachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const disabled =
@@ -1277,6 +1340,17 @@ function Composer({
     runtime.online === false ||
     runtime.liveState === 'stopping' ||
     runtime.liveState === 'waiting';
+  const attachmentsEnabled = runtime ? runtimeSupportsImages(runtime) : false;
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+  useEffect(
+    () => () => {
+      for (const attachment of attachmentsRef.current)
+        URL.revokeObjectURL(attachment.previewUrl);
+    },
+    [],
+  );
   useEffect(() => {
     setMode(runtime?.liveState === 'working' ? 'followUp' : 'prompt');
   }, [runtime?.liveState]);
@@ -1303,16 +1377,54 @@ function Composer({
         </button>
       </div>
     );
+  const selectImages = (files: readonly File[]) => {
+    if (!attachmentsEnabled || disabled || busy) return;
+    const result = addImageAttachments(
+      attachments.map((attachment) => attachment.file),
+      files,
+    );
+    if (result.accepted.length) {
+      setAttachments((current) => [
+        ...current,
+        ...result.accepted.map((file) => ({
+          file,
+          previewUrl: URL.createObjectURL(file),
+        })),
+      ]);
+    }
+    setError(result.error);
+  };
+  const removeImage = (previewUrl: string) => {
+    const attachment = attachments.find(
+      (candidate) => candidate.previewUrl === previewUrl,
+    );
+    if (!attachment) return;
+    URL.revokeObjectURL(attachment.previewUrl);
+    setAttachments((current) =>
+      current.filter((candidate) => candidate.previewUrl !== previewUrl),
+    );
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!text.trim() || disabled || busy) return;
+    const trimmedText = text.trim();
+    if ((!trimmedText && !attachments.length) || disabled || busy) return;
     setBusy(true);
     setError(undefined);
+    const command = {
+      type: runtime.liveState === 'idle' ? 'prompt' : mode,
+      text: trimmedText,
+    };
     try {
-      await postCommand(runtime.runtimeId, {
-        type: runtime.liveState === 'idle' ? 'prompt' : mode,
-        text: text.trim(),
-      });
+      if (attachments.length)
+        await postCommandWithImages(
+          runtime.runtimeId,
+          command,
+          attachments.map((attachment) => attachment.file),
+        );
+      else await postCommand(runtime.runtimeId, command);
+      for (const attachment of attachments)
+        URL.revokeObjectURL(attachment.previewUrl);
+      setAttachments([]);
       setText('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -1322,8 +1434,24 @@ function Composer({
   };
   return (
     <form
-      className="composer"
+      className={`composer ${dragging ? 'dragging' : ''}`}
       onSubmit={(event) => void submit(event)}
+      onDragEnter={(event) => {
+        if (!attachmentsEnabled || disabled || busy) return;
+        event.preventDefault();
+        setDragging(true);
+      }}
+      onDragOver={(event) => {
+        if (!attachmentsEnabled || disabled || busy) return;
+        event.preventDefault();
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={(event) => {
+        if (!attachmentsEnabled || disabled || busy) return;
+        event.preventDefault();
+        setDragging(false);
+        selectImages(Array.from(event.dataTransfer.files));
+      }}
       aria-label="Send a message"
     >
       <div className="composer-mode">
@@ -1355,14 +1483,72 @@ function Composer({
       </div>
       {error && (
         <p className="error" role="alert">
-          Command failed: {error}
+          {error}
         </p>
+      )}
+      {attachmentsEnabled && (
+        <>
+          <input
+            ref={fileInputRef}
+            className="sr-only"
+            type="file"
+            accept={IMAGE_TYPES.join(',')}
+            multiple
+            aria-label="Choose images"
+            disabled={disabled || busy}
+            onChange={(event) => {
+              selectImages(Array.from(event.target.files ?? []));
+              event.target.value = '';
+            }}
+          />
+          {attachments.length > 0 && (
+            <fieldset className="composer-previews">
+              <legend className="sr-only">Image attachments</legend>
+              {attachments.map((attachment) => (
+                <div className="composer-preview" key={attachment.previewUrl}>
+                  <img src={attachment.previewUrl} alt={attachment.file.name} />
+                  <button
+                    type="button"
+                    aria-label={`Remove ${attachment.file.name}`}
+                    disabled={busy}
+                    onClick={() => removeImage(attachment.previewUrl)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </fieldset>
+          )}
+          <button
+            type="button"
+            className="composer-attach"
+            disabled={disabled || busy}
+            onClick={() => fileInputRef.current?.click()}
+            aria-label="Attach images"
+          >
+            + Image
+          </button>
+        </>
       )}
       <textarea
         aria-label="Message Pi"
         value={text}
         disabled={disabled || busy}
         onChange={(event) => setText(event.target.value)}
+        onPaste={(event) => {
+          if (!attachmentsEnabled || disabled || busy) return;
+          const files = Array.from(event.clipboardData.files);
+          const itemFiles = Array.from(event.clipboardData.items).flatMap(
+            (item) => {
+              const file = item.kind === 'file' ? item.getAsFile() : null;
+              return file ? [file] : [];
+            },
+          );
+          const images = files.length ? files : itemFiles;
+          if (!images.length) return;
+          event.preventDefault();
+          selectImages(images);
+        }}
         onKeyDown={(event) => {
           if (
             event.key === 'Enter' &&
@@ -1376,7 +1562,10 @@ function Composer({
         placeholder={disabled ? 'Agent is waiting for input' : 'Message Pi…'}
         rows={3}
       />
-      <button type="submit" disabled={disabled || busy || !text.trim()}>
+      <button
+        type="submit"
+        disabled={disabled || busy || (!text.trim() && !attachments.length)}
+      >
         Send
       </button>
     </form>

@@ -1,15 +1,60 @@
+import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import {
+  addImageAttachments,
   asBrowserSnapshot,
   asSessionResponse,
   contextIndicatorData,
   formatContextTokens,
   isNearPageBottom,
   reconcileLiveEvent,
+  runtimeSupportsImages,
   sessionDisplayTitle,
   shouldShowActivityLead,
   toTranscriptEntries,
 } from './App';
+
+describe('image attachments', () => {
+  const image = (name: string, type: string, size: number) =>
+    new File([new Uint8Array(size)], name, { type });
+
+  it('accepts supported images within count and size limits', () => {
+    const result = addImageAttachments([], [image('one.png', 'image/png', 4)]);
+    expect(result).toEqual({ accepted: [expect.any(File)] });
+  });
+
+  it('rejects unsupported, oversized, and over-count attachments', () => {
+    expect(
+      addImageAttachments([], [image('no.gif', 'image/gif', 1)]).error,
+    ).toContain('not a PNG');
+    expect(
+      addImageAttachments(
+        [],
+        [image('large.jpg', 'image/jpeg', 5 * 1024 * 1024 + 1)],
+      ).error,
+    ).toContain('5 MiB');
+    const existing = Array.from({ length: 4 }, (_, index) =>
+      image(`${index}.webp`, 'image/webp', 1),
+    );
+    expect(
+      addImageAttachments(existing, [image('fifth.webp', 'image/webp', 1)])
+        .error,
+    ).toContain('up to 4');
+  });
+
+  it('keeps image capability compatible when omitted', () => {
+    const runtime = {
+      model: { provider: 'test', model: 'vision' },
+    } as RuntimeSnapshot;
+    expect(runtimeSupportsImages(runtime)).toBe(true);
+    expect(
+      runtimeSupportsImages({
+        ...runtime,
+        model: { provider: 'test', model: 'vision', supportsImages: false },
+      }),
+    ).toBe(false);
+  });
+});
 
 describe('dashboard snapshots', () => {
   it('rejects malformed session responses before rendering', () => {
