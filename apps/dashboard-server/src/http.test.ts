@@ -38,6 +38,83 @@ describe('dashboard HTTP boundary', () => {
     socket.close();
   });
 
+  it('publishes every browser update with the same monotonic revision as its snapshot', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-revision-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const origin = `http://127.0.0.1:${server.port}`;
+    const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws`, {
+      headers: { Origin: origin },
+    });
+    const messages: string[] = [];
+    socket.on('message', (value) => messages.push(String(value)));
+    await new Promise<void>((resolve) => socket.once('open', resolve));
+    socket.send(JSON.stringify({ type: 'auth', token: 'test-token' }));
+    const waitForMessage = async (): Promise<Record<string, unknown>> => {
+      while (messages.length === 0)
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      const message = messages.shift();
+      if (!message) throw new Error('Expected a websocket message.');
+      return JSON.parse(message) as Record<string, unknown>;
+    };
+    const initial = await waitForMessage();
+    const initialSnapshot = initial.snapshot as { revision: number };
+    expect(initial.type).toBe('snapshot');
+    expect(initialSnapshot.revision).toBe(server.snapshot().revision);
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    const hello = {
+      type: 'runtime.hello' as const,
+      protocolVersion: 1,
+      snapshot: {
+        runtimeId: 'revision-runtime',
+        ownership: 'external' as const,
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle' as const,
+        session: { id: 'revision-session', entries: [] },
+        pendingInteractions: [],
+      },
+    };
+    bridge.write(serializeFrame({ kind: 'event', seq: 1, event: hello }));
+    const registration = await waitForMessage();
+    expect(registration.type).toBe('snapshot');
+    const registrationSnapshot = registration.snapshot as { revision: number };
+    expect(registrationSnapshot.revision).toBeGreaterThan(
+      initialSnapshot.revision,
+    );
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 2,
+        event: { type: 'runtime.stateChanged', state: 'working' },
+      }),
+    );
+    const update = await waitForMessage();
+    expect(update.type).toBe('event');
+    expect(update.revision).toBe(
+      (update.snapshot as { revision: number }).revision,
+    );
+    expect(update.revision).toBeGreaterThan(registrationSnapshot.revision);
+    await server.refreshWorkspaces();
+    expect(server.snapshot().revision).toBeGreaterThan(
+      update.revision as number,
+    );
+    bridge.destroy();
+    socket.close();
+  });
+
   it('serves active session entries before the file index catches up and contains unknown-session failures', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-active-session-'),

@@ -122,6 +122,7 @@ export type BridgeFrame =
   | { kind: 'ack'; id: string; ok: false; error: string };
 
 export interface BrowserSnapshot {
+  /** Monotonically increasing server state revision. */
   revision: number;
   runtimes: readonly RuntimeSnapshot[];
   workspaces: readonly WorkspaceTarget[];
@@ -129,6 +130,17 @@ export interface BrowserSnapshot {
   usage?: unknown;
   unread: readonly NotificationEvent[];
 }
+
+/** Messages emitted on the authenticated browser websocket. */
+export type DashboardMessage =
+  | { type: 'snapshot'; snapshot: BrowserSnapshot }
+  | {
+      type: 'event';
+      revision: number;
+      runtimeId: string;
+      event: BridgeEvent;
+      snapshot: BrowserSnapshot;
+    };
 
 export interface WorkspaceTarget {
   id: string;

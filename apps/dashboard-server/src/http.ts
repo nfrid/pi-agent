@@ -282,7 +282,7 @@ class DashboardServerImpl implements DashboardServer {
       for (const workspace of this.workspaces)
         this.metadata.saveWorkspace(workspace);
       await this.sessions.refresh(this.workspaces);
-      this.publish({ type: 'snapshot', snapshot: this.snapshot() });
+      this.changed();
     } catch {
       // Sesh is catalogue data; losing it must not interrupt existing runtime control.
     }
@@ -678,7 +678,23 @@ class DashboardServerImpl implements DashboardServer {
 
   private changed(message?: unknown): void {
     this.revision += 1;
-    this.publish(message ?? { type: 'snapshot', snapshot: this.snapshot() });
+    const snapshot = this.snapshot();
+    if (!message) {
+      this.publish({ type: 'snapshot', snapshot });
+      return;
+    }
+    if (message && typeof message === 'object' && !Array.isArray(message)) {
+      const record = message as Record<string, unknown>;
+      this.publish({
+        ...record,
+        revision: this.revision,
+        ...(record.snapshot && typeof record.snapshot === 'object'
+          ? { snapshot }
+          : {}),
+      });
+      return;
+    }
+    this.publish(message);
   }
 
   private publish(message: unknown): void {
