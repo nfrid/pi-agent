@@ -370,6 +370,36 @@ describe('remote-control bridge', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('bounds an oversized valid interaction instead of silently dropping it', () => {
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      handleCommand: async () => ({ accepted: true }),
+    });
+    const socket = new net.Socket();
+    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', socket);
+    expect(
+      client.sendEvent({
+        type: 'interaction.requested',
+        interaction: {
+          id: 'oversized-interaction',
+          type: 'ask_user',
+          question: 'q'.repeat(600_000),
+          choices: [],
+          allowCustom: true,
+          createdAt: Date.now(),
+        },
+      }),
+    ).toBe(true);
+    const frame = JSON.parse(String(write.mock.calls[0]?.[0])) as {
+      event: { interaction: { question: string } };
+    };
+    expect(frame.event.interaction.question).toHaveLength(20_000);
+    client.stop();
+  });
+
   it('reconnects rather than silently dropping an interaction on backpressure', () => {
     const client = new BridgeClient({
       socketPath: '/unused',

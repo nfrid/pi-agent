@@ -233,7 +233,7 @@ export class BridgeClient {
       if (event.kind === 'requested') {
         this.sendEvent({
           type: 'interaction.requested',
-          interaction: event.interaction,
+          interaction: interactionSnapshot(event.interaction),
         });
       } else {
         this.sendEvent({
@@ -266,9 +266,19 @@ export class BridgeClient {
   sendEvent(event: BridgeEvent): boolean {
     const socket = this.socket;
     if (!socket || socket.destroyed || !socket.writable) return false;
+    const wireEvent: BridgeEvent =
+      event.type === 'interaction.requested'
+        ? { ...event, interaction: interactionSnapshot(event.interaction) }
+        : event.type === 'interaction.resolved'
+          ? { ...event, resolution: jsonSafe(event.resolution) }
+          : event;
     let data: string;
     try {
-      data = serializeFrame({ kind: 'event', event, seq: ++this.seq });
+      data = serializeFrame({
+        kind: 'event',
+        event: wireEvent,
+        seq: ++this.seq,
+      });
     } catch {
       // Optional provider payloads are not allowed to turn into a malformed
       // frame, and a serialization failure must not tear down the bridge.
@@ -277,7 +287,7 @@ export class BridgeClient {
     return this.enqueueOutbound(
       socket,
       data,
-      event.type === 'message.updated' || event.type === 'tool.updated',
+      wireEvent.type === 'message.updated' || wireEvent.type === 'tool.updated',
     );
   }
 
@@ -298,7 +308,8 @@ export class BridgeClient {
       }
       // The broker is authoritative at reconnect time. A cached snapshot can
       // still contain a question resolved while this bridge was offline.
-      const interactions = this.options.broker?.list() ?? [];
+      const interactions =
+        this.options.broker?.list().map(interactionSnapshot) ?? [];
       snapshot = {
         ...snapshot,
         ...(this.options.broker
@@ -615,7 +626,30 @@ function liveState(
 function interactionSnapshot(
   interaction: ReturnType<InteractionBroker['list']>[number],
 ): InteractionSnapshot {
-  return interaction;
+  const safe = jsonSafe(interaction) as InteractionSnapshot | null;
+  if (safe) return safe;
+  // Keep dashboard interactions comfortably below the frame cap even when a
+  // provider supplies many huge previews. The local Pi dialog remains the
+  // authoritative full-fidelity interaction.
+  return {
+    id: interaction.id,
+    type: 'ask_user',
+    question: interaction.question.slice(0, 20_000),
+    choices: interaction.choices.slice(0, 50).map((choice) => ({
+      label: choice.label.slice(0, 512),
+      value: choice.value.slice(0, 512),
+      ...(choice.description
+        ? { description: choice.description.slice(0, 2_000) }
+        : {}),
+      ...(choice.preview ? { preview: choice.preview.slice(0, 4_000) } : {}),
+      ...(choice.custom === undefined ? {} : { custom: choice.custom }),
+    })),
+    allowCustom: interaction.allowCustom,
+    ...(interaction.customLabel
+      ? { customLabel: interaction.customLabel.slice(0, 512) }
+      : {}),
+    createdAt: interaction.createdAt,
+  };
 }
 
 export async function dispatchDashboardCommand(
