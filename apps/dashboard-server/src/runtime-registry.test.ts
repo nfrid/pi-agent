@@ -27,6 +27,71 @@ function eventually<T>(read: () => T | undefined): Promise<T> {
 }
 
 describe('runtime registry', () => {
+  it('tombstones forgotten runtimes so leaked clients cannot reconnect', async () => {
+    const registry = new RuntimeRegistry({ expectedToken: () => true });
+    const first = new PassThrough();
+    registry.accept(first as never);
+    first.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    expect(registry.forget('runtime-1')).toMatchObject({
+      runtimeId: 'runtime-1',
+    });
+    expect(registry.get('runtime-1')).toBeUndefined();
+    const reconnect = new PassThrough();
+    registry.accept(reconnect as never);
+    reconnect.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(reconnect.destroyed).toBe(true);
+  });
+
+  it('allows the same managed runtime identity to reconnect after extension reload', async () => {
+    const registry = new RuntimeRegistry({ expectedToken: () => true });
+    const first = new PassThrough();
+    registry.accept(first as never);
+    first.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    first.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 2,
+        event: { type: 'runtime.goodbye', reason: 'reload' },
+      }),
+    );
+    await eventually(() =>
+      registry.get('runtime-1') === undefined ? true : undefined,
+    );
+    const replacement = new PassThrough();
+    registry.accept(replacement as never);
+    replacement.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    expect(registry.isOnline('runtime-1')).toBe(true);
+    replacement.destroy();
+  });
+
   it('registers full snapshots, serializes commands, and ignores duplicate events', async () => {
     const registry = new RuntimeRegistry({
       expectedToken: (_id, token) => token === 'one',
@@ -111,6 +176,15 @@ describe('runtime registry', () => {
       liveState: 'working',
       session: { entries: [{ id: 'live-entry' }] },
     });
-    bridge.destroy();
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 3,
+        event: { type: 'runtime.goodbye' },
+      }),
+    );
+    await eventually(() =>
+      registry.get('runtime-1') === undefined ? true : undefined,
+    );
   });
 });

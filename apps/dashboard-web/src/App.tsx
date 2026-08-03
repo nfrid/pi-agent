@@ -169,6 +169,7 @@ function Dashboard({ snapshot }: { snapshot: BrowserSnapshot }) {
   const groups = new Map<string, { workspace: WorkspaceTarget | undefined; runtimes: RuntimeSnapshot[] }>();
   for (const workspace of snapshot.workspaces) groups.set(workspace.id, { workspace, runtimes: [] });
   for (const runtime of snapshot.runtimes) {
+    if (runtime.online === false) continue;
     const workspace = snapshot.workspaces.find((item) => item.canonicalPath === runtime.cwd || runtime.cwd.startsWith(`${item.canonicalPath}/`));
     const key = workspace?.id ?? 'other';
     groups.set(key, groups.get(key) ?? { workspace, runtimes: [] });
@@ -193,7 +194,7 @@ function RuntimeCard({ runtime }: { runtime: RuntimeSnapshot }) {
 
 function WorkspaceView({ id, snapshot }: { id: string; snapshot: BrowserSnapshot }) {
   const workspace = snapshot.workspaces.find((item) => item.id === id);
-  const runtimes = snapshot.runtimes.filter((runtime) => workspace && (runtime.cwd === workspace.canonicalPath || runtime.cwd.startsWith(`${workspace.canonicalPath}/`)));
+  const runtimes = snapshot.runtimes.filter((runtime) => runtime.online !== false && workspace && (runtime.cwd === workspace.canonicalPath || runtime.cwd.startsWith(`${workspace.canonicalPath}/`)));
   const sessions = snapshot.sessions.filter((session) => session.workspaceId === id);
   return <section><Back /><div className="section-heading"><div><p className="eyebrow">Workspace</p><h1>{workspace?.name ?? 'Unknown workspace'}</h1><p className="muted path">{workspace?.canonicalPath}</p></div><button onClick={() => navigate('/new')}>Start agent</button></div>{workspace && !workspace.active && <div className="notice">This workspace has no active tmux session yet. Open it through Sesh on the Mac first.</div>}<h2>Active runtimes</h2>{runtimes.map((runtime) => <RuntimeCard runtime={runtime} key={runtime.runtimeId} />)}{!runtimes.length && <p className="empty">No active runtimes.</p>}<h2>Recent sessions</h2>{sessions.map((session) => <SessionRow key={session.id} session={session} />)}</section>;
 }
@@ -278,7 +279,7 @@ function SessionView({ id, snapshot, lastEvent, reconnectNonce }: { id: string; 
   const [data, setData] = useState<SessionResponse>();
   const [error, setError] = useState<string>();
   const scrolledSessionRef = useRef<string | undefined>(undefined);
-  const runtime = snapshot.runtimes.find((item) => item.session.id === id);
+  const runtime = snapshot.runtimes.find((item) => item.online !== false && item.session.id === id);
   useEffect(() => {
     let active = true;
     void api<unknown>(`/api/sessions/${encodeURIComponent(id)}`)

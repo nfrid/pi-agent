@@ -49,6 +49,7 @@ export interface RuntimeRegistryOptions {
 
 export class RuntimeRegistry {
   private readonly runtimes = new Map<string, RuntimeRecord>();
+  private readonly forgotten = new Set<string>();
 
   constructor(private readonly options: RuntimeRegistryOptions = {}) {}
 
@@ -115,6 +116,7 @@ export class RuntimeRegistry {
             )
           )
             return reject();
+          if (this.forgotten.has(snapshot.runtimeId)) return reject();
           const old = this.runtimes.get(snapshot.runtimeId);
           if (old?.socket && old.socket !== socket) old.socket.destroy();
           record = {
@@ -160,6 +162,21 @@ export class RuntimeRegistry {
       }
     });
     socket.once('error', () => socket.destroy());
+  }
+
+  /** Remove a stopped or unusable runtime and reject reconnects for this daemon lifetime. */
+  forget(runtimeId: string, tombstone = true): RuntimeSnapshot | undefined {
+    const record = this.runtimes.get(runtimeId);
+    if (tombstone) this.forgotten.add(runtimeId);
+    if (!record) return undefined;
+    this.runtimes.delete(runtimeId);
+    for (const pending of record.pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('Runtime was removed.'));
+    }
+    record.pending.clear();
+    record.socket?.destroy();
+    return record.snapshot;
   }
 
   sendCommand(runtimeId: string, input: unknown): Promise<unknown> {
@@ -218,6 +235,7 @@ export class RuntimeRegistry {
   close(): void {
     for (const record of this.runtimes.values()) record.socket?.destroy();
     this.runtimes.clear();
+    this.forgotten.clear();
   }
 
   private handleFrame(
@@ -249,6 +267,8 @@ export class RuntimeRegistry {
       event,
       snapshot: record.snapshot,
     });
+    if (event.type === 'runtime.goodbye')
+      this.forget(record.snapshot.runtimeId, event.reason !== 'reload');
   }
 
   private mergeEvent(

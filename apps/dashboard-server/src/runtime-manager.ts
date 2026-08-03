@@ -205,7 +205,13 @@ export class RuntimeManager {
       );
     const launch = this.launches.get(runtimeId);
     if (snapshot.ownership === 'external') {
-      await this.registry.sendCommand(runtimeId, { type: 'shutdown' });
+      // An external Pi may have an old extension context and reject shutdown.
+      // Stop still means "remove this runtime from the dashboard"; tombstoning
+      // also prevents a leaked bridge instance from immediately reconnecting.
+      await this.registry
+        .sendCommand(runtimeId, { type: 'shutdown' })
+        .catch(() => undefined);
+      this.registry.forget(runtimeId);
       return;
     }
     if (!force) {
@@ -232,6 +238,7 @@ export class RuntimeManager {
       this.metadata.markManagedStopped(runtimeId);
       this.launches.delete(runtimeId);
     }
+    this.registry.forget(runtimeId);
   }
 
   private signalManagedProcess(pid: number, signal: NodeJS.Signals): void {

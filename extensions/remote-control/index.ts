@@ -543,7 +543,10 @@ export default defineExtension('remote-control', (pi) => {
     const tearsDownExtension =
       event.reason === 'quit' || event.reason === 'reload';
     if (tearsDownExtension && runtime.isCurrent(ctx))
-      runtime.client.sendEvent({ type: 'runtime.goodbye' });
+      runtime.client.sendEvent({
+        type: 'runtime.goodbye',
+        reason: event.reason,
+      });
     runtime.clearContext(ctx);
     if (tearsDownExtension) runtime.client.stop();
   });

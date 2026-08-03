@@ -8,7 +8,7 @@ test('mobile dashboard renders and supports the new-agent route', async ({
       contentType: 'application/json',
       body: JSON.stringify({
         revision: 1,
-        runtimes: [],
+        runtimes: [{ runtimeId: 'ghost', ownership: 'external', pid: 1, cwd: '/tmp', liveState: 'idle', online: false, session: { id: 'ghost-session', entries: [] }, pendingInteractions: [] }],
         workspaces: [
           {
             id: 'w',
@@ -27,6 +27,7 @@ test('mobile dashboard renders and supports the new-agent route', async ({
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
   await expect(page.getByText('Nothing is running yet.')).toBeVisible();
+  await expect(page.getByText('ghost-session')).toHaveCount(0);
   await expect(page.getByRole('button', { name: '+ Agent' })).toBeVisible();
   expect(
     await page

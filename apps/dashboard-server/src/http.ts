@@ -81,7 +81,6 @@ class DashboardServerImpl implements DashboardServer {
   private usageSnapshot: unknown;
   private revision = 0;
   private started = false;
-  private readonly goodbyeRuntimes = new Set<string>();
 
   constructor(options: DashboardServerOptions = {}) {
     this.host = options.host ?? process.env.PI_DASHBOARD_HOST ?? '127.0.0.1';
@@ -594,27 +593,25 @@ class DashboardServerImpl implements DashboardServer {
     this.manager.onRegistryChange(change);
     if (change.kind === 'offline') {
       const runtimeId = change.snapshot.runtimeId;
-      if (!this.goodbyeRuntimes.delete(runtimeId)) {
-        const kind =
-          change.snapshot.liveState === 'failed' ? 'failed' : 'runtime-exited';
-        const notification: NotificationEvent = {
-          id: `${kind}-${runtimeId}-${change.snapshot.lastSeenAt ?? Date.now()}`,
-          kind,
-          runtimeId,
-          sessionId: change.snapshot.session.id,
-          title:
-            kind === 'failed'
-              ? 'Pi runtime failed'
-              : 'Pi runtime disconnected unexpectedly',
-          body:
-            change.snapshot.lastError ??
-            change.snapshot.session.name ??
-            change.snapshot.cwd,
-          createdAt: Date.now(),
-        };
-        this.metadata.addNotification(notification);
-        void this.push.notify(notification).catch(() => undefined);
-      }
+      const kind =
+        change.snapshot.liveState === 'failed' ? 'failed' : 'runtime-exited';
+      const notification: NotificationEvent = {
+        id: `${kind}-${runtimeId}-${change.snapshot.lastSeenAt ?? Date.now()}`,
+        kind,
+        runtimeId,
+        sessionId: change.snapshot.session.id,
+        title:
+          kind === 'failed'
+            ? 'Pi runtime failed'
+            : 'Pi runtime disconnected unexpectedly',
+        body:
+          change.snapshot.lastError ??
+          change.snapshot.session.name ??
+          change.snapshot.cwd,
+        createdAt: Date.now(),
+      };
+      this.metadata.addNotification(notification);
+      void this.push.notify(notification).catch(() => undefined);
     }
     if (change.kind === 'event') {
       const event = change.event;
@@ -624,8 +621,6 @@ class DashboardServerImpl implements DashboardServer {
           .clearWaiting?.(change.snapshot.runtimeId)
           .catch(() => undefined);
       }
-      if (event.type === 'runtime.goodbye')
-        this.goodbyeRuntimes.add(change.snapshot.runtimeId);
       const shouldNotify =
         event.type === 'interaction.requested' ||
         event.type === 'runtime.goodbye' ||
