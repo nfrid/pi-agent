@@ -969,6 +969,19 @@ function InteractionCard({
   );
 }
 
+function activityTitleLine(text: string): string {
+  return (
+    text
+      .split('\n')[0]
+      ?.trim()
+      .replace(/[.…:]+$/, '') ?? text
+  );
+}
+
+export function shouldShowActivityLead(text: string, title: string): boolean {
+  return !isNarration(text) && activityTitleLine(text) !== title;
+}
+
 function activityTitle(
   items: readonly TranscriptModelItem[],
   tools: readonly Extract<ActivityTranscriptEntry, { kind: 'tool' }>[],
@@ -981,13 +994,7 @@ function activityTitle(
       (item) =>
         item.role === 'assistant' && item.text && !isNarration(item.text),
     );
-  if (preamble?.text)
-    return (
-      preamble.text
-        .split('\n')[0]
-        ?.trim()
-        .replace(/[.…:]+$/, '') ?? preamble.text
-    );
+  if (preamble?.text) return activityTitleLine(preamble.text);
   const assistants = items
     .map((item) => item.raw)
     .filter((raw): raw is Record<string, unknown> =>
@@ -1050,7 +1057,9 @@ function Transcript({ entries }: { entries: unknown[] }) {
           );
           const lead = items[group.start];
           const visibleLead =
-            lead?.role === 'assistant' && lead.text && !isNarration(lead.text)
+            lead?.role === 'assistant' &&
+            lead.text &&
+            shouldShowActivityLead(lead.text, title)
               ? lead.text
               : undefined;
           const detailId = `activity-detail-${group.start}`;

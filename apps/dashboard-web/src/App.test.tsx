@@ -6,6 +6,7 @@ import {
   formatContextTokens,
   isNearPageBottom,
   reconcileLiveEvent,
+  shouldShowActivityLead,
   toTranscriptEntries,
 } from './App';
 
@@ -56,6 +57,20 @@ describe('context window indicator', () => {
         percent: null,
       }),
     ).toEqual({ percent: undefined, text: '?% [?/272k]', level: 'normal' });
+  });
+});
+
+describe('activity presentation', () => {
+  it('hides an assistant lead when the same text is used as the title', () => {
+    expect(
+      shouldShowActivityLead(
+        'Checking the mobile transcript.',
+        'Checking the mobile transcript',
+      ),
+    ).toBe(false);
+    expect(
+      shouldShowActivityLead('A useful explanation.', 'Explored with read'),
+    ).toBe(true);
   });
 });
 
