@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,13 +6,18 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   type RuntimeSnapshot,
   serializeFrame,
 } from '../../packages/dashboard-protocol/src/index';
 import { InteractionBroker } from '../ask-user/broker';
-import { BridgeClient, createRemoteControlRuntime } from './index';
+import {
+  BridgeClient,
+  createRemoteControlRuntime,
+  dispatchDashboardInput,
+  expandDashboardInput,
+} from './index';
 
 const snapshot: RuntimeSnapshot = {
   runtimeId: 'runtime-test',
@@ -36,6 +41,123 @@ function waitFor(predicate: () => boolean): Promise<void> {
     tick();
   });
 }
+
+describe('dashboard input dispatch', () => {
+  it('expands prompt templates with native positional argument semantics', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-prompt-'));
+    const file = path.join(directory, 'review.md');
+    await writeFile(
+      file,
+      `---\ndescription: Review code\n---\nReview $1 with \${2:-care}. All: $ARGUMENTS\n`,
+    );
+    expect(
+      expandDashboardInput('/review "src/app.ts"', [
+        {
+          name: 'review',
+          source: 'prompt',
+          sourceInfo: {
+            path: file,
+            source: 'local',
+            scope: 'user',
+            origin: 'top-level',
+            baseDir: directory,
+          },
+        },
+      ]),
+    ).toBe('Review src/app.ts with care. All: src/app.ts');
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('expands skills into the native skill block and preserves instructions', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-skill-'));
+    const file = path.join(directory, 'SKILL.md');
+    await writeFile(file, '---\nname: demo\n---\nFollow this skill.\n');
+    expect(
+      expandDashboardInput('/skill:demo inspect this', [
+        {
+          name: 'skill:demo',
+          source: 'skill',
+          sourceInfo: {
+            path: file,
+            source: 'local',
+            scope: 'user',
+            origin: 'top-level',
+            baseDir: directory,
+          },
+        },
+      ]),
+    ).toBe(
+      `<skill name="demo" location="${file}">\nReferences are relative to ${directory}.\n\nFollow this skill.\n</skill>\n\ninspect this`,
+    );
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  it('dispatches bridge-native commands and rejects unavailable extension commands', async () => {
+    const compact = vi.fn();
+    const setSessionName = vi.fn();
+    const sendUserMessage = vi.fn();
+    const pi = {
+      getCommands: () => [
+        {
+          name: 'custom',
+          source: 'extension',
+          sourceInfo: {
+            path: '/tmp/custom.ts',
+            source: 'local',
+            scope: 'user',
+            origin: 'top-level',
+          },
+        },
+      ],
+      setSessionName,
+      sendUserMessage,
+    } as unknown as ExtensionAPI;
+    const context = { compact } as unknown as ExtensionContext;
+
+    await expect(
+      dispatchDashboardInput(pi, context, '/compact keep decisions'),
+    ).resolves.toMatchObject({ command: 'compact' });
+    expect(compact).toHaveBeenCalledWith({
+      customInstructions: 'keep decisions',
+    });
+    await dispatchDashboardInput(pi, context, '/name Dashboard session');
+    expect(setSessionName).toHaveBeenCalledWith('Dashboard session');
+    await expect(
+      dispatchDashboardInput(pi, context, '/custom value'),
+    ).rejects.toThrow('not available through the dashboard yet');
+    await expect(
+      dispatchDashboardInput(pi, context, '/reload'),
+    ).rejects.toThrow('not available through the dashboard yet');
+    expect(sendUserMessage).not.toHaveBeenCalled();
+
+    await dispatchDashboardInput(pi, context, 'later', 'followUp');
+    expect(sendUserMessage).toHaveBeenCalledWith('later', {
+      deliverAs: 'followUp',
+    });
+  });
+
+  it('accepts an EOF-terminated frontmatter delimiter', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-prompt-eof-'));
+    const file = path.join(directory, 'empty.md');
+    await writeFile(file, '---\r\ndescription: Empty\r\n---');
+    expect(
+      expandDashboardInput('/empty', [
+        {
+          name: 'empty',
+          source: 'prompt',
+          sourceInfo: {
+            path: file,
+            source: 'local',
+            scope: 'user',
+            origin: 'top-level',
+            baseDir: directory,
+          },
+        },
+      ]),
+    ).toBe('');
+    await rm(directory, { recursive: true, force: true });
+  });
+});
 
 describe('remote-control bridge', () => {
   it('reconnects from a cached snapshot without touching a replaced session context', async () => {
