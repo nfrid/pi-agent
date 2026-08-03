@@ -587,6 +587,15 @@ h2 {
 .message-assistant .message-role {
   color: var(--purple);
 }
+.message-attachment {
+  display: inline-block;
+  margin: 2px 0 7px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--cyan);
+  font-size: 11px;
+}
 .markdown {
   min-width: 0;
   overflow-x: auto;

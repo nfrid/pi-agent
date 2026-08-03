@@ -145,6 +145,44 @@ describe('dashboard input dispatch', () => {
     });
   });
 
+  it('dispatches temporary images as native Pi multimodal content', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-image-input-'));
+    const file = path.join(directory, 'image.png');
+    await writeFile(
+      file,
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+    const sendUserMessage = vi.fn();
+    const pi = {
+      getCommands: () => [],
+      sendUserMessage,
+    } as unknown as ExtensionAPI;
+    await dispatchDashboardInput(
+      pi,
+      {} as ExtensionContext,
+      'describe this',
+      undefined,
+      [{ type: 'image', path: file, mediaType: 'image/png' }],
+    );
+    expect(sendUserMessage).toHaveBeenCalledWith(
+      [
+        { type: 'text', text: 'describe this' },
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            mediaType: 'image/png',
+            data: Buffer.from([
+              0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+            ]).toString('base64'),
+          },
+        },
+      ],
+      undefined,
+    );
+    await rm(directory, { recursive: true, force: true });
+  });
+
   it('accepts an EOF-terminated frontmatter delimiter', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-prompt-eof-'));
     const file = path.join(directory, 'empty.md');

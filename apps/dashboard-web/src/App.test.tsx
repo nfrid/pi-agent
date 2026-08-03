@@ -42,17 +42,31 @@ describe('image attachments', () => {
     ).toContain('up to 4');
   });
 
-  it('keeps image capability compatible when omitted', () => {
+  it('renders redacted image-only user messages as attachments', () => {
+    expect(
+      toTranscriptEntries([
+        {
+          type: 'message',
+          message: {
+            role: 'user',
+            content: [{ type: 'image', mimeType: 'image/png', omitted: true }],
+          },
+        },
+      ])[0],
+    ).toMatchObject({ role: 'user', imageCount: 1 });
+  });
+
+  it('requires an explicit image capability from the connected runtime', () => {
     const runtime = {
       model: { provider: 'test', model: 'vision' },
     } as RuntimeSnapshot;
-    expect(runtimeSupportsImages(runtime)).toBe(true);
+    expect(runtimeSupportsImages(runtime)).toBe(false);
     expect(
       runtimeSupportsImages({
         ...runtime,
-        model: { provider: 'test', model: 'vision', supportsImages: false },
+        model: { provider: 'test', model: 'vision', supportsImages: true },
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 

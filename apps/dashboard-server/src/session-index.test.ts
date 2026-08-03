@@ -52,7 +52,7 @@ describe('session index', () => {
     const file = path.join(root, 'project', 'session.jsonl');
     await writeFile(
       file,
-      `${JSON.stringify({ type: 'session', version: 3, id: 'session-id', cwd: '/tmp/project' })}\n${JSON.stringify({ type: 'message', id: 'entry' })}\n`,
+      `${JSON.stringify({ type: 'session', version: 3, id: 'session-id', cwd: '/tmp/project' })}\n${JSON.stringify({ type: 'message', id: 'entry', message: { role: 'user', content: [{ type: 'image', mimeType: 'image/png', data: 'base64-bytes' }] } })}\n`,
     );
     const index = new SessionIndex(root);
     await index.rebuild();
@@ -64,9 +64,16 @@ describe('session index', () => {
     await expect(index.readEntries('not-known')).rejects.toThrow(
       'Unknown session',
     );
-    await expect(index.readEntries('session-id')).resolves.toMatchObject({
+    const session = await index.readEntries('session-id');
+    expect(session).toMatchObject({
       entries: [{ type: 'session' }, { type: 'message' }],
     });
+    expect(session.entries[1]).toMatchObject({
+      message: {
+        content: [{ type: 'image', mimeType: 'image/png', omitted: true }],
+      },
+    });
+    expect(JSON.stringify(session.entries)).not.toContain('base64-bytes');
   });
 
   it('uses latest session_info and first user message, not header.name', async () => {

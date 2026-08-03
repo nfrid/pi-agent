@@ -5,6 +5,7 @@ import readline from 'node:readline';
 import {
   deriveSessionTitle,
   isRecord,
+  redactImageData,
   type SessionIndexEntry,
   validateSessionName,
   type WorkspaceTarget,
@@ -92,18 +93,32 @@ export class SessionIndex {
     if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
       throw new Error('Unknown session.');
     const { header: _header, lastEntryId: _lastEntryId, ...metadata } = indexed;
-    const stat = await fs.stat(indexed.file);
-    if (stat.size > 8 * 1024 * 1024)
-      throw new Error('Session is too large to open remotely.');
-    const text = await fs.readFile(indexed.file, 'utf8');
     const entries: unknown[] = [];
-    for (const line of text.split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        entries.push(JSON.parse(line) as unknown);
-      } catch {
-        /* tolerate a partial final line */
+    let responseBytes = 0;
+    const input = createReadStream(indexed.file, { encoding: 'utf8' });
+    const lines = readline.createInterface({
+      input,
+      crlfDelay: Number.POSITIVE_INFINITY,
+    });
+    try {
+      for await (const line of lines) {
+        if (!line.trim()) continue;
+        if (Buffer.byteLength(line) > 24 * 1024 * 1024)
+          throw new Error('A session entry is too large to open remotely.');
+        try {
+          const entry = redactImageData(JSON.parse(line) as unknown);
+          responseBytes += Buffer.byteLength(JSON.stringify(entry));
+          if (responseBytes > 8 * 1024 * 1024)
+            throw new Error('Session is too large to open remotely.');
+          entries.push(entry);
+        } catch (error) {
+          if (error instanceof SyntaxError) continue;
+          throw error;
+        }
       }
+    } finally {
+      lines.close();
+      input.destroy();
     }
     return { metadata, entries };
   }

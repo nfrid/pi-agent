@@ -13,6 +13,7 @@ import { URL } from 'node:url';
 import {
   type BrowserSnapshot,
   type NotificationEvent,
+  redactImageData,
   validateBridgeCommand,
   validateSessionRenameRequest,
   validateStartRuntimeRequest,
@@ -30,6 +31,10 @@ import { TmuxAdapter } from './tmux.js';
 import { CodexUsageProvider, type UsageProvider } from './usage.js';
 
 const MAX_BODY = 512 * 1024;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_IMAGE_TOTAL_BYTES = 12 * 1024 * 1024;
+const MAX_MULTIPART_BYTES = MAX_IMAGE_TOTAL_BYTES + 256 * 1024;
+const MAX_IMAGE_COUNT = 4;
 const MAX_WS_BUFFER = 1024 * 1024;
 const MAX_USAGE_BYTES = 256 * 1024;
 const USAGE_CACHE_MS = 30_000;
@@ -55,6 +60,131 @@ function loadOrCreateToken(stateDir: string): string {
     if (existing.length >= 32 && existing.length <= 512) return existing;
     throw new Error('Could not create a stable dashboard browser token.');
   }
+}
+
+function validImageDimensions(width: number, height: number): boolean {
+  return (
+    Number.isSafeInteger(width) &&
+    Number.isSafeInteger(height) &&
+    width > 0 &&
+    height > 0 &&
+    width * height <= 40_000_000
+  );
+}
+
+function validPng(data: Buffer): boolean {
+  const signature = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  ]);
+  if (data.length < 45 || !data.subarray(0, 8).equals(signature)) return false;
+  let offset = 8;
+  let sawHeader = false;
+  while (offset + 12 <= data.length) {
+    const length = data.readUInt32BE(offset);
+    const end = offset + 12 + length;
+    if (end > data.length) return false;
+    const type = data.toString('ascii', offset + 4, offset + 8);
+    if (!sawHeader) {
+      if (type !== 'IHDR' || length !== 13) return false;
+      if (
+        !validImageDimensions(
+          data.readUInt32BE(offset + 8),
+          data.readUInt32BE(offset + 12),
+        )
+      )
+        return false;
+      sawHeader = true;
+    }
+    if (type === 'IEND') return length === 0 && end === data.length;
+    offset = end;
+  }
+  return false;
+}
+
+function validJpeg(data: Buffer): boolean {
+  if (
+    data.length < 12 ||
+    data[0] !== 0xff ||
+    data[1] !== 0xd8 ||
+    data[data.length - 2] !== 0xff ||
+    data[data.length - 1] !== 0xd9
+  )
+    return false;
+  let offset = 2;
+  let hasDimensions = false;
+  while (offset + 4 <= data.length - 2) {
+    if (data[offset] !== 0xff) return false;
+    while (data[offset] === 0xff) offset += 1;
+    const marker = data[offset];
+    offset += 1;
+    if (marker === 0xda) return hasDimensions;
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+    if (offset + 2 > data.length - 2) return false;
+    const length = data.readUInt16BE(offset);
+    if (length < 2 || offset + length > data.length - 2) return false;
+    const isStartOfFrame =
+      marker !== undefined &&
+      ((marker >= 0xc0 && marker <= 0xc3) ||
+        (marker >= 0xc5 && marker <= 0xc7) ||
+        (marker >= 0xc9 && marker <= 0xcb) ||
+        (marker >= 0xcd && marker <= 0xcf));
+    if (isStartOfFrame) {
+      if (length < 7) return false;
+      hasDimensions = validImageDimensions(
+        data.readUInt16BE(offset + 5),
+        data.readUInt16BE(offset + 3),
+      );
+      if (!hasDimensions) return false;
+    }
+    offset += length;
+  }
+  return false;
+}
+
+function validWebp(data: Buffer): boolean {
+  if (
+    data.length < 30 ||
+    data.toString('ascii', 0, 4) !== 'RIFF' ||
+    data.readUInt32LE(4) + 8 !== data.length ||
+    data.toString('ascii', 8, 12) !== 'WEBP'
+  )
+    return false;
+  const chunk = data.toString('ascii', 12, 16);
+  const length = data.readUInt32LE(16);
+  if (20 + length > data.length) return false;
+  if (chunk === 'VP8X' && length >= 10) {
+    const width = 1 + data.readUIntLE(24, 3);
+    const height = 1 + data.readUIntLE(27, 3);
+    return validImageDimensions(width, height);
+  }
+  if (chunk === 'VP8L' && length >= 5 && data[20] === 0x2f) {
+    const bits = data.readUInt32LE(21);
+    return validImageDimensions(
+      1 + (bits & 0x3fff),
+      1 + ((bits >> 14) & 0x3fff),
+    );
+  }
+  if (
+    chunk === 'VP8 ' &&
+    length >= 10 &&
+    data[23] === 0x9d &&
+    data[24] === 0x01 &&
+    data[25] === 0x2a
+  )
+    return validImageDimensions(
+      data.readUInt16LE(26) & 0x3fff,
+      data.readUInt16LE(28) & 0x3fff,
+    );
+  return false;
+}
+
+function validateImageMediaType(
+  data: Buffer,
+): 'image/png' | 'image/jpeg' | 'image/webp' | undefined {
+  if (validPng(data)) return 'image/png';
+  if (validJpeg(data)) return 'image/jpeg';
+  if (validWebp(data)) return 'image/webp';
+  return undefined;
 }
 
 function isTranscriptEvent(change: RegistryChange): boolean {
@@ -251,6 +381,9 @@ class DashboardServerImpl implements DashboardServer {
     if (this.started) return;
     this.started = true;
     await fs.mkdir(this.stateDir, { recursive: true, mode: 0o700 });
+    const uploads = path.join(this.stateDir, 'uploads');
+    await fs.rm(uploads, { recursive: true, force: true });
+    await fs.mkdir(uploads, { recursive: true, mode: 0o700 });
     await fs.rm(this.socketPath, { force: true }).catch(() => undefined);
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => {
@@ -498,11 +631,109 @@ class DashboardServerImpl implements DashboardServer {
     request: http.IncomingMessage,
     response: http.ServerResponse,
   ): Promise<void> {
-    const body = (await this.body(request)) as Record<string, unknown>;
-    const command = validateBridgeCommand({ ...body, id: 'browser' });
-    const { id: _id, ...input } = command;
-    const result = await this.registry.sendCommand(runtimeId, input);
+    const contentType = request.headers['content-type'] ?? '';
+    const uploaded: string[] = [];
+    let result: unknown;
+    try {
+      let body: Record<string, unknown>;
+      let images: Array<{
+        type: 'image';
+        path: string;
+        mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+      }> = [];
+      if (contentType.startsWith('multipart/form-data;')) {
+        const parsed = await this.multipartCommand(request, contentType);
+        body = parsed.body;
+        images = parsed.images;
+        uploaded.push(...images.map((image) => image.path));
+      } else {
+        const value = await this.body(request);
+        if (!value || typeof value !== 'object' || Array.isArray(value))
+          throw new Error('Invalid command body.');
+        body = value as Record<string, unknown>;
+      }
+      if ('images' in body)
+        throw new Error('Image paths cannot be supplied by browser clients.');
+      if (
+        images.length > 0 &&
+        this.registry.get(runtimeId)?.model?.supportsImages !== true
+      )
+        throw new Error(
+          'This runtime does not support dashboard image attachments; reload it and select an image-capable model.',
+        );
+      const command = validateBridgeCommand({
+        ...body,
+        id: 'browser',
+        ...(images.length > 0 ? { images } : {}),
+      });
+      const { id: _id, ...input } = command;
+      result = await this.registry.sendCommand(runtimeId, input);
+    } finally {
+      await Promise.all(uploaded.map((file) => fs.rm(file, { force: true })));
+    }
     return this.json(response, 200, { ok: true, result });
+  }
+
+  private async multipartCommand(
+    request: http.IncomingMessage,
+    contentType: string,
+  ): Promise<{
+    body: Record<string, unknown>;
+    images: Array<{
+      type: 'image';
+      path: string;
+      mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+    }>;
+  }> {
+    const raw = await this.bodyBuffer(request, MAX_MULTIPART_BYTES);
+    const form = await new Response(new Uint8Array(raw), {
+      headers: { 'content-type': contentType },
+    }).formData();
+    const commandPart = form.get('command');
+    if (typeof commandPart !== 'string' || commandPart.length > MAX_BODY)
+      throw new Error('Multipart command is required.');
+    const parsed: unknown = JSON.parse(commandPart);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      throw new Error('Invalid multipart command.');
+    const parts = form.getAll('images');
+    if (parts.length === 0 || parts.length > MAX_IMAGE_COUNT)
+      throw new Error('Attach between one and four images.');
+    const directory = path.join(this.stateDir, 'uploads');
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    const images: Array<{
+      type: 'image';
+      path: string;
+      mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+    }> = [];
+    const createdPaths: string[] = [];
+    try {
+      let total = 0;
+      for (const part of parts) {
+        if (typeof part === 'string') throw new Error('Invalid image upload.');
+        if (part.size === 0 || part.size > MAX_IMAGE_BYTES)
+          throw new Error('Each image must be between 1 byte and 5 MiB.');
+        total += part.size;
+        if (total > MAX_IMAGE_TOTAL_BYTES)
+          throw new Error('Image attachments exceed the 12 MiB total limit.');
+        const data = Buffer.from(await part.arrayBuffer());
+        const mediaType = validateImageMediaType(data);
+        if (!mediaType)
+          throw new Error('Only PNG, JPEG, and WebP are allowed.');
+        const file = path.join(
+          directory,
+          `${Date.now()}-${randomBytes(16).toString('hex')}`,
+        );
+        createdPaths.push(file);
+        await fs.writeFile(file, data, { mode: 0o600, flag: 'wx' });
+        images.push({ type: 'image', path: file, mediaType });
+      }
+      return { body: parsed as Record<string, unknown>, images };
+    } catch (error) {
+      await Promise.all(
+        createdPaths.map((file) => fs.rm(file, { force: true })),
+      );
+      throw error;
+    }
   }
 
   private async handleStop(
@@ -609,7 +840,7 @@ class DashboardServerImpl implements DashboardServer {
           activeRuntimeId: runtime.runtimeId,
           entryCount: runtime.session.entries.length,
         },
-        entries: runtime.session.entries,
+        entries: redactImageData(runtime.session.entries),
       });
     }
   }
@@ -699,17 +930,25 @@ class DashboardServerImpl implements DashboardServer {
     );
   }
 
-  private async body(request: http.IncomingMessage): Promise<unknown> {
+  private async bodyBuffer(
+    request: http.IncomingMessage,
+    maxBytes = MAX_BODY,
+  ): Promise<Buffer> {
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of request) {
       const data = Buffer.from(chunk as Uint8Array);
       size += data.byteLength;
-      if (size > MAX_BODY) throw new Error('Request body is too large.');
+      if (size > maxBytes) throw new Error('Request body is too large.');
       chunks.push(data);
     }
-    if (chunks.length === 0) return {};
-    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+    return Buffer.concat(chunks);
+  }
+
+  private async body(request: http.IncomingMessage): Promise<unknown> {
+    const data = await this.bodyBuffer(request);
+    if (data.byteLength === 0) return {};
+    return JSON.parse(data.toString('utf8')) as unknown;
   }
 
   private setCors(

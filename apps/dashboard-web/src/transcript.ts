@@ -12,6 +12,7 @@ export interface TranscriptModelItem {
   raw: unknown;
   text?: string;
   role?: 'user' | 'assistant';
+  imageCount?: number;
 }
 
 function directStableId(value: unknown): string | undefined {
@@ -204,6 +205,17 @@ function messageText(message: Record<string, unknown>): string {
   return contentText(message.content ?? message.text).trim();
 }
 
+function messageImageCount(message: Record<string, unknown>): number {
+  return Array.isArray(message.content)
+    ? message.content.filter(
+        (part) =>
+          part &&
+          typeof part === 'object' &&
+          (part as Record<string, unknown>).type === 'image',
+      ).length
+    : 0;
+}
+
 function toolRecord(raw: unknown): Record<string, unknown> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const record = raw as Record<string, unknown>;
@@ -274,6 +286,7 @@ export function toTranscriptEntries(
           ? 'assistant'
           : undefined;
     const text = messageText(message);
+    const imageCount = messageImageCount(message);
     if (role === 'assistant') {
       const assistant = {
         ...message,
@@ -319,10 +332,18 @@ export function toTranscriptEntries(
           raw,
           text: visibleText,
           role,
+          ...(imageCount > 0 ? { imageCount } : {}),
         },
         ...tools,
       );
-    } else result.push({ entry: { kind: 'other' }, raw, text, role });
+    } else
+      result.push({
+        entry: { kind: 'other' },
+        raw,
+        text,
+        role,
+        ...(imageCount > 0 ? { imageCount } : {}),
+      });
   }
   return result;
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,12 +10,14 @@ import type {
 import {
   type BridgeCommand,
   type BridgeEvent,
+  type BridgeImageAttachment,
   deriveSessionTitle,
   type InteractionSnapshot,
   PROTOCOL_VERSION,
   parseFrame,
   type RuntimeLiveState,
   type RuntimeSnapshot,
+  redactImageData,
   type SessionSnapshot,
   serializeFrame,
 } from '../../packages/dashboard-protocol/src/index';
@@ -148,9 +150,12 @@ export async function dispatchDashboardInput(
   ctx: ExtensionContext,
   text: string,
   deliverAs?: 'steer' | 'followUp',
+  images: readonly BridgeImageAttachment[] = [],
 ): Promise<{ accepted: true; command?: string }> {
   const invocation = commandParts(text);
   if (invocation && !deliverAs) {
+    if (images.length > 0 && PI_BUILTIN_COMMANDS.has(invocation.name))
+      throw new Error('Images cannot be attached to dashboard commands.');
     if (invocation.name === 'compact') {
       ctx.compact({ customInstructions: invocation.args.trim() || undefined });
       return { accepted: true, command: 'compact' };
@@ -190,7 +195,33 @@ export async function dispatchDashboardInput(
     );
   }
   const expanded = expandDashboardInput(text, commands);
-  pi.sendUserMessage(expanded, deliverAs ? { deliverAs } : undefined);
+  const content =
+    images.length > 0
+      ? [
+          ...(expanded ? [{ type: 'text' as const, text: expanded }] : []),
+          ...images.map((image) => {
+            const stat = statSync(image.path);
+            if (
+              !stat.isFile() ||
+              stat.size === 0 ||
+              stat.size > 5 * 1024 * 1024
+            )
+              throw new Error('Invalid temporary image attachment.');
+            return {
+              type: 'image' as const,
+              source: {
+                type: 'base64' as const,
+                mediaType: image.mediaType,
+                data: readFileSync(image.path).toString('base64'),
+              },
+            };
+          }),
+        ]
+      : expanded;
+  pi.sendUserMessage(
+    content as Parameters<ExtensionAPI['sendUserMessage']>[0],
+    deliverAs ? { deliverAs } : undefined,
+  );
   return { accepted: true };
 }
 
@@ -581,7 +612,7 @@ export class BridgeClient {
 
 function jsonSafe(value: unknown, max = MAX_JSON_PAYLOAD_BYTES): unknown {
   try {
-    const text = JSON.stringify(value);
+    const text = JSON.stringify(redactImageData(value));
     if (!text || Buffer.byteLength(text) > max) return null;
     return JSON.parse(text) as unknown;
   } catch {
@@ -613,6 +644,7 @@ function modelSnapshot(ctx: ExtensionContext): RuntimeSnapshot['model'] {
     provider: model.provider,
     model: model.id,
     thinking: ctx.thinkingLevel,
+    supportsImages: model.input.includes('image'),
   };
 }
 
@@ -663,15 +695,26 @@ export async function dispatchDashboardCommand(
     case 'prompt':
       if (!ctx.isIdle())
         throw new Error('Agent is working; choose steer or follow-up.');
-      return dispatchDashboardInput(pi, ctx, command.text);
+      if (command.images?.length && !ctx.model?.input.includes('image'))
+        throw new Error('The selected model does not support image input.');
+      return dispatchDashboardInput(
+        pi,
+        ctx,
+        command.text,
+        undefined,
+        command.images,
+      );
     case 'steer':
     case 'followUp':
+      if (command.images?.length && !ctx.model?.input.includes('image'))
+        throw new Error('The selected model does not support image input.');
       return {
         ...(await dispatchDashboardInput(
           pi,
           ctx,
           command.text,
           command.type === 'steer' ? 'steer' : 'followUp',
+          command.images,
         )),
         mode: command.type,
       };

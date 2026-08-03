@@ -1214,11 +1214,16 @@ function TranscriptEntry({
 }: {
   item: import('./transcript').TranscriptModelItem;
 }) {
-  if (item.role && item.text)
+  if (item.role && (item.text || item.imageCount))
     return (
       <article className={`message-bubble message-${item.role}`}>
         <span className="message-role">{item.role}</span>
-        <Markdown>{item.text}</Markdown>
+        {item.imageCount ? (
+          <span className="message-attachment">
+            {item.imageCount} image{item.imageCount === 1 ? '' : 's'} attached
+          </span>
+        ) : null}
+        {item.text ? <Markdown>{item.text}</Markdown> : null}
       </article>
     );
   const raw = item.raw;
@@ -1285,10 +1290,7 @@ export const MAX_IMAGE_TOTAL_SIZE = 12 * 1024 * 1024;
 type ImageAttachment = { file: File; previewUrl: string };
 
 export function runtimeSupportsImages(runtime: RuntimeSnapshot): boolean {
-  const model = runtime.model as
-    | (RuntimeSnapshot['model'] & { supportsImages?: boolean })
-    | undefined;
-  return model?.supportsImages !== false;
+  return runtime.model?.supportsImages === true;
 }
 
 export function addImageAttachments(
@@ -1299,6 +1301,10 @@ export function addImageAttachments(
   let totalSize = existing.reduce((total, file) => total + file.size, 0);
   let error: string | undefined;
   for (const file of incoming) {
+    if (file.size === 0) {
+      error ??= `${file.name} is empty.`;
+      continue;
+    }
     if (!IMAGE_TYPES.includes(file.type as (typeof IMAGE_TYPES)[number])) {
       error ??= `${file.name} is not a PNG, JPEG, or WebP image.`;
       continue;
@@ -1354,6 +1360,14 @@ function Composer({
   useEffect(() => {
     setMode(runtime?.liveState === 'working' ? 'followUp' : 'prompt');
   }, [runtime?.liveState]);
+  useEffect(() => {
+    if (attachmentsEnabled) return;
+    setAttachments((current) => {
+      for (const attachment of current)
+        URL.revokeObjectURL(attachment.previewUrl);
+      return [];
+    });
+  }, [attachmentsEnabled]);
   if (!runtime)
     return (
       <div className="composer disabled">
@@ -1408,6 +1422,10 @@ function Composer({
     event.preventDefault();
     const trimmedText = text.trim();
     if ((!trimmedText && !attachments.length) || disabled || busy) return;
+    if (attachments.length > 0 && !attachmentsEnabled) {
+      setError('The selected model does not support image input.');
+      return;
+    }
     setBusy(true);
     setError(undefined);
     const command = {
@@ -1486,7 +1504,7 @@ function Composer({
           {error}
         </p>
       )}
-      {attachmentsEnabled && (
+      {attachmentsEnabled ? (
         <>
           <input
             ref={fileInputRef}
@@ -1529,6 +1547,16 @@ function Composer({
             + Image
           </button>
         </>
+      ) : (
+        <button
+          type="button"
+          className="composer-attach"
+          disabled
+          title="The selected model does not support image input."
+          aria-label="Attach images (unsupported by selected model)"
+        >
+          + Image
+        </button>
       )}
       <textarea
         aria-label="Message Pi"

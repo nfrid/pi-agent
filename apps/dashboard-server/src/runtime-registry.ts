@@ -5,6 +5,7 @@ import {
   type BridgeEvent,
   parseFrame,
   type RuntimeSnapshot,
+  redactBridgeEvent,
   serializeFrame,
   validateBridgeCommand,
 } from '@pi-dashboard/protocol';
@@ -111,7 +112,10 @@ export class RuntimeRegistry {
         if (!helloSeen) {
           if (frame.kind !== 'event' || frame.event.type !== 'runtime.hello')
             return reject();
-          const hello = frame.event;
+          const hello = redactBridgeEvent(frame.event) as Extract<
+            BridgeEvent,
+            { type: 'runtime.hello' }
+          >;
           const snapshot = hello.snapshot;
           if (
             hello.protocolVersion !== 1 ||
@@ -358,7 +362,7 @@ export class RuntimeRegistry {
     }
     if (frame.kind !== 'event' || frame.seq <= record.lastSeq) return;
     record.lastSeq = frame.seq;
-    const event = frame.event;
+    const event = redactBridgeEvent(frame.event);
     record.snapshot = this.mergeEvent(record.snapshot, event);
     record.snapshot = {
       ...record.snapshot,

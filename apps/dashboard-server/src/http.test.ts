@@ -1,8 +1,15 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { serializeFrame } from '@pi-dashboard/protocol';
+import { parseFrame, serializeFrame } from '@pi-dashboard/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { createDashboardServer } from './http.js';
@@ -222,6 +229,174 @@ describe('dashboard HTTP boundary', () => {
       (await fetch(`http://127.0.0.1:${server.port}/api/health`)).status,
     ).toBe(200);
     bridge.destroy();
+  });
+
+  it('forwards authenticated multipart images and removes temporary files after acknowledgement', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-image-'));
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            runtimeId: 'image-runtime',
+            ownership: 'external',
+            pid: 456,
+            cwd: '/tmp/project',
+            liveState: 'idle',
+            session: { id: 'image-session', entries: [] },
+            model: {
+              provider: 'test',
+              model: 'vision',
+              supportsImages: true,
+            },
+            pendingInteractions: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    let buffered = '';
+    let temporaryPath: string | undefined;
+    const commandSeen = new Promise<void>((resolve, reject) => {
+      bridge.on('data', async (chunk) => {
+        buffered += chunk.toString('utf8');
+        const newline = buffered.indexOf('\n');
+        if (newline < 0) return;
+        const line = buffered.slice(0, newline);
+        buffered = buffered.slice(newline + 1);
+        const frame = parseFrame(line);
+        if (frame.kind !== 'command') return;
+        try {
+          if (
+            frame.command.type !== 'prompt' &&
+            frame.command.type !== 'steer' &&
+            frame.command.type !== 'followUp'
+          )
+            throw new Error('Expected a prompt command.');
+          temporaryPath = frame.command.images?.[0]?.path;
+          expect(frame.command).toMatchObject({
+            type: 'prompt',
+            text: 'describe this',
+            images: [{ type: 'image', mediaType: 'image/png' }],
+          });
+          expect(temporaryPath).toBeTruthy();
+          await expect(readFile(temporaryPath as string)).resolves.toBeTruthy();
+          expect((await stat(temporaryPath as string)).mode & 0o777).toBe(
+            0o600,
+          );
+          resolve();
+        } catch (error) {
+          reject(error);
+        } finally {
+          bridge.write(
+            serializeFrame({ kind: 'ack', id: frame.command.id, ok: true }),
+          );
+        }
+      });
+    });
+    const form = new FormData();
+    form.set(
+      'command',
+      JSON.stringify({ type: 'prompt', text: 'describe this' }),
+    );
+    form.append(
+      'images',
+      new Blob([
+        new Uint8Array(
+          Buffer.from(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            'base64',
+          ),
+        ),
+      ]),
+      'sample.png',
+    );
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/runtimes/image-runtime/command`,
+      {
+        method: 'POST',
+        headers: {
+          Origin: `http://127.0.0.1:${server.port}`,
+          'x-dashboard-token': 'test-token',
+        },
+        body: form,
+      },
+    );
+    await commandSeen;
+    expect(response.status).toBe(200);
+    expect(temporaryPath).toBeTruthy();
+    await expect(readFile(temporaryPath as string)).rejects.toThrow();
+    bridge.destroy();
+  });
+
+  it('rejects spoofed image content and cleans partially written uploads', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-bad-image-'),
+    );
+    const stateDir = path.join(root, 'state');
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir,
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const form = new FormData();
+    form.set('command', JSON.stringify({ type: 'prompt', text: 'inspect' }));
+    form.append(
+      'images',
+      new Blob([
+        new Uint8Array(
+          Buffer.from(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            'base64',
+          ),
+        ),
+      ]),
+      'valid.png',
+    );
+    form.append(
+      'images',
+      new Blob([
+        new Uint8Array([
+          0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x62, 0x61, 0x64,
+        ]),
+      ]),
+      'spoofed.png',
+    );
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/runtimes/missing/command`,
+      {
+        method: 'POST',
+        headers: {
+          Origin: `http://127.0.0.1:${server.port}`,
+          'x-dashboard-token': 'test-token',
+        },
+        body: form,
+      },
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: expect.stringContaining('PNG, JPEG, and WebP'),
+    });
+    expect(await readdir(path.join(stateDir, 'uploads'))).toEqual([]);
   });
 
   it('renames a dormant indexed session through the authenticated API', async () => {

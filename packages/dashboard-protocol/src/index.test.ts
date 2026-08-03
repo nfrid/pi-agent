@@ -4,6 +4,7 @@ import {
   isBridgeEvent,
   MAX_FRAME_BYTES,
   parseFrame,
+  redactImageData,
   serializeFrame,
   validateBridgeCommand,
   validateSessionRenameRequest,
@@ -51,6 +52,60 @@ describe('dashboard protocol', () => {
       command: { id: '1', type: 'followUp' as const, text: 'continue' },
     };
     expect(parseFrame(serializeFrame(frame))).toEqual(frame);
+  });
+
+  it('accepts bounded image-only commands and redacts image bytes', () => {
+    expect(
+      validateBridgeCommand({
+        id: 'image-1',
+        type: 'prompt',
+        text: '',
+        images: [
+          {
+            type: 'image',
+            path: '/tmp/dashboard-image',
+            mediaType: 'image/png',
+          },
+        ],
+      }),
+    ).toMatchObject({ type: 'prompt', text: '', images: [{ type: 'image' }] });
+    expect(
+      redactImageData({
+        content: [
+          { type: 'image', data: 'large', mimeType: 'image/png' },
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              mediaType: 'image/jpeg',
+              data: 'large',
+            },
+          },
+          { type: 'base64', data: 'provider-shape' },
+          {
+            type: 'image_url',
+            image_url: { url: 'data:image/webp;base64,provider-url' },
+          },
+        ],
+      }),
+    ).toEqual({
+      content: [
+        { type: 'image', mimeType: 'image/png', omitted: true },
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            mediaType: 'image/jpeg',
+            omitted: true,
+          },
+        },
+        { type: 'base64', omitted: true },
+        {
+          type: 'image_url',
+          image_url: { url: '[image data omitted]' },
+        },
+      ],
+    });
   });
 
   it('rejects arbitrary commands and oversized frames', () => {

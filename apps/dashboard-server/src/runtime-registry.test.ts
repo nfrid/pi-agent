@@ -130,6 +130,89 @@ describe('runtime registry', () => {
     bridge.destroy();
   });
 
+  it('redacts image bytes from untrusted snapshots and live events', async () => {
+    const changes: unknown[] = [];
+    const registry = new RuntimeRegistry({
+      expectedToken: () => true,
+      onChange: (change) => changes.push(change),
+    });
+    const bridge = new PassThrough();
+    registry.accept(bridge as never);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            ...snapshot,
+            session: {
+              ...snapshot.session,
+              entries: [
+                {
+                  type: 'message',
+                  message: {
+                    role: 'user',
+                    content: [
+                      {
+                        type: 'image',
+                        mimeType: 'image/png',
+                        data: 'hello-secret',
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    expect(JSON.stringify(registry.get('runtime-1'))).not.toContain(
+      'hello-secret',
+    );
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 2,
+        event: {
+          type: 'message.finished',
+          sessionId: 'session-1',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  mediaType: 'image/jpeg',
+                  data: 'event-secret',
+                },
+              },
+            ],
+          },
+        },
+      }),
+    );
+    await eventually(() => (changes.length >= 2 ? changes.at(-1) : undefined));
+    expect(JSON.stringify(changes)).not.toContain('event-secret');
+    expect(changes.at(-1)).toMatchObject({
+      event: {
+        message: {
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', omitted: true },
+            },
+          ],
+        },
+      },
+    });
+    bridge.destroy();
+  });
+
   it('does not move a queued command to a replacement connection', async () => {
     const registry = new RuntimeRegistry({ expectedToken: () => true });
     const first = new PassThrough();

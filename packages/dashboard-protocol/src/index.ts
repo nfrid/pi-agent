@@ -40,6 +40,13 @@ export interface SessionSnapshot {
   entries: readonly unknown[];
 }
 
+export interface BridgeImageAttachment {
+  type: 'image';
+  /** Server-owned temporary file; browser clients can never provide this path. */
+  path: string;
+  mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+}
+
 export interface RuntimeSnapshot {
   runtimeId: string;
   ownership: RuntimeOwnership;
@@ -54,7 +61,12 @@ export interface RuntimeSnapshot {
   };
   liveState: RuntimeLiveState;
   session: SessionSnapshot;
-  model?: { provider: string; model: string; thinking?: string };
+  model?: {
+    provider: string;
+    model: string;
+    thinking?: string;
+    supportsImages?: boolean;
+  };
   contextUsage?: {
     tokens: number | null;
     contextWindow: number;
@@ -107,6 +119,7 @@ export type BridgeCommand =
   | (BridgeCommandBase & {
       type: 'prompt' | 'steer' | 'followUp';
       text: string;
+      images?: readonly BridgeImageAttachment[];
     })
   | (BridgeCommandBase & { type: 'abort' | 'shutdown' })
   | (BridgeCommandBase & { type: 'setModel'; provider: string; model: string })
@@ -307,6 +320,60 @@ function safeIdentifier(value: unknown, max: number): value is string {
   );
 }
 
+function validateBridgeImages(value: unknown): BridgeImageAttachment[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 4)
+    throw new Error('Invalid image attachments.');
+  return value.map((image) => {
+    if (
+      !isRecord(image) ||
+      !onlyKeys(image, new Set(['type', 'path', 'mediaType'])) ||
+      image.type !== 'image' ||
+      !safeIdentifier(image.path, 4096) ||
+      !['image/png', 'image/jpeg', 'image/webp'].includes(
+        image.mediaType as string,
+      )
+    )
+      throw new Error('Invalid image attachment.');
+    return image as unknown as BridgeImageAttachment;
+  });
+}
+
+/** Remove base64 image bytes before values cross dashboard snapshot boundaries. */
+export function redactImageData(value: unknown): unknown {
+  if (
+    typeof value === 'string' &&
+    /^data:image\/[a-z0-9.+-]+;base64,/iu.test(value)
+  )
+    return '[image data omitted]';
+  if (Array.isArray(value)) return value.map(redactImageData);
+  if (!isRecord(value)) return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (key === 'data' && (value.type === 'image' || value.type === 'base64'))
+      continue;
+    if (
+      key === 'source' &&
+      isRecord(item) &&
+      value.type === 'image' &&
+      item.type === 'base64'
+    ) {
+      const { data: _data, ...source } = item;
+      result.source = { ...source, omitted: true };
+      continue;
+    }
+    result[key] = redactImageData(item);
+  }
+  if ((value.type === 'image' || value.type === 'base64') && 'data' in value)
+    result.omitted = true;
+  return result;
+}
+
+/** Defense-in-depth redaction for untrusted runtime bridge events. */
+export function redactBridgeEvent(event: BridgeEvent): BridgeEvent {
+  return redactImageData(event) as BridgeEvent;
+}
+
 export function isRuntimeLiveState(value: unknown): value is RuntimeLiveState {
   return (
     value === 'idle' ||
@@ -339,9 +406,18 @@ export function validateBridgeCommand(value: unknown): BridgeCommand {
     throw new Error('Invalid bridge command.');
   const type = value.type;
   if (type === 'prompt' || type === 'steer' || type === 'followUp') {
-    if (!nonEmptyString(value.text, 100_000))
-      throw new Error('Command text is required.');
-    return { id: value.id, type, text: value.text };
+    if (!onlyKeys(value, new Set(['id', 'type', 'text', 'images'])))
+      throw new Error('Invalid prompt command.');
+    const text = typeof value.text === 'string' ? value.text.trim() : '';
+    const images = validateBridgeImages(value.images);
+    if (!text && images.length === 0)
+      throw new Error('Command text or an image is required.');
+    return {
+      id: value.id,
+      type,
+      text,
+      ...(images.length > 0 ? { images } : {}),
+    };
   }
   if (type === 'abort' || type === 'shutdown') return { id: value.id, type };
   if (type === 'setModel') {
@@ -624,11 +700,16 @@ function isRuntimeSnapshot(
   if (value.model !== undefined) {
     if (
       !isRecord(value.model) ||
-      !onlyKeys(value.model, new Set(['provider', 'model', 'thinking'])) ||
+      !onlyKeys(
+        value.model,
+        new Set(['provider', 'model', 'thinking', 'supportsImages']),
+      ) ||
       !safeIdentifier(value.model.provider, 200) ||
       !safeIdentifier(value.model.model, 300) ||
       (value.model.thinking !== undefined &&
-        !safeIdentifier(value.model.thinking, 64))
+        !safeIdentifier(value.model.thinking, 64)) ||
+      (value.model.supportsImages !== undefined &&
+        typeof value.model.supportsImages !== 'boolean')
     )
       return false;
   }

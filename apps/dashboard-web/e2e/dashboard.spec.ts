@@ -346,6 +346,11 @@ test('dense mobile session keeps conversation and activity readable', async ({
             cwd: '/tmp',
             liveState: 'idle',
             session: { id: 's1', entries: [] },
+            model: {
+              provider: 'test',
+              model: 'vision',
+              supportsImages: true,
+            },
             contextUsage: {
               tokens: 136_000,
               contextWindow: 272_000,
