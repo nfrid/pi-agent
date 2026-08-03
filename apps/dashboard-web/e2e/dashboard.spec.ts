@@ -361,6 +361,13 @@ test('dense mobile session keeps conversation and activity readable', async ({
     }),
   );
   let sessionReads = 0;
+  let commandContentType = '';
+  let commandBody = '';
+  await page.route(/\/api\/runtimes\/r1\/command$/, async (route) => {
+    commandContentType = route.request().headers()['content-type'] ?? '';
+    commandBody = route.request().postData() ?? '';
+    await route.fulfill({ contentType: 'application/json', body: '{}' });
+  });
   let releaseSettledRead: (() => void) | undefined;
   const settledRead = new Promise<void>((resolve) => {
     releaseSettledRead = resolve;
@@ -457,6 +464,55 @@ test('dense mobile session keeps conversation and activity readable', async ({
   });
   await expect(activity).toBeVisible();
   await expect(page.getByLabel('Message Pi')).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Attach images' }),
+  ).toBeVisible();
+  const imageInput = page.getByLabel('Choose images');
+  await imageInput.setInputFiles({
+    name: 'picker.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from([137, 80, 78, 71]),
+  });
+  await expect(page.getByAltText('picker.png')).toBeVisible();
+  await page.getByRole('button', { name: 'Remove picker.png' }).click();
+  await page.evaluate(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(
+      new File([new Uint8Array([1])], 'paste.webp', { type: 'image/webp' }),
+    );
+    document.querySelector('textarea')?.dispatchEvent(
+      new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: transfer,
+      }),
+    );
+  });
+  await expect(page.getByAltText('paste.webp')).toBeVisible();
+  await page.evaluate(() => {
+    const composer = document.querySelector('.composer');
+    if (!composer) throw new Error('Composer not found');
+    const transfer = new DataTransfer();
+    transfer.items.add(
+      new File([new Uint8Array([2])], 'drop.jpeg', { type: 'image/jpeg' }),
+    );
+    composer.dispatchEvent(
+      new DragEvent('drop', {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer,
+      }),
+    );
+  });
+  await expect(page.getByAltText('drop.jpeg')).toBeVisible();
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect.poll(() => commandBody).toContain('"text":""');
+  expect(commandContentType).toMatch(/^multipart\/form-data; boundary=/);
+  expect(commandBody).toContain('name="command"');
+  expect(commandBody).toContain('name="images"');
+  expect(commandBody).toContain('paste.webp');
+  expect(commandBody).toContain('drop.jpeg');
+  await expect(page.getByAltText('paste.webp')).toHaveCount(0);
   await expect(page.getByLabel('Context window 50% [136k/272k]')).toBeVisible();
   expect(
     await page.evaluate(

@@ -271,16 +271,7 @@ export function reconnectDelayWithJitter(
   return Math.round(delay * (0.8 + random() * 0.4));
 }
 
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = dashboardToken();
-  const response = await fetch(`${base}${path}`, {
-    ...init,
-    headers: {
-      'content-type': 'application/json',
-      ...(token ? { 'x-dashboard-token': token } : {}),
-      ...(init?.headers ?? {}),
-    },
-  });
+async function readApiResponse<T>(response: Response): Promise<T> {
   const body: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(
@@ -291,6 +282,35 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw error;
   }
   return body as T;
+}
+
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = dashboardToken();
+  return readApiResponse<T>(
+    await fetch(`${base}${path}`, {
+      ...init,
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { 'x-dashboard-token': token } : {}),
+        ...(init?.headers ?? {}),
+      },
+    }),
+  );
+}
+
+/** Send a multipart request without overriding the browser's boundary header. */
+export async function multipartApi<T>(
+  path: string,
+  body: FormData,
+): Promise<T> {
+  const token = dashboardToken();
+  return readApiResponse<T>(
+    await fetch(`${base}${path}`, {
+      method: 'POST',
+      headers: token ? { 'x-dashboard-token': token } : {},
+      body,
+    }),
+  );
 }
 
 export function shouldAcceptRevision(
