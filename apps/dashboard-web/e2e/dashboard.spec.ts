@@ -65,6 +65,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
       body: JSON.stringify({
         metadata: { id: 's1', file: '', cwd: '/tmp', updatedAt: Date.now() },
         entries: [
+          ...Array.from({ length: 30 }, (_, index) => ({ type: 'message', message: { role: 'user', content: [{ type: 'text', text: `Earlier message ${index + 1}` }] } })),
           { type: 'message', message: { role: 'user', content: [{ type: 'text', text: 'Check the dashboard.' }] } },
           { type: 'message', message: { role: 'assistant', content: [{ type: 'text', text: 'Checking the mobile transcript.' }, { type: 'toolCall', id: 'call-1', name: 'read', arguments: { path: 'src/App.tsx' } }] } },
           { type: 'message', message: { role: 'toolResult', toolCallId: 'call-1', content: [{ type: 'text', text: 'ok' }], isError: false } },
@@ -77,5 +78,6 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(page.getByText('Checking the mobile transcript.')).toBeVisible();
   await expect(page.getByText('Explored with read')).toBeVisible();
   await expect(page.getByLabel('Message Pi')).toBeVisible();
+  expect(await page.evaluate(() => window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2)).toBe(true);
   expect(await page.locator('body').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 });

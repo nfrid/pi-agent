@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { describeTools, groupTranscript, type TranscriptEntry as ActivityTranscriptEntry } from '@pi-dashboard/activity-model';
 import type { BrowserSnapshot, RuntimeSnapshot, SessionIndexEntry, StartRuntimeRequest, WorkspaceTarget } from '@pi-dashboard/protocol';
 
@@ -277,6 +277,7 @@ export function reconcileLiveEvent(entries: readonly unknown[], event: Dashboard
 function SessionView({ id, snapshot, lastEvent, reconnectNonce }: { id: string; snapshot: BrowserSnapshot; lastEvent?: DashboardEvent; reconnectNonce: number }) {
   const [data, setData] = useState<SessionResponse>();
   const [error, setError] = useState<string>();
+  const scrolledSessionRef = useRef<string | undefined>(undefined);
   const runtime = snapshot.runtimes.find((item) => item.session.id === id);
   useEffect(() => {
     let active = true;
@@ -289,6 +290,12 @@ function SessionView({ id, snapshot, lastEvent, reconnectNonce }: { id: string; 
       .catch((cause) => active && setError(cause instanceof Error ? cause.message : String(cause)));
     return () => { active = false; };
   }, [id, reconnectNonce]);
+  useLayoutEffect(() => {
+    if (!data || scrolledSessionRef.current === id) return;
+    scrolledSessionRef.current = id;
+    const frame = window.requestAnimationFrame(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    return () => window.cancelAnimationFrame(frame);
+  }, [data, id]);
   useEffect(() => {
     const event = lastEvent?.event;
     if (!event || !data) return;
