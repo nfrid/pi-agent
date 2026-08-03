@@ -165,6 +165,28 @@ function decodeVapidKey(value: string): ArrayBuffer {
   return bytes.buffer as ArrayBuffer;
 }
 
+export function formatContextTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${Number.parseFloat((tokens / 1_000_000).toFixed(1))}m`;
+  if (tokens >= 1_000) return `${Number.parseFloat((tokens / 1_000).toFixed(1))}k`;
+  return `${tokens}`;
+}
+
+export function contextIndicatorData(usage: RuntimeSnapshot['contextUsage']): { percent?: number; text: string; level: 'normal' | 'warning' | 'error' } | undefined {
+  if (!usage?.contextWindow) return undefined;
+  const percent = usage.tokens === null
+    ? undefined
+    : Math.round(usage.percent ?? (usage.tokens / usage.contextWindow) * 100);
+  const level = percent !== undefined && percent >= 80 ? 'error' : percent !== undefined && percent >= 50 ? 'warning' : 'normal';
+  const used = usage.tokens === null ? '?' : formatContextTokens(usage.tokens);
+  return { percent, text: `${percent ?? '?'}% [${used}/${formatContextTokens(usage.contextWindow)}]`, level };
+}
+
+function ContextIndicator({ usage }: { usage: RuntimeSnapshot['contextUsage'] }) {
+  const indicator = contextIndicatorData(usage);
+  if (!indicator) return null;
+  return <span className={`context-indicator context-${indicator.level}`} aria-label={`Context window ${indicator.text}`} title="Current context window usage"><span className="context-label">ctx</span><span className="context-meter" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, indicator.percent ?? 0))}%` }} /></span><strong>{indicator.text}</strong></span>;
+}
+
 function Dashboard({ snapshot }: { snapshot: BrowserSnapshot }) {
   const groups = new Map<string, { workspace: WorkspaceTarget | undefined; runtimes: RuntimeSnapshot[] }>();
   for (const workspace of snapshot.workspaces) groups.set(workspace.id, { workspace, runtimes: [] });
@@ -426,7 +448,7 @@ function Composer({ runtime }: { runtime: RuntimeSnapshot | undefined; sessionId
   useEffect(() => { setMode(runtime?.liveState === 'working' ? 'followUp' : 'prompt'); }, [runtime?.liveState]);
   if (!runtime) return <div className="composer disabled"><p>This session is dormant.</p><button onClick={() => navigate('/new')}>Resume in a new runtime</button></div>;
   const submit = async (event: FormEvent) => { event.preventDefault(); if (!text.trim() || disabled) return; await postCommand(runtime.runtimeId, { type: runtime.liveState === 'idle' ? 'prompt' : mode, text: text.trim() }); setText(''); };
-  return <form className="composer" onSubmit={(event) => void submit(event)}><div className="composer-mode">{runtime.liveState === 'working' && <><span>Mode:</span><button type="button" className={mode === 'followUp' ? 'selected' : ''} onClick={() => setMode('followUp')}>Follow-up</button><button type="button" className={mode === 'steer' ? 'selected' : ''} onClick={() => setMode('steer')}>Steer</button></>}{runtime.liveState === 'idle' && <span>Prompt</span>}{runtime.liveState === 'waiting' && <span>Answer above</span>}<span className="shortcut">⌘↵ send · shift+↵ newline</span></div><textarea aria-label="Message Pi" value={text} disabled={disabled} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={disabled ? 'Agent is waiting for input' : 'Message Pi…'} rows={3} /><button type="submit" disabled={disabled || !text.trim()}>Send</button></form>;
+  return <form className="composer" onSubmit={(event) => void submit(event)}><div className="composer-mode">{runtime.liveState === 'working' && <><span>Mode:</span><button type="button" className={mode === 'followUp' ? 'selected' : ''} onClick={() => setMode('followUp')}>Follow-up</button><button type="button" className={mode === 'steer' ? 'selected' : ''} onClick={() => setMode('steer')}>Steer</button></>}{runtime.liveState === 'idle' && <span>Prompt</span>}{runtime.liveState === 'waiting' && <span>Answer above</span>}<ContextIndicator usage={runtime.contextUsage} /><span className="shortcut">⌘↵ send · shift+↵ newline</span></div><textarea aria-label="Message Pi" value={text} disabled={disabled} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} placeholder={disabled ? 'Agent is waiting for input' : 'Message Pi…'} rows={3} /><button type="submit" disabled={disabled || !text.trim()}>Send</button></form>;
 }
 
 function RuntimeView({ id, snapshot }: { id: string; snapshot: BrowserSnapshot }) { const runtime = snapshot.runtimes.find((item) => item.runtimeId === id); return <section><Back /><h1>Runtime diagnostics</h1>{runtime ? <div className="diagnostics"><p>Ownership: <strong>{runtime.ownership}</strong></p><p>PID: {runtime.pid}</p><p>Bridge: {runtime.online === false ? 'offline' : 'connected'}</p><p>Session: {runtime.session.id}</p><p>tmux: {runtime.tmux?.displayTarget ?? 'not reported'}</p><button onClick={() => navigate(`/sessions/${encodeURIComponent(runtime.session.id)}`)}>Open session</button><pre>{JSON.stringify(runtime, null, 2)}</pre></div> : <p>Unknown runtime.</p>}</section>; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asBrowserSnapshot, asSessionResponse, reconcileLiveEvent, toTranscriptEntries } from './App';
+import { asBrowserSnapshot, asSessionResponse, contextIndicatorData, formatContextTokens, reconcileLiveEvent, toTranscriptEntries } from './App';
 
 describe('dashboard snapshots', () => {
   it('rejects malformed session responses before rendering', () => {
@@ -10,6 +10,17 @@ describe('dashboard snapshots', () => {
   it('rejects runtime snapshots and defaults optional browser collections', () => {
     expect(asBrowserSnapshot({ runtimeId: 'runtime-1' })).toBeUndefined();
     expect(asBrowserSnapshot({ revision: 1, runtimes: [], workspaces: [], sessions: [] })).toMatchObject({ unread: [] });
+  });
+});
+
+describe('context window indicator', () => {
+  it('matches the compact TUI token format and warning thresholds', () => {
+    expect(formatContextTokens(950)).toBe('950');
+    expect(formatContextTokens(12_400)).toBe('12.4k');
+    expect(formatContextTokens(1_050_000)).toBe('1.1m');
+    expect(contextIndicatorData({ tokens: 136_000, contextWindow: 272_000, percent: 50 })).toEqual({ percent: 50, text: '50% [136k/272k]', level: 'warning' });
+    expect(contextIndicatorData({ tokens: 230_000, contextWindow: 272_000, percent: 84.56 })).toEqual({ percent: 85, text: '85% [230k/272k]', level: 'error' });
+    expect(contextIndicatorData({ tokens: null, contextWindow: 272_000, percent: null })).toEqual({ percent: undefined, text: '?% [?/272k]', level: 'normal' });
   });
 });
 

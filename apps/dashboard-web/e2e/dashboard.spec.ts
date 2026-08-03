@@ -53,7 +53,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
       contentType: 'application/json',
       body: JSON.stringify({
         revision: 1,
-        runtimes: [{ runtimeId: 'r1', ownership: 'external', pid: 1, cwd: '/tmp', liveState: 'idle', session: { id: 's1', entries: [] }, pendingInteractions: [] }],
+        runtimes: [{ runtimeId: 'r1', ownership: 'external', pid: 1, cwd: '/tmp', liveState: 'idle', session: { id: 's1', entries: [] }, contextUsage: { tokens: 136_000, contextWindow: 272_000, percent: 50 }, pendingInteractions: [] }],
         workspaces: [],
         sessions: [],
         unread: [],
@@ -79,6 +79,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(page.getByText('Checking the mobile transcript.')).toBeVisible();
   await expect(page.getByText('Explored with read')).toBeVisible();
   await expect(page.getByLabel('Message Pi')).toBeVisible();
+  await expect(page.getByLabel('Context window 50% [136k/272k]')).toBeVisible();
   expect(await page.evaluate(() => window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2)).toBe(true);
   expect(await page.locator('body').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 });
