@@ -1049,6 +1049,11 @@ function Transcript({ entries }: { entries: unknown[] }) {
             tools,
             complete,
           );
+          const lead = items[group.start];
+          const visibleLead =
+            lead?.role === 'assistant' && lead.text && !isNarration(lead.text)
+              ? lead.text
+              : undefined;
           const detailId = `activity-detail-${group.start}`;
           return (
             <div
@@ -1074,6 +1079,12 @@ function Transcript({ entries }: { entries: unknown[] }) {
                   {expanded ? 'hide detail' : 'show detail'}
                 </small>
               </button>
+              {visibleLead && (
+                <div className="activity-lead">
+                  <span>assistant</span>
+                  {visibleLead}
+                </div>
+              )}
               {expanded && (
                 <div className="activity-detail" id={detailId}>
                   {items.slice(group.start, group.end + 1).map((child) => (

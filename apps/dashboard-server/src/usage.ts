@@ -1,4 +1,4 @@
-import { queryViaCodexAppServer } from '@pi-dashboard/protocol';
+import { queryViaCodexAppServer } from '@pi-dashboard/codex-usage';
 
 export interface UsageProvider {
   get(signal?: AbortSignal): Promise<unknown>;

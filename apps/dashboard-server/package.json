@@ -15,6 +15,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@pi-dashboard/codex-usage": "workspace:*",
     "@pi-dashboard/protocol": "workspace:*",
     "web-push": "^3.6.7",
     "ws": "^8.18.0"

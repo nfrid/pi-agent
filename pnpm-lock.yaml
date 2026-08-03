@@ -51,6 +51,9 @@ importers:
 
   apps/dashboard-server:
     dependencies:
+      '@pi-dashboard/codex-usage':
+        specifier: workspace:*
+        version: link:../../packages/codex-usage
       '@pi-dashboard/protocol':
         specifier: workspace:*
         version: link:../../packages/dashboard-protocol
@@ -113,6 +116,8 @@ importers:
       '@earendil-works/pi-ai':
         specifier: 0.82.1
         version: 0.82.1(ws@8.21.0)(zod@4.4.3)
+
+  packages/codex-usage: {}
 
   packages/dashboard-protocol: {}
 

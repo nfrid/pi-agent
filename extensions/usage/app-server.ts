@@ -1,8 +1,8 @@
-import { queryViaCodexAppServer as queryShared } from '../../packages/dashboard-protocol/src/usage-app-server';
+import { queryViaCodexAppServer as queryShared } from '../../packages/codex-usage/src/index';
 import type { UsageReport } from './types';
 
-// The daemon and the Pi extension share the same maintained app-server
-// transport. Keep this compatibility entry point for extension consumers.
+// The daemon and the Pi extension share one Node-only app-server transport.
+// Keep this compatibility entry point for extension consumers.
 export async function queryViaCodexAppServer(
   signal: AbortSignal,
 ): Promise<UsageReport> {

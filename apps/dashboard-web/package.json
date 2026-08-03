@@ -3,7 +3,26 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "vite", "preview": "vite preview", "build": "vite build", "typecheck": "tsc --noEmit -p tsconfig.json", "test": "vitest run --passWithNoTests --exclude e2e/**", "test:e2e": "playwright test" },
-  "dependencies": { "@pi-dashboard/activity-model": "workspace:*", "@pi-dashboard/protocol": "workspace:*", "@vitejs/plugin-react": "^5.0.0", "react": "^19.1.0", "react-dom": "^19.1.0", "vite": "^7.0.0" },
-  "devDependencies": { "@playwright/test": "^1.55.0", "@types/react": "^19.1.0", "@types/react-dom": "^19.1.0", "typescript": "^5.8.3" }
+  "scripts": {
+    "dev": "vite",
+    "preview": "vite preview",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests --exclude e2e/**",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@pi-dashboard/activity-model": "workspace:*",
+    "@pi-dashboard/protocol": "workspace:*",
+    "@vitejs/plugin-react": "^5.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "vite": "^7.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "typescript": "^5.8.3"
+  }
 }

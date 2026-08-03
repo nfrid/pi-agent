@@ -114,7 +114,10 @@ export class MetadataStore {
         snapshot.liveState,
         snapshot.online === false ? 0 : 1,
         snapshot.lastSeenAt ?? Date.now(),
-        JSON.stringify(snapshot),
+        JSON.stringify({
+          ...snapshot,
+          session: { ...snapshot.session, entries: [] },
+        }),
       );
   }
 

@@ -305,7 +305,7 @@ export function createRemoteControlRuntime(
   const broker = getInteractionBroker();
   let context: ExtensionContext | undefined;
   let currentSessionId: string | undefined;
-  let contextScope: object | undefined;
+  let contextScope: string | undefined;
   let lastError: string | undefined;
   const unavailableSnapshot = (): RuntimeSnapshot => ({
     runtimeId,
@@ -401,7 +401,7 @@ export function createRemoteControlRuntime(
     try {
       lastError = undefined;
       const next = snapshotFrom(ctx);
-      const nextScope = ctx.sessionManager as object;
+      const nextScope = ctx.sessionManager.getSessionId();
       if (contextScope && contextScope !== nextScope)
         broker.cancelScope(contextScope);
       context = ctx;
@@ -432,7 +432,7 @@ export function createRemoteControlRuntime(
   const clearContext = (ctx: ExtensionContext) => {
     if (!isCurrent(ctx) && context !== ctx) return;
     try {
-      broker.cancelScope(ctx.sessionManager as object);
+      broker.cancelScope(ctx.sessionManager.getSessionId());
     } catch {
       /* stale session contexts may no longer expose their manager */
     }

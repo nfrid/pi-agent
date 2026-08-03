@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  normalizeUsageResponse,
-  queryViaCodexAppServer,
-} from './usage-app-server.js';
+import { normalizeUsageResponse, queryViaCodexAppServer } from './index.js';
 
 describe('Codex app-server usage normalization', () => {
   it('accepts rate limits keyed by limit id', () => {

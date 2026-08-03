@@ -256,15 +256,21 @@ class DashboardServerImpl implements DashboardServer {
   }
 
   snapshot(): BrowserSnapshot {
-    const runtimes = this.registry.snapshots();
+    const liveRuntimes = this.registry.snapshots();
     const activeSessions = new Map(
-      runtimes
+      liveRuntimes
         .filter((runtime) => runtime.online !== false)
         .map((runtime) => [runtime.session.id, runtime.runtimeId]),
     );
     return {
       revision: this.revision,
-      runtimes,
+      // Transcripts are served by the session endpoint and reconciled from
+      // typed bridge events. Repeating them in every dashboard snapshot makes
+      // live transport and browser state grow with the conversation.
+      runtimes: liveRuntimes.map((runtime) => ({
+        ...runtime,
+        session: { ...runtime.session, entries: [] },
+      })),
       workspaces: this.workspaces,
       sessions: this.sessions.list().map((session) => ({
         ...session,

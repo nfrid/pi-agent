@@ -63,7 +63,7 @@ function registerAskUserTool(pi: ExtensionAPI): void {
               })
             : askThroughDialogs(params, choices, ctx.ui),
         mode === 'tui' ? () => cancelLocal?.() : undefined,
-        ctx.sessionManager,
+        ctx.sessionManager?.getSessionId(),
       );
 
       const details: Answer = result

@@ -1,5 +1,4 @@
 /** Framework-independent wire types for the Pi bridge and dashboard browser API. */
-export { queryViaCodexAppServer } from './usage-app-server.js';
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME_BYTES = 512 * 1024;

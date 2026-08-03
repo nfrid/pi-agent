@@ -83,7 +83,10 @@ describe('dashboard HTTP boundary', () => {
         pid: 1,
         cwd: '/tmp',
         liveState: 'idle' as const,
-        session: { id: 'revision-session', entries: [] },
+        session: {
+          id: 'revision-session',
+          entries: [{ type: 'message', message: { role: 'user' } }],
+        },
         pendingInteractions: [],
       },
     };
@@ -94,6 +97,7 @@ describe('dashboard HTTP boundary', () => {
     expect(registrationSnapshot.revision).toBeGreaterThan(
       initialSnapshot.revision,
     );
+    expect(server.snapshot().runtimes[0]?.session.entries).toEqual([]);
     bridge.write(
       serializeFrame({
         kind: 'event',

@@ -8,6 +8,10 @@ export default defineConfig({
     trace: 'retain-on-failure',
     serviceWorkers: 'block',
   },
-  webServer: { command: 'pnpm exec vite --host 127.0.0.1 --port 4174', port: 4174, reuseExistingServer: true },
+  webServer: {
+    command: 'pnpm exec vite --host 127.0.0.1 --port 4174',
+    port: 4174,
+    reuseExistingServer: true,
+  },
   projects: [{ name: 'mobile', use: { ...devices['Pixel 5'] } }],
 });
