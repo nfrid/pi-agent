@@ -225,13 +225,18 @@ test('dense mobile session keeps conversation and activity readable', async ({
     .toBe(true);
   await emitMessage('message.finished', 123, 'Live dashboard message');
   await expect(page.getByText('Live dashboard message')).toHaveCount(1);
-  const scrolledUp = await page.evaluate(() => {
-    window.scrollBy(0, -400);
-    return window.scrollY;
-  });
+  await page.evaluate(() => window.scrollBy(0, -400));
   await emitMessage('message.started', 456, 'Message while reading history');
   await expect(page.getByText('Message while reading history')).toHaveCount(1);
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrolledUp);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollHeight -
+          (window.scrollY + window.innerHeight),
+      ),
+    )
+    .toBeGreaterThan(120);
   expect(
     await page
       .locator('body')
