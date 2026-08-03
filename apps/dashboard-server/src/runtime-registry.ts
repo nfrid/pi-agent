@@ -275,15 +275,18 @@ export class RuntimeRegistry {
       online: true,
       lastSeenAt: Date.now(),
     };
-    if (event.type === 'runtime.goodbye') record.socket?.end();
+    if (event.type === 'runtime.goodbye') {
+      record.socket?.end();
+      // Remove first so observers build their authoritative snapshot after the
+      // cleanly exited runtime has left the registry.
+      this.forget(record.snapshot.runtimeId, event.reason !== 'reload');
+    }
     this.options.onChange?.({
       kind: 'event',
       runtimeId: record.snapshot.runtimeId,
       event,
       snapshot: record.snapshot,
     });
-    if (event.type === 'runtime.goodbye')
-      this.forget(record.snapshot.runtimeId, event.reason !== 'reload');
   }
 
   private mergeEvent(

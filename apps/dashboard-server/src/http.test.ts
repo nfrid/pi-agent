@@ -141,6 +141,17 @@ describe('dashboard HTTP boundary', () => {
     const transcriptDelta = await waitForMessage();
     expect(transcriptDelta.type).toBe('event');
     expect(transcriptDelta.snapshot).toBeUndefined();
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 4,
+        event: { type: 'runtime.goodbye' },
+      }),
+    );
+    const goodbye = await waitForMessage();
+    expect((goodbye.snapshot as { runtimes: unknown[] }).runtimes).toHaveLength(
+      0,
+    );
     await server.refreshWorkspaces();
     expect(server.snapshot().revision).toBeGreaterThan(
       update.revision as number,
