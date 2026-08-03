@@ -25,6 +25,8 @@ export type BrokerResult = {
   custom: boolean;
 } | null;
 
+export type BrokerScope = object | string;
+
 type Listener = (event: {
   kind: 'requested' | 'resolved';
   interaction: PendingInteraction;
@@ -43,6 +45,7 @@ export class InteractionBroker {
       interaction: PendingInteraction;
       resolve: (result: BrokerResult) => void;
       cancelLocal?: () => void;
+      scope?: BrokerScope;
     }
   >();
   private readonly listeners = new Set<Listener>();
@@ -60,6 +63,7 @@ export class InteractionBroker {
     input: Omit<PendingInteraction, 'id' | 'createdAt'>,
     presentLocal: () => Promise<BrokerResult>,
     cancelLocal?: () => void,
+    scope?: BrokerScope,
   ): Promise<BrokerResult> {
     const interaction: PendingInteraction = {
       ...input,
@@ -74,9 +78,13 @@ export class InteractionBroker {
       interaction,
       resolve: resolvePromise,
       cancelLocal,
+      scope,
     });
     this.emit({ kind: 'requested', interaction });
-    void presentLocal()
+    // Promise.resolve().then also captures a presenter that throws before it
+    // returns its promise, so no broker entry can remain unresolved.
+    void Promise.resolve()
+      .then(presentLocal)
       .then((result) => this.resolveLocal(interaction.id, result))
       .catch(() => this.resolveLocal(interaction.id, null));
     return promise;
@@ -129,6 +137,20 @@ export class InteractionBroker {
 
   cancel(id: string): boolean {
     return this.resolve(id, null);
+  }
+
+  cancelScope(scope: BrokerScope): number {
+    let cancelled = 0;
+    for (const [id, item] of this.pending) {
+      if (item.scope === scope && this.cancel(id)) cancelled += 1;
+    }
+    return cancelled;
+  }
+
+  cancelAll(): number {
+    let cancelled = 0;
+    for (const id of this.pending.keys()) if (this.cancel(id)) cancelled += 1;
+    return cancelled;
   }
 
   private emit(event: {

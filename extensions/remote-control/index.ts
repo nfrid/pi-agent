@@ -122,15 +122,20 @@ export class BridgeClient {
         this.sendEvent({ type: 'interaction.requested', interaction });
       }
     });
-    socket.on('data', (chunk: string) => this.onData(chunk));
+    socket.on('data', (chunk: string) => this.onData(socket, chunk));
     socket.once('error', () => socket.destroy());
     socket.once('close', () => {
-      if (this.socket === socket) this.socket = undefined;
+      if (this.socket !== socket) return;
+      this.socket = undefined;
+      this.buffer = '';
       this.scheduleReconnect();
     });
   }
 
-  private onData(chunk: string): void {
+  private onData(socket: net.Socket, chunk: string): void {
+    // Data delivered after close belongs to the old generation. It must not
+    // enqueue work or be acknowledged on a replacement connection.
+    if (socket !== this.socket) return;
     this.buffer += chunk;
     if (Buffer.byteLength(this.buffer) > MAX_LINE_BYTES * 2) {
       this.socket?.destroy();
@@ -144,7 +149,7 @@ export class BridgeClient {
       if (line) {
         try {
           const frame = parseFrame(line);
-          if (frame.kind === 'command') this.enqueue(frame.command);
+          if (frame.kind === 'command') this.enqueue(frame.command, socket);
         } catch {
           // Malformed browser/daemon data is ignored; the socket remains
           // usable for the next bounded frame.
@@ -154,14 +159,18 @@ export class BridgeClient {
     }
   }
 
-  private enqueue(command: BridgeCommand): void {
+  private enqueue(command: BridgeCommand, socket: net.Socket): void {
     this.commandTail = this.commandTail
       .then(async () => {
+        // Commands received on a replaced generation are abandoned rather than
+        // replayed. Replaying could duplicate a prompt after a daemon retry.
+        if (socket !== this.socket || socket.destroyed) return;
         try {
           const result = await this.options.handleCommand(command);
-          this.sendAck(command.id, true, result);
+          this.sendAck(socket, command.id, true, result);
         } catch (error) {
           this.sendAck(
+            socket,
             command.id,
             false,
             error instanceof Error ? error.message : String(error),
@@ -171,12 +180,27 @@ export class BridgeClient {
       .catch(() => undefined);
   }
 
-  private sendAck(id: string, ok: true, result?: unknown): void;
-  private sendAck(id: string, ok: false, result: string): void;
-  private sendAck(id: string, ok: boolean, result?: unknown): void {
-    if (ok) this.sendRaw({ kind: 'ack', id, ok: true, result });
+  private sendAck(
+    socket: net.Socket,
+    id: string,
+    ok: true,
+    result?: unknown,
+  ): void;
+  private sendAck(
+    socket: net.Socket,
+    id: string,
+    ok: false,
+    result: string,
+  ): void;
+  private sendAck(
+    socket: net.Socket,
+    id: string,
+    ok: boolean,
+    result?: unknown,
+  ): void {
+    if (ok) this.sendRaw(socket, { kind: 'ack', id, ok: true, result });
     else
-      this.sendRaw({
+      this.sendRaw(socket, {
         kind: 'ack',
         id,
         ok: false,
@@ -184,12 +208,15 @@ export class BridgeClient {
       });
   }
 
-  private sendRaw(frame: Parameters<typeof serializeFrame>[0]): void {
-    if (!this.socket || this.socket.destroyed || !this.socket.writable) return;
+  private sendRaw(
+    socket: net.Socket,
+    frame: Parameters<typeof serializeFrame>[0],
+  ): void {
+    if (socket !== this.socket || socket.destroyed || !socket.writable) return;
     try {
-      this.socket.write(serializeFrame(frame));
+      socket.write(serializeFrame(frame));
     } catch {
-      this.socket.destroy();
+      socket.destroy();
     }
   }
 
@@ -278,6 +305,7 @@ export function createRemoteControlRuntime(
   const broker = getInteractionBroker();
   let context: ExtensionContext | undefined;
   let currentSessionId: string | undefined;
+  let contextScope: object | undefined;
   let lastError: string | undefined;
   const unavailableSnapshot = (): RuntimeSnapshot => ({
     runtimeId,
@@ -373,11 +401,17 @@ export function createRemoteControlRuntime(
     try {
       lastError = undefined;
       const next = snapshotFrom(ctx);
+      const nextScope = ctx.sessionManager as object;
+      if (contextScope && contextScope !== nextScope)
+        broker.cancelScope(contextScope);
       context = ctx;
+      contextScope = nextScope;
       currentSessionId = next.session.id;
       cachedSnapshot = next;
     } catch (error) {
+      if (contextScope) broker.cancelScope(contextScope);
       context = undefined;
+      contextScope = undefined;
       currentSessionId = undefined;
       lastError = error instanceof Error ? error.message : String(error);
       cachedSnapshot = unavailableSnapshot();
@@ -397,7 +431,14 @@ export function createRemoteControlRuntime(
   };
   const clearContext = (ctx: ExtensionContext) => {
     if (!isCurrent(ctx) && context !== ctx) return;
+    try {
+      broker.cancelScope(ctx.sessionManager as object);
+    } catch {
+      /* stale session contexts may no longer expose their manager */
+    }
+    if (contextScope) broker.cancelScope(contextScope);
     context = undefined;
+    contextScope = undefined;
     currentSessionId = undefined;
     cachedSnapshot = unavailableSnapshot();
   };

@@ -92,6 +92,88 @@ describe('runtime registry', () => {
     replacement.destroy();
   });
 
+  it('does not let state updates replace runtime identity or pid', async () => {
+    const registry = new RuntimeRegistry({ expectedToken: () => true });
+    const bridge = new PassThrough();
+    registry.accept(bridge as never);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 2,
+        event: {
+          type: 'runtime.stateChanged',
+          state: 'working',
+          snapshot: {
+            runtimeId: 'attacker',
+            ownership: 'external',
+            pid: 999,
+            cwd: '/tmp/other',
+          },
+        },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1')?.liveState === 'working');
+    expect(registry.get('runtime-1')).toMatchObject({
+      runtimeId: 'runtime-1',
+      ownership: 'managed',
+      pid: 10,
+      cwd: '/tmp/other',
+    });
+    bridge.destroy();
+  });
+
+  it('does not move a queued command to a replacement connection', async () => {
+    const registry = new RuntimeRegistry({ expectedToken: () => true });
+    const first = new PassThrough();
+    const firstFrames: string[] = [];
+    first.on('data', (chunk) =>
+      firstFrames.push(...String(chunk).split('\\n').filter(Boolean)),
+    );
+    registry.accept(first as never);
+    first.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    const commandPromise = registry.sendCommand('runtime-1', {
+      type: 'abort',
+    });
+    await eventually(() =>
+      firstFrames.some((line) => line.includes('command')),
+    );
+
+    const replacement = new PassThrough();
+    const replacementFrames: string[] = [];
+    replacement.on('data', (chunk) =>
+      replacementFrames.push(...String(chunk).split('\\n').filter(Boolean)),
+    );
+    registry.accept(replacement as never);
+    replacement.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await expect(commandPromise).rejects.toThrow('disconnected');
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(
+      replacementFrames.some((line) => line.includes('"kind":"command"')),
+    ).toBe(false);
+    replacement.destroy();
+  });
+
   it('registers full snapshots, serializes commands, and ignores duplicate events', async () => {
     const registry = new RuntimeRegistry({
       expectedToken: (_id, token) => token === 'one',

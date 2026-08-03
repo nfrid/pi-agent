@@ -186,10 +186,13 @@ class DashboardServerImpl implements DashboardServer {
         }
         this.clients.add(client);
         client.once('close', () => this.clients.delete(client));
-        client.send(
+        this.sendClient(
+          client,
           JSON.stringify({ type: 'snapshot', snapshot: this.snapshot() }),
         );
       };
+      client.once('close', () => clearTimeout(timer));
+      client.once('error', () => client.terminate());
       client.on('message', authenticate);
     });
   }
@@ -238,7 +241,14 @@ class DashboardServerImpl implements DashboardServer {
     this.started = false;
     this.sessions.close();
     this.registry.close();
-    for (const client of this.clients) client.close();
+    for (const client of this.wss.clients) {
+      try {
+        client.close();
+      } catch {
+        client.terminate();
+      }
+    }
+    this.clients.clear();
     await new Promise<void>((resolve) => this.http.close(() => resolve()));
     await new Promise<void>((resolve) => this.bridge.close(() => resolve()));
     await fs.rm(this.socketPath, { force: true }).catch(() => undefined);
@@ -376,7 +386,8 @@ class DashboardServerImpl implements DashboardServer {
       return this.json(response, 404, { error: 'Not found.' });
     } catch (error) {
       const status =
-        (error as { code?: string }).code === 'shared-working-directory'
+        (error as { code?: string }).code === 'shared-working-directory' ||
+        (error as { code?: string }).code === 'active-session'
           ? 409
           : 400;
       return this.json(response, status, {
@@ -672,8 +683,23 @@ class DashboardServerImpl implements DashboardServer {
 
   private publish(message: unknown): void {
     const text = JSON.stringify(message);
-    for (const client of this.clients)
-      if (client.readyState === client.OPEN) client.send(text);
+    for (const client of this.clients) this.sendClient(client, text);
+  }
+
+  private sendClient(client: WebSocket, text: string): boolean {
+    if (client.readyState !== client.OPEN) return false;
+    try {
+      client.send(text, (error) => {
+        if (!error) return;
+        this.clients.delete(client);
+        client.terminate();
+      });
+      return true;
+    } catch {
+      this.clients.delete(client);
+      client.terminate();
+      return false;
+    }
   }
 }
 

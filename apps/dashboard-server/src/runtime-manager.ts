@@ -20,7 +20,6 @@ interface LaunchRecord {
   identityToken: string;
   workspace: WorkspaceTarget;
   placement: ManagedPlacement;
-  initialPrompt?: string;
   createdAt: number;
 }
 
@@ -30,6 +29,10 @@ export class RuntimeManager {
   private readonly tokens = new Map<
     string,
     { runtimeId: string; expiresAt: number }
+  >();
+  private readonly initialPrompts = new Map<
+    string,
+    { text: string; sent: boolean }
   >();
 
   constructor(
@@ -156,12 +159,40 @@ export class RuntimeManager {
         throw new Error('Resume target no longer exists.');
       sessionFile = session.file;
     }
+    if (request.sessionId) {
+      const active = this.registry
+        .snapshots()
+        .find(
+          (runtime) =>
+            runtime.online !== false &&
+            (runtime.session.id === request.sessionId ||
+              (sessionFile !== undefined &&
+                runtime.session.file === sessionFile)),
+        );
+      if (active) {
+        const error = new Error(
+          'This session is already active in another runtime.',
+        );
+        Object.assign(error, {
+          code: 'active-session',
+          runtimeId: active.runtimeId,
+        });
+        throw error;
+      }
+    }
     const runtimeId = `runtime-${randomUUID()}`;
     const launchToken = randomUUID();
     const identityToken = randomUUID();
     this.tokens.set(launchToken, { runtimeId, expiresAt: Date.now() + 60_000 });
+    if (request.initialPrompt)
+      this.initialPrompts.set(runtimeId, {
+        text: request.initialPrompt,
+        sent: false,
+      });
+    let placement: ManagedPlacement | undefined;
+    let metadataRecorded = false;
     try {
-      const placement = await this.tmux.newManagedWindow({
+      placement = await this.tmux.newManagedWindow({
         workspace,
         name: sanitizeDisplayName(
           request.name,
@@ -180,7 +211,6 @@ export class RuntimeManager {
         identityToken,
         workspace,
         placement,
-        initialPrompt: request.initialPrompt,
         createdAt: Date.now(),
       };
       this.launches.set(runtimeId, launch);
@@ -189,9 +219,29 @@ export class RuntimeManager {
         launchToken,
         launchConsumed: !this.tokens.has(launchToken),
       });
+      metadataRecorded = true;
+      this.dispatchInitialPrompt(runtimeId);
       return { runtimeId, placement };
     } catch (error) {
       this.tokens.delete(launchToken);
+      this.initialPrompts.delete(runtimeId);
+      this.launches.delete(runtimeId);
+      if (placement) {
+        try {
+          // This is harmless when persistence failed before inserting a row,
+          // and closes the metadata window when it did insert one.
+          this.metadata.markManagedStopped(runtimeId);
+        } catch {
+          /* rollback must still attempt tmux cleanup */
+        }
+        await this.tmux.killManagedWindow(placement).catch(() => undefined);
+      } else if (metadataRecorded) {
+        try {
+          this.metadata.markManagedStopped(runtimeId);
+        } catch {
+          /* best effort */
+        }
+      }
       throw error;
     }
   }
@@ -224,12 +274,12 @@ export class RuntimeManager {
       while (this.registry.isOnline(runtimeId) && Date.now() < gracefulDeadline)
         await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    if (this.registry.isOnline(runtimeId) && snapshot.pid)
+    if (this.registry.isOnline(runtimeId) && this.safePid(snapshot.pid))
       this.signalManagedProcess(snapshot.pid, 'SIGTERM');
     const termDeadline = Date.now() + (force ? 500 : 2_000);
     while (this.registry.isOnline(runtimeId) && Date.now() < termDeadline)
       await new Promise((resolve) => setTimeout(resolve, 100));
-    if (this.registry.isOnline(runtimeId) && snapshot.pid)
+    if (this.registry.isOnline(runtimeId) && this.safePid(snapshot.pid))
       this.signalManagedProcess(snapshot.pid, 'SIGKILL');
     if (launch) {
       await this.tmux
@@ -242,6 +292,7 @@ export class RuntimeManager {
   }
 
   private signalManagedProcess(pid: number, signal: NodeJS.Signals): void {
+    if (!this.safePid(pid)) return;
     try {
       process.kill(-pid, signal);
     } catch {
@@ -255,19 +306,31 @@ export class RuntimeManager {
 
   onRegistryChange(change: RegistryChange): void {
     if (change.kind !== 'registered') return;
-    const launch = this.launches.get(change.snapshot.runtimeId);
-    if (!launch?.initialPrompt) return;
+    this.dispatchInitialPrompt(change.snapshot.runtimeId);
+  }
+
+  private dispatchInitialPrompt(runtimeId: string): void {
+    const pending = this.initialPrompts.get(runtimeId);
+    if (!pending || pending.sent) return;
+    pending.sent = true;
     void this.registry
-      .sendCommand(launch.runtimeId, {
-        type: 'prompt',
-        text: launch.initialPrompt,
+      .sendCommand(runtimeId, { type: 'prompt', text: pending.text })
+      .then(() => {
+        if (this.initialPrompts.get(runtimeId) === pending)
+          this.initialPrompts.delete(runtimeId);
       })
-      .catch(() => undefined);
-    launch.initialPrompt = undefined;
+      .catch(() => {
+        if (this.initialPrompts.get(runtimeId) === pending)
+          pending.sent = false;
+      });
   }
 
   placement(runtimeId: string): ManagedPlacement | undefined {
     return this.launches.get(runtimeId)?.placement;
+  }
+
+  private safePid(pid: number): boolean {
+    return Number.isSafeInteger(pid) && pid > 0;
   }
 
   private sameLocation(left: string, right: string): boolean {

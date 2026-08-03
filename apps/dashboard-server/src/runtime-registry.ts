@@ -10,6 +10,7 @@ import {
 
 const MAX_BUFFER = 1024 * 1024;
 const ACK_TIMEOUT_MS = 15_000;
+const PRE_HELLO_TIMEOUT_MS = 5_000;
 
 type RuntimeRecord = {
   snapshot: RuntimeSnapshot;
@@ -71,6 +72,10 @@ export class RuntimeRegistry {
     let helloSeen = false;
     let buffer = '';
     const reject = () => socket.destroy();
+    const helloTimer = setTimeout(() => {
+      if (!helloSeen) reject();
+    }, PRE_HELLO_TIMEOUT_MS);
+    helloTimer.unref?.();
     socket.setEncoding('utf8');
     const onData = (chunk: string) => {
       buffer += chunk;
@@ -119,6 +124,12 @@ export class RuntimeRegistry {
           if (this.forgotten.has(snapshot.runtimeId)) return reject();
           const old = this.runtimes.get(snapshot.runtimeId);
           if (old?.socket && old.socket !== socket) old.socket.destroy();
+          clearTimeout(helloTimer);
+          try {
+            socket.setTimeout(0);
+          } catch {
+            /* best effort */
+          }
           record = {
             snapshot: { ...snapshot, online: true, lastSeenAt: Date.now() },
             socket,
@@ -141,23 +152,21 @@ export class RuntimeRegistry {
     };
     socket.on('data', onData);
     socket.once('close', () => {
+      clearTimeout(helloTimer);
       socket.off('data', onData);
-      if (
-        record &&
-        this.runtimes.get(record.snapshot.runtimeId) === record &&
-        record.socket === socket
-      ) {
-        record.socket = undefined;
+      if (!record) return;
+      if (record.socket === socket) record.socket = undefined;
+      for (const pending of record.pending.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error('Runtime bridge disconnected.'));
+      }
+      record.pending.clear();
+      if (this.runtimes.get(record.snapshot.runtimeId) === record) {
         record.snapshot = {
           ...record.snapshot,
           online: false,
           lastSeenAt: Date.now(),
         };
-        for (const pending of record.pending.values()) {
-          clearTimeout(pending.timer);
-          pending.reject(new Error('Runtime bridge disconnected.'));
-        }
-        record.pending.clear();
         this.options.onChange?.({ kind: 'offline', snapshot: record.snapshot });
       }
     });
@@ -181,7 +190,8 @@ export class RuntimeRegistry {
 
   sendCommand(runtimeId: string, input: unknown): Promise<unknown> {
     const record = this.runtimes.get(runtimeId);
-    if (!record?.socket || record.socket.destroyed)
+    const connection = record?.socket;
+    if (!record || !connection || connection.destroyed)
       return Promise.reject(new Error('Runtime is offline.'));
     if (!input || typeof input !== 'object' || Array.isArray(input))
       return Promise.reject(new Error('Invalid command.'));
@@ -198,9 +208,14 @@ export class RuntimeRegistry {
     record.commandTail = record.commandTail
       .then(async () => {
         const current = this.runtimes.get(runtimeId);
-        const socket = current?.socket;
-        if (!current || !socket || socket.destroyed)
-          throw new Error('Runtime is offline.');
+        // A queued command belongs to the connection that was current when the
+        // browser requested it. Never move it to a replacement socket.
+        if (
+          current !== record ||
+          record.socket !== connection ||
+          connection.destroyed
+        )
+          throw new Error('Runtime bridge connection was replaced.');
         const result = await new Promise<unknown>((resolve, reject) => {
           const timer = setTimeout(() => {
             current.pending.delete(command.id);
@@ -218,7 +233,7 @@ export class RuntimeRegistry {
             timer,
           });
           try {
-            socket.write(serializeFrame({ kind: 'command', command }));
+            connection.write(serializeFrame({ kind: 'command', command }));
           } catch (error) {
             current.pending.delete(command.id);
             clearTimeout(timer);
@@ -277,14 +292,37 @@ export class RuntimeRegistry {
   ): RuntimeSnapshot {
     switch (event.type) {
       case 'runtime.hello':
-        return { ...event.snapshot, online: true };
+        // Hello is only accepted during registration. A later hello must not
+        // be able to replace the established runtime identity.
+        return snapshot;
       case 'runtime.heartbeat':
-      case 'runtime.stateChanged':
+      case 'runtime.stateChanged': {
+        const update = event.snapshot;
         return {
           ...snapshot,
+          ...(update?.cwd === undefined ? {} : { cwd: update.cwd }),
+          ...(update?.workspaceHint === undefined
+            ? {}
+            : { workspaceHint: update.workspaceHint }),
+          ...(update?.tmux === undefined ? {} : { tmux: update.tmux }),
           liveState: event.state,
-          ...(event.snapshot ?? {}),
+          ...(update?.session === undefined ? {} : { session: update.session }),
+          ...(update?.model === undefined ? {} : { model: update.model }),
+          ...(update?.contextUsage === undefined
+            ? {}
+            : { contextUsage: update.contextUsage }),
+          ...(update?.pendingInteractions === undefined
+            ? {}
+            : { pendingInteractions: update.pendingInteractions }),
+          ...(update?.lastError === undefined
+            ? {}
+            : { lastError: update.lastError }),
+          ...(update?.online === undefined ? {} : { online: update.online }),
+          ...(update?.lastSeenAt === undefined
+            ? {}
+            : { lastSeenAt: update.lastSeenAt }),
         };
+      }
       case 'session.changed':
       case 'session.snapshot':
         return { ...snapshot, session: event.session };

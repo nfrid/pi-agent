@@ -28,6 +28,51 @@ describe('interaction broker', () => {
     expect(broker.answer(interaction.id, 'late')).toBe(false);
   });
 
+  it('settles when the local presenter throws synchronously', async () => {
+    const broker = new InteractionBroker();
+    const pending = broker.request(
+      {
+        type: 'ask_user',
+        question: 'Continue?',
+        choices: [],
+        allowCustom: true,
+      },
+      () => {
+        throw new Error('presenter unavailable');
+      },
+    );
+    await expect(pending).resolves.toBeNull();
+    expect(broker.list()).toHaveLength(0);
+  });
+
+  it('cancels only requests owned by a session scope', async () => {
+    const broker = new InteractionBroker();
+    const firstScope = {};
+    const secondScope = {};
+    const first = broker.request(
+      { type: 'ask_user', question: 'First?', choices: [], allowCustom: true },
+      async () => new Promise(() => undefined),
+      undefined,
+      firstScope,
+    );
+    const second = broker.request(
+      {
+        type: 'ask_user',
+        question: 'Second?',
+        choices: [],
+        allowCustom: true,
+      },
+      async () => new Promise(() => undefined),
+      undefined,
+      secondScope,
+    );
+    expect(broker.cancelScope(firstScope)).toBe(1);
+    await expect(first).resolves.toBeNull();
+    expect(broker.list()).toHaveLength(1);
+    expect(broker.cancelScope(secondScope)).toBe(1);
+    await expect(second).resolves.toBeNull();
+  });
+
   it('resolves once and lets the first surface win', async () => {
     const broker = new InteractionBroker();
     const promise = broker.request(

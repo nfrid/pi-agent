@@ -338,14 +338,266 @@ export function validateStartRuntimeRequest(
   return result;
 }
 
+const runtimeSnapshotKeys = new Set([
+  'runtimeId',
+  'ownership',
+  'pid',
+  'cwd',
+  'workspaceHint',
+  'tmux',
+  'liveState',
+  'session',
+  'model',
+  'contextUsage',
+  'pendingInteractions',
+  'lastError',
+  'online',
+  'lastSeenAt',
+]);
+const sessionSnapshotKeys = new Set([
+  'id',
+  'file',
+  'name',
+  'cwd',
+  'leafId',
+  'entries',
+]);
+const interactionKeys = new Set([
+  'id',
+  'type',
+  'question',
+  'choices',
+  'allowCustom',
+  'customLabel',
+  'createdAt',
+]);
+
+function onlyKeys(value: Record<string, unknown>, keys: Set<string>): boolean {
+  return Object.keys(value).every((key) => keys.has(key));
+}
+
+function safePid(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function isSessionSnapshot(value: unknown): value is SessionSnapshot {
+  if (
+    !isRecord(value) ||
+    !onlyKeys(value, sessionSnapshotKeys) ||
+    !safeIdentifier(value.id, 256) ||
+    !Array.isArray(value.entries)
+  )
+    return false;
+  return (
+    (value.file === undefined || nonEmptyString(value.file, 4096)) &&
+    (value.name === undefined || nonEmptyString(value.name, 512)) &&
+    (value.cwd === undefined || nonEmptyString(value.cwd, 4096)) &&
+    (value.leafId === undefined || safeIdentifier(value.leafId, 256))
+  );
+}
+
+function isInteractionSnapshot(value: unknown): value is InteractionSnapshot {
+  if (
+    !isRecord(value) ||
+    !onlyKeys(value, interactionKeys) ||
+    !safeIdentifier(value.id, 256) ||
+    value.type !== 'ask_user' ||
+    !nonEmptyString(value.question, 100_000) ||
+    !Array.isArray(value.choices) ||
+    typeof value.allowCustom !== 'boolean' ||
+    (value.customLabel !== undefined &&
+      !nonEmptyString(value.customLabel, 512)) ||
+    typeof value.createdAt !== 'number' ||
+    !Number.isFinite(value.createdAt)
+  )
+    return false;
+  return value.choices.every(
+    (choice) =>
+      isRecord(choice) &&
+      onlyKeys(
+        choice,
+        new Set(['label', 'value', 'description', 'preview', 'custom']),
+      ) &&
+      nonEmptyString(choice.label, 512) &&
+      safeIdentifier(choice.value, 512) &&
+      (choice.description === undefined ||
+        nonEmptyString(choice.description, 10_000)) &&
+      (choice.preview === undefined ||
+        nonEmptyString(choice.preview, 100_000)) &&
+      (choice.custom === undefined || typeof choice.custom === 'boolean'),
+  );
+}
+
+function isRuntimeSnapshot(
+  value: unknown,
+  partial = false,
+): value is RuntimeSnapshot | Partial<RuntimeSnapshot> {
+  if (!isRecord(value) || !onlyKeys(value, runtimeSnapshotKeys)) return false;
+  if (partial && Object.keys(value).length === 0) return true;
+  if (
+    !partial &&
+    (!safeIdentifier(value.runtimeId, 256) ||
+      !safePid(value.pid) ||
+      (value.ownership !== 'external' && value.ownership !== 'managed') ||
+      !nonEmptyString(value.cwd, 4096) ||
+      !isRuntimeLiveState(value.liveState) ||
+      !isSessionSnapshot(value.session) ||
+      !Array.isArray(value.pendingInteractions) ||
+      !value.pendingInteractions.every(isInteractionSnapshot))
+  )
+    return false;
+  if (value.runtimeId !== undefined && !safeIdentifier(value.runtimeId, 256))
+    return false;
+  if (
+    value.ownership !== undefined &&
+    value.ownership !== 'external' &&
+    value.ownership !== 'managed'
+  )
+    return false;
+  if (value.pid !== undefined && !safePid(value.pid)) return false;
+  if (value.cwd !== undefined && !nonEmptyString(value.cwd, 4096)) return false;
+  if (
+    value.workspaceHint !== undefined &&
+    !nonEmptyString(value.workspaceHint, 512)
+  )
+    return false;
+  if (value.liveState !== undefined && !isRuntimeLiveState(value.liveState))
+    return false;
+  if (value.session !== undefined && !isSessionSnapshot(value.session))
+    return false;
+  if (
+    value.pendingInteractions !== undefined &&
+    (!Array.isArray(value.pendingInteractions) ||
+      !value.pendingInteractions.every(isInteractionSnapshot))
+  )
+    return false;
+  if (value.tmux !== undefined) {
+    if (
+      !isRecord(value.tmux) ||
+      !onlyKeys(
+        value.tmux,
+        new Set(['session', 'windowId', 'paneId', 'displayTarget']),
+      ) ||
+      !safeIdentifier(value.tmux.session, 512) ||
+      !safeIdentifier(value.tmux.windowId, 128) ||
+      !safeIdentifier(value.tmux.paneId, 128) ||
+      !safeIdentifier(value.tmux.displayTarget, 768)
+    )
+      return false;
+  }
+  if (value.model !== undefined) {
+    if (
+      !isRecord(value.model) ||
+      !onlyKeys(value.model, new Set(['provider', 'model', 'thinking'])) ||
+      !safeIdentifier(value.model.provider, 200) ||
+      !safeIdentifier(value.model.model, 300) ||
+      (value.model.thinking !== undefined &&
+        !safeIdentifier(value.model.thinking, 64))
+    )
+      return false;
+  }
+  if (value.contextUsage !== undefined) {
+    if (
+      !isRecord(value.contextUsage) ||
+      !onlyKeys(
+        value.contextUsage,
+        new Set(['tokens', 'contextWindow', 'percent']),
+      ) ||
+      (value.contextUsage.tokens !== null &&
+        (typeof value.contextUsage.tokens !== 'number' ||
+          !Number.isFinite(value.contextUsage.tokens))) ||
+      typeof value.contextUsage.contextWindow !== 'number' ||
+      !Number.isFinite(value.contextUsage.contextWindow) ||
+      (value.contextUsage.percent !== undefined &&
+        value.contextUsage.percent !== null &&
+        (typeof value.contextUsage.percent !== 'number' ||
+          !Number.isFinite(value.contextUsage.percent)))
+    )
+      return false;
+  }
+  return (
+    (value.lastError === undefined ||
+      nonEmptyString(value.lastError, 10_000)) &&
+    (value.online === undefined || typeof value.online === 'boolean') &&
+    (value.lastSeenAt === undefined ||
+      (typeof value.lastSeenAt === 'number' &&
+        Number.isFinite(value.lastSeenAt)))
+  );
+}
+
 export function isBridgeEvent(value: unknown): value is BridgeEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false;
-  return (
-    value.type.startsWith('runtime.') ||
-    value.type.startsWith('session.') ||
-    value.type.startsWith('message.') ||
-    value.type.startsWith('tool.') ||
-    value.type === 'agent.settled' ||
-    value.type.startsWith('interaction.')
-  );
+  switch (value.type) {
+    case 'runtime.hello':
+      return (
+        onlyKeys(
+          value,
+          new Set([
+            'type',
+            'protocolVersion',
+            'token',
+            'identityToken',
+            'snapshot',
+          ]),
+        ) &&
+        value.protocolVersion === PROTOCOL_VERSION &&
+        (value.token === undefined || safeIdentifier(value.token, 512)) &&
+        (value.identityToken === undefined ||
+          safeIdentifier(value.identityToken, 512)) &&
+        isRuntimeSnapshot(value.snapshot)
+      );
+    case 'runtime.heartbeat':
+    case 'runtime.stateChanged':
+      return (
+        onlyKeys(value, new Set(['type', 'state', 'snapshot'])) &&
+        isRuntimeLiveState(value.state) &&
+        (value.snapshot === undefined ||
+          isRuntimeSnapshot(value.snapshot, true))
+      );
+    case 'session.changed':
+    case 'session.snapshot':
+      return (
+        onlyKeys(value, new Set(['type', 'session'])) &&
+        isSessionSnapshot(value.session)
+      );
+    case 'message.started':
+    case 'message.updated':
+    case 'message.finished':
+      return (
+        onlyKeys(value, new Set(['type', 'sessionId', 'message'])) &&
+        safeIdentifier(value.sessionId, 256) &&
+        'message' in value
+      );
+    case 'tool.started':
+    case 'tool.updated':
+    case 'tool.finished':
+      return (
+        onlyKeys(value, new Set(['type', 'sessionId', 'tool'])) &&
+        safeIdentifier(value.sessionId, 256) &&
+        'tool' in value
+      );
+    case 'agent.settled':
+      return (
+        onlyKeys(value, new Set(['type', 'sessionId'])) &&
+        safeIdentifier(value.sessionId, 256)
+      );
+    case 'interaction.requested':
+      return (
+        onlyKeys(value, new Set(['type', 'interaction'])) &&
+        isInteractionSnapshot(value.interaction)
+      );
+    case 'interaction.resolved':
+      return (
+        onlyKeys(value, new Set(['type', 'interactionId', 'resolution'])) &&
+        safeIdentifier(value.interactionId, 256) &&
+        'resolution' in value
+      );
+    case 'runtime.goodbye':
+      return (
+        onlyKeys(value, new Set(['type', 'reason'])) &&
+        (value.reason === undefined || nonEmptyString(value.reason, 512))
+      );
+    default:
+      return false;
+  }
 }
