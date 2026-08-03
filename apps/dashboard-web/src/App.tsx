@@ -132,7 +132,8 @@ export default function App() {
       : route[0] === 'runtimes' && route[1] ? <RuntimeView id={route[1]} snapshot={dashboard.snapshot} />
         : route[0] === 'new' ? <LaunchView snapshot={dashboard.snapshot} />
           : <Dashboard snapshot={dashboard.snapshot} />;
-  return <div className="app"><Header snapshot={dashboard.snapshot} /><main className="shell">{content}</main></div>;
+  const sessionRoute = route[0] === 'sessions' && Boolean(route[1]);
+  return <div className="app"><Header snapshot={dashboard.snapshot} /><main className={`shell ${sessionRoute ? 'session-shell' : ''}`}>{content}</main></div>;
 }
 
 function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
@@ -266,6 +267,22 @@ function replaceStable(value: unknown, id: string, replacement: unknown): unknow
   return changed ? next : value;
 }
 
+function messageIdentity(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  const message = record.type === 'message' && record.message && typeof record.message === 'object'
+    ? record.message as Record<string, unknown>
+    : record;
+  if (typeof message.role !== 'string') return undefined;
+  if (typeof message.timestamp === 'number' || typeof message.timestamp === 'string')
+    return `${message.role}:${message.timestamp}`;
+  return undefined;
+}
+
+export function isNearPageBottom(scrollHeight: number, scrollY: number, innerHeight: number, threshold = 120): boolean {
+  return scrollHeight - scrollY - innerHeight <= threshold;
+}
+
 /** Merge a live bridge item by its Pi-stable id, never by array position. */
 export function reconcileLiveEvent(entries: readonly unknown[], event: DashboardEvent['event'], sessionId: string): unknown[] {
   if (!event?.sessionId || event.sessionId !== sessionId) return [...entries];
@@ -286,6 +303,14 @@ export function reconcileLiveEvent(entries: readonly unknown[], event: Dashboard
     if (!isMessage && entry && typeof entry === 'object' && (entry as Record<string, unknown>).type === 'tool' && containsStableId(entry, id)) return toolWrapper;
     return replaceStable(entry, id, nestedReplacement);
   });
+  const identity = isMessage ? messageIdentity(payload) : undefined;
+  if (identity) {
+    let index = -1;
+    for (let entryIndex = entries.length - 1; entryIndex >= 0; entryIndex -= 1) {
+      if (messageIdentity(entries[entryIndex]) === identity) { index = entryIndex; break; }
+    }
+    if (index >= 0) return entries.map((entry, entryIndex) => entryIndex === index ? nestedReplacement : entry);
+  }
   if (isMessage && (payload as Record<string, unknown>).role === 'assistant') {
     let index = -1;
     for (let entryIndex = entries.length - 1; entryIndex >= 0; entryIndex -= 1) {
@@ -301,6 +326,7 @@ function SessionView({ id, snapshot, lastEvent, reconnectNonce }: { id: string; 
   const [data, setData] = useState<SessionResponse>();
   const [error, setError] = useState<string>();
   const scrolledSessionRef = useRef<string | undefined>(undefined);
+  const stickToBottomRef = useRef(true);
   const runtime = snapshot.runtimes.find((item) => item.online !== false && item.session.id === id);
   useEffect(() => {
     let active = true;
@@ -313,16 +339,34 @@ function SessionView({ id, snapshot, lastEvent, reconnectNonce }: { id: string; 
       .catch((cause) => active && setError(cause instanceof Error ? cause.message : String(cause)));
     return () => { active = false; };
   }, [id, reconnectNonce]);
+  useEffect(() => {
+    stickToBottomRef.current = true;
+    const update = () => {
+      stickToBottomRef.current = isNearPageBottom(document.documentElement.scrollHeight, window.scrollY, window.innerHeight);
+    };
+    window.addEventListener('scroll', update, { passive: true });
+    update();
+    return () => window.removeEventListener('scroll', update);
+  }, [id]);
   useLayoutEffect(() => {
-    if (!data || scrolledSessionRef.current === id) return;
+    if (!data) return;
+    const enteringSession = scrolledSessionRef.current !== id;
+    if (!enteringSession && !stickToBottomRef.current) return;
     scrolledSessionRef.current = id;
-    const frame = window.requestAnimationFrame(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    const frame = window.requestAnimationFrame(() => {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      stickToBottomRef.current = true;
+    });
     return () => window.cancelAnimationFrame(frame);
   }, [data, id]);
   useEffect(() => {
     const event = lastEvent?.event;
     if (!event || !data) return;
+    const captureBottomState = () => {
+      stickToBottomRef.current = isNearPageBottom(document.documentElement.scrollHeight, window.scrollY, window.innerHeight);
+    };
     if (event.type === 'agent.settled' || event.type === 'runtime.hello') {
+      captureBottomState();
       let active = true;
       void api<unknown>(`/api/sessions/${encodeURIComponent(id)}`).then((value) => {
         const next = asSessionResponse(value);
@@ -330,8 +374,10 @@ function SessionView({ id, snapshot, lastEvent, reconnectNonce }: { id: string; 
       }).catch(() => undefined);
       return () => { active = false; };
     }
-    if (event.type?.startsWith('message.') || event.type?.startsWith('tool.'))
+    if (event.type?.startsWith('message.') || event.type?.startsWith('tool.')) {
+      captureBottomState();
       setData((current) => current ? { ...current, entries: reconcileLiveEvent(current.entries, event, id) } : current);
+    }
   }, [lastEvent, id]);
   if (!data) return <section><Back /><p>{error ?? 'Loading session…'}</p></section>;
   return <section className="session-page"><Back /><div className="session-heading"><div><p className="eyebrow">Session</p><h1>{data.metadata.name ?? id.slice(0, 12)}</h1><p className="muted">{data.metadata.cwd} · {runtime ? runtime.liveState : 'dormant'}</p></div>{runtime && <RuntimeActions runtime={runtime} />}</div>{runtime?.pendingInteractions.map((interaction) => <InteractionCard key={interaction.id} interaction={interaction} />)}<Transcript entries={data.entries} /><Composer runtime={runtime} sessionId={id} /></section>;

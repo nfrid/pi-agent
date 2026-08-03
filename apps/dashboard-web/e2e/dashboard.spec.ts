@@ -48,6 +48,24 @@ test('dense mobile session keeps conversation and activity readable', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 720 });
+  await page.addInitScript(() => {
+    class FakeDashboardSocket {
+      static OPEN = 1;
+      readyState = 1;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onclose: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor() {
+        (window as unknown as { dashboardTestSocket: FakeDashboardSocket }).dashboardTestSocket = this;
+        window.setTimeout(() => this.onopen?.(), 0);
+      }
+      send() {}
+      close() { this.readyState = 3; this.onclose?.(); }
+      emit(value: unknown) { this.onmessage?.({ data: JSON.stringify(value) }); }
+    }
+    Object.defineProperty(window, 'WebSocket', { value: FakeDashboardSocket });
+  });
   await page.route('**/api/snapshot', async (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -81,5 +99,18 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(page.getByLabel('Message Pi')).toBeVisible();
   await expect(page.getByLabel('Context window 50% [136k/272k]')).toBeVisible();
   expect(await page.evaluate(() => window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2)).toBe(true);
+  expect(await page.locator('.composer').evaluate((element) => document.documentElement.scrollHeight - (window.scrollY + element.getBoundingClientRect().bottom))).toBeLessThanOrEqual(12);
+  const emitMessage = async (type: string, timestamp: number, text: string) => page.evaluate(({ type, timestamp, text }) => {
+    (window as unknown as { dashboardTestSocket: { emit(value: unknown): void } }).dashboardTestSocket.emit({ type: 'bridge.event', event: { type, sessionId: 's1', message: { message: { role: 'user', timestamp, content: [{ type: 'text', text }] } } } });
+  }, { type, timestamp, text });
+  await emitMessage('message.started', 123, 'Live dashboard message');
+  await expect(page.getByText('Live dashboard message')).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2)).toBe(true);
+  await emitMessage('message.finished', 123, 'Live dashboard message');
+  await expect(page.getByText('Live dashboard message')).toHaveCount(1);
+  const scrolledUp = await page.evaluate(() => { window.scrollBy(0, -400); return window.scrollY; });
+  await emitMessage('message.started', 456, 'Message while reading history');
+  await expect(page.getByText('Message while reading history')).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(scrolledUp);
   expect(await page.locator('body').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 });

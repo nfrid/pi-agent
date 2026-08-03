@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asBrowserSnapshot, asSessionResponse, contextIndicatorData, formatContextTokens, reconcileLiveEvent, toTranscriptEntries } from './App';
+import { asBrowserSnapshot, asSessionResponse, contextIndicatorData, formatContextTokens, isNearPageBottom, reconcileLiveEvent, toTranscriptEntries } from './App';
 
 describe('dashboard snapshots', () => {
   it('rejects malformed session responses before rendering', () => {
@@ -31,6 +31,17 @@ describe('active transcript reconciliation', () => {
     const updated = reconcileLiveEvent(entries, event, 's1');
     expect(updated).toHaveLength(1);
     expect(JSON.stringify(updated)).toContain('done');
+  });
+
+  it('reconciles ID-less user start/end events by Pi timestamp', () => {
+    const start = { type: 'message.started', sessionId: 's1', message: { message: { role: 'user', timestamp: 123, content: [{ type: 'text', text: 'hello' }] } } };
+    const finish = { ...start, type: 'message.finished' };
+    const once = reconcileLiveEvent([], start, 's1');
+    const twice = reconcileLiveEvent(once, finish, 's1');
+    expect(twice).toHaveLength(1);
+    expect(JSON.stringify(twice)).toContain('hello');
+    const repeatedLater = reconcileLiveEvent(twice, { ...start, message: { message: { role: 'user', timestamp: 456, content: [{ type: 'text', text: 'hello' }] } } }, 's1');
+    expect(repeatedLater).toHaveLength(2);
   });
 
   it('updates a live item by stable id without appending duplicates', () => {
@@ -70,5 +81,12 @@ describe('active transcript reconciliation', () => {
   it('ignores events from the previous session', () => {
     const entries = [{ type: 'message', message: { id: 'm1' } }];
     expect(reconcileLiveEvent(entries, { type: 'message.updated', sessionId: 'old', message: { id: 'old' } }, 'new')).toEqual(entries);
+  });
+});
+
+describe('bottom-stick scrolling', () => {
+  it('treats a small footer distance as bottom without following users who scroll up', () => {
+    expect(isNearPageBottom(2_000, 1_100, 800)).toBe(true);
+    expect(isNearPageBottom(2_000, 900, 800)).toBe(false);
   });
 });
