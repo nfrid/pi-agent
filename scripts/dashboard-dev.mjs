@@ -5,9 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const mode = process.argv[2] ?? 'all';
-if (!['all', 'daemon', 'web'].includes(mode)) {
+if (!['all', 'daemon', 'web', 'serve'].includes(mode)) {
   process.stderr.write(
-    'Usage: node scripts/dashboard-dev.mjs [all|daemon|web]\n',
+    'Usage: node scripts/dashboard-dev.mjs [all|daemon|web|serve]\n',
   );
   process.exit(2);
 }
@@ -56,7 +56,7 @@ function run(name, args) {
   child.once('exit', (code, signal) => {
     children.delete(child);
     if (stopping) return;
-    if (mode === 'all') stop(code ?? (signal ? 1 : 0));
+    if (mode === 'all' || mode === 'serve') stop(code ?? (signal ? 1 : 0));
     else process.exitCode = code ?? (signal ? 1 : 0);
   });
   child.once('error', (error) => {
@@ -84,6 +84,10 @@ if (mode === 'all' || mode === 'daemon')
   run('daemon', ['--filter', '@pi-dashboard/server', 'dev']);
 if (mode === 'all' || mode === 'web')
   run('web', ['--filter', '@pi-dashboard/web', 'dev']);
+if (mode === 'serve') {
+  run('daemon', ['--filter', '@pi-dashboard/server', 'start']);
+  run('web', ['--filter', '@pi-dashboard/web', 'preview']);
+}
 
 process.once('SIGINT', () => stop(0));
 process.once('SIGTERM', () => stop(0));

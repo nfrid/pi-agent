@@ -19,6 +19,7 @@
     "format:fix": "biome format extensions packages apps/dashboard-server scripts docs --write",
     "build": "pnpm run workspace:build",
     "dashboard:dev": "node scripts/dashboard-dev.mjs all",
+    "dashboard:serve": "node scripts/dashboard-dev.mjs serve",
     "dashboard:daemon": "node scripts/dashboard-dev.mjs daemon",
     "dashboard:web": "node scripts/dashboard-dev.mjs web",
     "workspace:typecheck": "pnpm --filter @pi-dashboard/protocol --filter @pi-dashboard/activity-model --filter @pi-dashboard/server --filter @pi-dashboard/web typecheck",
