@@ -36,8 +36,12 @@ export function authorizeRequest(input: {
   expectedToken: string;
   allowedOrigins: readonly string[];
 }): { ok: true } | { ok: false; status: number; error: string } {
-  if (!allowedOrigin(input.origin, input.allowedOrigins))
+  if (input.origin && !allowedOrigin(input.origin, input.allowedOrigins))
     return { ok: false, status: 403, error: 'Origin is not allowed.' };
+  // Browsers omit Origin on same-origin GET and HEAD requests. State-changing
+  // requests must still carry an allow-listed Origin as the CSRF boundary.
+  if (isStateChangingMethod(input.method) && !input.origin)
+    return { ok: false, status: 403, error: 'Origin is required.' };
   const token =
     input.tokenHeader ??
     (input.authorization?.startsWith('Bearer ')
@@ -45,10 +49,6 @@ export function authorizeRequest(input: {
       : undefined);
   if (!safeTokenEqual(token, input.expectedToken))
     return { ok: false, status: 401, error: 'Authentication required.' };
-  // Authorization plus an allow-listed Origin is the CSRF boundary. Do not
-  // accept a browser cookie or a permissive/no-origin state-changing request.
-  if (isStateChangingMethod(input.method) && !input.origin)
-    return { ok: false, status: 403, error: 'Origin is required.' };
   return { ok: true };
 }
 

@@ -121,6 +121,10 @@ describe('dashboard HTTP boundary', () => {
       headers: { Origin: origin, 'Access-Control-Request-Method': 'POST' },
     });
     expect(preflight.status).toBe(204);
+    const sameOriginResponse = await fetch(url, {
+      headers: { 'x-dashboard-token': 'test-token' },
+    });
+    expect(sameOriginResponse.status).toBe(200);
     const response = await fetch(url, {
       headers: { Origin: origin, 'x-dashboard-token': 'test-token' },
     });

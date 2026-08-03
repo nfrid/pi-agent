@@ -21,6 +21,31 @@ describe('dashboard security boundary', () => {
     ).toEqual({ ok: true });
     expect(
       authorizeRequest({
+        method: 'GET',
+        authorization: 'Bearer secret',
+        expectedToken: 'secret',
+        allowedOrigins: ['https://dashboard.example'],
+      }),
+    ).toEqual({ ok: true });
+    expect(
+      authorizeRequest({
+        method: 'GET',
+        origin: 'https://evil.example',
+        authorization: 'Bearer secret',
+        expectedToken: 'secret',
+        allowedOrigins: ['https://dashboard.example'],
+      }),
+    ).toMatchObject({ status: 403 });
+    expect(
+      authorizeRequest({
+        method: 'POST',
+        authorization: 'Bearer secret',
+        expectedToken: 'secret',
+        allowedOrigins: ['https://dashboard.example'],
+      }),
+    ).toMatchObject({ status: 403 });
+    expect(
+      authorizeRequest({
         method: 'POST',
         origin: 'https://dashboard.example',
         authorization: 'Bearer bad',
