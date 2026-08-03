@@ -24,6 +24,7 @@ describe('dashboard HTTP boundary', () => {
     };
     server = await createDashboardServer(options);
     const token = server.token;
+    expect(server.socketPath).toBe(path.join(root, 'state', 'bridge.sock'));
     await server.start();
     await server.stop();
     server = await createDashboardServer(options);

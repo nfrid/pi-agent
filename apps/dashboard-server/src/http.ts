@@ -133,8 +133,10 @@ class DashboardServerImpl implements DashboardServer {
       loadOrCreateToken(this.stateDir);
     this.socketPath =
       options.socketPath ??
-      process.env.PI_DASHBOARD_SOCKET ??
-      path.join(this.stateDir, 'bridge.sock');
+      (options.stateDir
+        ? path.join(this.stateDir, 'bridge.sock')
+        : (process.env.PI_DASHBOARD_SOCKET ??
+          path.join(this.stateDir, 'bridge.sock')));
     this.metadata =
       options.metadata ??
       new MetadataStore(path.join(this.stateDir, 'dashboard.sqlite'));
