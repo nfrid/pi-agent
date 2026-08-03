@@ -84,6 +84,34 @@ describe('session index', () => {
     });
   });
 
+  it('fans file-watcher changes out to live snapshot observers', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-watch-'));
+    let changed!: () => void;
+    const observed = new Promise<void>((resolve) => {
+      changed = resolve;
+    });
+    const index = new SessionIndex(root, undefined, changed);
+    await index.start();
+    try {
+      await writeFile(
+        path.join(root, 'watched.jsonl'),
+        `${JSON.stringify({ type: 'session', id: 'watched-id', cwd: '/tmp' })}\n`,
+      );
+      await Promise.race([
+        observed,
+        new Promise<never>((_resolve, reject) =>
+          setTimeout(
+            () => reject(new Error('Watcher did not publish.')),
+            2_000,
+          ),
+        ),
+      ]);
+      expect(index.get('watched-id')).toMatchObject({ id: 'watched-id' });
+    } finally {
+      index.close();
+    }
+  });
+
   it('renames a known dormant session by appending session_info', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-rename-'));
     const file = path.join(root, 'session.jsonl');

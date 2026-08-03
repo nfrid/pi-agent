@@ -49,6 +49,7 @@ export class SessionIndex {
   constructor(
     private readonly sessionDir: string,
     private readonly metadata?: MetadataStore,
+    private readonly onChange?: () => void,
   ) {}
 
   async rebuild(workspaces: readonly WorkspaceTarget[] = []): Promise<void> {
@@ -153,12 +154,17 @@ export class SessionIndex {
         { recursive: true },
         (_event, filename) => {
           if (!filename) {
-            void this.rebuild(this.workspaces);
+            void this.rebuild(this.workspaces)
+              .then(() => this.notifyChange())
+              .catch(() => undefined);
             return;
           }
           const file = path.resolve(this.sessionDir, String(filename));
           if (file.endsWith('.jsonl')) this.scheduleIndex(file);
-          else void this.rebuild(this.workspaces);
+          else
+            void this.rebuild(this.workspaces)
+              .then(() => this.notifyChange())
+              .catch(() => undefined);
         },
       );
       this.watcher.on('error', () => {
@@ -170,6 +176,15 @@ export class SessionIndex {
       // The session directory may not exist yet, or the platform may not
       // support recursive fs.watch. Retry so a later-created directory works.
       this.scheduleWatcherRetry();
+    }
+  }
+
+  private notifyChange(): void {
+    try {
+      this.onChange?.();
+    } catch {
+      // Filesystem observation must never fail because a downstream listener
+      // is temporarily unavailable.
     }
   }
 
@@ -191,6 +206,7 @@ export class SessionIndex {
       const next = previous
         .then(() => this.indexFile(file, this.workspaces))
         .catch(() => this.removeFile(file))
+        .then(() => this.notifyChange())
         .finally(() => {
           if (this.indexing.get(file) === next) this.indexing.delete(file);
         });

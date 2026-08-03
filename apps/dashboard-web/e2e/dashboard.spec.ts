@@ -3,6 +3,9 @@ import { expect, test } from '@playwright/test';
 test('mobile dashboard renders and supports the new-agent route', async ({
   page,
 }) => {
+  await page.route('**/api/usage', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
   await page.route('**/api/snapshot', async (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -39,7 +42,7 @@ test('mobile dashboard renders and supports the new-agent route', async ({
   await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
   await expect(page.getByText('No runtimes are connected.')).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'ghost-session offline' }),
+    page.getByRole('button', { name: 'Untitled session offline' }),
   ).toBeVisible();
   await expect(page.getByRole('button', { name: '+ Agent' })).toBeVisible();
   expect(
@@ -57,11 +60,139 @@ test('mobile dashboard renders and supports the new-agent route', async ({
   ).toBeVisible();
 });
 
+test('live transport contains malformed data and reconnects without breaking the UI', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('pi-dashboard-token', 'test-token');
+    const sockets: FakeDashboardSocket[] = [];
+    class FakeDashboardSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSED = 3;
+      readyState = FakeDashboardSocket.CONNECTING;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onclose: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor() {
+        sockets.push(this);
+        window.setTimeout(() => {
+          this.readyState = FakeDashboardSocket.OPEN;
+          this.onopen?.();
+        }, 0);
+      }
+      send(value: string) {
+        const message = JSON.parse(value) as { type?: string };
+        if (message.type !== 'auth') return;
+        this.emit({
+          type: 'snapshot',
+          snapshot: {
+            serverId: 'server-live',
+            revision: 1,
+            runtimes: [],
+            workspaces: [],
+            sessions: [],
+            unread: [],
+          },
+        });
+      }
+      close() {
+        if (this.readyState === FakeDashboardSocket.CLOSED) return;
+        this.readyState = FakeDashboardSocket.CLOSED;
+        this.onclose?.();
+      }
+      emit(value: unknown) {
+        this.onmessage?.({ data: JSON.stringify(value) });
+      }
+      emitRaw(data: string) {
+        this.onmessage?.({ data });
+      }
+    }
+    Object.defineProperty(window, 'WebSocket', { value: FakeDashboardSocket });
+    Object.assign(window, {
+      dashboardLiveTest: {
+        count: () => sockets.length,
+        current: () => sockets.at(-1),
+      },
+    });
+  });
+  await page.route('**/api/usage', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/snapshot', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        serverId: 'server-live',
+        revision: 1,
+        runtimes: [],
+        workspaces: [],
+        sessions: [],
+        unread: [],
+      }),
+    }),
+  );
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
+  await page.evaluate(() => {
+    const test = (
+      window as unknown as {
+        dashboardLiveTest: {
+          current(): {
+            emitRaw(data: string): void;
+            emit(value: unknown): void;
+          };
+        };
+      }
+    ).dashboardLiveTest;
+    test.current().emitRaw('{not-json');
+    test.current().emit({
+      type: 'snapshot',
+      snapshot: {
+        serverId: 'broken',
+        revision: 2,
+        runtimes: [{}],
+        workspaces: [],
+        sessions: [],
+        unread: [],
+      },
+    });
+  });
+  await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
+  await page.evaluate(() => {
+    (
+      window as unknown as {
+        dashboardLiveTest: { current(): { close(): void } };
+      }
+    ).dashboardLiveTest
+      .current()
+      .close();
+  });
+  await expect(page.getByRole('status')).toContainText(
+    'Live updates disconnected',
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (
+          window as unknown as {
+            dashboardLiveTest: { count(): number };
+          }
+        ).dashboardLiveTest.count(),
+      ),
+    )
+    .toBeGreaterThan(1);
+  await expect(page.getByRole('status')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
+});
+
 test('dense mobile session keeps conversation and activity readable', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 720 });
   await page.addInitScript(() => {
+    localStorage.setItem('pi-dashboard-token', 'test-token');
     class FakeDashboardSocket {
       static OPEN = 1;
       readyState = 1;
@@ -86,6 +217,9 @@ test('dense mobile session keeps conversation and activity readable', async ({
     }
     Object.defineProperty(window, 'WebSocket', { value: FakeDashboardSocket });
   });
+  await page.route('**/api/usage', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
   await page.route('**/api/snapshot', async (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -113,8 +247,15 @@ test('dense mobile session keeps conversation and activity readable', async ({
       }),
     }),
   );
-  await page.route(/\/api\/sessions\/[^/]+$/, async (route) =>
-    route.fulfill({
+  let sessionReads = 0;
+  let releaseSettledRead: (() => void) | undefined;
+  const settledRead = new Promise<void>((resolve) => {
+    releaseSettledRead = resolve;
+  });
+  await page.route(/\/api\/sessions\/[^/]+$/, async (route) => {
+    sessionReads += 1;
+    if (sessionReads === 3) await settledRead;
+    await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
         metadata: { id: 's1', file: '', cwd: '/tmp', updatedAt: Date.now() },
@@ -174,10 +315,23 @@ test('dense mobile session keeps conversation and activity readable', async ({
               ],
             },
           },
+          ...(sessionReads === 3
+            ? [
+                {
+                  type: 'message',
+                  message: {
+                    role: 'assistant',
+                    content: [
+                      { type: 'text', text: 'Authoritative settled refresh' },
+                    ],
+                  },
+                },
+              ]
+            : []),
         ],
       }),
-    }),
-  );
+    });
+  });
   await page.goto('/sessions/s1');
   await expect(page.getByText('Check', { exact: true })).toBeVisible();
   const userLink = page.getByRole('link', { name: 'dashboard' });
@@ -247,6 +401,20 @@ test('dense mobile session keeps conversation and activity readable', async ({
     .toBe(true);
   await emitMessage('message.finished', 123, 'Live dashboard message');
   await expect(page.getByText('Live dashboard message')).toHaveCount(1);
+  await page.evaluate(() => {
+    (
+      window as unknown as {
+        dashboardTestSocket: { emit(value: unknown): void };
+      }
+    ).dashboardTestSocket.emit({
+      type: 'bridge.event',
+      event: { type: 'agent.settled', sessionId: 's1' },
+    });
+  });
+  await expect.poll(() => sessionReads).toBe(3);
+  await emitMessage('message.started', 321, 'Delta during settled refresh');
+  releaseSettledRead?.();
+  await expect(page.getByText('Authoritative settled refresh')).toBeVisible();
   await page.evaluate(() => window.scrollBy(0, -400));
   await emitMessage('message.started', 456, 'Message while reading history');
   await expect(page.getByText('Message while reading history')).toHaveCount(1);

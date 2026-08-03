@@ -31,6 +31,7 @@ import { CodexUsageProvider, type UsageProvider } from './usage.js';
 
 const MAX_BODY = 512 * 1024;
 const MAX_WS_BUFFER = 1024 * 1024;
+const WS_HEARTBEAT_MS = 30_000;
 const WS_PATH = '/ws';
 
 function loadOrCreateToken(stateDir: string): string {
@@ -114,6 +115,8 @@ class DashboardServerImpl implements DashboardServer {
     maxPayload: 2048,
   });
   private readonly clients = new Set<WebSocket>();
+  private readonly awaitingPong = new WeakSet<WebSocket>();
+  private heartbeatTimer: NodeJS.Timeout | undefined;
   private workspaces: WorkspaceTarget[] = [];
   private usageSnapshot: unknown;
   private readonly serverId = randomBytes(12).toString('base64url');
@@ -152,6 +155,9 @@ class DashboardServerImpl implements DashboardServer {
             'sessions',
           ),
         this.metadata,
+        () => {
+          if (this.started) this.changed();
+        },
       );
     this.sesh = options.sesh ?? new CliSeshAdapter();
     this.tmux = options.tmux ?? new TmuxAdapter();
@@ -225,6 +231,7 @@ class DashboardServerImpl implements DashboardServer {
           return;
         }
         this.clients.add(client);
+        client.on('pong', () => this.awaitingPong.delete(client));
         client.once('close', () => this.clients.delete(client));
         this.sendClient(
           client,
@@ -274,11 +281,18 @@ class DashboardServerImpl implements DashboardServer {
     await this.refreshWorkspaces();
     await this.sessions.start(this.workspaces);
     if (!this.pushConfigured) this.push = await createPushSender(this.metadata);
+    this.heartbeatTimer = setInterval(
+      () => this.heartbeatClients(),
+      WS_HEARTBEAT_MS,
+    );
+    this.heartbeatTimer.unref?.();
   }
 
   async stop(): Promise<void> {
     if (!this.started) return;
     this.started = false;
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
     this.sessions.close();
     this.registry.close();
     for (const client of this.wss.clients) {
@@ -597,7 +611,11 @@ class DashboardServerImpl implements DashboardServer {
 
   private async handleUsage(response: http.ServerResponse): Promise<void> {
     try {
-      this.usageSnapshot = await this.usage.get();
+      const usage = await this.usage.get();
+      // Usage is an optional provider boundary. Reject values that cannot be
+      // represented on the wire instead of poisoning every future snapshot.
+      JSON.stringify(usage);
+      this.usageSnapshot = usage;
       this.changed();
       return this.json(response, 200, { usage: this.usageSnapshot });
     } catch (error) {
@@ -792,6 +810,7 @@ class DashboardServerImpl implements DashboardServer {
       const record = message as Record<string, unknown>;
       this.publish({
         ...record,
+        serverId: this.serverId,
         revision: this.revision,
         ...(record.snapshot && typeof record.snapshot === 'object'
           ? { snapshot }
@@ -803,13 +822,41 @@ class DashboardServerImpl implements DashboardServer {
   }
 
   private publish(message: unknown): void {
-    const text = JSON.stringify(message);
+    let text: string;
+    try {
+      text = JSON.stringify(message);
+    } catch {
+      // A bad optional provider payload must not escape an event callback and
+      // take down the daemon. The next valid change remains publishable.
+      return;
+    }
     for (const client of this.clients) this.sendClient(client, text);
+  }
+
+  private heartbeatClients(): void {
+    for (const client of this.clients) {
+      if (client.readyState !== client.OPEN) {
+        this.clients.delete(client);
+        continue;
+      }
+      if (this.awaitingPong.has(client)) {
+        this.clients.delete(client);
+        client.terminate();
+        continue;
+      }
+      this.awaitingPong.add(client);
+      try {
+        client.ping();
+      } catch {
+        this.clients.delete(client);
+        client.terminate();
+      }
+    }
   }
 
   private sendClient(client: WebSocket, text: string): boolean {
     if (client.readyState !== client.OPEN) return false;
-    if (client.bufferedAmount > MAX_WS_BUFFER) {
+    if (client.bufferedAmount >= MAX_WS_BUFFER) {
       this.clients.delete(client);
       client.terminate();
       return false;

@@ -141,10 +141,12 @@ export type DashboardMessage =
   | { type: 'snapshot'; snapshot: BrowserSnapshot }
   | {
       type: 'event';
+      serverId: string;
       revision: number;
       runtimeId: string;
       event: BridgeEvent;
-      snapshot: BrowserSnapshot;
+      /** Transcript deltas omit the state snapshot to keep streaming bounded. */
+      snapshot?: BrowserSnapshot;
     };
 
 export interface WorkspaceTarget {

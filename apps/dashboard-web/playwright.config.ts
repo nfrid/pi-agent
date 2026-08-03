@@ -1,17 +1,20 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const port = Number(process.env.PI_DASHBOARD_E2E_PORT ?? 43_174);
+const apiPort = Number(process.env.PI_DASHBOARD_E2E_API_PORT ?? 43_173);
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 15_000,
   use: {
-    baseURL: 'http://127.0.0.1:4174',
+    baseURL: `http://127.0.0.1:${port}`,
     trace: 'retain-on-failure',
     serviceWorkers: 'block',
   },
   webServer: {
-    command: 'pnpm exec vite --host 127.0.0.1 --port 4174',
-    port: 4174,
-    reuseExistingServer: true,
+    command: `PI_DASHBOARD_PORT=${apiPort} pnpm exec vite --host 127.0.0.1 --port ${port}`,
+    port,
+    reuseExistingServer: false,
   },
   projects: [{ name: 'mobile', use: { ...devices['Pixel 5'] } }],
 });

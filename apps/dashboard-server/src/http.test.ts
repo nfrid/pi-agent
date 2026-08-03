@@ -271,6 +271,31 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
     });
   });
 
+  it('contains non-serializable optional provider data without poisoning live snapshots', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-usage-'));
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+      usage: { get: async () => ({ invalid: 1n }) },
+    });
+    await server.start();
+    const headers = { 'x-dashboard-token': 'test-token' };
+    const usage = await fetch(`http://127.0.0.1:${server.port}/api/usage`, {
+      headers,
+    });
+    expect(usage.status).toBe(200);
+    expect(await usage.json()).toMatchObject({ error: expect.any(String) });
+    const snapshot = await fetch(
+      `http://127.0.0.1:${server.port}/api/snapshot`,
+      { headers },
+    );
+    expect(snapshot.status).toBe(200);
+    expect(await snapshot.json()).toMatchObject({ runtimes: [] });
+  });
+
   it('requires auth/origin, supports CORS preflight, and returns an authoritative snapshot', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-http-'));
     server = await createDashboardServer({

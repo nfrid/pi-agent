@@ -671,7 +671,7 @@ function SessionView({
   const stickToBottomRef = useRef(true);
   const sessionRequestRef = useRef(0);
   const runtimeIdRef = useRef<string | undefined>(undefined);
-  const seenEventsRef = useRef(new Set<DashboardEvent>());
+  const seenEventsRef = useRef(new WeakSet<DashboardEvent>());
   const runtime = snapshot.runtimes.find((item) => item.session.id === id);
   if (runtime) runtimeIdRef.current = runtime.runtimeId;
   useEffect(() => {
@@ -704,7 +704,7 @@ function SessionView({
   }, [id, reconnectNonce]);
   useEffect(() => {
     void id;
-    seenEventsRef.current.clear();
+    seenEventsRef.current = new WeakSet<DashboardEvent>();
     setData(undefined);
   }, [id]);
   useEffect(() => {
@@ -733,7 +733,6 @@ function SessionView({
     return () => window.cancelAnimationFrame(frame);
   }, [data, id]);
   useEffect(() => {
-    let active = true;
     for (const queued of events) {
       const event = queued.event;
       if (!event) continue;
@@ -783,8 +782,7 @@ function SessionView({
         void api<unknown>(`/api/sessions/${encodeURIComponent(id)}`)
           .then((value) => {
             const next = asSessionResponse(value);
-            if (active && request === sessionRequestRef.current && next)
-              setData(next);
+            if (request === sessionRequestRef.current && next) setData(next);
           })
           .catch(() => undefined);
       } else if (
@@ -802,9 +800,6 @@ function SessionView({
         );
       }
     }
-    return () => {
-      active = false;
-    };
   }, [events, data, id]);
   if (!data)
     return (
