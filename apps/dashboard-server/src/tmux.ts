@@ -44,10 +44,11 @@ export function parseNewWindowOutput(
   stdout: string,
   session: string,
 ): Pick<ManagedPlacement, 'tmuxWindowId' | 'tmuxPaneId' | 'displayTarget'> {
-  const [windowId, paneId] = stdout.trim().split(/\s+/);
+  const [windowId, paneId, ...extra] = stdout.trim().split(':');
   if (
     !windowId ||
     !paneId ||
+    extra.length > 0 ||
     !/^@[0-9]+$/.test(windowId) ||
     !/^%[0-9]+$/.test(paneId)
   )
@@ -133,7 +134,7 @@ export class TmuxAdapter {
       '-d',
       '-P',
       '-F',
-      '#{window_id}\t#{pane_id}',
+      '#{window_id}:#{pane_id}',
       '-t',
       session,
       '-n',

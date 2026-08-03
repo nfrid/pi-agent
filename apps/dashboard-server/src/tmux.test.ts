@@ -12,7 +12,7 @@ class FakeRunner implements TmuxCommandRunner {
   async run(args: readonly string[]) {
     this.calls.push([...args]);
     return {
-      stdout: args[0] === 'list-sessions' ? 'project\n' : '@4\t%9\n',
+      stdout: args[0] === 'list-sessions' ? 'project\n' : '@4:%9\n',
       stderr: '',
     };
   }
@@ -45,6 +45,8 @@ describe('tmux adapter', () => {
         'new-window',
         '-d',
         '-P',
+        '-F',
+        '#{window_id}:#{pane_id}',
         '-t',
         'project',
         'pi',
@@ -58,7 +60,16 @@ describe('tmux adapter', () => {
     expect(runner.calls.at(-1)?.join(' ')).not.toContain('mobile; no shell');
   });
 
+  it('parses the literal-delimited placement format', () => {
+    expect(parseNewWindowOutput('@4:%9\n', 'project')).toEqual({
+      tmuxWindowId: '@4',
+      tmuxPaneId: '%9',
+      displayTarget: 'project:@4',
+    });
+  });
+
   it('rejects malformed placements and unsafe names', () => {
+    expect(() => parseNewWindowOutput('@4\\t%9\n', 'project')).toThrow();
     expect(() => parseNewWindowOutput('bad output', 'project')).toThrow();
     expect(sanitizeTmuxName('a:b')).not.toContain(':');
   });
