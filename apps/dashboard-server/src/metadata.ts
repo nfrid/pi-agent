@@ -225,11 +225,23 @@ export class MetadataStore {
   }
 
   unreadNotifications(): NotificationEvent[] {
-    return this.db
+    const rows = this.db
       .prepare(
         'SELECT id,kind,runtime_id as runtimeId,session_id as sessionId,title,body,created_at as createdAt,read_at as readAt FROM notification WHERE read_at IS NULL ORDER BY created_at DESC LIMIT 100',
       )
-      .all() as unknown as NotificationEvent[];
+      .all() as Array<
+      Omit<NotificationEvent, 'runtimeId' | 'sessionId' | 'readAt'> & {
+        runtimeId: string | null;
+        sessionId: string | null;
+        readAt: number | null;
+      }
+    >;
+    return rows.map(({ runtimeId, sessionId, readAt, ...event }) => ({
+      ...event,
+      ...(runtimeId === null ? {} : { runtimeId }),
+      ...(sessionId === null ? {} : { sessionId }),
+      ...(readAt === null ? {} : { readAt }),
+    }));
   }
 
   markNotificationRead(id: string): void {
