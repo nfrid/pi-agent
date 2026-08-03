@@ -138,7 +138,8 @@ export default function App() {
 function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
   const working = snapshot.runtimes.filter((runtime) => runtime.online !== false && runtime.liveState === 'working').length;
   const waiting = snapshot.runtimes.filter((runtime) => runtime.online !== false && runtime.liveState === 'waiting').length;
-  return <header className="topbar"><button className="brand" onClick={() => navigate('/')}>PI AGENT</button><span className="header-stat">{working} working</span><span className="header-stat warning-text">{waiting} waiting</span><PushButton /><button className="header-action" onClick={() => navigate('/new')}>+ Agent</button></header>;
+  const online = snapshot.runtimes.filter((runtime) => runtime.online !== false).length;
+  return <header className="topbar"><div className="rail-inner"><button className="brand" onClick={() => navigate('/')} aria-label="Pi Dashboard home"><span className="prompt">›</span> PI<span className="brand-slash">{'//'}</span>DASHBOARD</button><div className="header-status" aria-label="Runtime status"><span className="header-stat"><i className="status-glyph working-glyph">●</i>{working} working</span><span className="header-stat warning-text"><i className="status-glyph waiting-glyph">◆</i>{waiting} waiting</span><span className="header-stat muted-stat">{online} online</span></div><PushButton /><button className="header-action" onClick={() => navigate('/new')}>+ Agent</button></div></header>;
 }
 
 function PushButton() {
@@ -171,14 +172,21 @@ function Dashboard({ snapshot }: { snapshot: BrowserSnapshot }) {
     const workspace = snapshot.workspaces.find((item) => item.canonicalPath === runtime.cwd || runtime.cwd.startsWith(`${item.canonicalPath}/`));
     const key = workspace?.id ?? 'other';
     groups.set(key, groups.get(key) ?? { workspace, runtimes: [] });
-    groups.get(key)!.runtimes.push(runtime);
+    groups.get(key)?.runtimes.push(runtime);
   }
-  return <section><div className="section-heading"><div><p className="eyebrow">Operational view</p><h1>Agents</h1></div><span className="muted">{snapshot.sessions.length} recent sessions</span></div>{[...groups.entries()].map(([key, group]) => <div className="workspace-block" key={key}><div className="workspace-title"><button onClick={() => group.workspace && navigate(`/workspaces/${group.workspace.id}`)}>{group.workspace?.name ?? 'Other runtimes'}</button><span>{group.runtimes.length} active</span></div>{group.runtimes.length ? group.runtimes.map((runtime) => <RuntimeCard key={runtime.runtimeId} runtime={runtime} />) : <p className="empty">No active runtimes · {group.workspace?.active ? 'Start one' : 'Open through Sesh first'}</p>}</div>)}{groups.size === 0 && <p className="empty">No Sesh workspaces discovered.</p>}</section>;
+  const orderedGroups = [...groups.entries()].sort(([, a], [, b]) => {
+    const active = (group: typeof a) => group.runtimes.some((runtime) => runtime.online !== false && runtime.liveState !== 'idle');
+    return Number(active(b)) - Number(active(a));
+  });
+  const liveCount = snapshot.runtimes.filter((runtime) => runtime.online !== false).length;
+  return <section><div className="section-heading"><div><p className="eyebrow">Operational view</p><h1>Agents</h1></div><span className="muted">{liveCount ? `${liveCount} live runtime${liveCount === 1 ? '' : 's'}` : 'No live runtimes'} · {snapshot.sessions.length} sessions</span></div>{liveCount === 0 && <div className="empty-hero"><span className="empty-mark">›_</span><div><strong>Nothing is running yet.</strong><p>Start an agent to see its work here, or open a workspace through Sesh.</p></div><button onClick={() => navigate('/new')}>Start an agent</button></div>}{orderedGroups.map(([key, group]) => <div className={`workspace-block ${group.runtimes.length ? '' : 'workspace-empty'}`} key={key}><div className="workspace-title"><button onClick={() => group.workspace && navigate(`/workspaces/${group.workspace.id}`)}>{group.workspace?.name ?? 'Other runtimes'}</button><span>{group.runtimes.length ? `${group.runtimes.length} runtime${group.runtimes.length === 1 ? '' : 's'}` : group.workspace?.active ? 'ready' : 'dormant'}</span></div>{group.runtimes.length ? group.runtimes.map((runtime) => <RuntimeCard key={runtime.runtimeId} runtime={runtime} />) : <p className="empty">{group.workspace?.active ? 'Ready for a new runtime.' : 'Open through Sesh to activate this workspace.'}</p>}</div>)}{groups.size === 0 && <p className="empty">No Sesh workspaces discovered.</p>}</section>;
 }
 
 function RuntimeCard({ runtime }: { runtime: RuntimeSnapshot }) {
-  const status = runtime.online === false ? 'Offline' : runtime.liveState;
-  return <button className={`runtime-card ${runtime.liveState}`} onClick={() => navigate(`/sessions/${encodeURIComponent(runtime.session.id)}`)}><span className="status-dot" /><span className="runtime-main"><strong>{runtime.session.name ?? runtime.session.id.slice(0, 8)}</strong><span>{status} · {runtime.model ? `${runtime.model.provider}/${runtime.model.model}` : 'model unavailable'}</span></span><span className="runtime-owner">{runtime.ownership}</span></button>;
+  const status = runtime.online === false ? 'offline' : runtime.liveState;
+  const glyph = status === 'working' ? '●' : status === 'waiting' ? '◆' : status === 'failed' ? '×' : status === 'offline' ? '○' : '·';
+  const model = runtime.model ? `${runtime.model.provider}/${runtime.model.model}` : 'model unavailable';
+  return <button className={`runtime-card ${status}`} onClick={() => navigate(`/sessions/${encodeURIComponent(runtime.session.id)}`)}><span className="runtime-rail"><span className="status-glyph">{glyph}</span></span><span className="runtime-main"><strong>{runtime.session.name ?? runtime.session.id.slice(0, 8)}</strong><span><b>{status}</b> · {model}</span><small>{runtime.cwd} · {runtime.ownership}</small></span><span className="runtime-owner">{runtime.tmux?.displayTarget ?? 'session'}</span></button>;
 }
 
 function WorkspaceView({ id, snapshot }: { id: string; snapshot: BrowserSnapshot }) {
@@ -292,31 +300,53 @@ function InteractionCard({ interaction }: { interaction: RuntimeSnapshot['pendin
   return <div className="interaction"><p className="eyebrow">Waiting for input</p><h2>{interaction.question}</h2><div className="choices">{interaction.choices.filter((choice) => !choice.custom).map((choice) => <button key={choice.value} onClick={() => void submit(choice.value)}>{choice.label}<small>{choice.description}</small></button>)}</div>{interaction.allowCustom && <form onSubmit={(event) => { event.preventDefault(); if (answer.trim()) void submit(answer.trim()); }}><input value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={interaction.customLabel ?? 'Type an answer'} /><button type="submit">Answer</button></form>}<button className="link-button" onClick={() => void api(`/api/interactions/${encodeURIComponent(interaction.id)}/cancel`, { method: 'POST', body: '{}' })}>Cancel</button></div>;
 }
 
-interface TranscriptModelItem { entry: ActivityTranscriptEntry; raw: unknown }
+interface TranscriptModelItem { entry: ActivityTranscriptEntry; raw: unknown; text?: string; role?: 'user' | 'assistant' }
+
+function contentText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(contentText).filter(Boolean).join('');
+  if (!value || typeof value !== 'object') return '';
+  const part = value as Record<string, unknown>;
+  if (typeof part.text === 'string') return part.text;
+  if (typeof part.content !== 'undefined') return contentText(part.content);
+  return '';
+}
+
+function messageText(message: Record<string, unknown>): string { return contentText(message.content ?? message.text).trim(); }
+
+function toolRecord(raw: unknown): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const record = raw as Record<string, unknown>;
+  if (record.type === 'tool' && record.tool && typeof record.tool === 'object') return record.tool as Record<string, unknown>;
+  if (record.type === 'toolCall' || record.type === 'tool_call' || typeof record.toolName === 'string') return record;
+  return undefined;
+}
 
 function toTranscriptEntries(rawEntries: readonly unknown[]): TranscriptModelItem[] {
   const result: TranscriptModelItem[] = [];
   for (const raw of rawEntries) {
     if (!raw || typeof raw !== 'object') { result.push({ entry: { kind: 'other' }, raw }); continue; }
     const entry = raw as Record<string, unknown>;
-    if (entry.type === 'tool') {
-      const tool = entry.tool && typeof entry.tool === 'object' ? entry.tool as Record<string, unknown> : entry;
+    const tool = entry.type === 'tool' ? toolRecord(raw) : undefined;
+    if (tool) {
       result.push({ entry: { kind: 'tool', name: typeof tool.name === 'string' ? tool.name : typeof tool.toolName === 'string' ? tool.toolName : 'tool', args: tool.arguments ?? tool.args }, raw });
       continue;
     }
     if (entry.type !== 'message' || !entry.message || typeof entry.message !== 'object') { result.push({ entry: { kind: 'other' }, raw }); continue; }
     const message = entry.message as Record<string, unknown>;
-    if (message.role === 'assistant') {
+    const role = message.role === 'user' ? 'user' : message.role === 'assistant' ? 'assistant' : undefined;
+    const text = messageText(message);
+    if (role === 'assistant') {
       const content = Array.isArray(message.content) ? message.content : [];
-      let spoke = false;
+      let spoke = Boolean(text);
       for (const item of content) {
         if (!item || typeof item !== 'object') continue;
         const part = item as Record<string, unknown>;
         if (part.type === 'toolCall' || part.type === 'tool_call') result.push({ entry: { kind: 'tool', name: typeof part.name === 'string' ? part.name : 'tool', args: part.arguments ?? part.args }, raw: part });
         else if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) spoke = true;
       }
-      result.push({ entry: { kind: 'assistant', speaks: spoke }, raw });
-    } else result.push({ entry: { kind: 'other' }, raw });
+      result.push({ entry: { kind: 'assistant', speaks: spoke }, raw, text, role });
+    } else result.push({ entry: { kind: 'other' }, raw, text, role });
   }
   return result;
 }
@@ -327,10 +357,27 @@ function Transcript({ entries }: { entries: unknown[] }) {
   const groups = useMemo(() => groupTranscript(modelEntries), [modelEntries]);
   const [open, setOpen] = useState<Set<number>>(new Set());
   const groupByStart = new Map(groups.map((group) => [group.start, group]));
-  return <div className="transcript"><h2>Activity</h2>{items.map((item, index) => { const group = groupByStart.get(index); if (group) { const expanded = open.has(group.start); const tools = modelEntries.slice(group.start, group.end + 1).filter((entry): entry is Extract<ActivityTranscriptEntry, { kind: 'tool' }> => entry.kind === 'tool'); const title = describeTools(tools, undefined, true); return <div className="activity-group" key={`group-${group.start}`}><button onClick={() => setOpen((current) => { const next = new Set(current); expanded ? next.delete(group.start) : next.add(group.start); return next; })}><span>●</span><strong>{title}</strong><small>{group.end - group.start + 1} steps · {expanded ? 'collapse' : 'expand'}</small></button>{expanded && <div>{items.slice(group.start, group.end + 1).map((child, offset) => <TranscriptEntry key={offset} raw={child.raw} />)}</div>}</div>; } return <TranscriptEntry key={index} raw={item.raw} />; })}</div>;
+  return <div className="transcript"><h2>Conversation &amp; activity</h2>{items.map((item, index) => { const group = groupByStart.get(index); if (group) { const expanded = open.has(group.start); const tools = modelEntries.slice(group.start, group.end + 1).filter((entry): entry is Extract<ActivityTranscriptEntry, { kind: 'tool' }> => entry.kind === 'tool'); const complete = tools.length > 0 && items.slice(group.start, group.end + 1).filter((item) => item.entry.kind === 'tool').every((item) => toolOutcome(item.raw) === 'success'); const title = describeTools(tools, undefined, complete); const lead = items[group.start]; return <div className={`activity-group ${complete ? 'activity-complete' : 'activity-pending'}`} key={`group-${group.start}`}><button onClick={() => setOpen((current) => { const next = new Set(current); expanded ? next.delete(group.start) : next.add(group.start); return next; })}><span className="activity-icon">{complete ? '✓' : '…'}</span><strong>{title}</strong><small>{tools.length} tool{tools.length === 1 ? '' : 's'} · {expanded ? 'hide detail' : 'show detail'}</small></button>{lead?.text && <div className="activity-lead"><span>assistant</span>{lead.text}</div>}{expanded && <div className="activity-detail">{items.slice(group.start, group.end + 1).map((child, offset) => <TranscriptEntry key={offset} item={child} />)}</div>}</div>; } return <TranscriptEntry key={index} item={item} />; })}</div>;
 }
 
-function TranscriptEntry({ raw }: { raw: unknown }) { const text = JSON.stringify(raw, null, 2); return <details className="transcript-entry"><summary>{typeof raw === 'object' && raw && 'type' in raw ? String((raw as { type?: unknown }).type) : 'entry'}</summary><pre>{text}</pre></details>; }
+function TranscriptEntry({ item }: { item: TranscriptModelItem }) {
+  if (item.role && item.text) return <article className={`message-bubble message-${item.role}`}><span className="message-role">{item.role}</span><div>{item.text}</div></article>;
+  const raw = item.raw;
+  const tool = toolRecord(raw);
+  if (tool) { const name = typeof tool.name === 'string' ? tool.name : typeof tool.toolName === 'string' ? tool.toolName : 'tool'; return <details className="transcript-entry tool-detail"><summary><span className="tool-chip">{name}</span><span>{toolSummary(tool)}</span></summary><pre>{JSON.stringify(raw, null, 2)}</pre></details>; }
+  const text = JSON.stringify(raw, null, 2);
+  return <details className="transcript-entry"><summary>{typeof raw === 'object' && raw && 'type' in raw ? String((raw as { type?: unknown }).type) : 'entry'}</summary><pre>{text}</pre></details>;
+}
+
+function toolOutcome(raw: unknown): 'success' | 'pending' | 'error' {
+  const tool = toolRecord(raw);
+  if (!tool) return 'pending';
+  if (tool.error || tool.status === 'error' || tool.status === 'failed') return 'error';
+  if (typeof tool.result !== 'undefined' || tool.status === 'completed' || tool.status === 'success') return 'success';
+  return 'pending';
+}
+
+function toolSummary(tool: Record<string, unknown>): string { const args = tool.arguments ?? tool.args; if (!args || typeof args !== 'object') return 'activity'; const values = Object.values(args as Record<string, unknown>).filter((value) => typeof value === 'string'); return values[0] ? String(values[0]).slice(0, 100) : 'activity'; }
 
 async function postCommand(runtimeId: string, command: Record<string, unknown>): Promise<void> { await api(`/api/runtimes/${encodeURIComponent(runtimeId)}/command`, { method: 'POST', body: JSON.stringify(command) }); }
 
@@ -341,7 +388,7 @@ function Composer({ runtime }: { runtime: RuntimeSnapshot | undefined; sessionId
   useEffect(() => { setMode(runtime?.liveState === 'working' ? 'followUp' : 'prompt'); }, [runtime?.liveState]);
   if (!runtime) return <div className="composer disabled"><p>This session is dormant.</p><button onClick={() => navigate('/new')}>Resume in a new runtime</button></div>;
   const submit = async (event: FormEvent) => { event.preventDefault(); if (!text.trim() || disabled) return; await postCommand(runtime.runtimeId, { type: runtime.liveState === 'idle' ? 'prompt' : mode, text: text.trim() }); setText(''); };
-  return <form className="composer" onSubmit={(event) => void submit(event)}><div className="composer-mode">{runtime.liveState === 'working' && <><button type="button" className={mode === 'followUp' ? 'selected' : ''} onClick={() => setMode('followUp')}>Follow-up</button><button type="button" className={mode === 'steer' ? 'selected' : ''} onClick={() => setMode('steer')}>Steer</button></>}{runtime.liveState === 'idle' && <span>Prompt</span>}{runtime.liveState === 'waiting' && <span>Answer above</span>}</div><textarea value={text} disabled={disabled} onChange={(event) => setText(event.target.value)} placeholder={disabled ? 'Agent is waiting for input' : 'Message Pi…'} rows={3} /><button type="submit" disabled={disabled || !text.trim()}>Send</button></form>;
+  return <form className="composer" onSubmit={(event) => void submit(event)}><div className="composer-mode">{runtime.liveState === 'working' && <><span>Mode:</span><button type="button" className={mode === 'followUp' ? 'selected' : ''} onClick={() => setMode('followUp')}>Follow-up</button><button type="button" className={mode === 'steer' ? 'selected' : ''} onClick={() => setMode('steer')}>Steer</button></>}{runtime.liveState === 'idle' && <span>Prompt</span>}{runtime.liveState === 'waiting' && <span>Answer above</span>}<span className="shortcut">⌘↵ send · shift+↵ newline</span></div><textarea aria-label="Message Pi" value={text} disabled={disabled} onChange={(event) => setText(event.target.value)} placeholder={disabled ? 'Agent is waiting for input' : 'Message Pi…'} rows={3} /><button type="submit" disabled={disabled || !text.trim()}>Send</button></form>;
 }
 
 function RuntimeView({ id, snapshot }: { id: string; snapshot: BrowserSnapshot }) { const runtime = snapshot.runtimes.find((item) => item.runtimeId === id); return <section><Back /><h1>Runtime diagnostics</h1>{runtime ? <div className="diagnostics"><p>Ownership: <strong>{runtime.ownership}</strong></p><p>PID: {runtime.pid}</p><p>Bridge: {runtime.online === false ? 'offline' : 'connected'}</p><p>Session: {runtime.session.id}</p><p>tmux: {runtime.tmux?.displayTarget ?? 'not reported'}</p><button onClick={() => navigate(`/sessions/${encodeURIComponent(runtime.session.id)}`)}>Open session</button><pre>{JSON.stringify(runtime, null, 2)}</pre></div> : <p>Unknown runtime.</p>}</section>; }
