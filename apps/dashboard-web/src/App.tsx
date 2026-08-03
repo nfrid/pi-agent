@@ -181,7 +181,7 @@ function Dashboard({ snapshot }: { snapshot: BrowserSnapshot }) {
       return Number(active(b)) - Number(active(a));
     });
   const liveCount = snapshot.runtimes.filter((runtime) => runtime.online !== false).length;
-  return <section><div className="section-heading"><div><p className="eyebrow">Operational view</p><h1>Agents</h1></div><span className="muted">{liveCount ? `${liveCount} live runtime${liveCount === 1 ? '' : 's'}` : 'No live runtimes'} · {snapshot.sessions.length} sessions</span></div>{liveCount === 0 && <div className="empty-hero"><span className="empty-mark">›_</span><div><strong>Nothing is running yet.</strong><p>Start an agent to see its work here, or open a workspace through Sesh.</p></div><button onClick={() => navigate('/new')}>Start an agent</button></div>}{orderedGroups.map(([key, group]) => <div className={`workspace-block ${group.runtimes.length ? '' : 'workspace-empty'}`} key={key}><div className="workspace-title"><button onClick={() => group.workspace && navigate(`/workspaces/${group.workspace.id}`)}>{group.workspace?.name ?? 'Other runtimes'}</button><span>{group.runtimes.length ? `${group.runtimes.length} runtime${group.runtimes.length === 1 ? '' : 's'}` : group.workspace?.active ? 'ready' : 'dormant'}</span></div>{group.runtimes.length ? group.runtimes.map((runtime) => <RuntimeCard key={runtime.runtimeId} runtime={runtime} />) : <p className="empty">{group.workspace?.active ? 'Ready for a new runtime.' : 'Open through Sesh to activate this workspace.'}</p>}</div>)}{groups.size === 0 && <p className="empty">No Sesh workspaces discovered.</p>}</section>;
+  return <section><div className="section-heading"><div><p className="eyebrow">Operational view</p><h1>Agents</h1></div><span className="muted">{liveCount ? `${liveCount} live runtime${liveCount === 1 ? '' : 's'}` : 'No live runtimes'} · {snapshot.sessions.length} sessions</span></div>{liveCount === 0 && <div className="empty-hero"><span className="empty-mark">›_</span><div><strong>Nothing is running yet.</strong><p>Start an agent to see its work here, or open a workspace through Sesh.</p></div><button onClick={() => navigate('/new')}>Start an agent</button></div>}{orderedGroups.map(([key, group]) => <div className={`workspace-block ${group.runtimes.length ? '' : 'workspace-empty'}`} key={key}><div className="workspace-title"><button onClick={() => group.workspace && navigate(`/workspaces/${group.workspace.id}`)}>{group.workspace?.name ?? 'Other runtimes'}</button><span>{group.runtimes.length ? `${group.runtimes.length} runtime${group.runtimes.length === 1 ? '' : 's'}` : group.workspace?.active ? 'ready' : 'dormant'}</span></div>{group.runtimes.length ? group.runtimes.map((runtime) => <RuntimeCard key={runtime.runtimeId} runtime={runtime} />) : <p className="empty">{group.workspace?.active ? 'Ready for a new runtime.' : 'Open through Sesh to activate this workspace.'}</p>}</div>)}{groups.size === 0 && <p className="empty">No Sesh workspaces discovered.</p>}{snapshot.sessions.length > 0 && <div className="recent-sessions"><div className="workspace-title"><span>Recent sessions</span><span>across all workspaces</span></div>{snapshot.sessions.slice(0, 8).map((session) => <SessionRow key={session.id} session={session} />)}</div>}</section>;
 }
 
 function RuntimeCard({ runtime }: { runtime: RuntimeSnapshot }) {
@@ -212,7 +212,14 @@ function containsStableId(value: unknown, id: string): boolean {
 function stableId(value: unknown): string | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const record = value as Record<string, unknown>;
-  for (const key of ['id', 'messageId', 'toolCallId', 'callId'])
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = stableId(item);
+      if (nested) return nested;
+    }
+    return undefined;
+  }
+  for (const key of ['id', 'messageId', 'responseId', 'toolCallId', 'callId'])
     if (typeof record[key] === 'string' && record[key]) return record[key] as string;
   for (const key of ['message', 'tool', 'content']) {
     const nested = stableId(record[key]);
@@ -244,18 +251,26 @@ export function reconcileLiveEvent(entries: readonly unknown[], event: Dashboard
     ? ((envelope as Record<string, unknown>).message ?? (envelope as Record<string, unknown>).tool ?? envelope)
     : envelope;
   const id = stableId(envelope) ?? stableId(payload);
-  if (!payload || !id) return [...entries];
+  if (!payload) return [...entries];
   const isMessage = event.type?.startsWith('message.');
   const tool = payload as Record<string, unknown>;
   const nestedReplacement = isMessage
     ? { type: 'message', message: payload }
     : { ...tool, type: 'toolCall', name: tool.toolName ?? tool.name ?? 'tool', arguments: tool.arguments ?? tool.args };
   const toolWrapper = { type: 'tool', tool: { ...tool, name: tool.toolName ?? tool.name } };
-  const found = entries.some((entry) => containsStableId(entry, id));
-  if (found) return entries.map((entry) => {
+  const found = id ? entries.some((entry) => containsStableId(entry, id)) : false;
+  if (found && id) return entries.map((entry) => {
     if (!isMessage && entry && typeof entry === 'object' && (entry as Record<string, unknown>).type === 'tool' && containsStableId(entry, id)) return toolWrapper;
     return replaceStable(entry, id, nestedReplacement);
   });
+  if (isMessage && (payload as Record<string, unknown>).role === 'assistant') {
+    let index = -1;
+    for (let entryIndex = entries.length - 1; entryIndex >= 0; entryIndex -= 1) {
+      const entry = entries[entryIndex];
+      if (entry && typeof entry === 'object' && (entry as Record<string, unknown>).type === 'message' && ((entry as Record<string, unknown>).message as Record<string, unknown> | undefined)?.role === 'assistant') { index = entryIndex; break; }
+    }
+    if (index >= 0) return entries.map((entry, entryIndex) => entryIndex === index ? nestedReplacement : entry);
+  }
   return [...entries, isMessage ? nestedReplacement : toolWrapper];
 }
 
@@ -324,7 +339,14 @@ function toolRecord(raw: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
-function toTranscriptEntries(rawEntries: readonly unknown[]): TranscriptModelItem[] {
+export function toTranscriptEntries(rawEntries: readonly unknown[]): TranscriptModelItem[] {
+  const toolResults = new Map<string, Record<string, unknown>>();
+  for (const raw of rawEntries) {
+    if (!raw || typeof raw !== 'object') continue;
+    const entry = raw as Record<string, unknown>;
+    const message = entry.message as Record<string, unknown> | undefined;
+    if (entry.type === 'message' && message?.role === 'toolResult' && typeof message.toolCallId === 'string') toolResults.set(message.toolCallId, message);
+  }
   const result: TranscriptModelItem[] = [];
   for (const raw of rawEntries) {
     if (!raw || typeof raw !== 'object') { result.push({ entry: { kind: 'other' }, raw }); continue; }
@@ -336,18 +358,24 @@ function toTranscriptEntries(rawEntries: readonly unknown[]): TranscriptModelIte
     }
     if (entry.type !== 'message' || !entry.message || typeof entry.message !== 'object') { result.push({ entry: { kind: 'other' }, raw }); continue; }
     const message = entry.message as Record<string, unknown>;
+    if (message.role === 'toolResult') continue;
     const role = message.role === 'user' ? 'user' : message.role === 'assistant' ? 'assistant' : undefined;
     const text = messageText(message);
     if (role === 'assistant') {
       const content = Array.isArray(message.content) ? message.content : [];
+      const tools: TranscriptModelItem[] = [];
       let spoke = Boolean(text);
       for (const item of content) {
         if (!item || typeof item !== 'object') continue;
         const part = item as Record<string, unknown>;
-        if (part.type === 'toolCall' || part.type === 'tool_call') result.push({ entry: { kind: 'tool', name: typeof part.name === 'string' ? part.name : 'tool', args: part.arguments ?? part.args }, raw: part });
+        if (part.type === 'toolCall' || part.type === 'tool_call') {
+          const callId = typeof part.id === 'string' ? part.id : typeof part.toolCallId === 'string' ? part.toolCallId : undefined;
+          const outcome = callId ? toolResults.get(callId) : undefined;
+          tools.push({ entry: { kind: 'tool', name: typeof part.name === 'string' ? part.name : 'tool', args: part.arguments ?? part.args }, raw: outcome ? { ...part, result: outcome.content, isError: outcome.isError } : part });
+        }
         else if (part.type === 'text' && typeof part.text === 'string' && part.text.trim()) spoke = true;
       }
-      result.push({ entry: { kind: 'assistant', speaks: spoke }, raw, text, role });
+      result.push({ entry: { kind: 'assistant', speaks: spoke }, raw, text, role }, ...tools);
     } else result.push({ entry: { kind: 'other' }, raw, text, role });
   }
   return result;
@@ -374,7 +402,7 @@ function TranscriptEntry({ item }: { item: TranscriptModelItem }) {
 function toolOutcome(raw: unknown): 'success' | 'pending' | 'error' {
   const tool = toolRecord(raw);
   if (!tool) return 'pending';
-  if (tool.error || tool.status === 'error' || tool.status === 'failed') return 'error';
+  if (tool.error || tool.isError === true || tool.status === 'error' || tool.status === 'failed') return 'error';
   if (typeof tool.result !== 'undefined' || tool.status === 'completed' || tool.status === 'success') return 'success';
   return 'pending';
 }
