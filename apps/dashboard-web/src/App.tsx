@@ -10,6 +10,7 @@ import {
   type SessionIndexEntry,
   type StartRuntimeRequest,
   type WorkspaceTarget,
+  workspaceForPath,
 } from '@pi-dashboard/protocol';
 import {
   type FormEvent,
@@ -323,11 +324,7 @@ function Dashboard({
   for (const workspace of snapshot.workspaces)
     groups.set(workspace.id, { workspace, runtimes: [] });
   for (const runtime of snapshot.runtimes) {
-    const workspace = snapshot.workspaces.find(
-      (item) =>
-        item.canonicalPath === runtime.cwd ||
-        runtime.cwd.startsWith(`${item.canonicalPath}/`),
-    );
+    const workspace = workspaceForPath(runtime.cwd, snapshot.workspaces);
     const key = workspace?.id ?? 'other';
     groups.set(key, groups.get(key) ?? { workspace, runtimes: [] });
     groups.get(key)?.runtimes.push(runtime);

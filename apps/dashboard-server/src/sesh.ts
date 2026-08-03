@@ -3,7 +3,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { WorkspaceTarget } from '@pi-dashboard/protocol';
+import {
+  type WorkspaceTarget,
+  workspaceSourcePriority,
+} from '@pi-dashboard/protocol';
 
 const execFileAsync = promisify(execFile);
 
@@ -68,25 +71,29 @@ export function normalizeSeshEntries(
     const gitRoot = gitRootRaw ? canonical(gitRootRaw) : undefined;
     const key = gitRoot ?? canonicalPath;
     const existing = merged.get(key);
-    const tmuxSession =
-      source === 'tmux' && active.has(name) ? name : existing?.tmuxSession;
+    const candidate: WorkspaceTarget = {
+      id: workspaceId(canonicalPath, gitRoot),
+      name,
+      path: path.resolve(rawPath),
+      canonicalPath,
+      gitRoot,
+      source,
+      tmuxSession: source === 'tmux' && active.has(name) ? name : undefined,
+      active: active.has(name),
+    };
+    const preferred =
+      existing &&
+      workspaceSourcePriority(existing.source) >=
+        workspaceSourcePriority(candidate.source)
+        ? existing
+        : candidate;
     const next: WorkspaceTarget = existing
       ? {
-          ...existing,
-          name: existing.name || name,
-          tmuxSession: tmuxSession ?? existing.tmuxSession,
-          active: existing.active || active.has(name),
+          ...preferred,
+          tmuxSession: candidate.tmuxSession ?? existing.tmuxSession,
+          active: existing.active || candidate.active,
         }
-      : {
-          id: workspaceId(canonicalPath, gitRoot),
-          name,
-          path: path.resolve(rawPath),
-          canonicalPath,
-          gitRoot,
-          source,
-          tmuxSession,
-          active: active.has(name),
-        };
+      : candidate;
     merged.set(key, next);
   }
   return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name));

@@ -8,6 +8,7 @@ import {
   type SessionIndexEntry,
   validateSessionName,
   type WorkspaceTarget,
+  workspaceForPath,
 } from '@pi-dashboard/protocol';
 import type { MetadataStore } from './metadata.js';
 
@@ -29,13 +30,7 @@ function workspaceFor(
   workspaces: readonly WorkspaceTarget[],
 ): string | undefined {
   const normalized = path.resolve(cwd);
-  const exact = workspaces.find(
-    (workspace) => workspace.canonicalPath === normalized,
-  );
-  if (exact) return exact.id;
-  return workspaces.find((workspace) =>
-    normalized.startsWith(`${workspace.canonicalPath}${path.sep}`),
-  )?.id;
+  return workspaceForPath(normalized, workspaces)?.id;
 }
 
 export class SessionIndex {

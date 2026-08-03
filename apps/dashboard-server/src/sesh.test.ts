@@ -19,6 +19,22 @@ describe('Sesh normalization', () => {
     });
   });
 
+  it('prefers explicit sessions even when zoxide lists the path first', () => {
+    const result = normalizeSeshEntries(
+      [
+        { Src: 'zoxide', Name: '~/.pi/agent', Path: '/tmp/pi-agent' },
+        { Src: 'tmux', Name: 'pi config', Path: '/tmp/pi-agent' },
+      ],
+      ['pi config'],
+    );
+    expect(result[0]).toMatchObject({
+      name: 'pi config',
+      source: 'tmux',
+      tmuxSession: 'pi config',
+      active: true,
+    });
+  });
+
   it('does not infer inactive tmux sessions from a Sesh row', () => {
     expect(
       normalizeSeshEntries([

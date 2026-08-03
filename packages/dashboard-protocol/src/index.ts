@@ -160,6 +160,46 @@ export interface WorkspaceTarget {
   active: boolean;
 }
 
+const WORKSPACE_SOURCE_PRIORITY: Record<WorkspaceTarget['source'], number> = {
+  tmux: 3,
+  'sesh-config': 2,
+  directory: 1,
+  zoxide: 0,
+};
+
+export function workspaceSourcePriority(
+  source: WorkspaceTarget['source'],
+): number {
+  return WORKSPACE_SOURCE_PRIORITY[source];
+}
+
+/** Choose the closest containing workspace, preferring explicit sources on ties. */
+export function workspaceForPath(
+  value: string,
+  workspaces: readonly WorkspaceTarget[],
+): WorkspaceTarget | undefined {
+  let best: WorkspaceTarget | undefined;
+  for (const workspace of workspaces) {
+    const root = workspace.canonicalPath.replace(/\/$/, '') || '/';
+    const contains =
+      value === root || value.startsWith(root === '/' ? root : `${root}/`);
+    if (!contains) continue;
+    const bestRoot = best
+      ? best.canonicalPath.replace(/\/$/, '') || '/'
+      : undefined;
+    if (
+      !best ||
+      (bestRoot !== undefined && root.length > bestRoot.length) ||
+      (bestRoot !== undefined &&
+        root.length === bestRoot.length &&
+        workspaceSourcePriority(workspace.source) >
+          workspaceSourcePriority(best.source))
+    )
+      best = workspace;
+  }
+  return best;
+}
+
 export interface SessionIndexEntry {
   id: string;
   file: string;

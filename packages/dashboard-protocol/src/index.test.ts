@@ -8,9 +8,43 @@ import {
   validateBridgeCommand,
   validateSessionRenameRequest,
   validateStartRuntimeRequest,
+  type WorkspaceTarget,
+  workspaceForPath,
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('matches the closest workspace and uses explicit sources as tie-breakers', () => {
+    const workspace = (
+      id: string,
+      canonicalPath: string,
+      source: WorkspaceTarget['source'],
+    ): WorkspaceTarget => ({
+      id,
+      name: id,
+      path: canonicalPath,
+      canonicalPath,
+      source,
+      active: source === 'tmux',
+    });
+    const zoxideParent = workspace('zoxide-parent', '/Users/me/.pi', 'zoxide');
+    const tmuxChild = workspace('pi-config', '/Users/me/.pi/agent', 'tmux');
+    expect(
+      workspaceForPath('/Users/me/.pi/agent', [zoxideParent, tmuxChild])?.id,
+    ).toBe('pi-config');
+    expect(
+      workspaceForPath('/Users/me/.pi/project', [
+        workspace('tmux-home', '/Users/me', 'tmux'),
+        workspace('zoxide-project', '/Users/me/.pi/project', 'zoxide'),
+      ])?.id,
+    ).toBe('zoxide-project');
+    expect(
+      workspaceForPath('/workspace', [
+        workspace('zoxide', '/workspace', 'zoxide'),
+        workspace('configured', '/workspace', 'sesh-config'),
+      ])?.id,
+    ).toBe('configured');
+  });
+
   it('round trips bounded commands', () => {
     const frame = {
       kind: 'command' as const,
