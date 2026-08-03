@@ -321,6 +321,7 @@ export class BridgeClient {
         protocolVersion: PROTOCOL_VERSION,
         token: this.options.token,
         identityToken: this.options.identityToken,
+        capabilities: { heartbeat: true },
         snapshot,
       });
       if (!helloSent) return;

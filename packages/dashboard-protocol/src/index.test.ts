@@ -103,6 +103,31 @@ describe('dashboard protocol', () => {
   });
 
   it('strictly validates each bridge event variant', () => {
+    const helloSnapshot = {
+      runtimeId: 'r',
+      ownership: 'external',
+      pid: 1,
+      cwd: '/tmp',
+      liveState: 'idle',
+      session: { id: 's', entries: [] },
+      pendingInteractions: [],
+    };
+    expect(
+      isBridgeEvent({
+        type: 'runtime.hello',
+        protocolVersion: 1,
+        capabilities: { heartbeat: true },
+        snapshot: helloSnapshot,
+      }),
+    ).toBe(true);
+    expect(
+      isBridgeEvent({
+        type: 'runtime.hello',
+        protocolVersion: 1,
+        capabilities: { heartbeat: false },
+        snapshot: helloSnapshot,
+      }),
+    ).toBe(false);
     expect(
       isBridgeEvent({
         type: 'runtime.hello',

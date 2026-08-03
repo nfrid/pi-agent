@@ -74,6 +74,7 @@ export type BridgeEvent =
       token?: string;
       /** Stable credential used by this runtime on every reconnect. */
       identityToken?: string;
+      capabilities?: { heartbeat: true };
       snapshot: RuntimeSnapshot;
     }
   | {
@@ -672,6 +673,7 @@ export function isBridgeEvent(value: unknown): value is BridgeEvent {
             'protocolVersion',
             'token',
             'identityToken',
+            'capabilities',
             'snapshot',
           ]),
         ) &&
@@ -679,6 +681,10 @@ export function isBridgeEvent(value: unknown): value is BridgeEvent {
         (value.token === undefined || safeIdentifier(value.token, 512)) &&
         (value.identityToken === undefined ||
           safeIdentifier(value.identityToken, 512)) &&
+        (value.capabilities === undefined ||
+          (isRecord(value.capabilities) &&
+            onlyKeys(value.capabilities, new Set(['heartbeat'])) &&
+            value.capabilities.heartbeat === true)) &&
         isRuntimeSnapshot(value.snapshot)
       );
     case 'runtime.heartbeat':

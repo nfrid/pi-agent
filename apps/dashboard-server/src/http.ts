@@ -32,6 +32,7 @@ import { CodexUsageProvider, type UsageProvider } from './usage.js';
 const MAX_BODY = 512 * 1024;
 const MAX_WS_BUFFER = 1024 * 1024;
 const MAX_USAGE_BYTES = 256 * 1024;
+const USAGE_CACHE_MS = 30_000;
 const WS_HEARTBEAT_MS = 30_000;
 const WS_PATH = '/ws';
 
@@ -118,8 +119,11 @@ class DashboardServerImpl implements DashboardServer {
   private readonly clients = new Set<WebSocket>();
   private readonly awaitingPong = new WeakSet<WebSocket>();
   private heartbeatTimer: NodeJS.Timeout | undefined;
+  private sessionPublishTimer: NodeJS.Timeout | undefined;
   private workspaces: WorkspaceTarget[] = [];
   private usageSnapshot: unknown;
+  private usageUpdatedAt = 0;
+  private usageRequest: Promise<unknown> | undefined;
   private readonly serverId = randomBytes(12).toString('base64url');
   private revision = 0;
   private started = false;
@@ -156,9 +160,7 @@ class DashboardServerImpl implements DashboardServer {
             'sessions',
           ),
         this.metadata,
-        () => {
-          if (this.started) this.changed();
-        },
+        () => this.scheduleSessionPublish(),
       );
     this.sesh = options.sesh ?? new CliSeshAdapter();
     this.tmux = options.tmux ?? new TmuxAdapter();
@@ -294,6 +296,8 @@ class DashboardServerImpl implements DashboardServer {
     this.started = false;
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = undefined;
+    if (this.sessionPublishTimer) clearTimeout(this.sessionPublishTimer);
+    this.sessionPublishTimer = undefined;
     this.sessions.close();
     this.registry.close();
     for (const client of this.wss.clients) {
@@ -612,7 +616,23 @@ class DashboardServerImpl implements DashboardServer {
 
   private async handleUsage(response: http.ServerResponse): Promise<void> {
     try {
-      const usage = await this.usage.get();
+      if (
+        this.usageSnapshot !== undefined &&
+        Date.now() - this.usageUpdatedAt < USAGE_CACHE_MS
+      )
+        return this.json(response, 200, { usage: this.usageSnapshot });
+      if (this.usageRequest) {
+        await this.usageRequest;
+        return this.json(response, 200, { usage: this.usageSnapshot });
+      }
+      const request = this.usage.get();
+      this.usageRequest = request;
+      let usage: unknown;
+      try {
+        usage = await request;
+      } finally {
+        if (this.usageRequest === request) this.usageRequest = undefined;
+      }
       // Usage is an optional provider boundary. Reject values that cannot be
       // represented on the wire instead of poisoning every future snapshot.
       const serialized = JSON.stringify(usage);
@@ -622,6 +642,7 @@ class DashboardServerImpl implements DashboardServer {
       )
         throw new Error('Usage payload exceeds the dashboard size limit.');
       this.usageSnapshot = usage;
+      this.usageUpdatedAt = Date.now();
       this.changed();
       return this.json(response, 200, { usage: this.usageSnapshot });
     } catch (error) {
@@ -726,6 +747,15 @@ class DashboardServerImpl implements DashboardServer {
         .map((origin) => origin.trim())
         .filter(Boolean) ?? []),
     ];
+  }
+
+  private scheduleSessionPublish(): void {
+    if (!this.started || this.sessionPublishTimer) return;
+    this.sessionPublishTimer = setTimeout(() => {
+      this.sessionPublishTimer = undefined;
+      if (this.started) this.changed();
+    }, 250);
+    this.sessionPublishTimer.unref?.();
   }
 
   private onRegistryChange(change: RegistryChange): void {

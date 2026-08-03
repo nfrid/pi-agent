@@ -60,9 +60,10 @@ test('mobile dashboard renders and supports the new-agent route', async ({
   ).toBeVisible();
 });
 
-test('live transport contains malformed data and reconnects without breaking the UI', async ({
+test('live transport contains malformed data and reconnects without HTTP polling', async ({
   page,
 }) => {
+  let usageRequests = 0;
   await page.addInitScript(() => {
     localStorage.setItem('pi-dashboard-token', 'test-token');
     const sockets: FakeDashboardSocket[] = [];
@@ -136,9 +137,10 @@ test('live transport contains malformed data and reconnects without breaking the
       },
     });
   });
-  await page.route('**/api/usage', async (route) =>
-    route.fulfill({ contentType: 'application/json', body: '{}' }),
-  );
+  await page.route('**/api/usage', async (route) => {
+    usageRequests += 1;
+    await route.fulfill({ contentType: 'application/json', body: '{}' });
+  });
   await page.route('**/api/snapshot', async (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -171,6 +173,29 @@ test('live transport contains malformed data and reconnects without breaking the
   );
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
+  await expect.poll(() => usageRequests).toBeGreaterThan(0);
+  const initialUsageRequests = usageRequests;
+  await page.evaluate(() => {
+    (
+      window as unknown as {
+        dashboardLiveTest: { current(): { emit(value: unknown): void } };
+      }
+    ).dashboardLiveTest
+      .current()
+      .emit({
+        type: 'snapshot',
+        snapshot: {
+          serverId: 'server-1',
+          revision: 2,
+          runtimes: [],
+          workspaces: [],
+          sessions: [],
+          unread: [],
+        },
+      });
+  });
+  await page.waitForTimeout(150);
+  expect(usageRequests).toBe(initialUsageRequests);
   await page.evaluate(() => {
     const test = (
       window as unknown as {
@@ -220,6 +245,7 @@ test('live transport contains malformed data and reconnects without breaking the
     )
     .toBeGreaterThan(1);
   await expect(page.getByRole('status')).toHaveCount(0);
+  expect(usageRequests).toBe(initialUsageRequests);
   const liveGeneration = await page.evaluate(() =>
     (
       window as unknown as {

@@ -462,7 +462,6 @@ export function useDashboard(): DashboardState {
       retryDelay = nextReconnectDelay(retryDelay);
       timer = window.setTimeout(() => {
         timer = undefined;
-        void refresh();
         connect();
       }, delay);
     };
@@ -511,7 +510,8 @@ export function useDashboard(): DashboardState {
           )
             return;
           if (next) {
-            if (candidateServerId === undefined) {
+            const authenticated = candidateServerId === undefined;
+            if (authenticated) {
               candidateServerId = next.serverId;
               authoritativeSocketServerId.current = next.serverId;
             } else if (next.serverId !== candidateServerId) return;
@@ -519,9 +519,7 @@ export function useDashboard(): DashboardState {
             acceptSnapshot(next);
             retryDelay = RECONNECT_MIN_MS;
             setConnectionState('connected');
-            setReconnectNonce((value) => value + 1);
-            void refresh();
-            void refreshUsage();
+            if (authenticated) setReconnectNonce((value) => value + 1);
           }
           const eventMessage =
             message.event && typeof message.event === 'object'
@@ -568,8 +566,6 @@ export function useDashboard(): DashboardState {
     };
     const refreshVisible = () => {
       if (stopped || document.visibilityState !== 'visible') return;
-      void refresh();
-      void refreshUsage();
       // Session transcripts are fetched separately from snapshots. Foreground
       // transitions reconcile any deltas missed while the page was suspended.
       setReconnectNonce((value) => value + 1);

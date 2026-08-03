@@ -140,10 +140,12 @@ export class RuntimeRegistry {
           if (old?.socket && old.socket !== socket) old.socket.destroy();
           clearTimeout(helloTimer);
           try {
-            // Bridges emit runtime.heartbeat independently of model work. Keep
-            // the idle deadline enabled after hello so half-open sockets are
-            // removed without treating a long model turn as a failure.
-            socket.setTimeout(RUNTIME_HEARTBEAT_TIMEOUT_MS);
+            // Only heartbeat-capable clients get an idle deadline. Agents
+            // already running during this rollout use protocol v1 without the
+            // capability and must remain connected until their next reload.
+            socket.setTimeout(
+              hello.capabilities?.heartbeat ? RUNTIME_HEARTBEAT_TIMEOUT_MS : 0,
+            );
           } catch {
             /* best effort */
           }
