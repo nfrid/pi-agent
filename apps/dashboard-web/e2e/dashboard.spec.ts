@@ -959,17 +959,29 @@ function phase6Capabilities() {
 }
 
 function phase6Interaction(id: string, question: string) {
+  const choices = [
+    {
+      label: 'Yes',
+      value: 'yes',
+      preview: 'Use the **recommended** answer. [Preview docs](#preview-docs)',
+    },
+    {
+      label: 'No',
+      value: 'no',
+      preview: 'Keep the current behavior instead.',
+    },
+  ];
   return {
     id,
     type: 'ask_user',
     question,
-    choices: [{ label: 'Yes', value: 'yes' }],
+    choices,
     allowCustom: false,
     rendererId: 'ask-user.question',
     viewModel: {
       id,
       question,
-      choices: [{ label: 'Yes', value: 'yes' }],
+      choices,
       allowCustom: false,
     },
     answerActionId: 'ask-user.answer',
@@ -1363,11 +1375,27 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     .toBe(1);
 
   await expect(page.getByRole('dialog')).toHaveCount(2);
-  await page
-    .getByRole('dialog')
-    .nth(0)
-    .getByRole('button', { name: 'Yes' })
-    .click();
+  const firstInteraction = page.getByRole('dialog').nth(0);
+  await firstInteraction.focus();
+  await firstInteraction.press('ArrowDown');
+  await expect(
+    firstInteraction.getByText('Keep the current behavior instead.'),
+  ).toBeVisible();
+  await firstInteraction.press('ArrowUp');
+  const previewLink = firstInteraction.getByRole('link', {
+    name: 'Preview docs',
+  });
+  await previewLink.focus();
+  await previewLink.press('Enter');
+  expect(
+    mocks.commands.filter(
+      (command) =>
+        command.type === 'action.invoke' &&
+        command.actionId === 'ask-user.answer',
+    ),
+  ).toHaveLength(0);
+  await firstInteraction.focus();
+  await firstInteraction.press('Enter');
   await expect(
     page.getByText('Answered from this dashboard.').first(),
   ).toBeVisible();
