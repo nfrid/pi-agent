@@ -1,0 +1,153 @@
+# Dashboard architecture baseline
+
+Status: Phase 0 inventory, recorded 2026-08-04 before the canonical-contract and reducer migration.
+
+## Baseline verification
+
+From the repository root:
+
+- `npm run check`: passed (96 test files, 811 tests).
+- `pnpm --filter @pi-dashboard/web test:e2e`: passed (3 Playwright scenarios).
+
+The baseline has no known failing checks.
+
+## Current architecture
+
+```text
+Pi extension events
+  -> extensions/remote-control
+  -> protocol-v1 JSONL over a bounded Unix socket
+  -> RuntimeRegistry
+  -> DashboardServerImpl state/revision publication
+  -> authenticated HTTP snapshots + authenticated browser WebSocket
+  -> useDashboard React hook
+  -> SessionView reconciliation
+```
+
+`DashboardServerImpl` in `apps/dashboard-server/src/http.ts` is the current composition root. It also owns HTTP routing, authentication and CORS, browser WebSockets, Unix-socket lifecycle, workspace/session orchestration, uploads, notifications, push, usage caching, snapshot construction, and event publication.
+
+`RuntimeRegistry` in `apps/dashboard-server/src/runtime-registry.ts` owns the runtime connection state. Its important existing invariants are:
+
+- the first frame must be a valid `runtime.hello` within five seconds;
+- protocol frames and socket input buffers are bounded;
+- managed launch and stable runtime identity credentials are checked separately;
+- runtime sequence numbers reject duplicate and out-of-order bridge events;
+- a replacement socket invalidates queued commands and acknowledgements from the old connection;
+- commands are bounded, serialized per runtime, and acknowledgement timeouts are finite;
+- backpressure cannot leave a command queue blocked indefinitely;
+- snapshots and events redact embedded image bytes;
+- forgotten runtimes cannot reconnect during the same daemon lifetime;
+- the Unix socket is created with owner-only permissions.
+
+These invariants are migration constraints, not behavior to replace during Phase 1.
+
+## Browser routes and operations
+
+The browser uses manual history/pathname routing for:
+
+- `/` — dashboard overview;
+- `/sessions/:id` — persisted/live transcript;
+- `/workspaces/:id` — workspace detail;
+- `/runtimes/:id` — runtime detail and controls;
+- `/new` — managed runtime launch.
+
+Current dashboard operations are:
+
+- list runtimes, sessions, workspaces, notifications, and usage;
+- refresh workspace discovery;
+- launch and stop a managed runtime;
+- send prompt, steering, and follow-up input;
+- upload and attach images;
+- abort an active run;
+- select model and thinking level;
+- rename a session;
+- answer or cancel an `ask-user` interaction;
+- mark notifications read or read all;
+- subscribe to browser push notifications.
+
+The browser WebSocket authenticates with an initial token message. `serverId` and monotonically increasing `revision` values order snapshots within one daemon process. The client maintains request serials, an authoritative socket generation, a bounded revision-deduplication window, a bounded raw event tail, update coalescing, and stale settled-session-read guards.
+
+## Browser API inventory
+
+`apps/dashboard-server/src/http.ts` currently exposes:
+
+- unauthenticated `GET /api/health`;
+- authenticated `GET /api/snapshot`;
+- authenticated `GET` and `POST /api/workspaces`;
+- authenticated `GET /api/usage`;
+- authenticated `GET /api/push/vapid-public-key` and `POST /api/push/subscribe`;
+- authenticated `GET /api/sessions/:id` and `POST /api/sessions/:id/name`;
+- authenticated `POST /api/runtimes/start`;
+- authenticated `POST /api/runtimes/:id/command` and `/stop`;
+- authenticated `POST /api/interactions/:id/answer` and `/cancel`;
+- authenticated `POST /api/notifications/read-all` and `/api/notifications/:id/read`;
+- authenticated browser WebSocket `/ws`.
+
+## Parity matrix
+
+“Shared core” records whether the current behavior already derives from a framework-independent semantic implementation.
+
+| Feature | TUI | Dashboard | Shared core | Missing headless API / current limitation |
+| --- | --- | --- | --- | --- |
+| Prompt, steer, follow-up | Yes | Yes | Partial | Dashboard calls `sendUserMessage`; transport semantics are dashboard-specific. |
+| Abort / shutdown | Yes | Yes | Partial | Available on `ExtensionContext`; command contracts are shared. |
+| Model / thinking selection | Yes | Yes | Partial | Available through extension APIs; dashboard still exposes one-off bridge commands. |
+| Session rename | Yes | Yes | Partial | Available through `setSessionName`; one-off bridge command. |
+| Image attachments | Yes | Yes | No | Upload/image validation policy is split between browser, daemon, and adapter. |
+| `ask-user` interaction | Yes | Yes | Partial | Broker is shared locally, but bridge/UI contribution is one-off. |
+| Activity grouping | Yes | Yes | Yes | Grouping/title semantics use `activity-model`; renderers remain separate as desired. |
+| Runtime launch / stop | N/A / external process | Yes | No | Daemon-specific orchestration. |
+| Workspace discovery / tmux | TUI environment | Yes | No | Daemon-specific orchestration. |
+| Notifications / push | TUI notices | Yes | No | Dashboard-specific derivation and persistence. |
+| Compact | Yes | Compatibility shim | No | `ctx.compact()` exists, but remote control parses `/compact`. |
+| New session | Yes | No | No | `newSession()` is command-context-only; socket callbacks currently retain only `ExtensionContext`. |
+| Resume / switch session | Yes | No | No | `switchSession()` is command-context-only; no semantic remote action. |
+| Fork / clone | Yes | No | No | `fork()` is command-context-only; no semantic remote action. |
+| Tree navigation | Yes | No | No | `navigateTree()` is command-context-only; no semantic remote action. |
+| Export / import / share / copy | Yes | No | No | Built-in interactive command behavior is not exposed as semantic actions. |
+| Reload | Yes | No | No | `reload()` is command-context-only; no semantic remote action. |
+| Extension commands | Yes | Rejected | No | `getCommands()` describes commands but remote control cannot invoke extension command handlers headlessly. |
+| Built-in commands | Yes | Mostly rejected | No | The adapter deny-list is manual; unlisted interactive commands such as `/debug` can currently fall through as model input. |
+| Skills / prompt templates | Yes | Expanded in adapter | No | Remote control reads files and imitates expansion. |
+| Command palette / hotkeys | Yes | No | No | No shared action descriptors yet. |
+| Session tree / branch inspector | Yes | No | No | Depends on semantic session actions and projections. |
+
+## Duplicated validation and reconciliation
+
+The protocol package currently mixes wire contracts with validation, redaction, title derivation, and workspace selection. The browser independently validates browser snapshots, sessions, runtimes, interactions, workspaces, notifications, and weak dashboard event envelopes in `apps/dashboard-web/src/dashboard-transport.ts`.
+
+Canonical transcript behavior currently lives in the browser:
+
+- recursive searches for `id`, `messageId`, `responseId`, `toolCallId`, `callId`, and timestamps;
+- replacement of nested tool objects in opaque provider payloads;
+- ID-less active-message fallback by role;
+- streaming update coalescing;
+- settled-file-read generation guards;
+- persisted tool-result pairing and transcript key derivation.
+
+The remote-control adapter sends raw Pi event wrappers, so the browser must infer identity after transport. Live Pi events provide a session ID, stable message timestamp, optional assistant response ID, and explicit tool-call IDs. Persisted Pi session entries additionally provide entry IDs, but those IDs are assigned only after message persistence and cannot identify an in-flight event. Phase 1 therefore needs explicit live identity fields normalized in the adapter, with timestamp/response correlation and a runtime-epoch plus sequence fallback. Persisted/live convergence must use a canonical origin key rather than assuming a later session-entry ID equals the live ID.
+
+## Phase 1 invariant
+
+Phase 1 introduces schema-first shared contracts and pure reducers while preserving the current HTTP and WebSocket transports:
+
+> Given the same authoritative snapshot and ordered normalized event sequence, replay produces the same semantic runtime and transcript projection, regardless of whether delivery was live or repeated after reconnect.
+
+The migration must keep historical transcript entries permissive: provider and extension payloads remain opaque data, while their surrounding semantic envelope and explicit identity fields are validated.
+
+## Next phase: cursor and SSE synchronization
+
+Phase 2 should replace browser revision/generation workarounds with one daemon-global ordered stream:
+
+1. allocate a monotonic daemon cursor for every published event;
+2. keep a configurable bounded replay buffer;
+3. return the current cursor with dashboard and session projection snapshots;
+4. add authenticated SSE replay from `Last-Event-ID` (or an explicit cursor query);
+5. distinguish replay gaps from ordinary disconnects;
+6. hydrate from an authoritative snapshot, then apply only events newer than its cursor;
+7. reconnect from the last accepted cursor and apply each cursor at most once;
+8. refetch after a replay gap;
+9. remove request-generation and raw-event-tail synchronization paths once SSE is authoritative;
+10. retain the browser WebSocket only during a bounded compatibility window, then remove it.
+
+Phase 2 must preserve all existing Unix-socket bounds, connection-generation command safety, authentication/origin policy, upload validation, and image redaction.
