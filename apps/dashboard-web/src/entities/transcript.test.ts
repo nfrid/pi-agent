@@ -120,6 +120,7 @@ describe('activity row views and virtual transcript construction', () => {
       ),
     ).toEqual(['failed']);
     expect(toolOutcome({ kind: 'tool', status: 'finished' })).toBe('success');
+    expect(toolOutcome({ kind: 'tool', status: 'complete' })).toBe('success');
   });
 
   it('accepts complete activity projections for every tool outcome', () => {

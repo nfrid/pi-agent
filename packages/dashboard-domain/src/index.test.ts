@@ -428,6 +428,60 @@ describe('dashboard domain reducers', () => {
     expect(JSON.stringify(entries)).not.toContain('must-not-be-used');
   });
 
+  it('hydrates direct session messages like wrapped entries in either replay order', () => {
+    for (const resultFirst of [true, false]) {
+      for (const isError of [false, true]) {
+        const user = {
+          id: 'user-direct',
+          role: 'user',
+          content: 'Inspect this.',
+        };
+        const assistant = {
+          id: 'assistant-direct',
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'call-direct',
+              name: 'read',
+              arguments: { path: 'file.txt' },
+            },
+          ],
+        };
+        const result = {
+          id: 'result-direct',
+          role: 'toolResult',
+          toolCallId: 'call-direct',
+          toolName: 'read',
+          content: [{ type: 'text', text: isError ? 'nope' : 'ok' }],
+          isError,
+        };
+        const ordered = resultFirst
+          ? [user, result, result, assistant]
+          : [user, assistant, result, result];
+        const direct = hydrateTranscript(ordered);
+        const wrapped = hydrateTranscript(
+          ordered.map((message) => ({ type: 'message', message })),
+        );
+        expect(direct).toEqual(wrapped);
+        expect(direct.items['user-direct']).toMatchObject({
+          kind: 'message',
+          role: 'user',
+          content: 'Inspect this.',
+        });
+        expect(direct.items['call-direct']).toMatchObject({
+          kind: 'tool',
+          name: 'read',
+          arguments: { path: 'file.txt' },
+          result: [{ type: 'text', text: isError ? 'nope' : 'ok' }],
+          status: isError ? 'error' : 'finished',
+          isError,
+        });
+        expect(selectLegacyTranscriptEntries(direct)).toHaveLength(3);
+      }
+    }
+  });
+
   it('pairs an out-of-order persisted tool result without duplicate rendering', () => {
     const state = hydrateTranscript([
       {

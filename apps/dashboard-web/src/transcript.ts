@@ -285,6 +285,7 @@ export function toolOutcome(
     typeof tool.result !== 'undefined' ||
     typeof tool.content !== 'undefined' ||
     tool.status === 'completed' ||
+    tool.status === 'complete' ||
     tool.status === 'finished' ||
     tool.status === 'success'
   )

@@ -436,7 +436,18 @@ export const reduceTranscript = reduceTranscriptEvent;
 function persistedMessage(
   entry: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
-  return isRecord(entry.message) ? entry.message : undefined;
+  if (isRecord(entry.message)) return entry.message;
+  // Session history also contains unwrapped Pi messages. Keep this gate
+  // deliberately narrow: only the known message roles cross the compatibility
+  // boundary; unrelated raw entries remain opaque below.
+  if (
+    entry.type === undefined &&
+    (entry.role === 'assistant' ||
+      entry.role === 'user' ||
+      entry.role === 'toolResult')
+  )
+    return entry;
+  return undefined;
 }
 
 function persistedEntryId(entry: Record<string, unknown>): string | undefined {
@@ -484,7 +495,7 @@ export function hydrateTranscript(
       return;
     }
     const message = persistedMessage(raw);
-    if (raw.type === 'message' && message) {
+    if (message && (raw.type === 'message' || raw.type === undefined)) {
       const messageId = persistedMessageId(raw, message);
       if (!messageId) {
         const id = `entry-${index}`;
