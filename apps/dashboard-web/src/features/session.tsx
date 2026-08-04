@@ -7,6 +7,7 @@ import {
   interactionCancelMutationOptions,
   invalidateDashboardQueries,
   renameSessionMutationOptions,
+  restartRuntimeMutationOptions,
   selectSessionChange,
   selectSessionReplacement,
   sessionQueryOptions,
@@ -267,8 +268,15 @@ function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
   const command = useMutation(commandMutationOptions(dashboardHttpClient));
   const action = useMutation(actionMutationOptions(dashboardHttpClient));
   const stop = useMutation(stopRuntimeMutationOptions(dashboardHttpClient));
+  const restart = useMutation(
+    restartRuntimeMutationOptions(dashboardHttpClient),
+  );
   const busy =
-    restarting || command.isPending || action.isPending || stop.isPending;
+    restarting ||
+    command.isPending ||
+    action.isPending ||
+    stop.isPending ||
+    restart.isPending;
   const compactSupported = Boolean(
     runtime.capabilities?.manifests.some((manifest) =>
       manifest.actions.some((candidate) => candidate.id === 'session.compact'),
@@ -320,7 +328,11 @@ function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
         type="button"
         className="danger"
         disabled={busy}
-        onClick={() => void run(() => stop.mutateAsync(runtime.runtimeId))}
+        onClick={() =>
+          void run(() =>
+            stop.mutateAsync({ runtimeId: runtime.runtimeId, force: false }),
+          )
+        }
       >
         Stop
       </button>
@@ -333,16 +345,8 @@ function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
               void run(async () => {
                 setRestarting(true);
                 try {
-                  const result = (await dashboardHttpClient.request(
-                    `/api/runtimes/${encodeURIComponent(runtime.runtimeId)}/restart`,
-                    {
-                      method: 'POST',
-                      body: JSON.stringify({
-                        id:
-                          globalThis.crypto?.randomUUID?.() ??
-                          `dashboard-restart-${Date.now()}`,
-                      }),
-                    },
+                  const result = (await restart.mutateAsync(
+                    runtime.runtimeId,
                   )) as { result?: { runtimeId?: unknown } };
                   const nextId = result.result?.runtimeId;
                   if (typeof nextId !== 'string')
@@ -362,10 +366,10 @@ function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
             disabled={busy}
             onClick={() =>
               void run(() =>
-                dashboardHttpClient.request(
-                  `/api/runtimes/${encodeURIComponent(runtime.runtimeId)}/stop`,
-                  { method: 'POST', body: JSON.stringify({ force: true }) },
-                ),
+                stop.mutateAsync({
+                  runtimeId: runtime.runtimeId,
+                  force: true,
+                }),
               )
             }
           >

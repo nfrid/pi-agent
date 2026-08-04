@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 
 const apps: ReturnType<typeof Fastify>[] = [];
@@ -39,6 +39,56 @@ function context(): DashboardRouteContext {
 }
 
 describe('Fastify dashboard route plugin', () => {
+  it('delegates restart IDs and workspace refresh through typed route boundaries', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const restart = vi.fn(async () => ({ runtimeId: 'restarted' }));
+    const refreshWorkspaces = vi.fn(async () => [
+      {
+        id: 'workspace-1',
+        name: 'Project',
+        path: '/tmp/project',
+        canonicalPath: '/tmp/project',
+        source: 'directory' as const,
+        active: true,
+      },
+    ]);
+    const routeContext = context();
+    routeContext.restartRuntime = restart;
+    routeContext.refreshWorkspaces = refreshWorkspaces;
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+    const refreshed = await app.inject({
+      method: 'POST',
+      url: '/api/workspaces/refresh',
+      headers,
+      payload: {},
+    });
+    expect(refreshed.statusCode).toBe(200);
+    expect(refreshed.json().workspaces[0]).toMatchObject({ id: 'workspace-1' });
+    expect(refreshWorkspaces).toHaveBeenCalledOnce();
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/runtimes/runtime-1/restart',
+      headers,
+      payload: { id: 'bad\u0000id' },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const restarted = await app.inject({
+      method: 'POST',
+      url: '/api/runtimes/runtime-1/restart',
+      headers,
+      payload: { id: 'restart-1' },
+    });
+    expect(restarted.statusCode).toBe(200);
+    expect(restart).toHaveBeenCalledWith('runtime-1', 'restart-1');
+  });
+
   it('supports inject without starting an HTTP listener', async () => {
     const app = Fastify();
     apps.push(app);

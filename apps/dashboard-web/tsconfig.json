@@ -6,7 +6,21 @@
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "noEmit": true,
-    "types": ["vite/client", "node"]
+    "types": ["vite/client", "node"],
+    "baseUrl": ".",
+    "paths": {
+      "@pi-dashboard/activity-model": [
+        "../../packages/activity-model/src/index.ts"
+      ],
+      "@pi-dashboard/domain": ["../../packages/dashboard-domain/src/index.ts"],
+      "@pi-dashboard/extension-contributions": [
+        "../../packages/extension-contributions/src/index.ts"
+      ],
+      "@pi-dashboard/protocol": [
+        "../../packages/dashboard-protocol/src/index.ts"
+      ],
+      "@pi-dashboard/client": ["../../packages/dashboard-client/src/index.ts"]
+    }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"],
   "exclude": []

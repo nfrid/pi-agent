@@ -28,7 +28,11 @@ describe('remote-control semantic lifecycle contribution', () => {
   });
 
   it('dispatches compact through action.invoke without slash parsing', async () => {
-    const compact = vi.fn();
+    let completed = false;
+    const compact = vi.fn(async () => {
+      await Promise.resolve();
+      completed = true;
+    });
     const context = {
       compact,
       isIdle: () => true,
@@ -55,5 +59,29 @@ describe('remote-control semantic lifecycle contribution', () => {
     expect(compact).toHaveBeenCalledWith({
       customInstructions: 'keep the decisions',
     });
+    expect(completed).toBe(true);
+  });
+
+  it('propagates a compact failure instead of acknowledging it', async () => {
+    const context = {
+      compact: vi.fn(async () => {
+        throw new Error('compaction failed');
+      }),
+      isIdle: () => true,
+    } as never;
+    await expect(
+      dispatchDashboardCommand(
+        {} as never,
+        context,
+        new InteractionBroker(),
+        {
+          id: 'compact-failure',
+          type: 'action.invoke',
+          actionId: SESSION_COMPACT_ACTION_ID,
+          input: {},
+        },
+        remoteControlCapabilitySnapshot,
+      ),
+    ).rejects.toThrow('compaction failed');
   });
 });

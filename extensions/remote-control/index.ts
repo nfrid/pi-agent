@@ -436,7 +436,9 @@ export async function dispatchDashboardInput(
     if (images.length > 0 && PI_BUILTIN_COMMANDS.has(invocation.name))
       throw new Error('Images cannot be attached to dashboard commands.');
     if (invocation.name === 'compact') {
-      ctx.compact({ customInstructions: invocation.args.trim() || undefined });
+      await ctx.compact({
+        customInstructions: invocation.args.trim() || undefined,
+      });
       return { accepted: true, command: 'compact' };
     }
     if (invocation.name === 'name') {
@@ -1143,7 +1145,9 @@ async function dispatchSemanticAction(
     return executeActivityGroupsAction(invocation.input);
   if (invocation.actionId === SESSION_COMPACT_ACTION_ID) {
     const input = invocation.input as { customInstructions?: string };
-    ctx.compact({ customInstructions: input.customInstructions || undefined });
+    await ctx.compact({
+      customInstructions: input.customInstructions || undefined,
+    });
     return { accepted: true, actionId: invocation.actionId };
   }
   if (invocation.actionId === RUNTIME_ABORT_ACTION_ID) {

@@ -31,6 +31,12 @@ export class RuntimeService {
   }
 
   async restart(runtimeId: string, commandId: string): Promise<unknown> {
+    // Check the target before reserving replay memory. An unknown or external
+    // runtime must remain retryable after the caller fixes its precondition.
+    if (!this.manager.canRestart(runtimeId))
+      throw Object.assign(new Error('Only managed runtimes can restart.'), {
+        code: 'restart-precondition',
+      });
     const reservation = this.restartCommandIds.reserve(commandId);
     if (reservation === 'duplicate')
       throw Object.assign(new Error('Duplicate restart command ID.'), {

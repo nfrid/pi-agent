@@ -3,6 +3,10 @@ import {
   dashboardHttpClient,
   workspaceRefreshMutationOptions,
 } from '@pi-dashboard/client';
+import {
+  isActionAvailable,
+  type RuntimeCapabilitySnapshot,
+} from '@pi-dashboard/extension-contributions';
 import type {
   BrowserSnapshot,
   RuntimeSnapshot,
@@ -95,12 +99,17 @@ function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
       ? []
       : (runtime.capabilities?.manifests ?? []).flatMap((manifest) =>
           manifest.actions
-            .filter((action) => {
-              const rule = action.availability;
-              return (
-                !rule?.liveStates || rule.liveStates.includes(runtime.liveState)
-              );
-            })
+            .filter((action) =>
+              isActionAvailable(
+                action,
+                runtime.capabilities as RuntimeCapabilitySnapshot | undefined,
+                {
+                  online: runtime.online !== false,
+                  liveState: runtime.liveState,
+                  pendingInteractions: runtime.pendingInteractions.length,
+                },
+              ),
+            )
             .map((action) => ({ runtime, action })),
         ),
   );

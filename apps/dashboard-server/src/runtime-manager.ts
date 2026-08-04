@@ -246,6 +246,15 @@ export class RuntimeManager {
     }
   }
 
+  canRestart(runtimeId: string): boolean {
+    const snapshot = this.registry.get(runtimeId);
+    return Boolean(
+      snapshot &&
+        snapshot.ownership === 'managed' &&
+        this.launches.has(runtimeId),
+    );
+  }
+
   async restart(
     runtimeId: string,
   ): Promise<{ runtimeId: string; placement: ManagedPlacement }> {

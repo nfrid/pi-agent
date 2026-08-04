@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 
 test('mobile dashboard renders and supports the new-agent route', async ({
   page,
@@ -729,4 +729,743 @@ test('dense mobile session keeps conversation and activity readable', async ({
       .locator('body')
       .evaluate((element) => element.scrollWidth <= element.clientWidth),
   ).toBe(true);
+});
+
+const phase6ActionSchema = {
+  type: 'object',
+  properties: {},
+  additionalProperties: false,
+};
+
+function phase6Capabilities() {
+  return {
+    version: 1,
+    capabilities: [
+      {
+        id: 'remote-control.semantic-actions',
+        version: '1',
+        available: true,
+      },
+      { id: 'activity-groups', version: '1', available: true },
+      { id: 'interaction.ask_user', version: '1', available: true },
+    ],
+    manifests: [
+      {
+        id: 'remote-control',
+        version: '1',
+        actions: [
+          {
+            id: 'session.compact',
+            title: 'Compact session',
+            inputSchema: {
+              type: 'object',
+              properties: { customInstructions: { type: 'string' } },
+              additionalProperties: false,
+            },
+            availability: {
+              requires: ['remote-control.semantic-actions'],
+              liveStates: ['idle', 'working', 'waiting'],
+            },
+          },
+          {
+            id: 'runtime.abort',
+            title: 'Abort run',
+            inputSchema: phase6ActionSchema,
+            availability: {
+              requires: ['remote-control.semantic-actions'],
+              liveStates: ['working', 'waiting', 'aborting'],
+            },
+          },
+          {
+            id: 'unsafe.action',
+            title: 'Unsafe unavailable action',
+            inputSchema: phase6ActionSchema,
+            availability: { requires: ['missing-capability'] },
+          },
+        ],
+        renderers: [],
+      },
+      {
+        id: 'activity-groups',
+        version: '1',
+        actions: [
+          {
+            id: 'activity-groups.set',
+            title: 'Set activity groups',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                expanded: { type: 'boolean' },
+                enabled: { type: 'boolean' },
+              },
+              minProperties: 1,
+              additionalProperties: false,
+            },
+            availability: { requires: ['activity-groups'] },
+          },
+        ],
+        renderers: [],
+      },
+      {
+        id: 'ask-user',
+        version: '1',
+        actions: [
+          {
+            id: 'ask-user.answer',
+            title: 'Answer question',
+            inputSchema: {
+              type: 'object',
+              required: ['interactionId', 'answer'],
+              properties: {
+                interactionId: { type: 'string' },
+                answer: { type: 'string' },
+              },
+              additionalProperties: false,
+            },
+            availability: {
+              requires: ['interaction.ask_user'],
+              pendingInteraction: true,
+            },
+          },
+          {
+            id: 'ask-user.cancel',
+            title: 'Cancel question',
+            inputSchema: {
+              type: 'object',
+              required: ['interactionId'],
+              properties: { interactionId: { type: 'string' } },
+              additionalProperties: false,
+            },
+            availability: {
+              requires: ['interaction.ask_user'],
+              pendingInteraction: true,
+            },
+          },
+        ],
+        renderers: [],
+      },
+    ],
+  };
+}
+
+function phase6Interaction(id: string, question: string) {
+  return {
+    id,
+    type: 'ask_user',
+    question,
+    choices: [{ label: 'Yes', value: 'yes' }],
+    allowCustom: false,
+    rendererId: 'ask-user.question',
+    viewModel: {
+      id,
+      question,
+      choices: [{ label: 'Yes', value: 'yes' }],
+      allowCustom: false,
+    },
+    answerActionId: 'ask-user.answer',
+    cancelActionId: 'ask-user.cancel',
+    createdAt: 1,
+  };
+}
+
+function phase6Entries() {
+  return [
+    ...Array.from({ length: 84 }, (_, index) => ({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: `Earlier history ${index + 1}` }],
+      },
+    })),
+    {
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'Existing session request' }],
+      },
+    },
+    {
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: '**Inspecting history**' },
+          {
+            type: 'toolCall',
+            id: 'history-read',
+            name: 'read',
+            arguments: { path: 'src/App.tsx' },
+          },
+        ],
+      },
+    },
+    {
+      type: 'message',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'history-read',
+        content: [{ type: 'text', text: 'history contents' }],
+        isError: false,
+      },
+    },
+  ];
+}
+
+function phase6Snapshot(
+  overrides: {
+    liveState?: string;
+    pendingInteractions?: unknown[];
+    workspaces?: unknown[];
+    unread?: unknown[];
+  } = {},
+) {
+  return {
+    serverId: 'phase-six',
+    revision: 1,
+    cursor: 1,
+    runtimes: [
+      {
+        runtimeId: 'r1',
+        ownership: 'managed',
+        pid: 42,
+        cwd: '/tmp/project',
+        liveState: overrides.liveState ?? 'waiting',
+        online: true,
+        session: { id: 's1', entries: [] },
+        model: {
+          provider: 'test',
+          model: 'vision',
+          thinking: 'medium',
+          supportsImages: true,
+        },
+        modelCatalog: [
+          {
+            provider: 'test',
+            model: 'vision',
+            name: 'Vision',
+            supportsImages: true,
+          },
+          {
+            provider: 'test',
+            model: 'text',
+            name: 'Text only',
+            supportsImages: false,
+          },
+        ],
+        thinkingLevels: ['off', 'low', 'medium', 'high'],
+        pendingInteractions: overrides.pendingInteractions ?? [
+          phase6Interaction('ask-1', 'Use the first answer?'),
+          phase6Interaction('ask-2', 'Use the second answer?'),
+        ],
+        capabilities: phase6Capabilities(),
+      },
+    ],
+    workspaces: overrides.workspaces ?? [
+      {
+        id: 'w1',
+        name: 'Project',
+        path: '/tmp/project',
+        canonicalPath: '/tmp/project',
+        source: 'directory',
+        active: true,
+      },
+    ],
+    sessions: [
+      {
+        id: 's1',
+        file: '/tmp/project/session.jsonl',
+        cwd: '/tmp/project',
+        workspaceId: 'w1',
+        title: 'Existing session request',
+        updatedAt: 1,
+        activeRuntimeId: 'r1',
+        entryCount: 87,
+      },
+    ],
+    unread: overrides.unread ?? [
+      {
+        id: 'notice-1',
+        kind: 'settled',
+        title: 'Agent settled',
+        body: 'The existing session is ready.',
+        createdAt: 1,
+      },
+    ],
+  };
+}
+
+async function installPhase6Mocks(page: Page) {
+  const commands: Array<Record<string, unknown>> = [];
+  const starts: Array<Record<string, unknown>> = [];
+  const stops: Array<Record<string, unknown>> = [];
+  const restarts: Array<Record<string, unknown>> = [];
+  await page.addInitScript(() => {
+    localStorage.setItem('pi-dashboard-token', 'test-token');
+    const streams: Array<{
+      controller?: ReadableStreamDefaultController<Uint8Array>;
+      close(): void;
+      emit(value: Record<string, unknown>): void;
+    }> = [];
+    let cursor = 1;
+    const originalFetch = window.fetch.bind(window);
+    const makeFrame = (value: unknown) =>
+      `event: dashboard\ndata: ${JSON.stringify(value)}\n\n`;
+    const createStream = () => {
+      const stream = {
+        controller: undefined as
+          | ReadableStreamDefaultController<Uint8Array>
+          | undefined,
+        close() {
+          try {
+            stream.controller?.close();
+          } catch {
+            /* closed test stream */
+          }
+        },
+        emit(value: Record<string, unknown>) {
+          const record =
+            value.type === 'snapshot'
+              ? {
+                  ...value,
+                  cursor: ++cursor,
+                  snapshot: {
+                    ...(value.snapshot as Record<string, unknown>),
+                    cursor,
+                  },
+                  emittedAt: Date.now(),
+                }
+              : {
+                  ...value,
+                  cursor: ++cursor,
+                  emittedAt: Date.now(),
+                };
+          try {
+            stream.controller?.enqueue(
+              new TextEncoder().encode(makeFrame(record)),
+            );
+          } catch {
+            /* stale stream */
+          }
+        },
+      };
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          stream.controller = controller;
+        },
+      });
+      streams.push(stream);
+      return {
+        stream,
+        response: new Response(body, {
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+      };
+    };
+    window.fetch = async (input, init) => {
+      const target = typeof input === 'string' ? input : input.url;
+      if (!target.includes('/api/events')) return originalFetch(input, init);
+      return createStream().response;
+    };
+    Object.assign(window, {
+      phase6Stream: {
+        current: () => streams.at(-1),
+        count: () => streams.length,
+      },
+    });
+  });
+  await page.route('**/api/usage', (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/snapshot', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(phase6Snapshot()),
+    }),
+  );
+  await page.route('**/api/sessions/s1', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        serverId: 'phase-six',
+        cursor: 1,
+        metadata: {
+          id: 's1',
+          file: '/tmp/project/session.jsonl',
+          cwd: '/tmp/project',
+          title: 'Existing session request',
+          updatedAt: 1,
+          activeRuntimeId: 'r1',
+          entryCount: 87,
+        },
+        entries: phase6Entries(),
+      }),
+    }),
+  );
+  await page.route('**/api/workspaces/refresh', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        workspaces: [
+          {
+            id: 'w1',
+            name: 'Refreshed project',
+            path: '/tmp/project',
+            canonicalPath: '/tmp/project',
+            source: 'directory',
+            active: true,
+          },
+        ],
+      }),
+    }),
+  );
+  await page.route('**/api/runtimes/start', async (route) => {
+    try {
+      starts.push(
+        JSON.parse(route.request().postData() ?? '{}') as Record<
+          string,
+          unknown
+        >,
+      );
+    } catch {
+      starts.push({});
+    }
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ runtimeId: 'r-launched' }),
+    });
+  });
+  await page.route('**/api/runtimes/r1/restart', async (route) => {
+    try {
+      restarts.push(
+        JSON.parse(route.request().postData() ?? '{}') as Record<
+          string,
+          unknown
+        >,
+      );
+    } catch {
+      restarts.push({});
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, result: { runtimeId: 'r-restarted' } }),
+    });
+  });
+  await page.route('**/api/runtimes/r1/stop', async (route) => {
+    try {
+      stops.push(
+        JSON.parse(route.request().postData() ?? '{}') as Record<
+          string,
+          unknown
+        >,
+      );
+    } catch {
+      stops.push({});
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true }),
+    });
+  });
+  await page.route('**/api/runtimes/r1/command', async (route) => {
+    const contentType = route.request().headers()['content-type'] ?? '';
+    const body = route.request().postData() ?? '';
+    if (contentType.startsWith('application/json')) {
+      try {
+        commands.push(JSON.parse(body) as Record<string, unknown>);
+      } catch {
+        commands.push({ type: 'invalid-json' });
+      }
+    } else commands.push({ type: 'multipart', body });
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, result: { accepted: true } }),
+    });
+  });
+  await page.route('**/api/push/vapid-public-key', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ publicKey: null }),
+    }),
+  );
+  return {
+    commands,
+    starts,
+    stops,
+    restarts,
+    emit: async (value: Record<string, unknown>) =>
+      page.evaluate((record) => {
+        (
+          window as unknown as {
+            phase6Stream: {
+              current(): { emit(value: Record<string, unknown>): void };
+            };
+          }
+        ).phase6Stream
+          .current()
+          .emit(record);
+      }, value),
+    close: async () =>
+      page.evaluate(() =>
+        (
+          window as unknown as {
+            phase6Stream: { current(): { close(): void } };
+          }
+        ).phase6Stream
+          .current()
+          .close(),
+      ),
+    streamCount: () =>
+      page.evaluate(() =>
+        (
+          window as unknown as { phase6Stream: { count(): number } }
+        ).phase6Stream.count(),
+      ),
+  };
+}
+
+test('phase six mocked session flow covers semantic controls and reconnect safety', async ({
+  page,
+}) => {
+  test.setTimeout(45_000);
+  await page.context().grantPermissions(['notifications']);
+  const mocks = await installPhase6Mocks(page);
+  await page.goto('/sessions/s1');
+  await expect(
+    page.getByRole('heading', { name: 'Existing session request' }),
+  ).toBeVisible();
+  await mocks.emit({ type: 'snapshot', snapshot: phase6Snapshot() });
+  await expect(page.getByLabel('Model')).toBeVisible();
+  await page.getByLabel('Model').selectOption('test/text');
+  await page.getByLabel('Thinking level').selectOption('high');
+  await expect
+    .poll(
+      () =>
+        mocks.commands.filter((command) => command.type === 'setModel').length,
+    )
+    .toBe(1);
+  await expect
+    .poll(
+      () =>
+        mocks.commands.filter((command) => command.type === 'setThinking')
+          .length,
+    )
+    .toBe(1);
+
+  await expect(page.getByRole('dialog')).toHaveCount(2);
+  await page
+    .getByRole('dialog')
+    .nth(0)
+    .getByRole('button', { name: 'Yes' })
+    .click();
+  await expect(
+    page.getByText('Answered from this dashboard.').first(),
+  ).toBeVisible();
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Cancel' })
+    .dispatchEvent('click');
+  await expect(page.getByText('Answered from this dashboard.')).toHaveCount(2);
+  await expect
+    .poll(
+      () =>
+        mocks.commands.filter(
+          (command) =>
+            command.type === 'action.invoke' &&
+            command.actionId === 'ask-user.answer',
+        ).length,
+    )
+    .toBe(1);
+  await expect
+    .poll(
+      () =>
+        mocks.commands.filter(
+          (command) =>
+            command.type === 'action.invoke' &&
+            command.actionId === 'ask-user.cancel',
+        ).length,
+    )
+    .toBe(1);
+
+  await page.evaluate(() =>
+    window.scrollTo(0, document.documentElement.scrollHeight),
+  );
+  const activity = page.getByRole('button', {
+    name: /Inspecting history.*1 tool/,
+  });
+  await expect(activity).toBeVisible();
+  await activity.click();
+  await expect(page.locator('.tool-chip').getByText('read')).toBeVisible();
+  await activity.click();
+  await expect(page.locator('.tool-chip').getByText('read')).toHaveCount(0);
+  await expect
+    .poll(
+      () =>
+        mocks.commands.filter(
+          (command) => command.actionId === 'activity-groups.set',
+        ).length,
+    )
+    .toBe(2);
+
+  await page.mouse.wheel(0, -100_000);
+  await page.waitForTimeout(150);
+  await expect(
+    page.getByText('Earlier history 1', { exact: true }),
+  ).toBeVisible();
+  await mocks.emit({
+    runtimeId: 'r1',
+    event: {
+      type: 'message.started',
+      sessionId: 's1',
+      message: {
+        messageId: 'reading-live',
+        role: 'user',
+        content: [{ type: 'text', text: 'Live update while reading' }],
+      },
+    },
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollHeight -
+          (window.scrollY + window.innerHeight),
+      ),
+    )
+    .toBeGreaterThan(120);
+  await page.mouse.wheel(0, 100_000);
+  await expect(page.getByText('Live update while reading')).toBeVisible();
+  await mocks.emit({
+    type: 'snapshot',
+    snapshot: phase6Snapshot({ liveState: 'idle', pendingInteractions: [] }),
+  });
+  await expect(page.getByLabel('Message Pi')).toBeEnabled();
+  await page.getByLabel('Message Pi').fill('stream this');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect
+    .poll(() => mocks.commands.some((command) => command.type === 'prompt'))
+    .toBe(true);
+  await mocks.emit({
+    runtimeId: 'r1',
+    event: {
+      type: 'message.started',
+      sessionId: 's1',
+      message: {
+        messageId: 'assistant-live',
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Streaming answer' },
+          {
+            type: 'toolCall',
+            id: 'stream-tool',
+            name: 'read',
+            arguments: { path: 'src/live.ts' },
+          },
+        ],
+      },
+    },
+  });
+  await mocks.emit({
+    runtimeId: 'r1',
+    event: {
+      type: 'tool.started',
+      sessionId: 's1',
+      tool: {
+        toolCallId: 'stream-tool',
+        name: 'read',
+        arguments: { path: 'src/live.ts' },
+        status: 'running',
+      },
+    },
+  });
+  await mocks.emit({
+    runtimeId: 'r1',
+    event: {
+      type: 'tool.finished',
+      sessionId: 's1',
+      tool: {
+        toolCallId: 'stream-tool',
+        name: 'read',
+        result: 'done',
+        status: 'completed',
+      },
+    },
+  });
+  await mocks.emit({
+    runtimeId: 'r1',
+    event: {
+      type: 'message.finished',
+      sessionId: 's1',
+      message: {
+        messageId: 'assistant-live',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Streaming answer' }],
+      },
+    },
+  });
+  await page.mouse.wheel(0, 100_000);
+  await expect(page.getByText('Streaming answer')).toBeVisible();
+
+  await page.getByLabel('Choose images').setInputFiles({
+    name: 'phase6.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from([1, 2, 3]),
+  });
+  await expect(page.getByAltText('phase6.png')).toBeVisible();
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect
+    .poll(() => mocks.commands.some((command) => command.type === 'multipart'))
+    .toBe(true);
+  await page.keyboard.press('Control+K');
+  await page.getByLabel('Filter actions').fill('Unsafe');
+  await expect(page.getByText('No advertised actions.')).toBeVisible();
+  await page.getByLabel('Filter actions').fill('Compact');
+  await page.keyboard.press('Enter');
+  await expect
+    .poll(() =>
+      mocks.commands.some((command) => command.actionId === 'session.compact'),
+    )
+    .toBe(true);
+
+  await mocks.close();
+  await expect(page.getByRole('status')).toContainText(
+    'Live updates disconnected',
+  );
+  await expect.poll(mocks.streamCount).toBeGreaterThan(1);
+  await page.reload();
+  await expect(
+    page.getByRole('heading', { name: 'Existing session request' }),
+  ).toBeVisible();
+});
+
+test('phase six mocked management flow covers refresh, fallback notification, launch, resume, and runtime lifecycle', async ({
+  page,
+}) => {
+  test.setTimeout(30_000);
+  await page.context().grantPermissions(['notifications']);
+  const mocks = await installPhase6Mocks(page);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Refresh workspaces' }).click();
+  await expect(page.getByText('Refreshed project')).toBeVisible();
+  await page.getByRole('button', { name: 'Browser alerts' }).click();
+  await expect(
+    page.getByRole('button', { name: /Browser alerts on|Alerts unavailable/ }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: '+ Agent' }).click();
+  await page.getByLabel('Resume session (optional)').selectOption('s1');
+  await page
+    .getByRole('button', { name: 'Start in a new tmux window' })
+    .click();
+  await expect(page).toHaveURL(/\/runtimes\/r-launched$/);
+  expect(mocks.starts[0]).toMatchObject({ workspaceId: 'w1', sessionId: 's1' });
+  await page.goto('/sessions/s1');
+  await expect(
+    page.getByRole('button', { name: 'Stop', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await page.getByRole('button', { name: 'Force stop', exact: true }).click();
+  await page.getByRole('button', { name: 'Restart', exact: true }).click();
+  await expect(page).toHaveURL(/\/runtimes\/r-restarted$/);
+  expect(mocks.stops).toEqual([{ force: false }, { force: true }]);
+  expect(mocks.restarts[0]?.id).toBeTruthy();
 });
