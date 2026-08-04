@@ -474,6 +474,7 @@ describe('dashboard HTTP boundary', () => {
       authToken: 'test-token',
       eventBufferSize: 2,
       stateDir: path.join(root, 'state'),
+      socketPath: path.join(root, 'bridge.sock'),
       sessionDir,
       sessions,
       sesh: { list: async () => [] },
