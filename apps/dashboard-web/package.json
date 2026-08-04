@@ -15,6 +15,7 @@
     "@pi-dashboard/activity-model": "workspace:*",
     "@pi-dashboard/client": "workspace:*",
     "@pi-dashboard/domain": "workspace:*",
+    "@pi-dashboard/extension-contributions": "workspace:*",
     "@pi-dashboard/protocol": "workspace:*",
     "@tailwindcss/vite": "^4.1.12",
     "@tanstack/react-query": "^5.90.7",
@@ -25,6 +26,7 @@
     "react-dom": "^19.1.0",
     "react-aria-components": "^1.13.0",
     "react-markdown": "10.1.0",
+    "typebox": "1.1.38",
     "remark-gfm": "4.0.1",
     "tailwindcss": "^4.1.12",
     "vite": "^7.0.0"

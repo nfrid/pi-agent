@@ -5,6 +5,7 @@
   "type": "commonjs",
   "main": "./index.ts",
   "dependencies": {
-    "@pi-dashboard/protocol": "workspace:*"
+    "@pi-dashboard/protocol": "workspace:*",
+    "@pi-dashboard/extension-contributions": "workspace:*"
   }
 }

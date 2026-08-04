@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@pi-dashboard/codex-usage": "workspace:*",
+    "@pi-dashboard/extension-contributions": "workspace:*",
     "@pi-dashboard/domain": "workspace:*",
     "@pi-dashboard/protocol": "workspace:*",
     "fastify": "5.11.2",

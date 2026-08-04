@@ -30,6 +30,10 @@ export default defineConfig({
         __dirname,
         '../../packages/dashboard-domain/src/index.ts',
       ),
+      '@pi-dashboard/extension-contributions': path.resolve(
+        __dirname,
+        '../../packages/extension-contributions/src/index.ts',
+      ),
     },
   },
   server: {

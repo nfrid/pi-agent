@@ -8,6 +8,15 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import {
+  type ActionInvocation,
+  createRuntimeCapabilitySnapshot,
+  findActionDescriptor,
+  isActionAvailable,
+  parseActionInput,
+  parseActionInvocation,
+  type RuntimeCapabilitySnapshot,
+} from '@pi-dashboard/extension-contributions';
+import {
   type BridgeCommand,
   type BridgeEvent,
   type BridgeImageAttachment,
@@ -24,10 +33,22 @@ import {
   type SessionSnapshot,
   serializeFrame,
 } from '../../packages/dashboard-protocol/src/index';
+import { executeActivityGroupsAction } from '../activity-groups/actions';
+import {
+  ACTIVITY_GROUPS_ACTION_ID,
+  activityGroupsCapabilitySnapshot,
+  activityGroupsManifest,
+} from '../activity-groups/contribution';
 import {
   getInteractionBroker,
   type InteractionBroker,
 } from '../ask-user/broker';
+import {
+  ASK_USER_ANSWER_ACTION_ID,
+  ASK_USER_CANCEL_ACTION_ID,
+  askUserCapabilitySnapshot,
+  askUserManifest,
+} from '../ask-user/contribution';
 import { defineExtension } from '../shared/runtime/extension';
 
 const RECONNECT_MIN_MS = 250;
@@ -38,6 +59,18 @@ export const BRIDGE_COMMAND_QUEUE_LIMIT = 64;
 const BRIDGE_WRITE_QUEUE_LIMIT = 128;
 const BRIDGE_WRITE_QUEUE_BYTES = 1 * 1024 * 1024;
 const HEARTBEAT_INTERVAL_MS = 5_000;
+
+const CONTRIBUTION_MANIFESTS = [
+  askUserManifest,
+  activityGroupsManifest,
+] as const;
+const RUNTIME_CAPABILITIES = createRuntimeCapabilitySnapshot(
+  CONTRIBUTION_MANIFESTS,
+  [
+    ...askUserCapabilitySnapshot.capabilities,
+    ...activityGroupsCapabilitySnapshot.capabilities,
+  ],
+);
 
 type CommandHandler = (command: BridgeCommand) => Promise<unknown>;
 
@@ -467,6 +500,7 @@ export interface BridgeClientOptions {
   snapshot: () => RuntimeSnapshot;
   handleCommand: CommandHandler;
   broker?: InteractionBroker;
+  capabilities?: RuntimeCapabilitySnapshot;
 }
 
 /** Reconnecting JSONL client. It never queues browser commands while offline. */
@@ -483,6 +517,7 @@ export class BridgeClient {
     socket: net.Socket;
   }> = [];
   private commandRunning = false;
+  private readonly actionCommandIds = new Set<string>();
   private outboundQueue: Array<{
     socket: net.Socket;
     data: string;
@@ -585,7 +620,7 @@ export class BridgeClient {
         protocolVersion: PROTOCOL_VERSION,
         token: this.options.token,
         identityToken: this.options.identityToken,
-        capabilities: { heartbeat: true },
+        capabilities: { heartbeat: true, extensions: RUNTIME_CAPABILITIES },
         snapshot,
       });
       if (!helloSent) return;
@@ -638,6 +673,24 @@ export class BridgeClient {
   }
 
   private enqueue(command: BridgeCommand, socket: net.Socket): void {
+    if (command.type === 'action.invoke') {
+      const action = this.options.capabilities?.manifests
+        .flatMap((manifest) => manifest.actions)
+        .find((item) => item.id === command.actionId);
+      if (!action?.idempotent) {
+        if (this.actionCommandIds.has(command.id)) {
+          this.sendAck(
+            socket,
+            command.id,
+            false,
+            'Duplicate semantic action command ID.',
+            'duplicate-action-id',
+          );
+          return;
+        }
+        this.actionCommandIds.add(command.id);
+      }
+    }
     if (
       this.commandQueue.length + (this.commandRunning ? 1 : 0) >=
       BRIDGE_COMMAND_QUEUE_LIMIT
@@ -668,6 +721,9 @@ export class BridgeClient {
             item.command.id,
             false,
             error instanceof Error ? error.message : String(error),
+            error && typeof error === 'object' && 'code' in error
+              ? String((error as { code: unknown }).code)
+              : undefined,
           );
         }
       } finally {
@@ -688,12 +744,14 @@ export class BridgeClient {
     id: string,
     ok: false,
     result: string,
+    code?: string,
   ): void;
   private sendAck(
     socket: net.Socket,
     id: string,
     ok: boolean,
     result?: unknown,
+    code?: string,
   ): void {
     if (ok) {
       this.sendRaw(socket, {
@@ -709,6 +767,7 @@ export class BridgeClient {
         id,
         ok: false,
         error: error || 'Command failed.',
+        ...(code ? { code: code.slice(0, 256) } : {}),
       });
     }
   }
@@ -928,6 +987,25 @@ function interactionSnapshot(
       ...(typeof choice.custom === 'boolean' ? { custom: choice.custom } : {}),
     })),
     allowCustom: interaction.allowCustom === true,
+    rendererId: 'ask-user.question',
+    answerActionId: ASK_USER_ANSWER_ACTION_ID,
+    cancelActionId: ASK_USER_CANCEL_ACTION_ID,
+    viewModel: {
+      id: boundedIdentifier(interaction.id, 256, 'interaction'),
+      question: boundedText(interaction.question, 20_000, 'Question'),
+      // The full descriptions/previews remain on the protocol snapshot. The
+      // view model is intentionally compact so advertising it cannot double
+      // a near-limit interaction frame.
+      choices: interaction.choices.slice(0, 50).map((choice) => ({
+        label: boundedText(choice.label, 512, 'Choice'),
+        value: boundedText(choice.value, 512, 'choice'),
+        ...(choice.custom === true ? { custom: true } : {}),
+      })),
+      allowCustom: interaction.allowCustom === true,
+      ...(typeof interaction.customLabel === 'string' && interaction.customLabel
+        ? { customLabel: interaction.customLabel.slice(0, 512) }
+        : {}),
+    },
     ...(typeof interaction.customLabel === 'string' && interaction.customLabel
       ? { customLabel: interaction.customLabel.slice(0, 512) }
       : {}),
@@ -939,12 +1017,70 @@ function interactionSnapshot(
   };
 }
 
+async function dispatchSemanticAction(
+  ctx: ExtensionContext,
+  broker: InteractionBroker,
+  command: Extract<BridgeCommand, { type: 'action.invoke' }>,
+): Promise<unknown> {
+  const invocation: ActionInvocation = parseActionInvocation(command);
+  const action = findActionDescriptor(
+    CONTRIBUTION_MANIFESTS,
+    invocation.actionId,
+  );
+  if (!action)
+    throw Object.assign(
+      new Error(`Unknown dashboard action: ${invocation.actionId}`),
+      { code: 'unknown-action' },
+    );
+  const available = isActionAvailable(action, RUNTIME_CAPABILITIES, {
+    online: true,
+    liveState:
+      broker.list().length > 0 ? 'waiting' : ctx.isIdle() ? 'idle' : 'working',
+    pendingInteractions: broker.list().length,
+  });
+  if (!available)
+    throw Object.assign(
+      new Error(`Dashboard action is unavailable: ${invocation.actionId}`),
+      { code: 'unavailable-action' },
+    );
+  parseActionInput(action, invocation.input);
+  if (invocation.actionId === ASK_USER_ANSWER_ACTION_ID) {
+    const input = invocation.input as { interactionId: string; answer: string };
+    if (!broker.answer(input.interactionId, input.answer))
+      throw Object.assign(
+        new Error('Interaction is already resolved or the answer is invalid.'),
+        {
+          code: 'unavailable-action',
+        },
+      );
+    return { accepted: true, actionId: invocation.actionId };
+  }
+  if (invocation.actionId === ASK_USER_CANCEL_ACTION_ID) {
+    const input = invocation.input as { interactionId: string };
+    if (!broker.cancel(input.interactionId))
+      throw Object.assign(new Error('Interaction is already resolved.'), {
+        code: 'unavailable-action',
+      });
+    return { accepted: true, actionId: invocation.actionId };
+  }
+  if (invocation.actionId === ACTIVITY_GROUPS_ACTION_ID)
+    return executeActivityGroupsAction(invocation.input);
+  throw Object.assign(
+    new Error(`No adapter for dashboard action: ${invocation.actionId}`),
+    {
+      code: 'unknown-action',
+    },
+  );
+}
+
 export async function dispatchDashboardCommand(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   broker: InteractionBroker,
   command: BridgeCommand,
 ): Promise<unknown> {
+  if (command.type === 'action.invoke')
+    return dispatchSemanticAction(ctx, broker, command);
   switch (command.type) {
     case 'prompt':
       if (!ctx.isIdle())
@@ -1042,6 +1178,7 @@ export function createRemoteControlRuntime(
     liveState: 'idle',
     session: { id: 'unknown', entries: [] },
     pendingInteractions: broker.list().map(interactionSnapshot),
+    capabilities: RUNTIME_CAPABILITIES,
     lastError,
   });
   let cachedSnapshot = unavailableSnapshot();
@@ -1063,6 +1200,7 @@ export function createRemoteControlRuntime(
           }
         : undefined,
       pendingInteractions: broker.list().map(interactionSnapshot),
+      capabilities: RUNTIME_CAPABILITIES,
       lastError,
     };
   };
@@ -1073,6 +1211,7 @@ export function createRemoteControlRuntime(
     identityToken: process.env.PI_DASHBOARD_IDENTITY_TOKEN,
     runtimeId,
     broker,
+    capabilities: RUNTIME_CAPABILITIES,
     // Socket callbacks run outside Pi's extension event dispatch. Returning a
     // cache keeps reconnects from dereferencing a context that was invalidated
     // by session replacement or extension reload.

@@ -97,6 +97,9 @@ function mergeRuntimeEvent(
         ...(update?.lastSeenAt === undefined
           ? {}
           : { lastSeenAt: update.lastSeenAt }),
+        ...(update?.capabilities === undefined
+          ? {}
+          : { capabilities: update.capabilities }),
       };
     }
     case 'session.changed':

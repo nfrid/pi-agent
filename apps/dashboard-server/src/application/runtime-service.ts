@@ -41,11 +41,28 @@ export class RuntimeService {
       );
     if (!runtime)
       throw new Error('Interaction is already resolved or offline.');
+    const interaction = runtime.pendingInteractions.find(
+      (item) => item.id === interactionId,
+    );
+    const actionId = cancel
+      ? (interaction?.cancelActionId ?? 'ask-user.cancel')
+      : (interaction?.answerActionId ?? 'ask-user.answer');
+    const advertisesAction = runtime.capabilities?.manifests.some((manifest) =>
+      manifest.actions.some((action) => action.id === actionId),
+    );
+    // Protocol-v1 runtimes retain the original operation. New runtimes use the
+    // contribution envelope; both paths resolve the same broker winner.
     return this.registry.sendCommand(
       runtime.runtimeId,
-      cancel
-        ? { type: 'interaction.cancel', interactionId }
-        : { type: 'interaction.answer', interactionId, answer },
+      advertisesAction
+        ? {
+            type: 'action.invoke',
+            actionId,
+            input: cancel ? { interactionId } : { interactionId, answer },
+          }
+        : cancel
+          ? { type: 'interaction.cancel', interactionId }
+          : { type: 'interaction.answer', interactionId, answer },
     );
   }
 

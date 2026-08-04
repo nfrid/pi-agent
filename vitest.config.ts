@@ -19,6 +19,9 @@ export default defineConfig({
       '@pi-dashboard/activity-model': path.resolve(
         'packages/activity-model/src/index.ts',
       ),
+      '@pi-dashboard/extension-contributions': path.resolve(
+        'packages/extension-contributions/src/index.ts',
+      ),
     },
   },
   test: {

@@ -149,6 +149,23 @@ export function commandMutationOptions(client: DashboardHttpClient) {
   });
 }
 
+export function actionMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: ({
+      runtimeId,
+      actionId,
+      input,
+      commandId,
+    }: {
+      runtimeId: string;
+      actionId: string;
+      input: unknown;
+      commandId?: string;
+    }) => client.invokeAction(runtimeId, actionId, input, commandId),
+    retry: false,
+  });
+}
+
 export function stopRuntimeMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
     mutationFn: (runtimeId: string) => client.stopRuntime(runtimeId),

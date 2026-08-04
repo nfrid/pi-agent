@@ -4,11 +4,37 @@
  * interfaces are Static-derived aliases so transports do not need to repeat
  * structural validation.
  */
+import {
+  CapabilitySummarySchema,
+  ExtensionManifestSummarySchema,
+  parseRuntimeCapabilitySnapshot as parseExtensionCapabilitySnapshot,
+  RuntimeCapabilitySnapshotSchema,
+  tryParseRuntimeCapabilitySnapshot as tryParseExtensionCapabilitySnapshot,
+} from '@pi-dashboard/extension-contributions';
 import { type Static, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME_BYTES = 512 * 1024;
+
+/** Capability contracts are optional so protocol-v1 runtimes remain usable. */
+export {
+  RuntimeCapabilitySnapshotSchema,
+  safeRuntimeCapabilitySnapshot,
+} from '@pi-dashboard/extension-contributions';
+export const parseRuntimeCapabilitySnapshot = parseExtensionCapabilitySnapshot;
+export const tryParseRuntimeCapabilitySnapshot =
+  tryParseExtensionCapabilitySnapshot;
+export type {
+  ActionInvocation,
+  ExtensionManifestSummary,
+  RuntimeCapabilitySnapshot,
+} from '@pi-dashboard/extension-contributions';
+export {
+  ActionInvocationSchema,
+  parseActionInvocation,
+  tryParseActionInvocation,
+} from '@pi-dashboard/extension-contributions';
 
 const MAX_ID = 256;
 const MAX_PATH = 4096;
@@ -63,6 +89,12 @@ export const InteractionSnapshotSchema = Type.Object(
     ),
     allowCustom: Type.Boolean(),
     customLabel: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    /** Known contribution renderer; absent means generic interaction fallback. */
+    rendererId: Type.Optional(IdentifierSchema),
+    /** Validated renderer view model, retained opaque at protocol v1. */
+    viewModel: Type.Optional(UnknownSchema),
+    answerActionId: Type.Optional(IdentifierSchema),
+    cancelActionId: Type.Optional(IdentifierSchema),
     createdAt: FiniteNumberSchema,
   },
   { additionalProperties: false },
@@ -165,6 +197,8 @@ const RuntimeSnapshotProperties = {
   lastError: Type.Optional(Type.String({ minLength: 1, maxLength: 10_000 })),
   online: Type.Optional(Type.Boolean()),
   lastSeenAt: Type.Optional(FiniteNumberSchema),
+  /** Optional validated extension capabilities advertised by newer runtimes. */
+  capabilities: Type.Optional(RuntimeCapabilitySnapshotSchema),
 };
 
 export const RuntimeSnapshotSchema = Type.Object(RuntimeSnapshotProperties, {
@@ -268,18 +302,34 @@ export type NormalizedToolLivePayload = NormalizedToolPayload;
 export const ToolLivePayloadSchema = NormalizedToolPayloadSchema;
 export type ToolLivePayload = NormalizedToolPayload;
 
+export const RuntimeHelloCapabilitiesSchema = Type.Object(
+  {
+    heartbeat: Type.Optional(Type.Literal(true)),
+    /** New runtimes advertise extension capabilities in this field. */
+    extensions: Type.Optional(RuntimeCapabilitySnapshotSchema),
+    /** Direct fields are accepted for simple protocol-v1 adapters. */
+    version: Type.Optional(Type.Literal(1)),
+    extensionCapabilities: Type.Optional(RuntimeCapabilitySnapshotSchema),
+    capabilitySummaries: Type.Optional(
+      Type.Array(CapabilitySummarySchema, { maxItems: 256 }),
+    ),
+    manifests: Type.Optional(
+      Type.Array(ExtensionManifestSummarySchema, { maxItems: 128 }),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type RuntimeHelloCapabilities = Static<
+  typeof RuntimeHelloCapabilitiesSchema
+>;
+
 const RuntimeHelloEventSchema = Type.Object(
   {
     type: Type.Literal('runtime.hello'),
     protocolVersion: Type.Literal(PROTOCOL_VERSION),
     token: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
     identityToken: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
-    capabilities: Type.Optional(
-      Type.Object(
-        { heartbeat: Type.Literal(true) },
-        { additionalProperties: false },
-      ),
-    ),
+    capabilities: Type.Optional(RuntimeHelloCapabilitiesSchema),
     snapshot: RuntimeSnapshotSchema,
   },
   { additionalProperties: false },
@@ -493,6 +543,19 @@ const CancelCommandSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+/** Semantic contribution invocation. It is intentionally not a slash command. */
+export const SemanticActionCommandSchema = Type.Object(
+  {
+    ...BridgeCommandBaseProperties,
+    type: Type.Literal('action.invoke'),
+    actionId: IdentifierSchema,
+    input: UnknownSchema,
+  },
+  { additionalProperties: false },
+);
+export type SemanticActionCommand = Static<typeof SemanticActionCommandSchema>;
+export const ActionCommandEnvelopeSchema = SemanticActionCommandSchema;
+export type ActionCommandEnvelope = SemanticActionCommand;
 export const BridgeCommandSchema = Type.Union([
   PromptCommandSchema,
   SimpleCommandSchema,
@@ -501,6 +564,7 @@ export const BridgeCommandSchema = Type.Union([
   SetSessionNameCommandSchema,
   AnswerCommandSchema,
   CancelCommandSchema,
+  SemanticActionCommandSchema,
 ]);
 export type BridgeCommand = Static<typeof BridgeCommandSchema>;
 export type BridgeCommandBase = { id: string };
@@ -533,6 +597,8 @@ const AckFrameSchema = Type.Union([
       id: Type.String({ minLength: 1, maxLength: 128 }),
       ok: Type.Literal(false),
       error: Type.String({ minLength: 1, maxLength: 1000 }),
+      /** Machine-readable semantic action/availability error when supplied. */
+      code: Type.Optional(IdentifierSchema),
     },
     { additionalProperties: false },
   ),
@@ -1056,6 +1122,16 @@ export function parseBridgeCommand(value: unknown): BridgeCommand {
     !safeIdentifier(command.interactionId, 128)
   )
     throw new Error('Invalid interaction id.');
+  if (command.type === 'action.invoke') {
+    if (
+      !onlyKeys(
+        command as Record<string, unknown>,
+        new Set(['id', 'type', 'actionId', 'input']),
+      ) ||
+      !safeIdentifier(command.actionId, MAX_ID)
+    )
+      throw new Error('Invalid semantic action invocation.');
+  }
   return command;
 }
 export const validateBridgeCommand = parseBridgeCommand;

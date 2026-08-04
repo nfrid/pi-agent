@@ -74,6 +74,15 @@ function messageText(message: Record<string, unknown>): string {
   return contentText(message.content ?? message.text).trim();
 }
 
+function preambleTitle(text: string): string {
+  return (
+    text
+      .split('\n')[0]
+      ?.trim()
+      .replace(/[.…:]+$/, '') || text
+  );
+}
+
 function messageImageCount(message: Record<string, unknown>): number {
   return Array.isArray(message.content)
     ? message.content.filter(
@@ -135,6 +144,8 @@ export function toTranscriptEntries(
                 ? tool.toolName
                 : 'tool',
           args: tool.arguments ?? tool.args,
+          status: toolOutcome(raw),
+          isError: toolOutcome(raw) === 'error',
         },
         raw,
       });
@@ -200,6 +211,13 @@ export function toTranscriptEntries(
       }
       const preparing =
         message.__dashboardStreaming === true && tools.length === 0;
+      const preamble =
+        visibleText && tools.length > 0
+          ? preambleTitle(visibleText)
+          : undefined;
+      const narratedTitle = (
+        textHeaders.length > 0 ? textHeaders : thinkingHeaders
+      ).at(-1);
       result.push(
         {
           key: entryKey,
@@ -207,6 +225,12 @@ export function toTranscriptEntries(
             kind: 'assistant',
             speaks: preparing ? false : Boolean(visibleText),
             narration,
+            title: preamble ?? narratedTitle,
+            ...(preamble
+              ? { titleKind: 'preamble' as const }
+              : narratedTitle
+                ? { titleKind: 'narration' as const }
+                : {}),
           },
           raw,
           text: visibleText,

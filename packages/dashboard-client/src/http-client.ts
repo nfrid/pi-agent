@@ -150,6 +150,24 @@ export class DashboardHttpClient {
     );
   }
 
+  async invokeAction(
+    runtimeId: string,
+    actionId: string,
+    input: unknown,
+    commandId?: string,
+  ): Promise<unknown> {
+    const id =
+      commandId ??
+      globalThis.crypto?.randomUUID?.() ??
+      `dashboard-action-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    return this.sendCommand(runtimeId, {
+      id,
+      type: 'action.invoke',
+      actionId,
+      input,
+    });
+  }
+
   async sendCommandWithImages(
     runtimeId: string,
     command: Record<string, unknown>,

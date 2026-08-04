@@ -18,6 +18,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { Container } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
+import { installActivityGroupsActionHandler } from './actions';
 import { createActivityGroupRenderer } from './renderer';
 import { installToolSequenceShim, type ShimHost } from './shim';
 import type { SequenceRenderer } from './types';
@@ -91,6 +92,7 @@ export default defineExtension('activity-groups', (pi) => {
 
   let context: ExtensionContext | undefined;
   let uninstall: (() => void) | undefined;
+  let uninstallActionHandler: (() => void) | undefined;
   /**
    * Whether groups show their members, independently of Pi's own tool-output
    * expansion. These are different questions — "what did it do" versus "what
@@ -186,7 +188,19 @@ export default defineExtension('activity-groups', (pi) => {
   };
 
   pi.on('session_start', (_event, ctx) => {
+    uninstallActionHandler?.();
     context = ctx;
+    // The semantic action is available to the bridge even when the installed
+    // Pi build has no native renderer hook. Rendering itself remains bounded
+    // by the verified shim below.
+    uninstallActionHandler = installActivityGroupsActionHandler((input) => {
+      if (input.enabled === false) {
+        uninstall?.();
+        uninstall = undefined;
+      } else if (input.enabled === true) install();
+      if (input.expanded !== undefined) opened = input.expanded;
+      return { enabled: Boolean(uninstall), expanded: opened };
+    });
     // Only the interactive TUI renders these components at all.
     if (ctx.mode === 'tui') install();
   });

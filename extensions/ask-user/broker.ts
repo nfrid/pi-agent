@@ -26,6 +26,8 @@ export type BrokerResult = {
 } | null;
 
 export type BrokerScope = object | string;
+export const DEFAULT_INTERACTION_TIMEOUT_MS = 5 * 60_000;
+export const MAX_INTERACTION_TIMEOUT_MS = 15 * 60_000;
 
 type Listener = (event: {
   kind: 'requested' | 'resolved';
@@ -46,6 +48,7 @@ export class InteractionBroker {
       resolve: (result: BrokerResult) => void;
       cancelLocal?: () => void;
       scope?: BrokerScope;
+      timeout?: NodeJS.Timeout;
     }
   >();
   private readonly listeners = new Set<Listener>();
@@ -64,6 +67,7 @@ export class InteractionBroker {
     presentLocal: () => Promise<BrokerResult>,
     cancelLocal?: () => void,
     scope?: BrokerScope,
+    timeoutMs = DEFAULT_INTERACTION_TIMEOUT_MS,
   ): Promise<BrokerResult> {
     const interaction: PendingInteraction = {
       ...input,
@@ -74,11 +78,21 @@ export class InteractionBroker {
     const promise = new Promise<BrokerResult>((resolve) => {
       resolvePromise = resolve;
     });
+    const boundedTimeout = Math.min(
+      Math.max(1, timeoutMs),
+      MAX_INTERACTION_TIMEOUT_MS,
+    );
+    const timeout = setTimeout(
+      () => this.cancel(interaction.id),
+      boundedTimeout,
+    );
+    timeout.unref?.();
     this.pending.set(interaction.id, {
       interaction,
       resolve: resolvePromise,
       cancelLocal,
       scope,
+      timeout,
     });
     this.emit({ kind: 'requested', interaction });
     // Promise.resolve().then also captures a presenter that throws before it
@@ -108,10 +122,12 @@ export class InteractionBroker {
     item: {
       interaction: PendingInteraction;
       resolve: (result: BrokerResult) => void;
+      timeout?: NodeJS.Timeout;
     },
     result: BrokerResult,
   ): boolean {
     this.pending.delete(id);
+    if (item.timeout) clearTimeout(item.timeout);
     item.resolve(result);
     this.emit({ kind: 'resolved', interaction: item.interaction, result });
     return true;

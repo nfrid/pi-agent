@@ -27,6 +27,10 @@ import {
 import { Button as AriaButton } from 'react-aria-components';
 import { isNearPageBottom, sessionDisplayTitle } from '../app-helpers';
 import { Transcript } from '../entities/transcript';
+import {
+  renderDashboardContribution,
+  resolveDashboardRenderer,
+} from '../renderer-registry';
 
 type ComposerProps = {
   runtime: RuntimeSnapshot | undefined;
@@ -183,9 +187,16 @@ export function SessionView({
         </div>
       )}
       {runtime?.pendingInteractions.map((interaction) => (
-        <InteractionCard key={interaction.id} interaction={interaction} />
+        <InteractionCard
+          key={interaction.id}
+          interaction={interaction}
+          runtime={runtime}
+        />
       ))}
-      <Transcript entries={selectLegacyTranscriptEntries(projection)} />
+      <Transcript
+        entries={selectLegacyTranscriptEntries(projection)}
+        runtime={runtime}
+      />
       <Composer runtime={runtime} sessionId={id} />
     </section>
   );
@@ -297,9 +308,28 @@ function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
 
 function InteractionCard({
   interaction,
+  runtime,
 }: {
   interaction: RuntimeSnapshot['pendingInteractions'][number];
+  runtime: RuntimeSnapshot;
 }) {
+  const answerActionId = interaction.answerActionId ?? 'ask-user.answer';
+  const cancelActionId = interaction.cancelActionId ?? 'ask-user.cancel';
+  const supportsSemanticAnswer = Boolean(
+    interaction.answerActionId &&
+      runtime.capabilities?.manifests.some((manifest) =>
+        manifest.actions.some((action) => action.id === answerActionId),
+      ),
+  );
+  const supportsSemanticCancel = Boolean(
+    interaction.cancelActionId &&
+      runtime.capabilities?.manifests.some((manifest) =>
+        manifest.actions.some((action) => action.id === cancelActionId),
+      ),
+  );
+  const legacyInteraction = runtime.capabilities === undefined;
+  const canAnswer = legacyInteraction || supportsSemanticAnswer;
+  const canCancel = legacyInteraction || supportsSemanticCancel;
   const [answer, setAnswer] = useState('');
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string>();
@@ -310,10 +340,21 @@ function InteractionCard({
     interactionCancelMutationOptions(dashboardHttpClient),
   );
   const busy = answerMutation.isPending || cancelMutation.isPending;
+  const knownRenderer = resolveDashboardRenderer(interaction.rendererId);
+  const canRenderInteraction =
+    !interaction.rendererId || Boolean(knownRenderer);
   const submit = async (value: string) => {
     setError(undefined);
     try {
-      await answerMutation.mutateAsync({ id: interaction.id, answer: value });
+      if (supportsSemanticAnswer)
+        await dashboardHttpClient.invokeAction(
+          runtime.runtimeId,
+          answerActionId,
+          { interactionId: interaction.id, answer: value },
+        );
+      else if (legacyInteraction)
+        await answerMutation.mutateAsync({ id: interaction.id, answer: value });
+      else throw new Error('Answer action is not supported by this runtime.');
       setSent(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -322,7 +363,15 @@ function InteractionCard({
   const cancel = async () => {
     setError(undefined);
     try {
-      await cancelMutation.mutateAsync(interaction.id);
+      if (supportsSemanticCancel)
+        await dashboardHttpClient.invokeAction(
+          runtime.runtimeId,
+          cancelActionId,
+          { interactionId: interaction.id },
+        );
+      else if (legacyInteraction)
+        await cancelMutation.mutateAsync(interaction.id);
+      else throw new Error('Cancel action is not supported by this runtime.');
       setSent(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -348,22 +397,32 @@ function InteractionCard({
           Interaction failed: {error}
         </p>
       )}
-      <div className="choices">
-        {interaction.choices
-          .filter((choice) => !choice.custom)
-          .map((choice) => (
-            <AriaButton
-              type="button"
-              isDisabled={busy}
-              key={choice.value}
-              onPress={() => void submit(choice.value)}
-            >
-              {choice.label}
-              <small>{choice.description}</small>
-            </AriaButton>
-          ))}
-      </div>
-      {interaction.allowCustom && (
+      {interaction.rendererId && !knownRenderer && (
+        <div className="contribution-fallback-view">
+          {renderDashboardContribution(
+            interaction.rendererId,
+            interaction.viewModel ?? interaction,
+          )}
+        </div>
+      )}
+      {canRenderInteraction && (
+        <div className="choices">
+          {interaction.choices
+            .filter((choice) => !choice.custom)
+            .map((choice) => (
+              <AriaButton
+                type="button"
+                isDisabled={busy || !canAnswer}
+                key={choice.value}
+                onPress={() => void submit(choice.value)}
+              >
+                {choice.label}
+                <small>{choice.description}</small>
+              </AriaButton>
+            ))}
+        </div>
+      )}
+      {canRenderInteraction && canAnswer && interaction.allowCustom && (
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -379,19 +438,21 @@ function InteractionCard({
             onChange={(event) => setAnswer(event.target.value)}
             placeholder={interaction.customLabel ?? 'Type an answer'}
           />
-          <AriaButton isDisabled={busy} type="submit">
+          <AriaButton isDisabled={busy || !canAnswer} type="submit">
             Answer
           </AriaButton>
         </form>
       )}
-      <AriaButton
-        type="button"
-        isDisabled={busy}
-        className="link-button"
-        onPress={() => void cancel()}
-      >
-        Cancel
-      </AriaButton>
+      {canRenderInteraction && canCancel && (
+        <AriaButton
+          type="button"
+          isDisabled={busy || !canCancel}
+          className="link-button"
+          onPress={() => void cancel()}
+        >
+          Cancel
+        </AriaButton>
+      )}
     </div>
   );
 }

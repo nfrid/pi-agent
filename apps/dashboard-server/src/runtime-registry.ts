@@ -6,6 +6,10 @@ import {
   type RuntimeReducerState,
 } from '@pi-dashboard/domain';
 import {
+  isActionAvailable,
+  parseRuntimeCapabilitySnapshot,
+} from '@pi-dashboard/extension-contributions';
+import {
   type BridgeCommand,
   type BridgeEvent,
   parseFrame,
@@ -45,6 +49,8 @@ type RuntimeRecord = {
   commandQueue: QueuedCommand[];
   commandRunning: boolean;
   writeBlocked: boolean;
+  /** Semantic action IDs already handed to Pi in this runtime epoch. */
+  actionCommandIds: Set<string>;
 };
 
 export type RegistryChange =
@@ -150,6 +156,31 @@ export class RuntimeRegistry {
           if (this.forgotten.has(snapshot.runtimeId)) return reject();
           const old = this.runtimes.get(snapshot.runtimeId);
           if (old?.socket && old.socket !== socket) old.socket.destroy();
+          // A v1 bridge may put the capability snapshot only on hello. Install
+          // it into the authoritative runtime snapshot when it validates; an
+          // absent/unknown capability payload remains absent and is safe.
+          const helloCapabilities =
+            hello.capabilities?.extensions ??
+            hello.capabilities?.extensionCapabilities ??
+            (hello.capabilities?.version === 1 &&
+            hello.capabilities.capabilitySummaries &&
+            hello.capabilities.manifests
+              ? {
+                  version: 1 as const,
+                  capabilities: hello.capabilities.capabilitySummaries,
+                  manifests: hello.capabilities.manifests,
+                }
+              : undefined);
+          const advertised = helloCapabilities
+            ? (() => {
+                try {
+                  return parseRuntimeCapabilitySnapshot(helloCapabilities);
+                } catch {
+                  return undefined;
+                }
+              })()
+            : undefined;
+          const advertisedSnapshot = snapshot.capabilities ?? advertised;
           clearTimeout(helloTimer);
           try {
             // Only heartbeat-capable clients get an idle deadline. Agents
@@ -164,6 +195,9 @@ export class RuntimeRegistry {
           const runtimeEpoch = randomUUID();
           const registeredSnapshot = {
             ...snapshot,
+            ...(advertisedSnapshot === undefined
+              ? {}
+              : { capabilities: advertisedSnapshot }),
             online: true,
             lastSeenAt: Date.now(),
           };
@@ -180,6 +214,7 @@ export class RuntimeRegistry {
             commandQueue: [],
             commandRunning: false,
             writeBlocked: false,
+            actionCommandIds: new Set(),
           };
           this.runtimes.set(snapshot.runtimeId, record);
           helloSeen = true;
@@ -248,14 +283,62 @@ export class RuntimeRegistry {
       return Promise.reject(new Error('Invalid command.'));
     let command: BridgeCommand;
     try {
+      const candidate = input as Record<string, unknown>;
       command = validateBridgeCommand({
-        ...(input as Record<string, unknown>),
-        id: randomUUID(),
+        ...candidate,
+        // Existing HTTP callers omit IDs; semantic callers retain their
+        // caller-owned stable ID so retries cannot become a second action.
+        id:
+          typeof candidate.id === 'string' && candidate.id.length > 0
+            ? candidate.id
+            : randomUUID(),
       });
     } catch (error) {
       return Promise.reject(
         error instanceof Error ? error : new Error(String(error)),
       );
+    }
+    if (command.type === 'action.invoke') {
+      const capabilities = record.snapshot.capabilities;
+      const action = capabilities?.manifests
+        .flatMap((manifest) => manifest.actions)
+        .find((item) => item.id === command.actionId);
+      if (!capabilities || !action)
+        return Promise.reject(
+          Object.assign(
+            new Error(`Runtime does not advertise action ${command.actionId}.`),
+            { code: 'unknown-action' },
+          ),
+        );
+      if (
+        !isActionAvailable(action, capabilities, {
+          online: true,
+          liveState: record.snapshot.liveState,
+          pendingInteractions: record.snapshot.pendingInteractions.length,
+        })
+      )
+        return Promise.reject(
+          Object.assign(
+            new Error(`Runtime action ${command.actionId} is unavailable.`),
+            { code: 'unavailable-action' },
+          ),
+        );
+      if (!action.idempotent) {
+        if (record.actionCommandIds.has(command.id))
+          return Promise.reject(
+            Object.assign(new Error('Duplicate semantic action command ID.'), {
+              code: 'duplicate-action-id',
+            }),
+          );
+        record.actionCommandIds.add(command.id);
+        // Keep this replay guard bounded without reusing an ID in the same
+        // runtime epoch. Old IDs are not safe to forget while a browser may
+        // still retry an acknowledgement.
+        if (record.actionCommandIds.size > 2048) {
+          const first = record.actionCommandIds.values().next().value;
+          if (typeof first === 'string') record.actionCommandIds.delete(first);
+        }
+      }
     }
     if (
       record.commandQueue.length + (record.commandRunning ? 1 : 0) >=
@@ -375,7 +458,11 @@ export class RuntimeRegistry {
       if (!pending) return;
       record.pending.delete(frame.id);
       if (frame.ok) pending.resolve(frame.result);
-      else pending.reject(new Error(frame.error));
+      else {
+        const error = new Error(frame.error);
+        if (frame.code) Object.assign(error, { code: frame.code });
+        pending.reject(error);
+      }
       return;
     }
     if (frame.kind !== 'event') return;

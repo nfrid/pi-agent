@@ -1,5 +1,5 @@
 {
-  "name": "@pi-dashboard/protocol",
+  "name": "@pi-dashboard/extension-contributions",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,6 +17,6 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@pi-dashboard/extension-contributions": "workspace:*"
+    "typebox": "1.1.38"
   }
 }

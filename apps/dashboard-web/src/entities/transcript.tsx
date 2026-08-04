@@ -1,8 +1,9 @@
 import {
   type TranscriptEntry as ActivityTranscriptEntry,
-  describeTools,
-  groupTranscript,
+  projectActivityGroups,
 } from '@pi-dashboard/activity-model';
+import { dashboardHttpClient } from '@pi-dashboard/client';
+import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import {
   type Dispatch,
@@ -15,7 +16,6 @@ import {
 import { Button as AriaButton } from 'react-aria-components';
 import { Markdown } from '../Markdown';
 import {
-  headersOf,
   isNarration,
   type TranscriptModelItem,
   toolOutcome,
@@ -62,49 +62,39 @@ export function shouldShowActivityLead(text: string, title: string): boolean {
   return !isNarration(text) && activityTitleLine(text) !== title;
 }
 
-function activityTitle(
-  items: readonly TranscriptModelItem[],
-  tools: readonly Extract<ActivityTranscriptEntry, { kind: 'tool' }>[],
-  complete: boolean,
-): string {
-  const firstTool = items.findIndex((item) => item.entry.kind === 'tool');
-  const preamble = items
-    .slice(0, firstTool < 0 ? items.length : firstTool)
-    .find(
-      (item) =>
-        item.role === 'assistant' && item.text && !isNarration(item.text),
-    );
-  if (preamble?.text) return activityTitleLine(preamble.text);
-  const assistants = items
-    .map((item) => item.raw)
-    .filter((raw): raw is Record<string, unknown> =>
-      Boolean(raw && typeof raw === 'object'),
+function invokeActivityExpansion(
+  runtime: RuntimeSnapshot | undefined,
+  groupKey: string,
+  expanded: boolean,
+): void {
+  const actionId = 'activity-groups.set';
+  const advertised = runtime?.capabilities?.manifests.some((manifest) =>
+    manifest.actions.some((action) => action.id === actionId),
+  );
+  if (!runtime || !advertised || runtime.online === false) return;
+  void dashboardHttpClient
+    .invokeAction(
+      runtime.runtimeId,
+      actionId,
+      { expanded },
+      `activity-groups:${runtime.runtimeId}:${groupKey}:${expanded}`,
     )
-    .map(
-      (raw) =>
-        (raw.type === 'message' &&
-        raw.message &&
-        typeof raw.message === 'object'
-          ? raw.message
-          : raw) as Record<string, unknown>,
-    )
-    .filter((message) => Array.isArray(message.content));
-  const textHeaders = assistants.flatMap((message) =>
-    headersOf(message as never, 'text'),
-  );
-  const thinkingHeaders = assistants.flatMap((message) =>
-    headersOf(message as never, 'thinking'),
-  );
-  return (
-    (textHeaders.length > 0 ? textHeaders : thinkingHeaders).at(-1) ??
-    describeTools(tools, undefined, complete)
-  );
+    .catch(() => undefined);
 }
 
-export function Transcript({ entries }: { entries: unknown[] }) {
+export function Transcript({
+  entries,
+  runtime,
+}: {
+  entries: unknown[];
+  runtime?: RuntimeSnapshot;
+}) {
   const items = useMemo(() => toTranscriptEntries(entries), [entries]);
   const modelEntries = useMemo(() => items.map((item) => item.entry), [items]);
-  const groups = useMemo(() => groupTranscript(modelEntries), [modelEntries]);
+  const groups = useMemo(
+    () => projectActivityGroups(modelEntries),
+    [modelEntries],
+  );
   const [open, setOpen] = useState<Set<string>>(new Set());
   const groupByStart = new Map(groups.map((group) => [group.start, group]));
   if (items.length > 80)
@@ -115,6 +105,7 @@ export function Transcript({ entries }: { entries: unknown[] }) {
         groups={groups}
         open={open}
         setOpen={setOpen}
+        runtime={runtime}
       />
     );
   return (
@@ -141,7 +132,7 @@ export function Transcript({ entries }: { entries: unknown[] }) {
             groupItems
               .filter((item) => item.entry.kind === 'tool')
               .every((item) => toolOutcome(item.raw) === 'success');
-          const title = activityTitle(groupItems, tools, complete);
+          const title = group.title;
           const lead = items[group.start];
           const visibleLead =
             !lead?.preparing &&
@@ -160,13 +151,15 @@ export function Transcript({ entries }: { entries: unknown[] }) {
                 type="button"
                 aria-expanded={expanded}
                 aria-controls={detailId}
-                onPress={() =>
+                onPress={() => {
+                  const nextExpanded = !expanded;
                   setOpen((current) => {
                     const next = new Set(current);
-                    expanded ? next.delete(groupKey) : next.add(groupKey);
+                    nextExpanded ? next.add(groupKey) : next.delete(groupKey);
                     return next;
-                  })
-                }
+                  });
+                  invokeActivityExpansion(runtime, groupKey, nextExpanded);
+                }}
               >
                 <span className="activity-icon">{complete ? '✓' : '…'}</span>
                 <strong>{title}</strong>
@@ -206,7 +199,7 @@ export function Transcript({ entries }: { entries: unknown[] }) {
   );
 }
 
-type TranscriptGroup = ReturnType<typeof groupTranscript>[number];
+type TranscriptGroup = ReturnType<typeof projectActivityGroups>[number];
 
 type VirtualTranscriptRow =
   | { kind: 'entry'; key: string; index: number }
@@ -218,12 +211,14 @@ function VirtualizedTranscript({
   groups,
   open,
   setOpen,
+  runtime,
 }: {
   items: readonly TranscriptModelItem[];
   modelEntries: readonly ActivityTranscriptEntry[];
   groups: readonly TranscriptGroup[];
   open: ReadonlySet<string>;
   setOpen: Dispatch<SetStateAction<Set<string>>>;
+  runtime?: RuntimeSnapshot;
 }) {
   const groupByStart = useMemo(
     () => new Map(groups.map((group) => [group.start, group])),
@@ -327,7 +322,7 @@ function VirtualizedTranscript({
       groupItems
         .filter((item) => item.entry.kind === 'tool')
         .every((item) => toolOutcome(item.raw) === 'success');
-    const title = activityTitle(groupItems, tools, complete);
+    const title = group.title;
     const lead = items[group.start];
     const visibleLead =
       !lead?.preparing &&
@@ -347,11 +342,13 @@ function VirtualizedTranscript({
           aria-controls={detailId}
           onPress={() => {
             captureScrollAnchor(`group-${groupKey}`);
+            const nextExpanded = !expanded;
             setOpen((current) => {
               const next = new Set(current);
-              expanded ? next.delete(groupKey) : next.add(groupKey);
+              nextExpanded ? next.add(groupKey) : next.delete(groupKey);
               return next;
             });
+            invokeActivityExpansion(runtime, groupKey, nextExpanded);
           }}
         >
           <span className="activity-icon">{complete ? '✓' : '…'}</span>

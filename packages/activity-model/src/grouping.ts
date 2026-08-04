@@ -243,8 +243,15 @@ export type TranscriptEntry = {
        * written and who it was written for.
        */
       narration?: Narration;
+      /** Latest pure title supplied by a transcript adapter, if known. */
+      title?: string;
+      /** A preamble names the work below and outranks later narration. */
+      titleKind?: 'preamble' | 'narration';
     }
-  | ({ kind: 'tool' } & ToolDescriptor)
+  | ({ kind: 'tool' } & ToolDescriptor & {
+        status?: 'pending' | 'running' | 'complete' | 'success' | 'error';
+        isError?: boolean;
+      })
   | { kind: 'other' }
 );
 
