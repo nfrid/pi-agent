@@ -16,11 +16,39 @@ export const ActivityGroupsActionInputSchema = Type.Object(
   },
   { additionalProperties: false, minProperties: 1 },
 );
+const ActivityToolArgsSchema = Type.Union([
+  Type.String({ maxLength: 10_000 }),
+  Type.Number(),
+  Type.Boolean(),
+  Type.Null(),
+  // Tool arguments are opaque provider data. Bound the top-level payload so a
+  // renderer cannot receive an unbounded object or array from a transcript.
+  Type.Array(Type.Unknown(), { maxItems: 128 }),
+  Type.Record(Type.String({ minLength: 1, maxLength: 256 }), Type.Unknown(), {
+    maxProperties: 128,
+  }),
+]);
+const ActivityToolSchema = Type.Object(
+  {
+    kind: Type.Literal('tool'),
+    name: Type.String({ minLength: 1, maxLength: 512 }),
+    args: Type.Optional(ActivityToolArgsSchema),
+  },
+  { additionalProperties: false },
+);
+
 export const ActivityGroupsViewModelSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 256 }),
     start: Type.Integer({ minimum: 0 }),
     end: Type.Integer({ minimum: 0 }),
+    kind: Type.Union([
+      Type.Literal('inspect'),
+      Type.Literal('mutate'),
+      Type.Literal('validate'),
+      Type.Literal('execute'),
+      Type.Literal('mixed'),
+    ]),
     title: Type.String({ minLength: 1, maxLength: 1000 }),
     status: Type.Union([
       Type.Literal('live'),
@@ -30,6 +58,7 @@ export const ActivityGroupsViewModelSchema = Type.Object(
     ]),
     expanded: Type.Boolean(),
     toolCount: Type.Integer({ minimum: 0 }),
+    tools: Type.Readonly(Type.Array(ActivityToolSchema, { maxItems: 128 })),
   },
   { additionalProperties: false },
 );

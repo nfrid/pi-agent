@@ -22,8 +22,8 @@ export interface ActivityGroupViewModel {
 }
 
 export interface ActivityProjectionOptions {
-  /** History is complete; a live tail can be marked live without changing boundaries. */
-  readonly completed?: boolean;
+  /** Mark only the final group live when runtime state says work is active. */
+  readonly liveTail?: boolean;
   readonly expandedIds?: ReadonlySet<string>;
   readonly groupId?: (group: ActivityGroup, index: number) => string;
   readonly failed?: (
@@ -62,8 +62,8 @@ export function projectActivityGroups(
   entries: readonly TranscriptEntry[],
   options: ActivityProjectionOptions = {},
 ): readonly ActivityGroupViewModel[] {
-  const completed = options.completed ?? true;
-  return groupTranscript(entries).map((group, index) => {
+  const groups = groupTranscript(entries);
+  return groups.map((group, index) => {
     const tools = entries
       .slice(group.start, group.end + 1)
       .filter(
@@ -78,19 +78,25 @@ export function projectActivityGroups(
     const streaming = entries
       .slice(group.start, group.end + 1)
       .some((entry) => entry.kind === 'assistant' && entry.streaming === true);
+    const live =
+      tools.some(
+        (tool) => tool.status === 'pending' || tool.status === 'running',
+      ) ||
+      (options.liveTail === true && index === groups.length - 1);
+    const status: ActivityGroupStatus = failed
+      ? 'failed'
+      : streaming
+        ? 'preparing'
+        : live
+          ? 'live'
+          : 'complete';
     return {
       id,
       start: group.start,
       end: group.end,
       kind: activityKind(tools),
-      title: titleFor(entries, group, tools, completed),
-      status: failed
-        ? 'failed'
-        : streaming
-          ? 'preparing'
-          : completed
-            ? 'complete'
-            : 'live',
+      title: titleFor(entries, group, tools, status !== 'live'),
+      status,
       expanded: options.expandedIds?.has(id) ?? false,
       toolCount: tools.length,
       tools,

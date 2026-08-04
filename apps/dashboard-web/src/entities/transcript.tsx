@@ -82,8 +82,18 @@ export function Transcript({
   const items = useMemo(() => toTranscriptEntries(entries), [entries]);
   const modelEntries = useMemo(() => items.map((item) => item.entry), [items]);
   const groups = useMemo(
-    () => projectActivityGroups(modelEntries),
-    [modelEntries],
+    () =>
+      projectActivityGroups(modelEntries, {
+        // Historical groups stay complete; only the transcript tail inherits
+        // activity from the runtime when a live tool status is not available.
+        liveTail:
+          runtime?.online !== false &&
+          (runtime?.liveState === 'working' ||
+            runtime?.liveState === 'waiting' ||
+            runtime?.liveState === 'aborting' ||
+            runtime?.liveState === 'stopping'),
+      }),
+    [modelEntries, runtime],
   );
   const [open, setOpen] = useState<Set<string>>(new Set());
   const groupByStart = new Map(groups.map((group) => [group.start, group]));
@@ -178,8 +188,9 @@ export type VirtualTranscriptRowBuildStats = { groupReads: number };
 
 /**
  * Collapse covered transcript entries into group rows with a single sorted group
- * pointer. Groups are produced in start order, so this is O(items + groups), not
- * a groups.some scan for every item.
+ * pointer. Callers must provide valid, sorted, disjoint ranges (the direct
+ * output of groupTranscript); under that assumption this is O(items + groups),
+ * not a groups.some scan for every item.
  */
 export function buildVirtualTranscriptRows(
   items: readonly Pick<TranscriptModelItem, 'key'>[],

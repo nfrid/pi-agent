@@ -318,6 +318,58 @@ describe('dashboard domain reducers', () => {
     expect(late.state.order).toEqual(['new-message']);
   });
 
+  it('fails closed on duplicate capability patches and accepts later valid updates', () => {
+    const initialCapabilities = {
+      version: 1 as const,
+      capabilities: [{ id: 'initial', version: '1' }],
+      manifests: [],
+    };
+    let state = createRuntimeReducerState({
+      ...snapshot(),
+      capabilities: initialCapabilities,
+    });
+    const invalid = applyRuntimeEvent(state, {
+      event: {
+        type: 'runtime.heartbeat',
+        state: 'working',
+        snapshot: {
+          capabilities: {
+            version: 1,
+            capabilities: [
+              { id: 'duplicate', version: '1' },
+              { id: 'duplicate', version: '2' },
+            ],
+            manifests: [],
+          },
+        },
+      },
+      runtimeSeq: 1,
+    } as never);
+    expect(invalid.accepted).toBe(false);
+    expect(invalid.reason).toBe('invalid-capabilities');
+    expect(invalid.state).toBe(state);
+
+    const valid = applyRuntimeEvent(state, {
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'working',
+        snapshot: {
+          capabilities: {
+            version: 1,
+            capabilities: [{ id: 'updated', version: '1' }],
+            manifests: [],
+          },
+        },
+      },
+      runtimeSeq: 2,
+    } as never);
+    expect(valid.accepted).toBe(true);
+    state = valid.state;
+    expect(state.snapshot.capabilities?.capabilities).toEqual([
+      { id: 'updated', version: '1' },
+    ]);
+  });
+
   it('replaces a runtime epoch and ignores a late retired runtime event', () => {
     let state = createRuntimeReducerState(snapshot(), {
       runtimeEpoch: 'epoch-old',

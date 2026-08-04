@@ -1168,33 +1168,84 @@ export const tryParseBridgeCommand = (
   }
 };
 
+function validateRuntimeSnapshotCapabilities(
+  snapshot: Pick<RuntimeSnapshot, 'capabilities'>,
+): void {
+  if (snapshot.capabilities !== undefined)
+    parseExtensionCapabilitySnapshot(snapshot.capabilities);
+}
+
+function validateHelloCapabilities(
+  capabilities: RuntimeHelloCapabilities | undefined,
+): void {
+  if (!capabilities) return;
+  if (capabilities.extensions)
+    parseExtensionCapabilitySnapshot(capabilities.extensions);
+  if (capabilities.extensionCapabilities)
+    parseExtensionCapabilitySnapshot(capabilities.extensionCapabilities);
+  if (
+    capabilities.capabilitySummaries !== undefined ||
+    capabilities.manifests !== undefined
+  )
+    parseExtensionCapabilitySnapshot({
+      version: 1,
+      capabilities: capabilities.capabilitySummaries ?? [],
+      manifests: capabilities.manifests ?? [],
+    });
+}
+
+/**
+ * Validate capability snapshots after structural protocol validation. This is
+ * kept separate from TypeBox because duplicate contribution IDs are semantic
+ * invalidity, not a JSON-shape constraint.
+ */
+function validateBridgeEventCapabilities(event: BridgeEvent): void {
+  if (event.type === 'runtime.hello') {
+    validateRuntimeSnapshotCapabilities(event.snapshot);
+    validateHelloCapabilities(event.capabilities);
+  } else if (
+    (event.type === 'runtime.heartbeat' ||
+      event.type === 'runtime.stateChanged') &&
+    event.snapshot
+  )
+    validateRuntimeSnapshotCapabilities(event.snapshot);
+}
+
 export function parseBridgeEvent(value: unknown): BridgeEvent {
-  return parseSchema(
+  const event = parseSchema(
     BridgeEventSchema,
     value,
     'bridge event',
   ) as unknown as BridgeEvent;
+  validateBridgeEventCapabilities(event);
+  return event;
 }
 export function tryParseBridgeEvent(value: unknown): BridgeEvent | undefined {
-  return tryParseSchema(BridgeEventSchema, value) as unknown as
-    | BridgeEvent
-    | undefined;
+  try {
+    return parseBridgeEvent(value);
+  } catch {
+    return undefined;
+  }
 }
 export function isBridgeEvent(value: unknown): value is BridgeEvent {
   return tryParseBridgeEvent(value) !== undefined;
 }
 
 export function parseBridgeFrame(value: unknown): BridgeFrame {
-  return parseSchema(
+  const frame = parseSchema(
     BridgeFrameSchema,
     value,
     'protocol frame',
   ) as unknown as BridgeFrame;
+  if (frame.kind === 'event') validateBridgeEventCapabilities(frame.event);
+  return frame;
 }
 export function tryParseBridgeFrame(value: unknown): BridgeFrame | undefined {
-  return tryParseSchema(BridgeFrameSchema, value) as unknown as
-    | BridgeFrame
-    | undefined;
+  try {
+    return parseBridgeFrame(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function frameBytes(line: string | Uint8Array): number {
@@ -1337,71 +1388,137 @@ export function tryParseInteractionSnapshot(
 ): InteractionSnapshot | undefined {
   return tryParseSchema(InteractionSnapshotSchema, value);
 }
+function validateBrowserSnapshotCapabilities(snapshot: BrowserSnapshot): void {
+  for (const runtime of snapshot.runtimes)
+    validateRuntimeSnapshotCapabilities(runtime);
+}
+
+function validateDashboardEventEnvelopeCapabilities(
+  value: DashboardEventEnvelope,
+): void {
+  validateBridgeEventCapabilities(value.event);
+  if (value.snapshot) validateBrowserSnapshotCapabilities(value.snapshot);
+}
+
 export function parseRuntimeSnapshot(value: unknown): RuntimeSnapshot {
-  return parseSchema(RuntimeSnapshotSchema, value, 'runtime snapshot');
+  const snapshot = parseSchema(
+    RuntimeSnapshotSchema,
+    value,
+    'runtime snapshot',
+  );
+  validateRuntimeSnapshotCapabilities(snapshot);
+  return snapshot;
 }
 export function tryParseRuntimeSnapshot(
   value: unknown,
 ): RuntimeSnapshot | undefined {
-  return tryParseSchema(RuntimeSnapshotSchema, value);
+  try {
+    return parseRuntimeSnapshot(value);
+  } catch {
+    return undefined;
+  }
 }
 export function parseRuntimeSnapshotPatch(
   value: unknown,
 ): RuntimeSnapshotPatch {
-  return parseSchema(
+  const patch = parseSchema(
     RuntimeSnapshotPatchSchema,
     value,
     'runtime snapshot patch',
   );
+  validateRuntimeSnapshotCapabilities(patch);
+  return patch;
 }
 export function tryParseRuntimeSnapshotPatch(
   value: unknown,
 ): RuntimeSnapshotPatch | undefined {
-  return tryParseSchema(RuntimeSnapshotPatchSchema, value);
+  try {
+    return parseRuntimeSnapshotPatch(value);
+  } catch {
+    return undefined;
+  }
 }
 export function parseDashboardEventEnvelope(
   value: unknown,
 ): DashboardEventEnvelope {
-  return parseSchema(
+  const envelope = parseSchema(
     DashboardEventEnvelopeSchema,
     value,
     'dashboard event envelope',
   );
+  validateDashboardEventEnvelopeCapabilities(envelope);
+  return envelope;
 }
 export function tryParseDashboardEventEnvelope(
   value: unknown,
 ): DashboardEventEnvelope | undefined {
-  return tryParseSchema(DashboardEventEnvelopeSchema, value);
+  try {
+    return parseDashboardEventEnvelope(value);
+  } catch {
+    return undefined;
+  }
 }
 export function parseDashboardStreamMessage(
   value: unknown,
 ): DashboardStreamMessage {
-  return parseSchema(
+  const message = parseSchema(
     DashboardStreamMessageSchema,
     value,
     'dashboard stream message',
   );
+  if ('event' in message) validateDashboardEventEnvelopeCapabilities(message);
+  else validateBrowserSnapshotCapabilities(message.snapshot);
+  return message;
 }
 export function tryParseDashboardStreamMessage(
   value: unknown,
 ): DashboardStreamMessage | undefined {
-  return tryParseSchema(DashboardStreamMessageSchema, value);
+  try {
+    return parseDashboardStreamMessage(value);
+  } catch {
+    return undefined;
+  }
 }
 export function parseBrowserSnapshot(value: unknown): BrowserSnapshot {
-  return parseSchema(BrowserSnapshotSchema, value, 'browser snapshot');
+  const snapshot = parseSchema(
+    BrowserSnapshotSchema,
+    value,
+    'browser snapshot',
+  );
+  validateBrowserSnapshotCapabilities(snapshot);
+  return snapshot;
 }
 export function tryParseBrowserSnapshot(
   value: unknown,
 ): BrowserSnapshot | undefined {
-  return tryParseSchema(BrowserSnapshotSchema, value);
+  try {
+    return parseBrowserSnapshot(value);
+  } catch {
+    return undefined;
+  }
 }
 export function parseDashboardMessage(value: unknown): DashboardMessage {
-  return parseSchema(DashboardMessageSchema, value, 'dashboard message');
+  const message = parseSchema(
+    DashboardMessageSchema,
+    value,
+    'dashboard message',
+  );
+  if (message.type === 'snapshot')
+    validateBrowserSnapshotCapabilities(message.snapshot);
+  else {
+    validateBridgeEventCapabilities(message.event);
+    if (message.snapshot) validateBrowserSnapshotCapabilities(message.snapshot);
+  }
+  return message;
 }
 export function tryParseDashboardMessage(
   value: unknown,
 ): DashboardMessage | undefined {
-  return tryParseSchema(DashboardMessageSchema, value);
+  try {
+    return parseDashboardMessage(value);
+  } catch {
+    return undefined;
+  }
 }
 export function parseSessionApiResponse(value: unknown): SessionApiResponse {
   return parseSchema(SessionApiResponseSchema, value, 'session API response');

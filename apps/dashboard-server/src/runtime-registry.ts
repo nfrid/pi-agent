@@ -6,6 +6,7 @@ import {
   type RuntimeReducerState,
 } from '@pi-dashboard/domain';
 import {
+  ContributionError,
   isActionAvailable,
   NonIdempotentActionIdGuard,
   parseActionInput,
@@ -122,7 +123,18 @@ export class RuntimeRegistry {
         let frame: ReturnType<typeof parseFrame>;
         try {
           frame = parseFrame(line);
-        } catch {
+        } catch (error) {
+          // Capability uniqueness is semantic validation layered over the
+          // structural frame schema. An invalid update is ignored as a whole;
+          // it must not tear down an otherwise healthy runtime connection.
+          if (
+            error instanceof ContributionError &&
+            (error.code === 'invalid-capability-snapshot' ||
+              error.code === 'duplicate-action-id')
+          ) {
+            newline = buffer.indexOf('\n');
+            continue;
+          }
           return reject();
         }
         if (!helloSeen) {
@@ -204,8 +216,14 @@ export class RuntimeRegistry {
             /* best effort */
           }
           const runtimeEpoch = randomUUID();
+          const snapshotForRegistration =
+            snapshotCapabilities === undefined &&
+            snapshot.capabilities !== undefined
+              ? (({ capabilities: _invalid, ...withoutCapabilities }) =>
+                  withoutCapabilities)(snapshot)
+              : snapshot;
           const registeredSnapshot = {
-            ...snapshot,
+            ...snapshotForRegistration,
             ...(advertisedSnapshot === undefined
               ? {}
               : { capabilities: advertisedSnapshot }),
@@ -315,7 +333,21 @@ export class RuntimeRegistry {
     )
       return Promise.reject(new Error('Runtime command queue is full.'));
     if (command.type === 'action.invoke') {
-      const capabilities = record.snapshot.capabilities;
+      // Keep direct lookup behind the same semantic validation as the bridge
+      // parser. This is defense in depth for typed callers and old records.
+      let capabilities: RuntimeSnapshot['capabilities'];
+      try {
+        capabilities = record.snapshot.capabilities
+          ? parseRuntimeCapabilitySnapshot(record.snapshot.capabilities)
+          : undefined;
+      } catch {
+        return Promise.reject(
+          Object.assign(
+            new Error(`Runtime does not advertise action ${command.actionId}.`),
+            { code: 'unknown-action' },
+          ),
+        );
+      }
       const action = capabilities?.manifests
         .flatMap((manifest) => manifest.actions)
         .find((item) => item.id === command.actionId);

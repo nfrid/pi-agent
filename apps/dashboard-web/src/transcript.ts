@@ -196,12 +196,15 @@ export function toTranscriptEntries(
                 ? part.toolCallId
                 : undefined;
           const outcome = callId ? toolResults.get(callId) : undefined;
+          const outcomeStatus = outcome ? toolOutcome(outcome) : 'pending';
           tools.push({
             key: `${entryKey}:tool:${callId ?? tools.length}`,
             entry: {
               kind: 'tool',
               name: typeof part.name === 'string' ? part.name : 'tool',
               args: part.arguments ?? part.args,
+              status: outcomeStatus,
+              ...(outcomeStatus === 'error' ? { isError: true } : {}),
             },
             raw: outcome
               ? { ...part, result: outcome.content, isError: outcome.isError }
@@ -259,7 +262,9 @@ export function toolRecordForTranscript(
 ): Record<string, unknown> | undefined {
   return toolRecord(raw);
 }
-export function toolOutcome(raw: unknown): 'success' | 'pending' | 'error' {
+export function toolOutcome(
+  raw: unknown,
+): 'success' | 'pending' | 'running' | 'error' {
   const tool = toolRecord(raw);
   if (!tool) return 'pending';
   if (
@@ -269,6 +274,7 @@ export function toolOutcome(raw: unknown): 'success' | 'pending' | 'error' {
     tool.status === 'failed'
   )
     return 'error';
+  if (tool.status === 'running') return 'running';
   if (
     typeof tool.result !== 'undefined' ||
     tool.status === 'completed' ||

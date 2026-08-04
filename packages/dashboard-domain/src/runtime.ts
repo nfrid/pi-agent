@@ -1,7 +1,8 @@
-import type {
-  BridgeEvent,
-  DashboardEventEnvelope,
-  RuntimeSnapshot,
+import {
+  type BridgeEvent,
+  type DashboardEventEnvelope,
+  parseRuntimeCapabilitySnapshot,
+  type RuntimeSnapshot,
 } from '@pi-dashboard/protocol';
 
 export interface RuntimeReducerState {
@@ -26,7 +27,37 @@ export interface RuntimeReducerEvent {
 export interface RuntimeReduceResult {
   state: RuntimeReducerState;
   accepted: boolean;
-  reason?: 'old-cursor' | 'duplicate-runtime-seq' | 'old-runtime-epoch';
+  reason?:
+    | 'old-cursor'
+    | 'duplicate-runtime-seq'
+    | 'old-runtime-epoch'
+    | 'invalid-capabilities';
+}
+
+function validateEventCapabilities(event: BridgeEvent): void {
+  if (event.type === 'runtime.hello') {
+    if (event.snapshot.capabilities)
+      parseRuntimeCapabilitySnapshot(event.snapshot.capabilities);
+    const capabilities = event.capabilities;
+    if (capabilities?.extensions)
+      parseRuntimeCapabilitySnapshot(capabilities.extensions);
+    if (capabilities?.extensionCapabilities)
+      parseRuntimeCapabilitySnapshot(capabilities.extensionCapabilities);
+    if (
+      capabilities?.capabilitySummaries !== undefined ||
+      capabilities?.manifests !== undefined
+    )
+      parseRuntimeCapabilitySnapshot({
+        version: 1,
+        capabilities: capabilities.capabilitySummaries ?? [],
+        manifests: capabilities.manifests ?? [],
+      });
+  } else if (
+    (event.type === 'runtime.heartbeat' ||
+      event.type === 'runtime.stateChanged') &&
+    event.snapshot?.capabilities
+  )
+    parseRuntimeCapabilitySnapshot(event.snapshot.capabilities);
 }
 
 function asReducerEvent(
@@ -147,6 +178,13 @@ export function applyRuntimeEvent(
   input: DashboardEventEnvelope | RuntimeReducerEvent | BridgeEvent,
 ): RuntimeReduceResult {
   const incoming = asReducerEvent(input);
+  try {
+    validateEventCapabilities(incoming.event);
+  } catch {
+    // Capability patches are optional metadata. Invalid semantic updates must
+    // not alter the runtime projection or make reducers throw.
+    return { state: current, accepted: false, reason: 'invalid-capabilities' };
+  }
   if (incoming.cursor !== undefined && incoming.cursor <= current.lastCursor)
     return { state: current, accepted: false, reason: 'old-cursor' };
 

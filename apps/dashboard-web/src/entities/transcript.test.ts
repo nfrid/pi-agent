@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { toTranscriptEntries } from '../transcript';
 import {
   activityGroupPresentation,
   buildVirtualTranscriptRows,
@@ -18,6 +19,40 @@ describe('activity row views and virtual transcript construction', () => {
     expect(view.className).toBe('activity-failed');
     expect(view.icon).toBe('!');
     expect(view.label).toContain('failed');
+  });
+
+  it('projects uncompleted assistant tool calls as pending activity', () => {
+    const [item] = toTranscriptEntries([
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'toolCall', id: 'call-1', name: 'read' }],
+        },
+      },
+    ]).filter(({ entry }) => entry.kind === 'tool');
+    expect(item?.entry).toMatchObject({ kind: 'tool', status: 'pending' });
+  });
+
+  it('uses the same live presentation for regular and virtual group rows', () => {
+    const group = {
+      start: 0,
+      end: 1,
+      status: 'live' as const,
+      toolCount: 1,
+      title: 'Working',
+    } as TranscriptGroup;
+    const regular = activityGroupPresentation(group, false);
+    const [virtual] = buildVirtualTranscriptRows(
+      [{ key: 'assistant-1' }, { key: 'tool-1' }],
+      [group],
+    );
+    expect(virtual?.kind).toBe('group');
+    expect(
+      virtual?.kind === 'group'
+        ? activityGroupPresentation(virtual.group, false)
+        : undefined,
+    ).toEqual(regular);
   });
 
   it('constructs alternating group rows with a linear group-read invariant', () => {

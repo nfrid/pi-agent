@@ -162,6 +162,49 @@ describe('dashboard protocol', () => {
     ).toHaveLength(96);
   });
 
+  it('semantically validates capability snapshots on runtime events', () => {
+    const duplicate = {
+      version: 1,
+      capabilities: [
+        { id: 'duplicate', version: '1' },
+        { id: 'duplicate', version: '2' },
+      ],
+      manifests: [],
+    };
+    expect(() =>
+      parseRuntimeSnapshot({
+        runtimeId: 'r',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 's', entries: [] },
+        pendingInteractions: [],
+        capabilities: duplicate,
+      }),
+    ).toThrow('Duplicate capability ID');
+    expect(
+      isBridgeEvent({
+        type: 'runtime.stateChanged',
+        state: 'working',
+        snapshot: { capabilities: duplicate },
+      }),
+    ).toBe(false);
+    expect(
+      isBridgeEvent({
+        type: 'runtime.heartbeat',
+        state: 'idle',
+        snapshot: {
+          capabilities: {
+            version: 1,
+            capabilities: [{ id: 'valid', version: '1' }],
+            manifests: [],
+          },
+        },
+      }),
+    ).toBe(true);
+  });
+
   it('strictly validates each bridge event variant', () => {
     const helloSnapshot = {
       runtimeId: 'r',

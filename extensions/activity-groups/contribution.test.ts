@@ -10,16 +10,32 @@ describe('activity groups contribution schema', () => {
       { kind: 'tool', name: 'read', args: {} },
     ]);
     expect(group?.status).toBe('preparing');
+    expect(group).toBeDefined();
+    expect(Value.Check(ActivityGroupsViewModelSchema, group)).toBe(true);
+  });
+
+  it('bounds opaque tool arguments while retaining the complete view model', () => {
+    const [group] = projectActivityGroups([
+      { kind: 'assistant', speaks: false },
+      {
+        kind: 'tool',
+        name: 'read',
+        args: { path: '/tmp/file', nested: ['ok'] },
+      },
+    ]);
+    expect(Value.Check(ActivityGroupsViewModelSchema, group)).toBe(true);
     expect(
       Value.Check(ActivityGroupsViewModelSchema, {
-        id: group?.id,
-        start: group?.start,
-        end: group?.end,
-        title: group?.title,
-        status: group?.status,
-        expanded: group?.expanded,
-        toolCount: group?.toolCount,
+        ...group,
+        tools: [
+          {
+            name: 'read',
+            args: Object.fromEntries(
+              Array.from({ length: 129 }, (_, index) => [`key-${index}`, true]),
+            ),
+          },
+        ],
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 });

@@ -154,6 +154,78 @@ describe('runtime registry', () => {
     bridge.destroy();
   });
 
+  it('ignores duplicate capability patches without dropping the runtime connection', async () => {
+    const registry = new RuntimeRegistry({ expectedToken: () => true });
+    const bridge = new PassThrough();
+    registry.accept(bridge as never);
+    const initialCapabilities = {
+      version: 1 as const,
+      capabilities: [{ id: 'initial', version: '1' }],
+      manifests: [],
+    };
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: { ...snapshot, capabilities: initialCapabilities },
+        },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    bridge.write(
+      `${JSON.stringify({
+        kind: 'event',
+        seq: 2,
+        event: {
+          type: 'runtime.heartbeat',
+          state: 'working',
+          snapshot: {
+            capabilities: {
+              version: 1,
+              capabilities: [
+                { id: 'duplicate', version: '1' },
+                { id: 'duplicate', version: '2' },
+              ],
+              manifests: [],
+            },
+          },
+        },
+      })}\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(bridge.destroyed).toBe(false);
+    expect(registry.get('runtime-1')?.capabilities).toEqual(
+      initialCapabilities,
+    );
+
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 3,
+        event: {
+          type: 'runtime.stateChanged',
+          state: 'working',
+          snapshot: {
+            capabilities: {
+              version: 1,
+              capabilities: [{ id: 'updated', version: '1' }],
+              manifests: [],
+            },
+          },
+        },
+      }),
+    );
+    await eventually(() =>
+      registry.get('runtime-1')?.capabilities?.capabilities[0]?.id === 'updated'
+        ? true
+        : undefined,
+    );
+    bridge.destroy();
+  });
+
   it('redacts image bytes from untrusted snapshots and live events', async () => {
     const changes: unknown[] = [];
     const registry = new RuntimeRegistry({

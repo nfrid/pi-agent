@@ -22,8 +22,8 @@ describe('shared activity model', () => {
       },
       { kind: 'tool' as const, name: 'bash', args: { command: 'npm test' } },
     ];
-    const historical = projectActivityGroups(entries, { completed: true });
-    const live = projectActivityGroups(entries, { completed: false });
+    const historical = projectActivityGroups(entries);
+    const live = projectActivityGroups(entries, { liveTail: true });
     expect(live[0]).toMatchObject({
       start: historical[0]?.start,
       end: historical[0]?.end,
@@ -78,11 +78,10 @@ describe('shared activity model', () => {
       { kind: 'tool' as const, name: 'edit', args: { path: 'src/App.tsx' } },
     ];
     const historical = projectActivityGroups(entries, {
-      completed: true,
       expandedIds: new Set(['activity-group-0']),
     });
     const live = projectActivityGroups(entries, {
-      completed: false,
+      liveTail: true,
       expandedIds: new Set(['activity-group-0']),
     });
     expect(
@@ -107,8 +106,18 @@ describe('shared activity model', () => {
         toolCount,
       })),
     ).toEqual([
-      { status: 'live', expanded: true, kind: 'inspect', toolCount: 2 },
+      { status: 'complete', expanded: true, kind: 'inspect', toolCount: 2 },
       { status: 'live', expanded: false, kind: 'mutate', toolCount: 1 },
     ]);
+  });
+
+  it('marks an explicitly pending tail live without reopening completed groups', () => {
+    const groups = projectActivityGroups([
+      { kind: 'assistant', speaks: false },
+      { kind: 'tool', name: 'read', args: {}, status: 'success' },
+      { kind: 'assistant', speaks: false },
+      { kind: 'tool', name: 'edit', args: {}, status: 'running' },
+    ]);
+    expect(groups.map(({ status }) => status)).toEqual(['complete', 'live']);
   });
 });
