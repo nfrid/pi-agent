@@ -258,6 +258,15 @@ h2 {
   border-color: var(--cyan);
   color: var(--cyan);
 }
+.notification-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.notification-actions button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
 .usage-row span {
   color: var(--muted);
   font-size: 11px;

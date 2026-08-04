@@ -5,6 +5,32 @@ import { describe, expect, it } from 'vitest';
 import { MetadataStore } from './metadata.js';
 
 describe('dashboard metadata wire boundaries', () => {
+  it('marks every unread notification as read', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-metadata-'),
+    );
+    const store = new MetadataStore(path.join(root, 'dashboard.sqlite'));
+    try {
+      for (const [id, createdAt] of [
+        ['notification-1', 1],
+        ['notification-2', 2],
+      ] as const) {
+        store.addNotification({
+          id,
+          kind: 'settled',
+          title: 'Finished',
+          body: 'Done',
+          createdAt,
+        });
+      }
+      store.markAllNotificationsRead();
+      expect(store.unreadNotifications()).toEqual([]);
+    } finally {
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('omits nullable SQLite notification fields from browser snapshots', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-metadata-'),

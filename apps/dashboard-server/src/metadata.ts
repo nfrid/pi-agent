@@ -250,6 +250,12 @@ export class MetadataStore {
       .run(Date.now(), id);
   }
 
+  markAllNotificationsRead(): void {
+    this.db
+      .prepare('UPDATE notification SET read_at=? WHERE read_at IS NULL')
+      .run(Date.now());
+  }
+
   clearWaitingNotifications(runtimeId: string): void {
     this.db
       .prepare(

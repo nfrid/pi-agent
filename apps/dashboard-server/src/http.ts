@@ -592,6 +592,14 @@ class DashboardServerImpl implements DashboardServer {
           response,
           true,
         );
+      if (
+        request.method === 'POST' &&
+        url.pathname === '/api/notifications/read-all'
+      ) {
+        this.metadata.markAllNotificationsRead();
+        this.changed();
+        return this.json(response, 200, { ok: true });
+      }
       const readMatch = url.pathname.match(
         /^\/api\/notifications\/([^/]+)\/read$/,
       );

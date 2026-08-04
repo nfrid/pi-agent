@@ -13,6 +13,7 @@ import { parseFrame, serializeFrame } from '@pi-dashboard/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { createDashboardServer } from './http.js';
+import { MetadataStore } from './metadata.js';
 
 let server: Awaited<ReturnType<typeof createDashboardServer>> | undefined;
 afterEach(async () => {
@@ -21,6 +22,49 @@ afterEach(async () => {
 });
 
 describe('dashboard HTTP boundary', () => {
+  it('marks all unread notifications through one authenticated request', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-read-all-'),
+    );
+    const stateDir = path.join(root, 'state');
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir,
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const metadata = new MetadataStore(path.join(stateDir, 'dashboard.sqlite'));
+    metadata.addNotification({
+      id: 'notification-1',
+      kind: 'settled',
+      title: 'Finished',
+      body: 'Done',
+      createdAt: 1,
+    });
+    metadata.addNotification({
+      id: 'notification-2',
+      kind: 'waiting',
+      title: 'Waiting',
+      body: 'Question',
+      createdAt: 2,
+    });
+    metadata.close();
+
+    expect(server.snapshot().unread).toHaveLength(2);
+    const origin = `http://127.0.0.1:${server.port}`;
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/notifications/read-all`,
+      {
+        method: 'POST',
+        headers: { Origin: origin, 'x-dashboard-token': 'test-token' },
+      },
+    );
+    expect(response.status).toBe(200);
+    expect(server.snapshot().unread).toEqual([]);
+  });
+
   it('keeps the generated browser token stable across daemon restarts', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-token-'));
     const options = {

@@ -440,6 +440,7 @@ function NotificationList({
   notifications: BrowserSnapshot['unread'];
 }) {
   const [error, setError] = useState<string>();
+  const [markingAll, setMarkingAll] = useState(false);
   const markRead = async (id: string) => {
     try {
       await api(`/api/notifications/${encodeURIComponent(id)}/read`, {
@@ -451,11 +452,34 @@ function NotificationList({
       setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
+  const markAllRead = async () => {
+    setMarkingAll(true);
+    try {
+      await api('/api/notifications/read-all', {
+        method: 'POST',
+        body: '{}',
+      });
+      setError(undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setMarkingAll(false);
+    }
+  };
   return (
     <section className="notifications" aria-labelledby="notifications-heading">
       <div className="workspace-title">
         <span id="notifications-heading">Unread events</span>
-        <span>{notifications.length}</span>
+        <span className="notification-actions">
+          <span>{notifications.length}</span>
+          <button
+            type="button"
+            onClick={() => void markAllRead()}
+            disabled={markingAll}
+          >
+            {markingAll ? 'Reading…' : 'Read all'}
+          </button>
+        </span>
       </div>
       {error && (
         <p className="error" role="alert">
