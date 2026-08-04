@@ -13,6 +13,8 @@ import {
   type BridgeImageAttachment,
   deriveSessionTitle,
   type InteractionSnapshot,
+  type NormalizedMessagePayload,
+  type NormalizedToolPayload,
   PROTOCOL_VERSION,
   parseFrame,
   type RuntimeLiveState,
@@ -39,6 +41,184 @@ const HEARTBEAT_INTERVAL_MS = 5_000;
 type CommandHandler = (command: BridgeCommand) => Promise<unknown>;
 
 type CommandInfo = ReturnType<ExtensionAPI['getCommands']>[number];
+type EventRecord = Record<string, unknown>;
+
+function eventRecord(value: unknown): EventRecord {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as EventRecord)
+    : {};
+}
+
+function directValue(record: EventRecord, key: string): unknown {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+function directString(record: EventRecord, key: string): string | undefined {
+  const value = directValue(record, key);
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function directIdentifier(
+  record: EventRecord,
+  key: string,
+): string | number | undefined {
+  const value = directValue(record, key);
+  return (typeof value === 'string' && value.length > 0) ||
+    (typeof value === 'number' && Number.isFinite(value))
+    ? value
+    : undefined;
+}
+
+function safeIdentityPart(value: string | number): string {
+  return Array.from(String(value), (character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127 ? '?' : character;
+  })
+    .join('')
+    .slice(0, 240);
+}
+
+/**
+ * Converts Pi's live event wrappers to the protocol's explicit live payloads.
+ * Identity lookup intentionally only examines documented, named wrapper fields;
+ * provider data is opaque and is never searched recursively for IDs.
+ */
+export class LiveEventNormalizer {
+  private identitySequence = 0;
+  private activeMessage:
+    | { messageId: string; identityKey?: string }
+    | undefined;
+
+  constructor(private readonly runtimeEpoch: string = randomUUID()) {}
+
+  reset(): void {
+    this.activeMessage = undefined;
+  }
+
+  normalizeMessage(
+    phase: 'started' | 'updated' | 'finished',
+    value: unknown,
+  ): NormalizedMessagePayload {
+    const event = eventRecord(value);
+    const message = eventRecord(directValue(event, 'message'));
+    const assistantEvent = eventRecord(
+      directValue(event, 'assistantMessageEvent'),
+    );
+    const responseId =
+      directIdentifier(event, 'responseId') ??
+      directIdentifier(message, 'responseId') ??
+      directIdentifier(assistantEvent, 'responseId');
+    const timestamp =
+      directIdentifier(event, 'timestamp') ??
+      directIdentifier(message, 'timestamp');
+    const identityKey =
+      responseId !== undefined
+        ? `response:${safeIdentityPart(responseId)}`
+        : timestamp !== undefined
+          ? `timestamp:${safeIdentityPart(timestamp)}`
+          : undefined;
+
+    let messageId: string;
+    if (phase === 'started') {
+      messageId = identityKey
+        ? identityKey
+        : `${this.runtimeEpoch}:${++this.identitySequence}`;
+      this.activeMessage = { messageId, identityKey };
+    } else if (this.activeMessage) {
+      // A responseId is often only present on the final message wrapper. The
+      // live ID established by start remains authoritative for this stream.
+      messageId = this.activeMessage.messageId;
+      this.activeMessage.identityKey ??= identityKey;
+    } else {
+      messageId = identityKey
+        ? identityKey
+        : `${this.runtimeEpoch}:${++this.identitySequence}`;
+    }
+
+    const rawContent =
+      directValue(message, 'content') ??
+      directValue(event, 'content') ??
+      directValue(assistantEvent, 'content') ??
+      directValue(assistantEvent, 'delta') ??
+      null;
+    const turnId =
+      directIdentifier(event, 'turnId') ?? directIdentifier(message, 'turnId');
+    const role =
+      directString(message, 'role') ??
+      directString(event, 'role') ??
+      'assistant';
+    const payload: NormalizedMessagePayload = {
+      messageId,
+      role,
+      content: jsonSafe(rawContent),
+      phase,
+      ...(timestamp !== undefined ? { timestamp } : {}),
+      ...(turnId !== undefined ? { turnId: String(turnId) } : {}),
+      ...(Array.isArray(directValue(message, 'toolCallIds'))
+        ? {
+            toolCallIds: (directValue(message, 'toolCallIds') as unknown[])
+              .filter((item): item is string => typeof item === 'string')
+              .slice(0, 128),
+          }
+        : {}),
+      ...this.opaqueData(event),
+    };
+    if (phase === 'finished') this.activeMessage = undefined;
+    return payload;
+  }
+
+  normalizeTool(
+    phase: 'started' | 'updated' | 'finished',
+    value: unknown,
+  ): NormalizedToolPayload {
+    const event = eventRecord(value);
+    const suppliedId = directValue(event, 'toolCallId');
+    const toolCallId =
+      typeof suppliedId === 'string' && suppliedId.length > 0
+        ? suppliedId
+        : `${this.runtimeEpoch}:tool:${++this.identitySequence}`;
+    const name = directString(event, 'toolName') ?? 'tool';
+    const suppliedStatus = directString(event, 'status');
+    const status =
+      suppliedStatus === 'pending' ||
+      suppliedStatus === 'running' ||
+      suppliedStatus === 'completed' ||
+      suppliedStatus === 'success' ||
+      suppliedStatus === 'error' ||
+      suppliedStatus === 'failed'
+        ? suppliedStatus
+        : phase === 'finished'
+          ? directValue(event, 'isError') === true
+            ? 'error'
+            : 'completed'
+          : 'running';
+    const payload: NormalizedToolPayload = {
+      toolCallId,
+      name,
+      phase,
+      ...(directValue(event, 'args') !== undefined
+        ? { arguments: jsonSafe(directValue(event, 'args')) }
+        : {}),
+      ...(directValue(event, 'result') !== undefined
+        ? { result: jsonSafe(directValue(event, 'result')) }
+        : {}),
+      ...(typeof directValue(event, 'isError') === 'boolean'
+        ? { isError: directValue(event, 'isError') as boolean }
+        : {}),
+      status,
+      ...(directIdentifier(event, 'turnId') !== undefined
+        ? { turnId: String(directIdentifier(event, 'turnId')) }
+        : {}),
+      ...this.opaqueData(event),
+    };
+    return payload;
+  }
+
+  private opaqueData(event: EventRecord): { data?: unknown } {
+    const data = jsonSafe(event);
+    return data === null ? {} : { data };
+  }
+}
 
 // Built-ins are dispatched by Pi's TUI, not AgentSession.prompt(), and are not
 // returned by ExtensionAPI.getCommands(). Never let an unsupported one become
@@ -753,6 +933,7 @@ export async function dispatchDashboardCommand(
 export interface RemoteControlRuntime {
   readonly runtimeId: string;
   readonly client: BridgeClient;
+  readonly eventNormalizer: LiveEventNormalizer;
   setContext(ctx: ExtensionContext): void;
   clearContext(ctx: ExtensionContext): void;
   isCurrent(ctx: ExtensionContext): boolean;
@@ -774,6 +955,7 @@ export function createRemoteControlRuntime(
     ? 'managed'
     : 'external';
   const broker = getInteractionBroker();
+  const eventNormalizer = new LiveEventNormalizer();
   let context: ExtensionContext | undefined;
   let currentSessionId: string | undefined;
   let contextScope: string | undefined;
@@ -832,8 +1014,10 @@ export function createRemoteControlRuntime(
       lastError = undefined;
       const next = snapshotFrom(ctx);
       const nextScope = ctx.sessionManager.getSessionId();
-      if (contextScope && contextScope !== nextScope)
+      if (contextScope && contextScope !== nextScope) {
         broker.cancelScope(contextScope);
+        eventNormalizer.reset();
+      }
       context = ctx;
       contextScope = nextScope;
       currentSessionId = next.session.id;
@@ -843,6 +1027,7 @@ export function createRemoteControlRuntime(
       context = undefined;
       contextScope = undefined;
       currentSessionId = undefined;
+      eventNormalizer.reset();
       lastError = error instanceof Error ? error.message : String(error);
       cachedSnapshot = unavailableSnapshot();
     }
@@ -870,11 +1055,13 @@ export function createRemoteControlRuntime(
     context = undefined;
     contextScope = undefined;
     currentSessionId = undefined;
+    eventNormalizer.reset();
     cachedSnapshot = unavailableSnapshot();
   };
   return {
     runtimeId,
     client,
+    eventNormalizer,
     setContext,
     clearContext,
     isCurrent,
@@ -963,42 +1150,42 @@ export default defineExtension('remote-control', (pi) => {
     runtime.client.sendEvent({
       type: 'message.started',
       sessionId: ctx.sessionManager.getSessionId(),
-      message: jsonSafe(event),
+      message: runtime.eventNormalizer.normalizeMessage('started', event),
     }),
   );
   onCurrentTransportEvent('message_update', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'message.updated',
       sessionId: ctx.sessionManager.getSessionId(),
-      message: jsonSafe(event),
+      message: runtime.eventNormalizer.normalizeMessage('updated', event),
     }),
   );
   onCurrentTransportEvent('message_end', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'message.finished',
       sessionId: ctx.sessionManager.getSessionId(),
-      message: jsonSafe(event),
+      message: runtime.eventNormalizer.normalizeMessage('finished', event),
     }),
   );
   onCurrentTransportEvent('tool_execution_start', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'tool.started',
       sessionId: ctx.sessionManager.getSessionId(),
-      tool: jsonSafe(event),
+      tool: runtime.eventNormalizer.normalizeTool('started', event),
     }),
   );
   onCurrentTransportEvent('tool_execution_update', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'tool.updated',
       sessionId: ctx.sessionManager.getSessionId(),
-      tool: jsonSafe(event),
+      tool: runtime.eventNormalizer.normalizeTool('updated', event),
     }),
   );
   onCurrentTransportEvent('tool_execution_end', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'tool.finished',
       sessionId: ctx.sessionManager.getSessionId(),
-      tool: jsonSafe(event),
+      tool: runtime.eventNormalizer.normalizeTool('finished', event),
     }),
   );
   onCurrentTransportEvent('model_select', (_event, ctx) =>

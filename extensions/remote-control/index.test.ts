@@ -18,6 +18,7 @@ import {
   dispatchDashboardCommand,
   dispatchDashboardInput,
   expandDashboardInput,
+  LiveEventNormalizer,
 } from './index';
 
 const snapshot: RuntimeSnapshot = {
@@ -203,6 +204,69 @@ describe('dashboard input dispatch', () => {
       ]),
     ).toBe('');
     await rm(directory, { recursive: true, force: true });
+  });
+});
+
+describe('remote event normalization', () => {
+  it('correlates id-less message phases and keeps the live ID when responseId arrives late', () => {
+    const normalizer = new LiveEventNormalizer('runtime-epoch');
+    const started = normalizer.normalizeMessage('started', {
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Hi' }] },
+    });
+    const updated = normalizer.normalizeMessage('updated', {
+      assistantMessageEvent: { type: 'text_delta', delta: ' there' },
+    });
+    const finished = normalizer.normalizeMessage('finished', {
+      message: { role: 'assistant', content: 'Hi there' },
+      responseId: 'provider-response-1',
+    });
+
+    expect(started.messageId).toBe('runtime-epoch:1');
+    expect(updated.messageId).toBe(started.messageId);
+    expect(finished.messageId).toBe(started.messageId);
+    expect(updated.content).toBe(' there');
+    expect(finished.content).toBe('Hi there');
+
+    const nextStarted = normalizer.normalizeMessage('started', {
+      message: { role: 'assistant', content: 'next' },
+    });
+    const nextFinished = normalizer.normalizeMessage('finished', {
+      message: { role: 'assistant', content: 'next' },
+    });
+    expect(nextStarted.messageId).toBe('runtime-epoch:2');
+    expect(nextFinished.messageId).toBe(nextStarted.messageId);
+    expect(nextStarted.messageId).not.toBe(started.messageId);
+  });
+
+  it('uses Pi toolCallId and preserves direct tool execution fields', () => {
+    const normalizer = new LiveEventNormalizer('runtime-epoch');
+    expect(
+      normalizer.normalizeTool('started', {
+        toolCallId: 'read-1',
+        toolName: 'read',
+        args: { path: '/tmp/file' },
+      }),
+    ).toMatchObject({
+      toolCallId: 'read-1',
+      name: 'read',
+      arguments: { path: '/tmp/file' },
+      phase: 'started',
+      status: 'running',
+    });
+    expect(
+      normalizer.normalizeTool('finished', {
+        toolCallId: 'read-1',
+        toolName: 'read',
+        result: 'contents',
+        isError: false,
+      }),
+    ).toMatchObject({
+      toolCallId: 'read-1',
+      result: 'contents',
+      isError: false,
+      phase: 'finished',
+      status: 'completed',
+    });
   });
 });
 
@@ -508,14 +572,25 @@ describe('remote-control bridge', () => {
       client.sendEvent({
         type: 'message.started',
         sessionId: 'session-test',
-        message: cyclic,
+        message: {
+          messageId: 'cyclic-message',
+          role: 'assistant',
+          content: 'cyclic payload test',
+          phase: 'started',
+          data: cyclic,
+        },
       }),
     ).toBe(false);
     expect(
       client.sendEvent({
         type: 'tool.finished',
         sessionId: 'session-test',
-        tool: 'x'.repeat(600_000),
+        tool: {
+          toolCallId: 'oversized-tool',
+          name: 'large-output',
+          phase: 'finished',
+          result: 'x'.repeat(600_000),
+        },
       }),
     ).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 10));
