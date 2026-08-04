@@ -114,6 +114,19 @@ export function asDashboardStreamMessage(
   return tryParseDashboardStreamMessage(value);
 }
 
+export function snapshotAcceptance(
+  currentServerId: string | undefined,
+  currentCursor: number,
+  next: BrowserSnapshot,
+): { accepted: boolean; reset: boolean } {
+  if (currentServerId !== undefined && currentServerId !== next.serverId)
+    return { accepted: true, reset: true };
+  return {
+    accepted: next.cursor >= currentCursor,
+    reset: false,
+  };
+}
+
 const RECONNECT_MIN_MS = 500;
 const RECONNECT_MAX_MS = 30_000;
 
@@ -191,52 +204,114 @@ export interface DashboardState {
 }
 
 const LIVE_EVENT_BUFFER_LIMIT = 256;
+const MAX_SSE_FRAME_BYTES = 2 * 1024 * 1024;
 
 class ReplayGapError extends Error {
   readonly code = 'replay-gap';
 }
 
-async function readSseResponse(
+function abortError(): DOMException {
+  return new DOMException(
+    'The dashboard event stream was aborted.',
+    'AbortError',
+  );
+}
+
+/**
+ * Consume one long-lived SSE response. A response can contain any number of
+ * records; reconnecting is the caller's job and only happens after EOF/error.
+ * Line parsing deliberately handles both LF and CRLF separators. A frame is
+ * bounded even when an upstream never sends its terminating blank line.
+ */
+export async function consumeSseResponse(
   response: Response,
-): Promise<DashboardStreamMessage> {
+  onRecord: (record: DashboardStreamMessage) => void | Promise<void>,
+  signal?: AbortSignal,
+): Promise<number> {
   const body = response.body;
   if (!body) throw new Error('Dashboard event stream has no body.');
   const reader = body.getReader();
   const decoder = new TextDecoder();
-  let buffer = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-    let boundary = buffer.indexOf('\n\n');
-    while (boundary >= 0) {
-      const frame = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
-      const data = frame
-        .split(/\r?\n/u)
-        .filter((line) => line.startsWith('data:'))
-        .map((line) => line.slice(5).trimStart())
-        .join('\n');
-      if (data) {
-        const parsed = asDashboardStreamMessage(JSON.parse(data));
-        if (!parsed) throw new Error('Dashboard returned an invalid event.');
-        await reader.cancel();
-        return parsed;
-      }
-      boundary = buffer.indexOf('\n\n');
+  const encoder = new TextEncoder();
+  let lineBuffer = '';
+  let dataLines: string[] = [];
+  let frameBytes = 0;
+  let records = 0;
+  let reachedEof = false;
+  let aborted = Boolean(signal?.aborted);
+  const onAbort = () => {
+    aborted = true;
+    void reader.cancel();
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  const dispatch = async () => {
+    if (dataLines.length === 0) return;
+    const data = dataLines.join('\n');
+    dataLines = [];
+    const parsed = asDashboardStreamMessage(JSON.parse(data));
+    if (!parsed) throw new Error('Dashboard returned an invalid event.');
+    await onRecord(parsed);
+    records += 1;
+  };
+  const processLine = async (rawLine: string) => {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    if (line.length === 0) {
+      await dispatch();
+      frameBytes = 0;
+      return;
     }
-    if (done) throw new Error('Dashboard event stream ended.');
+    frameBytes += encoder.encode(`${line}\n`).byteLength;
+    if (frameBytes > MAX_SSE_FRAME_BYTES)
+      throw new Error('Dashboard SSE frame exceeds its size limit.');
+    // SSE comments and event/id/retry fields are transport metadata. Only
+    // data fields enter the shared protocol parser.
+    if (line.startsWith('data:')) {
+      const value = line.slice(5);
+      dataLines.push(value.startsWith(' ') ? value.slice(1) : value);
+    }
+  };
+  try {
+    while (true) {
+      if (aborted) throw abortError();
+      const { done, value } = await reader.read();
+      if (aborted) throw abortError();
+      if (value) lineBuffer += decoder.decode(value, { stream: !done });
+      if (
+        lineBuffer.indexOf('\n') < 0 &&
+        encoder.encode(lineBuffer).byteLength > MAX_SSE_FRAME_BYTES
+      )
+        throw new Error('Dashboard SSE frame exceeds its size limit.');
+      let newline = lineBuffer.indexOf('\n');
+      while (newline >= 0) {
+        const line = lineBuffer.slice(0, newline);
+        lineBuffer = lineBuffer.slice(newline + 1);
+        await processLine(line);
+        newline = lineBuffer.indexOf('\n');
+      }
+      if (encoder.encode(lineBuffer).byteLength > MAX_SSE_FRAME_BYTES)
+        throw new Error('Dashboard SSE frame exceeds its size limit.');
+      if (!done) continue;
+      const trailing = decoder.decode();
+      if (trailing) lineBuffer += trailing;
+      if (lineBuffer) {
+        await processLine(lineBuffer);
+        lineBuffer = '';
+      }
+      await dispatch();
+      reachedEof = true;
+      return records;
+    }
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+    if (!reachedEof) await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
 }
 
-/**
- * Fetch one SSE record. The server uses a short-lived response and the hook
- * reconnects explicitly, which lets it send the last accepted cursor without
- * putting credentials in a URL.
- */
-async function fetchNextSseRecord(
+async function fetchSseResponse(
   cursor: number,
   signal: AbortSignal,
-): Promise<DashboardStreamMessage> {
+): Promise<Response> {
   const token = dashboardToken();
   if (!token) throw new Error('Authentication required.');
   const response = await fetch(
@@ -257,7 +332,7 @@ async function fetchNextSseRecord(
   }
   if (!response.ok)
     throw new Error(`Event stream failed (${response.status}).`);
-  return readSseResponse(response);
+  return response;
 }
 
 export function useDashboard(): DashboardState {
@@ -268,16 +343,29 @@ export function useDashboard(): DashboardState {
   const [resyncNonce, setResyncNonce] = useState(0);
   const [connectionState, setConnectionState] =
     useState<DashboardState['connectionState']>('connecting');
+  const acceptedServerId = useRef<string | undefined>(undefined);
   const acceptedCursor = useRef(0);
   const usageRequestSerial = useRef(0);
   const latestUsageResponse = useRef(0);
 
   const acceptSnapshot = useCallback((next: BrowserSnapshot): void => {
-    if (next.cursor < acceptedCursor.current) return;
-    acceptedCursor.current = next.cursor;
-    setSnapshot((current) =>
-      current && current.cursor > next.cursor ? current : next,
+    const decision = snapshotAcceptance(
+      acceptedServerId.current,
+      acceptedCursor.current,
+      next,
     );
+    if (!decision.accepted) return;
+    const replacingServer = decision.reset;
+    acceptedServerId.current = next.serverId;
+    acceptedCursor.current = next.cursor;
+    if (replacingServer) {
+      setEvents([]);
+      setSnapshot(next);
+    } else {
+      setSnapshot((current) =>
+        current && current.cursor > next.cursor ? current : next,
+      );
+    }
     setError(undefined);
   }, []);
 
@@ -363,20 +451,23 @@ export function useDashboard(): DashboardState {
       connecting = true;
       setConnectionState('connecting');
       controller = new AbortController();
-      let continueImmediately = false;
       try {
-        const record = await fetchNextSseRecord(
+        const response = await fetchSseResponse(
           acceptedCursor.current,
           controller.signal,
         );
-        if (stopped) return;
-        acceptRecord(record);
-        setConnectionState('connected');
-        setError(undefined);
-        retryDelay = RECONNECT_MIN_MS;
-        // A response carries one record; reconnect immediately to preserve a
-        // simple bounded read and make each request's cursor explicit.
-        continueImmediately = true;
+        await consumeSseResponse(
+          response,
+          (record) => {
+            if (stopped) return;
+            acceptRecord(record);
+            setConnectionState('connected');
+            setError(undefined);
+            retryDelay = RECONNECT_MIN_MS;
+          },
+          controller.signal,
+        );
+        if (!stopped) scheduleReconnect();
       } catch (cause) {
         if (
           stopped ||
@@ -388,7 +479,6 @@ export function useDashboard(): DashboardState {
       } finally {
         connecting = false;
         controller = undefined;
-        if (continueImmediately && !stopped) void connect();
       }
     };
     const reconnectNow = () => {

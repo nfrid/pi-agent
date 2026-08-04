@@ -30,6 +30,7 @@ describe('dashboard event stream', () => {
       2, 3,
     ]);
     expect(stream.replayAfter(0).gap).toBe(true);
+    expect(stream.replayAfter(4).gap).toBe(true);
   });
 
   it('does not report a gap at the replay boundary', () => {

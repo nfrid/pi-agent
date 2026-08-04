@@ -157,6 +157,38 @@ describe('dashboard HTTP boundary', () => {
     await expect(gap.json()).resolves.toMatchObject({ code: 'replay-gap' });
   });
 
+  it('turns a cursor from a prior daemon generation into a replay gap', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-restart-'));
+    const options = {
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    };
+    server = await createDashboardServer(options);
+    await server.start();
+    await server.refreshWorkspaces();
+    const oldCursor = server.snapshot().cursor;
+    await server.stop();
+    server = await createDashboardServer(options);
+    await server.start();
+    expect(server.snapshot().cursor).toBeLessThan(oldCursor);
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/events?cursor=${oldCursor}`,
+      {
+        headers: {
+          Origin: `http://127.0.0.1:${server.port}`,
+          'x-dashboard-token': 'test-token',
+        },
+      },
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'replay-gap',
+    });
+  });
+
   it('publishes every browser update with the same monotonic revision as its snapshot', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-revision-'),

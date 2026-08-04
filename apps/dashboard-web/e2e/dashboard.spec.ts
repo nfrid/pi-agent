@@ -67,19 +67,17 @@ test('live transport contains malformed data and reconnects without HTTP polling
   await page.addInitScript(() => {
     localStorage.setItem('pi-dashboard-token', 'test-token');
     type Stream = {
-      resolve?: (response: Response) => void;
+      controller?: ReadableStreamDefaultController<Uint8Array>;
       emit(value: unknown): void;
       emitRaw(data: string): void;
       close(): void;
+      response: Response;
     };
     const streams: Stream[] = [];
     let nextCursor = 0;
     let reconnectSnapshotPending = false;
     const originalFetch = window.fetch.bind(window);
-    const responseFor = (data: string) =>
-      new Response(`event: dashboard\ndata: ${data}\n\n`, {
-        headers: { 'content-type': 'text/event-stream' },
-      });
+    const frame = (data: string) => `event: dashboard\ndata: ${data}\n\n`;
     const generationSnapshot = (generation: number) => ({
       serverId: `server-${generation}`,
       revision: 1,
@@ -112,7 +110,16 @@ test('live transport contains malformed data and reconnects without HTTP polling
       runtimeId?: string;
       event?: unknown;
     }) => {
-      const cursor = ++nextCursor;
+      const malformedSnapshot =
+        value.type === 'snapshot' &&
+        Array.isArray(value.snapshot?.runtimes) &&
+        value.snapshot.runtimes.some(
+          (runtime) =>
+            !runtime ||
+            typeof runtime !== 'object' ||
+            !('runtimeId' in runtime),
+        );
+      const cursor = malformedSnapshot ? nextCursor : ++nextCursor;
       if (value.type === 'snapshot') {
         const snapshot = { ...value.snapshot, cursor };
         return { type: 'snapshot', cursor, emittedAt: Date.now(), snapshot };
@@ -125,29 +132,43 @@ test('live transport contains malformed data and reconnects without HTTP polling
       };
     };
     const createStream = (): Stream => {
-      const stream: Stream = {
-        resolve: undefined,
-        emit(value) {
-          const resolve = stream.resolve;
-          stream.resolve = undefined;
-          resolve?.(responseFor(JSON.stringify(streamRecord(value))));
+      const stream = {
+        response: undefined as unknown as Response,
+        emit(value: unknown) {
+          try {
+            stream.controller?.enqueue(
+              new TextEncoder().encode(
+                frame(JSON.stringify(streamRecord(value))),
+              ),
+            );
+          } catch {
+            /* stale test streams are intentionally inert after close */
+          }
         },
         emitRaw(data) {
-          const resolve = stream.resolve;
-          stream.resolve = undefined;
-          resolve?.(responseFor(data));
+          try {
+            stream.controller?.enqueue(new TextEncoder().encode(frame(data)));
+          } catch {
+            /* stale test streams are intentionally inert after close */
+          }
         },
         close() {
           reconnectSnapshotPending = true;
-          const resolve = stream.resolve;
-          stream.resolve = undefined;
-          resolve?.(
-            new Response('', {
-              headers: { 'content-type': 'text/event-stream' },
-            }),
-          );
+          try {
+            stream.controller?.close();
+          } catch {
+            /* parser errors already cancel the stale stream */
+          }
         },
-      };
+      } as Stream;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          stream.controller = controller;
+        },
+      });
+      stream.response = new Response(body, {
+        headers: { 'content-type': 'text/event-stream' },
+      });
       streams.push(stream);
       return stream;
     };
@@ -155,22 +176,23 @@ test('live transport contains malformed data and reconnects without HTTP polling
       const target = typeof input === 'string' ? input : input.url;
       if (!target.includes('/api/events')) return originalFetch(input, init);
       const stream = createStream();
-      const generation = streams.length;
-      if (generation === 1 || reconnectSnapshotPending) {
+      if (streams.length === 1 || reconnectSnapshotPending) {
         reconnectSnapshotPending = false;
-        const snapshot = generationSnapshot(generation);
-        return responseFor(
-          JSON.stringify({
-            type: 'snapshot',
-            cursor: snapshot.cursor,
-            emittedAt: Date.now(),
-            snapshot,
-          }),
+        const snapshot = generationSnapshot(streams.length);
+        stream.controller?.enqueue(
+          new TextEncoder().encode(
+            frame(
+              JSON.stringify({
+                type: 'snapshot',
+                cursor: snapshot.cursor,
+                emittedAt: Date.now(),
+                snapshot,
+              }),
+            ),
+          ),
         );
       }
-      return new Promise<Response>((resolve) => {
-        stream.resolve = resolve;
-      });
+      return stream.response;
     };
     Object.assign(window, {
       dashboardLiveTest: {
@@ -340,24 +362,21 @@ test('dense mobile session keeps conversation and activity readable', async ({
     localStorage.setItem('pi-dashboard-token', 'test-token');
     let cursor = 0;
     const originalFetch = window.fetch.bind(window);
-    const responseFor = (data: string) =>
-      new Response(`event: dashboard\ndata: ${data}\n\n`, {
-        headers: { 'content-type': 'text/event-stream' },
-      });
     const stream = {
-      resolve: undefined as ((response: Response) => void) | undefined,
+      controller: undefined as
+        | ReadableStreamDefaultController<Uint8Array>
+        | undefined,
+      response: undefined as unknown as Response,
       emit(value: { runtimeId?: string; event?: unknown }) {
-        const resolve = this.resolve;
-        this.resolve = undefined;
-        const nextCursor = ++cursor;
-        resolve?.(
-          responseFor(
-            JSON.stringify({
-              cursor: nextCursor,
+        const next = ++cursor;
+        stream.controller?.enqueue(
+          new TextEncoder().encode(
+            `event: dashboard\ndata: ${JSON.stringify({
+              cursor: next,
               emittedAt: Date.now(),
               runtimeId: value.runtimeId,
               event: value.event,
-            }),
+            })}\n\n`,
           ),
         );
       },
@@ -365,10 +384,16 @@ test('dense mobile session keeps conversation and activity readable', async ({
     window.fetch = async (input, init) => {
       const target = typeof input === 'string' ? input : input.url;
       if (!target.includes('/api/events')) return originalFetch(input, init);
-      Object.assign(window, { dashboardTestSocket: stream });
-      return new Promise<Response>((resolve) => {
-        stream.resolve = resolve;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          stream.controller = controller;
+        },
       });
+      stream.response = new Response(body, {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+      Object.assign(window, { dashboardTestSocket: stream });
+      return stream.response;
     };
   });
   await page.route('**/api/usage', async (route) =>

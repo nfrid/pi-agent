@@ -1,12 +1,15 @@
+import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import type { DashboardEvent } from './dashboard-transport';
 import {
   asBrowserSnapshot,
   asSessionResponse,
+  consumeSseResponse,
   enqueueStreamEvent,
   nextReconnectDelay,
   reconnectDelayWithJitter,
   shouldAcceptRevision,
+  snapshotAcceptance,
 } from './dashboard-transport';
 
 describe('dashboard transport revisions', () => {
@@ -14,6 +17,80 @@ describe('dashboard transport revisions', () => {
     expect(shouldAcceptRevision(7, 6)).toBe(false);
     expect(shouldAcceptRevision(7, 7)).toBe(false);
     expect(shouldAcceptRevision(7, 8)).toBe(true);
+  });
+
+  it('resets the cursor window when a replacement daemon has a lower cursor', () => {
+    const lower = { serverId: 'daemon-2', cursor: 1 } as BrowserSnapshot;
+    expect(snapshotAcceptance('daemon-1', 9, lower)).toEqual({
+      accepted: true,
+      reset: true,
+    });
+    expect(
+      snapshotAcceptance('daemon-1', 9, {
+        ...lower,
+        serverId: 'daemon-1',
+      }),
+    ).toEqual({ accepted: false, reset: false });
+  });
+
+  it('dispatches every CRLF data frame from one long-lived response', async () => {
+    const encoder = new TextEncoder();
+    let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        bodyController = controller;
+      },
+    });
+    const records: number[] = [];
+    bodyController?.enqueue(
+      encoder.encode(
+        ': heartbeat\r\n\r\nid: 1\r\nevent: dashboard\r\ndata: ' +
+          JSON.stringify({
+            cursor: 1,
+            emittedAt: 1,
+            event: { type: 'agent.settled', sessionId: 'session' },
+          }) +
+          '\r\n\r\n',
+      ),
+    );
+    let requests = 0;
+    const response = (() => {
+      requests += 1;
+      return new Response(body);
+    })();
+    const abort = new AbortController();
+    const consuming = consumeSseResponse(
+      response,
+      (record) => {
+        records.push(record.cursor);
+        return undefined;
+      },
+      abort.signal,
+    );
+    bodyController?.enqueue(
+      encoder.encode(
+        `id: 2\r\nevent: dashboard\r\ndata: ${JSON.stringify({
+          cursor: 2,
+          emittedAt: 2,
+          event: { type: 'agent.settled', sessionId: 'session' },
+        })}\r\n\r\n`,
+      ),
+    );
+    await expect.poll(() => records).toEqual([1, 2]);
+    expect(requests).toBe(1);
+    abort.abort();
+    await expect(consuming).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('rejects an unterminated SSE frame over the bounded limit', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(2 * 1024 * 1024 + 1));
+      },
+    });
+    await expect(
+      consumeSseResponse(new Response(body), () => undefined),
+    ).rejects.toThrow('frame exceeds');
   });
 
   it('preserves the server generation used to reset revisions after restart', () => {

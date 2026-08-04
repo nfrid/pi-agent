@@ -68,7 +68,10 @@ export class DashboardEventStream {
   }
 
   replayAfter(cursor: number): ReplayWindow {
-    const gap = cursor < this.oldestCursor - 1;
+    // Cursors are scoped to this daemon generation. A client asking for a
+    // future cursor has connected to a restarted daemon and must resync rather
+    // than wait forever for an event that can never arrive.
+    const gap = cursor < this.oldestCursor - 1 || cursor > this.cursorValue;
     return {
       currentCursor: this.cursorValue,
       oldestCursor: this.oldestCursor,
