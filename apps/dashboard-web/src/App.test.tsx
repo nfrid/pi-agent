@@ -134,6 +134,16 @@ describe('session replacement navigation', () => {
         sessionEvent('session.changed', 'old-session'),
       ),
     ).toBeUndefined();
+    // A route change to a dormant session resets the association before any
+    // queued event is considered.
+    expect(
+      sessionNavigationTarget(
+        'dormant-session',
+        undefined,
+        'runtime-1',
+        sessionEvent('session.snapshot', 'new-session'),
+      ),
+    ).toBeUndefined();
   });
 });
 

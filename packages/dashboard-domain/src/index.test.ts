@@ -120,6 +120,7 @@ describe('dashboard domain reducers', () => {
           toolCallId: 'call-1',
           name: 'read',
           arguments: { path: '/tmp/file' },
+          data: { providerTrace: 'trace-1' },
           phase: 'started',
         },
       }),
@@ -155,6 +156,7 @@ describe('dashboard domain reducers', () => {
     expect(terminal).toMatchObject({
       arguments: { path: '/tmp/file' },
       result: 'first result',
+      data: { providerTrace: 'trace-1' },
       status: 'finished',
     });
     const staleTool = applyTranscriptEvent(

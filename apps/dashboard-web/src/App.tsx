@@ -718,8 +718,10 @@ function SessionView({
   const stickToBottomRef = useRef(true);
   const sessionRequestRef = useRef(0);
   const runtimeIdRef = useRef<string | undefined>(undefined);
+  const matchedRuntimeIdRef = useRef<string | undefined>(undefined);
   const seenEventsRef = useRef(new WeakSet<DashboardEvent>());
   const runtime = snapshot.runtimes.find((item) => item.session.id === id);
+  matchedRuntimeIdRef.current = runtime?.runtimeId;
   // During a runtime's session replacement the snapshot already points at the
   // new session, so there is briefly no runtime matching the old route. Keep
   // the prior association until the replacement event is consumed.
@@ -755,6 +757,10 @@ function SessionView({
   }, [id, reconnectNonce]);
   useEffect(() => {
     void id;
+    // A manual route change must not inherit the prior session's runtime. The
+    // render above intentionally retains it only while the same route waits
+    // for its replacement event.
+    runtimeIdRef.current = matchedRuntimeIdRef.current;
     seenEventsRef.current = new WeakSet<DashboardEvent>();
     setData(undefined);
     setProjection(undefined);

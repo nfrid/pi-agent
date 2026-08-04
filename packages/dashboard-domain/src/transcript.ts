@@ -247,7 +247,11 @@ function mergeTool(
         ? {}
         : { turnId: previousTool.turnId }
       : { turnId: payload.turnId }),
-    ...(payload.data === undefined ? {} : { data: payload.data }),
+    ...(payload.data === undefined
+      ? previousTool?.data === undefined
+        ? {}
+        : { data: previousTool.data }
+      : { data: payload.data }),
   };
   items[payload.toolCallId] = item;
   return {
