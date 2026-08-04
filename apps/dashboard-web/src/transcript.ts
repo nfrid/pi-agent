@@ -5,8 +5,6 @@ import {
   headersOf,
   isNarration,
 } from '@pi-dashboard/activity-model';
-import type { DashboardEvent } from './dashboard-transport';
-
 export interface TranscriptModelItem {
   key: string;
   entry: ActivityTranscriptEntry;
@@ -28,61 +26,11 @@ function directStableId(value: unknown): string | undefined {
   return undefined;
 }
 
-function containsStableId(value: unknown, id: string): boolean {
-  if (!value || typeof value !== 'object') return false;
-  if (directStableId(value) === id) return true;
-  return Array.isArray(value)
-    ? value.some((item) => containsStableId(item, id))
-    : Object.values(value as Record<string, unknown>).some((item) =>
-        containsStableId(item, id),
-      );
-}
-
-function stableId(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const direct = directStableId(value);
-  if (direct) return direct;
-  return Array.isArray(value)
-    ? value.map(stableId).find((id): id is string => Boolean(id))
-    : Object.values(value as Record<string, unknown>)
-        .map(stableId)
-        .find((id): id is string => Boolean(id));
-}
-
-/** Replace only the object at the matching path; arrays are never mistaken for IDs. */
-function replaceStable(
-  value: unknown,
-  id: string,
-  replacement: unknown,
-): unknown {
-  if (!value || typeof value !== 'object') return value;
-  if (!Array.isArray(value) && directStableId(value) === id) return replacement;
-  if (Array.isArray(value)) {
-    let changed = false;
-    const next = value.map((item) => {
-      const replaced = replaceStable(item, id, replacement);
-      changed ||= replaced !== item;
-      return replaced;
-    });
-    return changed ? next : value;
-  }
-  let changed = false;
-  const next: Record<string, unknown> = {
-    ...(value as Record<string, unknown>),
-  };
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    const replaced = replaceStable(item, id, replacement);
-    changed ||= replaced !== item;
-    next[key] = replaced;
-  }
-  return changed ? next : value;
-}
-
 function messageLevelId(value: unknown): string | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     return undefined;
   const record = value as Record<string, unknown>;
-  for (const key of ['id', 'messageId', 'responseId'])
+  for (const key of ['messageId', 'id', 'responseId'])
     if (typeof record[key] === 'string' && record[key]) return record[key];
   return undefined;
 }
@@ -101,103 +49,14 @@ function messageRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof record.role === 'string' ? record : undefined;
 }
 
-function messageIdentity(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const record = value as Record<string, unknown>;
-  const message =
-    record.type === 'message' &&
-    record.message &&
-    typeof record.message === 'object'
-      ? (record.message as Record<string, unknown>)
-      : record;
-  if (typeof message.role !== 'string') return undefined;
-  if (
-    typeof message.timestamp === 'number' ||
-    typeof message.timestamp === 'string'
-  )
-    return `${message.role}:${message.timestamp}`;
-  return undefined;
-}
-
-/** Merge a live bridge item by its Pi-stable id, never by array position. */
-export function reconcileLiveEvent(
-  entries: unknown[],
-  event: DashboardEvent['event'],
-  sessionId: string,
-): unknown[] {
-  if (!event?.sessionId || event.sessionId !== sessionId) return entries;
-  const envelope = event.message ?? event.tool;
-  const payload =
-    envelope && typeof envelope === 'object'
-      ? ((envelope as Record<string, unknown>).message ??
-        (envelope as Record<string, unknown>).tool ??
-        envelope)
-      : envelope;
-  if (!payload) return [...entries];
-  const isMessage = event.type?.startsWith('message.');
-  const tool = payload as Record<string, unknown>;
-  if (isMessage) {
-    if (typeof payload !== 'object' || Array.isArray(payload)) return entries;
-    const messagePayload: Record<string, unknown> = {
-      ...(payload as Record<string, unknown>),
-      __dashboardStreaming: event.type !== 'message.finished',
-    };
-    const replacement = { type: 'message', message: messagePayload };
-    const id = messageLevelId(payload);
-    const identity = messageIdentity(payload);
-    let index = -1;
-    for (
-      let entryIndex = entries.length - 1;
-      entryIndex >= 0;
-      entryIndex -= 1
-    ) {
-      const existing = messageRecord(entries[entryIndex]);
-      if (!existing) continue;
-      if (
-        (id && messageLevelId(existing) === id) ||
-        (identity && messageIdentity(existing) === identity) ||
-        (event.type !== 'message.started' &&
-          (existing.__dashboardStreaming === true ||
-            (!id && !identity && event.type === 'message.updated')) &&
-          existing.role === messagePayload.role)
-      ) {
-        index = entryIndex;
-        break;
-      }
-    }
-    if (index < 0) return [...entries, replacement];
-    return entries.map((entry, entryIndex) =>
-      entryIndex === index ? replacement : entry,
-    );
-  }
-
-  const id = stableId(envelope) ?? stableId(payload);
-  const nestedReplacement = {
-    ...tool,
-    type: 'toolCall',
-    name: tool.toolName ?? tool.name ?? 'tool',
-    arguments: tool.arguments ?? tool.args,
-  };
-  const toolWrapper = {
-    type: 'tool',
-    tool: { ...tool, name: tool.toolName ?? tool.name },
-  };
-  const found = id
-    ? entries.some((entry) => containsStableId(entry, id))
-    : false;
-  if (found && id)
-    return entries.map((entry) => {
-      if (
-        entry &&
-        typeof entry === 'object' &&
-        !Array.isArray(entry) &&
-        (entry as Record<string, unknown>).type === 'tool' &&
-        containsStableId(entry, id)
-      )
-        return toolWrapper;
-      return replaceStable(entry, id, nestedReplacement);
-    });
-  return [...entries, toolWrapper];
+/** Presentation keys use only IDs explicitly present on the selected entry. */
+function transcriptEntryKey(value: unknown, index: number): string {
+  const message = messageRecord(value);
+  if (message) return messageLevelId(message) ?? `entry-${index}`;
+  const direct = directStableId(value);
+  if (direct) return direct;
+  const tool = toolRecord(value);
+  return directStableId(tool) ?? `entry-${index}`;
 }
 
 function contentText(value: unknown): string {
@@ -257,12 +116,7 @@ export function toTranscriptEntries(
   }
   const result: TranscriptModelItem[] = [];
   for (const [rawIndex, raw] of rawEntries.entries()) {
-    const keyedMessage = messageRecord(raw);
-    const entryKey = keyedMessage
-      ? (messageIdentity(keyedMessage) ??
-        messageLevelId(keyedMessage) ??
-        `entry-${rawIndex}`)
-      : (stableId(raw) ?? `entry-${rawIndex}`);
+    const entryKey = transcriptEntryKey(raw, rawIndex);
     if (!raw || typeof raw !== 'object') {
       result.push({ key: entryKey, entry: { kind: 'other' }, raw });
       continue;

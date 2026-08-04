@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { DashboardEvent } from './dashboard-transport';
 import {
   asBrowserSnapshot,
   asSessionResponse,
@@ -23,6 +24,7 @@ describe('dashboard transport revisions', () => {
         runtimes: [],
         workspaces: [],
         sessions: [],
+        unread: [],
       })?.serverId,
     ).toBe('daemon-2');
   });
@@ -54,17 +56,55 @@ describe('dashboard transport revisions', () => {
         entries: [],
       }),
     ).toBeUndefined();
+    expect(
+      asSessionResponse({
+        metadata: {
+          id: 'session',
+          file: '',
+          cwd: '/tmp',
+          updatedAt: 1,
+          unexpected: true,
+        },
+        entries: [],
+      }),
+    ).toBeUndefined();
   });
 
-  it('coalesces streaming deltas but preserves starts, finishes, and distinct tools', () => {
-    const event = (type: string, id: string, text: string) => ({
+  it('keeps the explicit legacy HTTP snapshot defaults at the parser boundary', () => {
+    expect(
+      asBrowserSnapshot({
+        runtimes: [],
+        workspaces: [],
+        sessions: [],
+      }),
+    ).toMatchObject({ serverId: 'legacy', revision: 0, unread: [] });
+    expect(
+      asSessionResponse({
+        metadata: {
+          id: 'session',
+          file: '',
+          cwd: '/tmp',
+          updatedAt: 1,
+        },
+        entries: [],
+      }),
+    ).toMatchObject({ metadata: { id: 'session' }, entries: [] });
+  });
+
+  it('coalesces normalized streaming deltas but preserves starts, finishes, and distinct tools', () => {
+    const event = (
+      type: 'tool.started' | 'tool.updated' | 'tool.finished',
+      id: string,
+      text: string,
+    ): DashboardEvent => ({
       type: 'event',
+      serverId: 'daemon',
       revision: text.length,
       runtimeId: 'runtime',
       event: {
         type,
         sessionId: 'session',
-        tool: { toolCallId: id, text },
+        tool: { toolCallId: id, name: 'read', result: text },
       },
     });
     let pending = enqueueStreamEvent([], event('tool.started', 'a', 'start'));
@@ -82,37 +122,60 @@ describe('dashboard transport revisions', () => {
     expect(JSON.stringify(pending)).not.toContain('latest');
     expect(JSON.stringify(pending)).toContain('finished');
 
-    const messageEvent = (type: string, text: string, responseId?: string) => ({
+    const messageEvent = (
+      type: 'message.updated' | 'message.finished',
+      text: string,
+      messageId: string,
+    ): DashboardEvent => ({
       type: 'event',
+      serverId: 'daemon',
       revision: text.length,
       runtimeId: 'runtime',
       event: {
         type,
         sessionId: 'session',
         message: {
+          messageId,
           role: 'assistant',
-          timestamp: 123,
-          ...(responseId ? { responseId } : {}),
           content: [{ type: 'text', text }],
         },
       },
     });
     let messages = enqueueStreamEvent(
       [],
-      messageEvent('message.updated', 'first'),
+      messageEvent('message.updated', 'first', 'message-1'),
     );
     messages = enqueueStreamEvent(
       messages,
-      messageEvent('message.updated', 'latest', 'response-later'),
+      messageEvent('message.updated', 'latest', 'message-1'),
     );
     expect(messages).toHaveLength(1);
     expect(JSON.stringify(messages)).not.toContain('first');
     messages = enqueueStreamEvent(
       messages,
-      messageEvent('message.finished', 'final', 'response-later'),
+      messageEvent('message.finished', 'final', 'message-1'),
     );
     expect(messages).toHaveLength(1);
     expect(JSON.stringify(messages)).not.toContain('latest');
+  });
+
+  it('does not coalesce a transcript event without its explicit normalized identity', () => {
+    const event = (text: string): DashboardEvent => ({
+      type: 'event',
+      serverId: 'daemon',
+      revision: text.length,
+      runtimeId: 'runtime',
+      event: {
+        type: 'message.updated',
+        sessionId: 'session',
+        message: { role: 'assistant', content: text },
+      },
+    });
+    const pending = enqueueStreamEvent(
+      enqueueStreamEvent([], event('first')),
+      event('second'),
+    );
+    expect(pending).toHaveLength(2);
   });
 
   it('caps exponential reconnect delay and applies bounded jitter', () => {

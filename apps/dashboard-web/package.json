@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@pi-dashboard/activity-model": "workspace:*",
+    "@pi-dashboard/domain": "workspace:*",
     "@pi-dashboard/protocol": "workspace:*",
     "@vitejs/plugin-react": "^5.0.0",
     "react": "^19.1.0",

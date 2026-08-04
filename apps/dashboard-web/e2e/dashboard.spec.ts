@@ -545,12 +545,15 @@ test('dense mobile session keeps conversation and activity readable', async ({
           dashboardTestSocket: { emit(value: unknown): void };
         }
       ).dashboardTestSocket.emit({
-        type: 'bridge.event',
+        type: 'event',
+        serverId: 'legacy',
+        revision: assistantContent.length,
+        runtimeId: 'r1',
         event: {
           type: 'message.updated',
           sessionId: 's1',
           message: {
-            id: 'live-assistant-turn',
+            messageId: 'live-assistant-turn',
             role: 'assistant',
             content: assistantContent,
           },
@@ -584,16 +587,18 @@ test('dense mobile session keeps conversation and activity readable', async ({
             dashboardTestSocket: { emit(value: unknown): void };
           }
         ).dashboardTestSocket.emit({
-          type: 'bridge.event',
+          type: 'event',
+          serverId: 'legacy',
+          revision: timestamp + (type.endsWith('finished') ? 1 : 0),
+          runtimeId: 'r1',
           event: {
             type,
             sessionId: 's1',
             message: {
-              message: {
-                role: 'user',
-                timestamp,
-                content: [{ type: 'text', text }],
-              },
+              messageId: `live-user-${timestamp}`,
+              role: 'user',
+              timestamp,
+              content: [{ type: 'text', text }],
             },
           },
         });
@@ -619,7 +624,10 @@ test('dense mobile session keeps conversation and activity readable', async ({
         dashboardTestSocket: { emit(value: unknown): void };
       }
     ).dashboardTestSocket.emit({
-      type: 'bridge.event',
+      type: 'event',
+      serverId: 'legacy',
+      revision: 1000,
+      runtimeId: 'r1',
       event: { type: 'agent.settled', sessionId: 's1' },
     });
   });

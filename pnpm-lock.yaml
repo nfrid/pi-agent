@@ -79,6 +79,9 @@ importers:
       '@pi-dashboard/activity-model':
         specifier: workspace:*
         version: link:../../packages/activity-model
+      '@pi-dashboard/domain':
+        specifier: workspace:*
+        version: link:../../packages/dashboard-domain
       '@pi-dashboard/protocol':
         specifier: workspace:*
         version: link:../../packages/dashboard-protocol

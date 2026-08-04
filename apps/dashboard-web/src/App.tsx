@@ -4,6 +4,12 @@ import {
   groupTranscript,
 } from '@pi-dashboard/activity-model';
 import {
+  hydrateTranscript,
+  reduceTranscriptEvent,
+  selectLegacyTranscriptEntries,
+  type TranscriptProjection,
+} from '@pi-dashboard/domain';
+import {
   type BrowserSnapshot,
   deriveSessionTitle,
   type RuntimeSnapshot,
@@ -33,7 +39,6 @@ import { Markdown } from './Markdown';
 import {
   headersOf,
   isNarration,
-  reconcileLiveEvent,
   type TranscriptModelItem,
   toolOutcome,
   toolRecordForTranscript,
@@ -46,7 +51,7 @@ export {
   asBrowserSnapshot,
   asSessionResponse,
 } from './dashboard-transport';
-export { reconcileLiveEvent, toTranscriptEntries } from './transcript';
+export { toTranscriptEntries } from './transcript';
 
 export function sessionDisplayTitle(
   session: { name?: string; title?: string },
@@ -691,6 +696,7 @@ function SessionView({
   reconnectNonce: number;
 }) {
   const [data, setData] = useState<SessionResponse>();
+  const [projection, setProjection] = useState<TranscriptProjection>();
   const [error, setError] = useState<string>();
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const stickToBottomRef = useRef(true);
@@ -714,6 +720,7 @@ function SessionView({
             return;
           }
           setData(next);
+          setProjection(hydrateTranscript(next.entries, next.metadata.id));
           setError(undefined);
         }
       })
@@ -731,6 +738,7 @@ function SessionView({
     void id;
     seenEventsRef.current = new WeakSet<DashboardEvent>();
     setData(undefined);
+    setProjection(undefined);
   }, [id]);
   useEffect(() => {
     void id;
@@ -747,7 +755,7 @@ function SessionView({
     return () => window.removeEventListener('scroll', update);
   }, [id]);
   useLayoutEffect(() => {
-    if (!data) return;
+    if (!data || !projection) return;
     const enteringSession = scrolledSessionRef.current !== id;
     if (!enteringSession && !stickToBottomRef.current) return;
     scrolledSessionRef.current = id;
@@ -757,12 +765,17 @@ function SessionView({
       stickToBottomRef.current = true;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [data, id]);
+  }, [data, projection, id]);
   useEffect(() => {
     for (const queued of events) {
       const event = queued.event;
       if (!event) continue;
-      const changedSessionId = event.sessionId ?? event.session?.id;
+      const changedSessionId =
+        'sessionId' in event
+          ? event.sessionId
+          : 'session' in event
+            ? event.session.id
+            : undefined;
       if (
         event.type === 'session.changed' &&
         queued.runtimeId === runtimeIdRef.current &&
@@ -793,7 +806,7 @@ function SessionView({
         );
         continue;
       }
-      if (!data || seenEventsRef.current.has(queued)) continue;
+      if (!data || !projection || seenEventsRef.current.has(queued)) continue;
       if (event.type !== 'session.changed' && changedSessionId !== id) continue;
       seenEventsRef.current.add(queued);
       const captureBottomState = () => {
@@ -814,8 +827,10 @@ function SessionView({
               request === sessionRequestRef.current &&
               arrivalGeneration === eventGeneration.current &&
               next
-            )
+            ) {
               setData(next);
+              setProjection(hydrateTranscript(next.entries, next.metadata.id));
+            }
           })
           .catch(() => undefined);
       } else if (
@@ -826,18 +841,13 @@ function SessionView({
         // stream win instead of allowing a lagging file read to flash backward.
         sessionRequestRef.current += 1;
         captureBottomState();
-        setData((current) =>
-          current
-            ? {
-                ...current,
-                entries: reconcileLiveEvent(current.entries, event, id),
-              }
-            : current,
+        setProjection((current) =>
+          current ? reduceTranscriptEvent(current, event) : current,
         );
       }
     }
-  }, [events, data, eventGeneration, id]);
-  if (!data)
+  }, [events, data, eventGeneration, id, projection]);
+  if (!data || !projection)
     return (
       <section>
         <Back />
@@ -884,7 +894,7 @@ function SessionView({
       {runtime?.pendingInteractions.map((interaction) => (
         <InteractionCard key={interaction.id} interaction={interaction} />
       ))}
-      <Transcript entries={data.entries} />
+      <Transcript entries={selectLegacyTranscriptEntries(projection)} />
       <Composer runtime={runtime} sessionId={id} />
     </section>
   );

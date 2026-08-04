@@ -1,6 +1,10 @@
-import type {
-  BrowserSnapshot,
-  SessionIndexEntry,
+import {
+  type BrowserSnapshot,
+  type DashboardMessage,
+  type SessionApiResponse,
+  tryParseBrowserSnapshot,
+  tryParseDashboardMessage,
+  tryParseSessionApiResponse,
 } from '@pi-dashboard/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -19,70 +23,45 @@ export function dashboardToken(): string | undefined {
 }
 
 export type AppError = Error & { code?: string };
-export type DashboardEvent = {
-  type?: string;
-  serverId?: string;
-  revision?: number;
-  runtimeId?: string;
-  snapshot?: BrowserSnapshot;
-  event?: {
-    type?: string;
-    sessionId?: string;
-    message?: unknown;
-    tool?: unknown;
-    interaction?: unknown;
-    session?: { id?: string; name?: string; title?: string };
-  };
-};
+export type DashboardEvent = Extract<DashboardMessage, { type: 'event' }>;
 
-function firstEventIdentity(value: unknown, depth = 0): string | undefined {
-  if (!value || typeof value !== 'object' || depth > 4) return undefined;
-  if (Array.isArray(value))
-    return value
-      .map((item) => firstEventIdentity(item, depth + 1))
-      .find((identity): identity is string => Boolean(identity));
-  const record = value as Record<string, unknown>;
-  for (const key of ['id', 'messageId', 'toolCallId', 'callId'])
-    if (typeof record[key] === 'string' && record[key]) return record[key];
-  if (
-    typeof record.timestamp === 'number' ||
-    typeof record.timestamp === 'string'
-  )
-    return String(record.timestamp);
-  return Object.values(record)
-    .map((item) => firstEventIdentity(item, depth + 1))
-    .find((identity): identity is string => Boolean(identity));
+/**
+ * v1 HTTP fixtures predate the shared snapshot contract. Keep these three
+ * defaults at the transport boundary; all nested validation belongs to the
+ * shared protocol parser.
+ */
+function normalizeLegacyBrowserSnapshot(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const snapshot = value as Record<string, unknown>;
+  return {
+    ...snapshot,
+    ...(snapshot.serverId === undefined ? { serverId: 'legacy' } : {}),
+    ...(snapshot.revision === undefined ? { revision: 0 } : {}),
+    ...(snapshot.unread === undefined ? { unread: [] } : {}),
+  };
 }
 
 function streamEventKey(event: DashboardEvent): string | undefined {
-  const type = event.event?.type;
-  if (!type?.startsWith('message.') && !type?.startsWith('tool.'))
+  const bridgeEvent = event.event;
+  const type = bridgeEvent.type;
+  if (!type.startsWith('message.') && !type.startsWith('tool.'))
     return undefined;
   const family = type.split('.')[0];
-  const envelope = event.event?.message ?? event.event?.tool;
-  const unwrapped =
-    envelope && typeof envelope === 'object' && !Array.isArray(envelope)
-      ? ((envelope as Record<string, unknown>).message ?? envelope)
-      : envelope;
+  const payload =
+    family === 'message' && 'message' in bridgeEvent
+      ? bridgeEvent.message
+      : family === 'tool' && 'tool' in bridgeEvent
+        ? bridgeEvent.tool
+        : undefined;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+    return undefined;
   const identity =
-    family === 'message' &&
-    unwrapped &&
-    typeof unwrapped === 'object' &&
-    !Array.isArray(unwrapped)
-      ? (() => {
-          const message = unwrapped as Record<string, unknown>;
-          if (
-            typeof message.timestamp === 'number' ||
-            typeof message.timestamp === 'string'
-          )
-            return String(message.timestamp);
-          for (const key of ['id', 'messageId', 'responseId'])
-            if (typeof message[key] === 'string' && message[key])
-              return message[key] as string;
-          return undefined;
-        })()
-      : firstEventIdentity(envelope);
-  return `${event.runtimeId ?? ''}:${event.event?.sessionId ?? ''}:${family}:${identity ?? 'active'}`;
+    family === 'message'
+      ? (payload as { messageId?: unknown }).messageId
+      : (payload as { toolCallId?: unknown }).toolCallId;
+  if (typeof identity !== 'string' || !identity) return undefined;
+  const sessionId = 'sessionId' in bridgeEvent ? bridgeEvent.sessionId : '';
+  return `${event.runtimeId}:${sessionId}:${family}:${identity}`;
 }
 
 export function enqueueStreamEvent(
@@ -113,225 +92,14 @@ export function enqueueStreamEvent(
   return [...withoutSuperseded, event];
 }
 
-export type SessionResponse = {
-  metadata: SessionIndexEntry;
-  entries: unknown[];
-};
-
-function isDashboardEventEnvelope(value: unknown): value is DashboardEvent {
-  if (!isRecord(value)) return false;
-  if (
-    (value.type !== undefined && typeof value.type !== 'string') ||
-    (value.serverId !== undefined && typeof value.serverId !== 'string') ||
-    (value.revision !== undefined &&
-      (!Number.isSafeInteger(value.revision) ||
-        (value.revision as number) < 0)) ||
-    (value.runtimeId !== undefined && typeof value.runtimeId !== 'string') ||
-    (value.event !== undefined && !isRecord(value.event))
-  )
-    return false;
-  if (!isRecord(value.event)) return true;
-  if (typeof value.event.type !== 'string') return false;
-  if (
-    value.event.sessionId !== undefined &&
-    typeof value.event.sessionId !== 'string'
-  )
-    return false;
-  if (value.event.session !== undefined) {
-    if (
-      !isRecord(value.event.session) ||
-      typeof value.event.session.id !== 'string' ||
-      !optionalString(value.event.session.name) ||
-      !optionalString(value.event.session.title)
-    )
-      return false;
-  }
-  return true;
-}
+export type SessionResponse = SessionApiResponse;
 
 export function asSessionResponse(value: unknown): SessionResponse | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const response = value as Partial<SessionResponse>;
-  const metadata = response.metadata as Partial<SessionIndexEntry> | undefined;
-  if (
-    !isRecord(metadata) ||
-    typeof metadata.id !== 'string' ||
-    typeof metadata.cwd !== 'string' ||
-    !optionalString(metadata.file) ||
-    !optionalString(metadata.workspaceId) ||
-    !optionalString(metadata.name) ||
-    !optionalString(metadata.title) ||
-    !optionalString(metadata.activeRuntimeId) ||
-    (metadata.updatedAt !== undefined && !isFiniteNumber(metadata.updatedAt)) ||
-    (metadata.entryCount !== undefined &&
-      !Number.isSafeInteger(metadata.entryCount)) ||
-    !Array.isArray(response.entries)
-  )
-    return undefined;
-  return {
-    metadata: {
-      ...metadata,
-      file: metadata.file ?? '',
-      updatedAt: metadata.updatedAt ?? 0,
-    } as SessionIndexEntry,
-    entries: response.entries,
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
-function isSession(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    typeof value.id === 'string' &&
-    typeof value.file === 'string' &&
-    typeof value.cwd === 'string' &&
-    optionalString(value.workspaceId) &&
-    optionalString(value.name) &&
-    optionalString(value.title) &&
-    optionalString(value.activeRuntimeId) &&
-    isFiniteNumber(value.updatedAt) &&
-    (value.entryCount === undefined || Number.isSafeInteger(value.entryCount))
-  );
-}
-
-function optionalString(value: unknown): boolean {
-  return value === undefined || typeof value === 'string';
-}
-
-function isInteraction(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    typeof value.id === 'string' &&
-    value.type === 'ask_user' &&
-    typeof value.question === 'string' &&
-    Array.isArray(value.choices) &&
-    value.choices.every(
-      (choice) =>
-        isRecord(choice) &&
-        typeof choice.label === 'string' &&
-        typeof choice.value === 'string' &&
-        optionalString(choice.description) &&
-        optionalString(choice.preview),
-    ) &&
-    typeof value.allowCustom === 'boolean' &&
-    optionalString(value.customLabel) &&
-    isFiniteNumber(value.createdAt)
-  );
-}
-
-function isRuntime(value: unknown): boolean {
-  if (
-    !isRecord(value) ||
-    typeof value.runtimeId !== 'string' ||
-    (value.ownership !== 'external' && value.ownership !== 'managed') ||
-    !Number.isSafeInteger(value.pid) ||
-    (value.pid as number) <= 0 ||
-    typeof value.cwd !== 'string' ||
-    !['idle', 'working', 'waiting', 'aborting', 'stopping', 'failed'].includes(
-      value.liveState as string,
-    ) ||
-    !isRecord(value.session) ||
-    typeof value.session.id !== 'string' ||
-    !optionalString(value.session.file) ||
-    !optionalString(value.session.name) ||
-    !optionalString(value.session.title) ||
-    !optionalString(value.session.cwd) ||
-    !optionalString(value.session.leafId) ||
-    !Array.isArray(value.session.entries) ||
-    !Array.isArray(value.pendingInteractions) ||
-    !value.pendingInteractions.every(isInteraction) ||
-    !optionalString(value.lastError) ||
-    (value.online !== undefined && typeof value.online !== 'boolean') ||
-    (value.lastSeenAt !== undefined && !isFiniteNumber(value.lastSeenAt))
-  )
-    return false;
-  if (
-    value.model !== undefined &&
-    (!isRecord(value.model) ||
-      typeof value.model.provider !== 'string' ||
-      typeof value.model.model !== 'string' ||
-      !optionalString(value.model.thinking))
-  )
-    return false;
-  return (
-    value.contextUsage === undefined ||
-    (isRecord(value.contextUsage) &&
-      (value.contextUsage.tokens === null ||
-        isFiniteNumber(value.contextUsage.tokens)) &&
-      isFiniteNumber(value.contextUsage.contextWindow) &&
-      (value.contextUsage.percent === undefined ||
-        value.contextUsage.percent === null ||
-        isFiniteNumber(value.contextUsage.percent)))
-  );
-}
-
-function isWorkspace(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    typeof value.id === 'string' &&
-    typeof value.name === 'string' &&
-    typeof value.path === 'string' &&
-    typeof value.canonicalPath === 'string' &&
-    optionalString(value.gitRoot) &&
-    optionalString(value.tmuxSession) &&
-    ['tmux', 'sesh-config', 'zoxide', 'directory'].includes(
-      value.source as string,
-    ) &&
-    typeof value.active === 'boolean'
-  );
-}
-
-function isNotification(value: unknown): boolean {
-  return (
-    isRecord(value) &&
-    typeof value.id === 'string' &&
-    ['waiting', 'failed', 'runtime-exited', 'settled'].includes(
-      value.kind as string,
-    ) &&
-    typeof value.title === 'string' &&
-    typeof value.body === 'string' &&
-    optionalString(value.runtimeId) &&
-    optionalString(value.sessionId) &&
-    isFiniteNumber(value.createdAt) &&
-    (value.readAt === undefined || isFiniteNumber(value.readAt))
-  );
+  return tryParseSessionApiResponse(value);
 }
 
 export function asBrowserSnapshot(value: unknown): BrowserSnapshot | undefined {
-  if (!isRecord(value)) return undefined;
-  const serverId =
-    typeof value.serverId === 'string' ? value.serverId : 'legacy';
-  const revision = value.revision === undefined ? 0 : value.revision;
-  const unread = value.unread === undefined ? [] : value.unread;
-  if (
-    !Number.isSafeInteger(revision) ||
-    (revision as number) < 0 ||
-    !Array.isArray(value.runtimes) ||
-    !value.runtimes.every(isRuntime) ||
-    !Array.isArray(value.workspaces) ||
-    !value.workspaces.every(isWorkspace) ||
-    !Array.isArray(value.sessions) ||
-    !value.sessions.every(isSession) ||
-    !Array.isArray(unread) ||
-    !unread.every(isNotification)
-  )
-    return undefined;
-  return {
-    ...value,
-    serverId,
-    revision: revision as number,
-    runtimes: value.runtimes,
-    workspaces: value.workspaces,
-    sessions: value.sessions,
-    unread,
-  } as unknown as BrowserSnapshot;
+  return tryParseBrowserSnapshot(normalizeLegacyBrowserSnapshot(value));
 }
 
 const RECONNECT_MIN_MS = 500;
@@ -603,22 +371,18 @@ export function useDashboard(): DashboardState {
           if (typeof event.data !== 'string')
             throw new Error('Invalid message');
           const parsed: unknown = JSON.parse(event.data);
-          if (!isDashboardEventEnvelope(parsed))
-            throw new Error('Invalid message');
-          const message = parsed;
+          const message = tryParseDashboardMessage(parsed);
+          if (!message) throw new Error('Invalid message');
           const next =
-            message.type === 'snapshot'
-              ? asBrowserSnapshot(message.snapshot)
-              : undefined;
-          if (message.type === 'snapshot' && !next)
-            throw new Error('Invalid snapshot');
+            message.type === 'snapshot' ? message.snapshot : undefined;
+          const envelopeServerId =
+            message.type === 'event' ? message.serverId : next?.serverId;
           if (
-            message.serverId !== undefined &&
-            next !== undefined &&
-            message.serverId !== next.serverId
+            message.type === 'event' &&
+            message.snapshot &&
+            message.serverId !== message.snapshot.serverId
           )
             return;
-          const envelopeServerId = message.serverId ?? next?.serverId;
           if (
             candidateServerId !== undefined &&
             envelopeServerId !== undefined &&
@@ -637,24 +401,9 @@ export function useDashboard(): DashboardState {
             setConnectionState('connected');
             if (authenticated) setReconnectNonce((value) => value + 1);
           }
-          const eventMessage =
-            message.event && typeof message.event === 'object'
-              ? message
-              : undefined;
-          if (eventMessage) {
-            if (message.snapshot) {
-              const eventSnapshot = asBrowserSnapshot(message.snapshot);
-              if (!eventSnapshot) throw new Error('Invalid event snapshot');
-              if (
-                candidateServerId !== undefined &&
-                eventSnapshot.serverId !== candidateServerId
-              )
-                return;
-              acceptSnapshot(eventSnapshot);
-            }
-            queueEvent(eventMessage);
-          } else if (!next && message.type !== 'snapshot') {
-            scheduleResync();
+          if (message.type === 'event') {
+            if (message.snapshot) acceptSnapshot(message.snapshot);
+            queueEvent(message);
           }
         } catch {
           scheduleResync();

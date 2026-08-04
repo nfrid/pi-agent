@@ -20,6 +20,10 @@ export default defineConfig({
         __dirname,
         '../../packages/activity-model/src/index.ts',
       ),
+      '@pi-dashboard/domain': path.resolve(
+        __dirname,
+        '../../packages/dashboard-domain/src/index.ts',
+      ),
     },
   },
   server: {
