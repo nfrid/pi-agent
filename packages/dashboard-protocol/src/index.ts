@@ -16,9 +16,9 @@ import { Value } from 'typebox/value';
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME_BYTES = 512 * 1024;
-
-/** Capability contracts are optional so protocol-v1 runtimes remain usable. */
+/** Capability contracts and replay bounds are optional protocol-v1 extensions. */
 export {
+  MAX_NON_IDEMPOTENT_ACTION_IDS,
   RuntimeCapabilitySnapshotSchema,
   safeRuntimeCapabilitySnapshot,
 } from '@pi-dashboard/extension-contributions';

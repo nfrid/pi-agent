@@ -9,6 +9,7 @@ import { type Static, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
 
 export const EXTENSION_CONTRIBUTIONS_VERSION = 1;
+export const MAX_NON_IDEMPOTENT_ACTION_IDS = 2048;
 export const UNKNOWN_FIELD_POLICY = 'reject' as const;
 export type UnknownFieldPolicy = typeof UNKNOWN_FIELD_POLICY;
 
@@ -63,6 +64,8 @@ export type AvailabilityRule = Static<typeof AvailabilityRuleSchema>;
 export const ActionSummarySchema = Type.Object(
   {
     id: IdentifierSchema,
+    /** New summaries retain this schema; old capability summaries may omit it. */
+    inputSchema: Type.Optional(SchemaSchema),
     title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     description: Type.Optional(Type.String({ maxLength: 2000 })),
     availability: Type.Optional(AvailabilityRuleSchema),
@@ -71,7 +74,14 @@ export const ActionSummarySchema = Type.Object(
   },
   { additionalProperties: false },
 );
-export type ActionSummary = Static<typeof ActionSummarySchema>;
+export interface ActionSummary {
+  readonly id: string;
+  readonly inputSchema?: TSchema;
+  readonly title?: string;
+  readonly description?: string;
+  readonly availability?: AvailabilityRule;
+  readonly idempotent?: boolean;
+}
 
 export const ActionDescriptorSchema = Type.Object(
   {
@@ -278,6 +288,33 @@ export type ContributionState = {
   readonly pendingInteractions?: number;
 };
 
+export type ActionCommandReservation = 'reserved' | 'duplicate' | 'capacity';
+
+/** Exact replay memory: capacity fails closed; IDs are never evicted. */
+export class NonIdempotentActionIdGuard {
+  private readonly ids = new Set<string>();
+
+  constructor(private readonly capacity = MAX_NON_IDEMPOTENT_ACTION_IDS) {
+    if (!Number.isSafeInteger(capacity) || capacity < 1)
+      throw new Error('Action ID capacity must be a positive integer.');
+  }
+
+  get size(): number {
+    return this.ids.size;
+  }
+
+  has(id: string): boolean {
+    return this.ids.has(id);
+  }
+
+  reserve(id: string): ActionCommandReservation {
+    if (this.ids.has(id)) return 'duplicate';
+    if (this.ids.size >= this.capacity) return 'capacity';
+    this.ids.add(id);
+    return 'reserved';
+  }
+}
+
 export class ContributionError extends Error {
   readonly code:
     | 'invalid-manifest'
@@ -409,7 +446,7 @@ export function summarizeManifest(
     version: parsed.version,
     ...(parsed.title === undefined ? {} : { title: parsed.title }),
     actions: parsed.actions.map(
-      ({ inputSchema: _input, outputSchema: _output, ...summary }) => summary,
+      ({ outputSchema: _output, ...summary }) => summary,
     ),
     renderers: parsed.renderers.map(
       ({ inputSchema: _input, summary: rendererSummary, ...renderer }) => ({
@@ -473,6 +510,15 @@ export function parseRuntimeCapabilitySnapshot(
   for (const manifest of snapshot.manifests) {
     duplicateIds(manifest.actions, `action in ${manifest.id}`);
     duplicateIds(manifest.renderers, `renderer in ${manifest.id}`);
+    for (const action of manifest.actions)
+      if (
+        action.inputSchema !== undefined &&
+        !isTypeBoxSchema(action.inputSchema)
+      )
+        throw new ContributionError(
+          'invalid-capability-snapshot',
+          `Action ${action.id} has an invalid input schema.`,
+        );
   }
   return snapshot;
 }
@@ -546,7 +592,7 @@ export function selectAvailableActions(
     manifest.actions.filter((action) =>
       isActionAvailable(action, snapshot, state),
     ),
-  );
+  ) as readonly (ActionDescriptor | ActionSummary)[];
 }
 
 export function findActionDescriptor(
@@ -581,7 +627,7 @@ export function findRendererDescriptor(
 }
 
 export function parseActionInput(
-  action: Pick<ActionDescriptor, 'id' | 'inputSchema'>,
+  action: { readonly id: string; readonly inputSchema?: unknown },
   input: unknown,
 ): unknown {
   if (
@@ -596,7 +642,7 @@ export function parseActionInput(
 }
 
 export function parseActionOutput(
-  action: Pick<ActionDescriptor, 'id' | 'outputSchema'>,
+  action: { readonly id: string; readonly outputSchema?: unknown },
   output: unknown,
 ): unknown {
   if (
@@ -635,6 +681,6 @@ export type ContributionActionHandler = (
 ) => Promise<unknown> | unknown;
 
 export function actionSummary(action: ActionDescriptor): ActionSummary {
-  const { inputSchema: _input, outputSchema: _output, ...summary } = action;
+  const { outputSchema: _output, ...summary } = action;
   return summary;
 }

@@ -5,6 +5,7 @@ import {
   createRuntimeCapabilitySnapshot,
   type ExtensionManifest,
   isActionAvailable,
+  NonIdempotentActionIdGuard,
   parseActionInput,
   parseExtensionManifest,
   parseRuntimeCapabilitySnapshot,
@@ -65,6 +66,16 @@ describe('extension contribution contracts', () => {
       }),
     ).toBe(false);
     expect(selectAvailableActions([manifest], capabilities)).toHaveLength(1);
+  });
+
+  it('fails closed at action-ID capacity without evicting duplicates', () => {
+    const guard = new NonIdempotentActionIdGuard(2);
+    expect(guard.reserve('one')).toBe('reserved');
+    expect(guard.reserve('two')).toBe('reserved');
+    expect(guard.reserve('one')).toBe('duplicate');
+    expect(guard.reserve('three')).toBe('capacity');
+    expect(guard.has('one')).toBe(true);
+    expect(guard.size).toBe(2);
   });
 
   it('rejects malformed capability snapshots and safely empties unknown data', () => {

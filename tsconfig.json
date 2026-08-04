@@ -1,12 +1,6 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "baseUrl": ".",
-    "paths": {
-      "@pi-dashboard/extension-contributions": [
-        "packages/extension-contributions/src/index.ts"
-      ]
-    },
     "module": "NodeNext",
     "moduleResolution": "nodenext",
     "strict": true,

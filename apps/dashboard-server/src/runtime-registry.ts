@@ -7,6 +7,8 @@ import {
 } from '@pi-dashboard/domain';
 import {
   isActionAvailable,
+  NonIdempotentActionIdGuard,
+  parseActionInput,
   parseRuntimeCapabilitySnapshot,
 } from '@pi-dashboard/extension-contributions';
 import {
@@ -50,7 +52,7 @@ type RuntimeRecord = {
   commandRunning: boolean;
   writeBlocked: boolean;
   /** Semantic action IDs already handed to Pi in this runtime epoch. */
-  actionCommandIds: Set<string>;
+  actionCommandIds: NonIdempotentActionIdGuard;
 };
 
 export type RegistryChange =
@@ -214,7 +216,7 @@ export class RuntimeRegistry {
             commandQueue: [],
             commandRunning: false,
             writeBlocked: false,
-            actionCommandIds: new Set(),
+            actionCommandIds: new NonIdempotentActionIdGuard(),
           };
           this.runtimes.set(snapshot.runtimeId, record);
           helloSeen = true;
@@ -298,6 +300,11 @@ export class RuntimeRegistry {
         error instanceof Error ? error : new Error(String(error)),
       );
     }
+    if (
+      record.commandQueue.length + (record.commandRunning ? 1 : 0) >=
+      RUNTIME_COMMAND_QUEUE_LIMIT
+    )
+      return Promise.reject(new Error('Runtime command queue is full.'));
     if (command.type === 'action.invoke') {
       const capabilities = record.snapshot.capabilities;
       const action = capabilities?.manifests
@@ -323,29 +330,33 @@ export class RuntimeRegistry {
             { code: 'unavailable-action' },
           ),
         );
+      try {
+        parseActionInput(action, command.input);
+      } catch (error) {
+        return Promise.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
       if (!action.idempotent) {
-        if (record.actionCommandIds.has(command.id))
+        const reservation = record.actionCommandIds.reserve(command.id);
+        if (reservation === 'duplicate')
           return Promise.reject(
             Object.assign(new Error('Duplicate semantic action command ID.'), {
               code: 'duplicate-action-id',
             }),
           );
-        record.actionCommandIds.add(command.id);
-        // Keep this replay guard bounded without reusing an ID in the same
-        // runtime epoch. Old IDs are not safe to forget while a browser may
-        // still retry an acknowledgement.
-        if (record.actionCommandIds.size > 2048) {
-          const first = record.actionCommandIds.values().next().value;
-          if (typeof first === 'string') record.actionCommandIds.delete(first);
-        }
+        if (reservation === 'capacity')
+          return Promise.reject(
+            Object.assign(
+              new Error('Non-idempotent action command capacity is full.'),
+              { code: 'action-command-capacity' },
+            ),
+          );
       }
     }
-    if (
-      record.commandQueue.length + (record.commandRunning ? 1 : 0) >=
-      RUNTIME_COMMAND_QUEUE_LIMIT
-    )
-      return Promise.reject(new Error('Runtime command queue is full.'));
     const promise = new Promise<unknown>((resolve, reject) => {
+      // The reservation above occurs only after queue admission; a rejected
+      // queue admission is not a consumed action ID.
       record.commandQueue.push({
         command,
         connection,

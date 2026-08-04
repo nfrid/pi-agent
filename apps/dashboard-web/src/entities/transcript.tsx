@@ -64,7 +64,6 @@ export function shouldShowActivityLead(text: string, title: string): boolean {
 
 function invokeActivityExpansion(
   runtime: RuntimeSnapshot | undefined,
-  groupKey: string,
   expanded: boolean,
 ): void {
   const actionId = 'activity-groups.set';
@@ -73,12 +72,7 @@ function invokeActivityExpansion(
   );
   if (!runtime || !advertised || runtime.online === false) return;
   void dashboardHttpClient
-    .invokeAction(
-      runtime.runtimeId,
-      actionId,
-      { expanded },
-      `activity-groups:${runtime.runtimeId}:${groupKey}:${expanded}`,
-    )
+    .invokeAction(runtime.runtimeId, actionId, { expanded })
     .catch(() => undefined);
 }
 
@@ -158,7 +152,7 @@ export function Transcript({
                     nextExpanded ? next.add(groupKey) : next.delete(groupKey);
                     return next;
                   });
-                  invokeActivityExpansion(runtime, groupKey, nextExpanded);
+                  invokeActivityExpansion(runtime, nextExpanded);
                 }}
               >
                 <span className="activity-icon">{complete ? '✓' : '…'}</span>
@@ -348,7 +342,7 @@ function VirtualizedTranscript({
               nextExpanded ? next.add(groupKey) : next.delete(groupKey);
               return next;
             });
-            invokeActivityExpansion(runtime, groupKey, nextExpanded);
+            invokeActivityExpansion(runtime, nextExpanded);
           }}
         >
           <span className="activity-icon">{complete ? '✓' : '…'}</span>

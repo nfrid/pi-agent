@@ -1,7 +1,31 @@
 import { PassThrough } from 'node:stream';
+import {
+  createRuntimeCapabilitySnapshot,
+  type ExtensionManifest,
+} from '@pi-dashboard/extension-contributions';
 import { type RuntimeSnapshot, serializeFrame } from '@pi-dashboard/protocol';
+import { Type } from 'typebox';
 import { describe, expect, it, vi } from 'vitest';
 import { RuntimeRegistry } from './runtime-registry.js';
+
+const actionManifest: ExtensionManifest = {
+  id: 'registry-test',
+  version: '1',
+  actions: [
+    {
+      id: 'registry-test.run',
+      inputSchema: Type.Object(
+        { value: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+    },
+  ],
+  renderers: [],
+};
+const actionCapabilities = createRuntimeCapabilitySnapshot(
+  [actionManifest],
+  [{ id: 'registry-test', version: '1', available: true }],
+);
 
 const snapshot: RuntimeSnapshot = {
   runtimeId: 'runtime-1',
@@ -210,6 +234,70 @@ describe('runtime registry', () => {
         },
       },
     });
+    bridge.destroy();
+  });
+
+  it('validates semantic action input before queueing and rejects duplicate IDs', async () => {
+    const registry = new RuntimeRegistry({ expectedToken: () => true });
+    const bridge = new PassThrough();
+    const frames: string[] = [];
+    bridge.on('data', (chunk) =>
+      frames.push(...String(chunk).split('\n').filter(Boolean)),
+    );
+    registry.accept(bridge as never);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: { ...snapshot, capabilities: actionCapabilities },
+        },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    await expect(
+      registry.sendCommand('runtime-1', {
+        id: 'invalid-input',
+        type: 'action.invoke',
+        actionId: 'registry-test.run',
+        input: { wrong: true },
+      }),
+    ).rejects.toThrow('Invalid input');
+    expect(frames.some((line) => line.includes('invalid-input'))).toBe(false);
+
+    const commandPromise = registry.sendCommand('runtime-1', {
+      id: 'stable-action-id',
+      type: 'action.invoke',
+      actionId: 'registry-test.run',
+      input: { value: 'ok' },
+    });
+    const command = await eventually(() =>
+      frames
+        .map(
+          (line) =>
+            JSON.parse(line) as { kind?: string; command?: { id: string } },
+        )
+        .find((frame) => frame.kind === 'command'),
+    );
+    bridge.write(
+      serializeFrame({
+        kind: 'ack',
+        id: command.command?.id ?? 'stable-action-id',
+        ok: true,
+        result: { accepted: true },
+      }),
+    );
+    await expect(commandPromise).resolves.toEqual({ accepted: true });
+    await expect(
+      registry.sendCommand('runtime-1', {
+        id: 'stable-action-id',
+        type: 'action.invoke',
+        actionId: 'registry-test.run',
+        input: { value: 'ok' },
+      }),
+    ).rejects.toThrow('Duplicate semantic action command ID');
     bridge.destroy();
   });
 

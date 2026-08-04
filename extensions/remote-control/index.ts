@@ -12,6 +12,7 @@ import {
   createRuntimeCapabilitySnapshot,
   findActionDescriptor,
   isActionAvailable,
+  NonIdempotentActionIdGuard,
   parseActionInput,
   parseActionInvocation,
   type RuntimeCapabilitySnapshot,
@@ -72,7 +73,10 @@ const RUNTIME_CAPABILITIES = createRuntimeCapabilitySnapshot(
   ],
 );
 
-type CommandHandler = (command: BridgeCommand) => Promise<unknown>;
+type CommandHandler = (
+  command: BridgeCommand,
+  capabilities: RuntimeCapabilitySnapshot,
+) => Promise<unknown>;
 
 type CommandInfo = ReturnType<ExtensionAPI['getCommands']>[number];
 type EventRecord = Record<string, unknown>;
@@ -517,7 +521,8 @@ export class BridgeClient {
     socket: net.Socket;
   }> = [];
   private commandRunning = false;
-  private readonly actionCommandIds = new Set<string>();
+  private readonly actionCommandIds = new NonIdempotentActionIdGuard();
+  private readonly effectiveCapabilities: RuntimeCapabilitySnapshot;
   private outboundQueue: Array<{
     socket: net.Socket;
     data: string;
@@ -528,6 +533,7 @@ export class BridgeClient {
   private unsubscribeBroker: (() => void) | undefined;
 
   constructor(private readonly options: BridgeClientOptions) {
+    this.effectiveCapabilities = options.capabilities ?? RUNTIME_CAPABILITIES;
     this.unsubscribeBroker = options.broker?.subscribe((event) => {
       if (event.kind === 'requested') {
         this.sendEvent({
@@ -611,6 +617,9 @@ export class BridgeClient {
         this.options.broker?.list().map(interactionSnapshot) ?? [];
       snapshot = {
         ...snapshot,
+        // One effective capability snapshot drives hello, runtime snapshot,
+        // duplicate protection, and semantic dispatch.
+        capabilities: this.effectiveCapabilities,
         ...(this.options.broker
           ? { pendingInteractions: interactions }
           : undefined),
@@ -620,7 +629,10 @@ export class BridgeClient {
         protocolVersion: PROTOCOL_VERSION,
         token: this.options.token,
         identityToken: this.options.identityToken,
-        capabilities: { heartbeat: true, extensions: RUNTIME_CAPABILITIES },
+        capabilities: {
+          heartbeat: true,
+          extensions: this.effectiveCapabilities,
+        },
         snapshot,
       });
       if (!helloSent) return;
@@ -673,12 +685,20 @@ export class BridgeClient {
   }
 
   private enqueue(command: BridgeCommand, socket: net.Socket): void {
+    if (
+      this.commandQueue.length + (this.commandRunning ? 1 : 0) >=
+      BRIDGE_COMMAND_QUEUE_LIMIT
+    ) {
+      this.sendAck(socket, command.id, false, 'Command queue is full.');
+      return;
+    }
     if (command.type === 'action.invoke') {
-      const action = this.options.capabilities?.manifests
+      const action = this.effectiveCapabilities.manifests
         .flatMap((manifest) => manifest.actions)
         .find((item) => item.id === command.actionId);
-      if (!action?.idempotent) {
-        if (this.actionCommandIds.has(command.id)) {
+      if (action && !action.idempotent) {
+        const reservation = this.actionCommandIds.reserve(command.id);
+        if (reservation === 'duplicate') {
           this.sendAck(
             socket,
             command.id,
@@ -688,15 +708,17 @@ export class BridgeClient {
           );
           return;
         }
-        this.actionCommandIds.add(command.id);
+        if (reservation === 'capacity') {
+          this.sendAck(
+            socket,
+            command.id,
+            false,
+            'Non-idempotent action command capacity is full.',
+            'action-command-capacity',
+          );
+          return;
+        }
       }
-    }
-    if (
-      this.commandQueue.length + (this.commandRunning ? 1 : 0) >=
-      BRIDGE_COMMAND_QUEUE_LIMIT
-    ) {
-      this.sendAck(socket, command.id, false, 'Command queue is full.');
-      return;
     }
     this.commandQueue.push({ command, socket });
     this.pumpCommands();
@@ -713,7 +735,10 @@ export class BridgeClient {
         // replayed. Replaying could duplicate a prompt after a daemon retry.
         if (item.socket !== this.socket || item.socket.destroyed) return;
         try {
-          const result = await this.options.handleCommand(item.command);
+          const result = await this.options.handleCommand(
+            item.command,
+            this.effectiveCapabilities,
+          );
           this.sendAck(item.socket, item.command.id, true, result);
         } catch (error) {
           this.sendAck(
@@ -1021,18 +1046,27 @@ async function dispatchSemanticAction(
   ctx: ExtensionContext,
   broker: InteractionBroker,
   command: Extract<BridgeCommand, { type: 'action.invoke' }>,
+  capabilities: RuntimeCapabilitySnapshot,
 ): Promise<unknown> {
   const invocation: ActionInvocation = parseActionInvocation(command);
   const action = findActionDescriptor(
     CONTRIBUTION_MANIFESTS,
     invocation.actionId,
   );
-  if (!action)
+  const advertisedAction = capabilities.manifests
+    .flatMap((manifest) => manifest.actions)
+    .find((candidate) => candidate.id === invocation.actionId);
+  if (!advertisedAction)
     throw Object.assign(
       new Error(`Unknown dashboard action: ${invocation.actionId}`),
       { code: 'unknown-action' },
     );
-  const available = isActionAvailable(action, RUNTIME_CAPABILITIES, {
+  if (!action)
+    throw Object.assign(
+      new Error(`No adapter for dashboard action: ${invocation.actionId}`),
+      { code: 'unknown-action' },
+    );
+  const available = isActionAvailable(advertisedAction, capabilities, {
     online: true,
     liveState:
       broker.list().length > 0 ? 'waiting' : ctx.isIdle() ? 'idle' : 'working',
@@ -1043,7 +1077,7 @@ async function dispatchSemanticAction(
       new Error(`Dashboard action is unavailable: ${invocation.actionId}`),
       { code: 'unavailable-action' },
     );
-  parseActionInput(action, invocation.input);
+  parseActionInput(advertisedAction, invocation.input);
   if (invocation.actionId === ASK_USER_ANSWER_ACTION_ID) {
     const input = invocation.input as { interactionId: string; answer: string };
     if (!broker.answer(input.interactionId, input.answer))
@@ -1078,9 +1112,10 @@ export async function dispatchDashboardCommand(
   ctx: ExtensionContext,
   broker: InteractionBroker,
   command: BridgeCommand,
+  capabilities = RUNTIME_CAPABILITIES,
 ): Promise<unknown> {
   if (command.type === 'action.invoke')
-    return dispatchSemanticAction(ctx, broker, command);
+    return dispatchSemanticAction(ctx, broker, command, capabilities);
   switch (command.type) {
     case 'prompt':
       if (!ctx.isIdle())
@@ -1216,9 +1251,15 @@ export function createRemoteControlRuntime(
     // cache keeps reconnects from dereferencing a context that was invalidated
     // by session replacement or extension reload.
     snapshot: () => cachedSnapshot,
-    handleCommand: async (command) => {
+    handleCommand: async (command, capabilities) => {
       if (!context) throw new Error('Pi session is not ready.');
-      return dispatchDashboardCommand(pi, context, broker, command);
+      return dispatchDashboardCommand(
+        pi,
+        context,
+        broker,
+        command,
+        capabilities,
+      );
     },
   });
 

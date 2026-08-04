@@ -3,11 +3,6 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "paths": {
-      "@pi-dashboard/extension-contributions": [
-        "packages/extension-contributions/dist/index.d.ts"
-      ]
-    },
     "noEmit": false,
     "declaration": true
   },

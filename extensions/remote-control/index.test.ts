@@ -6,6 +6,10 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import {
+  MAX_NON_IDEMPOTENT_ACTION_IDS,
+  type NonIdempotentActionIdGuard,
+} from '@pi-dashboard/extension-contributions';
 import { describe, expect, it, vi } from 'vitest';
 import {
   parseFrame,
@@ -13,6 +17,7 @@ import {
   serializeFrame,
 } from '../../packages/dashboard-protocol/src/index';
 import { InteractionBroker } from '../ask-user/broker';
+import { askUserCapabilitySnapshot } from '../ask-user/contribution';
 import {
   BridgeClient,
   createRemoteControlRuntime,
@@ -440,6 +445,62 @@ describe('remote-control bridge', () => {
     connection?.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
+  });
+
+  it('uses one bounded duplicate guard for semantic bridge commands', () => {
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      capabilities: askUserCapabilitySnapshot,
+      handleCommand: async () => new Promise(() => undefined),
+    });
+    const socket = new net.Socket();
+    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', socket);
+    const enqueue = (
+      Reflect.get(client, 'enqueue') as (
+        command: unknown,
+        socket: net.Socket,
+      ) => void
+    ).bind(client);
+    const command = {
+      id: 'answer-once',
+      type: 'action.invoke',
+      actionId: 'ask-user.answer',
+      input: { interactionId: 'i', answer: 'yes' },
+    };
+    enqueue(command, socket);
+    enqueue(command, socket);
+    const guard = Reflect.get(
+      client,
+      'actionCommandIds',
+    ) as NonIdempotentActionIdGuard;
+    for (
+      let index = guard.size;
+      index < MAX_NON_IDEMPOTENT_ACTION_IDS;
+      index += 1
+    )
+      expect(guard.reserve(`fill-${index}`)).toBe('reserved');
+    enqueue({ ...command, id: 'answer-capacity' }, socket);
+    const acks = write.mock.calls
+      .map((call) => {
+        try {
+          return JSON.parse(String(call[0])) as {
+            kind?: string;
+            code?: string;
+          };
+        } catch {
+          return undefined;
+        }
+      })
+      .filter((frame) => frame?.kind === 'ack');
+    expect(acks.map((ack) => ack?.code)).toEqual([
+      'duplicate-action-id',
+      'action-command-capacity',
+    ]);
+    expect(guard.has('answer-once')).toBe(true);
+    client.stop();
   });
 
   it('rebuilds reconnect hello interactions from the live broker', async () => {

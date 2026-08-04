@@ -1,6 +1,9 @@
 node_modules
 dist/
 apps/dashboard-web/dist/
+# TypeScript package builds belong in dist/, never beside extension-contributions sources.
+packages/extension-contributions/src/*.js
+packages/extension-contributions/src/*.d.ts
 test-results/
 playwright-report/
 /dashboard/

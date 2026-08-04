@@ -34,11 +34,12 @@ capability/action/renderer IDs never execute or load code.
 
 ## Installed Pi 0.82.1 shims
 
-* `extensions/ask-user/dialogs.ts` is the bounded RPC/headless dialog shim.
-  Remove it when Pi RPC exposes rich/custom dialog payloads (and remove the
-  headless omission once Pi exposes a headless interaction API). Broker answer
-  and cancel do not require a shim and retain session scope, timeout, and
-  single-winner resolution.
+* `extensions/ask-user/dialogs.ts` is the bounded RPC `select`/`input`
+  fallback. It loses previews because Pi 0.82.1 RPC has no `custom()` payload;
+  remove it when Pi RPC exposes rich/custom dialog payloads. The separate
+  headless omission is removed only when Pi exposes a headless interaction API.
+  Broker answer and cancel do not require a shim and retain session scope,
+  timeout, and single-winner resolution.
 * `extensions/activity-groups/shim.ts` is used only after its exact installed
   component-method canary passes because Pi 0.82.1 has no public
   `registerToolSequenceRenderer`. Remove the prototype patch and its canary
