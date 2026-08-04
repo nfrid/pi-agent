@@ -7,6 +7,9 @@ export default defineConfig({
       '@pi-dashboard/protocol': path.resolve(
         'packages/dashboard-protocol/src/index.ts',
       ),
+      '@pi-dashboard/domain': path.resolve(
+        'packages/dashboard-domain/src/index.ts',
+      ),
       '@pi-dashboard/codex-usage': path.resolve(
         'packages/codex-usage/src/index.ts',
       ),

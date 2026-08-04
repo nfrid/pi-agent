@@ -13,6 +13,7 @@
   "include": [
     "extensions/**/*.ts",
     "packages/dashboard-protocol/src/**/*.ts",
+    "packages/dashboard-domain/src/**/*.ts",
     "packages/activity-model/src/**/*.ts",
     "packages/codex-usage/src/**/*.ts",
     "apps/dashboard-server/src/**/*.ts"

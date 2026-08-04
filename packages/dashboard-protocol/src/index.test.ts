@@ -3,9 +3,12 @@ import {
   deriveSessionTitle,
   isBridgeEvent,
   MAX_FRAME_BYTES,
+  parseDashboardEventEnvelope,
   parseFrame,
+  parseNormalizedMessagePayload,
   redactImageData,
   serializeFrame,
+  tryParseNormalizedToolPayload,
   validateBridgeCommand,
   validateSessionRenameRequest,
   validateStartRuntimeRequest,
@@ -218,6 +221,38 @@ describe('dashboard protocol', () => {
         }),
       ),
     ).toThrow();
+  });
+
+  it('parses normalized payloads and canonical event envelopes strictly', () => {
+    const message = parseNormalizedMessagePayload({
+      messageId: 'm-1',
+      role: 'assistant',
+      content: 'hello',
+      phase: 'updated',
+    });
+    expect(message.messageId).toBe('m-1');
+    expect(
+      tryParseNormalizedToolPayload({
+        toolCallId: 'tool-1',
+        name: 'read',
+        unexpected: true,
+      }),
+    ).toBeUndefined();
+    expect(
+      parseDashboardEventEnvelope({
+        cursor: 1,
+        emittedAt: 100,
+        runtimeId: 'runtime-1',
+        runtimeEpoch: 'epoch-1',
+        runtimeSeq: 1,
+        sessionId: 'session-1',
+        event: {
+          type: 'message.updated',
+          sessionId: 'session-1',
+          message,
+        },
+      }).cursor,
+    ).toBe(1);
   });
 
   it('validates structured launch requests', () => {

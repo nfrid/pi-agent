@@ -54,6 +54,9 @@ importers:
       '@pi-dashboard/codex-usage':
         specifier: workspace:*
         version: link:../../packages/codex-usage
+      '@pi-dashboard/domain':
+        specifier: workspace:*
+        version: link:../../packages/dashboard-domain
       '@pi-dashboard/protocol':
         specifier: workspace:*
         version: link:../../packages/dashboard-protocol
@@ -124,6 +127,12 @@ importers:
         version: 0.82.1(ws@8.21.0)(zod@4.4.3)
 
   packages/codex-usage: {}
+
+  packages/dashboard-domain:
+    dependencies:
+      '@pi-dashboard/protocol':
+        specifier: workspace:*
+        version: link:../dashboard-protocol
 
   packages/dashboard-protocol: {}
 

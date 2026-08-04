@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'node:net';
 import {
+  applyRuntimeEvent,
+  createRuntimeReducerState,
+  type RuntimeReducerState,
+} from '@pi-dashboard/domain';
+import {
   type BridgeCommand,
   type BridgeEvent,
   parseFrame,
@@ -27,7 +32,8 @@ type RuntimeRecord = {
   snapshot: RuntimeSnapshot;
   socket?: Socket;
   buffer: string;
-  lastSeq: number;
+  runtimeEpoch: string;
+  reducerState: RuntimeReducerState;
   pending: Map<
     string,
     {
@@ -48,6 +54,8 @@ export type RegistryChange =
       runtimeId: string;
       event: BridgeEvent;
       snapshot: RuntimeSnapshot;
+      runtimeEpoch?: string;
+      runtimeSeq?: number;
     }
   | { kind: 'offline'; snapshot: RuntimeSnapshot };
 
@@ -153,11 +161,21 @@ export class RuntimeRegistry {
           } catch {
             /* best effort */
           }
+          const runtimeEpoch = randomUUID();
+          const registeredSnapshot = {
+            ...snapshot,
+            online: true,
+            lastSeenAt: Date.now(),
+          };
           record = {
-            snapshot: { ...snapshot, online: true, lastSeenAt: Date.now() },
+            snapshot: registeredSnapshot,
             socket,
             buffer: '',
-            lastSeq: frame.seq,
+            runtimeEpoch,
+            reducerState: createRuntimeReducerState(registeredSnapshot, {
+              runtimeEpoch,
+              runtimeSeq: frame.seq,
+            }),
             pending: new Map(),
             commandQueue: [],
             commandRunning: false,
@@ -360,15 +378,23 @@ export class RuntimeRegistry {
       else pending.reject(new Error(frame.error));
       return;
     }
-    if (frame.kind !== 'event' || frame.seq <= record.lastSeq) return;
-    record.lastSeq = frame.seq;
+    if (frame.kind !== 'event') return;
     const event = redactBridgeEvent(frame.event);
-    record.snapshot = this.mergeEvent(record.snapshot, event);
+    const reduced = applyRuntimeEvent(record.reducerState, {
+      event,
+      runtimeEpoch: record.runtimeEpoch,
+      runtimeSeq: frame.seq,
+    });
+    if (!reduced.accepted) return;
+    record.reducerState = reduced.state;
     record.snapshot = {
-      ...record.snapshot,
+      ...reduced.state.snapshot,
       online: true,
       lastSeenAt: Date.now(),
     };
+    // lastSeenAt and online are transport-owned observations, but keeping them
+    // in reducer state makes the next event a pure continuation of this one.
+    record.reducerState = { ...record.reducerState, snapshot: record.snapshot };
     if (event.type === 'runtime.goodbye') {
       record.socket?.end();
       // Remove first so observers build their authoritative snapshot after the
@@ -380,77 +406,8 @@ export class RuntimeRegistry {
       runtimeId: record.snapshot.runtimeId,
       event,
       snapshot: record.snapshot,
+      runtimeEpoch: record.runtimeEpoch,
+      runtimeSeq: frame.seq,
     });
-  }
-
-  private mergeEvent(
-    snapshot: RuntimeSnapshot,
-    event: BridgeEvent,
-  ): RuntimeSnapshot {
-    switch (event.type) {
-      case 'runtime.hello':
-        // Hello is only accepted during registration. A later hello must not
-        // be able to replace the established runtime identity.
-        return snapshot;
-      case 'runtime.heartbeat':
-      case 'runtime.stateChanged': {
-        const update = event.snapshot;
-        return {
-          ...snapshot,
-          ...(update?.cwd === undefined ? {} : { cwd: update.cwd }),
-          ...(update?.workspaceHint === undefined
-            ? {}
-            : { workspaceHint: update.workspaceHint }),
-          ...(update?.tmux === undefined ? {} : { tmux: update.tmux }),
-          liveState: event.state,
-          ...(update?.session === undefined ? {} : { session: update.session }),
-          ...(update?.model === undefined ? {} : { model: update.model }),
-          ...(update?.contextUsage === undefined
-            ? {}
-            : { contextUsage: update.contextUsage }),
-          ...(update?.pendingInteractions === undefined
-            ? {}
-            : { pendingInteractions: update.pendingInteractions }),
-          ...(update?.lastError === undefined
-            ? {}
-            : { lastError: update.lastError }),
-          ...(update?.online === undefined ? {} : { online: update.online }),
-          ...(update?.lastSeenAt === undefined
-            ? {}
-            : { lastSeenAt: update.lastSeenAt }),
-        };
-      }
-      case 'session.changed':
-      case 'session.snapshot':
-        return { ...snapshot, session: event.session };
-      case 'interaction.requested':
-        return {
-          ...snapshot,
-          pendingInteractions: [
-            ...snapshot.pendingInteractions.filter(
-              (item) => item.id !== event.interaction.id,
-            ),
-            event.interaction,
-          ],
-          liveState: 'waiting',
-        };
-      case 'interaction.resolved':
-        return {
-          ...snapshot,
-          pendingInteractions: snapshot.pendingInteractions.filter(
-            (item) => item.id !== event.interactionId,
-          ),
-        };
-      case 'agent.settled':
-        return {
-          ...snapshot,
-          liveState:
-            snapshot.pendingInteractions.length > 0 ? 'waiting' : 'idle',
-        };
-      case 'runtime.goodbye':
-        return { ...snapshot, online: false };
-      default:
-        return snapshot;
-    }
   }
 }
