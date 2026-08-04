@@ -108,6 +108,60 @@ describe('dashboard HTTP boundary', () => {
     socket.close();
   });
 
+  it('stops with an authenticated SSE client still open', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-sse-stop-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/events`, {
+      headers: { 'x-dashboard-token': 'test-token' },
+    });
+    expect(response.status).toBe(200);
+    await expect(
+      Promise.race([
+        server.stop().then(() => true),
+        new Promise<boolean>((resolve) =>
+          setTimeout(() => resolve(false), 2_000),
+        ),
+      ]),
+    ).resolves.toBe(true);
+    await response.body?.cancel().catch(() => undefined);
+  });
+
+  it('stops with a silent pre-hello bridge client still open', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-bridge-stop-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    await expect(
+      Promise.race([
+        server.stop().then(() => true),
+        new Promise<boolean>((resolve) =>
+          setTimeout(() => resolve(false), 2_000),
+        ),
+      ]),
+    ).resolves.toBe(true);
+  });
+
   it('replays authenticated SSE records and reports expired cursors', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-sse-'));
     server = await createDashboardServer({
@@ -241,6 +295,93 @@ describe('dashboard HTTP boundary', () => {
     const writesAfterCleanup = writes.length;
     publish();
     expect(writes).toHaveLength(writesAfterCleanup);
+  });
+
+  it('suppresses startup changes until one authoritative initial publication', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-startup-order-'),
+    );
+    let releaseWorkspaces!: () => void;
+    let workspacesStarted!: () => void;
+    const workspaceStarted = new Promise<void>((resolve) => {
+      workspacesStarted = resolve;
+    });
+    const workspaceRelease = new Promise<void>((resolve) => {
+      releaseWorkspaces = resolve;
+    });
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: {
+        list: async () => {
+          workspacesStarted();
+          await workspaceRelease;
+          return [];
+        },
+      },
+    });
+    const startup = server.start();
+    await workspaceStarted;
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            runtimeId: 'startup-runtime',
+            ownership: 'external',
+            pid: 1,
+            cwd: '/tmp/project',
+            liveState: 'idle',
+            session: { id: 'startup-session', entries: [] },
+            pendingInteractions: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(server.snapshot().revision).toBe(0);
+    expect(server.snapshot().cursor).toBe(0);
+    releaseWorkspaces();
+    await startup;
+    expect(server.snapshot().revision).toBe(1);
+    expect(server.snapshot().cursor).toBe(1);
+    bridge.destroy();
+  });
+
+  it('cleans up a failed startup so the server can be retried', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-startup-retry-'),
+    );
+    const sessions = new SessionIndex(path.join(root, 'sessions'));
+    const originalStart = sessions.start.bind(sessions);
+    let fail = true;
+    sessions.start = async (workspaces) => {
+      if (fail) {
+        fail = false;
+        throw new Error('startup failed');
+      }
+      await originalStart(workspaces);
+    };
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sessions,
+      sesh: { list: async () => [] },
+    });
+    await expect(server.start()).rejects.toThrow('startup failed');
+    await expect(server.start()).resolves.toBeUndefined();
   });
 
   it('turns a cursor from a prior daemon generation into a replay gap', async () => {

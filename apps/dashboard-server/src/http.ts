@@ -206,11 +206,17 @@ class DashboardServerImpl implements DashboardServer {
   });
   private readonly clients = new Set<WebSocket>();
   private readonly awaitingPong = new WeakSet<WebSocket>();
+  private readonly bridgeSockets = new Set<net.Socket>();
+  private readonly sseResponses = new Set<http.ServerResponse>();
   private heartbeatTimer: NodeJS.Timeout | undefined;
   private workspaces: WorkspaceTarget[] = [];
   private readonly serverId = randomBytes(12).toString('base64url');
   private revision = 0;
-  private started = false;
+  private lifecycle: 'stopped' | 'starting' | 'started' | 'stopping' =
+    'stopped';
+  private httpHasStarted = false;
+  private startPromise: Promise<void> | undefined;
+  private stopPromise: Promise<void> | undefined;
 
   constructor(dependencies: DashboardDependencies) {
     const config = dependencies.configuration;
@@ -232,6 +238,11 @@ class DashboardServerImpl implements DashboardServer {
     this.origins = config.origins;
 
     this.bridge = net.createServer((socket) => {
+      // Track the transport before RuntimeRegistry sees it. A client can be
+      // connected without having sent runtime.hello yet, and registry.close()
+      // only knows about authenticated runtime records.
+      this.bridgeSockets.add(socket);
+      socket.once('close', () => this.bridgeSockets.delete(socket));
       try {
         socket.setTimeout(0);
       } catch {
@@ -390,49 +401,123 @@ class DashboardServerImpl implements DashboardServer {
   }
 
   async start(): Promise<void> {
-    if (this.started) return;
-    this.started = true;
-    await fs.mkdir(this.stateDir, { recursive: true, mode: 0o700 });
-    await this.application.uploads.start();
-    await fs.rm(this.socketPath, { force: true }).catch(() => undefined);
-    await new Promise<void>((resolve, reject) => {
-      const onError = (error: Error) => {
-        this.bridge.off('error', onError);
-        reject(error);
-      };
-      this.bridge.once('error', onError);
-      this.bridge.listen(this.socketPath, () => {
-        this.bridge.off('error', onError);
-        resolve();
+    if (this.lifecycle === 'started') return;
+    if (this.lifecycle === 'starting') {
+      await this.startPromise;
+      return;
+    }
+    if (this.lifecycle === 'stopping') {
+      await this.stopPromise;
+      return this.start();
+    }
+    this.lifecycle = 'starting';
+    const startup = this.startInternal();
+    this.startPromise = startup;
+    try {
+      await startup;
+    } finally {
+      if (this.startPromise === startup) this.startPromise = undefined;
+    }
+  }
+
+  private async startInternal(): Promise<void> {
+    try {
+      await fs.mkdir(this.stateDir, { recursive: true, mode: 0o700 });
+      await this.application.uploads.start();
+      await fs.rm(this.socketPath, { force: true }).catch(() => undefined);
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => {
+          this.bridge.off('error', onError);
+          reject(error);
+        };
+        this.bridge.once('error', onError);
+        this.bridge.listen(this.socketPath, () => {
+          this.bridge.off('error', onError);
+          resolve();
+        });
       });
-    });
-    await fs.chmod(this.socketPath, 0o600).catch(() => undefined);
-    await this.app.listen({ port: this.port, host: this.host });
-    const address = this.http.address();
-    if (address && typeof address === 'object') this.port = address.port;
-    this.origins.push(
-      `http://${this.host}:${this.port}`,
-      `http://localhost:${this.port}`,
-    );
-    await this.refreshWorkspaces();
-    await this.sessions.start(this.workspaces);
-    if (!this.pushConfigured) this.push = await createPushSender(this.metadata);
-    this.application.setPush(this.push);
-    this.heartbeatTimer = setInterval(
-      () => this.heartbeatClients(),
-      WS_HEARTBEAT_MS,
-    );
-    this.heartbeatTimer.unref?.();
+      await fs.chmod(this.socketPath, 0o600).catch(() => undefined);
+      if (this.httpHasStarted) await this.listenHttp();
+      else {
+        await this.app.listen({ port: this.port, host: this.host });
+        this.httpHasStarted = true;
+      }
+      const address = this.http.address();
+      if (address && typeof address === 'object') this.port = address.port;
+      for (const origin of [
+        `http://${this.host}:${this.port}`,
+        `http://localhost:${this.port}`,
+      ]) {
+        if (!this.origins.includes(origin)) this.origins.push(origin);
+      }
+      await this.refreshWorkspaces();
+      await this.sessions.start(this.workspaces);
+      if (!this.pushConfigured)
+        this.push = await createPushSender(this.metadata);
+      this.application.setPush(this.push);
+      this.heartbeatTimer = setInterval(
+        () => this.heartbeatClients(),
+        WS_HEARTBEAT_MS,
+      );
+      this.heartbeatTimer.unref?.();
+      this.lifecycle = 'started';
+      // Startup callbacks are suppressed while the workspace and session
+      // state is being assembled. Publish one authoritative initial snapshot.
+      this.changed();
+    } catch (error) {
+      await this.cleanupFailedStart();
+      this.lifecycle = 'stopped';
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {
-    if (!this.started) return;
-    this.started = false;
+    if (this.lifecycle === 'stopped') return;
+    if (this.lifecycle === 'stopping') {
+      await this.stopPromise;
+      return;
+    }
+    if (this.lifecycle === 'starting') {
+      try {
+        await this.startPromise;
+      } catch {
+        return;
+      }
+      if ((this.lifecycle as string) !== 'started') return;
+    }
+    this.lifecycle = 'stopping';
+    const shutdown = this.stopInternal();
+    this.stopPromise = shutdown;
+    try {
+      await shutdown;
+    } finally {
+      if (this.stopPromise === shutdown) this.stopPromise = undefined;
+      this.lifecycle = 'stopped';
+    }
+  }
+
+  private async listenHttp(): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        this.http.off('error', onError);
+        reject(error);
+      };
+      this.http.once('error', onError);
+      this.http.listen({ port: this.port, host: this.host }, () => {
+        this.http.off('error', onError);
+        resolve();
+      });
+    });
+  }
+
+  private async stopInternal(): Promise<void> {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = undefined;
     this.sessions.close();
     this.eventStream.close();
     this.registry.close();
+    for (const response of this.sseResponses) this.destroySseResponse(response);
+    this.sseResponses.clear();
     for (const client of this.wss.clients) {
       try {
         client.close();
@@ -441,12 +526,34 @@ class DashboardServerImpl implements DashboardServer {
       }
     }
     this.clients.clear();
+    // Destroy raw transports before waiting for their listening servers to
+    // close. Otherwise a silent pre-hello bridge or open SSE can keep shutdown
+    // pending indefinitely.
+    for (const socket of this.bridgeSockets) socket.destroy();
     await this.app.close();
-    await new Promise<void>((resolve) => this.bridge.close(() => resolve()));
+    if (this.bridge.listening)
+      await new Promise<void>((resolve) => this.bridge.close(() => resolve()));
     await fs.rm(this.socketPath, { force: true }).catch(() => undefined);
     await this.application.uploads.close();
     this.push.close?.();
     this.metadata.close();
+  }
+
+  private async cleanupFailedStart(): Promise<void> {
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.heartbeatTimer = undefined;
+    this.sessions.close();
+    this.eventStream.close();
+    this.registry.close();
+    for (const response of this.sseResponses) this.destroySseResponse(response);
+    this.sseResponses.clear();
+    for (const socket of this.bridgeSockets) socket.destroy();
+    if (this.http.listening)
+      await new Promise<void>((resolve) => this.http.close(() => resolve()));
+    if (this.bridge.listening)
+      await new Promise<void>((resolve) => this.bridge.close(() => resolve()));
+    await fs.rm(this.socketPath, { force: true }).catch(() => undefined);
+    await this.application.uploads.close().catch(() => undefined);
   }
 
   snapshot(cursor = this.eventStream.cursor): BrowserSnapshot {
@@ -948,6 +1055,7 @@ class DashboardServerImpl implements DashboardServer {
       'x-accel-buffering': 'no',
     });
     response.flushHeaders?.();
+    this.sseResponses.add(response);
     let closed = false;
     let replaying = true;
     const queued: DashboardEventStreamRecord[] = [];
@@ -961,6 +1069,7 @@ class DashboardServerImpl implements DashboardServer {
     const cleanup = () => {
       if (closed) return;
       closed = true;
+      this.sseResponses.delete(response);
       unsubscribe();
       if (heartbeat) clearInterval(heartbeat);
       if (drainAttached) response.off('drain', flushWrites);
@@ -1079,6 +1188,19 @@ class DashboardServerImpl implements DashboardServer {
     heartbeat.unref?.();
   }
 
+  private destroySseResponse(response: http.ServerResponse): void {
+    if (response.writableEnded) return;
+    try {
+      response.destroy();
+    } catch {
+      try {
+        response.end();
+      } catch {
+        /* best effort during shutdown */
+      }
+    }
+  }
+
   private handleUpgrade(
     request: http.IncomingMessage,
     socket: import('node:stream').Duplex,
@@ -1153,6 +1275,7 @@ class DashboardServerImpl implements DashboardServer {
 
   public handleRegistryChange(change: RegistryChange): void {
     const applicationChange = this.application.onRegistryChange(change);
+    if (this.lifecycle !== 'started') return;
     this.changed(
       applicationChange.type === 'event'
         ? {
@@ -1164,7 +1287,7 @@ class DashboardServerImpl implements DashboardServer {
   }
 
   public publishChange(message?: unknown): void {
-    if (!this.started) return;
+    if (this.lifecycle !== 'started') return;
     this.changed(message);
   }
 
