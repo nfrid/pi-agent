@@ -283,6 +283,14 @@ describe('dashboard protocol', () => {
         unexpected: true,
       }),
     ).toBeUndefined();
+    for (const status of ['complete', 'completed', 'finished'] as const)
+      expect(
+        tryParseNormalizedToolPayload({
+          toolCallId: `tool-${status}`,
+          name: 'read',
+          status,
+        })?.status,
+      ).toBe(status);
     expect(
       parseDashboardEventEnvelope({
         cursor: 1,

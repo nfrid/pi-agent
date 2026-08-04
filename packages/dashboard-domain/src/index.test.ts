@@ -156,6 +156,28 @@ describe('dashboard domain reducers', () => {
     expect(state.items['must-not-be-an-identity']).toBeUndefined();
   });
 
+  it('normalizes terminal tool status aliases on update events', () => {
+    for (const status of ['complete', 'completed', 'finished'] as const) {
+      const state = applyTranscriptEvent(
+        hydrateTranscript([], 's'),
+        envelope(1, 1, {
+          type: 'tool.updated',
+          sessionId: 's',
+          tool: {
+            toolCallId: `call-${status}`,
+            name: 'read',
+            status,
+            phase: 'updated',
+          },
+        }),
+      ).state;
+      expect(state.items[`call-${status}`]).toMatchObject({
+        kind: 'tool',
+        status: 'finished',
+      });
+    }
+  });
+
   it('keeps terminal message and tool items inert for later lifecycle events', () => {
     let state = hydrateTranscript([], 's');
     state = applyTranscriptEvent(

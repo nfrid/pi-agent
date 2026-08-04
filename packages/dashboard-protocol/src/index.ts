@@ -300,7 +300,9 @@ export const NormalizedToolPayloadSchema = Type.Object(
       Type.Union([
         Type.Literal('pending'),
         Type.Literal('running'),
+        Type.Literal('complete'),
         Type.Literal('completed'),
+        Type.Literal('finished'),
         Type.Literal('success'),
         Type.Literal('error'),
         Type.Literal('failed'),

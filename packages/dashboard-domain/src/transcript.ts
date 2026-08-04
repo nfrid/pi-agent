@@ -167,6 +167,21 @@ function normalizedMessage(
   };
 }
 
+function normalizedToolStatus(
+  value: unknown,
+): NormalizedToolPayload['status'] | undefined {
+  return value === 'pending' ||
+    value === 'running' ||
+    value === 'complete' ||
+    value === 'completed' ||
+    value === 'finished' ||
+    value === 'success' ||
+    value === 'error' ||
+    value === 'failed'
+    ? value
+    : undefined;
+}
+
 function normalizedTool(value: unknown): NormalizedToolPayload | undefined {
   const direct = tryParseNormalizedToolPayload(value);
   if (direct) return direct;
@@ -177,6 +192,7 @@ function normalizedTool(value: unknown): NormalizedToolPayload | undefined {
   const toolCallId =
     directString(tool, 'toolCallId') ?? directString(tool, 'id');
   if (!toolCallId) return undefined;
+  const status = normalizedToolStatus(tool.status);
   return {
     toolCallId,
     name:
@@ -185,6 +201,7 @@ function normalizedTool(value: unknown): NormalizedToolPayload | undefined {
     ...(tool.arguments === undefined ? {} : { arguments: tool.arguments }),
     ...(tool.result === undefined ? {} : { result: tool.result }),
     ...(typeof tool.isError === 'boolean' ? { isError: tool.isError } : {}),
+    ...(status === undefined ? {} : { status }),
   };
 }
 
@@ -267,7 +284,9 @@ function mergeTool(
     payload.status === 'failed'
       ? 'error'
       : phase === 'finished' ||
+          payload.status === 'complete' ||
           payload.status === 'completed' ||
+          payload.status === 'finished' ||
           payload.status === 'success'
         ? 'finished'
         : phase === 'started'
