@@ -24,6 +24,7 @@ export const ActivityGroupsViewModelSchema = Type.Object(
     title: Type.String({ minLength: 1, maxLength: 1000 }),
     status: Type.Union([
       Type.Literal('live'),
+      Type.Literal('preparing'),
       Type.Literal('complete'),
       Type.Literal('failed'),
     ]),
