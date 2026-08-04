@@ -114,13 +114,33 @@ export function asDashboardStreamMessage(
   return tryParseDashboardStreamMessage(value);
 }
 
+export interface SnapshotAcceptanceProvenance {
+  source?: 'http' | 'sse';
+  /** Generation observed when an HTTP request was started. */
+  requestGeneration?: number;
+  /** Current browser generation at the time the response is accepted. */
+  currentGeneration?: number;
+}
+
 export function snapshotAcceptance(
   currentServerId: string | undefined,
   currentCursor: number,
   next: BrowserSnapshot,
+  provenance: SnapshotAcceptanceProvenance = {},
 ): { accepted: boolean; reset: boolean } {
-  if (currentServerId !== undefined && currentServerId !== next.serverId)
+  if (currentServerId !== undefined && currentServerId !== next.serverId) {
+    // A request made against an older generation is not allowed to roll back
+    // an SSE-authoritative replacement. A request in the current generation
+    // may still discover a legitimate future daemon replacement.
+    if (
+      provenance.source === 'http' &&
+      provenance.requestGeneration !== undefined &&
+      provenance.currentGeneration !== undefined &&
+      provenance.requestGeneration !== provenance.currentGeneration
+    )
+      return { accepted: false, reset: false };
     return { accepted: true, reset: true };
+  }
   return {
     accepted: next.cursor >= currentCursor,
     reset: false,
@@ -139,6 +159,14 @@ export function reconnectDelayWithJitter(
   random = Math.random,
 ): number {
   return Math.round(delay * (0.8 + random() * 0.4));
+}
+
+export function shouldReconnectAfterConnectUnwind(
+  reconnectRequested: boolean,
+  stopped: boolean,
+  online: boolean,
+): boolean {
+  return reconnectRequested && !stopped && online;
 }
 
 async function readApiResponse<T>(response: Response): Promise<T> {
@@ -197,6 +225,8 @@ export interface DashboardState {
   refresh: () => Promise<void>;
   /** A bounded set of canonical reducer inputs newer than recent snapshots. */
   events: readonly DashboardLiveEvent[];
+  /** Cursors for every accepted stream record, including snapshot records. */
+  cursorHistory: readonly number[];
   cursor: number;
   /** Increments only after an authoritative replay-gap resynchronization. */
   resyncNonce: number;
@@ -340,40 +370,57 @@ export function useDashboard(): DashboardState {
   const [error, setError] = useState<string>();
   const [usageError, setUsageError] = useState<string>();
   const [events, setEvents] = useState<DashboardLiveEvent[]>([]);
+  const [cursorHistory, setCursorHistory] = useState<number[]>([]);
   const [resyncNonce, setResyncNonce] = useState(0);
   const [connectionState, setConnectionState] =
     useState<DashboardState['connectionState']>('connecting');
   const acceptedServerId = useRef<string | undefined>(undefined);
   const acceptedCursor = useRef(0);
+  const serverGeneration = useRef(0);
   const usageRequestSerial = useRef(0);
   const latestUsageResponse = useRef(0);
 
-  const acceptSnapshot = useCallback((next: BrowserSnapshot): void => {
-    const decision = snapshotAcceptance(
-      acceptedServerId.current,
-      acceptedCursor.current,
-      next,
-    );
-    if (!decision.accepted) return;
-    const replacingServer = decision.reset;
-    acceptedServerId.current = next.serverId;
-    acceptedCursor.current = next.cursor;
-    if (replacingServer) {
-      setEvents([]);
-      setSnapshot(next);
-    } else {
-      setSnapshot((current) =>
-        current && current.cursor > next.cursor ? current : next,
+  const acceptSnapshot = useCallback(
+    (
+      next: BrowserSnapshot,
+      source: 'http' | 'sse' = 'sse',
+      requestGeneration?: number,
+    ): void => {
+      const decision = snapshotAcceptance(
+        acceptedServerId.current,
+        acceptedCursor.current,
+        next,
+        {
+          source,
+          requestGeneration,
+          currentGeneration: serverGeneration.current,
+        },
       );
-    }
-    setError(undefined);
-  }, []);
+      if (!decision.accepted) return;
+      const replacingServer = decision.reset;
+      if (replacingServer) serverGeneration.current += 1;
+      acceptedServerId.current = next.serverId;
+      acceptedCursor.current = next.cursor;
+      if (replacingServer) {
+        setEvents([]);
+        setCursorHistory([]);
+        setSnapshot(next);
+      } else {
+        setSnapshot((current) =>
+          current && current.cursor > next.cursor ? current : next,
+        );
+      }
+      setError(undefined);
+    },
+    [],
+  );
 
   const refresh = useCallback(async (): Promise<void> => {
+    const requestGeneration = serverGeneration.current;
     try {
       const next = asBrowserSnapshot(await api<unknown>('/api/snapshot'));
       if (!next) throw new Error('Dashboard returned an invalid snapshot.');
-      acceptSnapshot(next);
+      acceptSnapshot(next, 'http', requestGeneration);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
@@ -409,6 +456,7 @@ export function useDashboard(): DashboardState {
     let connectTimer: number | undefined;
     let controller: AbortController | undefined;
     let connecting = false;
+    let reconnectWhenUnwound = false;
     let retryDelay = RECONNECT_MIN_MS;
 
     const scheduleReconnect = () => {
@@ -430,16 +478,47 @@ export function useDashboard(): DashboardState {
       retryDelay = RECONNECT_MIN_MS;
     };
     const acceptRecord = (record: DashboardStreamMessage): void => {
-      if (record.cursor <= acceptedCursor.current) return;
-      if (record.cursor > acceptedCursor.current + 1) {
-        throw new ReplayGapError();
-      }
       if ('type' in record && record.type === 'snapshot') {
-        acceptSnapshot(record.snapshot);
+        if (
+          record.snapshot.serverId === acceptedServerId.current &&
+          record.cursor <= acceptedCursor.current
+        )
+          return;
+        acceptSnapshot(record.snapshot, 'sse');
+        if (
+          acceptedServerId.current !== record.snapshot.serverId ||
+          acceptedCursor.current !== record.cursor
+        )
+          return;
+        setCursorHistory((current) =>
+          [...current, record.cursor].slice(-LIVE_EVENT_BUFFER_LIMIT),
+        );
         return;
       }
-      acceptedCursor.current = record.cursor;
-      if (record.snapshot) acceptSnapshot(record.snapshot);
+      if (
+        record.snapshot &&
+        record.snapshot.serverId !== acceptedServerId.current
+      ) {
+        acceptSnapshot(record.snapshot, 'sse');
+        if (
+          acceptedServerId.current !== record.snapshot.serverId ||
+          acceptedCursor.current !== record.cursor
+        )
+          return;
+      } else {
+        if (record.cursor <= acceptedCursor.current) return;
+        if (record.cursor > acceptedCursor.current + 1) {
+          throw new ReplayGapError();
+        }
+        acceptedCursor.current = record.cursor;
+        if (record.snapshot) {
+          acceptSnapshot(record.snapshot, 'sse');
+          if (acceptedCursor.current !== record.cursor) return;
+        }
+      }
+      setCursorHistory((current) =>
+        [...current, record.cursor].slice(-LIVE_EVENT_BUFFER_LIMIT),
+      );
       setEvents((current) =>
         [...current, record as DashboardLiveEvent].slice(
           -LIVE_EVENT_BUFFER_LIMIT,
@@ -447,7 +526,8 @@ export function useDashboard(): DashboardState {
       );
     };
     const connect = async (): Promise<void> => {
-      if (stopped || connecting || !dashboardToken()) return;
+      if (stopped || connecting || !navigator.onLine || !dashboardToken())
+        return;
       connecting = true;
       setConnectionState('connecting');
       controller = new AbortController();
@@ -479,6 +559,17 @@ export function useDashboard(): DashboardState {
       } finally {
         connecting = false;
         controller = undefined;
+        if (
+          shouldReconnectAfterConnectUnwind(
+            reconnectWhenUnwound,
+            stopped,
+            navigator.onLine,
+          )
+        ) {
+          reconnectWhenUnwound = false;
+          retryDelay = RECONNECT_MIN_MS;
+          void connect();
+        }
       }
     };
     const reconnectNow = () => {
@@ -488,7 +579,11 @@ export function useDashboard(): DashboardState {
         reconnectTimer = undefined;
       }
       retryDelay = RECONNECT_MIN_MS;
-      if (!connecting) void connect();
+      if (connecting) {
+        reconnectWhenUnwound = true;
+        return;
+      }
+      void connect();
     };
     const pauseOffline = () => {
       if (reconnectTimer !== undefined) {
@@ -523,6 +618,7 @@ export function useDashboard(): DashboardState {
     usageError,
     refresh,
     events,
+    cursorHistory,
     cursor: acceptedCursor.current,
     resyncNonce,
     connectionState,

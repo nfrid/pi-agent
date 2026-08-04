@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import {
   mkdir,
   mkdtemp,
@@ -14,6 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { createDashboardServer } from './http.js';
 import { MetadataStore } from './metadata.js';
+import { SessionIndex } from './session-index.js';
 
 let server: Awaited<ReturnType<typeof createDashboardServer>> | undefined;
 afterEach(async () => {
@@ -155,6 +157,90 @@ describe('dashboard HTTP boundary', () => {
     );
     expect(gap.status).toBe(409);
     await expect(gap.json()).resolves.toMatchObject({ code: 'replay-gap' });
+  });
+
+  it('bounds slow SSE subscribers and resumes queued records after drain', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-sse-backpressure-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      sseBufferBytes: 1_024,
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const implementation = server as unknown as {
+      handleSse(
+        request: import('node:http').IncomingMessage,
+        response: import('node:http').ServerResponse,
+        url: URL,
+      ): void;
+      eventStream: {
+        publish(
+          factory: (cursor: number, emittedAt: number) => unknown,
+        ): unknown;
+      };
+      snapshot(
+        cursor?: number,
+      ): import('@pi-dashboard/protocol').BrowserSnapshot;
+    };
+    const response = new EventEmitter() as unknown as {
+      writableEnded: boolean;
+      writableLength: number;
+      writeHead: (...args: unknown[]) => void;
+      flushHeaders: () => void;
+      write: (value: string) => boolean;
+      destroy: () => void;
+    };
+    const writes: string[] = [];
+    let destroyed = false;
+    Object.assign(response, {
+      writableEnded: false,
+      writableLength: 0,
+      writeHead: () => undefined,
+      flushHeaders: () => undefined,
+      write: (value: string) => {
+        writes.push(value);
+        return false;
+      },
+      destroy: () => {
+        destroyed = true;
+        (response as unknown as EventEmitter).emit('close');
+      },
+    });
+    const request = new EventEmitter() as unknown as {
+      url: string;
+      headers: Record<string, string>;
+    };
+    request.url = `/api/events?cursor=${server.snapshot().cursor}`;
+    request.headers = {};
+    implementation.handleSse(
+      request as import('node:http').IncomingMessage,
+      response as unknown as import('node:http').ServerResponse,
+      new URL(`http://127.0.0.1${request.url}`),
+    );
+    const publish = () =>
+      implementation.eventStream.publish((cursor, emittedAt) => ({
+        type: 'snapshot',
+        cursor,
+        emittedAt,
+        snapshot: implementation.snapshot(cursor),
+      }));
+    publish();
+    expect(destroyed).toBe(false);
+    expect(writes).toHaveLength(1);
+    (response as unknown as EventEmitter).emit('drain');
+    expect(writes).toHaveLength(2);
+    publish();
+    expect(writes).toHaveLength(2);
+    for (let index = 0; index < 20 && !destroyed; index += 1) publish();
+    expect(destroyed).toBe(true);
+    const writesAfterCleanup = writes.length;
+    publish();
+    expect(writes).toHaveLength(writesAfterCleanup);
   });
 
   it('turns a cursor from a prior daemon generation into a replay gap', async () => {
@@ -356,6 +442,58 @@ describe('dashboard HTTP boundary', () => {
       (await fetch(`http://127.0.0.1:${server.port}/api/health`)).status,
     ).toBe(200);
     bridge.destroy();
+  });
+
+  it('captures the session cursor before a slow read, even after the replay window advances', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-session-cursor-race-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'slow.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'slow-session', cwd: '/tmp' })}\n`,
+    );
+    const sessions = new SessionIndex(sessionDir);
+    const originalReadEntries = sessions.readEntries.bind(sessions);
+    let releaseRead!: () => void;
+    const readBlocked = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let readStarted!: () => void;
+    const readStartedPromise = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
+    sessions.readEntries = async (id) => {
+      readStarted();
+      await readBlocked;
+      return originalReadEntries(id);
+    };
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      eventBufferSize: 2,
+      stateDir: path.join(root, 'state'),
+      sessionDir,
+      sessions,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const cursorAtRead = server.snapshot().cursor;
+    const pending = fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/slow-session`,
+      { headers: { 'x-dashboard-token': 'test-token' } },
+    );
+    await readStartedPromise;
+    for (let index = 0; index < 4; index += 1) await server.refreshWorkspaces();
+    expect(server.snapshot().cursor).toBeGreaterThan(cursorAtRead + 2);
+    releaseRead();
+    const response = await pending;
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      cursor: cursorAtRead,
+      metadata: { id: 'slow-session' },
+    });
   });
 
   it('forwards authenticated multipart images and removes temporary files after acknowledgement', async () => {

@@ -9,6 +9,7 @@ import {
   nextReconnectDelay,
   reconnectDelayWithJitter,
   shouldAcceptRevision,
+  shouldReconnectAfterConnectUnwind,
   snapshotAcceptance,
 } from './dashboard-transport';
 
@@ -31,6 +32,35 @@ describe('dashboard transport revisions', () => {
         serverId: 'daemon-1',
       }),
     ).toEqual({ accepted: false, reset: false });
+  });
+
+  it('rejects an old HTTP response after a newer SSE generation is authoritative', () => {
+    const oldResponse = {
+      serverId: 'daemon-1',
+      cursor: 12,
+    } as BrowserSnapshot;
+    expect(
+      snapshotAcceptance('daemon-2', 2, oldResponse, {
+        source: 'http',
+        requestGeneration: 0,
+        currentGeneration: 1,
+      }),
+    ).toEqual({ accepted: false, reset: false });
+    expect(
+      snapshotAcceptance(
+        'daemon-2',
+        2,
+        {
+          ...oldResponse,
+          serverId: 'daemon-3',
+        },
+        {
+          source: 'http',
+          requestGeneration: 1,
+          currentGeneration: 1,
+        },
+      ),
+    ).toEqual({ accepted: true, reset: true });
   });
 
   it('dispatches every CRLF data frame from one long-lived response', async () => {
@@ -253,6 +283,12 @@ describe('dashboard transport revisions', () => {
       event('second'),
     );
     expect(pending).toHaveLength(2);
+  });
+
+  it('reconnects when online arrives while an offline abort is unwinding', () => {
+    expect(shouldReconnectAfterConnectUnwind(true, false, true)).toBe(true);
+    expect(shouldReconnectAfterConnectUnwind(true, false, false)).toBe(false);
+    expect(shouldReconnectAfterConnectUnwind(false, false, true)).toBe(false);
   });
 
   it('caps exponential reconnect delay and applies bounded jitter', () => {

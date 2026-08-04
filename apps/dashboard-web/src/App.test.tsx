@@ -13,8 +13,10 @@ import {
   formatContextTokens,
   isNearPageBottom,
   runtimeSupportsImages,
+  sessionCursorRangeCovered,
   sessionDisplayTitle,
   sessionNavigationTarget,
+  shouldApplySessionMetadata,
   shouldShowActivityLead,
   toTranscriptEntries,
 } from './App';
@@ -94,6 +96,19 @@ describe('dashboard snapshots', () => {
         sessions: [],
       }),
     ).toMatchObject({ serverId: 'legacy', unread: [] });
+  });
+});
+
+describe('session hydration cursor coverage', () => {
+  it('does not let a stale metadata envelope roll back hydrated HTTP metadata', () => {
+    expect(shouldApplySessionMetadata(8, 9)).toBe(false);
+    expect(shouldApplySessionMetadata(10, 9)).toBe(true);
+  });
+
+  it('requires every stream cursor between the HTTP snapshot and current state', () => {
+    expect(sessionCursorRangeCovered(4, 7, [5, 6, 7])).toBe(true);
+    expect(sessionCursorRangeCovered(4, 7, [6, 7])).toBe(false);
+    expect(sessionCursorRangeCovered(4, 4, [])).toBe(true);
   });
 });
 

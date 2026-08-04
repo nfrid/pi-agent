@@ -841,9 +841,9 @@ class DashboardServerImpl implements DashboardServer {
     const runtime = this.registry
       .snapshots()
       .find((item) => item.session.id === id && item.online !== false);
+    const cursor = this.eventStream.cursor;
     try {
       const result = await this.sessions.readEntries(id);
-      const cursor = this.eventStream.cursor;
       if (!runtime) return this.json(response, 200, { ...result, cursor });
       return this.json(response, 200, {
         ...result,
@@ -862,7 +862,7 @@ class DashboardServerImpl implements DashboardServer {
     } catch (error) {
       if (!runtime) throw error;
       return this.json(response, 200, {
-        cursor: this.eventStream.cursor,
+        cursor,
         metadata: {
           id,
           file: runtime.session.file ?? '',
@@ -983,6 +983,11 @@ class DashboardServerImpl implements DashboardServer {
     let closed = false;
     let replaying = true;
     const queued: DashboardEventStreamRecord[] = [];
+    let queuedBytes = 0;
+    const pendingWrites: string[] = [];
+    let pendingBytes = 0;
+    let backpressured = false;
+    let drainAttached = false;
     let unsubscribe: () => void = () => undefined;
     let heartbeat: NodeJS.Timeout | undefined;
     const cleanup = () => {
@@ -990,25 +995,76 @@ class DashboardServerImpl implements DashboardServer {
       closed = true;
       unsubscribe();
       if (heartbeat) clearInterval(heartbeat);
+      if (drainAttached) response.off('drain', flushWrites);
+      pendingWrites.length = 0;
+      pendingBytes = 0;
     };
     const closeSlowClient = () => {
       cleanup();
       if (!response.writableEnded) response.destroy();
     };
+    const flushWrites = () => {
+      if (closed || response.writableEnded) return;
+      backpressured = false;
+      drainAttached = false;
+      while (pendingWrites.length > 0) {
+        const value = pendingWrites[0];
+        const bytes = Buffer.byteLength(value);
+        if (response.writableLength + bytes > this.sseBufferBytes) {
+          backpressured = true;
+          if (!drainAttached) {
+            drainAttached = true;
+            response.once('drain', flushWrites);
+          }
+          return;
+        }
+        try {
+          pendingWrites.shift();
+          pendingBytes -= bytes;
+          if (!response.write(value)) {
+            backpressured = true;
+            if (!drainAttached) {
+              drainAttached = true;
+              response.once('drain', flushWrites);
+            }
+            return;
+          }
+        } catch {
+          closeSlowClient();
+          return;
+        }
+      }
+    };
     const writeRaw = (value: string): boolean => {
       if (closed || response.writableEnded) return false;
       const bytes = Buffer.byteLength(value);
-      if (
-        bytes > this.sseBufferBytes ||
-        response.writableLength + bytes > this.sseBufferBytes
-      ) {
+      if (bytes > this.sseBufferBytes) {
+        closeSlowClient();
+        return false;
+      }
+      if (backpressured || pendingWrites.length > 0) {
+        if (
+          response.writableLength + pendingBytes + bytes >
+          this.sseBufferBytes
+        ) {
+          closeSlowClient();
+          return false;
+        }
+        pendingWrites.push(value);
+        pendingBytes += bytes;
+        return true;
+      }
+      if (response.writableLength + bytes > this.sseBufferBytes) {
         closeSlowClient();
         return false;
       }
       try {
         if (!response.write(value)) {
-          closeSlowClient();
-          return false;
+          backpressured = true;
+          if (!drainAttached) {
+            drainAttached = true;
+            response.once('drain', flushWrites);
+          }
         }
         return true;
       } catch {
@@ -1025,8 +1081,14 @@ class DashboardServerImpl implements DashboardServer {
     const writeHeartbeat = () => writeRaw(': heartbeat\n\n');
     const onRecord = (record: DashboardEventStreamRecord) => {
       if (replaying) {
-        if (queued.length >= 256) return closeSlowClient();
+        const bytes =
+          Buffer.byteLength(JSON.stringify(record)) +
+          Buffer.byteLength(
+            `id: ${record.cursor}\nevent: dashboard\ndata: \n\n`,
+          );
+        if (queuedBytes + bytes > this.sseBufferBytes) return closeSlowClient();
         queued.push(record);
+        queuedBytes += bytes;
         return;
       }
       writeRecord(record);

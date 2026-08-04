@@ -128,6 +128,8 @@ export default function App() {
         id={route[1]}
         snapshot={dashboard.snapshot}
         events={dashboard.events}
+        cursor={dashboard.cursor}
+        cursorHistory={dashboard.cursorHistory}
         resyncNonce={dashboard.resyncNonce}
       />
     ) : route[0] === 'workspaces' && route[1] ? (
@@ -683,6 +685,29 @@ export function isNearPageBottom(
   return scrollHeight - scrollY - innerHeight <= threshold;
 }
 
+export function shouldApplySessionMetadata(
+  eventCursor: number,
+  metadataCursor: number,
+): boolean {
+  return eventCursor > metadataCursor;
+}
+
+export function sessionCursorRangeCovered(
+  snapshotCursor: number,
+  currentCursor: number,
+  cursorHistory: readonly number[],
+): boolean {
+  if (currentCursor <= snapshotCursor) return true;
+  let expected = snapshotCursor + 1;
+  for (const cursor of cursorHistory) {
+    if (cursor < expected) continue;
+    if (cursor !== expected) return false;
+    expected += 1;
+    if (expected > currentCursor) return true;
+  }
+  return expected > currentCursor;
+}
+
 export function sessionNavigationTarget(
   currentSessionId: string,
   associatedRuntimeId: string | undefined,
@@ -703,21 +728,32 @@ function SessionView({
   id,
   snapshot,
   events,
+  cursor,
+  cursorHistory,
   resyncNonce,
 }: {
   id: string;
   snapshot: BrowserSnapshot;
   events: readonly DashboardLiveEvent[];
+  cursor: number;
+  cursorHistory: readonly number[];
   resyncNonce: number;
 }) {
   const [data, setData] = useState<SessionResponse>();
   const [projection, setProjection] = useState<TranscriptProjection>();
   const [error, setError] = useState<string>();
+  const dataRef = useRef<SessionResponse | undefined>(undefined);
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const stickToBottomRef = useRef(true);
   const runtimeIdRef = useRef<string | undefined>(undefined);
   const matchedRuntimeIdRef = useRef<string | undefined>(undefined);
+  const metadataCursorRef = useRef(0);
+  const dashboardCursorRef = useRef(cursor);
+  const cursorHistoryRef = useRef(cursorHistory);
   const bufferedEventsRef = useRef(events);
+  dataRef.current = data;
+  dashboardCursorRef.current = cursor;
+  cursorHistoryRef.current = cursorHistory;
   bufferedEventsRef.current = events;
   const runtime = snapshot.runtimes.find((item) => item.session.id === id);
   matchedRuntimeIdRef.current = runtime?.runtimeId;
@@ -725,47 +761,103 @@ function SessionView({
   // new session, so there is briefly no runtime matching the old route. Keep
   // the prior association until the replacement event is consumed.
   if (runtime) runtimeIdRef.current = runtime.runtimeId;
-  const hydrateSession = useCallback((next: SessionResponse) => {
-    let hydrated = hydrateTranscript(next.entries, next.metadata.id, {
-      cursor: next.cursor ?? 0,
-    });
-    // Events can arrive while the HTTP read is in flight. The snapshot is
-    // authoritative only through its cursor; newer buffered envelopes win.
-    for (const queued of bufferedEventsRef.current)
-      if (queued.cursor > hydrated.lastCursor)
-        hydrated = reduceTranscriptEvent(hydrated, queued);
-    return hydrated;
-  }, []);
+  const hydrateSession = useCallback(
+    (next: SessionResponse): TranscriptProjection | undefined => {
+      const snapshotCursor = next.cursor ?? dashboardCursorRef.current;
+      if (
+        !sessionCursorRangeCovered(
+          snapshotCursor,
+          dashboardCursorRef.current,
+          cursorHistoryRef.current,
+        )
+      )
+        return undefined;
+      let hydrated = hydrateTranscript(next.entries, next.metadata.id, {
+        cursor: snapshotCursor,
+      });
+      // Events can arrive while the HTTP read is in flight. The snapshot is
+      // authoritative only through its cursor; newer buffered envelopes win.
+      for (const queued of bufferedEventsRef.current)
+        if (queued.cursor > hydrated.lastCursor)
+          hydrated = reduceTranscriptEvent(hydrated, queued);
+      return hydrated;
+    },
+    [],
+  );
   useEffect(() => {
     if (!id) return;
     runtimeIdRef.current = matchedRuntimeIdRef.current;
+    metadataCursorRef.current = 0;
+    dataRef.current = undefined;
     setData(undefined);
     setProjection(undefined);
     setError(undefined);
   }, [id]);
   useEffect(() => {
     let active = true;
+    let retryTimer: number | undefined;
     void resyncNonce;
-    void api<unknown>(`/api/sessions/${encodeURIComponent(id)}`)
-      .then((value) => {
-        const next = asSessionResponse(value);
-        if (!next) throw new Error('Dashboard returned invalid session data.');
-        if (!active) return;
-        if (next.metadata.id !== id) {
-          navigate(`/sessions/${encodeURIComponent(next.metadata.id)}`);
-          return;
-        }
-        setData(next);
-        setProjection(hydrateSession(next));
-        setError(undefined);
-      })
-      .catch(
-        (cause) =>
-          active &&
-          setError(cause instanceof Error ? cause.message : String(cause)),
-      );
+    const load = () => {
+      void api<unknown>(`/api/sessions/${encodeURIComponent(id)}`)
+        .then((value) => {
+          const next = asSessionResponse(value);
+          if (!next)
+            throw new Error('Dashboard returned invalid session data.');
+          if (!active) return;
+          if (next.metadata.id !== id) {
+            navigate(`/sessions/${encodeURIComponent(next.metadata.id)}`);
+            return;
+          }
+          const hydrated = hydrateSession(next);
+          if (!hydrated) {
+            setError('Session changed while loading; retrying…');
+            retryTimer = window.setTimeout(load, 25);
+            return;
+          }
+          const readCursor = next.cursor ?? dashboardCursorRef.current;
+          let metadataCursor = Math.max(metadataCursorRef.current, readCursor);
+          let metadata = next.metadata;
+          if (
+            dataRef.current?.metadata.id === id &&
+            metadataCursorRef.current > readCursor
+          )
+            metadata = dataRef.current.metadata;
+          for (const queued of bufferedEventsRef.current) {
+            const event = queued.event;
+            if (
+              queued.cursor <= metadataCursor ||
+              (event.type !== 'session.changed' &&
+                event.type !== 'session.snapshot') ||
+              event.session.id !== id
+            )
+              continue;
+            metadata = {
+              ...metadata,
+              ...(event.session.name !== undefined
+                ? { name: event.session.name }
+                : {}),
+              ...(event.session.title !== undefined
+                ? { title: event.session.title }
+                : {}),
+            };
+            metadataCursor = queued.cursor;
+          }
+          metadataCursorRef.current = metadataCursor;
+          const accepted =
+            metadata === next.metadata ? next : { ...next, metadata };
+          setData(accepted);
+          setProjection(hydrated);
+          setError(undefined);
+        })
+        .catch((cause) => {
+          if (active)
+            setError(cause instanceof Error ? cause.message : String(cause));
+        });
+    };
+    load();
     return () => {
       active = false;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
   }, [id, resyncNonce, hydrateSession]);
   useEffect(() => {
@@ -816,8 +908,11 @@ function SessionView({
       if (
         (event.type === 'session.changed' ||
           event.type === 'session.snapshot') &&
-        changedSessionId === id
+        changedSessionId === id &&
+        data &&
+        shouldApplySessionMetadata(queued.cursor, metadataCursorRef.current)
       ) {
+        metadataCursorRef.current = queued.cursor;
         setData((current) =>
           current
             ? {
