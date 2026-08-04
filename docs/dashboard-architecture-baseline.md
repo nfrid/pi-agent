@@ -147,13 +147,13 @@ Phase 2 preserves the Unix-socket frame, queue, generation, authentication/origi
 
 ## Phase 3: modular daemon composition
 
-Implemented 2026-08-04. The daemon now has a manual entrypoint in `apps/dashboard-server/src/main.ts` and `create-daemon.ts`; `createDashboardServer` remains the inexpensive public compatibility factory. Browser HTTP is served by Fastify route plugins in `routes.ts`. The plugin owns request parsing, CORS/auth adaptation, TypeBox-backed boundary schemas, status mapping, and route registration; application methods receive plain values rather than Fastify request/reply objects. `GET /api/events` still hands the raw response to the bounded SSE writer, and `/ws` still uses the raw Node upgrade listener by design.
+Implemented 2026-08-04. `apps/dashboard-server/src/create-daemon.ts` is the manual composition root: it resolves environment/options into configuration, constructs the SQLite facade, session index, adapters, registry/manager, application services, event stream, and relay callbacks, then injects one explicit `DashboardDependencies` graph into `DashboardServerImpl`. The registry and application relays are connected only after the transport exists, so registry callbacks do not recursively publish themselves. `main.ts` remains the development wrapper; `dist/index.js` is the production/launchd entrypoint. `createDashboardServer` delegates to this same root. Browser HTTP is served by Fastify route plugins in `routes.ts`. The plugin owns request parsing, CORS/auth adaptation, TypeBox-backed boundary schemas, status mapping, and route registration; application methods receive plain values rather than Fastify request/reply objects. `GET /api/events` still hands the raw response to the bounded SSE writer, and `/ws` still uses the raw Node upgrade listener by design.
 
 ### Module map
 
 ```text
 main.ts / create-daemon.ts             manual composition + lifecycle
-  -> http.ts                            transport shell, raw bridge, WS/SSE compatibility
+  -> http.ts                            Fastify/raw transport shell, WS/SSE compatibility
      -> routes.ts                       Fastify browser route plugin + TypeBox schemas
      -> application/
           runtime-service               launch, stop, command, interaction, rename
@@ -173,4 +173,4 @@ main.ts / create-daemon.ts             manual composition + lifecycle
 
 ### Remaining compatibility layer
 
-`http.ts` intentionally retains the old manual dispatcher and its raw Node SSE implementation as a migration aid for tests and existing internal callers; the live listener is Fastify-backed and registers `routes.ts`. It also retains the bounded browser WebSocket at `/ws` until the documented SSE population/retirement window ends. `RuntimeRegistry` remains the independently testable Unix-socket bridge and is not wrapped by Fastify. The phase does not introduce TanStack, Tailwind, or any Phase 4/5 UI migration.
+`http.ts` intentionally retains the old manual dispatcher and its raw Node SSE implementation as a bounded migration aid for tests and existing internal callers; the live listener is Fastify-backed and registers `routes.ts`. It still owns the HTTP/Fastify instance, Unix bridge listener, raw SSE writer, and bounded browser WebSocket at `/ws`; those are transport lifecycles rather than a second dependency graph. `RuntimeRegistry` remains the independently testable Unix-socket bridge and is not wrapped by Fastify. The remaining debt is this legacy dispatcher plus duplicate raw SSE/WS compatibility paths, which can be retired after callers and browser clients leave the compatibility window. The phase does not introduce TanStack, Tailwind, or any Phase 4/5 UI migration.

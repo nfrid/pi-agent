@@ -1,11 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import {
-  chmodSync,
-  promises as fs,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import { promises as fs } from 'node:fs';
 import type http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
@@ -21,21 +15,15 @@ import {
 } from '@pi-dashboard/protocol';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { type WebSocket, WebSocketServer } from 'ws';
-import { DashboardApplication } from './application/dashboard-application.js';
-import {
-  DashboardEventStream,
-  type DashboardEventStreamRecord,
-} from './event-stream.js';
-import { MetadataStore } from './metadata.js';
-import { createPushSender, type PushSender } from './push.js';
+import type {
+  DashboardDependencies,
+  DashboardServerOptions,
+} from './composition.js';
+import type { DashboardEventStreamRecord } from './event-stream.js';
+import { createPushSender } from './push.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
-import { RuntimeManager } from './runtime-manager.js';
-import { type RegistryChange, RuntimeRegistry } from './runtime-registry.js';
+import type { RegistryChange } from './runtime-registry.js';
 import { allowedOrigin, authorizeRequest, safeTokenEqual } from './security.js';
-import { CliSeshAdapter, type SeshAdapter } from './sesh.js';
-import { SessionIndex } from './session-index.js';
-import { TmuxAdapter } from './tmux.js';
-import { CodexUsageProvider, type UsageProvider } from './usage.js';
 
 const MAX_BODY = 512 * 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -43,34 +31,9 @@ const MAX_IMAGE_TOTAL_BYTES = 12 * 1024 * 1024;
 const MAX_MULTIPART_BYTES = MAX_IMAGE_TOTAL_BYTES + 256 * 1024;
 const MAX_IMAGE_COUNT = 4;
 const MAX_WS_BUFFER = 1024 * 1024;
-const MAX_USAGE_BYTES = 256 * 1024;
-const USAGE_CACHE_MS = 30_000;
 const WS_HEARTBEAT_MS = 30_000;
-const SSE_HEARTBEAT_MS = 15_000;
-const SSE_BUFFER_BYTES = 1024 * 1024;
 const WS_PATH = '/ws';
 const SSE_PATH = '/api/events';
-
-function loadOrCreateToken(stateDir: string): string {
-  const file = path.join(stateDir, 'browser-token');
-  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-  try {
-    const existing = readFileSync(file, 'utf8').trim();
-    if (existing.length >= 32 && existing.length <= 512) return existing;
-  } catch {
-    /* create below */
-  }
-  const token = randomBytes(32).toString('base64url');
-  try {
-    writeFileSync(file, `${token}\n`, { encoding: 'utf8', mode: 0o600 });
-    chmodSync(file, 0o600);
-    return token;
-  } catch {
-    const existing = readFileSync(file, 'utf8').trim();
-    if (existing.length >= 32 && existing.length <= 512) return existing;
-    throw new Error('Could not create a stable dashboard browser token.');
-  }
-}
 
 function validImageDimensions(width: number, height: number): boolean {
   return (
@@ -205,33 +168,12 @@ function isTranscriptEvent(change: RegistryChange): boolean {
   );
 }
 
-export interface DashboardServerOptions {
-  host?: string;
-  port?: number;
-  socketPath?: string;
-  authToken?: string;
-  origins?: readonly string[];
-  stateDir?: string;
-  sessionDir?: string;
-  sesh?: SeshAdapter;
-  tmux?: TmuxAdapter;
-  metadata?: MetadataStore;
-  sessions?: SessionIndex;
-  registry?: RuntimeRegistry;
-  usage?: UsageProvider;
-  push?: PushSender;
-  /** Maximum number of daemon events retained for SSE replay. */
-  eventBufferSize?: number;
-  sseHeartbeatMs?: number;
-  sseBufferBytes?: number;
-}
-
 export interface DashboardServer {
   readonly token: string;
   readonly socketPath: string;
   readonly port: number;
-  readonly registry: RuntimeRegistry;
-  readonly manager: RuntimeManager;
+  readonly registry: DashboardDependencies['registry'];
+  readonly manager: DashboardDependencies['manager'];
   start(): Promise<void>;
   stop(): Promise<void>;
   snapshot(): BrowserSnapshot;
@@ -241,26 +183,23 @@ export interface DashboardServer {
 class DashboardServerImpl implements DashboardServer {
   readonly token: string;
   readonly socketPath: string;
-  readonly registry: RuntimeRegistry;
-  readonly manager: RuntimeManager;
+  readonly registry: DashboardDependencies['registry'];
+  readonly manager: DashboardDependencies['manager'];
   port: number;
   private readonly host: string;
   private readonly origins: string[];
   private readonly stateDir: string;
-  private readonly metadata: MetadataStore;
-  private readonly sessions: SessionIndex;
-  private readonly sesh: SeshAdapter;
-  private readonly tmux: TmuxAdapter;
-  private readonly usage: UsageProvider;
-  private push: PushSender;
+  private readonly metadata: DashboardDependencies['metadata'];
+  private readonly sessions: DashboardDependencies['sessions'];
   private readonly pushConfigured: boolean;
+  private push: DashboardDependencies['push'];
   private readonly app: FastifyInstance;
   private readonly http: http.Server;
   private readonly bridge: net.Server;
-  private readonly eventStream: DashboardEventStream;
+  private readonly eventStream: DashboardDependencies['eventStream'];
   private readonly sseHeartbeatMs: number;
   private readonly sseBufferBytes: number;
-  private readonly application: DashboardApplication;
+  private readonly application: DashboardDependencies['application'];
   private readonly wss = new WebSocketServer({
     noServer: true,
     maxPayload: 2048,
@@ -268,89 +207,30 @@ class DashboardServerImpl implements DashboardServer {
   private readonly clients = new Set<WebSocket>();
   private readonly awaitingPong = new WeakSet<WebSocket>();
   private heartbeatTimer: NodeJS.Timeout | undefined;
-  private sessionPublishTimer: NodeJS.Timeout | undefined;
   private workspaces: WorkspaceTarget[] = [];
-  private usageSnapshot: unknown;
-  private usageUpdatedAt = 0;
-  private usageRequest: Promise<unknown> | undefined;
   private readonly serverId = randomBytes(12).toString('base64url');
   private revision = 0;
   private started = false;
 
-  constructor(options: DashboardServerOptions = {}) {
-    this.host = options.host ?? process.env.PI_DASHBOARD_HOST ?? '127.0.0.1';
-    this.port = options.port ?? Number(process.env.PI_DASHBOARD_PORT ?? 0);
-    this.stateDir =
-      options.stateDir ??
-      process.env.PI_DASHBOARD_STATE_DIR ??
-      path.join(process.env.HOME ?? process.cwd(), '.pi', 'agent', 'dashboard');
-    this.token =
-      options.authToken ??
-      process.env.PI_DASHBOARD_AUTH_TOKEN ??
-      loadOrCreateToken(this.stateDir);
-    this.socketPath =
-      options.socketPath ??
-      (options.stateDir
-        ? path.join(this.stateDir, 'bridge.sock')
-        : (process.env.PI_DASHBOARD_SOCKET ??
-          path.join(this.stateDir, 'bridge.sock')));
-    this.metadata =
-      options.metadata ??
-      new MetadataStore(path.join(this.stateDir, 'dashboard.sqlite'));
-    this.sessions =
-      options.sessions ??
-      new SessionIndex(
-        options.sessionDir ??
-          process.env.PI_SESSION_DIR ??
-          path.join(
-            process.env.HOME ?? process.cwd(),
-            '.pi',
-            'agent',
-            'sessions',
-          ),
-        this.metadata,
-        () => this.scheduleSessionPublish(),
-      );
-    this.sesh = options.sesh ?? new CliSeshAdapter();
-    this.tmux = options.tmux ?? new TmuxAdapter();
-    this.usage = options.usage ?? new CodexUsageProvider();
-    this.eventStream = new DashboardEventStream(options.eventBufferSize ?? 256);
-    this.sseHeartbeatMs = options.sseHeartbeatMs ?? SSE_HEARTBEAT_MS;
-    this.sseBufferBytes = options.sseBufferBytes ?? SSE_BUFFER_BYTES;
-    this.pushConfigured = Boolean(options.push);
-    this.push = options.push ?? {
-      async notify() {
-        /* installed after start */
-      },
-    };
-    let manager!: RuntimeManager;
-    this.registry =
-      options.registry ??
-      new RuntimeRegistry({
-        allowExternalWithoutToken: true,
-        expectedToken: (runtimeId, launchToken, identityToken) =>
-          manager.expectedToken(runtimeId, launchToken, identityToken),
-        onChange: (change) => this.onRegistryChange(change),
-      });
-    this.manager = manager = new RuntimeManager(
-      this.registry,
-      this.tmux,
-      this.sessions,
-      this.metadata,
-      this.socketPath,
-    );
-    this.application = new DashboardApplication({
-      registry: this.registry,
-      manager: this.manager,
-      sessions: this.sessions,
-      metadata: this.metadata,
-      sesh: this.sesh,
-      usage: this.usage,
-      push: this.push,
-      stateDir: this.stateDir,
-      eventStream: this.eventStream,
-    });
-    this.origins = [...(options.origins ?? this.defaultOrigins())];
+  constructor(dependencies: DashboardDependencies) {
+    const config = dependencies.configuration;
+    this.host = config.host;
+    this.port = config.port;
+    this.stateDir = config.stateDir;
+    this.token = config.token;
+    this.socketPath = config.socketPath;
+    this.metadata = dependencies.metadata;
+    this.sessions = dependencies.sessions;
+    this.pushConfigured = dependencies.pushConfigured;
+    this.push = dependencies.push;
+    this.registry = dependencies.registry;
+    this.manager = dependencies.manager;
+    this.eventStream = dependencies.eventStream;
+    this.sseHeartbeatMs = config.sseHeartbeatMs;
+    this.sseBufferBytes = config.sseBufferBytes;
+    this.application = dependencies.application;
+    this.origins = config.origins;
+
     this.bridge = net.createServer((socket) => {
       try {
         socket.setTimeout(0);
@@ -361,7 +241,7 @@ class DashboardServerImpl implements DashboardServer {
     });
     this.app = Fastify({
       logger: false,
-      bodyLimit: MAX_MULTIPART_BYTES,
+      bodyLimit: MAX_BODY,
     });
     this.app.register(dashboardRoutes, { context: this.routeContext() });
     this.http = this.app.server;
@@ -550,8 +430,6 @@ class DashboardServerImpl implements DashboardServer {
     this.started = false;
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = undefined;
-    if (this.sessionPublishTimer) clearTimeout(this.sessionPublishTimer);
-    this.sessionPublishTimer = undefined;
     this.sessions.close();
     this.eventStream.close();
     this.registry.close();
@@ -578,7 +456,6 @@ class DashboardServerImpl implements DashboardServer {
   async refreshWorkspaces(): Promise<WorkspaceTarget[]> {
     const workspaces = await this.application.refreshWorkspaces();
     this.workspaces = workspaces;
-    this.changed();
     return workspaces;
   }
 
@@ -653,6 +530,7 @@ class DashboardServerImpl implements DashboardServer {
       `http://${request.headers.host ?? `${this.host}:${this.port}`}`,
     );
     this.setCors(response, request.headers.origin);
+    response.setHeader('cache-control', 'no-store');
     if (request.method === 'OPTIONS') {
       if (!allowedOrigin(request.headers.origin, this.origins))
         return this.json(response, 403, { error: 'Origin is not allowed.' });
@@ -1004,42 +882,7 @@ class DashboardServerImpl implements DashboardServer {
   }
 
   private async handleUsage(response: http.ServerResponse): Promise<void> {
-    try {
-      if (
-        this.usageSnapshot !== undefined &&
-        Date.now() - this.usageUpdatedAt < USAGE_CACHE_MS
-      )
-        return this.json(response, 200, { usage: this.usageSnapshot });
-      if (this.usageRequest) {
-        await this.usageRequest;
-        return this.json(response, 200, { usage: this.usageSnapshot });
-      }
-      const request = this.usage.get();
-      this.usageRequest = request;
-      let usage: unknown;
-      try {
-        usage = await request;
-      } finally {
-        if (this.usageRequest === request) this.usageRequest = undefined;
-      }
-      // Usage is an optional provider boundary. Reject values that cannot be
-      // represented on the wire instead of poisoning every future snapshot.
-      const serialized = JSON.stringify(usage);
-      if (
-        serialized === undefined ||
-        Buffer.byteLength(serialized) > MAX_USAGE_BYTES
-      )
-        throw new Error('Usage payload exceeds the dashboard size limit.');
-      this.usageSnapshot = usage;
-      this.usageUpdatedAt = Date.now();
-      this.changed();
-      return this.json(response, 200, { usage: this.usageSnapshot });
-    } catch (error) {
-      return this.json(response, 200, {
-        usage: this.usageSnapshot,
-        error: error instanceof Error ? error.message : 'Usage unavailable.',
-      });
-    }
+    return this.json(response, 200, await this.application.usage.get());
   }
 
   private async handlePushSubscribe(
@@ -1308,26 +1151,7 @@ class DashboardServerImpl implements DashboardServer {
     response.end(text);
   }
 
-  private defaultOrigins(): string[] {
-    return [
-      `http://${this.host}:${this.port}`,
-      `http://localhost:${this.port}`,
-      ...(process.env.PI_DASHBOARD_ORIGINS?.split(',')
-        .map((origin) => origin.trim())
-        .filter(Boolean) ?? []),
-    ];
-  }
-
-  private scheduleSessionPublish(): void {
-    if (!this.started || this.sessionPublishTimer) return;
-    this.sessionPublishTimer = setTimeout(() => {
-      this.sessionPublishTimer = undefined;
-      if (this.started) this.changed();
-    }, 250);
-    this.sessionPublishTimer.unref?.();
-  }
-
-  private onRegistryChange(change: RegistryChange): void {
+  public handleRegistryChange(change: RegistryChange): void {
     const applicationChange = this.application.onRegistryChange(change);
     this.changed(
       applicationChange.type === 'event'
@@ -1337,6 +1161,11 @@ class DashboardServerImpl implements DashboardServer {
           }
         : { type: 'snapshot', snapshot: this.snapshot() },
     );
+  }
+
+  public publishChange(message?: unknown): void {
+    if (!this.started) return;
+    this.changed(message);
   }
 
   private changed(message?: unknown): void {
@@ -1457,8 +1286,9 @@ class DashboardServerImpl implements DashboardServer {
 export async function createDashboardServer(
   options: DashboardServerOptions = {},
 ): Promise<DashboardServer> {
-  const server = new DashboardServerImpl(options);
-  return server;
+  const { createDaemon } = await import('./create-daemon.js');
+  return createDaemon(options);
 }
 
+export type { DashboardServerOptions } from './composition.js';
 export { DashboardServerImpl };

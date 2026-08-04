@@ -10,8 +10,38 @@ import type {
 import { Type } from 'typebox';
 import { allowedOrigin, authorizeRequest } from './security.js';
 
+const MAX_JSON_BODY = 512 * 1024;
+const MAX_MULTIPART_BODY = 12 * 1024 * 1024 + 256 * 1024;
 const objectBody = Type.Object({}, { additionalProperties: true });
 const anyBody = Type.Any();
+
+type BodyLimitError = Error & { code: string; statusCode: number };
+
+function bodyTooLarge(): BodyLimitError {
+  return Object.assign(new Error('Request body is too large.'), {
+    code: 'FST_ERR_CTP_BODY_TOO_LARGE',
+    statusCode: 413,
+  });
+}
+
+function parseJsonBody(
+  _request: FastifyRequest,
+  body: Buffer,
+  done: (error: Error | null, value?: unknown) => void,
+): void {
+  if (body.byteLength > MAX_JSON_BODY) {
+    done(bodyTooLarge());
+    return;
+  }
+  try {
+    done(null, JSON.parse(body.toString('utf8')) as unknown);
+  } catch (error) {
+    const parseError =
+      error instanceof Error ? error : new Error(String(error));
+    Object.assign(parseError, { statusCode: 400 });
+    done(parseError);
+  }
+}
 
 export interface DashboardRouteContext {
   readonly token: string;
@@ -132,6 +162,25 @@ export const dashboardRoutes: FastifyPluginAsync<{
   context: DashboardRouteContext;
 }> = async (app, options) => {
   const { context } = options;
+  app.addHook('onSend', async (_request, reply) => {
+    reply.header('cache-control', 'no-store');
+  });
+  app.setErrorHandler((error, _request, reply) => {
+    const statusCode =
+      typeof (error as { statusCode?: unknown }).statusCode === 'number'
+        ? (error as { statusCode: number }).statusCode
+        : 500;
+    return reply.code(statusCode).send({
+      error: error instanceof Error ? error.message : String(error),
+      code: (error as { code?: string }).code,
+    });
+  });
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser(
+    'application/json',
+    { parseAs: 'buffer' },
+    parseJsonBody,
+  );
   app.addContentTypeParser(
     'multipart/form-data',
     { parseAs: 'buffer' },
@@ -226,7 +275,10 @@ export const dashboardRoutes: FastifyPluginAsync<{
   );
   app.post<{ Params: { runtimeId: string } }>(
     '/api/runtimes/:runtimeId/command',
-    { schema: { body: anyBody } },
+    {
+      bodyLimit: MAX_MULTIPART_BODY,
+      schema: { body: anyBody },
+    },
     async (request, reply) => {
       try {
         const payload = await commandPayload(request);

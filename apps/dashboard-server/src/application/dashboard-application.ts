@@ -55,14 +55,12 @@ export class DashboardApplication {
   private readonly manager: RuntimeManager;
   private readonly metadata: MetadataStore;
   private readonly sessionIndex: SessionIndex;
-  private readonly onChange?: () => void;
 
   constructor(options: DashboardApplicationOptions) {
     this.registry = options.registry;
     this.manager = options.manager;
     this.metadata = options.metadata;
     this.sessionIndex = options.sessions;
-    this.onChange = options.onChange;
     this.eventStream = options.eventStream ?? new DashboardEventStream(256);
     this.runtime = new RuntimeService(
       options.registry,
@@ -144,7 +142,6 @@ export class DashboardApplication {
       this.metadata.saveRuntime(change.snapshot);
     this.manager.onRegistryChange(change);
     this.notifications.handle(change);
-    this.onChange?.();
     return change.kind === 'event'
       ? {
           type: 'event',

@@ -89,4 +89,99 @@ describe('Fastify dashboard route plugin', () => {
       }),
     ).resolves.toMatchObject({ statusCode: 400 });
   });
+
+  it('rejects oversized JSON before a route handler while allowing larger multipart commands', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    let called = false;
+    let startCalled = false;
+    routeContext.startRuntime = async () => {
+      startCalled = true;
+      return { runtimeId: 'unexpected' };
+    };
+    routeContext.commandRuntime = async () => {
+      called = true;
+      return { accepted: true };
+    };
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+      'content-type': 'application/json',
+    };
+    const oversized = await app.inject({
+      method: 'POST',
+      url: '/api/runtimes/runtime/command',
+      headers,
+      payload: JSON.stringify({ text: 'x'.repeat(512 * 1024) }),
+    });
+    expect(oversized.statusCode).toBe(413);
+    expect(oversized.headers['cache-control']).toBe('no-store');
+    expect(called).toBe(false);
+
+    const globalOversized = await app.inject({
+      method: 'POST',
+      url: '/api/runtimes/start',
+      headers,
+      payload: JSON.stringify({
+        workspaceId: 'workspace',
+        value: 'x'.repeat(512 * 1024),
+      }),
+    });
+    expect(globalOversized.statusCode).toBe(413);
+    expect(startCalled).toBe(false);
+
+    const form = new FormData();
+    form.set('command', '{}');
+    form.set('padding', 'x'.repeat(600 * 1024));
+    const formRequest = new Request('http://dashboard.test', {
+      method: 'POST',
+      body: form,
+    });
+    const accepted = await app.inject({
+      method: 'POST',
+      url: '/api/runtimes/runtime/command',
+      headers: {
+        ...headers,
+        'content-type': formRequest.headers.get('content-type') as string,
+      },
+      payload: Buffer.from(await formRequest.arrayBuffer()),
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(called).toBe(true);
+  });
+
+  it('marks API success, auth, and not-found responses no-store', async () => {
+    const app = Fastify();
+    apps.push(app);
+    await app.register(dashboardRoutes, { context: context() });
+    await app.ready();
+    await expect(
+      app.inject({ method: 'GET', url: '/api/health' }),
+    ).resolves.toMatchObject({
+      statusCode: 200,
+      headers: { 'cache-control': 'no-store' },
+    });
+    await expect(
+      app.inject({ method: 'GET', url: '/api/snapshot' }),
+    ).resolves.toMatchObject({
+      statusCode: 401,
+      headers: { 'cache-control': 'no-store' },
+    });
+    await expect(
+      app.inject({
+        method: 'GET',
+        url: '/api/missing',
+        headers: {
+          origin: 'http://dashboard.test',
+          'x-dashboard-token': 'route-token',
+        },
+      }),
+    ).resolves.toMatchObject({
+      statusCode: 404,
+      headers: { 'cache-control': 'no-store' },
+    });
+  });
 });
