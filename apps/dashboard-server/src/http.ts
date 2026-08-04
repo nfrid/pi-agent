@@ -6,27 +6,29 @@ import {
   readFileSync,
   writeFileSync,
 } from 'node:fs';
-import http from 'node:http';
+import type http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 import { URL } from 'node:url';
 import {
   type BridgeEvent,
   type BrowserSnapshot,
-  type NotificationEvent,
   redactImageData,
   validateBridgeCommand,
   validateSessionRenameRequest,
   validateStartRuntimeRequest,
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
+import Fastify, { type FastifyInstance } from 'fastify';
 import { type WebSocket, WebSocketServer } from 'ws';
+import { DashboardApplication } from './application/dashboard-application.js';
 import {
   DashboardEventStream,
   type DashboardEventStreamRecord,
 } from './event-stream.js';
 import { MetadataStore } from './metadata.js';
 import { createPushSender, type PushSender } from './push.js';
+import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 import { RuntimeManager } from './runtime-manager.js';
 import { type RegistryChange, RuntimeRegistry } from './runtime-registry.js';
 import { allowedOrigin, authorizeRequest, safeTokenEqual } from './security.js';
@@ -252,11 +254,13 @@ class DashboardServerImpl implements DashboardServer {
   private readonly usage: UsageProvider;
   private push: PushSender;
   private readonly pushConfigured: boolean;
+  private readonly app: FastifyInstance;
   private readonly http: http.Server;
   private readonly bridge: net.Server;
   private readonly eventStream: DashboardEventStream;
   private readonly sseHeartbeatMs: number;
   private readonly sseBufferBytes: number;
+  private readonly application: DashboardApplication;
   private readonly wss = new WebSocketServer({
     noServer: true,
     maxPayload: 2048,
@@ -335,6 +339,17 @@ class DashboardServerImpl implements DashboardServer {
       this.metadata,
       this.socketPath,
     );
+    this.application = new DashboardApplication({
+      registry: this.registry,
+      manager: this.manager,
+      sessions: this.sessions,
+      metadata: this.metadata,
+      sesh: this.sesh,
+      usage: this.usage,
+      push: this.push,
+      stateDir: this.stateDir,
+      eventStream: this.eventStream,
+    });
     this.origins = [...(options.origins ?? this.defaultOrigins())];
     this.bridge = net.createServer((socket) => {
       try {
@@ -344,9 +359,12 @@ class DashboardServerImpl implements DashboardServer {
       }
       this.registry.accept(socket);
     });
-    this.http = http.createServer(
-      (request, response) => void this.handleHttp(request, response),
-    );
+    this.app = Fastify({
+      logger: false,
+      bodyLimit: MAX_MULTIPART_BYTES,
+    });
+    this.app.register(dashboardRoutes, { context: this.routeContext() });
+    this.http = this.app.server;
     this.http.on('upgrade', (request, socket, head) => {
       this.handleUpgrade(request, socket, head);
     });
@@ -395,13 +413,107 @@ class DashboardServerImpl implements DashboardServer {
     });
   }
 
+  private routeContext(): DashboardRouteContext {
+    return {
+      token: this.token,
+      origins: () => this.origins,
+      snapshot: () =>
+        this.application.snapshot(
+          this.serverId,
+          this.revision,
+          this.eventStream.cursor,
+        ),
+      workspaces: () => this.application.workspaces.list(),
+      refreshWorkspaces: () => this.refreshWorkspaces(),
+      usage: () => this.application.usage.get(),
+      readSession: (id) => this.sessionResult(id),
+      renameSession: async (id, name) => {
+        if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
+          throw new Error('Invalid session id.');
+        const { name: safeName } = validateSessionRenameRequest({ name });
+        const runtime = this.registry
+          .snapshots()
+          .find((item) => item.session.id === id && item.online !== false);
+        if (runtime) {
+          const result = await this.application.runtime.renameSession(
+            id,
+            safeName,
+          );
+          this.changed();
+          return { result };
+        }
+        const metadata = await this.application.runtime.renameSession(
+          id,
+          safeName,
+        );
+        this.changed();
+        return { metadata };
+      },
+      startRuntime: async (input) => {
+        const result = await this.application.runtime.launch(input);
+        this.changed();
+        return result;
+      },
+      commandRuntime: async (runtimeId, input, imageBuffers) => {
+        if (!input || typeof input !== 'object' || Array.isArray(input))
+          throw new Error('Invalid command body.');
+        const body = input as Record<string, unknown>;
+        if ('images' in body)
+          throw new Error('Image paths cannot be supplied by browser clients.');
+        const images =
+          imageBuffers.length > 0
+            ? await this.application.uploads.save(imageBuffers)
+            : [];
+        try {
+          if (
+            imageBuffers.length > 0 &&
+            this.registry.get(runtimeId)?.model?.supportsImages !== true
+          )
+            throw new Error(
+              'This runtime does not support dashboard image attachments; reload it and select an image-capable model.',
+            );
+          const command = validateBridgeCommand({
+            ...body,
+            id: 'browser',
+            ...(images.length > 0 ? { images } : {}),
+          });
+          const { id: _id, ...inputCommand } = command;
+          return await this.application.runtime.command(
+            runtimeId,
+            inputCommand,
+          );
+        } finally {
+          await this.application.uploads.cleanup(
+            images.map((image) => image.path),
+          );
+        }
+      },
+      stopRuntime: async (runtimeId, force) => {
+        await this.application.runtime.stop(runtimeId, force);
+        this.changed();
+      },
+      interaction: (id, answer, cancel) =>
+        this.application.runtime.answerInteraction(id, answer, cancel),
+      markNotificationRead: (id) => {
+        this.application.markNotificationRead(id);
+        this.changed();
+      },
+      markAllNotificationsRead: () => {
+        this.application.markAllNotificationsRead();
+        this.changed();
+      },
+      pushSubscribe: (body) => this.savePushSubscription(body),
+      vapidPublicKey: () => process.env.PI_DASHBOARD_VAPID_PUBLIC_KEY ?? null,
+      handleSse: (request, response, url) =>
+        this.handleSse(request, response, url),
+    };
+  }
+
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
     await fs.mkdir(this.stateDir, { recursive: true, mode: 0o700 });
-    const uploads = path.join(this.stateDir, 'uploads');
-    await fs.rm(uploads, { recursive: true, force: true });
-    await fs.mkdir(uploads, { recursive: true, mode: 0o700 });
+    await this.application.uploads.start();
     await fs.rm(this.socketPath, { force: true }).catch(() => undefined);
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => {
@@ -415,17 +527,7 @@ class DashboardServerImpl implements DashboardServer {
       });
     });
     await fs.chmod(this.socketPath, 0o600).catch(() => undefined);
-    await new Promise<void>((resolve, reject) => {
-      const onError = (error: Error) => {
-        this.http.off('error', onError);
-        reject(error);
-      };
-      this.http.once('error', onError);
-      this.http.listen(this.port, this.host, () => {
-        this.http.off('error', onError);
-        resolve();
-      });
-    });
+    await this.app.listen({ port: this.port, host: this.host });
     const address = this.http.address();
     if (address && typeof address === 'object') this.port = address.port;
     this.origins.push(
@@ -435,6 +537,7 @@ class DashboardServerImpl implements DashboardServer {
     await this.refreshWorkspaces();
     await this.sessions.start(this.workspaces);
     if (!this.pushConfigured) this.push = await createPushSender(this.metadata);
+    this.application.setPush(this.push);
     this.heartbeatTimer = setInterval(
       () => this.heartbeatClients(),
       WS_HEARTBEAT_MS,
@@ -460,65 +563,87 @@ class DashboardServerImpl implements DashboardServer {
       }
     }
     this.clients.clear();
-    await new Promise<void>((resolve) => this.http.close(() => resolve()));
+    await this.app.close();
     await new Promise<void>((resolve) => this.bridge.close(() => resolve()));
     await fs.rm(this.socketPath, { force: true }).catch(() => undefined);
+    await this.application.uploads.close();
+    this.push.close?.();
     this.metadata.close();
   }
 
   snapshot(cursor = this.eventStream.cursor): BrowserSnapshot {
-    const liveRuntimes = this.registry.snapshots();
-    const activeSessions = new Map(
-      liveRuntimes
-        .filter((runtime) => runtime.online !== false)
-        .map((runtime) => [runtime.session.id, runtime.runtimeId]),
-    );
-    return {
-      serverId: this.serverId,
-      revision: this.revision,
-      cursor,
-      // Transcripts are served by the session endpoint and reconciled from
-      // typed bridge events. Repeating them in every dashboard snapshot makes
-      // live transport and browser state grow with the conversation.
-      runtimes: liveRuntimes.map((runtime) => ({
-        ...runtime,
-        session: { ...runtime.session, entries: [] },
-      })),
-      workspaces: this.workspaces,
-      sessions: this.sessions.list().map((session) => {
-        const runtime = liveRuntimes.find(
-          (item) => item.session.id === session.id && item.online !== false,
-        );
-        return {
-          ...session,
-          ...(runtime?.session.name !== undefined
-            ? { name: runtime.session.name }
-            : {}),
-          ...(runtime?.session.title !== undefined
-            ? { title: runtime.session.title }
-            : {}),
-          activeRuntimeId: activeSessions.get(session.id),
-        };
-      }),
-      usage: this.usageSnapshot,
-      unread: this.metadata.unreadNotifications(),
-    };
+    return this.application.snapshot(this.serverId, this.revision, cursor);
   }
 
   async refreshWorkspaces(): Promise<WorkspaceTarget[]> {
-    try {
-      this.workspaces = await this.sesh.list();
-      this.manager.setWorkspaces(this.workspaces);
-      for (const workspace of this.workspaces)
-        this.metadata.saveWorkspace(workspace);
-      await this.sessions.refresh(this.workspaces);
-      this.changed();
-    } catch {
-      // Sesh is catalogue data; losing it must not interrupt existing runtime control.
-    }
-    return this.workspaces;
+    const workspaces = await this.application.refreshWorkspaces();
+    this.workspaces = workspaces;
+    this.changed();
+    return workspaces;
   }
 
+  private async sessionResult(id: string): Promise<unknown> {
+    if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
+      throw new Error('Invalid session id.');
+    const runtime = this.registry
+      .snapshots()
+      .find((item) => item.session.id === id && item.online !== false);
+    const cursor = this.eventStream.cursor;
+    try {
+      const result = await this.sessions.readEntries(id);
+      if (!runtime) return { ...result, cursor };
+      return {
+        ...result,
+        cursor,
+        metadata: {
+          ...result.metadata,
+          ...(runtime.session.name !== undefined
+            ? { name: runtime.session.name }
+            : {}),
+          ...(runtime.session.title !== undefined
+            ? { title: runtime.session.title }
+            : {}),
+          activeRuntimeId: runtime.runtimeId,
+        },
+      };
+    } catch (error) {
+      if (!runtime) throw error;
+      return {
+        cursor,
+        metadata: {
+          id,
+          file: runtime.session.file ?? '',
+          cwd: runtime.cwd,
+          name: runtime.session.name,
+          title: runtime.session.title,
+          updatedAt: runtime.lastSeenAt ?? Date.now(),
+          activeRuntimeId: runtime.runtimeId,
+          entryCount: runtime.session.entries.length,
+        },
+        entries: redactImageData(runtime.session.entries),
+      };
+    }
+  }
+
+  private savePushSubscription(body: unknown): void {
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      typeof (body as Record<string, unknown>).endpoint !== 'string' ||
+      !/^https:\/\//.test((body as Record<string, unknown>).endpoint as string)
+    )
+      throw new Error('Invalid push subscription.');
+    const now = Date.now();
+    this.metadata.savePushSubscription({
+      endpoint: (body as Record<string, unknown>).endpoint as string,
+      subscription: body,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  // Compatibility dispatcher retained for internal callers during the route migration.
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: compatibility path is intentionally not the live listener
   private async handleHttp(
     request: http.IncomingMessage,
     response: http.ServerResponse,
@@ -1203,82 +1328,11 @@ class DashboardServerImpl implements DashboardServer {
   }
 
   private onRegistryChange(change: RegistryChange): void {
-    if (!isTranscriptEvent(change)) this.metadata.saveRuntime(change.snapshot);
-    this.manager.onRegistryChange(change);
-    if (change.kind === 'offline') {
-      const runtimeId = change.snapshot.runtimeId;
-      const kind =
-        change.snapshot.liveState === 'failed' ? 'failed' : 'runtime-exited';
-      const notification: NotificationEvent = {
-        id: `${kind}-${runtimeId}-${change.snapshot.lastSeenAt ?? Date.now()}`,
-        kind,
-        runtimeId,
-        sessionId: change.snapshot.session.id,
-        title:
-          kind === 'failed'
-            ? 'Pi runtime failed'
-            : 'Pi runtime disconnected unexpectedly',
-        body:
-          change.snapshot.lastError ??
-          change.snapshot.session.name ??
-          change.snapshot.cwd,
-        createdAt: Date.now(),
-      };
-      this.metadata.addNotification(notification);
-      void this.push.notify(notification).catch(() => undefined);
-    }
-    if (change.kind === 'event') {
-      const event = change.event;
-      if (event.type === 'interaction.resolved') {
-        this.metadata.clearWaitingNotifications(change.snapshot.runtimeId);
-        void this.push
-          .clearWaiting?.(change.snapshot.runtimeId)
-          .catch(() => undefined);
-      }
-      const shouldNotify =
-        event.type === 'interaction.requested' ||
-        event.type === 'runtime.goodbye' ||
-        (event.type === 'agent.settled' &&
-          process.env.PI_DASHBOARD_NOTIFY_SETTLED === '1');
-      if (shouldNotify) {
-        const notification: NotificationEvent = {
-          id: `${event.type}-${change.snapshot.runtimeId}-${event.type === 'interaction.requested' ? event.interaction.id : Date.now()}`,
-          kind:
-            event.type === 'interaction.requested'
-              ? 'waiting'
-              : event.type === 'agent.settled'
-                ? 'settled'
-                : 'runtime-exited',
-          runtimeId: change.snapshot.runtimeId,
-          sessionId: change.snapshot.session.id,
-          title:
-            event.type === 'interaction.requested'
-              ? 'Pi is waiting for an answer'
-              : event.type === 'agent.settled'
-                ? 'Pi finished a turn'
-                : 'Pi runtime exited',
-          body:
-            event.type === 'interaction.requested'
-              ? event.interaction.question
-              : (change.snapshot.session.name ?? change.snapshot.cwd),
-          createdAt: Date.now(),
-        };
-        this.metadata.addNotification(notification);
-        void this.push.notify(notification).catch(() => undefined);
-      }
-    }
+    const applicationChange = this.application.onRegistryChange(change);
     this.changed(
-      change.kind === 'event'
+      applicationChange.type === 'event'
         ? {
-            type: 'event',
-            event: change.event,
-            runtimeId: change.runtimeId,
-            ...(change.runtimeEpoch === undefined
-              ? {}
-              : { runtimeEpoch: change.runtimeEpoch }),
-            ...(change.runtimeSeq === undefined
-              ? {}
-              : { runtimeSeq: change.runtimeSeq }),
+            ...applicationChange,
             ...(isTranscriptEvent(change) ? {} : { snapshot: change.snapshot }),
           }
         : { type: 'snapshot', snapshot: this.snapshot() },

@@ -144,3 +144,33 @@ Implemented 2026-08-04. `DashboardEventStream` is the daemon-global clock and bo
 The browser uses a fetch-based SSE adapter so the token remains a header rather than a URL credential. It reconnects with the last accepted cursor, rejects duplicate/older records, retains only a bounded reducer-input window, and refetches `/api/snapshot` after a replay gap. Cursor ordering is scoped by `serverId`: a replacement daemon resets the accepted cursor and buffered events before installing its lower authoritative snapshot. Session hydration installs the HTTP projection at its cursor and applies only newer buffered envelopes through the shared transcript reducer. The old WebSocket remains a bounded, authenticated compatibility path for already-running v1 clients; it can be removed after the production extension/runtime population has migrated to SSE-capable browser clients and the compatibility window has elapsed.
 
 Phase 2 preserves the Unix-socket frame, queue, generation, authentication/origin, upload validation, and image-redaction invariants recorded above. No bearer token is accepted in an SSE URL.
+
+## Phase 3: modular daemon composition
+
+Implemented 2026-08-04. The daemon now has a manual entrypoint in `apps/dashboard-server/src/main.ts` and `create-daemon.ts`; `createDashboardServer` remains the inexpensive public compatibility factory. Browser HTTP is served by Fastify route plugins in `routes.ts`. The plugin owns request parsing, CORS/auth adaptation, TypeBox-backed boundary schemas, status mapping, and route registration; application methods receive plain values rather than Fastify request/reply objects. `GET /api/events` still hands the raw response to the bounded SSE writer, and `/ws` still uses the raw Node upgrade listener by design.
+
+### Module map
+
+```text
+main.ts / create-daemon.ts             manual composition + lifecycle
+  -> http.ts                            transport shell, raw bridge, WS/SSE compatibility
+     -> routes.ts                       Fastify browser route plugin + TypeBox schemas
+     -> application/
+          runtime-service               launch, stop, command, interaction, rename
+          session-service               catalogue/transcript access
+          workspace-service             Sesh catalogue and refresh persistence
+          notification-service          runtime-derived notifications and push fan-out
+          usage-service                 bounded provider cache/coalescing
+          upload-service                bounded image validation, files, cleanup
+          dashboard-application         framework-independent application boundary
+     -> repositories/
+          migrations                    numbered idempotent SQLite migrations
+          sqlite-metadata-repository    workspace/runtime/session/launch metadata
+          sqlite-notification-repository notifications and push subscriptions
+```
+
+`MetadataStore` is now a compatibility facade over the two SQLite repositories. It preserves existing collaborators while new code can depend on narrower repository interfaces. Migrations are recorded in `schema_migrations`; the credential-column migration is safe for databases created by the pre-Phase-3 schema and can be rerun without changing results.
+
+### Remaining compatibility layer
+
+`http.ts` intentionally retains the old manual dispatcher and its raw Node SSE implementation as a migration aid for tests and existing internal callers; the live listener is Fastify-backed and registers `routes.ts`. It also retains the bounded browser WebSocket at `/ws` until the documented SSE population/retirement window ends. `RuntimeRegistry` remains the independently testable Unix-socket bridge and is not wrapped by Fastify. The phase does not introduce TanStack, Tailwind, or any Phase 4/5 UI migration.

@@ -65,10 +65,7 @@ export async function createPushSender(
         }
         // Expired subscriptions are removed by the same adapter only. Runtime
         // state/control never awaits this path.
-        for (const endpoint of stale)
-          metadata.db
-            .prepare('DELETE FROM push_subscription WHERE endpoint=?')
-            .run(endpoint);
+        for (const endpoint of stale) metadata.removePushSubscription(endpoint);
       },
       async clearWaiting(runtimeId) {
         for (const subscription of metadata.pushSubscriptions()) {

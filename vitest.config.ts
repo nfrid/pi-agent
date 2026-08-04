@@ -19,6 +19,11 @@ export default defineConfig({
     },
   },
   test: {
-    exclude: [...configDefaults.exclude, '**/.worktrees/**', '**/e2e/**'],
+    exclude: [
+      ...configDefaults.exclude,
+      '**/.worktrees/**',
+      '**/dist/**',
+      '**/e2e/**',
+    ],
   },
 });
