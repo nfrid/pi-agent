@@ -18,8 +18,6 @@ export interface ActivityGroupViewModel {
   readonly status: ActivityGroupStatus;
   readonly expanded: boolean;
   readonly toolCount: number;
-  /** Number of calls with an error outcome, retained for compact summaries. */
-  readonly failureCount: number;
   readonly tools: readonly ToolDescriptor[];
 }
 
@@ -101,9 +99,6 @@ export function projectActivityGroups(
       status,
       expanded: options.expandedIds?.has(id) ?? false,
       toolCount: tools.length,
-      failureCount: tools.filter(
-        (tool) => tool.isError === true || tool.status === 'error',
-      ).length,
       tools,
     };
   });

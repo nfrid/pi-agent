@@ -186,12 +186,7 @@ export type ActivityGroupSummary = {
   failureCount: number;
 };
 
-type ActivityGroupSummaryInput = Pick<
-  TranscriptGroup,
-  'tools' | 'toolCount'
-> & {
-  failureCount?: number;
-};
+type ActivityGroupSummaryInput = Pick<TranscriptGroup, 'tools' | 'toolCount'>;
 
 function isFailedActivityTool(tool: unknown): boolean {
   if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return false;
@@ -206,17 +201,14 @@ function isFailedActivityTool(tool: unknown): boolean {
 /**
  * Keep the collapsed row bounded and honest: names and outcomes come from the
  * shared activity projection, while opaque tool arguments stay in expanded
- * details rather than being guessed at here. The fallback retains rendering
- * for older version-1 projections that did not include failureCount.
+ * details rather than being guessed at here. Failure totals are derived from
+ * existing tool outcomes so the version-1 contribution contract stays stable.
  */
 export function activityGroupSummary(
   group: ActivityGroupSummaryInput,
 ): ActivityGroupSummary {
   const recentTools = group.tools.slice(-3).map((tool) => tool.name);
-  const failureCount =
-    typeof group.failureCount === 'number'
-      ? group.failureCount
-      : group.tools.filter(isFailedActivityTool).length;
+  const failureCount = group.tools.filter(isFailedActivityTool).length;
   return {
     recentTools,
     earlierToolCount: Math.max(0, group.tools.length - recentTools.length),

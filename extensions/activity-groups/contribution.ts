@@ -68,9 +68,6 @@ export const ActivityGroupsViewModelSchema = Type.Object(
     ]),
     expanded: Type.Boolean(),
     toolCount: Type.Integer({ minimum: 0 }),
-    // Optional for compatibility with version-1 payloads emitted before the
-    // dashboard added failure counts to the shared projection.
-    failureCount: Type.Optional(Type.Integer({ minimum: 0 })),
     tools: Type.Readonly(Type.Array(ActivityToolSchema, { maxItems: 128 })),
   },
   { additionalProperties: false },

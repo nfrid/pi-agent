@@ -18,12 +18,11 @@ describe('activity row views and virtual transcript construction', () => {
   it('derives a bounded latest-step summary from the canonical group model', () => {
     const group = {
       toolCount: 5,
-      failureCount: 2,
       tools: [
         { name: 'read', args: {} },
         { name: 'grep', args: {} },
-        { name: 'edit', args: {} },
-        { name: 'bash', args: {} },
+        { name: 'edit', args: {}, status: 'error' },
+        { name: 'bash', args: {}, isError: true },
         { name: 'write', args: {} },
       ],
     };
@@ -33,17 +32,6 @@ describe('activity row views and virtual transcript construction', () => {
       toolCount: 5,
       failureCount: 2,
     });
-  });
-
-  it('falls back to tool outcomes when an older group lacks failureCount', () => {
-    const group = {
-      toolCount: 2,
-      tools: [
-        { name: 'read', args: {} },
-        { name: 'bash', args: {}, status: 'error' },
-      ],
-    };
-    expect(activityGroupSummary(group).failureCount).toBe(1);
   });
 
   it('omits failure metadata when there are no failed calls', () => {

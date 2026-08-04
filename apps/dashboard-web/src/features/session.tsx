@@ -428,11 +428,22 @@ export function interactionKeyAction(
   return undefined;
 }
 
-function isTextEntryTarget(target: EventTarget | null): boolean {
-  return (
+function blocksInteractionShortcut(
+  target: EventTarget | null,
+  key: string,
+): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
-    (target instanceof HTMLElement && target.isContentEditable)
+    target instanceof HTMLSelectElement ||
+    target.isContentEditable ||
+    target.closest('a[href], [role="link"]')
+  )
+    return true;
+  return (
+    (key === 'Enter' || key === ' ') &&
+    Boolean(target.closest('button, [role="button"]'))
   );
 }
 
@@ -491,15 +502,16 @@ function InteractionCard({
     );
   }, [selectableChoices.length]);
   useEffect(() => {
-    if (canRenderInteraction && canAnswer && selectableChoices.length > 0)
-      interactionRef.current?.focus();
-    else if (
-      canRenderInteraction &&
-      canAnswer &&
-      selectableChoices.length === 0 &&
-      interaction.allowCustom
+    if (!canRenderInteraction || !canAnswer) return;
+    const active = document.activeElement;
+    if (
+      active &&
+      active !== document.body &&
+      active !== document.documentElement
     )
-      answerRef.current?.focus();
+      return;
+    if (selectableChoices.length > 0) interactionRef.current?.focus();
+    else if (interaction.allowCustom) answerRef.current?.focus();
   }, [
     canAnswer,
     canRenderInteraction,
@@ -548,16 +560,14 @@ function InteractionCard({
     choiceRefs.current[index]?.focus();
   };
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    // Text editing owns arrows, digits, Enter, and Escape. Do not turn a
-    // custom answer field into an accidental choice navigator or cancel key.
-    if (event.key === 'Enter' && event.target instanceof HTMLButtonElement)
-      return;
-    if (busy) return;
+    // Form controls and preview links own their keys. Choice buttons retain
+    // native Enter/Space activation while arrows, digits, and Escape remain
+    // available for the interaction's keyboard contract.
+    if (blocksInteractionShortcut(event.target, event.key) || busy) return;
     const action = interactionKeyAction(
       event.key,
       selectedChoice,
       selectableChoices.length,
-      isTextEntryTarget(event.target),
     );
     if (!action) return;
     if (action.type === 'cancel') {
@@ -622,7 +632,6 @@ function InteractionCard({
                 ref={(element) => {
                   choiceRefs.current[index] = element;
                 }}
-                aria-pressed={selectedChoice === index}
                 data-selected={selectedChoice === index ? 'true' : undefined}
                 onFocus={() => setSelectedChoice(index)}
                 onPress={() => {

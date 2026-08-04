@@ -47,7 +47,7 @@ describe('shared activity model', () => {
       { kind: 'assistant' as const, speaks: false, streaming: true },
       { kind: 'tool' as const, name: 'bash', args: {} },
     ]);
-    expect(failed[0]).toMatchObject({ status: 'failed', failureCount: 1 });
+    expect(failed[0]?.status).toBe('failed');
     expect(streaming[0]?.status).toBe('preparing');
     expect(failed[0]?.status).not.toBe(streaming[0]?.status);
   });
