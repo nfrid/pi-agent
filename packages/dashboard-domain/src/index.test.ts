@@ -8,6 +8,7 @@ import {
   createRuntimeReducerState,
   createTranscriptProjection,
   hydrateTranscript,
+  reduceTranscriptEvent,
   selectLegacyTranscriptEntries,
 } from './index.js';
 
@@ -107,6 +108,52 @@ describe('dashboard domain reducers', () => {
       content: 'final',
       status: 'finished',
     });
+  });
+
+  it('keeps already-running protocol-v1 wrappers functional without recursive identity search', () => {
+    let state = hydrateTranscript([], 's');
+    state = reduceTranscriptEvent(state, {
+      type: 'message.started',
+      sessionId: 's',
+      message: {
+        message: {
+          role: 'assistant',
+          timestamp: 123,
+          content: [{ type: 'text', text: 'start' }],
+          metadata: { id: 'must-not-be-an-identity' },
+        },
+      },
+    });
+    state = reduceTranscriptEvent(state, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        message: {
+          role: 'assistant',
+          timestamp: 123,
+          content: [{ type: 'text', text: 'updated' }],
+        },
+      },
+    });
+    state = reduceTranscriptEvent(state, {
+      type: 'tool.finished',
+      sessionId: 's',
+      tool: {
+        toolCallId: 'call-legacy',
+        toolName: 'read',
+        args: { path: 'file.txt' },
+        result: 'contents',
+      },
+    });
+    expect(state.items['assistant:123']).toMatchObject({
+      content: [{ type: 'text', text: 'updated' }],
+    });
+    expect(state.items['call-legacy']).toMatchObject({
+      name: 'read',
+      arguments: { path: 'file.txt' },
+      result: 'contents',
+    });
+    expect(state.items['must-not-be-an-identity']).toBeUndefined();
   });
 
   it('keeps terminal message and tool items inert for later lifecycle events', () => {

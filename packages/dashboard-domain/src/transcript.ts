@@ -119,22 +119,73 @@ export const createTranscriptReducerState = createTranscriptProjection;
 
 function normalizedMessage(
   value: unknown,
+  projection: TranscriptProjection,
+  phase: 'started' | 'updated' | 'finished',
 ): NormalizedMessagePayload | undefined {
   // One unwrap is allowed for v1 bridge wrappers. Deliberately do not search
   // arbitrary nested provider fields for identities.
   const direct = tryParseNormalizedMessagePayload(value);
   if (direct) return direct;
-  if (isRecord(value) && isRecord(value.message))
-    return tryParseNormalizedMessagePayload(value.message);
-  return undefined;
+  if (!isRecord(value)) return undefined;
+  const message = isRecord(value.message) ? value.message : value;
+  const normalized = tryParseNormalizedMessagePayload(message);
+  if (normalized) return normalized;
+
+  // Rollout compatibility for already-running protocol-v1 extensions. Remove
+  // after old runtimes can no longer reconnect without explicit identities.
+  const role = directString(message, 'role');
+  if (!role || message.content === undefined) return undefined;
+  const timestamp = message.timestamp;
+  const explicitId =
+    directString(message, 'messageId') ??
+    directString(message, 'id') ??
+    directString(message, 'responseId');
+  const activeId = [...projection.order].reverse().find((id) => {
+    const item = projection.items[id];
+    return (
+      item?.kind === 'message' &&
+      item.role === role &&
+      item.status === 'streaming'
+    );
+  });
+  const messageId =
+    explicitId ??
+    (typeof timestamp === 'number' || typeof timestamp === 'string'
+      ? `${role}:${timestamp}`
+      : phase === 'started'
+        ? undefined
+        : activeId);
+  if (!messageId) return undefined;
+  return {
+    messageId,
+    role,
+    content: message.content,
+    ...(typeof timestamp === 'number' || typeof timestamp === 'string'
+      ? { timestamp }
+      : {}),
+    phase,
+  };
 }
 
 function normalizedTool(value: unknown): NormalizedToolPayload | undefined {
   const direct = tryParseNormalizedToolPayload(value);
   if (direct) return direct;
-  if (isRecord(value) && isRecord(value.tool))
-    return tryParseNormalizedToolPayload(value.tool);
-  return undefined;
+  if (!isRecord(value)) return undefined;
+  const tool = isRecord(value.tool) ? value.tool : value;
+  const normalized = tryParseNormalizedToolPayload(tool);
+  if (normalized) return normalized;
+  const toolCallId =
+    directString(tool, 'toolCallId') ?? directString(tool, 'id');
+  if (!toolCallId) return undefined;
+  return {
+    toolCallId,
+    name:
+      directString(tool, 'toolName') ?? directString(tool, 'name') ?? 'tool',
+    ...(tool.args === undefined ? {} : { arguments: tool.args }),
+    ...(tool.arguments === undefined ? {} : { arguments: tool.arguments }),
+    ...(tool.result === undefined ? {} : { result: tool.result }),
+    ...(typeof tool.isError === 'boolean' ? { isError: tool.isError } : {}),
+  };
 }
 
 function phaseFor(type: string): 'started' | 'updated' | 'finished' {
@@ -359,6 +410,8 @@ export function applyTranscriptEvent(
   if (event.type.startsWith('message.')) {
     const payload = normalizedMessage(
       'message' in event ? event.message : undefined,
+      state,
+      phase,
     );
     if (!payload) return { state, accepted: true };
     return { state: mergeMessage(state, payload, phase), accepted: true };
