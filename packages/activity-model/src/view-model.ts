@@ -7,7 +7,7 @@ import {
 } from './grouping.js';
 import { describeTools } from './title.js';
 
-export type ActivityGroupStatus = 'live' | 'complete' | 'failed';
+export type ActivityGroupStatus = 'live' | 'preparing' | 'complete' | 'failed';
 
 export interface ActivityGroupViewModel {
   readonly id: string;
@@ -75,13 +75,22 @@ export function projectActivityGroups(
     const failed =
       options.failed?.(group, tools) ??
       tools.some((tool) => tool.isError || tool.status === 'error');
+    const streaming = entries
+      .slice(group.start, group.end + 1)
+      .some((entry) => entry.kind === 'assistant' && entry.streaming === true);
     return {
       id,
       start: group.start,
       end: group.end,
       kind: activityKind(tools),
       title: titleFor(entries, group, tools, completed),
-      status: failed ? 'failed' : completed ? 'complete' : 'live',
+      status: failed
+        ? 'failed'
+        : streaming
+          ? 'preparing'
+          : completed
+            ? 'complete'
+            : 'live',
       expanded: options.expandedIds?.has(id) ?? false,
       toolCount: tools.length,
       tools,

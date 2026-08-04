@@ -1,7 +1,4 @@
-import {
-  type TranscriptEntry as ActivityTranscriptEntry,
-  projectActivityGroups,
-} from '@pi-dashboard/activity-model';
+import { projectActivityGroups } from '@pi-dashboard/activity-model';
 import { dashboardHttpClient } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
@@ -18,7 +15,6 @@ import { Markdown } from '../Markdown';
 import {
   isNarration,
   type TranscriptModelItem,
-  toolOutcome,
   toolRecordForTranscript,
   toolSummary,
   toTranscriptEntries,
@@ -95,7 +91,6 @@ export function Transcript({
     return (
       <VirtualizedTranscript
         items={items}
-        modelEntries={modelEntries}
         groups={groups}
         open={open}
         setOpen={setOpen}
@@ -110,22 +105,8 @@ export function Transcript({
         if (group) {
           const groupKey = items[group.start]?.key ?? 'unknown-group';
           const expanded = open.has(groupKey);
-          const tools = modelEntries
-            .slice(group.start, group.end + 1)
-            .filter(
-              (
-                entry,
-              ): entry is Extract<ActivityTranscriptEntry, { kind: 'tool' }> =>
-                entry.kind === 'tool',
-            );
+          const presentation = activityGroupPresentation(group, expanded);
           const groupItems = items.slice(group.start, group.end + 1);
-          const preparing = groupItems.some((item) => item.preparing);
-          const complete =
-            !preparing &&
-            tools.length > 0 &&
-            groupItems
-              .filter((item) => item.entry.kind === 'tool')
-              .every((item) => toolOutcome(item.raw) === 'success');
           const title = group.title;
           const lead = items[group.start];
           const visibleLead =
@@ -138,7 +119,7 @@ export function Transcript({
           const detailId = `activity-detail-${group.start}`;
           return (
             <div
-              className={`activity-group ${complete ? 'activity-complete' : 'activity-pending'}`}
+              className={`activity-group ${presentation.className}`}
               key={`group-${groupKey}`}
             >
               <AriaButton
@@ -155,15 +136,9 @@ export function Transcript({
                   invokeActivityExpansion(runtime, nextExpanded);
                 }}
               >
-                <span className="activity-icon">{complete ? '✓' : '…'}</span>
+                <span className="activity-icon">{presentation.icon}</span>
                 <strong>{title}</strong>
-                <small>
-                  {preparing
-                    ? tools.length > 0
-                      ? `${tools.length} tool${tools.length === 1 ? '' : 's'} · preparing next tool call`
-                      : 'preparing tool call'
-                    : `${tools.length} tool${tools.length === 1 ? '' : 's'} · ${expanded ? 'hide detail' : 'show detail'}`}
-                </small>
+                <small>{presentation.label}</small>
               </AriaButton>
               {visibleLead && (
                 <div className="activity-lead">
@@ -193,47 +168,106 @@ export function Transcript({
   );
 }
 
-type TranscriptGroup = ReturnType<typeof projectActivityGroups>[number];
+export type TranscriptGroup = ReturnType<typeof projectActivityGroups>[number];
 
-type VirtualTranscriptRow =
+export type VirtualTranscriptRow =
   | { kind: 'entry'; key: string; index: number }
   | { kind: 'group'; key: string; group: TranscriptGroup };
 
+export type VirtualTranscriptRowBuildStats = { groupReads: number };
+
+/**
+ * Collapse covered transcript entries into group rows with a single sorted group
+ * pointer. Groups are produced in start order, so this is O(items + groups), not
+ * a groups.some scan for every item.
+ */
+export function buildVirtualTranscriptRows(
+  items: readonly Pick<TranscriptModelItem, 'key'>[],
+  groups: readonly TranscriptGroup[],
+  stats?: VirtualTranscriptRowBuildStats,
+): VirtualTranscriptRow[] {
+  const result: VirtualTranscriptRow[] = [];
+  let groupIndex = 0;
+  for (let index = 0; index < items.length; index += 1) {
+    while (groupIndex < groups.length) {
+      if (stats) stats.groupReads += 1;
+      const candidate = groups[groupIndex];
+      if (!candidate || candidate.end >= index) break;
+      groupIndex += 1;
+    }
+    const group = groups[groupIndex];
+    if (stats) stats.groupReads += 1;
+    if (group?.start === index) {
+      const groupKey = items[group.start]?.key ?? `group-${group.start}`;
+      result.push({ kind: 'group', key: `group-${groupKey}`, group });
+    } else if (!group || index <= group.start || index > group.end) {
+      result.push({
+        kind: 'entry',
+        key: items[index]?.key ?? `entry-${index}`,
+        index,
+      });
+    }
+  }
+  return result;
+}
+
+export function activityGroupPresentation(
+  group: Pick<TranscriptGroup, 'status' | 'toolCount'>,
+  expanded: boolean,
+): {
+  className: 'activity-complete' | 'activity-pending' | 'activity-failed';
+  icon: '✓' | '…' | '!';
+  label: string;
+  status: TranscriptGroup['status'];
+} {
+  const detail = expanded ? 'hide detail' : 'show detail';
+  const count = `${group.toolCount} tool${group.toolCount === 1 ? '' : 's'}`;
+  if (group.status === 'failed')
+    return {
+      className: 'activity-failed',
+      icon: '!',
+      label: `${count} · failed · ${detail}`,
+      status: group.status,
+    };
+  if (group.status === 'preparing')
+    return {
+      className: 'activity-pending',
+      icon: '…',
+      label: 'preparing tool call',
+      status: group.status,
+    };
+  if (group.status === 'live')
+    return {
+      className: 'activity-pending',
+      icon: '…',
+      label: `${count} · in progress · ${detail}`,
+      status: group.status,
+    };
+  return {
+    className: 'activity-complete',
+    icon: '✓',
+    label: `${count} · ${detail}`,
+    status: group.status,
+  };
+}
+
 function VirtualizedTranscript({
   items,
-  modelEntries,
   groups,
   open,
   setOpen,
   runtime,
 }: {
   items: readonly TranscriptModelItem[];
-  modelEntries: readonly ActivityTranscriptEntry[];
   groups: readonly TranscriptGroup[];
   open: ReadonlySet<string>;
   setOpen: Dispatch<SetStateAction<Set<string>>>;
   runtime?: RuntimeSnapshot;
 }) {
-  const groupByStart = useMemo(
-    () => new Map(groups.map((group) => [group.start, group])),
-    [groups],
+  const rows = useMemo(
+    () => buildVirtualTranscriptRows(items, groups),
+    [groups, items],
   );
-  const rows = useMemo<VirtualTranscriptRow[]>(() => {
-    const result: VirtualTranscriptRow[] = [];
-    items.forEach((item, index) => {
-      const group = groupByStart.get(index);
-      if (group) {
-        const groupKey = items[group.start]?.key ?? `group-${group.start}`;
-        result.push({ kind: 'group', key: `group-${groupKey}`, group });
-      } else if (
-        !groups.some(
-          (candidate) => index > candidate.start && index <= candidate.end,
-        )
-      )
-        result.push({ kind: 'entry', key: item.key, index });
-    });
-    return result;
-  }, [groupByStart, groups, items]);
   const virtualizer = useWindowVirtualizer({
     count: rows.length,
     estimateSize: (index) => (rows[index]?.kind === 'group' ? 132 : 96),
@@ -303,19 +337,7 @@ function VirtualizedTranscript({
     const groupKey = items[group.start]?.key ?? `group-${group.start}`;
     const expanded = open.has(groupKey);
     const groupItems = items.slice(group.start, group.end + 1);
-    const tools = modelEntries
-      .slice(group.start, group.end + 1)
-      .filter(
-        (entry): entry is Extract<ActivityTranscriptEntry, { kind: 'tool' }> =>
-          entry.kind === 'tool',
-      );
-    const preparing = groupItems.some((item) => item.preparing);
-    const complete =
-      !preparing &&
-      tools.length > 0 &&
-      groupItems
-        .filter((item) => item.entry.kind === 'tool')
-        .every((item) => toolOutcome(item.raw) === 'success');
+    const presentation = activityGroupPresentation(group, expanded);
     const title = group.title;
     const lead = items[group.start];
     const visibleLead =
@@ -327,9 +349,7 @@ function VirtualizedTranscript({
         : undefined;
     const detailId = `activity-detail-${group.start}`;
     return (
-      <div
-        className={`activity-group ${complete ? 'activity-complete' : 'activity-pending'}`}
-      >
+      <div className={`activity-group ${presentation.className}`}>
         <AriaButton
           type="button"
           aria-expanded={expanded}
@@ -345,15 +365,9 @@ function VirtualizedTranscript({
             invokeActivityExpansion(runtime, nextExpanded);
           }}
         >
-          <span className="activity-icon">{complete ? '✓' : '…'}</span>
+          <span className="activity-icon">{presentation.icon}</span>
           <strong>{title}</strong>
-          <small>
-            {preparing
-              ? tools.length > 0
-                ? `${tools.length} tool${tools.length === 1 ? '' : 's'} · preparing next tool call`
-                : 'preparing tool call'
-              : `${tools.length} tool${tools.length === 1 ? '' : 's'} · ${expanded ? 'hide detail' : 'show detail'}`}
-          </small>
+          <small>{presentation.label}</small>
         </AriaButton>
         {visibleLead && (
           <div className="activity-lead">

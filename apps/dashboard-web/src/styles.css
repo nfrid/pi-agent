@@ -730,6 +730,10 @@ h2 {
 .activity-group.activity-pending {
   border-left: 2px solid var(--cyan);
 }
+.activity-group.activity-failed {
+  border-left: 2px solid var(--red);
+  background: var(--tool-error);
+}
 .activity-group > button {
   display: flex;
   width: 100%;
@@ -756,6 +760,9 @@ h2 {
 }
 .activity-complete .activity-icon {
   color: var(--green);
+}
+.activity-failed .activity-icon {
+  color: var(--red);
 }
 .activity-lead {
   border-top: 1px solid var(--line-soft);

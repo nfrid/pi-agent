@@ -33,6 +33,25 @@ describe('shared activity model', () => {
     expect(live[0]?.status).toBe('live');
   });
 
+  it('projects failed and streaming groups distinctly for every renderer', () => {
+    const failed = projectActivityGroups([
+      { kind: 'assistant' as const, speaks: false },
+      {
+        kind: 'tool' as const,
+        name: 'bash',
+        args: { command: 'false' },
+        isError: true,
+      },
+    ]);
+    const streaming = projectActivityGroups([
+      { kind: 'assistant' as const, speaks: false, streaming: true },
+      { kind: 'tool' as const, name: 'bash', args: {} },
+    ]);
+    expect(failed[0]?.status).toBe('failed');
+    expect(streaming[0]?.status).toBe('preparing');
+    expect(failed[0]?.status).not.toBe(streaming[0]?.status);
+  });
+
   it('extracts model headers without rendering them', () => {
     const message = {
       content: [{ type: 'text', text: '**Inspecting files**' }],

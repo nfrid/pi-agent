@@ -362,6 +362,39 @@ function duplicateIds(values: readonly { id: string }[], label: string): void {
   }
 }
 
+type ManifestCollection = readonly (
+  | ExtensionManifest
+  | ExtensionManifestSummary
+)[];
+
+/** Contribution IDs are dispatched from the flattened collection, not by manifest. */
+function validateManifestCollection(manifests: ManifestCollection): void {
+  duplicateIds(
+    manifests.flatMap(
+      (manifest) => manifest.actions as readonly { id: string }[],
+    ),
+    'action across manifests',
+  );
+  duplicateIds(
+    manifests.flatMap(
+      (manifest) => manifest.renderers as readonly { id: string }[],
+    ),
+    'renderer across manifests',
+  );
+  duplicateIds(
+    manifests.flatMap(
+      (manifest) => (manifest.inspectors ?? []) as readonly { id: string }[],
+    ),
+    'inspector across manifests',
+  );
+  duplicateIds(
+    manifests.flatMap(
+      (manifest) => (manifest.interactions ?? []) as readonly { id: string }[],
+    ),
+    'interaction across manifests',
+  );
+}
+
 function validateManifestSchemas(manifest: ExtensionManifest): void {
   for (const action of manifest.actions) {
     if (!isTypeBoxSchema(action.inputSchema))
@@ -479,6 +512,7 @@ export function createRuntimeCapabilitySnapshot(
 ): RuntimeCapabilitySnapshot {
   const parsedManifests = manifests.map(parseExtensionManifest);
   duplicateIds(parsedManifests, 'manifest');
+  validateManifestCollection(parsedManifests);
   duplicateIds(capabilities, 'capability');
   if (
     !capabilities.every((capability) =>
@@ -507,9 +541,8 @@ export function parseRuntimeCapabilitySnapshot(
   const snapshot = value as RuntimeCapabilitySnapshot;
   duplicateIds(snapshot.capabilities, 'capability');
   duplicateIds(snapshot.manifests, 'manifest');
+  validateManifestCollection(snapshot.manifests);
   for (const manifest of snapshot.manifests) {
-    duplicateIds(manifest.actions, `action in ${manifest.id}`);
-    duplicateIds(manifest.renderers, `renderer in ${manifest.id}`);
     for (const action of manifest.actions)
       if (
         action.inputSchema !== undefined &&
@@ -588,6 +621,7 @@ export function selectAvailableActions(
   snapshot: RuntimeCapabilitySnapshot | undefined,
   state: ContributionState = {},
 ): readonly (ActionDescriptor | ActionSummary)[] {
+  validateManifestCollection(manifests);
   return manifests.flatMap((manifest) =>
     manifest.actions.filter((action) =>
       isActionAvailable(action, snapshot, state),
@@ -599,6 +633,7 @@ export function findActionDescriptor(
   manifests: readonly ExtensionManifest[],
   actionId: string,
 ): ActionDescriptor | undefined {
+  validateManifestCollection(manifests);
   return manifests
     .flatMap((manifest) => manifest.actions)
     .find((action) => action.id === actionId);
@@ -610,6 +645,7 @@ export function selectAvailableRenderers(
   | RendererDescriptor
   | ExtensionManifestSummary['renderers'][number]
 )[] {
+  validateManifestCollection(manifests);
   const result: Array<
     RendererDescriptor | ExtensionManifestSummary['renderers'][number]
   > = [];
@@ -621,6 +657,7 @@ export function findRendererDescriptor(
   manifests: readonly ExtensionManifest[],
   rendererId: string,
 ): RendererDescriptor | undefined {
+  validateManifestCollection(manifests);
   return manifests
     .flatMap((manifest) => manifest.renderers)
     .find((renderer) => renderer.id === rendererId);

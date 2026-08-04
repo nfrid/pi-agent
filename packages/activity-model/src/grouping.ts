@@ -237,6 +237,8 @@ export type TranscriptEntry = {
   | {
       kind: 'assistant';
       speaks: boolean;
+      /** The assistant is still streaming this turn; projections keep it live. */
+      streaming?: boolean;
       /**
        * Whether the model narrated this turn, and on which channel. The words
        * are the renderer's business; all a boundary needs is that a header was

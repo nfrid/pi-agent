@@ -224,6 +224,7 @@ export function toTranscriptEntries(
           entry: {
             kind: 'assistant',
             speaks: preparing ? false : Boolean(visibleText),
+            ...(preparing ? { streaming: true } : {}),
             narration,
             title: preamble ?? narratedTitle,
             ...(preamble

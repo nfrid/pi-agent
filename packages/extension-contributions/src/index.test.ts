@@ -4,6 +4,8 @@ import {
   ContributionError,
   createRuntimeCapabilitySnapshot,
   type ExtensionManifest,
+  findActionDescriptor,
+  findRendererDescriptor,
   isActionAvailable,
   NonIdempotentActionIdGuard,
   parseActionInput,
@@ -50,6 +52,73 @@ describe('extension contribution contracts', () => {
         actions: [action, { ...action, inputSchema: action.inputSchema }],
       }),
     ).toThrow('Duplicate action ID');
+  });
+
+  it('rejects contribution IDs duplicated across manifests in every category', () => {
+    const inspector = {
+      id: 'demo.inspector',
+      inputSchema: Type.Object({}, { additionalProperties: false }),
+    };
+    const interaction = {
+      id: 'demo.interaction',
+      rendererId: 'demo.view',
+      viewModelSchema: Type.Object({}, { additionalProperties: false }),
+      answerActionId: 'demo.run',
+      cancelActionId: 'demo.run',
+    };
+    const cases: readonly [
+      string,
+      Partial<
+        Pick<
+          ExtensionManifest,
+          'actions' | 'renderers' | 'inspectors' | 'interactions'
+        >
+      >,
+    ][] = [
+      ['action', { actions: [action] }],
+      ['renderer', { renderers: manifest.renderers }],
+      ['inspector', { inspectors: [inspector] }],
+      ['interaction', { interactions: [interaction] }],
+    ];
+    for (const [label, contribution] of cases) {
+      const duplicate: ExtensionManifest = {
+        id: `other-${label}`,
+        version: '1',
+        actions: contribution.actions ?? [],
+        renderers: contribution.renderers ?? [],
+        ...(contribution.inspectors
+          ? { inspectors: contribution.inspectors }
+          : {}),
+        ...(contribution.interactions
+          ? { interactions: contribution.interactions }
+          : {}),
+      };
+      const source: ExtensionManifest = {
+        ...manifest,
+        ...(contribution.inspectors
+          ? { inspectors: contribution.inspectors }
+          : {}),
+        ...(contribution.interactions
+          ? { interactions: contribution.interactions }
+          : {}),
+      };
+      expect(() =>
+        createRuntimeCapabilitySnapshot([source, duplicate]),
+      ).toThrow(`Duplicate ${label} across manifests ID`);
+    }
+  });
+
+  it('rejects duplicates before order-dependent descriptor lookup', () => {
+    const duplicate: ExtensionManifest = {
+      ...manifest,
+      id: 'other-demo',
+    };
+    expect(() =>
+      findActionDescriptor([manifest, duplicate], action.id),
+    ).toThrow('across manifests');
+    expect(() =>
+      findRendererDescriptor([manifest, duplicate], 'demo.view'),
+    ).toThrow('across manifests');
   });
 
   it('validates action input and pure availability', () => {
