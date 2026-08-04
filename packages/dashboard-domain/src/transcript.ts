@@ -166,8 +166,9 @@ function mergeMessage(
 ): TranscriptProjection {
   const items = copyItems(projection);
   const previous = items[payload.messageId];
-  if (previous && isFinished(previous) && phase !== 'finished')
-    return projection;
+  // Finished and errored entities are terminal. A later lifecycle event can
+  // have a newer transport cursor while still being stale for this item.
+  if (previous && isFinished(previous)) return projection;
   const item: TranscriptMessageItem = {
     kind: 'message',
     messageId: payload.messageId,
@@ -205,8 +206,10 @@ function mergeTool(
 ): TranscriptProjection {
   const items = copyItems(projection);
   const previous = items[payload.toolCallId];
-  if (previous && isFinished(previous) && phase !== 'finished')
-    return projection;
+  // Finished and errored entities are terminal. In particular, a duplicate
+  // finished event must not replace an earlier result or error.
+  if (previous && isFinished(previous)) return projection;
+  const previousTool = previous?.kind === 'tool' ? previous : undefined;
   const status: TranscriptEntityStatus =
     payload.isError === true ||
     payload.status === 'error' ||
@@ -222,14 +225,28 @@ function mergeTool(
   const item: TranscriptToolItem = {
     kind: 'tool',
     toolCallId: payload.toolCallId,
-    name: payload.name,
+    name: payload.name || previousTool?.name || 'tool',
     ...(payload.arguments === undefined
-      ? {}
+      ? previousTool?.arguments === undefined
+        ? {}
+        : { arguments: previousTool.arguments }
       : { arguments: payload.arguments }),
-    ...(payload.result === undefined ? {} : { result: payload.result }),
-    ...(payload.isError === undefined ? {} : { isError: payload.isError }),
+    ...(payload.result === undefined
+      ? previousTool?.result === undefined
+        ? {}
+        : { result: previousTool.result }
+      : { result: payload.result }),
+    ...(payload.isError === undefined
+      ? previousTool?.isError === undefined
+        ? {}
+        : { isError: previousTool.isError }
+      : { isError: payload.isError }),
     status,
-    ...(payload.turnId === undefined ? {} : { turnId: payload.turnId }),
+    ...(payload.turnId === undefined
+      ? previousTool?.turnId === undefined
+        ? {}
+        : { turnId: previousTool.turnId }
+      : { turnId: payload.turnId }),
     ...(payload.data === undefined ? {} : { data: payload.data }),
   };
   items[payload.toolCallId] = item;
@@ -304,6 +321,7 @@ function transportState(
   return {
     projection: {
       ...current,
+      ...(replacingEpoch ? { sessionId: undefined, order: [], items: {} } : {}),
       runtimeEpoch,
       retiredEpochs,
       lastCursor: incoming.cursor ?? current.lastCursor,

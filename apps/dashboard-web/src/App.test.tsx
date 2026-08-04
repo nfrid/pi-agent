@@ -14,9 +14,11 @@ import {
   isNearPageBottom,
   runtimeSupportsImages,
   sessionDisplayTitle,
+  sessionNavigationTarget,
   shouldShowActivityLead,
   toTranscriptEntries,
 } from './App';
+import type { DashboardEvent } from './dashboard-transport';
 
 describe('image attachments', () => {
   const image = (name: string, type: string, size: number) =>
@@ -92,6 +94,46 @@ describe('dashboard snapshots', () => {
         sessions: [],
       }),
     ).toMatchObject({ serverId: 'legacy', unread: [] });
+  });
+});
+
+describe('session replacement navigation', () => {
+  const sessionEvent = (
+    type: 'session.changed' | 'session.snapshot',
+    id: string,
+  ) => ({ type, session: { id, entries: [] } }) as DashboardEvent['event'];
+
+  it.each([
+    'session.changed',
+    'session.snapshot',
+  ] as const)('follows a runtime replacement delivered as %s without losing its association', (type) => {
+    expect(
+      sessionNavigationTarget(
+        'old-session',
+        'runtime-1',
+        'runtime-1',
+        sessionEvent(type, 'new-session'),
+      ),
+    ).toBe('new-session');
+  });
+
+  it('does not navigate for another runtime or the current session', () => {
+    expect(
+      sessionNavigationTarget(
+        'old-session',
+        'runtime-1',
+        'runtime-2',
+        sessionEvent('session.snapshot', 'new-session'),
+      ),
+    ).toBeUndefined();
+    expect(
+      sessionNavigationTarget(
+        'old-session',
+        'runtime-1',
+        'runtime-1',
+        sessionEvent('session.changed', 'old-session'),
+      ),
+    ).toBeUndefined();
   });
 });
 

@@ -682,6 +682,22 @@ export function isNearPageBottom(
   return scrollHeight - scrollY - innerHeight <= threshold;
 }
 
+export function sessionNavigationTarget(
+  currentSessionId: string,
+  associatedRuntimeId: string | undefined,
+  eventRuntimeId: string | undefined,
+  event: DashboardEvent['event'],
+): string | undefined {
+  if (
+    (event.type !== 'session.changed' && event.type !== 'session.snapshot') ||
+    associatedRuntimeId === undefined ||
+    eventRuntimeId !== associatedRuntimeId
+  )
+    return undefined;
+  const nextSessionId = event.session.id;
+  return nextSessionId !== currentSessionId ? nextSessionId : undefined;
+}
+
 function SessionView({
   id,
   snapshot,
@@ -704,7 +720,10 @@ function SessionView({
   const runtimeIdRef = useRef<string | undefined>(undefined);
   const seenEventsRef = useRef(new WeakSet<DashboardEvent>());
   const runtime = snapshot.runtimes.find((item) => item.session.id === id);
-  runtimeIdRef.current = runtime?.runtimeId;
+  // During a runtime's session replacement the snapshot already points at the
+  // new session, so there is briefly no runtime matching the old route. Keep
+  // the prior association until the replacement event is consumed.
+  if (runtime) runtimeIdRef.current = runtime.runtimeId;
   useEffect(() => {
     let active = true;
     // A reconnect gets a fresh session read even when no bridge event was lost.
@@ -776,16 +795,22 @@ function SessionView({
           : 'session' in event
             ? event.session.id
             : undefined;
-      if (
-        event.type === 'session.changed' &&
-        queued.runtimeId === runtimeIdRef.current &&
-        changedSessionId &&
-        changedSessionId !== id
-      ) {
-        navigate(`/sessions/${encodeURIComponent(changedSessionId)}`);
+      const replacementSessionId = sessionNavigationTarget(
+        id,
+        runtimeIdRef.current,
+        queued.runtimeId,
+        event,
+      );
+      if (replacementSessionId) {
+        navigate(`/sessions/${encodeURIComponent(replacementSessionId)}`);
         return;
       }
-      if (event.type === 'session.changed' && changedSessionId === id && data) {
+      if (
+        (event.type === 'session.changed' ||
+          event.type === 'session.snapshot') &&
+        changedSessionId === id &&
+        data
+      ) {
         if (seenEventsRef.current.has(queued)) continue;
         seenEventsRef.current.add(queued);
         setData((current) =>

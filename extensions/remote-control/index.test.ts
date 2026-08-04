@@ -8,6 +8,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  parseFrame,
   type RuntimeSnapshot,
   serializeFrame,
 } from '../../packages/dashboard-protocol/src/index';
@@ -224,8 +225,18 @@ describe('remote event normalization', () => {
     expect(started.messageId).toBe('runtime-epoch:1');
     expect(updated.messageId).toBe(started.messageId);
     expect(finished.messageId).toBe(started.messageId);
-    expect(updated.content).toBe(' there');
+    expect(updated.content).toEqual([{ type: 'text', text: 'Hi there' }]);
     expect(finished.content).toBe('Hi there');
+
+    const deltaOnly = new LiveEventNormalizer('runtime-delta');
+    deltaOnly.normalizeMessage('started', {
+      message: { role: 'assistant', content: 'Hi' },
+    });
+    expect(
+      deltaOnly.normalizeMessage('updated', {
+        assistantMessageEvent: { delta: ' there' },
+      }).content,
+    ).toBe('Hi there');
 
     const nextStarted = normalizer.normalizeMessage('started', {
       message: { role: 'assistant', content: 'next' },
@@ -236,6 +247,18 @@ describe('remote event normalization', () => {
     expect(nextStarted.messageId).toBe('runtime-epoch:2');
     expect(nextFinished.messageId).toBe(nextStarted.messageId);
     expect(nextStarted.messageId).not.toBe(started.messageId);
+  });
+
+  it('accumulates delta-only updates even when no final event arrives', () => {
+    const normalizer = new LiveEventNormalizer('runtime-delta-only');
+    normalizer.normalizeMessage('started', {
+      message: { role: 'assistant', content: 'Hi' },
+    });
+    expect(
+      normalizer.normalizeMessage('updated', {
+        assistantMessageEvent: { delta: ' there' },
+      }),
+    ).toMatchObject({ content: 'Hi there', phase: 'updated' });
   });
 
   it('uses Pi toolCallId and preserves direct tool execution fields', () => {
@@ -502,6 +525,45 @@ describe('remote-control bridge', () => {
     client.stop();
   });
 
+  it('normalizes oversized interactions to values accepted by the shared schema', () => {
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      handleCommand: async () => ({ accepted: true }),
+    });
+    const socket = new net.Socket();
+    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', socket);
+    expect(
+      client.sendEvent({
+        type: 'interaction.requested',
+        interaction: {
+          id: 'i'.repeat(400),
+          type: 'ask_user',
+          question: 'q'.repeat(150_000),
+          choices: Array.from({ length: 200 }, (_, index) => ({
+            label: `l${index}`.repeat(1_000),
+            value: `v${index}`.repeat(1_000),
+            description: 'd'.repeat(20_000),
+            preview: 'p'.repeat(150_000),
+          })),
+          allowCustom: true,
+          customLabel: 'c'.repeat(2_000),
+          createdAt: Date.now(),
+        },
+      }),
+    ).toBe(true);
+    const frame = parseFrame(String(write.mock.calls[0]?.[0]));
+    if (frame.kind !== 'event' || frame.event.type !== 'interaction.requested')
+      throw new Error('expected interaction event');
+    expect(frame.event.interaction.question).toHaveLength(20_000);
+    expect(frame.event.interaction.choices).toHaveLength(50);
+    expect(frame.event.interaction.choices[0]?.description).toHaveLength(2_000);
+    expect(frame.event.interaction.choices[0]?.preview).toHaveLength(4_000);
+    client.stop();
+  });
+
   it('reconnects rather than silently dropping an interaction on backpressure', () => {
     const client = new BridgeClient({
       socketPath: '/unused',
@@ -580,7 +642,7 @@ describe('remote-control bridge', () => {
           data: cyclic,
         },
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       client.sendEvent({
         type: 'tool.finished',
@@ -595,13 +657,13 @@ describe('remote-control bridge', () => {
     ).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(connection?.destroyed).toBe(false);
-    expect(
-      received.filter(
-        (frame) =>
-          (frame.event as { type?: string } | undefined)?.type !==
-          'runtime.hello',
-      ),
-    ).toHaveLength(0);
+    const nonHello = received.filter(
+      (frame) =>
+        (frame.event as { type?: string } | undefined)?.type !==
+        'runtime.hello',
+    );
+    expect(nonHello).toHaveLength(1);
+    expect(JSON.stringify(nonHello)).not.toContain('self');
     client.stop();
     connection?.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));

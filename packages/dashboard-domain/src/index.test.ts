@@ -6,6 +6,7 @@ import {
   applyRuntimeEvent,
   applyTranscriptEvent,
   createRuntimeReducerState,
+  createTranscriptProjection,
   hydrateTranscript,
   selectLegacyTranscriptEntries,
 } from './index.js';
@@ -30,6 +31,7 @@ function envelope(
   runtimeSeq: number,
   event: Record<string, unknown>,
   runtimeEpoch = 'epoch-1',
+  sessionId = 's',
 ) {
   return {
     cursor,
@@ -37,7 +39,7 @@ function envelope(
     runtimeId: 'r',
     runtimeEpoch,
     runtimeSeq,
-    sessionId: 's',
+    sessionId,
     event,
   } as never;
 }
@@ -107,7 +109,167 @@ describe('dashboard domain reducers', () => {
     });
   });
 
-  it('replaces an epoch and ignores a late event from the retired epoch', () => {
+  it('keeps terminal message and tool items inert for later lifecycle events', () => {
+    let state = hydrateTranscript([], 's');
+    state = applyTranscriptEvent(
+      state,
+      envelope(1, 1, {
+        type: 'tool.started',
+        sessionId: 's',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'read',
+          arguments: { path: '/tmp/file' },
+          phase: 'started',
+        },
+      }),
+    ).state;
+    state = applyTranscriptEvent(
+      state,
+      envelope(2, 2, {
+        type: 'tool.updated',
+        sessionId: 's',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'read',
+          status: 'running',
+          phase: 'updated',
+        },
+      }),
+    ).state;
+    state = applyTranscriptEvent(
+      state,
+      envelope(3, 3, {
+        type: 'tool.finished',
+        sessionId: 's',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'read',
+          result: 'first result',
+          status: 'completed',
+          phase: 'finished',
+        },
+      }),
+    ).state;
+    const terminal = state.items['call-1'];
+    expect(terminal).toMatchObject({
+      arguments: { path: '/tmp/file' },
+      result: 'first result',
+      status: 'finished',
+    });
+    const staleTool = applyTranscriptEvent(
+      state,
+      envelope(4, 4, {
+        type: 'tool.finished',
+        sessionId: 's',
+        tool: {
+          toolCallId: 'call-1',
+          name: 'read',
+          result: 'stale result',
+          phase: 'finished',
+        },
+      }),
+    );
+    expect(staleTool.state.items['call-1']).toEqual(terminal);
+
+    state = applyTranscriptEvent(
+      state,
+      envelope(5, 5, {
+        type: 'message.finished',
+        sessionId: 's',
+        message: {
+          messageId: 'message-1',
+          role: 'assistant',
+          content: 'final',
+          phase: 'finished',
+        },
+      }),
+    ).state;
+    const message = state.items['message-1'];
+    const staleMessage = applyTranscriptEvent(
+      state,
+      envelope(6, 6, {
+        type: 'message.finished',
+        sessionId: 's',
+        message: {
+          messageId: 'message-1',
+          role: 'assistant',
+          content: 'replacement',
+          phase: 'finished',
+        },
+      }),
+    );
+    expect(staleMessage.state.items['message-1']).toEqual(message);
+  });
+
+  it('replaces a transcript epoch, clears old items, and ignores late events', () => {
+    let state = createTranscriptProjection('s');
+    state = applyTranscriptEvent(
+      state,
+      envelope(
+        1,
+        1,
+        {
+          type: 'message.finished',
+          sessionId: 's',
+          message: {
+            messageId: 'old-message',
+            role: 'assistant',
+            content: 'old',
+            phase: 'finished',
+          },
+        },
+        'epoch-old',
+      ),
+    ).state;
+    const replacement = applyTranscriptEvent(
+      state,
+      envelope(
+        2,
+        1,
+        {
+          type: 'message.updated',
+          sessionId: 's-new',
+          message: {
+            messageId: 'new-message',
+            role: 'assistant',
+            content: 'new',
+            phase: 'updated',
+          },
+        },
+        'epoch-new',
+        's-new',
+      ),
+    );
+    expect(replacement.accepted).toBe(true);
+    expect(replacement.state.order).toEqual(['new-message']);
+    expect(replacement.state.items['old-message']).toBeUndefined();
+    expect(replacement.state.sessionId).toBe('s-new');
+    const late = applyTranscriptEvent(
+      replacement.state,
+      envelope(
+        3,
+        2,
+        {
+          type: 'message.updated',
+          sessionId: 's-new',
+          message: {
+            messageId: 'late-message',
+            role: 'assistant',
+            content: 'late',
+            phase: 'updated',
+          },
+        },
+        'epoch-old',
+        's-new',
+      ),
+    );
+    expect(late.accepted).toBe(false);
+    expect(late.reason).toBe('old-runtime-epoch');
+    expect(late.state.order).toEqual(['new-message']);
+  });
+
+  it('replaces a runtime epoch and ignores a late retired runtime event', () => {
     let state = createRuntimeReducerState(snapshot(), {
       runtimeEpoch: 'epoch-old',
       runtimeSeq: 4,

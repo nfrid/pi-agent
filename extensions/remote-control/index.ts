@@ -13,6 +13,7 @@ import {
   type BridgeImageAttachment,
   deriveSessionTitle,
   type InteractionSnapshot,
+  MAX_FRAME_BYTES,
   type NormalizedMessagePayload,
   type NormalizedToolPayload,
   PROTOCOL_VERSION,
@@ -49,6 +50,24 @@ function eventRecord(value: unknown): EventRecord {
     : {};
 }
 
+function withoutOpaqueData(event: BridgeEvent): BridgeEvent {
+  if (event.type.startsWith('message.') && 'message' in event) {
+    const message = event.message;
+    if (message && typeof message === 'object' && !Array.isArray(message)) {
+      const { data: _data, ...canonical } = message as Record<string, unknown>;
+      return { ...event, message: canonical };
+    }
+  }
+  if (event.type.startsWith('tool.') && 'tool' in event) {
+    const tool = event.tool;
+    if (tool && typeof tool === 'object' && !Array.isArray(tool)) {
+      const { data: _data, ...canonical } = tool as Record<string, unknown>;
+      return { ...event, tool: canonical };
+    }
+  }
+  return event;
+}
+
 function directValue(record: EventRecord, key: string): unknown {
   return Object.hasOwn(record, key) ? record[key] : undefined;
 }
@@ -78,6 +97,32 @@ function safeIdentityPart(value: string | number): string {
     .slice(0, 240);
 }
 
+function appendMessageContent(previous: unknown, delta: unknown): unknown {
+  if (typeof delta !== 'string') return previous ?? delta ?? null;
+  if (typeof previous === 'string') return previous + delta;
+  if (previous === undefined || previous === null) return delta;
+  if (Array.isArray(previous)) {
+    const next = [...previous];
+    const last = next.at(-1);
+    if (
+      last &&
+      typeof last === 'object' &&
+      !Array.isArray(last) &&
+      (last as Record<string, unknown>).type === 'text' &&
+      typeof (last as Record<string, unknown>).text === 'string'
+    ) {
+      next[next.length - 1] = {
+        ...(last as Record<string, unknown>),
+        text: `${(last as Record<string, unknown>).text}${delta}`,
+      };
+      return next;
+    }
+    next.push({ type: 'text', text: delta });
+    return next;
+  }
+  return `${String(previous)}${delta}`;
+}
+
 /**
  * Converts Pi's live event wrappers to the protocol's explicit live payloads.
  * Identity lookup intentionally only examines documented, named wrapper fields;
@@ -86,7 +131,7 @@ function safeIdentityPart(value: string | number): string {
 export class LiveEventNormalizer {
   private identitySequence = 0;
   private activeMessage:
-    | { messageId: string; identityKey?: string }
+    | { messageId: string; identityKey?: string; content?: unknown }
     | undefined;
 
   constructor(private readonly runtimeEpoch: string = randomUUID()) {}
@@ -135,12 +180,27 @@ export class LiveEventNormalizer {
         : `${this.runtimeEpoch}:${++this.identitySequence}`;
     }
 
+    // Pi's message wrapper contains the complete message. Only use a delta
+    // when no complete content is present, and accumulate it for the active
+    // message so an update never replaces the already-rendered prefix.
+    const fullContent = Object.hasOwn(message, 'content')
+      ? directValue(message, 'content')
+      : Object.hasOwn(event, 'content')
+        ? directValue(event, 'content')
+        : Object.hasOwn(assistantEvent, 'content')
+          ? directValue(assistantEvent, 'content')
+          : undefined;
     const rawContent =
-      directValue(message, 'content') ??
-      directValue(event, 'content') ??
-      directValue(assistantEvent, 'content') ??
-      directValue(assistantEvent, 'delta') ??
-      null;
+      fullContent !== undefined
+        ? fullContent
+        : Object.hasOwn(assistantEvent, 'delta')
+          ? appendMessageContent(
+              this.activeMessage?.content,
+              directValue(assistantEvent, 'delta'),
+            )
+          : (this.activeMessage?.content ?? null);
+    const safeContent = jsonSafe(rawContent, MAX_FRAME_BYTES);
+    if (this.activeMessage) this.activeMessage.content = safeContent;
     const turnId =
       directIdentifier(event, 'turnId') ?? directIdentifier(message, 'turnId');
     const role =
@@ -150,7 +210,7 @@ export class LiveEventNormalizer {
     const payload: NormalizedMessagePayload = {
       messageId,
       role,
-      content: jsonSafe(rawContent),
+      content: safeContent,
       phase,
       ...(timestamp !== undefined ? { timestamp } : {}),
       ...(turnId !== undefined ? { turnId: String(turnId) } : {}),
@@ -161,7 +221,6 @@ export class LiveEventNormalizer {
               .slice(0, 128),
           }
         : {}),
-      ...this.opaqueData(event),
     };
     if (phase === 'finished') this.activeMessage = undefined;
     return payload;
@@ -197,10 +256,10 @@ export class LiveEventNormalizer {
       name,
       phase,
       ...(directValue(event, 'args') !== undefined
-        ? { arguments: jsonSafe(directValue(event, 'args')) }
+        ? { arguments: jsonSafe(directValue(event, 'args'), MAX_FRAME_BYTES) }
         : {}),
       ...(directValue(event, 'result') !== undefined
-        ? { result: jsonSafe(directValue(event, 'result')) }
+        ? { result: jsonSafe(directValue(event, 'result'), MAX_FRAME_BYTES) }
         : {}),
       ...(typeof directValue(event, 'isError') === 'boolean'
         ? { isError: directValue(event, 'isError') as boolean }
@@ -209,14 +268,8 @@ export class LiveEventNormalizer {
       ...(directIdentifier(event, 'turnId') !== undefined
         ? { turnId: String(directIdentifier(event, 'turnId')) }
         : {}),
-      ...this.opaqueData(event),
     };
     return payload;
-  }
-
-  private opaqueData(event: EventRecord): { data?: unknown } {
-    const data = jsonSafe(event);
-    return data === null ? {} : { data };
   }
 }
 
@@ -482,7 +535,7 @@ export class BridgeClient {
         ? { ...event, interaction: interactionSnapshot(event.interaction) }
         : event.type === 'interaction.resolved'
           ? { ...event, resolution: jsonSafe(event.resolution) }
-          : event;
+          : withoutOpaqueData(event);
     let data: string;
     try {
       data = serializeFrame({
@@ -836,32 +889,53 @@ function liveState(
   return ctx.isIdle() ? 'idle' : 'working';
 }
 
+function boundedText(value: unknown, max: number, fallback: string): string {
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  return text.slice(0, max) || fallback;
+}
+
+function boundedIdentifier(
+  value: unknown,
+  max: number,
+  fallback: string,
+): string {
+  const text = Array.from(boundedText(value, max, fallback), (character) =>
+    character.charCodeAt(0) <= 31 || character.charCodeAt(0) === 127
+      ? ''
+      : character,
+  ).join('');
+  return text.slice(0, max) || fallback;
+}
+
 function interactionSnapshot(
   interaction: ReturnType<InteractionBroker['list']>[number],
 ): InteractionSnapshot {
-  const safe = jsonSafe(interaction) as InteractionSnapshot | null;
-  if (safe) return safe;
-  // Keep dashboard interactions comfortably below the frame cap even when a
-  // provider supplies many huge previews. The local Pi dialog remains the
-  // authoritative full-fidelity interaction.
+  // Normalize every field even when the JSON is otherwise small enough to fit
+  // a frame. Frame-size checks do not enforce the stricter shared schema.
   return {
-    id: interaction.id,
+    id: boundedIdentifier(interaction.id, 256, 'interaction'),
     type: 'ask_user',
-    question: interaction.question.slice(0, 20_000),
-    choices: interaction.choices.slice(0, 50).map((choice) => ({
-      label: choice.label.slice(0, 512),
-      value: choice.value.slice(0, 512),
-      ...(choice.description
+    question: boundedText(interaction.question, 20_000, 'Question'),
+    choices: interaction.choices.slice(0, 50).map((choice, index) => ({
+      label: boundedText(choice.label, 512, `Choice ${index + 1}`),
+      value: boundedText(choice.value, 512, `choice-${index + 1}`),
+      ...(typeof choice.description === 'string' && choice.description
         ? { description: choice.description.slice(0, 2_000) }
         : {}),
-      ...(choice.preview ? { preview: choice.preview.slice(0, 4_000) } : {}),
-      ...(choice.custom === undefined ? {} : { custom: choice.custom }),
+      ...(typeof choice.preview === 'string' && choice.preview
+        ? { preview: choice.preview.slice(0, 4_000) }
+        : {}),
+      ...(typeof choice.custom === 'boolean' ? { custom: choice.custom } : {}),
     })),
-    allowCustom: interaction.allowCustom,
-    ...(interaction.customLabel
+    allowCustom: interaction.allowCustom === true,
+    ...(typeof interaction.customLabel === 'string' && interaction.customLabel
       ? { customLabel: interaction.customLabel.slice(0, 512) }
       : {}),
-    createdAt: interaction.createdAt,
+    createdAt:
+      typeof interaction.createdAt === 'number' &&
+      Number.isFinite(interaction.createdAt)
+        ? interaction.createdAt
+        : 0,
   };
 }
 
