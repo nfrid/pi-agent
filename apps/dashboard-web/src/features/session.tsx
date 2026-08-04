@@ -177,6 +177,8 @@ export function SessionView({
                 ? 'offline'
                 : runtime.liveState
               : 'dormant'}
+            {runtime?.model &&
+              ` · ${runtime.model.provider}/${runtime.model.model}${runtime.model.thinking ? ` · ${runtime.model.thinking}` : ''}`}
           </p>
         </div>
         <div className="session-heading-actions">

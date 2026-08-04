@@ -1357,15 +1357,14 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     page.getByRole('heading', { name: 'Existing session request' }),
   ).toBeVisible();
   await mocks.emit({ type: 'snapshot', snapshot: phase6Snapshot() });
-  await expect(page.getByLabel('Model')).toBeVisible();
-  await page.getByLabel('Model').selectOption('test/text');
+  await expect(page.getByLabel('Model')).toHaveCount(0);
+  await expect(page.locator('.session-heading')).toContainText(
+    'test/vision · medium',
+  );
   await page.getByLabel('Thinking level').selectOption('high');
-  await expect
-    .poll(
-      () =>
-        mocks.commands.filter((command) => command.type === 'setModel').length,
-    )
-    .toBe(1);
+  expect(
+    mocks.commands.filter((command) => command.type === 'setModel'),
+  ).toHaveLength(0);
   await expect
     .poll(
       () =>

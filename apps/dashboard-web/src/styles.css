@@ -1244,29 +1244,28 @@ h2 {
   font-size: 11px;
   margin: 8px 9px;
 }
-.composer-model-row {
+.composer-control-row {
   min-width: 0;
   margin-top: 0;
 }
-.model-controls {
+.thinking-control {
   display: flex;
   min-width: 0;
   margin: 0;
   border: 0;
   padding: 0;
-  flex-wrap: wrap;
   align-items: end;
   gap: 8px;
   color: var(--muted);
   font-size: 11px;
 }
-.model-controls label {
+.thinking-control label {
   display: grid;
   gap: 3px;
 }
-.model-controls select {
+.thinking-control select {
   min-width: 130px;
-  max-width: 260px;
+  max-width: 180px;
   padding: 5px;
   border: 1px solid var(--line);
   background: var(--bg-alt);
@@ -1377,16 +1376,15 @@ h2 {
   .composer-mode {
     width: 100%;
   }
-  .composer-model-row {
-    flex: 1 1 190px;
+  .composer-control-row {
+    flex: 0 1 150px;
   }
-  .model-controls {
+  .thinking-control {
     display: grid;
-    grid-template-columns: minmax(0, 1.6fr) minmax(78px, 0.75fr);
     gap: 6px;
   }
-  .model-controls label,
-  .model-controls select {
+  .thinking-control label,
+  .thinking-control select {
     min-width: 0;
     width: 100%;
     max-width: none;
