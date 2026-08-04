@@ -182,7 +182,16 @@ export class RuntimeRegistry {
                 }
               })()
             : undefined;
-          const advertisedSnapshot = snapshot.capabilities ?? advertised;
+          const snapshotCapabilities = snapshot.capabilities
+            ? (() => {
+                try {
+                  return parseRuntimeCapabilitySnapshot(snapshot.capabilities);
+                } catch {
+                  return undefined;
+                }
+              })()
+            : undefined;
+          const advertisedSnapshot = snapshotCapabilities ?? advertised;
           clearTimeout(helloTimer);
           try {
             // Only heartbeat-capable clients get an idle deadline. Agents
