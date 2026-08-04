@@ -14,6 +14,16 @@ describe('activity groups contribution schema', () => {
     expect(Value.Check(ActivityGroupsViewModelSchema, group)).toBe(true);
   });
 
+  it('accepts legacy projections without a failure count', () => {
+    const [group] = projectActivityGroups([
+      { kind: 'assistant', speaks: false },
+      { kind: 'tool', name: 'read', args: {} },
+    ]);
+    const legacyGroup: Record<string, unknown> = { ...group };
+    delete legacyGroup.failureCount;
+    expect(Value.Check(ActivityGroupsViewModelSchema, legacyGroup)).toBe(true);
+  });
+
   it('bounds opaque tool arguments while retaining the complete view model', () => {
     const [group] = projectActivityGroups([
       { kind: 'assistant', speaks: false },

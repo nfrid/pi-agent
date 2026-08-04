@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { ActivityGroupsViewModelSchema } from '../../../../extensions/activity-groups/contribution';
 import { toolOutcome, toTranscriptEntries } from '../transcript';
 import {
+  activityGroupMetadata,
   activityGroupPresentation,
   activityGroupSummary,
   buildTranscriptGroupCoverage,
@@ -32,6 +33,26 @@ describe('activity row views and virtual transcript construction', () => {
       toolCount: 5,
       failureCount: 2,
     });
+  });
+
+  it('falls back to tool outcomes when an older group lacks failureCount', () => {
+    const group = {
+      toolCount: 2,
+      tools: [
+        { name: 'read', args: {} },
+        { name: 'bash', args: {}, status: 'error' },
+      ],
+    };
+    expect(activityGroupSummary(group).failureCount).toBe(1);
+  });
+
+  it('omits failure metadata when there are no failed calls', () => {
+    expect(activityGroupMetadata({ toolCount: 2, failureCount: 0 })).toBe(
+      '2 tool calls',
+    );
+    expect(activityGroupMetadata({ toolCount: 2, failureCount: 1 })).toBe(
+      '2 tool calls · 1 failure',
+    );
   });
 
   it('keeps failed shared status distinct in the dashboard row view', () => {

@@ -186,21 +186,56 @@ export type ActivityGroupSummary = {
   failureCount: number;
 };
 
+type ActivityGroupSummaryInput = Pick<
+  TranscriptGroup,
+  'tools' | 'toolCount'
+> & {
+  failureCount?: number;
+};
+
+function isFailedActivityTool(tool: unknown): boolean {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return false;
+  const candidate = tool as Record<string, unknown>;
+  return (
+    candidate.isError === true ||
+    candidate.status === 'error' ||
+    candidate.status === 'failed'
+  );
+}
+
 /**
  * Keep the collapsed row bounded and honest: names and outcomes come from the
  * shared activity projection, while opaque tool arguments stay in expanded
- * details rather than being guessed at here.
+ * details rather than being guessed at here. The fallback retains rendering
+ * for older version-1 projections that did not include failureCount.
  */
 export function activityGroupSummary(
-  group: Pick<TranscriptGroup, 'tools' | 'toolCount' | 'failureCount'>,
+  group: ActivityGroupSummaryInput,
 ): ActivityGroupSummary {
   const recentTools = group.tools.slice(-3).map((tool) => tool.name);
+  const failureCount =
+    typeof group.failureCount === 'number'
+      ? group.failureCount
+      : group.tools.filter(isFailedActivityTool).length;
   return {
     recentTools,
     earlierToolCount: Math.max(0, group.tools.length - recentTools.length),
     toolCount: group.toolCount,
-    failureCount: group.failureCount,
+    failureCount,
   };
+}
+
+export function activityGroupMetadata(
+  summary: Pick<ActivityGroupSummary, 'toolCount' | 'failureCount'>,
+): string {
+  const parts = [
+    `${summary.toolCount} tool call${summary.toolCount === 1 ? '' : 's'}`,
+  ];
+  if (summary.failureCount > 0)
+    parts.push(
+      `${summary.failureCount} failure${summary.failureCount === 1 ? '' : 's'}`,
+    );
+  return parts.join(' · ');
 }
 
 function CollapsedActivitySummary({ group }: { group: TranscriptGroup }) {
@@ -228,9 +263,7 @@ function CollapsedActivitySummary({ group }: { group: TranscriptGroup }) {
         </ol>
       )}
       <small className="activity-metadata">
-        {summary.toolCount} tool call{summary.toolCount === 1 ? '' : 's'} ·{' '}
-        {summary.failureCount} failure
-        {summary.failureCount === 1 ? '' : 's'}
+        {activityGroupMetadata(summary)}
       </small>
     </div>
   );
