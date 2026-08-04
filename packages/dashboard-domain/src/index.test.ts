@@ -322,8 +322,56 @@ describe('dashboard domain reducers', () => {
     ]);
     const entries = selectLegacyTranscriptEntries(state);
     expect(entries).toHaveLength(2);
-    expect(entries[0]).toMatchObject({ message: { id: 'message-1' } });
+    expect(entries[0]).toMatchObject({
+      message: { id: 'message-1', content: [] },
+    });
     expect(entries[1]).toMatchObject({ tool: { toolCallId: 'call-1' } });
     expect(JSON.stringify(entries)).not.toContain('must-not-be-used');
+  });
+
+  it('pairs an out-of-order persisted tool result without duplicate rendering', () => {
+    const state = hydrateTranscript([
+      {
+        type: 'message',
+        id: 'result-entry',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'call-1',
+          toolName: 'read',
+          content: [{ type: 'text', text: 'file contents' }],
+          isError: false,
+        },
+      },
+      {
+        type: 'message',
+        id: 'assistant-entry',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'call-1',
+              name: 'read',
+              arguments: { path: 'file.txt' },
+            },
+          ],
+        },
+      },
+    ]);
+    expect(state.items['call-1']).toMatchObject({
+      kind: 'tool',
+      name: 'read',
+      arguments: { path: 'file.txt' },
+      result: [{ type: 'text', text: 'file contents' }],
+      status: 'finished',
+    });
+    const entries = selectLegacyTranscriptEntries(state);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      tool: { toolCallId: 'call-1', result: [{ text: 'file contents' }] },
+    });
+    expect(entries[1]).toMatchObject({
+      message: { id: 'assistant-entry', content: [] },
+    });
   });
 });

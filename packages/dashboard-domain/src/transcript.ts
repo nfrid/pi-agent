@@ -489,17 +489,36 @@ export function hydrateTranscript(
           const toolCallId =
             directString(part, 'toolCallId') ?? directString(part, 'id');
           if (!toolCallId) continue;
+          const existingTool =
+            items[toolCallId]?.kind === 'tool'
+              ? (items[toolCallId] as TranscriptToolItem)
+              : undefined;
           items[toolCallId] = {
             kind: 'tool',
             toolCallId,
             name:
               directString(part, 'name') ??
               directString(part, 'toolName') ??
+              existingTool?.name ??
               'tool',
             ...(part.arguments === undefined
-              ? {}
+              ? existingTool?.arguments === undefined
+                ? {}
+                : { arguments: existingTool.arguments }
               : { arguments: part.arguments }),
-            status: 'finished',
+            ...(existingTool?.result === undefined
+              ? {}
+              : { result: existingTool.result }),
+            ...(existingTool?.isError === undefined
+              ? {}
+              : { isError: existingTool.isError }),
+            status: existingTool?.status ?? 'pending',
+            ...(existingTool?.turnId === undefined
+              ? {}
+              : { turnId: existingTool.turnId }),
+            ...(existingTool?.data === undefined
+              ? {}
+              : { data: existingTool.data }),
           };
           if (!order.includes(toolCallId)) order.push(toolCallId);
         }
@@ -552,7 +571,20 @@ export function selectLegacyTranscriptEntries(
     const item = projection.items[id];
     if (!item) return [];
     if (item.kind === 'other') return [item.raw];
-    if (item.kind === 'message')
+    if (item.kind === 'message') {
+      // Tool calls are normalized as standalone projection items. Remove only
+      // embedded calls that have a matching semantic item so compatibility
+      // rendering cannot display the same call twice.
+      const content = Array.isArray(item.content)
+        ? item.content.filter((part) => {
+            if (!isRecord(part)) return true;
+            if (part.type !== 'toolCall' && part.type !== 'tool_call')
+              return true;
+            const toolCallId =
+              directString(part, 'toolCallId') ?? directString(part, 'id');
+            return !toolCallId || projection.items[toolCallId]?.kind !== 'tool';
+          })
+        : item.content;
       return [
         {
           type: 'message',
@@ -560,7 +592,7 @@ export function selectLegacyTranscriptEntries(
             id: item.messageId,
             messageId: item.messageId,
             role: item.role,
-            content: item.content,
+            content,
             ...(item.timestamp === undefined
               ? {}
               : { timestamp: item.timestamp }),
@@ -574,6 +606,7 @@ export function selectLegacyTranscriptEntries(
           },
         },
       ];
+    }
     return [
       {
         type: 'tool',
