@@ -564,6 +564,7 @@ describe('dashboard HTTP boundary', () => {
             session: {
               id: 'live-session',
               name: 'Live session',
+              entriesComplete: true,
               entries: [{ type: 'message', id: 'one' }],
             },
             pendingInteractions: [],
@@ -582,6 +583,8 @@ describe('dashboard HTTP boundary', () => {
     expect(await active.json()).toMatchObject({
       metadata: { id: 'live-session', name: 'Live session' },
       entries: [{ type: 'message', id: 'one' }],
+      runtimeEpoch: expect.any(String),
+      runtimeSeq: 1,
     });
     const missing = await fetch(
       `http://127.0.0.1:${server.port}/api/sessions/missing`,

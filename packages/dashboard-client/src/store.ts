@@ -273,10 +273,19 @@ export class DashboardLiveStore {
       ? this.state.transcriptsBySessionId[sessionId]
       : undefined;
     let transcripts = this.state.transcriptsBySessionId;
-    if (sessionId && currentProjection) {
-      const nextProjection = reduceTranscriptEvent(currentProjection, envelope);
-      if (nextProjection !== currentProjection)
-        transcripts = { ...transcripts, [sessionId]: nextProjection };
+    if (sessionId) {
+      const canSeedSnapshot =
+        envelope.event.type === 'session.snapshot' &&
+        (envelope.event.session as { entriesComplete?: boolean })
+          .entriesComplete === true;
+      const baseProjection =
+        currentProjection ??
+        (canSeedSnapshot ? hydrateTranscript([], sessionId) : undefined);
+      if (baseProjection) {
+        const nextProjection = reduceTranscriptEvent(baseProjection, envelope);
+        if (nextProjection !== baseProjection)
+          transcripts = { ...transcripts, [sessionId]: nextProjection };
+      }
     }
     let sessionsById = this.state.sessionsById;
     let nextSnapshot = this.state.snapshot;
@@ -373,12 +382,91 @@ export class DashboardLiveStore {
       )
     )
       return undefined;
-    let projection = hydrateTranscript(response.entries, response.metadata.id, {
-      cursor: snapshotCursor,
+    const currentProjection =
+      this.state.transcriptsBySessionId[response.metadata.id];
+    const sessionEvents = this.state.recentEvents.filter((envelope) => {
+      if (sessionIdForEvent(envelope) !== response.metadata.id) return false;
+      // The HTTP branch belongs to its advertised runtime generation. Older
+      // generations cannot refine it; a newer generation after the response
+      // cursor is still replayed and may intentionally replace it.
+      return (
+        response.runtimeEpoch === undefined ||
+        envelope.runtimeEpoch === undefined ||
+        envelope.runtimeEpoch === response.runtimeEpoch ||
+        envelope.cursor > snapshotCursor
+      );
     });
-    for (const envelope of this.state.recentEvents)
+    // The HTTP cursor covers event publication, not necessarily Pi's append to
+    // JSONL. Replay the bounded live buffer so a terminal tool event emitted
+    // just before persistence is reconciled, and so a complete /tree snapshot
+    // can replace stale append-only data already returned by HTTP.
+    const firstReplayCursor = sessionEvents[0]?.cursor;
+    const replayCursor =
+      firstReplayCursor === undefined
+        ? snapshotCursor
+        : Math.min(snapshotCursor, firstReplayCursor) - 1;
+    const firstResponseEpochSeq = sessionEvents
+      .filter(
+        (envelope) =>
+          response.runtimeEpoch !== undefined &&
+          envelope.runtimeEpoch === response.runtimeEpoch &&
+          envelope.runtimeSeq !== undefined,
+      )
+      .map((envelope) => envelope.runtimeSeq as number)
+      .sort((a, b) => a - b)[0];
+    const baselineRuntimeSeq =
+      firstResponseEpochSeq === undefined
+        ? response.runtimeSeq
+        : firstResponseEpochSeq - 1;
+    let projection = hydrateTranscript(response.entries, response.metadata.id, {
+      cursor: replayCursor,
+      ...(response.runtimeEpoch === undefined
+        ? {}
+        : { runtimeEpoch: response.runtimeEpoch }),
+      ...(baselineRuntimeSeq === undefined
+        ? {}
+        : { runtimeSeq: baselineRuntimeSeq }),
+    });
+    for (const envelope of sessionEvents)
       if (envelope.cursor > projection.lastCursor)
         projection = reduceTranscriptEvent(projection, envelope);
+    const retiredEpochs = new Set([
+      ...projection.retiredEpochs,
+      ...(currentProjection?.retiredEpochs ?? []),
+    ]);
+    if (
+      currentProjection?.runtimeEpoch !== undefined &&
+      currentProjection.runtimeEpoch !== projection.runtimeEpoch
+    )
+      retiredEpochs.add(currentProjection.runtimeEpoch);
+    const responseRuntimeSeq =
+      response.runtimeEpoch !== undefined &&
+      response.runtimeEpoch === projection.runtimeEpoch
+        ? (response.runtimeSeq ?? -1)
+        : -1;
+    const currentRuntimeSeq =
+      currentProjection?.runtimeEpoch !== undefined &&
+      currentProjection.runtimeEpoch === projection.runtimeEpoch
+        ? currentProjection.lastRuntimeSeq
+        : -1;
+    projection = {
+      ...projection,
+      ...(projection.runtimeEpoch === undefined &&
+      currentProjection?.runtimeEpoch !== undefined
+        ? { runtimeEpoch: currentProjection.runtimeEpoch }
+        : {}),
+      lastCursor: Math.max(
+        projection.lastCursor,
+        snapshotCursor,
+        currentProjection?.lastCursor ?? -1,
+      ),
+      lastRuntimeSeq: Math.max(
+        projection.lastRuntimeSeq,
+        responseRuntimeSeq,
+        currentRuntimeSeq,
+      ),
+      retiredEpochs: [...retiredEpochs],
+    };
     const currentMetadata = this.state.sessionsById[response.metadata.id];
     const metadata = currentMetadata
       ? { ...response.metadata, ...currentMetadata }

@@ -3,6 +3,7 @@ import { expect, type Page, test } from '@playwright/test';
 test('mobile dashboard renders and supports the new-agent route', async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
@@ -16,10 +17,14 @@ test('mobile dashboard renders and supports the new-agent route', async ({
             runtimeId: 'ghost',
             ownership: 'external',
             pid: 1,
-            cwd: '/tmp',
+            cwd: '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
             liveState: 'idle',
             online: false,
-            session: { id: 'ghost-session', entries: [] },
+            session: {
+              id: 'ghost-session',
+              title: 'A deliberately long session title that must wrap safely',
+              entries: [],
+            },
             pendingInteractions: [],
           },
         ],
@@ -42,15 +47,54 @@ test('mobile dashboard renders and supports the new-agent route', async ({
   await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
   await expect(page.getByText('No runtimes are connected.')).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Untitled session offline' }),
+    page.getByRole('button', {
+      name: 'A deliberately long session title that must wrap safely offline',
+    }),
   ).toBeVisible();
   await expect(page.getByRole('button', { name: '+ Agent' })).toBeVisible();
+  await page.getByRole('button', { name: 'Open command palette' }).click();
+  await expect(
+    page.getByRole('dialog', { name: 'Command palette' }),
+  ).toBeVisible();
+  await expect(page.getByRole('option', { name: /Dashboard/ })).toBeVisible();
+  await expect(page.getByRole('option', { name: /New Agent/ })).toBeVisible();
+  await expect(
+    page.getByRole('option', { name: /Workspace: Demo/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('No actions available from connected runtimes.'),
+  ).toBeVisible();
+  await page.getByLabel('Filter actions and navigation').fill('does-not-exist');
+  await expect(
+    page.getByText('No results for “does-not-exist”.'),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(
+    page.getByRole('button', { name: 'Open command palette' }),
+  ).toBeFocused();
+  await page.keyboard.press('Control+k');
+  await expect(
+    page.getByRole('dialog', { name: 'Command palette' }),
+  ).toBeVisible();
+  await page.keyboard.press('Control+k');
+  await expect(
+    page.getByRole('dialog', { name: 'Command palette' }),
+  ).toHaveCount(0);
+  await page.keyboard.press('Meta+k');
+  await expect(
+    page.getByRole('dialog', { name: 'Command palette' }),
+  ).toBeVisible();
+  await page.keyboard.press('Meta+k');
+  await expect(
+    page.getByRole('dialog', { name: 'Command palette' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open command palette' }).click();
+  await page.getByRole('option', { name: /New Agent/ }).click();
   expect(
     await page
       .locator('body')
       .evaluate((element) => element.scrollWidth <= element.clientWidth),
   ).toBe(true);
-  await page.getByRole('button', { name: '+ Agent' }).click();
   await expect(
     page.getByRole('heading', { name: 'Start an agent' }),
   ).toBeVisible();
@@ -58,6 +102,72 @@ test('mobile dashboard renders and supports the new-agent route', async ({
   await expect(
     page.getByRole('button', { name: 'Start in a new tmux window' }),
   ).toBeVisible();
+});
+
+test('command palette identifies the runtime before invoking repeated actions', async ({
+  page,
+}) => {
+  const runtime = (runtimeId: string, title: string, cwd: string) => ({
+    runtimeId,
+    ownership: 'external',
+    pid: 1,
+    cwd,
+    liveState: 'working',
+    online: true,
+    session: { id: `session-${runtimeId}`, title, entries: [] },
+    pendingInteractions: [],
+    capabilities: {
+      version: 1,
+      capabilities: [],
+      manifests: [
+        {
+          id: `manifest-${runtimeId}`,
+          version: '1',
+          actions: [{ id: 'runtime.abort', title: 'Abort run' }],
+          renderers: [],
+        },
+      ],
+    },
+  });
+  await page.route('**/api/usage', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/snapshot', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        revision: 1,
+        runtimes: [
+          runtime('runtime-alpha', 'Alpha agent', '/workspace/alpha'),
+          runtime('runtime-beta', 'Beta agent', '/workspace/beta'),
+        ],
+        workspaces: [],
+        sessions: [],
+        unread: [],
+      }),
+    }),
+  );
+  let invokedRuntime: string | undefined;
+  await page.route('**/api/runtimes/*/command', async (route) => {
+    invokedRuntime = new URL(route.request().url()).pathname.split('/')[3];
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ accepted: true }),
+    });
+  });
+  await page.goto('/');
+  await expect(
+    page.getByRole('button', { name: 'Open command palette' }),
+  ).toBeVisible();
+  await page.keyboard.press('Control+k');
+  await page.getByLabel('Filter actions and navigation').fill('runtime-beta');
+  const option = page.getByRole('option', { name: /Abort run/ });
+  await expect(option).toHaveCount(1);
+  await expect(option).toContainText(
+    'Target: runtime-beta · Beta agent · /workspace/beta',
+  );
+  await option.click();
+  await expect.poll(() => invokedRuntime).toBe('runtime-beta');
 });
 
 test('live transport contains malformed data and reconnects without HTTP polling', async ({
@@ -1418,7 +1528,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     .toBe(true);
   await page.keyboard.press('Control+K');
   await page.getByLabel('Filter actions').fill('Unsafe');
-  await expect(page.getByText('No advertised actions.')).toBeVisible();
+  await expect(page.getByText('No results for “Unsafe”.')).toBeVisible();
   await page.getByLabel('Filter actions').fill('Compact');
   await page.keyboard.press('Enter');
   await expect

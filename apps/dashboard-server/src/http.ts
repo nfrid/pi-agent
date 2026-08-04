@@ -593,6 +593,33 @@ class DashboardServerImpl implements DashboardServer {
       .snapshots()
       .find((item) => item.session.id === id && item.online !== false);
     const cursor = this.eventStream.cursor;
+    const provenance = runtime
+      ? this.registry.transportProvenance(runtime.runtimeId)
+      : undefined;
+    const runtimeTransport =
+      provenance && provenance.runtimeSeq >= 0 ? provenance : {};
+    if (
+      runtime &&
+      (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
+        true
+    ) {
+      return {
+        serverId: this.serverId,
+        cursor,
+        ...runtimeTransport,
+        metadata: {
+          id,
+          file: runtime.session.file ?? '',
+          cwd: runtime.session.cwd ?? runtime.cwd,
+          name: runtime.session.name,
+          title: runtime.session.title,
+          updatedAt: runtime.lastSeenAt ?? Date.now(),
+          activeRuntimeId: runtime.runtimeId,
+          entryCount: runtime.session.entries.length,
+        },
+        entries: redactImageData(runtime.session.entries),
+      };
+    }
     try {
       const result = await this.sessions.readEntries(id);
       if (!runtime) return { ...result, serverId: this.serverId, cursor };
@@ -600,6 +627,7 @@ class DashboardServerImpl implements DashboardServer {
         ...result,
         serverId: this.serverId,
         cursor,
+        ...runtimeTransport,
         metadata: {
           ...result.metadata,
           ...(runtime.session.name !== undefined
@@ -616,6 +644,7 @@ class DashboardServerImpl implements DashboardServer {
       return {
         serverId: this.serverId,
         cursor,
+        ...runtimeTransport,
         metadata: {
           id,
           file: runtime.session.file ?? '',

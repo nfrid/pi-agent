@@ -93,6 +93,17 @@ export class RuntimeRegistry {
     return this.runtimes.get(runtimeId)?.snapshot;
   }
 
+  transportProvenance(
+    runtimeId: string,
+  ): { runtimeEpoch: string; runtimeSeq: number } | undefined {
+    const record = this.runtimes.get(runtimeId);
+    if (!record) return undefined;
+    return {
+      runtimeEpoch: record.runtimeEpoch,
+      runtimeSeq: record.reducerState.lastRuntimeSeq,
+    };
+  }
+
   isOnline(runtimeId: string): boolean {
     return Boolean(this.runtimes.get(runtimeId)?.socket);
   }

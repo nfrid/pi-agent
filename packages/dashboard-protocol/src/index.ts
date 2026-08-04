@@ -124,6 +124,8 @@ const SessionSnapshotProperties = {
   title: Type.Optional(Type.String({ minLength: 1, maxLength: 96 })),
   cwd: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_PATH })),
   leafId: Type.Optional(IdentifierSchema),
+  /** True only when entries is a bounded, successful serialization of the active branch. */
+  entriesComplete: Type.Optional(Type.Boolean()),
   entries: Type.Readonly(Type.Array(UnknownSchema)),
 };
 export const SessionSnapshotSchema = Type.Object(SessionSnapshotProperties, {
@@ -132,6 +134,7 @@ export const SessionSnapshotSchema = Type.Object(SessionSnapshotProperties, {
 type SessionSnapshotStatic = Static<typeof SessionSnapshotSchema>;
 export type SessionSnapshot = Omit<SessionSnapshotStatic, 'entries'> & {
   readonly entries: readonly unknown[];
+  readonly entriesComplete?: boolean;
 };
 export const SessionSnapshotFullSchema = SessionSnapshotSchema;
 export type SessionSnapshotFull = SessionSnapshot;
@@ -143,6 +146,7 @@ export const SessionSnapshotPatchSchema = Type.Object(
     title: Type.Optional(Type.String({ minLength: 1, maxLength: 96 })),
     cwd: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_PATH })),
     leafId: Type.Optional(IdentifierSchema),
+    entriesComplete: Type.Optional(Type.Boolean()),
     entries: Type.Optional(Type.Readonly(Type.Array(UnknownSchema))),
   },
   { additionalProperties: false },
@@ -805,6 +809,10 @@ export const SessionApiResponseSchema = Type.Object(
     serverId: Type.Optional(IdentifierSchema),
     /** Authoritative daemon cursor at which these entries were read. */
     cursor: Type.Optional(Type.Integer({ minimum: 0 })),
+    /** Active runtime generation that supplied the branch, when available. */
+    runtimeEpoch: Type.Optional(IdentifierSchema),
+    /** Runtime sequence covered by the active branch snapshot. */
+    runtimeSeq: Type.Optional(Type.Integer({ minimum: 0 })),
   },
   { additionalProperties: false },
 );

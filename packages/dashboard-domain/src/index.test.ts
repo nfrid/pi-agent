@@ -156,6 +156,145 @@ describe('dashboard domain reducers', () => {
     expect(state.items['must-not-be-an-identity']).toBeUndefined();
   });
 
+  it('keeps a raw active message identity when finish adds responseId late', () => {
+    let state = hydrateTranscript([], 's');
+    state = reduceTranscriptEvent(state, {
+      type: 'message.started',
+      sessionId: 's',
+      message: {
+        message: {
+          role: 'assistant',
+          timestamp: 123,
+          content: 'start',
+        },
+      },
+    });
+    state = reduceTranscriptEvent(state, {
+      type: 'message.finished',
+      sessionId: 's',
+      responseId: 'provider-response',
+      message: {
+        message: { role: 'assistant', content: 'finish' },
+      },
+    } as never);
+    expect(state.order).toEqual(['assistant:123']);
+    expect(state.items['assistant:123']).toMatchObject({
+      status: 'finished',
+      content: 'finish',
+    });
+    expect(state.items['provider-response']).toBeUndefined();
+  });
+
+  it('derives tool associations from normalized live message content', () => {
+    const state = reduceTranscriptEvent(
+      hydrateTranscript([], 's'),
+      envelope(1, 1, {
+        type: 'message.finished',
+        sessionId: 's',
+        message: {
+          messageId: 'assistant-normalized',
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Inspecting files.' },
+            { type: 'toolCall', id: 'call-normalized', name: 'read' },
+          ],
+          phase: 'finished',
+        },
+      }),
+    );
+    expect(state.items['assistant-normalized']).toMatchObject({
+      toolCallIds: ['call-normalized'],
+    });
+  });
+
+  it('preserves direct tool associations and skips only Pi metadata', () => {
+    const state = hydrateTranscript([
+      { type: 'session_info', id: 'meta' },
+      {
+        type: 'message',
+        message: {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Inspecting files.' },
+            { type: 'toolCall', id: 'call-1', name: 'read' },
+          ],
+        },
+      },
+      { type: 'tool', tool: { toolCallId: 'call-1', name: 'read' } },
+      { type: 'custom_message', text: 'boundary' },
+      { type: 'future_entry', text: 'unknown boundary' },
+    ]);
+    expect(state.items['assistant-1']).toMatchObject({
+      toolCallIds: ['call-1'],
+    });
+    const selected = selectLegacyTranscriptEntries(state);
+    expect(selected.map((entry) => (entry as { type?: string }).type)).toEqual([
+      'message',
+      'tool',
+      'custom_message',
+      'future_entry',
+    ]);
+    expect(
+      (selected[0] as { message: { content: unknown[] } }).message.content,
+    ).toEqual([{ type: 'text', text: 'Inspecting files.' }]);
+  });
+
+  it('replaces the transcript only for complete session snapshots', () => {
+    let state = hydrateTranscript([], 's');
+    state = reduceTranscriptEvent(
+      state,
+      envelope(1, 1, {
+        type: 'message.finished',
+        sessionId: 's',
+        message: {
+          messageId: 'old',
+          role: 'assistant',
+          content: 'old',
+          phase: 'finished',
+        },
+      }),
+    );
+    const incomplete = reduceTranscriptEvent(state, {
+      cursor: 2,
+      emittedAt: 2,
+      runtimeEpoch: 'epoch-2',
+      runtimeSeq: 2,
+      event: {
+        type: 'session.snapshot',
+        session: { id: 's', entries: [], entriesComplete: false },
+      },
+    } as never);
+    expect(incomplete.items.old).toBeDefined();
+    expect(incomplete.runtimeEpoch).toBe('epoch-2');
+    expect(incomplete.retiredEpochs).toContain('epoch-1');
+    const complete = reduceTranscriptEvent(incomplete, {
+      cursor: 3,
+      emittedAt: 3,
+      runtimeEpoch: 'epoch-2',
+      runtimeSeq: 3,
+      event: {
+        type: 'session.snapshot',
+        session: {
+          id: 's',
+          entriesComplete: true,
+          entries: [
+            {
+              type: 'message',
+              message: { id: 'new', role: 'user', content: 'new' },
+            },
+          ],
+        },
+      },
+    } as never);
+    expect(complete.items.old).toBeUndefined();
+    expect(complete.items.new).toMatchObject({ role: 'user' });
+    expect(complete.lastCursor).toBe(3);
+    expect(complete.lastRuntimeSeq).toBe(3);
+    expect(complete.runtimeEpoch).toBe('epoch-2');
+    expect(complete.retiredEpochs).toContain('epoch-1');
+  });
+
   it('normalizes terminal tool status aliases on update events', () => {
     for (const status of ['complete', 'completed', 'finished'] as const) {
       const state = applyTranscriptEvent(

@@ -21,6 +21,7 @@ import {
   toTranscriptEntries,
 } from './App';
 import type { DashboardEvent } from './dashboard-transport';
+import { actionNeedsInput, paletteItems } from './routes/dashboard';
 
 describe('image attachments', () => {
   const image = (name: string, type: string, size: number) =>
@@ -73,6 +74,93 @@ describe('image attachments', () => {
       runtimeSupportsImages({
         ...runtime,
         model: { provider: 'test', model: 'vision', supportsImages: true },
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('command palette', () => {
+  it('keeps navigation available without runtime capabilities and bounds sessions', () => {
+    const snapshot = {
+      runtimes: [],
+      workspaces: [
+        {
+          id: 'workspace-1',
+          name: 'Workspace',
+          canonicalPath: '/workspace',
+        },
+      ],
+      sessions: Array.from({ length: 437 }, (_, index) => ({
+        id: `session-${index}`,
+        cwd: '/workspace',
+        updatedAt: index,
+      })),
+    } as never;
+    const items = paletteItems(snapshot);
+    expect(items.slice(0, 2).map((item) => item.title)).toEqual([
+      'Dashboard',
+      'New Agent',
+    ]);
+    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(27);
+    expect(items[2]?.title).toBe('Session: Untitled session');
+    expect(items.at(-1)?.title).toBe('Workspace: Workspace');
+    expect(items.some((item) => item.title === 'Session: session-436')).toBe(
+      false,
+    );
+  });
+
+  it('disambiguates identical actions by their runtime target', () => {
+    const runtime = (runtimeId: string, title: string, cwd: string) => ({
+      runtimeId,
+      ownership: 'external',
+      pid: 1,
+      cwd,
+      liveState: 'working',
+      online: true,
+      session: { id: `session-${runtimeId}`, title, entries: [] },
+      pendingInteractions: [],
+      capabilities: {
+        version: 1,
+        capabilities: [],
+        manifests: [
+          {
+            id: `manifest-${runtimeId}`,
+            version: '1',
+            actions: [{ id: 'runtime.abort', title: 'Abort run' }],
+            renderers: [],
+          },
+        ],
+      },
+    });
+    const items = paletteItems({
+      runtimes: [
+        runtime('runtime-alpha', 'Alpha agent', '/workspace/alpha'),
+        runtime('runtime-beta', 'Beta agent', '/workspace/beta'),
+      ],
+      workspaces: [],
+      sessions: [],
+    } as never).filter((item) => item.kind === 'action');
+    expect(items).toMatchObject([
+      {
+        title: 'Abort run',
+        target: 'Alpha agent',
+        runtime: { runtimeId: 'runtime-alpha', cwd: '/workspace/alpha' },
+      },
+      {
+        title: 'Abort run',
+        target: 'Beta agent',
+        runtime: { runtimeId: 'runtime-beta', cwd: '/workspace/beta' },
+      },
+    ]);
+  });
+
+  it('treats missing and empty schemas as inputless while preserving required input', () => {
+    expect(actionNeedsInput({})).toBe(false);
+    expect(actionNeedsInput({ inputSchema: {} })).toBe(false);
+    expect(actionNeedsInput({ inputSchema: { type: 'object' } })).toBe(false);
+    expect(
+      actionNeedsInput({
+        inputSchema: { type: 'object', required: ['value'] },
       }),
     ).toBe(true);
   });

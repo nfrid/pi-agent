@@ -954,6 +954,8 @@ function jsonSafe(value: unknown, max = MAX_JSON_PAYLOAD_BYTES): unknown {
 function sessionSnapshot(ctx: ExtensionContext): SessionSnapshot {
   const manager = ctx.sessionManager;
   const entries = manager.getBranch() as readonly unknown[];
+  const serialized = jsonSafe(entries);
+  const complete = Array.isArray(serialized);
   return {
     id: manager.getSessionId(),
     file: manager.getSessionFile(),
@@ -961,7 +963,8 @@ function sessionSnapshot(ctx: ExtensionContext): SessionSnapshot {
     title: deriveSessionTitle(entries),
     cwd: manager.getCwd(),
     leafId: manager.getLeafId() ?? undefined,
-    entries: (jsonSafe(entries) as readonly unknown[] | null) ?? [],
+    entriesComplete: complete,
+    entries: complete ? serialized : [],
   };
 }
 
@@ -1437,6 +1440,14 @@ export default defineExtension('remote-control', (pi) => {
     if (!runtime.isCurrent(ctx)) return;
     runtime.client.sendEvent({
       type: 'session.changed',
+      session: sessionSnapshot(ctx),
+    });
+  });
+  pi.on('session_tree', (_event, ctx) => {
+    runtime.setContext(ctx);
+    if (!runtime.isCurrent(ctx)) return;
+    runtime.client.sendEvent({
+      type: 'session.snapshot',
       session: sessionSnapshot(ctx),
     });
   });

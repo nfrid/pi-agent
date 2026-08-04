@@ -94,6 +94,55 @@ function messageImageCount(message: Record<string, unknown>): number {
     : 0;
 }
 
+const NON_RENDERED_PI_ENTRY_TYPES = new Set([
+  'session',
+  'model_change',
+  'thinking_level_change',
+  'compaction',
+  'branch_summary',
+  'label',
+  'session_info',
+]);
+
+function isNonRenderedPiMetadata(raw: unknown): boolean {
+  return (
+    !!raw &&
+    typeof raw === 'object' &&
+    !Array.isArray(raw) &&
+    typeof (raw as Record<string, unknown>).type === 'string' &&
+    NON_RENDERED_PI_ENTRY_TYPES.has(
+      (raw as Record<string, unknown>).type as string,
+    )
+  );
+}
+
+function directToolCallIds(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) return [];
+  const ids: string[] = [];
+  for (const part of value) {
+    if (!part || typeof part !== 'object' || Array.isArray(part)) continue;
+    const item = part as Record<string, unknown>;
+    if (item.type !== 'toolCall' && item.type !== 'tool_call') continue;
+    const id =
+      typeof item.toolCallId === 'string'
+        ? item.toolCallId
+        : typeof item.id === 'string'
+          ? item.id
+          : undefined;
+    if (id && !ids.includes(id)) ids.push(id);
+    if (ids.length >= 128) break;
+  }
+  return ids;
+}
+
+function toolCallId(raw: Record<string, unknown>): string | undefined {
+  return typeof raw.toolCallId === 'string'
+    ? raw.toolCallId
+    : typeof raw.id === 'string'
+      ? raw.id
+      : undefined;
+}
+
 function toolRecord(raw: unknown): Record<string, unknown> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const record = raw as Record<string, unknown>;
@@ -120,6 +169,7 @@ export function toTranscriptEntries(
   rawEntries: readonly unknown[],
 ): TranscriptModelItem[] {
   const toolResults = new Map<string, Record<string, unknown>>();
+  const standaloneTools = new Map<string, Record<string, unknown>>();
   for (const raw of rawEntries) {
     if (!raw || typeof raw !== 'object') continue;
     const message = messageRecord(raw);
@@ -128,6 +178,14 @@ export function toTranscriptEntries(
       typeof message.toolCallId === 'string'
     )
       toolResults.set(message.toolCallId, message);
+    if (
+      (raw as Record<string, unknown>).type === 'tool' ||
+      (raw as Record<string, unknown>).kind === 'tool'
+    ) {
+      const tool = toolRecord(raw);
+      const id = tool ? toolCallId(tool) : undefined;
+      if (tool && id) standaloneTools.set(id, tool);
+    }
   }
   const result: TranscriptModelItem[] = [];
   for (const [rawIndex, raw] of rawEntries.entries()) {
@@ -137,6 +195,7 @@ export function toTranscriptEntries(
       continue;
     }
     const entry = raw as Record<string, unknown>;
+    if (isNonRenderedPiMetadata(raw)) continue;
     const tool =
       entry.type === 'tool' || entry.kind === 'tool'
         ? toolRecord(raw)
@@ -217,10 +276,25 @@ export function toTranscriptEntries(
           });
         }
       }
+      // Compatibility selection strips embedded calls when a semantic
+      // standalone tool item exists. The bounded direct association survives
+      // that filtering and still tells the web renderer that this assistant
+      // message leads activity below it.
+      const knownToolCallIds = Array.isArray(message.toolCallIds)
+        ? message.toolCallIds
+            .filter(
+              (id): id is string => typeof id === 'string' && id.length > 0,
+            )
+            .slice(0, 128)
+        : directToolCallIds(message.content);
+      const knownStandaloneTools = knownToolCallIds
+        .map((id) => standaloneTools.get(id))
+        .filter((tool): tool is Record<string, unknown> => tool !== undefined);
+      const associatedToolCount = tools.length + knownStandaloneTools.length;
       const preparing =
-        message.__dashboardStreaming === true && tools.length === 0;
+        message.__dashboardStreaming === true && associatedToolCount === 0;
       const preamble =
-        visibleText && tools.length > 0
+        visibleText && associatedToolCount > 0
           ? preambleTitle(visibleText)
           : undefined;
       const narratedTitle = (

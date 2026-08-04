@@ -90,6 +90,30 @@ function directString(
   return typeof value[key] === 'string' && value[key] ? value[key] : undefined;
 }
 
+function directToolCallIds(content: unknown): string[] {
+  if (!Array.isArray(content)) return [];
+  const ids: string[] = [];
+  for (const part of content) {
+    if (
+      !isRecord(part) ||
+      (part.type !== 'toolCall' && part.type !== 'tool_call')
+    )
+      continue;
+    const id = directString(part, 'toolCallId') ?? directString(part, 'id');
+    if (id && !ids.includes(id)) ids.push(id);
+    if (ids.length >= 128) break;
+  }
+  return ids;
+}
+
+function mergeToolCallIds(
+  first: readonly string[] | undefined,
+  second: readonly string[] | undefined,
+): string[] | undefined {
+  const ids = [...new Set([...(first ?? []), ...(second ?? [])])].slice(0, 128);
+  return ids.length > 0 ? ids : undefined;
+}
+
 function asInput(
   input: DashboardEventEnvelope | TranscriptReducerEvent | BridgeEvent,
 ): TranscriptReducerEvent {
@@ -125,20 +149,40 @@ function normalizedMessage(
   // One unwrap is allowed for v1 bridge wrappers. Deliberately do not search
   // arbitrary nested provider fields for identities.
   const direct = tryParseNormalizedMessagePayload(value);
-  if (direct) return direct;
+  if (direct) {
+    const toolCallIds = mergeToolCallIds(
+      direct.toolCallIds,
+      directToolCallIds(direct.content),
+    );
+    return toolCallIds === undefined ? direct : { ...direct, toolCallIds };
+  }
   if (!isRecord(value)) return undefined;
-  const message = isRecord(value.message) ? value.message : value;
+  const wrapper = isRecord(value.message) ? value.message : value;
+  const message = isRecord(wrapper.message) ? wrapper.message : wrapper;
   const normalized = tryParseNormalizedMessagePayload(message);
-  if (normalized) return normalized;
+  if (normalized) {
+    const toolCallIds = mergeToolCallIds(
+      normalized.toolCallIds,
+      directToolCallIds(normalized.content),
+    );
+    return toolCallIds === undefined
+      ? normalized
+      : { ...normalized, toolCallIds };
+  }
 
   // Rollout compatibility for already-running protocol-v1 extensions. Remove
   // after old runtimes can no longer reconnect without explicit identities.
   const role = directString(message, 'role');
   if (!role || message.content === undefined) return undefined;
-  const timestamp = message.timestamp;
+  const timestamp =
+    message.timestamp ??
+    wrapper.timestamp ??
+    (value as Record<string, unknown>).timestamp;
   const explicitId =
-    directString(message, 'messageId') ??
-    directString(message, 'id') ??
+    directString(message, 'messageId') ?? directString(message, 'id');
+  const responseId =
+    directString(value as Record<string, unknown>, 'responseId') ??
+    directString(wrapper, 'responseId') ??
     directString(message, 'responseId');
   const activeId = [...projection.order].reverse().find((id) => {
     const item = projection.items[id];
@@ -150,11 +194,12 @@ function normalizedMessage(
   });
   const messageId =
     explicitId ??
-    (typeof timestamp === 'number' || typeof timestamp === 'string'
-      ? `${role}:${timestamp}`
-      : phase === 'started'
-        ? undefined
-        : activeId);
+    (phase !== 'started'
+      ? (activeId ?? responseId)
+      : (responseId ??
+        (typeof timestamp === 'number' || typeof timestamp === 'string'
+          ? `${role}:${timestamp}`
+          : undefined)));
   if (!messageId) return undefined;
   return {
     messageId,
@@ -162,6 +207,9 @@ function normalizedMessage(
     content: message.content,
     ...(typeof timestamp === 'number' || typeof timestamp === 'string'
       ? { timestamp }
+      : {}),
+    ...(directToolCallIds(message.content).length > 0
+      ? { toolCallIds: directToolCallIds(message.content) }
       : {}),
     phase,
   };
@@ -237,6 +285,10 @@ function mergeMessage(
   // Finished and errored entities are terminal. A later lifecycle event can
   // have a newer transport cursor while still being stale for this item.
   if (previous && isFinished(previous)) return projection;
+  const toolCallIds = mergeToolCallIds(
+    previous?.kind === 'message' ? previous.toolCallIds : undefined,
+    mergeToolCallIds(payload.toolCallIds, directToolCallIds(payload.content)),
+  );
   const item: TranscriptMessageItem = {
     kind: 'message',
     messageId: payload.messageId,
@@ -246,9 +298,7 @@ function mergeMessage(
       ? {}
       : { timestamp: payload.timestamp }),
     ...(payload.turnId === undefined ? {} : { turnId: payload.turnId }),
-    ...(payload.toolCallIds === undefined
-      ? {}
-      : { toolCallIds: payload.toolCallIds }),
+    ...(toolCallIds === undefined ? {} : { toolCallIds }),
     status:
       phase === 'finished'
         ? 'finished'
@@ -420,18 +470,47 @@ export function applyTranscriptEvent(
   let state = transport.projection;
   const event = incoming.event;
   const eventSession =
-    incoming.sessionId ?? ('sessionId' in event ? event.sessionId : undefined);
+    incoming.sessionId ??
+    ('sessionId' in event ? event.sessionId : undefined) ??
+    (event.type === 'session.changed' || event.type === 'session.snapshot'
+      ? event.session.id
+      : undefined);
   if (state.sessionId && eventSession && eventSession !== state.sessionId)
     return { state, accepted: true };
   if (!state.sessionId && eventSession)
     state = { ...state, sessionId: eventSession };
+  if (event.type === 'session.snapshot') {
+    if (
+      (event.session as { entriesComplete?: boolean }).entriesComplete !== true
+    )
+      return {
+        state: transport.replacingEpoch
+          ? {
+              ...state,
+              sessionId: current.sessionId,
+              order: current.order,
+              items: current.items,
+            }
+          : state,
+        accepted: true,
+      };
+    const replacement = hydrateTranscript(
+      event.session.entries,
+      event.session.id,
+      {
+        cursor: state.lastCursor,
+        runtimeEpoch: state.runtimeEpoch,
+        runtimeSeq: state.lastRuntimeSeq,
+      },
+    );
+    return {
+      state: { ...replacement, retiredEpochs: state.retiredEpochs },
+      accepted: true,
+    };
+  }
   const phase = phaseFor(event.type);
   if (event.type.startsWith('message.')) {
-    const payload = normalizedMessage(
-      'message' in event ? event.message : undefined,
-      state,
-      phase,
-    );
+    const payload = normalizedMessage(event, state, phase);
     if (!payload) return { state, accepted: true };
     return { state: mergeMessage(state, payload, phase), accepted: true };
   }
@@ -554,12 +633,14 @@ export function hydrateTranscript(
         return;
       }
       const content = message.content;
+      const toolCallIds = directToolCallIds(content);
       items[messageId] = {
         kind: 'message',
         messageId,
         role,
         content,
         ...(timestamp === undefined ? {} : { timestamp }),
+        ...(toolCallIds.length > 0 ? { toolCallIds } : {}),
         status: 'finished',
       };
       if (!order.includes(messageId)) order.push(messageId);
@@ -658,6 +739,24 @@ export function hydrateTranscript(
 }
 export const hydrateTranscriptProjection = hydrateTranscript;
 
+const NON_RENDERED_PI_ENTRY_TYPES = new Set([
+  'session',
+  'model_change',
+  'thinking_level_change',
+  'compaction',
+  'branch_summary',
+  'label',
+  'session_info',
+]);
+
+function isNonRenderedPiEntry(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.type === 'string' &&
+    NON_RENDERED_PI_ENTRY_TYPES.has(value.type)
+  );
+}
+
 /** Existing dashboard UI compatibility selector; no transport logic lives here. */
 export function selectLegacyTranscriptEntries(
   projection: TranscriptProjection,
@@ -665,7 +764,8 @@ export function selectLegacyTranscriptEntries(
   return projection.order.flatMap((id) => {
     const item = projection.items[id];
     if (!item) return [];
-    if (item.kind === 'other') return [item.raw];
+    if (item.kind === 'other')
+      return isNonRenderedPiEntry(item.raw) ? [] : [item.raw];
     if (item.kind === 'message') {
       // Tool calls are normalized as standalone projection items. Remove only
       // embedded calls that have a matching semantic item so compatibility

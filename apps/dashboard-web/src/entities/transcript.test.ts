@@ -38,6 +38,46 @@ describe('activity row views and virtual transcript construction', () => {
     expect(item?.entry).toMatchObject({ kind: 'tool', status: 'pending' });
   });
 
+  it('uses semantic toolCallIds after compatibility filtering for preamble titles', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          messageId: 'assistant-live',
+          toolCallIds: ['call-live'],
+          content: [{ type: 'text', text: 'Inspecting the workspace.' }],
+          __dashboardStreaming: true,
+        },
+      },
+      {
+        type: 'tool',
+        tool: { toolCallId: 'call-live', name: 'read', status: 'pending' },
+      },
+      { type: 'session_info', id: 'metadata' },
+      { type: 'custom_message', text: 'keep boundary' },
+    ]);
+    const assistant = items.find(({ entry }) => entry.kind === 'assistant');
+    expect(assistant?.entry).toMatchObject({
+      title: 'Inspecting the workspace',
+      titleKind: 'preamble',
+    });
+    expect(assistant?.preparing).toBeUndefined();
+    expect(
+      items.some(
+        ({ raw }) => (raw as { type?: string })?.type === 'session_info',
+      ),
+    ).toBe(false);
+    expect(
+      items.some(
+        ({ raw }) => (raw as { type?: string })?.type === 'custom_message',
+      ),
+    ).toBe(true);
+    expect(
+      projectActivityGroups(items.map(({ entry }) => entry))[0]?.status,
+    ).toBe('live');
+  });
+
   it('normalizes historical Pi toolResult messages out of order', () => {
     const successful = toTranscriptEntries([
       {

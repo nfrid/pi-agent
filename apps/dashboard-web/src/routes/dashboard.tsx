@@ -77,24 +77,45 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
   );
 }
 
-function actionNeedsInput(action: { inputSchema?: unknown }): boolean {
+export function actionNeedsInput(action: { inputSchema?: unknown }): boolean {
   const schema = action.inputSchema;
-  if (!schema || typeof schema !== 'object' || Array.isArray(schema))
-    return true;
+  // Older manifests omitted inputSchema for actions that accept {}. Treat an
+  // absent schema, and an explicitly empty object schema, as inputless.
+  if (schema === undefined || schema === null) return false;
+  if (typeof schema !== 'object' || Array.isArray(schema)) return true;
   const value = schema as { required?: unknown; minProperties?: unknown };
   return (
     (Array.isArray(value.required) && value.required.length > 0) ||
-    value.minProperties === 1
+    (typeof value.minProperties === 'number' && value.minProperties > 0)
   );
 }
 
-function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState(0);
-  const [error, setError] = useState<string>();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const actions = snapshot.runtimes.flatMap((runtime) =>
+type PaletteItem =
+  | {
+      kind: 'navigate';
+      id: string;
+      title: string;
+      description: string;
+      path: string;
+    }
+  | {
+      kind: 'action';
+      id: string;
+      title: string;
+      description: string;
+      runtime: RuntimeSnapshot;
+      action: ReturnType<typeof snapshotActions>[number]['action'];
+      target: string;
+      needsInput: boolean;
+    };
+
+// Keep the palette useful on large installations without creating a second
+// unbounded session browser inside the dialog.
+const MAX_PALETTE_WORKSPACES = 24;
+const MAX_PALETTE_SESSIONS = 24;
+
+function snapshotActions(snapshot: BrowserSnapshot) {
+  return snapshot.runtimes.flatMap((runtime) =>
     runtime.online === false
       ? []
       : (runtime.capabilities?.manifests ?? []).flatMap((manifest) =>
@@ -113,16 +134,91 @@ function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
             .map((action) => ({ runtime, action })),
         ),
   );
-  const filtered = actions.filter(({ runtime, action }) =>
-    `${action.title ?? action.id} ${action.description ?? ''} ${runtime.runtimeId}`
+}
+
+export function paletteItems(snapshot: BrowserSnapshot): PaletteItem[] {
+  const primary: PaletteItem[] = [
+    {
+      kind: 'navigate',
+      id: 'dashboard',
+      title: 'Dashboard',
+      description: 'Go to the operational overview',
+      path: '/',
+    },
+    {
+      kind: 'navigate',
+      id: 'new-agent',
+      title: 'New Agent',
+      description: 'Start an agent in a workspace',
+      path: '/new',
+    },
+  ];
+  const actions = snapshotActions(snapshot).map(
+    ({ runtime, action }): PaletteItem => ({
+      kind: 'action',
+      id: `action:${runtime.runtimeId}:${action.id}`,
+      title: action.title ?? action.id,
+      description: action.description ?? action.id,
+      runtime,
+      action,
+      target: sessionDisplayTitle(runtime.session, runtime.session.entries),
+      needsInput: actionNeedsInput(action),
+    }),
+  );
+  const sessions = snapshot.sessions.slice(0, MAX_PALETTE_SESSIONS).map(
+    (session): PaletteItem => ({
+      kind: 'navigate',
+      id: `session:${session.id}`,
+      title: `Session: ${sessionDisplayTitle(session)}`,
+      description: session.cwd,
+      path: `/sessions/${encodeURIComponent(session.id)}`,
+    }),
+  );
+  const workspaces = snapshot.workspaces.slice(0, MAX_PALETTE_WORKSPACES).map(
+    (workspace): PaletteItem => ({
+      kind: 'navigate',
+      id: `workspace:${workspace.id}`,
+      title: `Workspace: ${workspace.name}`,
+      description: workspace.canonicalPath,
+      path: `/workspaces/${encodeURIComponent(workspace.id)}`,
+    }),
+  );
+  return [...primary, ...actions, ...sessions, ...workspaces];
+}
+
+function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
+  const go = useDashboardNavigate();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState(0);
+  const [error, setError] = useState<string>();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(false);
+  const items = paletteItems(snapshot);
+  const runtimeActionCount = items.filter(
+    (item) => item.kind === 'action',
+  ).length;
+  const filtered = items.filter((item) =>
+    `${item.title} ${item.description} ${
+      item.kind === 'action'
+        ? `${item.target} ${item.runtime.cwd} ${item.runtime.runtimeId}`
+        : ''
+    }`
       .toLowerCase()
       .includes(query.trim().toLowerCase()),
   );
+  const enabledIndexes = filtered.flatMap((item, index) =>
+    item.kind === 'navigate' || !item.needsInput ? [index] : [],
+  );
+  const firstEnabledIndex = enabledIndexes[0] ?? 0;
+  const selectionResetKey = `${query}\u0000${enabledIndexes.join(',')}`;
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setOpen(true);
+        setOpen((value) => !value);
       }
       if (event.key === 'Escape') setOpen(false);
     };
@@ -130,23 +226,48 @@ function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
   useEffect(() => {
-    if (!open) return;
-    setSelected(0);
+    if (!open) {
+      if (wasOpenRef.current) triggerRef.current?.focus();
+      wasOpenRef.current = false;
+      return;
+    }
+    wasOpenRef.current = true;
     setError(undefined);
+    setQuery('');
     window.setTimeout(() => inputRef.current?.focus(), 0);
   }, [open]);
+  useEffect(() => {
+    // The derived key also changes when a query changes but results do not.
+    void selectionResetKey;
+    setSelected(firstEnabledIndex);
+  }, [selectionResetKey, firstEnabledIndex]);
+  const close = () => setOpen(false);
+  const moveSelection = (direction: 1 | -1) => {
+    if (!enabledIndexes.length) return;
+    const currentPosition = enabledIndexes.indexOf(selected);
+    const nextPosition =
+      currentPosition < 0
+        ? 0
+        : (currentPosition + direction + enabledIndexes.length) %
+          enabledIndexes.length;
+    setSelected(enabledIndexes[nextPosition] ?? 0);
+  };
   const invoke = async (index: number) => {
     const item = filtered[index];
-    if (!item || actionNeedsInput(item.action)) return;
+    if (!item || (item.kind === 'action' && item.needsInput)) return;
     setError(undefined);
+    if (item.kind === 'navigate') {
+      close();
+      go(item.path);
+      return;
+    }
     try {
       await dashboardHttpClient.invokeAction(
         item.runtime.runtimeId,
         item.action.id,
         {},
       );
-      setOpen(false);
-      setQuery('');
+      close();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
@@ -154,72 +275,116 @@ function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
   return (
     <>
       <button
+        ref={triggerRef}
         type="button"
         className="header-action palette-trigger"
         aria-label="Open command palette"
-        onClick={() => setOpen(true)}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
       >
-        ⌘K
+        Ctrl/⌘ K
       </button>
       {open && (
-        <div className="palette-backdrop" role="presentation">
+        // The backdrop intentionally closes on a click outside the dialog.
+        // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop is an inert click target, not a content element.
+        <div
+          className="palette-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) close();
+          }}
+        >
           <section
+            ref={dialogRef}
             className="command-palette"
             role="dialog"
             aria-modal="true"
             aria-labelledby="command-palette-heading"
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                close();
+                return;
+              }
+              if (event.key !== 'Tab') return;
+              const focusable = Array.from(
+                dialogRef.current?.querySelectorAll<HTMLElement>(
+                  'input, button:not(:disabled)',
+                ) ?? [],
+              );
+              const first = focusable[0];
+              const last = focusable.at(-1);
+              if (!first || !last) return;
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+              }
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
           >
             <h2 id="command-palette-heading">Command palette</h2>
             <input
               ref={inputRef}
-              aria-label="Filter actions"
+              aria-label="Filter actions and navigation"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'ArrowDown') {
                   event.preventDefault();
-                  setSelected((value) =>
-                    Math.min(value + 1, filtered.length - 1),
-                  );
+                  moveSelection(1);
                 } else if (event.key === 'ArrowUp') {
                   event.preventDefault();
-                  setSelected((value) => Math.max(value - 1, 0));
+                  moveSelection(-1);
                 } else if (event.key === 'Enter') {
                   event.preventDefault();
                   void invoke(selected);
                 }
               }}
-              placeholder="Search advertised actions…"
+              placeholder="Search actions, sessions, and workspaces…"
             />
             <div
               className="palette-list"
               role="listbox"
-              aria-label="Advertised actions"
+              aria-label="Commands and navigation"
             >
-              {filtered.map(({ runtime, action }, index) => {
-                const needsInput = actionNeedsInput(action);
+              {filtered.map((item, index) => {
+                const disabled = item.kind === 'action' && item.needsInput;
                 return (
                   <button
                     type="button"
                     role="option"
                     aria-selected={selected === index}
                     className={selected === index ? 'palette-selected' : ''}
-                    disabled={needsInput}
-                    key={`${runtime.runtimeId}:${action.id}`}
+                    disabled={disabled}
+                    key={item.id}
                     onClick={() => void invoke(index)}
                   >
-                    <strong>{action.title ?? action.id}</strong>
+                    <strong>{item.title}</strong>
                     <small>
-                      {runtime.runtimeId} ·{' '}
-                      {needsInput
-                        ? 'requires input'
-                        : (action.description ?? action.id)}
+                      {item.kind === 'action' && disabled
+                        ? `Requires input — open the session to complete it. ${item.description}`
+                        : item.description}
                     </small>
+                    {item.kind === 'action' && (
+                      <small className="palette-target">
+                        Target: {item.runtime.runtimeId} · {item.target} ·{' '}
+                        {item.runtime.cwd}
+                      </small>
+                    )}
                   </button>
                 );
               })}
-              {!filtered.length && (
-                <p className="empty">No advertised actions.</p>
+              {!filtered.length && query.trim() && (
+                <p className="empty">No results for “{query.trim()}”.</p>
+              )}
+              {!query.trim() && runtimeActionCount === 0 && (
+                <p className="palette-runtime-empty">
+                  No actions available from connected runtimes. Navigation is
+                  still available above.
+                </p>
               )}
             </div>
             {error && (
@@ -227,7 +392,7 @@ function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
                 {error}
               </p>
             )}
-            <p className="muted">Esc close · ↑↓ move · Enter invoke</p>
+            <p className="muted">Esc close · ↑↓ move · Enter run</p>
           </section>
         </div>
       )}
