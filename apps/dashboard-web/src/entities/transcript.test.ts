@@ -5,6 +5,7 @@ import { ActivityGroupsViewModelSchema } from '../../../../extensions/activity-g
 import { toolOutcome, toTranscriptEntries } from '../transcript';
 import {
   activityGroupPresentation,
+  activityGroupSummary,
   buildTranscriptGroupCoverage,
   buildVirtualTranscriptRows,
   preserveVirtualScrollOffset,
@@ -13,6 +14,26 @@ import {
 } from './transcript';
 
 describe('activity row views and virtual transcript construction', () => {
+  it('derives a bounded latest-step summary from the canonical group model', () => {
+    const group = {
+      toolCount: 5,
+      failureCount: 2,
+      tools: [
+        { name: 'read', args: {} },
+        { name: 'grep', args: {} },
+        { name: 'edit', args: {} },
+        { name: 'bash', args: {} },
+        { name: 'write', args: {} },
+      ],
+    };
+    expect(activityGroupSummary(group)).toEqual({
+      recentTools: ['edit', 'bash', 'write'],
+      earlierToolCount: 2,
+      toolCount: 5,
+      failureCount: 2,
+    });
+  });
+
   it('keeps failed shared status distinct in the dashboard row view', () => {
     const group = {
       status: 'failed' as const,

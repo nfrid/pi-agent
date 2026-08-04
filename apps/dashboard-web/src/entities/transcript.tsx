@@ -153,6 +153,7 @@ export function Transcript({
                 <strong>{title}</strong>
                 <small>{presentation.label}</small>
               </AriaButton>
+              {!expanded && <CollapsedActivitySummary group={group} />}
               {visibleLead && (
                 <div className="activity-lead">
                   <span className="message-role">assistant</span>
@@ -177,6 +178,63 @@ export function Transcript({
 }
 
 export type TranscriptGroup = ReturnType<typeof projectActivityGroups>[number];
+
+export type ActivityGroupSummary = {
+  recentTools: readonly string[];
+  earlierToolCount: number;
+  toolCount: number;
+  failureCount: number;
+};
+
+/**
+ * Keep the collapsed row bounded and honest: names and outcomes come from the
+ * shared activity projection, while opaque tool arguments stay in expanded
+ * details rather than being guessed at here.
+ */
+export function activityGroupSummary(
+  group: Pick<TranscriptGroup, 'tools' | 'toolCount' | 'failureCount'>,
+): ActivityGroupSummary {
+  const recentTools = group.tools.slice(-3).map((tool) => tool.name);
+  return {
+    recentTools,
+    earlierToolCount: Math.max(0, group.tools.length - recentTools.length),
+    toolCount: group.toolCount,
+    failureCount: group.failureCount,
+  };
+}
+
+function CollapsedActivitySummary({ group }: { group: TranscriptGroup }) {
+  const summary = activityGroupSummary(group);
+  const stepKeyCounts = new Map<string, number>();
+  return (
+    <div className="activity-summary">
+      {summary.earlierToolCount > 0 && (
+        <span className="activity-earlier">
+          ⋮ {summary.earlierToolCount} earlier step
+          {summary.earlierToolCount === 1 ? '' : 's'}
+        </span>
+      )}
+      {summary.recentTools.length > 0 && (
+        <ol className="activity-steps">
+          {summary.recentTools.map((name) => {
+            const occurrence = (stepKeyCounts.get(name) ?? 0) + 1;
+            stepKeyCounts.set(name, occurrence);
+            return (
+              <li key={`${name}-${occurrence}`}>
+                <span aria-hidden="true">⏺</span> {name}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+      <small className="activity-metadata">
+        {summary.toolCount} tool call{summary.toolCount === 1 ? '' : 's'} ·{' '}
+        {summary.failureCount} failure
+        {summary.failureCount === 1 ? '' : 's'}
+      </small>
+    </div>
+  );
+}
 
 export function buildTranscriptGroupCoverage(
   itemCount: number,
@@ -406,6 +464,7 @@ function VirtualizedTranscript({
           <strong>{title}</strong>
           <small>{presentation.label}</small>
         </AriaButton>
+        {!expanded && <CollapsedActivitySummary group={group} />}
         {visibleLead && (
           <div className="activity-lead">
             <span className="message-role">assistant</span>

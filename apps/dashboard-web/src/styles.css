@@ -528,26 +528,60 @@ h2 {
 .interaction .eyebrow {
   color: var(--orange);
 }
+.interaction-choice-layout {
+  display: grid;
+  gap: 14px;
+}
 .choices {
   display: grid;
   gap: 7px;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
 }
 .choices button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 6px;
   border: 1px solid #8f6d4d;
   background: transparent;
   padding: 11px;
   text-align: left;
   cursor: pointer;
 }
-.choices button:hover {
+.choices button:hover,
+.choices button[data-selected="true"] {
   border-color: var(--orange);
-  background: #ffb86c14;
+  background: #ffb86c1f;
+}
+.choices button[data-selected="true"] {
+  box-shadow: inset 3px 0 0 var(--orange);
+}
+.choice-number {
+  color: var(--orange);
+  font-weight: 700;
+}
+.choice-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .choices small {
+  grid-column: 2;
   display: block;
   color: #c09b76;
   margin-top: 3px;
   font-size: 11px;
+}
+.interaction-preview {
+  min-width: 0;
+  border: 1px solid #8f6d4d;
+  background: #28231f99;
+  padding: 11px;
+  overflow-wrap: anywhere;
+}
+.interaction-preview .eyebrow {
+  margin-bottom: 8px;
 }
 .interaction form,
 .composer {
@@ -809,6 +843,9 @@ h2 {
 .activity-failed .activity-icon {
   color: var(--red);
 }
+.activity-group.activity-pending .activity-icon {
+  animation: tui-pulse 1.2s steps(2, end) infinite;
+}
 .activity-lead {
   border-top: 1px solid var(--line-soft);
   padding: 9px 13px;
@@ -823,6 +860,38 @@ h2 {
   letter-spacing: 0.08em;
   font-size: 10px;
   margin-bottom: 4px;
+}
+.activity-summary {
+  border-top: 1px solid var(--line-soft);
+  padding: 7px 13px 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.activity-steps {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.activity-summary .activity-steps li {
+  overflow: hidden;
+  color: var(--fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-summary .activity-steps li span {
+  color: var(--cyan);
+}
+.activity-earlier {
+  display: block;
+  color: var(--dim);
+  margin-bottom: 2px;
+}
+.activity-metadata {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
 }
 .activity-detail {
   border-top: 1px solid var(--line-soft);
@@ -1233,7 +1302,21 @@ h2 {
   max-height: 240px;
   overflow: auto;
 }
+@media (min-width: 700px) {
+  .interaction-choice-layout.has-preview {
+    grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.95fr);
+    align-items: start;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-group.activity-pending .activity-icon {
+    animation: none;
+  }
+}
 @media (max-width: 600px) {
+  .interaction-choice-layout.has-preview {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .rail-inner {
     padding: 0 13px;
     gap: 10px;

@@ -15,12 +15,17 @@ import {
   useDashboardStore,
 } from '@pi-dashboard/client';
 import { selectLegacyTranscriptEntries } from '@pi-dashboard/domain';
-import type { BrowserSnapshot, RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type {
+  BrowserSnapshot,
+  InteractionChoice,
+  RuntimeSnapshot,
+} from '@pi-dashboard/protocol';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import {
   type ComponentType,
   type FormEvent,
+  type KeyboardEvent,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -29,6 +34,7 @@ import {
 import { Button as AriaButton } from 'react-aria-components';
 import { isNearPageBottom, sessionDisplayTitle } from '../app-helpers';
 import { Transcript } from '../entities/transcript';
+import { Markdown } from '../Markdown';
 import {
   renderDashboardContribution,
   resolveDashboardRenderer,
@@ -386,6 +392,50 @@ function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
   );
 }
 
+export type InteractionKeyAction =
+  | { type: 'move'; index: number }
+  | { type: 'submit'; index: number }
+  | { type: 'cancel' };
+
+/** The focused interaction's small keyboard contract, kept pure for testing. */
+export function selectedInteractionPreview(
+  choices: readonly InteractionChoice[],
+  selected: number,
+): string | undefined {
+  return choices.filter((choice) => !choice.custom)[selected]?.preview;
+}
+
+export function interactionKeyAction(
+  key: string,
+  selected: number,
+  choiceCount: number,
+  textEntryFocused = false,
+): InteractionKeyAction | undefined {
+  if (textEntryFocused) return undefined;
+  if (key === 'Escape') return { type: 'cancel' };
+  if (choiceCount <= 0) return undefined;
+  const current = Math.max(0, Math.min(selected, choiceCount - 1));
+  if (key === 'ArrowUp')
+    return { type: 'move', index: Math.max(0, current - 1) };
+  if (key === 'ArrowDown')
+    return { type: 'move', index: Math.min(choiceCount - 1, current + 1) };
+  if (key === 'Enter') return { type: 'submit', index: current };
+  if (/^[0-9]$/.test(key)) {
+    const number = key === '0' ? 10 : Number(key);
+    if (number >= 1 && number <= choiceCount)
+      return { type: 'move', index: number - 1 };
+  }
+  return undefined;
+}
+
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
+}
+
 function InteractionCard({
   interaction,
   runtime,
@@ -410,9 +460,16 @@ function InteractionCard({
   const legacyInteraction = runtime.capabilities === undefined;
   const canAnswer = legacyInteraction || supportsSemanticAnswer;
   const canCancel = legacyInteraction || supportsSemanticCancel;
+  const selectableChoices = interaction.choices.filter(
+    (choice) => !choice.custom,
+  );
   const [answer, setAnswer] = useState('');
+  const [selectedChoice, setSelectedChoice] = useState(0);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string>();
+  const interactionRef = useRef<HTMLDivElement>(null);
+  const answerRef = useRef<HTMLInputElement>(null);
+  const choiceRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const answerMutation = useMutation(
     interactionAnswerMutationOptions(dashboardHttpClient),
   );
@@ -423,7 +480,35 @@ function InteractionCard({
   const knownRenderer = resolveDashboardRenderer(interaction.rendererId);
   const canRenderInteraction =
     !interaction.rendererId || Boolean(knownRenderer);
+  const selectedPreview = selectedInteractionPreview(
+    interaction.choices,
+    selectedChoice,
+  );
+
+  useEffect(() => {
+    setSelectedChoice((current) =>
+      Math.min(current, Math.max(0, selectableChoices.length - 1)),
+    );
+  }, [selectableChoices.length]);
+  useEffect(() => {
+    if (canRenderInteraction && canAnswer && selectableChoices.length > 0)
+      interactionRef.current?.focus();
+    else if (
+      canRenderInteraction &&
+      canAnswer &&
+      selectableChoices.length === 0 &&
+      interaction.allowCustom
+    )
+      answerRef.current?.focus();
+  }, [
+    canAnswer,
+    canRenderInteraction,
+    interaction.allowCustom,
+    selectableChoices.length,
+  ]);
+
   const submit = async (value: string) => {
+    if (busy || !canAnswer || !value.trim()) return;
     setError(undefined);
     try {
       if (supportsSemanticAnswer)
@@ -441,6 +526,7 @@ function InteractionCard({
     }
   };
   const cancel = async () => {
+    if (busy || !canCancel) return;
     setError(undefined);
     try {
       if (supportsSemanticCancel)
@@ -457,6 +543,39 @@ function InteractionCard({
       setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
+  const selectChoice = (index: number) => {
+    setSelectedChoice(index);
+    choiceRefs.current[index]?.focus();
+  };
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // Text editing owns arrows, digits, Enter, and Escape. Do not turn a
+    // custom answer field into an accidental choice navigator or cancel key.
+    if (event.key === 'Enter' && event.target instanceof HTMLButtonElement)
+      return;
+    if (busy) return;
+    const action = interactionKeyAction(
+      event.key,
+      selectedChoice,
+      selectableChoices.length,
+      isTextEntryTarget(event.target),
+    );
+    if (!action) return;
+    if (action.type === 'cancel') {
+      if (!canCancel) return;
+      event.preventDefault();
+      void cancel();
+      return;
+    }
+    if (!canAnswer) return;
+    event.preventDefault();
+    if (action.type === 'move') {
+      selectChoice(action.index);
+      return;
+    }
+    const choice = selectableChoices[action.index];
+    if (choice) void submit(choice.value);
+  };
+
   if (sent)
     return (
       <div className="notice">
@@ -469,6 +588,10 @@ function InteractionCard({
       className="interaction"
       role="dialog"
       aria-labelledby={`interaction-${interaction.id}`}
+      aria-keyshortcuts="ArrowUp ArrowDown Enter Escape"
+      tabIndex={selectableChoices.length > 0 ? 0 : undefined}
+      ref={interactionRef}
+      onKeyDown={handleKeyDown}
     >
       <p className="eyebrow">Waiting for input</p>
       <h2 id={`interaction-${interaction.id}`}>{interaction.question}</h2>
@@ -485,21 +608,44 @@ function InteractionCard({
           )}
         </div>
       )}
-      {canRenderInteraction && (
-        <div className="choices">
-          {interaction.choices
-            .filter((choice) => !choice.custom)
-            .map((choice) => (
+      {canRenderInteraction && selectableChoices.length > 0 && (
+        <div
+          className={`interaction-choice-layout${selectedPreview ? ' has-preview' : ''}`}
+        >
+          <fieldset className="choices">
+            <legend className="sr-only">Choices</legend>
+            {selectableChoices.map((choice, index) => (
               <AriaButton
                 type="button"
                 isDisabled={busy || !canAnswer}
                 key={choice.value}
-                onPress={() => void submit(choice.value)}
+                ref={(element) => {
+                  choiceRefs.current[index] = element;
+                }}
+                aria-pressed={selectedChoice === index}
+                data-selected={selectedChoice === index ? 'true' : undefined}
+                onFocus={() => setSelectedChoice(index)}
+                onPress={() => {
+                  setSelectedChoice(index);
+                  void submit(choice.value);
+                }}
               >
-                {choice.label}
-                <small>{choice.description}</small>
+                <span className="choice-number">{index + 1}.</span>
+                <span className="choice-label">{choice.label}</span>
+                {choice.description && <small>{choice.description}</small>}
               </AriaButton>
             ))}
+          </fieldset>
+          {selectedPreview && (
+            <aside
+              className="interaction-preview"
+              aria-label="Selected choice preview"
+              aria-live="polite"
+            >
+              <p className="eyebrow">Preview</p>
+              <Markdown>{selectedPreview}</Markdown>
+            </aside>
+          )}
         </div>
       )}
       {canRenderInteraction && canAnswer && interaction.allowCustom && (
@@ -514,6 +660,7 @@ function InteractionCard({
           </label>
           <input
             id={`answer-${interaction.id}`}
+            ref={answerRef}
             value={answer}
             onChange={(event) => setAnswer(event.target.value)}
             placeholder={interaction.customLabel ?? 'Type an answer'}

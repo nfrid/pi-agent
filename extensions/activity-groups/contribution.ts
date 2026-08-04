@@ -68,6 +68,7 @@ export const ActivityGroupsViewModelSchema = Type.Object(
     ]),
     expanded: Type.Boolean(),
     toolCount: Type.Integer({ minimum: 0 }),
+    failureCount: Type.Integer({ minimum: 0 }),
     tools: Type.Readonly(Type.Array(ActivityToolSchema, { maxItems: 128 })),
   },
   { additionalProperties: false },
