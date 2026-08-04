@@ -1084,9 +1084,8 @@ class DashboardServerImpl implements DashboardServer {
 
   private changed(message?: unknown): void {
     this.revision += 1;
-    const snapshot = this.snapshot();
     if (!message) {
-      this.publish({ type: 'snapshot', snapshot });
+      this.publish({ type: 'snapshot', snapshot: this.snapshot() });
       return;
     }
     if (message && typeof message === 'object' && !Array.isArray(message)) {
@@ -1096,7 +1095,7 @@ class DashboardServerImpl implements DashboardServer {
         serverId: this.serverId,
         revision: this.revision,
         ...(record.snapshot && typeof record.snapshot === 'object'
-          ? { snapshot }
+          ? { snapshot: this.snapshot() }
           : {}),
       });
       return;

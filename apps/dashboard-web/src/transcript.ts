@@ -8,11 +8,14 @@ import {
 import type { DashboardEvent } from './dashboard-transport';
 
 export interface TranscriptModelItem {
+  key: string;
   entry: ActivityTranscriptEntry;
   raw: unknown;
   text?: string;
   role?: 'user' | 'assistant';
   imageCount?: number;
+  /** Live assistant text whose final answer/tool-call intent is not known yet. */
+  preparing?: boolean;
 }
 
 function directStableId(value: unknown): string | undefined {
@@ -75,6 +78,29 @@ function replaceStable(
   return changed ? next : value;
 }
 
+function messageLevelId(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined;
+  const record = value as Record<string, unknown>;
+  for (const key of ['id', 'messageId', 'responseId'])
+    if (typeof record[key] === 'string' && record[key]) return record[key];
+  return undefined;
+}
+
+function messageRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined;
+  const record = value as Record<string, unknown>;
+  if (
+    record.type === 'message' &&
+    record.message &&
+    typeof record.message === 'object' &&
+    !Array.isArray(record.message)
+  )
+    return record.message as Record<string, unknown>;
+  return typeof record.role === 'string' ? record : undefined;
+}
+
 function messageIdentity(value: unknown): string | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const record = value as Record<string, unknown>;
@@ -95,11 +121,11 @@ function messageIdentity(value: unknown): string | undefined {
 
 /** Merge a live bridge item by its Pi-stable id, never by array position. */
 export function reconcileLiveEvent(
-  entries: readonly unknown[],
+  entries: unknown[],
   event: DashboardEvent['event'],
   sessionId: string,
 ): unknown[] {
-  if (!event?.sessionId || event.sessionId !== sessionId) return [...entries];
+  if (!event?.sessionId || event.sessionId !== sessionId) return entries;
   const envelope = event.message ?? event.tool;
   const payload =
     envelope && typeof envelope === 'object'
@@ -107,18 +133,51 @@ export function reconcileLiveEvent(
         (envelope as Record<string, unknown>).tool ??
         envelope)
       : envelope;
-  const id = stableId(envelope) ?? stableId(payload);
   if (!payload) return [...entries];
   const isMessage = event.type?.startsWith('message.');
   const tool = payload as Record<string, unknown>;
-  const nestedReplacement = isMessage
-    ? { type: 'message', message: payload }
-    : {
-        ...tool,
-        type: 'toolCall',
-        name: tool.toolName ?? tool.name ?? 'tool',
-        arguments: tool.arguments ?? tool.args,
-      };
+  if (isMessage) {
+    if (typeof payload !== 'object' || Array.isArray(payload)) return entries;
+    const messagePayload: Record<string, unknown> = {
+      ...(payload as Record<string, unknown>),
+      __dashboardStreaming: event.type !== 'message.finished',
+    };
+    const replacement = { type: 'message', message: messagePayload };
+    const id = messageLevelId(payload);
+    const identity = messageIdentity(payload);
+    let index = -1;
+    for (
+      let entryIndex = entries.length - 1;
+      entryIndex >= 0;
+      entryIndex -= 1
+    ) {
+      const existing = messageRecord(entries[entryIndex]);
+      if (!existing) continue;
+      if (
+        (id && messageLevelId(existing) === id) ||
+        (identity && messageIdentity(existing) === identity) ||
+        (event.type !== 'message.started' &&
+          (existing.__dashboardStreaming === true ||
+            (!id && !identity && event.type === 'message.updated')) &&
+          existing.role === messagePayload.role)
+      ) {
+        index = entryIndex;
+        break;
+      }
+    }
+    if (index < 0) return [...entries, replacement];
+    return entries.map((entry, entryIndex) =>
+      entryIndex === index ? replacement : entry,
+    );
+  }
+
+  const id = stableId(envelope) ?? stableId(payload);
+  const nestedReplacement = {
+    ...tool,
+    type: 'toolCall',
+    name: tool.toolName ?? tool.name ?? 'tool',
+    arguments: tool.arguments ?? tool.args,
+  };
   const toolWrapper = {
     type: 'tool',
     tool: { ...tool, name: tool.toolName ?? tool.name },
@@ -129,7 +188,6 @@ export function reconcileLiveEvent(
   if (found && id)
     return entries.map((entry) => {
       if (
-        !isMessage &&
         entry &&
         typeof entry === 'object' &&
         !Array.isArray(entry) &&
@@ -137,57 +195,9 @@ export function reconcileLiveEvent(
         containsStableId(entry, id)
       )
         return toolWrapper;
-      // A message envelope owns its payload, while a nested tool call owns only
-      // its content item. Passing the payload here preserves both outer shapes.
-      return replaceStable(entry, id, isMessage ? payload : nestedReplacement);
+      return replaceStable(entry, id, nestedReplacement);
     });
-  const identity = isMessage ? messageIdentity(payload) : undefined;
-  if (identity) {
-    let index = -1;
-    for (
-      let entryIndex = entries.length - 1;
-      entryIndex >= 0;
-      entryIndex -= 1
-    ) {
-      if (messageIdentity(entries[entryIndex]) === identity) {
-        index = entryIndex;
-        break;
-      }
-    }
-    if (index >= 0)
-      return entries.map((entry, entryIndex) =>
-        entryIndex === index ? nestedReplacement : entry,
-      );
-  }
-  if (isMessage && (payload as Record<string, unknown>).role === 'assistant') {
-    let index = -1;
-    for (
-      let entryIndex = entries.length - 1;
-      entryIndex >= 0;
-      entryIndex -= 1
-    ) {
-      const entry = entries[entryIndex];
-      if (
-        entry &&
-        typeof entry === 'object' &&
-        !Array.isArray(entry) &&
-        (entry as Record<string, unknown>).type === 'message' &&
-        (
-          (entry as Record<string, unknown>).message as
-            | Record<string, unknown>
-            | undefined
-        )?.role === 'assistant'
-      ) {
-        index = entryIndex;
-        break;
-      }
-    }
-    if (index >= 0)
-      return entries.map((entry, entryIndex) =>
-        entryIndex === index ? nestedReplacement : entry,
-      );
-  }
-  return [...entries, isMessage ? nestedReplacement : toolWrapper];
+  return [...entries, toolWrapper];
 }
 
 function contentText(value: unknown): string {
@@ -246,15 +256,22 @@ export function toTranscriptEntries(
       toolResults.set(message.toolCallId, message);
   }
   const result: TranscriptModelItem[] = [];
-  for (const raw of rawEntries) {
+  for (const [rawIndex, raw] of rawEntries.entries()) {
+    const keyedMessage = messageRecord(raw);
+    const entryKey = keyedMessage
+      ? (messageIdentity(keyedMessage) ??
+        messageLevelId(keyedMessage) ??
+        `entry-${rawIndex}`)
+      : (stableId(raw) ?? `entry-${rawIndex}`);
     if (!raw || typeof raw !== 'object') {
-      result.push({ entry: { kind: 'other' }, raw });
+      result.push({ key: entryKey, entry: { kind: 'other' }, raw });
       continue;
     }
     const entry = raw as Record<string, unknown>;
     const tool = entry.type === 'tool' ? toolRecord(raw) : undefined;
     if (tool) {
       result.push({
+        key: entryKey,
         entry: {
           kind: 'tool',
           name:
@@ -274,7 +291,7 @@ export function toTranscriptEntries(
       !entry.message ||
       typeof entry.message !== 'object'
     ) {
-      result.push({ entry: { kind: 'other' }, raw });
+      result.push({ key: entryKey, entry: { kind: 'other' }, raw });
       continue;
     }
     const message = entry.message as Record<string, unknown>;
@@ -315,6 +332,7 @@ export function toTranscriptEntries(
                 : undefined;
           const outcome = callId ? toolResults.get(callId) : undefined;
           tools.push({
+            key: `${entryKey}:tool:${callId ?? tools.length}`,
             entry: {
               kind: 'tool',
               name: typeof part.name === 'string' ? part.name : 'tool',
@@ -326,18 +344,27 @@ export function toTranscriptEntries(
           });
         }
       }
+      const preparing =
+        message.__dashboardStreaming === true && tools.length === 0;
       result.push(
         {
-          entry: { kind: 'assistant', speaks: Boolean(visibleText), narration },
+          key: entryKey,
+          entry: {
+            kind: 'assistant',
+            speaks: preparing ? false : Boolean(visibleText),
+            narration,
+          },
           raw,
           text: visibleText,
           role,
           ...(imageCount > 0 ? { imageCount } : {}),
+          ...(preparing ? { preparing: true } : {}),
         },
         ...tools,
       );
     } else
       result.push({
+        key: entryKey,
         entry: { kind: 'other' },
         raw,
         text,

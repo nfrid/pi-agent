@@ -35,6 +35,84 @@ export type DashboardEvent = {
   };
 };
 
+function firstEventIdentity(value: unknown, depth = 0): string | undefined {
+  if (!value || typeof value !== 'object' || depth > 4) return undefined;
+  if (Array.isArray(value))
+    return value
+      .map((item) => firstEventIdentity(item, depth + 1))
+      .find((identity): identity is string => Boolean(identity));
+  const record = value as Record<string, unknown>;
+  for (const key of ['id', 'messageId', 'toolCallId', 'callId'])
+    if (typeof record[key] === 'string' && record[key]) return record[key];
+  if (
+    typeof record.timestamp === 'number' ||
+    typeof record.timestamp === 'string'
+  )
+    return String(record.timestamp);
+  return Object.values(record)
+    .map((item) => firstEventIdentity(item, depth + 1))
+    .find((identity): identity is string => Boolean(identity));
+}
+
+function streamEventKey(event: DashboardEvent): string | undefined {
+  const type = event.event?.type;
+  if (!type?.startsWith('message.') && !type?.startsWith('tool.'))
+    return undefined;
+  const family = type.split('.')[0];
+  const envelope = event.event?.message ?? event.event?.tool;
+  const unwrapped =
+    envelope && typeof envelope === 'object' && !Array.isArray(envelope)
+      ? ((envelope as Record<string, unknown>).message ?? envelope)
+      : envelope;
+  const identity =
+    family === 'message' &&
+    unwrapped &&
+    typeof unwrapped === 'object' &&
+    !Array.isArray(unwrapped)
+      ? (() => {
+          const message = unwrapped as Record<string, unknown>;
+          if (
+            typeof message.timestamp === 'number' ||
+            typeof message.timestamp === 'string'
+          )
+            return String(message.timestamp);
+          for (const key of ['id', 'messageId', 'responseId'])
+            if (typeof message[key] === 'string' && message[key])
+              return message[key] as string;
+          return undefined;
+        })()
+      : firstEventIdentity(envelope);
+  return `${event.runtimeId ?? ''}:${event.event?.sessionId ?? ''}:${family}:${identity ?? 'active'}`;
+}
+
+export function enqueueStreamEvent(
+  pending: readonly DashboardEvent[],
+  event: DashboardEvent,
+): DashboardEvent[] {
+  const key = streamEventKey(event);
+  if (key && event.event?.type?.endsWith('.updated')) {
+    const existing = pending.findIndex(
+      (candidate) =>
+        streamEventKey(candidate) === key &&
+        candidate.event?.type?.endsWith('.updated'),
+    );
+    return existing < 0
+      ? [...pending, event]
+      : pending.map((candidate, index) =>
+          index === existing ? event : candidate,
+        );
+  }
+  const withoutSuperseded =
+    key && event.event?.type?.endsWith('.finished')
+      ? pending.filter(
+          (candidate) =>
+            streamEventKey(candidate) !== key ||
+            !candidate.event?.type?.endsWith('.updated'),
+        )
+      : pending;
+  return [...withoutSuperseded, event];
+}
+
 export type SessionResponse = {
   metadata: SessionIndexEntry;
   entries: unknown[];
@@ -317,7 +395,7 @@ export function shouldAcceptRevision(
   currentRevision: number,
   nextRevision: number,
 ): boolean {
-  return nextRevision >= currentRevision;
+  return nextRevision > currentRevision;
 }
 
 export interface DashboardState {
@@ -326,6 +404,8 @@ export interface DashboardState {
   usageError: string | undefined;
   refresh: () => Promise<void>;
   events: readonly DashboardEvent[];
+  /** Advances synchronously when an accepted socket event arrives. */
+  eventGeneration: { readonly current: number };
   reconnectNonce: number;
   connectionState: 'connecting' | 'connected' | 'reconnecting';
 }
@@ -350,6 +430,7 @@ export function useDashboard(): DashboardState {
   const acceptedServerId = useRef<string | undefined>(undefined);
   const acceptedRevision = useRef(-1);
   const eventRevisions = useRef(new Set<number>());
+  const eventGeneration = useRef(0);
   const eventRevisionOrder = useRef<number[]>([]);
   const liveDisconnected = useRef(false);
   const authoritativeSocketServerId = useRef<string | undefined>(undefined);
@@ -438,8 +519,21 @@ export function useDashboard(): DashboardState {
     let timer: number | undefined;
     let connectTimer: number | undefined;
     let resyncTimer: number | undefined;
+    let eventFlushTimer: number | undefined;
     let stopped = false;
+    let pendingEvents: DashboardEvent[] = [];
     let retryDelay = RECONNECT_MIN_MS;
+    const flushEvents = () => {
+      eventFlushTimer = undefined;
+      const batch = pendingEvents.filter(
+        (event) =>
+          event.serverId === undefined ||
+          event.serverId === acceptedServerId.current,
+      );
+      pendingEvents = [];
+      if (batch.length > 0)
+        setEvents((current) => [...current, ...batch].slice(-128));
+    };
     const queueEvent = (event: DashboardEvent): void => {
       if (
         event.serverId !== undefined &&
@@ -463,7 +557,9 @@ export function useDashboard(): DashboardState {
           if (expired !== undefined) eventRevisions.current.delete(expired);
         }
       }
-      setEvents((current) => [...current, event].slice(-128));
+      eventGeneration.current += 1;
+      pendingEvents = enqueueStreamEvent(pendingEvents, event);
+      eventFlushTimer ??= window.setTimeout(flushEvents, 50);
     };
     const scheduleResync = () => {
       if (stopped || resyncTimer !== undefined) return;
@@ -609,6 +705,8 @@ export function useDashboard(): DashboardState {
       if (timer) window.clearTimeout(timer);
       if (connectTimer) window.clearTimeout(connectTimer);
       if (resyncTimer) window.clearTimeout(resyncTimer);
+      if (eventFlushTimer) window.clearTimeout(eventFlushTimer);
+      pendingEvents = [];
       const activeSocket = socket;
       socket = undefined;
       authoritativeSocketServerId.current = undefined;
@@ -629,6 +727,7 @@ export function useDashboard(): DashboardState {
     usageError,
     refresh,
     events,
+    eventGeneration,
     reconnectNonce,
     connectionState,
   };

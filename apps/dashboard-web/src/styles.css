@@ -764,6 +764,16 @@ h2 {
   color: var(--muted);
   font-size: 11px;
 }
+.preparing-toolcall {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--cyan);
+}
+.preparing-toolcall small {
+  margin-left: auto;
+  color: var(--muted);
+}
 .transcript-entry:last-child {
   border-bottom: 0;
 }

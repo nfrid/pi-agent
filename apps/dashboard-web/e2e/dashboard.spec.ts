@@ -538,6 +538,44 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await activity.click();
   await expect(page.locator('.tool-chip').getByText('read')).toBeVisible();
   await activity.click();
+  const emitAssistant = async (content: unknown[]) =>
+    page.evaluate((assistantContent) => {
+      (
+        window as unknown as {
+          dashboardTestSocket: { emit(value: unknown): void };
+        }
+      ).dashboardTestSocket.emit({
+        type: 'bridge.event',
+        event: {
+          type: 'message.updated',
+          sessionId: 's1',
+          message: {
+            id: 'live-assistant-turn',
+            role: 'assistant',
+            content: assistantContent,
+          },
+        },
+      });
+    }, content);
+  await emitAssistant([{ type: 'text', text: 'Preparing live tool.' }]);
+  await expect(
+    page.getByText('preparing tool call', { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('.message-assistant')).not.toContainText(
+    'Preparing live tool.',
+  );
+  await emitAssistant([
+    { type: 'text', text: 'Preparing live tool.' },
+    {
+      type: 'toolCall',
+      id: 'live-call',
+      name: 'read',
+      arguments: { path: 'src/live.ts' },
+    },
+  ]);
+  await expect(
+    page.getByRole('button', { name: /Preparing live tool.*1 tool/ }),
+  ).toBeVisible();
   const emitMessage = async (type: string, timestamp: number, text: string) =>
     page.evaluate(
       ({ type, timestamp, text }) => {
@@ -588,7 +626,8 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect.poll(() => sessionReads).toBe(3);
   await emitMessage('message.started', 321, 'Delta during settled refresh');
   releaseSettledRead?.();
-  await expect(page.getByText('Authoritative settled refresh')).toBeVisible();
+  await expect(page.getByText('Delta during settled refresh')).toBeVisible();
+  await expect(page.getByText('Authoritative settled refresh')).toHaveCount(0);
   await page.evaluate(() => window.scrollBy(0, -400));
   await emitMessage('message.started', 456, 'Message while reading history');
   await expect(page.getByText('Message while reading history')).toHaveCount(1);

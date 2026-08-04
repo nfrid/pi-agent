@@ -178,6 +178,54 @@ describe('active transcript reconciliation', () => {
     expect(JSON.stringify(updated)).toContain('done');
   });
 
+  it('renders streaming assistant text as preparation until intent is final', () => {
+    const update = (type: string, content: unknown[]) => ({
+      type,
+      sessionId: 's1',
+      message: {
+        id: 'assistant-live',
+        role: 'assistant',
+        content,
+      },
+    });
+    const preparingEntries = reconcileLiveEvent(
+      [],
+      update('message.updated', [
+        { type: 'text', text: 'Checking the transport.' },
+      ]),
+      's1',
+    );
+    expect(toTranscriptEntries(preparingEntries)[0]).toMatchObject({
+      preparing: true,
+      text: 'Checking the transport.',
+      entry: { kind: 'assistant', speaks: false },
+    });
+    const callingEntries = reconcileLiveEvent(
+      preparingEntries,
+      update('message.updated', [
+        { type: 'text', text: 'Checking the transport.' },
+        { type: 'toolCall', id: 'call-1', name: 'read', arguments: {} },
+      ]),
+      's1',
+    );
+    const calling = toTranscriptEntries(callingEntries);
+    expect(calling[0]?.preparing).toBeUndefined();
+    expect(calling[1]?.entry).toMatchObject({ kind: 'tool', name: 'read' });
+    const finishedEntries = reconcileLiveEvent(
+      preparingEntries,
+      update('message.finished', [
+        { type: 'text', text: 'Here is the final answer.' },
+      ]),
+      's1',
+    );
+    const finished = toTranscriptEntries(finishedEntries)[0];
+    expect(finished).toMatchObject({
+      text: 'Here is the final answer.',
+      entry: { kind: 'assistant', speaks: true },
+    });
+    expect(finished?.preparing).toBeUndefined();
+  });
+
   it('reconciles ID-less user start/end events by Pi timestamp', () => {
     const start = {
       type: 'message.started',
@@ -242,6 +290,113 @@ describe('active transcript reconciliation', () => {
     );
     expect(twice).toHaveLength(1);
     expect(JSON.stringify(twice)).toContain('done!');
+  });
+
+  it('replaces an ID-less assistant row without corrupting its nested tool call', () => {
+    const message = (type: string, content: unknown[]) => ({
+      type,
+      sessionId: 's1',
+      message: {
+        role: 'assistant',
+        timestamp: 123,
+        content,
+      },
+    });
+    let entries = reconcileLiveEvent([], message('message.started', []), 's1');
+    entries = reconcileLiveEvent(
+      entries,
+      message('message.updated', [
+        { type: 'text', text: 'Reading the file.' },
+        { type: 'toolCall', id: 'nested-call', name: 'read', arguments: {} },
+      ]),
+      's1',
+    );
+    entries = reconcileLiveEvent(
+      entries,
+      message('message.finished', [
+        { type: 'text', text: 'Reading the file.' },
+        { type: 'toolCall', id: 'nested-call', name: 'read', arguments: {} },
+      ]),
+      's1',
+    );
+    expect(entries).toHaveLength(1);
+    const transcript = toTranscriptEntries(entries);
+    expect(transcript).toHaveLength(2);
+    expect(transcript[0]).toMatchObject({
+      key: 'assistant:123',
+      entry: { kind: 'assistant' },
+    });
+    expect(transcript[1]).toMatchObject({
+      key: 'assistant:123:tool:nested-call',
+      entry: { kind: 'tool', name: 'read' },
+    });
+  });
+
+  it('keeps one message row when responseId appears during streaming', () => {
+    const started = reconcileLiveEvent(
+      [],
+      {
+        type: 'message.started',
+        sessionId: 's1',
+        message: {
+          role: 'assistant',
+          timestamp: 456,
+          content: [],
+        },
+      },
+      's1',
+    );
+    const startedKey = toTranscriptEntries(started)[0]?.key;
+    const updated = reconcileLiveEvent(
+      started,
+      {
+        type: 'message.updated',
+        sessionId: 's1',
+        message: {
+          role: 'assistant',
+          timestamp: 456,
+          responseId: 'response-added-later',
+          content: [
+            { type: 'text', text: 'Calling now.' },
+            { type: 'toolCall', id: 'call-later', name: 'bash', arguments: {} },
+          ],
+        },
+      },
+      's1',
+    );
+    expect(updated).toHaveLength(1);
+    const transcript = toTranscriptEntries(updated);
+    expect(transcript).toHaveLength(2);
+    expect(transcript[0]?.key).toBe(startedKey);
+  });
+
+  it('appends a new stable assistant id instead of replacing the prior answer', () => {
+    const entries = [
+      {
+        type: 'message',
+        message: {
+          id: 'finished-answer',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Previous answer' }],
+        },
+      },
+    ];
+    const updated = reconcileLiveEvent(
+      entries,
+      {
+        type: 'message.updated',
+        sessionId: 's1',
+        message: {
+          id: 'new-turn',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Preparing work' }],
+        },
+      },
+      's1',
+    );
+    expect(updated).toHaveLength(2);
+    expect(JSON.stringify(updated[0])).toContain('Previous answer');
+    expect(JSON.stringify(updated[1])).toContain('Preparing work');
   });
 
   it('keeps live tools renderable when updating nested and new calls', () => {

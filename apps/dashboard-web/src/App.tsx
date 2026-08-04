@@ -121,6 +121,7 @@ export default function App() {
         id={route[1]}
         snapshot={dashboard.snapshot}
         events={dashboard.events}
+        eventGeneration={dashboard.eventGeneration}
         reconnectNonce={dashboard.reconnectNonce}
       />
     ) : route[0] === 'workspaces' && route[1] ? (
@@ -680,11 +681,13 @@ function SessionView({
   id,
   snapshot,
   events,
+  eventGeneration,
   reconnectNonce,
 }: {
   id: string;
   snapshot: BrowserSnapshot;
   events: readonly DashboardEvent[];
+  eventGeneration: { readonly current: number };
   reconnectNonce: number;
 }) {
   const [data, setData] = useState<SessionResponse>();
@@ -695,7 +698,7 @@ function SessionView({
   const runtimeIdRef = useRef<string | undefined>(undefined);
   const seenEventsRef = useRef(new WeakSet<DashboardEvent>());
   const runtime = snapshot.runtimes.find((item) => item.session.id === id);
-  if (runtime) runtimeIdRef.current = runtime.runtimeId;
+  runtimeIdRef.current = runtime?.runtimeId;
   useEffect(() => {
     let active = true;
     // A reconnect gets a fresh session read even when no bridge event was lost.
@@ -749,6 +752,7 @@ function SessionView({
     if (!enteringSession && !stickToBottomRef.current) return;
     scrolledSessionRef.current = id;
     const frame = window.requestAnimationFrame(() => {
+      if (!stickToBottomRef.current) return;
       window.scrollTo(0, document.documentElement.scrollHeight);
       stickToBottomRef.current = true;
     });
@@ -790,6 +794,7 @@ function SessionView({
         continue;
       }
       if (!data || seenEventsRef.current.has(queued)) continue;
+      if (event.type !== 'session.changed' && changedSessionId !== id) continue;
       seenEventsRef.current.add(queued);
       const captureBottomState = () => {
         stickToBottomRef.current = isNearPageBottom(
@@ -798,19 +803,28 @@ function SessionView({
           window.innerHeight,
         );
       };
-      if (event.type === 'agent.settled' || event.type === 'runtime.hello') {
+      if (event.type === 'agent.settled') {
         captureBottomState();
         const request = ++sessionRequestRef.current;
+        const arrivalGeneration = eventGeneration.current;
         void api<unknown>(`/api/sessions/${encodeURIComponent(id)}`)
           .then((value) => {
             const next = asSessionResponse(value);
-            if (request === sessionRequestRef.current && next) setData(next);
+            if (
+              request === sessionRequestRef.current &&
+              arrivalGeneration === eventGeneration.current &&
+              next
+            )
+              setData(next);
           })
           .catch(() => undefined);
       } else if (
         event.type?.startsWith('message.') ||
         event.type?.startsWith('tool.')
       ) {
+        // A later delta makes any settled-session read stale. Let the live
+        // stream win instead of allowing a lagging file read to flash backward.
+        sessionRequestRef.current += 1;
         captureBottomState();
         setData((current) =>
           current
@@ -822,7 +836,7 @@ function SessionView({
         );
       }
     }
-  }, [events, data, id]);
+  }, [events, data, eventGeneration, id]);
   if (!data)
     return (
       <section>
@@ -1143,17 +1157,16 @@ function Transcript({ entries }: { entries: unknown[] }) {
   const items = useMemo(() => toTranscriptEntries(entries), [entries]);
   const modelEntries = useMemo(() => items.map((item) => item.entry), [items]);
   const groups = useMemo(() => groupTranscript(modelEntries), [modelEntries]);
-  const [open, setOpen] = useState<Set<number>>(new Set());
+  const [open, setOpen] = useState<Set<string>>(new Set());
   const groupByStart = new Map(groups.map((group) => [group.start, group]));
-  const itemKey = (item: TranscriptModelItem): string =>
-    `${item.entry.kind}:${item.role ?? ''}:${item.text ?? JSON.stringify(item.raw)}`;
   return (
     <div className="transcript">
       <h2>Conversation &amp; activity</h2>
       {items.map((item, index) => {
         const group = groupByStart.get(index);
         if (group) {
-          const expanded = open.has(group.start);
+          const groupKey = items[group.start]?.key ?? 'unknown-group';
+          const expanded = open.has(groupKey);
           const tools = modelEntries
             .slice(group.start, group.end + 1)
             .filter(
@@ -1162,19 +1175,18 @@ function Transcript({ entries }: { entries: unknown[] }) {
               ): entry is Extract<ActivityTranscriptEntry, { kind: 'tool' }> =>
                 entry.kind === 'tool',
             );
+          const groupItems = items.slice(group.start, group.end + 1);
+          const preparing = groupItems.some((item) => item.preparing);
           const complete =
+            !preparing &&
             tools.length > 0 &&
-            items
-              .slice(group.start, group.end + 1)
+            groupItems
               .filter((item) => item.entry.kind === 'tool')
               .every((item) => toolOutcome(item.raw) === 'success');
-          const title = activityTitle(
-            items.slice(group.start, group.end + 1),
-            tools,
-            complete,
-          );
+          const title = activityTitle(groupItems, tools, complete);
           const lead = items[group.start];
           const visibleLead =
+            !lead?.preparing &&
             lead?.role === 'assistant' &&
             lead.text &&
             shouldShowActivityLead(lead.text, title)
@@ -1184,7 +1196,7 @@ function Transcript({ entries }: { entries: unknown[] }) {
           return (
             <div
               className={`activity-group ${complete ? 'activity-complete' : 'activity-pending'}`}
-              key={`group-${group.start}`}
+              key={`group-${groupKey}`}
             >
               <button
                 type="button"
@@ -1193,7 +1205,7 @@ function Transcript({ entries }: { entries: unknown[] }) {
                 onClick={() =>
                   setOpen((current) => {
                     const next = new Set(current);
-                    expanded ? next.delete(group.start) : next.add(group.start);
+                    expanded ? next.delete(groupKey) : next.add(groupKey);
                     return next;
                   })
                 }
@@ -1201,8 +1213,11 @@ function Transcript({ entries }: { entries: unknown[] }) {
                 <span className="activity-icon">{complete ? '✓' : '…'}</span>
                 <strong>{title}</strong>
                 <small>
-                  {tools.length} tool{tools.length === 1 ? '' : 's'} ·{' '}
-                  {expanded ? 'hide detail' : 'show detail'}
+                  {preparing
+                    ? tools.length > 0
+                      ? `${tools.length} tool${tools.length === 1 ? '' : 's'} · preparing next tool call`
+                      : 'preparing tool call'
+                    : `${tools.length} tool${tools.length === 1 ? '' : 's'} · ${expanded ? 'hide detail' : 'show detail'}`}
                 </small>
               </button>
               {visibleLead && (
@@ -1213,8 +1228,8 @@ function Transcript({ entries }: { entries: unknown[] }) {
               )}
               {expanded && (
                 <div className="activity-detail" id={detailId}>
-                  {items.slice(group.start, group.end + 1).map((child) => (
-                    <TranscriptEntry key={itemKey(child)} item={child} />
+                  {groupItems.map((child) => (
+                    <TranscriptEntry key={child.key} item={child} />
                   ))}
                 </div>
               )}
@@ -1227,7 +1242,7 @@ function Transcript({ entries }: { entries: unknown[] }) {
           )
         )
           return null;
-        return <TranscriptEntry key={itemKey(item)} item={item} />;
+        return <TranscriptEntry key={item.key} item={item} />;
       })}
     </div>
   );
@@ -1238,6 +1253,16 @@ function TranscriptEntry({
 }: {
   item: import('./transcript').TranscriptModelItem;
 }) {
+  if (item.preparing)
+    return (
+      <div className="transcript-entry preparing-toolcall" role="status">
+        <span className="activity-icon">…</span>
+        <strong>
+          {item.text ? activityTitleLine(item.text) : 'Preparing tool call'}
+        </strong>
+        <small>preparing tool call</small>
+      </div>
+    );
   if (item.role && (item.text || item.imageCount))
     return (
       <article className={`message-bubble message-${item.role}`}>
