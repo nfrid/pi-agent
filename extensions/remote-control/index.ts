@@ -51,6 +51,13 @@ import {
   askUserManifest,
 } from '../ask-user/contribution';
 import { defineExtension } from '../shared/runtime/extension';
+import {
+  RUNTIME_ABORT_ACTION_ID,
+  RUNTIME_SHUTDOWN_ACTION_ID,
+  remoteControlCapabilitySnapshot,
+  remoteControlManifest,
+  SESSION_COMPACT_ACTION_ID,
+} from './contribution';
 
 const RECONNECT_MIN_MS = 250;
 const RECONNECT_MAX_MS = 10_000;
@@ -64,12 +71,14 @@ const HEARTBEAT_INTERVAL_MS = 5_000;
 const CONTRIBUTION_MANIFESTS = [
   askUserManifest,
   activityGroupsManifest,
+  remoteControlManifest,
 ] as const;
 const RUNTIME_CAPABILITIES = createRuntimeCapabilitySnapshot(
   CONTRIBUTION_MANIFESTS,
   [
     ...askUserCapabilitySnapshot.capabilities,
     ...activityGroupsCapabilitySnapshot.capabilities,
+    ...remoteControlCapabilitySnapshot.capabilities,
   ],
 );
 
@@ -965,6 +974,39 @@ function modelSnapshot(ctx: ExtensionContext): RuntimeSnapshot['model'] {
   };
 }
 
+function modelCatalogSnapshot(
+  ctx: ExtensionContext,
+): RuntimeSnapshot['modelCatalog'] {
+  const registry = (
+    ctx as unknown as {
+      modelRegistry?: { getAll?: () => readonly unknown[] };
+    }
+  ).modelRegistry;
+  const models = registry?.getAll?.() ?? [];
+  return models.slice(0, 256).flatMap((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate))
+      return [];
+    const value = candidate as Record<string, unknown>;
+    if (typeof value.provider !== 'string' || typeof value.id !== 'string')
+      return [];
+    const input = Array.isArray(value.input) ? value.input : [];
+    return [
+      {
+        provider: value.provider,
+        model: value.id,
+        ...(typeof value.name === 'string' ? { name: value.name } : {}),
+        supportsImages: input.includes('image'),
+      },
+    ];
+  });
+}
+
+function thinkingLevelsSnapshot(): string[] {
+  // These are the stable ThinkingLevel values accepted by Pi 0.82.1. They
+  // are data controls, not command names, and remain bounded on the wire.
+  return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+}
+
 function liveState(
   ctx: ExtensionContext,
   broker: InteractionBroker,
@@ -1099,6 +1141,19 @@ async function dispatchSemanticAction(
   }
   if (invocation.actionId === ACTIVITY_GROUPS_ACTION_ID)
     return executeActivityGroupsAction(invocation.input);
+  if (invocation.actionId === SESSION_COMPACT_ACTION_ID) {
+    const input = invocation.input as { customInstructions?: string };
+    ctx.compact({ customInstructions: input.customInstructions || undefined });
+    return { accepted: true, actionId: invocation.actionId };
+  }
+  if (invocation.actionId === RUNTIME_ABORT_ACTION_ID) {
+    ctx.abort();
+    return { accepted: true, actionId: invocation.actionId };
+  }
+  if (invocation.actionId === RUNTIME_SHUTDOWN_ACTION_ID) {
+    ctx.shutdown();
+    return { accepted: true, actionId: invocation.actionId };
+  }
   throw Object.assign(
     new Error(`No adapter for dashboard action: ${invocation.actionId}`),
     {
@@ -1227,6 +1282,8 @@ export function createRemoteControlRuntime(
       liveState: liveState(ctx, broker),
       session: sessionSnapshot(ctx),
       model: modelSnapshot(ctx),
+      modelCatalog: modelCatalogSnapshot(ctx),
+      thinkingLevels: thinkingLevelsSnapshot(),
       contextUsage: usage
         ? {
             tokens: usage.tokens,

@@ -71,6 +71,22 @@ export function NotificationList({
   notifications: BrowserSnapshot['unread'];
 }) {
   const [error, setError] = useState<string>();
+  const [browserAlerts, setBrowserAlerts] = useState<
+    'off' | 'on' | 'unavailable'
+  >('off');
+  const enableBrowserAlerts = async () => {
+    if (!('Notification' in window)) {
+      setBrowserAlerts('unavailable');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+    setBrowserAlerts('on');
+    // This is a local fallback when Push/VAPID is unavailable. It is bounded
+    // to the visible notification slice and never retries a failed delivery.
+    for (const notification of notifications.slice(0, 8))
+      new Notification(notification.title, { body: notification.body });
+  };
   const readMutation = useMutation(
     notificationReadMutationOptions(dashboardHttpClient),
   );
@@ -110,6 +126,17 @@ export function NotificationList({
             disabled={markingAll}
           >
             {markingAll ? 'Reading…' : 'Read all'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void enableBrowserAlerts()}
+            disabled={browserAlerts === 'on' || !notifications.length}
+          >
+            {browserAlerts === 'on'
+              ? 'Browser alerts on'
+              : browserAlerts === 'unavailable'
+                ? 'Alerts unavailable'
+                : 'Browser alerts'}
           </button>
         </span>
       </div>

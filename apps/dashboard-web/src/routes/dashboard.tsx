@@ -1,3 +1,8 @@
+import {
+  type DashboardLiveStore,
+  dashboardHttpClient,
+  workspaceRefreshMutationOptions,
+} from '@pi-dashboard/client';
 import type {
   BrowserSnapshot,
   RuntimeSnapshot,
@@ -5,7 +10,9 @@ import type {
   WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { workspaceForPath } from '@pi-dashboard/protocol';
+import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
+import { useEffect, useRef, useState } from 'react';
 import { sessionDisplayTitle } from '../app-helpers';
 import {
   NotificationList,
@@ -53,6 +60,7 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
           <span className="header-stat muted-stat">{online} online</span>
         </div>
         <PushButton />
+        <CommandPalette snapshot={snapshot} />
         <button
           type="button"
           className="header-action"
@@ -65,12 +73,205 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
   );
 }
 
+function actionNeedsInput(action: { inputSchema?: unknown }): boolean {
+  const schema = action.inputSchema;
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema))
+    return true;
+  const value = schema as { required?: unknown; minProperties?: unknown };
+  return (
+    (Array.isArray(value.required) && value.required.length > 0) ||
+    value.minProperties === 1
+  );
+}
+
+function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState(0);
+  const [error, setError] = useState<string>();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const actions = snapshot.runtimes.flatMap((runtime) =>
+    runtime.online === false
+      ? []
+      : (runtime.capabilities?.manifests ?? []).flatMap((manifest) =>
+          manifest.actions
+            .filter((action) => {
+              const rule = action.availability;
+              return (
+                !rule?.liveStates || rule.liveStates.includes(runtime.liveState)
+              );
+            })
+            .map((action) => ({ runtime, action })),
+        ),
+  );
+  const filtered = actions.filter(({ runtime, action }) =>
+    `${action.title ?? action.id} ${action.description ?? ''} ${runtime.runtimeId}`
+      .toLowerCase()
+      .includes(query.trim().toLowerCase()),
+  );
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setOpen(true);
+      }
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    setSelected(0);
+    setError(undefined);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, [open]);
+  const invoke = async (index: number) => {
+    const item = filtered[index];
+    if (!item || actionNeedsInput(item.action)) return;
+    setError(undefined);
+    try {
+      await dashboardHttpClient.invokeAction(
+        item.runtime.runtimeId,
+        item.action.id,
+        {},
+      );
+      setOpen(false);
+      setQuery('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+  return (
+    <>
+      <button
+        type="button"
+        className="header-action palette-trigger"
+        aria-label="Open command palette"
+        onClick={() => setOpen(true)}
+      >
+        ⌘K
+      </button>
+      {open && (
+        <div className="palette-backdrop" role="presentation">
+          <section
+            className="command-palette"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="command-palette-heading"
+          >
+            <h2 id="command-palette-heading">Command palette</h2>
+            <input
+              ref={inputRef}
+              aria-label="Filter actions"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  setSelected((value) =>
+                    Math.min(value + 1, filtered.length - 1),
+                  );
+                } else if (event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setSelected((value) => Math.max(value - 1, 0));
+                } else if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void invoke(selected);
+                }
+              }}
+              placeholder="Search advertised actions…"
+            />
+            <div
+              className="palette-list"
+              role="listbox"
+              aria-label="Advertised actions"
+            >
+              {filtered.map(({ runtime, action }, index) => {
+                const needsInput = actionNeedsInput(action);
+                return (
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={selected === index}
+                    className={selected === index ? 'palette-selected' : ''}
+                    disabled={needsInput}
+                    key={`${runtime.runtimeId}:${action.id}`}
+                    onClick={() => void invoke(index)}
+                  >
+                    <strong>{action.title ?? action.id}</strong>
+                    <small>
+                      {runtime.runtimeId} ·{' '}
+                      {needsInput
+                        ? 'requires input'
+                        : (action.description ?? action.id)}
+                    </small>
+                  </button>
+                );
+              })}
+              {!filtered.length && (
+                <p className="empty">No advertised actions.</p>
+              )}
+            </div>
+            {error && (
+              <p className="error" role="alert">
+                {error}
+              </p>
+            )}
+            <p className="muted">Esc close · ↑↓ move · Enter invoke</p>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+
+function WorkspaceRefresh({
+  snapshot,
+  store,
+}: {
+  snapshot: BrowserSnapshot;
+  store?: DashboardLiveStore;
+}) {
+  const mutation = useMutation(
+    workspaceRefreshMutationOptions(dashboardHttpClient),
+  );
+  const refresh = async () => {
+    try {
+      const result = (await mutation.mutateAsync()) as {
+        workspaces?: BrowserSnapshot['workspaces'];
+      };
+      if (store && result.workspaces) {
+        store.installSnapshot(
+          { ...snapshot, workspaces: result.workspaces },
+          { source: 'http', requestGeneration: store.getGeneration() },
+        );
+      }
+    } catch {
+      // The live catalogue remains usable; the button exposes failure state.
+    }
+  };
+  return (
+    <button
+      type="button"
+      className="header-action"
+      onClick={() => void refresh()}
+      disabled={mutation.isPending}
+      aria-label="Refresh workspaces"
+    >
+      {mutation.isPending ? 'Refreshing…' : 'Refresh workspaces'}
+    </button>
+  );
+}
+
 export function Dashboard({
   snapshot,
   usageError,
+  store,
 }: {
   snapshot: BrowserSnapshot;
   usageError?: string;
+  store?: DashboardLiveStore;
 }) {
   const go = useDashboardNavigate();
   const groups = new Map<
@@ -104,13 +305,16 @@ export function Dashboard({
           <p className="eyebrow">Operational view</p>
           <h1>Agents</h1>
         </div>
-        <span className="muted">
-          {liveCount
-            ? `${liveCount} live runtime${liveCount === 1 ? '' : 's'}`
-            : 'No live runtimes'}{' '}
-          · {snapshot.runtimes.length} tracked · {snapshot.sessions.length}{' '}
-          sessions
-        </span>
+        <div className="section-heading-actions">
+          <span className="muted">
+            {liveCount
+              ? `${liveCount} live runtime${liveCount === 1 ? '' : 's'}`
+              : 'No live runtimes'}{' '}
+            · {snapshot.runtimes.length} tracked · {snapshot.sessions.length}{' '}
+            sessions
+          </span>
+          <WorkspaceRefresh snapshot={snapshot} store={store} />
+        </div>
       </div>
       {liveCount === 0 && (
         <div className="empty-hero">

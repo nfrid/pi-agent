@@ -65,6 +65,17 @@ export const RuntimeOwnershipSchema = Type.Union([
 ]);
 export type RuntimeOwnership = Static<typeof RuntimeOwnershipSchema>;
 
+export const RuntimeModelOptionSchema = Type.Object(
+  {
+    provider: Type.String({ minLength: 1, maxLength: 200 }),
+    model: Type.String({ minLength: 1, maxLength: 300 }),
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })),
+    supportsImages: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type RuntimeModelOption = Static<typeof RuntimeModelOptionSchema>;
+
 const InteractionChoiceSchema = Type.Object(
   {
     label: Type.String({ minLength: 1, maxLength: 512 }),
@@ -181,6 +192,18 @@ const RuntimeSnapshotProperties = {
         supportsImages: Type.Optional(Type.Boolean()),
       },
       { additionalProperties: false },
+    ),
+  ),
+  /** Bounded catalogue from the installed Pi model registry; credentials never cross the bridge. */
+  modelCatalog: Type.Optional(
+    Type.Readonly(Type.Array(RuntimeModelOptionSchema, { maxItems: 256 })),
+  ),
+  /** Values accepted by the installed runtime's setThinkingLevel API. */
+  thinkingLevels: Type.Optional(
+    Type.Readonly(
+      Type.Array(Type.String({ minLength: 1, maxLength: 64 }), {
+        maxItems: 16,
+      }),
     ),
   ),
   contextUsage: Type.Optional(

@@ -35,6 +35,18 @@ const WS_HEARTBEAT_MS = 30_000;
 const WS_PATH = '/ws';
 const SSE_PATH = '/api/events';
 
+function validCommandId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    !Array.from(value).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  );
+}
+
 function validImageDimensions(width: number, height: number): boolean {
   return (
     Number.isSafeInteger(width) &&
@@ -346,6 +358,14 @@ class DashboardServerImpl implements DashboardServer {
         this.changed();
         return result;
       },
+      restartRuntime: async (runtimeId, commandId) => {
+        const result = await this.application.runtime.restart(
+          runtimeId,
+          commandId,
+        );
+        this.changed();
+        return result;
+      },
       commandRuntime: async (runtimeId, input, imageBuffers) => {
         if (!input || typeof input !== 'object' || Array.isArray(input))
           throw new Error('Invalid command body.');
@@ -366,14 +386,13 @@ class DashboardServerImpl implements DashboardServer {
             );
           const command = validateBridgeCommand({
             ...body,
-            id: 'browser',
+            id:
+              typeof body.id === 'string' && body.id.length > 0
+                ? body.id
+                : randomBytes(16).toString('hex'),
             ...(images.length > 0 ? { images } : {}),
           });
-          const { id: _id, ...inputCommand } = command;
-          return await this.application.runtime.command(
-            runtimeId,
-            inputCommand,
-          );
+          return await this.application.runtime.command(runtimeId, command);
         } finally {
           await this.application.uploads.cleanup(
             images.map((image) => image.path),
@@ -699,6 +718,11 @@ class DashboardServerImpl implements DashboardServer {
         );
       if (request.method === 'POST' && url.pathname === '/api/runtimes/start')
         return await this.handleStart(request, response);
+      const restartMatch = url.pathname.match(
+        /^\/api\/runtimes\/([^/]+)\/restart$/,
+      );
+      if (request.method === 'POST' && restartMatch)
+        return await this.handleRestart(restartMatch[1], request, response);
       const commandMatch = url.pathname.match(
         /^\/api\/runtimes\/([^/]+)\/command$/,
       );
@@ -769,6 +793,19 @@ class DashboardServerImpl implements DashboardServer {
     return this.json(response, 201, result);
   }
 
+  private async handleRestart(
+    runtimeId: string,
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+  ): Promise<void> {
+    const body = (await this.body(request)) as Record<string, unknown>;
+    if (!validCommandId(body.id))
+      throw new Error('Restart command ID is required.');
+    const result = await this.application.runtime.restart(runtimeId, body.id);
+    this.changed();
+    return this.json(response, 200, { ok: true, result });
+  }
+
   private async handleCommand(
     runtimeId: string,
     request: http.IncomingMessage,
@@ -806,11 +843,13 @@ class DashboardServerImpl implements DashboardServer {
         );
       const command = validateBridgeCommand({
         ...body,
-        id: 'browser',
+        id:
+          typeof body.id === 'string' && body.id.length > 0
+            ? body.id
+            : randomBytes(16).toString('hex'),
         ...(images.length > 0 ? { images } : {}),
       });
-      const { id: _id, ...input } = command;
-      result = await this.registry.sendCommand(runtimeId, input);
+      result = await this.registry.sendCommand(runtimeId, command);
     } finally {
       await Promise.all(uploaded.map((file) => fs.rm(file, { force: true })));
     }

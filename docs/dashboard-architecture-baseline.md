@@ -218,3 +218,31 @@ Virtual's window virtualizer with semantic keys, overscan, DOM measurement, and
 variable row estimates. Expansion captures the first visible semantic row and
 restores its offset after measurement when the reader is not bottom-stuck;
 short transcripts retain the original document flow.
+
+## Phase 6: feature and UX parity
+
+The dashboard consumes Phase 5 capability manifests as the source of truth for
+its command palette and extension-action controls. Semantic actions use
+`action.invoke` with caller-owned IDs; the browser HTTP client allocates one ID
+for ordinary bridge commands when a caller does not provide one, and mutations
+never retry. Runtime epoch checks continue to abandon commands queued on a
+replaced socket rather than replaying them.
+
+The remote-control adapter advertises only actions directly backed by the
+installed Pi 0.82.1 `ExtensionContext`: compact, abort, and graceful shutdown.
+It deliberately does **not** advertise new, resume/switch, fork/clone, tree, or
+reload. Those APIs are command-context-only in the audited 0.82.1 host and are
+not safe to invoke from the socket callback retained by this extension. A
+future removal condition is a Pi headless lifecycle callback that supplies the
+operation result plus a runtime/session epoch; only then may corresponding
+manifest actions be added. Until then, managed launch/resume is the supported
+browser lifecycle path and legacy slash-command compatibility remains bounded
+and fail-closed for unsupported built-ins/extension commands.
+
+Runtime hello snapshots include a bounded model catalogue and thinking-level
+catalogue without credentials. The browser adds keyboard-first capability
+palette navigation, model/thinking selectors, force-stop controls for managed
+runtimes, workspace refresh, bounded structured tool inspectors, and local
+browser-notification fallback when push/VAPID is unavailable. Mobile layouts
+retain the existing visual language; responsive controls and reconnect/offline
+status are additive rather than a redesign.

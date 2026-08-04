@@ -246,6 +246,34 @@ export class RuntimeManager {
     }
   }
 
+  async restart(
+    runtimeId: string,
+  ): Promise<{ runtimeId: string; placement: ManagedPlacement }> {
+    const snapshot = this.registry.get(runtimeId);
+    const launch = this.launches.get(runtimeId);
+    if (!snapshot || !launch)
+      throw new Error('Only managed runtimes can restart.');
+    const session = this.sessions.get(snapshot.session.id);
+    const request = {
+      workspaceId: launch.workspace.id,
+      ...(session ? { sessionId: session.id } : {}),
+      ...(snapshot.session.name ? { name: snapshot.session.name } : {}),
+      ...(snapshot.model
+        ? {
+            model: {
+              provider: snapshot.model.provider,
+              model: snapshot.model.model,
+              ...(snapshot.model.thinking
+                ? { thinking: snapshot.model.thinking }
+                : {}),
+            },
+          }
+        : {}),
+    };
+    await this.stop(runtimeId);
+    return this.launch(request);
+  }
+
   async stop(runtimeId: string, force = false): Promise<void> {
     const snapshot = this.registry.get(runtimeId);
     if (!snapshot) throw new Error('Unknown runtime.');

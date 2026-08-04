@@ -7,6 +7,7 @@ import {
   parseDashboardStreamMessage,
   parseFrame,
   parseNormalizedMessagePayload,
+  parseRuntimeSnapshot,
   redactImageData,
   serializeFrame,
   tryParseNormalizedToolPayload,
@@ -262,6 +263,32 @@ describe('dashboard protocol', () => {
         event: { type: 'agent.settled', sessionId: 'session-1' },
       }).cursor,
     ).toBe(2);
+  });
+
+  it('accepts bounded model and thinking catalogues in runtime snapshots', () => {
+    expect(
+      parseRuntimeSnapshot({
+        runtimeId: 'runtime-1',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 'session-1', entries: [] },
+        pendingInteractions: [],
+        modelCatalog: [
+          {
+            provider: 'test',
+            model: 'vision',
+            name: 'Vision',
+            supportsImages: true,
+          },
+        ],
+        thinkingLevels: ['off', 'high'],
+      }),
+    ).toMatchObject({
+      modelCatalog: [{ model: 'vision', supportsImages: true }],
+      thinkingLevels: ['off', 'high'],
+    });
   });
 
   it('validates structured launch requests', () => {

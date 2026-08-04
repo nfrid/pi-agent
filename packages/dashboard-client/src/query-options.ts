@@ -168,7 +168,20 @@ export function actionMutationOptions(client: DashboardHttpClient) {
 
 export function stopRuntimeMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
-    mutationFn: (runtimeId: string) => client.stopRuntime(runtimeId),
+    mutationFn: ({
+      runtimeId,
+      force = false,
+    }: {
+      runtimeId: string;
+      force?: boolean;
+    }) => client.stopRuntime(runtimeId, force),
+    retry: false,
+  });
+}
+
+export function restartRuntimeMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: (runtimeId: string) => client.restartRuntime(runtimeId),
     retry: false,
   });
 }

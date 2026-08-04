@@ -144,9 +144,22 @@ export class DashboardHttpClient {
     runtimeId: string,
     command: Record<string, unknown>,
   ): Promise<unknown> {
+    // IDs are allocated once at the browser boundary. The daemon/bridge never
+    // retries a command and can therefore fail closed on a replacement epoch.
+    const withId =
+      typeof command.id === 'string' && command.id.length > 0
+        ? command
+        : { ...command, id: this.newCommandId('dashboard-command') };
     return this.request(
       `/api/runtimes/${encodeURIComponent(runtimeId)}/command`,
-      { method: 'POST', body: JSON.stringify(command) },
+      { method: 'POST', body: JSON.stringify(withId) },
+    );
+  }
+
+  private newCommandId(prefix: string): string {
+    return (
+      globalThis.crypto?.randomUUID?.() ??
+      `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
     );
   }
 
@@ -156,10 +169,7 @@ export class DashboardHttpClient {
     input: unknown,
     commandId?: string,
   ): Promise<unknown> {
-    const id =
-      commandId ??
-      globalThis.crypto?.randomUUID?.() ??
-      `dashboard-action-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const id = commandId ?? this.newCommandId('dashboard-action');
     return this.sendCommand(runtimeId, {
       id,
       type: 'action.invoke',
@@ -174,7 +184,11 @@ export class DashboardHttpClient {
     images: readonly File[],
   ): Promise<unknown> {
     const body = new FormData();
-    body.append('command', JSON.stringify(command));
+    const withId =
+      typeof command.id === 'string' && command.id.length > 0
+        ? command
+        : { ...command, id: this.newCommandId('dashboard-command') };
+    body.append('command', JSON.stringify(withId));
     for (const image of images) body.append('images', image, image.name);
     return this.multipart(
       `/api/runtimes/${encodeURIComponent(runtimeId)}/command`,
@@ -198,11 +212,26 @@ export class DashboardHttpClient {
     });
   }
 
-  async stopRuntime(runtimeId: string): Promise<unknown> {
+  async stopRuntime(runtimeId: string, force = false): Promise<unknown> {
     return this.request(`/api/runtimes/${encodeURIComponent(runtimeId)}/stop`, {
       method: 'POST',
-      body: '{}',
+      body: JSON.stringify({ force }),
     });
+  }
+
+  async restartRuntime(
+    runtimeId: string,
+    commandId?: string,
+  ): Promise<unknown> {
+    return this.request(
+      `/api/runtimes/${encodeURIComponent(runtimeId)}/restart`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          id: commandId ?? this.newCommandId('dashboard-restart'),
+        }),
+      },
+    );
   }
 
   async answerInteraction(id: string, answer: string): Promise<unknown> {
@@ -245,7 +274,10 @@ export class DashboardHttpClient {
   }
 
   async refreshWorkspaces(): Promise<unknown> {
-    return this.request('/api/workspaces', { method: 'POST', body: '{}' });
+    return this.request('/api/workspaces/refresh', {
+      method: 'POST',
+      body: '{}',
+    });
   }
 
   async events(

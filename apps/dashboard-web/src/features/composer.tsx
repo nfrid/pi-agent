@@ -15,6 +15,15 @@ function useDashboardNavigate(): (path: string) => void {
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 export const MAX_IMAGE_ATTACHMENTS = 4;
+type RuntimeWithModelCatalog = RuntimeSnapshot & {
+  modelCatalog?: readonly {
+    provider: string;
+    model: string;
+    name?: string;
+    supportsImages?: boolean;
+  }[];
+  thinkingLevels?: readonly string[];
+};
 export const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 export const MAX_IMAGE_TOTAL_SIZE = 12 * 1024 * 1024;
 
@@ -115,6 +124,116 @@ export function addImageAttachments(
     totalSize += file.size;
   }
   return { accepted, ...(error ? { error } : {}) };
+}
+
+function ModelControls({ runtime }: { runtime: RuntimeSnapshot }) {
+  const command = useMutation(commandMutationOptions(dashboardHttpClient));
+  const [modelValue, setModelValue] = useState(
+    runtime.model ? `${runtime.model.provider}/${runtime.model.model}` : '',
+  );
+  const [thinking, setThinking] = useState(runtime.model?.thinking ?? 'off');
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    setModelValue(
+      runtime.model ? `${runtime.model.provider}/${runtime.model.model}` : '',
+    );
+    setThinking(runtime.model?.thinking ?? 'off');
+  }, [runtime.model]);
+  const unavailable =
+    runtime.online === false || runtime.liveState === 'stopping';
+  const setModel = async (value: string) => {
+    const separator = value.indexOf('/');
+    if (separator < 1) return;
+    setError(undefined);
+    try {
+      await command.mutateAsync({
+        runtimeId: runtime.runtimeId,
+        command: {
+          type: 'setModel',
+          provider: value.slice(0, separator),
+          model: value.slice(separator + 1),
+        },
+      });
+      setModelValue(value);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+  const setLevel = async (level: string) => {
+    setError(undefined);
+    try {
+      await command.mutateAsync({
+        runtimeId: runtime.runtimeId,
+        command: { type: 'setThinking', level },
+      });
+      setThinking(level);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+  const catalogRuntime = runtime as RuntimeWithModelCatalog;
+  const models =
+    catalogRuntime.modelCatalog ??
+    (runtime.model
+      ? [
+          {
+            provider: runtime.model.provider,
+            model: runtime.model.model,
+            supportsImages: runtime.model.supportsImages,
+          },
+        ]
+      : []);
+  const levels =
+    catalogRuntime.thinkingLevels ??
+    (runtime.model?.thinking ? [runtime.model.thinking] : []);
+  if (!models.length && !levels.length && !error) return null;
+  return (
+    <fieldset className="model-controls">
+      <legend className="sr-only">Model controls</legend>
+      {models.length > 0 && (
+        <label>
+          <span>Model</span>
+          <select
+            aria-label="Model"
+            value={modelValue}
+            disabled={unavailable || command.isPending}
+            onChange={(event) => void setModel(event.target.value)}
+          >
+            {models.map((model) => {
+              const value = `${model.provider}/${model.model}`;
+              return (
+                <option value={value} key={value}>
+                  {model.name ?? value}
+                </option>
+              );
+            })}
+          </select>
+        </label>
+      )}
+      {levels.length > 0 && (
+        <label>
+          <span>Thinking</span>
+          <select
+            aria-label="Thinking level"
+            value={thinking}
+            disabled={unavailable || command.isPending}
+            onChange={(event) => void setLevel(event.target.value)}
+          >
+            {levels.map((level) => (
+              <option value={level} key={level}>
+                {level}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {error && (
+        <span className="error" role="alert">
+          {error}
+        </span>
+      )}
+    </fieldset>
+  );
 }
 
 export function Composer({
@@ -296,6 +415,9 @@ export function Composer({
         {runtime.liveState === 'waiting' && <span>Answer above</span>}
         <ContextIndicator usage={runtime.contextUsage} />
         <span className="shortcut">⌘↵ send · shift+↵ newline</span>
+      </div>
+      <div className="composer-model-row">
+        <ModelControls runtime={runtime} />
       </div>
       {error && (
         <p className="error" role="alert">

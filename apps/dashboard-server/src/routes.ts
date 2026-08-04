@@ -15,6 +15,18 @@ const MAX_MULTIPART_BODY = 12 * 1024 * 1024 + 256 * 1024;
 const objectBody = Type.Object({}, { additionalProperties: true });
 const anyBody = Type.Any();
 
+function validCommandId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    !Array.from(value).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  );
+}
+
 type BodyLimitError = Error & { code: string; statusCode: number };
 
 function bodyTooLarge(): BodyLimitError {
@@ -53,6 +65,7 @@ export interface DashboardRouteContext {
   readSession(id: string): Promise<unknown>;
   renameSession(id: string, name: string): Promise<unknown>;
   startRuntime(input: unknown): Promise<unknown>;
+  restartRuntime?(runtimeId: string, commandId: string): Promise<unknown>;
   commandRuntime(
     runtimeId: string,
     input: unknown,
@@ -268,6 +281,27 @@ export const dashboardRoutes: FastifyPluginAsync<{
     async (request, reply) => {
       try {
         return reply.code(201).send(await context.startRuntime(request.body));
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{ Params: { runtimeId: string }; Body: { id?: unknown } }>(
+    '/api/runtimes/:runtimeId/restart',
+    { schema: { body: objectBody } },
+    async (request, reply) => {
+      try {
+        if (!validCommandId(request.body?.id))
+          throw new Error('Restart command ID is required.');
+        if (!context.restartRuntime)
+          throw new Error('Runtime restart is unavailable.');
+        return {
+          ok: true,
+          result: await context.restartRuntime(
+            request.params.runtimeId,
+            request.body.id,
+          ),
+        };
       } catch (error) {
         return sendError(reply, error);
       }

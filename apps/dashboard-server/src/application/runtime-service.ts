@@ -1,3 +1,4 @@
+import { NonIdempotentActionIdGuard } from '@pi-dashboard/extension-contributions';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import type { RuntimeManager } from '../runtime-manager.js';
 import type { RuntimeRegistry } from '../runtime-registry.js';
@@ -5,6 +6,8 @@ import type { SessionIndex } from '../session-index.js';
 
 /** Runtime commands exposed to browser adapters without transport types. */
 export class RuntimeService {
+  private readonly restartCommandIds = new NonIdempotentActionIdGuard();
+
   constructor(
     private readonly registry: RuntimeRegistry,
     private readonly manager: RuntimeManager,
@@ -25,6 +28,19 @@ export class RuntimeService {
 
   async stop(runtimeId: string, force = false): Promise<void> {
     await this.manager.stop(runtimeId, force);
+  }
+
+  async restart(runtimeId: string, commandId: string): Promise<unknown> {
+    const reservation = this.restartCommandIds.reserve(commandId);
+    if (reservation === 'duplicate')
+      throw Object.assign(new Error('Duplicate restart command ID.'), {
+        code: 'duplicate-action-id',
+      });
+    if (reservation === 'capacity')
+      throw Object.assign(new Error('Restart command capacity is full.'), {
+        code: 'action-command-capacity',
+      });
+    return this.manager.restart(runtimeId);
   }
 
   async answerInteraction(

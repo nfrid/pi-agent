@@ -165,9 +165,12 @@ function RouteShell() {
     <div className="app">
       <Header snapshot={dashboard.snapshot} />
       <main className={`shell ${sessionRoute ? 'session-shell' : ''}`}>
-        {dashboard.error && (
+        {(dashboard.error || dashboard.connectionState !== 'connected') && (
           <div className="notice sync-notice" role="status">
-            {dashboard.error}
+            {dashboard.error ??
+              (dashboard.connectionState === 'reconnecting'
+                ? 'Live updates disconnected; reconnecting…'
+                : 'Connecting to live updates…')}
           </div>
         )}
         <Outlet />
@@ -183,6 +186,7 @@ function HomeRoute() {
     <Dashboard
       snapshot={dashboard.snapshot}
       usageError={dashboard.usageError}
+      store={dashboard.store}
     />
   );
 }

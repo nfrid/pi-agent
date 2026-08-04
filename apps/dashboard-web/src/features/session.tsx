@@ -1,4 +1,5 @@
 import {
+  actionMutationOptions,
   commandMutationOptions,
   type DashboardLiveStore,
   dashboardHttpClient,
@@ -260,24 +261,33 @@ function SessionRename({
 }
 
 function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
+  const navigate = useNavigate();
   const [error, setError] = useState<string>();
+  const [restarting, setRestarting] = useState(false);
   const command = useMutation(commandMutationOptions(dashboardHttpClient));
+  const action = useMutation(actionMutationOptions(dashboardHttpClient));
   const stop = useMutation(stopRuntimeMutationOptions(dashboardHttpClient));
-  const busy = command.isPending || stop.isPending;
-  const run = async (action: () => Promise<unknown>) => {
+  const busy =
+    restarting || command.isPending || action.isPending || stop.isPending;
+  const compactSupported = Boolean(
+    runtime.capabilities?.manifests.some((manifest) =>
+      manifest.actions.some((candidate) => candidate.id === 'session.compact'),
+    ),
+  );
+  const run = async (operation: () => Promise<unknown>) => {
     setError(undefined);
     try {
-      await action();
+      await operation();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
-  const disabled = busy || runtime.online === false;
+  const onlineOnly = busy || runtime.online === false;
   return (
     <div className="actions">
       <button
         type="button"
-        disabled={disabled}
+        disabled={onlineOnly}
         onClick={() =>
           void run(() =>
             command.mutateAsync({
@@ -289,14 +299,80 @@ function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
       >
         Abort
       </button>
+      {compactSupported && (
+        <button
+          type="button"
+          disabled={onlineOnly}
+          onClick={() =>
+            void run(() =>
+              action.mutateAsync({
+                runtimeId: runtime.runtimeId,
+                actionId: 'session.compact',
+                input: {},
+              }),
+            )
+          }
+        >
+          Compact
+        </button>
+      )}
       <button
         type="button"
         className="danger"
-        disabled={disabled}
+        disabled={busy}
         onClick={() => void run(() => stop.mutateAsync(runtime.runtimeId))}
       >
         Stop
       </button>
+      {runtime.ownership === 'managed' && (
+        <>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                setRestarting(true);
+                try {
+                  const result = (await dashboardHttpClient.request(
+                    `/api/runtimes/${encodeURIComponent(runtime.runtimeId)}/restart`,
+                    {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        id:
+                          globalThis.crypto?.randomUUID?.() ??
+                          `dashboard-restart-${Date.now()}`,
+                      }),
+                    },
+                  )) as { result?: { runtimeId?: unknown } };
+                  const nextId = result.result?.runtimeId;
+                  if (typeof nextId !== 'string')
+                    throw new Error('Restart did not return a runtime ID.');
+                  await navigate({ to: `/runtimes/${nextId}` });
+                } finally {
+                  setRestarting(false);
+                }
+              })
+            }
+          >
+            {restarting ? 'Restarting…' : 'Restart'}
+          </button>
+          <button
+            type="button"
+            className="danger"
+            disabled={busy}
+            onClick={() =>
+              void run(() =>
+                dashboardHttpClient.request(
+                  `/api/runtimes/${encodeURIComponent(runtime.runtimeId)}/stop`,
+                  { method: 'POST', body: JSON.stringify({ force: true }) },
+                ),
+              )
+            }
+          >
+            Force stop
+          </button>
+        </>
+      )}
       {error && (
         <span className="error" role="alert">
           {error}
