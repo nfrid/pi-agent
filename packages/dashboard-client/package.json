@@ -1,0 +1,32 @@
+{
+  "name": "@pi-dashboard/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --config vitest.config.ts",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@pi-dashboard/domain": "workspace:*",
+    "@pi-dashboard/protocol": "workspace:*",
+    "@tanstack/react-query": "^5.90.7",
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "linkedom": "^0.16.11",
+    "react-dom": "^19.1.0",
+    "react-test-renderer": "^19.1.0"
+  }
+}

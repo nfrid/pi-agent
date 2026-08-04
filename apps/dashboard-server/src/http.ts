@@ -178,6 +178,7 @@ export interface DashboardServer {
   stop(): Promise<void>;
   snapshot(): BrowserSnapshot;
   refreshWorkspaces(): Promise<WorkspaceTarget[]>;
+  publishChange(message?: unknown): void;
 }
 
 class DashboardServerImpl implements DashboardServer {
@@ -575,9 +576,10 @@ class DashboardServerImpl implements DashboardServer {
     const cursor = this.eventStream.cursor;
     try {
       const result = await this.sessions.readEntries(id);
-      if (!runtime) return { ...result, cursor };
+      if (!runtime) return { ...result, serverId: this.serverId, cursor };
       return {
         ...result,
+        serverId: this.serverId,
         cursor,
         metadata: {
           ...result.metadata,
@@ -593,6 +595,7 @@ class DashboardServerImpl implements DashboardServer {
     } catch (error) {
       if (!runtime) throw error;
       return {
+        serverId: this.serverId,
         cursor,
         metadata: {
           id,
@@ -1034,6 +1037,18 @@ class DashboardServerImpl implements DashboardServer {
       this.json(response, 400, {
         error: 'Invalid event cursor.',
         code: 'invalid-cursor',
+      });
+      return;
+    }
+    const requestedServerId = url.searchParams.get('serverId');
+    if (requestedServerId && requestedServerId !== this.serverId) {
+      this.json(response, 409, {
+        error: 'The requested event generation is no longer available.',
+        code: 'replay-gap',
+        reason: 'server-generation-mismatch',
+        serverId: this.serverId,
+        cursor: this.eventStream.cursor,
+        oldestCursor: this.eventStream.oldestCursor,
       });
       return;
     }

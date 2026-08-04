@@ -396,13 +396,21 @@ describe('dashboard HTTP boundary', () => {
     server = await createDashboardServer(options);
     await server.start();
     await server.refreshWorkspaces();
-    const oldCursor = server.snapshot().cursor;
+    const oldSnapshot = server.snapshot();
+    const oldCursor = oldSnapshot.cursor;
+    const oldServerId = oldSnapshot.serverId;
     await server.stop();
     server = await createDashboardServer(options);
     await server.start();
-    expect(server.snapshot().cursor).toBeLessThan(oldCursor);
+    for (const sessionId of ['restart-session-1', 'restart-session-2'])
+      server.publishChange({
+        type: 'event',
+        sessionId,
+        event: { type: 'agent.settled', sessionId },
+      });
+    expect(server.snapshot().cursor).toBeGreaterThan(oldCursor);
     const response = await fetch(
-      `http://127.0.0.1:${server.port}/api/events?cursor=${oldCursor}`,
+      `http://127.0.0.1:${server.port}/api/events?cursor=${oldCursor}&serverId=${encodeURIComponent(oldServerId)}`,
       {
         headers: {
           Origin: `http://127.0.0.1:${server.port}`,
@@ -413,6 +421,7 @@ describe('dashboard HTTP boundary', () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
       code: 'replay-gap',
+      reason: 'server-generation-mismatch',
     });
   });
 

@@ -64,6 +64,7 @@ test('live transport contains malformed data and reconnects without HTTP polling
   page,
 }) => {
   let usageRequests = 0;
+  let snapshotRequests = 0;
   await page.addInitScript(() => {
     localStorage.setItem('pi-dashboard-token', 'test-token');
     type Stream = {
@@ -76,6 +77,7 @@ test('live transport contains malformed data and reconnects without HTTP polling
     const streams: Stream[] = [];
     let nextCursor = 0;
     let reconnectSnapshotPending = false;
+    let replayGapPending = false;
     const originalFetch = window.fetch.bind(window);
     const frame = (data: string) => `event: dashboard\ndata: ${data}\n\n`;
     const generationSnapshot = (generation: number) => ({
@@ -175,6 +177,13 @@ test('live transport contains malformed data and reconnects without HTTP polling
     window.fetch = async (input, init) => {
       const target = typeof input === 'string' ? input : input.url;
       if (!target.includes('/api/events')) return originalFetch(input, init);
+      if (replayGapPending) {
+        replayGapPending = false;
+        return new Response(JSON.stringify({ code: 'replay-gap' }), {
+          status: 409,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       const stream = createStream();
       if (streams.length === 1 || reconnectSnapshotPending) {
         reconnectSnapshotPending = false;
@@ -199,12 +208,19 @@ test('live transport contains malformed data and reconnects without HTTP polling
         count: () => streams.length,
         current: () => streams.at(-1),
         first: () => streams[0],
+        forceReplayGap: () => {
+          replayGapPending = true;
+          streams.at(-1)?.close();
+        },
       },
     });
   });
   await page.route('**/api/usage', async (route) => {
     usageRequests += 1;
     await route.fulfill({ contentType: 'application/json', body: '{}' });
+  });
+  page.on('request', (request) => {
+    if (request.url().includes('/api/snapshot')) snapshotRequests += 1;
   });
   await page.route('**/api/snapshot', async (route) =>
     route.fulfill({
@@ -239,6 +255,8 @@ test('live transport contains malformed data and reconnects without HTTP polling
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
   await expect.poll(() => usageRequests).toBeGreaterThan(0);
+  await expect.poll(() => snapshotRequests).toBe(1);
+  expect(usageRequests).toBe(1);
   const initialUsageRequests = usageRequests;
   await page.evaluate(() => {
     (
@@ -313,6 +331,16 @@ test('live transport contains malformed data and reconnects without HTTP polling
   expect(usageRequests).toBe(initialUsageRequests);
   await page.waitForTimeout(200);
   await expect(page.getByText(/Live generation \d+/)).toBeVisible();
+  const snapshotsBeforeReplayGap = snapshotRequests;
+  await page.evaluate(() => {
+    (
+      window as unknown as { dashboardLiveTest: { forceReplayGap(): void } }
+    ).dashboardLiveTest.forceReplayGap();
+  });
+  await expect
+    .poll(() => snapshotRequests)
+    .toBeGreaterThan(snapshotsBeforeReplayGap);
+  await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
   await page.evaluate(() => {
     (
       window as unknown as {
@@ -444,7 +472,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
       body: JSON.stringify({
         metadata: { id: 's1', file: '', cwd: '/tmp', updatedAt: Date.now() },
         entries: [
-          ...Array.from({ length: 30 }, (_, index) => ({
+          ...Array.from({ length: 90 }, (_, index) => ({
             type: 'message',
             message: {
               role: 'user',
@@ -653,6 +681,11 @@ test('dense mobile session keeps conversation and activity readable', async ({
     );
   await emitMessage('message.started', 123, 'Live dashboard message');
   await expect(page.getByText('Live dashboard message')).toHaveCount(1);
+  // Reload while the authenticated stream is active; the session baseline and
+  // transcript projection must hydrate without relying on the old page state.
+  await page.reload();
+  await expect(page.getByText('ready', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Message Pi')).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(

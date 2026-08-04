@@ -1,3 +1,21 @@
+/* Tailwind v4 utilities without preflight: the legacy dashboard cascade remains authoritative. */
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme {
+  --color-dashboard-bg: var(--bg);
+  --color-dashboard-surface: var(--bg-alt);
+  --color-dashboard-line: var(--line);
+  --color-dashboard-line-soft: var(--line-soft);
+  --color-dashboard-fg: var(--fg);
+  --color-dashboard-muted: var(--muted);
+  --color-dashboard-accent: var(--purple);
+  --color-dashboard-focus: var(--pink);
+  --color-dashboard-success: var(--green);
+  --color-dashboard-warning: var(--orange);
+  --color-dashboard-danger: var(--red);
+}
+
 :root {
   --bg: #282a36;
   --bg-alt: #343746;

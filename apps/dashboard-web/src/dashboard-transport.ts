@@ -1,51 +1,53 @@
+import type { DashboardState } from '@pi-dashboard/client';
 import {
-  type BrowserSnapshot,
-  type DashboardEventEnvelope,
-  type DashboardMessage,
-  type DashboardStreamMessage,
-  type SessionApiResponse,
-  tryParseBrowserSnapshot,
-  tryParseDashboardStreamMessage,
-  tryParseSessionApiResponse,
+  api,
+  asBrowserSnapshot,
+  asDashboardStreamMessage,
+  asSessionResponse,
+  consumeSseResponse,
+  dashboardBaseUrl,
+  dashboardToken,
+  multipartApi,
+  nextReconnectDelay,
+  reconnectDelayWithJitter,
+  shouldReconnectAfterConnectUnwind,
+  snapshotAcceptance,
+  useDashboard,
+} from '@pi-dashboard/client';
+import type {
+  DashboardEventEnvelope,
+  DashboardMessage,
+  DashboardStreamMessage,
+  SessionApiResponse,
 } from '@pi-dashboard/protocol';
-import { useCallback, useEffect, useRef, useState } from 'react';
-
-export const base =
-  (import.meta.env.VITE_DASHBOARD_URL as string | undefined)?.replace(
-    /\/$/,
-    '',
-  ) ?? '';
-
-export function dashboardToken(): string | undefined {
-  try {
-    return localStorage.getItem('pi-dashboard-token') ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export type AppError = Error & { code?: string };
-export type DashboardEvent = Extract<DashboardMessage, { type: 'event' }>;
-/** Canonical SSE reducer input. The legacy websocket event remains exported for v1 callers. */
-export type DashboardLiveEvent = DashboardEventEnvelope;
-export type DashboardStreamRecord = DashboardStreamMessage;
 
 /**
- * v1 HTTP fixtures predate the shared snapshot contract. Keep these three
- * defaults at the transport boundary; all nested validation belongs to the
- * shared protocol parser.
+ * Compatibility facade for Phase 2 callers. HTTP, auth, SSE parsing and the
+ * live store now belong to @pi-dashboard/client; this file only keeps the
+ * historical web imports stable while pages migrate.
  */
-function normalizeLegacyBrowserSnapshot(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  const snapshot = value as Record<string, unknown>;
-  return {
-    ...snapshot,
-    ...(snapshot.serverId === undefined ? { serverId: 'legacy' } : {}),
-    ...(snapshot.revision === undefined ? { revision: 0 } : {}),
-    ...(snapshot.cursor === undefined ? { cursor: 0 } : {}),
-    ...(snapshot.unread === undefined ? { unread: [] } : {}),
-  };
-}
+export const base = dashboardBaseUrl;
+export type { DashboardState };
+export {
+  api,
+  asBrowserSnapshot,
+  asDashboardStreamMessage,
+  asSessionResponse,
+  consumeSseResponse,
+  dashboardToken,
+  multipartApi,
+  nextReconnectDelay,
+  reconnectDelayWithJitter,
+  shouldReconnectAfterConnectUnwind,
+  snapshotAcceptance,
+  useDashboard,
+};
+
+export type AppError = Error & { code?: string; status?: number };
+export type DashboardEvent = Extract<DashboardMessage, { type: 'event' }>;
+export type DashboardLiveEvent = DashboardEventEnvelope;
+export type DashboardStreamRecord = DashboardStreamMessage;
+export type SessionResponse = SessionApiResponse;
 
 function streamEventKey(event: DashboardEvent): string | undefined {
   const bridgeEvent = event.event;
@@ -98,119 +100,6 @@ export function enqueueStreamEvent(
   return [...withoutSuperseded, event];
 }
 
-export type SessionResponse = SessionApiResponse;
-
-export function asSessionResponse(value: unknown): SessionResponse | undefined {
-  return tryParseSessionApiResponse(value);
-}
-
-export function asBrowserSnapshot(value: unknown): BrowserSnapshot | undefined {
-  return tryParseBrowserSnapshot(normalizeLegacyBrowserSnapshot(value));
-}
-
-export function asDashboardStreamMessage(
-  value: unknown,
-): DashboardStreamMessage | undefined {
-  return tryParseDashboardStreamMessage(value);
-}
-
-export interface SnapshotAcceptanceProvenance {
-  source?: 'http' | 'sse';
-  /** Generation observed when an HTTP request was started. */
-  requestGeneration?: number;
-  /** Current browser generation at the time the response is accepted. */
-  currentGeneration?: number;
-}
-
-export function snapshotAcceptance(
-  currentServerId: string | undefined,
-  currentCursor: number,
-  next: BrowserSnapshot,
-  provenance: SnapshotAcceptanceProvenance = {},
-): { accepted: boolean; reset: boolean } {
-  if (currentServerId !== undefined && currentServerId !== next.serverId) {
-    // A request made against an older generation is not allowed to roll back
-    // an SSE-authoritative replacement. A request in the current generation
-    // may still discover a legitimate future daemon replacement.
-    if (
-      provenance.source === 'http' &&
-      provenance.requestGeneration !== undefined &&
-      provenance.currentGeneration !== undefined &&
-      provenance.requestGeneration !== provenance.currentGeneration
-    )
-      return { accepted: false, reset: false };
-    return { accepted: true, reset: true };
-  }
-  return {
-    accepted: next.cursor >= currentCursor,
-    reset: false,
-  };
-}
-
-const RECONNECT_MIN_MS = 500;
-const RECONNECT_MAX_MS = 30_000;
-
-export function nextReconnectDelay(current: number): number {
-  return Math.min(RECONNECT_MAX_MS, Math.max(RECONNECT_MIN_MS, current * 2));
-}
-
-export function reconnectDelayWithJitter(
-  delay: number,
-  random = Math.random,
-): number {
-  return Math.round(delay * (0.8 + random() * 0.4));
-}
-
-export function shouldReconnectAfterConnectUnwind(
-  reconnectRequested: boolean,
-  stopped: boolean,
-  online: boolean,
-): boolean {
-  return reconnectRequested && !stopped && online;
-}
-
-async function readApiResponse<T>(response: Response): Promise<T> {
-  const body: unknown = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(
-      (body as { error?: string }).error ??
-        `Request failed (${response.status})`,
-    ) as AppError;
-    Object.assign(error, body);
-    throw error;
-  }
-  return body as T;
-}
-
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = dashboardToken();
-  return readApiResponse<T>(
-    await fetch(`${base}${path}`, {
-      ...init,
-      headers: {
-        'content-type': 'application/json',
-        ...(token ? { 'x-dashboard-token': token } : {}),
-        ...(init?.headers ?? {}),
-      },
-    }),
-  );
-}
-
-/** Send a multipart request without overriding the browser's boundary header. */
-export async function multipartApi<T>(
-  path: string,
-  body: FormData,
-): Promise<T> {
-  const token = dashboardToken();
-  return readApiResponse<T>(
-    await fetch(`${base}${path}`, {
-      method: 'POST',
-      headers: token ? { 'x-dashboard-token': token } : {},
-      body,
-    }),
-  );
-}
-
 export function shouldAcceptRevision(
   currentRevision: number,
   nextRevision: number,
@@ -218,409 +107,5 @@ export function shouldAcceptRevision(
   return nextRevision > currentRevision;
 }
 
-export interface DashboardState {
-  snapshot: BrowserSnapshot | undefined;
-  error: string | undefined;
-  usageError: string | undefined;
-  refresh: () => Promise<void>;
-  /** A bounded set of canonical reducer inputs newer than recent snapshots. */
-  events: readonly DashboardLiveEvent[];
-  /** Cursors for every accepted stream record, including snapshot records. */
-  cursorHistory: readonly number[];
-  cursor: number;
-  /** Increments only after an authoritative replay-gap resynchronization. */
-  resyncNonce: number;
-  connectionState: 'connecting' | 'connected' | 'reconnecting';
-}
-
-const LIVE_EVENT_BUFFER_LIMIT = 256;
-const MAX_SSE_FRAME_BYTES = 2 * 1024 * 1024;
-
-class ReplayGapError extends Error {
-  readonly code = 'replay-gap';
-}
-
-function abortError(): DOMException {
-  return new DOMException(
-    'The dashboard event stream was aborted.',
-    'AbortError',
-  );
-}
-
-/**
- * Consume one long-lived SSE response. A response can contain any number of
- * records; reconnecting is the caller's job and only happens after EOF/error.
- * Line parsing deliberately handles both LF and CRLF separators. A frame is
- * bounded even when an upstream never sends its terminating blank line.
- */
-export async function consumeSseResponse(
-  response: Response,
-  onRecord: (record: DashboardStreamMessage) => void | Promise<void>,
-  signal?: AbortSignal,
-): Promise<number> {
-  const body = response.body;
-  if (!body) throw new Error('Dashboard event stream has no body.');
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  const encoder = new TextEncoder();
-  let lineBuffer = '';
-  let dataLines: string[] = [];
-  let frameBytes = 0;
-  let records = 0;
-  let reachedEof = false;
-  let aborted = Boolean(signal?.aborted);
-  const onAbort = () => {
-    aborted = true;
-    void reader.cancel();
-  };
-  signal?.addEventListener('abort', onAbort, { once: true });
-  const dispatch = async () => {
-    if (dataLines.length === 0) return;
-    const data = dataLines.join('\n');
-    dataLines = [];
-    const parsed = asDashboardStreamMessage(JSON.parse(data));
-    if (!parsed) throw new Error('Dashboard returned an invalid event.');
-    await onRecord(parsed);
-    records += 1;
-  };
-  const processLine = async (rawLine: string) => {
-    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
-    if (line.length === 0) {
-      await dispatch();
-      frameBytes = 0;
-      return;
-    }
-    frameBytes += encoder.encode(`${line}\n`).byteLength;
-    if (frameBytes > MAX_SSE_FRAME_BYTES)
-      throw new Error('Dashboard SSE frame exceeds its size limit.');
-    // SSE comments and event/id/retry fields are transport metadata. Only
-    // data fields enter the shared protocol parser.
-    if (line.startsWith('data:')) {
-      const value = line.slice(5);
-      dataLines.push(value.startsWith(' ') ? value.slice(1) : value);
-    }
-  };
-  try {
-    while (true) {
-      if (aborted) throw abortError();
-      const { done, value } = await reader.read();
-      if (aborted) throw abortError();
-      if (value) lineBuffer += decoder.decode(value, { stream: !done });
-      if (
-        lineBuffer.indexOf('\n') < 0 &&
-        encoder.encode(lineBuffer).byteLength > MAX_SSE_FRAME_BYTES
-      )
-        throw new Error('Dashboard SSE frame exceeds its size limit.');
-      let newline = lineBuffer.indexOf('\n');
-      while (newline >= 0) {
-        const line = lineBuffer.slice(0, newline);
-        lineBuffer = lineBuffer.slice(newline + 1);
-        await processLine(line);
-        newline = lineBuffer.indexOf('\n');
-      }
-      if (encoder.encode(lineBuffer).byteLength > MAX_SSE_FRAME_BYTES)
-        throw new Error('Dashboard SSE frame exceeds its size limit.');
-      if (!done) continue;
-      const trailing = decoder.decode();
-      if (trailing) lineBuffer += trailing;
-      if (lineBuffer) {
-        await processLine(lineBuffer);
-        lineBuffer = '';
-      }
-      await dispatch();
-      reachedEof = true;
-      return records;
-    }
-  } finally {
-    signal?.removeEventListener('abort', onAbort);
-    if (!reachedEof) await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
-}
-
-async function fetchSseResponse(
-  cursor: number,
-  signal: AbortSignal,
-): Promise<Response> {
-  const token = dashboardToken();
-  if (!token) throw new Error('Authentication required.');
-  const response = await fetch(
-    `${base}/api/events?cursor=${encodeURIComponent(cursor)}`,
-    {
-      headers: {
-        accept: 'text/event-stream',
-        'x-dashboard-token': token,
-      },
-      signal,
-    },
-  );
-  if (response.status === 409) {
-    const body = (await response.json().catch(() => ({}))) as {
-      code?: string;
-    };
-    if (body.code === 'replay-gap') throw new ReplayGapError();
-  }
-  if (!response.ok)
-    throw new Error(`Event stream failed (${response.status}).`);
-  return response;
-}
-
-export function useDashboard(): DashboardState {
-  const [snapshot, setSnapshot] = useState<BrowserSnapshot>();
-  const [error, setError] = useState<string>();
-  const [usageError, setUsageError] = useState<string>();
-  const [events, setEvents] = useState<DashboardLiveEvent[]>([]);
-  const [cursorHistory, setCursorHistory] = useState<number[]>([]);
-  const [resyncNonce, setResyncNonce] = useState(0);
-  const [connectionState, setConnectionState] =
-    useState<DashboardState['connectionState']>('connecting');
-  const acceptedServerId = useRef<string | undefined>(undefined);
-  const acceptedCursor = useRef(0);
-  const serverGeneration = useRef(0);
-  const usageRequestSerial = useRef(0);
-  const latestUsageResponse = useRef(0);
-
-  const acceptSnapshot = useCallback(
-    (
-      next: BrowserSnapshot,
-      source: 'http' | 'sse' = 'sse',
-      requestGeneration?: number,
-    ): void => {
-      const decision = snapshotAcceptance(
-        acceptedServerId.current,
-        acceptedCursor.current,
-        next,
-        {
-          source,
-          requestGeneration,
-          currentGeneration: serverGeneration.current,
-        },
-      );
-      if (!decision.accepted) return;
-      const replacingServer = decision.reset;
-      if (replacingServer) serverGeneration.current += 1;
-      acceptedServerId.current = next.serverId;
-      acceptedCursor.current = next.cursor;
-      if (replacingServer) {
-        setEvents([]);
-        setCursorHistory([]);
-        setSnapshot(next);
-      } else {
-        setSnapshot((current) =>
-          current && current.cursor > next.cursor ? current : next,
-        );
-      }
-      setError(undefined);
-    },
-    [],
-  );
-
-  const refresh = useCallback(async (): Promise<void> => {
-    const requestGeneration = serverGeneration.current;
-    try {
-      const next = asBrowserSnapshot(await api<unknown>('/api/snapshot'));
-      if (!next) throw new Error('Dashboard returned an invalid snapshot.');
-      acceptSnapshot(next, 'http', requestGeneration);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    }
-  }, [acceptSnapshot]);
-
-  const refreshUsage = useCallback(async (): Promise<void> => {
-    const requestId = ++usageRequestSerial.current;
-    try {
-      const response = await api<{ usage?: unknown; error?: string }>(
-        '/api/usage',
-      );
-      if (requestId < latestUsageResponse.current) return;
-      latestUsageResponse.current = requestId;
-      if (response.error) {
-        setUsageError(response.error);
-        return;
-      }
-      setUsageError(undefined);
-      if (typeof response.usage !== 'undefined')
-        setSnapshot((current) =>
-          current ? { ...current, usage: response.usage } : current,
-        );
-    } catch (cause) {
-      if (requestId < latestUsageResponse.current) return;
-      latestUsageResponse.current = requestId;
-      setUsageError(cause instanceof Error ? cause.message : String(cause));
-    }
-  }, []);
-
-  useEffect(() => {
-    let stopped = false;
-    let reconnectTimer: number | undefined;
-    let connectTimer: number | undefined;
-    let controller: AbortController | undefined;
-    let connecting = false;
-    let reconnectWhenUnwound = false;
-    let retryDelay = RECONNECT_MIN_MS;
-
-    const scheduleReconnect = () => {
-      if (stopped || reconnectTimer !== undefined) return;
-      setConnectionState('reconnecting');
-      setError('Live updates disconnected; retrying…');
-      if (!navigator.onLine) return;
-      const delay = reconnectDelayWithJitter(retryDelay);
-      retryDelay = nextReconnectDelay(retryDelay);
-      reconnectTimer = window.setTimeout(() => {
-        reconnectTimer = undefined;
-        void connect();
-      }, delay);
-    };
-    const handleReplayGap = async () => {
-      setError('Live replay window expired; resynchronizing…');
-      await refresh();
-      setResyncNonce((value) => value + 1);
-      retryDelay = RECONNECT_MIN_MS;
-    };
-    const acceptRecord = (record: DashboardStreamMessage): void => {
-      if ('type' in record && record.type === 'snapshot') {
-        if (
-          record.snapshot.serverId === acceptedServerId.current &&
-          record.cursor <= acceptedCursor.current
-        )
-          return;
-        acceptSnapshot(record.snapshot, 'sse');
-        if (
-          acceptedServerId.current !== record.snapshot.serverId ||
-          acceptedCursor.current !== record.cursor
-        )
-          return;
-        setCursorHistory((current) =>
-          [...current, record.cursor].slice(-LIVE_EVENT_BUFFER_LIMIT),
-        );
-        return;
-      }
-      if (
-        record.snapshot &&
-        record.snapshot.serverId !== acceptedServerId.current
-      ) {
-        acceptSnapshot(record.snapshot, 'sse');
-        if (
-          acceptedServerId.current !== record.snapshot.serverId ||
-          acceptedCursor.current !== record.cursor
-        )
-          return;
-      } else {
-        if (record.cursor <= acceptedCursor.current) return;
-        if (record.cursor > acceptedCursor.current + 1) {
-          throw new ReplayGapError();
-        }
-        acceptedCursor.current = record.cursor;
-        if (record.snapshot) {
-          acceptSnapshot(record.snapshot, 'sse');
-          if (acceptedCursor.current !== record.cursor) return;
-        }
-      }
-      setCursorHistory((current) =>
-        [...current, record.cursor].slice(-LIVE_EVENT_BUFFER_LIMIT),
-      );
-      setEvents((current) =>
-        [...current, record as DashboardLiveEvent].slice(
-          -LIVE_EVENT_BUFFER_LIMIT,
-        ),
-      );
-    };
-    const connect = async (): Promise<void> => {
-      if (stopped || connecting || !navigator.onLine || !dashboardToken())
-        return;
-      connecting = true;
-      setConnectionState('connecting');
-      controller = new AbortController();
-      try {
-        const response = await fetchSseResponse(
-          acceptedCursor.current,
-          controller.signal,
-        );
-        await consumeSseResponse(
-          response,
-          (record) => {
-            if (stopped) return;
-            acceptRecord(record);
-            setConnectionState('connected');
-            setError(undefined);
-            retryDelay = RECONNECT_MIN_MS;
-          },
-          controller.signal,
-        );
-        if (!stopped) scheduleReconnect();
-      } catch (cause) {
-        if (
-          stopped ||
-          (cause instanceof DOMException && cause.name === 'AbortError')
-        )
-          return;
-        if (cause instanceof ReplayGapError) await handleReplayGap();
-        scheduleReconnect();
-      } finally {
-        connecting = false;
-        controller = undefined;
-        if (
-          shouldReconnectAfterConnectUnwind(
-            reconnectWhenUnwound,
-            stopped,
-            navigator.onLine,
-          )
-        ) {
-          reconnectWhenUnwound = false;
-          retryDelay = RECONNECT_MIN_MS;
-          void connect();
-        }
-      }
-    };
-    const reconnectNow = () => {
-      if (stopped || !navigator.onLine) return;
-      if (reconnectTimer !== undefined) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = undefined;
-      }
-      retryDelay = RECONNECT_MIN_MS;
-      if (connecting) {
-        reconnectWhenUnwound = true;
-        return;
-      }
-      void connect();
-    };
-    const pauseOffline = () => {
-      if (reconnectTimer !== undefined) {
-        window.clearTimeout(reconnectTimer);
-        reconnectTimer = undefined;
-      }
-      controller?.abort();
-    };
-    const refreshVisible = () => {
-      if (document.visibilityState === 'visible') reconnectNow();
-    };
-    void refresh();
-    void refreshUsage();
-    window.addEventListener('online', reconnectNow);
-    window.addEventListener('offline', pauseOffline);
-    document.addEventListener('visibilitychange', refreshVisible);
-    connectTimer = window.setTimeout(() => void connect(), 0);
-    return () => {
-      stopped = true;
-      window.removeEventListener('online', reconnectNow);
-      window.removeEventListener('offline', pauseOffline);
-      document.removeEventListener('visibilitychange', refreshVisible);
-      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
-      if (connectTimer !== undefined) window.clearTimeout(connectTimer);
-      controller?.abort();
-    };
-  }, [acceptSnapshot, refresh, refreshUsage]);
-
-  return {
-    snapshot,
-    error,
-    usageError,
-    refresh,
-    events,
-    cursorHistory,
-    cursor: acceptedCursor.current,
-    resyncNonce,
-    connectionState,
-  };
-}
+export type { DashboardState as LegacyDashboardState };
+export { dashboardToken as getDashboardToken };

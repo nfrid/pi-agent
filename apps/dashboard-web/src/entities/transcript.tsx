@@ -1,0 +1,481 @@
+import {
+  type TranscriptEntry as ActivityTranscriptEntry,
+  describeTools,
+  groupTranscript,
+} from '@pi-dashboard/activity-model';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
+import {
+  type Dispatch,
+  type SetStateAction,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { Button as AriaButton } from 'react-aria-components';
+import { Markdown } from '../Markdown';
+import {
+  headersOf,
+  isNarration,
+  type TranscriptModelItem,
+  toolOutcome,
+  toolRecordForTranscript,
+  toolSummary,
+  toTranscriptEntries,
+} from '../transcript';
+
+export function preserveVirtualScrollOffset(
+  previousTop: number,
+  nextTop: number,
+  bottomStuck: boolean,
+): number {
+  return bottomStuck ? 0 : previousTop - nextTop;
+}
+
+export function restoreVirtualBottom(
+  scrollHeight: number,
+  viewportHeight: number,
+  bottomStuck: boolean,
+): number | undefined {
+  return bottomStuck ? Math.max(0, scrollHeight - viewportHeight) : undefined;
+}
+
+function isNearPageBottom(
+  scrollHeight: number,
+  scrollY: number,
+  innerHeight: number,
+  threshold = 120,
+): boolean {
+  return scrollHeight - scrollY - innerHeight <= threshold;
+}
+
+function activityTitleLine(text: string): string {
+  return (
+    text
+      .split('\n')[0]
+      ?.trim()
+      .replace(/[.…:]+$/, '') ?? text
+  );
+}
+
+export function shouldShowActivityLead(text: string, title: string): boolean {
+  return !isNarration(text) && activityTitleLine(text) !== title;
+}
+
+function activityTitle(
+  items: readonly TranscriptModelItem[],
+  tools: readonly Extract<ActivityTranscriptEntry, { kind: 'tool' }>[],
+  complete: boolean,
+): string {
+  const firstTool = items.findIndex((item) => item.entry.kind === 'tool');
+  const preamble = items
+    .slice(0, firstTool < 0 ? items.length : firstTool)
+    .find(
+      (item) =>
+        item.role === 'assistant' && item.text && !isNarration(item.text),
+    );
+  if (preamble?.text) return activityTitleLine(preamble.text);
+  const assistants = items
+    .map((item) => item.raw)
+    .filter((raw): raw is Record<string, unknown> =>
+      Boolean(raw && typeof raw === 'object'),
+    )
+    .map(
+      (raw) =>
+        (raw.type === 'message' &&
+        raw.message &&
+        typeof raw.message === 'object'
+          ? raw.message
+          : raw) as Record<string, unknown>,
+    )
+    .filter((message) => Array.isArray(message.content));
+  const textHeaders = assistants.flatMap((message) =>
+    headersOf(message as never, 'text'),
+  );
+  const thinkingHeaders = assistants.flatMap((message) =>
+    headersOf(message as never, 'thinking'),
+  );
+  return (
+    (textHeaders.length > 0 ? textHeaders : thinkingHeaders).at(-1) ??
+    describeTools(tools, undefined, complete)
+  );
+}
+
+export function Transcript({ entries }: { entries: unknown[] }) {
+  const items = useMemo(() => toTranscriptEntries(entries), [entries]);
+  const modelEntries = useMemo(() => items.map((item) => item.entry), [items]);
+  const groups = useMemo(() => groupTranscript(modelEntries), [modelEntries]);
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const groupByStart = new Map(groups.map((group) => [group.start, group]));
+  if (items.length > 80)
+    return (
+      <VirtualizedTranscript
+        items={items}
+        modelEntries={modelEntries}
+        groups={groups}
+        open={open}
+        setOpen={setOpen}
+      />
+    );
+  return (
+    <div className="transcript">
+      <h2>Conversation &amp; activity</h2>
+      {items.map((item, index) => {
+        const group = groupByStart.get(index);
+        if (group) {
+          const groupKey = items[group.start]?.key ?? 'unknown-group';
+          const expanded = open.has(groupKey);
+          const tools = modelEntries
+            .slice(group.start, group.end + 1)
+            .filter(
+              (
+                entry,
+              ): entry is Extract<ActivityTranscriptEntry, { kind: 'tool' }> =>
+                entry.kind === 'tool',
+            );
+          const groupItems = items.slice(group.start, group.end + 1);
+          const preparing = groupItems.some((item) => item.preparing);
+          const complete =
+            !preparing &&
+            tools.length > 0 &&
+            groupItems
+              .filter((item) => item.entry.kind === 'tool')
+              .every((item) => toolOutcome(item.raw) === 'success');
+          const title = activityTitle(groupItems, tools, complete);
+          const lead = items[group.start];
+          const visibleLead =
+            !lead?.preparing &&
+            lead?.role === 'assistant' &&
+            lead.text &&
+            shouldShowActivityLead(lead.text, title)
+              ? lead.text
+              : undefined;
+          const detailId = `activity-detail-${group.start}`;
+          return (
+            <div
+              className={`activity-group ${complete ? 'activity-complete' : 'activity-pending'}`}
+              key={`group-${groupKey}`}
+            >
+              <AriaButton
+                type="button"
+                aria-expanded={expanded}
+                aria-controls={detailId}
+                onPress={() =>
+                  setOpen((current) => {
+                    const next = new Set(current);
+                    expanded ? next.delete(groupKey) : next.add(groupKey);
+                    return next;
+                  })
+                }
+              >
+                <span className="activity-icon">{complete ? '✓' : '…'}</span>
+                <strong>{title}</strong>
+                <small>
+                  {preparing
+                    ? tools.length > 0
+                      ? `${tools.length} tool${tools.length === 1 ? '' : 's'} · preparing next tool call`
+                      : 'preparing tool call'
+                    : `${tools.length} tool${tools.length === 1 ? '' : 's'} · ${expanded ? 'hide detail' : 'show detail'}`}
+                </small>
+              </AriaButton>
+              {visibleLead && (
+                <div className="activity-lead">
+                  <span className="message-role">assistant</span>
+                  <Markdown>{visibleLead}</Markdown>
+                </div>
+              )}
+              {expanded && (
+                <div className="activity-detail" id={detailId}>
+                  {groupItems.map((child) => (
+                    <TranscriptEntry key={child.key} item={child} />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        }
+        if (
+          groups.some(
+            (candidate) => index > candidate.start && index <= candidate.end,
+          )
+        )
+          return null;
+        return <TranscriptEntry key={item.key} item={item} />;
+      })}
+    </div>
+  );
+}
+
+type TranscriptGroup = ReturnType<typeof groupTranscript>[number];
+
+type VirtualTranscriptRow =
+  | { kind: 'entry'; key: string; index: number }
+  | { kind: 'group'; key: string; group: TranscriptGroup };
+
+function VirtualizedTranscript({
+  items,
+  modelEntries,
+  groups,
+  open,
+  setOpen,
+}: {
+  items: readonly TranscriptModelItem[];
+  modelEntries: readonly ActivityTranscriptEntry[];
+  groups: readonly TranscriptGroup[];
+  open: ReadonlySet<string>;
+  setOpen: Dispatch<SetStateAction<Set<string>>>;
+}) {
+  const groupByStart = useMemo(
+    () => new Map(groups.map((group) => [group.start, group])),
+    [groups],
+  );
+  const rows = useMemo<VirtualTranscriptRow[]>(() => {
+    const result: VirtualTranscriptRow[] = [];
+    items.forEach((item, index) => {
+      const group = groupByStart.get(index);
+      if (group) {
+        const groupKey = items[group.start]?.key ?? `group-${group.start}`;
+        result.push({ kind: 'group', key: `group-${groupKey}`, group });
+      } else if (
+        !groups.some(
+          (candidate) => index > candidate.start && index <= candidate.end,
+        )
+      )
+        result.push({ kind: 'entry', key: item.key, index });
+    });
+    return result;
+  }, [groupByStart, groups, items]);
+  const virtualizer = useWindowVirtualizer({
+    count: rows.length,
+    estimateSize: (index) => (rows[index]?.kind === 'group' ? 132 : 96),
+    overscan: 8,
+    getItemKey: (index) => rows[index]?.key ?? `transcript-row-${index}`,
+    measureElement: (element) => element.getBoundingClientRect().height,
+  });
+  const anchorRef = useRef<{ key: string; top: number } | undefined>(undefined);
+  const bottomStuckRef = useRef(false);
+  const captureScrollAnchor = (key: string) => {
+    const bottomStuck = isNearPageBottom(
+      document.documentElement.scrollHeight,
+      window.scrollY,
+      window.innerHeight,
+    );
+    bottomStuckRef.current = bottomStuck;
+    if (bottomStuck) {
+      anchorRef.current = undefined;
+      return;
+    }
+    const element = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-transcript-row]'),
+    ).find((candidate) => candidate.dataset.transcriptRow === key);
+    if (element)
+      anchorRef.current = { key, top: element.getBoundingClientRect().top };
+  };
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const bottomStuck = bottomStuckRef.current;
+    if (!anchor && !bottomStuck) return;
+    let measuredFrame: number | undefined;
+    const frame = window.requestAnimationFrame(() => {
+      measuredFrame = window.requestAnimationFrame(() => {
+        if (bottomStuck) {
+          const top = restoreVirtualBottom(
+            document.documentElement.scrollHeight,
+            window.innerHeight,
+            true,
+          );
+          if (top !== undefined) window.scrollTo(0, top);
+        } else if (anchor) {
+          const element = Array.from(
+            document.querySelectorAll<HTMLElement>('[data-transcript-row]'),
+          ).find((candidate) => candidate.dataset.transcriptRow === anchor.key);
+          if (element)
+            window.scrollBy({
+              top: preserveVirtualScrollOffset(
+                anchor.top,
+                element.getBoundingClientRect().top,
+                false,
+              ),
+              left: 0,
+            });
+        }
+        anchorRef.current = undefined;
+        bottomStuckRef.current = false;
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      if (measuredFrame !== undefined)
+        window.cancelAnimationFrame(measuredFrame);
+    };
+  });
+
+  const renderGroup = (group: TranscriptGroup) => {
+    const groupKey = items[group.start]?.key ?? `group-${group.start}`;
+    const expanded = open.has(groupKey);
+    const groupItems = items.slice(group.start, group.end + 1);
+    const tools = modelEntries
+      .slice(group.start, group.end + 1)
+      .filter(
+        (entry): entry is Extract<ActivityTranscriptEntry, { kind: 'tool' }> =>
+          entry.kind === 'tool',
+      );
+    const preparing = groupItems.some((item) => item.preparing);
+    const complete =
+      !preparing &&
+      tools.length > 0 &&
+      groupItems
+        .filter((item) => item.entry.kind === 'tool')
+        .every((item) => toolOutcome(item.raw) === 'success');
+    const title = activityTitle(groupItems, tools, complete);
+    const lead = items[group.start];
+    const visibleLead =
+      !lead?.preparing &&
+      lead?.role === 'assistant' &&
+      lead.text &&
+      shouldShowActivityLead(lead.text, title)
+        ? lead.text
+        : undefined;
+    const detailId = `activity-detail-${group.start}`;
+    return (
+      <div
+        className={`activity-group ${complete ? 'activity-complete' : 'activity-pending'}`}
+      >
+        <AriaButton
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={detailId}
+          onPress={() => {
+            captureScrollAnchor(`group-${groupKey}`);
+            setOpen((current) => {
+              const next = new Set(current);
+              expanded ? next.delete(groupKey) : next.add(groupKey);
+              return next;
+            });
+          }}
+        >
+          <span className="activity-icon">{complete ? '✓' : '…'}</span>
+          <strong>{title}</strong>
+          <small>
+            {preparing
+              ? tools.length > 0
+                ? `${tools.length} tool${tools.length === 1 ? '' : 's'} · preparing next tool call`
+                : 'preparing tool call'
+              : `${tools.length} tool${tools.length === 1 ? '' : 's'} · ${expanded ? 'hide detail' : 'show detail'}`}
+          </small>
+        </AriaButton>
+        {visibleLead && (
+          <div className="activity-lead">
+            <span className="message-role">assistant</span>
+            <Markdown>{visibleLead}</Markdown>
+          </div>
+        )}
+        {expanded && (
+          <div className="activity-detail" id={detailId}>
+            {groupItems.map((child) => (
+              <TranscriptEntry key={child.key} item={child} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="transcript transcript-virtualized">
+      <h2>Conversation &amp; activity</h2>
+      <div
+        className="transcript-virtualizer"
+        style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+      >
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const row = rows[virtualRow.index];
+          if (!row) return null;
+          return (
+            <div
+              key={virtualRow.key}
+              data-index={virtualRow.index}
+              data-transcript-row={row.key}
+              ref={virtualizer.measureElement}
+              className="transcript-virtual-row"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                transform: `translateY(${virtualRow.start}px)`,
+              }}
+            >
+              {row.kind === 'group' ? (
+                renderGroup(row.group)
+              ) : (
+                <TranscriptEntry item={items[row.index]} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function TranscriptEntry({
+  item,
+}: {
+  item: import('../transcript').TranscriptModelItem;
+}) {
+  if (item.preparing)
+    return (
+      <div className="transcript-entry preparing-toolcall" role="status">
+        <span className="activity-icon">…</span>
+        <strong>
+          {item.text ? activityTitleLine(item.text) : 'Preparing tool call'}
+        </strong>
+        <small>preparing tool call</small>
+      </div>
+    );
+  if (item.role && (item.text || item.imageCount))
+    return (
+      <article className={`message-bubble message-${item.role}`}>
+        <span className="message-role">{item.role}</span>
+        {item.imageCount ? (
+          <span className="message-attachment">
+            {item.imageCount} image{item.imageCount === 1 ? '' : 's'} attached
+          </span>
+        ) : null}
+        {item.text ? <Markdown>{item.text}</Markdown> : null}
+      </article>
+    );
+  const raw = item.raw;
+  const tool = toolRecordForTranscript(raw);
+  if (tool) {
+    const name =
+      typeof tool.name === 'string'
+        ? tool.name
+        : typeof tool.toolName === 'string'
+          ? tool.toolName
+          : 'tool';
+    return (
+      <details className="transcript-entry tool-detail">
+        <summary>
+          <span className="tool-chip">{name}</span>
+          <span>{toolSummary(tool)}</span>
+        </summary>
+        <pre>{JSON.stringify(raw, null, 2)}</pre>
+      </details>
+    );
+  }
+  const text = JSON.stringify(raw, null, 2);
+  return (
+    <details className="transcript-entry">
+      <summary>
+        {typeof raw === 'object' && raw && 'type' in raw
+          ? String((raw as { type?: unknown }).type)
+          : 'entry'}
+      </summary>
+      <pre>{text}</pre>
+    </details>
+  );
+}
+
+export { activityTitleLine };

@@ -710,6 +710,8 @@ export const SessionApiResponseSchema = Type.Object(
   {
     metadata: SessionIndexEntrySchema,
     entries: Type.Array(UnknownSchema),
+    /** Daemon generation that produced this response; optional for legacy clients. */
+    serverId: Type.Optional(IdentifierSchema),
     /** Authoritative daemon cursor at which these entries were read. */
     cursor: Type.Optional(Type.Integer({ minimum: 0 })),
   },

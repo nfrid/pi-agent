@@ -4,6 +4,9 @@ import { configDefaults, defineConfig } from 'vitest/config';
 export default defineConfig({
   resolve: {
     alias: {
+      '@pi-dashboard/client': path.resolve(
+        'packages/dashboard-client/src/index.ts',
+      ),
       '@pi-dashboard/protocol': path.resolve(
         'packages/dashboard-protocol/src/index.ts',
       ),

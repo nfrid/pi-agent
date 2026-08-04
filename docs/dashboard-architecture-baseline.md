@@ -174,3 +174,47 @@ main.ts / create-daemon.ts             manual composition + lifecycle
 ### Remaining compatibility layer
 
 `http.ts` intentionally retains the old manual dispatcher and its raw Node SSE implementation as a bounded migration aid for tests and existing internal callers; the live listener is Fastify-backed and registers `routes.ts`. It still owns the HTTP/Fastify instance, Unix bridge listener, raw SSE writer, and bounded browser WebSocket at `/ws`; those are transport lifecycles rather than a second dependency graph. `RuntimeRegistry` remains the independently testable Unix-socket bridge and is not wrapped by Fastify. The remaining debt is this legacy dispatcher plus duplicate raw SSE/WS compatibility paths, which can be retired after callers and browser clients leave the compatibility window. The phase does not introduce TanStack, Tailwind, or any Phase 4/5 UI migration.
+
+## Phase 4: frontend infrastructure migration
+
+Implemented 2026-08-04 as an incremental browser migration. `@pi-dashboard/client`
+now owns the typed authenticated HTTP boundary, token storage, bounded SSE frame
+parser, reconnect/cursor handling, and `DashboardLiveStore`. The store is the
+single `useSyncExternalStore` source for normalized snapshots, entity indexes,
+256-entry cursor/event windows, transcript projections, connection state, daemon
+generation acceptance, and HTTP-session hydration/replay coverage. A replay gap
+refetches the authoritative snapshot before reconnecting; an HTTP response from a
+previous daemon generation cannot replace a newer SSE generation.
+
+`apps/dashboard-web/src/dashboard-transport.ts` is a bounded compatibility facade
+for Phase 2 helper imports and tests only. It contains no connection lifecycle or
+React state. Session routes use TanStack Query's typed session options for the
+fetch baseline and ask the client store to hydrate/replay it. TanStack Query is
+not used to implement the token stream. Query/mutation factories cover snapshot,
+session, workspace, runtime, usage, settings, notifications, command, launch,
+rename, and notification mutations; authentication failures are never retried.
+
+The app now composes a TanStack Router tree for `/`, `/sessions/$sessionId`,
+`/workspaces/$workspaceId`, `/runtimes/$runtimeId`, and `/new`; navigation is
+performed through router hooks, with no pathname parsing or history listeners.
+`App.tsx` is providers/router/shell composition. Dashboard/workspace/header UI
+lives in `routes/dashboard.tsx`, runtime/launch UI in `routes/runtime.tsx`,
+session rendering and mutations in `features/session.tsx`, notification/push
+operations in `features/notifications.tsx`, composer actions in
+`features/composer.tsx`, and activity/transcript presentation in
+`entities/transcript.tsx`. Page modules use typed client query/mutation options;
+they do not call the generic HTTP compatibility facade. The session feature
+consumes store selectors (`sessionChangeById` and
+`sessionReplacementBySessionId`) rather than raw envelopes; the store performs
+HTTP hydration, replay, metadata reconciliation, and replacement targeting.
+Existing class names, labels, routes, API paths, and mobile layout remain
+compatibility constraints.
+
+Tailwind v4 is installed with theme/utilities imports only (no preflight); the
+existing Dracula-like CSS remains authoritative and semantic dashboard tokens are
+aliases. React Aria Components are introduced at behavioral boundaries without
+changing accessible names. Long transcripts over 80 logical rows use TanStack
+Virtual's window virtualizer with semantic keys, overscan, DOM measurement, and
+variable row estimates. Expansion captures the first visible semantic row and
+restores its offset after measurement when the reader is not bottom-stuck;
+short transcripts retain the original document flow.
