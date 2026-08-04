@@ -97,15 +97,23 @@ function messageImageCount(message: Record<string, unknown>): number {
 function toolRecord(raw: unknown): Record<string, unknown> | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const record = raw as Record<string, unknown>;
-  if (record.type === 'tool' && record.tool && typeof record.tool === 'object')
+  if (
+    (record.type === 'tool' || record.kind === 'tool') &&
+    record.tool &&
+    typeof record.tool === 'object'
+  )
     return record.tool as Record<string, unknown>;
   if (
+    record.type === 'tool' ||
+    record.kind === 'tool' ||
     record.type === 'toolCall' ||
     record.type === 'tool_call' ||
+    record.role === 'toolResult' ||
     typeof record.toolName === 'string'
   )
     return record;
-  return undefined;
+  const message = messageRecord(raw);
+  return message?.role === 'toolResult' ? message : undefined;
 }
 
 export function toTranscriptEntries(
@@ -114,10 +122,8 @@ export function toTranscriptEntries(
   const toolResults = new Map<string, Record<string, unknown>>();
   for (const raw of rawEntries) {
     if (!raw || typeof raw !== 'object') continue;
-    const entry = raw as Record<string, unknown>;
-    const message = entry.message as Record<string, unknown> | undefined;
+    const message = messageRecord(raw);
     if (
-      entry.type === 'message' &&
       message?.role === 'toolResult' &&
       typeof message.toolCallId === 'string'
     )
@@ -131,7 +137,10 @@ export function toTranscriptEntries(
       continue;
     }
     const entry = raw as Record<string, unknown>;
-    const tool = entry.type === 'tool' ? toolRecord(raw) : undefined;
+    const tool =
+      entry.type === 'tool' || entry.kind === 'tool'
+        ? toolRecord(raw)
+        : undefined;
     if (tool) {
       result.push({
         key: entryKey,
@@ -151,15 +160,11 @@ export function toTranscriptEntries(
       });
       continue;
     }
-    if (
-      entry.type !== 'message' ||
-      !entry.message ||
-      typeof entry.message !== 'object'
-    ) {
+    const message = messageRecord(raw);
+    if (!message) {
       result.push({ key: entryKey, entry: { kind: 'other' }, raw });
       continue;
     }
-    const message = entry.message as Record<string, unknown>;
     if (message.role === 'toolResult') continue;
     const role =
       message.role === 'user'
@@ -276,8 +281,11 @@ export function toolOutcome(
     return 'error';
   if (tool.status === 'running') return 'running';
   if (
+    tool.isError === false ||
     typeof tool.result !== 'undefined' ||
+    typeof tool.content !== 'undefined' ||
     tool.status === 'completed' ||
+    tool.status === 'finished' ||
     tool.status === 'success'
   )
     return 'success';

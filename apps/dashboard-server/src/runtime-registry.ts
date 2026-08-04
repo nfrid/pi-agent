@@ -176,13 +176,12 @@ export class RuntimeRegistry {
           const helloCapabilities =
             hello.capabilities?.extensions ??
             hello.capabilities?.extensionCapabilities ??
-            (hello.capabilities?.version === 1 &&
-            hello.capabilities.capabilitySummaries &&
-            hello.capabilities.manifests
+            (hello.capabilities?.capabilitySummaries !== undefined ||
+            hello.capabilities?.manifests !== undefined
               ? {
                   version: 1 as const,
-                  capabilities: hello.capabilities.capabilitySummaries,
-                  manifests: hello.capabilities.manifests,
+                  capabilities: hello.capabilities.capabilitySummaries ?? [],
+                  manifests: hello.capabilities.manifests ?? [],
                 }
               : undefined);
           const advertised = helloCapabilities

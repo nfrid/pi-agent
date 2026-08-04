@@ -1,7 +1,11 @@
+import { projectActivityGroups } from '@pi-dashboard/activity-model';
+import { Value } from 'typebox/value';
 import { describe, expect, it } from 'vitest';
-import { toTranscriptEntries } from '../transcript';
+import { ActivityGroupsViewModelSchema } from '../../../../extensions/activity-groups/contribution';
+import { toolOutcome, toTranscriptEntries } from '../transcript';
 import {
   activityGroupPresentation,
+  buildTranscriptGroupCoverage,
   buildVirtualTranscriptRows,
   preserveVirtualScrollOffset,
   restoreVirtualBottom,
@@ -32,6 +36,117 @@ describe('activity row views and virtual transcript construction', () => {
       },
     ]).filter(({ entry }) => entry.kind === 'tool');
     expect(item?.entry).toMatchObject({ kind: 'tool', status: 'pending' });
+  });
+
+  it('normalizes historical Pi toolResult messages out of order', () => {
+    const successful = toTranscriptEntries([
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'history-success',
+          toolName: 'read',
+          content: [{ type: 'text', text: 'ok' }],
+          isError: false,
+        },
+      },
+      // Pi can replay a result while restoring a historical session.
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolCallId: 'history-success',
+          toolName: 'read',
+          content: [{ type: 'text', text: 'ok' }],
+          isError: false,
+        },
+      },
+      {
+        type: 'message',
+        id: 'assistant-success',
+        message: {
+          id: 'assistant-success-message',
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'history-success',
+              name: 'read',
+              arguments: { path: 'file.txt' },
+            },
+          ],
+        },
+      },
+    ]);
+    const failed = toTranscriptEntries([
+      {
+        role: 'toolResult',
+        toolCallId: 'history-failed',
+        toolName: 'bash',
+        content: [{ type: 'text', text: 'nope' }],
+        isError: true,
+      },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'history-failed',
+            name: 'bash',
+            arguments: { command: 'false' },
+          },
+        ],
+      },
+    ]);
+    const successTool = successful.find(({ entry }) => entry.kind === 'tool');
+    const failedTool = failed.find(({ entry }) => entry.kind === 'tool');
+    expect(successTool).toMatchObject({
+      key: 'assistant-success-message:tool:history-success',
+      entry: { kind: 'tool', status: 'success' },
+    });
+    expect(failedTool).toMatchObject({
+      entry: { kind: 'tool', status: 'error', isError: true },
+    });
+    expect(successful).toHaveLength(2);
+    expect(failed).toHaveLength(2);
+    expect(
+      projectActivityGroups(successful.map(({ entry }) => entry)).map(
+        ({ status }) => status,
+      ),
+    ).toEqual(['complete']);
+    expect(
+      projectActivityGroups(failed.map(({ entry }) => entry)).map(
+        ({ status }) => status,
+      ),
+    ).toEqual(['failed']);
+    expect(toolOutcome({ kind: 'tool', status: 'finished' })).toBe('success');
+  });
+
+  it('accepts complete activity projections for every tool outcome', () => {
+    for (const tool of [
+      { name: 'read', args: {}, status: 'success' as const },
+      { name: 'bash', args: {}, status: 'error' as const, isError: true },
+      { name: 'bash', args: {}, status: 'running' as const },
+    ]) {
+      const [group] = projectActivityGroups([
+        { kind: 'assistant', speaks: false },
+        { kind: 'tool', ...tool },
+      ]);
+      expect(Value.Check(ActivityGroupsViewModelSchema, group)).toBe(true);
+    }
+  });
+
+  it('precomputes regular transcript coverage without scanning groups per item', () => {
+    const groups = [
+      { start: 1, end: 3 },
+      { start: 6, end: 7 },
+    ] as TranscriptGroup[];
+    const { groupByStart, groupCoverage } = buildTranscriptGroupCoverage(
+      9,
+      groups,
+    );
+    expect([...groupByStart.keys()]).toEqual([1, 6]);
+    expect([...groupCoverage]).toEqual([0, 1, 1, 1, 0, 0, 1, 1, 0]);
   });
 
   it('uses the same live presentation for regular and virtual group rows', () => {

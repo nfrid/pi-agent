@@ -80,6 +80,62 @@ describe('runtime registry', () => {
     expect(reconnect.destroyed).toBe(true);
   });
 
+  it('installs either direct legacy hello capability field with an empty absent side', async () => {
+    const cases = [
+      {
+        capabilities: {
+          capabilitySummaries: [
+            { id: 'legacy-capability', version: '1', available: true },
+          ],
+        },
+        expected: {
+          version: 1,
+          capabilities: [
+            { id: 'legacy-capability', version: '1', available: true },
+          ],
+          manifests: [],
+        },
+      },
+      {
+        capabilities: {
+          manifests: [
+            { id: 'legacy-manifest', version: '1', actions: [], renderers: [] },
+          ],
+        },
+        expected: {
+          version: 1,
+          capabilities: [],
+          manifests: [
+            { id: 'legacy-manifest', version: '1', actions: [], renderers: [] },
+          ],
+        },
+      },
+    ] as const;
+    for (const [index, candidate] of cases.entries()) {
+      const registry = new RuntimeRegistry({ expectedToken: () => true });
+      const bridge = new PassThrough();
+      registry.accept(bridge as never);
+      bridge.write(
+        serializeFrame({
+          kind: 'event',
+          seq: 1,
+          event: {
+            type: 'runtime.hello',
+            protocolVersion: 1,
+            capabilities: candidate.capabilities,
+            snapshot: { ...snapshot, runtimeId: `legacy-${index}` },
+          },
+        }),
+      );
+      await eventually(() => registry.get(`legacy-${index}`));
+      expect(registry.get(`legacy-${index}`)?.capabilities).toEqual(
+        candidate.expected,
+      );
+      bridge.destroy();
+      registry.close();
+    }
+  });
+
   it('allows the same managed runtime identity to reconnect after extension reload', async () => {
     const registry = new RuntimeRegistry({ expectedToken: () => true });
     const first = new PassThrough();

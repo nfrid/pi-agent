@@ -8,7 +8,10 @@ host adapter; it is not a React component or a slash command.
 
 1. Add a versioned `ExtensionManifest` next to the extension. Give every action,
    renderer, inspector, and interaction a globally stable ID (`extension.id` is
-   a useful prefix).
+   a useful prefix). IDs must be unique within their dispatched category
+   (actions, renderers, inspectors, or interactions); the same ID in different
+   categories is intentional and allowed because dispatch namespaces are
+   separate.
 2. Define every action input and every renderer view model with TypeBox. Set
    `availability.requires` to capability IDs and set `idempotent: true` only
    when replaying the same command is harmless.

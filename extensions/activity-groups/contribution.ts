@@ -33,6 +33,16 @@ const ActivityToolSchema = Type.Object(
     kind: Type.Literal('tool'),
     name: Type.String({ minLength: 1, maxLength: 512 }),
     args: Type.Optional(ActivityToolArgsSchema),
+    status: Type.Optional(
+      Type.Union([
+        Type.Literal('pending'),
+        Type.Literal('running'),
+        Type.Literal('complete'),
+        Type.Literal('success'),
+        Type.Literal('error'),
+      ]),
+    ),
+    isError: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

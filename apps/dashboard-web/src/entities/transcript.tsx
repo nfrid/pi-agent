@@ -96,7 +96,10 @@ export function Transcript({
     [modelEntries, runtime],
   );
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const groupByStart = new Map(groups.map((group) => [group.start, group]));
+  const { groupByStart, groupCoverage } = useMemo(
+    () => buildTranscriptGroupCoverage(items.length, groups),
+    [groups, items.length],
+  );
   if (items.length > 80)
     return (
       <VirtualizedTranscript
@@ -166,12 +169,7 @@ export function Transcript({
             </div>
           );
         }
-        if (
-          groups.some(
-            (candidate) => index > candidate.start && index <= candidate.end,
-          )
-        )
-          return null;
+        if (groupCoverage[index]) return null;
         return <TranscriptEntry key={item.key} item={item} />;
       })}
     </div>
@@ -179,6 +177,34 @@ export function Transcript({
 }
 
 export type TranscriptGroup = ReturnType<typeof projectActivityGroups>[number];
+
+export function buildTranscriptGroupCoverage(
+  itemCount: number,
+  groups: readonly TranscriptGroup[],
+): {
+  groupByStart: Map<number, TranscriptGroup>;
+  groupCoverage: Uint8Array;
+} {
+  const groupByStart = new Map<number, TranscriptGroup>();
+  const groupCoverage = new Uint8Array(itemCount);
+  let groupIndex = 0;
+  for (let index = 0; index < itemCount; index += 1) {
+    while (groupIndex < groups.length) {
+      const candidate = groups[groupIndex];
+      if (!candidate || candidate.end >= index) break;
+      groupIndex += 1;
+    }
+    const group = groups[groupIndex];
+    if (!group) continue;
+    groupByStart.set(group.start, group);
+    if (group.start <= index && index <= group.end) groupCoverage[index] = 1;
+  }
+  // A group can start beyond the last item only for malformed external input;
+  // retain the start map without letting it affect the coverage scan.
+  for (const group of groups)
+    if (!groupByStart.has(group.start)) groupByStart.set(group.start, group);
+  return { groupByStart, groupCoverage };
+}
 
 export type VirtualTranscriptRow =
   | { kind: 'entry'; key: string; index: number }
