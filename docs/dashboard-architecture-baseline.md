@@ -135,19 +135,12 @@ Phase 1 introduces schema-first shared contracts and pure reducers while preserv
 
 The migration must keep historical transcript entries permissive: provider and extension payloads remain opaque data, while their surrounding semantic envelope and explicit identity fields are validated.
 
-## Next phase: cursor and SSE synchronization
+## Phase 2: cursor and SSE synchronization
 
-Phase 2 should replace browser revision/generation workarounds with one daemon-global ordered stream:
+Implemented 2026-08-04. `DashboardEventStream` is the daemon-global clock and bounded in-memory replay log. Every browser publication, including authoritative snapshot replacements, allocates exactly one cursor before subscribers are notified. `BrowserSnapshot.cursor` and the legacy-shaped session response `cursor` identify the authoritative position of each read; `revision` and `serverId` remain only for bounded WebSocket compatibility.
 
-1. allocate a monotonic daemon cursor for every published event;
-2. keep a configurable bounded replay buffer;
-3. return the current cursor with dashboard and session projection snapshots;
-4. add authenticated SSE replay from `Last-Event-ID` (or an explicit cursor query);
-5. distinguish replay gaps from ordinary disconnects;
-6. hydrate from an authoritative snapshot, then apply only events newer than its cursor;
-7. reconnect from the last accepted cursor and apply each cursor at most once;
-8. refetch after a replay gap;
-9. remove request-generation and raw-event-tail synchronization paths once SSE is authoritative;
-10. retain the browser WebSocket only during a bounded compatibility window, then remove it.
+`GET /api/events` is authenticated and origin-checked like the other API routes. It accepts `Last-Event-ID` or the explicit `cursor` query parameter, emits SSE `id` values and canonical event envelopes, sends heartbeat comments, closes clients whose output buffer exceeds its configured bound, and returns HTTP 409 `{ code: "replay-gap" }` when the requested cursor predates the retained window. Runtime event envelopes retain runtime epoch and sequence fields; envelopes that change dashboard state carry the corresponding projection snapshot.
 
-Phase 2 must preserve all existing Unix-socket bounds, connection-generation command safety, authentication/origin policy, upload validation, and image redaction.
+The browser uses a fetch-based SSE adapter so the token remains a header rather than a URL credential. It reconnects with the last accepted cursor, rejects duplicate/older records, retains only a bounded reducer-input window, and refetches `/api/snapshot` after a replay gap. Session hydration installs the HTTP projection at its cursor and applies only newer buffered envelopes through the shared transcript reducer. The old WebSocket remains a bounded, authenticated compatibility path for already-running v1 clients; it can be removed after the production extension/runtime population has migrated to SSE-capable browser clients and the compatibility window has elapsed.
+
+Phase 2 preserves the Unix-socket frame, queue, generation, authentication/origin, upload validation, and image-redaction invariants recorded above. No bearer token is accepted in an SSE URL.

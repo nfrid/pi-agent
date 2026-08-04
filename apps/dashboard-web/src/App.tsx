@@ -20,6 +20,7 @@ import {
 } from '@pi-dashboard/protocol';
 import {
   type FormEvent,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -31,6 +32,7 @@ import {
   api,
   asSessionResponse,
   type DashboardEvent,
+  type DashboardLiveEvent,
   multipartApi,
   type SessionResponse,
   useDashboard,
@@ -126,8 +128,7 @@ export default function App() {
         id={route[1]}
         snapshot={dashboard.snapshot}
         events={dashboard.events}
-        eventGeneration={dashboard.eventGeneration}
-        reconnectNonce={dashboard.reconnectNonce}
+        resyncNonce={dashboard.resyncNonce}
       />
     ) : route[0] === 'workspaces' && route[1] ? (
       <WorkspaceView id={route[1]} snapshot={dashboard.snapshot} />
@@ -702,69 +703,71 @@ function SessionView({
   id,
   snapshot,
   events,
-  eventGeneration,
-  reconnectNonce,
+  resyncNonce,
 }: {
   id: string;
   snapshot: BrowserSnapshot;
-  events: readonly DashboardEvent[];
-  eventGeneration: { readonly current: number };
-  reconnectNonce: number;
+  events: readonly DashboardLiveEvent[];
+  resyncNonce: number;
 }) {
   const [data, setData] = useState<SessionResponse>();
   const [projection, setProjection] = useState<TranscriptProjection>();
   const [error, setError] = useState<string>();
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const stickToBottomRef = useRef(true);
-  const sessionRequestRef = useRef(0);
   const runtimeIdRef = useRef<string | undefined>(undefined);
   const matchedRuntimeIdRef = useRef<string | undefined>(undefined);
-  const seenEventsRef = useRef(new WeakSet<DashboardEvent>());
+  const bufferedEventsRef = useRef(events);
+  bufferedEventsRef.current = events;
   const runtime = snapshot.runtimes.find((item) => item.session.id === id);
   matchedRuntimeIdRef.current = runtime?.runtimeId;
   // During a runtime's session replacement the snapshot already points at the
   // new session, so there is briefly no runtime matching the old route. Keep
   // the prior association until the replacement event is consumed.
   if (runtime) runtimeIdRef.current = runtime.runtimeId;
+  const hydrateSession = useCallback((next: SessionResponse) => {
+    let hydrated = hydrateTranscript(next.entries, next.metadata.id, {
+      cursor: next.cursor ?? 0,
+    });
+    // Events can arrive while the HTTP read is in flight. The snapshot is
+    // authoritative only through its cursor; newer buffered envelopes win.
+    for (const queued of bufferedEventsRef.current)
+      if (queued.cursor > hydrated.lastCursor)
+        hydrated = reduceTranscriptEvent(hydrated, queued);
+    return hydrated;
+  }, []);
+  useEffect(() => {
+    if (!id) return;
+    runtimeIdRef.current = matchedRuntimeIdRef.current;
+    setData(undefined);
+    setProjection(undefined);
+    setError(undefined);
+  }, [id]);
   useEffect(() => {
     let active = true;
-    // A reconnect gets a fresh session read even when no bridge event was lost.
-    void reconnectNonce;
-    const request = ++sessionRequestRef.current;
+    void resyncNonce;
     void api<unknown>(`/api/sessions/${encodeURIComponent(id)}`)
       .then((value) => {
         const next = asSessionResponse(value);
         if (!next) throw new Error('Dashboard returned invalid session data.');
-        if (active && request === sessionRequestRef.current) {
-          if (next.metadata.id !== id) {
-            navigate(`/sessions/${encodeURIComponent(next.metadata.id)}`);
-            return;
-          }
-          setData(next);
-          setProjection(hydrateTranscript(next.entries, next.metadata.id));
-          setError(undefined);
+        if (!active) return;
+        if (next.metadata.id !== id) {
+          navigate(`/sessions/${encodeURIComponent(next.metadata.id)}`);
+          return;
         }
+        setData(next);
+        setProjection(hydrateSession(next));
+        setError(undefined);
       })
       .catch(
         (cause) =>
           active &&
-          request === sessionRequestRef.current &&
           setError(cause instanceof Error ? cause.message : String(cause)),
       );
     return () => {
       active = false;
     };
-  }, [id, reconnectNonce]);
-  useEffect(() => {
-    void id;
-    // A manual route change must not inherit the prior session's runtime. The
-    // render above intentionally retains it only while the same route waits
-    // for its replacement event.
-    runtimeIdRef.current = matchedRuntimeIdRef.current;
-    seenEventsRef.current = new WeakSet<DashboardEvent>();
-    setData(undefined);
-    setProjection(undefined);
-  }, [id]);
+  }, [id, resyncNonce, hydrateSession]);
   useEffect(() => {
     void id;
     stickToBottomRef.current = true;
@@ -794,7 +797,6 @@ function SessionView({
   useEffect(() => {
     for (const queued of events) {
       const event = queued.event;
-      if (!event) continue;
       const changedSessionId =
         'sessionId' in event
           ? event.sessionId
@@ -814,70 +816,48 @@ function SessionView({
       if (
         (event.type === 'session.changed' ||
           event.type === 'session.snapshot') &&
-        changedSessionId === id &&
-        data
+        changedSessionId === id
       ) {
-        if (seenEventsRef.current.has(queued)) continue;
-        seenEventsRef.current.add(queued);
         setData((current) =>
           current
             ? {
                 ...current,
                 metadata: {
                   ...current.metadata,
-                  ...(event.session?.name !== undefined
+                  ...(event.session.name !== undefined
                     ? { name: event.session.name }
                     : {}),
-                  ...(event.session?.title !== undefined
+                  ...(event.session.title !== undefined
                     ? { title: event.session.title }
                     : {}),
                 },
               }
             : current,
         );
+      }
+      if (
+        !data ||
+        (event.type !== 'session.changed' && changedSessionId !== id)
+      )
         continue;
-      }
-      if (!data || !projection || seenEventsRef.current.has(queued)) continue;
-      if (event.type !== 'session.changed' && changedSessionId !== id) continue;
-      seenEventsRef.current.add(queued);
-      const captureBottomState = () => {
-        stickToBottomRef.current = isNearPageBottom(
-          document.documentElement.scrollHeight,
-          window.scrollY,
-          window.innerHeight,
-        );
-      };
-      if (event.type === 'agent.settled') {
-        captureBottomState();
-        const request = ++sessionRequestRef.current;
-        const arrivalGeneration = eventGeneration.current;
-        void api<unknown>(`/api/sessions/${encodeURIComponent(id)}`)
-          .then((value) => {
-            const next = asSessionResponse(value);
-            if (
-              request === sessionRequestRef.current &&
-              arrivalGeneration === eventGeneration.current &&
-              next
-            ) {
-              setData(next);
-              setProjection(hydrateTranscript(next.entries, next.metadata.id));
-            }
-          })
-          .catch(() => undefined);
-      } else if (
-        event.type?.startsWith('message.') ||
-        event.type?.startsWith('tool.')
-      ) {
-        // A later delta makes any settled-session read stale. Let the live
-        // stream win instead of allowing a lagging file read to flash backward.
-        sessionRequestRef.current += 1;
-        captureBottomState();
-        setProjection((current) =>
-          current ? reduceTranscriptEvent(current, event) : current,
-        );
-      }
+      if (
+        !event.type.startsWith('message.') &&
+        !event.type.startsWith('tool.') &&
+        event.type !== 'agent.settled'
+      )
+        continue;
+      stickToBottomRef.current = isNearPageBottom(
+        document.documentElement.scrollHeight,
+        window.scrollY,
+        window.innerHeight,
+      );
+      // The domain reducer rejects duplicate and older cursors. No raw event
+      // identity set or HTTP request generation is needed here.
+      setProjection((current) =>
+        current ? reduceTranscriptEvent(current, queued) : current,
+      );
     }
-  }, [events, data, eventGeneration, id, projection]);
+  }, [events, data, id]);
   if (!data || !projection)
     return (
       <section>

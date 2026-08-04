@@ -106,6 +106,57 @@ describe('dashboard HTTP boundary', () => {
     socket.close();
   });
 
+  it('replays authenticated SSE records and reports expired cursors', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-sse-'));
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      eventBufferSize: 1,
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const origin = `http://127.0.0.1:${server.port}`;
+    const headers = { Origin: origin, 'x-dashboard-token': 'test-token' };
+    const live = await fetch(
+      `http://127.0.0.1:${server.port}/api/events?cursor=${server.snapshot().cursor - 1}`,
+      { headers },
+    );
+    expect(live.status).toBe(200);
+    const reader = live.body?.getReader();
+    expect(reader).toBeTruthy();
+    let text = '';
+    while (!text.includes('data:')) {
+      const next = await reader?.read();
+      if (!next || next.done) break;
+      text += new TextDecoder().decode(next.value);
+    }
+    expect(text).toContain('event: dashboard');
+    expect(text).toContain('"type":"snapshot"');
+    await reader?.cancel();
+    const headerReplay = await fetch(
+      `http://127.0.0.1:${server.port}/api/events`,
+      {
+        headers: {
+          ...headers,
+          'last-event-id': String(server.snapshot().cursor - 1),
+        },
+      },
+    );
+    expect(headerReplay.status).toBe(200);
+    await headerReplay.body?.cancel();
+
+    await server.refreshWorkspaces();
+    await server.refreshWorkspaces();
+    const gap = await fetch(
+      `http://127.0.0.1:${server.port}/api/events?cursor=0`,
+      { headers },
+    );
+    expect(gap.status).toBe(409);
+    await expect(gap.json()).resolves.toMatchObject({ code: 'replay-gap' });
+  });
+
   it('publishes every browser update with the same monotonic revision as its snapshot', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-revision-'),

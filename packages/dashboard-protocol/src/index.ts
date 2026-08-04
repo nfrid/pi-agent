@@ -608,8 +608,10 @@ export const BrowserSnapshotSchema = Type.Object(
   {
     /** Changes whenever the dashboard daemon process restarts. */
     serverId: Type.String({ minLength: 1, maxLength: 512 }),
-    /** Monotonically increasing state revision within one server process. */
+    /** Compatibility revision retained for v1 websocket clients. */
     revision: Type.Integer({ minimum: 0 }),
+    /** Authoritative position in the daemon-global resumable event stream. */
+    cursor: Type.Integer({ minimum: 0 }),
     runtimes: Type.Array(RuntimeSnapshotSchema),
     workspaces: Type.Array(WorkspaceTargetSchema),
     sessions: Type.Array(SessionIndexEntrySchema),
@@ -668,6 +670,8 @@ export const DashboardEventEnvelopeSchema = Type.Object(
   {
     cursor: Type.Integer({ minimum: 0 }),
     emittedAt: FiniteNumberSchema,
+    /** Optional projection accompanying an event that changes dashboard state. */
+    snapshot: Type.Optional(BrowserSnapshotSchema),
     runtimeId: Type.Optional(IdentifierSchema),
     runtimeEpoch: Type.Optional(IdentifierSchema),
     runtimeSeq: Type.Optional(Type.Integer({ minimum: 0 })),
@@ -703,7 +707,12 @@ export const SessionProjectionSchema = Type.Object(
 export type SessionProjection = Static<typeof SessionProjectionSchema>;
 
 export const SessionApiResponseSchema = Type.Object(
-  { metadata: SessionIndexEntrySchema, entries: Type.Array(UnknownSchema) },
+  {
+    metadata: SessionIndexEntrySchema,
+    entries: Type.Array(UnknownSchema),
+    /** Authoritative daemon cursor at which these entries were read. */
+    cursor: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
   { additionalProperties: false },
 );
 export type SessionApiResponse = Static<typeof SessionApiResponseSchema>;
@@ -724,6 +733,30 @@ export const DashboardSnapshotResponseSchema = Type.Object(
 );
 export type DashboardSnapshotResponse = Static<
   typeof DashboardSnapshotResponseSchema
+>;
+
+/**
+ * SSE-only snapshot records are separate from event envelopes so a client can
+ * distinguish an authoritative replacement from a reducer input.
+ */
+export const DashboardSnapshotStreamSchema = Type.Object(
+  {
+    type: Type.Literal('snapshot'),
+    cursor: Type.Integer({ minimum: 0 }),
+    emittedAt: FiniteNumberSchema,
+    snapshot: BrowserSnapshotSchema,
+  },
+  { additionalProperties: false },
+);
+export type DashboardSnapshotStream = Static<
+  typeof DashboardSnapshotStreamSchema
+>;
+export const DashboardStreamMessageSchema = Type.Union([
+  DashboardEventEnvelopeSchema,
+  DashboardSnapshotStreamSchema,
+]);
+export type DashboardStreamMessage = Static<
+  typeof DashboardStreamMessageSchema
 >;
 
 export const StartRuntimeRequestSchema = Type.Object(
@@ -1238,6 +1271,20 @@ export function tryParseDashboardEventEnvelope(
   value: unknown,
 ): DashboardEventEnvelope | undefined {
   return tryParseSchema(DashboardEventEnvelopeSchema, value);
+}
+export function parseDashboardStreamMessage(
+  value: unknown,
+): DashboardStreamMessage {
+  return parseSchema(
+    DashboardStreamMessageSchema,
+    value,
+    'dashboard stream message',
+  );
+}
+export function tryParseDashboardStreamMessage(
+  value: unknown,
+): DashboardStreamMessage | undefined {
+  return tryParseSchema(DashboardStreamMessageSchema, value);
 }
 export function parseBrowserSnapshot(value: unknown): BrowserSnapshot {
   return parseSchema(BrowserSnapshotSchema, value, 'browser snapshot');

@@ -1,9 +1,11 @@
 import {
   type BrowserSnapshot,
+  type DashboardEventEnvelope,
   type DashboardMessage,
+  type DashboardStreamMessage,
   type SessionApiResponse,
   tryParseBrowserSnapshot,
-  tryParseDashboardMessage,
+  tryParseDashboardStreamMessage,
   tryParseSessionApiResponse,
 } from '@pi-dashboard/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -24,6 +26,9 @@ export function dashboardToken(): string | undefined {
 
 export type AppError = Error & { code?: string };
 export type DashboardEvent = Extract<DashboardMessage, { type: 'event' }>;
+/** Canonical SSE reducer input. The legacy websocket event remains exported for v1 callers. */
+export type DashboardLiveEvent = DashboardEventEnvelope;
+export type DashboardStreamRecord = DashboardStreamMessage;
 
 /**
  * v1 HTTP fixtures predate the shared snapshot contract. Keep these three
@@ -37,6 +42,7 @@ function normalizeLegacyBrowserSnapshot(value: unknown): unknown {
     ...snapshot,
     ...(snapshot.serverId === undefined ? { serverId: 'legacy' } : {}),
     ...(snapshot.revision === undefined ? { revision: 0 } : {}),
+    ...(snapshot.cursor === undefined ? { cursor: 0 } : {}),
     ...(snapshot.unread === undefined ? { unread: [] } : {}),
   };
 }
@@ -102,9 +108,14 @@ export function asBrowserSnapshot(value: unknown): BrowserSnapshot | undefined {
   return tryParseBrowserSnapshot(normalizeLegacyBrowserSnapshot(value));
 }
 
+export function asDashboardStreamMessage(
+  value: unknown,
+): DashboardStreamMessage | undefined {
+  return tryParseDashboardStreamMessage(value);
+}
+
 const RECONNECT_MIN_MS = 500;
 const RECONNECT_MAX_MS = 30_000;
-const EVENT_REVISION_LIMIT = 256;
 
 export function nextReconnectDelay(current: number): number {
   return Math.min(RECONNECT_MAX_MS, Math.max(RECONNECT_MIN_MS, current * 2));
@@ -171,97 +182,123 @@ export interface DashboardState {
   error: string | undefined;
   usageError: string | undefined;
   refresh: () => Promise<void>;
-  events: readonly DashboardEvent[];
-  /** Advances synchronously when an accepted socket event arrives. */
-  eventGeneration: { readonly current: number };
-  reconnectNonce: number;
+  /** A bounded set of canonical reducer inputs newer than recent snapshots. */
+  events: readonly DashboardLiveEvent[];
+  cursor: number;
+  /** Increments only after an authoritative replay-gap resynchronization. */
+  resyncNonce: number;
   connectionState: 'connecting' | 'connected' | 'reconnecting';
 }
 
+const LIVE_EVENT_BUFFER_LIMIT = 256;
+
+class ReplayGapError extends Error {
+  readonly code = 'replay-gap';
+}
+
+async function readSseResponse(
+  response: Response,
+): Promise<DashboardStreamMessage> {
+  const body = response.body;
+  if (!body) throw new Error('Dashboard event stream has no body.');
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    let boundary = buffer.indexOf('\n\n');
+    while (boundary >= 0) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      const data = frame
+        .split(/\r?\n/u)
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart())
+        .join('\n');
+      if (data) {
+        const parsed = asDashboardStreamMessage(JSON.parse(data));
+        if (!parsed) throw new Error('Dashboard returned an invalid event.');
+        await reader.cancel();
+        return parsed;
+      }
+      boundary = buffer.indexOf('\n\n');
+    }
+    if (done) throw new Error('Dashboard event stream ended.');
+  }
+}
+
 /**
- * The browser accepts snapshots in revision order and serializes event delivery
- * into an ordered list. Fetches are still allowed to overlap, but an older
- * response can never replace a newer response or a websocket snapshot.
+ * Fetch one SSE record. The server uses a short-lived response and the hook
+ * reconnects explicitly, which lets it send the last accepted cursor without
+ * putting credentials in a URL.
  */
+async function fetchNextSseRecord(
+  cursor: number,
+  signal: AbortSignal,
+): Promise<DashboardStreamMessage> {
+  const token = dashboardToken();
+  if (!token) throw new Error('Authentication required.');
+  const response = await fetch(
+    `${base}/api/events?cursor=${encodeURIComponent(cursor)}`,
+    {
+      headers: {
+        accept: 'text/event-stream',
+        'x-dashboard-token': token,
+      },
+      signal,
+    },
+  );
+  if (response.status === 409) {
+    const body = (await response.json().catch(() => ({}))) as {
+      code?: string;
+    };
+    if (body.code === 'replay-gap') throw new ReplayGapError();
+  }
+  if (!response.ok)
+    throw new Error(`Event stream failed (${response.status}).`);
+  return readSseResponse(response);
+}
+
 export function useDashboard(): DashboardState {
   const [snapshot, setSnapshot] = useState<BrowserSnapshot>();
   const [error, setError] = useState<string>();
   const [usageError, setUsageError] = useState<string>();
-  const [events, setEvents] = useState<DashboardEvent[]>([]);
-  const [reconnectNonce, setReconnectNonce] = useState(0);
+  const [events, setEvents] = useState<DashboardLiveEvent[]>([]);
+  const [resyncNonce, setResyncNonce] = useState(0);
   const [connectionState, setConnectionState] =
     useState<DashboardState['connectionState']>('connecting');
-  const requestSerial = useRef(0);
-  const latestResponse = useRef(0);
+  const acceptedCursor = useRef(0);
   const usageRequestSerial = useRef(0);
   const latestUsageResponse = useRef(0);
-  const acceptedServerId = useRef<string | undefined>(undefined);
-  const acceptedRevision = useRef(-1);
-  const eventRevisions = useRef(new Set<number>());
-  const eventGeneration = useRef(0);
-  const eventRevisionOrder = useRef<number[]>([]);
-  const liveDisconnected = useRef(false);
-  const authoritativeSocketServerId = useRef<string | undefined>(undefined);
 
   const acceptSnapshot = useCallback((next: BrowserSnapshot): void => {
-    if (acceptedServerId.current !== next.serverId) {
-      acceptedServerId.current = next.serverId;
-      acceptedRevision.current = -1;
-      eventRevisions.current.clear();
-      eventRevisionOrder.current = [];
-      setEvents([]);
-    }
-    if (!shouldAcceptRevision(acceptedRevision.current, next.revision)) return;
-    acceptedRevision.current = next.revision;
+    if (next.cursor < acceptedCursor.current) return;
+    acceptedCursor.current = next.cursor;
     setSnapshot((current) =>
-      current &&
-      current.serverId === next.serverId &&
-      !shouldAcceptRevision(current.revision, next.revision)
-        ? current
-        : next,
+      current && current.cursor > next.cursor ? current : next,
     );
-    if (!liveDisconnected.current) setError(undefined);
+    setError(undefined);
   }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
-    const requestId = ++requestSerial.current;
-    const requestServerId = acceptedServerId.current;
     try {
       const next = asBrowserSnapshot(await api<unknown>('/api/snapshot'));
       if (!next) throw new Error('Dashboard returned an invalid snapshot.');
-      if (requestId < latestResponse.current) return;
-      latestResponse.current = requestId;
-      // A request issued before a daemon transition can complete after the new
-      // websocket is authoritative. Never roll the UI back to that retired
-      // server generation.
-      if (
-        authoritativeSocketServerId.current !== undefined &&
-        authoritativeSocketServerId.current !== next.serverId
-      )
-        return;
-      if (
-        acceptedServerId.current !== requestServerId &&
-        acceptedServerId.current !== next.serverId
-      )
-        return;
       acceptSnapshot(next);
     } catch (cause) {
-      if (requestId < latestResponse.current) return;
-      latestResponse.current = requestId;
       setError(cause instanceof Error ? cause.message : String(cause));
     }
   }, [acceptSnapshot]);
 
   const refreshUsage = useCallback(async (): Promise<void> => {
     const requestId = ++usageRequestSerial.current;
-    const requestServerId = acceptedServerId.current;
     try {
       const response = await api<{ usage?: unknown; error?: string }>(
         '/api/usage',
       );
       if (requestId < latestUsageResponse.current) return;
       latestUsageResponse.current = requestId;
-      if (acceptedServerId.current !== requestServerId) return;
       if (response.error) {
         setUsageError(response.error);
         return;
@@ -279,194 +316,114 @@ export function useDashboard(): DashboardState {
   }, []);
 
   useEffect(() => {
-    void refresh();
-    void refreshUsage();
-    const url = new URL(`${base || window.location.origin}/ws`);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    let socket: WebSocket | undefined;
-    let timer: number | undefined;
-    let connectTimer: number | undefined;
-    let resyncTimer: number | undefined;
-    let eventFlushTimer: number | undefined;
     let stopped = false;
-    let pendingEvents: DashboardEvent[] = [];
+    let reconnectTimer: number | undefined;
+    let connectTimer: number | undefined;
+    let controller: AbortController | undefined;
+    let connecting = false;
     let retryDelay = RECONNECT_MIN_MS;
-    const flushEvents = () => {
-      eventFlushTimer = undefined;
-      const batch = pendingEvents.filter(
-        (event) =>
-          event.serverId === undefined ||
-          event.serverId === acceptedServerId.current,
-      );
-      pendingEvents = [];
-      if (batch.length > 0)
-        setEvents((current) => [...current, ...batch].slice(-128));
-    };
-    const queueEvent = (event: DashboardEvent): void => {
-      if (
-        event.serverId !== undefined &&
-        acceptedServerId.current !== undefined &&
-        event.serverId !== acceptedServerId.current
-      )
-        return;
-      if (typeof event.revision === 'number') {
-        const eventType = event.event?.type;
-        const transcriptDelta =
-          eventType?.startsWith('message.') || eventType?.startsWith('tool.');
-        // State snapshots do not contain transcripts, so an HTTP snapshot may
-        // overtake a transcript delta without making that delta redundant.
-        if (!transcriptDelta && event.revision < acceptedRevision.current)
-          return;
-        if (eventRevisions.current.has(event.revision)) return;
-        eventRevisions.current.add(event.revision);
-        eventRevisionOrder.current.push(event.revision);
-        while (eventRevisionOrder.current.length > EVENT_REVISION_LIMIT) {
-          const expired = eventRevisionOrder.current.shift();
-          if (expired !== undefined) eventRevisions.current.delete(expired);
-        }
-      }
-      eventGeneration.current += 1;
-      pendingEvents = enqueueStreamEvent(pendingEvents, event);
-      eventFlushTimer ??= window.setTimeout(flushEvents, 50);
-    };
-    const scheduleResync = () => {
-      if (stopped || resyncTimer !== undefined) return;
-      resyncTimer = window.setTimeout(() => {
-        resyncTimer = undefined;
-        void refresh();
-      }, 100);
-    };
+
     const scheduleReconnect = () => {
-      if (stopped || timer !== undefined) return;
-      liveDisconnected.current = true;
+      if (stopped || reconnectTimer !== undefined) return;
       setConnectionState('reconnecting');
       setError('Live updates disconnected; retrying…');
       if (!navigator.onLine) return;
       const delay = reconnectDelayWithJitter(retryDelay);
       retryDelay = nextReconnectDelay(retryDelay);
-      timer = window.setTimeout(() => {
-        timer = undefined;
-        connect();
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = undefined;
+        void connect();
       }, delay);
     };
-    const connect = () => {
-      if (stopped) return;
-      if (timer !== undefined) {
-        window.clearTimeout(timer);
-        timer = undefined;
-      }
-      const token = dashboardToken();
-      if (!token) return;
-      setConnectionState('connecting');
-      const candidate = new WebSocket(url);
-      let candidateServerId: string | undefined;
-      socket = candidate;
-      candidate.onopen = () => {
-        if (stopped || socket !== candidate) return;
-        candidate.send(JSON.stringify({ type: 'auth', token }));
-      };
-      candidate.onmessage = (event) => {
-        if (stopped || socket !== candidate) return;
-        try {
-          if (typeof event.data !== 'string')
-            throw new Error('Invalid message');
-          const parsed: unknown = JSON.parse(event.data);
-          const message = tryParseDashboardMessage(parsed);
-          if (!message) throw new Error('Invalid message');
-          const next =
-            message.type === 'snapshot' ? message.snapshot : undefined;
-          const envelopeServerId =
-            message.type === 'event' ? message.serverId : next?.serverId;
-          if (
-            message.type === 'event' &&
-            message.snapshot &&
-            message.serverId !== message.snapshot.serverId
-          )
-            return;
-          if (
-            candidateServerId !== undefined &&
-            envelopeServerId !== undefined &&
-            envelopeServerId !== candidateServerId
-          )
-            return;
-          if (next) {
-            const authenticated = candidateServerId === undefined;
-            if (authenticated) {
-              candidateServerId = next.serverId;
-              authoritativeSocketServerId.current = next.serverId;
-            } else if (next.serverId !== candidateServerId) return;
-            liveDisconnected.current = false;
-            acceptSnapshot(next);
-            retryDelay = RECONNECT_MIN_MS;
-            setConnectionState('connected');
-            if (authenticated) setReconnectNonce((value) => value + 1);
-          }
-          if (message.type === 'event') {
-            if (message.snapshot) acceptSnapshot(message.snapshot);
-            queueEvent(message);
-          }
-        } catch {
-          scheduleResync();
-        }
-      };
-      candidate.onclose = () => {
-        if (socket !== candidate) return;
-        socket = undefined;
-        if (authoritativeSocketServerId.current === candidateServerId)
-          authoritativeSocketServerId.current = undefined;
-        scheduleReconnect();
-      };
-      candidate.onerror = () => candidate.close();
+    const handleReplayGap = async () => {
+      setError('Live replay window expired; resynchronizing…');
+      await refresh();
+      setResyncNonce((value) => value + 1);
+      retryDelay = RECONNECT_MIN_MS;
     };
-    // Delay initial connection by one task so React Strict Mode can complete its
-    // development-only mount/unmount probe without closing a CONNECTING socket.
+    const acceptRecord = (record: DashboardStreamMessage): void => {
+      if (record.cursor <= acceptedCursor.current) return;
+      if (record.cursor > acceptedCursor.current + 1) {
+        throw new ReplayGapError();
+      }
+      if ('type' in record && record.type === 'snapshot') {
+        acceptSnapshot(record.snapshot);
+        return;
+      }
+      acceptedCursor.current = record.cursor;
+      if (record.snapshot) acceptSnapshot(record.snapshot);
+      setEvents((current) =>
+        [...current, record as DashboardLiveEvent].slice(
+          -LIVE_EVENT_BUFFER_LIMIT,
+        ),
+      );
+    };
+    const connect = async (): Promise<void> => {
+      if (stopped || connecting || !dashboardToken()) return;
+      connecting = true;
+      setConnectionState('connecting');
+      controller = new AbortController();
+      let continueImmediately = false;
+      try {
+        const record = await fetchNextSseRecord(
+          acceptedCursor.current,
+          controller.signal,
+        );
+        if (stopped) return;
+        acceptRecord(record);
+        setConnectionState('connected');
+        setError(undefined);
+        retryDelay = RECONNECT_MIN_MS;
+        // A response carries one record; reconnect immediately to preserve a
+        // simple bounded read and make each request's cursor explicit.
+        continueImmediately = true;
+      } catch (cause) {
+        if (
+          stopped ||
+          (cause instanceof DOMException && cause.name === 'AbortError')
+        )
+          return;
+        if (cause instanceof ReplayGapError) await handleReplayGap();
+        scheduleReconnect();
+      } finally {
+        connecting = false;
+        controller = undefined;
+        if (continueImmediately && !stopped) void connect();
+      }
+    };
     const reconnectNow = () => {
       if (stopped || !navigator.onLine) return;
-      retryDelay = RECONNECT_MIN_MS;
-      if (timer !== undefined) {
-        window.clearTimeout(timer);
-        timer = undefined;
+      if (reconnectTimer !== undefined) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = undefined;
       }
-      if (!socket) connect();
-    };
-    const refreshVisible = () => {
-      if (stopped || document.visibilityState !== 'visible') return;
-      // Session transcripts are fetched separately from snapshots. Foreground
-      // transitions reconcile any deltas missed while the page was suspended.
-      setReconnectNonce((value) => value + 1);
-      reconnectNow();
+      retryDelay = RECONNECT_MIN_MS;
+      if (!connecting) void connect();
     };
     const pauseOffline = () => {
-      if (timer !== undefined) {
-        window.clearTimeout(timer);
-        timer = undefined;
+      if (reconnectTimer !== undefined) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = undefined;
       }
+      controller?.abort();
     };
+    const refreshVisible = () => {
+      if (document.visibilityState === 'visible') reconnectNow();
+    };
+    void refresh();
+    void refreshUsage();
     window.addEventListener('online', reconnectNow);
     window.addEventListener('offline', pauseOffline);
     document.addEventListener('visibilitychange', refreshVisible);
-    connectTimer = window.setTimeout(connect, 0);
+    connectTimer = window.setTimeout(() => void connect(), 0);
     return () => {
+      stopped = true;
       window.removeEventListener('online', reconnectNow);
       window.removeEventListener('offline', pauseOffline);
       document.removeEventListener('visibilitychange', refreshVisible);
-      stopped = true;
-      if (timer) window.clearTimeout(timer);
-      if (connectTimer) window.clearTimeout(connectTimer);
-      if (resyncTimer) window.clearTimeout(resyncTimer);
-      if (eventFlushTimer) window.clearTimeout(eventFlushTimer);
-      pendingEvents = [];
-      const activeSocket = socket;
-      socket = undefined;
-      authoritativeSocketServerId.current = undefined;
-      if (activeSocket) {
-        activeSocket.onmessage = null;
-        activeSocket.onerror = null;
-        activeSocket.onclose = null;
-        if (activeSocket.readyState === WebSocket.CONNECTING)
-          activeSocket.onopen = () => activeSocket.close();
-        else activeSocket.close();
-      }
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+      if (connectTimer !== undefined) window.clearTimeout(connectTimer);
+      controller?.abort();
     };
   }, [acceptSnapshot, refresh, refreshUsage]);
 
@@ -476,8 +433,8 @@ export function useDashboard(): DashboardState {
     usageError,
     refresh,
     events,
-    eventGeneration,
-    reconnectNonce,
+    cursor: acceptedCursor.current,
+    resyncNonce,
     connectionState,
   };
 }

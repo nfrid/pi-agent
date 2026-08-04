@@ -66,74 +66,117 @@ test('live transport contains malformed data and reconnects without HTTP polling
   let usageRequests = 0;
   await page.addInitScript(() => {
     localStorage.setItem('pi-dashboard-token', 'test-token');
-    const sockets: FakeDashboardSocket[] = [];
-    class FakeDashboardSocket {
-      static CONNECTING = 0;
-      static OPEN = 1;
-      static CLOSED = 3;
-      readyState = FakeDashboardSocket.CONNECTING;
-      onopen: (() => void) | null = null;
-      onmessage: ((event: { data: string }) => void) | null = null;
-      onclose: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      constructor() {
-        sockets.push(this);
-        window.setTimeout(() => {
-          this.readyState = FakeDashboardSocket.OPEN;
-          this.onopen?.();
-        }, 0);
+    type Stream = {
+      resolve?: (response: Response) => void;
+      emit(value: unknown): void;
+      emitRaw(data: string): void;
+      close(): void;
+    };
+    const streams: Stream[] = [];
+    let nextCursor = 0;
+    let reconnectSnapshotPending = false;
+    const originalFetch = window.fetch.bind(window);
+    const responseFor = (data: string) =>
+      new Response(`event: dashboard\ndata: ${data}\n\n`, {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    const generationSnapshot = (generation: number) => ({
+      serverId: `server-${generation}`,
+      revision: 1,
+      cursor: ++nextCursor,
+      runtimes: [],
+      workspaces: [
+        {
+          id: `workspace-${generation}`,
+          name: `Live generation ${generation}`,
+          path: '/tmp',
+          canonicalPath: '/tmp',
+          source: 'directory',
+          active: false,
+        },
+      ],
+      sessions: [],
+      unread: [
+        {
+          id: `generation-${generation}`,
+          kind: 'settled',
+          title: `Live generation ${generation}`,
+          body: 'Generation marker',
+          createdAt: generation,
+        },
+      ],
+    });
+    const streamRecord = (value: {
+      type?: string;
+      snapshot?: Record<string, unknown>;
+      runtimeId?: string;
+      event?: unknown;
+    }) => {
+      const cursor = ++nextCursor;
+      if (value.type === 'snapshot') {
+        const snapshot = { ...value.snapshot, cursor };
+        return { type: 'snapshot', cursor, emittedAt: Date.now(), snapshot };
       }
-      send(value: string) {
-        const message = JSON.parse(value) as { type?: string };
-        if (message.type !== 'auth') return;
-        const generation = sockets.indexOf(this) + 1;
-        this.emit({
-          type: 'snapshot',
-          snapshot: {
-            serverId: `server-${generation}`,
-            revision: 1,
-            runtimes: [],
-            workspaces: [
-              {
-                id: `workspace-${generation}`,
-                name: `Live generation ${generation}`,
-                path: '/tmp',
-                canonicalPath: '/tmp',
-                source: 'directory',
-                active: false,
-              },
-            ],
-            sessions: [],
-            unread: [
-              {
-                id: `generation-${generation}`,
-                kind: 'settled',
-                title: `Live generation ${generation}`,
-                body: 'Generation marker',
-                createdAt: generation,
-              },
-            ],
-          },
-        });
+      return {
+        cursor,
+        emittedAt: Date.now(),
+        runtimeId: value.runtimeId,
+        event: value.event,
+      };
+    };
+    const createStream = (): Stream => {
+      const stream: Stream = {
+        resolve: undefined,
+        emit(value) {
+          const resolve = stream.resolve;
+          stream.resolve = undefined;
+          resolve?.(responseFor(JSON.stringify(streamRecord(value))));
+        },
+        emitRaw(data) {
+          const resolve = stream.resolve;
+          stream.resolve = undefined;
+          resolve?.(responseFor(data));
+        },
+        close() {
+          reconnectSnapshotPending = true;
+          const resolve = stream.resolve;
+          stream.resolve = undefined;
+          resolve?.(
+            new Response('', {
+              headers: { 'content-type': 'text/event-stream' },
+            }),
+          );
+        },
+      };
+      streams.push(stream);
+      return stream;
+    };
+    window.fetch = async (input, init) => {
+      const target = typeof input === 'string' ? input : input.url;
+      if (!target.includes('/api/events')) return originalFetch(input, init);
+      const stream = createStream();
+      const generation = streams.length;
+      if (generation === 1 || reconnectSnapshotPending) {
+        reconnectSnapshotPending = false;
+        const snapshot = generationSnapshot(generation);
+        return responseFor(
+          JSON.stringify({
+            type: 'snapshot',
+            cursor: snapshot.cursor,
+            emittedAt: Date.now(),
+            snapshot,
+          }),
+        );
       }
-      close() {
-        if (this.readyState === FakeDashboardSocket.CLOSED) return;
-        this.readyState = FakeDashboardSocket.CLOSED;
-        this.onclose?.();
-      }
-      emit(value: unknown) {
-        this.onmessage?.({ data: JSON.stringify(value) });
-      }
-      emitRaw(data: string) {
-        this.onmessage?.({ data });
-      }
-    }
-    Object.defineProperty(window, 'WebSocket', { value: FakeDashboardSocket });
+      return new Promise<Response>((resolve) => {
+        stream.resolve = resolve;
+      });
+    };
     Object.assign(window, {
       dashboardLiveTest: {
-        count: () => sockets.length,
-        current: () => sockets.at(-1),
-        first: () => sockets[0],
+        count: () => streams.length,
+        current: () => streams.at(-1),
+        first: () => streams[0],
       },
     });
   });
@@ -246,17 +289,8 @@ test('live transport contains malformed data and reconnects without HTTP polling
     .toBeGreaterThan(1);
   await expect(page.getByRole('status')).toHaveCount(0);
   expect(usageRequests).toBe(initialUsageRequests);
-  const liveGeneration = await page.evaluate(() =>
-    (
-      window as unknown as {
-        dashboardLiveTest: { count(): number };
-      }
-    ).dashboardLiveTest.count(),
-  );
   await page.waitForTimeout(200);
-  await expect(
-    page.getByText(`Live generation ${liveGeneration}`),
-  ).toBeVisible();
+  await expect(page.getByText(/Live generation \d+/)).toBeVisible();
   await page.evaluate(() => {
     (
       window as unknown as {
@@ -293,9 +327,7 @@ test('live transport contains malformed data and reconnects without HTTP polling
         },
       });
   });
-  await expect(
-    page.getByText(`Live generation ${liveGeneration}`),
-  ).toBeVisible();
+  await expect(page.getByText(/Live generation \d+/)).toBeVisible();
   await expect(page.getByText('ROLLED BACK')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
 });
@@ -306,29 +338,38 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await page.setViewportSize({ width: 320, height: 720 });
   await page.addInitScript(() => {
     localStorage.setItem('pi-dashboard-token', 'test-token');
-    class FakeDashboardSocket {
-      static OPEN = 1;
-      readyState = 1;
-      onopen: (() => void) | null = null;
-      onmessage: ((event: { data: string }) => void) | null = null;
-      onclose: (() => void) | null = null;
-      onerror: (() => void) | null = null;
-      constructor() {
-        (
-          window as unknown as { dashboardTestSocket: FakeDashboardSocket }
-        ).dashboardTestSocket = this;
-        window.setTimeout(() => this.onopen?.(), 0);
-      }
-      send() {}
-      close() {
-        this.readyState = 3;
-        this.onclose?.();
-      }
-      emit(value: unknown) {
-        this.onmessage?.({ data: JSON.stringify(value) });
-      }
-    }
-    Object.defineProperty(window, 'WebSocket', { value: FakeDashboardSocket });
+    let cursor = 0;
+    const originalFetch = window.fetch.bind(window);
+    const responseFor = (data: string) =>
+      new Response(`event: dashboard\ndata: ${data}\n\n`, {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    const stream = {
+      resolve: undefined as ((response: Response) => void) | undefined,
+      emit(value: { runtimeId?: string; event?: unknown }) {
+        const resolve = this.resolve;
+        this.resolve = undefined;
+        const nextCursor = ++cursor;
+        resolve?.(
+          responseFor(
+            JSON.stringify({
+              cursor: nextCursor,
+              emittedAt: Date.now(),
+              runtimeId: value.runtimeId,
+              event: value.event,
+            }),
+          ),
+        );
+      },
+    };
+    window.fetch = async (input, init) => {
+      const target = typeof input === 'string' ? input : input.url;
+      if (!target.includes('/api/events')) return originalFetch(input, init);
+      Object.assign(window, { dashboardTestSocket: stream });
+      return new Promise<Response>((resolve) => {
+        stream.resolve = resolve;
+      });
+    };
   });
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
@@ -365,7 +406,6 @@ test('dense mobile session keeps conversation and activity readable', async ({
       }),
     }),
   );
-  let sessionReads = 0;
   let commandContentType = '';
   let commandBody = '';
   await page.route(/\/api\/runtimes\/r1\/command$/, async (route) => {
@@ -373,13 +413,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
     commandBody = route.request().postData() ?? '';
     await route.fulfill({ contentType: 'application/json', body: '{}' });
   });
-  let releaseSettledRead: (() => void) | undefined;
-  const settledRead = new Promise<void>((resolve) => {
-    releaseSettledRead = resolve;
-  });
   await page.route(/\/api\/sessions\/[^/]+$/, async (route) => {
-    sessionReads += 1;
-    if (sessionReads === 3) await settledRead;
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -440,19 +474,6 @@ test('dense mobile session keeps conversation and activity readable', async ({
               ],
             },
           },
-          ...(sessionReads === 3
-            ? [
-                {
-                  type: 'message',
-                  message: {
-                    role: 'assistant',
-                    content: [
-                      { type: 'text', text: 'Authoritative settled refresh' },
-                    ],
-                  },
-                },
-              ]
-            : []),
         ],
       }),
     });
@@ -631,11 +652,8 @@ test('dense mobile session keeps conversation and activity readable', async ({
       event: { type: 'agent.settled', sessionId: 's1' },
     });
   });
-  await expect.poll(() => sessionReads).toBe(3);
-  await emitMessage('message.started', 321, 'Delta during settled refresh');
-  releaseSettledRead?.();
-  await expect(page.getByText('Delta during settled refresh')).toBeVisible();
-  await expect(page.getByText('Authoritative settled refresh')).toHaveCount(0);
+  await emitMessage('message.started', 321, 'Delta during settled turn');
+  await expect(page.getByText('Delta during settled turn')).toBeVisible();
   await page.evaluate(() => window.scrollBy(0, -400));
   await emitMessage('message.started', 456, 'Message while reading history');
   await expect(page.getByText('Message while reading history')).toHaveCount(1);

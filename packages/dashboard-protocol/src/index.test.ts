@@ -4,6 +4,7 @@ import {
   isBridgeEvent,
   MAX_FRAME_BYTES,
   parseDashboardEventEnvelope,
+  parseDashboardStreamMessage,
   parseFrame,
   parseNormalizedMessagePayload,
   redactImageData,
@@ -253,6 +254,14 @@ describe('dashboard protocol', () => {
         },
       }).cursor,
     ).toBe(1);
+    expect(
+      parseDashboardStreamMessage({
+        cursor: 2,
+        emittedAt: 101,
+        runtimeId: 'runtime-1',
+        event: { type: 'agent.settled', sessionId: 'session-1' },
+      }).cursor,
+    ).toBe(2);
   });
 
   it('validates structured launch requests', () => {

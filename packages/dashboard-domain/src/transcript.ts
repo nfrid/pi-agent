@@ -471,6 +471,7 @@ function persistedTimestamp(
 export function hydrateTranscript(
   entries: readonly unknown[],
   sessionId?: string,
+  options: { cursor?: number; runtimeEpoch?: string; runtimeSeq?: number } = {},
 ): TranscriptProjection {
   let projection = createTranscriptProjection(sessionId);
   const items = copyItems(projection);
@@ -611,7 +612,18 @@ export function hydrateTranscript(
     items[id] = { kind: 'other', id, raw };
     if (!order.includes(id)) order.push(id);
   });
-  projection = { ...projection, order, items };
+  projection = {
+    ...projection,
+    order,
+    items,
+    ...(options.cursor === undefined ? {} : { lastCursor: options.cursor }),
+    ...(options.runtimeEpoch === undefined
+      ? {}
+      : { runtimeEpoch: options.runtimeEpoch }),
+    ...(options.runtimeSeq === undefined
+      ? {}
+      : { lastRuntimeSeq: options.runtimeSeq }),
+  };
   return projection;
 }
 export const hydrateTranscriptProjection = hydrateTranscript;

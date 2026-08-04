@@ -11,6 +11,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { URL } from 'node:url';
 import {
+  type BridgeEvent,
   type BrowserSnapshot,
   type NotificationEvent,
   redactImageData,
@@ -20,6 +21,10 @@ import {
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { type WebSocket, WebSocketServer } from 'ws';
+import {
+  DashboardEventStream,
+  type DashboardEventStreamRecord,
+} from './event-stream.js';
 import { MetadataStore } from './metadata.js';
 import { createPushSender, type PushSender } from './push.js';
 import { RuntimeManager } from './runtime-manager.js';
@@ -39,7 +44,10 @@ const MAX_WS_BUFFER = 1024 * 1024;
 const MAX_USAGE_BYTES = 256 * 1024;
 const USAGE_CACHE_MS = 30_000;
 const WS_HEARTBEAT_MS = 30_000;
+const SSE_HEARTBEAT_MS = 15_000;
+const SSE_BUFFER_BYTES = 1024 * 1024;
 const WS_PATH = '/ws';
+const SSE_PATH = '/api/events';
 
 function loadOrCreateToken(stateDir: string): string {
   const file = path.join(stateDir, 'browser-token');
@@ -210,6 +218,10 @@ export interface DashboardServerOptions {
   registry?: RuntimeRegistry;
   usage?: UsageProvider;
   push?: PushSender;
+  /** Maximum number of daemon events retained for SSE replay. */
+  eventBufferSize?: number;
+  sseHeartbeatMs?: number;
+  sseBufferBytes?: number;
 }
 
 export interface DashboardServer {
@@ -242,6 +254,9 @@ class DashboardServerImpl implements DashboardServer {
   private readonly pushConfigured: boolean;
   private readonly http: http.Server;
   private readonly bridge: net.Server;
+  private readonly eventStream: DashboardEventStream;
+  private readonly sseHeartbeatMs: number;
+  private readonly sseBufferBytes: number;
   private readonly wss = new WebSocketServer({
     noServer: true,
     maxPayload: 2048,
@@ -295,6 +310,9 @@ class DashboardServerImpl implements DashboardServer {
     this.sesh = options.sesh ?? new CliSeshAdapter();
     this.tmux = options.tmux ?? new TmuxAdapter();
     this.usage = options.usage ?? new CodexUsageProvider();
+    this.eventStream = new DashboardEventStream(options.eventBufferSize ?? 256);
+    this.sseHeartbeatMs = options.sseHeartbeatMs ?? SSE_HEARTBEAT_MS;
+    this.sseBufferBytes = options.sseBufferBytes ?? SSE_BUFFER_BYTES;
     this.pushConfigured = Boolean(options.push);
     this.push = options.push ?? {
       async notify() {
@@ -432,6 +450,7 @@ class DashboardServerImpl implements DashboardServer {
     if (this.sessionPublishTimer) clearTimeout(this.sessionPublishTimer);
     this.sessionPublishTimer = undefined;
     this.sessions.close();
+    this.eventStream.close();
     this.registry.close();
     for (const client of this.wss.clients) {
       try {
@@ -447,7 +466,7 @@ class DashboardServerImpl implements DashboardServer {
     this.metadata.close();
   }
 
-  snapshot(): BrowserSnapshot {
+  snapshot(cursor = this.eventStream.cursor): BrowserSnapshot {
     const liveRuntimes = this.registry.snapshots();
     const activeSessions = new Map(
       liveRuntimes
@@ -457,6 +476,7 @@ class DashboardServerImpl implements DashboardServer {
     return {
       serverId: this.serverId,
       revision: this.revision,
+      cursor,
       // Transcripts are served by the session endpoint and reconciled from
       // typed bridge events. Repeating them in every dashboard snapshot makes
       // live transport and browser state grow with the conversation.
@@ -528,6 +548,8 @@ class DashboardServerImpl implements DashboardServer {
     if (!auth.ok)
       return this.json(response, auth.status, { error: auth.error });
     try {
+      if (request.method === 'GET' && url.pathname === SSE_PATH)
+        return this.handleSse(request, response, url);
       if (request.method === 'GET' && url.pathname === '/api/snapshot')
         return this.json(response, 200, this.snapshot());
       if (
@@ -821,9 +843,11 @@ class DashboardServerImpl implements DashboardServer {
       .find((item) => item.session.id === id && item.online !== false);
     try {
       const result = await this.sessions.readEntries(id);
-      if (!runtime) return this.json(response, 200, result);
+      const cursor = this.eventStream.cursor;
+      if (!runtime) return this.json(response, 200, { ...result, cursor });
       return this.json(response, 200, {
         ...result,
+        cursor,
         metadata: {
           ...result.metadata,
           ...(runtime.session.name !== undefined
@@ -838,6 +862,7 @@ class DashboardServerImpl implements DashboardServer {
     } catch (error) {
       if (!runtime) throw error;
       return this.json(response, 200, {
+        cursor: this.eventStream.cursor,
         metadata: {
           id,
           file: runtime.session.file ?? '',
@@ -912,6 +937,116 @@ class DashboardServerImpl implements DashboardServer {
       updatedAt: now,
     });
     return this.json(response, 201, { ok: true });
+  }
+
+  private handleSse(
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+    url: URL,
+  ): void {
+    const rawCursor =
+      url.searchParams.get('cursor') ??
+      (typeof request.headers['last-event-id'] === 'string'
+        ? request.headers['last-event-id']
+        : undefined);
+    const requestedCursor =
+      rawCursor === undefined || rawCursor === ''
+        ? this.eventStream.cursor
+        : /^\d+$/u.test(rawCursor) && Number.isSafeInteger(Number(rawCursor))
+          ? Number(rawCursor)
+          : undefined;
+    if (requestedCursor === undefined) {
+      this.json(response, 400, {
+        error: 'Invalid event cursor.',
+        code: 'invalid-cursor',
+      });
+      return;
+    }
+    const replay = this.eventStream.replayAfter(requestedCursor);
+    if (replay.gap) {
+      this.json(response, 409, {
+        error: 'The requested event cursor is no longer available.',
+        code: 'replay-gap',
+        cursor: replay.currentCursor,
+        oldestCursor: replay.oldestCursor,
+      });
+      return;
+    }
+
+    response.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-store',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
+    response.flushHeaders?.();
+    let closed = false;
+    let replaying = true;
+    const queued: DashboardEventStreamRecord[] = [];
+    let unsubscribe: () => void = () => undefined;
+    let heartbeat: NodeJS.Timeout | undefined;
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      unsubscribe();
+      if (heartbeat) clearInterval(heartbeat);
+    };
+    const closeSlowClient = () => {
+      cleanup();
+      if (!response.writableEnded) response.destroy();
+    };
+    const writeRaw = (value: string): boolean => {
+      if (closed || response.writableEnded) return false;
+      const bytes = Buffer.byteLength(value);
+      if (
+        bytes > this.sseBufferBytes ||
+        response.writableLength + bytes > this.sseBufferBytes
+      ) {
+        closeSlowClient();
+        return false;
+      }
+      try {
+        if (!response.write(value)) {
+          closeSlowClient();
+          return false;
+        }
+        return true;
+      } catch {
+        closeSlowClient();
+        return false;
+      }
+    };
+    const writeRecord = (record: DashboardEventStreamRecord): boolean => {
+      const text = JSON.stringify(record);
+      return writeRaw(
+        `id: ${record.cursor}\nevent: dashboard\ndata: ${text}\n\n`,
+      );
+    };
+    const writeHeartbeat = () => writeRaw(': heartbeat\n\n');
+    const onRecord = (record: DashboardEventStreamRecord) => {
+      if (replaying) {
+        if (queued.length >= 256) return closeSlowClient();
+        queued.push(record);
+        return;
+      }
+      writeRecord(record);
+    };
+    unsubscribe = this.eventStream.subscribe(onRecord);
+    response.once('close', cleanup);
+    request.once('aborted', cleanup);
+    if (!writeHeartbeat()) return;
+    for (const record of replay.events) {
+      if (!writeRecord(record)) return;
+    }
+    replaying = false;
+    for (const record of queued) {
+      if (!writeRecord(record)) return;
+    }
+    heartbeat = setInterval(
+      writeHeartbeat,
+      Math.max(1_000, this.sseHeartbeatMs),
+    );
+    heartbeat.unref?.();
   }
 
   private handleUpgrade(
@@ -1076,6 +1211,12 @@ class DashboardServerImpl implements DashboardServer {
             type: 'event',
             event: change.event,
             runtimeId: change.runtimeId,
+            ...(change.runtimeEpoch === undefined
+              ? {}
+              : { runtimeEpoch: change.runtimeEpoch }),
+            ...(change.runtimeSeq === undefined
+              ? {}
+              : { runtimeSeq: change.runtimeSeq }),
             ...(isTranscriptEvent(change) ? {} : { snapshot: change.snapshot }),
           }
         : { type: 'snapshot', snapshot: this.snapshot() },
@@ -1084,26 +1225,61 @@ class DashboardServerImpl implements DashboardServer {
 
   private changed(message?: unknown): void {
     this.revision += 1;
-    if (!message) {
-      this.publish({ type: 'snapshot', snapshot: this.snapshot() });
-      return;
-    }
-    if (message && typeof message === 'object' && !Array.isArray(message)) {
-      const record = message as Record<string, unknown>;
-      this.publish({
+    const record =
+      message && typeof message === 'object' && !Array.isArray(message)
+        ? (message as Record<string, unknown>)
+        : undefined;
+    if (record?.type === 'event' && record.event) {
+      const includeSnapshot =
+        record.snapshot !== undefined && typeof record.snapshot === 'object';
+      let streamRecord: DashboardEventStreamRecord;
+      try {
+        streamRecord = this.eventStream.publish((cursor, emittedAt) => ({
+          cursor,
+          emittedAt,
+          event: record.event as BridgeEvent,
+          ...(record.runtimeId === undefined
+            ? {}
+            : { runtimeId: record.runtimeId as string }),
+          ...(record.runtimeEpoch === undefined
+            ? {}
+            : { runtimeEpoch: record.runtimeEpoch as string }),
+          ...(record.runtimeSeq === undefined
+            ? {}
+            : { runtimeSeq: record.runtimeSeq as number }),
+          ...(record.sessionId === undefined
+            ? {}
+            : { sessionId: record.sessionId as string }),
+          ...(includeSnapshot ? { snapshot: this.snapshot(cursor) } : {}),
+        }));
+      } catch {
+        // A malformed optional provider payload must not escape a runtime
+        // callback and take down the daemon.
+        return;
+      }
+      this.publishLegacy({
         ...record,
         serverId: this.serverId,
         revision: this.revision,
-        ...(record.snapshot && typeof record.snapshot === 'object'
-          ? { snapshot: this.snapshot() }
+        ...(includeSnapshot
+          ? { snapshot: this.snapshot(streamRecord.cursor) }
           : {}),
       });
       return;
     }
-    this.publish(message);
+    const streamRecord = this.eventStream.publish((cursor, emittedAt) => ({
+      type: 'snapshot',
+      cursor,
+      emittedAt,
+      snapshot: this.snapshot(cursor),
+    }));
+    this.publishLegacy({
+      type: 'snapshot',
+      snapshot: this.snapshot(streamRecord.cursor),
+    });
   }
 
-  private publish(message: unknown): void {
+  private publishLegacy(message: unknown): void {
     let text: string;
     try {
       text = JSON.stringify(message);
