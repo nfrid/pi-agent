@@ -1325,6 +1325,7 @@ function phase6Entries() {
       message: {
         role: 'user',
         content: [{ type: 'text', text: `Earlier history ${index + 1}` }],
+        timestamp: Date.UTC(2026, 7, 5, 18, index),
       },
     })),
     {
@@ -1780,6 +1781,47 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   );
   await expect(dockMarker).toHaveCount(1);
   await expect(dockMarker).toHaveAttribute('aria-label', 'Earlier history 1');
+  const supportsOutlineHover = await page.evaluate(
+    () => window.matchMedia('(pointer: fine) and (min-width: 821px)').matches,
+  );
+  if (supportsOutlineHover) {
+    await dockMarker.hover();
+    const outlinePreview = dockMarker.locator('.transcript-minimap-preview');
+    await expect(outlinePreview).toBeVisible();
+    await expect(outlinePreview).toHaveAttribute(
+      'data-meta',
+      /User message · .+/u,
+    );
+    await expect(outlinePreview).toHaveAttribute(
+      'data-label',
+      'Earlier history 1',
+    );
+    const outlineGeometry = await dockMarker.evaluate((marker) => {
+      const preview = marker.querySelector<HTMLElement>(
+        '.transcript-minimap-preview',
+      );
+      const markerBox = marker.getBoundingClientRect();
+      return {
+        markerWidth: markerBox.width,
+        previewDoesNotCapturePointer: preview
+          ? getComputedStyle(preview).pointerEvents === 'none'
+          : false,
+        stackLevel: Number(
+          getComputedStyle(marker.closest('.transcript-minimap') as Element)
+            .zIndex,
+        ),
+        wraps: preview
+          ? getComputedStyle(preview).whiteSpace === 'normal'
+          : false,
+      };
+    });
+    expect(outlineGeometry).toMatchObject({
+      markerWidth: 64,
+      previewDoesNotCapturePointer: true,
+      stackLevel: 30,
+      wraps: true,
+    });
+  }
 
   await page.evaluate(() =>
     window.scrollTo(0, document.documentElement.scrollHeight),
@@ -1820,7 +1862,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await page.mouse.wheel(0, -100_000);
   await page.waitForTimeout(150);
   await expect(
-    page.getByText('Earlier history 1', { exact: true }),
+    page.getByRole('paragraph').filter({ hasText: /^Earlier history 1$/u }),
   ).toBeVisible();
   await mocks.emit({
     runtimeId: 'r1',

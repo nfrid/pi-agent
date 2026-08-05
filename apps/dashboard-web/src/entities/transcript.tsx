@@ -88,15 +88,57 @@ export type TranscriptLandmark = {
   label: string;
   kind: 'user' | 'assistant' | 'activity';
   itemIndex: number;
+  timestamp?: number | string;
 };
 
 function landmarkLabel(item: TranscriptModelItem, fallback: string): string {
   const text = item.text?.replace(/\s+/gu, ' ').trim();
-  if (text) return text.length > 72 ? `${text.slice(0, 71)}…` : text;
+  if (text) return text.length > 240 ? `${text.slice(0, 239)}…` : text;
   if (item.preparing) return 'Preparing activity';
   if (item.entry.kind === 'assistant' && item.entry.title)
     return item.entry.title;
   return fallback;
+}
+
+function landmarkTimestamp(
+  item: TranscriptModelItem,
+): number | string | undefined {
+  const raw =
+    item.raw && typeof item.raw === 'object'
+      ? (item.raw as Record<string, unknown>)
+      : undefined;
+  const message =
+    raw?.message && typeof raw.message === 'object'
+      ? (raw.message as Record<string, unknown>)
+      : undefined;
+  const timestamp = message?.timestamp ?? raw?.timestamp;
+  return typeof timestamp === 'number' || typeof timestamp === 'string'
+    ? timestamp
+    : undefined;
+}
+
+function landmarkType(kind: TranscriptLandmark['kind']): string {
+  if (kind === 'user') return 'User message';
+  if (kind === 'assistant') return 'Assistant update';
+  return 'Agent activity';
+}
+
+function landmarkTime(
+  timestamp: number | string | undefined,
+): string | undefined {
+  if (timestamp === undefined) return undefined;
+  const numeric =
+    typeof timestamp === 'string' && /^\d+$/u.test(timestamp)
+      ? Number(timestamp)
+      : timestamp;
+  const date = new Date(numeric);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
 }
 
 export function buildTranscriptLandmarks(
@@ -115,6 +157,9 @@ export function buildTranscriptLandmarks(
         label: group.title,
         kind: 'activity',
         itemIndex: index,
+        ...(landmarkTimestamp(item) === undefined
+          ? {}
+          : { timestamp: landmarkTimestamp(item) }),
       });
       continue;
     }
@@ -124,6 +169,9 @@ export function buildTranscriptLandmarks(
         label: landmarkLabel(item, 'User turn'),
         kind: 'user',
         itemIndex: index,
+        ...(landmarkTimestamp(item) === undefined
+          ? {}
+          : { timestamp: landmarkTimestamp(item) }),
       });
     else if (
       item.role === 'assistant' &&
@@ -135,6 +183,9 @@ export function buildTranscriptLandmarks(
         label: landmarkLabel(item, 'Assistant activity'),
         kind: 'assistant',
         itemIndex: index,
+        ...(landmarkTimestamp(item) === undefined
+          ? {}
+          : { timestamp: landmarkTimestamp(item) }),
       });
   }
   return result;
@@ -255,6 +306,12 @@ export function TranscriptOutline({
             data-preview={landmark.label}
             onClick={() => onJump(landmark)}
           >
+            <span
+              className="transcript-minimap-preview"
+              data-label={landmark.label}
+              data-meta={`${landmarkType(landmark.kind)}${landmarkTime(landmark.timestamp) ? ` · ${landmarkTime(landmark.timestamp)}` : ''}`}
+              aria-hidden="true"
+            />
             <i aria-hidden="true" />
           </button>
         ))}
