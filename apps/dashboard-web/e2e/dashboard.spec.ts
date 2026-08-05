@@ -742,6 +742,9 @@ test('dense mobile session keeps conversation and activity readable', async ({
   ).toBeLessThanOrEqual(12);
   await activity.click();
   await expect(page.locator('.tool-chip').getByText('read')).toBeVisible();
+  await expect(
+    page.getByText('read src/App.tsx', { exact: true }),
+  ).toBeVisible();
   await activity.click();
   const emitAssistant = async (content: unknown[]) =>
     page.evaluate((assistantContent) => {
