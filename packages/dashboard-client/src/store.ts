@@ -1,7 +1,9 @@
 import {
+  applyRuntimeEvent,
+  applyTransportOrdering,
   createRuntimeReducerState,
   hydrateTranscript,
-  reduceRuntimeEvent,
+  type RuntimeReducerState,
   reduceTranscriptEvent,
   type TranscriptProjection,
 } from '@pi-dashboard/domain';
@@ -152,6 +154,8 @@ export class DashboardLiveStore {
   private state: DashboardLiveState = emptyState();
   private listeners = new Set<() => void>();
   private generation = 0;
+  /** Runtime snapshots omit transport metadata; retain it outside the wire model. */
+  private runtimeReducerStates = new Map<string, RuntimeReducerState>();
   private stream?: DashboardEventStream;
 
   getGeneration(): number {
@@ -315,6 +319,7 @@ export class DashboardLiveStore {
     if (!decision.accepted) return false;
     if (decision.reset) {
       this.generation += 1;
+      this.runtimeReducerStates.clear();
       const resetState = this.installSnapshotProjection(
         {
           ...emptyState(),
@@ -429,22 +434,32 @@ export class DashboardLiveStore {
           );
       }
     }
-    if (!envelope.snapshot && envelope.runtimeId) {
+    if (envelope.runtimeId) {
       const currentRuntime = nextState.runtimesById[envelope.runtimeId];
       if (currentRuntime) {
-        const nextRuntime = reduceRuntimeEvent(
-          createRuntimeReducerState(currentRuntime, {
-            runtimeEpoch: envelope.runtimeEpoch,
-            runtimeSeq:
-              envelope.runtimeSeq === undefined
-                ? undefined
-                : envelope.runtimeSeq - 1,
-            cursor: priorCursor,
-          }),
-          envelope,
-        ).snapshot;
-        if (nextRuntime !== currentRuntime)
-          nextState = this.installRuntimeProjection(nextState, nextRuntime);
+        const priorRuntimeState = this.runtimeReducerStates.get(
+          envelope.runtimeId,
+        );
+        const runtimeState = priorRuntimeState
+          ? { ...priorRuntimeState, snapshot: currentRuntime }
+          : createRuntimeReducerState(currentRuntime);
+        if (envelope.snapshot) {
+          // The browser snapshot already includes this runtime event. Advance
+          // transport metadata without reducing the event a second time.
+          const ordering = applyTransportOrdering(runtimeState, envelope);
+          this.runtimeReducerStates.set(envelope.runtimeId, {
+            snapshot: currentRuntime,
+            ...ordering.state,
+          });
+        } else {
+          const reduced = applyRuntimeEvent(runtimeState, envelope);
+          this.runtimeReducerStates.set(envelope.runtimeId, reduced.state);
+          if (reduced.state.snapshot !== currentRuntime)
+            nextState = this.installRuntimeProjection(
+              nextState,
+              reduced.state.snapshot,
+            );
+        }
       }
     }
     let sessionChangeById = nextState.sessionChangeById;
