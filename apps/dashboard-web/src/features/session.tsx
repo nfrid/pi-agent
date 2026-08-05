@@ -14,7 +14,6 @@ import {
   stopRuntimeMutationOptions,
   useDashboardStore,
 } from '@pi-dashboard/client';
-import { selectLegacyTranscriptEntries } from '@pi-dashboard/domain';
 import type {
   BrowserSnapshot,
   InteractionChoice,
@@ -197,10 +196,7 @@ export function SessionView({
           Runtime failure: {runtimeError}
         </div>
       )}
-      <Transcript
-        entries={selectLegacyTranscriptEntries(projection)}
-        runtime={runtime}
-      />
+      <Transcript projection={projection} runtime={runtime} />
       <div className="session-control-layer">
         <ExtensionSurfaceStack runtime={runtime} />
         <ExtensionSurfaceStack runtime={runtime} placement="composer" />

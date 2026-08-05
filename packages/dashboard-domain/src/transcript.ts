@@ -62,6 +62,63 @@ export interface TranscriptProjection {
   retiredEpochs: readonly string[];
 }
 
+/** Tool outcome names consumed by the shared activity model. */
+export type TranscriptActivityToolStatus =
+  | 'pending'
+  | 'running'
+  | 'success'
+  | 'error';
+
+/**
+ * Canonical transcript-to-render projection.  The web renderer should consume
+ * this shape rather than rediscovering identities, tool pairing, or lifecycle
+ * state from compatibility entries.
+ */
+export interface TranscriptRenderMessageItem {
+  kind: 'message';
+  key: string;
+  messageId: string;
+  role: string;
+  content: unknown;
+  timestamp?: number | string;
+  turnId?: string;
+  toolCallIds: readonly string[];
+  associatedToolCallIds: readonly string[];
+  status: TranscriptMessageItem['status'];
+  streaming: boolean;
+  preparing: boolean;
+}
+
+export interface TranscriptRenderToolItem {
+  kind: 'tool';
+  key: string;
+  toolCallId: string;
+  name: string;
+  arguments?: unknown;
+  result?: unknown;
+  isError?: boolean;
+  status: TranscriptActivityToolStatus;
+  turnId?: string;
+  data?: unknown;
+}
+
+export interface TranscriptRenderOtherItem {
+  kind: 'other';
+  key: string;
+  id: string;
+  raw: unknown;
+}
+
+export type TranscriptRenderItem =
+  | TranscriptRenderMessageItem
+  | TranscriptRenderToolItem
+  | TranscriptRenderOtherItem;
+
+export interface TranscriptRenderProjection {
+  sessionId?: string;
+  items: readonly TranscriptRenderItem[];
+}
+
 export type TranscriptReducerState = TranscriptProjection;
 
 export interface TranscriptReducerEvent {
@@ -91,15 +148,66 @@ function directString(
   return typeof value[key] === 'string' && value[key] ? value[key] : undefined;
 }
 
-function directToolCallIds(content: unknown): string[] {
+/** Return the direct compatibility tool record without recursive provider scans. */
+export function transcriptToolRecord(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined;
+  if ((value.type === 'tool' || value.kind === 'tool') && isRecord(value.tool))
+    return value.tool;
+  if (
+    value.type === 'tool' ||
+    value.kind === 'tool' ||
+    value.type === 'toolCall' ||
+    value.type === 'tool_call' ||
+    value.role === 'toolResult' ||
+    typeof value.toolName === 'string'
+  )
+    return value;
+  return undefined;
+}
+
+/** Canonical activity outcome for raw compatibility tool records. */
+export function transcriptToolOutcome(
+  value: unknown,
+): TranscriptActivityToolStatus {
+  const tool = transcriptToolRecord(value);
+  if (!tool) return 'pending';
+  if (
+    tool.error ||
+    tool.isError === true ||
+    tool.status === 'error' ||
+    tool.status === 'failed'
+  )
+    return 'error';
+  if (tool.status === 'running') return 'running';
+  if (
+    tool.isError === false ||
+    typeof tool.result !== 'undefined' ||
+    typeof tool.content !== 'undefined' ||
+    tool.status === 'completed' ||
+    tool.status === 'complete' ||
+    tool.status === 'finished' ||
+    tool.status === 'success'
+  )
+    return 'success';
+  return 'pending';
+}
+
+function directToolCallParts(content: unknown): Record<string, unknown>[] {
   if (!Array.isArray(content)) return [];
-  const ids: string[] = [];
-  for (const part of content) {
-    if (
-      !isRecord(part) ||
-      (part.type !== 'toolCall' && part.type !== 'tool_call')
+  return content
+    .filter(
+      (part): part is Record<string, unknown> =>
+        isRecord(part) &&
+        (part.type === 'toolCall' || part.type === 'tool_call'),
     )
-      continue;
+    .slice(0, 128);
+}
+
+function directToolCallIds(content: unknown): string[] {
+  const ids: string[] = [];
+  for (const part of directToolCallParts(content)) {
     const id = directString(part, 'toolCallId') ?? directString(part, 'id');
     if (id && !ids.includes(id)) ids.push(id);
     if (ids.length >= 128) break;
@@ -505,14 +613,31 @@ function persistedTimestamp(
     : undefined;
 }
 
+function persistedToolStatus(
+  tool: Record<string, unknown>,
+): Exclude<TranscriptEntityStatus, 'streaming'> {
+  const outcome = transcriptToolOutcome(tool);
+  if (outcome === 'error') return 'error';
+  if (outcome === 'running') return 'running';
+  if (outcome === 'success') return 'finished';
+  return 'pending';
+}
+
 /**
  * Hydrate Pi JSONL entries. Only explicit entry/message/tool IDs and direct
  * timestamps are used; arbitrary recursive provider fields are not identities.
+ * `fallbackEntryIds` is a compatibility mode for the public web adapter: it
+ * preserves its stable entry-N keys for otherwise opaque message records.
  */
 export function hydrateTranscript(
   entries: readonly unknown[],
   sessionId?: string,
-  options: { cursor?: number; runtimeEpoch?: string; runtimeSeq?: number } = {},
+  options: {
+    cursor?: number;
+    runtimeEpoch?: string;
+    runtimeSeq?: number;
+    fallbackEntryIds?: boolean;
+  } = {},
 ): TranscriptProjection {
   let projection = createTranscriptProjection(sessionId);
   const items = copyItems(projection);
@@ -526,7 +651,9 @@ export function hydrateTranscript(
     }
     const message = persistedMessage(raw);
     if (message && (raw.type === 'message' || raw.type === undefined)) {
-      const messageId = persistedMessageId(raw, message);
+      const messageId =
+        persistedMessageId(raw, message) ??
+        (options.fallbackEntryIds ? `entry-${index}` : undefined);
       if (!messageId) {
         const id = `entry-${index}`;
         items[id] = { kind: 'other', id, raw };
@@ -565,7 +692,13 @@ export function hydrateTranscript(
         return;
       }
       const content = message.content;
-      const toolCallIds = directToolCallIds(content);
+      const explicitToolCallIds = Array.isArray(message.toolCallIds)
+        ? message.toolCallIds.filter(
+            (id): id is string => typeof id === 'string' && id.length > 0,
+          )
+        : [];
+      const toolCallIds =
+        mergeToolCallIds(explicitToolCallIds, directToolCallIds(content)) ?? [];
       items[messageId] = {
         kind: 'message',
         messageId,
@@ -573,7 +706,8 @@ export function hydrateTranscript(
         content,
         ...(timestamp === undefined ? {} : { timestamp }),
         ...(toolCallIds.length > 0 ? { toolCallIds } : {}),
-        status: 'finished',
+        status:
+          message.__dashboardStreaming === true ? 'streaming' : 'finished',
       };
       if (!order.includes(messageId)) order.push(messageId);
       if (Array.isArray(content)) {
@@ -598,18 +732,27 @@ export function hydrateTranscript(
               directString(part, 'toolName') ??
               existingTool?.name ??
               'tool',
-            ...(part.arguments === undefined
+            ...(part.arguments === undefined && part.args === undefined
               ? existingTool?.arguments === undefined
                 ? {}
                 : { arguments: existingTool.arguments }
-              : { arguments: part.arguments }),
-            ...(existingTool?.result === undefined
-              ? {}
-              : { result: existingTool.result }),
-            ...(existingTool?.isError === undefined
-              ? {}
-              : { isError: existingTool.isError }),
-            status: existingTool?.status ?? 'pending',
+              : {
+                  arguments:
+                    part.arguments === undefined ? part.args : part.arguments,
+                }),
+            ...(part.result === undefined
+              ? existingTool?.result === undefined
+                ? {}
+                : { result: existingTool.result }
+              : { result: part.result }),
+            ...(part.isError === undefined
+              ? existingTool?.isError === undefined
+                ? {}
+                : { isError: existingTool.isError }
+              : typeof part.isError === 'boolean'
+                ? { isError: part.isError }
+                : {}),
+            status: existingTool?.status ?? persistedToolStatus(part),
             ...(existingTool?.turnId === undefined
               ? {}
               : { turnId: existingTool.turnId }),
@@ -622,9 +765,13 @@ export function hydrateTranscript(
       }
       return;
     }
-    if (raw.type === 'tool' && isRecord(raw.tool)) {
-      const tool = raw.tool;
-      const toolCallId = directString(tool, 'toolCallId');
+    const tool =
+      raw.type === 'tool' || raw.kind === 'tool'
+        ? transcriptToolRecord(raw)
+        : undefined;
+    if (tool) {
+      const toolCallId =
+        directString(tool, 'toolCallId') ?? directString(tool, 'id');
       if (toolCallId) {
         items[toolCallId] = {
           kind: 'tool',
@@ -633,19 +780,18 @@ export function hydrateTranscript(
             directString(tool, 'name') ??
             directString(tool, 'toolName') ??
             'tool',
-          ...(tool.arguments === undefined
+          ...(tool.arguments === undefined && tool.args === undefined
             ? {}
-            : { arguments: tool.arguments }),
+            : {
+                arguments:
+                  tool.arguments === undefined ? tool.args : tool.arguments,
+              }),
           ...(tool.result === undefined ? {} : { result: tool.result }),
-          status:
-            tool.isError === true
-              ? 'error'
-              : tool.result === undefined
-                ? 'pending'
-                : 'finished',
+          status: persistedToolStatus(tool),
           ...(typeof tool.isError === 'boolean'
             ? { isError: tool.isError }
             : {}),
+          ...(tool.data === undefined ? {} : { data: tool.data }),
         };
         if (!order.includes(toolCallId)) order.push(toolCallId);
         return;
@@ -689,67 +835,195 @@ function isNonRenderedPiEntry(value: unknown): boolean {
   );
 }
 
+function renderedMessageContent(
+  item: TranscriptMessageItem,
+  projection: TranscriptProjection,
+  virtualToolCallIds: ReadonlySet<string> = new Set(),
+): unknown {
+  // Tool calls are normalized as standalone projection items. Remove only
+  // embedded calls that have a matching semantic item so renderers cannot
+  // display the same call twice.
+  if (!Array.isArray(item.content)) return item.content;
+  return item.content.filter((part) => {
+    if (!isRecord(part)) return true;
+    if (part.type !== 'toolCall' && part.type !== 'tool_call') return true;
+    const toolCallId =
+      directString(part, 'toolCallId') ?? directString(part, 'id');
+    return (
+      !toolCallId ||
+      (projection.items[toolCallId]?.kind !== 'tool' &&
+        !virtualToolCallIds.has(toolCallId))
+    );
+  });
+}
+
+function renderToolStatus(
+  status: TranscriptEntityStatus,
+): TranscriptActivityToolStatus {
+  if (status === 'error') return 'error';
+  if (status === 'running') return 'running';
+  if (status === 'finished') return 'success';
+  return 'pending';
+}
+
+/**
+ * Project the reducer-owned transcript into renderer/activity semantics. This
+ * is the single place where domain entity status and tool associations become
+ * render status and streaming/preparing flags.
+ */
+export function projectTranscriptForRender(
+  projection: TranscriptProjection,
+  options: { includePendingEmbeddedToolCalls?: boolean } = {},
+): TranscriptRenderProjection {
+  const includePendingEmbeddedToolCalls =
+    options.includePendingEmbeddedToolCalls !== false;
+  const items: TranscriptRenderItem[] = [];
+  const virtualToolCallIds = new Set<string>();
+  const renderedVirtualToolCallIds = new Set<string>();
+  for (const id of projection.order) {
+    const item = projection.items[id];
+    if (!item) continue;
+    if (item.kind === 'other') {
+      if (!isNonRenderedPiEntry(item.raw))
+        items.push({ kind: 'other', key: item.id, id: item.id, raw: item.raw });
+      continue;
+    }
+    if (item.kind === 'message') {
+      const embeddedToolCalls = directToolCallParts(item.content);
+      const embeddedToolCallIds = embeddedToolCalls
+        .map(
+          (part) =>
+            directString(part, 'toolCallId') ?? directString(part, 'id'),
+        )
+        .filter((toolCallId): toolCallId is string => toolCallId !== undefined);
+      const toolCallIds =
+        mergeToolCallIds(item.toolCallIds, embeddedToolCallIds) ?? [];
+      if (includePendingEmbeddedToolCalls)
+        for (const toolCallId of embeddedToolCallIds)
+          if (projection.items[toolCallId]?.kind !== 'tool')
+            virtualToolCallIds.add(toolCallId);
+      const associatedToolCallIds = toolCallIds.filter(
+        (toolCallId) =>
+          projection.items[toolCallId]?.kind === 'tool' ||
+          virtualToolCallIds.has(toolCallId),
+      );
+      items.push({
+        kind: 'message',
+        key: item.messageId,
+        messageId: item.messageId,
+        role: item.role,
+        content: renderedMessageContent(item, projection, virtualToolCallIds),
+        ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
+        ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+        toolCallIds,
+        associatedToolCallIds,
+        status: item.status,
+        streaming: item.status === 'streaming',
+        preparing:
+          item.status === 'streaming' && associatedToolCallIds.length === 0,
+      });
+      for (const part of includePendingEmbeddedToolCalls
+        ? embeddedToolCalls
+        : []) {
+        const toolCallId =
+          directString(part, 'toolCallId') ?? directString(part, 'id');
+        if (!toolCallId || projection.items[toolCallId]?.kind === 'tool')
+          continue;
+        if (renderedVirtualToolCallIds.has(toolCallId)) continue;
+        renderedVirtualToolCallIds.add(toolCallId);
+        items.push({
+          kind: 'tool',
+          key: toolCallId,
+          toolCallId,
+          name:
+            directString(part, 'name') ??
+            directString(part, 'toolName') ??
+            'tool',
+          ...(part.arguments === undefined && part.args === undefined
+            ? {}
+            : {
+                arguments:
+                  part.arguments === undefined ? part.args : part.arguments,
+              }),
+          ...(part.result === undefined ? {} : { result: part.result }),
+          ...(typeof part.isError === 'boolean'
+            ? { isError: part.isError }
+            : {}),
+          status: renderToolStatus(persistedToolStatus(part)),
+        });
+      }
+      continue;
+    }
+    items.push({
+      kind: 'tool',
+      key: item.toolCallId,
+      toolCallId: item.toolCallId,
+      name: item.name,
+      ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
+      ...(item.result === undefined ? {} : { result: item.result }),
+      ...(item.isError === undefined ? {} : { isError: item.isError }),
+      status: renderToolStatus(item.status),
+      ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+      ...(item.data === undefined ? {} : { data: item.data }),
+    });
+  }
+  return {
+    ...(projection.sessionId === undefined
+      ? {}
+      : { sessionId: projection.sessionId }),
+    items,
+  };
+}
+
+export function selectTranscriptRenderItems(
+  projection: TranscriptProjection,
+): readonly TranscriptRenderItem[] {
+  return projectTranscriptForRender(projection).items;
+}
+
 /** Existing dashboard UI compatibility selector; no transport logic lives here. */
 export function selectLegacyTranscriptEntries(
   projection: TranscriptProjection,
 ): unknown[] {
-  return projection.order.flatMap((id) => {
-    const item = projection.items[id];
-    if (!item) return [];
-    if (item.kind === 'other')
-      return isNonRenderedPiEntry(item.raw) ? [] : [item.raw];
-    if (item.kind === 'message') {
-      // Tool calls are normalized as standalone projection items. Remove only
-      // embedded calls that have a matching semantic item so compatibility
-      // rendering cannot display the same call twice.
-      const content = Array.isArray(item.content)
-        ? item.content.filter((part) => {
-            if (!isRecord(part)) return true;
-            if (part.type !== 'toolCall' && part.type !== 'tool_call')
-              return true;
-            const toolCallId =
-              directString(part, 'toolCallId') ?? directString(part, 'id');
-            return !toolCallId || projection.items[toolCallId]?.kind !== 'tool';
-          })
-        : item.content;
-      return [
-        {
-          type: 'message',
-          message: {
-            id: item.messageId,
-            messageId: item.messageId,
-            role: item.role,
-            content,
-            ...(item.timestamp === undefined
-              ? {}
-              : { timestamp: item.timestamp }),
-            ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
-            ...(item.toolCallIds === undefined
-              ? {}
-              : { toolCallIds: item.toolCallIds }),
-            ...(item.status === 'streaming'
-              ? { __dashboardStreaming: true }
-              : {}),
-          },
-        },
-      ];
-    }
-    return [
-      {
-        type: 'tool',
-        tool: {
-          toolCallId: item.toolCallId,
-          id: item.toolCallId,
-          name: item.name,
-          ...(item.arguments === undefined
+  return projectTranscriptForRender(projection, {
+    includePendingEmbeddedToolCalls: false,
+  }).items.map((item) => {
+    if (item.kind === 'other') return item.raw;
+    if (item.kind === 'message')
+      return {
+        type: 'message',
+        message: {
+          id: item.messageId,
+          messageId: item.messageId,
+          role: item.role,
+          content: item.content,
+          ...(item.timestamp === undefined
             ? {}
-            : { arguments: item.arguments }),
-          ...(item.result === undefined ? {} : { result: item.result }),
-          ...(item.isError === undefined ? {} : { isError: item.isError }),
-          status: item.status,
+            : { timestamp: item.timestamp }),
+          ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+          ...(item.toolCallIds.length === 0
+            ? {}
+            : { toolCallIds: item.toolCallIds }),
+          ...(item.streaming ? { __dashboardStreaming: true } : {}),
         },
+      };
+    return {
+      type: 'tool',
+      tool: {
+        toolCallId: item.toolCallId,
+        id: item.toolCallId,
+        name: item.name,
+        ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
+        ...(item.result === undefined ? {} : { result: item.result }),
+        ...(item.isError === undefined ? {} : { isError: item.isError }),
+        status:
+          item.status === 'success'
+            ? 'finished'
+            : item.status === 'error'
+              ? 'error'
+              : item.status,
       },
-    ];
+    };
   });
 }
 export const selectLegacyRawEntries = selectLegacyTranscriptEntries;

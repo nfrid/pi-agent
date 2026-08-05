@@ -1,4 +1,9 @@
 import { projectActivityGroups } from '@pi-dashboard/activity-model';
+import {
+  hydrateTranscript,
+  projectTranscriptForRender,
+  reduceTranscriptEvent,
+} from '@pi-dashboard/domain';
 import { Value } from 'typebox/value';
 import { describe, expect, it } from 'vitest';
 import { ActivityGroupsViewModelSchema } from '../../../../extensions/activity-groups/contribution';
@@ -91,6 +96,43 @@ describe('activity row views and virtual transcript construction', () => {
       },
     ]).filter(({ entry }) => entry.kind === 'tool');
     expect(item?.entry).toMatchObject({ kind: 'tool', status: 'pending' });
+  });
+
+  it('adapts the canonical domain render projection without re-pairing tools', () => {
+    let projection = hydrateTranscript([], 's1');
+    projection = reduceTranscriptEvent(projection, {
+      type: 'message.started',
+      sessionId: 's1',
+      message: {
+        messageId: 'assistant-live',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Inspecting the workspace.' }],
+        toolCallIds: ['call-live'],
+      },
+    });
+    projection = reduceTranscriptEvent(projection, {
+      type: 'tool.updated',
+      sessionId: 's1',
+      tool: {
+        toolCallId: 'call-live',
+        name: 'read',
+        status: 'running',
+      },
+    });
+    expect(projectTranscriptForRender(projection).items).toMatchObject([
+      {
+        kind: 'message',
+        messageId: 'assistant-live',
+        associatedToolCallIds: ['call-live'],
+        preparing: false,
+      },
+      { kind: 'tool', toolCallId: 'call-live', status: 'running' },
+    ]);
+    const items = toTranscriptEntries(projection);
+    expect(items).toMatchObject([
+      { key: 'assistant-live', entry: { kind: 'assistant' } },
+      { entry: { kind: 'tool', status: 'running' }, tool: { name: 'read' } },
+    ]);
   });
 
   it('uses semantic toolCallIds after compatibility filtering for preamble titles', () => {

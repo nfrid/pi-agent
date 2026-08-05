@@ -6,6 +6,16 @@ import {
   isNarration,
   toolActionSummary,
 } from '@pi-dashboard/activity-model';
+import {
+  hydrateTranscript,
+  projectTranscriptForRender,
+  type TranscriptProjection,
+  type TranscriptRenderItem,
+  type TranscriptRenderToolItem,
+  transcriptToolOutcome,
+  transcriptToolRecord,
+} from '@pi-dashboard/domain';
+
 export interface TranscriptModelItem {
   key: string;
   entry: ActivityTranscriptEntry;
@@ -13,51 +23,46 @@ export interface TranscriptModelItem {
   text?: string;
   role?: 'user' | 'assistant';
   imageCount?: number;
+  /** Canonical domain tool semantics used by the inspector presentation. */
+  tool?: TranscriptRenderToolItem;
   /** Live assistant text whose final answer/tool-call intent is not known yet. */
   preparing?: boolean;
 }
 
-function directStableId(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    return undefined;
-  const record = value as Record<string, unknown>;
-  for (const key of ['id', 'messageId', 'responseId', 'toolCallId', 'callId']) {
-    if (typeof record[key] === 'string' && record[key]) return record[key];
-  }
-  return undefined;
+export type TranscriptInput = TranscriptProjection | readonly unknown[];
+
+function isTranscriptProjection(
+  value: TranscriptInput,
+): value is TranscriptProjection {
+  if (Array.isArray(value) || typeof value !== 'object' || value === null)
+    return false;
+  const candidate = value as TranscriptProjection;
+  return (
+    Array.isArray(candidate.order) &&
+    typeof candidate.items === 'object' &&
+    candidate.items !== null
+  );
 }
 
-function messageLevelId(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    return undefined;
-  const record = value as Record<string, unknown>;
-  for (const key of ['messageId', 'id', 'responseId'])
-    if (typeof record[key] === 'string' && record[key]) return record[key];
-  return undefined;
-}
-
-function messageRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value))
-    return undefined;
-  const record = value as Record<string, unknown>;
-  if (
-    record.type === 'message' &&
-    record.message &&
-    typeof record.message === 'object' &&
-    !Array.isArray(record.message)
-  )
-    return record.message as Record<string, unknown>;
-  return typeof record.role === 'string' ? record : undefined;
-}
-
-/** Presentation keys use only IDs explicitly present on the selected entry. */
-function transcriptEntryKey(value: unknown, index: number): string {
-  const message = messageRecord(value);
-  if (message) return messageLevelId(message) ?? `entry-${index}`;
-  const direct = directStableId(value);
-  if (direct) return direct;
-  const tool = toolRecord(value);
-  return directStableId(tool) ?? `entry-${index}`;
+function renderItems(input: TranscriptInput): readonly TranscriptRenderItem[] {
+  const projected = isTranscriptProjection(input)
+    ? projectTranscriptForRender(input).items
+    : projectTranscriptForRender(
+        hydrateTranscript(input, undefined, { fallbackEntryIds: true }),
+      ).items;
+  // Historical raw-entry adaptation used a nested React key for an embedded
+  // tool call. Keep that presentation key while taking the association itself
+  // exclusively from the domain projection.
+  const toolKeys = new Map<string, string>();
+  for (const item of projected)
+    if (item.kind === 'message')
+      for (const toolCallId of item.associatedToolCallIds)
+        toolKeys.set(toolCallId, `${item.key}:tool:${toolCallId}`);
+  return projected.map((item) =>
+    item.kind === 'tool'
+      ? { ...item, key: toolKeys.get(item.toolCallId) ?? item.key }
+      : item,
+  );
 }
 
 function contentText(value: unknown): string {
@@ -71,8 +76,8 @@ function contentText(value: unknown): string {
   return '';
 }
 
-function messageText(message: Record<string, unknown>): string {
-  return contentText(message.content ?? message.text).trim();
+function messageText(content: unknown): string {
+  return contentText(content).trim();
 }
 
 function preambleTitle(text: string): string {
@@ -84,9 +89,9 @@ function preambleTitle(text: string): string {
   );
 }
 
-function messageImageCount(message: Record<string, unknown>): number {
-  return Array.isArray(message.content)
-    ? message.content.filter(
+function messageImageCount(content: unknown): number {
+  return Array.isArray(content)
+    ? content.filter(
         (part) =>
           part &&
           typeof part === 'object' &&
@@ -95,278 +100,148 @@ function messageImageCount(message: Record<string, unknown>): number {
     : 0;
 }
 
-const NON_RENDERED_PI_ENTRY_TYPES = new Set([
-  'session',
-  'model_change',
-  'thinking_level_change',
-  'compaction',
-  'branch_summary',
-  'label',
-  'session_info',
-]);
-
-function isNonRenderedPiMetadata(raw: unknown): boolean {
-  return (
-    !!raw &&
-    typeof raw === 'object' &&
-    !Array.isArray(raw) &&
-    typeof (raw as Record<string, unknown>).type === 'string' &&
-    NON_RENDERED_PI_ENTRY_TYPES.has(
-      (raw as Record<string, unknown>).type as string,
-    )
-  );
+function messageRaw(item: Extract<TranscriptRenderItem, { kind: 'message' }>) {
+  return {
+    type: 'message',
+    message: {
+      id: item.messageId,
+      messageId: item.messageId,
+      role: item.role,
+      content: item.content,
+      ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
+      ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+      ...(item.toolCallIds.length === 0
+        ? {}
+        : { toolCallIds: item.toolCallIds }),
+      ...(item.streaming ? { __dashboardStreaming: true } : {}),
+    },
+  };
 }
 
-function directToolCallIds(value: unknown): readonly string[] {
-  if (!Array.isArray(value)) return [];
-  const ids: string[] = [];
-  for (const part of value) {
-    if (!part || typeof part !== 'object' || Array.isArray(part)) continue;
-    const item = part as Record<string, unknown>;
-    if (item.type !== 'toolCall' && item.type !== 'tool_call') continue;
-    const id =
-      typeof item.toolCallId === 'string'
-        ? item.toolCallId
-        : typeof item.id === 'string'
-          ? item.id
-          : undefined;
-    if (id && !ids.includes(id)) ids.push(id);
-    if (ids.length >= 128) break;
-  }
-  return ids;
+function toolRaw(item: TranscriptRenderToolItem) {
+  return {
+    type: 'tool',
+    tool: {
+      toolCallId: item.toolCallId,
+      id: item.toolCallId,
+      name: item.name,
+      ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
+      ...(item.result === undefined ? {} : { result: item.result }),
+      ...(item.isError === undefined ? {} : { isError: item.isError }),
+      status: item.status,
+    },
+  };
 }
 
-function toolCallId(raw: Record<string, unknown>): string | undefined {
-  return typeof raw.toolCallId === 'string'
-    ? raw.toolCallId
-    : typeof raw.id === 'string'
-      ? raw.id
-      : undefined;
-}
-
-function toolRecord(raw: unknown): Record<string, unknown> | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const record = raw as Record<string, unknown>;
-  if (
-    (record.type === 'tool' || record.kind === 'tool') &&
-    record.tool &&
-    typeof record.tool === 'object'
-  )
-    return record.tool as Record<string, unknown>;
-  if (
-    record.type === 'tool' ||
-    record.kind === 'tool' ||
-    record.type === 'toolCall' ||
-    record.type === 'tool_call' ||
-    record.role === 'toolResult' ||
-    typeof record.toolName === 'string'
-  )
-    return record;
-  const message = messageRecord(raw);
-  return message?.role === 'toolResult' ? message : undefined;
-}
-
+/**
+ * Adapt the canonical domain render projection to activity-model entries.
+ * Content text and narration remain presentation concerns; identities,
+ * pairing, outcomes, and streaming/preparing flags come from the domain.
+ */
 export function toTranscriptEntries(
-  rawEntries: readonly unknown[],
+  input: TranscriptInput,
 ): TranscriptModelItem[] {
-  const toolResults = new Map<string, Record<string, unknown>>();
-  const standaloneTools = new Map<string, Record<string, unknown>>();
-  for (const raw of rawEntries) {
-    if (!raw || typeof raw !== 'object') continue;
-    const message = messageRecord(raw);
-    if (
-      message?.role === 'toolResult' &&
-      typeof message.toolCallId === 'string'
-    )
-      toolResults.set(message.toolCallId, message);
-    if (
-      (raw as Record<string, unknown>).type === 'tool' ||
-      (raw as Record<string, unknown>).kind === 'tool'
-    ) {
-      const tool = toolRecord(raw);
-      const id = tool ? toolCallId(tool) : undefined;
-      if (tool && id) standaloneTools.set(id, tool);
-    }
-  }
   const result: TranscriptModelItem[] = [];
-  for (const [rawIndex, raw] of rawEntries.entries()) {
-    const entryKey = transcriptEntryKey(raw, rawIndex);
-    if (!raw || typeof raw !== 'object') {
-      result.push({ key: entryKey, entry: { kind: 'other' }, raw });
+  for (const item of renderItems(input)) {
+    if (item.kind === 'other') {
+      result.push({ key: item.key, entry: { kind: 'other' }, raw: item.raw });
       continue;
     }
-    const entry = raw as Record<string, unknown>;
-    if (isNonRenderedPiMetadata(raw)) continue;
-    const tool =
-      entry.type === 'tool' || entry.kind === 'tool'
-        ? toolRecord(raw)
-        : undefined;
-    if (tool) {
+    if (item.kind === 'tool') {
       result.push({
-        key: entryKey,
+        key: item.key,
         entry: {
           kind: 'tool',
-          name:
-            typeof tool.name === 'string'
-              ? tool.name
-              : typeof tool.toolName === 'string'
-                ? tool.toolName
-                : 'tool',
-          args: tool.arguments ?? tool.args,
-          status: toolOutcome(raw),
-          isError: toolOutcome(raw) === 'error',
+          name: item.name,
+          args: item.arguments,
+          status: item.status,
+          ...(item.status === 'error' ? { isError: true } : {}),
         },
-        raw,
+        raw: toolRaw(item),
+        tool: item,
       });
       continue;
     }
-    const message = messageRecord(raw);
-    if (!message) {
-      result.push({ key: entryKey, entry: { kind: 'other' }, raw });
-      continue;
-    }
-    if (message.role === 'toolResult') continue;
+    const text = messageText(item.content);
+    const imageCount = messageImageCount(item.content);
+    const raw = messageRaw(item);
     const role =
-      message.role === 'user'
+      item.role === 'user'
         ? 'user'
-        : message.role === 'assistant'
+        : item.role === 'assistant'
           ? 'assistant'
           : undefined;
-    const text = messageText(message);
-    const imageCount = messageImageCount(message);
-    if (role === 'assistant') {
-      const assistant = {
-        ...message,
-        content: Array.isArray(message.content) ? message.content : [],
-      } as unknown as AssistantMessage;
-      const textHeaders = headersOf(assistant, 'text');
-      const thinkingHeaders = headersOf(assistant, 'thinking');
-      const narration =
-        textHeaders.length > 0
-          ? 'announced'
-          : thinkingHeaders.length > 0
-            ? 'thought'
-            : undefined;
-      const visibleText = text && !isNarration(text) ? text : undefined;
-      const content = Array.isArray(message.content) ? message.content : [];
-      const tools: TranscriptModelItem[] = [];
-      for (const item of content) {
-        if (!item || typeof item !== 'object') continue;
-        const part = item as Record<string, unknown>;
-        if (part.type === 'toolCall' || part.type === 'tool_call') {
-          const callId =
-            typeof part.id === 'string'
-              ? part.id
-              : typeof part.toolCallId === 'string'
-                ? part.toolCallId
-                : undefined;
-          const outcome = callId ? toolResults.get(callId) : undefined;
-          const outcomeStatus = outcome ? toolOutcome(outcome) : 'pending';
-          tools.push({
-            key: `${entryKey}:tool:${callId ?? tools.length}`,
-            entry: {
-              kind: 'tool',
-              name: typeof part.name === 'string' ? part.name : 'tool',
-              args: part.arguments ?? part.args,
-              status: outcomeStatus,
-              ...(outcomeStatus === 'error' ? { isError: true } : {}),
-            },
-            raw: outcome
-              ? { ...part, result: outcome.content, isError: outcome.isError }
-              : part,
-          });
-        }
-      }
-      // Compatibility selection strips embedded calls when a semantic
-      // standalone tool item exists. The bounded direct association survives
-      // that filtering and still tells the web renderer that this assistant
-      // message leads activity below it.
-      const knownToolCallIds = Array.isArray(message.toolCallIds)
-        ? message.toolCallIds
-            .filter(
-              (id): id is string => typeof id === 'string' && id.length > 0,
-            )
-            .slice(0, 128)
-        : directToolCallIds(message.content);
-      const knownStandaloneTools = knownToolCallIds
-        .map((id) => standaloneTools.get(id))
-        .filter((tool): tool is Record<string, unknown> => tool !== undefined);
-      const associatedToolCount = tools.length + knownStandaloneTools.length;
-      const preparing =
-        message.__dashboardStreaming === true && associatedToolCount === 0;
-      const preamble =
-        visibleText && associatedToolCount > 0
-          ? preambleTitle(visibleText)
-          : undefined;
-      const narratedTitle = (
-        textHeaders.length > 0 ? textHeaders : thinkingHeaders
-      ).at(-1);
-      result.push(
-        {
-          key: entryKey,
-          entry: {
-            kind: 'assistant',
-            speaks: preparing ? false : Boolean(visibleText),
-            ...(preparing ? { streaming: true } : {}),
-            narration,
-            title: preamble ?? narratedTitle,
-            ...(preamble
-              ? { titleKind: 'preamble' as const }
-              : narratedTitle
-                ? { titleKind: 'narration' as const }
-                : {}),
-          },
-          raw,
-          text: visibleText,
-          role,
-          ...(imageCount > 0 ? { imageCount } : {}),
-          ...(preparing ? { preparing: true } : {}),
-        },
-        ...tools,
-      );
-    } else
+    if (role !== 'assistant') {
       result.push({
-        key: entryKey,
+        key: item.key,
         entry: { kind: 'other' },
         raw,
         text,
-        role,
+        ...(role === undefined ? {} : { role }),
         ...(imageCount > 0 ? { imageCount } : {}),
       });
+      continue;
+    }
+    const assistant = {
+      role: item.role,
+      content: Array.isArray(item.content) ? item.content : [],
+    } as unknown as AssistantMessage;
+    const textHeaders = headersOf(assistant, 'text');
+    const thinkingHeaders = headersOf(assistant, 'thinking');
+    const narration =
+      textHeaders.length > 0
+        ? 'announced'
+        : thinkingHeaders.length > 0
+          ? 'thought'
+          : undefined;
+    const visibleText = text && !isNarration(text) ? text : undefined;
+    const hasAssociatedTools = item.associatedToolCallIds.length > 0;
+    const preamble =
+      visibleText && hasAssociatedTools
+        ? preambleTitle(visibleText)
+        : undefined;
+    const narratedTitle = (
+      textHeaders.length > 0 ? textHeaders : thinkingHeaders
+    ).at(-1);
+    result.push({
+      key: item.key,
+      entry: {
+        kind: 'assistant',
+        speaks: item.preparing ? false : Boolean(visibleText),
+        ...(item.preparing ? { streaming: true } : {}),
+        narration,
+        title: preamble ?? narratedTitle,
+        ...(preamble
+          ? { titleKind: 'preamble' as const }
+          : narratedTitle
+            ? { titleKind: 'narration' as const }
+            : {}),
+      },
+      raw,
+      text: visibleText,
+      role,
+      ...(imageCount > 0 ? { imageCount } : {}),
+      ...(item.preparing ? { preparing: true } : {}),
+    });
   }
   return result;
 }
 
+/** Compatibility helper retained for consumers with raw tool entries. */
 export function toolRecordForTranscript(
   raw: unknown,
 ): Record<string, unknown> | undefined {
-  return toolRecord(raw);
+  return transcriptToolRecord(raw);
 }
+
+/** Compatibility spelling; lifecycle semantics are owned by dashboard-domain. */
 export function toolOutcome(
   raw: unknown,
 ): 'success' | 'pending' | 'running' | 'error' {
-  const tool = toolRecord(raw);
-  if (!tool) return 'pending';
-  if (
-    tool.error ||
-    tool.isError === true ||
-    tool.status === 'error' ||
-    tool.status === 'failed'
-  )
-    return 'error';
-  if (tool.status === 'running') return 'running';
-  if (
-    tool.isError === false ||
-    typeof tool.result !== 'undefined' ||
-    typeof tool.content !== 'undefined' ||
-    tool.status === 'completed' ||
-    tool.status === 'complete' ||
-    tool.status === 'finished' ||
-    tool.status === 'success'
-  )
-    return 'success';
-  return 'pending';
+  return transcriptToolOutcome(raw);
 }
+
+/** Tool labels are presentation-only and remain available to web consumers. */
 export function toolSummary(tool: Record<string, unknown>): string {
   const name =
     typeof tool.name === 'string'
@@ -379,4 +254,5 @@ export function toolSummary(tool: Record<string, unknown>): string {
     args: tool.arguments ?? tool.args,
   });
 }
+
 export { describeTools, headersOf, isNarration };

@@ -8,6 +8,7 @@ import {
   createRuntimeReducerState,
   createTranscriptProjection,
   hydrateTranscript,
+  projectTranscriptForRender,
   reduceTranscriptEvent,
   selectLegacyTranscriptEntries,
 } from './index.js';
@@ -205,6 +206,86 @@ describe('dashboard domain reducers', () => {
     expect(state.items['assistant-normalized']).toMatchObject({
       toolCallIds: ['call-normalized'],
     });
+  });
+
+  it('projects canonical render IDs, pairing, lifecycle, and streaming state', () => {
+    let state = hydrateTranscript([], 's');
+    state = reduceTranscriptEvent(state, {
+      type: 'message.started',
+      sessionId: 's',
+      message: {
+        messageId: 'assistant-1',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Inspecting files.' }],
+        toolCallIds: ['call-1'],
+      },
+    });
+    state = reduceTranscriptEvent(state, {
+      type: 'tool.updated',
+      sessionId: 's',
+      tool: {
+        toolCallId: 'call-1',
+        name: 'read',
+        status: 'running',
+      },
+    });
+    const rendered = projectTranscriptForRender(state).items;
+    expect(rendered).toEqual([
+      expect.objectContaining({
+        kind: 'message',
+        key: 'assistant-1',
+        toolCallIds: ['call-1'],
+        associatedToolCallIds: ['call-1'],
+        streaming: true,
+        preparing: false,
+      }),
+      expect.objectContaining({
+        kind: 'tool',
+        key: 'call-1',
+        status: 'running',
+      }),
+    ]);
+
+    const preparing = projectTranscriptForRender(
+      reduceTranscriptEvent(hydrateTranscript([], 's'), {
+        type: 'message.started',
+        sessionId: 's',
+        message: {
+          messageId: 'assistant-2',
+          role: 'assistant',
+          content: 'Preparing.',
+        },
+      }),
+    ).items;
+    expect(preparing[0]).toMatchObject({
+      kind: 'message',
+      streaming: true,
+      preparing: true,
+    });
+
+    const embedded = projectTranscriptForRender(
+      reduceTranscriptEvent(hydrateTranscript([], 's'), {
+        type: 'message.updated',
+        sessionId: 's',
+        message: {
+          messageId: 'assistant-3',
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Reading.' },
+            { type: 'toolCall', id: 'call-3', name: 'read' },
+          ],
+        },
+      }),
+    ).items;
+    expect(embedded).toMatchObject([
+      {
+        kind: 'message',
+        content: [{ type: 'text', text: 'Reading.' }],
+        associatedToolCallIds: ['call-3'],
+        preparing: false,
+      },
+      { kind: 'tool', toolCallId: 'call-3', status: 'pending' },
+    ]);
   });
 
   it('preserves direct tool associations and skips only Pi metadata', () => {

@@ -4,6 +4,10 @@ import {
   toolBaseName,
 } from '@pi-dashboard/activity-model';
 import { dashboardHttpClient } from '@pi-dashboard/client';
+import type {
+  TranscriptProjection,
+  TranscriptRenderToolItem,
+} from '@pi-dashboard/domain';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import {
@@ -19,8 +23,6 @@ import { Markdown } from '../Markdown';
 import {
   isNarration,
   type TranscriptModelItem,
-  toolRecordForTranscript,
-  toolSummary,
   toTranscriptEntries,
 } from '../transcript';
 
@@ -78,12 +80,17 @@ function invokeActivityExpansion(
 
 export function Transcript({
   entries,
+  projection,
   runtime,
 }: {
-  entries: unknown[];
+  /** Legacy raw-entry input retained for embedders. */
+  entries?: unknown[];
+  /** Preferred canonical domain projection input. */
+  projection?: TranscriptProjection;
   runtime?: RuntimeSnapshot;
 }) {
-  const items = useMemo(() => toTranscriptEntries(entries), [entries]);
+  const input = projection ?? entries ?? [];
+  const items = useMemo(() => toTranscriptEntries(input), [input]);
   const modelEntries = useMemo(() => items.map((item) => item.entry), [items]);
   const groups = useMemo(
     () =>
@@ -617,6 +624,20 @@ export function toolInspectorRows(
   return rows.filter(([, value]) => value !== undefined);
 }
 
+function toolInspectorRecord(
+  tool: TranscriptRenderToolItem,
+): Record<string, unknown> {
+  return {
+    toolCallId: tool.toolCallId,
+    name: tool.name,
+    ...(tool.arguments === undefined ? {} : { arguments: tool.arguments }),
+    ...(tool.result === undefined ? {} : { result: tool.result }),
+    ...(tool.isError === undefined ? {} : { isError: tool.isError }),
+    status: tool.status,
+    ...(tool.data === undefined ? {} : { data: tool.data }),
+  };
+}
+
 function ToolInspector({ tool }: { tool: Record<string, unknown> }) {
   let rawText = '[unavailable tool payload]';
   try {
@@ -669,25 +690,22 @@ function TranscriptEntry({
         {item.text ? <Markdown>{item.text}</Markdown> : null}
       </article>
     );
-  const raw = item.raw;
-  const tool = toolRecordForTranscript(raw);
-  if (tool) {
-    const name =
-      typeof tool.name === 'string'
-        ? tool.name
-        : typeof tool.toolName === 'string'
-          ? tool.toolName
-          : 'tool';
+  if (item.tool) {
+    const tool = item.tool;
+    const record = toolInspectorRecord(tool);
     return (
       <details className="transcript-entry tool-detail">
         <summary>
-          <span className="tool-chip">{name}</span>
-          <span>{toolSummary(tool)}</span>
+          <span className="tool-chip">{tool.name}</span>
+          <span>
+            {toolActionSummary({ name: tool.name, args: tool.arguments })}
+          </span>
         </summary>
-        <ToolInspector tool={tool} />
+        <ToolInspector tool={record} />
       </details>
     );
   }
+  const raw = item.raw;
   const text = JSON.stringify(raw, null, 2);
   return (
     <details className="transcript-entry">
