@@ -1398,9 +1398,11 @@ h2 {
 /* Live extension cards retain the compact status density of the TUI. */
 .extension-surfaces {
   display: grid;
-  gap: 9px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 7px;
   width: min(100%, 820px);
-  margin: 14px 0;
+  margin: 10px 0;
 }
 .extension-surface-slot {
   min-width: 0;
@@ -1412,21 +1414,49 @@ h2 {
   box-shadow: 0 5px 16px #0002;
 }
 .surface-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 12px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 11px 7px;
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+  padding: 7px 9px;
+}
+.surface-toggle {
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+.surface-toggle:hover {
+  background: color-mix(in srgb, var(--purple) 8%, transparent);
+}
+.surface-toggle[aria-expanded="true"] {
   border-bottom: 1px solid var(--line-soft);
 }
-.surface-header .eyebrow {
-  margin-bottom: 2px;
-  color: var(--cyan);
+.surface-title {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
 }
-.surface-header h3 {
+.surface-header .eyebrow {
   margin: 0;
+  color: var(--cyan);
+  font-size: 8px;
+}
+.surface-title strong {
+  min-width: 0;
+  overflow: hidden;
   color: var(--fg);
-  font-size: 13px;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.surface-chevron {
+  color: var(--purple);
+  font-size: 15px;
+  text-align: right;
 }
 .surface-count,
 .surface-overflow {
@@ -1458,6 +1488,11 @@ h2 {
 .task-rows {
   display: grid;
   min-width: 0;
+}
+.surface-detail-list {
+  max-height: min(260px, 42vh);
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 .delegate-row,
 .task-row {
@@ -1817,6 +1852,10 @@ h2 {
   }
   .session-shell {
     padding-bottom: 8px;
+  }
+  .extension-surfaces {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
   }
   .section-heading,
   .session-heading {

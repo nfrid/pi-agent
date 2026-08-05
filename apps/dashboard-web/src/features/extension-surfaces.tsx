@@ -138,6 +138,7 @@ function delegateStats(rows: readonly Record<string, unknown>[]) {
 function DelegateSurface({ surface }: { surface: LiveExtensionSurface }) {
   const rows = delegateRows(surface.viewModel);
   const stats = delegateStats(rows);
+  const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const title = surfaceModelTitle(surface.viewModel, 'Delegate status');
   const toggle = (id: string) =>
@@ -146,179 +147,204 @@ function DelegateSurface({ surface }: { surface: LiveExtensionSurface }) {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  const active = rows.find(
+    (row) => stateLabel(row.state ?? row.status) === 'running',
+  );
+  const summary = active
+    ? `● ${short(text(active.name, 'Subagent'), 42)}`
+    : stats.failed
+      ? `! ${stats.failed} failed`
+      : `✓ ${stats.done} done`;
   return (
     <article className="extension-surface surface-delegate" aria-label={title}>
-      <header className="surface-header">
-        <div>
-          <p className="eyebrow">Delegates</p>
-          <h3>{title}</h3>
-        </div>
+      <AriaButton
+        type="button"
+        className="surface-header surface-toggle"
+        aria-expanded={open}
+        onPress={() => setOpen((current) => !current)}
+      >
+        <span className="surface-title">
+          <span className="eyebrow">Delegates</span>
+          <strong>{summary}</strong>
+        </span>
         <span className="surface-count">
           {stats.running
             ? `${stats.running} running`
             : `${rows.length} tracked`}
         </span>
-      </header>
-      <div
-        className="surface-summary"
-        role="status"
-        aria-label="Delegate status summary"
-      >
-        {stats.running > 0 && (
-          <span className="surface-running">● {stats.running} active</span>
-        )}
-        {stats.queued > 0 && <span>○ {stats.queued} queued</span>}
-        {stats.done > 0 && (
-          <span className="surface-done">✓ {stats.done} done</span>
-        )}
-        {stats.failed > 0 && (
-          <span className="surface-failed">! {stats.failed} failed</span>
-        )}
-        {!rows.length && (
-          <span className="muted">No delegate runs reported.</span>
-        )}
-      </div>
-      <div className="delegate-rows">
-        {rows.slice(0, 12).map((row, index) => {
-          const id = text(row.id, `delegate-${index}`);
-          const state = stateLabel(row.state ?? row.status);
-          const activity = asRecord(row.activity);
-          const activityLabel = short(
-            text(activity?.latestText) ||
-              text(activity?.label) ||
-              (state === 'queued' ? 'waiting for a slot' : 'starting'),
-            140,
-          );
-          const name = short(text(row.name, 'Subagent'), 70);
-          const route = text(row.route) || text(asRecord(row.routing)?.route);
-          const context = text(row.context);
-          const elapsedText = elapsed(
-            row.startedAt ?? row.createdAt,
-            row.finishedAt,
-          );
-          const isExpanded = expanded.has(id);
-          const jobId = text(row.jobId);
-          const activityType = text(activity?.type);
-          const activityStatus = text(activity?.status);
-          const latestText = short(text(activity?.latestText), 600);
-          const runs = list(row.runs).slice(-6);
-          return (
-            <div
-              className={`delegate-row ${stateClass(state)}`}
-              key={`${surface.id}-${id}`}
-            >
-              <AriaButton
-                type="button"
-                className="delegate-row-toggle"
-                aria-expanded={isExpanded}
-                onPress={() => toggle(id)}
-              >
-                <span className="surface-state" aria-hidden="true">
-                  {stateGlyph(state)}
-                </span>
-                <span className="delegate-row-main">
-                  <strong>{name}</strong>
-                  <small>{activityLabel}</small>
-                </span>
-                <span className="delegate-row-meta">
-                  {state}
-                  {elapsedText ? ` · ${elapsedText}` : ''}
-                </span>
-                <span className="delegate-row-chevron" aria-hidden="true">
-                  {isExpanded ? '⌄' : '›'}
-                </span>
-              </AriaButton>
-              {isExpanded && (
-                <div className="delegate-row-detail">
-                  <dl>
-                    {route && (
-                      <div>
-                        <dt>Route</dt>
-                        <dd>{route}</dd>
-                      </div>
-                    )}
-                    {context && (
-                      <div>
-                        <dt>Context</dt>
-                        <dd>{context}</dd>
-                      </div>
-                    )}
-                    <div>
-                      <dt>Access</dt>
-                      <dd>
-                        {row.allowWrites === true ? 'read/write' : 'read-only'}
-                      </dd>
+        <span className="surface-chevron" aria-hidden="true">
+          {open ? '⌄' : '›'}
+        </span>
+      </AriaButton>
+      {open && (
+        <>
+          <div
+            className="surface-summary"
+            role="status"
+            aria-label="Delegate status summary"
+          >
+            {stats.running > 0 && (
+              <span className="surface-running">● {stats.running} active</span>
+            )}
+            {stats.queued > 0 && <span>○ {stats.queued} queued</span>}
+            {stats.done > 0 && (
+              <span className="surface-done">✓ {stats.done} done</span>
+            )}
+            {stats.failed > 0 && (
+              <span className="surface-failed">! {stats.failed} failed</span>
+            )}
+            {!rows.length && (
+              <span className="muted">No delegate runs reported.</span>
+            )}
+          </div>
+          <div className="delegate-rows surface-detail-list">
+            {rows.slice(0, 12).map((row, index) => {
+              const id = text(row.id, `delegate-${index}`);
+              const state = stateLabel(row.state ?? row.status);
+              const activity = asRecord(row.activity);
+              const activityLabel = short(
+                text(activity?.latestText) ||
+                  text(activity?.label) ||
+                  (state === 'queued' ? 'waiting for a slot' : 'starting'),
+                140,
+              );
+              const name = short(text(row.name, 'Subagent'), 70);
+              const route =
+                text(row.route) || text(asRecord(row.routing)?.route);
+              const context = text(row.context);
+              const elapsedText = elapsed(
+                row.startedAt ?? row.createdAt,
+                row.finishedAt,
+              );
+              const isExpanded = expanded.has(id);
+              const jobId = text(row.jobId);
+              const activityType = text(activity?.type);
+              const activityStatus = text(activity?.status);
+              const latestText = short(text(activity?.latestText), 600);
+              const runs = list(row.runs).slice(-6);
+              return (
+                <div
+                  className={`delegate-row ${stateClass(state)}`}
+                  key={`${surface.id}-${id}`}
+                >
+                  <AriaButton
+                    type="button"
+                    className="delegate-row-toggle"
+                    aria-expanded={isExpanded}
+                    onPress={() => toggle(id)}
+                  >
+                    <span className="surface-state" aria-hidden="true">
+                      {stateGlyph(state)}
+                    </span>
+                    <span className="delegate-row-main">
+                      <strong>{name}</strong>
+                      <small>{activityLabel}</small>
+                    </span>
+                    <span className="delegate-row-meta">
+                      {state}
+                      {elapsedText ? ` · ${elapsedText}` : ''}
+                    </span>
+                    <span className="delegate-row-chevron" aria-hidden="true">
+                      {isExpanded ? '⌄' : '›'}
+                    </span>
+                  </AriaButton>
+                  {isExpanded && (
+                    <div className="delegate-row-detail">
+                      <dl>
+                        {route && (
+                          <div>
+                            <dt>Route</dt>
+                            <dd>{route}</dd>
+                          </div>
+                        )}
+                        {context && (
+                          <div>
+                            <dt>Context</dt>
+                            <dd>{context}</dd>
+                          </div>
+                        )}
+                        <div>
+                          <dt>Access</dt>
+                          <dd>
+                            {row.allowWrites === true
+                              ? 'read/write'
+                              : 'read-only'}
+                          </dd>
+                        </div>
+                        {jobId && (
+                          <div>
+                            <dt>Job</dt>
+                            <dd>{jobId}</dd>
+                          </div>
+                        )}
+                        {(activityType || activityStatus) && (
+                          <div>
+                            <dt>Activity</dt>
+                            <dd>
+                              {[activityType, activityStatus]
+                                .filter(Boolean)
+                                .join(' · ')}
+                            </dd>
+                          </div>
+                        )}
+                      </dl>
+                      {latestText && <p>{latestText}</p>}
+                      {runs.length > 0 && (
+                        <ol
+                          className="delegate-run-history"
+                          aria-label="Run history"
+                        >
+                          {runs.map((run, runIndex) => {
+                            const runState = stateLabel(run.state);
+                            const runKey = [
+                              id,
+                              runState,
+                              String(run.startedAt),
+                              String(run.finishedAt),
+                            ].join('-');
+                            return (
+                              <li className="delegate-run-item" key={runKey}>
+                                <span
+                                  className={`surface-state ${stateClass(runState)}`}
+                                  aria-hidden="true"
+                                >
+                                  {stateGlyph(runState)}
+                                </span>
+                                <span>Run {runIndex + 1}</span>
+                                <small>
+                                  {runState}
+                                  {elapsed(run.startedAt, run.finishedAt)
+                                    ? ` · ${elapsed(run.startedAt, run.finishedAt)}`
+                                    : ''}
+                                </small>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      )}
+                      {!route &&
+                        !context &&
+                        !jobId &&
+                        !activityType &&
+                        !activityStatus &&
+                        !latestText &&
+                        runs.length === 0 && (
+                          <span>
+                            Waiting for the delegate to report details.
+                          </span>
+                        )}
                     </div>
-                    {jobId && (
-                      <div>
-                        <dt>Job</dt>
-                        <dd>{jobId}</dd>
-                      </div>
-                    )}
-                    {(activityType || activityStatus) && (
-                      <div>
-                        <dt>Activity</dt>
-                        <dd>
-                          {[activityType, activityStatus]
-                            .filter(Boolean)
-                            .join(' · ')}
-                        </dd>
-                      </div>
-                    )}
-                  </dl>
-                  {latestText && <p>{latestText}</p>}
-                  {runs.length > 0 && (
-                    <ol
-                      className="delegate-run-history"
-                      aria-label="Run history"
-                    >
-                      {runs.map((run, runIndex) => {
-                        const runState = stateLabel(run.state);
-                        const runKey = [
-                          id,
-                          runState,
-                          String(run.startedAt),
-                          String(run.finishedAt),
-                        ].join('-');
-                        return (
-                          <li className="delegate-run-item" key={runKey}>
-                            <span
-                              className={`surface-state ${stateClass(runState)}`}
-                              aria-hidden="true"
-                            >
-                              {stateGlyph(runState)}
-                            </span>
-                            <span>Run {runIndex + 1}</span>
-                            <small>
-                              {runState}
-                              {elapsed(run.startedAt, run.finishedAt)
-                                ? ` · ${elapsed(run.startedAt, run.finishedAt)}`
-                                : ''}
-                            </small>
-                          </li>
-                        );
-                      })}
-                    </ol>
                   )}
-                  {!route &&
-                    !context &&
-                    !jobId &&
-                    !activityType &&
-                    !activityStatus &&
-                    !latestText &&
-                    runs.length === 0 && (
-                      <span>Waiting for the delegate to report details.</span>
-                    )}
                 </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      {rows.length > 12 && (
-        <small className="surface-overflow">
-          +{rows.length - 12} more delegates
-        </small>
+              );
+            })}
+          </div>
+          {rows.length > 12 && (
+            <small className="surface-overflow">
+              +{rows.length - 12} more delegates
+            </small>
+          )}
+        </>
       )}
     </article>
   );
@@ -341,6 +367,7 @@ function taskDependencies(row: Record<string, unknown>): string[] {
 
 function TasksSurface({ surface }: { surface: LiveExtensionSurface }) {
   const rows = taskRows(surface.viewModel);
+  const [open, setOpen] = useState(false);
   const record = asRecord(surface.viewModel);
   const completed = rows.filter(
     (row) => stateLabel(row.status) === 'done',
@@ -353,68 +380,88 @@ function TasksSurface({ surface }: { surface: LiveExtensionSurface }) {
     typeof activeCount === 'number'
       ? `${activeCount} active`
       : `${completed}/${total} done`;
+  const current = rows.find((row) => stateLabel(row.status) === 'running');
+  const summary = current
+    ? `● ${short(text(current.text, 'Task in progress'), 42)}`
+    : `${completed}/${total} complete`;
   return (
     <article className="extension-surface surface-tasks" aria-label={title}>
-      <header className="surface-header">
-        <div>
-          <p className="eyebrow">Tasks</p>
-          <h3>{title}</h3>
-        </div>
-        <span className="surface-count">{short(countLabel, 40)}</span>
-      </header>
-      <div
-        className="task-progress"
-        role="progressbar"
-        aria-label="Task progress"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={progress}
+      <AriaButton
+        type="button"
+        className="surface-header surface-toggle"
+        aria-expanded={open}
+        onPress={() => setOpen((value) => !value)}
       >
-        <span>
-          {completed}/{total} complete
+        <span className="surface-title">
+          <span className="eyebrow">Tasks</span>
+          <strong>{summary}</strong>
         </span>
-        <span className="task-progress-track" aria-hidden="true">
-          <i style={{ width: `${progress}%` }} />
+        <span className="surface-count">{short(countLabel, 40)}</span>
+        <span className="surface-chevron" aria-hidden="true">
+          {open ? '⌄' : '›'}
         </span>
-      </div>
-      <div className="task-rows">
-        {rows.slice(0, 10).map((row, index) => {
-          const state = stateLabel(row.status);
-          const id = text(row.id, `task-${index}`);
-          const priority = text(row.priority);
-          const dependencies = taskDependencies(row);
-          return (
-            <div
-              className={`task-row ${stateClass(state)}`}
-              key={`${surface.id}-${id}`}
-            >
-              <span className="surface-state" title={state} aria-hidden="true">
-                {stateGlyph(state)}
-              </span>
-              <span className="sr-only">{state}</span>
-              <span className="task-row-main">
-                <strong>{id}</strong>
-                <span>{short(text(row.text, 'Untitled task'), 180)}</span>
-              </span>
-              <span className="task-row-meta">
-                {priority && (
-                  <b className={`priority-${priority}`}>{priority}</b>
-                )}
-                {dependencies.length > 0 && (
-                  <small title={`Depends on ${dependencies.join(', ')}`}>
-                    ↳ {dependencies.join(', ')}
-                  </small>
-                )}
-              </span>
-            </div>
-          );
-        })}
-        {!rows.length && <span className="muted">No tasks reported.</span>}
-      </div>
-      {rows.length > 10 && (
-        <small className="surface-overflow">
-          +{rows.length - 10} more tasks
-        </small>
+      </AriaButton>
+      {open && (
+        <>
+          <div
+            className="task-progress"
+            role="progressbar"
+            aria-label="Task progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progress}
+          >
+            <span>
+              {completed}/{total} complete
+            </span>
+            <span className="task-progress-track" aria-hidden="true">
+              <i style={{ width: `${progress}%` }} />
+            </span>
+          </div>
+          <div className="task-rows surface-detail-list">
+            {rows.slice(0, 10).map((row, index) => {
+              const state = stateLabel(row.status);
+              const id = text(row.id, `task-${index}`);
+              const priority = text(row.priority);
+              const dependencies = taskDependencies(row);
+              return (
+                <div
+                  className={`task-row ${stateClass(state)}`}
+                  key={`${surface.id}-${id}`}
+                >
+                  <span
+                    className="surface-state"
+                    title={state}
+                    aria-hidden="true"
+                  >
+                    {stateGlyph(state)}
+                  </span>
+                  <span className="sr-only">{state}</span>
+                  <span className="task-row-main">
+                    <strong>{id}</strong>
+                    <span>{short(text(row.text, 'Untitled task'), 180)}</span>
+                  </span>
+                  <span className="task-row-meta">
+                    {priority && (
+                      <b className={`priority-${priority}`}>{priority}</b>
+                    )}
+                    {dependencies.length > 0 && (
+                      <small title={`Depends on ${dependencies.join(', ')}`}>
+                        ↳ {dependencies.join(', ')}
+                      </small>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+            {!rows.length && <span className="muted">No tasks reported.</span>}
+          </div>
+          {rows.length > 10 && (
+            <small className="surface-overflow">
+              +{rows.length - 10} more tasks
+            </small>
+          )}
+        </>
       )}
     </article>
   );

@@ -1,4 +1,5 @@
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
   renderLiveExtensionSurface,
@@ -31,6 +32,42 @@ describe('live extension surface fixtures', () => {
         placement: 'composer',
       },
     ]);
+  });
+
+  it('keeps live surfaces collapsed to compact summaries by default', () => {
+    const delegate = renderLiveExtensionSurface({
+      id: 'delegate-1',
+      rendererId: 'delegate.status',
+      viewModel: {
+        statuses: [
+          {
+            id: 'd1',
+            name: 'Compact delegate',
+            state: 'running',
+            route: 'luna-high',
+          },
+        ],
+      },
+    });
+    const tasks = renderLiveExtensionSurface({
+      id: 'tasks-1',
+      rendererId: 'tasks.current',
+      viewModel: {
+        tasks: [{ id: 'T1', text: 'Compact task', status: 'doing' }],
+      },
+    });
+
+    const markup = renderToStaticMarkup(
+      <>
+        {delegate}
+        {tasks}
+      </>,
+    );
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('● Compact delegate');
+    expect(markup).toContain('● Compact task');
+    expect(markup).not.toContain('luna-high');
+    expect(markup).not.toContain('task-progress');
   });
 
   it('selects rich delegate and task renderers by tolerant renderer IDs', () => {
