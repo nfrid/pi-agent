@@ -26,23 +26,19 @@ export type QueuedMessage = {
   text: string;
 };
 
-type RuntimeWithQueue = RuntimeSnapshot & {
-  queuedMessages?: readonly QueuedMessage[];
-};
-
 export function queuedMessagesForRuntime(
   runtime: RuntimeSnapshot | undefined,
 ): readonly QueuedMessage[] {
-  const queue = (runtime as RuntimeWithQueue | undefined)?.queuedMessages;
+  const queue = runtime?.queueDrafts;
   if (!Array.isArray(queue)) return [];
-  return queue.filter((item): item is QueuedMessage =>
-    Boolean(
-      item &&
-        typeof item.id === 'string' &&
-        item.id.length > 0 &&
-        (item.mode === 'steer' || item.mode === 'followUp') &&
-        typeof item.text === 'string',
-    ),
+  return queue.flatMap((item) =>
+    item &&
+    typeof item.clientId === 'string' &&
+    item.clientId.length > 0 &&
+    (item.mode === 'steer' || item.mode === 'followUp') &&
+    typeof item.text === 'string'
+      ? [{ id: item.clientId, mode: item.mode, text: item.text }]
+      : [],
   );
 }
 
@@ -55,21 +51,21 @@ function newQueueId(): string {
 
 export function queueCommand(
   type: 'queue.add' | 'queue.update',
-  queueId: string,
+  clientId: string,
   mode: 'steer' | 'followUp',
   text: string,
 ): Record<string, unknown> {
   return {
     id: newQueueId(),
     type,
-    queueId,
+    clientId,
     mode,
     text: text.trim(),
   };
 }
 
-export function queueRemoveCommand(queueId: string): Record<string, unknown> {
-  return { id: newQueueId(), type: 'queue.remove', queueId };
+export function queueRemoveCommand(clientId: string): Record<string, unknown> {
+  return { id: newQueueId(), type: 'queue.remove', clientId };
 }
 
 export function formatContextTokens(tokens: number): string {

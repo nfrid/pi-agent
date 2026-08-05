@@ -19,7 +19,7 @@ describe('live extension surface fixtures', () => {
             viewModel: { statuses: [] },
             placement: 'composer',
           },
-          { id: '', rendererId: 'tasks.tasks', viewModel: {} },
+          { id: '', rendererId: 'tasks.current', viewModel: {} },
           { id: 'bad', rendererId: '', viewModel: {} },
           null,
         ]),
@@ -52,7 +52,7 @@ describe('live extension surface fixtures', () => {
     });
     const tasks = renderLiveExtensionSurface({
       id: 'tasks-1',
-      rendererId: 'tasks.tasks',
+      rendererId: 'tasks.current',
       viewModel: {
         tasks: [
           {
@@ -77,7 +77,7 @@ describe('live extension surface fixtures', () => {
     expect(tasks).toMatchObject({
       type: expect.any(Function),
       props: {
-        surface: expect.objectContaining({ rendererId: 'tasks.tasks' }),
+        surface: expect.objectContaining({ rendererId: 'tasks.current' }),
       },
     });
   });

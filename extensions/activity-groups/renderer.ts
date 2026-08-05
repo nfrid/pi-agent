@@ -60,6 +60,42 @@ function toolSubject(
       argument: shortCommand(command, MAX_COMMAND_WIDTH),
     };
   }
+  if (name === 'delegate') {
+    const action = stringArg(tool.args, 'action');
+    const agentName = stringArg(tool.args, 'name');
+    const args =
+      tool.args && typeof tool.args === 'object' && !Array.isArray(tool.args)
+        ? (tool.args as Record<string, unknown>)
+        : undefined;
+    const taskCount = Array.isArray(args?.tasks) ? args.tasks.length : 0;
+    return {
+      action: action ? `Delegate ${action}` : 'Delegating',
+      argument:
+        agentName ??
+        (taskCount > 0
+          ? `${taskCount} subagent${taskCount === 1 ? '' : 's'}`
+          : undefined),
+    };
+  }
+  if (name === 'todo' || name === 'tasks') {
+    const action = stringArg(tool.args, 'action');
+    const id = stringArg(tool.args, 'id');
+    const args =
+      tool.args && typeof tool.args === 'object' && !Array.isArray(tool.args)
+        ? (tool.args as Record<string, unknown>)
+        : undefined;
+    const operationCount = Array.isArray(args?.operations)
+      ? args.operations.length
+      : 0;
+    return {
+      action: action ? `Tasks ${action}` : 'Updating tasks',
+      argument:
+        id ??
+        (operationCount > 0
+          ? `${operationCount} operation${operationCount === 1 ? '' : 's'}`
+          : undefined),
+    };
+  }
   const pattern = stringArg(tool.args, 'pattern');
   if (pattern && (name === 'grep' || name === 'find' || name === 'glob'))
     return {

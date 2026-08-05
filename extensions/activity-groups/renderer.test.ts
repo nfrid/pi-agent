@@ -272,6 +272,37 @@ describe('activity groups renderer', () => {
     (component as unknown as { dispose(): void }).dispose();
   });
 
+  it('labels delegate and task actions with their useful subject', () => {
+    const component = createActivityGroupRenderer()(
+      {
+        id: 'extension-actions',
+        cwd: process.cwd(),
+        startedAt: 1000,
+        completedAt: 2000,
+        failed: false,
+        items: [
+          toolItem('delegate-1', 'delegate', { name: 'Queue reviewer' }, false),
+          toolItem('todo-1', 'todo', { action: 'start', id: 'T2' }, false),
+          toolItem(
+            'delegate-2',
+            'delegate',
+            { action: 'create', tasks: [{ name: 'A' }, { name: 'B' }] },
+            false,
+          ),
+        ],
+      },
+      { streaming: false, expanded: false, defaultView: new Text('', 0, 0) },
+      theme,
+      context(),
+    );
+    if (!component) throw new Error('renderer returned no component');
+    const output = component.render(100).join('\n');
+    expect(output).toContain('Delegating Queue reviewer');
+    expect(output).toContain('Tasks start T2');
+    expect(output).toContain('Delegate create 2 subagents');
+    (component as unknown as { dispose(): void }).dispose();
+  });
+
   it('keeps the last steps legible and counts away the rest', () => {
     const renderer = createActivityGroupRenderer();
     const ctx = context();

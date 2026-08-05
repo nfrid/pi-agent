@@ -33,10 +33,10 @@ import { actionNeedsInput, paletteItems } from './routes/dashboard';
 describe('queued message commands', () => {
   it('normalizes queue fixtures and creates explicit bridge commands', () => {
     const runtime = {
-      queuedMessages: [
-        { id: 'q1', mode: 'steer', text: 'inspect this' },
-        { id: 'q2', mode: 'followUp', text: 'then test it' },
-        { id: '', mode: 'steer', text: 'ignore' },
+      queueDrafts: [
+        { clientId: 'q1', mode: 'steer', text: 'inspect this' },
+        { clientId: 'q2', mode: 'followUp', text: 'then test it' },
+        { clientId: '', mode: 'steer', text: 'ignore' },
       ],
     } as unknown as RuntimeSnapshot;
     expect(queuedMessagesForRuntime(runtime)).toEqual([
@@ -47,13 +47,13 @@ describe('queued message commands', () => {
       queueCommand('queue.update', 'q1', 'steer', ' revised '),
     ).toMatchObject({
       type: 'queue.update',
-      queueId: 'q1',
+      clientId: 'q1',
       mode: 'steer',
       text: 'revised',
     });
     expect(queueRemoveCommand('q2')).toMatchObject({
       type: 'queue.remove',
-      queueId: 'q2',
+      clientId: 'q2',
     });
   });
 });

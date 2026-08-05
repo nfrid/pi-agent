@@ -371,7 +371,12 @@ export function renderLiveExtensionSurface(surface: LiveExtensionSurface) {
     rendererId.endsWith('.delegate.status')
   )
     return <DelegateSurface surface={surface} />;
-  if (rendererId === 'tasks.tasks' || rendererId.endsWith('.tasks.tasks'))
+  if (
+    rendererId === 'tasks.current' ||
+    rendererId.endsWith('.tasks.current') ||
+    rendererId === 'tasks.tasks' ||
+    rendererId.endsWith('.tasks.tasks')
+  )
     return <TasksSurface surface={surface} />;
   return <UnknownSurface surface={surface} />;
 }
