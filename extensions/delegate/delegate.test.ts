@@ -540,7 +540,7 @@ describe('delegate', () => {
     );
   });
 
-  test('uses persistent, minimal, read-only children with the system prompt extension', () => {
+  test('uses persistent, minimal, read-only children with required extensions', () => {
     const args = buildChildArgs({ task: 'inspect' }, '/tmp/child.jsonl');
     expect(args).toContain('--session');
     expect(args[args.indexOf('--session') + 1]).toBe('/tmp/child.jsonl');
@@ -552,6 +552,13 @@ describe('delegate', () => {
     expect(extensionPaths[1]).toMatch(
       /extensions[\\/]system-prompt[\\/]index\.ts$/,
     );
+    expect(extensionPaths[2]).toMatch(
+      /extensions[\\/]mid-run-compaction[\\/]index\.ts$/,
+    );
+    expect(extensionPaths[3]).toMatch(
+      /extensions[\\/]tool-argument-validation[\\/]index\.ts$/,
+    );
+    expect(extensionPaths).toHaveLength(4);
     expect(extensionPaths.every(existsSync)).toBe(true);
     // Read-only is an intent signal, not a sandbox: the child keeps an ordinary
     // shell so it can inspect the repository the way any agent would.

@@ -26,6 +26,14 @@ const SYSTEM_PROMPT_EXTENSION = path.resolve(
   __dirname,
   '../system-prompt/index.ts',
 );
+const MID_RUN_COMPACTION_EXTENSION = path.resolve(
+  __dirname,
+  '../mid-run-compaction/index.ts',
+);
+const TOOL_ARGUMENT_VALIDATION_EXTENSION = path.resolve(
+  __dirname,
+  '../tool-argument-validation/index.ts',
+);
 
 export { mapWithConcurrency } from './concurrency';
 
@@ -113,6 +121,10 @@ export function buildChildArgs(
     DELEGATE_EXTENSION,
     '--extension',
     SYSTEM_PROMPT_EXTENSION,
+    '--extension',
+    MID_RUN_COMPACTION_EXTENSION,
+    '--extension',
+    TOOL_ARGUMENT_VALIDATION_EXTENSION,
     '--no-skills',
     '--no-prompt-templates',
     '--no-themes',
