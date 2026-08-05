@@ -1268,6 +1268,7 @@ h2 {
 }
 .palette-backdrop {
   position: fixed;
+  animation: overlay-in 160ms ease-out both;
   inset: 0;
   z-index: 70;
   display: grid;
@@ -1277,6 +1278,7 @@ h2 {
 }
 .command-palette {
   width: min(620px, calc(100vw - 24px));
+  animation: palette-in 160ms ease-out both;
   max-height: 72vh;
   overflow: auto;
   padding: 16px;
@@ -1293,6 +1295,14 @@ h2 {
   border: 1px solid var(--line);
   background: var(--bg);
   color: var(--fg);
+}
+.palette-backdrop.is-exiting {
+  animation: overlay-out 160ms ease-in both;
+  pointer-events: none;
+}
+.command-palette.is-exiting {
+  animation: palette-out 160ms ease-in both;
+  pointer-events: none;
 }
 .palette-list {
   display: grid;
@@ -2391,6 +2401,7 @@ h2 {
 }
 .session-inspector {
   position: absolute;
+  animation: drawer-in 160ms ease-out both;
   top: 0;
   right: 0;
   bottom: 0;
@@ -2403,6 +2414,15 @@ h2 {
   color: var(--fg);
   outline: 0;
   pointer-events: auto;
+}
+.session-inspector-layer.is-exiting .session-inspector-backdrop {
+  animation: overlay-out 160ms ease-in both;
+  pointer-events: none;
+}
+.session-inspector.is-exiting,
+.session-inspector-layer.is-exiting .session-inspector {
+  animation: drawer-out 160ms ease-in both;
+  pointer-events: none;
 }
 .inspector-header {
   display: flex;
@@ -2694,6 +2714,61 @@ h2 {
   color: var(--muted);
 }
 /* The same list is the desktop session switcher and the mobile off-canvas drawer. */
+.dashboard-workspace {
+  align-items: stretch;
+}
+.dashboard-empty-workspace {
+  min-width: 0;
+  min-height: min(620px, calc(100vh - 120px));
+  display: flex;
+  flex-direction: column;
+}
+.dashboard-empty-workspace .home-heading {
+  padding-right: 0;
+}
+.empty-workspace-state {
+  display: grid;
+  flex: 1;
+  place-content: center;
+  justify-items: center;
+  min-height: 360px;
+  border: 1px dashed var(--line-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-alt) 22%, transparent);
+  color: var(--muted);
+  padding: 40px 24px;
+  text-align: center;
+}
+.empty-workspace-state strong {
+  margin-top: 12px;
+  color: var(--fg);
+  font-size: 14px;
+}
+.empty-workspace-state p {
+  max-width: 430px;
+  margin: 7px 0 17px;
+  font-size: 12px;
+}
+.empty-workspace-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.empty-workspace-actions button {
+  border: 1px solid var(--purple);
+  border-radius: 7px;
+  background: var(--purple);
+  color: var(--bg);
+  padding: 8px 12px;
+  cursor: pointer;
+  font-weight: 700;
+}
+.empty-workspace-actions button.secondary-button {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+}
 .session-layout {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
@@ -3137,6 +3212,7 @@ h2 {
 .surface-dialog-layer,
 .outline-sheet-layer {
   position: fixed;
+  animation: overlay-in 160ms ease-out both;
   z-index: 45;
   inset: 0;
   pointer-events: auto;
@@ -3154,7 +3230,21 @@ h2 {
   background: var(--bg-alt);
   box-shadow: -18px 0 48px #0008;
   pointer-events: auto;
-  animation: drawer-in 150ms ease-out;
+  animation: drawer-in 160ms ease-out both;
+}
+.surface-dialog-layer.is-exiting,
+.outline-sheet-layer.is-exiting {
+  animation: overlay-out 160ms ease-in both;
+  pointer-events: none;
+}
+:where(
+  .surface-dialog[data-exiting],
+  .outline-sheet[data-exiting],
+  .surface-dialog-layer.is-exiting .surface-dialog,
+  .outline-sheet-layer.is-exiting .outline-sheet
+) {
+  animation: drawer-out 160ms ease-in both;
+  pointer-events: none;
 }
 .surface-dialog-header,
 .outline-sheet > header {
@@ -3496,6 +3586,22 @@ h2 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
 @keyframes drawer-in {
   from {
     opacity: 0;
@@ -3504,6 +3610,36 @@ h2 {
   to {
     opacity: 1;
     transform: translateX(0);
+  }
+}
+@keyframes drawer-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+}
+@keyframes palette-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes palette-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.99);
   }
 }
 @media (min-width: 821px) {
@@ -3569,6 +3705,7 @@ h2 {
   .agent-nav-drawer {
     position: fixed;
     z-index: 35;
+    animation: drawer-slide-in 160ms ease-out both;
     inset: 0 auto 0 0;
     width: min(310px, calc(100vw - 34px));
     transform: translateX(-102%);
@@ -3578,6 +3715,17 @@ h2 {
   .agent-nav-drawer.open {
     transform: translateX(0);
     pointer-events: auto;
+  }
+  .agent-nav-drawer.is-exiting {
+    animation: drawer-slide-out 160ms ease-in both;
+    pointer-events: none;
+  }
+  .agent-nav-backdrop {
+    animation: overlay-in 160ms ease-out both;
+  }
+  .agent-nav-backdrop.is-exiting {
+    animation: overlay-out 160ms ease-in both;
+    pointer-events: none;
   }
   .agent-nav-drawer > .agent-thread-nav {
     position: static;
@@ -3707,10 +3855,10 @@ h2 {
     display: none;
   }
 }
-body:has(.session-layout) .global-new-agent,
-body:has(.session-layout) .global-notifications,
-body:has(.session-layout) .global-tools > .push-button,
-body:has(.session-layout) .global-tools > .palette-trigger {
+body:has(.session-page) .global-new-agent,
+body:has(.session-page) .global-notifications,
+body:has(.session-page) .global-tools > .push-button,
+body:has(.session-page) .global-tools > .palette-trigger {
   display: none;
 }
 .session-page.has-pending-interaction .queue-panel {
@@ -3719,7 +3867,34 @@ body:has(.session-layout) .global-tools > .palette-trigger {
 .session-page.has-pending-interaction .interaction-dock {
   z-index: 80;
 }
+@keyframes drawer-slide-in {
+  from {
+    transform: translateX(-102%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes drawer-slide-out {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-102%);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
+  .palette-backdrop,
+  .command-palette,
+  .session-inspector-layer,
+  .session-inspector-backdrop,
+  .agent-nav-backdrop,
+  .agent-nav-drawer,
+  .surface-dialog-layer,
+  .outline-sheet-layer,
+  .surface-dialog,
+  .outline-sheet,
+  .session-inspector,
   .agent-thread-row,
   .composer,
   .composer textarea,

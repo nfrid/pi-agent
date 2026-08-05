@@ -29,6 +29,11 @@ import {
 import { Button as AriaButton } from 'react-aria-components';
 import { useDashboardShell } from './dashboard-transport';
 import { Composer } from './features/composer';
+import { DashboardDialog } from './features/dashboard-dialog';
+import {
+  DashboardUtilityProvider,
+  useDashboardUtility,
+} from './features/dashboard-utility-context';
 import { SessionView } from './features/session';
 import {
   Dashboard,
@@ -181,26 +186,87 @@ function DashboardApp() {
 
 function RouteShell() {
   const dashboard = useDashboardContext();
-  const sessionRoute = useRouterState({
-    select: (state) =>
-      state.matches.some((match) => match.routeId === '/sessions/$sessionId'),
+  const routeState = useRouterState({
+    select: (state) => ({
+      isSession: state.matches.some(
+        (match) => match.routeId === '/sessions/$sessionId',
+      ),
+      pathname: state.location.pathname,
+    }),
   });
   if (!dashboard.snapshot) return null;
+  const activeSessionId = routeState.pathname.startsWith('/sessions/')
+    ? decodeURIComponent(routeState.pathname.split('/')[2] ?? '')
+    : undefined;
+  const pendingQuestions = Boolean(
+    activeSessionId &&
+      dashboard.snapshot.runtimes.some(
+        (runtime) =>
+          runtime.session?.id === activeSessionId &&
+          runtime.pendingInteractions.length > 0,
+      ),
+  );
   return (
     <div className="app">
-      <Header snapshot={dashboard.snapshot} />
-      <main className={`shell ${sessionRoute ? 'session-shell' : ''}`}>
-        {(dashboard.error || dashboard.connectionState !== 'connected') && (
-          <div className="notice sync-notice" role="status">
-            {dashboard.error ??
-              (dashboard.connectionState === 'reconnecting'
-                ? 'Live updates disconnected; reconnecting…'
-                : 'Connecting to live updates…')}
-          </div>
-        )}
-        <Outlet />
-      </main>
+      <DashboardUtilityProvider blocked={pendingQuestions}>
+        <Header snapshot={dashboard.snapshot} />
+        <main
+          className={`shell ${routeState.isSession ? 'session-shell' : ''}`}
+        >
+          {(dashboard.error || dashboard.connectionState !== 'connected') && (
+            <div className="notice sync-notice" role="status">
+              {dashboard.error ??
+                (dashboard.connectionState === 'reconnecting'
+                  ? 'Live updates disconnected; reconnecting…'
+                  : 'Connecting to live updates…')}
+            </div>
+          )}
+          <Outlet />
+        </main>
+        <DashboardUtilityOverlay
+          snapshot={dashboard.snapshot}
+          usageError={dashboard.usageError}
+          store={dashboard.store}
+        />
+      </DashboardUtilityProvider>
     </div>
+  );
+}
+
+function DashboardUtilityOverlay({
+  snapshot,
+  usageError,
+  store,
+}: {
+  snapshot: NonNullable<ReturnType<typeof useDashboardContext>['snapshot']>;
+  usageError?: string;
+  store: ReturnType<typeof useDashboardContext>['store'];
+}) {
+  const utility = useDashboardUtility();
+  const title =
+    utility?.panel === 'workspaces'
+      ? 'Workspaces'
+      : utility?.panel === 'sessions'
+        ? 'History'
+        : utility?.panel === 'inbox'
+          ? 'Inbox'
+          : 'Dashboard utility';
+  return (
+    <DashboardDialog
+      title={title}
+      eyebrow="Workspace utility"
+      className="surface-dialog utility-dialog"
+      isOpen={Boolean(utility?.open && utility.panel)}
+      onClose={() => utility?.close()}
+    >
+      {utility?.panel === 'workspaces' && (
+        <WorkspacesView snapshot={snapshot} store={store} />
+      )}
+      {utility?.panel === 'sessions' && <SessionsView snapshot={snapshot} />}
+      {utility?.panel === 'inbox' && (
+        <InboxView snapshot={snapshot} usageError={usageError} />
+      )}
+    </DashboardDialog>
   );
 }
 
@@ -241,7 +307,7 @@ function WorkspaceRoute() {
 function WorkspacesRoute() {
   const dashboard = useDashboardContext();
   return dashboard.snapshot ? (
-    <WorkspacesView snapshot={dashboard.snapshot} />
+    <WorkspacesView snapshot={dashboard.snapshot} store={dashboard.store} />
   ) : null;
 }
 

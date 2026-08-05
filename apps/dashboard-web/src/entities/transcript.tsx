@@ -255,17 +255,16 @@ export function TranscriptOutline({
           </button>
         ))}
       </aside>
-      {open && (
-        <DashboardDialog
-          title="Transcript outline"
-          eyebrow="This session"
-          className="outline-sheet"
-          layerClassName="outline-sheet-layer"
-          onClose={() => onOpenChange?.(false)}
-        >
-          {list}
-        </DashboardDialog>
-      )}
+      <DashboardDialog
+        isOpen={open}
+        title="Transcript outline"
+        eyebrow="This session"
+        className="outline-sheet"
+        layerClassName="outline-sheet-layer"
+        onClose={() => onOpenChange?.(false)}
+      >
+        {list}
+      </DashboardDialog>
     </>
   );
 }

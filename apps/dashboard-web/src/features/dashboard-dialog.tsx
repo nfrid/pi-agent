@@ -1,5 +1,6 @@
 import { type KeyboardEvent, type ReactNode, useId } from 'react';
 import { Dialog as AriaDialog, ModalOverlay } from 'react-aria-components';
+import { useOverlayPresence } from './overlay-presence';
 
 /** Shared overlay primitive for dashboard sheets and panels. */
 export function DashboardDialog({
@@ -9,6 +10,7 @@ export function DashboardDialog({
   eyebrow = 'Live work',
   className = 'surface-dialog',
   layerClassName = 'surface-dialog-layer',
+  isOpen = true,
 }: {
   title: string;
   onClose: () => void;
@@ -16,13 +18,19 @@ export function DashboardDialog({
   eyebrow?: string;
   className?: string;
   layerClassName?: string;
+  isOpen?: boolean;
 }) {
   const titleId = useId();
+  const { present, exiting } = useOverlayPresence(isOpen);
+  if (!present) return null;
   return (
     <ModalOverlay
       isOpen
+      isExiting={exiting}
       isDismissable
-      className={layerClassName}
+      className={({ isExiting }) =>
+        `${layerClassName}${isExiting || exiting ? ' is-exiting' : ''}`
+      }
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
