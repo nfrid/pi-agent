@@ -5,6 +5,7 @@ import {
   type ToolDescriptor,
   type TranscriptEntry,
 } from './grouping.js';
+import { hasUnresolvedToolFailure } from './outcome.mjs';
 import { describeTools } from './title.js';
 
 export type ActivityGroupStatus = 'live' | 'preparing' | 'complete' | 'failed';
@@ -73,8 +74,7 @@ export function projectActivityGroups(
     const id =
       options.groupId?.(group, index) ?? `activity-group-${group.start}`;
     const failed =
-      options.failed?.(group, tools) ??
-      tools.some((tool) => tool.isError || tool.status === 'error');
+      options.failed?.(group, tools) ?? hasUnresolvedToolFailure(tools);
     const streaming = entries
       .slice(group.start, group.end + 1)
       .some((entry) => entry.kind === 'assistant' && entry.streaming === true);

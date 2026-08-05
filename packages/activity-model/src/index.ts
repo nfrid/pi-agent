@@ -4,6 +4,7 @@
  * part of this package.
  */
 export * from './grouping.js';
+export * from './outcome.mjs';
 export * from './title.js';
 export * from './types.js';
 export * from './view-model.js';
