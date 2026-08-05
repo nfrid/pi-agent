@@ -7,7 +7,8 @@ import type { BrowserSnapshot, RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useEffect, useRef, useState } from 'react';
 import { sessionDisplayTitle } from '../app-helpers';
 import { useDashboardNavigate } from '../routes/navigation';
-import { useOverlayPresence } from './overlay-presence';
+import { useDashboardUtility } from './dashboard-utility-context';
+import { DASHBOARD_MOTION_MS, useOverlayPresence } from './overlay-presence';
 
 export function actionNeedsInput(action: { inputSchema?: unknown }): boolean {
   const schema = action.inputSchema;
@@ -147,6 +148,7 @@ export function CommandPalette({
   disabled?: boolean;
 }) {
   const go = useDashboardNavigate();
+  const utility = useDashboardUtility();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
@@ -157,6 +159,7 @@ export function CommandPalette({
   const dialogRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const utilityTimerRef = useRef<number | undefined>(undefined);
   const wasOpenRef = useRef(false);
   const items = paletteItems(snapshot);
   const runtimeActionCount = items.filter(
@@ -195,16 +198,23 @@ export function CommandPalette({
   useEffect(() => {
     if (disabled) setOpen(false);
   }, [disabled]);
+  useEffect(
+    () => () => {
+      if (utilityTimerRef.current !== undefined)
+        window.clearTimeout(utilityTimerRef.current);
+    },
+    [],
+  );
   useEffect(() => {
     if (!open) {
       if (wasOpenRef.current) {
         const previous = previousFocusRef.current;
         if (previous?.isConnected && previous.getClientRects().length > 0)
-          previous.focus();
+          previous.focus({ preventScroll: true });
         else
           document
             .querySelector<HTMLElement>('.composer textarea, main button')
-            ?.focus();
+            ?.focus({ preventScroll: true });
       }
       wasOpenRef.current = false;
       return;
@@ -235,8 +245,25 @@ export function CommandPalette({
     if (!item || (item.kind === 'action' && item.needsInput)) return;
     setError(undefined);
     if (item.kind === 'navigate') {
+      const utilityPanel =
+        item.path === '/workspaces'
+          ? 'workspaces'
+          : item.path === '/sessions'
+            ? 'sessions'
+            : item.path === '/inbox'
+              ? 'inbox'
+              : undefined;
       close();
-      go(item.path);
+      if (utility && utilityPanel) {
+        if (utilityTimerRef.current !== undefined)
+          window.clearTimeout(utilityTimerRef.current);
+        const pathname = window.location.pathname;
+        utilityTimerRef.current = window.setTimeout(() => {
+          utilityTimerRef.current = undefined;
+          if (window.location.pathname === pathname)
+            utility.openPanel(utilityPanel);
+        }, DASHBOARD_MOTION_MS);
+      } else go(item.path);
       return;
     }
     try {

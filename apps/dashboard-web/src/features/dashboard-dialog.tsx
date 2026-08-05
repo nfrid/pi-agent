@@ -1,4 +1,10 @@
-import { type KeyboardEvent, type ReactNode, useId } from 'react';
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+} from 'react';
 import { Dialog as AriaDialog, ModalOverlay } from 'react-aria-components';
 import { useOverlayPresence } from './overlay-presence';
 
@@ -21,13 +27,31 @@ export function DashboardDialog({
   isOpen?: boolean;
 }) {
   const titleId = useId();
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
   const { present, exiting } = useOverlayPresence(isOpen);
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      previousFocusRef.current = document.activeElement as HTMLElement | null;
+      wasOpenRef.current = true;
+      return;
+    }
+    if (!isOpen && wasOpenRef.current) {
+      const previous = previousFocusRef.current;
+      if (previous?.isConnected && previous.getClientRects().length > 0)
+        previous.focus({ preventScroll: true });
+      previousFocusRef.current = null;
+      wasOpenRef.current = false;
+    }
+  }, [isOpen]);
   if (!present) return null;
   return (
     <ModalOverlay
       isOpen
       isExiting={exiting}
       isDismissable
+      aria-hidden={exiting || undefined}
+      inert={exiting || undefined}
       className={({ isExiting }) =>
         `${layerClassName}${isExiting || exiting ? ' is-exiting' : ''}`
       }
@@ -39,8 +63,9 @@ export function DashboardDialog({
       }}
     >
       {/* FocusScope owns focus; this wrapper forwards Escape from the dialog. */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: keyboard dismissal is delegated from the Aria dialog focus scope. */}
       <div
+        aria-hidden={exiting || undefined}
+        inert={exiting || undefined}
         onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
           if (event.key === 'Escape') {
             event.preventDefault();

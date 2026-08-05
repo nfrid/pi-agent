@@ -61,7 +61,14 @@ export function Dashboard({
 }) {
   const go = useDashboardNavigate();
   const [agentNavOpen, setAgentNavOpen] = useState(false);
-  const latest = agentThreadRows(snapshot)[0];
+  const latestSession = snapshot.sessions.reduce<
+    BrowserSnapshot['sessions'][number] | undefined
+  >(
+    (latest, session) =>
+      !latest || session.updatedAt > latest.updatedAt ? session : latest,
+    undefined,
+  );
+  const latestId = latestSession?.id ?? agentThreadRows(snapshot)[0]?.id;
   const onlineCount = snapshot.runtimes.filter(
     (runtime) => runtime.online !== false,
   ).length;
@@ -86,39 +93,30 @@ export function Dashboard({
               transcript.
             </p>
           </div>
-          <div className="home-actions">
-            <WorkspaceRefresh snapshot={snapshot} store={store} />
-            <button
-              type="button"
-              className="new-agent-button"
-              onClick={() => go('/new')}
-            >
-              + New agent
-            </button>
-          </div>
         </div>
         <div className="empty-workspace-state">
           <span className="empty-mark" aria-hidden="true">
             ›_
           </span>
-          <strong>Choose a thread to open its transcript</strong>
+          <strong>Ready for the next task</strong>
           <p>
-            Your agents and recent history stay in the persistent workspace nav.
-            Start a new agent when there is no thread to resume.
+            Start a new agent, or choose an existing thread from the workspace
+            nav to open its transcript.
           </p>
           <div className="empty-workspace-actions">
             <button type="button" onClick={() => go('/new')}>
               New agent
             </button>
-            {latest && (
+            {latestId && (
               <button
                 type="button"
                 className="secondary-button"
-                onClick={() => go(`/sessions/${encodeURIComponent(latest.id)}`)}
+                onClick={() => go(`/sessions/${encodeURIComponent(latestId)}`)}
               >
                 Resume latest
               </button>
             )}
+            <WorkspaceRefresh snapshot={snapshot} store={store} />
           </div>
         </div>
         {snapshot.runtimes.length > 0 && onlineCount === 0 && (

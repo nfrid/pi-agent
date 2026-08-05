@@ -76,12 +76,51 @@ export function PendingInteractions({
 }: {
   runtime: RuntimeSnapshot | undefined;
 }) {
+  const dockRef = useRef<HTMLElement>(null);
+  const interactionKey = runtime?.pendingInteractions
+    .map((interaction) => interaction.id)
+    .join('\u0000');
+  useEffect(() => {
+    if (!interactionKey) return;
+    const frame = window.requestAnimationFrame(() => {
+      dockRef.current
+        ?.querySelector<HTMLElement>(
+          '.interaction[tabindex="0"], input:not(:disabled), button:not(:disabled)',
+        )
+        ?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [interactionKey]);
   if (!runtime || runtime.pendingInteractions.length === 0) return null;
   return (
     <aside
+      ref={dockRef}
       className="interaction-dock"
+      role="dialog"
+      aria-modal="true"
       aria-label="Pending questions"
       aria-live="assertive"
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key !== 'Tab' || !dockRef.current) return;
+        const focusable = Array.from(
+          dockRef.current.querySelectorAll<HTMLElement>(
+            '.interaction[tabindex="0"], input:not(:disabled), button:not(:disabled), a[href]',
+          ),
+        );
+        const first = focusable[0];
+        const last = focusable.at(-1);
+        if (!first || !last) {
+          event.preventDefault();
+          dockRef.current.focus();
+        } else if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }}
     >
       {runtime.pendingInteractions.map((interaction) => (
         <InteractionCard
@@ -125,7 +164,7 @@ function InteractionCard({
   const [selectedChoice, setSelectedChoice] = useState(0);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string>();
-  const interactionRef = useRef<HTMLDivElement>(null);
+  const interactionRef = useRef<HTMLFieldSetElement>(null);
   const answerRef = useRef<HTMLInputElement>(null);
   const choiceRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const answerMutation = useMutation(
@@ -199,7 +238,7 @@ function InteractionCard({
     setSelectedChoice(index);
     choiceRefs.current[index]?.focus();
   };
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLFieldSetElement>) => {
     // Form controls and preview links own their keys. Choice buttons retain
     // native Enter/Space activation while arrows, digits, and Escape remain
     // available for the interaction's keyboard contract.
@@ -234,9 +273,8 @@ function InteractionCard({
       </div>
     );
   return (
-    <div
+    <fieldset
       className="interaction"
-      role="dialog"
       aria-labelledby={`interaction-${interaction.id}`}
       aria-keyshortcuts="ArrowUp ArrowDown Enter Escape"
       tabIndex={selectableChoices.length > 0 ? 0 : undefined}
@@ -329,6 +367,6 @@ function InteractionCard({
           Cancel
         </AriaButton>
       )}
-    </div>
+    </fieldset>
   );
 }

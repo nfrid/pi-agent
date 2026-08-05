@@ -208,7 +208,10 @@ function RouteShell() {
   );
   return (
     <div className="app">
-      <DashboardUtilityProvider blocked={pendingQuestions}>
+      <DashboardUtilityProvider
+        blocked={pendingQuestions}
+        locationKey={routeState.pathname}
+      >
         <Header snapshot={dashboard.snapshot} />
         <main
           className={`shell ${routeState.isSession ? 'session-shell' : ''}`}

@@ -256,7 +256,7 @@ export function AgentThreadNav({
       if (frame !== undefined) window.cancelAnimationFrame(frame);
       window.removeEventListener('keydown', onKeyDown);
       if (mobile && !document.querySelector('.interaction-dock'))
-        handleRef.current?.focus();
+        handleRef.current?.focus({ preventScroll: true });
     };
   }, [mode, onOpenChange, open]);
   const select = (id: string) => {

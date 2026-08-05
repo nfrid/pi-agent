@@ -62,9 +62,18 @@ test('mobile dashboard renders and supports the new-agent route', async ({
       name: 'A deliberately long session title that must wrap safely offline',
     }),
   ).toBeVisible();
-  await expect(page.locator('.agent-nav-new')).toBeVisible();
+  await expect(
+    page
+      .getByRole('complementary', { name: 'Agents and threads' })
+      .getByRole('button', { name: 'New agent', exact: true }),
+  ).toBeVisible();
   await page.locator('.agent-nav-backdrop').click();
-  await page.getByRole('button', { name: 'Open command palette' }).click();
+  await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
+  const paletteTrigger = page.getByRole('button', {
+    name: 'Open command palette',
+  });
+  await paletteTrigger.focus();
+  await page.keyboard.press('Enter');
   await expect(
     page.getByRole('dialog', { name: 'Command palette' }),
   ).toBeVisible();
@@ -100,7 +109,8 @@ test('mobile dashboard renders and supports the new-agent route', async ({
   await expect(
     page.getByRole('dialog', { name: 'Command palette' }),
   ).toHaveCount(0);
-  await page.getByRole('button', { name: 'Open command palette' }).click();
+  await paletteTrigger.focus();
+  await page.keyboard.press('Enter');
   await page.getByRole('option', { name: /New Agent/ }).click();
   expect(
     await page
@@ -835,6 +845,10 @@ test('dense mobile session keeps conversation and activity readable', async ({
   );
   await page.keyboard.press('Escape');
   await expect(mobileInspector).toHaveCount(0);
+  await page.evaluate(() =>
+    window.scrollTo(0, document.documentElement.scrollHeight),
+  );
+  await expect(activity).toBeVisible();
   await activity.click();
   await expect(page.locator('.tool-chip').getByText('read')).toBeVisible();
   await expect(
@@ -1504,8 +1518,14 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     )
     .toBe(1);
 
-  await expect(page.getByRole('dialog')).toHaveCount(2);
-  const firstInteraction = page.getByRole('dialog').nth(0);
+  const pendingDialog = page.getByRole('dialog', {
+    name: 'Pending questions',
+  });
+  await expect(pendingDialog).toHaveCount(1);
+  await expect(pendingDialog).toHaveAttribute('aria-modal', 'true');
+  const firstInteraction = page.getByRole('group', {
+    name: 'Use the first answer?',
+  });
   await firstInteraction.focus();
   await firstInteraction.press('ArrowDown');
   await expect(
@@ -1529,8 +1549,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(
     page.getByText('Answered from this dashboard.').first(),
   ).toBeVisible();
-  await page
-    .getByRole('dialog')
+  await pendingDialog
     .getByRole('button', { name: 'Cancel' })
     .dispatchEvent('click');
   await expect(page.getByText('Answered from this dashboard.')).toHaveCount(2);
@@ -1554,6 +1573,11 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
         ).length,
     )
     .toBe(1);
+  await mocks.emit({
+    type: 'snapshot',
+    snapshot: phase6Snapshot({ pendingInteractions: [] }),
+  });
+  await expect(pendingDialog).toHaveCount(0);
 
   await page.evaluate(() =>
     window.scrollTo(0, document.documentElement.scrollHeight),
@@ -1743,9 +1767,14 @@ test('phase six mocked management flow covers refresh, fallback notification, la
   await workspaceDialog
     .getByRole('button', { name: 'Close Workspaces' })
     .click();
-  // React Aria keeps the dialog in the tree while its 160ms exit runs.
-  await expect(workspaceDialog).toHaveCount(1);
-  await expect(workspaceDialog).toHaveCount(0);
+  // The panel stays mounted for its visual exit but leaves the accessibility tree.
+  const exitingUtility = page.locator('.surface-dialog-layer.is-exiting');
+  await expect(exitingUtility.locator('> div')).toHaveAttribute(
+    'aria-hidden',
+    'true',
+  );
+  await expect(page.locator('.utility-dialog')).toHaveCount(1);
+  await expect(page.locator('.utility-dialog')).toHaveCount(0);
   await page.getByRole('button', { name: 'Open agent list' }).click();
   await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Workspaces' })).toBeVisible();
@@ -1825,31 +1854,39 @@ test('phase six mocked management flow covers refresh, fallback notification, la
   await expect(inspector).toContainText('Runtime controls');
   await expect(inspector).not.toContainText('Live work');
   await expect(inspector).not.toContainText('test/vision');
-  const desktopGeometry = await page.evaluate(() => {
-    const rail = document
-      .querySelector('.agent-thread-nav-session')
-      ?.getBoundingClientRect();
-    const composer = document
-      .querySelector('.composer')
-      ?.getBoundingClientRect();
-    const inspector = document
-      .querySelector('.session-inspector')
-      ?.getBoundingClientRect();
-    return rail && composer && inspector
-      ? {
-          railRight: rail.right,
-          composerLeft: composer.left,
-          composerRight: composer.right,
-          inspectorLeft: inspector.left,
-        }
-      : undefined;
-  });
-  expect(desktopGeometry?.composerLeft).toBeGreaterThanOrEqual(
-    desktopGeometry?.railRight ?? Number.POSITIVE_INFINITY,
-  );
-  expect(desktopGeometry?.composerRight).toBeLessThanOrEqual(
-    desktopGeometry?.inspectorLeft ?? Number.NEGATIVE_INFINITY,
-  );
+  const readDesktopGeometry = () =>
+    page.evaluate(() => {
+      const rail = document
+        .querySelector('.agent-thread-nav-session')
+        ?.getBoundingClientRect();
+      const composerElement = document.querySelector<HTMLElement>('.composer');
+      const composer = composerElement?.getBoundingClientRect();
+      const inspector = document
+        .querySelector('.session-inspector')
+        ?.getBoundingClientRect();
+      return rail && composer && inspector && composerElement
+        ? {
+            railRight: rail.right,
+            composerLeft: composer.left,
+            composerRight: composer.right,
+            composerVisibility: getComputedStyle(composerElement).visibility,
+            inspectorLeft: inspector.left,
+          }
+        : undefined;
+    });
+  for (const width of [1200, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    const geometry = await readDesktopGeometry();
+    expect(geometry?.composerLeft).toBeGreaterThanOrEqual(
+      geometry?.railRight ?? Number.POSITIVE_INFINITY,
+    );
+    expect(geometry?.composerRight).toBeLessThanOrEqual(
+      geometry?.inspectorLeft ?? Number.NEGATIVE_INFINITY,
+    );
+  }
+  await page.setViewportSize({ width: 1024, height: 900 });
+  expect((await readDesktopGeometry())?.composerVisibility).toBe('hidden');
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.keyboard.press('Escape');
   await expect(inspector).toHaveCount(0);
   await page.getByRole('button', { name: 'Details', exact: true }).click();

@@ -113,7 +113,7 @@ export function SessionView({
     if (outlineOpen) outlineWasOpenRef.current = true;
     else if (outlineWasOpenRef.current) {
       outlineWasOpenRef.current = false;
-      outlineTriggerRef.current?.focus();
+      outlineTriggerRef.current?.focus({ preventScroll: true });
     }
   }, [outlineOpen]);
   useEffect(() => {
@@ -363,7 +363,7 @@ export function SessionInspector({
       window.cancelAnimationFrame(frame);
       document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', onKeyDown);
-      triggerFocusRef.current?.focus();
+      triggerFocusRef.current?.focus({ preventScroll: true });
       triggerFocusRef.current = null;
     };
   }, [onClose, open]);

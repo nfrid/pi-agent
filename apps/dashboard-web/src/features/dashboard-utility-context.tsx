@@ -22,9 +22,11 @@ export const DashboardUtilityContext = createContext<
 
 export function DashboardUtilityProvider({
   blocked = false,
+  locationKey,
   children,
 }: {
   blocked?: boolean;
+  locationKey?: string;
   children: ReactNode;
 }) {
   const [panel, setPanel] = useState<DashboardUtilityPanel>();
@@ -32,6 +34,10 @@ export function DashboardUtilityProvider({
   useEffect(() => {
     if (blocked) setOpen(false);
   }, [blocked]);
+  useEffect(() => {
+    void locationKey;
+    setOpen(false);
+  }, [locationKey]);
   const value = useMemo<DashboardUtilityContextValue>(
     () => ({
       panel,
