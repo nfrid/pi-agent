@@ -21,6 +21,7 @@ import {
   sessionNavigationTarget,
   shouldApplySessionMetadata,
   shouldShowActivityLead,
+  shouldShowQueuePanel,
   toTranscriptEntries,
 } from './App';
 import type { DashboardEvent } from './dashboard-transport';
@@ -55,6 +56,10 @@ describe('queued message commands', () => {
       type: 'queue.remove',
       clientId: 'q2',
     });
+    expect(shouldShowQueuePanel('working', 0)).toBe(true);
+    expect(shouldShowQueuePanel('idle', 1)).toBe(true);
+    expect(shouldShowQueuePanel('waiting', 1)).toBe(true);
+    expect(shouldShowQueuePanel('idle', 0)).toBe(false);
   });
 });
 

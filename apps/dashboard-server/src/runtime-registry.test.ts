@@ -473,6 +473,67 @@ describe('runtime registry', () => {
     replacement.destroy();
   });
 
+  it('sends queue draft edits without waiting behind a semantic command', async () => {
+    const registry = new RuntimeRegistry({ expectedToken: () => true });
+    const bridge = new PassThrough();
+    const frames: string[] = [];
+    bridge.on('data', (chunk) => {
+      frames.push(...String(chunk).split('\n').filter(Boolean));
+    });
+    registry.accept(bridge as never);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+
+    const blocking = registry.sendCommand('runtime-1', {
+      id: 'blocking',
+      type: 'abort',
+    });
+    await eventually(() =>
+      frames.some((line) => line.includes('"id":"blocking"')),
+    );
+    const draft = registry.sendCommand('runtime-1', {
+      id: 'draft-now',
+      type: 'queue.add',
+      clientId: 'draft-1',
+      mode: 'steer',
+      text: 'deliver at the next boundary',
+    });
+    await eventually(() =>
+      frames.some((line) => line.includes('"id":"draft-now"')),
+    );
+    bridge.write(
+      serializeFrame({
+        kind: 'ack',
+        id: 'draft-now',
+        ok: true,
+        result: { accepted: true },
+      }),
+    );
+    await expect(draft).resolves.toEqual({ accepted: true });
+    let blockingSettled = false;
+    void blocking.finally(() => {
+      blockingSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(blockingSettled).toBe(false);
+    bridge.write(
+      serializeFrame({
+        kind: 'ack',
+        id: 'blocking',
+        ok: true,
+        result: { accepted: true },
+      }),
+    );
+    await expect(blocking).resolves.toEqual({ accepted: true });
+    bridge.destroy();
+  });
+
   it('recycles a connection when backpressure outlives the command timeout', async () => {
     const registry = new RuntimeRegistry({
       expectedToken: () => true,

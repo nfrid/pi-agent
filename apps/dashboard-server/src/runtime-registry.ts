@@ -15,6 +15,7 @@ import {
 import {
   type BridgeCommand,
   type BridgeEvent,
+  MAX_QUEUE_DRAFTS,
   parseFrame,
   type RuntimeSnapshot,
   redactBridgeEvent,
@@ -51,6 +52,7 @@ type RuntimeRecord = {
   >;
   commandQueue: QueuedCommand[];
   commandRunning: boolean;
+  queueDraftCommandsRunning: number;
   writeBlocked: boolean;
   /** Semantic action IDs already handed to Pi in this runtime epoch. */
   actionCommandIds: NonIdempotentActionIdGuard;
@@ -67,6 +69,17 @@ export type RegistryChange =
       runtimeSeq?: number;
     }
   | { kind: 'offline'; snapshot: RuntimeSnapshot };
+
+function isQueueDraftCommand(command: BridgeCommand): boolean {
+  return (
+    command.type === 'queue.add' ||
+    command.type === 'queueDraft.add' ||
+    command.type === 'queue.update' ||
+    command.type === 'queueDraft.update' ||
+    command.type === 'queue.remove' ||
+    command.type === 'queueDraft.remove'
+  );
+}
 
 export interface RuntimeRegistryOptions {
   expectedToken?: (
@@ -252,6 +265,7 @@ export class RuntimeRegistry {
             pending: new Map(),
             commandQueue: [],
             commandRunning: false,
+            queueDraftCommandsRunning: 0,
             writeBlocked: false,
             actionCommandIds: new NonIdempotentActionIdGuard(),
           };
@@ -337,11 +351,20 @@ export class RuntimeRegistry {
         error instanceof Error ? error : new Error(String(error)),
       );
     }
+    const queueDraftCommand = isQueueDraftCommand(command);
     if (
+      !queueDraftCommand &&
       record.commandQueue.length + (record.commandRunning ? 1 : 0) >=
-      RUNTIME_COMMAND_QUEUE_LIMIT
+        RUNTIME_COMMAND_QUEUE_LIMIT
     )
       return Promise.reject(new Error('Runtime command queue is full.'));
+    if (
+      queueDraftCommand &&
+      record.queueDraftCommandsRunning >= MAX_QUEUE_DRAFTS
+    )
+      return Promise.reject(
+        new Error('Runtime queue draft command capacity is full.'),
+      );
     if (command.type === 'action.invoke') {
       // Keep direct lookup behind the same semantic validation as the bridge
       // parser. This is defense in depth for typed callers and old records.
@@ -405,17 +428,26 @@ export class RuntimeRegistry {
           );
       }
     }
+    let queued: QueuedCommand | undefined;
     const promise = new Promise<unknown>((resolve, reject) => {
-      // The reservation above occurs only after queue admission; a rejected
-      // queue admission is not a consumed action ID.
-      record.commandQueue.push({
-        command,
-        connection,
-        resolve,
-        reject,
-      });
+      queued = { command, connection, resolve, reject };
     });
-    this.pumpCommands(runtimeId, record);
+    if (!queued) return Promise.reject(new Error('Command setup failed.'));
+    if (queueDraftCommand) {
+      // Queue drafts are editable dashboard state, so keep them responsive
+      // while a semantic command awaits its acknowledgement. This lane is
+      // independently bounded and writes on the connection/session generation
+      // captured synchronously above.
+      record.queueDraftCommandsRunning += 1;
+      void this.executeCommand(runtimeId, record, queued).finally(() => {
+        record.queueDraftCommandsRunning -= 1;
+      });
+    } else {
+      // The action reservation above occurs only after queue admission; a
+      // rejected admission is not a consumed semantic command ID.
+      record.commandQueue.push(queued);
+      this.pumpCommands(runtimeId, record);
+    }
     return promise;
   }
 

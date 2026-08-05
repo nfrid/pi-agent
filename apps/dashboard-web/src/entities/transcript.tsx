@@ -228,7 +228,7 @@ export function activityGroupMetadata(
   ];
   if (summary.failureCount > 0)
     parts.push(
-      `${summary.failureCount} failure${summary.failureCount === 1 ? '' : 's'}`,
+      `${summary.failureCount} failed attempt${summary.failureCount === 1 ? '' : 's'}`,
     );
   return parts.join(' · ');
 }

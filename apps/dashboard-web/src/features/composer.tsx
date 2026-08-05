@@ -68,6 +68,13 @@ export function queueRemoveCommand(clientId: string): Record<string, unknown> {
   return { id: newQueueId(), type: 'queue.remove', clientId };
 }
 
+export function shouldShowQueuePanel(
+  liveState: RuntimeSnapshot['liveState'],
+  queuedCount: number,
+): boolean {
+  return liveState === 'working' || queuedCount > 0;
+}
+
 export function formatContextTokens(tokens: number): string {
   if (tokens >= 1_000_000)
     return `${Number.parseFloat((tokens / 1_000_000).toFixed(1))}m`;
@@ -544,7 +551,7 @@ export function Composer({
           }}
         />
       )}
-      {runtime.liveState === 'working' && (
+      {shouldShowQueuePanel(runtime.liveState, queue.length) && (
         <QueuePanel
           runtimeId={runtime.runtimeId}
           items={queue}

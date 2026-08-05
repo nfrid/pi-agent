@@ -39,7 +39,7 @@ describe('activity row views and virtual transcript construction', () => {
       '2 tool calls',
     );
     expect(activityGroupMetadata({ toolCount: 2, failureCount: 1 })).toBe(
-      '2 tool calls · 1 failure',
+      '2 tool calls · 1 failed attempt',
     );
   });
 

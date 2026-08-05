@@ -387,7 +387,10 @@ export class ActivityGroupComponent implements Component {
         formatDuration(this.sequence.completedAt - this.sequence.startedAt),
       );
     const historicalFailed = tools.filter((tool) => tool.isError).length;
-    if (historicalFailed > 0) parts.push(`${historicalFailed} failed`);
+    if (historicalFailed > 0)
+      parts.push(
+        `${historicalFailed} failed attempt${historicalFailed === 1 ? '' : 's'}`,
+      );
     if (parts.length === 0) return [];
     const indent = width > 3 ? '   ' : '';
     return wrapTextWithAnsi(

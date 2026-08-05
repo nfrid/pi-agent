@@ -54,6 +54,7 @@ export {
   queuedMessagesForRuntime,
   queueRemoveCommand,
   runtimeSupportsImages,
+  shouldShowQueuePanel,
 } from './features/composer';
 export {
   ExtensionSurfaceStack,
