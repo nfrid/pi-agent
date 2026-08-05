@@ -135,6 +135,81 @@ export function toolPath(args: unknown): string | undefined {
   return stringArg(args, 'path') ?? stringArg(args, 'file_path');
 }
 
+const TOOL_ACTION_LABEL_MAX = 140;
+
+function actionArgs(args: unknown): Record<string, unknown> | undefined {
+  return args && typeof args === 'object' && !Array.isArray(args)
+    ? (args as Record<string, unknown>)
+    : undefined;
+}
+
+function compactAction(value: string, max = TOOL_ACTION_LABEL_MAX): string {
+  const compact = value.replace(/\s+/gu, ' ').trim();
+  return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
+}
+
+function actionValue(args: unknown, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = stringArg(args, key);
+    if (value) return compactAction(value, 120);
+  }
+  return undefined;
+}
+
+/**
+ * A bounded, tool-aware label for compact activity rows.
+ *
+ * Tool names alone make a collapsed run look like a list of indistinguishable
+ * dots. Keep the verb/name visible, then add the one argument that tells a
+ * reader what happened. Opaque or unusually shaped provider arguments still
+ * fall back to the stable tool name rather than being guessed at.
+ */
+export function toolActionSummary(tool: ToolDescriptor): string {
+  const base = toolBaseName(tool.name);
+  const args = actionArgs(tool.args);
+  const path = toolPath(tool.args);
+  if (base === 'bash' || base === 'shell' || base === 'exec') {
+    const command = actionValue(tool.args, 'command', 'cmd', 'script');
+    return command ? `${base} ${command}` : base;
+  }
+  if (base === 'delegate' || base === 'delegates') {
+    const action = actionValue(tool.args, 'action', 'operation');
+    const name = actionValue(
+      tool.args,
+      'name',
+      'task',
+      'description',
+      'prompt',
+    );
+    if (action && name) return `${base} ${action}: ${name}`;
+    if (name) return `${base}: ${name}`;
+    if (args && Array.isArray(args.tasks))
+      return `${base}: ${args.tasks.length} task${args.tasks.length === 1 ? '' : 's'}`;
+    return action ? `${base} ${action}` : base;
+  }
+  if (base === 'todo' || base === 'tasks') {
+    const action = actionValue(tool.args, 'action', 'operation');
+    const id = actionValue(tool.args, 'id', 'taskId');
+    if (action && id) return `${base} ${action} ${id}`;
+    if (action) return `${base} ${action}`;
+    if (id) return `${base} ${id}`;
+    return base;
+  }
+  if (
+    base === 'web_search' ||
+    base === 'web' ||
+    base === 'search_web' ||
+    base === 'fetch_content' ||
+    base === 'get_search_content'
+  ) {
+    const query = actionValue(tool.args, 'query', 'q', 'url', 'href');
+    return query ? `${base}: ${query}` : base;
+  }
+  if (path) return `${base} ${compactAction(path, 120)}`;
+  const value = actionValue(tool.args, 'pattern', 'query', 'url', 'text');
+  return value ? `${base}: ${value}` : base;
+}
+
 function isValidationCommand(tool: ToolDescriptor): boolean {
   if (toolBaseName(tool.name) !== 'bash') return false;
   const command = stringArg(tool.args, 'command')?.toLowerCase() ?? '';
@@ -237,14 +312,23 @@ export type TranscriptEntry = {
   | {
       kind: 'assistant';
       speaks: boolean;
+      /** The assistant is still streaming this turn; projections keep it live. */
+      streaming?: boolean;
       /**
        * Whether the model narrated this turn, and on which channel. The words
        * are the renderer's business; all a boundary needs is that a header was
        * written and who it was written for.
        */
       narration?: Narration;
+      /** Latest pure title supplied by a transcript adapter, if known. */
+      title?: string;
+      /** A preamble names the work below and outranks later narration. */
+      titleKind?: 'preamble' | 'narration';
     }
-  | ({ kind: 'tool' } & ToolDescriptor)
+  | ({ kind: 'tool' } & ToolDescriptor & {
+        status?: 'pending' | 'running' | 'complete' | 'success' | 'error';
+        isError?: boolean;
+      })
   | { kind: 'other' }
 );
 

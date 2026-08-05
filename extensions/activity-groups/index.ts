@@ -18,6 +18,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import type { Container } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
+import { installActivityGroupsActionHandler } from './actions';
 import { createActivityGroupRenderer } from './renderer';
 import { installToolSequenceShim, type ShimHost } from './shim';
 import type { SequenceRenderer } from './types';
@@ -84,13 +85,12 @@ function shimIsSupported(container: typeof Container | undefined): boolean {
 export default defineExtension('activity-groups', (pi) => {
   const renderer = createActivityGroupRenderer();
 
-  if (hasNativeHook(pi)) {
-    pi.registerToolSequenceRenderer(renderer);
-    return;
-  }
+  const nativeHook = hasNativeHook(pi);
+  if (nativeHook) pi.registerToolSequenceRenderer(renderer);
 
   let context: ExtensionContext | undefined;
   let uninstall: (() => void) | undefined;
+  let uninstallActionHandler: (() => void) | undefined;
   /**
    * Whether groups show their members, independently of Pi's own tool-output
    * expansion. These are different questions — "what did it do" versus "what
@@ -140,7 +140,7 @@ export default defineExtension('activity-groups', (pi) => {
     error instanceof Error ? error.message : String(error);
 
   const install = () => {
-    if (uninstall || !context) return;
+    if (nativeHook || uninstall || !context) return;
     const container = containerClassOf(AssistantMessageComponent);
     if (!shimIsSupported(container)) {
       notify(
@@ -186,9 +186,32 @@ export default defineExtension('activity-groups', (pi) => {
   };
 
   pi.on('session_start', (_event, ctx) => {
+    uninstallActionHandler?.();
     context = ctx;
+    // The semantic action is available to the bridge even when the installed
+    // Pi build has no native renderer hook. Rendering itself remains bounded
+    // by the verified shim below.
+    uninstallActionHandler = installActivityGroupsActionHandler((input) => {
+      if (input.enabled === false && !nativeHook) {
+        uninstall?.();
+        uninstall = undefined;
+      } else if (input.enabled === true) install();
+      if (input.expanded !== undefined) {
+        opened = input.expanded;
+        if (nativeHook) ctx.ui.setToolsExpanded(opened);
+      }
+      return { enabled: nativeHook || Boolean(uninstall), expanded: opened };
+    });
     // Only the interactive TUI renders these components at all.
-    if (ctx.mode === 'tui') install();
+    if (!nativeHook && ctx.mode === 'tui') install();
+  });
+  pi.on('session_shutdown', (_event, ctx) => {
+    if (context !== ctx) return;
+    uninstallActionHandler?.();
+    uninstallActionHandler = undefined;
+    uninstall?.();
+    uninstall = undefined;
+    context = undefined;
   });
 
   /**
@@ -208,16 +231,25 @@ export default defineExtension('activity-groups', (pi) => {
       const action = args.trim().toLowerCase();
 
       if (action === 'off') {
-        uninstall?.();
-        uninstall = undefined;
-        ctx.ui.notify('Activity groups off', 'info');
+        if (nativeHook) {
+          ctx.ui.notify(
+            'Activity groups are managed by the native renderer',
+            'info',
+          );
+        } else {
+          uninstall?.();
+          uninstall = undefined;
+          ctx.ui.notify('Activity groups off', 'info');
+        }
         return;
       }
       if (action === 'on') {
         install();
         ctx.ui.notify(
-          uninstall ? 'Activity groups on' : 'Activity groups unavailable',
-          uninstall ? 'info' : 'warning',
+          nativeHook || uninstall
+            ? 'Activity groups on'
+            : 'Activity groups unavailable',
+          nativeHook || uninstall ? 'info' : 'warning',
         );
         return;
       }
@@ -226,7 +258,7 @@ export default defineExtension('activity-groups', (pi) => {
         return;
       }
 
-      if (!uninstall) {
+      if (!nativeHook && !uninstall) {
         ctx.ui.notify(
           'Activity groups are off — /activity-groups on to enable',
           'warning',
@@ -234,6 +266,7 @@ export default defineExtension('activity-groups', (pi) => {
         return;
       }
       opened = !opened;
+      if (nativeHook) ctx.ui.setToolsExpanded(opened);
       ctx.ui.notify(opened ? 'Groups opened' : 'Groups collapsed', 'info');
     },
   });

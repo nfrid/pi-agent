@@ -1,0 +1,28 @@
+{
+  "runtimeId": "runtime-fixture",
+  "ownership": "managed",
+  "pid": 42,
+  "cwd": "/tmp/dashboard-fixture",
+  "liveState": "working",
+  "session": {
+    "id": "session-fixture",
+    "entries": [
+      {
+        "type": "session",
+        "id": "session-entry",
+        "cwd": "/tmp/dashboard-fixture"
+      },
+      {
+        "type": "message",
+        "id": "user-entry",
+        "timestamp": "2026-08-04T12:00:00.000Z",
+        "message": {
+          "id": "user-1",
+          "role": "user",
+          "content": "Inspect the fixture."
+        }
+      }
+    ]
+  },
+  "pendingInteractions": []
+}

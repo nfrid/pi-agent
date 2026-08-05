@@ -7,7 +7,7 @@ This tree contains the first self-hosted dashboard vertical slice. It keeps Pi a
 - `packages/dashboard-protocol`: versioned JSONL DTOs, bounded parsing, and launch/command validation.
 - `packages/activity-model`: canonical pure grouping/title model consumed by both the TUI extension and dashboard web renderer. Compatibility imports under `extensions/activity-groups` only re-export it.
 - `extensions/remote-control`: Pi 0.82.1 bridge. It is safe to load globally, defaults to `~/.pi/agent/dashboard/bridge.sock`, and quietly retries while no daemon is present. Managed launches also set a one-time launch credential and a separate persistent runtime identity credential.
-- `apps/dashboard-server`: localhost HTTP/WebSocket daemon, Unix bridge socket, Sesh/tmux adapters, runtime registry, session index, metadata SQLite, interaction broker transport, usage and isolated Web Push adapters.
+- `apps/dashboard-server`: localhost HTTP/WebSocket daemon, Unix bridge socket, manual composition root, Sesh/tmux adapters, runtime registry, session index, metadata SQLite, interaction broker transport, usage and isolated Web Push adapters.
 - `apps/dashboard-web`: mobile React/Vite PWA with dashboard, workspace, session, runtime and launch routes.
 
 ## Requirements and setup
@@ -28,12 +28,14 @@ For local development, copy `.env.dashboard.example` to `.env.dashboard`, set a 
 pnpm dashboard:dev
 ```
 
-Use `pnpm dashboard:daemon` or `pnpm dashboard:web` to run only one side. The private `.env.dashboard` file is gitignored; root environment variables override values from it. For a production daemon after building:
+Use `pnpm dashboard:daemon` or `pnpm dashboard:web` to run only one side. The private `.env.dashboard` file is gitignored; root environment variables override values from it. For a production daemon after building (the same `dist/index.js` target used by `deploy/com.pi.dashboard.plist`):
 
 ```sh
 pnpm --filter @pi-dashboard/server build
 node apps/dashboard-server/dist/index.js
 ```
+
+`create-daemon.ts` is the single manual composition root. It constructs the configuration, repositories/facades, adapters, application services, and event/registry relays, then injects one dependency graph into the HTTP transport. `createDashboardServer` delegates to that root for API compatibility; `main.ts` is only the development wrapper. The transport intentionally still owns Fastify, the Unix listener, raw SSE, and WebSocket upgrade lifecycles, and retains the old bounded `handleHttp` dispatcher only as migration debt.
 
 The daemon prints a per-install browser token. Build the web app with `VITE_DASHBOARD_URL` only when server and web are on different origins, then serve `apps/dashboard-web/dist` over HTTPS. The PWA never embeds the auth token in its build: on first load it asks for the printed token and keeps it in browser local storage. WebSocket authentication is a bounded first `{type:"auth",token}` message; the token is never placed in a URL. For local development, run `pnpm --filter @pi-dashboard/web dev` and include its origin in `PI_DASHBOARD_ORIGINS`.
 

@@ -6,18 +6,30 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import {
+  MAX_NON_IDEMPOTENT_ACTION_IDS,
+  type NonIdempotentActionIdGuard,
+} from '@pi-dashboard/extension-contributions';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  type BridgeCommand,
+  parseFrame,
   type RuntimeSnapshot,
   serializeFrame,
 } from '../../packages/dashboard-protocol/src/index';
 import { InteractionBroker } from '../ask-user/broker';
+import { askUserCapabilitySnapshot } from '../ask-user/contribution';
+import { LiveSurfaceHub } from '../shared/runtime/live-surfaces';
 import {
   BridgeClient,
   createRemoteControlRuntime,
   dispatchDashboardCommand,
   dispatchDashboardInput,
   expandDashboardInput,
+  flushQueueDrafts,
+  LiveEventNormalizer,
+  QueueDraftStore,
+  shouldForwardLiveMessage,
 } from './index';
 
 const snapshot: RuntimeSnapshot = {
@@ -169,13 +181,10 @@ describe('dashboard input dispatch', () => {
         { type: 'text', text: 'describe this' },
         {
           type: 'image',
-          source: {
-            type: 'base64',
-            mediaType: 'image/png',
-            data: Buffer.from([
-              0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-            ]).toString('base64'),
-          },
+          mimeType: 'image/png',
+          data: Buffer.from([
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+          ]).toString('base64'),
         },
       ],
       undefined,
@@ -203,6 +212,297 @@ describe('dashboard input dispatch', () => {
       ]),
     ).toBe('');
     await rm(directory, { recursive: true, force: true });
+  });
+});
+
+describe('remote event normalization', () => {
+  it('suppresses duplicate tool-result messages from the live transcript', () => {
+    expect(
+      shouldForwardLiveMessage({
+        message: {
+          role: 'toolResult',
+          toolCallId: 'call-1',
+          content: [{ type: 'text', text: 'done' }],
+        },
+      }),
+    ).toBe(false);
+    expect(
+      shouldForwardLiveMessage({
+        message: { role: 'assistant', content: 'Continuing.' },
+      }),
+    ).toBe(true);
+    expect(shouldForwardLiveMessage({ role: 'user', content: 'Prompt' })).toBe(
+      true,
+    );
+  });
+
+  it('correlates id-less message phases and keeps the live ID when responseId arrives late', () => {
+    const normalizer = new LiveEventNormalizer('runtime-epoch');
+    const started = normalizer.normalizeMessage('started', {
+      message: { role: 'assistant', content: [{ type: 'text', text: 'Hi' }] },
+    });
+    const updated = normalizer.normalizeMessage('updated', {
+      assistantMessageEvent: { type: 'text_delta', delta: ' there' },
+    });
+    const finished = normalizer.normalizeMessage('finished', {
+      message: { role: 'assistant', content: 'Hi there' },
+      responseId: 'provider-response-1',
+    });
+
+    expect(started.messageId).toBe('runtime-epoch:1');
+    expect(updated.messageId).toBe(started.messageId);
+    expect(finished.messageId).toBe(started.messageId);
+    expect(updated.content).toEqual([{ type: 'text', text: 'Hi there' }]);
+    expect(finished.content).toBe('Hi there');
+
+    const deltaOnly = new LiveEventNormalizer('runtime-delta');
+    deltaOnly.normalizeMessage('started', {
+      message: { role: 'assistant', content: 'Hi' },
+    });
+    expect(
+      deltaOnly.normalizeMessage('updated', {
+        assistantMessageEvent: { delta: ' there' },
+      }).content,
+    ).toBe('Hi there');
+
+    const nextStarted = normalizer.normalizeMessage('started', {
+      message: { role: 'assistant', content: 'next' },
+    });
+    const nextFinished = normalizer.normalizeMessage('finished', {
+      message: { role: 'assistant', content: 'next' },
+    });
+    expect(nextStarted.messageId).toBe('runtime-epoch:2');
+    expect(nextFinished.messageId).toBe(nextStarted.messageId);
+    expect(nextStarted.messageId).not.toBe(started.messageId);
+  });
+
+  it('accumulates delta-only updates even when no final event arrives', () => {
+    const normalizer = new LiveEventNormalizer('runtime-delta-only');
+    normalizer.normalizeMessage('started', {
+      message: { role: 'assistant', content: 'Hi' },
+    });
+    expect(
+      normalizer.normalizeMessage('updated', {
+        assistantMessageEvent: { delta: ' there' },
+      }),
+    ).toMatchObject({ content: 'Hi there', phase: 'updated' });
+  });
+
+  it('uses Pi toolCallId and preserves direct tool execution fields', () => {
+    const normalizer = new LiveEventNormalizer('runtime-epoch');
+    expect(
+      normalizer.normalizeTool('started', {
+        toolCallId: 'read-1',
+        toolName: 'read',
+        args: { path: '/tmp/file' },
+      }),
+    ).toMatchObject({
+      toolCallId: 'read-1',
+      name: 'read',
+      arguments: { path: '/tmp/file' },
+      phase: 'started',
+      status: 'running',
+    });
+    expect(
+      normalizer.normalizeTool('finished', {
+        toolCallId: 'read-1',
+        toolName: 'read',
+        result: 'contents',
+        isError: false,
+      }),
+    ).toMatchObject({
+      toolCallId: 'read-1',
+      result: 'contents',
+      isError: false,
+      phase: 'finished',
+      status: 'completed',
+    });
+  });
+});
+
+describe('dashboard-owned queue drafts', () => {
+  it('rejects duplicate and unknown client ids while enforcing lifecycle bounds', () => {
+    const store = new QueueDraftStore();
+    expect(() =>
+      store.add({ clientId: 'draft-1', mode: 'steer', text: 'x' }),
+    ).toThrow('session');
+    store.setSession('session-1');
+    store.add({ clientId: 'draft-1', mode: 'steer', text: 'x' });
+    expect(() =>
+      store.add({ clientId: 'draft-1', mode: 'followUp', text: 'duplicate' }),
+    ).toThrow('already exists');
+    expect(() =>
+      store.update({ clientId: 'unknown', mode: 'steer', text: 'x' }),
+    ).toThrow('unknown');
+    expect(() => store.remove('unknown')).toThrow('unknown');
+    expect(() =>
+      store.add({ clientId: 'bad', mode: 'steer', text: ' '.repeat(20_000) }),
+    ).toThrow('invalid');
+    for (let index = 2; index < 33; index += 1)
+      store.add({
+        clientId: `draft-${index}`,
+        mode: 'steer',
+        text: `${index}`,
+      });
+    expect(() =>
+      store.add({
+        clientId: 'draft-overflow',
+        mode: 'steer',
+        text: 'overflow',
+      }),
+    ).toThrow('full');
+    expect(store.list()).toHaveLength(32);
+    store.setSession('session-2');
+    expect(store.list()).toEqual([]);
+  });
+
+  it('flushes each mode once, restores failed sends, and ignores stale sessions', () => {
+    const sendUserMessage = vi.fn((text: string) => {
+      if (text === 'fails') throw new Error('Pi queue rejected message');
+    });
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    if (!runtime) throw new Error('runtime was not created');
+    const contextFor = (id: string) =>
+      ({
+        cwd: '/tmp',
+        model: undefined,
+        thinkingLevel: 'off',
+        sessionManager: {
+          getBranch: () => [],
+          getSessionId: () => id,
+          getSessionFile: () => undefined,
+          getSessionName: () => undefined,
+          getCwd: () => '/tmp',
+          getLeafId: () => undefined,
+        },
+        getContextUsage: () => undefined,
+        isIdle: () => false,
+      }) as unknown as ExtensionContext;
+    const first = contextFor('session-queue-1');
+    runtime.setContext(first);
+    runtime.queueDrafts.add({
+      clientId: 'steer-1',
+      mode: 'steer',
+      text: 'steer first',
+    });
+    runtime.queueDrafts.add({
+      clientId: 'follow-1',
+      mode: 'followUp',
+      text: 'follow later',
+    });
+    runtime.queueDrafts.add({
+      clientId: 'steer-2',
+      mode: 'steer',
+      text: 'fails',
+    });
+    flushQueueDrafts(
+      runtime,
+      { sendUserMessage } as unknown as ExtensionAPI,
+      first,
+      'steer',
+    );
+    expect(sendUserMessage).toHaveBeenNthCalledWith(1, 'steer first', {
+      deliverAs: 'steer',
+    });
+    expect(sendUserMessage).toHaveBeenNthCalledWith(2, 'fails', {
+      deliverAs: 'steer',
+    });
+    expect(runtime.queueDrafts.list()).toEqual([
+      { clientId: 'follow-1', mode: 'followUp', text: 'follow later' },
+      { clientId: 'steer-2', mode: 'steer', text: 'fails' },
+    ]);
+    sendUserMessage.mockImplementation(() => undefined);
+    flushQueueDrafts(
+      runtime,
+      { sendUserMessage } as unknown as ExtensionAPI,
+      first,
+      'steer',
+    );
+    expect(runtime.queueDrafts.list()).toEqual([
+      { clientId: 'follow-1', mode: 'followUp', text: 'follow later' },
+    ]);
+    flushQueueDrafts(
+      runtime,
+      { sendUserMessage } as unknown as ExtensionAPI,
+      first,
+      'followUp',
+    );
+    expect(sendUserMessage).toHaveBeenLastCalledWith('follow later', {
+      deliverAs: 'followUp',
+    });
+    const second = contextFor('session-queue-2');
+    runtime.setContext(second);
+    runtime.queueDrafts.add({
+      clientId: 'new-session',
+      mode: 'steer',
+      text: 'new',
+    });
+    expect(
+      flushQueueDrafts(
+        runtime,
+        { sendUserMessage } as unknown as ExtensionAPI,
+        first,
+        'steer',
+      ),
+    ).toBe(false);
+    expect(runtime.queueDrafts.list()).toEqual([
+      { clientId: 'new-session', mode: 'steer', text: 'new' },
+    ]);
+    runtime.clearContext(second);
+    expect(runtime.queueDrafts.list()).toEqual([]);
+  });
+
+  it('dispatches queue commands into the current session store', async () => {
+    const store = new QueueDraftStore();
+    store.setSession('session-commands');
+    const commandContext = {
+      isIdle: () => false,
+    } as unknown as ExtensionContext;
+    await expect(
+      dispatchDashboardCommand(
+        {} as ExtensionAPI,
+        commandContext,
+        new InteractionBroker(),
+        {
+          id: 'add-1',
+          type: 'queue.add',
+          clientId: 'client-1',
+          mode: 'followUp',
+          text: '  draft  ',
+        },
+        undefined,
+        store,
+      ),
+    ).resolves.toEqual({
+      accepted: true,
+      draft: { clientId: 'client-1', mode: 'followUp', text: 'draft' },
+    });
+    await expect(
+      dispatchDashboardCommand(
+        {} as ExtensionAPI,
+        commandContext,
+        new InteractionBroker(),
+        {
+          id: 'update-1',
+          type: 'queue.update',
+          clientId: 'client-1',
+          mode: 'steer',
+          text: 'updated',
+        },
+        undefined,
+        store,
+      ),
+    ).resolves.toMatchObject({ accepted: true, draft: { mode: 'steer' } });
+    await expect(
+      dispatchDashboardCommand(
+        {} as ExtensionAPI,
+        commandContext,
+        new InteractionBroker(),
+        { id: 'remove-1', type: 'queue.remove', clientId: 'client-1' },
+        undefined,
+        store,
+      ),
+    ).resolves.toEqual({ accepted: true, clientId: 'client-1' });
   });
 });
 
@@ -355,6 +655,146 @@ describe('remote-control bridge', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('pushes live surface patches and unsubscribes on stop', () => {
+    const hub = new LiveSurfaceHub();
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => ({ ...snapshot, extensionSurfaces: hub.snapshot() }),
+      liveSurfaces: hub,
+      handleCommand: async () => ({ accepted: true }),
+    });
+    const socket = new net.Socket();
+    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', socket);
+    hub.publish('tasks', [
+      {
+        id: 'tasks.current',
+        rendererId: 'tasks.current',
+        placement: 'left-rail',
+        viewModel: { version: 1, tasks: [] },
+      },
+    ]);
+    const frame = JSON.parse(String(write.mock.calls[0]?.[0])) as {
+      event: { type: string; snapshot?: RuntimeSnapshot };
+    };
+    expect(frame.event).toMatchObject({
+      type: 'runtime.stateChanged',
+      snapshot: { extensionSurfaces: [{ id: 'tasks.current' }] },
+    });
+    client.stop();
+    hub.publish('tasks', []);
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it('processes queue drafts without waiting behind a long semantic command', async () => {
+    let release: (() => void) | undefined;
+    const handleCommand = vi.fn((command: BridgeCommand) => {
+      if (command.id !== 'blocking') return Promise.resolve({ accepted: true });
+      return new Promise<unknown>((resolve) => {
+        release = () => resolve({ accepted: true });
+      });
+    });
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      commandScope: () => 'session-current',
+      handleCommand,
+    });
+    const socket = new net.Socket();
+    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', socket);
+    const enqueue = (
+      Reflect.get(client, 'enqueue') as (
+        command: BridgeCommand,
+        socket: net.Socket,
+      ) => void
+    ).bind(client);
+    enqueue({ id: 'blocking', type: 'abort' }, socket);
+    enqueue(
+      {
+        id: 'draft-now',
+        type: 'queue.add',
+        clientId: 'draft-1',
+        mode: 'steer',
+        text: 'deliver at the next boundary',
+      },
+      socket,
+    );
+    await waitFor(() =>
+      write.mock.calls.some((call) => String(call[0]).includes('draft-now')),
+    );
+    expect(handleCommand.mock.calls.map(([command]) => command.id)).toEqual([
+      'blocking',
+      'draft-now',
+    ]);
+    expect(
+      write.mock.calls.some((call) => String(call[0]).includes('blocking')),
+    ).toBe(false);
+    release?.();
+    await waitFor(() =>
+      write.mock.calls.some((call) => String(call[0]).includes('blocking')),
+    );
+    client.stop();
+  });
+
+  it('uses one bounded duplicate guard for semantic bridge commands', () => {
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      capabilities: askUserCapabilitySnapshot,
+      handleCommand: async () => new Promise(() => undefined),
+    });
+    const socket = new net.Socket();
+    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', socket);
+    const enqueue = (
+      Reflect.get(client, 'enqueue') as (
+        command: unknown,
+        socket: net.Socket,
+      ) => void
+    ).bind(client);
+    const command = {
+      id: 'answer-once',
+      type: 'action.invoke',
+      actionId: 'ask-user.answer',
+      input: { interactionId: 'i', answer: 'yes' },
+    };
+    enqueue(command, socket);
+    enqueue(command, socket);
+    const guard = Reflect.get(
+      client,
+      'actionCommandIds',
+    ) as NonIdempotentActionIdGuard;
+    for (
+      let index = guard.size;
+      index < MAX_NON_IDEMPOTENT_ACTION_IDS;
+      index += 1
+    )
+      expect(guard.reserve(`fill-${index}`)).toBe('reserved');
+    enqueue({ ...command, id: 'answer-capacity' }, socket);
+    const acks = write.mock.calls
+      .map((call) => {
+        try {
+          return JSON.parse(String(call[0])) as {
+            kind?: string;
+            code?: string;
+          };
+        } catch {
+          return undefined;
+        }
+      })
+      .filter((frame) => frame?.kind === 'ack');
+    expect(acks.map((ack) => ack?.code)).toEqual([
+      'duplicate-action-id',
+      'action-command-capacity',
+    ]);
+    expect(guard.has('answer-once')).toBe(true);
+    client.stop();
+  });
+
   it('rebuilds reconnect hello interactions from the live broker', async () => {
     const directory = await mkdtemp(
       path.join(os.tmpdir(), 'pi-bridge-reconnect-state-'),
@@ -438,6 +878,45 @@ describe('remote-control bridge', () => {
     client.stop();
   });
 
+  it('normalizes oversized interactions to values accepted by the shared schema', () => {
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      handleCommand: async () => ({ accepted: true }),
+    });
+    const socket = new net.Socket();
+    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', socket);
+    expect(
+      client.sendEvent({
+        type: 'interaction.requested',
+        interaction: {
+          id: 'i'.repeat(400),
+          type: 'ask_user',
+          question: 'q'.repeat(150_000),
+          choices: Array.from({ length: 200 }, (_, index) => ({
+            label: `l${index}`.repeat(1_000),
+            value: `v${index}`.repeat(1_000),
+            description: 'd'.repeat(20_000),
+            preview: 'p'.repeat(150_000),
+          })),
+          allowCustom: true,
+          customLabel: 'c'.repeat(2_000),
+          createdAt: Date.now(),
+        },
+      }),
+    ).toBe(true);
+    const frame = parseFrame(String(write.mock.calls[0]?.[0]));
+    if (frame.kind !== 'event' || frame.event.type !== 'interaction.requested')
+      throw new Error('expected interaction event');
+    expect(frame.event.interaction.question).toHaveLength(20_000);
+    expect(frame.event.interaction.choices).toHaveLength(50);
+    expect(frame.event.interaction.choices[0]?.description).toHaveLength(2_000);
+    expect(frame.event.interaction.choices[0]?.preview).toHaveLength(4_000);
+    client.stop();
+  });
+
   it('reconnects rather than silently dropping an interaction on backpressure', () => {
     const client = new BridgeClient({
       socketPath: '/unused',
@@ -508,25 +987,36 @@ describe('remote-control bridge', () => {
       client.sendEvent({
         type: 'message.started',
         sessionId: 'session-test',
-        message: cyclic,
+        message: {
+          messageId: 'cyclic-message',
+          role: 'assistant',
+          content: 'cyclic payload test',
+          phase: 'started',
+          data: cyclic,
+        },
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       client.sendEvent({
         type: 'tool.finished',
         sessionId: 'session-test',
-        tool: 'x'.repeat(600_000),
+        tool: {
+          toolCallId: 'oversized-tool',
+          name: 'large-output',
+          phase: 'finished',
+          result: 'x'.repeat(600_000),
+        },
       }),
     ).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(connection?.destroyed).toBe(false);
-    expect(
-      received.filter(
-        (frame) =>
-          (frame.event as { type?: string } | undefined)?.type !==
-          'runtime.hello',
-      ),
-    ).toHaveLength(0);
+    const nonHello = received.filter(
+      (frame) =>
+        (frame.event as { type?: string } | undefined)?.type !==
+        'runtime.hello',
+    );
+    expect(nonHello).toHaveLength(1);
+    expect(JSON.stringify(nonHello)).not.toContain('self');
     client.stop();
     connection?.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));

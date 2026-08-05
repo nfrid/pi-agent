@@ -22,9 +22,10 @@
     "dashboard:serve": "node scripts/dashboard-dev.mjs serve",
     "dashboard:daemon": "node scripts/dashboard-dev.mjs daemon",
     "dashboard:web": "node scripts/dashboard-dev.mjs web",
-    "workspace:typecheck": "pnpm --filter @pi-dashboard/protocol --filter @pi-dashboard/activity-model --filter @pi-dashboard/codex-usage --filter @pi-dashboard/server --filter @pi-dashboard/web typecheck",
-    "workspace:build": "pnpm --filter @pi-dashboard/protocol --filter @pi-dashboard/activity-model --filter @pi-dashboard/codex-usage --filter @pi-dashboard/server --filter @pi-dashboard/web build",
-    "workspace:test": "pnpm --filter @pi-dashboard/protocol --filter @pi-dashboard/activity-model --filter @pi-dashboard/codex-usage --filter @pi-dashboard/server --filter @pi-dashboard/web test",
+    "dashboard:dist-smoke": "pnpm --filter @pi-dashboard/server build && node scripts/dashboard-dist-smoke.mjs",
+    "workspace:typecheck": "pnpm --filter @pi-dashboard/extension-contributions --filter @pi-dashboard/protocol --filter @pi-dashboard/domain --filter @pi-dashboard/activity-model --filter @pi-dashboard/codex-usage --filter @pi-dashboard/client --filter @pi-dashboard/server --filter @pi-dashboard/web typecheck",
+    "workspace:build": "pnpm --filter @pi-dashboard/extension-contributions --filter @pi-dashboard/protocol --filter @pi-dashboard/domain --filter @pi-dashboard/activity-model --filter @pi-dashboard/codex-usage --filter @pi-dashboard/client --filter @pi-dashboard/server --filter @pi-dashboard/web build",
+    "workspace:test": "pnpm --filter @pi-dashboard/extension-contributions --filter @pi-dashboard/protocol --filter @pi-dashboard/domain --filter @pi-dashboard/activity-model --filter @pi-dashboard/codex-usage --filter @pi-dashboard/client --filter @pi-dashboard/server --filter @pi-dashboard/web test",
     "check": "node scripts/clean-npm-env.mjs sh -c \"node scripts/check-node.mjs && node scripts/check-pi-sdk-version.mjs && pnpm run typecheck && pnpm run lint && pnpm run format && vitest run\"",
     "test": "node scripts/clean-npm-env.mjs sh -c \"node scripts/check-node.mjs && vitest run\"",
     "session:metrics": "node scripts/session-metrics/index.mjs",
@@ -32,6 +33,7 @@
     "pi:sdk-sync": "VERSION=$(pi --version) && pnpm add -E @earendil-works/pi-ai@$VERSION @earendil-works/pi-coding-agent@$VERSION @earendil-works/pi-tui@$VERSION"
   },
   "dependencies": {
+    "@pi-dashboard/extension-contributions": "workspace:*",
     "@earendil-works/pi-ai": "0.82.1",
     "@earendil-works/pi-coding-agent": "0.82.1",
     "@earendil-works/pi-tui": "0.82.1",

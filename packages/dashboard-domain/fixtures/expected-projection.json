@@ -1,0 +1,43 @@
+{
+  "sessionId": "session-fixture",
+  "order": ["session-entry", "user-1", "assistant-1", "call-1"],
+  "items": {
+    "session-entry": {
+      "kind": "other",
+      "id": "session-entry",
+      "raw": {
+        "type": "session",
+        "id": "session-entry",
+        "cwd": "/tmp/dashboard-fixture"
+      }
+    },
+    "user-1": {
+      "kind": "message",
+      "messageId": "user-1",
+      "role": "user",
+      "content": "Inspect the fixture.",
+      "timestamp": "2026-08-04T12:00:00.000Z",
+      "status": "finished"
+    },
+    "assistant-1": {
+      "kind": "message",
+      "messageId": "assistant-1",
+      "role": "assistant",
+      "content": [{ "type": "text", "text": "I inspected it." }],
+      "timestamp": 1005,
+      "status": "finished"
+    },
+    "call-1": {
+      "kind": "tool",
+      "toolCallId": "call-1",
+      "name": "read",
+      "arguments": { "path": "fixture.txt" },
+      "result": "fixture result",
+      "status": "finished"
+    }
+  },
+  "lastCursor": 5,
+  "runtimeEpoch": "epoch-1",
+  "lastRuntimeSeq": 5,
+  "retiredEpochs": []
+}

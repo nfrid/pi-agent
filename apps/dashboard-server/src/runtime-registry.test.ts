@@ -1,7 +1,31 @@
 import { PassThrough } from 'node:stream';
+import {
+  createRuntimeCapabilitySnapshot,
+  type ExtensionManifest,
+} from '@pi-dashboard/extension-contributions';
 import { type RuntimeSnapshot, serializeFrame } from '@pi-dashboard/protocol';
+import { Type } from 'typebox';
 import { describe, expect, it, vi } from 'vitest';
 import { RuntimeRegistry } from './runtime-registry.js';
+
+const actionManifest: ExtensionManifest = {
+  id: 'registry-test',
+  version: '1',
+  actions: [
+    {
+      id: 'registry-test.run',
+      inputSchema: Type.Object(
+        { value: Type.String({ minLength: 1 }) },
+        { additionalProperties: false },
+      ),
+    },
+  ],
+  renderers: [],
+};
+const actionCapabilities = createRuntimeCapabilitySnapshot(
+  [actionManifest],
+  [{ id: 'registry-test', version: '1', available: true }],
+);
 
 const snapshot: RuntimeSnapshot = {
   runtimeId: 'runtime-1',
@@ -54,6 +78,62 @@ describe('runtime registry', () => {
     );
     await new Promise((resolve) => setTimeout(resolve, 1));
     expect(reconnect.destroyed).toBe(true);
+  });
+
+  it('installs either direct legacy hello capability field with an empty absent side', async () => {
+    const cases = [
+      {
+        capabilities: {
+          capabilitySummaries: [
+            { id: 'legacy-capability', version: '1', available: true },
+          ],
+        },
+        expected: {
+          version: 1,
+          capabilities: [
+            { id: 'legacy-capability', version: '1', available: true },
+          ],
+          manifests: [],
+        },
+      },
+      {
+        capabilities: {
+          manifests: [
+            { id: 'legacy-manifest', version: '1', actions: [], renderers: [] },
+          ],
+        },
+        expected: {
+          version: 1,
+          capabilities: [],
+          manifests: [
+            { id: 'legacy-manifest', version: '1', actions: [], renderers: [] },
+          ],
+        },
+      },
+    ] as const;
+    for (const [index, candidate] of cases.entries()) {
+      const registry = new RuntimeRegistry({ expectedToken: () => true });
+      const bridge = new PassThrough();
+      registry.accept(bridge as never);
+      bridge.write(
+        serializeFrame({
+          kind: 'event',
+          seq: 1,
+          event: {
+            type: 'runtime.hello',
+            protocolVersion: 1,
+            capabilities: candidate.capabilities,
+            snapshot: { ...snapshot, runtimeId: `legacy-${index}` },
+          },
+        }),
+      );
+      await eventually(() => registry.get(`legacy-${index}`));
+      expect(registry.get(`legacy-${index}`)?.capabilities).toEqual(
+        candidate.expected,
+      );
+      bridge.destroy();
+      registry.close();
+    }
   });
 
   it('allows the same managed runtime identity to reconnect after extension reload', async () => {
@@ -127,6 +207,78 @@ describe('runtime registry', () => {
       pid: 10,
       cwd: '/tmp/other',
     });
+    bridge.destroy();
+  });
+
+  it('ignores duplicate capability patches without dropping the runtime connection', async () => {
+    const registry = new RuntimeRegistry({ expectedToken: () => true });
+    const bridge = new PassThrough();
+    registry.accept(bridge as never);
+    const initialCapabilities = {
+      version: 1 as const,
+      capabilities: [{ id: 'initial', version: '1' }],
+      manifests: [],
+    };
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: { ...snapshot, capabilities: initialCapabilities },
+        },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    bridge.write(
+      `${JSON.stringify({
+        kind: 'event',
+        seq: 2,
+        event: {
+          type: 'runtime.heartbeat',
+          state: 'working',
+          snapshot: {
+            capabilities: {
+              version: 1,
+              capabilities: [
+                { id: 'duplicate', version: '1' },
+                { id: 'duplicate', version: '2' },
+              ],
+              manifests: [],
+            },
+          },
+        },
+      })}\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(bridge.destroyed).toBe(false);
+    expect(registry.get('runtime-1')?.capabilities).toEqual(
+      initialCapabilities,
+    );
+
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 3,
+        event: {
+          type: 'runtime.stateChanged',
+          state: 'working',
+          snapshot: {
+            capabilities: {
+              version: 1,
+              capabilities: [{ id: 'updated', version: '1' }],
+              manifests: [],
+            },
+          },
+        },
+      }),
+    );
+    await eventually(() =>
+      registry.get('runtime-1')?.capabilities?.capabilities[0]?.id === 'updated'
+        ? true
+        : undefined,
+    );
     bridge.destroy();
   });
 
@@ -213,6 +365,70 @@ describe('runtime registry', () => {
     bridge.destroy();
   });
 
+  it('validates semantic action input before queueing and rejects duplicate IDs', async () => {
+    const registry = new RuntimeRegistry({ expectedToken: () => true });
+    const bridge = new PassThrough();
+    const frames: string[] = [];
+    bridge.on('data', (chunk) =>
+      frames.push(...String(chunk).split('\n').filter(Boolean)),
+    );
+    registry.accept(bridge as never);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: { ...snapshot, capabilities: actionCapabilities },
+        },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    await expect(
+      registry.sendCommand('runtime-1', {
+        id: 'invalid-input',
+        type: 'action.invoke',
+        actionId: 'registry-test.run',
+        input: { wrong: true },
+      }),
+    ).rejects.toThrow('Invalid input');
+    expect(frames.some((line) => line.includes('invalid-input'))).toBe(false);
+
+    const commandPromise = registry.sendCommand('runtime-1', {
+      id: 'stable-action-id',
+      type: 'action.invoke',
+      actionId: 'registry-test.run',
+      input: { value: 'ok' },
+    });
+    const command = await eventually(() =>
+      frames
+        .map(
+          (line) =>
+            JSON.parse(line) as { kind?: string; command?: { id: string } },
+        )
+        .find((frame) => frame.kind === 'command'),
+    );
+    bridge.write(
+      serializeFrame({
+        kind: 'ack',
+        id: command.command?.id ?? 'stable-action-id',
+        ok: true,
+        result: { accepted: true },
+      }),
+    );
+    await expect(commandPromise).resolves.toEqual({ accepted: true });
+    await expect(
+      registry.sendCommand('runtime-1', {
+        id: 'stable-action-id',
+        type: 'action.invoke',
+        actionId: 'registry-test.run',
+        input: { value: 'ok' },
+      }),
+    ).rejects.toThrow('Duplicate semantic action command ID');
+    bridge.destroy();
+  });
+
   it('does not move a queued command to a replacement connection', async () => {
     const registry = new RuntimeRegistry({ expectedToken: () => true });
     const first = new PassThrough();
@@ -255,6 +471,82 @@ describe('runtime registry', () => {
       replacementFrames.some((line) => line.includes('"kind":"command"')),
     ).toBe(false);
     replacement.destroy();
+  });
+
+  it('sends queue draft edits without waiting behind a semantic command', async () => {
+    const registry = new RuntimeRegistry({ expectedToken: () => true });
+    const bridge = new PassThrough();
+    const frames: string[] = [];
+    bridge.on('data', (chunk) => {
+      frames.push(...String(chunk).split('\n').filter(Boolean));
+    });
+    registry.accept(bridge as never);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+
+    const blocking = registry.sendCommand('runtime-1', {
+      id: 'blocking',
+      type: 'abort',
+    });
+    await eventually(() =>
+      frames.some((line) => line.includes('"id":"blocking"')),
+    );
+    const draft = registry.sendCommand('runtime-1', {
+      id: 'draft-now',
+      type: 'queue.add',
+      clientId: 'draft-1',
+      mode: 'steer',
+      text: 'deliver at the next boundary',
+    });
+    await eventually(() =>
+      frames.some((line) => line.includes('"id":"draft-now"')),
+    );
+    await expect(
+      registry.sendCommand('runtime-1', {
+        id: 'draft-now',
+        type: 'queue.update',
+        clientId: 'draft-1',
+        mode: 'steer',
+        text: 'duplicate correlation id',
+      }),
+    ).rejects.toMatchObject({
+      message: 'Duplicate in-flight queue draft command ID.',
+      code: 'duplicate-command-id',
+    });
+    expect(
+      frames.filter((line) => line.includes('"id":"draft-now"')),
+    ).toHaveLength(1);
+    bridge.write(
+      serializeFrame({
+        kind: 'ack',
+        id: 'draft-now',
+        ok: true,
+        result: { accepted: true },
+      }),
+    );
+    await expect(draft).resolves.toEqual({ accepted: true });
+    let blockingSettled = false;
+    void blocking.finally(() => {
+      blockingSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(blockingSettled).toBe(false);
+    bridge.write(
+      serializeFrame({
+        kind: 'ack',
+        id: 'blocking',
+        ok: true,
+        result: { accepted: true },
+      }),
+    );
+    await expect(blocking).resolves.toEqual({ accepted: true });
+    bridge.destroy();
   });
 
   it('recycles a connection when backpressure outlives the command timeout', async () => {

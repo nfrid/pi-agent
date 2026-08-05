@@ -14,6 +14,16 @@ export interface DelegateStatusTiming {
   finishedAt?: number;
 }
 
+export interface DelegateTranscriptEntry {
+  id: string;
+  type: 'task' | 'thinking' | 'tool' | 'assistant' | 'error';
+  label: string;
+  text?: string;
+  status?: 'running' | 'completed' | 'error';
+  at?: number;
+  run?: number;
+}
+
 export interface DelegateStatusSnapshot {
   id: string;
   name: string;
@@ -31,6 +41,9 @@ export interface DelegateStatusSnapshot {
   runCount?: number;
   /** Every invocation retained for aggregate elapsed-time rendering. */
   runs?: DelegateStatusTiming[];
+  /** Ordered, bounded activity and response history across the lineage. */
+  transcript?: DelegateTranscriptEntry[];
+  transcriptTruncated?: boolean;
 }
 
 interface DelegateStatusRecord extends DelegateStatusSnapshot {
@@ -42,6 +55,73 @@ interface DelegateStatusRecord extends DelegateStatusSnapshot {
   turnStarted: boolean;
   /** The parent produced an assistant message in that later turn. */
   assistantResponded: boolean;
+}
+
+const MAX_TRANSCRIPT_ENTRIES = 128;
+
+function assistantText(run: DelegatedRun): DelegateTranscriptEntry[] {
+  return run.messages.flatMap((message, index) => {
+    if (message.role !== 'assistant') return [];
+    const value = message.content
+      .filter((part) => part.type === 'text')
+      .map((part) => (part.type === 'text' ? part.text : ''))
+      .join('\n')
+      .trim();
+    return value
+      ? [
+          {
+            id: `assistant-${message.timestamp}-${index}`,
+            type: 'assistant' as const,
+            label: 'Response',
+            text: value,
+            status: 'completed' as const,
+            at: message.timestamp,
+          },
+        ]
+      : [];
+  });
+}
+
+function transcript(run: DelegatedRun): DelegateTranscriptEntry[] {
+  const entries: DelegateTranscriptEntry[] = [
+    {
+      id: 'task',
+      type: 'task',
+      label: 'Task',
+      text: run.task,
+      status: 'completed',
+      at: run.queuedAt,
+    },
+    ...run.activities.map((activity, index) => ({
+      id: activity.id ?? `activity-${index}`,
+      type: activity.type,
+      label: activity.label,
+      ...(activity.transcriptText || activity.latestText
+        ? { text: activity.transcriptText ?? activity.latestText }
+        : {}),
+      status: activity.status,
+      at: activity.startedAt,
+    })),
+    ...assistantText(run),
+  ];
+  if (run.errorMessage?.trim())
+    entries.push({
+      id: 'error',
+      type: 'error',
+      label: 'Error',
+      text: run.errorMessage.trim(),
+      status: 'error',
+      at: run.finishedAt,
+    });
+  return entries
+    .map((entry, order) => ({ entry, order }))
+    .sort(
+      (left, right) =>
+        (left.entry.at ?? Number.MAX_SAFE_INTEGER) -
+          (right.entry.at ?? Number.MAX_SAFE_INTEGER) ||
+        left.order - right.order,
+    )
+    .map(({ entry }) => entry);
 }
 
 function isSettled(state: DelegateRunState): boolean {
@@ -93,6 +173,7 @@ export class DelegateStatusStore {
         context: run.context,
         allowWrites: run.allowWrites === true,
         activity: displayActivity(run, undefined),
+        transcript: transcript(run),
         resultEntered: false,
         turnStarted: false,
         assistantResponded: false,
@@ -114,6 +195,7 @@ export class DelegateStatusStore {
     record.context = run.context;
     record.allowWrites = run.allowWrites === true;
     record.activity = displayActivity(run, record.activity);
+    record.transcript = transcript(run);
     this.onChange();
   }
 
@@ -131,6 +213,7 @@ export class DelegateStatusStore {
       record.context = run.context;
       record.allowWrites = run.allowWrites === true;
       record.activity = displayActivity(run, record.activity);
+      record.transcript = transcript(run);
       changed = true;
     }
     if (changed) this.onChange();
@@ -250,8 +333,24 @@ export class DelegateStatusStore {
         assistantResponded: _assistantResponded,
         runCount: _runCount,
         runs: _runs,
+        transcript: _transcript,
+        transcriptTruncated: _transcriptTruncated,
         ...snapshot
       } = current;
+      const fullTranscript = ordered.flatMap((record, runIndex) =>
+        (record.transcript ?? []).map((entry) => ({
+          ...entry,
+          id: `${runIndex + 1}:${entry.id}`,
+          run: runIndex + 1,
+        })),
+      );
+      const boundedTranscript =
+        fullTranscript.length <= MAX_TRANSCRIPT_ENTRIES
+          ? fullTranscript
+          : [
+              fullTranscript[0],
+              ...fullTranscript.slice(1 - MAX_TRANSCRIPT_ENTRIES),
+            ];
       return {
         ...snapshot,
         id: ordered[0].id,
@@ -262,6 +361,10 @@ export class DelegateStatusStore {
           startedAt: record.startedAt,
           finishedAt: record.finishedAt,
         })),
+        transcript: boundedTranscript,
+        ...(boundedTranscript.length < fullTranscript.length
+          ? { transcriptTruncated: true }
+          : {}),
         activity: current.activity
           ? {
               ...current.activity,

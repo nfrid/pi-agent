@@ -1,11 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
   deriveSessionTitle,
+  ExtensionSurfaceSchema,
   isBridgeEvent,
+  LiveExtensionSurfaceSchema,
   MAX_FRAME_BYTES,
+  MAX_QUEUE_DRAFT_TEXT,
+  MAX_QUEUE_DRAFTS,
+  MAX_RUNTIME_EXTENSION_SURFACES,
+  parseBridgeCommand,
+  parseDashboardEventEnvelope,
+  parseDashboardStreamMessage,
   parseFrame,
+  parseNormalizedMessagePayload,
+  parseRuntimeExtensionSurface,
+  parseRuntimeSnapshot,
+  RuntimeExtensionSurfaceSchema,
   redactImageData,
   serializeFrame,
+  tryParseNormalizedToolPayload,
   validateBridgeCommand,
   validateSessionRenameRequest,
   validateStartRuntimeRequest,
@@ -52,6 +65,78 @@ describe('dashboard protocol', () => {
       command: { id: '1', type: 'followUp' as const, text: 'continue' },
     };
     expect(parseFrame(serializeFrame(frame))).toEqual(frame);
+  });
+
+  it('accepts, normalizes, and bounds dashboard queue draft commands', () => {
+    expect(
+      parseBridgeCommand({
+        id: 'command-1',
+        type: 'queue.add',
+        clientId: 'draft-1',
+        mode: 'steer',
+        text: '  inspect this  ',
+      }),
+    ).toEqual({
+      id: 'command-1',
+      type: 'queue.add',
+      clientId: 'draft-1',
+      mode: 'steer',
+      text: 'inspect this',
+    });
+    expect(
+      parseBridgeCommand({
+        id: 'command-2',
+        type: 'queueDraft.update',
+        clientId: 'draft-1',
+        mode: 'followUp',
+        text: 'updated',
+      }),
+    ).toMatchObject({ type: 'queueDraft.update', mode: 'followUp' });
+    expect(() =>
+      parseBridgeCommand({
+        id: 'command-3',
+        type: 'queue.add',
+        clientId: 'draft-1',
+        mode: 'steer',
+        text: ' '.repeat(MAX_QUEUE_DRAFT_TEXT),
+      }),
+    ).toThrow('text');
+    expect(() =>
+      parseBridgeCommand({
+        id: 'command-4',
+        type: 'queue.add',
+        clientId: 'draft-1',
+        mode: 'steer',
+        text: 'x'.repeat(MAX_QUEUE_DRAFT_TEXT + 1),
+      }),
+    ).toThrow();
+    expect(() =>
+      parseBridgeCommand({
+        id: 'command-5',
+        type: 'queue.remove',
+        clientId: 'draft-1',
+        extra: true,
+      }),
+    ).toThrow();
+    expect(() =>
+      parseRuntimeSnapshot({
+        runtimeId: 'runtime-1',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 'session-1', entries: [] },
+        pendingInteractions: [],
+        queueDrafts: Array.from(
+          { length: MAX_QUEUE_DRAFTS + 1 },
+          (_, index) => ({
+            clientId: `draft-${index}`,
+            mode: 'steer',
+            text: 'x',
+          }),
+        ),
+      }),
+    ).toThrow();
   });
 
   it('accepts bounded image-only commands and redacts image bytes', () => {
@@ -157,6 +242,49 @@ describe('dashboard protocol', () => {
     ).toHaveLength(96);
   });
 
+  it('semantically validates capability snapshots on runtime events', () => {
+    const duplicate = {
+      version: 1,
+      capabilities: [
+        { id: 'duplicate', version: '1' },
+        { id: 'duplicate', version: '2' },
+      ],
+      manifests: [],
+    };
+    expect(() =>
+      parseRuntimeSnapshot({
+        runtimeId: 'r',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 's', entries: [] },
+        pendingInteractions: [],
+        capabilities: duplicate,
+      }),
+    ).toThrow('Duplicate capability ID');
+    expect(
+      isBridgeEvent({
+        type: 'runtime.stateChanged',
+        state: 'working',
+        snapshot: { capabilities: duplicate },
+      }),
+    ).toBe(false);
+    expect(
+      isBridgeEvent({
+        type: 'runtime.heartbeat',
+        state: 'idle',
+        snapshot: {
+          capabilities: {
+            version: 1,
+            capabilities: [{ id: 'valid', version: '1' }],
+            manifests: [],
+          },
+        },
+      }),
+    ).toBe(true);
+  });
+
   it('strictly validates each bridge event variant', () => {
     const helloSnapshot = {
       runtimeId: 'r',
@@ -218,6 +346,132 @@ describe('dashboard protocol', () => {
         }),
       ),
     ).toThrow();
+  });
+
+  it('parses normalized payloads and canonical event envelopes strictly', () => {
+    const message = parseNormalizedMessagePayload({
+      messageId: 'm-1',
+      role: 'assistant',
+      content: 'hello',
+      phase: 'updated',
+    });
+    expect(message.messageId).toBe('m-1');
+    expect(
+      tryParseNormalizedToolPayload({
+        toolCallId: 'tool-1',
+        name: 'read',
+        unexpected: true,
+      }),
+    ).toBeUndefined();
+    for (const status of ['complete', 'completed', 'finished'] as const)
+      expect(
+        tryParseNormalizedToolPayload({
+          toolCallId: `tool-${status}`,
+          name: 'read',
+          status,
+        })?.status,
+      ).toBe(status);
+    expect(
+      parseDashboardEventEnvelope({
+        cursor: 1,
+        emittedAt: 100,
+        runtimeId: 'runtime-1',
+        runtimeEpoch: 'epoch-1',
+        runtimeSeq: 1,
+        sessionId: 'session-1',
+        event: {
+          type: 'message.updated',
+          sessionId: 'session-1',
+          message,
+        },
+      }).cursor,
+    ).toBe(1);
+    expect(
+      parseDashboardStreamMessage({
+        cursor: 2,
+        emittedAt: 101,
+        runtimeId: 'runtime-1',
+        event: { type: 'agent.settled', sessionId: 'session-1' },
+      }).cursor,
+    ).toBe(2);
+  });
+
+  it('retains explicit runtime/live surface aliases over the canonical contract', () => {
+    expect(RuntimeExtensionSurfaceSchema).toBe(ExtensionSurfaceSchema);
+    expect(LiveExtensionSurfaceSchema).toBe(RuntimeExtensionSurfaceSchema);
+    expect(
+      parseRuntimeExtensionSurface({
+        id: 'tasks.current',
+        rendererId: 'tasks.current',
+        placement: 'left-rail',
+        viewModel: {},
+      }).rendererId,
+    ).toBe('tasks.current');
+  });
+
+  it('accepts bounded extension surfaces and rejects an oversized catalogue', () => {
+    const surface = {
+      id: 'tasks.current',
+      rendererId: 'tasks.current',
+      placement: 'left-rail',
+      viewModel: { version: 1, tasks: [] },
+    };
+    expect(
+      parseRuntimeSnapshot({
+        runtimeId: 'runtime-1',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 'session-1', entries: [] },
+        pendingInteractions: [],
+        extensionSurfaces: [surface],
+      }),
+    ).toMatchObject({ extensionSurfaces: [surface] });
+    expect(() =>
+      parseRuntimeSnapshot({
+        runtimeId: 'runtime-1',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 'session-1', entries: [] },
+        pendingInteractions: [],
+        extensionSurfaces: Array.from(
+          { length: MAX_RUNTIME_EXTENSION_SURFACES + 1 },
+          (_, index) => ({
+            ...surface,
+            id: `surface-${index}`,
+          }),
+        ),
+      }),
+    ).toThrow();
+  });
+
+  it('accepts bounded model and thinking catalogues in runtime snapshots', () => {
+    expect(
+      parseRuntimeSnapshot({
+        runtimeId: 'runtime-1',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 'session-1', entries: [] },
+        pendingInteractions: [],
+        modelCatalog: [
+          {
+            provider: 'test',
+            model: 'vision',
+            name: 'Vision',
+            supportsImages: true,
+          },
+        ],
+        thinkingLevels: ['off', 'high'],
+      }),
+    ).toMatchObject({
+      modelCatalog: [{ model: 'vision', supportsImages: true }],
+      thinkingLevels: ['off', 'high'],
+    });
   });
 
   it('validates structured launch requests', () => {

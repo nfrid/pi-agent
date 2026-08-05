@@ -1,10 +1,10 @@
 import type { Message } from '@earendil-works/pi-ai';
 import type { DelegatedRun } from './types';
 
-const MAX_ACTIVITY_COUNT = 20;
+const MAX_ACTIVITY_COUNT = 96;
 const MAX_MESSAGE_COUNT = 100;
 const MAX_MESSAGE_BYTES = 5 * 1024 * 1024;
-const MAX_PREVIEW_CHARS = 1000;
+const MAX_THINKING_TRANSCRIPT_CHARS = 8_000;
 
 type ThinkingGroup = {
   id: string;
@@ -88,6 +88,8 @@ function upsertActivity(
     label: string;
     status: 'running' | 'completed' | 'error';
     latestText?: string;
+    transcriptText?: string;
+    startedAt?: number;
   },
 ) {
   const existingIndex = activity.id
@@ -95,11 +97,25 @@ function upsertActivity(
     : -1;
   const existing =
     existingIndex >= 0 ? run.activities[existingIndex] : undefined;
-  const { latestText = existing?.latestText, ...safeActivity } = activity;
-  const stored = safeActivity as DelegatedRun['activities'][number];
+  const {
+    latestText = existing?.latestText,
+    transcriptText = existing?.transcriptText,
+    startedAt = existing?.startedAt ?? Date.now(),
+    ...safeActivity
+  } = activity;
+  const stored = {
+    ...safeActivity,
+    startedAt,
+  } as DelegatedRun['activities'][number];
   if (latestText)
     Object.defineProperty(stored, 'latestText', {
       value: latestText,
+      enumerable: false,
+      configurable: true,
+    });
+  if (transcriptText)
+    Object.defineProperty(stored, 'transcriptText', {
+      value: transcriptText,
       enumerable: false,
       configurable: true,
     });
@@ -190,10 +206,11 @@ function writeThinkingGroup(
   const state = getThinkingState(run);
   const key = thinkingKey(event);
   const group = state.active.get(key) ?? startThinkingGroup(run, event);
-  // Only the tail is ever shown, so the cap drops the oldest text rather than
-  // freezing the preview at the first MAX_PREVIEW_CHARS of the block.
+  // Keep a bounded complete block for the dashboard transcript. When it grows
+  // beyond the live budget, retain the newest text rather than freezing on the
+  // opening paragraph.
   group.text = (mode === 'replace' ? text : `${group.text}${text}`).slice(
-    -MAX_PREVIEW_CHARS,
+    -MAX_THINKING_TRANSCRIPT_CHARS,
   );
   upsertActivity(run, {
     id: group.activityId,
@@ -201,6 +218,7 @@ function writeThinkingGroup(
     label: 'thinking',
     status: 'running',
     latestText: latestThinkingParagraph(group.text),
+    transcriptText: group.text,
   });
   return group;
 }

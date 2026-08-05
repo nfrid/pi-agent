@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import {
   mkdir,
   mkdtemp,
@@ -14,6 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { createDashboardServer } from './http.js';
 import { MetadataStore } from './metadata.js';
+import { SessionIndex } from './session-index.js';
 
 let server: Awaited<ReturnType<typeof createDashboardServer>> | undefined;
 afterEach(async () => {
@@ -104,6 +106,323 @@ describe('dashboard HTTP boundary', () => {
     socket.send(JSON.stringify({ type: 'auth', token: 'test-token' }));
     await expect(message).resolves.toContain('snapshot');
     socket.close();
+  });
+
+  it('stops with an authenticated SSE client still open', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-sse-stop-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/events`, {
+      headers: { 'x-dashboard-token': 'test-token' },
+    });
+    expect(response.status).toBe(200);
+    await expect(
+      Promise.race([
+        server.stop().then(() => true),
+        new Promise<boolean>((resolve) =>
+          setTimeout(() => resolve(false), 2_000),
+        ),
+      ]),
+    ).resolves.toBe(true);
+    await response.body?.cancel().catch(() => undefined);
+  });
+
+  it('stops with a silent pre-hello bridge client still open', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-bridge-stop-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    await expect(
+      Promise.race([
+        server.stop().then(() => true),
+        new Promise<boolean>((resolve) =>
+          setTimeout(() => resolve(false), 2_000),
+        ),
+      ]),
+    ).resolves.toBe(true);
+  });
+
+  it('replays authenticated SSE records and reports expired cursors', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-sse-'));
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      eventBufferSize: 1,
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const origin = `http://127.0.0.1:${server.port}`;
+    const headers = { Origin: origin, 'x-dashboard-token': 'test-token' };
+    const live = await fetch(
+      `http://127.0.0.1:${server.port}/api/events?cursor=${server.snapshot().cursor - 1}`,
+      { headers },
+    );
+    expect(live.status).toBe(200);
+    const reader = live.body?.getReader();
+    expect(reader).toBeTruthy();
+    let text = '';
+    while (!text.includes('data:')) {
+      const next = await reader?.read();
+      if (!next || next.done) break;
+      text += new TextDecoder().decode(next.value);
+    }
+    expect(text).toContain('event: dashboard');
+    expect(text).toContain('"type":"snapshot"');
+    await reader?.cancel();
+    const headerReplay = await fetch(
+      `http://127.0.0.1:${server.port}/api/events`,
+      {
+        headers: {
+          ...headers,
+          'last-event-id': String(server.snapshot().cursor - 1),
+        },
+      },
+    );
+    expect(headerReplay.status).toBe(200);
+    await headerReplay.body?.cancel();
+
+    await server.refreshWorkspaces();
+    await server.refreshWorkspaces();
+    const gap = await fetch(
+      `http://127.0.0.1:${server.port}/api/events?cursor=0`,
+      { headers },
+    );
+    expect(gap.status).toBe(409);
+    await expect(gap.json()).resolves.toMatchObject({ code: 'replay-gap' });
+  });
+
+  it('bounds slow SSE subscribers and resumes queued records after drain', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-sse-backpressure-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      sseBufferBytes: 1_024,
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const implementation = server as unknown as {
+      handleSse(
+        request: import('node:http').IncomingMessage,
+        response: import('node:http').ServerResponse,
+        url: URL,
+      ): void;
+      eventStream: {
+        publish(
+          factory: (cursor: number, emittedAt: number) => unknown,
+        ): unknown;
+      };
+      snapshot(
+        cursor?: number,
+      ): import('@pi-dashboard/protocol').BrowserSnapshot;
+    };
+    const response = new EventEmitter() as unknown as {
+      writableEnded: boolean;
+      writableLength: number;
+      writeHead: (...args: unknown[]) => void;
+      flushHeaders: () => void;
+      write: (value: string) => boolean;
+      destroy: () => void;
+    };
+    const writes: string[] = [];
+    let destroyed = false;
+    Object.assign(response, {
+      writableEnded: false,
+      writableLength: 0,
+      writeHead: () => undefined,
+      flushHeaders: () => undefined,
+      write: (value: string) => {
+        writes.push(value);
+        return false;
+      },
+      destroy: () => {
+        destroyed = true;
+        (response as unknown as EventEmitter).emit('close');
+      },
+    });
+    const request = new EventEmitter() as unknown as {
+      url: string;
+      headers: Record<string, string>;
+    };
+    request.url = `/api/events?cursor=${server.snapshot().cursor}`;
+    request.headers = {};
+    implementation.handleSse(
+      request as import('node:http').IncomingMessage,
+      response as unknown as import('node:http').ServerResponse,
+      new URL(`http://127.0.0.1${request.url}`),
+    );
+    const publish = () =>
+      implementation.eventStream.publish((cursor, emittedAt) => ({
+        type: 'snapshot',
+        cursor,
+        emittedAt,
+        snapshot: implementation.snapshot(cursor),
+      }));
+    publish();
+    expect(destroyed).toBe(false);
+    expect(writes).toHaveLength(1);
+    (response as unknown as EventEmitter).emit('drain');
+    expect(writes).toHaveLength(2);
+    publish();
+    expect(writes).toHaveLength(2);
+    for (let index = 0; index < 20 && !destroyed; index += 1) publish();
+    expect(destroyed).toBe(true);
+    const writesAfterCleanup = writes.length;
+    publish();
+    expect(writes).toHaveLength(writesAfterCleanup);
+  });
+
+  it('suppresses startup changes until one authoritative initial publication', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-startup-order-'),
+    );
+    let releaseWorkspaces!: () => void;
+    let workspacesStarted!: () => void;
+    const workspaceStarted = new Promise<void>((resolve) => {
+      workspacesStarted = resolve;
+    });
+    const workspaceRelease = new Promise<void>((resolve) => {
+      releaseWorkspaces = resolve;
+    });
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: {
+        list: async () => {
+          workspacesStarted();
+          await workspaceRelease;
+          return [];
+        },
+      },
+    });
+    const startup = server.start();
+    await workspaceStarted;
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            runtimeId: 'startup-runtime',
+            ownership: 'external',
+            pid: 1,
+            cwd: '/tmp/project',
+            liveState: 'idle',
+            session: { id: 'startup-session', entries: [] },
+            pendingInteractions: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(server.snapshot().revision).toBe(0);
+    expect(server.snapshot().cursor).toBe(0);
+    releaseWorkspaces();
+    await startup;
+    expect(server.snapshot().revision).toBe(1);
+    expect(server.snapshot().cursor).toBe(1);
+    bridge.destroy();
+  });
+
+  it('cleans up a failed startup so the server can be retried', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-startup-retry-'),
+    );
+    const sessions = new SessionIndex(path.join(root, 'sessions'));
+    const originalStart = sessions.start.bind(sessions);
+    let fail = true;
+    sessions.start = async (workspaces) => {
+      if (fail) {
+        fail = false;
+        throw new Error('startup failed');
+      }
+      await originalStart(workspaces);
+    };
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sessions,
+      sesh: { list: async () => [] },
+    });
+    await expect(server.start()).rejects.toThrow('startup failed');
+    await expect(server.start()).resolves.toBeUndefined();
+  });
+
+  it('turns a cursor from a prior daemon generation into a replay gap', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-restart-'));
+    const options = {
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    };
+    server = await createDashboardServer(options);
+    await server.start();
+    await server.refreshWorkspaces();
+    const oldSnapshot = server.snapshot();
+    const oldCursor = oldSnapshot.cursor;
+    const oldServerId = oldSnapshot.serverId;
+    await server.stop();
+    server = await createDashboardServer(options);
+    await server.start();
+    for (const sessionId of ['restart-session-1', 'restart-session-2'])
+      server.publishChange({
+        type: 'event',
+        sessionId,
+        event: { type: 'agent.settled', sessionId },
+      });
+    expect(server.snapshot().cursor).toBeGreaterThan(oldCursor);
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/events?cursor=${oldCursor}&serverId=${encodeURIComponent(oldServerId)}`,
+      {
+        headers: {
+          Origin: `http://127.0.0.1:${server.port}`,
+          'x-dashboard-token': 'test-token',
+        },
+      },
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'replay-gap',
+      reason: 'server-generation-mismatch',
+    });
   });
 
   it('publishes every browser update with the same monotonic revision as its snapshot', async () => {
@@ -245,6 +564,7 @@ describe('dashboard HTTP boundary', () => {
             session: {
               id: 'live-session',
               name: 'Live session',
+              entriesComplete: true,
               entries: [{ type: 'message', id: 'one' }],
             },
             pendingInteractions: [],
@@ -263,6 +583,8 @@ describe('dashboard HTTP boundary', () => {
     expect(await active.json()).toMatchObject({
       metadata: { id: 'live-session', name: 'Live session' },
       entries: [{ type: 'message', id: 'one' }],
+      runtimeEpoch: expect.any(String),
+      runtimeSeq: 1,
     });
     const missing = await fetch(
       `http://127.0.0.1:${server.port}/api/sessions/missing`,
@@ -273,6 +595,59 @@ describe('dashboard HTTP boundary', () => {
       (await fetch(`http://127.0.0.1:${server.port}/api/health`)).status,
     ).toBe(200);
     bridge.destroy();
+  });
+
+  it('captures the session cursor before a slow read, even after the replay window advances', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-session-cursor-race-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'slow.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'slow-session', cwd: '/tmp' })}\n`,
+    );
+    const sessions = new SessionIndex(sessionDir);
+    const originalReadEntries = sessions.readEntries.bind(sessions);
+    let releaseRead!: () => void;
+    const readBlocked = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let readStarted!: () => void;
+    const readStartedPromise = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
+    sessions.readEntries = async (id) => {
+      readStarted();
+      await readBlocked;
+      return originalReadEntries(id);
+    };
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      eventBufferSize: 2,
+      stateDir: path.join(root, 'state'),
+      socketPath: path.join(root, 'bridge.sock'),
+      sessionDir,
+      sessions,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const cursorAtRead = server.snapshot().cursor;
+    const pending = fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/slow-session`,
+      { headers: { 'x-dashboard-token': 'test-token' } },
+    );
+    await readStartedPromise;
+    for (let index = 0; index < 4; index += 1) await server.refreshWorkspaces();
+    expect(server.snapshot().cursor).toBeGreaterThan(cursorAtRead + 2);
+    releaseRead();
+    const response = await pending;
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      cursor: cursorAtRead,
+      metadata: { id: 'slow-session' },
+    });
   });
 
   it('forwards authenticated multipart images and removes temporary files after acknowledgement', async () => {
@@ -511,6 +886,7 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
     await server.start();
     const url = `http://127.0.0.1:${server.port}/api/usage`;
     const headers = { 'x-dashboard-token': 'test-token' };
+    const beforeUsage = server.snapshot();
     const [first, second] = await Promise.all([
       fetch(url, { headers }),
       fetch(url, { headers }),
@@ -520,6 +896,8 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
     expect((await (await fetch(url, { headers })).json()) as unknown).toEqual({
       usage: { calls: 1 },
     });
+    expect(server.snapshot().revision).toBeGreaterThan(beforeUsage.revision);
+    expect(server.snapshot().cursor).toBeGreaterThan(beforeUsage.cursor);
     expect(calls).toBe(1);
   });
 

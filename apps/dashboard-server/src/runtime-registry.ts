@@ -1,8 +1,21 @@
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'node:net';
 import {
+  applyRuntimeEvent,
+  createRuntimeReducerState,
+  type RuntimeReducerState,
+} from '@pi-dashboard/domain';
+import {
+  ContributionError,
+  isActionAvailable,
+  NonIdempotentActionIdGuard,
+  parseActionInput,
+  parseRuntimeCapabilitySnapshot,
+} from '@pi-dashboard/extension-contributions';
+import {
   type BridgeCommand,
   type BridgeEvent,
+  MAX_QUEUE_DRAFTS,
   parseFrame,
   type RuntimeSnapshot,
   redactBridgeEvent,
@@ -27,7 +40,8 @@ type RuntimeRecord = {
   snapshot: RuntimeSnapshot;
   socket?: Socket;
   buffer: string;
-  lastSeq: number;
+  runtimeEpoch: string;
+  reducerState: RuntimeReducerState;
   pending: Map<
     string,
     {
@@ -38,7 +52,10 @@ type RuntimeRecord = {
   >;
   commandQueue: QueuedCommand[];
   commandRunning: boolean;
+  queueDraftCommandsRunning: number;
   writeBlocked: boolean;
+  /** Semantic action IDs already handed to Pi in this runtime epoch. */
+  actionCommandIds: NonIdempotentActionIdGuard;
 };
 
 export type RegistryChange =
@@ -48,8 +65,21 @@ export type RegistryChange =
       runtimeId: string;
       event: BridgeEvent;
       snapshot: RuntimeSnapshot;
+      runtimeEpoch?: string;
+      runtimeSeq?: number;
     }
   | { kind: 'offline'; snapshot: RuntimeSnapshot };
+
+function isQueueDraftCommand(command: BridgeCommand): boolean {
+  return (
+    command.type === 'queue.add' ||
+    command.type === 'queueDraft.add' ||
+    command.type === 'queue.update' ||
+    command.type === 'queueDraft.update' ||
+    command.type === 'queue.remove' ||
+    command.type === 'queueDraft.remove'
+  );
+}
 
 export interface RuntimeRegistryOptions {
   expectedToken?: (
@@ -74,6 +104,17 @@ export class RuntimeRegistry {
 
   get(runtimeId: string): RuntimeSnapshot | undefined {
     return this.runtimes.get(runtimeId)?.snapshot;
+  }
+
+  transportProvenance(
+    runtimeId: string,
+  ): { runtimeEpoch: string; runtimeSeq: number } | undefined {
+    const record = this.runtimes.get(runtimeId);
+    if (!record) return undefined;
+    return {
+      runtimeEpoch: record.runtimeEpoch,
+      runtimeSeq: record.reducerState.lastRuntimeSeq,
+    };
   }
 
   isOnline(runtimeId: string): boolean {
@@ -106,7 +147,18 @@ export class RuntimeRegistry {
         let frame: ReturnType<typeof parseFrame>;
         try {
           frame = parseFrame(line);
-        } catch {
+        } catch (error) {
+          // Capability uniqueness is semantic validation layered over the
+          // structural frame schema. An invalid update is ignored as a whole;
+          // it must not tear down an otherwise healthy runtime connection.
+          if (
+            error instanceof ContributionError &&
+            (error.code === 'invalid-capability-snapshot' ||
+              error.code === 'duplicate-action-id')
+          ) {
+            newline = buffer.indexOf('\n');
+            continue;
+          }
           return reject();
         }
         if (!helloSeen) {
@@ -142,6 +194,39 @@ export class RuntimeRegistry {
           if (this.forgotten.has(snapshot.runtimeId)) return reject();
           const old = this.runtimes.get(snapshot.runtimeId);
           if (old?.socket && old.socket !== socket) old.socket.destroy();
+          // A v1 bridge may put the capability snapshot only on hello. Install
+          // it into the authoritative runtime snapshot when it validates; an
+          // absent/unknown capability payload remains absent and is safe.
+          const helloCapabilities =
+            hello.capabilities?.extensions ??
+            hello.capabilities?.extensionCapabilities ??
+            (hello.capabilities?.capabilitySummaries !== undefined ||
+            hello.capabilities?.manifests !== undefined
+              ? {
+                  version: 1 as const,
+                  capabilities: hello.capabilities.capabilitySummaries ?? [],
+                  manifests: hello.capabilities.manifests ?? [],
+                }
+              : undefined);
+          const advertised = helloCapabilities
+            ? (() => {
+                try {
+                  return parseRuntimeCapabilitySnapshot(helloCapabilities);
+                } catch {
+                  return undefined;
+                }
+              })()
+            : undefined;
+          const snapshotCapabilities = snapshot.capabilities
+            ? (() => {
+                try {
+                  return parseRuntimeCapabilitySnapshot(snapshot.capabilities);
+                } catch {
+                  return undefined;
+                }
+              })()
+            : undefined;
+          const advertisedSnapshot = snapshotCapabilities ?? advertised;
           clearTimeout(helloTimer);
           try {
             // Only heartbeat-capable clients get an idle deadline. Agents
@@ -153,15 +238,36 @@ export class RuntimeRegistry {
           } catch {
             /* best effort */
           }
+          const runtimeEpoch = randomUUID();
+          const snapshotForRegistration =
+            snapshotCapabilities === undefined &&
+            snapshot.capabilities !== undefined
+              ? (({ capabilities: _invalid, ...withoutCapabilities }) =>
+                  withoutCapabilities)(snapshot)
+              : snapshot;
+          const registeredSnapshot = {
+            ...snapshotForRegistration,
+            ...(advertisedSnapshot === undefined
+              ? {}
+              : { capabilities: advertisedSnapshot }),
+            online: true,
+            lastSeenAt: Date.now(),
+          };
           record = {
-            snapshot: { ...snapshot, online: true, lastSeenAt: Date.now() },
+            snapshot: registeredSnapshot,
             socket,
             buffer: '',
-            lastSeq: frame.seq,
+            runtimeEpoch,
+            reducerState: createRuntimeReducerState(registeredSnapshot, {
+              runtimeEpoch,
+              runtimeSeq: frame.seq,
+            }),
             pending: new Map(),
             commandQueue: [],
             commandRunning: false,
+            queueDraftCommandsRunning: 0,
             writeBlocked: false,
+            actionCommandIds: new NonIdempotentActionIdGuard(),
           };
           this.runtimes.set(snapshot.runtimeId, record);
           helloSeen = true;
@@ -230,29 +336,127 @@ export class RuntimeRegistry {
       return Promise.reject(new Error('Invalid command.'));
     let command: BridgeCommand;
     try {
+      const candidate = input as Record<string, unknown>;
       command = validateBridgeCommand({
-        ...(input as Record<string, unknown>),
-        id: randomUUID(),
+        ...candidate,
+        // Existing HTTP callers omit IDs; semantic callers retain their
+        // caller-owned stable ID so retries cannot become a second action.
+        id:
+          typeof candidate.id === 'string' && candidate.id.length > 0
+            ? candidate.id
+            : randomUUID(),
       });
     } catch (error) {
       return Promise.reject(
         error instanceof Error ? error : new Error(String(error)),
       );
     }
+    const queueDraftCommand = isQueueDraftCommand(command);
     if (
+      !queueDraftCommand &&
       record.commandQueue.length + (record.commandRunning ? 1 : 0) >=
-      RUNTIME_COMMAND_QUEUE_LIMIT
+        RUNTIME_COMMAND_QUEUE_LIMIT
     )
       return Promise.reject(new Error('Runtime command queue is full.'));
+    if (queueDraftCommand && record.pending.has(command.id))
+      return Promise.reject(
+        Object.assign(
+          new Error('Duplicate in-flight queue draft command ID.'),
+          {
+            code: 'duplicate-command-id',
+          },
+        ),
+      );
+    if (
+      queueDraftCommand &&
+      record.queueDraftCommandsRunning >= MAX_QUEUE_DRAFTS
+    )
+      return Promise.reject(
+        new Error('Runtime queue draft command capacity is full.'),
+      );
+    if (command.type === 'action.invoke') {
+      // Keep direct lookup behind the same semantic validation as the bridge
+      // parser. This is defense in depth for typed callers and old records.
+      let capabilities: RuntimeSnapshot['capabilities'];
+      try {
+        capabilities = record.snapshot.capabilities
+          ? parseRuntimeCapabilitySnapshot(record.snapshot.capabilities)
+          : undefined;
+      } catch {
+        return Promise.reject(
+          Object.assign(
+            new Error(`Runtime does not advertise action ${command.actionId}.`),
+            { code: 'unknown-action' },
+          ),
+        );
+      }
+      const action = capabilities?.manifests
+        .flatMap((manifest) => manifest.actions)
+        .find((item) => item.id === command.actionId);
+      if (!capabilities || !action)
+        return Promise.reject(
+          Object.assign(
+            new Error(`Runtime does not advertise action ${command.actionId}.`),
+            { code: 'unknown-action' },
+          ),
+        );
+      if (
+        !isActionAvailable(action, capabilities, {
+          online: true,
+          liveState: record.snapshot.liveState,
+          pendingInteractions: record.snapshot.pendingInteractions.length,
+        })
+      )
+        return Promise.reject(
+          Object.assign(
+            new Error(`Runtime action ${command.actionId} is unavailable.`),
+            { code: 'unavailable-action' },
+          ),
+        );
+      try {
+        parseActionInput(action, command.input);
+      } catch (error) {
+        return Promise.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+      if (!action.idempotent) {
+        const reservation = record.actionCommandIds.reserve(command.id);
+        if (reservation === 'duplicate')
+          return Promise.reject(
+            Object.assign(new Error('Duplicate semantic action command ID.'), {
+              code: 'duplicate-action-id',
+            }),
+          );
+        if (reservation === 'capacity')
+          return Promise.reject(
+            Object.assign(
+              new Error('Non-idempotent action command capacity is full.'),
+              { code: 'action-command-capacity' },
+            ),
+          );
+      }
+    }
+    let queued: QueuedCommand | undefined;
     const promise = new Promise<unknown>((resolve, reject) => {
-      record.commandQueue.push({
-        command,
-        connection,
-        resolve,
-        reject,
-      });
+      queued = { command, connection, resolve, reject };
     });
-    this.pumpCommands(runtimeId, record);
+    if (!queued) return Promise.reject(new Error('Command setup failed.'));
+    if (queueDraftCommand) {
+      // Queue drafts are editable dashboard state, so keep them responsive
+      // while a semantic command awaits its acknowledgement. This lane is
+      // independently bounded and writes on the connection/session generation
+      // captured synchronously above.
+      record.queueDraftCommandsRunning += 1;
+      void this.executeCommand(runtimeId, record, queued).finally(() => {
+        record.queueDraftCommandsRunning -= 1;
+      });
+    } else {
+      // The action reservation above occurs only after queue admission; a
+      // rejected admission is not a consumed semantic command ID.
+      record.commandQueue.push(queued);
+      this.pumpCommands(runtimeId, record);
+    }
     return promise;
   }
 
@@ -357,18 +561,30 @@ export class RuntimeRegistry {
       if (!pending) return;
       record.pending.delete(frame.id);
       if (frame.ok) pending.resolve(frame.result);
-      else pending.reject(new Error(frame.error));
+      else {
+        const error = new Error(frame.error);
+        if (frame.code) Object.assign(error, { code: frame.code });
+        pending.reject(error);
+      }
       return;
     }
-    if (frame.kind !== 'event' || frame.seq <= record.lastSeq) return;
-    record.lastSeq = frame.seq;
+    if (frame.kind !== 'event') return;
     const event = redactBridgeEvent(frame.event);
-    record.snapshot = this.mergeEvent(record.snapshot, event);
+    const reduced = applyRuntimeEvent(record.reducerState, {
+      event,
+      runtimeEpoch: record.runtimeEpoch,
+      runtimeSeq: frame.seq,
+    });
+    if (!reduced.accepted) return;
+    record.reducerState = reduced.state;
     record.snapshot = {
-      ...record.snapshot,
+      ...reduced.state.snapshot,
       online: true,
       lastSeenAt: Date.now(),
     };
+    // lastSeenAt and online are transport-owned observations, but keeping them
+    // in reducer state makes the next event a pure continuation of this one.
+    record.reducerState = { ...record.reducerState, snapshot: record.snapshot };
     if (event.type === 'runtime.goodbye') {
       record.socket?.end();
       // Remove first so observers build their authoritative snapshot after the
@@ -380,77 +596,8 @@ export class RuntimeRegistry {
       runtimeId: record.snapshot.runtimeId,
       event,
       snapshot: record.snapshot,
+      runtimeEpoch: record.runtimeEpoch,
+      runtimeSeq: frame.seq,
     });
-  }
-
-  private mergeEvent(
-    snapshot: RuntimeSnapshot,
-    event: BridgeEvent,
-  ): RuntimeSnapshot {
-    switch (event.type) {
-      case 'runtime.hello':
-        // Hello is only accepted during registration. A later hello must not
-        // be able to replace the established runtime identity.
-        return snapshot;
-      case 'runtime.heartbeat':
-      case 'runtime.stateChanged': {
-        const update = event.snapshot;
-        return {
-          ...snapshot,
-          ...(update?.cwd === undefined ? {} : { cwd: update.cwd }),
-          ...(update?.workspaceHint === undefined
-            ? {}
-            : { workspaceHint: update.workspaceHint }),
-          ...(update?.tmux === undefined ? {} : { tmux: update.tmux }),
-          liveState: event.state,
-          ...(update?.session === undefined ? {} : { session: update.session }),
-          ...(update?.model === undefined ? {} : { model: update.model }),
-          ...(update?.contextUsage === undefined
-            ? {}
-            : { contextUsage: update.contextUsage }),
-          ...(update?.pendingInteractions === undefined
-            ? {}
-            : { pendingInteractions: update.pendingInteractions }),
-          ...(update?.lastError === undefined
-            ? {}
-            : { lastError: update.lastError }),
-          ...(update?.online === undefined ? {} : { online: update.online }),
-          ...(update?.lastSeenAt === undefined
-            ? {}
-            : { lastSeenAt: update.lastSeenAt }),
-        };
-      }
-      case 'session.changed':
-      case 'session.snapshot':
-        return { ...snapshot, session: event.session };
-      case 'interaction.requested':
-        return {
-          ...snapshot,
-          pendingInteractions: [
-            ...snapshot.pendingInteractions.filter(
-              (item) => item.id !== event.interaction.id,
-            ),
-            event.interaction,
-          ],
-          liveState: 'waiting',
-        };
-      case 'interaction.resolved':
-        return {
-          ...snapshot,
-          pendingInteractions: snapshot.pendingInteractions.filter(
-            (item) => item.id !== event.interactionId,
-          ),
-        };
-      case 'agent.settled':
-        return {
-          ...snapshot,
-          liveState:
-            snapshot.pendingInteractions.length > 0 ? 'waiting' : 'idle',
-        };
-      case 'runtime.goodbye':
-        return { ...snapshot, online: false };
-      default:
-        return snapshot;
-    }
   }
 }

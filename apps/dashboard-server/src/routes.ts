@@ -1,0 +1,432 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { URL } from 'node:url';
+import type { BrowserSnapshot, WorkspaceTarget } from '@pi-dashboard/protocol';
+import type {
+  FastifyInstance,
+  FastifyPluginAsync,
+  FastifyReply,
+  FastifyRequest,
+} from 'fastify';
+import { Type } from 'typebox';
+import { allowedOrigin, authorizeRequest } from './security.js';
+
+const MAX_JSON_BODY = 512 * 1024;
+const MAX_MULTIPART_BODY = 12 * 1024 * 1024 + 256 * 1024;
+const objectBody = Type.Object({}, { additionalProperties: true });
+const anyBody = Type.Any();
+
+function validCommandId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    !Array.from(value).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  );
+}
+
+type BodyLimitError = Error & { code: string; statusCode: number };
+
+function bodyTooLarge(): BodyLimitError {
+  return Object.assign(new Error('Request body is too large.'), {
+    code: 'FST_ERR_CTP_BODY_TOO_LARGE',
+    statusCode: 413,
+  });
+}
+
+function parseJsonBody(
+  request: FastifyRequest,
+  body: Buffer,
+  done: (error: Error | null, value?: unknown) => void,
+): void {
+  if (body.byteLength === 0) {
+    const path = request.raw.url?.split('?', 1)[0];
+    if (
+      /^\/api\/runtimes\/[^/]+\/stop$/.test(path ?? '') ||
+      /^\/api\/interactions\/[^/]+\/cancel$/.test(path ?? '')
+    ) {
+      done(null, {});
+      return;
+    }
+  }
+  if (body.byteLength > MAX_JSON_BODY) {
+    done(bodyTooLarge());
+    return;
+  }
+  try {
+    done(null, JSON.parse(body.toString('utf8')) as unknown);
+  } catch (error) {
+    const parseError =
+      error instanceof Error ? error : new Error(String(error));
+    Object.assign(parseError, { statusCode: 400 });
+    done(parseError);
+  }
+}
+
+export interface DashboardRouteContext {
+  readonly token: string;
+  origins(): readonly string[];
+  snapshot(): BrowserSnapshot;
+  workspaces(): WorkspaceTarget[];
+  refreshWorkspaces(): Promise<WorkspaceTarget[]>;
+  usage(): Promise<{ usage: unknown; error?: string }>;
+  readSession(id: string): Promise<unknown>;
+  renameSession(id: string, name: string): Promise<unknown>;
+  startRuntime(input: unknown): Promise<unknown>;
+  restartRuntime?(runtimeId: string, commandId: string): Promise<unknown>;
+  commandRuntime(
+    runtimeId: string,
+    input: unknown,
+    images: readonly Buffer[],
+  ): Promise<unknown>;
+  stopRuntime(runtimeId: string, force: boolean): Promise<void>;
+  interaction(
+    interactionId: string,
+    answer: unknown,
+    cancel: boolean,
+  ): Promise<unknown>;
+  markNotificationRead(id: string): void;
+  markAllNotificationsRead(): void;
+  pushSubscribe(body: unknown): void;
+  vapidPublicKey(): string | null;
+  handleSse(request: IncomingMessage, response: ServerResponse, url: URL): void;
+}
+
+function requestUrl(request: FastifyRequest): URL {
+  return new URL(
+    request.raw.url ?? '/',
+    `http://${request.headers.host ?? '127.0.0.1'}`,
+  );
+}
+
+function errorStatus(error: unknown): number {
+  const code = (error as { code?: string }).code;
+  return code === 'shared-working-directory' || code === 'active-session'
+    ? 409
+    : 400;
+}
+
+function sendError(reply: FastifyReply, error: unknown): FastifyReply {
+  return reply.code(errorStatus(error)).send({
+    error: error instanceof Error ? error.message : String(error),
+    code: (error as { code?: string }).code,
+  });
+}
+
+async function multipartPayload(
+  request: FastifyRequest,
+): Promise<{ body: Record<string, unknown>; images: Buffer[] }> {
+  const raw = request.body;
+  if (!Buffer.isBuffer(raw)) throw new Error('Invalid multipart request.');
+  const form = await new Response(new Uint8Array(raw), {
+    headers: { 'content-type': request.headers['content-type'] ?? '' },
+  }).formData();
+  const commandPart = form.get('command');
+  if (typeof commandPart !== 'string' || commandPart.length > 512 * 1024)
+    throw new Error('Multipart command is required.');
+  const parsed: unknown = JSON.parse(commandPart);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    throw new Error('Invalid multipart command.');
+  const parts = form.getAll('images');
+  const images: Buffer[] = [];
+  for (const part of parts) {
+    if (typeof part === 'string') throw new Error('Invalid image upload.');
+    images.push(Buffer.from(await part.arrayBuffer()));
+  }
+  return { body: parsed as Record<string, unknown>, images };
+}
+
+async function commandPayload(
+  request: FastifyRequest,
+): Promise<{ body: unknown; images: Buffer[] }> {
+  if (
+    (request.headers['content-type'] ?? '').startsWith('multipart/form-data;')
+  )
+    return multipartPayload(request);
+  return { body: request.body ?? {}, images: [] };
+}
+
+function installCorsAndAuth(
+  app: FastifyInstance,
+  context: DashboardRouteContext,
+): void {
+  app.addHook('onRequest', async (request, reply) => {
+    const origin = request.headers.origin;
+    if (origin && context.origins().includes(origin)) {
+      reply.header('access-control-allow-origin', origin);
+      reply.header(
+        'access-control-allow-headers',
+        'authorization, content-type, x-dashboard-token',
+      );
+      reply.header('access-control-allow-methods', 'GET, POST, OPTIONS');
+      reply.header('vary', 'Origin');
+    }
+    if (request.method === 'OPTIONS') {
+      if (!allowedOrigin(origin, context.origins()))
+        return reply.code(403).send({ error: 'Origin is not allowed.' });
+      return reply.code(204).send();
+    }
+    if (request.url.split('?', 1)[0] === '/api/health') return;
+    const auth = authorizeRequest({
+      method: request.method,
+      origin,
+      authorization: request.headers.authorization,
+      tokenHeader: request.headers['x-dashboard-token'] as string | undefined,
+      expectedToken: context.token,
+      allowedOrigins: context.origins(),
+    });
+    if (!auth.ok) return reply.code(auth.status).send({ error: auth.error });
+  });
+}
+
+export const dashboardRoutes: FastifyPluginAsync<{
+  context: DashboardRouteContext;
+}> = async (app, options) => {
+  const { context } = options;
+  app.addHook('onSend', async (_request, reply) => {
+    reply.header('cache-control', 'no-store');
+  });
+  app.setErrorHandler((error, _request, reply) => {
+    const statusCode =
+      typeof (error as { statusCode?: unknown }).statusCode === 'number'
+        ? (error as { statusCode: number }).statusCode
+        : 500;
+    return reply.code(statusCode).send({
+      error: error instanceof Error ? error.message : String(error),
+      code: (error as { code?: string }).code,
+    });
+  });
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser(
+    'application/json',
+    { parseAs: 'buffer', bodyLimit: MAX_JSON_BODY },
+    parseJsonBody,
+  );
+  app.addContentTypeParser(
+    'multipart/form-data',
+    { parseAs: 'buffer', bodyLimit: MAX_MULTIPART_BODY },
+    (_request, body, done) => done(null, body),
+  );
+  installCorsAndAuth(app, context);
+  app.setNotFoundHandler((_request, reply) =>
+    reply.code(404).send({ error: 'Not found.' }),
+  );
+
+  app.options('/*', async (_request, reply) => reply.code(204).send());
+  app.get(
+    '/api/health',
+    { schema: { response: { 200: Type.Object({ ok: Type.Boolean() }) } } },
+    async () => ({ ok: true }),
+  );
+  app.get(
+    '/api/snapshot',
+    { schema: { response: { 200: Type.Any() } } },
+    async () => context.snapshot(),
+  );
+  app.get('/api/events', async (request, reply) => {
+    reply.hijack();
+    context.handleSse(request.raw, reply.raw, requestUrl(request));
+  });
+  app.get('/api/workspaces', async () => ({
+    workspaces: context.workspaces(),
+  }));
+  app.post('/api/workspaces/refresh', async (_request, reply) => {
+    try {
+      return { workspaces: await context.refreshWorkspaces() };
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+  app.get('/api/usage', async (_request, reply) => {
+    try {
+      return await context.usage();
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+  app.get('/api/push/vapid-public-key', async () => ({
+    publicKey: context.vapidPublicKey(),
+  }));
+
+  app.get<{ Params: { id: string } }>(
+    '/api/sessions/:id',
+    async (request, reply) => {
+      try {
+        return await context.readSession(request.params.id);
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{
+    Params: { id: string };
+    Body: { name?: unknown };
+  }>(
+    '/api/sessions/:id/name',
+    { schema: { body: objectBody } },
+    async (request, reply) => {
+      try {
+        if (typeof request.body?.name !== 'string')
+          throw new Error('Session name is required.');
+        return {
+          ok: true,
+          ...((await context.renameSession(
+            request.params.id,
+            request.body.name,
+          )) as {
+            result?: unknown;
+            metadata?: unknown;
+          }),
+        };
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post(
+    '/api/runtimes/start',
+    { schema: { body: objectBody } },
+    async (request, reply) => {
+      try {
+        return reply.code(201).send(await context.startRuntime(request.body));
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{ Params: { runtimeId: string }; Body: { id?: unknown } }>(
+    '/api/runtimes/:runtimeId/restart',
+    { schema: { body: objectBody } },
+    async (request, reply) => {
+      try {
+        if (!validCommandId(request.body?.id))
+          throw new Error('Restart command ID is required.');
+        if (!context.restartRuntime)
+          throw new Error('Runtime restart is unavailable.');
+        return {
+          ok: true,
+          result: await context.restartRuntime(
+            request.params.runtimeId,
+            request.body.id,
+          ),
+        };
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{ Params: { runtimeId: string } }>(
+    '/api/runtimes/:runtimeId/command',
+    {
+      bodyLimit: MAX_MULTIPART_BODY,
+      schema: { body: anyBody },
+    },
+    async (request, reply) => {
+      try {
+        const payload = await commandPayload(request);
+        return {
+          ok: true,
+          result: await context.commandRuntime(
+            request.params.runtimeId,
+            payload.body,
+            payload.images,
+          ),
+        };
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{
+    Params: { runtimeId: string };
+    Body: { force?: unknown };
+  }>(
+    '/api/runtimes/:runtimeId/stop',
+    {
+      preValidation: async (request) => {
+        if (request.body === undefined) request.body = {};
+      },
+      schema: { body: objectBody },
+    },
+    async (request, reply) => {
+      try {
+        await context.stopRuntime(
+          request.params.runtimeId,
+          request.body?.force === true,
+        );
+        return { ok: true };
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{
+    Params: { interactionId: string };
+    Body: { answer?: unknown };
+  }>(
+    '/api/interactions/:interactionId/answer',
+    { schema: { body: objectBody } },
+    async (request, reply) => {
+      try {
+        return {
+          ok: true,
+          result: await context.interaction(
+            request.params.interactionId,
+            request.body?.answer,
+            false,
+          ),
+        };
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{ Params: { interactionId: string } }>(
+    '/api/interactions/:interactionId/cancel',
+    {
+      preValidation: async (request) => {
+        if (request.body === undefined) request.body = {};
+      },
+      schema: { body: objectBody },
+    },
+    async (request, reply) => {
+      try {
+        return {
+          ok: true,
+          result: await context.interaction(
+            request.params.interactionId,
+            undefined,
+            true,
+          ),
+        };
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post('/api/notifications/read-all', async () => {
+    context.markAllNotificationsRead();
+    return { ok: true };
+  });
+  app.post<{ Params: { id: string } }>(
+    '/api/notifications/:id/read',
+    async (request) => {
+      context.markNotificationRead(request.params.id);
+      return { ok: true };
+    },
+  );
+  app.post(
+    '/api/push/subscribe',
+    { schema: { body: objectBody } },
+    async (request, reply) => {
+      try {
+        context.pushSubscribe(request.body);
+        return reply.code(201).send({ ok: true });
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+};

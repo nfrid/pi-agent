@@ -43,12 +43,18 @@ describe('delegate status store', () => {
       type: 'thinking' as const,
       label: 'thinking',
       status: 'running' as const,
+      startedAt: run.startedAt,
     };
     Object.defineProperty(activity, 'latestText', {
       value: 'Checking the changed execution paths',
       enumerable: false,
     });
     run.activities.push(activity);
+    run.messages.push({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'The audit is complete.' }],
+      timestamp: run.startedAt + 1,
+    } as never);
     store.update(id, run);
     expect(store.list()[0]).toMatchObject({
       state: 'running',
@@ -59,6 +65,17 @@ describe('delegate status store', () => {
         type: 'thinking',
         latestText: 'Checking the changed execution paths',
       },
+      transcript: [
+        {
+          type: 'task',
+          text: 'A very long task that is not used as the label',
+        },
+        {
+          type: 'thinking',
+          text: 'Checking the changed execution paths',
+        },
+        { type: 'assistant', text: 'The audit is complete.' },
+      ],
     });
 
     store.finish([id]);

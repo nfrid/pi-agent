@@ -1,3 +1,8 @@
+import {
+  hydrateTranscript,
+  reduceTranscriptEvent,
+  selectLegacyTranscriptEntries,
+} from '@pi-dashboard/domain';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import {
@@ -7,12 +12,56 @@ import {
   contextIndicatorData,
   formatContextTokens,
   isNearPageBottom,
-  reconcileLiveEvent,
+  queueCommand,
+  queuedMessagesForRuntime,
+  queueRemoveCommand,
   runtimeSupportsImages,
+  sessionCursorRangeCovered,
   sessionDisplayTitle,
+  sessionNavigationTarget,
+  shouldApplySessionMetadata,
   shouldShowActivityLead,
+  shouldShowQueuePanel,
   toTranscriptEntries,
 } from './App';
+import type { DashboardEvent } from './dashboard-transport';
+import {
+  interactionKeyAction,
+  selectedInteractionPreview,
+} from './features/session';
+import { actionNeedsInput, paletteItems } from './routes/dashboard';
+
+describe('queued message commands', () => {
+  it('normalizes queue fixtures and creates explicit bridge commands', () => {
+    const runtime = {
+      queueDrafts: [
+        { clientId: 'q1', mode: 'steer', text: 'inspect this' },
+        { clientId: 'q2', mode: 'followUp', text: 'then test it' },
+        { clientId: '', mode: 'steer', text: 'ignore' },
+      ],
+    } as unknown as RuntimeSnapshot;
+    expect(queuedMessagesForRuntime(runtime)).toEqual([
+      { id: 'q1', mode: 'steer', text: 'inspect this' },
+      { id: 'q2', mode: 'followUp', text: 'then test it' },
+    ]);
+    expect(
+      queueCommand('queue.update', 'q1', 'steer', ' revised '),
+    ).toMatchObject({
+      type: 'queue.update',
+      clientId: 'q1',
+      mode: 'steer',
+      text: 'revised',
+    });
+    expect(queueRemoveCommand('q2')).toMatchObject({
+      type: 'queue.remove',
+      clientId: 'q2',
+    });
+    expect(shouldShowQueuePanel('working', 0)).toBe(true);
+    expect(shouldShowQueuePanel('idle', 1)).toBe(true);
+    expect(shouldShowQueuePanel('waiting', 1)).toBe(true);
+    expect(shouldShowQueuePanel('idle', 0)).toBe(false);
+  });
+});
 
 describe('image attachments', () => {
   const image = (name: string, type: string, size: number) =>
@@ -70,15 +119,102 @@ describe('image attachments', () => {
   });
 });
 
+describe('command palette', () => {
+  it('keeps navigation available without runtime capabilities and bounds sessions', () => {
+    const snapshot = {
+      runtimes: [],
+      workspaces: [
+        {
+          id: 'workspace-1',
+          name: 'Workspace',
+          canonicalPath: '/workspace',
+        },
+      ],
+      sessions: Array.from({ length: 437 }, (_, index) => ({
+        id: `session-${index}`,
+        cwd: '/workspace',
+        updatedAt: index,
+      })),
+    } as never;
+    const items = paletteItems(snapshot);
+    expect(items.slice(0, 2).map((item) => item.title)).toEqual([
+      'Dashboard',
+      'New Agent',
+    ]);
+    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(27);
+    expect(items[2]?.title).toBe('Session: Untitled session');
+    expect(items.at(-1)?.title).toBe('Workspace: Workspace');
+    expect(items.some((item) => item.title === 'Session: session-436')).toBe(
+      false,
+    );
+  });
+
+  it('disambiguates identical actions by their runtime target', () => {
+    const runtime = (runtimeId: string, title: string, cwd: string) => ({
+      runtimeId,
+      ownership: 'external',
+      pid: 1,
+      cwd,
+      liveState: 'working',
+      online: true,
+      session: { id: `session-${runtimeId}`, title, entries: [] },
+      pendingInteractions: [],
+      capabilities: {
+        version: 1,
+        capabilities: [],
+        manifests: [
+          {
+            id: `manifest-${runtimeId}`,
+            version: '1',
+            actions: [{ id: 'runtime.abort', title: 'Abort run' }],
+            renderers: [],
+          },
+        ],
+      },
+    });
+    const items = paletteItems({
+      runtimes: [
+        runtime('runtime-alpha', 'Alpha agent', '/workspace/alpha'),
+        runtime('runtime-beta', 'Beta agent', '/workspace/beta'),
+      ],
+      workspaces: [],
+      sessions: [],
+    } as never).filter((item) => item.kind === 'action');
+    expect(items).toMatchObject([
+      {
+        title: 'Abort run',
+        target: 'Alpha agent',
+        runtime: { runtimeId: 'runtime-alpha', cwd: '/workspace/alpha' },
+      },
+      {
+        title: 'Abort run',
+        target: 'Beta agent',
+        runtime: { runtimeId: 'runtime-beta', cwd: '/workspace/beta' },
+      },
+    ]);
+  });
+
+  it('treats missing and empty schemas as inputless while preserving required input', () => {
+    expect(actionNeedsInput({})).toBe(false);
+    expect(actionNeedsInput({ inputSchema: {} })).toBe(false);
+    expect(actionNeedsInput({ inputSchema: { type: 'object' } })).toBe(false);
+    expect(
+      actionNeedsInput({
+        inputSchema: { type: 'object', required: ['value'] },
+      }),
+    ).toBe(true);
+  });
+});
+
 describe('dashboard snapshots', () => {
   it('rejects malformed session responses before rendering', () => {
     expect(asSessionResponse({ entries: [] })).toBeUndefined();
     expect(
       asSessionResponse({ metadata: { id: 's1', cwd: '/tmp' }, entries: [] }),
-    ).toMatchObject({ metadata: { id: 's1' } });
+    ).toBeUndefined();
   });
 
-  it('rejects runtime snapshots and defaults optional browser collections', () => {
+  it('rejects malformed runtime snapshots and defaults legacy HTTP collections', () => {
     expect(asBrowserSnapshot({ runtimeId: 'runtime-1' })).toBeUndefined();
     expect(
       asBrowserSnapshot({
@@ -87,7 +223,70 @@ describe('dashboard snapshots', () => {
         workspaces: [],
         sessions: [],
       }),
-    ).toMatchObject({ unread: [] });
+    ).toMatchObject({ serverId: 'legacy', unread: [] });
+  });
+});
+
+describe('session hydration cursor coverage', () => {
+  it('does not let a stale metadata envelope roll back hydrated HTTP metadata', () => {
+    expect(shouldApplySessionMetadata(8, 9)).toBe(false);
+    expect(shouldApplySessionMetadata(10, 9)).toBe(true);
+  });
+
+  it('requires every stream cursor between the HTTP snapshot and current state', () => {
+    expect(sessionCursorRangeCovered(4, 7, [5, 6, 7])).toBe(true);
+    expect(sessionCursorRangeCovered(4, 7, [6, 7])).toBe(false);
+    expect(sessionCursorRangeCovered(4, 4, [])).toBe(true);
+  });
+});
+
+describe('session replacement navigation', () => {
+  const sessionEvent = (
+    type: 'session.changed' | 'session.snapshot',
+    id: string,
+  ) => ({ type, session: { id, entries: [] } }) as DashboardEvent['event'];
+
+  it.each([
+    'session.changed',
+    'session.snapshot',
+  ] as const)('follows a runtime replacement delivered as %s without losing its association', (type) => {
+    expect(
+      sessionNavigationTarget(
+        'old-session',
+        'runtime-1',
+        'runtime-1',
+        sessionEvent(type, 'new-session'),
+      ),
+    ).toBe('new-session');
+  });
+
+  it('does not navigate for another runtime or the current session', () => {
+    expect(
+      sessionNavigationTarget(
+        'old-session',
+        'runtime-1',
+        'runtime-2',
+        sessionEvent('session.snapshot', 'new-session'),
+      ),
+    ).toBeUndefined();
+    expect(
+      sessionNavigationTarget(
+        'old-session',
+        'runtime-1',
+        'runtime-1',
+        sessionEvent('session.changed', 'old-session'),
+      ),
+    ).toBeUndefined();
+    // A route change to a dormant session resets the association before any
+    // queued event is considered.
+    expect(
+      sessionNavigationTarget(
+        'dormant-session',
+        undefined,
+        'runtime-1',
+        sessionEvent('session.snapshot', 'new-session'),
+      ),
+    ).toBeUndefined();
   });
 });
 
@@ -138,323 +337,114 @@ describe('context window indicator', () => {
   });
 });
 
-describe('activity presentation', () => {
-  it('hides an assistant lead when the same text is used as the title', () => {
-    expect(
-      shouldShowActivityLead(
-        'Checking the mobile transcript.',
-        'Checking the mobile transcript',
-      ),
-    ).toBe(false);
-    expect(
-      shouldShowActivityLead('A useful explanation.', 'Explored with read'),
-    ).toBe(true);
-  });
-});
-
-describe('active transcript reconciliation', () => {
-  it('reconciles representative ID-less streaming assistant messages in place', () => {
-    const entries = [
-      {
-        type: 'message',
-        message: {
-          role: 'assistant',
-          content: [{ type: 'text', text: 'start' }],
-        },
-      },
-    ];
-    const event = {
-      type: 'message.updated',
-      sessionId: 's1',
-      message: {
-        message: {
-          role: 'assistant',
-          content: [{ type: 'text', text: 'done' }],
-        },
-      },
-    };
-    const updated = reconcileLiveEvent(entries, event, 's1');
-    expect(updated).toHaveLength(1);
-    expect(JSON.stringify(updated)).toContain('done');
-  });
-
-  it('renders streaming assistant text as preparation until intent is final', () => {
-    const update = (type: string, content: unknown[]) => ({
+describe('shared transcript projection web integration', () => {
+  const message = (
+    type: 'message.started' | 'message.updated' | 'message.finished',
+    messageId: string,
+    text: string,
+  ) =>
+    ({
       type,
       sessionId: 's1',
       message: {
-        id: 'assistant-live',
+        messageId,
         role: 'assistant',
-        content,
+        content: [{ type: 'text', text }],
       },
-    });
-    const preparingEntries = reconcileLiveEvent(
-      [],
-      update('message.updated', [
-        { type: 'text', text: 'Checking the transport.' },
-      ]),
-      's1',
-    );
-    expect(toTranscriptEntries(preparingEntries)[0]).toMatchObject({
-      preparing: true,
-      text: 'Checking the transport.',
-      entry: { kind: 'assistant', speaks: false },
-    });
-    const callingEntries = reconcileLiveEvent(
-      preparingEntries,
-      update('message.updated', [
-        { type: 'text', text: 'Checking the transport.' },
-        { type: 'toolCall', id: 'call-1', name: 'read', arguments: {} },
-      ]),
-      's1',
-    );
-    const calling = toTranscriptEntries(callingEntries);
-    expect(calling[0]?.preparing).toBeUndefined();
-    expect(calling[1]?.entry).toMatchObject({ kind: 'tool', name: 'read' });
-    const finishedEntries = reconcileLiveEvent(
-      preparingEntries,
-      update('message.finished', [
-        { type: 'text', text: 'Here is the final answer.' },
-      ]),
-      's1',
-    );
-    const finished = toTranscriptEntries(finishedEntries)[0];
-    expect(finished).toMatchObject({
-      text: 'Here is the final answer.',
-      entry: { kind: 'assistant', speaks: true },
-    });
-    expect(finished?.preparing).toBeUndefined();
-  });
+    }) as Parameters<typeof reduceTranscriptEvent>[1];
 
-  it('reconciles ID-less user start/end events by Pi timestamp', () => {
-    const start = {
-      type: 'message.started',
+  const tool = (
+    type: 'tool.started' | 'tool.updated' | 'tool.finished',
+    toolCallId: string,
+    result?: string,
+  ) =>
+    ({
+      type,
       sessionId: 's1',
-      message: {
-        message: {
-          role: 'user',
-          timestamp: 123,
-          content: [{ type: 'text', text: 'hello' }],
-        },
+      tool: {
+        toolCallId,
+        name: 'read',
+        ...(result === undefined ? {} : { result }),
       },
-    };
-    const finish = { ...start, type: 'message.finished' };
-    const once = reconcileLiveEvent([], start, 's1');
-    const twice = reconcileLiveEvent(once, finish, 's1');
-    expect(twice).toHaveLength(1);
-    expect(JSON.stringify(twice)).toContain('hello');
-    const repeatedLater = reconcileLiveEvent(
-      twice,
-      {
-        ...start,
-        message: {
+    }) as Parameters<typeof reduceTranscriptEvent>[1];
+
+  it('hydrates, reduces, selects legacy entries, and preserves presentation mapping', () => {
+    let projection = hydrateTranscript(
+      [
+        {
+          type: 'message',
           message: {
+            id: 'user-1',
             role: 'user',
-            timestamp: 456,
-            content: [{ type: 'text', text: 'hello' }],
+            content: [{ type: 'text', text: 'Inspect this.' }],
           },
         },
-      },
+      ],
       's1',
     );
-    expect(repeatedLater).toHaveLength(2);
-  });
+    projection = reduceTranscriptEvent(
+      projection,
+      message('message.started', 'assistant-1', 'Preparing.'),
+    );
+    projection = reduceTranscriptEvent(
+      projection,
+      tool('tool.started', 'call-1'),
+    );
+    projection = reduceTranscriptEvent(
+      projection,
+      tool('tool.finished', 'call-1', 'done'),
+    );
+    projection = reduceTranscriptEvent(
+      projection,
+      message('message.finished', 'assistant-1', 'Finished.'),
+    );
 
-  it('updates a live item by stable id without appending duplicates', () => {
-    const entries = [
-      {
-        type: 'message',
-        message: { id: 'm1', role: 'assistant', content: [] },
-      },
-    ];
-    const event = {
-      type: 'message.updated',
-      sessionId: 's1',
-      message: {
-        id: 'm1',
-        role: 'assistant',
-        content: [{ type: 'text', text: 'done' }],
-      },
-    };
-    const once = reconcileLiveEvent(entries, event, 's1');
-    const twice = reconcileLiveEvent(
-      once,
-      {
-        ...event,
-        message: {
-          ...event.message,
-          content: [{ type: 'text', text: 'done!' }],
-        },
-      },
-      's1',
-    );
-    expect(twice).toHaveLength(1);
-    expect(JSON.stringify(twice)).toContain('done!');
-  });
-
-  it('replaces an ID-less assistant row without corrupting its nested tool call', () => {
-    const message = (type: string, content: unknown[]) => ({
-      type,
-      sessionId: 's1',
-      message: {
-        role: 'assistant',
-        timestamp: 123,
-        content,
-      },
+    const selected = selectLegacyTranscriptEntries(projection);
+    const entries = toTranscriptEntries(selected);
+    expect(entries).toHaveLength(3);
+    expect(entries[0]).toMatchObject({ role: 'user', text: 'Inspect this.' });
+    expect(entries[1]).toMatchObject({
+      role: 'assistant',
+      text: 'Finished.',
+      entry: { kind: 'assistant', speaks: true },
     });
-    let entries = reconcileLiveEvent([], message('message.started', []), 's1');
-    entries = reconcileLiveEvent(
-      entries,
-      message('message.updated', [
-        { type: 'text', text: 'Reading the file.' },
-        { type: 'toolCall', id: 'nested-call', name: 'read', arguments: {} },
-      ]),
-      's1',
-    );
-    entries = reconcileLiveEvent(
-      entries,
-      message('message.finished', [
-        { type: 'text', text: 'Reading the file.' },
-        { type: 'toolCall', id: 'nested-call', name: 'read', arguments: {} },
-      ]),
-      's1',
-    );
-    expect(entries).toHaveLength(1);
-    const transcript = toTranscriptEntries(entries);
-    expect(transcript).toHaveLength(2);
-    expect(transcript[0]).toMatchObject({
-      key: 'assistant:123',
-      entry: { kind: 'assistant' },
-    });
-    expect(transcript[1]).toMatchObject({
-      key: 'assistant:123:tool:nested-call',
+    expect(entries[2]).toMatchObject({
       entry: { kind: 'tool', name: 'read' },
     });
+    expect(JSON.stringify(selected)).toContain('call-1');
   });
 
-  it('keeps one message row when responseId appears during streaming', () => {
-    const started = reconcileLiveEvent(
-      [],
-      {
-        type: 'message.started',
-        sessionId: 's1',
-        message: {
-          role: 'assistant',
-          timestamp: 456,
-          content: [],
-        },
-      },
-      's1',
+  it('keeps a finished entity stable when a later update is replayed', () => {
+    let projection = hydrateTranscript([], 's1');
+    projection = reduceTranscriptEvent(
+      projection,
+      message('message.finished', 'assistant-1', 'final'),
     );
-    const startedKey = toTranscriptEntries(started)[0]?.key;
-    const updated = reconcileLiveEvent(
-      started,
-      {
-        type: 'message.updated',
-        sessionId: 's1',
-        message: {
-          role: 'assistant',
-          timestamp: 456,
-          responseId: 'response-added-later',
-          content: [
-            { type: 'text', text: 'Calling now.' },
-            { type: 'toolCall', id: 'call-later', name: 'bash', arguments: {} },
-          ],
-        },
-      },
-      's1',
+    projection = reduceTranscriptEvent(
+      projection,
+      message('message.updated', 'assistant-1', 'stale'),
     );
-    expect(updated).toHaveLength(1);
-    const transcript = toTranscriptEntries(updated);
-    expect(transcript).toHaveLength(2);
-    expect(transcript[0]?.key).toBe(startedKey);
+    const selected = selectLegacyTranscriptEntries(projection);
+    expect(selected).toHaveLength(1);
+    expect(JSON.stringify(selected)).toContain('final');
+    expect(JSON.stringify(selected)).not.toContain('stale');
   });
 
-  it('appends a new stable assistant id instead of replacing the prior answer', () => {
-    const entries = [
+  it('uses selected projection entries rather than recursive provider identities', () => {
+    const projection = hydrateTranscript([
       {
         type: 'message',
         message: {
-          id: 'finished-answer',
+          id: 'message-1',
           role: 'assistant',
-          content: [{ type: 'text', text: 'Previous answer' }],
+          content: [{ type: 'text', text: 'hello' }],
+          metadata: { id: 'must-not-be-used' },
         },
       },
-    ];
-    const updated = reconcileLiveEvent(
-      entries,
-      {
-        type: 'message.updated',
-        sessionId: 's1',
-        message: {
-          id: 'new-turn',
-          role: 'assistant',
-          content: [{ type: 'text', text: 'Preparing work' }],
-        },
-      },
-      's1',
-    );
-    expect(updated).toHaveLength(2);
-    expect(JSON.stringify(updated[0])).toContain('Previous answer');
-    expect(JSON.stringify(updated[1])).toContain('Preparing work');
-  });
-
-  it('keeps live tools renderable when updating nested and new calls', () => {
-    const entries = [
-      {
-        type: 'message',
-        message: {
-          id: 'm1',
-          role: 'assistant',
-          content: [{ type: 'toolCall', toolCallId: 't1', name: 'read' }],
-        },
-      },
-    ];
-    const updated = reconcileLiveEvent(
-      entries,
-      {
-        type: 'tool.updated',
-        sessionId: 's1',
-        tool: { toolCallId: 't1', toolName: 'read', args: { path: 'a.ts' } },
-      },
-      's1',
-    );
-    expect(updated).not.toBe(entries);
-    expect(
-      (entries[0] as { message: { content: unknown[] } }).message.content,
-    ).toHaveLength(1);
-    expect(updated[0]).toMatchObject({ type: 'message' });
-    expect(
-      (updated[0] as { message: { content: unknown[] } }).message.content,
-    ).toHaveLength(1);
-    expect(
-      (updated[0] as { message: { content: unknown[] } }).message.content[0],
-    ).toMatchObject({ type: 'toolCall', name: 'read' });
-    const appended = reconcileLiveEvent(
-      updated,
-      {
-        type: 'tool.started',
-        sessionId: 's1',
-        tool: { toolCallId: 't2', toolName: 'bash', args: { command: 'pwd' } },
-      },
-      's1',
-    );
-    expect(appended).toHaveLength(2);
-    expect(JSON.stringify(appended[1])).toContain('"name":"bash"');
-    const finished = reconcileLiveEvent(
-      appended,
-      {
-        type: 'tool.finished',
-        sessionId: 's1',
-        tool: { toolCallId: 't2', toolName: 'bash', result: 'ok' },
-      },
-      's1',
-    );
-    expect(finished).toHaveLength(2);
-    expect(finished[1]).toMatchObject({
-      type: 'tool',
-      tool: { name: 'bash', result: 'ok' },
-    });
+    ]);
+    const selected = selectLegacyTranscriptEntries(projection);
+    expect(JSON.stringify(selected)).not.toContain('must-not-be-used');
+    expect(toTranscriptEntries(selected)[0]?.key).toBe('message-1');
   });
 
   it('uses shared narration semantics without treating a header as speech', () => {
@@ -477,50 +467,55 @@ describe('active transcript reconciliation', () => {
     });
     expect(entries[0]?.text).toBeUndefined();
   });
+});
 
-  it('pairs persisted Pi tool results with calls and excludes result-only rows', () => {
-    const callId = 'call-1';
-    const entries = toTranscriptEntries([
-      {
-        type: 'message',
-        message: {
-          role: 'assistant',
-          content: [
-            {
-              type: 'toolCall',
-              id: callId,
-              name: 'read',
-              arguments: { path: 'a.ts' },
-            },
-          ],
-        },
-      },
-      {
-        type: 'message',
-        message: {
-          role: 'toolResult',
-          toolCallId: callId,
-          toolName: 'read',
-          content: [{ type: 'text', text: 'file' }],
-          isError: false,
-        },
-      },
-    ]);
-    expect(entries).toHaveLength(2);
-    expect(entries[0]?.entry).toMatchObject({ kind: 'assistant' });
-    expect(entries[1]?.entry).toMatchObject({ kind: 'tool', name: 'read' });
-    expect(JSON.stringify(entries[1]?.raw)).toContain('"result"');
+describe('ask-user keyboard contract', () => {
+  it('moves, numbers, submits, and cancels without submitting on navigation', () => {
+    expect(interactionKeyAction('ArrowDown', 0, 3)).toEqual({
+      type: 'move',
+      index: 1,
+    });
+    expect(interactionKeyAction('ArrowUp', 0, 3)).toEqual({
+      type: 'move',
+      index: 0,
+    });
+    expect(interactionKeyAction('2', 0, 3)).toEqual({
+      type: 'move',
+      index: 1,
+    });
+    expect(interactionKeyAction('Enter', 1, 3)).toEqual({
+      type: 'submit',
+      index: 1,
+    });
+    expect(interactionKeyAction('Escape', 1, 3)).toEqual({
+      type: 'cancel',
+    });
+    expect(interactionKeyAction('ArrowDown', 0, 0)).toBeUndefined();
+    expect(interactionKeyAction('Escape', 1, 3, true)).toBeUndefined();
   });
 
-  it('ignores events from the previous session', () => {
-    const entries = [{ type: 'message', message: { id: 'm1' } }];
+  it('uses the selected choice preview and ignores custom-answer rows', () => {
+    const choices = [
+      { label: 'Custom', value: 'custom', custom: true },
+      { label: 'First', value: 'first', preview: '# First' },
+      { label: 'Second', value: 'second', preview: '## Second' },
+    ];
+    expect(selectedInteractionPreview(choices, 0)).toBe('# First');
+    expect(selectedInteractionPreview(choices, 1)).toBe('## Second');
+  });
+});
+
+describe('activity presentation', () => {
+  it('hides an assistant lead when the same text is used as the title', () => {
     expect(
-      reconcileLiveEvent(
-        entries,
-        { type: 'message.updated', sessionId: 'old', message: { id: 'old' } },
-        'new',
+      shouldShowActivityLead(
+        'Checking the mobile transcript.',
+        'Checking the mobile transcript',
       ),
-    ).toEqual(entries);
+    ).toBe(false);
+    expect(
+      shouldShowActivityLead('A useful explanation.', 'Explored with read'),
+    ).toBe(true);
   });
 });
 

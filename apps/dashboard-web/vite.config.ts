@@ -1,4 +1,5 @@
 import path from 'node:path';
+import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
@@ -9,9 +10,14 @@ const proxy = {
 };
 
 export default defineConfig({
-  plugins: [react()],
+  // Tailwind v4 is utility-only here; styles.css intentionally does not import preflight.
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
+      '@pi-dashboard/client': path.resolve(
+        __dirname,
+        '../../packages/dashboard-client/src/index.ts',
+      ),
       '@pi-dashboard/protocol': path.resolve(
         __dirname,
         '../../packages/dashboard-protocol/src/index.ts',
@@ -19,6 +25,14 @@ export default defineConfig({
       '@pi-dashboard/activity-model': path.resolve(
         __dirname,
         '../../packages/activity-model/src/index.ts',
+      ),
+      '@pi-dashboard/domain': path.resolve(
+        __dirname,
+        '../../packages/dashboard-domain/src/index.ts',
+      ),
+      '@pi-dashboard/extension-contributions': path.resolve(
+        __dirname,
+        '../../packages/extension-contributions/src/index.ts',
       ),
     },
   },

@@ -1,7 +1,7 @@
 import {
   hasUnresolvedToolFailure as sharedHasUnresolvedToolFailure,
   validationKindsOf,
-} from './outcome-core.mjs';
+} from '../../packages/activity-model/src/outcome.mjs';
 import type { SequenceItem } from './types';
 
 export { validationKindsOf };
