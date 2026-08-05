@@ -22,6 +22,15 @@ export function isNearPageBottom(
   return scrollHeight - scrollY - innerHeight <= threshold;
 }
 
+export function shouldShowJumpToLatest(
+  scrollHeight: number,
+  scrollY: number,
+  innerHeight: number,
+  threshold = 120,
+): boolean {
+  return !isNearPageBottom(scrollHeight, scrollY, innerHeight, threshold);
+}
+
 export function shouldApplySessionMetadata(
   eventCursor: number,
   metadataCursor: number,

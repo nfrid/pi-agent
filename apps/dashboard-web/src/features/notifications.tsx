@@ -116,14 +116,13 @@ export function NotificationList({
   };
   return (
     <section className="notifications" aria-labelledby="notifications-heading">
-      <div className="workspace-title">
-        <span id="notifications-heading">Unread events</span>
+      <div className="subsection-heading">
+        <span id="notifications-heading">Notifications</span>
         <span className="notification-actions">
-          <span>{notifications.length}</span>
           <button
             type="button"
             onClick={() => void markAllRead()}
-            disabled={markingAll}
+            disabled={markingAll || !notifications.length}
           >
             {markingAll ? 'Reading…' : 'Read all'}
           </button>
@@ -145,17 +144,24 @@ export function NotificationList({
           Could not update notification: {error}
         </p>
       )}
-      {notifications.slice(0, 8).map((notification) => (
-        <article className="notification" key={notification.id}>
-          <div>
-            <strong>{notification.title}</strong>
-            <p>{notification.body}</p>
-          </div>
-          <button type="button" onClick={() => void markRead(notification.id)}>
-            Mark read
-          </button>
-        </article>
-      ))}
+      {notifications.length ? (
+        notifications.slice(0, 8).map((notification) => (
+          <article className="notification" key={notification.id}>
+            <div>
+              <strong>{notification.title}</strong>
+              <p>{notification.body}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void markRead(notification.id)}
+            >
+              Mark read
+            </button>
+          </article>
+        ))
+      ) : (
+        <p className="empty inbox-empty">You’re all caught up.</p>
+      )}
     </section>
   );
 }
@@ -175,7 +181,7 @@ export function UsagePanel({
       : [];
   return (
     <section className="usage-panel" aria-labelledby="usage-heading">
-      <div className="workspace-title">
+      <div className="subsection-heading">
         <span id="usage-heading">Usage</span>
         <span>{snapshots.length ? 'latest' : 'reported'}</span>
       </div>

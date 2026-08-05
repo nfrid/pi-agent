@@ -16,7 +16,11 @@ import {
   useRef,
   useState,
 } from 'react';
-import { isNearPageBottom, sessionDisplayTitle } from '../app-helpers';
+import {
+  isNearPageBottom,
+  sessionDisplayTitle,
+  shouldShowJumpToLatest,
+} from '../app-helpers';
 import { Transcript } from '../entities/transcript';
 import { ExtensionSurfaceStack } from './extension-surfaces';
 import { PendingInteractions } from './pending-interaction';
@@ -79,6 +83,7 @@ export function SessionView({
     ? { ...query.data, metadata: storedMetadata ?? query.data.metadata }
     : undefined;
   const [error, setError] = useState<string>();
+  const [awayFromLatest, setAwayFromLatest] = useState(false);
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const stickToBottomRef = useRef(true);
   useEffect(() => {
@@ -107,11 +112,20 @@ export function SessionView({
   useEffect(() => {
     void id;
     stickToBottomRef.current = true;
+    setAwayFromLatest(false);
     const update = () => {
-      stickToBottomRef.current = isNearPageBottom(
+      const nearLatest = isNearPageBottom(
         document.documentElement.scrollHeight,
         window.scrollY,
         window.innerHeight,
+      );
+      stickToBottomRef.current = nearLatest;
+      setAwayFromLatest(
+        shouldShowJumpToLatest(
+          document.documentElement.scrollHeight,
+          window.scrollY,
+          window.innerHeight,
+        ),
       );
     };
     window.addEventListener('scroll', update, { passive: true });
@@ -155,32 +169,58 @@ export function SessionView({
       </section>
     );
   const runtimeError = runtime?.lastError;
+  const jumpToLatest = () => {
+    window.scrollTo({
+      top: document.documentElement.scrollHeight,
+      behavior: 'smooth',
+    });
+    stickToBottomRef.current = true;
+    setAwayFromLatest(false);
+  };
   return (
     <section className="session-page">
-      <Back />
-      <div className="session-heading">
-        <div>
-          <p className="eyebrow">Session</p>
-          <h1>{sessionDisplayTitle(data.metadata, data.entries)}</h1>
-          <p className="muted">
-            {data.metadata.cwd} ·{' '}
-            {runtime
-              ? runtime.online === false
-                ? 'offline'
-                : runtime.liveState
-              : 'dormant'}
-            {runtime?.model &&
-              ` · ${runtime.model.provider}/${runtime.model.model}${runtime.model.thinking ? ` · ${runtime.model.thinking}` : ''}`}
-          </p>
+      <div className="session-context session-heading">
+        <div className="session-context-main">
+          <Back />
+          <div className="session-identity">
+            <h1 title={sessionDisplayTitle(data.metadata, data.entries)}>
+              {sessionDisplayTitle(data.metadata, data.entries)}
+            </h1>
+            <p className="muted">
+              {data.metadata.cwd} ·{' '}
+              {runtime
+                ? runtime.online === false
+                  ? 'offline'
+                  : runtime.liveState
+                : 'dormant'}
+              {runtime?.model &&
+                ` · ${runtime.model.provider}/${runtime.model.model}${runtime.model.thinking ? ` · ${runtime.model.thinking}` : ''}`}
+            </p>
+          </div>
         </div>
         <div className="session-heading-actions">
+          {awayFromLatest && (
+            <button
+              type="button"
+              className="jump-latest"
+              onClick={jumpToLatest}
+              aria-label="Jump to latest transcript activity"
+            >
+              ↓ Latest
+            </button>
+          )}
           <SessionRename
             id={id}
             initialName={data.metadata.name}
             store={store}
             onRenamed={(name) => store.updateSessionMetadata(id, { name })}
           />
-          {runtime && <RuntimeActions runtime={runtime} />}
+          {runtime && (
+            <details className="session-controls">
+              <summary>Runtime controls</summary>
+              <RuntimeActions runtime={runtime} />
+            </details>
+          )}
         </div>
       </div>
       {runtimeError && (

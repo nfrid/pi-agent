@@ -21,6 +21,7 @@ import {
   sessionNavigationTarget,
   shouldApplySessionMetadata,
   shouldShowActivityLead,
+  shouldShowJumpToLatest,
   shouldShowQueuePanel,
   toTranscriptEntries,
 } from './App';
@@ -141,8 +142,8 @@ describe('command palette', () => {
       'Dashboard',
       'New Agent',
     ]);
-    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(27);
-    expect(items[2]?.title).toBe('Session: Untitled session');
+    expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(30);
+    expect(items[5]?.title).toBe('Session: Untitled session');
     expect(items.at(-1)?.title).toBe('Workspace: Workspace');
     expect(items.some((item) => item.title === 'Session: session-436')).toBe(
       false,
@@ -224,6 +225,13 @@ describe('dashboard snapshots', () => {
         sessions: [],
       }),
     ).toMatchObject({ serverId: 'legacy', unread: [] });
+  });
+});
+
+describe('session latest control', () => {
+  it('shows jump-to-latest only after leaving the latest viewport', () => {
+    expect(shouldShowJumpToLatest(1000, 780, 200)).toBe(false);
+    expect(shouldShowJumpToLatest(1600, 300, 600)).toBe(true);
   });
 });
 

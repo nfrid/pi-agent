@@ -30,7 +30,14 @@ import { Button as AriaButton } from 'react-aria-components';
 import { useDashboardShell } from './dashboard-transport';
 import { Composer } from './features/composer';
 import { SessionView } from './features/session';
-import { Dashboard, Header, WorkspaceView } from './routes/dashboard';
+import {
+  Dashboard,
+  Header,
+  InboxView,
+  SessionsView,
+  WorkspacesView,
+  WorkspaceView,
+} from './routes/dashboard';
 import { LaunchView, RuntimeView } from './routes/runtime';
 
 export {
@@ -39,6 +46,7 @@ export {
   sessionDisplayTitle,
   sessionNavigationTarget,
   shouldApplySessionMetadata,
+  shouldShowJumpToLatest,
 } from './app-helpers';
 export {
   api,
@@ -222,6 +230,30 @@ function WorkspaceRoute() {
   ) : null;
 }
 
+function WorkspacesRoute() {
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <WorkspacesView snapshot={dashboard.snapshot} />
+  ) : null;
+}
+
+function SessionsRoute() {
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <SessionsView snapshot={dashboard.snapshot} />
+  ) : null;
+}
+
+function InboxRoute() {
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <InboxView
+      snapshot={dashboard.snapshot}
+      usageError={dashboard.usageError}
+    />
+  ) : null;
+}
+
 function RuntimeRoute() {
   const { runtimeId } = useParams({ from: '/runtimes/$runtimeId' });
   const dashboard = useDashboardContext();
@@ -243,15 +275,30 @@ const homeRoute = createRoute({
   path: '/',
   component: HomeRoute,
 });
+const sessionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/sessions',
+  component: SessionsRoute,
+});
 const sessionRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/sessions/$sessionId',
   component: SessionRoute,
 });
+const workspacesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/workspaces',
+  component: WorkspacesRoute,
+});
 const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/workspaces/$workspaceId',
   component: WorkspaceRoute,
+});
+const inboxRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/inbox',
+  component: InboxRoute,
 });
 const runtimeRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -265,8 +312,11 @@ const newRoute = createRoute({
 });
 export const dashboardRouteTree = rootRoute.addChildren([
   homeRoute,
+  sessionsRoute,
   sessionRoute,
+  workspacesRoute,
   workspaceRoute,
+  inboxRoute,
   runtimeRoute,
   newRoute,
 ]);

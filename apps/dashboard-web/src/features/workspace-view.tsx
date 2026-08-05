@@ -26,7 +26,6 @@ export function WorkspaceView({
       <Back />
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Workspace</p>
           <h1>{workspace?.name ?? 'Unknown workspace'}</h1>
           <p className="muted path">{workspace?.canonicalPath}</p>
         </div>

@@ -10,6 +10,10 @@ describe('dashboard route tree', () => {
     });
     await router.load();
     expect(router.state.location.pathname).toBe('/new');
+    for (const path of ['/workspaces', '/sessions', '/inbox'] as const) {
+      await router.navigate({ to: path });
+      expect(router.state.location.pathname).toBe(path);
+    }
     await router.navigate({
       to: '/sessions/$sessionId',
       params: { sessionId: 's1' },

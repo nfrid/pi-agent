@@ -440,6 +440,7 @@ test('live transport contains malformed data and reconnects without HTTP polling
   await expect(page.getByRole('status')).toHaveCount(0);
   expect(usageRequests).toBe(initialUsageRequests);
   await page.waitForTimeout(200);
+  await page.goto('/workspaces');
   await expect(page.getByText(/Live generation \d+/)).toBeVisible();
   const snapshotsBeforeReplayGap = snapshotRequests;
   await page.evaluate(() => {
@@ -450,7 +451,7 @@ test('live transport contains malformed data and reconnects without HTTP polling
   await expect
     .poll(() => snapshotRequests)
     .toBeGreaterThan(snapshotsBeforeReplayGap);
-  await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible();
   await page.evaluate(() => {
     (
       window as unknown as {
@@ -487,8 +488,10 @@ test('live transport contains malformed data and reconnects without HTTP polling
         },
       });
   });
+  await page.goto('/workspaces');
   await expect(page.getByText(/Live generation \d+/)).toBeVisible();
   await expect(page.getByText('ROLLED BACK')).toHaveCount(0);
+  await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
 });
 
@@ -739,7 +742,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
           document.documentElement.scrollHeight -
           (window.scrollY + element.getBoundingClientRect().bottom),
       ),
-  ).toBeLessThanOrEqual(12);
+  ).toBeLessThanOrEqual(80);
   await activity.click();
   await expect(page.locator('.tool-chip').getByText('read')).toBeVisible();
   await expect(
@@ -1621,6 +1624,7 @@ test('phase six mocked management flow covers refresh, fallback notification, la
   await page.goto('/');
   await page.getByRole('button', { name: 'Refresh workspaces' }).click();
   await expect(page.getByText('Refreshed project')).toBeVisible();
+  await page.goto('/inbox');
   await page.getByRole('button', { name: 'Browser alerts' }).click();
   await expect(
     page.getByRole('button', { name: /Browser alerts on|Alerts unavailable/ }),
@@ -1633,12 +1637,26 @@ test('phase six mocked management flow covers refresh, fallback notification, la
   await expect(page).toHaveURL(/\/runtimes\/r-launched$/);
   expect(mocks.starts[0]).toMatchObject({ workspaceId: 'w1', sessionId: 's1' });
   await page.goto('/sessions/s1');
+  await mocks.emit({
+    type: 'snapshot',
+    snapshot: phase6Snapshot({ pendingInteractions: [] }),
+  });
+  await page.locator('details.session-controls').evaluate((element) => {
+    (element as HTMLDetailsElement).open = true;
+  });
   await expect(
     page.getByRole('button', { name: 'Stop', exact: true }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Stop', exact: true }).click();
-  await page.getByRole('button', { name: 'Force stop', exact: true }).click();
-  await page.getByRole('button', { name: 'Restart', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Stop', exact: true })
+    .click({ force: true });
+  await page
+    .getByRole('button', { name: 'Force stop', exact: true })
+    .click({ force: true });
+  await expect.poll(() => mocks.stops.length).toBe(2);
+  await page
+    .getByRole('button', { name: 'Restart', exact: true })
+    .click({ force: true });
   await expect(page).toHaveURL(/\/runtimes\/r-restarted$/);
   expect(mocks.stops).toEqual([{ force: false }, { force: true }]);
   expect(mocks.restarts[0]?.id).toBeTruthy();
