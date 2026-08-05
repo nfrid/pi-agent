@@ -1,6 +1,6 @@
 # HF-20260804: Dropping delegate worktrees breaks parent workspace dependencies
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-04
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Multi-package TypeScript refactor using writable isolated delegates, branch review/merge, and parent-side verification
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Writable `luna-xhigh`/`luna-high` worktree delegates completed successfully; after `delegate_branches drop`, parent verification failed because root dependency symlinks targeted the deleted delegate worktree
 - **Observed cost / rework:** Parent had to recreate the entire workspace `node_modules` repeatedly with `CI=true pnpm install --frozen-lockfile` before tests could run
 - **Recurrence / confidence:** Observed more than once in this session; high confidence
-- **Ticket:** —
+- **Ticket:** [HFM-20260805: Use project-native delegate worktree setup](../tickets/20260805-isolate-delegate-dependency-links.md)
 
 ## Behavior
 

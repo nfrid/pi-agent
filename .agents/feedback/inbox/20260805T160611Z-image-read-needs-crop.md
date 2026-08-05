@@ -1,6 +1,6 @@
 # HF-20260805: Image reads need crop or region controls
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-05
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Visually verify a responsive dashboard redesign using desktop and mobile screenshots.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Read tall full-page Playwright screenshots produced during a delegated visual audit; the images rendered successfully but were too compressed for UI inspection.
 - **Observed cost / rework:** The parent had to recapture viewport-sized screenshots and inspect geometry separately because controls and spacing were unreadable in the full-page render.
 - **Recurrence / confidence:** Likely recurring in browser/UI work that produces full-page screenshots; high confidence.
-- **Ticket:** —
+- **Ticket:** [HFM-20260805: Add crop controls to image reads](../tickets/20260805-add-image-read-crops.md)
 
 ## Behavior
 

@@ -1,6 +1,6 @@
 # HF-20260804: Delegate branch listing mixes unrelated historical work
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-04
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Long migration with several writable delegates and independent read-only audits
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Listed branches to confirm cleanup after merging the current task's delegates; output included many branches and retired snapshots from unrelated earlier work
 - **Observed cost / rework:** Made cleanup state noisy and required manually distinguishing six current branches from dozens of historical entries
 - **Recurrence / confidence:** Observed in this task; likely recurring in long-lived harness repositories, medium-high confidence
-- **Ticket:** —
+- **Ticket:** [HFM-20260805: Add a session-scoped delegate branch inventory](../tickets/20260805-filter-delegate-branch-list.md)
 
 ## Behavior
 

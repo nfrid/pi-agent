@@ -1,6 +1,6 @@
 # HF-20260804: Delegate worktree installs leak pnpm links into the parent checkout
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-04
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Multi-phase TypeScript workspace migration using writable isolated delegate worktrees
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Writable Luna delegates completed and their branches were merged/dropped; later parent typechecking resolved workspace packages through a retired delegate worktree
 - **Observed cost / rework:** Produced stale type errors and required a full frozen pnpm reinstall before final verification
 - **Recurrence / confidence:** Observed twice in this task; high confidence
-- **Ticket:** —
+- **Ticket:** [HFM-20260805: Use project-native delegate worktree setup](../tickets/20260805-isolate-delegate-dependency-links.md)
 
 ## Behavior
 

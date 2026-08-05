@@ -1,6 +1,6 @@
 # HF-20260802: Activity grouping and outcome metrics disagree on validation commands
 
-- **Status:** new
+- **Status:** duplicate
 - **Observed date:** 2026-08-02
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent` (local Pi agent configuration)
 - **Task shape:** Maintainer audit of extensions for over-engineering and refactoring opportunities
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Static audit on the parent route plus a `sol-medium` maintainer-review delegate; both identified duplicated validation policy
 - **Observed cost / rework:** A local deduplication would be premature because validation affects both transcript grouping and offline outcome interpretation
 - **Recurrence / confidence:** Deterministic for matching commands; high confidence
-- **Ticket:** —
+- **Ticket:** [HFM-20260730: Derive task outcome episodes automatically](../tickets/20260730-derive-task-outcome-episodes.md)
 
 ## Behavior
 

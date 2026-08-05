@@ -1,6 +1,6 @@
 # HF-20260805: Delegate branch review lacks bounded diff controls
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-05
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Review and integrate a successful multi-file dashboard implementation delegate.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** A writable `luna-xhigh` delegate completed successfully; the parent then reviewed its 14-path branch before merging.
 - **Observed cost / rework:** The review emitted a very large patch, including hundreds of lines of mostly structural JSX reindent, so the parent had to inspect targeted files separately to make the review actionable.
 - **Recurrence / confidence:** Likely recurring for medium-to-large delegated implementations; high confidence.
-- **Ticket:** —
+- **Ticket:** [HFM-20260805: Add bounded views to delegate branch review](../tickets/20260805-bound-delegate-branch-review.md)
 
 ## Behavior
 

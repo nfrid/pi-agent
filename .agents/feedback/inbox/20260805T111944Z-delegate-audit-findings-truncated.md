@@ -1,6 +1,6 @@
 # HF-20260805: Delegate completion truncates actionable audit findings
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-05
 - **Source cwd/repo:** /Users/nfrid/.pi/agent
 - **Task shape:** Background independent regression/security audit of a multi-package dashboard refactor
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** luna-xhigh / one successful audit / actionable evidence truncated
 - **Observed cost / rework:** Required a separate artifact retrieval before the parent could understand, prioritize, or assign the reported defects.
 - **Recurrence / confidence:** Observed once in this session and similarly on multiple delegate completions; high confidence for reports with several findings.
-- **Ticket:** —
+- **Ticket:** [HFM-20260805: Add schema-driven delegate outputs](../tickets/20260805-add-schema-driven-delegate-outputs.md)
 
 ## Behavior
 

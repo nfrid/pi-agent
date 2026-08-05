@@ -3,7 +3,7 @@
 - **Status:** evaluation-pending
 - **Approval:** approved 2026-07-30
 - **Created:** 2026-07-30
-- **Source reports:** [HF-20260730: Measure end-to-end task outcomes, not only harness events](../inbox/20260730T095735Z-task-outcome-benchmark.md)
+- **Source reports:** [HF-20260730: Measure end-to-end task outcomes, not only harness events](../inbox/20260730T095735Z-task-outcome-benchmark.md); [HF-20260802: Activity grouping and outcome metrics disagree on validation commands](../inbox/20260802T133848Z-activity-group-validation-policy-diverges.md)
 
 <!-- Proposal and implementation approval are separate decisions. A proposed ticket does not authorize implementation. -->
 

@@ -1,6 +1,6 @@
 # HF-20260805: Delegate branch listing lacks a session-scoped view
 
-- **Status:** new
+- **Status:** duplicate
 - **Observed date:** 2026-08-05
 - **Source cwd/repo:** /Users/nfrid/.pi/agent
 - **Task shape:** Integrate several writable delegates, clean their worktrees, and verify no current delegation branches remain
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Multiple successful Luna writable/read-only delegates / final branch inventory
 - **Observed cost / rework:** The final inventory returned dozens of historical branches and snapshots unrelated to the current session, obscuring the current cleanup state and consuming output context.
 - **Recurrence / confidence:** Deterministic for repositories with retained delegate history; high confidence.
-- **Ticket:** —
+- **Ticket:** [HFM-20260805: Add a session-scoped delegate branch inventory](../tickets/20260805-filter-delegate-branch-list.md)
 
 ## Behavior
 
