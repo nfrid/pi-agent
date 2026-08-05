@@ -1,17 +1,44 @@
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
 const dashboardTarget = `http://127.0.0.1:${process.env.PI_DASHBOARD_PORT ?? 4173}`;
 const proxy = {
   '/api': { target: dashboardTarget },
   '/ws': { target: dashboardTarget, ws: true },
 };
+const dashboardBuildId =
+  process.env.PI_DASHBOARD_BUILD_ID?.trim() || randomUUID();
+const versionPayload = `${JSON.stringify({ version: dashboardBuildId })}\n`;
+
+function dashboardVersionPlugin(): Plugin {
+  return {
+    name: 'dashboard-version',
+    configureServer(server) {
+      server.middlewares.use('/version.json', (_request, response) => {
+        response.setHeader('Content-Type', 'application/json');
+        response.setHeader('Cache-Control', 'no-store');
+        response.end(versionPayload);
+      });
+    },
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'version.json',
+        source: versionPayload,
+      });
+    },
+  };
+}
 
 export default defineConfig({
+  define: {
+    __DASHBOARD_BUILD_ID__: JSON.stringify(dashboardBuildId),
+  },
   // Tailwind v4 is utility-only here; styles.css intentionally does not import preflight.
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), dashboardVersionPlugin()],
   resolve: {
     alias: {
       '@pi-dashboard/client': path.resolve(

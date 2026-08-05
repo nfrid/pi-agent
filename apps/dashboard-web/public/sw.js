@@ -34,6 +34,9 @@ self.addEventListener('fetch', (event) => {
     ),
   );
 });
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') void self.skipWaiting();
+});
 self.addEventListener('push', (event) => {
   const data = event.data?.json?.() || {};
   if (data.clear && data.runtimeId) {

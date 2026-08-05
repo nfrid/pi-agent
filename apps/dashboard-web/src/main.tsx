@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { UpdateAvailablePrompt } from './pwa-update';
 import './styles.css';
 
 class DashboardErrorBoundary extends Component<
@@ -41,6 +42,7 @@ if (!root) throw new Error('Dashboard root element is missing.');
 createRoot(root).render(
   <StrictMode>
     <DashboardErrorBoundary>
+      <UpdateAvailablePrompt />
       <App />
     </DashboardErrorBoundary>
   </StrictMode>,
