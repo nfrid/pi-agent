@@ -134,6 +134,7 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
         <button
           type="button"
           className="new-agent-button"
+          aria-label="New agent"
           onClick={() => go('/new')}
         >
           + Agent

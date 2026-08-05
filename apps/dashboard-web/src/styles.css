@@ -2253,7 +2253,7 @@ h2 {
 .global-tools {
   position: fixed;
   z-index: 11;
-  bottom: 126px;
+  bottom: 225px;
   left: 23px;
 }
 .global-tools .palette-trigger {

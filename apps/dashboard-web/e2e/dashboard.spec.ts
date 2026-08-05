@@ -51,7 +51,9 @@ test('mobile dashboard renders and supports the new-agent route', async ({
       name: 'A deliberately long session title that must wrap safely offline',
     }),
   ).toBeVisible();
-  await expect(page.getByRole('button', { name: '+ Agent' })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'New agent', exact: true }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Open command palette' }).click();
   await expect(
     page.getByRole('dialog', { name: 'Command palette' }),
@@ -1659,7 +1661,7 @@ test('phase six mocked management flow covers refresh, fallback notification, la
   await expect(
     page.getByRole('button', { name: /Browser alerts on|Alerts unavailable/ }),
   ).toBeVisible();
-  await page.getByRole('button', { name: '+ Agent' }).click();
+  await page.getByRole('button', { name: 'New agent', exact: true }).click();
   await page.getByLabel('Resume session (optional)').selectOption('s1');
   await page
     .getByRole('button', { name: 'Start in a new tmux window' })
