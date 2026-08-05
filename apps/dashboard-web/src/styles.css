@@ -875,13 +875,34 @@ h2 {
   list-style: none;
 }
 .activity-summary .activity-steps li {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.activity-step-dot {
+  color: var(--cyan);
+}
+.activity-tool-name {
+  border: 1px solid color-mix(in srgb, var(--cyan) 42%, transparent);
+  border-radius: 3px;
+  padding: 1px 5px;
+  background: color-mix(in srgb, var(--cyan) 8%, transparent);
+  color: var(--cyan);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+.activity-tool-argument {
+  min-width: 0;
   overflow: hidden;
   color: var(--fg);
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.activity-summary .activity-steps li span {
-  color: var(--cyan);
 }
 .activity-earlier {
   display: block;

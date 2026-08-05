@@ -1,6 +1,7 @@
 import {
   projectActivityGroups,
   toolActionSummary,
+  toolBaseName,
 } from '@pi-dashboard/activity-model';
 import { dashboardHttpClient } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
@@ -191,6 +192,24 @@ export type ActivityGroupSummary = {
 
 type ActivityGroupSummaryInput = Pick<TranscriptGroup, 'tools' | 'toolCount'>;
 
+type ActivityStepTool = TranscriptGroup['tools'][number];
+
+export function activityStepParts(tool: ActivityStepTool): {
+  label: string;
+  tool: string;
+  argument?: string;
+} {
+  const name = toolBaseName(tool.name);
+  const label = toolActionSummary(tool);
+  const remainder = label.slice(name.length).trim();
+  const argument = remainder.replace(/^:\s*/u, '');
+  return {
+    label,
+    tool: name,
+    ...(argument ? { argument } : {}),
+  };
+}
+
 function isFailedActivityTool(tool: unknown): boolean {
   if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return false;
   const candidate = tool as Record<string, unknown>;
@@ -237,7 +256,7 @@ function CollapsedActivitySummary({ group }: { group: TranscriptGroup }) {
   const summary = activityGroupSummary(group);
   const recentActions = group.tools
     .slice(-summary.recentTools.length)
-    .map((tool) => toolActionSummary(tool));
+    .map(activityStepParts);
   const stepKeyCounts = new Map<string, number>();
   return (
     <div className="activity-summary">
@@ -250,11 +269,19 @@ function CollapsedActivitySummary({ group }: { group: TranscriptGroup }) {
       {recentActions.length > 0 && (
         <ol className="activity-steps">
           {recentActions.map((action) => {
-            const occurrence = (stepKeyCounts.get(action) ?? 0) + 1;
-            stepKeyCounts.set(action, occurrence);
+            const occurrence = (stepKeyCounts.get(action.label) ?? 0) + 1;
+            stepKeyCounts.set(action.label, occurrence);
             return (
-              <li key={`${action}-${occurrence}`} title={action}>
-                <span aria-hidden="true">⏺</span> {action}
+              <li key={`${action.label}-${occurrence}`} title={action.label}>
+                <span className="activity-step-dot" aria-hidden="true">
+                  ⏺
+                </span>
+                <span className="activity-tool-name">{action.tool}</span>
+                {action.argument && (
+                  <span className="activity-tool-argument">
+                    {action.argument}
+                  </span>
+                )}
               </li>
             );
           })}

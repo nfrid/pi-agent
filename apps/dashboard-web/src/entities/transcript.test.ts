@@ -7,6 +7,7 @@ import {
   activityGroupMetadata,
   activityGroupPresentation,
   activityGroupSummary,
+  activityStepParts,
   buildTranscriptGroupCoverage,
   buildVirtualTranscriptRows,
   preserveVirtualScrollOffset,
@@ -15,6 +16,30 @@ import {
 } from './transcript';
 
 describe('activity row views and virtual transcript construction', () => {
+  it('separates tool names from their high-signal arguments', () => {
+    expect(
+      activityStepParts({
+        name: 'functions.bash',
+        args: { command: 'pnpm run check' },
+      }),
+    ).toEqual({
+      label: 'bash pnpm run check',
+      tool: 'bash',
+      argument: 'pnpm run check',
+    });
+    expect(
+      activityStepParts({ name: 'read', args: { path: 'src/App.tsx' } }),
+    ).toEqual({
+      label: 'read src/App.tsx',
+      tool: 'read',
+      argument: 'src/App.tsx',
+    });
+    expect(activityStepParts({ name: 'todo', args: {} })).toEqual({
+      label: 'todo',
+      tool: 'todo',
+    });
+  });
+
   it('derives a bounded latest-step summary from the canonical group model', () => {
     const group = {
       toolCount: 5,
