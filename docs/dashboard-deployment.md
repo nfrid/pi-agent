@@ -2,6 +2,12 @@
 
 The production dashboard is served from generated `dist/` directories by the macOS LaunchAgent `com.pi.dashboard`. Changes under `apps/dashboard-*`, `packages/dashboard-*`, `packages/activity-model`, or `packages/codex-usage` are not deployed until the production bundles are rebuilt and the service is restarted.
 
+## Browser-test guidance
+
+- Read `apps/dashboard-web/playwright.config.ts` before adding hover or responsive assertions. The default Playwright configuration may only define a mobile project; desktop-only behavior needs an explicit desktop context or project.
+- Run filtered Playwright tests with `pnpm --filter @pi-dashboard/web exec playwright test --grep "<test name>"`. Do not insert `--` before `--grep`: it can be forwarded as a positional argument and cause the full suite to run.
+- Hidden tooltip, preview, and accessibility-only DOM can still make Playwright text locators ambiguous. Avoid duplicating decorative text in DOM nodes when `data-*` attributes or CSS-generated content suffice. Otherwise, scope text assertions to the semantic transcript or control that owns the text.
+
 After validating a dashboard-affecting change:
 
 1. Build every dashboard workspace dependency from the repository root:
