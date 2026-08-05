@@ -1401,6 +1401,9 @@ h2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
   gap: 7px;
+  position: sticky;
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 122px);
+  z-index: 3;
   width: min(100%, 820px);
   margin: 10px 0;
 }
@@ -1855,6 +1858,7 @@ h2 {
   }
   .extension-surfaces {
     grid-template-columns: minmax(0, 1fr);
+    bottom: calc(max(6px, env(safe-area-inset-bottom)) + 116px);
     gap: 5px;
   }
   .section-heading,
