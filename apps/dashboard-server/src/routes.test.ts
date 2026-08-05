@@ -140,6 +140,47 @@ describe('Fastify dashboard route plugin', () => {
     ).resolves.toMatchObject({ statusCode: 400 });
   });
 
+  it('accepts empty stop/cancel bodies but rejects malformed JSON bodies', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.stopRuntime = vi.fn(async () => undefined);
+    routeContext.interaction = vi.fn(async () => ({ accepted: true }));
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+
+    for (const url of [
+      '/api/runtimes/runtime/stop',
+      '/api/interactions/interaction/cancel',
+    ]) {
+      await expect(
+        app.inject({ method: 'POST', url, headers }),
+      ).resolves.toMatchObject({ statusCode: 200 });
+      await expect(
+        app.inject({
+          method: 'POST',
+          url,
+          headers: { ...headers, 'content-type': 'application/json' },
+          payload: '',
+        }),
+      ).resolves.toMatchObject({ statusCode: 200 });
+      await expect(
+        app.inject({
+          method: 'POST',
+          url,
+          headers: { ...headers, 'content-type': 'application/json' },
+          payload: '{ malformed',
+        }),
+      ).resolves.toMatchObject({ statusCode: 400 });
+    }
+    expect(routeContext.stopRuntime).toHaveBeenCalledTimes(2);
+    expect(routeContext.interaction).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects oversized JSON before a route handler while allowing larger multipart commands', async () => {
     const app = Fastify();
     apps.push(app);
