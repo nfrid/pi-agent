@@ -358,6 +358,15 @@ export class RuntimeRegistry {
         RUNTIME_COMMAND_QUEUE_LIMIT
     )
       return Promise.reject(new Error('Runtime command queue is full.'));
+    if (queueDraftCommand && record.pending.has(command.id))
+      return Promise.reject(
+        Object.assign(
+          new Error('Duplicate in-flight queue draft command ID.'),
+          {
+            code: 'duplicate-command-id',
+          },
+        ),
+      );
     if (
       queueDraftCommand &&
       record.queueDraftCommandsRunning >= MAX_QUEUE_DRAFTS

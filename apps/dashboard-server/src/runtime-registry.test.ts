@@ -507,6 +507,21 @@ describe('runtime registry', () => {
     await eventually(() =>
       frames.some((line) => line.includes('"id":"draft-now"')),
     );
+    await expect(
+      registry.sendCommand('runtime-1', {
+        id: 'draft-now',
+        type: 'queue.update',
+        clientId: 'draft-1',
+        mode: 'steer',
+        text: 'duplicate correlation id',
+      }),
+    ).rejects.toMatchObject({
+      message: 'Duplicate in-flight queue draft command ID.',
+      code: 'duplicate-command-id',
+    });
+    expect(
+      frames.filter((line) => line.includes('"id":"draft-now"')),
+    ).toHaveLength(1);
     bridge.write(
       serializeFrame({
         kind: 'ack',

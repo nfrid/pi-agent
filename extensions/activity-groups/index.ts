@@ -205,6 +205,14 @@ export default defineExtension('activity-groups', (pi) => {
     // Only the interactive TUI renders these components at all.
     if (!nativeHook && ctx.mode === 'tui') install();
   });
+  pi.on('session_shutdown', (_event, ctx) => {
+    if (context !== ctx) return;
+    uninstallActionHandler?.();
+    uninstallActionHandler = undefined;
+    uninstall?.();
+    uninstall = undefined;
+    context = undefined;
+  });
 
   /**
    * One command, because `/groups` and `/activity-groups` did two different
