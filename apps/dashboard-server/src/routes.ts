@@ -37,10 +37,20 @@ function bodyTooLarge(): BodyLimitError {
 }
 
 function parseJsonBody(
-  _request: FastifyRequest,
+  request: FastifyRequest,
   body: Buffer,
   done: (error: Error | null, value?: unknown) => void,
 ): void {
+  if (body.byteLength === 0) {
+    const path = request.raw.url?.split('?', 1)[0];
+    if (
+      /^\/api\/runtimes\/[^/]+\/stop$/.test(path ?? '') ||
+      /^\/api\/interactions\/[^/]+\/cancel$/.test(path ?? '')
+    ) {
+      done(null, {});
+      return;
+    }
+  }
   if (body.byteLength > MAX_JSON_BODY) {
     done(bodyTooLarge());
     return;
@@ -191,12 +201,12 @@ export const dashboardRoutes: FastifyPluginAsync<{
   app.removeContentTypeParser('application/json');
   app.addContentTypeParser(
     'application/json',
-    { parseAs: 'buffer' },
+    { parseAs: 'buffer', bodyLimit: MAX_JSON_BODY },
     parseJsonBody,
   );
   app.addContentTypeParser(
     'multipart/form-data',
-    { parseAs: 'buffer' },
+    { parseAs: 'buffer', bodyLimit: MAX_MULTIPART_BODY },
     (_request, body, done) => done(null, body),
   );
   installCorsAndAuth(app, context);
@@ -334,7 +344,12 @@ export const dashboardRoutes: FastifyPluginAsync<{
     Body: { force?: unknown };
   }>(
     '/api/runtimes/:runtimeId/stop',
-    { schema: { body: objectBody } },
+    {
+      preValidation: async (request) => {
+        if (request.body === undefined) request.body = {};
+      },
+      schema: { body: objectBody },
+    },
     async (request, reply) => {
       try {
         await context.stopRuntime(
@@ -370,7 +385,12 @@ export const dashboardRoutes: FastifyPluginAsync<{
   );
   app.post<{ Params: { interactionId: string } }>(
     '/api/interactions/:interactionId/cancel',
-    { schema: { body: objectBody } },
+    {
+      preValidation: async (request) => {
+        if (request.body === undefined) request.body = {};
+      },
+      schema: { body: objectBody },
+    },
     async (request, reply) => {
       try {
         return {
