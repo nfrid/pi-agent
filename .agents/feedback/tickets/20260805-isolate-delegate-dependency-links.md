@@ -74,5 +74,5 @@ Compare against two parent dependency corruptions and the current implicit setup
 
 - **Approved implementation:** Honor configured native Git hooks during delegate worktree creation and rehydration; remove harness-managed dependency symlinks, Node package discovery used for projection, and predefined `.env` copying; preserve lifecycle and source-snapshot semantics; document project-owned idempotent setup and its trust boundary without adding package-manager adapters, a Pi-specific hook format, or a global setup skill. Approved by the user on 2026-08-05.
 - **Implemented:** Native hook setup, isolated child-local state, bounded setup-failure cleanup, commit-hook suppression for synthetic commits, lifecycle metadata cleanup, regression tests, and delegation documentation are implemented in this change.
-- **Merged change:** —
+- **Merged change:** `d3b0fc9` (`Merge branch 'pi/implement-native-worktree-hooks'`)
 - **Resolution:** pending evaluation
