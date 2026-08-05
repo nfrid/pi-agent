@@ -78,8 +78,28 @@ export class LiveSurfaceHub implements LiveSurfacePublisher {
   }
 }
 
-/** The one bridge-local publisher shared by extension registrations. */
-export const liveExtensionSurfaceHub = new LiveSurfaceHub();
+/**
+ * The one process-local publisher shared by independently loaded extensions.
+ *
+ * Pi evaluates extension entry points in isolated module graphs, so a plain
+ * module singleton gives tasks, delegate, and remote-control different hubs.
+ * A global symbol is stable across those graphs and across extension reloads,
+ * matching the interaction broker's proven handoff pattern.
+ */
+const liveSurfaceHubKey = Symbol.for('pi.dashboard.live-extension-surfaces');
+const liveSurfaceGlobal = globalThis as typeof globalThis & {
+  [liveSurfaceHubKey]?: LiveSurfaceHub;
+};
+
+export function getLiveExtensionSurfaceHub(): LiveSurfaceHub {
+  const existing = liveSurfaceGlobal[liveSurfaceHubKey];
+  if (existing) return existing;
+  const hub = new LiveSurfaceHub();
+  liveSurfaceGlobal[liveSurfaceHubKey] = hub;
+  return hub;
+}
+
+export const liveExtensionSurfaceHub = getLiveExtensionSurfaceHub();
 /** Short alias for callers that already know the hub is live-only. */
 export const liveSurfaceHub = liveExtensionSurfaceHub;
 

@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
+  getLiveExtensionSurfaceHub,
   LiveSurfaceHub,
+  liveExtensionSurfaceHub,
   MAX_LIVE_EXTENSION_SURFACES_PER_EXTENSION,
 } from './live-surfaces';
 
 describe('live surface hub', () => {
+  it('uses a process-global singleton across isolated extension modules', () => {
+    expect(getLiveExtensionSurfaceHub()).toBe(liveExtensionSurfaceHub);
+    expect(
+      Reflect.get(
+        globalThis,
+        Symbol.for('pi.dashboard.live-extension-surfaces'),
+      ),
+    ).toBe(liveExtensionSurfaceHub);
+  });
+
   it('publishes bounded source slots and removes them on clear', () => {
     const hub = new LiveSurfaceHub();
     const updates: unknown[][] = [];
