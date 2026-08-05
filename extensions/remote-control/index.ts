@@ -641,6 +641,10 @@ export class BridgeClient {
   sendEvent(event: BridgeEvent): boolean {
     const socket = this.socket;
     if (!socket || socket.destroyed || !socket.writable) return false;
+    // The daemon requires runtime.hello to be the first frame. The connect
+    // callback builds that authoritative snapshot from the latest context, so
+    // events attempted before the handshake are safely covered by hello.
+    if (socket.connecting) return false;
     const wireEvent: BridgeEvent =
       event.type === 'interaction.requested'
         ? { ...event, interaction: interactionSnapshot(event.interaction) }
