@@ -24,7 +24,7 @@ describe('DashboardEventStream lifecycle', () => {
     }
   });
 
-  it('yields between ready data chunks so the browser can paint live updates', async () => {
+  it('yields between bounded record batches without falling behind token streams', async () => {
     const encoder = new TextEncoder();
     const frame = (cursor: number) =>
       `data: ${JSON.stringify({
@@ -35,7 +35,11 @@ describe('DashboardEventStream lifecycle', () => {
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         // One transport read can contain many proxy-buffered SSE frames.
-        controller.enqueue(encoder.encode(`${frame(1)}${frame(2)}`));
+        controller.enqueue(
+          encoder.encode(
+            Array.from({ length: 33 }, (_, index) => frame(index + 1)).join(''),
+          ),
+        );
         controller.close();
       },
     });
@@ -51,18 +55,17 @@ describe('DashboardEventStream lifecycle', () => {
       undefined,
       () => {
         yieldCount += 1;
-        if (yieldCount > 1) return Promise.resolve();
         return new Promise<void>((resolve) => {
           releaseFirstYield = resolve;
         });
       },
     );
 
-    await expect.poll(() => records).toEqual([1]);
+    await expect.poll(() => records).toHaveLength(32);
     expect(yieldCount).toBe(1);
     releaseFirstYield?.();
-    await expect(consuming).resolves.toBe(2);
-    expect(records).toEqual([1, 2]);
+    await expect(consuming).resolves.toBe(33);
+    expect(records).toHaveLength(33);
   });
 
   it('marks an idle response connected before the first data record', async () => {

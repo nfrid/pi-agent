@@ -197,6 +197,11 @@ function DelegateSurface({ surface }: { surface: LiveExtensionSurface }) {
             row.finishedAt,
           );
           const isExpanded = expanded.has(id);
+          const jobId = text(row.jobId);
+          const activityType = text(activity?.type);
+          const activityStatus = text(activity?.status);
+          const latestText = short(text(activity?.latestText), 600);
+          const runs = list(row.runs).slice(-6);
           return (
             <div
               className={`delegate-row ${stateClass(state)}`}
@@ -225,19 +230,85 @@ function DelegateSurface({ surface }: { surface: LiveExtensionSurface }) {
               </AriaButton>
               {isExpanded && (
                 <div className="delegate-row-detail">
-                  <span>
-                    {route || context || row.allowWrites === true
-                      ? [route, context, row.allowWrites === true ? 'rw' : 'ro']
-                          .filter(Boolean)
-                          .join(' · ')
-                      : 'Details will appear as the delegate reports progress.'}
-                  </span>
-                  {text(row.task) && <p>{short(text(row.task), 360)}</p>}
-                  {Array.isArray(row.scope) && row.scope.length > 0 && (
-                    <small>
-                      scope: {row.scope.slice(0, 5).map(String).join(', ')}
-                    </small>
+                  <dl>
+                    {route && (
+                      <div>
+                        <dt>Route</dt>
+                        <dd>{route}</dd>
+                      </div>
+                    )}
+                    {context && (
+                      <div>
+                        <dt>Context</dt>
+                        <dd>{context}</dd>
+                      </div>
+                    )}
+                    <div>
+                      <dt>Access</dt>
+                      <dd>
+                        {row.allowWrites === true ? 'read/write' : 'read-only'}
+                      </dd>
+                    </div>
+                    {jobId && (
+                      <div>
+                        <dt>Job</dt>
+                        <dd>{jobId}</dd>
+                      </div>
+                    )}
+                    {(activityType || activityStatus) && (
+                      <div>
+                        <dt>Activity</dt>
+                        <dd>
+                          {[activityType, activityStatus]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                  {latestText && <p>{latestText}</p>}
+                  {runs.length > 0 && (
+                    <ol
+                      className="delegate-run-history"
+                      aria-label="Run history"
+                    >
+                      {runs.map((run, runIndex) => {
+                        const runState = stateLabel(run.state);
+                        const runKey = [
+                          id,
+                          runState,
+                          String(run.startedAt),
+                          String(run.finishedAt),
+                        ].join('-');
+                        return (
+                          <li className="delegate-run-item" key={runKey}>
+                            <span
+                              className={`surface-state ${stateClass(runState)}`}
+                              aria-hidden="true"
+                            >
+                              {stateGlyph(runState)}
+                            </span>
+                            <span>Run {runIndex + 1}</span>
+                            <small>
+                              {runState}
+                              {elapsed(run.startedAt, run.finishedAt)
+                                ? ` · ${elapsed(run.startedAt, run.finishedAt)}`
+                                : ''}
+                            </small>
+                          </li>
+                        );
+                      })}
+                    </ol>
                   )}
+                  {!route &&
+                    !context &&
+                    !jobId &&
+                    !activityType &&
+                    !activityStatus &&
+                    !latestText &&
+                    runs.length === 0 && (
+                      <span>Waiting for the delegate to report details.</span>
+                    )}
                 </div>
               )}
             </div>

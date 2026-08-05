@@ -38,6 +38,61 @@ const sessionResponse = (
   }) as SessionApiResponse;
 
 describe('DashboardLiveStore', () => {
+  it('applies patch-only runtime state to the live snapshot', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      runtimes: [
+        {
+          runtimeId: 'runtime-1',
+          liveState: 'working',
+          pendingInteractions: [],
+          extensionSurfaces: [],
+          session: { id: 'session-1', entries: [] },
+        },
+      ],
+    } as unknown as BrowserSnapshot);
+
+    store.acceptStreamRecord({
+      cursor: 2,
+      emittedAt: 2,
+      runtimeId: 'runtime-1',
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'waiting',
+        snapshot: {
+          pendingInteractions: [
+            {
+              id: 'question-1',
+              type: 'ask_user',
+              question: 'Continue?',
+              choices: [],
+              allowCustom: false,
+              createdAt: 2,
+            },
+          ],
+          extensionSurfaces: [
+            {
+              id: 'delegate.status',
+              rendererId: 'delegate.status',
+              viewModel: { statuses: [] },
+            },
+          ],
+        },
+      },
+    } as unknown as StreamRecord);
+
+    expect(store.getSnapshot().snapshot?.runtimes[0]).toMatchObject({
+      liveState: 'waiting',
+      pendingInteractions: [{ id: 'question-1' }],
+      extensionSurfaces: [{ id: 'delegate.status' }],
+    });
+    expect(store.getSnapshot().runtimesById['runtime-1']).toMatchObject({
+      pendingInteractions: [{ id: 'question-1' }],
+      extensionSurfaces: [{ id: 'delegate.status' }],
+    });
+  });
+
   it('keeps bounded cursor/event history and rejects replay gaps', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 4));

@@ -197,11 +197,11 @@ export function SessionView({
           Runtime failure: {runtimeError}
         </div>
       )}
-      <ExtensionSurfaceStack runtime={runtime} />
       <Transcript
         entries={selectLegacyTranscriptEntries(projection)}
         runtime={runtime}
       />
+      <ExtensionSurfaceStack runtime={runtime} />
       <ExtensionSurfaceStack runtime={runtime} placement="composer" />
       {runtime && runtime.pendingInteractions.length > 0 && (
         <aside

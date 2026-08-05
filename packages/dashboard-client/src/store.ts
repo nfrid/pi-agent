@@ -1,5 +1,7 @@
 import {
+  createRuntimeReducerState,
   hydrateTranscript,
+  reduceRuntimeEvent,
   reduceTranscriptEvent,
   type TranscriptProjection,
 } from '@pi-dashboard/domain';
@@ -323,7 +325,39 @@ export class DashboardLiveStore {
       }
     }
     let sessionsById = this.state.sessionsById;
+    let runtimesById = this.state.runtimesById;
     let nextSnapshot = this.state.snapshot;
+    if (!envelope.snapshot && envelope.runtimeId) {
+      const currentRuntime = runtimesById[envelope.runtimeId];
+      if (currentRuntime) {
+        const nextRuntime = reduceRuntimeEvent(
+          createRuntimeReducerState(currentRuntime, {
+            runtimeEpoch: envelope.runtimeEpoch,
+            runtimeSeq:
+              envelope.runtimeSeq === undefined
+                ? undefined
+                : envelope.runtimeSeq - 1,
+            cursor: priorCursor,
+          }),
+          envelope,
+        ).snapshot;
+        if (nextRuntime !== currentRuntime) {
+          runtimesById = {
+            ...runtimesById,
+            [envelope.runtimeId]: nextRuntime,
+          };
+          if (nextSnapshot)
+            nextSnapshot = {
+              ...nextSnapshot,
+              runtimes: nextSnapshot.runtimes.map((runtime) =>
+                runtime.runtimeId === envelope.runtimeId
+                  ? nextRuntime
+                  : runtime,
+              ),
+            };
+        }
+      }
+    }
     let sessionChangeById = this.state.sessionChangeById;
     let sessionReplacementByRuntimeId =
       this.state.sessionReplacementByRuntimeId;
@@ -381,6 +415,7 @@ export class DashboardLiveStore {
     this.publish({
       ...this.state,
       snapshot: nextSnapshot,
+      runtimesById,
       sessionsById,
       sessionChangeById,
       sessionReplacementByRuntimeId,

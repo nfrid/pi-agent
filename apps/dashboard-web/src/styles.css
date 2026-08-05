@@ -1535,12 +1535,57 @@ h2 {
   font-size: 10px;
   overflow-wrap: anywhere;
 }
-.delegate-row-detail p {
+.delegate-row-detail dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 5px 12px;
+  margin: 0;
+}
+.delegate-row-detail dl > div {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+.delegate-row-detail dt {
+  color: var(--dim);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.delegate-row-detail dd {
+  min-width: 0;
   margin: 0;
   color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.delegate-row-detail p {
+  max-height: 9em;
+  margin: 0;
+  overflow: auto;
+  color: var(--fg);
+  white-space: pre-wrap;
 }
 .delegate-row-detail small {
   color: var(--dim);
+}
+.delegate-run-history {
+  display: grid;
+  gap: 3px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.delegate-run-history .delegate-run-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+}
+.surface-state.surface-running,
+.surface-state.surface-done {
+  color: var(--green);
+}
+.surface-state.surface-failed {
+  color: var(--red);
 }
 .task-progress {
   display: grid;

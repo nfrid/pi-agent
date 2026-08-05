@@ -6,6 +6,7 @@ import type { DashboardHttpClient } from './http-client.js';
 import { DashboardHttpError, ReplayGapError } from './http-client.js';
 
 export const SSE_FRAME_LIMIT = 2 * 1024 * 1024;
+export const SSE_RECORDS_PER_YIELD = 32;
 export const RECONNECT_MIN_MS = 500;
 export const RECONNECT_MAX_MS = 30_000;
 
@@ -76,9 +77,10 @@ export async function consumeSseResponse(
     await onRecord(record);
     records += 1;
     // Proxies and browsers may coalesce many SSE frames into one read chunk.
-    // Yield per record so a continuous token stream cannot monopolize the
-    // microtask queue and prevent React from painting live updates.
-    await yieldControl();
+    // Yield in bounded batches: yielding for every token record caps the
+    // consumer near the display refresh rate and can permanently starve later
+    // state/question records during a fast model stream.
+    if (records % SSE_RECORDS_PER_YIELD === 0) await yieldControl();
   };
   const processLine = async (rawLine: string) => {
     const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
