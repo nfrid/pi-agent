@@ -1615,6 +1615,10 @@ h2 {
 }
 .queue-list {
   display: grid;
+  max-height: min(34vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .queue-item {
   display: grid;
@@ -1859,6 +1863,9 @@ h2 {
   }
   .task-row-meta small {
     max-width: 100px;
+  }
+  .queue-list {
+    max-height: min(28vh, 220px);
   }
   .queue-item {
     grid-template-columns: auto minmax(0, 1fr);

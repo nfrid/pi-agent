@@ -559,6 +559,7 @@ export class BridgeClient {
     scope?: string;
   }> = [];
   private commandRunning = false;
+  private queueDraftCommandsRunning = 0;
   private readonly actionCommandIds = new NonIdempotentActionIdGuard();
   private readonly effectiveCapabilities: RuntimeCapabilitySnapshot;
   private outboundQueue: Array<{
@@ -742,6 +743,31 @@ export class BridgeClient {
   }
 
   private enqueue(command: BridgeCommand, socket: net.Socket): void {
+    const item = {
+      command,
+      socket,
+      scope: this.options.commandScope?.(),
+    };
+    // Draft edits are dashboard-owned state and must remain responsive while a
+    // long-running semantic command is awaiting completion. Their store is
+    // synchronous and independently bounded, so they can safely bypass the
+    // serialized Pi command lane while retaining the captured session scope.
+    if (isQueueDraftCommand(command)) {
+      if (this.queueDraftCommandsRunning >= MAX_QUEUE_DRAFTS) {
+        this.sendAck(
+          socket,
+          command.id,
+          false,
+          'Queue draft command capacity is full.',
+        );
+        return;
+      }
+      this.queueDraftCommandsRunning += 1;
+      void this.executeCommand(item).finally(() => {
+        this.queueDraftCommandsRunning -= 1;
+      });
+      return;
+    }
     if (
       this.commandQueue.length + (this.commandRunning ? 1 : 0) >=
       BRIDGE_COMMAND_QUEUE_LIMIT
@@ -777,12 +803,48 @@ export class BridgeClient {
         }
       }
     }
-    this.commandQueue.push({
-      command,
-      socket,
-      scope: this.options.commandScope?.(),
-    });
+    this.commandQueue.push(item);
     this.pumpCommands();
+  }
+
+  private async executeCommand(item: {
+    command: BridgeCommand;
+    socket: net.Socket;
+    scope?: string;
+  }): Promise<void> {
+    // Commands received on a replaced generation are abandoned rather than
+    // replayed. Replaying could duplicate a prompt after a daemon retry.
+    if (item.socket !== this.socket || item.socket.destroyed) return;
+    if (
+      isQueueDraftCommand(item.command) &&
+      item.scope !== this.options.commandScope?.()
+    ) {
+      this.sendAck(
+        item.socket,
+        item.command.id,
+        false,
+        'Queue draft command belongs to a replaced session.',
+        'stale-session',
+      );
+      return;
+    }
+    try {
+      const result = await this.options.handleCommand(
+        item.command,
+        this.effectiveCapabilities,
+      );
+      this.sendAck(item.socket, item.command.id, true, result);
+    } catch (error) {
+      this.sendAck(
+        item.socket,
+        item.command.id,
+        false,
+        error instanceof Error ? error.message : String(error),
+        error && typeof error === 'object' && 'code' in error
+          ? String((error as { code: unknown }).code)
+          : undefined,
+      );
+    }
   }
 
   private pumpCommands(): void {
@@ -790,46 +852,10 @@ export class BridgeClient {
     const item = this.commandQueue.shift();
     if (!item) return;
     this.commandRunning = true;
-    void (async () => {
-      try {
-        // Commands received on a replaced generation are abandoned rather than
-        // replayed. Replaying could duplicate a prompt after a daemon retry.
-        if (item.socket !== this.socket || item.socket.destroyed) return;
-        if (
-          isQueueDraftCommand(item.command) &&
-          item.scope !== this.options.commandScope?.()
-        ) {
-          this.sendAck(
-            item.socket,
-            item.command.id,
-            false,
-            'Queue draft command belongs to a replaced session.',
-            'stale-session',
-          );
-          return;
-        }
-        try {
-          const result = await this.options.handleCommand(
-            item.command,
-            this.effectiveCapabilities,
-          );
-          this.sendAck(item.socket, item.command.id, true, result);
-        } catch (error) {
-          this.sendAck(
-            item.socket,
-            item.command.id,
-            false,
-            error instanceof Error ? error.message : String(error),
-            error && typeof error === 'object' && 'code' in error
-              ? String((error as { code: unknown }).code)
-              : undefined,
-          );
-        }
-      } finally {
-        this.commandRunning = false;
-        this.pumpCommands();
-      }
-    })();
+    void this.executeCommand(item).finally(() => {
+      this.commandRunning = false;
+      this.pumpCommands();
+    });
   }
 
   private sendAck(

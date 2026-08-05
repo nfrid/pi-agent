@@ -121,6 +121,12 @@ function mergeRuntimeEvent(
         ...(update?.pendingInteractions === undefined
           ? {}
           : { pendingInteractions: update.pendingInteractions }),
+        ...(update?.queueDrafts === undefined
+          ? {}
+          : { queueDrafts: update.queueDrafts }),
+        ...(update?.extensionSurfaces === undefined
+          ? {}
+          : { extensionSurfaces: update.extensionSurfaces }),
         ...(update?.lastError === undefined
           ? {}
           : { lastError: update.lastError }),

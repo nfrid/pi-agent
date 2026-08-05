@@ -479,6 +479,44 @@ describe('dashboard domain reducers', () => {
     expect(late.state.order).toEqual(['new-message']);
   });
 
+  it('merges live queue and extension surface patches without dropping either', () => {
+    const state = createRuntimeReducerState({
+      ...snapshot(),
+      queueDrafts: [{ clientId: 'old', mode: 'steer', text: 'replace me' }],
+      extensionSurfaces: [],
+    });
+    const result = applyRuntimeEvent(state, {
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'working',
+        snapshot: {
+          queueDrafts: [
+            { clientId: 'draft-1', mode: 'followUp', text: 'run later' },
+          ],
+          extensionSurfaces: [
+            {
+              id: 'tasks.current',
+              rendererId: 'tasks.current',
+              viewModel: { version: 1, tasks: [] },
+            },
+          ],
+        },
+      },
+      runtimeSeq: 1,
+    });
+    expect(result.accepted).toBe(true);
+    expect(result.state.snapshot.queueDrafts).toEqual([
+      { clientId: 'draft-1', mode: 'followUp', text: 'run later' },
+    ]);
+    expect(result.state.snapshot.extensionSurfaces).toEqual([
+      {
+        id: 'tasks.current',
+        rendererId: 'tasks.current',
+        viewModel: { version: 1, tasks: [] },
+      },
+    ]);
+  });
+
   it('fails closed on duplicate capability patches and accepts later valid updates', () => {
     const initialCapabilities = {
       version: 1 as const,

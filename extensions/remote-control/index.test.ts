@@ -12,6 +12,7 @@ import {
 } from '@pi-dashboard/extension-contributions';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  type BridgeCommand,
   parseFrame,
   type RuntimeSnapshot,
   serializeFrame,
@@ -665,20 +666,19 @@ describe('remote-control bridge', () => {
     expect(write).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects a queued draft command captured before session replacement', async () => {
-    let scope = 'session-before';
+  it('processes queue drafts without waiting behind a long semantic command', async () => {
     let release: (() => void) | undefined;
-    const handleCommand = vi.fn(
-      () =>
-        new Promise<unknown>((resolve) => {
-          release = () => resolve({ accepted: true });
-        }),
-    );
+    const handleCommand = vi.fn((command: BridgeCommand) => {
+      if (command.id !== 'blocking') return Promise.resolve({ accepted: true });
+      return new Promise<unknown>((resolve) => {
+        release = () => resolve({ accepted: true });
+      });
+    });
     const client = new BridgeClient({
       socketPath: '/unused',
       runtimeId: 'runtime-test',
       snapshot: () => snapshot,
-      commandScope: () => scope,
+      commandScope: () => 'session-current',
       handleCommand,
     });
     const socket = new net.Socket();
@@ -686,29 +686,35 @@ describe('remote-control bridge', () => {
     Reflect.set(client, 'socket', socket);
     const enqueue = (
       Reflect.get(client, 'enqueue') as (
-        command: unknown,
+        command: BridgeCommand,
         socket: net.Socket,
       ) => void
     ).bind(client);
     enqueue({ id: 'blocking', type: 'abort' }, socket);
     enqueue(
       {
-        id: 'stale-draft',
+        id: 'draft-now',
         type: 'queue.add',
         clientId: 'draft-1',
         mode: 'steer',
-        text: 'stale',
+        text: 'deliver at the next boundary',
       },
       socket,
     );
-    scope = 'session-after';
+    await waitFor(() =>
+      write.mock.calls.some((call) => String(call[0]).includes('draft-now')),
+    );
+    expect(handleCommand.mock.calls.map(([command]) => command.id)).toEqual([
+      'blocking',
+      'draft-now',
+    ]);
+    expect(
+      write.mock.calls.some((call) => String(call[0]).includes('blocking')),
+    ).toBe(false);
     release?.();
     await waitFor(() =>
-      write.mock.calls.some((call) =>
-        String(call[0]).includes('stale-session'),
-      ),
+      write.mock.calls.some((call) => String(call[0]).includes('blocking')),
     );
-    expect(handleCommand).toHaveBeenCalledOnce();
     client.stop();
   });
 
