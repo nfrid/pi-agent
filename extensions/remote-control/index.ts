@@ -142,6 +142,18 @@ function directString(record: EventRecord, key: string): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
+/**
+ * Tool execution events already carry the canonical live result. Forwarding
+ * Pi's later toolResult message as a second transcript entity would duplicate
+ * the tool and introduce a false activity-group boundary.
+ */
+export function shouldForwardLiveMessage(value: unknown): boolean {
+  const event = eventRecord(value);
+  const message = eventRecord(directValue(event, 'message'));
+  const role = directString(message, 'role') ?? directString(event, 'role');
+  return role !== 'toolResult';
+}
+
 function directIdentifier(
   record: EventRecord,
   key: string,
@@ -1833,27 +1845,30 @@ export default defineExtension('remote-control', (pi) => {
     if (!flushQueueDrafts(runtime, pi, ctx, 'followUp'))
       emitState(runtime, ctx);
   });
-  onCurrentTransportEvent('message_start', (event, ctx) =>
+  onCurrentTransportEvent('message_start', (event, ctx) => {
+    if (!shouldForwardLiveMessage(event)) return;
     runtime.client.sendEvent({
       type: 'message.started',
       sessionId: ctx.sessionManager.getSessionId(),
       message: runtime.eventNormalizer.normalizeMessage('started', event),
-    }),
-  );
-  onCurrentTransportEvent('message_update', (event, ctx) =>
+    });
+  });
+  onCurrentTransportEvent('message_update', (event, ctx) => {
+    if (!shouldForwardLiveMessage(event)) return;
     runtime.client.sendEvent({
       type: 'message.updated',
       sessionId: ctx.sessionManager.getSessionId(),
       message: runtime.eventNormalizer.normalizeMessage('updated', event),
-    }),
-  );
-  onCurrentTransportEvent('message_end', (event, ctx) =>
+    });
+  });
+  onCurrentTransportEvent('message_end', (event, ctx) => {
+    if (!shouldForwardLiveMessage(event)) return;
     runtime.client.sendEvent({
       type: 'message.finished',
       sessionId: ctx.sessionManager.getSessionId(),
       message: runtime.eventNormalizer.normalizeMessage('finished', event),
-    }),
-  );
+    });
+  });
   onCurrentTransportEvent('tool_execution_start', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'tool.started',

@@ -552,6 +552,11 @@ export function applyTranscriptEvent(
   if (event.type.startsWith('message.')) {
     const payload = normalizedMessage(event, state, phase);
     if (!payload) return { state, accepted: true };
+    // Pi emits toolResult message lifecycle events after the canonical
+    // tool_execution lifecycle. Persisted hydration folds those records into
+    // their tools, so retaining them as live messages would create opaque rows
+    // and false activity-group boundaries until reload.
+    if (payload.role === 'toolResult') return { state, accepted: true };
     return { state: mergeMessage(state, payload, phase), accepted: true };
   }
   if (event.type.startsWith('tool.')) {

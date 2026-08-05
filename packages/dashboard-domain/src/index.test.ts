@@ -186,6 +186,46 @@ describe('dashboard domain reducers', () => {
     expect(state.items['provider-response']).toBeUndefined();
   });
 
+  it('omits duplicate live toolResult messages like persisted hydration', () => {
+    let state = hydrateTranscript([], 's');
+    state = reduceTranscriptEvent(state, {
+      type: 'tool.finished',
+      sessionId: 's',
+      tool: {
+        toolCallId: 'call-1',
+        name: 'read',
+        result: 'done',
+        status: 'completed',
+      },
+    });
+    state = reduceTranscriptEvent(state, {
+      type: 'message.started',
+      sessionId: 's',
+      message: {
+        messageId: 'tool-result-message',
+        role: 'toolResult',
+        content: [{ type: 'text', text: 'done' }],
+      },
+    });
+    state = reduceTranscriptEvent(state, {
+      type: 'message.finished',
+      sessionId: 's',
+      message: {
+        messageId: 'tool-result-message',
+        role: 'toolResult',
+        content: [{ type: 'text', text: 'done' }],
+      },
+    });
+
+    expect(state.order).toEqual(['call-1']);
+    expect(state.items['tool-result-message']).toBeUndefined();
+    expect(state.items['call-1']).toMatchObject({
+      kind: 'tool',
+      result: 'done',
+      status: 'finished',
+    });
+  });
+
   it('derives tool associations from normalized live message content', () => {
     const state = reduceTranscriptEvent(
       hydrateTranscript([], 's'),

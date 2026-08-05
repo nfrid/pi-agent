@@ -29,6 +29,7 @@ import {
   flushQueueDrafts,
   LiveEventNormalizer,
   QueueDraftStore,
+  shouldForwardLiveMessage,
 } from './index';
 
 const snapshot: RuntimeSnapshot = {
@@ -215,6 +216,26 @@ describe('dashboard input dispatch', () => {
 });
 
 describe('remote event normalization', () => {
+  it('suppresses duplicate tool-result messages from the live transcript', () => {
+    expect(
+      shouldForwardLiveMessage({
+        message: {
+          role: 'toolResult',
+          toolCallId: 'call-1',
+          content: [{ type: 'text', text: 'done' }],
+        },
+      }),
+    ).toBe(false);
+    expect(
+      shouldForwardLiveMessage({
+        message: { role: 'assistant', content: 'Continuing.' },
+      }),
+    ).toBe(true);
+    expect(shouldForwardLiveMessage({ role: 'user', content: 'Prompt' })).toBe(
+      true,
+    );
+  });
+
   it('correlates id-less message phases and keeps the live ID when responseId arrives late', () => {
     const normalizer = new LiveEventNormalizer('runtime-epoch');
     const started = normalizer.normalizeMessage('started', {

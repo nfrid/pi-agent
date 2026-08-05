@@ -135,6 +135,79 @@ describe('activity row views and virtual transcript construction', () => {
     ]);
   });
 
+  it('keeps live multi-turn tools in the same group as reloaded history', () => {
+    let projection = hydrateTranscript([], 's1');
+    const reduce = (event: Parameters<typeof reduceTranscriptEvent>[1]) => {
+      projection = reduceTranscriptEvent(projection, event);
+    };
+    reduce({
+      type: 'message.finished',
+      sessionId: 's1',
+      message: {
+        messageId: 'assistant-1',
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Inspecting the workspace.' },
+          { type: 'toolCall', id: 'call-1', name: 'read' },
+          { type: 'toolCall', id: 'call-2', name: 'bash' },
+        ],
+      },
+    });
+    for (const [toolCallId, name] of [
+      ['call-1', 'read'],
+      ['call-2', 'bash'],
+    ] as const)
+      reduce({
+        type: 'tool.finished',
+        sessionId: 's1',
+        tool: { toolCallId, name, result: 'done', status: 'completed' },
+      });
+    for (const toolCallId of ['call-1', 'call-2'])
+      reduce({
+        type: 'message.finished',
+        sessionId: 's1',
+        message: {
+          messageId: `result-${toolCallId}`,
+          role: 'toolResult',
+          content: [{ type: 'text', text: 'done' }],
+        },
+      });
+    reduce({
+      type: 'message.finished',
+      sessionId: 's1',
+      message: {
+        messageId: 'assistant-2',
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '**Checking the timestamp**' },
+          { type: 'toolCall', id: 'call-3', name: 'bash' },
+        ],
+      },
+    });
+    reduce({
+      type: 'tool.finished',
+      sessionId: 's1',
+      tool: {
+        toolCallId: 'call-3',
+        name: 'bash',
+        result: 'done',
+        status: 'completed',
+      },
+    });
+
+    const items = toTranscriptEntries(projection);
+    expect(items.some(({ entry }) => entry.kind === 'other')).toBe(false);
+    expect(
+      projectActivityGroups(items.map(({ entry }) => entry)),
+    ).toMatchObject([
+      {
+        title: 'Inspecting the workspace',
+        toolCount: 3,
+        status: 'complete',
+      },
+    ]);
+  });
+
   it('uses semantic toolCallIds after compatibility filtering for preamble titles', () => {
     const items = toTranscriptEntries([
       {
