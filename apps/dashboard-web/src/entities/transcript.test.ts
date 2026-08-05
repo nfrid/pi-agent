@@ -15,6 +15,7 @@ import {
   activityStepParts,
   buildTranscriptGroupCoverage,
   buildVirtualTranscriptRows,
+  displayActivityPath,
   preserveVirtualScrollOffset,
   restoreVirtualBottom,
   type TranscriptGroup,
@@ -28,21 +29,132 @@ describe('activity row views and virtual transcript construction', () => {
         args: { command: 'pnpm run check' },
       }),
     ).toEqual({
-      label: 'bash pnpm run check',
-      tool: 'bash',
+      label: 'Running pnpm run check',
+      action: 'Running',
       argument: 'pnpm run check',
+      role: 'command',
+      state: 'complete',
     });
     expect(
       activityStepParts({ name: 'read', args: { path: 'src/App.tsx' } }),
     ).toEqual({
-      label: 'read src/App.tsx',
-      tool: 'read',
+      label: 'Reading src/App.tsx',
+      action: 'Reading',
       argument: 'src/App.tsx',
+      role: 'read',
+      state: 'complete',
     });
     expect(activityStepParts({ name: 'todo', args: {} })).toEqual({
-      label: 'todo',
-      tool: 'todo',
+      label: 'Updating tasks',
+      action: 'Updating tasks',
+      role: 'other',
+      state: 'complete',
     });
+  });
+
+  it('keeps workspace paths relative and outside paths absolute', () => {
+    expect(
+      displayActivityPath(
+        '/Users/example/Code/project/src/index.ts',
+        '/Users/example/Code/project',
+      ),
+    ).toBe('src/index.ts');
+    expect(
+      displayActivityPath(
+        '/Users/example/shared/config.json',
+        '/Users/example/Code/project',
+      ),
+    ).toBe('/Users/example/shared/config.json');
+    expect(displayActivityPath('./src/App.tsx', '/workspace')).toBe(
+      'src/App.tsx',
+    );
+    expect(
+      displayActivityPath(
+        'C:\\Users\\example\\Code\\project\\src\\index.ts',
+        'c:\\users\\example\\code\\project',
+      ),
+    ).toBe('src/index.ts');
+  });
+
+  it('preserves supported alternate action argument names', () => {
+    expect(
+      activityStepParts({ name: 'bash', args: { script: 'pnpm test' } }),
+    ).toMatchObject({ action: 'Running', argument: 'pnpm test' });
+    expect(
+      activityStepParts({
+        name: 'todo',
+        args: { operation: 'done', taskId: 'T4' },
+      }),
+    ).toMatchObject({ action: 'Tasks done', argument: 'T4' });
+    expect(
+      activityStepParts({ name: 'web_search', args: { q: 'Pi dashboard' } }),
+    ).toMatchObject({ action: 'Searching the web', argument: 'Pi dashboard' });
+    expect(
+      activityStepParts({
+        name: 'fetch_content',
+        args: { href: 'https://example.com/docs' },
+      }),
+    ).toMatchObject({
+      action: 'Fetching',
+      argument: 'https://example.com/docs',
+    });
+  });
+
+  it('summarizes delegation, artifacts, fetches, and file ranges usefully', () => {
+    expect(
+      activityStepParts({
+        name: 'delegate_branches',
+        args: {
+          action: 'drop',
+          id: '136d280a-7c10-4427-9d2d-1f7e62acd03b',
+        },
+      }),
+    ).toMatchObject({
+      action: 'Dropping delegate branch',
+      argument: '136d280a…cd03b',
+      role: 'command',
+    });
+    expect(
+      activityStepParts({
+        name: 'artifact_retrieve',
+        args: { mode: 'lines', offset: 0, limit: 120 },
+      }),
+    ).toMatchObject({
+      action: 'Reading artifact',
+      argument: 'lines 1–120',
+      role: 'read',
+    });
+    expect(
+      activityStepParts({
+        name: 'fetch_content',
+        args: { urls: ['https://one.test', 'https://two.test'] },
+      }),
+    ).toMatchObject({ action: 'Fetching', argument: '2 pages', role: 'read' });
+    expect(
+      activityStepParts({
+        name: 'get_search_content',
+        args: { responseId: 'result', urlIndex: 1 },
+      }),
+    ).toMatchObject({
+      action: 'Reading search result',
+      argument: 'result 2',
+      role: 'read',
+    });
+    expect(
+      activityStepParts(
+        {
+          name: 'read',
+          args: { path: '/workspace/src/App.tsx', offset: 20, limit: 8 },
+        },
+        '/workspace',
+      ),
+    ).toMatchObject({ action: 'Reading', argument: 'src/App.tsx:20–27' });
+    expect(
+      activityStepParts({
+        name: 'edit',
+        args: { path: 'src/App.tsx', edits: [{}, {}, {}] },
+      }),
+    ).toMatchObject({ action: 'Editing', argument: 'src/App.tsx · 3 changes' });
   });
 
   it('derives a bounded latest-step summary from the canonical group model', () => {
@@ -83,6 +195,20 @@ describe('activity row views and virtual transcript construction', () => {
     expect(view.className).toBe('activity-failed');
     expect(view.icon).toBe('!');
     expect(view.label).toContain('failed');
+  });
+
+  it('drops empty assistant messages after filtering empty thinking', () => {
+    expect(
+      toTranscriptEntries([
+        {
+          type: 'message',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'thinking', thinking: '   ' }],
+          },
+        },
+      ]),
+    ).toEqual([]);
   });
 
   it('projects uncompleted assistant tool calls as pending activity', () => {
@@ -180,6 +306,7 @@ describe('activity row views and virtual transcript construction', () => {
         role: 'assistant',
         content: [
           { type: 'thinking', thinking: '**Checking the timestamp**' },
+          { type: 'thinking', thinking: '   ' },
           { type: 'toolCall', id: 'call-3', name: 'bash' },
         ],
       },
@@ -197,6 +324,9 @@ describe('activity row views and virtual transcript construction', () => {
 
     const items = toTranscriptEntries(projection);
     expect(items.some(({ entry }) => entry.kind === 'other')).toBe(false);
+    expect(items.find(({ key }) => key === 'assistant-2')?.thinking).toEqual([
+      '**Checking the timestamp**',
+    ]);
     expect(
       projectActivityGroups(items.map(({ entry }) => entry)),
     ).toMatchObject([

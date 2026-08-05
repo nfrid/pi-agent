@@ -39,8 +39,18 @@ import {
 import {
   interactionKeyAction,
   selectedInteractionPreview,
+  visualViewportKeyboardInset,
 } from './features/session';
 import { actionNeedsInput, paletteItems } from './routes/dashboard';
+
+describe('session control geometry', () => {
+  it('derives only the keyboard-covered portion of the layout viewport', () => {
+    expect(visualViewportKeyboardInset(844, 520, 0)).toBe(324);
+    expect(visualViewportKeyboardInset(844, 700, 120)).toBe(24);
+    expect(visualViewportKeyboardInset(700, 700, 0)).toBe(0);
+    expect(visualViewportKeyboardInset(600, 700, 0)).toBe(0);
+  });
+});
 
 describe('queued message commands', () => {
   it('normalizes queue fixtures and creates explicit bridge commands', () => {

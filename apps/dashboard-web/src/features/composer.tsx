@@ -1,3 +1,4 @@
+import type { MDXEditorMethods } from '@mdxeditor/editor';
 import {
   commandMutationOptions,
   dashboardHttpClient,
@@ -5,7 +6,14 @@ import {
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import {
+  type FormEvent,
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 
 function useDashboardNavigate(): (path: string) => void {
@@ -14,6 +22,7 @@ function useDashboardNavigate(): (path: string) => void {
 }
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+const MarkdownComposerEditor = lazy(() => import('./markdown-composer-editor'));
 export const MAX_IMAGE_ATTACHMENTS = 4;
 export const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 export const MAX_IMAGE_TOTAL_SIZE = 12 * 1024 * 1024;
@@ -361,7 +370,10 @@ export function Composer({
 }) {
   const go = useDashboardNavigate();
   const [text, setText] = useState('');
-  const [mode, setMode] = useState<'prompt' | 'steer' | 'followUp'>('prompt');
+  const editorRef = useRef<MDXEditorMethods>(null);
+  const [mode, setMode] = useState<'prompt' | 'steer' | 'followUp'>(() =>
+    runtime?.liveState === 'working' ? 'steer' : 'prompt',
+  );
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const attachmentsRef = useRef<ImageAttachment[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -397,7 +409,7 @@ export function Composer({
     [],
   );
   useEffect(() => {
-    setMode(runtime?.liveState === 'working' ? 'followUp' : 'prompt');
+    setMode(runtime?.liveState === 'working' ? 'steer' : 'prompt');
   }, [runtime?.liveState]);
   useEffect(() => {
     if (attachmentsEnabled) return;
@@ -508,6 +520,7 @@ export function Composer({
         URL.revokeObjectURL(attachment.previewUrl);
       setAttachments([]);
       setText('');
+      editorRef.current?.setMarkdown('');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -577,41 +590,49 @@ export function Composer({
             ))}
           </fieldset>
         )}
-        <div className="composer-primary">
-          <textarea
-            aria-label="Message Pi"
-            value={text}
-            disabled={disabled || busy}
-            onChange={(event) => setText(event.target.value)}
-            onPaste={(event) => {
-              if (!attachmentsEnabled || disabled || busy) return;
-              const files = Array.from(event.clipboardData.files);
-              const itemFiles = Array.from(event.clipboardData.items).flatMap(
-                (item) => {
-                  const file = item.kind === 'file' ? item.getAsFile() : null;
-                  return file ? [file] : [];
-                },
-              );
-              const images = files.length ? files : itemFiles;
-              if (!images.length) return;
+        <div
+          className="composer-primary composer-rich-surface"
+          onPasteCapture={(event) => {
+            if (!attachmentsEnabled || disabled || busy) return;
+            const files = Array.from(event.clipboardData.files);
+            const itemFiles = Array.from(event.clipboardData.items).flatMap(
+              (item) => {
+                const file = item.kind === 'file' ? item.getAsFile() : null;
+                return file ? [file] : [];
+              },
+            );
+            const images = files.length ? files : itemFiles;
+            if (!images.length) return;
+            event.preventDefault();
+            selectImages(images);
+          }}
+          onKeyDownCapture={(event) => {
+            if (
+              event.key === 'Enter' &&
+              (event.metaKey || event.ctrlKey) &&
+              !event.shiftKey
+            ) {
               event.preventDefault();
-              selectImages(images);
-            }}
-            onKeyDown={(event) => {
-              if (
-                event.key === 'Enter' &&
-                (event.metaKey || event.ctrlKey) &&
-                !event.shiftKey
-              ) {
-                event.preventDefault();
-                event.currentTarget.form?.requestSubmit();
-              }
-            }}
-            placeholder={
-              disabled ? 'Agent is waiting for input' : 'Message Pi…'
+              event.currentTarget.closest('form')?.requestSubmit();
             }
-            rows={2}
-          />
+          }}
+        >
+          <Suspense
+            fallback={
+              <div className="composer-editor-loading" role="status">
+                Loading editor…
+              </div>
+            }
+          >
+            <MarkdownComposerEditor
+              ref={editorRef}
+              onChange={setText}
+              placeholder={
+                disabled ? 'Agent is waiting for input' : 'Message Pi…'
+              }
+              readOnly={disabled || busy}
+            />
+          </Suspense>
           <div className="composer-actions">
             <AriaButton
               type="button"

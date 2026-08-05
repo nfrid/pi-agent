@@ -730,6 +730,21 @@ test('dense mobile session keeps conversation and activity readable', async ({
     name: /Checking the mobile transcript.*1 tool/,
   });
   await expect(activity).toBeVisible();
+  const mobileActivityHeader = await activity.evaluate((button) => {
+    const icon = button
+      .querySelector('.activity-icon')
+      ?.getBoundingClientRect();
+    const title = button.querySelector('strong')?.getBoundingClientRect();
+    return icon && title
+      ? {
+          topDifference: Math.abs(icon.top - title.top),
+          gap: title.left - icon.right,
+        }
+      : undefined;
+  });
+  expect(mobileActivityHeader?.topDifference).toBeLessThan(5);
+  expect(mobileActivityHeader?.gap).toBeGreaterThanOrEqual(0);
+  await expect(activity.locator('small')).toBeHidden();
   await expect(
     activity.locator('xpath=..').getByText('1 tool call', { exact: true }),
   ).toHaveCount(1);
@@ -747,31 +762,86 @@ test('dense mobile session keeps conversation and activity readable', async ({
     buffer: Buffer.from([137, 80, 78, 71]),
   });
   await expect(page.getByAltText('picker.png')).toBeVisible();
-  const floatingAttachmentLayout = await page.evaluate(() => {
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const layer = document.querySelector('.session-control-layer');
+        const sessionPage = document.querySelector('.session-page');
+        if (!layer || !sessionPage) return 0;
+        return (
+          Number.parseFloat(getComputedStyle(sessionPage).paddingBottom) -
+          layer.getBoundingClientRect().height
+        );
+      }),
+    )
+    .toBeGreaterThanOrEqual(13);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollHeight -
+          (window.scrollY + window.innerHeight),
+      ),
+    )
+    .toBeLessThanOrEqual(1);
+  const attachmentLayout = await page.evaluate(() => {
     const composer = document.querySelector('.composer');
     const previews = document.querySelector('.composer-previews');
-    if (!composer || !previews) throw new Error('Composer previews not found');
+    const controlLayer = document.querySelector('.session-control-layer');
+    const sessionPage = document.querySelector('.session-page');
+    if (!composer || !previews || !controlLayer || !sessionPage)
+      throw new Error('Composer layout not found');
     const composerRect = composer.getBoundingClientRect();
     const previewsRect = previews.getBoundingClientRect();
     return {
       composerHeight: composerRect.height,
+      previewsTop: previewsRect.top,
       previewsBottom: previewsRect.bottom,
       composerTop: composerRect.top,
+      composerBottom: composerRect.bottom,
+      controlHeight: controlLayer.getBoundingClientRect().height,
+      controlTop: controlLayer.getBoundingClientRect().top,
+      transcriptTailBottom: Array.from(
+        document.querySelectorAll<HTMLElement>(
+          '.transcript [data-transcript-row]',
+        ),
+      )
+        .at(-1)
+        ?.getBoundingClientRect().bottom,
+      pagePaddingBottom: Number.parseFloat(
+        getComputedStyle(sessionPage).paddingBottom,
+      ),
     };
   });
-  expect(floatingAttachmentLayout.composerHeight).toBe(
+  expect(attachmentLayout.composerHeight).toBeGreaterThan(
     composerHeightBeforeAttachment,
   );
-  expect(floatingAttachmentLayout.previewsBottom).toBeLessThanOrEqual(
-    floatingAttachmentLayout.composerTop,
+  expect(attachmentLayout.previewsTop).toBeGreaterThanOrEqual(
+    attachmentLayout.composerTop,
   );
+  expect(attachmentLayout.previewsBottom).toBeLessThanOrEqual(
+    attachmentLayout.composerBottom,
+  );
+  expect(attachmentLayout.pagePaddingBottom).toBeGreaterThanOrEqual(
+    attachmentLayout.controlHeight + 13,
+  );
+  expect(attachmentLayout.pagePaddingBottom).toBeLessThanOrEqual(
+    attachmentLayout.controlHeight + 16,
+  );
+  expect(attachmentLayout.transcriptTailBottom).toBeLessThanOrEqual(
+    attachmentLayout.controlTop,
+  );
+  expect(
+    attachmentLayout.controlTop -
+      (attachmentLayout.transcriptTailBottom ?? attachmentLayout.controlTop),
+  ).toBeLessThanOrEqual(8);
   await page.getByRole('button', { name: 'Remove picker.png' }).click();
   await page.evaluate(() => {
     const transfer = new DataTransfer();
     transfer.items.add(
       new File([new Uint8Array([1])], 'paste.webp', { type: 'image/webp' }),
     );
-    document.querySelector('textarea')?.dispatchEvent(
+    document.querySelector('[contenteditable="true"]')?.dispatchEvent(
       new ClipboardEvent('paste', {
         bubbles: true,
         cancelable: true,
@@ -824,6 +894,45 @@ test('dense mobile session keeps conversation and activity readable', async ({
   expect(composerViewportLayout?.bottom).toBeLessThanOrEqual(
     (composerViewportLayout?.viewport ?? 0) + 1,
   );
+  await page.evaluate(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) throw new Error('Visual Viewport unavailable');
+    Object.defineProperty(viewport, 'height', {
+      configurable: true,
+      value: window.innerHeight - 240,
+    });
+    viewport.dispatchEvent(new Event('resize'));
+  });
+  await expect
+    .poll(() =>
+      page
+        .locator('.session-page')
+        .evaluate((element) =>
+          Number.parseFloat(
+            getComputedStyle(element).getPropertyValue('--keyboard-inset'),
+          ),
+        ),
+    )
+    .toBe(240);
+  const keyboardComposerBottom = await page
+    .locator('.composer')
+    .evaluate((element) => element.getBoundingClientRect().bottom);
+  const keyboardVisibleBottom = (composerViewportLayout?.viewport ?? 0) - 240;
+  expect(keyboardComposerBottom).toBeLessThanOrEqual(keyboardVisibleBottom);
+  expect(keyboardVisibleBottom - keyboardComposerBottom).toBeLessThanOrEqual(1);
+  const keyboardScrollY = await page.evaluate(() => {
+    window.scrollBy(0, -48);
+    window.visualViewport?.dispatchEvent(new Event('scroll'));
+    return window.scrollY;
+  });
+  await page.waitForTimeout(50);
+  expect(await page.evaluate(() => window.scrollY)).toBe(keyboardScrollY);
+  await page.evaluate(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    Reflect.deleteProperty(viewport, 'height');
+    viewport.dispatchEvent(new Event('resize'));
+  });
   await page.getByRole('button', { name: 'Details', exact: true }).click();
   const mobileInspector = page.getByRole('dialog');
   await expect(mobileInspector).toBeVisible();
@@ -850,10 +959,8 @@ test('dense mobile session keeps conversation and activity readable', async ({
   );
   await expect(activity).toBeVisible();
   await activity.click();
-  await expect(page.locator('.tool-chip').getByText('read')).toBeVisible();
-  await expect(
-    page.getByText('read src/App.tsx', { exact: true }),
-  ).toBeVisible();
+  await expect(page.locator('.tool-chip').getByText('Reading')).toBeVisible();
+  await expect(page.getByText('src/App.tsx', { exact: true })).toBeVisible();
   await activity.click();
   const emitAssistant = async (content: unknown[]) =>
     page.evaluate((assistantContent) => {
@@ -880,7 +987,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await emitAssistant([{ type: 'text', text: 'Preparing live tool.' }]);
   await expect(
     page.getByText('preparing tool call', { exact: true }),
-  ).toBeVisible();
+  ).toBeHidden();
   await expect(page.locator('.message-assistant')).not.toContainText(
     'Preparing live tool.',
   );
@@ -1144,12 +1251,13 @@ function phase6Entries() {
       message: {
         role: 'assistant',
         content: [
+          { type: 'thinking', thinking: '**Considering the workspace**' },
           { type: 'text', text: '**Inspecting history**' },
           {
             type: 'toolCall',
             id: 'history-read',
             name: 'read',
-            arguments: { path: 'src/App.tsx' },
+            arguments: { path: '/tmp/project/src/App.tsx' },
           },
         ],
       },
@@ -1490,18 +1598,16 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await page.context().grantPermissions(['notifications']);
   const mocks = await installPhase6Mocks(page);
   await page.goto('/sessions/s1');
-  await expect(
-    page.getByRole('heading', { name: 'Existing session request' }),
-  ).toBeVisible();
+  await expect(page.locator('.session-heading h1')).toHaveText(
+    'Existing session request',
+  );
   await mocks.emit({ type: 'snapshot', snapshot: phase6Snapshot() });
   await expect(page.getByLabel('Model')).toHaveCount(0);
   await expect(page.locator('.session-heading')).toContainText('Project');
   await expect(page.locator('.session-heading')).not.toContainText(
     'test/vision',
   );
-  await expect(
-    page.getByRole('button', { name: 'Details', exact: true }),
-  ).toBeDisabled();
+  await expect(page.locator('.session-details-trigger')).toBeDisabled();
   await page.keyboard.press('Control+K');
   await expect(
     page.getByRole('dialog', { name: 'Command palette' }),
@@ -1522,6 +1628,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     name: 'Pending questions',
   });
   await expect(pendingDialog).toHaveCount(1);
+  await expect(page.locator('.session-heading')).toBeHidden();
   await expect(pendingDialog).toHaveAttribute('aria-modal', 'true');
   const firstInteraction = page.getByRole('group', {
     name: 'Use the first answer?',
@@ -1578,6 +1685,13 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     snapshot: phase6Snapshot({ pendingInteractions: [] }),
   });
   await expect(pendingDialog).toHaveCount(0);
+  await expect(page.locator('.session-heading')).toBeVisible();
+
+  const dockMarker = page.locator(
+    '.transcript-minimap-marker[data-preview="Earlier history 1"]',
+  );
+  await expect(dockMarker).toHaveCount(1);
+  await expect(dockMarker).toHaveAttribute('aria-label', 'Earlier history 1');
 
   await page.evaluate(() =>
     window.scrollTo(0, document.documentElement.scrollHeight),
@@ -1586,10 +1700,26 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     name: /Inspecting history.*1 tool/,
   });
   await expect(activity).toBeVisible();
+  await expect(
+    activity.locator('xpath=..').getByText('Reading', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    activity.locator('xpath=..').getByText('src/App.tsx', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    activity
+      .locator('xpath=..')
+      .getByText('/tmp/project/src/App.tsx', { exact: true }),
+  ).toHaveCount(0);
   await activity.click();
-  await expect(page.locator('.tool-chip').getByText('read')).toBeVisible();
+  await expect(
+    page
+      .locator('.transcript-thinking-blob')
+      .getByText('Considering the workspace'),
+  ).toBeVisible();
+  await expect(page.locator('.tool-chip').getByText('Reading')).toBeVisible();
   await activity.click();
-  await expect(page.locator('.tool-chip').getByText('read')).toHaveCount(0);
+  await expect(page.locator('.tool-chip').getByText('Reading')).toHaveCount(0);
   await expect
     .poll(
       () =>
@@ -1635,17 +1765,49 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     name: 'Steer current work instead of following up later',
   });
   await expect(deliveryMode).toHaveCount(1);
-  await expect(deliveryMode).toHaveText('Later');
-  await expect(deliveryMode).toHaveAttribute('aria-pressed', 'false');
-  await deliveryMode.click();
   await expect(deliveryMode).toHaveText('Steer');
   await expect(deliveryMode).toHaveAttribute('aria-pressed', 'true');
+  await deliveryMode.click();
+  await expect(deliveryMode).toHaveText('Later');
+  await expect(deliveryMode).toHaveAttribute('aria-pressed', 'false');
   await mocks.emit({
     type: 'snapshot',
     snapshot: phase6Snapshot({ liveState: 'idle', pendingInteractions: [] }),
   });
-  await expect(page.getByLabel('Message Pi')).toBeEnabled();
-  await page.getByLabel('Message Pi').fill('stream this');
+  const composerInput = page.getByLabel('Message Pi');
+  await expect(composerInput).toBeEnabled();
+  const initialComposerHeight = await composerInput.evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+  await composerInput.fill(
+    Array.from({ length: 12 }, (_, index) => `line ${index}`).join('\n'),
+  );
+  const grownComposerHeight = await composerInput.evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+  expect(grownComposerHeight).toBeGreaterThan(initialComposerHeight);
+  expect(grownComposerHeight).toBeLessThanOrEqual(180);
+  await composerInput.fill(
+    Array.from({ length: 60 }, (_, index) => `line ${index}`).join('\n'),
+  );
+  const cappedComposer = await composerInput.evaluate((element) => ({
+    height: element.getBoundingClientRect().height,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(cappedComposer.height).toBeLessThanOrEqual(180);
+  expect(cappedComposer.scrollHeight).toBeGreaterThan(cappedComposer.height);
+  await composerInput.fill('');
+  await composerInput.pressSequentially('# ');
+  await composerInput.pressSequentially('Live markdown heading');
+  await expect(
+    page
+      .locator('.composer-rich-editor')
+      .getByRole('heading', { name: 'Live markdown heading' }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Preview', exact: true }),
+  ).toHaveCount(0);
+  await composerInput.fill('stream this');
   await page.getByRole('button', { name: 'Send' }).click();
   await expect
     .poll(() => mocks.commands.some((command) => command.type === 'prompt'))
@@ -1738,9 +1900,9 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   );
   await expect.poll(mocks.streamCount).toBeGreaterThan(1);
   await page.reload();
-  await expect(
-    page.getByRole('heading', { name: 'Existing session request' }),
-  ).toBeVisible();
+  await expect(page.locator('.session-heading h1')).toHaveText(
+    'Existing session request',
+  );
 });
 
 test('phase six mocked management flow covers refresh, fallback notification, launch, resume, and runtime lifecycle', async ({

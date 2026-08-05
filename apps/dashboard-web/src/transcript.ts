@@ -21,6 +21,7 @@ export interface TranscriptModelItem {
   entry: ActivityTranscriptEntry;
   raw: unknown;
   text?: string;
+  thinking?: readonly string[];
   role?: 'user' | 'assistant';
   imageCount?: number;
   /** Canonical domain tool semantics used by the inspector presentation. */
@@ -87,6 +88,20 @@ function preambleTitle(text: string): string {
       ?.trim()
       .replace(/[.…:]+$/, '') || text
   );
+}
+
+function messageThinking(content: unknown): string[] {
+  if (!Array.isArray(content)) return [];
+  return content
+    .flatMap((part) =>
+      part &&
+      typeof part === 'object' &&
+      (part as Record<string, unknown>).type === 'thinking' &&
+      typeof (part as Record<string, unknown>).thinking === 'string'
+        ? [(part as { thinking: string }).thinking.trim()]
+        : [],
+    )
+    .filter((thinking) => thinking.length > 0);
 }
 
 function messageImageCount(content: unknown): number {
@@ -163,6 +178,7 @@ export function toTranscriptEntries(
       continue;
     }
     const text = messageText(item.content);
+    const thinking = messageThinking(item.content);
     const imageCount = messageImageCount(item.content);
     const raw = messageRaw(item);
     const role =
@@ -196,6 +212,14 @@ export function toTranscriptEntries(
           : undefined;
     const visibleText = text && !isNarration(text) ? text : undefined;
     const hasAssociatedTools = item.associatedToolCallIds.length > 0;
+    if (
+      !visibleText &&
+      thinking.length === 0 &&
+      imageCount === 0 &&
+      !hasAssociatedTools &&
+      !item.preparing
+    )
+      continue;
     const preamble =
       visibleText && hasAssociatedTools
         ? preambleTitle(visibleText)
@@ -219,6 +243,7 @@ export function toTranscriptEntries(
       },
       raw,
       text: visibleText,
+      ...(thinking.length > 0 ? { thinking } : {}),
       role,
       ...(imageCount > 0 ? { imageCount } : {}),
       ...(item.preparing ? { preparing: true } : {}),

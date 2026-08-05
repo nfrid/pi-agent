@@ -45,6 +45,14 @@ type ComposerProps = {
   sessionId: string;
 };
 
+export function visualViewportKeyboardInset(
+  layoutHeight: number,
+  viewportHeight: number,
+  viewportOffsetTop: number,
+): number {
+  return Math.max(0, layoutHeight - viewportHeight - viewportOffsetTop);
+}
+
 export function SessionView({
   id,
   snapshot,
@@ -86,6 +94,8 @@ export function SessionView({
   const stickToBottomRef = useRef(true);
   const outlineTriggerRef = useRef<HTMLButtonElement>(null);
   const outlineWasOpenRef = useRef(false);
+  const sessionPageRef = useRef<HTMLElement>(null);
+  const controlLayerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!id) return;
     setError(undefined);
@@ -163,6 +173,56 @@ export function SessionView({
     });
     return () => window.cancelAnimationFrame(frame);
   }, [data, projection, id]);
+  const sessionMounted = Boolean(data && projection);
+  useLayoutEffect(() => {
+    if (!sessionMounted) return;
+    const page = sessionPageRef.current;
+    const controlLayer = controlLayerRef.current;
+    if (!page || !controlLayer) return;
+    let frame: number | undefined;
+    const update = (preserveLatest: boolean) => {
+      const viewport = window.visualViewport;
+      const keyboardInset = viewport
+        ? visualViewportKeyboardInset(
+            window.innerHeight,
+            viewport.height,
+            viewport.offsetTop,
+          )
+        : 0;
+      page.style.setProperty(
+        '--session-control-height',
+        `${Math.ceil(controlLayer.getBoundingClientRect().height)}px`,
+      );
+      page.style.setProperty(
+        '--keyboard-inset',
+        `${Math.ceil(keyboardInset)}px`,
+      );
+      page.toggleAttribute('data-keyboard-open', keyboardInset > 0);
+      if (!preserveLatest || !stickToBottomRef.current) return;
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        window.scrollTo(0, document.documentElement.scrollHeight);
+      });
+    };
+    const onResize = () => update(true);
+    const onViewportScroll = () => update(false);
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(onResize);
+    observer?.observe(controlLayer);
+    window.addEventListener('resize', onResize);
+    window.visualViewport?.addEventListener('resize', onResize);
+    window.visualViewport?.addEventListener('scroll', onViewportScroll);
+    update(true);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', onResize);
+      window.visualViewport?.removeEventListener('resize', onResize);
+      window.visualViewport?.removeEventListener('scroll', onViewportScroll);
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+    };
+  }, [sessionMounted]);
   useEffect(() => {
     if (replacementSessionId && replacementSessionId !== id) {
       void navigate({
@@ -215,14 +275,20 @@ export function SessionView({
         onOpenChange={setAgentNavOpen}
       />
       <section
-        className={`session-page ${inspectorOpen ? 'inspector-open' : ''} ${hasPendingInteraction ? 'has-pending-interaction' : ''}`}
+        ref={sessionPageRef}
+        className={`session-page ${inspectorOpen ? 'inspector-open' : ''} ${hasPendingInteraction ? 'has-pending-interaction' : ''} ${inspectorOpen || outlineOpen || agentNavOpen || hasPendingInteraction ? 'modal-open' : ''}`}
       >
         <header className="session-context session-heading">
           <div className="session-context-main">
             <div className="session-identity">
               <div className="session-breadcrumb">
-                <span>{workspaceName}</span>
-                <span aria-hidden="true"> / </span>
+                <span className="session-workspace">{workspaceName}</span>
+                <span
+                  className="session-breadcrumb-separator"
+                  aria-hidden="true"
+                >
+                  /
+                </span>
                 <h1 title={sessionDisplayTitle(data.metadata, data.entries)}>
                   {sessionDisplayTitle(data.metadata, data.entries)}
                 </h1>
@@ -252,7 +318,9 @@ export function SessionView({
               aria-haspopup="dialog"
               onClick={() => setOutlineOpen(true)}
             >
-              ≡
+              <span className="session-icon-glyph" aria-hidden="true">
+                ≡
+              </span>
             </button>
             <button
               type="button"
@@ -271,7 +339,13 @@ export function SessionView({
                 if (!hasPendingInteraction) setInspectorOpen(true);
               }}
             >
-              ⋯<span className="sr-only">Details</span>
+              <span
+                className="session-icon-glyph session-more-glyph"
+                aria-hidden="true"
+              >
+                •••
+              </span>
+              <span className="sr-only">Details</span>
             </button>
           </div>
         </header>
@@ -290,7 +364,7 @@ export function SessionView({
           outlineOpen={outlineOpen}
           onOutlineOpenChange={setOutlineOpen}
         />
-        <div className="session-control-layer">
+        <div ref={controlLayerRef} className="session-control-layer">
           <ExtensionSurfaceStack runtime={runtime} placement="composer" />
           <Composer runtime={runtime} sessionId={id} />
         </div>

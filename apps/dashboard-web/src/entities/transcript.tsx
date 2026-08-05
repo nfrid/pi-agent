@@ -1,7 +1,10 @@
 import {
   projectActivityGroups,
+  stringArg,
   toolActionSummary,
   toolBaseName,
+  toolPath,
+  toolRole,
 } from '@pi-dashboard/activity-model';
 import { dashboardHttpClient } from '@pi-dashboard/client';
 import type {
@@ -249,6 +252,7 @@ export function TranscriptOutline({
             key={landmark.key}
             aria-label={landmark.label}
             title={landmark.label}
+            data-preview={landmark.label}
             onClick={() => onJump(landmark)}
           >
             <i aria-hidden="true" />
@@ -377,11 +381,14 @@ export function Transcript({
                 <span className="activity-icon">{presentation.icon}</span>
                 <strong>{title}</strong>
                 <span className="sr-only">
-                  {group.toolCount} tool{group.toolCount === 1 ? '' : 's'}
+                  {group.toolCount} tool{group.toolCount === 1 ? '' : 's'} ·{' '}
+                  {presentation.label}
                 </span>
-                <small>{presentation.label}</small>
+                <small aria-hidden="true">{presentation.label}</small>
               </AriaButton>
-              {!expanded && <CollapsedActivitySummary group={group} />}
+              {!expanded && (
+                <CollapsedActivitySummary group={group} cwd={runtime?.cwd} />
+              )}
               {visibleLead && (
                 <div className="activity-lead">
                   <span className="message-role">assistant</span>
@@ -391,7 +398,11 @@ export function Transcript({
               {expanded && (
                 <div className="activity-detail" id={detailId}>
                   {groupItems.map((child) => (
-                    <TranscriptEntry key={child.key} item={child} />
+                    <TranscriptEntry
+                      key={child.key}
+                      item={child}
+                      cwd={runtime?.cwd}
+                    />
                   ))}
                 </div>
               )}
@@ -401,7 +412,7 @@ export function Transcript({
         if (groupCoverage[index]) return null;
         return (
           <div data-transcript-key={item.key} key={item.key}>
-            <TranscriptEntry item={item} />
+            <TranscriptEntry item={item} cwd={runtime?.cwd} />
           </div>
         );
       })}
@@ -422,19 +433,244 @@ type ActivityGroupSummaryInput = Pick<TranscriptGroup, 'tools' | 'toolCount'>;
 
 type ActivityStepTool = TranscriptGroup['tools'][number];
 
-export function activityStepParts(tool: ActivityStepTool): {
+export type ActivityStepParts = {
   label: string;
-  tool: string;
+  action: string;
   argument?: string;
-} {
+  role: 'edit' | 'read' | 'search' | 'command' | 'other';
+  state: 'complete' | 'pending' | 'failed';
+};
+
+export function displayActivityPath(value: string, cwd = ''): string {
+  const normalized = value.replace(/\\/gu, '/').replace(/\/+/gu, '/');
+  const normalizedCwd = cwd
+    .replace(/\\/gu, '/')
+    .replace(/\/+/gu, '/')
+    .replace(/\/$/u, '');
+  const windowsAbsolute = /^[A-Za-z]:\//u.test(normalized);
+  if (!normalized.startsWith('/') && !windowsAbsolute)
+    return normalized.replace(/^\.\//u, '');
+  if (!normalizedCwd) return normalized;
+  const caseInsensitive =
+    windowsAbsolute && /^[A-Za-z]:\//u.test(normalizedCwd);
+  const comparablePath = caseInsensitive
+    ? normalized.toLowerCase()
+    : normalized;
+  const comparableCwd = caseInsensitive
+    ? normalizedCwd.toLowerCase()
+    : normalizedCwd;
+  if (comparablePath === comparableCwd) return '.';
+  const prefix = `${comparableCwd}/`;
+  return comparablePath.startsWith(prefix)
+    ? normalized.slice(normalizedCwd.length + 1)
+    : normalized;
+}
+
+function shortActivityArgument(value: string, maximum = 96): string {
+  const compact = value.replace(/\s+/gu, ' ').trim();
+  return compact.length > maximum
+    ? `${compact.slice(0, maximum - 1).trimEnd()}…`
+    : compact;
+}
+
+function activityArgs(args: unknown): Record<string, unknown> | undefined {
+  return args && typeof args === 'object' && !Array.isArray(args)
+    ? (args as Record<string, unknown>)
+    : undefined;
+}
+
+function numberArg(args: unknown, key: string): number | undefined {
+  const value = activityArgs(args)?.[key];
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function arrayArg(args: unknown, key: string): readonly unknown[] {
+  const value = activityArgs(args)?.[key];
+  return Array.isArray(value) ? value : [];
+}
+
+function countLabel(count: number, singular: string): string {
+  return `${count} ${count === 1 ? singular : `${singular}s`}`;
+}
+
+function shortActivityId(value: string): string {
+  return value.length > 22 ? `${value.slice(0, 8)}…${value.slice(-5)}` : value;
+}
+
+function readPathArgument(path: string, args: unknown, cwd: string): string {
+  const displayed = displayActivityPath(path, cwd);
+  const offset = numberArg(args, 'offset');
+  const limit = numberArg(args, 'limit');
+  if (offset === undefined) return displayed;
+  const end = limit === undefined ? undefined : offset + Math.max(0, limit - 1);
+  return `${displayed}:${offset}${end === undefined ? '' : `–${end}`}`;
+}
+
+function activityToolState(tool: ActivityStepTool): ActivityStepParts['state'] {
+  if (isFailedActivityTool(tool)) return 'failed';
+  const status = 'status' in tool ? tool.status : undefined;
+  return status === 'pending' || status === 'running' || status === 'preparing'
+    ? 'pending'
+    : 'complete';
+}
+
+export function activityStepParts(
+  tool: ActivityStepTool,
+  cwd = '',
+): ActivityStepParts {
   const name = toolBaseName(tool.name);
-  const label = toolActionSummary(tool);
-  const remainder = label.slice(name.length).trim();
-  const argument = remainder.replace(/^:\s*/u, '');
+  let role = toolRole(tool.name);
+  const state = activityToolState(tool);
+  const path = toolPath(tool.args);
+  let action: string;
+  let argument: string | undefined;
+  if (name === 'bash' || name === 'shell' || name === 'exec') {
+    action = 'Running';
+    const command =
+      stringArg(tool.args, 'command') ??
+      stringArg(tool.args, 'cmd') ??
+      stringArg(tool.args, 'script');
+    if (command)
+      argument = shortActivityArgument(
+        command.split(/&&|\|\||[;|]/u)[0] ?? command,
+      );
+  } else if (name === 'inspect_shell') {
+    action = 'Checking';
+    const command = stringArg(tool.args, 'command');
+    if (command) argument = shortActivityArgument(command);
+  } else if (name === 'delegate' || name === 'delegates') {
+    role = 'command';
+    const operation =
+      stringArg(tool.args, 'action') ?? stringArg(tool.args, 'operation');
+    action = operation ? `Delegate ${operation}` : 'Delegating';
+    argument = stringArg(tool.args, 'name') ?? stringArg(tool.args, 'task');
+    const tasks = arrayArg(tool.args, 'tasks');
+    if (!argument && tasks.length) argument = countLabel(tasks.length, 'task');
+  } else if (name === 'delegate_jobs') {
+    role = 'command';
+    const operation = stringArg(tool.args, 'action') ?? 'list';
+    action =
+      operation === 'peek'
+        ? 'Checking delegate job'
+        : operation === 'cancel'
+          ? 'Cancelling delegate jobs'
+          : 'Listing delegate jobs';
+    argument =
+      stringArg(tool.args, 'id') ??
+      (arrayArg(tool.args, 'ids').length
+        ? countLabel(arrayArg(tool.args, 'ids').length, 'job')
+        : undefined);
+  } else if (name === 'delegate_branches') {
+    role = 'command';
+    const operation = stringArg(tool.args, 'action') ?? 'list';
+    action =
+      operation === 'review'
+        ? 'Reviewing delegate branch'
+        : operation === 'merge'
+          ? 'Merging delegate branch'
+          : operation === 'drop'
+            ? 'Dropping delegate branch'
+            : 'Listing delegate branches';
+    const id = stringArg(tool.args, 'id');
+    if (id) argument = shortActivityId(id);
+  } else if (name === 'background') {
+    role = 'command';
+    const operation = stringArg(tool.args, 'action') ?? 'list';
+    action =
+      operation === 'start'
+        ? 'Starting background command'
+        : operation === 'peek'
+          ? 'Checking background command'
+          : operation === 'stop'
+            ? 'Stopping background command'
+            : 'Listing background commands';
+    argument = stringArg(tool.args, 'title') ?? stringArg(tool.args, 'id');
+  } else if (name === 'todo' || name === 'tasks') {
+    const operation =
+      stringArg(tool.args, 'action') ?? stringArg(tool.args, 'operation');
+    action = operation ? `Tasks ${operation}` : 'Updating tasks';
+    argument = stringArg(tool.args, 'id') ?? stringArg(tool.args, 'taskId');
+    if (!argument && tool.args && typeof tool.args === 'object') {
+      const operations = (tool.args as { operations?: unknown }).operations;
+      if (Array.isArray(operations))
+        argument = `${operations.length} operation${operations.length === 1 ? '' : 's'}`;
+    }
+  } else if (name === 'grep' || name === 'find' || name === 'glob') {
+    action = 'Searching for';
+    const pattern =
+      stringArg(tool.args, 'pattern') ?? stringArg(tool.args, 'query');
+    const location = path ? displayActivityPath(path, cwd) : undefined;
+    argument = [pattern, location ? `in ${location}` : undefined]
+      .filter(Boolean)
+      .join(' ');
+  } else if (name === 'web_search' || name === 'search_web') {
+    role = 'search';
+    action = 'Searching the web';
+    const queries = arrayArg(tool.args, 'queries');
+    argument =
+      stringArg(tool.args, 'query') ??
+      stringArg(tool.args, 'q') ??
+      (queries.length ? countLabel(queries.length, 'query') : undefined);
+  } else if (name === 'fetch_content') {
+    role = 'read';
+    action = 'Fetching';
+    const urls = arrayArg(tool.args, 'urls');
+    argument =
+      stringArg(tool.args, 'url') ??
+      stringArg(tool.args, 'href') ??
+      (urls.length ? countLabel(urls.length, 'page') : undefined);
+  } else if (name === 'get_search_content') {
+    role = 'read';
+    action = 'Reading search result';
+    argument =
+      stringArg(tool.args, 'heading') ??
+      stringArg(tool.args, 'literal') ??
+      stringArg(tool.args, 'query');
+    if (!argument) {
+      const page =
+        numberArg(tool.args, 'urlIndex') ?? numberArg(tool.args, 'queryIndex');
+      if (page !== undefined) argument = `result ${page + 1}`;
+    }
+  } else if (name === 'artifact_retrieve') {
+    role = 'read';
+    action = 'Reading artifact';
+    const mode = stringArg(tool.args, 'mode');
+    const offset = numberArg(tool.args, 'offset');
+    const limit = numberArg(tool.args, 'limit');
+    if (mode === 'lines' && offset !== undefined)
+      argument = `lines ${offset + 1}${limit === undefined ? '' : `–${offset + limit}`}`;
+    else argument = mode;
+  } else if (path) {
+    const changes = arrayArg(tool.args, 'edits');
+    action =
+      name === 'read'
+        ? 'Reading'
+        : name === 'ls'
+          ? 'Listing'
+          : name === 'write'
+            ? 'Writing'
+            : 'Editing';
+    argument =
+      name === 'read'
+        ? readPathArgument(path, tool.args, cwd)
+        : `${displayActivityPath(path, cwd)}${changes.length ? ` · ${countLabel(changes.length, 'change')}` : ''}`;
+  } else {
+    action = `Running ${name}`;
+    const fallback = toolActionSummary(tool);
+    const detail = fallback.slice(name.length).trim().replace(/^:\s*/u, '');
+    if (detail) argument = detail;
+  }
+  const boundedArgument = argument
+    ? shortActivityArgument(argument)
+    : undefined;
   return {
-    label,
-    tool: name,
-    ...(argument ? { argument } : {}),
+    label: boundedArgument ? `${action} ${boundedArgument}` : action,
+    action,
+    ...(boundedArgument ? { argument: boundedArgument } : {}),
+    role,
+    state,
   };
 }
 
@@ -480,11 +716,17 @@ export function activityGroupMetadata(
   return parts.join(' · ');
 }
 
-function CollapsedActivitySummary({ group }: { group: TranscriptGroup }) {
+function CollapsedActivitySummary({
+  group,
+  cwd,
+}: {
+  group: TranscriptGroup;
+  cwd?: string;
+}) {
   const summary = activityGroupSummary(group);
   const recentActions = group.tools
     .slice(-summary.recentTools.length)
-    .map(activityStepParts);
+    .map((tool) => activityStepParts(tool, cwd));
   const stepKeyCounts = new Map<string, number>();
   return (
     <div className="activity-summary">
@@ -500,11 +742,19 @@ function CollapsedActivitySummary({ group }: { group: TranscriptGroup }) {
             const occurrence = (stepKeyCounts.get(action.label) ?? 0) + 1;
             stepKeyCounts.set(action.label, occurrence);
             return (
-              <li key={`${action.label}-${occurrence}`} title={action.label}>
+              <li
+                className={`activity-step role-${action.role} step-${action.state}`}
+                key={`${action.label}-${occurrence}`}
+                title={action.label}
+              >
                 <span className="activity-step-dot" aria-hidden="true">
-                  ⏺
+                  {action.state === 'failed'
+                    ? '!'
+                    : action.state === 'pending'
+                      ? '…'
+                      : '●'}
                 </span>
-                <span className="activity-tool-name">{action.tool}</span>
+                <span className="activity-tool-name">{action.action}</span>
                 {action.argument && (
                   <span className="activity-tool-argument">
                     {action.argument}
@@ -652,13 +902,30 @@ function VirtualizedTranscript({
     () => buildVirtualTranscriptRows(items, groups),
     [groups, items],
   );
+  const virtualizerRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
   const virtualizer = useWindowVirtualizer({
     count: rows.length,
     estimateSize: (index) => (rows[index]?.kind === 'group' ? 132 : 96),
     overscan: 8,
+    scrollMargin,
     getItemKey: (index) => rows[index]?.key ?? `transcript-row-${index}`,
     measureElement: (element) => element.getBoundingClientRect().height,
   });
+  useLayoutEffect(() => {
+    void rows.length;
+    const measure = () => {
+      const element = virtualizerRef.current;
+      if (!element) return;
+      const next = element.getBoundingClientRect().top + window.scrollY;
+      setScrollMargin((current) =>
+        Math.abs(current - next) < 1 ? current : next,
+      );
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [rows.length]);
   const landmarks = useMemo(
     () => buildTranscriptLandmarks(items, groups),
     [groups, items],
@@ -782,11 +1049,14 @@ function VirtualizedTranscript({
           <span className="activity-icon">{presentation.icon}</span>
           <strong>{title}</strong>
           <span className="sr-only">
-            {group.toolCount} tool{group.toolCount === 1 ? '' : 's'}
+            {group.toolCount} tool{group.toolCount === 1 ? '' : 's'} ·{' '}
+            {presentation.label}
           </span>
-          <small>{presentation.label}</small>
+          <small aria-hidden="true">{presentation.label}</small>
         </AriaButton>
-        {!expanded && <CollapsedActivitySummary group={group} />}
+        {!expanded && (
+          <CollapsedActivitySummary group={group} cwd={runtime?.cwd} />
+        )}
         {visibleLead && (
           <div className="activity-lead">
             <span className="message-role">assistant</span>
@@ -796,7 +1066,11 @@ function VirtualizedTranscript({
         {expanded && (
           <div className="activity-detail" id={detailId}>
             {groupItems.map((child) => (
-              <TranscriptEntry key={child.key} item={child} />
+              <TranscriptEntry
+                key={child.key}
+                item={child}
+                cwd={runtime?.cwd}
+              />
             ))}
           </div>
         )}
@@ -814,6 +1088,7 @@ function VirtualizedTranscript({
         onJump={jumpToLandmark}
       />
       <div
+        ref={virtualizerRef}
         className="transcript-virtualizer"
         style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
       >
@@ -832,14 +1107,14 @@ function VirtualizedTranscript({
                 top: 0,
                 left: 0,
                 width: '100%',
-                transform: `translateY(${virtualRow.start}px)`,
+                transform: `translateY(${virtualRow.start - scrollMargin}px)`,
               }}
             >
               {row.kind === 'group' ? (
                 renderGroup(row.group)
               ) : (
                 <div data-transcript-key={items[row.index]?.key}>
-                  <TranscriptEntry item={items[row.index]} />
+                  <TranscriptEntry item={items[row.index]} cwd={runtime?.cwd} />
                 </div>
               )}
             </div>
@@ -928,10 +1203,32 @@ function ToolInspector({ tool }: { tool: Record<string, unknown> }) {
   );
 }
 
+function ThinkingBlobs({ thinking }: { thinking: readonly string[] }) {
+  const occurrences = new Map<string, number>();
+  return (
+    <aside className="transcript-thinking-blobs" aria-label="Thinking">
+      {thinking.map((content) => {
+        const occurrence = (occurrences.get(content) ?? 0) + 1;
+        occurrences.set(content, occurrence);
+        return (
+          <div
+            className="transcript-thinking-blob"
+            key={`${content}-${occurrence}`}
+          >
+            <Markdown>{content}</Markdown>
+          </div>
+        );
+      })}
+    </aside>
+  );
+}
+
 function TranscriptEntry({
   item,
+  cwd,
 }: {
   item: import('../transcript').TranscriptModelItem;
+  cwd?: string;
 }) {
   if (item.preparing)
     return (
@@ -943,28 +1240,41 @@ function TranscriptEntry({
         <small>preparing tool call</small>
       </div>
     );
-  if (item.role && (item.text || item.imageCount))
+  if (item.role && (item.text || item.imageCount || item.thinking?.length))
     return (
-      <article className={`message-bubble message-${item.role}`}>
-        <span className="message-role">{item.role}</span>
-        {item.imageCount ? (
-          <span className="message-attachment">
-            {item.imageCount} image{item.imageCount === 1 ? '' : 's'} attached
-          </span>
+      <div className="transcript-message-entry">
+        {item.role === 'assistant' && item.thinking?.length ? (
+          <ThinkingBlobs thinking={item.thinking} />
         ) : null}
-        {item.text ? <Markdown>{item.text}</Markdown> : null}
-      </article>
+        {item.text || item.imageCount ? (
+          <article className={`message-bubble message-${item.role}`}>
+            <span className="message-role">{item.role}</span>
+            {item.imageCount ? (
+              <span className="message-attachment">
+                {item.imageCount} image{item.imageCount === 1 ? '' : 's'}{' '}
+                attached
+              </span>
+            ) : null}
+            {item.text ? <Markdown>{item.text}</Markdown> : null}
+          </article>
+        ) : null}
+      </div>
     );
   if (item.tool) {
     const tool = item.tool;
     const record = toolInspectorRecord(tool);
+    const action = activityStepParts(
+      {
+        name: tool.name,
+        args: tool.arguments,
+      },
+      cwd,
+    );
     return (
-      <details className="transcript-entry tool-detail">
-        <summary>
-          <span className="tool-chip">{tool.name}</span>
-          <span>
-            {toolActionSummary({ name: tool.name, args: tool.arguments })}
-          </span>
+      <details className={`transcript-entry tool-detail role-${action.role}`}>
+        <summary title={action.label}>
+          <span className="tool-chip">{action.action}</span>
+          {action.argument && <span>{action.argument}</span>}
         </summary>
         <ToolInspector tool={record} />
       </details>
