@@ -4,14 +4,14 @@ import {
   parseRuntimeCapabilitySnapshot,
   type RuntimeSnapshot,
 } from '@pi-dashboard/protocol';
+import {
+  applyTransportOrdering,
+  type TransportRejectReason,
+  type TransportState,
+} from './transport.js';
 
-export interface RuntimeReducerState {
+export interface RuntimeReducerState extends TransportState {
   snapshot: RuntimeSnapshot;
-  runtimeEpoch?: string;
-  lastCursor: number;
-  lastRuntimeSeq: number;
-  /** Epochs which have been replaced; late frames from them are inert. */
-  retiredEpochs: readonly string[];
 }
 
 export interface RuntimeReducerEvent {
@@ -27,11 +27,7 @@ export interface RuntimeReducerEvent {
 export interface RuntimeReduceResult {
   state: RuntimeReducerState;
   accepted: boolean;
-  reason?:
-    | 'old-cursor'
-    | 'duplicate-runtime-seq'
-    | 'old-runtime-epoch'
-    | 'invalid-capabilities';
+  reason?: TransportRejectReason | 'invalid-capabilities';
 }
 
 function validateEventCapabilities(event: BridgeEvent): void {
@@ -191,56 +187,18 @@ export function applyRuntimeEvent(
     // not alter the runtime projection or make reducers throw.
     return { state: current, accepted: false, reason: 'invalid-capabilities' };
   }
-  if (incoming.cursor !== undefined && incoming.cursor <= current.lastCursor)
-    return { state: current, accepted: false, reason: 'old-cursor' };
-
-  const epoch = incoming.runtimeEpoch;
-  let nextEpoch = current.runtimeEpoch;
-  let retired = current.retiredEpochs;
-  let replacingEpoch = false;
-  if (
-    epoch !== undefined &&
-    current.runtimeEpoch !== undefined &&
-    epoch !== current.runtimeEpoch
-  ) {
-    if (current.retiredEpochs.includes(epoch))
-      return { state: current, accepted: false, reason: 'old-runtime-epoch' };
-    replacingEpoch = true;
-    retired = [...current.retiredEpochs, current.runtimeEpoch];
-    nextEpoch = epoch;
-  } else if (epoch !== undefined && current.runtimeEpoch === undefined) {
-    nextEpoch = epoch;
-  }
-
-  if (
-    !replacingEpoch &&
-    epoch !== undefined &&
-    current.retiredEpochs.includes(epoch)
-  )
-    return { state: current, accepted: false, reason: 'old-runtime-epoch' };
-  if (
-    !replacingEpoch &&
-    incoming.runtimeSeq !== undefined &&
-    incoming.runtimeSeq <= current.lastRuntimeSeq
-  )
-    return { state: current, accepted: false, reason: 'duplicate-runtime-seq' };
+  const transport = applyTransportOrdering(current, incoming);
+  if (!transport.accepted)
+    return { state: current, accepted: false, reason: transport.reason };
 
   let snapshot = current.snapshot;
   if (
     incoming.event.type === 'runtime.hello' &&
-    (replacingEpoch || current.runtimeEpoch === undefined)
+    (transport.replacingEpoch || current.runtimeEpoch === undefined)
   )
     snapshot = incoming.event.snapshot;
   snapshot = mergeRuntimeEvent(snapshot, incoming.event);
-  const state: RuntimeReducerState = {
-    snapshot,
-    runtimeEpoch: nextEpoch,
-    lastCursor: incoming.cursor ?? current.lastCursor,
-    lastRuntimeSeq: replacingEpoch
-      ? (incoming.runtimeSeq ?? -1)
-      : (incoming.runtimeSeq ?? current.lastRuntimeSeq),
-    retiredEpochs: retired,
-  };
+  const state: RuntimeReducerState = { snapshot, ...transport.state };
   return { state, accepted: true };
 }
 

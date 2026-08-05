@@ -89,6 +89,29 @@ function runtimeIndex(
   return Object.fromEntries(items.map((item) => [item.runtimeId, item]));
 }
 
+function upsertEntity<T>(
+  items: readonly T[],
+  next: T,
+  getId: (item: T) => string,
+): readonly T[] {
+  const id = getId(next);
+  let replaced = false;
+  const result = items.map((item) => {
+    if (getId(item) !== id) return item;
+    replaced = true;
+    return next;
+  });
+  return replaced ? result : [...result, next];
+}
+
+function removeEntity<T>(
+  items: readonly T[],
+  id: string,
+  getId: (item: T) => string,
+): readonly T[] {
+  return items.filter((item) => getId(item) !== id);
+}
+
 function emptyState(): DashboardLiveState {
   return {
     revision: 0,
@@ -147,6 +170,98 @@ export class DashboardLiveStore {
     for (const listener of this.listeners) listener();
   }
 
+  /** Install every entity index represented by an authoritative browser snapshot. */
+  private installSnapshotProjection(
+    state: DashboardLiveState,
+    snapshot: BrowserSnapshot,
+  ): DashboardLiveState {
+    return {
+      ...state,
+      snapshot,
+      serverId: snapshot.serverId,
+      revision: snapshot.revision,
+      workspacesById: indexed(snapshot.workspaces),
+      workspaceOrder: snapshot.workspaces.map((item) => item.id),
+      runtimesById: runtimeIndex(snapshot.runtimes),
+      sessionsById: indexed(snapshot.sessions),
+      notificationsById: indexed(snapshot.unread),
+    };
+  }
+
+  /** Keep the runtime index and embedded browser snapshot projection in lockstep. */
+  private installRuntimeProjection(
+    state: DashboardLiveState,
+    runtime: RuntimeSnapshot,
+  ): DashboardLiveState {
+    return {
+      ...state,
+      runtimesById: { ...state.runtimesById, [runtime.runtimeId]: runtime },
+      snapshot: state.snapshot
+        ? {
+            ...state.snapshot,
+            runtimes: upsertEntity(
+              state.snapshot.runtimes,
+              runtime,
+              (item) => item.runtimeId,
+            ),
+          }
+        : undefined,
+    };
+  }
+
+  /** Keep session metadata in both the index and embedded browser snapshot. */
+  private installSessionProjection(
+    state: DashboardLiveState,
+    metadata: SessionIndexEntry,
+  ): DashboardLiveState {
+    return {
+      ...state,
+      sessionsById: { ...state.sessionsById, [metadata.id]: metadata },
+      snapshot: state.snapshot
+        ? {
+            ...state.snapshot,
+            sessions: upsertEntity(
+              state.snapshot.sessions,
+              metadata,
+              (item) => item.id,
+            ),
+          }
+        : undefined,
+    };
+  }
+
+  private installTranscriptProjection(
+    state: DashboardLiveState,
+    sessionId: string,
+    projection: TranscriptProjection,
+  ): DashboardLiveState {
+    return {
+      ...state,
+      transcriptsBySessionId: {
+        ...state.transcriptsBySessionId,
+        [sessionId]: projection,
+      },
+    };
+  }
+
+  private removeNotificationProjection(
+    state: DashboardLiveState,
+    id: string,
+  ): DashboardLiveState {
+    const notificationsById = { ...state.notificationsById };
+    delete notificationsById[id];
+    return {
+      ...state,
+      notificationsById,
+      snapshot: state.snapshot
+        ? {
+            ...state.snapshot,
+            unread: removeEntity(state.snapshot.unread, id, (item) => item.id),
+          }
+        : undefined,
+    };
+  }
+
   setConnection(status: ConnectionStatus, error?: string): void {
     const current = this.state.connection;
     if (
@@ -200,24 +315,22 @@ export class DashboardLiveStore {
     if (!decision.accepted) return false;
     if (decision.reset) {
       this.generation += 1;
-      this.publish({
-        ...emptyState(),
-        snapshot: next,
-        serverId: next.serverId,
-        revision: next.revision,
-        cursor: next.cursor,
-        connection: {
-          ...this.state.connection,
-          lastCursor: next.cursor,
+      const resetState = this.installSnapshotProjection(
+        {
+          ...emptyState(),
+          cursor: next.cursor,
+          connection: {
+            ...this.state.connection,
+            lastCursor: next.cursor,
+          },
         },
-        workspacesById: indexed(next.workspaces),
-        workspaceOrder: next.workspaces.map((item) => item.id),
-        runtimesById: runtimeIndex(next.runtimes),
-        sessionsById: indexed(next.sessions),
+        next,
+      );
+      this.publish({
+        ...resetState,
         sessionChangeById: {},
         sessionReplacementByRuntimeId: {},
         sessionReplacementBySessionId: {},
-        notificationsById: indexed(next.unread),
         cursorHistory: [next.cursor].slice(-LIVE_BUFFER_LIMIT),
         resyncNonce: this.state.resyncNonce + 1,
       });
@@ -232,24 +345,14 @@ export class DashboardLiveStore {
     const advanceCursor =
       provenance.source !== 'http' || provenance.rebaseCursor === true;
     const cursor = advanceCursor ? next.cursor : this.state.cursor;
+    const projected = this.installSnapshotProjection(this.state, next);
     this.publish({
-      ...this.state,
-      snapshot: next,
-      serverId: next.serverId,
-      revision: next.revision,
+      ...projected,
       cursor,
-      connection: { ...this.state.connection, lastCursor: cursor },
-      workspacesById: indexed(next.workspaces),
-      workspaceOrder: next.workspaces.map((item) => item.id),
-      runtimesById: runtimeIndex(next.runtimes),
-      sessionsById: indexed(next.sessions),
-      sessionChangeById: this.state.sessionChangeById,
-      sessionReplacementByRuntimeId: this.state.sessionReplacementByRuntimeId,
-      sessionReplacementBySessionId: this.state.sessionReplacementBySessionId,
-      notificationsById: indexed(next.unread),
+      connection: { ...projected.connection, lastCursor: cursor },
       cursorHistory: advanceCursor
-        ? [...this.state.cursorHistory, next.cursor].slice(-LIVE_BUFFER_LIMIT)
-        : this.state.cursorHistory,
+        ? [...projected.cursorHistory, next.cursor].slice(-LIVE_BUFFER_LIMIT)
+        : projected.cursorHistory,
     });
     return true;
   }
@@ -305,12 +408,10 @@ export class DashboardLiveStore {
       envelope.snapshot.cursor >= (this.state.snapshot?.cursor ?? 0)
     )
       this.installSnapshot(envelope.snapshot, { source: 'sse' });
+    let nextState = this.state;
     const sessionId = sessionIdForEvent(envelope);
-    const currentProjection = sessionId
-      ? this.state.transcriptsBySessionId[sessionId]
-      : undefined;
-    let transcripts = this.state.transcriptsBySessionId;
     if (sessionId) {
+      const currentProjection = nextState.transcriptsBySessionId[sessionId];
       const canSeedSnapshot =
         envelope.event.type === 'session.snapshot' &&
         (envelope.event.session as { entriesComplete?: boolean })
@@ -321,14 +422,15 @@ export class DashboardLiveStore {
       if (baseProjection) {
         const nextProjection = reduceTranscriptEvent(baseProjection, envelope);
         if (nextProjection !== baseProjection)
-          transcripts = { ...transcripts, [sessionId]: nextProjection };
+          nextState = this.installTranscriptProjection(
+            nextState,
+            sessionId,
+            nextProjection,
+          );
       }
     }
-    let sessionsById = this.state.sessionsById;
-    let runtimesById = this.state.runtimesById;
-    let nextSnapshot = this.state.snapshot;
     if (!envelope.snapshot && envelope.runtimeId) {
-      const currentRuntime = runtimesById[envelope.runtimeId];
+      const currentRuntime = nextState.runtimesById[envelope.runtimeId];
       if (currentRuntime) {
         const nextRuntime = reduceRuntimeEvent(
           createRuntimeReducerState(currentRuntime, {
@@ -341,28 +443,13 @@ export class DashboardLiveStore {
           }),
           envelope,
         ).snapshot;
-        if (nextRuntime !== currentRuntime) {
-          runtimesById = {
-            ...runtimesById,
-            [envelope.runtimeId]: nextRuntime,
-          };
-          if (nextSnapshot)
-            nextSnapshot = {
-              ...nextSnapshot,
-              runtimes: nextSnapshot.runtimes.map((runtime) =>
-                runtime.runtimeId === envelope.runtimeId
-                  ? nextRuntime
-                  : runtime,
-              ),
-            };
-        }
+        if (nextRuntime !== currentRuntime)
+          nextState = this.installRuntimeProjection(nextState, nextRuntime);
       }
     }
-    let sessionChangeById = this.state.sessionChangeById;
-    let sessionReplacementByRuntimeId =
-      this.state.sessionReplacementByRuntimeId;
-    let sessionReplacementBySessionId =
-      this.state.sessionReplacementBySessionId;
+    let sessionChangeById = nextState.sessionChangeById;
+    let sessionReplacementByRuntimeId = nextState.sessionReplacementByRuntimeId;
+    let sessionReplacementBySessionId = nextState.sessionReplacementBySessionId;
     const event = envelope.event;
     const semanticSessionUpdate =
       Boolean(sessionId) &&
@@ -381,7 +468,7 @@ export class DashboardLiveStore {
       (event.type === 'session.changed' || event.type === 'session.snapshot') &&
       'session' in event
     ) {
-      const current = sessionsById[sessionId];
+      const current = nextState.sessionsById[sessionId];
       if (current) {
         const metadata = {
           ...current,
@@ -392,14 +479,7 @@ export class DashboardLiveStore {
             ? {}
             : { title: event.session.title }),
         };
-        sessionsById = { ...sessionsById, [sessionId]: metadata };
-        if (nextSnapshot)
-          nextSnapshot = {
-            ...nextSnapshot,
-            sessions: nextSnapshot.sessions.map((item) =>
-              item.id === sessionId ? metadata : item,
-            ),
-          };
+        nextState = this.installSessionProjection(nextState, metadata);
       }
       if (envelope.runtimeId)
         sessionReplacementByRuntimeId = {
@@ -413,22 +493,18 @@ export class DashboardLiveStore {
         };
     }
     this.publish({
-      ...this.state,
-      snapshot: nextSnapshot,
-      runtimesById,
-      sessionsById,
+      ...nextState,
       sessionChangeById,
       sessionReplacementByRuntimeId,
       sessionReplacementBySessionId,
       cursor: envelope.cursor,
-      connection: { ...this.state.connection, lastCursor: envelope.cursor },
-      cursorHistory: [...this.state.cursorHistory, envelope.cursor].slice(
+      connection: { ...nextState.connection, lastCursor: envelope.cursor },
+      cursorHistory: [...nextState.cursorHistory, envelope.cursor].slice(
         -LIVE_BUFFER_LIMIT,
       ),
-      recentEvents: [...this.state.recentEvents, envelope].slice(
+      recentEvents: [...nextState.recentEvents, envelope].slice(
         -LIVE_BUFFER_LIMIT,
       ),
-      transcriptsBySessionId: transcripts,
     });
     return true;
   }
@@ -569,17 +645,13 @@ export class DashboardLiveStore {
     const metadata = currentMetadata
       ? { ...response.metadata, ...currentMetadata }
       : response.metadata;
-    this.publish({
-      ...this.state,
-      sessionsById: {
-        ...this.state.sessionsById,
-        [response.metadata.id]: metadata,
-      },
-      transcriptsBySessionId: {
-        ...this.state.transcriptsBySessionId,
-        [response.metadata.id]: projection,
-      },
-    });
+    let nextState = this.installSessionProjection(this.state, metadata);
+    nextState = this.installTranscriptProjection(
+      nextState,
+      response.metadata.id,
+      projection,
+    );
+    this.publish(nextState);
     return projection;
   }
 
@@ -617,37 +689,13 @@ export class DashboardLiveStore {
     const current = this.state.sessionsById[id];
     if (!current) return;
     const metadata = { ...current, ...patch };
-    const sessionsById = { ...this.state.sessionsById, [id]: metadata };
-    const snapshot = this.state.snapshot;
-    this.publish({
-      ...this.state,
-      sessionsById,
-      snapshot: snapshot
-        ? {
-            ...snapshot,
-            sessions: snapshot.sessions.map((session) =>
-              session.id === id ? { ...session, ...patch } : session,
-            ),
-          }
-        : undefined,
-    });
+    this.publish(this.installSessionProjection(this.state, metadata));
   }
 
   markNotificationRead(id: string): void {
     const current = this.state.notificationsById[id];
     if (!current) return;
-    const next = { ...this.state.notificationsById };
-    delete next[id];
-    this.publish({
-      ...this.state,
-      notificationsById: next,
-      snapshot: this.state.snapshot
-        ? {
-            ...this.state.snapshot,
-            unread: this.state.snapshot.unread.filter((item) => item.id !== id),
-          }
-        : undefined,
-    });
+    this.publish(this.removeNotificationProjection(this.state, id));
   }
 
   clearServer(): void {

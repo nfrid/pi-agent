@@ -4,6 +4,7 @@ import type {
   NormalizedMessagePayload,
   NormalizedToolPayload,
 } from '@pi-dashboard/protocol';
+import { applyTransportOrdering } from './transport.js';
 import {
   tryParseNormalizedMessagePayload,
   tryParseNormalizedToolPayload,
@@ -383,91 +384,22 @@ function mergeTool(
   };
 }
 
-function transportState(
-  current: TranscriptProjection,
-  incoming: TranscriptReducerEvent,
-): {
-  projection: TranscriptProjection;
-  accepted: boolean;
-  reason?: TranscriptReduceResult['reason'];
-  replacingEpoch: boolean;
-} {
-  if (incoming.cursor !== undefined && incoming.cursor <= current.lastCursor)
-    return {
-      projection: current,
-      accepted: false,
-      reason: 'old-cursor',
-      replacingEpoch: false,
-    };
-  const epoch = incoming.runtimeEpoch;
-  let runtimeEpoch = current.runtimeEpoch;
-  let retiredEpochs = current.retiredEpochs;
-  let replacingEpoch = false;
-  if (
-    epoch !== undefined &&
-    current.runtimeEpoch !== undefined &&
-    epoch !== current.runtimeEpoch
-  ) {
-    if (current.retiredEpochs.includes(epoch))
-      return {
-        projection: current,
-        accepted: false,
-        reason: 'old-runtime-epoch',
-        replacingEpoch: false,
-      };
-    replacingEpoch = true;
-    retiredEpochs = [...current.retiredEpochs, current.runtimeEpoch];
-    runtimeEpoch = epoch;
-  } else if (epoch !== undefined && current.runtimeEpoch === undefined)
-    runtimeEpoch = epoch;
-  if (
-    !replacingEpoch &&
-    epoch !== undefined &&
-    current.retiredEpochs.includes(epoch)
-  )
-    return {
-      projection: current,
-      accepted: false,
-      reason: 'old-runtime-epoch',
-      replacingEpoch: false,
-    };
-  if (
-    !replacingEpoch &&
-    incoming.runtimeSeq !== undefined &&
-    incoming.runtimeSeq <= current.lastRuntimeSeq
-  )
-    return {
-      projection: current,
-      accepted: false,
-      reason: 'duplicate-runtime-seq',
-      replacingEpoch: false,
-    };
-  return {
-    projection: {
-      ...current,
-      ...(replacingEpoch ? { sessionId: undefined, order: [], items: {} } : {}),
-      runtimeEpoch,
-      retiredEpochs,
-      lastCursor: incoming.cursor ?? current.lastCursor,
-      lastRuntimeSeq: replacingEpoch
-        ? (incoming.runtimeSeq ?? -1)
-        : (incoming.runtimeSeq ?? current.lastRuntimeSeq),
-    },
-    accepted: true,
-    replacingEpoch,
-  };
-}
-
 /** Apply one normalized live event without mutating the prior projection. */
 export function applyTranscriptEvent(
   current: TranscriptProjection,
   input: DashboardEventEnvelope | TranscriptReducerEvent | BridgeEvent,
 ): TranscriptReduceResult {
   const incoming = asInput(input);
-  const transport = transportState(current, incoming);
+  const transport = applyTransportOrdering(current, incoming);
   if (!transport.accepted)
     return { state: current, accepted: false, reason: transport.reason };
-  let state = transport.projection;
+  let state: TranscriptProjection = {
+    ...current,
+    ...transport.state,
+    ...(transport.replacingEpoch
+      ? { sessionId: undefined, order: [], items: {} }
+      : {}),
+  };
   const event = incoming.event;
   const eventSession =
     incoming.sessionId ??

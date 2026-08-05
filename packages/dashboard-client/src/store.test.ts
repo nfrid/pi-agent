@@ -93,6 +93,55 @@ describe('DashboardLiveStore', () => {
     });
   });
 
+  it('keeps entity indexes and embedded snapshot projections aligned across ingress paths', () => {
+    const store = new DashboardLiveStore();
+    const runtime = {
+      runtimeId: 'runtime-1',
+      liveState: 'working',
+      pendingInteractions: [],
+      extensionSurfaces: [],
+      session: { id: 'session-1', entries: [] },
+    };
+    const metadata = {
+      id: 'session-1',
+      file: '',
+      cwd: '/tmp',
+      updatedAt: 1,
+    };
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      runtimes: [runtime],
+      sessions: [metadata],
+    } as unknown as BrowserSnapshot);
+
+    store.acceptStreamRecord({
+      cursor: 2,
+      emittedAt: 2,
+      runtimeId: 'runtime-1',
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'waiting',
+        snapshot: { pendingInteractions: [] },
+      },
+    } as unknown as StreamRecord);
+    const afterEvent = store.getSnapshot();
+    expect(afterEvent.snapshot?.runtimes).toContainEqual(
+      afterEvent.runtimesById['runtime-1'],
+    );
+
+    store.applyMutationResult({
+      serverId: 'daemon-1',
+      cursor: 2,
+      metadata: { ...metadata, title: 'from HTTP' },
+      entries: [],
+    });
+    const afterMutation = store.getSnapshot();
+    expect(afterMutation.snapshot?.sessions).toContainEqual(
+      afterMutation.sessionsById['session-1'],
+    );
+    expect(afterMutation.snapshot?.sessions).toHaveLength(1);
+  });
+
   it('keeps bounded cursor/event history and rejects replay gaps', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 4));
