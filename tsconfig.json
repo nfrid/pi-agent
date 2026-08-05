@@ -7,12 +7,6 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
-    "paths": {
-      "@pi-dashboard/extension-contributions": [
-        "packages/extension-contributions/src/index.ts"
-      ]
-    },
     "noEmit": true,
     "types": ["node"]
   },

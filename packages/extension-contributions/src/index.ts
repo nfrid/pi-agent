@@ -538,7 +538,17 @@ export function parseExtensionSurfaceList(
       'invalid-surface',
       'Extension surface catalogue contains invalid or unknown fields.',
     );
-  return value as ExtensionSurfaceList;
+  const surfaces = value as ExtensionSurfaceList;
+  const ids = new Set<string>();
+  for (const surface of surfaces) {
+    if (ids.has(surface.id))
+      throw new ContributionError(
+        'invalid-surface',
+        `Duplicate extension surface ID: ${surface.id}`,
+      );
+    ids.add(surface.id);
+  }
+  return surfaces;
 }
 
 export function tryParseExtensionSurfaceList(

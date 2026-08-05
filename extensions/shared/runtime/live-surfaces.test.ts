@@ -41,6 +41,20 @@ describe('live surface hub', () => {
     expect(updates).toHaveLength(2);
   });
 
+  it('rejects duplicate surface IDs across extension sources atomically', () => {
+    const hub = new LiveSurfaceHub();
+    const surface = {
+      id: 'shared.surface',
+      rendererId: 'test.renderer',
+      viewModel: {},
+    };
+    hub.publish('first', [surface]);
+    expect(() => hub.publish('second', [surface])).toThrow(
+      'Duplicate extension surface ID',
+    );
+    expect(hub.snapshot()).toEqual([surface]);
+  });
+
   it('isolates source replacement and unsubscribe lifecycle', () => {
     const hub = new LiveSurfaceHub();
     const listener = () => {

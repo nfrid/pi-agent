@@ -1,7 +1,7 @@
 import {
   type ExtensionSurface,
   MAX_EXTENSION_SURFACES,
-  parseExtensionSurface,
+  parseExtensionSurfaceList,
 } from '@pi-dashboard/extension-contributions';
 
 /** The bridge keeps the aggregate surface catalogue bounded. */
@@ -44,9 +44,15 @@ export class LiveSurfaceHub implements LiveSurfacePublisher {
       0,
       MAX_LIVE_EXTENSION_SURFACES_PER_EXTENSION,
     );
-    for (const surface of bounded) parseExtensionSurface(surface);
     const previous = this.sources.get(extensionId) ?? [];
     if (sameSurfaceList(previous, bounded)) return;
+    const prospective = [...this.sources.entries()].flatMap(
+      ([source, values]) => (source === extensionId ? [] : values),
+    );
+    prospective.push(...bounded);
+    parseExtensionSurfaceList(
+      prospective.slice(0, MAX_LIVE_EXTENSION_SURFACES),
+    );
     if (bounded.length > 0) this.sources.set(extensionId, bounded);
     else this.sources.delete(extensionId);
     this.notify();

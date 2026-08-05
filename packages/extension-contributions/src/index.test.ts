@@ -149,6 +149,9 @@ describe('extension contribution contracts', () => {
     });
     expect(surface.placement).toBe('left-rail');
     expect(parseExtensionSurfaceList([surface])).toEqual([surface]);
+    expect(() => parseExtensionSurfaceList([surface, surface])).toThrow(
+      'Duplicate extension surface ID',
+    );
     expect(tryParseExtensionSurface({ ...surface, placement: 'unknown' })).toBe(
       undefined,
     );
