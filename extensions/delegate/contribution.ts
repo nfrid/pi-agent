@@ -39,6 +39,30 @@ const DelegateTimingSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+const DelegateTranscriptEntrySchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 512 }),
+    type: Type.Union([
+      Type.Literal('task'),
+      Type.Literal('thinking'),
+      Type.Literal('tool'),
+      Type.Literal('assistant'),
+      Type.Literal('error'),
+    ]),
+    label: Type.String({ minLength: 1, maxLength: 2_000 }),
+    text: Type.Optional(Type.String({ maxLength: 8_000 })),
+    status: Type.Optional(
+      Type.Union([
+        Type.Literal('running'),
+        Type.Literal('completed'),
+        Type.Literal('error'),
+      ]),
+    ),
+    at: Type.Optional(Type.Number()),
+    run: Type.Optional(Type.Integer({ minimum: 1, maximum: 64 })),
+  },
+  { additionalProperties: false },
+);
 export const DelegateStatusSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 256 }),
@@ -63,6 +87,12 @@ export const DelegateStatusSchema = Type.Object(
     runs: Type.Optional(
       Type.Readonly(Type.Array(DelegateTimingSchema, { maxItems: 64 })),
     ),
+    transcript: Type.Optional(
+      Type.Readonly(
+        Type.Array(DelegateTranscriptEntrySchema, { maxItems: 128 }),
+      ),
+    ),
+    transcriptTruncated: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

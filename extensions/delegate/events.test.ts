@@ -160,6 +160,7 @@ describe('events', () => {
     ]);
     expect(run.activities[1]?.latestText).toBe('private-command --with-input');
     expect(run.activities[2]?.latestText).toBe('private-thinking');
+    expect(run.activities[2]?.transcriptText).toBe('private-thinking');
     expect(run.messages).toHaveLength(1);
     expect(JSON.stringify(run)).not.toContain('private-');
     expect(JSON.stringify(run)).toContain('safe handoff');
@@ -183,7 +184,10 @@ describe('events', () => {
     delta('Now sizing ');
     delta('the columns.');
 
-    expect(run.activities.at(-1)?.latestText).toBe('Now sizing the columns.');
+    expect(run.activities.at(-1)).toMatchObject({
+      latestText: 'Now sizing the columns.',
+      transcriptText: 'Checking the widget layout.\n\nNow sizing the columns.',
+    });
   });
 
   test('keeps the tail of a long thinking block rather than its opening', () => {

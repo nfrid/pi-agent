@@ -28,6 +28,10 @@ describe('delegate live surface', () => {
             name: 'Subagent',
             state: 'running',
             activity: { label: 'read source' },
+            transcript: [
+              { type: 'task', label: 'Task', text: 'inspect' },
+              { type: 'tool', label: 'read source' },
+            ],
           },
         ],
       },

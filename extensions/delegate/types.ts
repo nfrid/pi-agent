@@ -18,6 +18,9 @@ export interface DelegatedActivity {
   label: string;
   status: 'running' | 'completed' | 'error';
   latestText?: string;
+  /** Bounded complete thinking block; kept non-enumerable on run details. */
+  transcriptText?: string;
+  startedAt?: number;
 }
 
 export type ThinkingLevel =

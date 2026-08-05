@@ -1607,6 +1607,62 @@ h2 {
 .delegate-row-detail small {
   color: var(--dim);
 }
+.delegate-transcript {
+  display: grid;
+  gap: 7px;
+  margin: 3px 0;
+  padding: 0;
+  list-style: none;
+}
+.delegate-transcript-entry {
+  min-width: 0;
+  border-left: 2px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 48%, transparent);
+  padding: 7px 8px;
+}
+.delegate-transcript-entry.transcript-thinking {
+  border-left-color: var(--purple);
+}
+.delegate-transcript-entry.transcript-tool {
+  border-left-color: var(--cyan);
+}
+.delegate-transcript-entry.transcript-assistant {
+  border-left-color: var(--green);
+}
+.delegate-transcript-entry.transcript-error {
+  border-left-color: var(--red);
+}
+.delegate-transcript-entry header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.delegate-transcript-entry header strong {
+  color: var(--fg);
+}
+.delegate-transcript-entry pre {
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  color: var(--fg);
+  font-size: 10px;
+  white-space: pre-wrap;
+}
+.delegate-transcript-entry .markdown {
+  color: var(--fg);
+  font-size: 10px;
+}
+.delegate-transcript-entry .markdown > :first-child {
+  margin-top: 0;
+}
+.delegate-transcript-entry .markdown > :last-child {
+  margin-bottom: 0;
+}
+.delegate-transcript-truncated {
+  color: var(--dim);
+  font-size: 9px;
+}
 .delegate-run-history {
   display: grid;
   gap: 3px;

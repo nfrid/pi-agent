@@ -12,12 +12,57 @@ import {
 import type { DelegateStatusSnapshot, DelegateStatusStore } from './status';
 
 export const DELEGATE_EXTENSION_ID = 'delegate';
+const MAX_TRANSCRIPT_SURFACE_CHARS = 240_000;
 
 function text(value: string, max: number): string {
   return value.slice(0, max);
 }
 
-function statusSnapshot(status: DelegateStatusSnapshot) {
+function transcriptSnapshot(
+  status: DelegateStatusSnapshot,
+  budget: { remaining: number },
+) {
+  const entries = status.transcript ?? [];
+  const projected = [];
+  let truncated = status.transcriptTruncated === true;
+  for (const entry of entries) {
+    if (budget.remaining <= 0) {
+      truncated = true;
+      break;
+    }
+    const label = text(entry.label, 2_000) || entry.type;
+    const textBudget = Math.max(
+      0,
+      Math.min(8_000, budget.remaining - label.length - 64),
+    );
+    const value = entry.text ? text(entry.text, textBudget) : undefined;
+    if (entry.text && value?.length !== entry.text.length) truncated = true;
+    const cost = label.length + (value?.length ?? 0) + 64;
+    if (cost > budget.remaining) {
+      truncated = true;
+      break;
+    }
+    budget.remaining -= cost;
+    projected.push({
+      id: text(entry.id, 512) || `${entry.type}-${projected.length}`,
+      type: entry.type,
+      label,
+      ...(value ? { text: value } : {}),
+      ...(entry.status ? { status: entry.status } : {}),
+      ...(entry.at === undefined ? {} : { at: entry.at }),
+      ...(entry.run === undefined ? {} : { run: entry.run }),
+    });
+  }
+  return {
+    ...(projected.length > 0 ? { transcript: projected } : {}),
+    ...(truncated ? { transcriptTruncated: true } : {}),
+  };
+}
+
+function statusSnapshot(
+  status: DelegateStatusSnapshot,
+  transcriptBudget: { remaining: number },
+) {
   return {
     id: text(status.id, 256),
     name: text(status.name, 2_000) || 'Subagent',
@@ -61,15 +106,20 @@ function statusSnapshot(status: DelegateStatusSnapshot) {
           })),
         }
       : {}),
+    ...transcriptSnapshot(status, transcriptBudget),
   };
 }
 
 export function delegateSurface(
   store: DelegateStatusStore,
 ): RuntimeExtensionSurface {
+  const transcriptBudget = { remaining: MAX_TRANSCRIPT_SURFACE_CHARS };
   const viewModel = {
     version: 1 as const,
-    statuses: store.list().slice(0, 64).map(statusSnapshot),
+    statuses: store
+      .list()
+      .slice(0, 64)
+      .map((status) => statusSnapshot(status, transcriptBudget)),
   };
   // Keep this check next to the adapter so a future status field cannot leak
   // into the bridge without a corresponding renderer contract change.

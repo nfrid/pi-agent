@@ -1,6 +1,7 @@
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMemo, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
+import { Markdown } from '../Markdown';
 
 /** The bridge adds these fields independently of the core runtime contract. */
 export type LiveExtensionSurface = {
@@ -135,6 +136,54 @@ function delegateStats(rows: readonly Record<string, unknown>[]) {
   };
 }
 
+export function DelegateTranscript({
+  entries,
+  truncated = false,
+}: {
+  entries: readonly Record<string, unknown>[];
+  truncated?: boolean;
+}) {
+  return (
+    <ol className="delegate-transcript" aria-label="Delegate transcript">
+      {entries.map((entry) => {
+        const entryId = text(entry.id);
+        const entryType = text(entry.type, 'activity');
+        const entryText = text(entry.text);
+        const entryStatus = text(entry.status);
+        const transcriptRun =
+          typeof entry.run === 'number' ? entry.run : undefined;
+        return (
+          <li
+            className={`delegate-transcript-entry transcript-${entryType}`}
+            key={entryId}
+          >
+            <header>
+              <strong>{text(entry.label, entryType)}</strong>
+              <small>
+                {[transcriptRun ? `run ${transcriptRun}` : '', entryStatus]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </small>
+            </header>
+            {entryText &&
+              (entryType === 'tool' ? (
+                <pre>{entryText}</pre>
+              ) : (
+                <Markdown>{entryText}</Markdown>
+              ))}
+          </li>
+        );
+      })}
+      {truncated && (
+        <li className="delegate-transcript-truncated">
+          Earlier transcript entries were omitted to keep the live surface
+          bounded.
+        </li>
+      )}
+    </ol>
+  );
+}
+
 function DelegateSurface({ surface }: { surface: LiveExtensionSurface }) {
   const rows = delegateRows(surface.viewModel);
   const stats = delegateStats(rows);
@@ -222,6 +271,7 @@ function DelegateSurface({ surface }: { surface: LiveExtensionSurface }) {
               const activityStatus = text(activity?.status);
               const latestText = short(text(activity?.latestText), 600);
               const runs = list(row.runs).slice(-6);
+              const transcript = list(row.transcript);
               return (
                 <div
                   className={`delegate-row ${stateClass(state)}`}
@@ -288,7 +338,14 @@ function DelegateSurface({ surface }: { surface: LiveExtensionSurface }) {
                           </div>
                         )}
                       </dl>
-                      {latestText && <p>{latestText}</p>}
+                      {transcript.length > 0 ? (
+                        <DelegateTranscript
+                          entries={transcript}
+                          truncated={row.transcriptTruncated === true}
+                        />
+                      ) : (
+                        latestText && <p>{latestText}</p>
+                      )}
                       {runs.length > 0 && (
                         <ol
                           className="delegate-run-history"
@@ -328,6 +385,7 @@ function DelegateSurface({ surface }: { surface: LiveExtensionSurface }) {
                         !activityType &&
                         !activityStatus &&
                         !latestText &&
+                        transcript.length === 0 &&
                         runs.length === 0 && (
                           <span>
                             Waiting for the delegate to report details.

@@ -2,6 +2,7 @@ import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
+  DelegateTranscript,
   ExtensionSurfaceStack,
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
@@ -100,6 +101,46 @@ describe('live extension surface fixtures', () => {
     );
     expect(markup).toContain('0/12 complete');
     expect(markup).not.toContain('more tasks');
+  });
+
+  it('renders ordered delegate transcript entries with bounded-history notice', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateTranscript
+        entries={[
+          {
+            id: '1:task',
+            type: 'task',
+            label: 'Task',
+            text: 'Inspect the queue',
+            status: 'completed',
+            run: 1,
+          },
+          {
+            id: '1:tool',
+            type: 'tool',
+            label: 'bash',
+            text: 'npm test',
+            status: 'running',
+            run: 1,
+          },
+          {
+            id: '1:response',
+            type: 'assistant',
+            label: 'Response',
+            text: '**Done**',
+            status: 'completed',
+            run: 1,
+          },
+        ]}
+        truncated
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Delegate transcript"');
+    expect(markup).toContain('Inspect the queue');
+    expect(markup).toContain('<pre>npm test</pre>');
+    expect(markup).toContain('<strong>Done</strong>');
+    expect(markup).toContain('Earlier transcript entries were omitted');
   });
 
   it('selects rich delegate and task renderers by tolerant renderer IDs', () => {
