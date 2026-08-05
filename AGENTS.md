@@ -16,4 +16,6 @@ Use fix scripts when appropriate:
 
 Use Conventional Commits for every commit message (for example, `fix(delegate): deduplicate queued completions` or `docs(feedback): record ticket decision`).
 
+For shared-checkout and commit hygiene, follow `docs/development-workflow.md`.
+
 For changes that affect the dashboard, read and follow `docs/dashboard-deployment.md` before finishing, including its browser-test guidance and production deployment checks.

@@ -7,6 +7,13 @@ The production dashboard is served from generated `dist/` directories by the mac
 - Read `apps/dashboard-web/playwright.config.ts` before adding hover or responsive assertions. The default Playwright configuration may only define a mobile project; desktop-only behavior needs an explicit desktop context or project.
 - Run filtered Playwright tests with `pnpm --filter @pi-dashboard/web exec playwright test --grep "<test name>"`. Do not insert `--` before `--grep`: it can be forwarded as a positional argument and cause the full suite to run.
 - Hidden tooltip, preview, and accessibility-only DOM can still make Playwright text locators ambiguous. Avoid duplicating decorative text in DOM nodes when `data-*` attributes or CSS-generated content suffice. Otherwise, scope text assertions to the semantic transcript or control that owns the text.
+- The default test ports are shared process resources. If either is occupied, identify its owner rather than stopping an unfamiliar process, choose an unused pair, and run with `PI_DASHBOARD_E2E_PORT=<port> PI_DASHBOARD_E2E_API_PORT=<port> pnpm --filter @pi-dashboard/web test:e2e`.
+
+## Dirty-tree deployment
+
+The deployment steps below assume the dashboard build contains only the intended work. Before building, follow `docs/development-workflow.md` and inspect both `HEAD` and the working tree.
+
+If unrelated changes are present, do not deploy a build from the mixed checkout. Commit the owned change first, then either wait for the shared checkout to become suitable or build the exact intended commit in an isolated detached worktree. Copy only that build's generated dashboard `dist/` artifacts into the production checkout before restarting the service, and report the deployed commit. Validation run in a mixed checkout does not prove the isolated commit.
 
 After validating a dashboard-affecting change:
 
