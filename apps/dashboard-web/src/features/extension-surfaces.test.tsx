@@ -2,6 +2,7 @@ import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
+  ExtensionSurfaceStack,
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
 } from './extension-surfaces';
@@ -68,6 +69,37 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('● Compact task');
     expect(markup).not.toContain('luna-high');
     expect(markup).not.toContain('task-progress');
+  });
+
+  it('orders tasks left of delegates and retains every row for scrolling', () => {
+    const markup = renderToStaticMarkup(
+      <ExtensionSurfaceStack
+        runtime={runtimeFixture([
+          {
+            id: 'delegate-1',
+            rendererId: 'delegate.status',
+            viewModel: { statuses: [] },
+          },
+          {
+            id: 'tasks-1',
+            rendererId: 'tasks.current',
+            viewModel: {
+              tasks: Array.from({ length: 12 }, (_, index) => ({
+                id: `T${index + 1}`,
+                text: `Task ${index + 1}`,
+                status: 'todo',
+              })),
+            },
+          },
+        ])}
+      />,
+    );
+
+    expect(markup.indexOf('aria-label="Tasks"')).toBeLessThan(
+      markup.indexOf('aria-label="Delegate status"'),
+    );
+    expect(markup).toContain('0/12 complete');
+    expect(markup).not.toContain('more tasks');
   });
 
   it('selects rich delegate and task renderers by tolerant renderer IDs', () => {

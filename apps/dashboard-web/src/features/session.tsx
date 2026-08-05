@@ -201,8 +201,11 @@ export function SessionView({
         entries={selectLegacyTranscriptEntries(projection)}
         runtime={runtime}
       />
-      <ExtensionSurfaceStack runtime={runtime} />
-      <ExtensionSurfaceStack runtime={runtime} placement="composer" />
+      <div className="session-control-layer">
+        <ExtensionSurfaceStack runtime={runtime} />
+        <ExtensionSurfaceStack runtime={runtime} placement="composer" />
+        <Composer runtime={runtime} sessionId={id} />
+      </div>
       {runtime && runtime.pendingInteractions.length > 0 && (
         <aside
           className="interaction-dock"
@@ -218,7 +221,6 @@ export function SessionView({
           ))}
         </aside>
       )}
-      <Composer runtime={runtime} sessionId={id} />
     </section>
   );
 }

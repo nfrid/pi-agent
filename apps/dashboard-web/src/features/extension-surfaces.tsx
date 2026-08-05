@@ -198,7 +198,7 @@ function DelegateSurface({ surface }: { surface: LiveExtensionSurface }) {
             )}
           </div>
           <div className="delegate-rows surface-detail-list">
-            {rows.slice(0, 12).map((row, index) => {
+            {rows.map((row, index) => {
               const id = text(row.id, `delegate-${index}`);
               const state = stateLabel(row.state ?? row.status);
               const activity = asRecord(row.activity);
@@ -339,11 +339,6 @@ function DelegateSurface({ surface }: { surface: LiveExtensionSurface }) {
               );
             })}
           </div>
-          {rows.length > 12 && (
-            <small className="surface-overflow">
-              +{rows.length - 12} more delegates
-            </small>
-          )}
         </>
       )}
     </article>
@@ -419,7 +414,7 @@ function TasksSurface({ surface }: { surface: LiveExtensionSurface }) {
             </span>
           </div>
           <div className="task-rows surface-detail-list">
-            {rows.slice(0, 10).map((row, index) => {
+            {rows.map((row, index) => {
               const state = stateLabel(row.status);
               const id = text(row.id, `task-${index}`);
               const priority = text(row.priority);
@@ -456,11 +451,6 @@ function TasksSurface({ surface }: { surface: LiveExtensionSurface }) {
             })}
             {!rows.length && <span className="muted">No tasks reported.</span>}
           </div>
-          {rows.length > 10 && (
-            <small className="surface-overflow">
-              +{rows.length - 10} more tasks
-            </small>
-          )}
         </>
       )}
     </article>
@@ -508,9 +498,13 @@ export function ExtensionSurfaceStack({
 }) {
   const surfaces = useMemo(
     () =>
-      runtimeExtensionSurfaces(runtime).filter(
-        (surface) => surfacePlacement(surface) === placement,
-      ),
+      runtimeExtensionSurfaces(runtime)
+        .filter((surface) => surfacePlacement(surface) === placement)
+        .sort((left, right) => {
+          const order = (surface: LiveExtensionSurface) =>
+            surface.rendererId.toLowerCase().includes('tasks') ? 0 : 1;
+          return order(left) - order(right);
+        }),
     [runtime, placement],
   );
   if (!surfaces.length) return null;

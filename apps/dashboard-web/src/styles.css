@@ -168,6 +168,17 @@ select:focus-visible {
 .session-shell {
   padding-bottom: 16px;
 }
+.session-page {
+  padding-bottom: 160px;
+}
+.session-control-layer {
+  position: fixed;
+  left: 50%;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 10;
+  width: min(calc(100vw - 44px), 1016px);
+  transform: translateX(-50%);
+}
 .centered {
   min-height: 100vh;
   display: grid;
@@ -526,7 +537,7 @@ h2 {
   z-index: 12;
   display: grid;
   place-items: end center;
-  padding: 72px 13px 148px;
+  padding: 72px 13px 202px;
   overflow: hidden;
   pointer-events: none;
 }
@@ -973,14 +984,13 @@ h2 {
 }
 .composer {
   display: block;
-  background: color-mix(in srgb, var(--bg-alt) 94%, var(--purple));
+  position: static;
+  margin-top: 0;
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 9px;
-  position: sticky;
-  bottom: max(12px, env(safe-area-inset-bottom));
-  z-index: 2;
+  background: color-mix(in srgb, var(--bg-alt) 94%, var(--purple));
   box-shadow: 0 8px 28px #0006;
+  padding: 9px;
 }
 .composer-secondary {
   display: grid;
@@ -1051,23 +1061,18 @@ h2 {
   transform: none;
 }
 .composer-previews {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 8px);
-  z-index: 3;
   display: flex;
   flex-wrap: nowrap;
   gap: 7px;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
+  margin: 0 0 7px;
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: 9px;
-  padding: 6px;
-  margin: 0;
-  min-width: 0;
   background: color-mix(in srgb, var(--bg-alt) 92%, transparent);
-  box-shadow: 0 6px 22px #0008;
-  backdrop-filter: blur(8px);
+  padding: 6px;
 }
 .composer-preview {
   position: relative;
@@ -1399,13 +1404,10 @@ h2 {
 .extension-surfaces {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
+  align-items: end;
   gap: 7px;
-  position: sticky;
-  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 122px);
-  z-index: 3;
-  width: min(100%, 820px);
-  margin: 10px 0;
+  width: 100%;
+  margin: 0 0 7px;
 }
 .extension-surface-slot {
   min-width: 0;
@@ -1856,9 +1858,15 @@ h2 {
   .session-shell {
     padding-bottom: 8px;
   }
+  .session-page {
+    padding-bottom: 150px;
+  }
+  .session-control-layer {
+    bottom: max(6px, env(safe-area-inset-bottom));
+    width: calc(100vw - 26px);
+  }
   .extension-surfaces {
     grid-template-columns: minmax(0, 1fr);
-    bottom: calc(max(6px, env(safe-area-inset-bottom)) + 116px);
     gap: 5px;
   }
   .section-heading,
@@ -1922,7 +1930,6 @@ h2 {
     display: none;
   }
   .composer {
-    bottom: max(6px, env(safe-area-inset-bottom));
     padding: 7px;
   }
   .composer-primary {
@@ -1972,7 +1979,7 @@ h2 {
     flex: none;
   }
   .interaction-dock {
-    padding: 58px 13px 164px;
+    padding: 58px 13px 215px;
   }
   .interaction-dock .interaction {
     max-height: min(62vh, 520px);
