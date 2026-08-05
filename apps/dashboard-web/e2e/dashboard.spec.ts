@@ -621,6 +621,69 @@ test('dense mobile session keeps conversation and activity readable', async ({
             },
           })),
           {
+            type: 'compaction',
+            summary: '## Compaction checkpoint\nPreserved the dashboard task.',
+            tokensBefore: 232_000,
+          },
+          {
+            type: 'custom',
+            customType: 'lean-todo',
+            data: {
+              kind: 'snapshot',
+              state: {
+                tasks: [{ id: 'T1', text: 'Verify dashboard', status: 'todo' }],
+              },
+            },
+          },
+          {
+            type: 'custom',
+            customType: 'lean-todo',
+            data: {
+              kind: 'snapshot',
+              state: {
+                tasks: [
+                  { id: 'T1', text: 'Verify dashboard', status: 'doing' },
+                ],
+              },
+            },
+          },
+          {
+            type: 'model_change',
+            provider: 'openai',
+            modelId: 'gpt-5.6-sol',
+          },
+          { type: 'thinking_level_change', thinkingLevel: 'medium' },
+          {
+            type: 'custom_message',
+            customType: 'delegate-job-result',
+            display: true,
+            content: '# Background delegate job dj-1 (UX audit) success',
+            details: { jobs: [{ name: 'UX audit', state: 'success' }] },
+          },
+          {
+            type: 'custom_message',
+            customType: 'background-terminal-result',
+            display: true,
+            content: 'Background build completed.',
+            details: {
+              title: 'Dashboard build',
+              status: 'done',
+              exitCode: 0,
+              duration: 2400,
+            },
+          },
+          {
+            type: 'custom',
+            customType: 'artifact:v1',
+            data: { bytes: 12 },
+          },
+          {
+            type: 'custom_message',
+            customType: 'private-context',
+            display: false,
+            content: 'Do not render this context.',
+          },
+          {
             type: 'message',
             message: {
               role: 'user',
@@ -689,6 +752,23 @@ test('dense mobile session keeps conversation and activity readable', async ({
   expect(compactHeader.text).not.toContain('/tmp');
   expect(compactHeader.text).not.toContain('test/');
   await expect(page.getByText('inline code', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Context compacted', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('232K tokens', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Tasks · T1 added · 1 waiting/)).toBeVisible();
+  await expect(page.getByText(/Tasks · T1 started · 1 active/)).toBeVisible();
+  await expect(
+    page.getByText('Model → openai/gpt-5.6-sol · thinking medium'),
+  ).toBeVisible();
+  await expect(page.getByText('Delegate finished · UX audit')).toBeVisible();
+  await expect(
+    page.getByText(/Background command finished · Dashboard build · 2s/),
+  ).toBeVisible();
+  await expect(page.getByText('artifact:v1')).toHaveCount(0);
+  await expect(page.getByText('Do not render this context.')).toHaveCount(0);
+  await page.getByText('Context compacted', { exact: true }).click();
+  await expect(page.getByText('Compaction checkpoint')).toBeVisible();
   await page.evaluate(() => {
     const target = document;
     if (!document.querySelector('.agent-nav-handle'))
@@ -1030,7 +1110,9 @@ test('dense mobile session keeps conversation and activity readable', async ({
       { type, timestamp, text },
     );
   await emitMessage('message.started', 123, 'Live dashboard message');
-  await expect(page.getByText('Live dashboard message')).toHaveCount(1);
+  await expect(
+    page.locator('.message-bubble').getByText('Live dashboard message'),
+  ).toHaveCount(1);
   // Reload while the authenticated stream is active; the session baseline and
   // transcript projection must hydrate without relying on the old page state.
   await page.reload();
@@ -1046,7 +1128,9 @@ test('dense mobile session keeps conversation and activity readable', async ({
     )
     .toBe(true);
   await emitMessage('message.finished', 123, 'Live dashboard message');
-  await expect(page.getByText('Live dashboard message')).toHaveCount(1);
+  await expect(
+    page.locator('.message-bubble').getByText('Live dashboard message'),
+  ).toHaveCount(1);
   await page.evaluate(() => {
     (
       window as unknown as {
@@ -1061,10 +1145,14 @@ test('dense mobile session keeps conversation and activity readable', async ({
     });
   });
   await emitMessage('message.started', 321, 'Delta during settled turn');
-  await expect(page.getByText('Delta during settled turn')).toBeVisible();
+  await expect(
+    page.locator('.message-bubble').getByText('Delta during settled turn'),
+  ).toBeVisible();
   await page.evaluate(() => window.scrollBy(0, -400));
   await emitMessage('message.started', 456, 'Message while reading history');
-  await expect(page.getByText('Message while reading history')).toHaveCount(1);
+  await expect(
+    page.locator('.message-bubble').getByText('Message while reading history'),
+  ).toHaveCount(1);
   await expect
     .poll(() =>
       page.evaluate(

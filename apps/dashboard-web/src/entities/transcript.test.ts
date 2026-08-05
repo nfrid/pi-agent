@@ -14,6 +14,7 @@ import {
   activityGroupSummary,
   activityStepParts,
   buildTranscriptGroupCoverage,
+  buildTranscriptLandmarks,
   buildVirtualTranscriptRows,
   displayActivityPath,
   preserveVirtualScrollOffset,
@@ -22,6 +23,29 @@ import {
 } from './transcript';
 
 describe('activity row views and virtual transcript construction', () => {
+  it('keeps rich outline preview text and message timestamps', () => {
+    const text =
+      `Outline detail ${'with more useful context '.repeat(8)}`.trim();
+    const [item] = toTranscriptEntries([
+      {
+        type: 'message',
+        message: {
+          role: 'user',
+          content: text,
+          timestamp: '2026-08-05T18:42:00.000Z',
+        },
+      },
+    ]);
+    expect(item).toBeDefined();
+    const [landmark] = buildTranscriptLandmarks(item ? [item] : []);
+    expect(landmark).toMatchObject({
+      kind: 'user',
+      label: text,
+      timestamp: '2026-08-05T18:42:00.000Z',
+    });
+    expect(landmark?.label.length).toBeGreaterThan(72);
+  });
+
   it('separates tool names from their high-signal arguments', () => {
     expect(
       activityStepParts({
@@ -211,6 +235,86 @@ describe('activity row views and virtual transcript construction', () => {
     ).toEqual([]);
   });
 
+  it('projects semantic session events and hides extension persistence noise', () => {
+    const todo = (status: string) => ({
+      type: 'custom',
+      customType: 'lean-todo',
+      data: {
+        kind: 'snapshot',
+        state: {
+          tasks: [{ id: 'T1', text: 'Verify dashboard', status }],
+        },
+      },
+    });
+    const items = toTranscriptEntries([
+      { type: 'model_change', provider: 'openai', modelId: 'initial' },
+      todo('todo'),
+      todo('todo'),
+      todo('doing'),
+      {
+        type: 'custom_message',
+        customType: 'lean-todo-turn-snapshot',
+        display: false,
+        content: 'Todo state injected',
+      },
+      {
+        type: 'compaction',
+        summary: '## Goal\nKeep the dashboard compact.',
+        tokensBefore: 232_000,
+      },
+      {
+        type: 'message',
+        message: { role: 'user', content: 'Continue.' },
+      },
+      { type: 'model_change', provider: 'openai', modelId: 'gpt-5.6-sol' },
+      { type: 'thinking_level_change', thinkingLevel: 'medium' },
+      {
+        type: 'custom_message',
+        customType: 'delegate-job-result',
+        display: true,
+        content: '# Background delegate job dj-1 (UX audit) success',
+        details: { jobs: [{ name: 'UX audit', state: 'success' }] },
+      },
+      {
+        type: 'custom',
+        customType: 'artifact:v1',
+        data: { bytes: 12 },
+      },
+      {
+        type: 'custom_message',
+        customType: 'extension-note',
+        display: true,
+        content: 'Visible extension note',
+      },
+    ]);
+    expect(
+      items.flatMap((item) => (item.event ? [item.event.kind] : [])),
+    ).toEqual([
+      'todo',
+      'todo',
+      'compaction',
+      'settings',
+      'delegate-result',
+      'custom-message',
+    ]);
+    expect(
+      items.find((item) => item.event?.kind === 'todo')?.event,
+    ).toMatchObject({
+      label: 'Tasks · T1 added · 1 waiting',
+    });
+    expect(
+      items.find((item) => item.event?.kind === 'settings')?.event,
+    ).toMatchObject({
+      label: 'Model → openai/gpt-5.6-sol · thinking medium',
+    });
+    expect(
+      items.find((item) => item.event?.kind === 'delegate-result')?.event,
+    ).toMatchObject({
+      label: 'Delegate finished · UX audit',
+      status: 'success',
+    });
+  });
+
   it('projects uncompleted assistant tool calls as pending activity', () => {
     const [item] = toTranscriptEntries([
       {
@@ -355,7 +459,12 @@ describe('activity row views and virtual transcript construction', () => {
         tool: { toolCallId: 'call-live', name: 'read', status: 'pending' },
       },
       { type: 'session_info', id: 'metadata' },
-      { type: 'custom_message', text: 'keep boundary' },
+      {
+        type: 'custom_message',
+        customType: 'notice',
+        display: true,
+        content: 'keep boundary',
+      },
     ]);
     const assistant = items.find(({ entry }) => entry.kind === 'assistant');
     expect(assistant?.entry).toMatchObject({

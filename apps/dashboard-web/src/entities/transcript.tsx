@@ -1223,6 +1223,97 @@ function ThinkingBlobs({ thinking }: { thinking: readonly string[] }) {
   );
 }
 
+function compactTokenCount(tokens: number): string {
+  return new Intl.NumberFormat('en', {
+    notation: 'compact',
+    maximumFractionDigits: 0,
+  }).format(tokens);
+}
+
+function TranscriptEventEntry({
+  event,
+}: {
+  event: NonNullable<import('../transcript').TranscriptModelItem['event']>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const failed =
+    (event.kind === 'delegate-result' || event.kind === 'background-result') &&
+    event.status === 'error';
+  const icon =
+    event.kind === 'compaction' || event.kind === 'branch-summary'
+      ? '◇'
+      : event.kind === 'todo'
+        ? '◆'
+        : event.kind === 'settings'
+          ? '◈'
+          : failed
+            ? '×'
+            : '✓';
+  const metric =
+    event.kind === 'compaction' && event.tokensBefore !== undefined
+      ? `${compactTokenCount(event.tokensBefore)} tokens`
+      : undefined;
+  const details = expanded ? (
+    event.kind === 'compaction' || event.kind === 'branch-summary' ? (
+      <div className="session-event-details">
+        <Markdown>{event.summary}</Markdown>
+      </div>
+    ) : event.kind === 'todo' ? (
+      <ul className="session-event-tasks">
+        {event.tasks.map((task) => (
+          <li className="session-event-task" key={task.id}>
+            <span>{task.id}</span>
+            <strong>{task.text}</strong>
+            <small>{task.status}</small>
+          </li>
+        ))}
+      </ul>
+    ) : event.kind === 'delegate-result' ||
+      event.kind === 'background-result' ||
+      event.kind === 'custom-message' ? (
+      event.content ? (
+        <div className="session-event-details">
+          <Markdown>{event.content}</Markdown>
+        </div>
+      ) : null
+    ) : null
+  ) : null;
+  const hasDetails =
+    event.kind === 'compaction' ||
+    event.kind === 'branch-summary' ||
+    event.kind === 'todo' ||
+    ((event.kind === 'delegate-result' ||
+      event.kind === 'background-result' ||
+      event.kind === 'custom-message') &&
+      Boolean(event.content));
+  const className = `session-event event-${event.kind}${failed ? ' event-failed' : ''}`;
+  const heading = (
+    <>
+      <span className="session-event-icon" aria-hidden="true">
+        {icon}
+      </span>
+      <strong>{event.label}</strong>
+      {metric ? <small>{metric}</small> : null}
+    </>
+  );
+  return hasDetails ? (
+    <details
+      className={className}
+      onToggle={(toggleEvent) => setExpanded(toggleEvent.currentTarget.open)}
+    >
+      <summary>
+        {heading}
+        <span className="session-event-disclosure" aria-hidden="true">
+          ›
+        </span>
+      </summary>
+      {details}
+    </details>
+  ) : (
+    <div className={className}>{heading}</div>
+  );
+}
+
 function TranscriptEntry({
   item,
   cwd,
@@ -1230,6 +1321,7 @@ function TranscriptEntry({
   item: import('../transcript').TranscriptModelItem;
   cwd?: string;
 }) {
+  if (item.event) return <TranscriptEventEntry event={item.event} />;
   if (item.preparing)
     return (
       <div className="transcript-entry preparing-toolcall" role="status">

@@ -4144,6 +4144,108 @@ body:has(.session-page) .global-tools > .palette-trigger {
   gap: 5px;
 }
 
+.session-event {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 7px;
+  margin: 6px 0;
+  border-left: 1px solid var(--dim);
+  background: color-mix(in srgb, var(--bg-alt) 34%, transparent);
+  padding: 5px 9px;
+  color: var(--dim);
+  font-size: 10px;
+}
+details.session-event {
+  display: block;
+  padding: 0;
+}
+.session-event > summary {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  cursor: pointer;
+  list-style: none;
+}
+.session-event > summary::-webkit-details-marker {
+  display: none;
+}
+.session-event-icon {
+  color: var(--purple);
+  font-size: 11px;
+}
+.session-event strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-event small {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.session-event-disclosure {
+  color: var(--dim);
+  font-size: 13px;
+  transition: transform 120ms ease;
+}
+.session-event[open] .session-event-disclosure {
+  transform: rotate(90deg);
+}
+.session-event.event-delegate-result,
+.session-event.event-background-result {
+  border-left-color: var(--green);
+}
+.session-event.event-delegate-result .session-event-icon,
+.session-event.event-background-result .session-event-icon {
+  color: var(--green);
+}
+.session-event.event-failed {
+  border-left-color: var(--red);
+}
+.session-event.event-failed .session-event-icon {
+  color: var(--red);
+}
+.session-event-details {
+  max-height: min(52vh, 440px);
+  overflow: auto;
+  border-top: 1px solid var(--line-soft);
+  padding: 9px 12px 11px 27px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.session-event-details > .markdown > :first-child {
+  margin-top: 0;
+}
+.session-event-details > .markdown > :last-child {
+  margin-bottom: 0;
+}
+.session-event-tasks {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  border-top: 1px solid var(--line-soft);
+  padding: 8px 10px 9px 27px;
+  list-style: none;
+}
+.session-event-task {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 7px;
+}
+.session-event-task > span {
+  color: var(--purple);
+}
+.session-event-task > small {
+  color: var(--dim);
+  text-transform: lowercase;
+}
+
 .activity-group {
   --activity-status-color: var(--cyan);
   overflow: hidden;

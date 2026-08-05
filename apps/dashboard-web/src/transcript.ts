@@ -16,6 +16,45 @@ import {
   transcriptToolRecord,
 } from '@pi-dashboard/domain';
 
+export interface TranscriptTodoTask {
+  id: string;
+  text: string;
+  status: string;
+}
+
+export type TranscriptEvent =
+  | {
+      kind: 'compaction' | 'branch-summary';
+      label: string;
+      summary: string;
+      tokensBefore?: number;
+      details?: unknown;
+    }
+  | {
+      kind: 'todo';
+      label: string;
+      tasks: readonly TranscriptTodoTask[];
+    }
+  | {
+      kind: 'delegate-result' | 'background-result';
+      label: string;
+      status: 'success' | 'error';
+      content?: string;
+      details?: unknown;
+    }
+  | {
+      kind: 'settings';
+      label: string;
+      model?: string;
+      thinkingLevel?: string;
+    }
+  | {
+      kind: 'custom-message';
+      label: string;
+      content?: string;
+      details?: unknown;
+    };
+
 export interface TranscriptModelItem {
   key: string;
   entry: ActivityTranscriptEntry;
@@ -24,6 +63,7 @@ export interface TranscriptModelItem {
   thinking?: readonly string[];
   role?: 'user' | 'assistant';
   imageCount?: number;
+  event?: TranscriptEvent;
   /** Canonical domain tool semantics used by the inspector presentation. */
   tool?: TranscriptRenderToolItem;
   /** Live assistant text whose final answer/tool-call intent is not known yet. */
@@ -47,9 +87,10 @@ function isTranscriptProjection(
 
 function renderItems(input: TranscriptInput): readonly TranscriptRenderItem[] {
   const projected = isTranscriptProjection(input)
-    ? projectTranscriptForRender(input).items
+    ? projectTranscriptForRender(input, { includeSessionEvents: true }).items
     : projectTranscriptForRender(
         hydrateTranscript(input, undefined, { fallbackEntryIds: true }),
+        { includeSessionEvents: true },
       ).items;
   // Historical raw-entry adaptation used a nested React key for an embedded
   // tool call. Keep that presentation key while taking the association itself
@@ -64,6 +105,26 @@ function renderItems(input: TranscriptInput): readonly TranscriptRenderItem[] {
       ? { ...item, key: toolKeys.get(item.toolCallId) ?? item.key }
       : item,
   );
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function stringField(
+  value: Record<string, unknown> | undefined,
+  key: string,
+): string | undefined {
+  return typeof value?.[key] === 'string' ? value[key] : undefined;
+}
+
+function numberField(
+  value: Record<string, unknown> | undefined,
+  key: string,
+): number | undefined {
+  return typeof value?.[key] === 'number' ? value[key] : undefined;
 }
 
 function contentText(value: unknown): string {
@@ -115,6 +176,117 @@ function messageImageCount(content: unknown): number {
     : 0;
 }
 
+function todoSnapshot(
+  raw: Record<string, unknown>,
+): TranscriptTodoTask[] | undefined {
+  if (raw.type !== 'custom' || raw.customType !== 'lean-todo') return undefined;
+  const state = record(record(raw.data)?.state);
+  if (!state || !Array.isArray(state.tasks)) return undefined;
+  return state.tasks.flatMap((value) => {
+    const task = record(value);
+    const id = stringField(task, 'id');
+    const text = stringField(task, 'text');
+    const status = stringField(task, 'status');
+    return id && text && status ? [{ id, text, status }] : [];
+  });
+}
+
+function todoStatusVerb(status: string): string {
+  if (status === 'doing') return 'started';
+  if (status === 'done') return 'completed';
+  if (status === 'blocked') return 'blocked';
+  if (status === 'dropped') return 'dropped';
+  return 'queued';
+}
+
+function todoEvent(
+  previous: readonly TranscriptTodoTask[] | undefined,
+  tasks: readonly TranscriptTodoTask[],
+): Extract<TranscriptEvent, { kind: 'todo' }> | undefined {
+  if (!previous && tasks.length === 0) return undefined;
+  const prior = new Map((previous ?? []).map((task) => [task.id, task]));
+  const next = new Map(tasks.map((task) => [task.id, task]));
+  const changes: string[] = [];
+  for (const task of tasks) {
+    const old = prior.get(task.id);
+    if (!old) changes.push(`${task.id} added`);
+    else if (old.status !== task.status)
+      changes.push(`${task.id} ${todoStatusVerb(task.status)}`);
+  }
+  for (const task of previous ?? [])
+    if (!next.has(task.id)) changes.push(`${task.id} removed`);
+  if (changes.length === 0) return undefined;
+  const waiting = tasks.filter((task) => task.status === 'todo').length;
+  const active = tasks.filter((task) => task.status === 'doing').length;
+  const blocked = tasks.filter((task) => task.status === 'blocked').length;
+  const tail = [
+    active ? `${active} active` : undefined,
+    waiting ? `${waiting} waiting` : undefined,
+    blocked ? `${blocked} blocked` : undefined,
+  ].filter((part): part is string => Boolean(part));
+  const visibleChanges = changes.slice(0, 2);
+  if (changes.length > visibleChanges.length)
+    visibleChanges.push(`+${changes.length - visibleChanges.length} changes`);
+  return {
+    kind: 'todo',
+    label: ['Tasks', ...visibleChanges, ...tail].join(' · '),
+    tasks,
+  };
+}
+
+function asyncResultEvent(
+  raw: Record<string, unknown>,
+):
+  | Extract<TranscriptEvent, { kind: 'delegate-result' | 'background-result' }>
+  | undefined {
+  if (raw.type !== 'custom_message' || raw.display !== true) return undefined;
+  const customType = stringField(raw, 'customType');
+  const content = contentText(raw.content).trim();
+  const details = record(raw.details);
+  if (customType === 'delegate-job-result') {
+    const jobs = Array.isArray(details?.jobs)
+      ? details.jobs.flatMap((value) => {
+          const job = record(value);
+          return job ? [job] : [];
+        })
+      : [];
+    const match = content.match(
+      /^# Background delegate job \S+(?: \(([^)]+)\))? (success|error)/u,
+    );
+    const name = match?.[1] ?? stringField(jobs[0], 'name');
+    const status =
+      match?.[2] === 'error' || jobs.some((job) => job.state === 'error')
+        ? 'error'
+        : 'success';
+    const subject =
+      jobs.length > 1 ? `${jobs.length} delegate jobs` : (name ?? 'Delegate');
+    return {
+      kind: 'delegate-result',
+      label: `${status === 'error' ? 'Delegate failed' : 'Delegate finished'} · ${subject}`,
+      status,
+      ...(content ? { content } : {}),
+      ...(details ? { details } : {}),
+    };
+  }
+  if (customType === 'background-terminal-result') {
+    const status =
+      details?.status === 'failed' ||
+      (typeof details?.exitCode === 'number' && details.exitCode !== 0)
+        ? 'error'
+        : 'success';
+    const title = stringField(details, 'title') ?? 'Background command';
+    const duration = numberField(details, 'duration');
+    return {
+      kind: 'background-result',
+      label: `${status === 'error' ? 'Background command failed' : 'Background command finished'} · ${title}${duration === undefined ? '' : ` · ${Math.max(0, Math.round(duration / 1000))}s`}`,
+      status,
+      ...(content ? { content } : {}),
+      ...(details ? { details } : {}),
+    };
+  }
+  return undefined;
+}
+
 function messageRaw(item: Extract<TranscriptRenderItem, { kind: 'message' }>) {
   return {
     type: 'message',
@@ -157,11 +329,126 @@ export function toTranscriptEntries(
   input: TranscriptInput,
 ): TranscriptModelItem[] {
   const result: TranscriptModelItem[] = [];
+  let previousTodo: readonly TranscriptTodoTask[] | undefined;
+  let hasConversation = false;
   for (const item of renderItems(input)) {
     if (item.kind === 'other') {
+      const raw = record(item.raw);
+      if (!raw) {
+        result.push({ key: item.key, entry: { kind: 'other' }, raw: item.raw });
+        continue;
+      }
+      const tasks = todoSnapshot(raw);
+      if (tasks) {
+        const event = todoEvent(previousTodo, tasks);
+        previousTodo = tasks;
+        if (event)
+          result.push({
+            key: item.key,
+            entry: { kind: 'other' },
+            raw: item.raw,
+            event,
+          });
+        continue;
+      }
+      if (raw.type === 'custom') continue;
+      if (raw.type === 'compaction' || raw.type === 'branch_summary') {
+        const summary = stringField(raw, 'summary');
+        if (!summary) continue;
+        const isBranch = raw.type === 'branch_summary';
+        result.push({
+          key: item.key,
+          entry: { kind: 'other' },
+          raw: item.raw,
+          event: {
+            kind: isBranch ? 'branch-summary' : 'compaction',
+            label: isBranch ? 'Branch context summarized' : 'Context compacted',
+            summary,
+            ...(isBranch
+              ? {}
+              : numberField(raw, 'tokensBefore') === undefined
+                ? {}
+                : { tokensBefore: numberField(raw, 'tokensBefore') }),
+            ...(raw.details === undefined ? {} : { details: raw.details }),
+          },
+        });
+        continue;
+      }
+      if (raw.type === 'model_change' || raw.type === 'thinking_level_change') {
+        if (!hasConversation) continue;
+        const prior = result.at(-1);
+        const current =
+          prior?.event?.kind === 'settings' ? prior.event : undefined;
+        const model =
+          raw.type === 'model_change'
+            ? [stringField(raw, 'provider'), stringField(raw, 'modelId')]
+                .filter(Boolean)
+                .join('/')
+            : current?.model;
+        const thinkingLevel =
+          raw.type === 'thinking_level_change'
+            ? stringField(raw, 'thinkingLevel')
+            : current?.thinkingLevel;
+        const label = [
+          model ? `Model → ${model}` : undefined,
+          thinkingLevel ? `thinking ${thinkingLevel}` : undefined,
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        if (!label) continue;
+        const event: Extract<TranscriptEvent, { kind: 'settings' }> = {
+          kind: 'settings',
+          label,
+          ...(model ? { model } : {}),
+          ...(thinkingLevel ? { thinkingLevel } : {}),
+        };
+        if (prior && current) prior.event = event;
+        else
+          result.push({
+            key: item.key,
+            entry: { kind: 'other' },
+            raw: item.raw,
+            event,
+          });
+        continue;
+      }
+      if (raw.type === 'custom_message') {
+        const asyncEvent = asyncResultEvent(raw);
+        if (asyncEvent) {
+          result.push({
+            key: item.key,
+            entry: { kind: 'other' },
+            raw: item.raw,
+            event: asyncEvent,
+          });
+          continue;
+        }
+        if (raw.display !== true) continue;
+        const customType = stringField(raw, 'customType') ?? 'extension';
+        const content = contentText(raw.content).trim();
+        result.push({
+          key: item.key,
+          entry: { kind: 'other' },
+          raw: item.raw,
+          event: {
+            kind: 'custom-message',
+            label: customType.replaceAll('-', ' '),
+            ...(content ? { content } : {}),
+            ...(raw.details === undefined ? {} : { details: raw.details }),
+          },
+        });
+        continue;
+      }
+      if (
+        raw.type === 'session' ||
+        raw.type === 'session_info' ||
+        raw.type === 'label'
+      )
+        continue;
       result.push({ key: item.key, entry: { kind: 'other' }, raw: item.raw });
       continue;
     }
+    hasConversation = true;
     if (item.kind === 'tool') {
       result.push({
         key: item.key,

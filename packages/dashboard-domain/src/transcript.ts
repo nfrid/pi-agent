@@ -878,7 +878,10 @@ function renderToolStatus(
  */
 export function projectTranscriptForRender(
   projection: TranscriptProjection,
-  options: { includePendingEmbeddedToolCalls?: boolean } = {},
+  options: {
+    includePendingEmbeddedToolCalls?: boolean;
+    includeSessionEvents?: boolean;
+  } = {},
 ): TranscriptRenderProjection {
   const includePendingEmbeddedToolCalls =
     options.includePendingEmbeddedToolCalls !== false;
@@ -889,7 +892,7 @@ export function projectTranscriptForRender(
     const item = projection.items[id];
     if (!item) continue;
     if (item.kind === 'other') {
-      if (!isNonRenderedPiEntry(item.raw))
+      if (options.includeSessionEvents || !isNonRenderedPiEntry(item.raw))
         items.push({ kind: 'other', key: item.id, id: item.id, raw: item.raw });
       continue;
     }
