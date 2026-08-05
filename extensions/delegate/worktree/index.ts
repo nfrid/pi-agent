@@ -1,11 +1,11 @@
 /**
  * Seamless git worktrees for parallel delegated work.
  *
- * A writable delegate gets its own checkout on a real named branch. Setup needs
- * no per-repo hooks: dependencies are linked, gitignored essentials are copied,
- * and the parent's uncommitted work is carried in by default. When the run ends
- * the branch holds the work, and the orchestrator integrates it with ordinary
- * git rather than a bespoke patch protocol.
+ * A writable delegate gets its own checkout on a real named branch. Git's native
+ * checkout/setup hooks prepare each child when configured, and the parent's
+ * uncommitted work is carried in by default. When the run ends the branch holds
+ * the work, and the orchestrator integrates it with ordinary git rather than a
+ * bespoke patch protocol.
  */
 export {
   attachWorktreeSession,

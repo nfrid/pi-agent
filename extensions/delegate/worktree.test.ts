@@ -1,21 +1,13 @@
-import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   lstatSync,
-  mkdirSync,
   readFileSync,
-  readlinkSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, test } from 'vitest';
-import {
-  carriedWipPackage,
-  createCarriedWipPackage,
-  git,
-  repository,
-} from './test/worktree-fixture';
+import { configureNativeHooks, git, repository } from './test/worktree-fixture';
 import { continuationRecoveryNote, createRun } from './types';
 import {
   attachWorktreeSession,
@@ -24,12 +16,13 @@ import {
   listWorktrees,
   loadWorktree,
   prepareWorktree,
+  rehydrateWorktreeSession,
   removeWorktree,
   restoreWorktreeSession,
   retireWorktreeSnapshot,
   worktreeSummary,
 } from './worktree';
-import { snapshotFilesDir, writeWorktreeRecord } from './worktree/records';
+import { writeWorktreeRecord } from './worktree/records';
 import { finalizeWorktreeRun } from './worktree-lifecycle';
 
 async function prepared(
@@ -67,22 +60,39 @@ describe('worktree preparation', () => {
     expect(second.record.worktreePath).not.toBe(first.record.worktreePath);
   });
 
-  test('sets the worktree up without per-repo hooks', async () => {
+  test('honors a custom core.hooksPath and creates child-local setup', async () => {
+    configureNativeHooks();
     const worktree = await prepared();
-    const root = worktree.record.worktreePath;
-    // Dependencies are linked rather than reinstalled...
-    expect(lstatSync(path.join(root, 'node_modules')).isSymbolicLink()).toBe(
-      true,
+    const child = worktree.record.worktreePath;
+
+    expect(
+      readFileSync(
+        path.join(child, '.delegate-setup', 'worktree-path'),
+        'utf8',
+      ),
+    ).toBe(`${child}\n`);
+    expect(lstatSync(path.join(child, 'node_modules')).isSymbolicLink()).toBe(
+      false,
     );
     expect(
-      existsSync(path.join(root, 'node_modules', 'fixture', 'index.js')),
+      existsSync(path.join(child, 'node_modules', 'hook-local', 'README')),
     ).toBe(true);
-    expect(worktree.record.dependencyLinks).toContain('node_modules');
-    // ...and gitignored essentials git would never provide are copied in.
-    expect(readFileSync(path.join(root, '.env'), 'utf8')).toBe(
-      'SECRET=local\n',
+    expect(existsSync(path.join(child, '.delegate-build', 'cache.txt'))).toBe(
+      true,
     );
-    expect(worktree.record.carriedFiles).toContain('.env');
+    expect(existsSync(path.join(child, '.env'))).toBe(false);
+    expect(worktree.record).not.toHaveProperty('dependencyLinks');
+    expect(worktree.record).not.toHaveProperty('carriedFiles');
+  });
+
+  test('hookless worktrees receive no implicit dependency or environment setup', async () => {
+    const worktree = await prepared();
+    const child = worktree.record.worktreePath;
+    expect(existsSync(path.join(child, 'node_modules'))).toBe(false);
+    expect(existsSync(path.join(child, '.env'))).toBe(false);
+    const summary = worktreeSummary(worktree.record);
+    expect(summary).not.toHaveProperty('dependencyLinkCount');
+    expect(summary).not.toHaveProperty('carriedFileCount');
   });
 
   test('keeps the worktree directory out of git status', async () => {
@@ -118,85 +128,111 @@ describe('worktree preparation', () => {
     ).toBe('one\n');
   });
 
-  test('links dependencies for carried WIP packages without leaking them into HEAD', async () => {
-    createCarriedWipPackage();
-    const wip = await prepared({ name: 'Check carried package' });
-    const head = await prepared({ name: 'Check HEAD package', base: 'head' });
-    const dependencyLink = path.join(carriedWipPackage, 'node_modules');
-    const wipPackage = path.join(wip.record.worktreePath, carriedWipPackage);
-    const headPackage = path.join(head.record.worktreePath, carriedWipPackage);
+  test('isolates setup outputs across concurrent sibling worktrees', async () => {
+    configureNativeHooks();
+    const first = await prepared({ name: 'Sibling setup one' });
+    const second = await prepared({ name: 'Sibling setup two' });
+    const firstSetup = path.join(first.record.worktreePath, '.delegate-setup');
 
-    expect(wip.record.dependencyLinks).toContain(dependencyLink);
-    expect(
-      lstatSync(path.join(wipPackage, 'node_modules')).isSymbolicLink(),
-    ).toBe(true);
-    expect(readlinkSync(path.join(wipPackage, 'node_modules'))).toBe(
-      path.join(repository, dependencyLink),
+    expect(readFileSync(path.join(firstSetup, 'worktree-path'), 'utf8')).toBe(
+      `${first.record.worktreePath}\n`,
     );
     expect(
-      execFileSync(path.join(wipPackage, 'node_modules', '.bin', 'wip-check'), {
-        encoding: 'utf8',
-      }).trim(),
-    ).toBe('dependency available');
-    expect(existsSync(path.join(headPackage, 'package.json'))).toBe(false);
-    expect(head.record.dependencyLinks).not.toContain(dependencyLink);
-    expect(existsSync(path.join(headPackage, 'node_modules'))).toBe(false);
-
-    writeFileSync(
-      path.join(wipPackage, 'src', 'value.ts'),
-      'export const value = 2;\n',
-    );
-    const record = await finishWorktree(wip.record.id, {
-      taskName: 'Check carried package',
-      outcome: 'success',
+      readFileSync(
+        path.join(
+          second.record.worktreePath,
+          '.delegate-setup',
+          'worktree-path',
+        ),
+        'utf8',
+      ),
+    ).toBe(`${second.record.worktreePath}\n`);
+    rmSync(path.join(first.record.worktreePath, 'node_modules'), {
+      recursive: true,
+      force: true,
     });
+    rmSync(firstSetup, { recursive: true, force: true });
     expect(
-      git(repository, [
-        'log',
-        '--format=',
-        '--name-only',
-        `${record.baseHead}..${record.headCommit}`,
-      ]),
-    ).not.toContain(dependencyLink);
-
-    await removeWorktree(wip.record.id);
-    expect(existsSync(path.join(wipPackage, 'node_modules'))).toBe(false);
+      existsSync(
+        path.join(
+          second.record.worktreePath,
+          'node_modules',
+          'hook-local',
+          'README',
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      existsSync(path.join(repository, 'node_modules', 'fixture', 'index.js')),
+    ).toBe(true);
   });
 
-  test('exposes only bounded lifecycle metadata in worktree summaries', async () => {
-    createCarriedWipPackage();
+  test('exposes source snapshot metadata without setup projections', async () => {
     const worktree = await prepared({ name: 'Bounded summary' });
     const summary = worktreeSummary(worktree.record);
 
-    expect(summary).toMatchObject({
-      snapshotBase: 'wip',
-      carriedFileCount: expect.any(Number),
-      dependencyProjectionCandidateCount: expect.any(Number),
-      dependencyLinkCount: expect.any(Number),
-    });
-    expect(summary.dependencyProjectionCandidateCount).toBeGreaterThan(0);
-    expect(summary.dependencyLinkCount).toBeGreaterThan(0);
+    expect(summary).toMatchObject({ snapshotBase: 'wip' });
     expect(Object.keys(summary)).not.toContain('carriedFiles');
     expect(Object.keys(summary)).not.toContain('dependencyLinks');
+    expect(Object.keys(summary)).not.toContain('dependencyLinkCount');
+    expect(Object.keys(summary)).not.toContain('carriedFileCount');
   });
 
-  test('skips missing parent dependencies without installing them', async () => {
-    const packageDirectory = path.join('packages', 'without-dependencies');
-    mkdirSync(path.join(repository, packageDirectory), { recursive: true });
+  test('does not put ignored hook setup into delegate commits', async () => {
+    configureNativeHooks();
+    const worktree = await prepared({ name: 'Ignored setup commit' });
     writeFileSync(
-      path.join(repository, packageDirectory, 'package.json'),
-      '{"name":"without-dependencies","private":true}\n',
+      path.join(worktree.record.worktreePath, 'src', 'delegated.txt'),
+      'work\n',
     );
-    git(repository, ['add', packageDirectory]);
-    git(repository, ['commit', '-qm', 'add package without dependencies']);
+    const record = await finishWorktree(worktree.record.id, {
+      taskName: 'Ignored setup commit',
+      outcome: 'success',
+    });
+    const committedPaths = git(repository, [
+      'log',
+      '--format=',
+      '--name-only',
+      `${record.baseHead}..${record.headCommit}`,
+    ]);
+    expect(committedPaths).toContain('src/delegated.txt');
+    expect(committedPaths).not.toContain('.delegate-setup');
+    expect(committedPaths).not.toContain('.delegate-build');
+    expect(committedPaths).not.toContain('node_modules');
+  });
 
-    const worktree = await prepared({ name: 'No dependency install' });
-    const dependencyLink = path.join(packageDirectory, 'node_modules');
-    expect(worktree.record.dependencyLinks).not.toContain(dependencyLink);
+  test('reports bounded setup failure and removes its partial worktree and branch', async () => {
+    configureNativeHooks({ failCheckout: true });
+    const preparation = await prepareWorktree({
+      cwd: repository,
+      name: 'Failing setup',
+    });
+    expect(preparation.worktree).toBeUndefined();
+    expect(preparation.fallbackReason).toMatch(/checkout\/setup hooks|hook/i);
+    expect(preparation.fallbackReason?.length).toBeLessThan(3_000);
     expect(
-      existsSync(path.join(worktree.record.worktreePath, dependencyLink)),
+      existsSync(path.join(repository, '.worktrees', 'failing-setup')),
     ).toBe(false);
-    expect(existsSync(path.join(repository, dependencyLink))).toBe(false);
+    expect(
+      git(repository, ['branch', '--list', 'pi/failing-setup']).trim(),
+    ).toBe('');
+    expect(git(repository, ['worktree', 'list'])).not.toContain('.worktrees');
+  });
+
+  test('suppresses hooks for synthetic WIP and finish commits', async () => {
+    configureNativeHooks({ failCommit: true });
+    writeFileSync(path.join(repository, 'src', 'parent-wip.txt'), 'parent\n');
+    const worktree = await prepared({ name: 'Suppressed synthetic commits' });
+    writeFileSync(
+      path.join(worktree.record.worktreePath, 'src', 'delegated.txt'),
+      'work\n',
+    );
+    const record = await finishWorktree(worktree.record.id, {
+      taskName: 'Suppressed synthetic commits',
+      outcome: 'success',
+    });
+    expect(record.carriedWip).toBe(true);
+    expect(record.changedPaths).toEqual(['src/delegated.txt']);
   });
 
   test('reports setup failure outside a repository', async () => {
@@ -239,8 +275,8 @@ describe('finishing a worktree', () => {
     expect(record.runOutcome).toBeUndefined();
     expect(record.changedPaths).toEqual(['src/value.txt']);
     expect(record.headCommit).not.toBe(record.baseHead);
-    // Nothing tracked is left pending; the injected node_modules symlink stays
-    // untracked on purpose so it never reaches the parent.
+    // Nothing tracked is left pending; ignored native setup stays local and
+    // never reaches the parent.
     expect(
       git(worktree.record.worktreePath, [
         'status',
@@ -381,6 +417,33 @@ describe('finishing a worktree', () => {
     expect(worktreeSummary(record).hasWork).toBe(false);
   });
 
+  test('rehydrates a snapshot by rerunning native setup hooks', async () => {
+    configureNativeHooks();
+    const worktree = await prepared({ name: 'Hooked snapshot' });
+    const child = worktree.record.worktreePath;
+    expect(
+      existsSync(path.join(child, '.delegate-setup', 'worktree-path')),
+    ).toBe(true);
+    await retireWorktreeSnapshot(worktree.record.id);
+    expect(existsSync(child)).toBe(false);
+    expect(existsSync(path.join(child, '.delegate-setup'))).toBe(false);
+
+    const rehydrated = await rehydrateWorktreeSession(
+      worktree.record,
+      'snapshot-token',
+    );
+    expect(rehydrated.record.snapshot).toBeUndefined();
+    expect(
+      readFileSync(
+        path.join(child, '.delegate-setup', 'worktree-path'),
+        'utf8',
+      ),
+    ).toBe(`${child}\n`);
+    expect(lstatSync(path.join(child, 'node_modules')).isSymbolicLink()).toBe(
+      false,
+    );
+  });
+
   test('retires a successful clean read-only run as a resumable snapshot', async () => {
     writeFileSync(path.join(repository, 'src', 'value.txt'), 'parent WIP\n');
     const worktree = await prepared({ name: 'Snapshot review' });
@@ -444,12 +507,10 @@ describe('cleaning up', () => {
       outcome: 'success',
     });
     await retireWorktreeSnapshot(worktree.record.id);
-    expect(existsSync(snapshotFilesDir(worktree.record.id))).toBe(true);
     git(repository, ['branch', '-D', worktree.record.branch]);
 
     await removeWorktree(worktree.record.id, { deleteBranch: true });
     expect(loadWorktree(worktree.record.id)).toBeUndefined();
-    expect(existsSync(snapshotFilesDir(worktree.record.id))).toBe(false);
   });
 
   test('discarding an unstarted worktree takes the branch too', async () => {

@@ -292,9 +292,7 @@ describe('delegate task lifecycle', () => {
     expect(readFileSync(path.join(same.cwd, 'src', 'value.txt'), 'utf8')).toBe(
       'original WIP\n',
     );
-    expect(readFileSync(path.join(same.cwd, '.env'), 'utf8')).toBe(
-      'SECRET=local\n',
-    );
+    expect(existsSync(path.join(same.cwd, '.env'))).toBe(false);
     const sameCompleted = createRun('same snapshot review', undefined, {
       allowWrites: false,
     });
