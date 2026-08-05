@@ -3,15 +3,12 @@ import {
   dashboardHttpClient,
   workspaceRefreshMutationOptions,
 } from '@pi-dashboard/client';
-import type {
-  BrowserSnapshot,
-  RuntimeSnapshot,
-  WorkspaceTarget,
-} from '@pi-dashboard/protocol';
+import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { workspaceForPath } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { sessionDisplayTitle } from '../app-helpers';
 import { useDashboardNavigate } from '../routes/navigation';
+import { AgentThreadNav } from './agent-thread-nav';
 import { SessionRow } from './workspace-session';
 
 function WorkspaceRefresh({
@@ -52,6 +49,7 @@ function WorkspaceRefresh({
   );
 }
 
+/** Home is intentionally a thread browser, not a dashboard of duplicate cards. */
 export function Dashboard({
   snapshot,
   store,
@@ -61,45 +59,33 @@ export function Dashboard({
   store?: DashboardLiveStore;
 }) {
   const go = useDashboardNavigate();
-  const groups = new Map<
-    string,
-    { workspace: WorkspaceTarget | undefined; runtimes: RuntimeSnapshot[] }
-  >();
-  for (const runtime of snapshot.runtimes) {
-    const workspace = workspaceForPath(runtime.cwd, snapshot.workspaces);
-    const key = workspace?.id ?? 'other';
-    groups.set(key, groups.get(key) ?? { workspace, runtimes: [] });
-    groups.get(key)?.runtimes.push(runtime);
-  }
-  const orderedGroups = [...groups.entries()].sort(([, a], [, b]) => {
-    const active = (group: typeof a) =>
-      group.runtimes.some(
-        (runtime) => runtime.online !== false && runtime.liveState !== 'idle',
-      );
-    return Number(active(b)) - Number(active(a));
-  });
   const onlineCount = snapshot.runtimes.filter(
     (runtime) => runtime.online !== false,
   ).length;
   return (
-    <section>
-      <div className="section-heading page-heading">
+    <section className="dashboard-home">
+      <div className="home-heading">
         <div>
+          <p className="eyebrow">Pi workspace</p>
           <h1>Agents</h1>
-          <p className="muted">Actionable runtimes across your workspaces.</p>
+          <p className="muted">Pick up a thread or start a new agent.</p>
         </div>
-        <div className="section-heading-actions">
+        <div className="home-actions">
           <WorkspaceRefresh snapshot={snapshot} store={store} />
-          <button type="button" onClick={() => go('/new')}>
+          <button
+            type="button"
+            className="new-agent-button"
+            onClick={() => go('/new')}
+          >
             + New agent
           </button>
         </div>
       </div>
-      {!snapshot.runtimes.length && (
+      {!snapshot.runtimes.length && !snapshot.sessions.length && (
         <div className="empty-hero">
           <span className="empty-mark">›_</span>
           <div>
-            <strong>No runtimes are tracked yet.</strong>
+            <strong>No agent threads yet.</strong>
             <p>Start an agent to see its work here.</p>
           </div>
           <button type="button" onClick={() => go('/new')}>
@@ -109,31 +95,11 @@ export function Dashboard({
       )}
       {snapshot.runtimes.length > 0 && onlineCount === 0 && (
         <div className="notice quiet-notice" role="status">
-          No runtimes are connected. Offline and failed runtimes remain below
-          for diagnosis.
+          No runtimes are connected. Offline and failed threads remain below for
+          diagnosis.
         </div>
       )}
-      {orderedGroups.map(([key, group]) => (
-        <div className="workspace-block" key={key}>
-          <div className="workspace-title">
-            <button
-              type="button"
-              onClick={() =>
-                group.workspace && go(`/workspaces/${group.workspace.id}`)
-              }
-            >
-              {group.workspace?.name ?? 'Other runtimes'}
-            </button>
-            <span>
-              {group.runtimes.length} runtime
-              {group.runtimes.length === 1 ? '' : 's'}
-            </span>
-          </div>
-          {group.runtimes.map((runtime) => (
-            <RuntimeCard key={runtime.runtimeId} runtime={runtime} />
-          ))}
-        </div>
-      ))}
+      <AgentThreadNav snapshot={snapshot} />
     </section>
   );
 }
@@ -209,7 +175,11 @@ export function SessionsView({ snapshot }: { snapshot: BrowserSnapshot }) {
   );
 }
 
-export function RuntimeCard({ runtime }: { runtime: RuntimeSnapshot }) {
+export function RuntimeCard({
+  runtime,
+}: {
+  runtime: import('@pi-dashboard/protocol').RuntimeSnapshot;
+}) {
   const go = useDashboardNavigate();
   const status = runtime.online === false ? 'offline' : runtime.liveState;
   const title = sessionDisplayTitle(runtime.session, runtime.session.entries);

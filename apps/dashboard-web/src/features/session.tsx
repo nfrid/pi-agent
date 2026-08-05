@@ -27,11 +27,8 @@ import {
   shouldShowJumpToLatest,
 } from '../app-helpers';
 import { Transcript } from '../entities/transcript';
-import {
-  dashboardSurfacePlacement,
-  ExtensionSurfaceStack,
-  runtimeExtensionSurfaces,
-} from './extension-surfaces';
+import { AgentThreadNav, workspaceNameForSession } from './agent-thread-nav';
+import { ExtensionSurfaceStack } from './extension-surfaces';
 import { PendingInteractions } from './pending-interaction';
 import { RuntimeActions } from './runtime-actions';
 import { SessionRename } from './session-rename';
@@ -46,19 +43,6 @@ type ComposerProps = {
   runtime: RuntimeSnapshot | undefined;
   sessionId: string;
 };
-
-function Back() {
-  const navigate = useNavigate();
-  return (
-    <button
-      type="button"
-      className="back"
-      onClick={() => void navigate({ to: '/' })}
-    >
-      ← Dashboard
-    </button>
-  );
-}
 
 export function SessionView({
   id,
@@ -94,9 +78,13 @@ export function SessionView({
   const [error, setError] = useState<string>();
   const [awayFromLatest, setAwayFromLatest] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [agentNavOpen, setAgentNavOpen] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
   const closeInspector = useCallback(() => setInspectorOpen(false), []);
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const stickToBottomRef = useRef(true);
+  const outlineTriggerRef = useRef<HTMLButtonElement>(null);
+  const outlineWasOpenRef = useRef(false);
   useEffect(() => {
     if (!id) return;
     setError(undefined);
@@ -121,9 +109,20 @@ export function SessionView({
     if (resyncNonce > 0) void query.refetch();
   }, [query.refetch, resyncNonce]);
   useEffect(() => {
+    if (outlineOpen) outlineWasOpenRef.current = true;
+    else if (outlineWasOpenRef.current) {
+      outlineWasOpenRef.current = false;
+      outlineTriggerRef.current?.focus();
+    }
+  }, [outlineOpen]);
+  useEffect(() => {
     // A pending question is a higher-priority modal than the optional
     // inspector; never leave either fixed surface competing for the viewport.
-    if (runtime?.pendingInteractions.length) setInspectorOpen(false);
+    if (runtime?.pendingInteractions.length) {
+      setInspectorOpen(false);
+      setAgentNavOpen(false);
+      setOutlineOpen(false);
+    }
   }, [runtime?.pendingInteractions.length]);
   useEffect(() => {
     void id;
@@ -180,15 +179,23 @@ export function SessionView({
   if (!data || !projection)
     return (
       <section>
-        <Back />
         <p>{error ?? 'Loading session…'}</p>
       </section>
     );
   const runtimeError = runtime?.lastError;
   const hasPendingInteraction = Boolean(runtime?.pendingInteractions.length);
-  const liveSurfaceCount = runtimeExtensionSurfaces(runtime).filter(
-    (surface) => dashboardSurfacePlacement(surface.placement) === 'main',
-  ).length;
+  const workspaceName = workspaceNameForSession(
+    snapshot,
+    data.metadata,
+    runtime,
+  );
+  const status = runtime
+    ? runtime.online === false
+      ? 'offline'
+      : runtime.liveState === 'idle'
+        ? 'ready'
+        : runtime.liveState
+    : 'dormant';
   const jumpToLatest = () => {
     window.scrollTo({
       top: document.documentElement.scrollHeight,
@@ -198,80 +205,105 @@ export function SessionView({
     setAwayFromLatest(false);
   };
   return (
-    <section
-      className={`session-page ${inspectorOpen ? 'inspector-open' : ''}`}
-    >
-      <div className="session-context session-heading">
-        <div className="session-context-main">
-          <Back />
-          <div className="session-identity">
-            <h1 title={sessionDisplayTitle(data.metadata, data.entries)}>
-              {sessionDisplayTitle(data.metadata, data.entries)}
-            </h1>
-            <p className="muted">
-              {data.metadata.cwd} ·{' '}
-              {runtime
-                ? runtime.online === false
-                  ? 'offline'
-                  : runtime.liveState
-                : 'dormant'}
-              {runtime?.model &&
-                ` · ${runtime.model.provider}/${runtime.model.model}${runtime.model.thinking ? ` · ${runtime.model.thinking}` : ''}`}
-            </p>
-          </div>
-        </div>
-        <div className="session-heading-actions">
-          {awayFromLatest && (
+    <div className="session-layout">
+      <AgentThreadNav
+        snapshot={snapshot}
+        mode="session"
+        currentSessionId={id}
+        open={agentNavOpen}
+        onOpenChange={setAgentNavOpen}
+      />
+      <section
+        className={`session-page ${inspectorOpen ? 'inspector-open' : ''}`}
+      >
+        <header className="session-context session-heading">
+          <div className="session-context-main">
             <button
               type="button"
-              className="jump-latest"
-              onClick={jumpToLatest}
-              aria-label="Jump to latest transcript activity"
+              className="session-icon-button agent-nav-trigger"
+              aria-label="Open agent list"
+              onClick={() => setAgentNavOpen(true)}
             >
-              ↓ Latest
+              ‹
             </button>
-          )}
-          <button
-            type="button"
-            className="session-details-trigger"
-            aria-haspopup="dialog"
-            aria-expanded={inspectorOpen}
-            aria-controls="session-inspector"
-            disabled={hasPendingInteraction}
-            title={
-              hasPendingInteraction
-                ? 'Answer the pending question before opening session details'
-                : undefined
-            }
-            onClick={() => {
-              if (!hasPendingInteraction) setInspectorOpen(true);
-            }}
-          >
-            Details
-            {liveSurfaceCount > 0 && (
-              <span className="session-details-badge" aria-hidden="true">
-                {liveSurfaceCount}
+            <div className="session-identity">
+              <div className="session-breadcrumb">
+                <span>{workspaceName}</span>
+                <span aria-hidden="true"> / </span>
+                <h1 title={sessionDisplayTitle(data.metadata, data.entries)}>
+                  {sessionDisplayTitle(data.metadata, data.entries)}
+                </h1>
+              </div>
+              <span className={`session-status status-${status}`}>
+                <i aria-hidden="true">●</i> {status}
               </span>
+            </div>
+          </div>
+          <div className="session-heading-actions">
+            {awayFromLatest && (
+              <button
+                type="button"
+                className="session-icon-button jump-latest"
+                onClick={jumpToLatest}
+                aria-label="Jump to latest transcript activity"
+                title="Jump to latest"
+              >
+                ↓
+              </button>
             )}
-          </button>
+            <button
+              type="button"
+              ref={outlineTriggerRef}
+              className="session-icon-button outline-trigger"
+              aria-label="Open transcript outline"
+              aria-haspopup="dialog"
+              onClick={() => setOutlineOpen(true)}
+            >
+              ≡
+            </button>
+            <button
+              type="button"
+              className="session-icon-button session-details-trigger"
+              aria-label="Details"
+              aria-haspopup="dialog"
+              aria-expanded={inspectorOpen}
+              aria-controls="session-inspector"
+              disabled={hasPendingInteraction}
+              title={
+                hasPendingInteraction
+                  ? 'Answer the pending question before opening session details'
+                  : 'Session details'
+              }
+              onClick={() => {
+                if (!hasPendingInteraction) setInspectorOpen(true);
+              }}
+            >
+              ⋯<span className="sr-only">Details</span>
+            </button>
+          </div>
+        </header>
+        <SessionInspector
+          id={id}
+          open={inspectorOpen}
+          onClose={closeInspector}
+          data={data}
+          runtime={runtime}
+          runtimeError={runtimeError}
+          store={store}
+        />
+        <Transcript
+          projection={projection}
+          runtime={runtime}
+          outlineOpen={outlineOpen}
+          onOutlineOpenChange={setOutlineOpen}
+        />
+        <div className="session-control-layer">
+          <ExtensionSurfaceStack runtime={runtime} placement="composer" />
+          <Composer runtime={runtime} sessionId={id} />
         </div>
-      </div>
-      <SessionInspector
-        id={id}
-        open={inspectorOpen}
-        onClose={closeInspector}
-        data={data}
-        runtime={runtime}
-        runtimeError={runtimeError}
-        store={store}
-      />
-      <Transcript projection={projection} runtime={runtime} />
-      <div className="session-control-layer">
-        <ExtensionSurfaceStack runtime={runtime} placement="composer" />
-        <Composer runtime={runtime} sessionId={id} />
-      </div>
-      <PendingInteractions runtime={runtime} />
-    </section>
+        <PendingInteractions runtime={runtime} />
+      </section>
+    </div>
   );
 }
 
@@ -343,14 +375,6 @@ export function SessionInspector({
   }, [onClose, open]);
   if (!open) return null;
   const title = sessionDisplayTitle(data.metadata, data.entries);
-  const status = runtime
-    ? runtime.online === false
-      ? 'offline'
-      : runtime.liveState
-    : 'dormant';
-  const model = runtime?.model
-    ? `${runtime.model.provider}/${runtime.model.model}${runtime.model.thinking ? ` · ${runtime.model.thinking}` : ''}`
-    : 'model unavailable';
   return (
     <div className="session-inspector-layer">
       <button
@@ -383,22 +407,6 @@ export function SessionInspector({
           </button>
         </header>
         <div className="inspector-body">
-          <dl className="inspector-summary">
-            <div className="inspector-summary-row">
-              <dt>Path</dt>
-              <dd className="path">
-                {data.metadata.cwd ?? 'Path unavailable'}
-              </dd>
-            </div>
-            <div className="inspector-summary-row">
-              <dt>Status</dt>
-              <dd className={`inspector-status ${status}`}>{status}</dd>
-            </div>
-            <div className="inspector-summary-row">
-              <dt>Model</dt>
-              <dd>{model}</dd>
-            </div>
-          </dl>
           <section
             className="inspector-section"
             aria-labelledby="inspector-rename-heading"
@@ -425,15 +433,7 @@ export function SessionInspector({
               Runtime failure: {runtimeError}
             </div>
           )}
-          {runtime ? (
-            <section
-              className="inspector-section inspector-surfaces"
-              aria-labelledby="inspector-surfaces-heading"
-            >
-              <h3 id="inspector-surfaces-heading">Live work</h3>
-              <ExtensionSurfaceStack runtime={runtime} />
-            </section>
-          ) : (
+          {!runtime && (
             <p className="muted">
               No active runtime is attached to this session.
             </p>
@@ -443,5 +443,3 @@ export function SessionInspector({
     </div>
   );
 }
-
-export { Back };

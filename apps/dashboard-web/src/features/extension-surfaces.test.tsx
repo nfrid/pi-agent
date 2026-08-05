@@ -128,7 +128,8 @@ describe('live extension surface fixtures', () => {
     expect(markup.indexOf('aria-label="Tasks"')).toBeLessThan(
       markup.indexOf('aria-label="Delegate status"'),
     );
-    expect(markup).toContain('0/12 complete');
+    expect(markup).toContain('Tasks need attention');
+    expect(markup).not.toContain('0/12 complete');
     expect(markup).not.toContain('more tasks');
   });
 

@@ -651,10 +651,53 @@ test('dense mobile session keeps conversation and activity readable', async ({
   const userLink = page.getByRole('link', { name: 'dashboard' });
   await expect(userLink).toHaveAttribute('href', 'https://example.com');
   await expect(userLink).toHaveAttribute('target', '_blank');
-  await expect(page.getByText('ready', { exact: true })).toBeVisible();
+  await expect(page.locator('.session-status')).toContainText('ready');
+  const compactHeader = await page
+    .locator('.session-heading')
+    .evaluate((element) => ({
+      height: element.getBoundingClientRect().height,
+      text: element.textContent ?? '',
+    }));
+  expect(compactHeader.height).toBeGreaterThanOrEqual(44);
+  expect(compactHeader.height).toBeLessThanOrEqual(52);
+  expect(compactHeader.text).not.toContain('/tmp');
+  expect(compactHeader.text).not.toContain('test/');
   await expect(page.getByText('inline code', { exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    const handle = document.querySelector('.agent-nav-handle');
+    if (!handle) throw new Error('agent drawer handle missing');
+    const touch = (type: string, x: number) =>
+      handle.dispatchEvent(
+        new TouchEvent(type, {
+          bubbles: true,
+          changedTouches: [
+            new Touch({
+              identifier: 1,
+              target: handle,
+              clientX: x,
+              clientY: 300,
+            }),
+          ],
+        }),
+      );
+    touch('touchstart', 2);
+    touch('touchend', 86);
+  });
+  await expect(page.locator('.agent-nav-drawer.open')).toBeVisible();
+  await page.getByRole('button', { name: 'Close agent list' }).click();
+  await expect(page.locator('.agent-nav-drawer.open')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open transcript outline' }).click();
+  const outline = page.getByRole('dialog', { name: 'Transcript outline' });
+  await expect(outline).toBeVisible();
+  await outline
+    .getByRole('button', { name: 'Earlier message 1', exact: true })
+    .click();
+  await expect(outline).toHaveCount(0);
+  await page.evaluate(() =>
+    window.scrollTo(0, document.documentElement.scrollHeight),
+  );
   const activity = page.getByRole('button', {
-    name: /Checking the mobile transcript.*1 tool/,
+    name: /Checking the mobile transcript/,
   });
   await expect(activity).toBeVisible();
   await expect(page.getByLabel('Message Pi')).toBeVisible();
@@ -736,18 +779,18 @@ test('dense mobile session keeps conversation and activity readable', async ({
         document.documentElement.scrollHeight - 2,
     ),
   ).toBe(true);
-  const mobileControlGap = await page.evaluate(() => {
+  expect(await page.locator('.mobile-bottom-nav')).toHaveCount(0);
+  const composerViewportLayout = await page.evaluate(() => {
     const composer = document
       .querySelector('.composer')
       ?.getBoundingClientRect();
-    const navigation = document
-      .querySelector('.mobile-bottom-nav')
-      ?.getBoundingClientRect();
-    if (!composer || !navigation) return Number.POSITIVE_INFINITY;
-    return navigation.top - composer.bottom;
+    return composer
+      ? { bottom: composer.bottom, viewport: window.innerHeight }
+      : undefined;
   });
-  expect(mobileControlGap).toBeGreaterThanOrEqual(0);
-  expect(mobileControlGap).toBeLessThanOrEqual(12);
+  expect(composerViewportLayout?.bottom).toBeLessThanOrEqual(
+    (composerViewportLayout?.viewport ?? 0) + 1,
+  );
   await page.getByRole('button', { name: 'Details', exact: true }).click();
   const mobileInspector = page.getByRole('dialog');
   await expect(mobileInspector).toBeVisible();
@@ -755,21 +798,18 @@ test('dense mobile session keeps conversation and activity readable', async ({
     const inspector = document
       .querySelector('.session-inspector')
       ?.getBoundingClientRect();
-    const topbar = document
-      .querySelector('.mobile-topbar')
-      ?.getBoundingClientRect();
-    const navigation = document
-      .querySelector('.mobile-bottom-nav')
-      ?.getBoundingClientRect();
-    return inspector && topbar && navigation
+    return inspector
       ? {
-          topGap: inspector.top - topbar.bottom,
-          bottomGap: navigation.top - inspector.bottom,
+          top: inspector.top,
+          bottom: inspector.bottom,
+          viewport: window.innerHeight,
         }
       : undefined;
   });
-  expect(mobileInspectorGeometry?.topGap).toBeGreaterThanOrEqual(0);
-  expect(mobileInspectorGeometry?.bottomGap).toBeGreaterThanOrEqual(0);
+  expect(mobileInspectorGeometry?.top).toBeGreaterThanOrEqual(0);
+  expect(mobileInspectorGeometry?.bottom).toBeLessThanOrEqual(
+    mobileInspectorGeometry?.viewport ?? 0,
+  );
   await page.keyboard.press('Escape');
   await expect(mobileInspector).toHaveCount(0);
   await activity.click();
@@ -817,7 +857,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
     },
   ]);
   await expect(
-    page.getByRole('button', { name: /Preparing live tool.*1 tool/ }),
+    page.getByRole('button', { name: /Preparing live tool/ }),
   ).toBeVisible();
   const emitMessage = async (type: string, timestamp: number, text: string) =>
     page.evaluate(
@@ -850,7 +890,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
   // Reload while the authenticated stream is active; the session baseline and
   // transcript projection must hydrate without relying on the old page state.
   await page.reload();
-  await expect(page.getByText('ready', { exact: true })).toBeVisible();
+  await expect(page.locator('.session-status')).toContainText('ready');
   await expect(page.getByLabel('Message Pi')).toBeVisible();
   await expect
     .poll(() =>
@@ -1095,6 +1135,7 @@ function phase6Snapshot(
     pendingInteractions?: unknown[];
     workspaces?: unknown[];
     unread?: unknown[];
+    extensionSurfaces?: unknown[];
   } = {},
 ) {
   return {
@@ -1136,6 +1177,9 @@ function phase6Snapshot(
           phase6Interaction('ask-2', 'Use the second answer?'),
         ],
         capabilities: phase6Capabilities(),
+        ...(overrides.extensionSurfaces
+          ? { extensionSurfaces: overrides.extensionSurfaces }
+          : {}),
       },
     ],
     workspaces: overrides.workspaces ?? [
@@ -1414,8 +1458,9 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   ).toBeVisible();
   await mocks.emit({ type: 'snapshot', snapshot: phase6Snapshot() });
   await expect(page.getByLabel('Model')).toHaveCount(0);
-  await expect(page.locator('.session-heading')).toContainText(
-    'test/vision · medium',
+  await expect(page.locator('.session-heading')).toContainText('Project');
+  await expect(page.locator('.session-heading')).not.toContainText(
+    'test/vision',
   );
   await expect(
     page.getByRole('button', { name: 'Details', exact: true }),
@@ -1487,7 +1532,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     window.scrollTo(0, document.documentElement.scrollHeight),
   );
   const activity = page.getByRole('button', {
-    name: /Inspecting history.*1 tool/,
+    name: /Inspecting history/,
   });
   await expect(activity).toBeVisible();
   await activity.click();
@@ -1672,16 +1717,61 @@ test('phase six mocked management flow covers refresh, fallback notification, la
   await page.goto('/sessions/s1');
   await mocks.emit({
     type: 'snapshot',
-    snapshot: phase6Snapshot({ pendingInteractions: [] }),
+    snapshot: phase6Snapshot({
+      pendingInteractions: [],
+      extensionSurfaces: [
+        {
+          id: 'tasks-1',
+          rendererId: 'tasks.current',
+          placement: 'composer',
+          viewModel: {
+            version: 1,
+            tasks: [
+              {
+                id: 'T1',
+                text: 'Inspect the new drawer',
+                status: 'doing',
+                dependsOn: [],
+                createdAt: 1,
+                updatedAt: 1,
+              },
+            ],
+            stats: { total: 1, active: 1, done: 0, blocked: 0, ready: 1 },
+          },
+        },
+        {
+          id: 'delegates-1',
+          rendererId: 'delegate.status',
+          placement: 'composer',
+          viewModel: { version: 1, statuses: [] },
+        },
+      ],
+    }),
   });
+  await expect(
+    page.getByRole('button', { name: /Inspect the new drawer/ }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: /Inspect the new drawer/ }).click();
+  const tasksPanel = page.getByRole('dialog', { name: 'Tasks' });
+  await expect(tasksPanel).toBeVisible();
+  await expect(tasksPanel).toContainText('0/1 complete');
+  await tasksPanel.getByRole('button', { name: 'Close Tasks' }).click();
+  await expect(tasksPanel).toHaveCount(0);
+  await page.getByRole('button', { name: /No active delegates/ }).click();
+  await expect(
+    page.getByRole('dialog', { name: 'Delegate status' }),
+  ).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Details', exact: true }).click();
   const inspector = page.getByRole('dialog');
   await expect(inspector).toBeVisible();
-  await expect(inspector).toContainText('/tmp/project');
-  await expect(inspector).toContainText('waiting');
-  await expect(inspector).toContainText('test/vision · medium');
+  await expect(inspector).toContainText('Runtime controls');
+  await expect(inspector).not.toContainText('Live work');
+  await expect(inspector).not.toContainText('test/vision');
   const desktopGeometry = await page.evaluate(() => {
-    const rail = document.querySelector('.side-rail')?.getBoundingClientRect();
+    const rail = document
+      .querySelector('.agent-thread-nav-session')
+      ?.getBoundingClientRect();
     const composer = document
       .querySelector('.composer')
       ?.getBoundingClientRect();

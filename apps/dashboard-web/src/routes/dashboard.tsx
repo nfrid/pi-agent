@@ -1,4 +1,6 @@
 // Keep this route module as the compatibility surface for dashboard views.
+
+export { AgentThreadNav, agentThreadRows } from '../features/agent-thread-nav';
 export {
   actionNeedsInput,
   CommandPalette,

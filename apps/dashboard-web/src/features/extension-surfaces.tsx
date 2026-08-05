@@ -77,11 +77,15 @@ export function ExtensionSurfaceStack({
       runtimeExtensionSurfaces(runtime)
         .filter(
           (surface) =>
-            dashboardSurfacePlacement(surface.placement) === placement,
+            dashboardSurfacePlacement(surface.placement) === placement ||
+            (placement === 'composer' &&
+              (surface.rendererId === TASKS_RENDERER_ID ||
+                surface.rendererId === DELEGATE_RENDERER_ID)),
         )
         .sort((left, right) => surfaceOrder(left) - surfaceOrder(right)),
     [runtime, placement],
   );
+  if (runtime?.pendingInteractions?.length) return null;
   if (!surfaces.length) return null;
   return (
     <section
