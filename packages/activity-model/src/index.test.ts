@@ -70,6 +70,43 @@ describe('shared activity model', () => {
     expect(live[0]?.status).toBe('live');
   });
 
+  it('uses retry-aware outcomes for shared dashboard projections', () => {
+    const corrected = projectActivityGroups([
+      { kind: 'assistant' as const, speaks: false },
+      {
+        kind: 'tool' as const,
+        name: 'bash',
+        args: { command: 'npm run lint' },
+        status: 'error' as const,
+        isError: true,
+      },
+      {
+        kind: 'tool' as const,
+        name: 'bash',
+        args: { command: 'npm run lint -- --fix' },
+        status: 'success' as const,
+      },
+    ]);
+    const unresolved = projectActivityGroups([
+      { kind: 'assistant' as const, speaks: false },
+      {
+        kind: 'tool' as const,
+        name: 'bash',
+        args: { command: 'npm run lint' },
+        status: 'error' as const,
+        isError: true,
+      },
+      {
+        kind: 'tool' as const,
+        name: 'bash',
+        args: { command: 'npm test' },
+        status: 'success' as const,
+      },
+    ]);
+    expect(corrected[0]?.status).toBe('complete');
+    expect(unresolved[0]?.status).toBe('failed');
+  });
+
   it('projects failed and streaming groups distinctly for every renderer', () => {
     const failed = projectActivityGroups([
       { kind: 'assistant' as const, speaks: false },
