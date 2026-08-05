@@ -25,7 +25,9 @@ import {
   dispatchDashboardCommand,
   dispatchDashboardInput,
   expandDashboardInput,
+  flushQueueDrafts,
   LiveEventNormalizer,
+  QueueDraftStore,
 } from './index';
 
 const snapshot: RuntimeSnapshot = {
@@ -296,6 +298,192 @@ describe('remote event normalization', () => {
   });
 });
 
+describe('dashboard-owned queue drafts', () => {
+  it('rejects duplicate and unknown client ids while enforcing lifecycle bounds', () => {
+    const store = new QueueDraftStore();
+    expect(() =>
+      store.add({ clientId: 'draft-1', mode: 'steer', text: 'x' }),
+    ).toThrow('session');
+    store.setSession('session-1');
+    store.add({ clientId: 'draft-1', mode: 'steer', text: 'x' });
+    expect(() =>
+      store.add({ clientId: 'draft-1', mode: 'followUp', text: 'duplicate' }),
+    ).toThrow('already exists');
+    expect(() =>
+      store.update({ clientId: 'unknown', mode: 'steer', text: 'x' }),
+    ).toThrow('unknown');
+    expect(() => store.remove('unknown')).toThrow('unknown');
+    expect(() =>
+      store.add({ clientId: 'bad', mode: 'steer', text: ' '.repeat(20_000) }),
+    ).toThrow('invalid');
+    for (let index = 2; index < 33; index += 1)
+      store.add({
+        clientId: `draft-${index}`,
+        mode: 'steer',
+        text: `${index}`,
+      });
+    expect(() =>
+      store.add({
+        clientId: 'draft-overflow',
+        mode: 'steer',
+        text: 'overflow',
+      }),
+    ).toThrow('full');
+    expect(store.list()).toHaveLength(32);
+    store.setSession('session-2');
+    expect(store.list()).toEqual([]);
+  });
+
+  it('flushes each mode once, restores failed sends, and ignores stale sessions', () => {
+    const sendUserMessage = vi.fn((text: string) => {
+      if (text === 'fails') throw new Error('Pi queue rejected message');
+    });
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    if (!runtime) throw new Error('runtime was not created');
+    const contextFor = (id: string) =>
+      ({
+        cwd: '/tmp',
+        model: undefined,
+        thinkingLevel: 'off',
+        sessionManager: {
+          getBranch: () => [],
+          getSessionId: () => id,
+          getSessionFile: () => undefined,
+          getSessionName: () => undefined,
+          getCwd: () => '/tmp',
+          getLeafId: () => undefined,
+        },
+        getContextUsage: () => undefined,
+        isIdle: () => false,
+      }) as unknown as ExtensionContext;
+    const first = contextFor('session-queue-1');
+    runtime.setContext(first);
+    runtime.queueDrafts.add({
+      clientId: 'steer-1',
+      mode: 'steer',
+      text: 'steer first',
+    });
+    runtime.queueDrafts.add({
+      clientId: 'follow-1',
+      mode: 'followUp',
+      text: 'follow later',
+    });
+    runtime.queueDrafts.add({
+      clientId: 'steer-2',
+      mode: 'steer',
+      text: 'fails',
+    });
+    flushQueueDrafts(
+      runtime,
+      { sendUserMessage } as unknown as ExtensionAPI,
+      first,
+      'steer',
+    );
+    expect(sendUserMessage).toHaveBeenNthCalledWith(1, 'steer first', {
+      deliverAs: 'steer',
+    });
+    expect(sendUserMessage).toHaveBeenNthCalledWith(2, 'fails', {
+      deliverAs: 'steer',
+    });
+    expect(runtime.queueDrafts.list()).toEqual([
+      { clientId: 'follow-1', mode: 'followUp', text: 'follow later' },
+      { clientId: 'steer-2', mode: 'steer', text: 'fails' },
+    ]);
+    sendUserMessage.mockImplementation(() => undefined);
+    flushQueueDrafts(
+      runtime,
+      { sendUserMessage } as unknown as ExtensionAPI,
+      first,
+      'steer',
+    );
+    expect(runtime.queueDrafts.list()).toEqual([
+      { clientId: 'follow-1', mode: 'followUp', text: 'follow later' },
+    ]);
+    flushQueueDrafts(
+      runtime,
+      { sendUserMessage } as unknown as ExtensionAPI,
+      first,
+      'followUp',
+    );
+    expect(sendUserMessage).toHaveBeenLastCalledWith('follow later', {
+      deliverAs: 'followUp',
+    });
+    const second = contextFor('session-queue-2');
+    runtime.setContext(second);
+    runtime.queueDrafts.add({
+      clientId: 'new-session',
+      mode: 'steer',
+      text: 'new',
+    });
+    expect(
+      flushQueueDrafts(
+        runtime,
+        { sendUserMessage } as unknown as ExtensionAPI,
+        first,
+        'steer',
+      ),
+    ).toBe(false);
+    expect(runtime.queueDrafts.list()).toEqual([
+      { clientId: 'new-session', mode: 'steer', text: 'new' },
+    ]);
+    runtime.clearContext(second);
+    expect(runtime.queueDrafts.list()).toEqual([]);
+  });
+
+  it('dispatches queue commands into the current session store', async () => {
+    const store = new QueueDraftStore();
+    store.setSession('session-commands');
+    const commandContext = {
+      isIdle: () => false,
+    } as unknown as ExtensionContext;
+    await expect(
+      dispatchDashboardCommand(
+        {} as ExtensionAPI,
+        commandContext,
+        new InteractionBroker(),
+        {
+          id: 'add-1',
+          type: 'queue.add',
+          clientId: 'client-1',
+          mode: 'followUp',
+          text: '  draft  ',
+        },
+        undefined,
+        store,
+      ),
+    ).resolves.toEqual({
+      accepted: true,
+      draft: { clientId: 'client-1', mode: 'followUp', text: 'draft' },
+    });
+    await expect(
+      dispatchDashboardCommand(
+        {} as ExtensionAPI,
+        commandContext,
+        new InteractionBroker(),
+        {
+          id: 'update-1',
+          type: 'queue.update',
+          clientId: 'client-1',
+          mode: 'steer',
+          text: 'updated',
+        },
+        undefined,
+        store,
+      ),
+    ).resolves.toMatchObject({ accepted: true, draft: { mode: 'steer' } });
+    await expect(
+      dispatchDashboardCommand(
+        {} as ExtensionAPI,
+        commandContext,
+        new InteractionBroker(),
+        { id: 'remove-1', type: 'queue.remove', clientId: 'client-1' },
+        undefined,
+        store,
+      ),
+    ).resolves.toEqual({ accepted: true, clientId: 'client-1' });
+  });
+});
+
 describe('remote-control bridge', () => {
   it('reconnects from a cached snapshot without touching a replaced session context', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-bridge-stale-'));
@@ -475,6 +663,53 @@ describe('remote-control bridge', () => {
     client.stop();
     hub.publish('tasks', []);
     expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a queued draft command captured before session replacement', async () => {
+    let scope = 'session-before';
+    let release: (() => void) | undefined;
+    const handleCommand = vi.fn(
+      () =>
+        new Promise<unknown>((resolve) => {
+          release = () => resolve({ accepted: true });
+        }),
+    );
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      commandScope: () => scope,
+      handleCommand,
+    });
+    const socket = new net.Socket();
+    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', socket);
+    const enqueue = (
+      Reflect.get(client, 'enqueue') as (
+        command: unknown,
+        socket: net.Socket,
+      ) => void
+    ).bind(client);
+    enqueue({ id: 'blocking', type: 'abort' }, socket);
+    enqueue(
+      {
+        id: 'stale-draft',
+        type: 'queue.add',
+        clientId: 'draft-1',
+        mode: 'steer',
+        text: 'stale',
+      },
+      socket,
+    );
+    scope = 'session-after';
+    release?.();
+    await waitFor(() =>
+      write.mock.calls.some((call) =>
+        String(call[0]).includes('stale-session'),
+      ),
+    );
+    expect(handleCommand).toHaveBeenCalledOnce();
+    client.stop();
   });
 
   it('uses one bounded duplicate guard for semantic bridge commands', () => {

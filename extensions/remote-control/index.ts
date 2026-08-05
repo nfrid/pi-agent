@@ -24,10 +24,18 @@ import {
   deriveSessionTitle,
   type InteractionSnapshot,
   MAX_FRAME_BYTES,
+  MAX_QUEUE_DRAFT_TEXT,
+  MAX_QUEUE_DRAFT_TOTAL_TEXT,
+  MAX_QUEUE_DRAFTS,
   type NormalizedMessagePayload,
   type NormalizedToolPayload,
   PROTOCOL_VERSION,
   parseFrame,
+  type QueueDraft,
+  type QueueDraftAddCommand,
+  type QueueDraftMode,
+  type QueueDraftRemoveCommand,
+  type QueueDraftUpdateCommand,
   type RuntimeExtensionSurface,
   type RuntimeLiveState,
   type RuntimeSnapshot,
@@ -521,6 +529,8 @@ export interface BridgeClientOptions {
   identityToken?: string;
   runtimeId: string;
   snapshot: () => RuntimeSnapshot;
+  /** Session generation captured when a browser command enters the bridge. */
+  commandScope?: () => string | undefined;
   handleCommand: CommandHandler;
   broker?: InteractionBroker;
   capabilities?: RuntimeCapabilitySnapshot;
@@ -546,6 +556,7 @@ export class BridgeClient {
   private commandQueue: Array<{
     command: BridgeCommand;
     socket: net.Socket;
+    scope?: string;
   }> = [];
   private commandRunning = false;
   private readonly actionCommandIds = new NonIdempotentActionIdGuard();
@@ -766,7 +777,11 @@ export class BridgeClient {
         }
       }
     }
-    this.commandQueue.push({ command, socket });
+    this.commandQueue.push({
+      command,
+      socket,
+      scope: this.options.commandScope?.(),
+    });
     this.pumpCommands();
   }
 
@@ -780,6 +795,19 @@ export class BridgeClient {
         // Commands received on a replaced generation are abandoned rather than
         // replayed. Replaying could duplicate a prompt after a daemon retry.
         if (item.socket !== this.socket || item.socket.destroyed) return;
+        if (
+          isQueueDraftCommand(item.command) &&
+          item.scope !== this.options.commandScope?.()
+        ) {
+          this.sendAck(
+            item.socket,
+            item.command.id,
+            false,
+            'Queue draft command belongs to a replaced session.',
+            'stale-session',
+          );
+          return;
+        }
         try {
           const result = await this.options.handleCommand(
             item.command,
@@ -1073,6 +1101,182 @@ function boundedIdentifier(
   return text.slice(0, max) || fallback;
 }
 
+function queueDraftError(
+  code: string,
+  message: string,
+): Error & { code: string } {
+  return Object.assign(new Error(message), { code });
+}
+
+function validQueueDraftText(text: string): string {
+  const normalized = text.trim();
+  if (!normalized || normalized.length > MAX_QUEUE_DRAFT_TEXT)
+    throw queueDraftError(
+      'invalid-queue-draft',
+      'Queue draft text is invalid.',
+    );
+  return normalized;
+}
+
+function validQueueDraftClientId(clientId: string): string {
+  if (
+    !clientId.trim() ||
+    clientId.length > 256 ||
+    [...clientId].some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  )
+    throw queueDraftError(
+      'invalid-queue-draft-client-id',
+      'Queue draft client id is invalid.',
+    );
+  return clientId;
+}
+
+/**
+ * Dashboard-owned queue state. Pi's own queue is intentionally not reflected
+ * here: drafts remain editable until a lifecycle boundary hands them to Pi.
+ */
+export class QueueDraftStore {
+  private sessionId: string | undefined;
+  private readonly drafts = new Map<string, QueueDraft>();
+
+  setSession(sessionId: string | undefined): void {
+    if (this.sessionId === sessionId) return;
+    this.sessionId = sessionId;
+    this.drafts.clear();
+  }
+
+  getSessionId(): string | undefined {
+    return this.sessionId;
+  }
+
+  list(): readonly QueueDraft[] {
+    return [...this.drafts.values()].map((draft) => ({ ...draft }));
+  }
+
+  add(draft: QueueDraft): QueueDraft {
+    this.requireSession();
+    const clientId = validQueueDraftClientId(draft.clientId);
+    if (this.drafts.has(clientId))
+      throw queueDraftError(
+        'duplicate-queue-draft-client-id',
+        'Queue draft client id already exists.',
+      );
+    if (this.drafts.size >= MAX_QUEUE_DRAFTS)
+      throw queueDraftError(
+        'queue-draft-capacity',
+        'Queue draft queue is full.',
+      );
+    const next = {
+      clientId,
+      mode: draft.mode,
+      text: validQueueDraftText(draft.text),
+    } satisfies QueueDraft;
+    if (this.totalTextLength() + next.text.length > MAX_QUEUE_DRAFT_TOTAL_TEXT)
+      throw queueDraftError(
+        'queue-draft-capacity',
+        'Queue draft text capacity is full.',
+      );
+    this.drafts.set(clientId, next);
+    return { ...next };
+  }
+
+  update(draft: QueueDraft): QueueDraft {
+    this.requireSession();
+    const clientId = validQueueDraftClientId(draft.clientId);
+    if (!this.drafts.has(clientId))
+      throw queueDraftError(
+        'unknown-queue-draft-client-id',
+        'Queue draft client id is unknown.',
+      );
+    const next = {
+      clientId,
+      mode: draft.mode,
+      text: validQueueDraftText(draft.text),
+    } satisfies QueueDraft;
+    const current = this.drafts.get(clientId);
+    if (
+      this.totalTextLength() - (current?.text.length ?? 0) + next.text.length >
+      MAX_QUEUE_DRAFT_TOTAL_TEXT
+    )
+      throw queueDraftError(
+        'queue-draft-capacity',
+        'Queue draft text capacity is full.',
+      );
+    this.drafts.set(clientId, next);
+    return { ...next };
+  }
+
+  remove(clientId: string): QueueDraft {
+    this.requireSession();
+    validQueueDraftClientId(clientId);
+    const draft = this.drafts.get(clientId);
+    if (!draft)
+      throw queueDraftError(
+        'unknown-queue-draft-client-id',
+        'Queue draft client id is unknown.',
+      );
+    this.drafts.delete(clientId);
+    return { ...draft };
+  }
+
+  /** Atomically claim drafts for one Pi delivery boundary. */
+  take(mode: QueueDraftMode): QueueDraft[] {
+    this.requireSession();
+    const claimed: QueueDraft[] = [];
+    for (const [clientId, draft] of this.drafts) {
+      if (draft.mode !== mode) continue;
+      claimed.push({ ...draft });
+      this.drafts.delete(clientId);
+    }
+    return claimed;
+  }
+
+  /** Restore a failed delivery without replacing newer edits. */
+  restore(drafts: readonly QueueDraft[]): void {
+    if (!this.sessionId) return;
+    for (const draft of drafts)
+      if (
+        !this.drafts.has(draft.clientId) &&
+        this.totalTextLength() + draft.text.length <= MAX_QUEUE_DRAFT_TOTAL_TEXT
+      )
+        this.drafts.set(draft.clientId, { ...draft });
+  }
+
+  clear(): void {
+    this.drafts.clear();
+  }
+
+  private totalTextLength(): number {
+    let total = 0;
+    for (const draft of this.drafts.values()) total += draft.text.length;
+    return total;
+  }
+
+  private requireSession(): void {
+    if (!this.sessionId)
+      throw queueDraftError('session-unavailable', 'Pi session is not ready.');
+  }
+}
+
+function isQueueDraftCommand(
+  command: BridgeCommand,
+): command is
+  | QueueDraftAddCommand
+  | QueueDraftUpdateCommand
+  | QueueDraftRemoveCommand {
+  return (
+    command.type === 'queue.add' ||
+    command.type === 'queueDraft.add' ||
+    command.type === 'queue.update' ||
+    command.type === 'queueDraft.update' ||
+    command.type === 'queue.remove' ||
+    command.type === 'queueDraft.remove'
+  );
+}
+
 function interactionSnapshot(
   interaction: ReturnType<InteractionBroker['list']>[number],
 ): InteractionSnapshot {
@@ -1210,9 +1414,23 @@ export async function dispatchDashboardCommand(
   broker: InteractionBroker,
   command: BridgeCommand,
   capabilities = RUNTIME_CAPABILITIES,
+  queueDrafts?: QueueDraftStore,
 ): Promise<unknown> {
   if (command.type === 'action.invoke')
     return dispatchSemanticAction(ctx, broker, command, capabilities);
+  if (isQueueDraftCommand(command)) {
+    if (!queueDrafts)
+      throw queueDraftError(
+        'queue-drafts-unavailable',
+        'Queue drafts are unavailable for this runtime.',
+      );
+    if (command.type === 'queue.add' || command.type === 'queueDraft.add')
+      return { accepted: true, draft: queueDrafts.add(command) };
+    if (command.type === 'queue.update' || command.type === 'queueDraft.update')
+      return { accepted: true, draft: queueDrafts.update(command) };
+    queueDrafts.remove(command.clientId);
+    return { accepted: true, clientId: command.clientId };
+  }
   switch (command.type) {
     case 'prompt':
       if (!ctx.isIdle())
@@ -1276,6 +1494,7 @@ export interface RemoteControlRuntime {
   readonly runtimeId: string;
   readonly client: BridgeClient;
   readonly eventNormalizer: LiveEventNormalizer;
+  readonly queueDrafts: QueueDraftStore;
   setContext(ctx: ExtensionContext): void;
   clearContext(ctx: ExtensionContext): void;
   isCurrent(ctx: ExtensionContext): boolean;
@@ -1302,6 +1521,7 @@ export function createRemoteControlRuntime(
   let currentSessionId: string | undefined;
   let contextScope: string | undefined;
   let lastError: string | undefined;
+  const queueDrafts = new QueueDraftStore();
   const unavailableSnapshot = (): RuntimeSnapshot => ({
     runtimeId,
     ownership,
@@ -1310,6 +1530,7 @@ export function createRemoteControlRuntime(
     liveState: 'idle',
     session: { id: 'unknown', entries: [] },
     pendingInteractions: broker.list().map(interactionSnapshot),
+    queueDrafts: queueDrafts.list(),
     capabilities: RUNTIME_CAPABILITIES,
     extensionSurfaces: liveExtensionSurfaceHub.snapshot(),
     lastError,
@@ -1335,6 +1556,7 @@ export function createRemoteControlRuntime(
           }
         : undefined,
       pendingInteractions: broker.list().map(interactionSnapshot),
+      queueDrafts: queueDrafts.list(),
       capabilities: RUNTIME_CAPABILITIES,
       extensionSurfaces: liveExtensionSurfaceHub.snapshot(),
       lastError,
@@ -1348,6 +1570,7 @@ export function createRemoteControlRuntime(
     runtimeId,
     broker,
     capabilities: RUNTIME_CAPABILITIES,
+    commandScope: () => contextScope,
     liveSurfaces: liveExtensionSurfaceHub,
     onLiveSurfacesChanged: (surfaces) => {
       cachedSnapshot = { ...cachedSnapshot, extensionSurfaces: surfaces };
@@ -1357,31 +1580,52 @@ export function createRemoteControlRuntime(
     // by session replacement or extension reload.
     snapshot: () => cachedSnapshot,
     handleCommand: async (command, capabilities) => {
-      if (!context) throw new Error('Pi session is not ready.');
-      return dispatchDashboardCommand(
+      const commandContext = context;
+      if (!commandContext) throw new Error('Pi session is not ready.');
+      const commandSessionId = commandContext.sessionManager.getSessionId();
+      const result = await dispatchDashboardCommand(
         pi,
-        context,
+        commandContext,
         broker,
         command,
         capabilities,
+        queueDrafts,
       );
+      // Queue mutations are dashboard-owned state, so acknowledge them only
+      // after refreshing the cached snapshot. A session replacement that wins
+      // the race must not publish the old draft set into the new session.
+      if (
+        isQueueDraftCommand(command) &&
+        context === commandContext &&
+        currentSessionId === commandSessionId
+      ) {
+        setContext(commandContext);
+        client.sendEvent({
+          type: 'runtime.stateChanged',
+          state: liveState(commandContext, broker),
+          snapshot: cachedSnapshot,
+        });
+      }
+      return result;
     },
   });
 
   const setContext = (ctx: ExtensionContext) => {
     try {
       lastError = undefined;
-      const next = snapshotFrom(ctx);
       const nextScope = ctx.sessionManager.getSessionId();
       if (contextScope && contextScope !== nextScope) {
         broker.cancelScope(contextScope);
         eventNormalizer.reset();
       }
+      queueDrafts.setSession(nextScope);
+      const next = snapshotFrom(ctx);
       context = ctx;
       contextScope = nextScope;
       currentSessionId = next.session.id;
       cachedSnapshot = next;
     } catch (error) {
+      queueDrafts.clear();
       if (contextScope) broker.cancelScope(contextScope);
       context = undefined;
       contextScope = undefined;
@@ -1411,6 +1655,8 @@ export function createRemoteControlRuntime(
       /* stale session contexts may no longer expose their manager */
     }
     if (contextScope) broker.cancelScope(contextScope);
+    queueDrafts.setSession(undefined);
+    queueDrafts.clear();
     context = undefined;
     contextScope = undefined;
     currentSessionId = undefined;
@@ -1421,12 +1667,51 @@ export function createRemoteControlRuntime(
     runtimeId,
     client,
     eventNormalizer,
+    queueDrafts,
     setContext,
     clearContext,
     isCurrent,
     setLiveState,
     snapshot,
   };
+}
+
+export function flushQueueDrafts(
+  runtime: RemoteControlRuntime,
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  mode: QueueDraftMode,
+): boolean {
+  if (!runtime.isCurrent(ctx)) return false;
+  runtime.setContext(ctx);
+  if (!runtime.isCurrent(ctx)) return false;
+  const drafts = runtime.queueDrafts.take(mode);
+  if (drafts.length === 0) return false;
+  let failedAt = drafts.length;
+  for (const [index, draft] of drafts.entries()) {
+    try {
+      pi.sendUserMessage(draft.text, {
+        deliverAs: draft.mode,
+      });
+    } catch {
+      failedAt = index;
+      break;
+    }
+  }
+  // A send may synchronously trigger a session replacement. Never restore an
+  // old session's drafts into the replacement, and never reinstall its cache.
+  if (failedAt < drafts.length && runtime.isCurrent(ctx))
+    runtime.queueDrafts.restore(drafts.slice(failedAt));
+  if (runtime.isCurrent(ctx)) {
+    runtime.setContext(ctx);
+    if (runtime.isCurrent(ctx))
+      runtime.client.sendEvent({
+        type: 'runtime.stateChanged',
+        state: liveState(ctx, getInteractionBroker()),
+        snapshot: runtime.snapshot(),
+      });
+  }
+  return true;
 }
 
 function emitState(runtime: RemoteControlRuntime, ctx: ExtensionContext): void {
@@ -1475,6 +1760,9 @@ export default defineExtension('remote-control', (pi) => {
       type: 'session.snapshot',
       session: sessionSnapshot(ctx),
     });
+    // Session replacement clears dashboard-owned drafts in setContext; publish
+    // that empty/current set even when the bridge connection is reused.
+    emitState(runtime, ctx);
   });
   pi.on('session_info_changed', (_event, ctx) => {
     runtime.setContext(ctx);
@@ -1504,6 +1792,9 @@ export default defineExtension('remote-control', (pi) => {
     });
   });
   pi.on('agent_start', (_event, ctx) => emitState(runtime, ctx));
+  pi.on('turn_end', (_event, ctx) => {
+    flushQueueDrafts(runtime, pi, ctx, 'steer');
+  });
   pi.on('agent_settled', (_event, ctx) => {
     emitState(runtime, ctx);
     if (!runtime.isCurrent(ctx)) return;
@@ -1512,7 +1803,10 @@ export default defineExtension('remote-control', (pi) => {
       sessionId: ctx.sessionManager.getSessionId(),
     });
   });
-  pi.on('agent_end', (_event, ctx) => emitState(runtime, ctx));
+  pi.on('agent_end', (_event, ctx) => {
+    if (!flushQueueDrafts(runtime, pi, ctx, 'followUp'))
+      emitState(runtime, ctx);
+  });
   onCurrentTransportEvent('message_start', (event, ctx) =>
     runtime.client.sendEvent({
       type: 'message.started',
@@ -1567,12 +1861,19 @@ export default defineExtension('remote-control', (pi) => {
   pi.on('session_shutdown', (event, ctx) => {
     const tearsDownExtension =
       event.reason === 'quit' || event.reason === 'reload';
-    if (tearsDownExtension && runtime.isCurrent(ctx))
+    const wasCurrent = runtime.isCurrent(ctx);
+    if (tearsDownExtension && wasCurrent)
       runtime.client.sendEvent({
         type: 'runtime.goodbye',
         reason: event.reason,
       });
     runtime.clearContext(ctx);
+    if (wasCurrent && !tearsDownExtension)
+      runtime.client.sendEvent({
+        type: 'runtime.stateChanged',
+        state: 'idle',
+        snapshot: runtime.snapshot(),
+      });
     if (tearsDownExtension) runtime.client.stop();
   });
 });

@@ -39,6 +39,15 @@ export {
 const MAX_ID = 256;
 const MAX_PATH = 4096;
 const MAX_TEXT = 100_000;
+/** Maximum number of dashboard-owned drafts retained for one session. */
+export const MAX_QUEUE_DRAFTS = 32;
+/** Maximum UTF-16 code units in one dashboard-owned draft. */
+export const MAX_QUEUE_DRAFT_TEXT = 20_000;
+/** Aggregate draft text budget keeps runtime state updates below frame limits. */
+export const MAX_QUEUE_DRAFT_TOTAL_TEXT = 200_000;
+/** Compatibility spelling for clients that call these entries queued messages. */
+export const MAX_QUEUE_MESSAGES = MAX_QUEUE_DRAFTS;
+export const MAX_QUEUE_MESSAGE_TEXT = MAX_QUEUE_DRAFT_TEXT;
 
 const IdentifierSchema = Type.String({
   minLength: 1,
@@ -186,6 +195,22 @@ export const BridgeImageAttachmentSchema = Type.Object(
 );
 export type BridgeImageAttachment = Static<typeof BridgeImageAttachmentSchema>;
 
+export const QueueDraftModeSchema = Type.Union([
+  Type.Literal('steer'),
+  Type.Literal('followUp'),
+]);
+export type QueueDraftMode = Static<typeof QueueDraftModeSchema>;
+export const QueueDraftSchema = Type.Object(
+  {
+    /** Stable browser-owned identity, distinct from a command frame id. */
+    clientId: IdentifierSchema,
+    mode: QueueDraftModeSchema,
+    text: Type.String({ minLength: 1, maxLength: MAX_QUEUE_DRAFT_TEXT }),
+  },
+  { additionalProperties: false },
+);
+export type QueueDraft = Static<typeof QueueDraftSchema>;
+
 const RuntimeSnapshotProperties = {
   runtimeId: IdentifierSchema,
   ownership: RuntimeOwnershipSchema,
@@ -239,6 +264,10 @@ const RuntimeSnapshotProperties = {
     ),
   ),
   pendingInteractions: Type.Readonly(Type.Array(InteractionSnapshotSchema)),
+  /** Dashboard-owned text drafts, before they are handed to Pi's queue. */
+  queueDrafts: Type.Optional(
+    Type.Readonly(Type.Array(QueueDraftSchema, { maxItems: MAX_QUEUE_DRAFTS })),
+  ),
   lastError: Type.Optional(Type.String({ minLength: 1, maxLength: 10_000 })),
   online: Type.Optional(Type.Boolean()),
   lastSeenAt: Type.Optional(FiniteNumberSchema),
@@ -260,10 +289,11 @@ export const RuntimeSnapshotSchema = Type.Object(RuntimeSnapshotProperties, {
 type RuntimeSnapshotStatic = Static<typeof RuntimeSnapshotSchema>;
 export type RuntimeSnapshot = Omit<
   RuntimeSnapshotStatic,
-  'session' | 'pendingInteractions' | 'extensionSurfaces'
+  'session' | 'pendingInteractions' | 'queueDrafts' | 'extensionSurfaces'
 > & {
   session: SessionSnapshot;
   readonly pendingInteractions: readonly InteractionSnapshot[];
+  readonly queueDrafts?: readonly QueueDraft[];
   readonly extensionSurfaces?: readonly RuntimeExtensionSurface[];
 };
 
@@ -275,10 +305,11 @@ export const RuntimeSnapshotPatchSchema = Type.Partial(RuntimeSnapshotSchema, {
 type RuntimeSnapshotPatchStatic = Static<typeof RuntimeSnapshotPatchSchema>;
 export type RuntimeSnapshotPatch = Omit<
   RuntimeSnapshotPatchStatic,
-  'session' | 'pendingInteractions' | 'extensionSurfaces'
+  'session' | 'pendingInteractions' | 'queueDrafts' | 'extensionSurfaces'
 > & {
   session?: SessionSnapshot;
   pendingInteractions?: readonly InteractionSnapshot[];
+  queueDrafts?: readonly QueueDraft[];
   extensionSurfaces?: readonly RuntimeExtensionSurface[];
 };
 /** Compatibility spelling used by some consumers. */
@@ -551,6 +582,57 @@ const PromptCommandSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+export const QueueDraftAddCommandSchema = Type.Object(
+  {
+    ...BridgeCommandBaseProperties,
+    /** `queueDraft.*` is accepted as a spelling for older dashboard clients. */
+    type: Type.Union([
+      Type.Literal('queue.add'),
+      Type.Literal('queueDraft.add'),
+    ]),
+    clientId: IdentifierSchema,
+    mode: QueueDraftModeSchema,
+    text: Type.String({ maxLength: MAX_QUEUE_DRAFT_TEXT }),
+  },
+  { additionalProperties: false },
+);
+export const QueueDraftUpdateCommandSchema = Type.Object(
+  {
+    ...BridgeCommandBaseProperties,
+    type: Type.Union([
+      Type.Literal('queue.update'),
+      Type.Literal('queueDraft.update'),
+    ]),
+    clientId: IdentifierSchema,
+    mode: QueueDraftModeSchema,
+    text: Type.String({ maxLength: MAX_QUEUE_DRAFT_TEXT }),
+  },
+  { additionalProperties: false },
+);
+export const QueueDraftRemoveCommandSchema = Type.Object(
+  {
+    ...BridgeCommandBaseProperties,
+    type: Type.Union([
+      Type.Literal('queue.remove'),
+      Type.Literal('queueDraft.remove'),
+    ]),
+    clientId: IdentifierSchema,
+  },
+  { additionalProperties: false },
+);
+export type QueueDraftAddCommand = Static<typeof QueueDraftAddCommandSchema>;
+export type QueueDraftUpdateCommand = Static<
+  typeof QueueDraftUpdateCommandSchema
+>;
+export type QueueDraftRemoveCommand = Static<
+  typeof QueueDraftRemoveCommandSchema
+>;
+export const QueueDraftCommandSchema = Type.Union([
+  QueueDraftAddCommandSchema,
+  QueueDraftUpdateCommandSchema,
+  QueueDraftRemoveCommandSchema,
+]);
+export type QueueDraftCommand = Static<typeof QueueDraftCommandSchema>;
 const SimpleCommandSchema = Type.Object(
   {
     ...BridgeCommandBaseProperties,
@@ -615,6 +697,7 @@ export const ActionCommandEnvelopeSchema = SemanticActionCommandSchema;
 export type ActionCommandEnvelope = SemanticActionCommand;
 export const BridgeCommandSchema = Type.Union([
   PromptCommandSchema,
+  QueueDraftCommandSchema,
   SimpleCommandSchema,
   SetModelCommandSchema,
   SetThinkingCommandSchema,
@@ -1140,6 +1223,34 @@ export function parseBridgeCommand(value: unknown): BridgeCommand {
   if (!Value.Check(BridgeCommandSchema, value))
     throw new Error('Invalid bridge command.');
   const command = value as BridgeCommand;
+  if (
+    command.type === 'queue.add' ||
+    command.type === 'queueDraft.add' ||
+    command.type === 'queue.update' ||
+    command.type === 'queueDraft.update' ||
+    command.type === 'queue.remove' ||
+    command.type === 'queueDraft.remove'
+  ) {
+    const queueCommand = command as {
+      clientId: string;
+      text?: string;
+      mode?: QueueDraftMode;
+    };
+    if (
+      !onlyKeys(
+        command as Record<string, unknown>,
+        new Set(['id', 'type', 'clientId', 'mode', 'text']),
+      ) ||
+      !safeIdentifier(queueCommand.clientId, MAX_ID)
+    )
+      throw new Error('Invalid queue draft client id.');
+    if (queueCommand.text !== undefined) {
+      const text = queueCommand.text.trim();
+      if (!text) throw new Error('Queue draft text is required.');
+      return { ...command, text } as BridgeCommand;
+    }
+    return command;
+  }
   if (
     command.type === 'prompt' ||
     command.type === 'steer' ||

@@ -3,7 +3,10 @@ import {
   deriveSessionTitle,
   isBridgeEvent,
   MAX_FRAME_BYTES,
+  MAX_QUEUE_DRAFT_TEXT,
+  MAX_QUEUE_DRAFTS,
   MAX_RUNTIME_EXTENSION_SURFACES,
+  parseBridgeCommand,
   parseDashboardEventEnvelope,
   parseDashboardStreamMessage,
   parseFrame,
@@ -58,6 +61,78 @@ describe('dashboard protocol', () => {
       command: { id: '1', type: 'followUp' as const, text: 'continue' },
     };
     expect(parseFrame(serializeFrame(frame))).toEqual(frame);
+  });
+
+  it('accepts, normalizes, and bounds dashboard queue draft commands', () => {
+    expect(
+      parseBridgeCommand({
+        id: 'command-1',
+        type: 'queue.add',
+        clientId: 'draft-1',
+        mode: 'steer',
+        text: '  inspect this  ',
+      }),
+    ).toEqual({
+      id: 'command-1',
+      type: 'queue.add',
+      clientId: 'draft-1',
+      mode: 'steer',
+      text: 'inspect this',
+    });
+    expect(
+      parseBridgeCommand({
+        id: 'command-2',
+        type: 'queueDraft.update',
+        clientId: 'draft-1',
+        mode: 'followUp',
+        text: 'updated',
+      }),
+    ).toMatchObject({ type: 'queueDraft.update', mode: 'followUp' });
+    expect(() =>
+      parseBridgeCommand({
+        id: 'command-3',
+        type: 'queue.add',
+        clientId: 'draft-1',
+        mode: 'steer',
+        text: ' '.repeat(MAX_QUEUE_DRAFT_TEXT),
+      }),
+    ).toThrow('text');
+    expect(() =>
+      parseBridgeCommand({
+        id: 'command-4',
+        type: 'queue.add',
+        clientId: 'draft-1',
+        mode: 'steer',
+        text: 'x'.repeat(MAX_QUEUE_DRAFT_TEXT + 1),
+      }),
+    ).toThrow();
+    expect(() =>
+      parseBridgeCommand({
+        id: 'command-5',
+        type: 'queue.remove',
+        clientId: 'draft-1',
+        extra: true,
+      }),
+    ).toThrow();
+    expect(() =>
+      parseRuntimeSnapshot({
+        runtimeId: 'runtime-1',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 'session-1', entries: [] },
+        pendingInteractions: [],
+        queueDrafts: Array.from(
+          { length: MAX_QUEUE_DRAFTS + 1 },
+          (_, index) => ({
+            clientId: `draft-${index}`,
+            mode: 'steer',
+            text: 'x',
+          }),
+        ),
+      }),
+    ).toThrow();
   });
 
   it('accepts bounded image-only commands and redacts image bytes', () => {
