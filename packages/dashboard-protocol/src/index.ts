@@ -76,6 +76,24 @@ export const RuntimeModelOptionSchema = Type.Object(
 );
 export type RuntimeModelOption = Static<typeof RuntimeModelOptionSchema>;
 
+/** A bounded, framework-free live surface contributed by a Pi extension. */
+export const RuntimeExtensionSurfaceSchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    rendererId: IdentifierSchema,
+    viewModel: UnknownSchema,
+    placement: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  },
+  { additionalProperties: false },
+);
+export type RuntimeExtensionSurface = Static<
+  typeof RuntimeExtensionSurfaceSchema
+>;
+/** Compatibility spelling for consumers that call these live surfaces. */
+export const LiveExtensionSurfaceSchema = RuntimeExtensionSurfaceSchema;
+export type LiveExtensionSurface = RuntimeExtensionSurface;
+export const MAX_RUNTIME_EXTENSION_SURFACES = 64;
+
 const InteractionChoiceSchema = Type.Object(
   {
     label: Type.String({ minLength: 1, maxLength: 512 }),
@@ -226,6 +244,14 @@ const RuntimeSnapshotProperties = {
   lastSeenAt: Type.Optional(FiniteNumberSchema),
   /** Optional validated extension capabilities advertised by newer runtimes. */
   capabilities: Type.Optional(RuntimeCapabilitySnapshotSchema),
+  /** Bounded live state projected by installed framework-free extensions. */
+  extensionSurfaces: Type.Optional(
+    Type.Readonly(
+      Type.Array(RuntimeExtensionSurfaceSchema, {
+        maxItems: MAX_RUNTIME_EXTENSION_SURFACES,
+      }),
+    ),
+  ),
 };
 
 export const RuntimeSnapshotSchema = Type.Object(RuntimeSnapshotProperties, {
@@ -234,10 +260,11 @@ export const RuntimeSnapshotSchema = Type.Object(RuntimeSnapshotProperties, {
 type RuntimeSnapshotStatic = Static<typeof RuntimeSnapshotSchema>;
 export type RuntimeSnapshot = Omit<
   RuntimeSnapshotStatic,
-  'session' | 'pendingInteractions'
+  'session' | 'pendingInteractions' | 'extensionSurfaces'
 > & {
   session: SessionSnapshot;
   readonly pendingInteractions: readonly InteractionSnapshot[];
+  readonly extensionSurfaces?: readonly RuntimeExtensionSurface[];
 };
 
 // Type.Partial needs its options argument to preserve strict unknown-field
@@ -248,10 +275,11 @@ export const RuntimeSnapshotPatchSchema = Type.Partial(RuntimeSnapshotSchema, {
 type RuntimeSnapshotPatchStatic = Static<typeof RuntimeSnapshotPatchSchema>;
 export type RuntimeSnapshotPatch = Omit<
   RuntimeSnapshotPatchStatic,
-  'session' | 'pendingInteractions'
+  'session' | 'pendingInteractions' | 'extensionSurfaces'
 > & {
   session?: SessionSnapshot;
   pendingInteractions?: readonly InteractionSnapshot[];
+  extensionSurfaces?: readonly RuntimeExtensionSurface[];
 };
 /** Compatibility spelling used by some consumers. */
 export const RuntimeSnapshotFullSchema = RuntimeSnapshotSchema;

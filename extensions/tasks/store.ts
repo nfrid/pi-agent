@@ -8,6 +8,8 @@ import { EXT, type SnapshotEntry, type State } from './model';
 export type TaskStore = {
   state: State;
   lastCtx: ExtensionContext | undefined;
+  /** Publishes the current state to framework-free live surfaces. */
+  onChange: () => void;
   completedPendingHide: Set<string>;
   hiddenCompleted: Set<string>;
 };
@@ -15,10 +17,11 @@ export type TaskStore = {
 export const initialState = (): State => ({ version: 1, nextId: 1, tasks: [] });
 
 /** Runtime state owned by one task extension registration. */
-export function createTaskStore(): TaskStore {
+export function createTaskStore(onChange: () => void = () => {}): TaskStore {
   return {
     state: initialState(),
     lastCtx: undefined,
+    onChange,
     completedPendingHide: new Set(),
     hiddenCompleted: new Set(),
   };

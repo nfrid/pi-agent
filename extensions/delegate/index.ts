@@ -18,6 +18,7 @@ import {
 } from './config';
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
+import { clearDelegateSurface, publishDelegateSurface } from './live';
 import { pruneDelegateSessions } from './session';
 import { DelegateStatusStore } from './status';
 import { registerDelegateTool } from './tool';
@@ -322,6 +323,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   };
 
   pi.on('session_start', (event, ctx) => {
+    clearDelegateSurface();
     const promptConfig = loadDelegateConfig(ctx.cwd);
     promptSnapshot = {
       fingerprint: fingerprintDelegateConfig(promptConfig),
@@ -342,7 +344,13 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     pruneDelegateSessions({
       isWorktreeRetained: (id) => Boolean(loadWorktree(id)),
     });
-    statuses = new DelegateStatusStore(syncWidget);
+    let nextStatuses: DelegateStatusStore | undefined;
+    nextStatuses = new DelegateStatusStore(() => {
+      syncWidget();
+      if (nextStatuses) publishDelegateSurface(nextStatuses);
+    });
+    statuses = nextStatuses;
+    publishDelegateSurface(nextStatuses);
     jobs = new DelegateJobManager({
       onSettled: queueCompletion,
     });
@@ -417,6 +425,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     statuses = undefined;
     await closing?.dispose();
     closingStatuses?.clear();
+    clearDelegateSurface();
     ui = undefined;
   });
 

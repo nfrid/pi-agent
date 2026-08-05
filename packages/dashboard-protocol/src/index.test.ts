@@ -3,6 +3,7 @@ import {
   deriveSessionTitle,
   isBridgeEvent,
   MAX_FRAME_BYTES,
+  MAX_RUNTIME_EXTENSION_SURFACES,
   parseDashboardEventEnvelope,
   parseDashboardStreamMessage,
   parseFrame,
@@ -314,6 +315,45 @@ describe('dashboard protocol', () => {
         event: { type: 'agent.settled', sessionId: 'session-1' },
       }).cursor,
     ).toBe(2);
+  });
+
+  it('accepts bounded extension surfaces and rejects an oversized catalogue', () => {
+    const surface = {
+      id: 'tasks.current',
+      rendererId: 'tasks.current',
+      placement: 'left-rail',
+      viewModel: { version: 1, tasks: [] },
+    };
+    expect(
+      parseRuntimeSnapshot({
+        runtimeId: 'runtime-1',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 'session-1', entries: [] },
+        pendingInteractions: [],
+        extensionSurfaces: [surface],
+      }),
+    ).toMatchObject({ extensionSurfaces: [surface] });
+    expect(() =>
+      parseRuntimeSnapshot({
+        runtimeId: 'runtime-1',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 'session-1', entries: [] },
+        pendingInteractions: [],
+        extensionSurfaces: Array.from(
+          { length: MAX_RUNTIME_EXTENSION_SURFACES + 1 },
+          (_, index) => ({
+            ...surface,
+            id: `surface-${index}`,
+          }),
+        ),
+      }),
+    ).toThrow();
   });
 
   it('accepts bounded model and thinking catalogues in runtime snapshots', () => {

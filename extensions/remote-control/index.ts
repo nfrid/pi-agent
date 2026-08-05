@@ -28,6 +28,7 @@ import {
   type NormalizedToolPayload,
   PROTOCOL_VERSION,
   parseFrame,
+  type RuntimeExtensionSurface,
   type RuntimeLiveState,
   type RuntimeSnapshot,
   redactImageData,
@@ -50,7 +51,13 @@ import {
   askUserCapabilitySnapshot,
   askUserManifest,
 } from '../ask-user/contribution';
+import {
+  delegateCapabilitySnapshot,
+  delegateManifest,
+} from '../delegate/contribution';
 import { defineExtension } from '../shared/runtime/extension';
+import { liveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
+import { tasksCapabilitySnapshot, tasksManifest } from '../tasks/contribution';
 import {
   RUNTIME_ABORT_ACTION_ID,
   RUNTIME_SHUTDOWN_ACTION_ID,
@@ -72,6 +79,8 @@ const CONTRIBUTION_MANIFESTS = [
   askUserManifest,
   activityGroupsManifest,
   remoteControlManifest,
+  delegateManifest,
+  tasksManifest,
 ] as const;
 const RUNTIME_CAPABILITIES = createRuntimeCapabilitySnapshot(
   CONTRIBUTION_MANIFESTS,
@@ -79,6 +88,8 @@ const RUNTIME_CAPABILITIES = createRuntimeCapabilitySnapshot(
     ...askUserCapabilitySnapshot.capabilities,
     ...activityGroupsCapabilitySnapshot.capabilities,
     ...remoteControlCapabilitySnapshot.capabilities,
+    ...delegateCapabilitySnapshot.capabilities,
+    ...tasksCapabilitySnapshot.capabilities,
   ],
 );
 
@@ -513,6 +524,14 @@ export interface BridgeClientOptions {
   handleCommand: CommandHandler;
   broker?: InteractionBroker;
   capabilities?: RuntimeCapabilitySnapshot;
+  liveSurfaces?: {
+    subscribe(
+      listener: (surfaces: readonly RuntimeExtensionSurface[]) => void,
+    ): () => void;
+  };
+  onLiveSurfacesChanged?: (
+    surfaces: readonly RuntimeExtensionSurface[],
+  ) => void;
 }
 
 /** Reconnecting JSONL client. It never queues browser commands while offline. */
@@ -539,6 +558,7 @@ export class BridgeClient {
   private outboundBytes = 0;
   private writeBlocked = false;
   private unsubscribeBroker: (() => void) | undefined;
+  private unsubscribeLiveSurfaces: (() => void) | undefined;
 
   constructor(private readonly options: BridgeClientOptions) {
     this.effectiveCapabilities = options.capabilities ?? RUNTIME_CAPABILITIES;
@@ -556,6 +576,22 @@ export class BridgeClient {
         });
       }
     });
+    this.unsubscribeLiveSurfaces = options.liveSurfaces?.subscribe(
+      (surfaces) => {
+        try {
+          options.onLiveSurfacesChanged?.(surfaces);
+          const current = options.snapshot();
+          this.sendEvent({
+            type: 'runtime.stateChanged',
+            state: current.liveState,
+            snapshot: { extensionSurfaces: surfaces },
+          });
+        } catch {
+          // A surface publisher must not make a Pi mutation fail because the
+          // bridge is offline or a stale cached snapshot is unavailable.
+        }
+      },
+    );
   }
 
   start(): void {
@@ -570,6 +606,8 @@ export class BridgeClient {
     this.stopHeartbeat();
     this.unsubscribeBroker?.();
     this.unsubscribeBroker = undefined;
+    this.unsubscribeLiveSurfaces?.();
+    this.unsubscribeLiveSurfaces = undefined;
     this.commandQueue = [];
     this.clearOutboundQueue();
     this.socket?.destroy();
@@ -1273,6 +1311,7 @@ export function createRemoteControlRuntime(
     session: { id: 'unknown', entries: [] },
     pendingInteractions: broker.list().map(interactionSnapshot),
     capabilities: RUNTIME_CAPABILITIES,
+    extensionSurfaces: liveExtensionSurfaceHub.snapshot(),
     lastError,
   });
   let cachedSnapshot = unavailableSnapshot();
@@ -1297,6 +1336,7 @@ export function createRemoteControlRuntime(
         : undefined,
       pendingInteractions: broker.list().map(interactionSnapshot),
       capabilities: RUNTIME_CAPABILITIES,
+      extensionSurfaces: liveExtensionSurfaceHub.snapshot(),
       lastError,
     };
   };
@@ -1308,6 +1348,10 @@ export function createRemoteControlRuntime(
     runtimeId,
     broker,
     capabilities: RUNTIME_CAPABILITIES,
+    liveSurfaces: liveExtensionSurfaceHub,
+    onLiveSurfacesChanged: (surfaces) => {
+      cachedSnapshot = { ...cachedSnapshot, extensionSurfaces: surfaces };
+    },
     // Socket callbacks run outside Pi's extension event dispatch. Returning a
     // cache keeps reconnects from dereferencing a context that was invalidated
     // by session replacement or extension reload.

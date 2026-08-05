@@ -1,0 +1,52 @@
+import { Value } from 'typebox/value';
+import type { RuntimeExtensionSurface } from '../../packages/dashboard-protocol/src/index';
+import {
+  clearLiveExtensionSurfaces,
+  publishLiveExtensionSurfaces,
+} from '../shared/runtime/live-surfaces';
+import {
+  TASKS_RENDERER_ID,
+  TASKS_SURFACE_ID,
+  TaskStateViewModelSchema,
+} from './contribution';
+import { stats } from './domain';
+import type { TaskStore } from './store';
+
+export const TASKS_EXTENSION_ID = 'tasks';
+
+function boundedTask(task: TaskStore['state']['tasks'][number]) {
+  return {
+    id: task.id.slice(0, 256),
+    text: task.text.slice(0, 4_000),
+    status: task.status,
+    dependsOn: task.dependsOn.slice(0, 64).map((id) => id.slice(0, 256)),
+    ...(task.priority === undefined ? {} : { priority: task.priority }),
+    ...(task.notes === undefined ? {} : { notes: task.notes.slice(0, 10_000) }),
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  };
+}
+
+export function taskSurface(store: TaskStore): RuntimeExtensionSurface {
+  const viewModel = {
+    version: 1 as const,
+    tasks: store.state.tasks.slice(0, 128).map(boundedTask),
+    stats: stats(store),
+  };
+  if (!Value.Check(TaskStateViewModelSchema, viewModel))
+    throw new Error('Task state surface is invalid.');
+  return {
+    id: TASKS_SURFACE_ID,
+    rendererId: TASKS_RENDERER_ID,
+    placement: 'left-rail',
+    viewModel,
+  };
+}
+
+export function publishTaskSurface(store: TaskStore): void {
+  publishLiveExtensionSurfaces(TASKS_EXTENSION_ID, [taskSurface(store)]);
+}
+
+export function clearTaskSurface(): void {
+  clearLiveExtensionSurfaces(TASKS_EXTENSION_ID);
+}

@@ -47,11 +47,17 @@ export function executeMutation(
       ? mutateBatchUnsafe(store, params.operations ?? [])
       : mutateUnsafe(store, action, params);
   if (result.error) restoreMutationSnapshot(store, snapshot);
-  if (!effects || (result.error && !effects.updateOnError)) return result;
+  if (!effects || (result.error && !effects.updateOnError)) {
+    if (!result.error && result.changed) store.onChange();
+    return result;
+  }
 
   try {
     effects.updateUi();
-    if (!result.error && result.changed) effects.persist();
+    if (!result.error && result.changed) {
+      effects.persist();
+      store.onChange();
+    }
   } catch (error) {
     restoreMutationSnapshot(store, snapshot);
     try {

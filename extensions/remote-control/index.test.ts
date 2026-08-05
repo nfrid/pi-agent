@@ -18,6 +18,7 @@ import {
 } from '../../packages/dashboard-protocol/src/index';
 import { InteractionBroker } from '../ask-user/broker';
 import { askUserCapabilitySnapshot } from '../ask-user/contribution';
+import { LiveSurfaceHub } from '../shared/runtime/live-surfaces';
 import {
   BridgeClient,
   createRemoteControlRuntime,
@@ -442,6 +443,38 @@ describe('remote-control bridge', () => {
     connection?.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
+  });
+
+  it('pushes live surface patches and unsubscribes on stop', () => {
+    const hub = new LiveSurfaceHub();
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => ({ ...snapshot, extensionSurfaces: hub.snapshot() }),
+      liveSurfaces: hub,
+      handleCommand: async () => ({ accepted: true }),
+    });
+    const socket = new net.Socket();
+    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', socket);
+    hub.publish('tasks', [
+      {
+        id: 'tasks.current',
+        rendererId: 'tasks.current',
+        placement: 'left-rail',
+        viewModel: { version: 1, tasks: [] },
+      },
+    ]);
+    const frame = JSON.parse(String(write.mock.calls[0]?.[0])) as {
+      event: { type: string; snapshot?: RuntimeSnapshot };
+    };
+    expect(frame.event).toMatchObject({
+      type: 'runtime.stateChanged',
+      snapshot: { extensionSurfaces: [{ id: 'tasks.current' }] },
+    });
+    client.stop();
+    hub.publish('tasks', []);
+    expect(write).toHaveBeenCalledTimes(1);
   });
 
   it('uses one bounded duplicate guard for semantic bridge commands', () => {
