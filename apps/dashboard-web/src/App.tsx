@@ -27,7 +27,7 @@ import {
   useState,
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
-import { useDashboard } from './dashboard-transport';
+import { useDashboardShell } from './dashboard-transport';
 import { Composer } from './features/composer';
 import { SessionView } from './features/session';
 import { Dashboard, Header, WorkspaceView } from './routes/dashboard';
@@ -55,13 +55,13 @@ export {
 export { toTranscriptEntries } from './transcript';
 
 const DashboardContext = createContext<
-  ReturnType<typeof useDashboard> | undefined
+  ReturnType<typeof useDashboardShell> | undefined
 >(undefined);
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false } },
 });
 
-function useDashboardContext(): ReturnType<typeof useDashboard> {
+function useDashboardContext(): ReturnType<typeof useDashboardShell> {
   const value = useContext(DashboardContext);
   if (!value) throw new Error('Dashboard context is unavailable.');
   return value;
@@ -102,7 +102,7 @@ export default function App() {
 }
 
 function DashboardApp() {
-  const dashboard = useDashboard();
+  const dashboard = useDashboardShell();
   const snapshotQuery = useQuery(
     snapshotQueryOptions(dashboardHttpClient, () =>
       dashboard.store.getGeneration(),

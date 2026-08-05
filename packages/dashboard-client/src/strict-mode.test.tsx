@@ -1,9 +1,14 @@
+import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { parseHTML } from 'linkedom';
 import { act, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it } from 'vitest';
 import type { DashboardHttpClient } from './http-client.js';
-import { useDashboard } from './index.js';
+import {
+  type DashboardShellState,
+  useDashboard,
+  useDashboardShell,
+} from './index.js';
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -78,5 +83,55 @@ describe('useDashboard StrictMode lifecycle', () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
     expect(active).toBe(0);
+  });
+
+  it('does not rerender the application shell for transcript-only records', async () => {
+    const client = {
+      events: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({ start: () => undefined }),
+        ),
+    } as unknown as DashboardHttpClient;
+    let dashboard: DashboardShellState | undefined;
+    let renders = 0;
+    function Probe() {
+      dashboard = useDashboardShell(client);
+      renders += 1;
+      return null;
+    }
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <Probe />
+        </StrictMode>,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    await act(async () => {
+      dashboard?.store.installSnapshot({
+        serverId: 'daemon-1',
+        revision: 1,
+        cursor: 1,
+        runtimes: [],
+        workspaces: [],
+        sessions: [],
+        unread: [],
+      } as unknown as BrowserSnapshot);
+    });
+    const rendersAfterSnapshot = renders;
+    await act(async () => {
+      dashboard?.store.acceptStreamRecord({
+        cursor: 2,
+        emittedAt: 2,
+        sessionId: 'session-1',
+        event: { type: 'agent.settled', sessionId: 'session-1' },
+      });
+    });
+    expect(renders).toBe(rendersAfterSnapshot);
+    await act(async () => root.unmount());
   });
 });

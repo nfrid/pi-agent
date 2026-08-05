@@ -50,6 +50,79 @@ describe('DashboardLiveStore', () => {
     expect(state.recentEvents.map((item) => item.cursor)).toEqual([5, 6]);
   });
 
+  it('does not let an HTTP snapshot skip pending SSE transcript replay', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 5), {
+      source: 'http',
+      requestGeneration: 0,
+    });
+    expect(store.getSnapshot().cursor).toBe(0);
+    store.hydrateSession(sessionResponse(5));
+
+    for (const [cursor, type, content] of [
+      [1, 'message.started', ''],
+      [2, 'message.updated', 'hel'],
+      [3, 'message.updated', 'hello'],
+      [4, 'message.finished', 'hello'],
+    ] as const)
+      store.acceptStreamRecord({
+        cursor,
+        emittedAt: cursor,
+        sessionId: 'session-1',
+        event: {
+          type,
+          sessionId: 'session-1',
+          message: {
+            messageId: 'answer-1',
+            role: 'assistant',
+            content,
+            phase: type.split('.')[1],
+          },
+        },
+      } as StreamRecord);
+    store.acceptStreamRecord(envelope(5));
+
+    expect(store.getSnapshot().cursor).toBe(5);
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.items[
+        'answer-1'
+      ],
+    ).toMatchObject({ content: 'hello', status: 'finished' });
+  });
+
+  it('advances replay without regressing a newer HTTP projection', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 5), {
+      source: 'http',
+      requestGeneration: 0,
+    });
+    expect(
+      store.acceptStreamRecord({
+        type: 'snapshot',
+        cursor: 1,
+        emittedAt: 1,
+        snapshot: snapshot('daemon-1', 1),
+      } as StreamRecord),
+    ).toBe(true);
+    expect(store.getSnapshot().cursor).toBe(1);
+    expect(store.getSnapshot().snapshot?.cursor).toBe(5);
+  });
+
+  it('rebases the stream cursor after a replay gap snapshot', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 5), {
+      source: 'http',
+      requestGeneration: 0,
+    });
+    store.installSnapshot(snapshot('daemon-1', 8), {
+      source: 'http',
+      requestGeneration: 0,
+      rebaseCursor: true,
+    });
+    expect(store.getSnapshot().cursor).toBe(8);
+    expect(store.getSnapshot().cursorHistory).toEqual([8]);
+  });
+
   it('hydrates at an HTTP cursor and replays buffered records newer than it', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 3));
@@ -202,6 +275,42 @@ describe('DashboardLiveStore', () => {
     expect(projection?.items['answer-b']).toBeDefined();
   });
 
+  it('does not resurrect stale HTTP entries after a live branch ages out', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.acceptStreamRecord({
+      cursor: 2,
+      emittedAt: 2,
+      event: {
+        type: 'session.snapshot',
+        session: {
+          id: 'session-1',
+          entriesComplete: true,
+          entries: [
+            {
+              type: 'message',
+              message: { id: 'new-tail', role: 'user', content: 'new' },
+            },
+          ],
+        },
+      },
+    } as never);
+    for (let cursor = 3; cursor <= 260; cursor += 1)
+      store.acceptStreamRecord(envelope(cursor, 'session-2'));
+
+    const projection = store.hydrateSession({
+      ...sessionResponse(260),
+      entries: [
+        {
+          type: 'message',
+          message: { id: 'old-tail', role: 'user', content: 'old' },
+        },
+      ],
+    });
+    expect(projection?.items['new-tail']).toBeDefined();
+    expect(projection?.items['old-tail']).toBeUndefined();
+  });
+
   it('replays a tree replacement beyond the former 64-event overlap', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
@@ -270,6 +379,8 @@ describe('DashboardLiveStore', () => {
     store.installSnapshot(snapshot('daemon-2', 1), { source: 'sse' });
     expect(store.getSnapshot().serverId).toBe('daemon-2');
     expect(store.getSnapshot().cursor).toBe(1);
+    expect(store.getSnapshot().connection.lastCursor).toBe(1);
+    expect(store.getSnapshot().resyncNonce).toBe(1);
     expect(
       store.installSnapshot(snapshot('daemon-1', 13), {
         source: 'http',

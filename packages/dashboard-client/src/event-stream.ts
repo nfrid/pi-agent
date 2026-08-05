@@ -16,6 +16,30 @@ function abortError(): DOMException {
   );
 }
 
+export function yieldToBrowser(fallbackMs = 100): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame !== 'function') {
+      setTimeout(resolve, 0);
+      return;
+    }
+    let settled = false;
+    let frame: number | undefined;
+    const fallback = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      if (frame !== undefined && typeof cancelAnimationFrame === 'function')
+        cancelAnimationFrame(frame);
+      resolve();
+    }, fallbackMs);
+    frame = requestAnimationFrame(() => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(fallback);
+      resolve();
+    });
+  });
+}
+
 /** Parse one long-lived SSE response. The parser intentionally ignores id/event fields. */
 export async function consumeSseResponse(
   response: Response,
@@ -26,6 +50,7 @@ export async function consumeSseResponse(
     if (!record) throw new Error('Dashboard returned an invalid event.');
     return record;
   },
+  yieldControl: () => Promise<void> = yieldToBrowser,
 ): Promise<number> {
   const body = response.body;
   if (!body) throw new Error('Dashboard event stream has no body.');
@@ -50,6 +75,10 @@ export async function consumeSseResponse(
     const record = parse(JSON.parse(data));
     await onRecord(record);
     records += 1;
+    // Proxies and browsers may coalesce many SSE frames into one read chunk.
+    // Yield per record so a continuous token stream cannot monopolize the
+    // microtask queue and prevent React from painting live updates.
+    await yieldControl();
   };
   const processLine = async (rawLine: string) => {
     const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
@@ -213,14 +242,17 @@ export class DashboardEventStream {
         controller.signal,
         this.options.getServerId(),
       );
+      if (this.stopped) return;
+      // A successful response means the live channel is connected even when
+      // the daemon is idle and sends only heartbeat comments.
+      this.options.onState('connected');
+      this.options.onError(undefined);
+      this.retryDelay = RECONNECT_MIN_MS;
       await consumeSseResponse(
         response,
         (record) => {
           if (this.stopped) return;
           this.options.onRecord(record);
-          this.options.onState('connected');
-          this.options.onError(undefined);
-          this.retryDelay = RECONNECT_MIN_MS;
         },
         controller.signal,
         (value) => {

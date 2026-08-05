@@ -52,6 +52,8 @@ export interface SnapshotAcceptanceProvenance {
   source?: 'http' | 'sse';
   requestGeneration?: number;
   currentGeneration?: number;
+  /** A replay-gap snapshot establishes the next SSE cursor baseline. */
+  rebaseCursor?: boolean;
 }
 
 export function snapshotAcceptance(
@@ -144,6 +146,13 @@ export class DashboardLiveStore {
   }
 
   setConnection(status: ConnectionStatus, error?: string): void {
+    const current = this.state.connection;
+    if (
+      current.status === status &&
+      current.lastCursor === this.state.cursor &&
+      current.error === error
+    )
+      return;
     this.publish({
       ...this.state,
       connection: {
@@ -155,6 +164,7 @@ export class DashboardLiveStore {
   }
 
   setUsageError(error: string | undefined): void {
+    if (this.state.usageError === error) return;
     this.publish({
       ...this.state,
       ...(error ? { usageError: error } : { usageError: undefined }),
@@ -162,6 +172,7 @@ export class DashboardLiveStore {
   }
 
   setError(error: string | undefined): void {
+    if (this.state.connection.error === error) return;
     this.publish({
       ...this.state,
       connection: {
@@ -177,7 +188,7 @@ export class DashboardLiveStore {
   ): boolean {
     const decision = snapshotAcceptance(
       this.state.serverId,
-      this.state.cursor,
+      Math.max(this.state.cursor, this.state.snapshot?.cursor ?? 0),
       next,
       {
         ...provenance,
@@ -193,7 +204,10 @@ export class DashboardLiveStore {
         serverId: next.serverId,
         revision: next.revision,
         cursor: next.cursor,
-        connection: this.state.connection,
+        connection: {
+          ...this.state.connection,
+          lastCursor: next.cursor,
+        },
         workspacesById: indexed(next.workspaces),
         workspaceOrder: next.workspaces.map((item) => item.id),
         runtimesById: runtimeIndex(next.runtimes),
@@ -203,18 +217,26 @@ export class DashboardLiveStore {
         sessionReplacementBySessionId: {},
         notificationsById: indexed(next.unread),
         cursorHistory: [next.cursor].slice(-LIVE_BUFFER_LIMIT),
+        resyncNonce: this.state.resyncNonce + 1,
       });
       return true;
     }
     const current = this.state.snapshot;
     if (current && current.cursor > next.cursor) return false;
+    // Ordinary HTTP reads update the authoritative projection but must not
+    // jump over SSE records that were requested earlier and are still being
+    // replayed. Only SSE delivery (or an explicit replay-gap rebase) advances
+    // the transport cursor.
+    const advanceCursor =
+      provenance.source !== 'http' || provenance.rebaseCursor === true;
+    const cursor = advanceCursor ? next.cursor : this.state.cursor;
     this.publish({
       ...this.state,
       snapshot: next,
       serverId: next.serverId,
       revision: next.revision,
-      cursor: next.cursor,
-      connection: { ...this.state.connection, lastCursor: next.cursor },
+      cursor,
+      connection: { ...this.state.connection, lastCursor: cursor },
       workspacesById: indexed(next.workspaces),
       workspaceOrder: next.workspaces.map((item) => item.id),
       runtimesById: runtimeIndex(next.runtimes),
@@ -223,9 +245,9 @@ export class DashboardLiveStore {
       sessionReplacementByRuntimeId: this.state.sessionReplacementByRuntimeId,
       sessionReplacementBySessionId: this.state.sessionReplacementBySessionId,
       notificationsById: indexed(next.unread),
-      cursorHistory: [...this.state.cursorHistory, next.cursor].slice(
-        -LIVE_BUFFER_LIMIT,
-      ),
+      cursorHistory: advanceCursor
+        ? [...this.state.cursorHistory, next.cursor].slice(-LIVE_BUFFER_LIMIT)
+        : this.state.cursorHistory,
     });
     return true;
   }
@@ -237,11 +259,20 @@ export class DashboardLiveStore {
         record.cursor <= this.state.cursor
       )
         return false;
-      const accepted = this.installSnapshot(record.snapshot, { source: 'sse' });
-      if (!accepted) return false;
+      const projectionIsOlder =
+        record.snapshot.serverId === this.state.serverId &&
+        record.snapshot.cursor < (this.state.snapshot?.cursor ?? 0);
+      if (!projectionIsOlder) {
+        const accepted = this.installSnapshot(record.snapshot, {
+          source: 'sse',
+        });
+        if (!accepted) return false;
+      }
+      if (record.cursor === this.state.cursor) return true;
       this.publish({
         ...this.state,
         cursor: record.cursor,
+        connection: { ...this.state.connection, lastCursor: record.cursor },
         cursorHistory: [...this.state.cursorHistory, record.cursor].slice(
           -LIVE_BUFFER_LIMIT,
         ),
@@ -266,7 +297,11 @@ export class DashboardLiveStore {
       !envelope.snapshot
     )
       throw new ReplayGapError();
-    if (envelope.snapshot)
+    if (
+      envelope.snapshot &&
+      envelope.snapshot.serverId === this.state.serverId &&
+      envelope.snapshot.cursor >= (this.state.snapshot?.cursor ?? 0)
+    )
       this.installSnapshot(envelope.snapshot, { source: 'sse' });
     const sessionId = sessionIdForEvent(envelope);
     const currentProjection = sessionId
@@ -382,6 +417,10 @@ export class DashboardLiveStore {
       )
     )
       return undefined;
+    // A session response can arrive while older records from the same SSE
+    // replay are still pending. Its entries are authoritative, but transport
+    // ordering is covered only through the cursor the stream has accepted.
+    const coveredCursor = Math.min(snapshotCursor, this.state.cursor);
     const currentProjection =
       this.state.transcriptsBySessionId[response.metadata.id];
     const sessionEvents = this.state.recentEvents.filter((envelope) => {
@@ -403,8 +442,8 @@ export class DashboardLiveStore {
     const firstReplayCursor = sessionEvents[0]?.cursor;
     const replayCursor =
       firstReplayCursor === undefined
-        ? snapshotCursor
-        : Math.min(snapshotCursor, firstReplayCursor) - 1;
+        ? coveredCursor
+        : Math.min(coveredCursor, firstReplayCursor) - 1;
     const firstResponseEpochSeq = sessionEvents
       .filter(
         (envelope) =>
@@ -457,7 +496,7 @@ export class DashboardLiveStore {
         : {}),
       lastCursor: Math.max(
         projection.lastCursor,
-        snapshotCursor,
+        coveredCursor,
         currentProjection?.lastCursor ?? -1,
       ),
       lastRuntimeSeq: Math.max(
@@ -467,6 +506,30 @@ export class DashboardLiveStore {
       ),
       retiredEpochs: [...retiredEpochs],
     };
+    const sameRuntimeGeneration =
+      currentProjection !== undefined &&
+      (currentProjection.runtimeEpoch === undefined ||
+        response.runtimeEpoch === undefined ||
+        currentProjection.runtimeEpoch === response.runtimeEpoch);
+    if (currentProjection && sameRuntimeGeneration) {
+      // A delayed/equal-generation HTTP read is not allowed to replace an
+      // already-live projection: the event that established its branch may
+      // have aged out of the bounded replay tail. HTTP can enrich transport
+      // metadata, while a genuinely new runtime epoch still rehydrates.
+      projection = {
+        ...currentProjection,
+        ...(currentProjection.runtimeEpoch === undefined &&
+        response.runtimeEpoch !== undefined
+          ? { runtimeEpoch: response.runtimeEpoch }
+          : {}),
+        lastCursor: Math.max(currentProjection.lastCursor, coveredCursor),
+        lastRuntimeSeq: Math.max(
+          currentProjection.lastRuntimeSeq,
+          response.runtimeSeq ?? -1,
+        ),
+        retiredEpochs: [...retiredEpochs],
+      };
+    }
     const currentMetadata = this.state.sessionsById[response.metadata.id];
     const metadata = currentMetadata
       ? { ...response.metadata, ...currentMetadata }
@@ -565,7 +628,6 @@ export class DashboardLiveStore {
       getServerId: () => this.state.serverId,
       onRecord: (record) => {
         this.acceptStreamRecord(record);
-        this.setError(undefined);
       },
       onReplayGap: async () => {
         const requestGeneration = this.generation;
@@ -575,6 +637,7 @@ export class DashboardLiveStore {
             source: 'http',
             requestGeneration,
             currentGeneration: this.generation,
+            rebaseCursor: true,
           });
           this.publish({
             ...this.state,

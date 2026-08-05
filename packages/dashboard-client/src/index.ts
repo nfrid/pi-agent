@@ -23,14 +23,15 @@ export interface DashboardState {
   store: DashboardLiveStore;
 }
 
-/** React adapter for the client-owned store and SSE lifecycle. */
-export function useDashboard(
-  client: DashboardHttpClient = dashboardHttpClient,
-): DashboardState {
+export type DashboardShellState = Omit<
+  DashboardState,
+  'events' | 'cursorHistory' | 'cursor' | 'resyncNonce'
+>;
+
+function useConnectedDashboardStore(client: DashboardHttpClient) {
   const storeRef = useRef<DashboardLiveStore | undefined>(undefined);
   if (!storeRef.current) storeRef.current = new DashboardLiveStore();
   const store = storeRef.current;
-  const state = useDashboardStore(store, (current) => current);
 
   useEffect(() => {
     const stop = store.connect(client);
@@ -51,6 +52,15 @@ export function useDashboard(
     };
   }, [client, store]);
 
+  return store;
+}
+
+/** Full compatibility adapter, including raw stream metadata. */
+export function useDashboard(
+  client: DashboardHttpClient = dashboardHttpClient,
+): DashboardState {
+  const store = useConnectedDashboardStore(client);
+  const state = useDashboardStore(store, (current) => current);
   return {
     snapshot: state.snapshot,
     error: state.connection.error,
@@ -62,4 +72,22 @@ export function useDashboard(
     connectionState: state.connection.status,
     store,
   };
+}
+
+/**
+ * Optimized application-shell adapter. Transcript routes use dedicated entity
+ * selectors, so token records must not rerender the router, header, and page.
+ */
+export function useDashboardShell(
+  client: DashboardHttpClient = dashboardHttpClient,
+): DashboardShellState {
+  const store = useConnectedDashboardStore(client);
+  const snapshot = useDashboardStore(store, (state) => state.snapshot);
+  const error = useDashboardStore(store, (state) => state.connection.error);
+  const usageError = useDashboardStore(store, (state) => state.usageError);
+  const connectionState = useDashboardStore(
+    store,
+    (state) => state.connection.status,
+  );
+  return { snapshot, error, usageError, connectionState, store };
 }

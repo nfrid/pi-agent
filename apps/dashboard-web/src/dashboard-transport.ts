@@ -13,6 +13,7 @@ import {
   shouldReconnectAfterConnectUnwind,
   snapshotAcceptance,
   useDashboard,
+  useDashboardShell,
 } from '@pi-dashboard/client';
 import type {
   DashboardEventEnvelope,
@@ -41,6 +42,7 @@ export {
   shouldReconnectAfterConnectUnwind,
   snapshotAcceptance,
   useDashboard,
+  useDashboardShell,
 };
 
 export type AppError = Error & { code?: string; status?: number };
