@@ -1,4 +1,5 @@
 import { waitFor, withAbort } from './async';
+import { setPendingProcessCount } from './pending-processes';
 
 /**
  * The bookkeeping every long-running job in this repo needs: an id, a state,
@@ -94,6 +95,7 @@ export class AsyncJobRegistry<
 
   add(record: TRecord): void {
     this.records.set(record.id, record);
+    this.syncPendingProcesses();
   }
 
   changed(): void {
@@ -167,6 +169,7 @@ export class AsyncJobRegistry<
     if (!this.shuttingDown && record.observers === 0)
       this.options.onSettled?.(snapshot);
     this.prune();
+    this.syncPendingProcesses();
     this.changed();
     return snapshot;
   }
@@ -177,8 +180,13 @@ export class AsyncJobRegistry<
     const active = this.active();
     await Promise.all(active.map((record) => this.options.teardown(record)));
     this.records.clear();
+    this.syncPendingProcesses();
     this.changed();
     return active;
+  }
+
+  private syncPendingProcesses(): void {
+    setPendingProcessCount(this, this.activeCount);
   }
 
   /** Keep only the most recently settled records; active ones always stay. */

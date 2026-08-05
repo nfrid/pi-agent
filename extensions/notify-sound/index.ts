@@ -2,6 +2,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { defineExtension } from '../shared/runtime/extension';
+import { hasPendingProcesses } from '../shared/runtime/pending-processes';
 
 const ENABLE_FOCUS_REPORTING = '\x1b[?1004h';
 const DISABLE_FOCUS_REPORTING = '\x1b[?1004l';
@@ -29,6 +30,10 @@ function isActiveTmuxPane(): boolean {
   } catch {
     return true;
   }
+}
+
+export function shouldNotifyAgentSettled(): boolean {
+  return !hasPendingProcesses();
 }
 
 function playSound(): void {
@@ -88,7 +93,9 @@ export default defineExtension('notify-sound', (pi: ExtensionAPI) => {
     if (event.toolName === 'ask_user_question') playIfOutOfFocus();
   });
 
-  pi.on('agent_settled', playIfOutOfFocus);
+  pi.on('agent_settled', () => {
+    if (shouldNotifyAgentSettled()) playIfOutOfFocus();
+  });
 
   pi.on('session_shutdown', () => {
     if (!installed) return;

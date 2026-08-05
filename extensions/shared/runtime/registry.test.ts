@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
+import { pendingProcessCount } from './pending-processes';
 import { AsyncJobRegistry, type JobRecord } from './registry';
 
 type State = 'running' | 'done' | 'failed';
@@ -92,6 +93,16 @@ describe('capacity', () => {
 });
 
 describe('settling', () => {
+  test('contributes active jobs to the process-wide pending count', () => {
+    const baseline = pendingProcessCount();
+    const { registry, add } = build();
+    const record = add('first');
+
+    expect(pendingProcessCount()).toBe(baseline + 1);
+    registry.settle(record, 'done');
+    expect(pendingProcessCount()).toBe(baseline);
+  });
+
   test('announces the outcome once and only once', () => {
     const onSettled = vi.fn();
     const { registry, add } = build({ onSettled });

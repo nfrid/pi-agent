@@ -20,11 +20,13 @@ import {
 import { InteractionBroker } from '../ask-user/broker';
 import { askUserCapabilitySnapshot } from '../ask-user/contribution';
 import { LiveSurfaceHub } from '../shared/runtime/live-surfaces';
+import { setPendingProcessCount } from '../shared/runtime/pending-processes';
 import {
   BridgeClient,
   createRemoteControlRuntime,
   dispatchDashboardCommand,
   dispatchDashboardInput,
+  emitAgentSettlement,
   expandDashboardInput,
   flushQueueDrafts,
   LiveEventNormalizer,
@@ -1150,5 +1152,40 @@ describe('remote-control bridge', () => {
     connection?.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
+  });
+});
+
+describe('agent settlement', () => {
+  it('keeps the dashboard working and suppresses settlement while a process is pending', () => {
+    const source = {};
+    const events: unknown[] = [];
+    let currentSnapshot = { ...snapshot };
+    const runtime = {
+      isCurrent: () => true,
+      setContext: () => undefined,
+      setLiveState: (liveState: RuntimeSnapshot['liveState']) => {
+        currentSnapshot = { ...currentSnapshot, liveState };
+      },
+      snapshot: () => currentSnapshot,
+      client: { sendEvent: (event: unknown) => events.push(event) },
+    } as unknown as Parameters<typeof emitAgentSettlement>[0];
+    const ctx = {
+      sessionManager: { getSessionId: () => 'session-test' },
+    } as unknown as ExtensionContext;
+
+    setPendingProcessCount(source, 1);
+    try {
+      emitAgentSettlement(runtime, ctx);
+    } finally {
+      setPendingProcessCount(source, 0);
+    }
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'runtime.stateChanged',
+        state: 'working',
+        snapshot: expect.objectContaining({ liveState: 'working' }),
+      }),
+    ]);
   });
 });

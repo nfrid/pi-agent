@@ -65,6 +65,7 @@ import {
 } from '../delegate/contribution';
 import { defineExtension } from '../shared/runtime/extension';
 import { liveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
+import { hasPendingProcesses } from '../shared/runtime/pending-processes';
 import { tasksCapabilitySnapshot, tasksManifest } from '../tasks/contribution';
 import {
   RUNTIME_ABORT_ACTION_ID,
@@ -1756,14 +1757,36 @@ export function flushQueueDrafts(
   return true;
 }
 
-function emitState(runtime: RemoteControlRuntime, ctx: ExtensionContext): void {
+function emitState(
+  runtime: RemoteControlRuntime,
+  ctx: ExtensionContext,
+  forcedState?: RuntimeLiveState,
+): void {
   if (!runtime.isCurrent(ctx)) return;
   runtime.setContext(ctx);
   if (!runtime.isCurrent(ctx)) return;
+  const state = forcedState ?? liveState(ctx, getInteractionBroker());
+  if (forcedState) runtime.setLiveState(forcedState);
   runtime.client.sendEvent({
     type: 'runtime.stateChanged',
-    state: liveState(ctx, getInteractionBroker()),
+    state,
     snapshot: runtime.snapshot(),
+  });
+}
+
+export function emitAgentSettlement(
+  runtime: RemoteControlRuntime,
+  ctx: ExtensionContext,
+): void {
+  if (hasPendingProcesses()) {
+    emitState(runtime, ctx, 'working');
+    return;
+  }
+  emitState(runtime, ctx);
+  if (!runtime.isCurrent(ctx)) return;
+  runtime.client.sendEvent({
+    type: 'agent.settled',
+    sessionId: ctx.sessionManager.getSessionId(),
   });
 }
 
@@ -1838,12 +1861,7 @@ export default defineExtension('remote-control', (pi) => {
     flushQueueDrafts(runtime, pi, ctx, 'steer');
   });
   pi.on('agent_settled', (_event, ctx) => {
-    emitState(runtime, ctx);
-    if (!runtime.isCurrent(ctx)) return;
-    runtime.client.sendEvent({
-      type: 'agent.settled',
-      sessionId: ctx.sessionManager.getSessionId(),
-    });
+    emitAgentSettlement(runtime, ctx);
   });
   pi.on('agent_end', (_event, ctx) => {
     if (!flushQueueDrafts(runtime, pi, ctx, 'followUp'))
