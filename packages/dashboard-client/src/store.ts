@@ -1,5 +1,6 @@
 import {
   applyRuntimeEvent,
+  applyTransportOrdering,
   createRuntimeReducerState,
   hydrateTranscript,
   type RuntimeReducerState,
@@ -433,7 +434,7 @@ export class DashboardLiveStore {
           );
       }
     }
-    if (!envelope.snapshot && envelope.runtimeId) {
+    if (envelope.runtimeId) {
       const currentRuntime = nextState.runtimesById[envelope.runtimeId];
       if (currentRuntime) {
         const priorRuntimeState = this.runtimeReducerStates.get(
@@ -442,13 +443,23 @@ export class DashboardLiveStore {
         const runtimeState = priorRuntimeState
           ? { ...priorRuntimeState, snapshot: currentRuntime }
           : createRuntimeReducerState(currentRuntime);
-        const reduced = applyRuntimeEvent(runtimeState, envelope);
-        this.runtimeReducerStates.set(envelope.runtimeId, reduced.state);
-        if (reduced.state.snapshot !== currentRuntime)
-          nextState = this.installRuntimeProjection(
-            nextState,
-            reduced.state.snapshot,
-          );
+        if (envelope.snapshot) {
+          // The browser snapshot already includes this runtime event. Advance
+          // transport metadata without reducing the event a second time.
+          const ordering = applyTransportOrdering(runtimeState, envelope);
+          this.runtimeReducerStates.set(envelope.runtimeId, {
+            snapshot: currentRuntime,
+            ...ordering.state,
+          });
+        } else {
+          const reduced = applyRuntimeEvent(runtimeState, envelope);
+          this.runtimeReducerStates.set(envelope.runtimeId, reduced.state);
+          if (reduced.state.snapshot !== currentRuntime)
+            nextState = this.installRuntimeProjection(
+              nextState,
+              reduced.state.snapshot,
+            );
+        }
       }
     }
     let sessionChangeById = nextState.sessionChangeById;

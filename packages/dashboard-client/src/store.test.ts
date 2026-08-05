@@ -132,6 +132,71 @@ describe('DashboardLiveStore', () => {
     );
   });
 
+  it('synchronizes runtime ordering from authoritative snapshot events', () => {
+    const store = new DashboardLiveStore();
+    const runtime = {
+      runtimeId: 'runtime-1',
+      liveState: 'idle',
+      pendingInteractions: [],
+      extensionSurfaces: [],
+      session: { id: 'session-1', entries: [] },
+    };
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      runtimes: [runtime],
+    } as unknown as BrowserSnapshot);
+    store.acceptStreamRecord({
+      cursor: 2,
+      emittedAt: 2,
+      runtimeId: 'runtime-1',
+      runtimeEpoch: 'epoch-a',
+      runtimeSeq: 1,
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'working',
+        snapshot: {},
+      },
+    } as StreamRecord);
+
+    const authoritative = {
+      ...snapshot('daemon-1', 3),
+      runtimes: [{ ...runtime, liveState: 'waiting' }],
+    } as unknown as BrowserSnapshot;
+    store.acceptStreamRecord({
+      cursor: 3,
+      emittedAt: 3,
+      runtimeId: 'runtime-1',
+      runtimeEpoch: 'epoch-b',
+      runtimeSeq: 1,
+      snapshot: authoritative,
+      // Deliberately conflicts with the authoritative runtime projection.
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'idle',
+        snapshot: {},
+      },
+    } as StreamRecord);
+    expect(store.getSnapshot().runtimesById['runtime-1'].liveState).toBe(
+      'waiting',
+    );
+
+    store.acceptStreamRecord({
+      cursor: 4,
+      emittedAt: 4,
+      runtimeId: 'runtime-1',
+      runtimeEpoch: 'epoch-a',
+      runtimeSeq: 99,
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'idle',
+        snapshot: {},
+      },
+    } as StreamRecord);
+    expect(store.getSnapshot().runtimesById['runtime-1'].liveState).toBe(
+      'waiting',
+    );
+  });
+
   it('keeps entity indexes and embedded snapshot projections aligned across ingress paths', () => {
     const store = new DashboardLiveStore();
     const runtime = {
