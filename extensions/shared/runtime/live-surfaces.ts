@@ -1,26 +1,27 @@
-import type { RuntimeExtensionSurface } from '../../../packages/dashboard-protocol/src/index';
+import {
+  type ExtensionSurface,
+  MAX_EXTENSION_SURFACES,
+  parseExtensionSurface,
+} from '@pi-dashboard/extension-contributions';
 
 /** The bridge keeps the aggregate surface catalogue bounded. */
-export const MAX_LIVE_EXTENSION_SURFACES = 64;
+export const MAX_LIVE_EXTENSION_SURFACES = MAX_EXTENSION_SURFACES;
 export const MAX_LIVE_EXTENSION_SURFACES_PER_EXTENSION = 32;
 
 export type LiveSurfaceListener = (
-  surfaces: readonly RuntimeExtensionSurface[],
+  surfaces: readonly ExtensionSurface[],
 ) => void;
 
 export interface LiveSurfacePublisher {
-  publish(
-    extensionId: string,
-    surfaces: readonly RuntimeExtensionSurface[],
-  ): void;
+  publish(extensionId: string, surfaces: readonly ExtensionSurface[]): void;
   clear(extensionId: string): void;
-  snapshot(): readonly RuntimeExtensionSurface[];
+  snapshot(): readonly ExtensionSurface[];
   subscribe(listener: LiveSurfaceListener): () => void;
 }
 
 function sameSurfaceList(
-  left: readonly RuntimeExtensionSurface[],
-  right: readonly RuntimeExtensionSurface[],
+  left: readonly ExtensionSurface[],
+  right: readonly ExtensionSurface[],
 ): boolean {
   return (
     left.length === right.length &&
@@ -34,21 +35,16 @@ function sameSurfaceList(
  * lifecycle, so neither side needs to import the other's implementation.
  */
 export class LiveSurfaceHub implements LiveSurfacePublisher {
-  private readonly sources = new Map<
-    string,
-    readonly RuntimeExtensionSurface[]
-  >();
+  private readonly sources = new Map<string, readonly ExtensionSurface[]>();
   private readonly listeners = new Set<LiveSurfaceListener>();
 
-  publish(
-    extensionId: string,
-    surfaces: readonly RuntimeExtensionSurface[],
-  ): void {
+  publish(extensionId: string, surfaces: readonly ExtensionSurface[]): void {
     if (!extensionId) throw new Error('Live surface extension ID is required.');
     const bounded = surfaces.slice(
       0,
       MAX_LIVE_EXTENSION_SURFACES_PER_EXTENSION,
     );
+    for (const surface of bounded) parseExtensionSurface(surface);
     const previous = this.sources.get(extensionId) ?? [];
     if (sameSurfaceList(previous, bounded)) return;
     if (bounded.length > 0) this.sources.set(extensionId, bounded);
@@ -61,7 +57,7 @@ export class LiveSurfaceHub implements LiveSurfacePublisher {
     this.notify();
   }
 
-  snapshot(): readonly RuntimeExtensionSurface[] {
+  snapshot(): readonly ExtensionSurface[] {
     return [...this.sources.values()]
       .flat()
       .slice(0, MAX_LIVE_EXTENSION_SURFACES);
@@ -105,7 +101,7 @@ export const liveSurfaceHub = liveExtensionSurfaceHub;
 
 export function publishLiveExtensionSurfaces(
   extensionId: string,
-  surfaces: readonly RuntimeExtensionSurface[],
+  surfaces: readonly ExtensionSurface[],
 ): void {
   liveExtensionSurfaceHub.publish(extensionId, surfaces);
 }

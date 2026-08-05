@@ -114,6 +114,44 @@ export const RendererModeSchema = Type.Union([
 ]);
 export type RendererMode = Static<typeof RendererModeSchema>;
 
+/**
+ * Host-independent semantic slots for a live extension surface.
+ *
+ * Hosts intentionally map these slots to their own layout regions.  The rail
+ * names describe the extension's intent, not a React/TUI implementation.
+ * `above-composer` remains a wire-compatible spelling for older dashboard
+ * adapters and is mapped to the composer's host slot there.
+ */
+export const ExtensionSurfacePlacementSchema = Type.Union([
+  Type.Literal('main'),
+  Type.Literal('composer'),
+  Type.Literal('above-composer'),
+  Type.Literal('left-rail'),
+  Type.Literal('right-rail'),
+]);
+export type ExtensionSurfacePlacement = Static<
+  typeof ExtensionSurfacePlacementSchema
+>;
+
+/** Maximum surfaces one host snapshot may carry. */
+export const MAX_EXTENSION_SURFACES = 64;
+
+/** A bounded, framework-free value projected by an installed extension. */
+export const ExtensionSurfaceSchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    rendererId: IdentifierSchema,
+    viewModel: Type.Unknown(),
+    placement: Type.Optional(ExtensionSurfacePlacementSchema),
+  },
+  { additionalProperties: false },
+);
+export type ExtensionSurface = Static<typeof ExtensionSurfaceSchema>;
+export const ExtensionSurfaceListSchema = Type.Readonly(
+  Type.Array(ExtensionSurfaceSchema, { maxItems: MAX_EXTENSION_SURFACES }),
+);
+export type ExtensionSurfaceList = Static<typeof ExtensionSurfaceListSchema>;
+
 export const RendererDescriptorSchema = Type.Object(
   {
     id: IdentifierSchema,
@@ -324,6 +362,7 @@ export class ContributionError extends Error {
     | 'unavailable-action'
     | 'invalid-action-input'
     | 'invalid-action-output'
+    | 'invalid-surface'
     | 'duplicate-action-id';
 
   constructor(code: ContributionError['code'], message: string) {
@@ -468,6 +507,48 @@ export function parseCapabilitySummary(value: unknown): CapabilitySummary {
       'Capability summary contains invalid or unknown fields.',
     );
   return value as CapabilitySummary;
+}
+
+/** Validate one framework-free live surface at an extension/host boundary. */
+export function parseExtensionSurface(value: unknown): ExtensionSurface {
+  if (!Value.Check(ExtensionSurfaceSchema, value))
+    throw new ContributionError(
+      'invalid-surface',
+      'Extension surface contains invalid or unknown fields.',
+    );
+  return value as ExtensionSurface;
+}
+
+export function tryParseExtensionSurface(
+  value: unknown,
+): ExtensionSurface | undefined {
+  try {
+    return parseExtensionSurface(value);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Validate a bounded surface catalogue without assigning host semantics. */
+export function parseExtensionSurfaceList(
+  value: unknown,
+): ExtensionSurfaceList {
+  if (!Value.Check(ExtensionSurfaceListSchema, value))
+    throw new ContributionError(
+      'invalid-surface',
+      'Extension surface catalogue contains invalid or unknown fields.',
+    );
+  return value as ExtensionSurfaceList;
+}
+
+export function tryParseExtensionSurfaceList(
+  value: unknown,
+): ExtensionSurfaceList | undefined {
+  try {
+    return parseExtensionSurfaceList(value);
+  } catch {
+    return undefined;
+  }
 }
 
 export function summarizeManifest(

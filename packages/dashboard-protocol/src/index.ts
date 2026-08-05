@@ -7,20 +7,39 @@
 import {
   CapabilitySummarySchema,
   ExtensionManifestSummarySchema,
+  type ExtensionSurface,
+  ExtensionSurfaceSchema,
+  MAX_EXTENSION_SURFACES,
   parseRuntimeCapabilitySnapshot as parseExtensionCapabilitySnapshot,
+  parseExtensionSurface,
+  parseExtensionSurfaceList,
   RuntimeCapabilitySnapshotSchema,
   tryParseRuntimeCapabilitySnapshot as tryParseExtensionCapabilitySnapshot,
+  tryParseExtensionSurface,
+  tryParseExtensionSurfaceList,
 } from '@pi-dashboard/extension-contributions';
 import { type Static, type TSchema, Type } from 'typebox';
 import { Value } from 'typebox/value';
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME_BYTES = 512 * 1024;
+export type {
+  ExtensionSurface,
+  ExtensionSurfaceList,
+  ExtensionSurfacePlacement,
+} from '@pi-dashboard/extension-contributions';
 /** Capability contracts and replay bounds are optional protocol-v1 extensions. */
 export {
+  ExtensionSurfaceListSchema,
+  ExtensionSurfacePlacementSchema,
+  ExtensionSurfaceSchema,
   MAX_NON_IDEMPOTENT_ACTION_IDS,
+  parseExtensionSurface,
+  parseExtensionSurfaceList,
   RuntimeCapabilitySnapshotSchema,
   safeRuntimeCapabilitySnapshot,
+  tryParseExtensionSurface,
+  tryParseExtensionSurfaceList,
 } from '@pi-dashboard/extension-contributions';
 export const parseRuntimeCapabilitySnapshot = parseExtensionCapabilitySnapshot;
 export const tryParseRuntimeCapabilitySnapshot =
@@ -85,23 +104,16 @@ export const RuntimeModelOptionSchema = Type.Object(
 );
 export type RuntimeModelOption = Static<typeof RuntimeModelOptionSchema>;
 
-/** A bounded, framework-free live surface contributed by a Pi extension. */
-export const RuntimeExtensionSurfaceSchema = Type.Object(
-  {
-    id: IdentifierSchema,
-    rendererId: IdentifierSchema,
-    viewModel: UnknownSchema,
-    placement: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
-  },
-  { additionalProperties: false },
-);
-export type RuntimeExtensionSurface = Static<
-  typeof RuntimeExtensionSurfaceSchema
->;
-/** Compatibility spelling for consumers that call these live surfaces. */
+/** Compatibility aliases for the original dashboard protocol surface names. */
+export const RuntimeExtensionSurfaceSchema = ExtensionSurfaceSchema;
+export type RuntimeExtensionSurface = ExtensionSurface;
 export const LiveExtensionSurfaceSchema = RuntimeExtensionSurfaceSchema;
 export type LiveExtensionSurface = RuntimeExtensionSurface;
-export const MAX_RUNTIME_EXTENSION_SURFACES = 64;
+export const MAX_RUNTIME_EXTENSION_SURFACES = MAX_EXTENSION_SURFACES;
+export const parseRuntimeExtensionSurface = parseExtensionSurface;
+export const tryParseRuntimeExtensionSurface = tryParseExtensionSurface;
+export const parseRuntimeExtensionSurfaceList = parseExtensionSurfaceList;
+export const tryParseRuntimeExtensionSurfaceList = tryParseExtensionSurfaceList;
 
 const InteractionChoiceSchema = Type.Object(
   {
@@ -1324,6 +1336,13 @@ function validateRuntimeSnapshotCapabilities(
     parseExtensionCapabilitySnapshot(snapshot.capabilities);
 }
 
+function validateRuntimeSnapshotSurfaces(
+  snapshot: Pick<RuntimeSnapshot, 'extensionSurfaces'>,
+): void {
+  if (snapshot.extensionSurfaces !== undefined)
+    parseExtensionSurfaceList(snapshot.extensionSurfaces);
+}
+
 function validateHelloCapabilities(
   capabilities: RuntimeHelloCapabilities | undefined,
 ): void {
@@ -1351,13 +1370,16 @@ function validateHelloCapabilities(
 function validateBridgeEventCapabilities(event: BridgeEvent): void {
   if (event.type === 'runtime.hello') {
     validateRuntimeSnapshotCapabilities(event.snapshot);
+    validateRuntimeSnapshotSurfaces(event.snapshot);
     validateHelloCapabilities(event.capabilities);
   } else if (
     (event.type === 'runtime.heartbeat' ||
       event.type === 'runtime.stateChanged') &&
     event.snapshot
-  )
+  ) {
     validateRuntimeSnapshotCapabilities(event.snapshot);
+    validateRuntimeSnapshotSurfaces(event.snapshot);
+  }
 }
 
 export function parseBridgeEvent(value: unknown): BridgeEvent {
@@ -1556,6 +1578,7 @@ export function parseRuntimeSnapshot(value: unknown): RuntimeSnapshot {
     'runtime snapshot',
   );
   validateRuntimeSnapshotCapabilities(snapshot);
+  validateRuntimeSnapshotSurfaces(snapshot);
   return snapshot;
 }
 export function tryParseRuntimeSnapshot(
@@ -1576,6 +1599,7 @@ export function parseRuntimeSnapshotPatch(
     'runtime snapshot patch',
   );
   validateRuntimeSnapshotCapabilities(patch);
+  validateRuntimeSnapshotSurfaces(patch);
   return patch;
 }
 export function tryParseRuntimeSnapshotPatch(

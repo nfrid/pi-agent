@@ -1,5 +1,8 @@
+import {
+  type ExtensionSurface,
+  parseExtensionSurface,
+} from '@pi-dashboard/extension-contributions';
 import { Value } from 'typebox/value';
-import type { RuntimeExtensionSurface } from '../../packages/dashboard-protocol/src/index';
 import {
   clearLiveExtensionSurfaces,
   publishLiveExtensionSurfaces,
@@ -27,7 +30,7 @@ function boundedTask(task: TaskStore['state']['tasks'][number]) {
   };
 }
 
-export function taskSurface(store: TaskStore): RuntimeExtensionSurface {
+export function taskSurface(store: TaskStore): ExtensionSurface {
   const viewModel = {
     version: 1 as const,
     tasks: store.state.tasks.slice(0, 128).map(boundedTask),
@@ -35,12 +38,12 @@ export function taskSurface(store: TaskStore): RuntimeExtensionSurface {
   };
   if (!Value.Check(TaskStateViewModelSchema, viewModel))
     throw new Error('Task state surface is invalid.');
-  return {
+  return parseExtensionSurface({
     id: TASKS_SURFACE_ID,
     rendererId: TASKS_RENDERER_ID,
     placement: 'left-rail',
     viewModel,
-  };
+  });
 }
 
 export function publishTaskSurface(store: TaskStore): void {

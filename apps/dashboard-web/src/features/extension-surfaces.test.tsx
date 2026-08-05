@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
   DelegateTranscript,
+  dashboardSurfacePlacement,
   ExtensionSurfaceStack,
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
@@ -12,6 +13,14 @@ const runtimeFixture = (extensionSurfaces: unknown): RuntimeSnapshot =>
   ({ extensionSurfaces }) as unknown as RuntimeSnapshot;
 
 describe('live extension surface fixtures', () => {
+  it('maps typed extension placement semantics to dashboard host slots', () => {
+    expect(dashboardSurfacePlacement('composer')).toBe('composer');
+    expect(dashboardSurfacePlacement('above-composer')).toBe('composer');
+    expect(dashboardSurfacePlacement('left-rail')).toBe('main');
+    expect(dashboardSurfacePlacement('right-rail')).toBe('main');
+    expect(dashboardSurfacePlacement(undefined)).toBe('main');
+  });
+
   it('accepts bounded runtime surface records and ignores malformed entries', () => {
     expect(
       runtimeExtensionSurfaces(
@@ -41,11 +50,15 @@ describe('live extension surface fixtures', () => {
       id: 'delegate-1',
       rendererId: 'delegate.status',
       viewModel: {
+        version: 1,
         statuses: [
           {
             id: 'd1',
             name: 'Compact delegate',
+            kind: 'background',
             state: 'running',
+            createdAt: 1,
+            allowWrites: false,
             route: 'luna-high',
           },
         ],
@@ -55,7 +68,18 @@ describe('live extension surface fixtures', () => {
       id: 'tasks-1',
       rendererId: 'tasks.current',
       viewModel: {
-        tasks: [{ id: 'T1', text: 'Compact task', status: 'doing' }],
+        version: 1,
+        tasks: [
+          {
+            id: 'T1',
+            text: 'Compact task',
+            status: 'doing',
+            dependsOn: [],
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ],
+        stats: { total: 1, active: 1, done: 0, blocked: 0, ready: 0 },
       },
     });
 
@@ -79,17 +103,22 @@ describe('live extension surface fixtures', () => {
           {
             id: 'delegate-1',
             rendererId: 'delegate.status',
-            viewModel: { statuses: [] },
+            viewModel: { version: 1, statuses: [] },
           },
           {
             id: 'tasks-1',
             rendererId: 'tasks.current',
             viewModel: {
+              version: 1,
               tasks: Array.from({ length: 12 }, (_, index) => ({
                 id: `T${index + 1}`,
                 text: `Task ${index + 1}`,
                 status: 'todo',
+                dependsOn: [],
+                createdAt: 1,
+                updatedAt: 1,
               })),
+              stats: { total: 12, active: 12, done: 0, blocked: 0, ready: 12 },
             },
           },
         ])}
@@ -143,27 +172,22 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('Earlier transcript entries were omitted');
   });
 
-  it('selects rich delegate and task renderers by tolerant renderer IDs', () => {
-    const delegate = renderLiveExtensionSurface({
+  it('routes exact renderer IDs through schema validation and rejects suffix aliases', () => {
+    const unknown = renderLiveExtensionSurface({
       id: 'delegate-1',
       rendererId: 'runtime.delegate.status',
-      viewModel: {
-        title: 'Subagents',
-        statuses: [
-          {
-            id: 'd1',
-            name: 'Fix queue handling',
-            state: 'running',
-            task: 'Inspect queue commands',
-            activity: { type: 'tool', label: 'read', status: 'running' },
-          },
-        ],
-      },
+      viewModel: { version: 1, statuses: [] },
+    });
+    const delegate = renderLiveExtensionSurface({
+      id: 'delegate-1',
+      rendererId: 'delegate.status',
+      viewModel: { version: 1, statuses: [] },
     });
     const tasks = renderLiveExtensionSurface({
       id: 'tasks-1',
       rendererId: 'tasks.current',
       viewModel: {
+        version: 1,
         tasks: [
           {
             id: 'T1',
@@ -171,17 +195,26 @@ describe('live extension surface fixtures', () => {
             status: 'doing',
             priority: 'high',
             dependsOn: ['T0'],
+            createdAt: 1,
+            updatedAt: 2,
           },
-          { id: 'T0', text: 'Define protocol', status: 'done' },
+          {
+            id: 'T0',
+            text: 'Define protocol',
+            status: 'done',
+            dependsOn: [],
+            createdAt: 1,
+            updatedAt: 2,
+          },
         ],
+        stats: { total: 2, active: 1, done: 1, blocked: 0, ready: 0 },
       },
     });
+    expect(unknown).toMatchObject({ type: 'details' });
     expect(delegate).toMatchObject({
       type: expect.any(Function),
       props: {
-        surface: expect.objectContaining({
-          rendererId: 'runtime.delegate.status',
-        }),
+        surface: expect.objectContaining({ rendererId: 'delegate.status' }),
       },
     });
     expect(tasks).toMatchObject({

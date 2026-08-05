@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   deriveSessionTitle,
+  ExtensionSurfaceSchema,
   isBridgeEvent,
+  LiveExtensionSurfaceSchema,
   MAX_FRAME_BYTES,
   MAX_QUEUE_DRAFT_TEXT,
   MAX_QUEUE_DRAFTS,
@@ -11,7 +13,9 @@ import {
   parseDashboardStreamMessage,
   parseFrame,
   parseNormalizedMessagePayload,
+  parseRuntimeExtensionSurface,
   parseRuntimeSnapshot,
+  RuntimeExtensionSurfaceSchema,
   redactImageData,
   serializeFrame,
   tryParseNormalizedToolPayload,
@@ -390,6 +394,19 @@ describe('dashboard protocol', () => {
         event: { type: 'agent.settled', sessionId: 'session-1' },
       }).cursor,
     ).toBe(2);
+  });
+
+  it('retains explicit runtime/live surface aliases over the canonical contract', () => {
+    expect(RuntimeExtensionSurfaceSchema).toBe(ExtensionSurfaceSchema);
+    expect(LiveExtensionSurfaceSchema).toBe(RuntimeExtensionSurfaceSchema);
+    expect(
+      parseRuntimeExtensionSurface({
+        id: 'tasks.current',
+        rendererId: 'tasks.current',
+        placement: 'left-rail',
+        viewModel: {},
+      }).rendererId,
+    ).toBe('tasks.current');
   });
 
   it('accepts bounded extension surfaces and rejects an oversized catalogue', () => {

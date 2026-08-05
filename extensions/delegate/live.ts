@@ -1,5 +1,8 @@
+import {
+  type ExtensionSurface,
+  parseExtensionSurface,
+} from '@pi-dashboard/extension-contributions';
 import { Value } from 'typebox/value';
-import type { RuntimeExtensionSurface } from '../../packages/dashboard-protocol/src/index';
 import {
   clearLiveExtensionSurfaces,
   publishLiveExtensionSurfaces,
@@ -110,9 +113,7 @@ function statusSnapshot(
   };
 }
 
-export function delegateSurface(
-  store: DelegateStatusStore,
-): RuntimeExtensionSurface {
+export function delegateSurface(store: DelegateStatusStore): ExtensionSurface {
   const transcriptBudget = { remaining: MAX_TRANSCRIPT_SURFACE_CHARS };
   const viewModel = {
     version: 1 as const,
@@ -125,12 +126,12 @@ export function delegateSurface(
   // into the bridge without a corresponding renderer contract change.
   if (!Value.Check(DelegateStatusViewModelSchema, viewModel))
     throw new Error('Delegate status surface is invalid.');
-  return {
+  return parseExtensionSurface({
     id: DELEGATE_SURFACE_ID,
     rendererId: DELEGATE_RENDERER_ID,
     placement: 'right-rail',
     viewModel,
-  };
+  });
 }
 
 export function publishDelegateSurface(store: DelegateStatusStore): void {

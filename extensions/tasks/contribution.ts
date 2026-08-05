@@ -3,7 +3,7 @@ import {
   type ExtensionManifest,
   type RendererDescriptor,
 } from '@pi-dashboard/extension-contributions';
-import { Type } from 'typebox';
+import { type Static, Type } from 'typebox';
 
 export const TASKS_CAPABILITY_ID = 'tasks.live-state';
 export const TASKS_RENDERER_ID = 'tasks.current';
@@ -57,6 +57,8 @@ export const TaskStateViewModelSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+export type TaskSurfaceTask = Static<typeof TaskSurfaceTaskSchema>;
+export type TaskStateViewModel = Static<typeof TaskStateViewModelSchema>;
 
 export const tasksRenderer: RendererDescriptor = {
   id: TASKS_RENDERER_ID,

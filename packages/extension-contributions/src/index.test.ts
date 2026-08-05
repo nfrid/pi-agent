@@ -10,9 +10,12 @@ import {
   NonIdempotentActionIdGuard,
   parseActionInput,
   parseExtensionManifest,
+  parseExtensionSurface,
+  parseExtensionSurfaceList,
   parseRuntimeCapabilitySnapshot,
   safeRuntimeCapabilitySnapshot,
   selectAvailableActions,
+  tryParseExtensionSurface,
 } from './index.js';
 
 const action = {
@@ -135,6 +138,23 @@ describe('extension contribution contracts', () => {
       }),
     ).toBe(false);
     expect(selectAvailableActions([manifest], capabilities)).toHaveLength(1);
+  });
+
+  it('parses typed live surfaces and maps invalid values to a safe failure', () => {
+    const surface = parseExtensionSurface({
+      id: 'tasks.current',
+      rendererId: 'tasks.current',
+      placement: 'left-rail',
+      viewModel: { version: 1, tasks: [] },
+    });
+    expect(surface.placement).toBe('left-rail');
+    expect(parseExtensionSurfaceList([surface])).toEqual([surface]);
+    expect(tryParseExtensionSurface({ ...surface, placement: 'unknown' })).toBe(
+      undefined,
+    );
+    expect(() => parseExtensionSurface({ ...surface, extra: true })).toThrow(
+      'invalid or unknown',
+    );
   });
 
   it('fails closed at action-ID capacity without evicting duplicates', () => {

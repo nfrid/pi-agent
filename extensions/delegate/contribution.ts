@@ -3,7 +3,7 @@ import {
   type ExtensionManifest,
   type RendererDescriptor,
 } from '@pi-dashboard/extension-contributions';
-import { Type } from 'typebox';
+import { type Static, Type } from 'typebox';
 
 export const DELEGATE_CAPABILITY_ID = 'delegate.live-status';
 export const DELEGATE_RENDERER_ID = 'delegate.status';
@@ -104,6 +104,14 @@ export const DelegateStatusViewModelSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+export type DelegateActivity = Static<typeof DelegateActivitySchema>;
+export type DelegateTranscriptEntry = Static<
+  typeof DelegateTranscriptEntrySchema
+>;
+export type DelegateStatus = Static<typeof DelegateStatusSchema>;
+export type DelegateStatusViewModel = Static<
+  typeof DelegateStatusViewModelSchema
+>;
 
 export const delegateStatusRenderer: RendererDescriptor = {
   id: DELEGATE_RENDERER_ID,

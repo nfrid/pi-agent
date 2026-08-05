@@ -1,4 +1,5 @@
 import {
+  type ExtensionSurfacePlacement,
   isTypeBoxSchema,
   type RendererDescriptor,
 } from '@pi-dashboard/extension-contributions';
@@ -6,10 +7,25 @@ import type { ReactNode } from 'react';
 import { Value } from 'typebox/value';
 import { activityGroupsRenderer } from '../../../extensions/activity-groups/contribution';
 import { askUserRenderer } from '../../../extensions/ask-user/contribution';
+import { delegateStatusRenderer } from '../../../extensions/delegate/contribution';
+import { tasksRenderer } from '../../../extensions/tasks/contribution';
+import {
+  renderDelegateSurface,
+  renderTasksSurface,
+} from './features/live-surface-renderers';
+
+export interface DashboardRendererContext {
+  readonly surfaceId?: string;
+  readonly rendererId?: string;
+  readonly placement?: ExtensionSurfacePlacement;
+}
 
 export interface DashboardRenderer {
   readonly descriptor: RendererDescriptor;
-  readonly render: (input: unknown) => ReactNode;
+  readonly render: (
+    input: unknown,
+    context?: DashboardRendererContext,
+  ) => ReactNode;
 }
 
 export function createDashboardRendererRegistry(
@@ -87,6 +103,16 @@ const explicitRenderers: readonly DashboardRenderer[] = [
       );
     },
   },
+  // Live extension renderers are explicit trusted imports. Their IDs are
+  // matched exactly and their descriptors validate input before adapters run.
+  {
+    descriptor: tasksRenderer,
+    render: renderTasksSurface,
+  },
+  {
+    descriptor: delegateStatusRenderer,
+    render: renderDelegateSurface,
+  },
 ];
 
 /** Static imports are intentional: no filesystem discovery, eval, or runtime JS. */
@@ -102,13 +128,14 @@ export function resolveDashboardRenderer(
 export function renderDashboardContribution(
   rendererId: string | undefined,
   input: unknown,
+  context?: DashboardRendererContext,
 ): ReactNode {
   const renderer = resolveDashboardRenderer(rendererId);
   if (!renderer) return genericUnknownRenderer(input, rendererId);
   if (!Value.Check(renderer.descriptor.inputSchema, input))
     return genericUnknownRenderer(input, rendererId);
   try {
-    return renderer.render(input);
+    return renderer.render(input, context);
   } catch {
     return genericUnknownRenderer(input, rendererId);
   }
