@@ -1641,16 +1641,23 @@ test('phase six mocked management flow covers refresh, fallback notification, la
     type: 'snapshot',
     snapshot: phase6Snapshot({ pendingInteractions: [] }),
   });
-  await page.locator('details.session-controls').evaluate((element) => {
-    (element as HTMLDetailsElement).open = true;
-  });
+  await page.getByRole('button', { name: 'Details', exact: true }).click();
+  const inspector = page.getByRole('dialog');
+  await expect(inspector).toBeVisible();
+  await expect(inspector).toContainText('/tmp/project');
+  await expect(inspector).toContainText('waiting');
+  await expect(inspector).toContainText('test/vision · medium');
+  await page.keyboard.press('Escape');
+  await expect(inspector).toHaveCount(0);
+  await page.getByRole('button', { name: 'Details', exact: true }).click();
+  const reopenedInspector = page.getByRole('dialog');
   await expect(
-    page.getByRole('button', { name: 'Stop', exact: true }),
+    reopenedInspector.getByRole('button', { name: 'Stop', exact: true }),
   ).toBeVisible();
-  await page
+  await inspector
     .getByRole('button', { name: 'Stop', exact: true })
     .click({ force: true });
-  await page
+  await inspector
     .getByRole('button', { name: 'Force stop', exact: true })
     .click({ force: true });
   await expect.poll(() => mocks.stops.length).toBe(2);

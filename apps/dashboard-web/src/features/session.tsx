@@ -6,7 +6,11 @@ import {
   sessionQueryOptions,
   useDashboardStore,
 } from '@pi-dashboard/client';
-import type { BrowserSnapshot, RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type {
+  BrowserSnapshot,
+  RuntimeSnapshot,
+  SessionApiResponse,
+} from '@pi-dashboard/protocol';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import {
@@ -84,6 +88,7 @@ export function SessionView({
     : undefined;
   const [error, setError] = useState<string>();
   const [awayFromLatest, setAwayFromLatest] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const stickToBottomRef = useRef(true);
   useEffect(() => {
@@ -109,6 +114,11 @@ export function SessionView({
   useEffect(() => {
     if (resyncNonce > 0) void query.refetch();
   }, [query.refetch, resyncNonce]);
+  useEffect(() => {
+    // A pending question is a higher-priority modal than the optional
+    // inspector; never leave either fixed surface competing for the viewport.
+    if (runtime?.pendingInteractions.length) setInspectorOpen(false);
+  }, [runtime?.pendingInteractions.length]);
   useEffect(() => {
     void id;
     stickToBottomRef.current = true;
@@ -178,7 +188,9 @@ export function SessionView({
     setAwayFromLatest(false);
   };
   return (
-    <section className="session-page">
+    <section
+      className={`session-page ${inspectorOpen ? 'inspector-open' : ''}`}
+    >
       <div className="session-context session-heading">
         <div className="session-context-main">
           <Back />
@@ -209,33 +221,203 @@ export function SessionView({
               ↓ Latest
             </button>
           )}
-          <SessionRename
-            id={id}
-            initialName={data.metadata.name}
-            store={store}
-            onRenamed={(name) => store.updateSessionMetadata(id, { name })}
-          />
-          {runtime && (
-            <details className="session-controls">
-              <summary>Runtime controls</summary>
-              <RuntimeActions runtime={runtime} />
-            </details>
-          )}
+          <button
+            type="button"
+            className="session-details-trigger"
+            aria-haspopup="dialog"
+            aria-expanded={inspectorOpen}
+            aria-controls="session-inspector"
+            onClick={() => setInspectorOpen(true)}
+          >
+            Details
+          </button>
         </div>
       </div>
-      {runtimeError && (
-        <div className="error notice" role="alert">
-          Runtime failure: {runtimeError}
-        </div>
-      )}
+      <SessionInspector
+        id={id}
+        open={inspectorOpen}
+        onClose={() => setInspectorOpen(false)}
+        data={data}
+        runtime={runtime}
+        runtimeError={runtimeError}
+        store={store}
+      />
       <Transcript projection={projection} runtime={runtime} />
       <div className="session-control-layer">
-        <ExtensionSurfaceStack runtime={runtime} />
         <ExtensionSurfaceStack runtime={runtime} placement="composer" />
         <Composer runtime={runtime} sessionId={id} />
       </div>
       <PendingInteractions runtime={runtime} />
     </section>
+  );
+}
+
+type SessionInspectorData = Pick<SessionApiResponse, 'metadata' | 'entries'>;
+
+export function SessionInspector({
+  id,
+  open,
+  onClose,
+  data,
+  runtime,
+  runtimeError,
+  store,
+}: {
+  id: string;
+  open: boolean;
+  onClose: () => void;
+  data: SessionInspectorData;
+  runtime: RuntimeSnapshot | undefined;
+  runtimeError: string | undefined;
+  store: DashboardLiveStore;
+}) {
+  const panelRef = useRef<HTMLElement>(null);
+  const triggerFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    triggerFocusRef.current = document.activeElement as HTMLElement | null;
+    const frame = window.requestAnimationFrame(() => {
+      const first = panelRef.current?.querySelector<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), [href], select:not(:disabled), textarea:not(:disabled)',
+      );
+      (first ?? panelRef.current)?.focus();
+    });
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab' || !panelRef.current) return;
+      const focusable = Array.from(
+        panelRef.current.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), [href], select:not(:disabled), textarea:not(:disabled)',
+        ),
+      );
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) {
+        event.preventDefault();
+        panelRef.current.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+      triggerFocusRef.current?.focus();
+      triggerFocusRef.current = null;
+    };
+  }, [onClose, open]);
+  if (!open) return null;
+  const title = sessionDisplayTitle(data.metadata, data.entries);
+  const status = runtime
+    ? runtime.online === false
+      ? 'offline'
+      : runtime.liveState
+    : 'dormant';
+  const model = runtime?.model
+    ? `${runtime.model.provider}/${runtime.model.model}${runtime.model.thinking ? ` · ${runtime.model.thinking}` : ''}`
+    : 'model unavailable';
+  return (
+    <div className="session-inspector-layer">
+      <button
+        type="button"
+        className="session-inspector-backdrop"
+        aria-label="Close session details"
+        onClick={onClose}
+      />
+      <section
+        ref={panelRef}
+        id="session-inspector"
+        className="session-inspector"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="session-inspector-title"
+        tabIndex={-1}
+      >
+        <header className="inspector-header">
+          <div>
+            <p className="inspector-kicker">Session details</p>
+            <h2 id="session-inspector-title">{title}</h2>
+          </div>
+          <button
+            type="button"
+            className="inspector-close"
+            onClick={onClose}
+            aria-label="Close session details"
+          >
+            ×
+          </button>
+        </header>
+        <div className="inspector-body">
+          <dl className="inspector-summary">
+            <div className="inspector-summary-row">
+              <dt>Path</dt>
+              <dd className="path">
+                {data.metadata.cwd ?? 'Path unavailable'}
+              </dd>
+            </div>
+            <div className="inspector-summary-row">
+              <dt>Status</dt>
+              <dd className={`inspector-status ${status}`}>{status}</dd>
+            </div>
+            <div className="inspector-summary-row">
+              <dt>Model</dt>
+              <dd>{model}</dd>
+            </div>
+          </dl>
+          <section
+            className="inspector-section"
+            aria-labelledby="inspector-rename-heading"
+          >
+            <h3 id="inspector-rename-heading">Name</h3>
+            <SessionRename
+              id={id}
+              initialName={data.metadata.name}
+              store={store}
+              onRenamed={(name) => store.updateSessionMetadata(id, { name })}
+            />
+          </section>
+          {runtime && (
+            <section
+              className="inspector-section"
+              aria-labelledby="inspector-controls-heading"
+            >
+              <h3 id="inspector-controls-heading">Runtime controls</h3>
+              <RuntimeActions runtime={runtime} />
+            </section>
+          )}
+          {runtimeError && (
+            <div className="error notice inspector-error" role="alert">
+              Runtime failure: {runtimeError}
+            </div>
+          )}
+          {runtime ? (
+            <section
+              className="inspector-section inspector-surfaces"
+              aria-labelledby="inspector-surfaces-heading"
+            >
+              <h3 id="inspector-surfaces-heading">Live work</h3>
+              <ExtensionSurfaceStack runtime={runtime} />
+            </section>
+          ) : (
+            <p className="muted">
+              No active runtime is attached to this session.
+            </p>
+          )}
+        </div>
+      </section>
+    </div>
   );
 }
 
