@@ -734,15 +734,42 @@ test('dense mobile session keeps conversation and activity readable', async ({
         document.documentElement.scrollHeight - 2,
     ),
   ).toBe(true);
-  expect(
-    await page
-      .locator('.composer')
-      .evaluate(
-        (element) =>
-          document.documentElement.scrollHeight -
-          (window.scrollY + element.getBoundingClientRect().bottom),
-      ),
-  ).toBeLessThanOrEqual(80);
+  const mobileControlGap = await page.evaluate(() => {
+    const composer = document
+      .querySelector('.composer')
+      ?.getBoundingClientRect();
+    const navigation = document
+      .querySelector('.mobile-bottom-nav')
+      ?.getBoundingClientRect();
+    if (!composer || !navigation) return Number.POSITIVE_INFINITY;
+    return navigation.top - composer.bottom;
+  });
+  expect(mobileControlGap).toBeGreaterThanOrEqual(0);
+  expect(mobileControlGap).toBeLessThanOrEqual(12);
+  await page.getByRole('button', { name: 'Details', exact: true }).click();
+  const mobileInspector = page.getByRole('dialog');
+  await expect(mobileInspector).toBeVisible();
+  const mobileInspectorGeometry = await page.evaluate(() => {
+    const inspector = document
+      .querySelector('.session-inspector')
+      ?.getBoundingClientRect();
+    const topbar = document
+      .querySelector('.mobile-topbar')
+      ?.getBoundingClientRect();
+    const navigation = document
+      .querySelector('.mobile-bottom-nav')
+      ?.getBoundingClientRect();
+    return inspector && topbar && navigation
+      ? {
+          topGap: inspector.top - topbar.bottom,
+          bottomGap: navigation.top - inspector.bottom,
+        }
+      : undefined;
+  });
+  expect(mobileInspectorGeometry?.topGap).toBeGreaterThanOrEqual(0);
+  expect(mobileInspectorGeometry?.bottomGap).toBeGreaterThanOrEqual(0);
+  await page.keyboard.press('Escape');
+  await expect(mobileInspector).toHaveCount(0);
   await activity.click();
   await expect(page.locator('.tool-chip').getByText('read')).toBeVisible();
   await expect(
@@ -1388,6 +1415,9 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(page.locator('.session-heading')).toContainText(
     'test/vision · medium',
   );
+  await expect(
+    page.getByRole('button', { name: 'Details', exact: true }),
+  ).toBeDisabled();
   await page.getByLabel('Thinking level').selectOption('high');
   expect(
     mocks.commands.filter((command) => command.type === 'setModel'),
@@ -1636,6 +1666,7 @@ test('phase six mocked management flow covers refresh, fallback notification, la
     .click();
   await expect(page).toHaveURL(/\/runtimes\/r-launched$/);
   expect(mocks.starts[0]).toMatchObject({ workspaceId: 'w1', sessionId: 's1' });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/sessions/s1');
   await mocks.emit({
     type: 'snapshot',
@@ -1647,6 +1678,29 @@ test('phase six mocked management flow covers refresh, fallback notification, la
   await expect(inspector).toContainText('/tmp/project');
   await expect(inspector).toContainText('waiting');
   await expect(inspector).toContainText('test/vision · medium');
+  const desktopGeometry = await page.evaluate(() => {
+    const rail = document.querySelector('.side-rail')?.getBoundingClientRect();
+    const composer = document
+      .querySelector('.composer')
+      ?.getBoundingClientRect();
+    const inspector = document
+      .querySelector('.session-inspector')
+      ?.getBoundingClientRect();
+    return rail && composer && inspector
+      ? {
+          railRight: rail.right,
+          composerLeft: composer.left,
+          composerRight: composer.right,
+          inspectorLeft: inspector.left,
+        }
+      : undefined;
+  });
+  expect(desktopGeometry?.composerLeft).toBeGreaterThanOrEqual(
+    desktopGeometry?.railRight ?? Number.POSITIVE_INFINITY,
+  );
+  expect(desktopGeometry?.composerRight).toBeLessThanOrEqual(
+    desktopGeometry?.inspectorLeft ?? Number.NEGATIVE_INFINITY,
+  );
   await page.keyboard.press('Escape');
   await expect(inspector).toHaveCount(0);
   await page.getByRole('button', { name: 'Details', exact: true }).click();
@@ -1654,16 +1708,24 @@ test('phase six mocked management flow covers refresh, fallback notification, la
   await expect(
     reopenedInspector.getByRole('button', { name: 'Stop', exact: true }),
   ).toBeVisible();
-  await inspector
-    .getByRole('button', { name: 'Stop', exact: true })
-    .click({ force: true });
-  await inspector
-    .getByRole('button', { name: 'Force stop', exact: true })
-    .click({ force: true });
+  const stopButton = reopenedInspector.getByRole('button', {
+    name: 'Stop',
+    exact: true,
+  });
+  const forceStopButton = reopenedInspector.getByRole('button', {
+    name: 'Force stop',
+    exact: true,
+  });
+  const restartButton = reopenedInspector.getByRole('button', {
+    name: 'Restart',
+    exact: true,
+  });
+  await stopButton.click();
+  await expect(forceStopButton).toBeEnabled();
+  await forceStopButton.click();
   await expect.poll(() => mocks.stops.length).toBe(2);
-  await page
-    .getByRole('button', { name: 'Restart', exact: true })
-    .click({ force: true });
+  await expect(restartButton).toBeEnabled();
+  await restartButton.click();
   await expect(page).toHaveURL(/\/runtimes\/r-restarted$/);
   expect(mocks.stops).toEqual([{ force: false }, { force: true }]);
   expect(mocks.restarts[0]?.id).toBeTruthy();

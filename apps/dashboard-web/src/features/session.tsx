@@ -15,6 +15,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import {
   type ComponentType,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -26,7 +27,11 @@ import {
   shouldShowJumpToLatest,
 } from '../app-helpers';
 import { Transcript } from '../entities/transcript';
-import { ExtensionSurfaceStack } from './extension-surfaces';
+import {
+  dashboardSurfacePlacement,
+  ExtensionSurfaceStack,
+  runtimeExtensionSurfaces,
+} from './extension-surfaces';
 import { PendingInteractions } from './pending-interaction';
 import { RuntimeActions } from './runtime-actions';
 import { SessionRename } from './session-rename';
@@ -89,6 +94,7 @@ export function SessionView({
   const [error, setError] = useState<string>();
   const [awayFromLatest, setAwayFromLatest] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const closeInspector = useCallback(() => setInspectorOpen(false), []);
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const stickToBottomRef = useRef(true);
   useEffect(() => {
@@ -179,6 +185,10 @@ export function SessionView({
       </section>
     );
   const runtimeError = runtime?.lastError;
+  const hasPendingInteraction = Boolean(runtime?.pendingInteractions.length);
+  const liveSurfaceCount = runtimeExtensionSurfaces(runtime).filter(
+    (surface) => dashboardSurfacePlacement(surface.placement) === 'main',
+  ).length;
   const jumpToLatest = () => {
     window.scrollTo({
       top: document.documentElement.scrollHeight,
@@ -227,16 +237,29 @@ export function SessionView({
             aria-haspopup="dialog"
             aria-expanded={inspectorOpen}
             aria-controls="session-inspector"
-            onClick={() => setInspectorOpen(true)}
+            disabled={hasPendingInteraction}
+            title={
+              hasPendingInteraction
+                ? 'Answer the pending question before opening session details'
+                : undefined
+            }
+            onClick={() => {
+              if (!hasPendingInteraction) setInspectorOpen(true);
+            }}
           >
             Details
+            {liveSurfaceCount > 0 && (
+              <span className="session-details-badge" aria-hidden="true">
+                {liveSurfaceCount}
+              </span>
+            )}
           </button>
         </div>
       </div>
       <SessionInspector
         id={id}
         open={inspectorOpen}
-        onClose={() => setInspectorOpen(false)}
+        onClose={closeInspector}
         data={data}
         runtime={runtime}
         runtimeError={runtimeError}
