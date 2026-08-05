@@ -1,8 +1,15 @@
 import { useNavigate } from '@tanstack/react-router';
+import { useDashboardUtility } from '../features/dashboard-utility-context';
 
 export function useDashboardNavigate(): (path: string) => void {
   const navigate = useNavigate();
-  return (path) => void navigate({ to: path });
+  const utility = useDashboardUtility();
+  return (path) => {
+    // Navigation from a utility panel must never leave the old panel over the
+    // destination. The panel state is intentionally independent of the URL.
+    utility?.close();
+    void navigate({ to: path });
+  };
 }
 
 export function Back() {

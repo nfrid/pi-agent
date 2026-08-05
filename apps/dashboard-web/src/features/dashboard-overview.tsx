@@ -6,9 +6,10 @@ import {
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { workspaceForPath } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
+import { useState } from 'react';
 import { sessionDisplayTitle } from '../app-helpers';
 import { useDashboardNavigate } from '../routes/navigation';
-import { AgentThreadNav } from './agent-thread-nav';
+import { AgentThreadNav, agentThreadRows } from './agent-thread-nav';
 import { SessionRow } from './workspace-session';
 
 function WorkspaceRefresh({
@@ -59,52 +60,85 @@ export function Dashboard({
   store?: DashboardLiveStore;
 }) {
   const go = useDashboardNavigate();
+  const [agentNavOpen, setAgentNavOpen] = useState(false);
+  const latest = agentThreadRows(snapshot)[0];
   const onlineCount = snapshot.runtimes.filter(
     (runtime) => runtime.online !== false,
   ).length;
   return (
-    <section className="dashboard-home">
-      <div className="home-heading">
-        <div>
-          <p className="eyebrow">Pi workspace</p>
-          <h1>Agents</h1>
-          <p className="muted">Pick up a thread or start a new agent.</p>
-        </div>
-        <div className="home-actions">
-          <WorkspaceRefresh snapshot={snapshot} store={store} />
-          <button
-            type="button"
-            className="new-agent-button"
-            onClick={() => go('/new')}
-          >
-            + New agent
-          </button>
-        </div>
-      </div>
-      {!snapshot.runtimes.length && !snapshot.sessions.length && (
-        <div className="empty-hero">
-          <span className="empty-mark">›_</span>
+    <div className="session-layout dashboard-workspace">
+      <AgentThreadNav
+        snapshot={snapshot}
+        mode="session"
+        open={agentNavOpen}
+        onOpenChange={setAgentNavOpen}
+      />
+      <section
+        className="dashboard-empty-workspace"
+        aria-label="Agent workspace"
+      >
+        <div className="home-heading">
           <div>
-            <strong>No agent threads yet.</strong>
-            <p>Start an agent to see its work here.</p>
+            <p className="eyebrow">Pi workspace</p>
+            <h1>No thread selected</h1>
+            <p className="muted">
+              Choose an agent thread from the workspace nav to resume its
+              transcript.
+            </p>
           </div>
-          <button type="button" onClick={() => go('/new')}>
-            Start an agent
-          </button>
+          <div className="home-actions">
+            <WorkspaceRefresh snapshot={snapshot} store={store} />
+            <button
+              type="button"
+              className="new-agent-button"
+              onClick={() => go('/new')}
+            >
+              + New agent
+            </button>
+          </div>
         </div>
-      )}
-      {snapshot.runtimes.length > 0 && onlineCount === 0 && (
-        <div className="notice quiet-notice" role="status">
-          No runtimes are connected. Offline and failed threads remain below for
-          diagnosis.
+        <div className="empty-workspace-state">
+          <span className="empty-mark" aria-hidden="true">
+            ›_
+          </span>
+          <strong>Choose a thread to open its transcript</strong>
+          <p>
+            Your agents and recent history stay in the persistent workspace nav.
+            Start a new agent when there is no thread to resume.
+          </p>
+          <div className="empty-workspace-actions">
+            <button type="button" onClick={() => go('/new')}>
+              New agent
+            </button>
+            {latest && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => go(`/sessions/${encodeURIComponent(latest.id)}`)}
+              >
+                Resume latest
+              </button>
+            )}
+          </div>
         </div>
-      )}
-      <AgentThreadNav snapshot={snapshot} />
-    </section>
+        {snapshot.runtimes.length > 0 && onlineCount === 0 && (
+          <div className="notice quiet-notice" role="status">
+            No runtimes are connected. Offline and failed threads remain in the
+            workspace nav for diagnosis.
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 
-export function WorkspacesView({ snapshot }: { snapshot: BrowserSnapshot }) {
+export function WorkspacesView({
+  snapshot,
+  store,
+}: {
+  snapshot: BrowserSnapshot;
+  store?: DashboardLiveStore;
+}) {
   const go = useDashboardNavigate();
   return (
     <section>
@@ -113,7 +147,7 @@ export function WorkspacesView({ snapshot }: { snapshot: BrowserSnapshot }) {
           <h1>Workspaces</h1>
           <p className="muted">Projects available to agents and sessions.</p>
         </div>
-        <WorkspaceRefresh snapshot={snapshot} />
+        <WorkspaceRefresh snapshot={snapshot} store={store} />
       </div>
       <div className="workspace-list">
         {snapshot.workspaces.map((workspace) => {

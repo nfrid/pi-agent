@@ -172,169 +172,169 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
           </span>
         </AriaButton>
       </article>
-      {open && (
-        <DashboardDialog title={title} onClose={() => setOpen(false)}>
-          <div
-            className="surface-summary"
-            role="status"
-            aria-label="Delegate status summary"
-          >
-            {rows.length
-              ? 'Select a delegate to inspect its latest activity.'
-              : 'No delegate runs reported.'}
-          </div>
-          <div className="delegate-rows surface-detail-list">
-            {rows.map((row) => {
-              const id = row.id;
-              const state = stateLabel(row.state);
-              const activity = row.activity;
-              const activityLabel = short(
-                activity?.latestText ||
-                  activity?.label ||
-                  (state === 'queued' ? 'waiting for a slot' : 'starting'),
-                140,
-              );
-              const name = short(row.name, 70);
-              const route = row.route ?? '';
-              const context = row.context ?? '';
-              const elapsedText = elapsed(
-                row.startedAt ?? row.createdAt,
-                row.finishedAt,
-              );
-              const isExpanded = expanded.has(id);
-              const jobId = row.jobId ?? '';
-              const activityType = activity?.type ?? '';
-              const activityStatus = activity?.status ?? '';
-              const latestText = short(activity?.latestText ?? '', 600);
-              const runs = row.runs?.slice(-6) ?? [];
-              const transcript = row.transcript ?? [];
-              return (
-                <div
-                  className={`delegate-row ${stateClass(state)}`}
-                  key={`${surface.id}-${id}`}
+      <DashboardDialog
+        title={title}
+        isOpen={open}
+        onClose={() => setOpen(false)}
+      >
+        <div
+          className="surface-summary"
+          role="status"
+          aria-label="Delegate status summary"
+        >
+          {rows.length
+            ? 'Select a delegate to inspect its latest activity.'
+            : 'No delegate runs reported.'}
+        </div>
+        <div className="delegate-rows surface-detail-list">
+          {rows.map((row) => {
+            const id = row.id;
+            const state = stateLabel(row.state);
+            const activity = row.activity;
+            const activityLabel = short(
+              activity?.latestText ||
+                activity?.label ||
+                (state === 'queued' ? 'waiting for a slot' : 'starting'),
+              140,
+            );
+            const name = short(row.name, 70);
+            const route = row.route ?? '';
+            const context = row.context ?? '';
+            const elapsedText = elapsed(
+              row.startedAt ?? row.createdAt,
+              row.finishedAt,
+            );
+            const isExpanded = expanded.has(id);
+            const jobId = row.jobId ?? '';
+            const activityType = activity?.type ?? '';
+            const activityStatus = activity?.status ?? '';
+            const latestText = short(activity?.latestText ?? '', 600);
+            const runs = row.runs?.slice(-6) ?? [];
+            const transcript = row.transcript ?? [];
+            return (
+              <div
+                className={`delegate-row ${stateClass(state)}`}
+                key={`${surface.id}-${id}`}
+              >
+                <AriaButton
+                  type="button"
+                  className="delegate-row-toggle"
+                  aria-expanded={isExpanded}
+                  onPress={() => toggle(id)}
                 >
-                  <AriaButton
-                    type="button"
-                    className="delegate-row-toggle"
-                    aria-expanded={isExpanded}
-                    onPress={() => toggle(id)}
-                  >
-                    <span className="surface-state" aria-hidden="true">
-                      {stateGlyph(state)}
-                    </span>
-                    <span className="delegate-row-main">
-                      <strong>{name}</strong>
-                      <small>{activityLabel}</small>
-                    </span>
-                    <span className="delegate-row-meta">
-                      {state}
-                      {elapsedText ? ` · ${elapsedText}` : ''}
-                    </span>
-                    <span className="delegate-row-chevron" aria-hidden="true">
-                      {isExpanded ? '⌄' : '›'}
-                    </span>
-                  </AriaButton>
-                  {isExpanded && (
-                    <div className="delegate-row-detail">
-                      <dl>
-                        {route && (
-                          <div>
-                            <dt>Route</dt>
-                            <dd>{route}</dd>
-                          </div>
-                        )}
-                        {context && (
-                          <div>
-                            <dt>Context</dt>
-                            <dd>{context}</dd>
-                          </div>
-                        )}
+                  <span className="surface-state" aria-hidden="true">
+                    {stateGlyph(state)}
+                  </span>
+                  <span className="delegate-row-main">
+                    <strong>{name}</strong>
+                    <small>{activityLabel}</small>
+                  </span>
+                  <span className="delegate-row-meta">
+                    {state}
+                    {elapsedText ? ` · ${elapsedText}` : ''}
+                  </span>
+                  <span className="delegate-row-chevron" aria-hidden="true">
+                    {isExpanded ? '⌄' : '›'}
+                  </span>
+                </AriaButton>
+                {isExpanded && (
+                  <div className="delegate-row-detail">
+                    <dl>
+                      {route && (
                         <div>
-                          <dt>Access</dt>
+                          <dt>Route</dt>
+                          <dd>{route}</dd>
+                        </div>
+                      )}
+                      {context && (
+                        <div>
+                          <dt>Context</dt>
+                          <dd>{context}</dd>
+                        </div>
+                      )}
+                      <div>
+                        <dt>Access</dt>
+                        <dd>
+                          {row.allowWrites === true
+                            ? 'read/write'
+                            : 'read-only'}
+                        </dd>
+                      </div>
+                      {jobId && (
+                        <div>
+                          <dt>Job</dt>
+                          <dd>{jobId}</dd>
+                        </div>
+                      )}
+                      {(activityType || activityStatus) && (
+                        <div>
+                          <dt>Activity</dt>
                           <dd>
-                            {row.allowWrites === true
-                              ? 'read/write'
-                              : 'read-only'}
+                            {[activityType, activityStatus]
+                              .filter(Boolean)
+                              .join(' · ')}
                           </dd>
                         </div>
-                        {jobId && (
-                          <div>
-                            <dt>Job</dt>
-                            <dd>{jobId}</dd>
-                          </div>
-                        )}
-                        {(activityType || activityStatus) && (
-                          <div>
-                            <dt>Activity</dt>
-                            <dd>
-                              {[activityType, activityStatus]
-                                .filter(Boolean)
-                                .join(' · ')}
-                            </dd>
-                          </div>
-                        )}
-                      </dl>
-                      {transcript.length > 0 ? (
-                        <DelegateTranscript
-                          entries={transcript}
-                          truncated={row.transcriptTruncated === true}
-                        />
-                      ) : (
-                        latestText && <p>{latestText}</p>
                       )}
-                      {runs.length > 0 && (
-                        <ol
-                          className="delegate-run-history"
-                          aria-label="Run history"
-                        >
-                          {runs.map((run, runIndex) => {
-                            const runState = stateLabel(run.state);
-                            const runKey = [
-                              id,
-                              runState,
-                              String(run.startedAt),
-                              String(run.finishedAt),
-                            ].join('-');
-                            return (
-                              <li className="delegate-run-item" key={runKey}>
-                                <span
-                                  className={`surface-state ${stateClass(runState)}`}
-                                  aria-hidden="true"
-                                >
-                                  {stateGlyph(runState)}
-                                </span>
-                                <span>Run {runIndex + 1}</span>
-                                <small>
-                                  {runState}
-                                  {elapsed(run.startedAt, run.finishedAt)
-                                    ? ` · ${elapsed(run.startedAt, run.finishedAt)}`
-                                    : ''}
-                                </small>
-                              </li>
-                            );
-                          })}
-                        </ol>
+                    </dl>
+                    {transcript.length > 0 ? (
+                      <DelegateTranscript
+                        entries={transcript}
+                        truncated={row.transcriptTruncated === true}
+                      />
+                    ) : (
+                      latestText && <p>{latestText}</p>
+                    )}
+                    {runs.length > 0 && (
+                      <ol
+                        className="delegate-run-history"
+                        aria-label="Run history"
+                      >
+                        {runs.map((run, runIndex) => {
+                          const runState = stateLabel(run.state);
+                          const runKey = [
+                            id,
+                            runState,
+                            String(run.startedAt),
+                            String(run.finishedAt),
+                          ].join('-');
+                          return (
+                            <li className="delegate-run-item" key={runKey}>
+                              <span
+                                className={`surface-state ${stateClass(runState)}`}
+                                aria-hidden="true"
+                              >
+                                {stateGlyph(runState)}
+                              </span>
+                              <span>Run {runIndex + 1}</span>
+                              <small>
+                                {runState}
+                                {elapsed(run.startedAt, run.finishedAt)
+                                  ? ` · ${elapsed(run.startedAt, run.finishedAt)}`
+                                  : ''}
+                              </small>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    )}
+                    {!route &&
+                      !context &&
+                      !jobId &&
+                      !activityType &&
+                      !activityStatus &&
+                      !latestText &&
+                      transcript.length === 0 &&
+                      runs.length === 0 && (
+                        <span>Waiting for the delegate to report details.</span>
                       )}
-                      {!route &&
-                        !context &&
-                        !jobId &&
-                        !activityType &&
-                        !activityStatus &&
-                        !latestText &&
-                        transcript.length === 0 &&
-                        runs.length === 0 && (
-                          <span>
-                            Waiting for the delegate to report details.
-                          </span>
-                        )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </DashboardDialog>
-      )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </DashboardDialog>
     </>
   );
 }
@@ -384,63 +384,65 @@ function TasksSurface({ surface }: { surface: ExtensionSurface }) {
           </span>
         </AriaButton>
       </article>
-      {open && (
-        <DashboardDialog title={title} onClose={() => setOpen(false)}>
-          <div
-            className="task-progress"
-            role="progressbar"
-            aria-label="Task progress"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={progress}
-          >
-            <span>
-              {completed}/{total} complete
-            </span>
-            <span className="task-progress-track" aria-hidden="true">
-              <i style={{ width: `${progress}%` }} />
-            </span>
-          </div>
-          <div className="task-rows surface-detail-list">
-            {rows.map((row) => {
-              const state = stateLabel(row.status);
-              const id = row.id;
-              const priority = row.priority;
-              const dependencies = taskDependencies(row);
-              return (
-                <div
-                  className={`task-row ${stateClass(state)}`}
-                  key={`${surface.id}-${id}`}
+      <DashboardDialog
+        title={title}
+        isOpen={open}
+        onClose={() => setOpen(false)}
+      >
+        <div
+          className="task-progress"
+          role="progressbar"
+          aria-label="Task progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progress}
+        >
+          <span>
+            {completed}/{total} complete
+          </span>
+          <span className="task-progress-track" aria-hidden="true">
+            <i style={{ width: `${progress}%` }} />
+          </span>
+        </div>
+        <div className="task-rows surface-detail-list">
+          {rows.map((row) => {
+            const state = stateLabel(row.status);
+            const id = row.id;
+            const priority = row.priority;
+            const dependencies = taskDependencies(row);
+            return (
+              <div
+                className={`task-row ${stateClass(state)}`}
+                key={`${surface.id}-${id}`}
+              >
+                <span
+                  className="surface-state"
+                  title={state}
+                  aria-hidden="true"
                 >
-                  <span
-                    className="surface-state"
-                    title={state}
-                    aria-hidden="true"
-                  >
-                    {stateGlyph(state)}
-                  </span>
-                  <span className="sr-only">{state}</span>
-                  <span className="task-row-main">
-                    <strong>{id}</strong>
-                    <span>{short(row.text || 'Untitled task', 180)}</span>
-                  </span>
-                  <span className="task-row-meta">
-                    {priority && (
-                      <b className={`priority-${priority}`}>{priority}</b>
-                    )}
-                    {dependencies.length > 0 && (
-                      <small title={`Depends on ${dependencies.join(', ')}`}>
-                        ↳ {dependencies.join(', ')}
-                      </small>
-                    )}
-                  </span>
-                </div>
-              );
-            })}
-            {!rows.length && <span className="muted">No tasks reported.</span>}
-          </div>
-        </DashboardDialog>
-      )}
+                  {stateGlyph(state)}
+                </span>
+                <span className="sr-only">{state}</span>
+                <span className="task-row-main">
+                  <strong>{id}</strong>
+                  <span>{short(row.text || 'Untitled task', 180)}</span>
+                </span>
+                <span className="task-row-meta">
+                  {priority && (
+                    <b className={`priority-${priority}`}>{priority}</b>
+                  )}
+                  {dependencies.length > 0 && (
+                    <small title={`Depends on ${dependencies.join(', ')}`}>
+                      ↳ {dependencies.join(', ')}
+                    </small>
+                  )}
+                </span>
+              </div>
+            );
+          })}
+          {!rows.length && <span className="muted">No tasks reported.</span>}
+        </div>
+      </DashboardDialog>
     </>
   );
 }

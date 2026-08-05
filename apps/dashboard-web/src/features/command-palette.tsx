@@ -7,6 +7,7 @@ import type { BrowserSnapshot, RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useEffect, useRef, useState } from 'react';
 import { sessionDisplayTitle } from '../app-helpers';
 import { useDashboardNavigate } from '../routes/navigation';
+import { useOverlayPresence } from './overlay-presence';
 
 export function actionNeedsInput(action: { inputSchema?: unknown }): boolean {
   const schema = action.inputSchema;
@@ -150,6 +151,8 @@ export function CommandPalette({
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(0);
   const [error, setError] = useState<string>();
+  const { present: palettePresent, exiting: paletteExiting } =
+    useOverlayPresence(open);
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -266,11 +269,11 @@ export function CommandPalette({
       >
         Ctrl/⌘ K
       </button>
-      {open && (
+      {palettePresent && (
         // The backdrop intentionally closes on a click outside the dialog.
-        // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop is an inert click target, not a content element.
         <div
-          className="palette-backdrop"
+          className={`palette-backdrop${paletteExiting ? ' is-exiting' : ''}`}
+          aria-hidden={paletteExiting || undefined}
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) close();
@@ -278,8 +281,9 @@ export function CommandPalette({
         >
           <section
             ref={dialogRef}
-            className="command-palette"
+            className={`command-palette${paletteExiting ? ' is-exiting' : ''}`}
             role="dialog"
+            aria-hidden={paletteExiting || undefined}
             aria-modal="true"
             aria-labelledby="command-palette-heading"
             onKeyDown={(event) => {

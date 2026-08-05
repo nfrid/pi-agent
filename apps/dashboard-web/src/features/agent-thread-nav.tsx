@@ -8,6 +8,8 @@ import { workspaceForPath } from '@pi-dashboard/protocol';
 import { type TouchEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { sessionDisplayTitle } from '../app-helpers';
 import { useDashboardNavigate } from '../routes/navigation';
+import { useDashboardUtility } from './dashboard-utility-context';
+import { useOverlayPresence } from './overlay-presence';
 
 export type AgentThreadRow = {
   id: string;
@@ -121,6 +123,7 @@ export function AgentThreadNav({
   onOpenChange?: (open: boolean) => void;
 }) {
   const go = useDashboardNavigate();
+  const utility = useDashboardUtility();
   const [query, setQuery] = useState('');
   const [historyLimit, setHistoryLimit] = useState(MAX_VISIBLE_HISTORY_THREADS);
   const touchStart = useRef<{ x: number; y: number } | undefined>(undefined);
@@ -129,6 +132,22 @@ export function AgentThreadNav({
   );
   const drawerRef = useRef<HTMLElement>(null);
   const handleRef = useRef<HTMLButtonElement>(null);
+  const [isMobile, setIsMobile] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      window.matchMedia('(max-width: 820px)').matches,
+  );
+  const { present: drawerPresent, exiting: drawerExiting } = useOverlayPresence(
+    mode === 'session' && open,
+  );
+  useEffect(() => {
+    if (mode !== 'session') return;
+    const media = window.matchMedia('(max-width: 820px)');
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, [mode]);
   const rows = useMemo(() => agentThreadRows(snapshot), [snapshot]);
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -244,6 +263,14 @@ export function AgentThreadNav({
     go(`/sessions/${encodeURIComponent(id)}`);
     if (mode === 'session') onOpenChange?.(false);
   };
+  const openUtility = (
+    panel: 'workspaces' | 'sessions' | 'inbox',
+    fallbackPath: string,
+  ) => {
+    onOpenChange?.(false);
+    if (utility) utility.openPanel(panel);
+    else go(fallbackPath);
+  };
   const nav = (
     <aside
       ref={mode === 'session' ? drawerRef : undefined}
@@ -356,10 +383,7 @@ export function AgentThreadNav({
         <button
           type="button"
           className="agent-nav-utility"
-          onClick={() => {
-            go('/workspaces');
-            onOpenChange?.(false);
-          }}
+          onClick={() => openUtility('workspaces', '/workspaces')}
         >
           <span aria-hidden="true">⌂</span>
           <span>Workspaces</span>
@@ -367,10 +391,7 @@ export function AgentThreadNav({
         <button
           type="button"
           className="agent-nav-utility"
-          onClick={() => {
-            go('/sessions');
-            onOpenChange?.(false);
-          }}
+          onClick={() => openUtility('sessions', '/sessions')}
         >
           <span aria-hidden="true">▤</span>
           <span>History</span>
@@ -378,10 +399,7 @@ export function AgentThreadNav({
         <button
           type="button"
           className="agent-nav-utility"
-          onClick={() => {
-            go('/inbox');
-            onOpenChange?.(false);
-          }}
+          onClick={() => openUtility('inbox', '/inbox')}
         >
           <span aria-hidden="true">✉</span>
           <span>Inbox</span>
@@ -408,15 +426,22 @@ export function AgentThreadNav({
       >
         ‹
       </button>
-      {open && (
+      {drawerPresent && (
         <button
           type="button"
-          className="agent-nav-backdrop"
+          className={`agent-nav-backdrop${drawerExiting ? ' is-exiting' : ''}`}
           aria-label="Close agent list"
           onClick={() => onOpenChange?.(false)}
         />
       )}
-      <div className={`agent-nav-drawer ${open ? 'open' : ''}`}>{nav}</div>
+      {(!isMobile || drawerPresent) && (
+        <div
+          className={`agent-nav-drawer ${open ? 'open' : ''}${drawerExiting ? ' is-exiting' : ''}`}
+          aria-hidden={isMobile && !open ? true : undefined}
+        >
+          {nav}
+        </div>
+      )}
     </>
   );
 }

@@ -29,6 +29,7 @@ import {
 import { Transcript } from '../entities/transcript';
 import { AgentThreadNav, workspaceNameForSession } from './agent-thread-nav';
 import { ExtensionSurfaceStack } from './extension-surfaces';
+import { useOverlayPresence } from './overlay-presence';
 import { PendingInteractions } from './pending-interaction';
 import { RuntimeActions } from './runtime-actions';
 import { SessionRename } from './session-rename';
@@ -320,6 +321,7 @@ export function SessionInspector({
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const triggerFocusRef = useRef<HTMLElement | null>(null);
+  const { present, exiting } = useOverlayPresence(open);
   useEffect(() => {
     if (!open) return;
     triggerFocusRef.current = document.activeElement as HTMLElement | null;
@@ -365,21 +367,25 @@ export function SessionInspector({
       triggerFocusRef.current = null;
     };
   }, [onClose, open]);
-  if (!open) return null;
+  if (!present) return null;
   const title = sessionDisplayTitle(data.metadata, data.entries);
   return (
-    <div className="session-inspector-layer">
+    <div
+      className={`session-inspector-layer${exiting ? ' is-exiting' : ''}`}
+      aria-hidden={exiting || undefined}
+    >
       <button
         type="button"
-        className="session-inspector-backdrop"
+        className={`session-inspector-backdrop${exiting ? ' is-exiting' : ''}`}
         aria-label="Close session details"
         onClick={onClose}
       />
       <section
         ref={panelRef}
         id="session-inspector"
-        className="session-inspector"
+        className={`session-inspector${exiting ? ' is-exiting' : ''}`}
         role="dialog"
+        aria-hidden={exiting || undefined}
         aria-modal="true"
         aria-labelledby="session-inspector-title"
         tabIndex={-1}

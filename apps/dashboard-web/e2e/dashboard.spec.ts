@@ -44,16 +44,26 @@ test('mobile dashboard renders and supports the new-agent route', async ({
     }),
   );
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
-  await expect(page.getByText('No runtimes are connected.')).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'No thread selected' }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      'No runtimes are connected. Offline and failed threads remain in the workspace nav for diagnosis.',
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Open agent list' }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  await expect(page.getByText('Agents', { exact: true })).toBeVisible();
   await expect(
     page.getByRole('button', {
       name: 'A deliberately long session title that must wrap safely offline',
     }),
   ).toBeVisible();
-  await expect(
-    page.getByRole('button', { name: 'New agent', exact: true }),
-  ).toBeVisible();
+  await expect(page.locator('.agent-nav-new')).toBeVisible();
+  await page.locator('.agent-nav-backdrop').click();
   await page.getByRole('button', { name: 'Open command palette' }).click();
   await expect(
     page.getByRole('dialog', { name: 'Command palette' }),
@@ -365,7 +375,9 @@ test('live transport contains malformed data and reconnects without HTTP polling
     }),
   );
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'No thread selected' }),
+  ).toBeVisible();
   await expect.poll(() => usageRequests).toBeGreaterThan(0);
   await expect.poll(() => snapshotRequests).toBe(1);
   expect(usageRequests).toBe(1);
@@ -415,7 +427,9 @@ test('live transport contains malformed data and reconnects without HTTP polling
       },
     });
   });
-  await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'No thread selected' }),
+  ).toBeVisible();
   await page.evaluate(() => {
     (
       window as unknown as {
@@ -494,7 +508,9 @@ test('live transport contains malformed data and reconnects without HTTP polling
   await expect(page.getByText(/Live generation \d+/)).toBeVisible();
   await expect(page.getByText('ROLLED BACK')).toHaveCount(0);
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Agents' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'No thread selected' }),
+  ).toBeVisible();
 });
 
 test('dense mobile session keeps conversation and activity readable', async ({
@@ -1710,8 +1726,33 @@ test('phase six mocked management flow covers refresh, fallback notification, la
   await page.context().grantPermissions(['notifications']);
   const mocks = await installPhase6Mocks(page);
   await page.goto('/');
-  await page.getByRole('button', { name: 'Refresh workspaces' }).click();
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await page
+    .getByRole('dialog', { name: 'Workspaces' })
+    .getByRole('button', { name: 'Refresh workspaces' })
+    .click();
   await expect(page.getByText('Refreshed project')).toBeVisible();
+  const workspaceDialog = page.getByRole('dialog', { name: 'Workspaces' });
+  await page.keyboard.press('Escape');
+  await expect(workspaceDialog).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
+  await expect(workspaceDialog).toBeVisible();
+  await workspaceDialog
+    .getByRole('button', { name: 'Close Workspaces' })
+    .click();
+  // React Aria keeps the dialog in the tree while its 160ms exit runs.
+  await expect(workspaceDialog).toHaveCount(1);
+  await expect(workspaceDialog).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Workspaces' })).toBeVisible();
+  await page.locator('.surface-dialog-layer').evaluate((element) => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await expect(page.getByRole('dialog', { name: 'Workspaces' })).toHaveCount(0);
   await page.goto('/inbox');
   await page.getByRole('button', { name: 'Browser alerts' }).click();
   await expect(
@@ -1773,8 +1814,13 @@ test('phase six mocked management flow covers refresh, fallback notification, la
     page.getByRole('dialog', { name: 'Delegate status' }),
   ).toBeVisible();
   await page.keyboard.press('Escape');
+  await expect(
+    page.getByRole('dialog', { name: 'Delegate status' }),
+  ).toHaveCount(0);
   await page.getByRole('button', { name: 'Details', exact: true }).click();
-  const inspector = page.getByRole('dialog');
+  const inspector = page.getByRole('dialog', {
+    name: 'Existing session request',
+  });
   await expect(inspector).toBeVisible();
   await expect(inspector).toContainText('Runtime controls');
   await expect(inspector).not.toContainText('Live work');
