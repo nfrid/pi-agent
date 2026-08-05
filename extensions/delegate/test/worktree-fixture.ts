@@ -81,6 +81,14 @@ export function configureNativeHooks(
 set -eu
 mkdir -p node_modules/hook-local .delegate-setup .delegate-build
 printf '%s\\n' "$PWD" > .delegate-setup/worktree-path
+printf '%s\\n' "$1" "$2" "$3" > .delegate-setup/post-checkout-args
+git rev-parse HEAD > .delegate-setup/hook-head
+if [ -f src/value.txt ]; then cat src/value.txt > .delegate-setup/hook-value
+else : > .delegate-setup/hook-value
+fi
+if [ -e src/parent-only.txt ]; then printf 'present\\n' > .delegate-setup/parent-only-at-hook
+else printf 'absent\\n' > .delegate-setup/parent-only-at-hook
+fi
 [ -f node_modules/hook-local/README ] || printf 'child-local dependency\\n' > node_modules/hook-local/README
 [ -f .delegate-build/cache.txt ] || printf 'child-local build\\n' > .delegate-build/cache.txt
 ${options.failCheckout ? "printf '%s\\n' 'checkout setup failed' >&2\nexit 23\n" : ''}`,

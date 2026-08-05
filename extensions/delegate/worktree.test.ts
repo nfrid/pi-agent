@@ -85,6 +85,48 @@ describe('worktree preparation', () => {
     expect(worktree.record).not.toHaveProperty('carriedFiles');
   });
 
+  test('records native checkout arguments before parent WIP carry is applied', async () => {
+    const baseHead = git(repository, ['rev-parse', 'HEAD']).trim();
+    writeFileSync(path.join(repository, 'src', 'value.txt'), 'parent WIP\n');
+    writeFileSync(
+      path.join(repository, 'src', 'parent-only.txt'),
+      'parent-only\n',
+    );
+    configureNativeHooks();
+    const worktree = await prepared({ name: 'Hook timing' });
+    const child = worktree.record.worktreePath;
+    const args = readFileSync(
+      path.join(child, '.delegate-setup', 'post-checkout-args'),
+      'utf8',
+    )
+      .trim()
+      .split(/\r?\n/);
+
+    expect(args).toHaveLength(3);
+    expect(args[0]).toMatch(/^0+$/);
+    expect(args[0]).toHaveLength(args[1].length);
+    expect(
+      readFileSync(path.join(child, '.delegate-setup', 'hook-head'), 'utf8'),
+    ).toBe(`${args[1]}\n`);
+    expect(args[1]).toBe(baseHead);
+    expect(args[2]).toBe('1');
+    expect(
+      readFileSync(path.join(child, '.delegate-setup', 'hook-value'), 'utf8'),
+    ).toBe('one\n');
+    expect(
+      readFileSync(
+        path.join(child, '.delegate-setup', 'parent-only-at-hook'),
+        'utf8',
+      ),
+    ).toBe('absent\n');
+    expect(readFileSync(path.join(child, 'src', 'value.txt'), 'utf8')).toBe(
+      'parent WIP\n',
+    );
+    expect(
+      readFileSync(path.join(child, 'src', 'parent-only.txt'), 'utf8'),
+    ).toBe('parent-only\n');
+  });
+
   test('hookless worktrees receive no implicit dependency or environment setup', async () => {
     const worktree = await prepared();
     const child = worktree.record.worktreePath;
