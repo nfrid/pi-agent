@@ -13,12 +13,14 @@ import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import {
   type Dispatch,
   type SetStateAction,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
+import { DashboardDialog } from '../features/dashboard-dialog';
 import { Markdown } from '../Markdown';
 import {
   isNarration,
@@ -78,16 +80,177 @@ function invokeActivityExpansion(
     .catch(() => undefined);
 }
 
+export type TranscriptLandmark = {
+  key: string;
+  label: string;
+  kind: 'user' | 'assistant' | 'activity';
+  itemIndex: number;
+};
+
+function landmarkLabel(item: TranscriptModelItem, fallback: string): string {
+  const text = item.text?.replace(/\s+/gu, ' ').trim();
+  if (text) return text.length > 72 ? `${text.slice(0, 71)}…` : text;
+  if (item.preparing) return 'Preparing activity';
+  if (item.entry.kind === 'assistant' && item.entry.title)
+    return item.entry.title;
+  return fallback;
+}
+
+export function buildTranscriptLandmarks(
+  items: readonly TranscriptModelItem[],
+  groups: readonly TranscriptGroup[] = [],
+): TranscriptLandmark[] {
+  const result: TranscriptLandmark[] = [];
+  const groupStarts = new Set(groups.map((group) => group.start));
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (!item) continue;
+    if (groupStarts.has(index)) {
+      const group = groups.find((candidate) => candidate.start === index);
+      if (group)
+        result.push({
+          key: `group-${item.key}`,
+          label: group.title,
+          kind: 'activity',
+          itemIndex: index,
+        });
+    }
+    if (item.role === 'user')
+      result.push({
+        key: item.key,
+        label: landmarkLabel(item, 'User turn'),
+        kind: 'user',
+        itemIndex: index,
+      });
+    else if (
+      item.role === 'assistant' &&
+      (item.text ||
+        item.preparing ||
+        (item.entry.kind === 'assistant' && item.entry.title))
+    )
+      result.push({
+        key: item.key,
+        label: landmarkLabel(item, 'Assistant activity'),
+        kind: 'assistant',
+        itemIndex: index,
+      });
+  }
+  return result;
+}
+
+export function TranscriptOutline({
+  landmarks,
+  open = false,
+  onOpenChange,
+  onJump,
+}: {
+  landmarks: readonly TranscriptLandmark[];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onJump: (landmark: TranscriptLandmark) => void;
+}) {
+  const [activeKey, setActiveKey] = useState(landmarks[0]?.key);
+  useEffect(() => {
+    setActiveKey((current) =>
+      landmarks.some((landmark) => landmark.key === current)
+        ? current
+        : landmarks[0]?.key,
+    );
+    let frame: number | undefined;
+    const updateActive = () => {
+      if (frame !== undefined) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = undefined;
+        const elements = new Map(
+          Array.from(
+            document.querySelectorAll<HTMLElement>('[data-transcript-key]'),
+          ).map((element) => [element.dataset.transcriptKey, element]),
+        );
+        let active: string | undefined;
+        for (const landmark of landmarks) {
+          const element = elements.get(landmark.key);
+          if (element && element.getBoundingClientRect().top <= 120)
+            active = landmark.key;
+        }
+        if (active) setActiveKey(active);
+      });
+    };
+    window.addEventListener('scroll', updateActive, { passive: true });
+    updateActive();
+    return () => {
+      window.removeEventListener('scroll', updateActive);
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+    };
+  }, [landmarks]);
+  const list = (
+    <div className="transcript-outline-list">
+      {landmarks.length ? (
+        landmarks.map((landmark) => (
+          <button
+            type="button"
+            className={`transcript-outline-item outline-${landmark.kind}`}
+            key={landmark.key}
+            onClick={() => {
+              onJump(landmark);
+              onOpenChange?.(false);
+            }}
+            title={landmark.label}
+          >
+            <i aria-hidden="true" />
+            <span>{landmark.label}</span>
+          </button>
+        ))
+      ) : (
+        <p className="muted">No transcript landmarks yet.</p>
+      )}
+    </div>
+  );
+  return (
+    <>
+      <aside className="transcript-minimap" aria-label="Transcript outline">
+        <span className="transcript-minimap-label">Outline</span>
+        {landmarks.map((landmark) => (
+          <button
+            type="button"
+            className={`transcript-minimap-marker outline-${landmark.kind}${activeKey === landmark.key ? ' active' : ''}`}
+            key={landmark.key}
+            aria-label={landmark.label}
+            title={landmark.label}
+            onClick={() => onJump(landmark)}
+          >
+            <i aria-hidden="true" />
+          </button>
+        ))}
+      </aside>
+      {open && (
+        <DashboardDialog
+          title="Transcript outline"
+          eyebrow="This session"
+          className="outline-sheet"
+          layerClassName="outline-sheet-layer"
+          onClose={() => onOpenChange?.(false)}
+        >
+          {list}
+        </DashboardDialog>
+      )}
+    </>
+  );
+}
+
 export function Transcript({
   entries,
   projection,
   runtime,
+  outlineOpen,
+  onOutlineOpenChange,
 }: {
   /** Legacy raw-entry input retained for embedders. */
   entries?: unknown[];
   /** Preferred canonical domain projection input. */
   projection?: TranscriptProjection;
   runtime?: RuntimeSnapshot;
+  outlineOpen?: boolean;
+  onOutlineOpenChange?: (open: boolean) => void;
 }) {
   const input = projection ?? entries ?? [];
   const items = useMemo(() => toTranscriptEntries(input), [input]);
@@ -107,6 +270,16 @@ export function Transcript({
     [modelEntries, runtime],
   );
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const landmarks = useMemo(
+    () => buildTranscriptLandmarks(items, groups),
+    [groups, items],
+  );
+  const jumpToLandmark = (landmark: TranscriptLandmark) => {
+    const target = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-transcript-key]'),
+    ).find((element) => element.dataset.transcriptKey === landmark.key);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   const { groupByStart, groupCoverage } = useMemo(
     () => buildTranscriptGroupCoverage(items.length, groups),
     [groups, items.length],
@@ -119,11 +292,19 @@ export function Transcript({
         open={open}
         setOpen={setOpen}
         runtime={runtime}
+        outlineOpen={outlineOpen}
+        onOutlineOpenChange={onOutlineOpenChange}
       />
     );
   return (
     <div className="transcript">
       <h2>Conversation &amp; activity</h2>
+      <TranscriptOutline
+        landmarks={landmarks}
+        open={outlineOpen}
+        onOpenChange={onOutlineOpenChange}
+        onJump={jumpToLandmark}
+      />
       {items.map((item, index) => {
         const group = groupByStart.get(index);
         if (group) {
@@ -144,6 +325,7 @@ export function Transcript({
           return (
             <div
               className={`activity-group ${presentation.className}`}
+              data-transcript-key={`group-${groupKey}`}
               key={`group-${groupKey}`}
             >
               <AriaButton
@@ -182,7 +364,11 @@ export function Transcript({
           );
         }
         if (groupCoverage[index]) return null;
-        return <TranscriptEntry key={item.key} item={item} />;
+        return (
+          <div data-transcript-key={item.key} key={item.key}>
+            <TranscriptEntry item={item} />
+          </div>
+        );
       })}
     </div>
   );
@@ -381,12 +567,11 @@ export function activityGroupPresentation(
   status: TranscriptGroup['status'];
 } {
   const detail = expanded ? 'hide detail' : 'show detail';
-  const count = `${group.toolCount} tool${group.toolCount === 1 ? '' : 's'}`;
   if (group.status === 'failed')
     return {
       className: 'activity-failed',
       icon: '!',
-      label: `${count} · failed · ${detail}`,
+      label: `failed · ${detail}`,
       status: group.status,
     };
   if (group.status === 'preparing')
@@ -400,13 +585,13 @@ export function activityGroupPresentation(
     return {
       className: 'activity-pending',
       icon: '…',
-      label: `${count} · in progress · ${detail}`,
+      label: `in progress · ${detail}`,
       status: group.status,
     };
   return {
     className: 'activity-complete',
     icon: '✓',
-    label: `${count} · ${detail}`,
+    label: detail,
     status: group.status,
   };
 }
@@ -417,12 +602,16 @@ function VirtualizedTranscript({
   open,
   setOpen,
   runtime,
+  outlineOpen,
+  onOutlineOpenChange,
 }: {
   items: readonly TranscriptModelItem[];
   groups: readonly TranscriptGroup[];
   open: ReadonlySet<string>;
   setOpen: Dispatch<SetStateAction<Set<string>>>;
   runtime?: RuntimeSnapshot;
+  outlineOpen?: boolean;
+  onOutlineOpenChange?: (open: boolean) => void;
 }) {
   const rows = useMemo(
     () => buildVirtualTranscriptRows(items, groups),
@@ -435,6 +624,33 @@ function VirtualizedTranscript({
     getItemKey: (index) => rows[index]?.key ?? `transcript-row-${index}`,
     measureElement: (element) => element.getBoundingClientRect().height,
   });
+  const landmarks = useMemo(
+    () => buildTranscriptLandmarks(items, groups),
+    [groups, items],
+  );
+  const rowIndexByKey = useMemo(() => {
+    const result = new Map<string, number>();
+    rows.forEach((row, index) => {
+      result.set(row.key, index);
+      if (row.kind === 'group') {
+        result.set(row.key.replace(/^group-/, ''), index);
+        for (
+          let itemIndex = row.group.start;
+          itemIndex <= row.group.end;
+          itemIndex += 1
+        ) {
+          const item = items[itemIndex];
+          if (item) result.set(item.key, index);
+        }
+      }
+    });
+    return result;
+  }, [items, rows]);
+  const jumpToLandmark = (landmark: TranscriptLandmark) => {
+    const rowIndex = rowIndexByKey.get(landmark.key);
+    if (rowIndex !== undefined)
+      virtualizer.scrollToIndex(rowIndex, { align: 'start' });
+  };
   const anchorRef = useRef<{ key: string; top: number } | undefined>(undefined);
   const bottomStuckRef = useRef(false);
   const captureScrollAnchor = (key: string) => {
@@ -509,7 +725,10 @@ function VirtualizedTranscript({
         : undefined;
     const detailId = `activity-detail-${group.start}`;
     return (
-      <div className={`activity-group ${presentation.className}`}>
+      <div
+        className={`activity-group ${presentation.className}`}
+        data-transcript-key={`group-${groupKey}`}
+      >
         <AriaButton
           type="button"
           aria-expanded={expanded}
@@ -550,6 +769,12 @@ function VirtualizedTranscript({
   return (
     <div className="transcript transcript-virtualized">
       <h2>Conversation &amp; activity</h2>
+      <TranscriptOutline
+        landmarks={landmarks}
+        open={outlineOpen}
+        onOpenChange={onOutlineOpenChange}
+        onJump={jumpToLandmark}
+      />
       <div
         className="transcript-virtualizer"
         style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
@@ -575,7 +800,9 @@ function VirtualizedTranscript({
               {row.kind === 'group' ? (
                 renderGroup(row.group)
               ) : (
-                <TranscriptEntry item={items[row.index]} />
+                <div data-transcript-key={items[row.index]?.key}>
+                  <TranscriptEntry item={items[row.index]} />
+                </div>
               )}
             </div>
           );

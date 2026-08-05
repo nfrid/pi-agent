@@ -27,6 +27,15 @@ import {
 } from './App';
 import type { DashboardEvent } from './dashboard-transport';
 import {
+  activityGroupMetadata,
+  activityGroupPresentation,
+  buildTranscriptLandmarks,
+} from './entities/transcript';
+import {
+  agentThreadRows,
+  boundedAgentThreadRows,
+} from './features/agent-thread-nav';
+import {
   interactionKeyAction,
   selectedInteractionPreview,
 } from './features/session';
@@ -510,6 +519,96 @@ describe('ask-user keyboard contract', () => {
     ];
     expect(selectedInteractionPreview(choices, 0)).toBe('# First');
     expect(selectedInteractionPreview(choices, 1)).toBe('## Second');
+  });
+});
+
+describe('workspace-first agent navigation', () => {
+  it('prioritizes working, waiting, failed, then recent idle threads', () => {
+    const snapshot = {
+      runtimes: [
+        {
+          runtimeId: 'idle',
+          liveState: 'idle',
+          online: true,
+          cwd: '/workspace/app',
+          session: { id: 'idle-session', title: 'Old thread', entries: [] },
+        },
+        {
+          runtimeId: 'failed',
+          liveState: 'failed',
+          online: true,
+          cwd: '/workspace/app',
+          session: {
+            id: 'failed-session',
+            title: 'Broken thread',
+            entries: [],
+          },
+        },
+        {
+          runtimeId: 'working',
+          liveState: 'working',
+          online: true,
+          cwd: '/workspace/app',
+          session: {
+            id: 'working-session',
+            title: 'Current thread',
+            entries: [],
+          },
+        },
+      ],
+      workspaces: [{ id: 'app', name: 'App', canonicalPath: '/workspace/app' }],
+      sessions: [
+        { id: 'idle-session', cwd: '/workspace/app', updatedAt: 1 },
+        { id: 'failed-session', cwd: '/workspace/app', updatedAt: 2 },
+        { id: 'working-session', cwd: '/workspace/app', updatedAt: 3 },
+      ],
+    } as never;
+    const rows = agentThreadRows(snapshot);
+    expect(rows.map((row) => row.id)).toEqual([
+      'working-session',
+      'failed-session',
+      'idle-session',
+    ]);
+    const idle = rows[2];
+    if (!idle) throw new Error('idle row missing');
+    const history = Array.from({ length: 100 }, (_, index) => ({
+      ...idle,
+      id: `history-${index}`,
+      updatedAt: index,
+    }));
+    expect(
+      boundedAgentThreadRows([...rows.slice(0, 2), ...history]),
+    ).toHaveLength(26);
+    expect(
+      boundedAgentThreadRows([...rows.slice(0, 2), ...history], true),
+    ).toHaveLength(102);
+  });
+});
+
+describe('transcript outline and metadata', () => {
+  it('keeps user turns and activity landmarks stable while exposing one tool count', () => {
+    const items = toTranscriptEntries([
+      { type: 'message', message: { role: 'user', content: 'First request' } },
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Inspecting files' }],
+        },
+      },
+    ]);
+    const landmarks = buildTranscriptLandmarks(items, []);
+    expect(landmarks.map((landmark) => landmark.label)).toEqual([
+      'First request',
+      'Inspecting files',
+    ]);
+    expect(activityGroupMetadata({ toolCount: 1, failureCount: 0 })).toBe(
+      '1 tool call',
+    );
+    expect(
+      activityGroupPresentation({ status: 'complete', toolCount: 1 }, false)
+        .label,
+    ).not.toContain('tool');
   });
 });
 

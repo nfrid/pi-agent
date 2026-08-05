@@ -12,6 +12,7 @@ import type {
 } from '../../../../extensions/tasks/contribution';
 import { Markdown } from '../Markdown';
 import type { DashboardRendererContext } from '../renderer-registry';
+import { DashboardDialog } from './dashboard-dialog';
 
 function text(value: string | undefined, fallback = ''): string {
   return value?.trim() || fallback;
@@ -145,49 +146,42 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
   const summary = active
     ? `● ${short(text(active.name, 'Subagent'), 42)}`
     : stats.failed
-      ? `! ${stats.failed} failed`
-      : `✓ ${stats.done} done`;
+      ? '! A delegate failed'
+      : stats.done
+        ? '✓ Delegates complete'
+        : 'No active delegates';
   return (
-    <article className="extension-surface surface-delegate" aria-label={title}>
-      <AriaButton
-        type="button"
-        className="surface-header surface-toggle"
-        aria-expanded={open}
-        onPress={() => setOpen((current) => !current)}
+    <>
+      <article
+        className="extension-surface surface-delegate"
+        aria-label={title}
       >
-        <span className="surface-title">
-          <span className="eyebrow">Delegates</span>
-          <strong>{summary}</strong>
-        </span>
-        <span className="surface-count">
-          {stats.running
-            ? `${stats.running} running`
-            : `${rows.length} tracked`}
-        </span>
-        <span className="surface-chevron" aria-hidden="true">
-          {open ? '⌄' : '›'}
-        </span>
-      </AriaButton>
+        <AriaButton
+          type="button"
+          className="surface-launcher"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onPress={() => setOpen((current) => !current)}
+        >
+          <span className="surface-title">
+            <span className="eyebrow">Delegates</span>
+            <strong>{summary}</strong>
+          </span>
+          <span className="surface-chevron" aria-hidden="true">
+            ›
+          </span>
+        </AriaButton>
+      </article>
       {open && (
-        <>
+        <DashboardDialog title={title} onClose={() => setOpen(false)}>
           <div
             className="surface-summary"
             role="status"
             aria-label="Delegate status summary"
           >
-            {stats.running > 0 && (
-              <span className="surface-running">● {stats.running} active</span>
-            )}
-            {stats.queued > 0 && <span>○ {stats.queued} queued</span>}
-            {stats.done > 0 && (
-              <span className="surface-done">✓ {stats.done} done</span>
-            )}
-            {stats.failed > 0 && (
-              <span className="surface-failed">! {stats.failed} failed</span>
-            )}
-            {!rows.length && (
-              <span className="muted">No delegate runs reported.</span>
-            )}
+            {rows.length
+              ? 'Select a delegate to inspect its latest activity.'
+              : 'No delegate runs reported.'}
           </div>
           <div className="delegate-rows surface-detail-list">
             {rows.map((row) => {
@@ -339,9 +333,9 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
               );
             })}
           </div>
-        </>
+        </DashboardDialog>
       )}
-    </article>
+    </>
   );
 }
 
@@ -363,30 +357,35 @@ function TasksSurface({ surface }: { surface: ExtensionSurface }) {
   const total = rows.length;
   const progress = total ? Math.round((completed / total) * 100) : 0;
   const title = 'Tasks';
-  const countLabel = `${model.stats.active} active`;
   const current = rows.find((row) => stateLabel(row.status) === 'running');
   const summary = current
     ? `● ${short(text(current.text, 'Task in progress'), 42)}`
-    : `${completed}/${total} complete`;
+    : total === 0
+      ? 'No tasks reported'
+      : completed === total
+        ? 'All tasks complete'
+        : 'Tasks need attention';
   return (
-    <article className="extension-surface surface-tasks" aria-label={title}>
-      <AriaButton
-        type="button"
-        className="surface-header surface-toggle"
-        aria-expanded={open}
-        onPress={() => setOpen((value) => !value)}
-      >
-        <span className="surface-title">
-          <span className="eyebrow">Tasks</span>
-          <strong>{summary}</strong>
-        </span>
-        <span className="surface-count">{short(countLabel, 40)}</span>
-        <span className="surface-chevron" aria-hidden="true">
-          {open ? '⌄' : '›'}
-        </span>
-      </AriaButton>
+    <>
+      <article className="extension-surface surface-tasks" aria-label={title}>
+        <AriaButton
+          type="button"
+          className="surface-launcher"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onPress={() => setOpen((value) => !value)}
+        >
+          <span className="surface-title">
+            <span className="eyebrow">Tasks</span>
+            <strong>{summary}</strong>
+          </span>
+          <span className="surface-chevron" aria-hidden="true">
+            ›
+          </span>
+        </AriaButton>
+      </article>
       {open && (
-        <>
+        <DashboardDialog title={title} onClose={() => setOpen(false)}>
           <div
             className="task-progress"
             role="progressbar"
@@ -440,9 +439,9 @@ function TasksSurface({ surface }: { surface: ExtensionSurface }) {
             })}
             {!rows.length && <span className="muted">No tasks reported.</span>}
           </div>
-        </>
+        </DashboardDialog>
       )}
-    </article>
+    </>
   );
 }
 

@@ -53,7 +53,15 @@ export {
   asBrowserSnapshot,
   asSessionResponse,
 } from './dashboard-transport';
-export { shouldShowActivityLead } from './entities/transcript';
+export {
+  buildTranscriptLandmarks,
+  shouldShowActivityLead,
+} from './entities/transcript';
+export {
+  AgentThreadNav,
+  agentThreadRows,
+  boundedAgentThreadRows,
+} from './features/agent-thread-nav';
 export {
   addImageAttachments,
   contextIndicatorData,

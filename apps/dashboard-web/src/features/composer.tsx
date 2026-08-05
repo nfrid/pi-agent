@@ -515,42 +515,7 @@ export function Composer({
     }
   };
   return (
-    <form
-      className={`composer ${dragging ? 'dragging' : ''}`}
-      onSubmit={(event) => void submit(event)}
-      onDragEnter={(event) => {
-        if (!attachmentsEnabled || disabled || busy) return;
-        event.preventDefault();
-        setDragging(true);
-      }}
-      onDragOver={(event) => {
-        if (!attachmentsEnabled || disabled || busy) return;
-        event.preventDefault();
-      }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={(event) => {
-        if (!attachmentsEnabled || disabled || busy) return;
-        event.preventDefault();
-        setDragging(false);
-        selectImages(Array.from(event.dataTransfer.files));
-      }}
-      aria-label="Send a message"
-    >
-      {attachmentsEnabled && (
-        <input
-          ref={fileInputRef}
-          className="sr-only"
-          type="file"
-          accept={IMAGE_TYPES.join(',')}
-          multiple
-          aria-label="Choose images"
-          disabled={disabled || busy}
-          onChange={(event) => {
-            selectImages(Array.from(event.target.files ?? []));
-            event.target.value = '';
-          }}
-        />
-      )}
+    <>
       {shouldShowQueuePanel(runtime.liveState, queue.length) && (
         <QueuePanel
           runtimeId={runtime.runtimeId}
@@ -558,134 +523,165 @@ export function Composer({
           onItemsChange={setQueue}
         />
       )}
-      {attachments.length > 0 && (
-        <fieldset className="composer-previews">
-          <legend className="sr-only">Image attachments</legend>
-          {attachments.map((attachment) => (
-            <div className="composer-preview" key={attachment.previewUrl}>
-              <img src={attachment.previewUrl} alt={attachment.file.name} />
-              <button
-                type="button"
-                aria-label={`Remove ${attachment.file.name}`}
-                disabled={busy}
-                onClick={() => removeImage(attachment.previewUrl)}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </fieldset>
-      )}
-      <div className="composer-secondary">
-        <div className="composer-mode">
-          {runtime.liveState === 'working' && (
-            <>
-              <span>Mode:</span>
-              <AriaButton
-                type="button"
-                aria-label="Steer current work instead of following up later"
-                aria-pressed={mode === 'steer'}
-                className={mode === 'steer' ? 'selected' : ''}
-                onPress={() =>
-                  setMode((current) =>
-                    current === 'steer' ? 'followUp' : 'steer',
-                  )
-                }
-              >
-                {mode === 'steer' ? 'Steer' : 'Later'}
-              </AriaButton>
-            </>
-          )}
-          {runtime.liveState === 'idle' && <span>Prompt</span>}
-          {runtime.liveState === 'waiting' && <span>Answer above</span>}
-          <ContextIndicator usage={runtime.contextUsage} />
-        </div>
-        <div className="composer-control-row">
-          <ThinkingControl runtime={runtime} />
-        </div>
-        {error && (
-          <p className="error composer-error" role="alert">
-            {error}
-          </p>
+      <form
+        className={`composer ${dragging ? 'dragging' : ''}`}
+        onSubmit={(event) => void submit(event)}
+        onDragEnter={(event) => {
+          if (!attachmentsEnabled || disabled || busy) return;
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragOver={(event) => {
+          if (!attachmentsEnabled || disabled || busy) return;
+          event.preventDefault();
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(event) => {
+          if (!attachmentsEnabled || disabled || busy) return;
+          event.preventDefault();
+          setDragging(false);
+          selectImages(Array.from(event.dataTransfer.files));
+        }}
+        aria-label="Send a message"
+      >
+        {attachmentsEnabled && (
+          <input
+            ref={fileInputRef}
+            className="sr-only"
+            type="file"
+            accept={IMAGE_TYPES.join(',')}
+            multiple
+            aria-label="Choose images"
+            disabled={disabled || busy}
+            onChange={(event) => {
+              selectImages(Array.from(event.target.files ?? []));
+              event.target.value = '';
+            }}
+          />
         )}
-      </div>
-      <div className="composer-primary">
-        <textarea
-          aria-label="Message Pi"
-          value={text}
-          disabled={disabled || busy}
-          onChange={(event) => setText(event.target.value)}
-          onPaste={(event) => {
-            if (!attachmentsEnabled || disabled || busy) return;
-            const files = Array.from(event.clipboardData.files);
-            const itemFiles = Array.from(event.clipboardData.items).flatMap(
-              (item) => {
-                const file = item.kind === 'file' ? item.getAsFile() : null;
-                return file ? [file] : [];
-              },
-            );
-            const images = files.length ? files : itemFiles;
-            if (!images.length) return;
-            event.preventDefault();
-            selectImages(images);
-          }}
-          onKeyDown={(event) => {
-            if (
-              event.key === 'Enter' &&
-              (event.metaKey || event.ctrlKey) &&
-              !event.shiftKey
-            ) {
+        {attachments.length > 0 && (
+          <fieldset className="composer-previews">
+            <legend className="sr-only">Image attachments</legend>
+            {attachments.map((attachment) => (
+              <div className="composer-preview" key={attachment.previewUrl}>
+                <img src={attachment.previewUrl} alt={attachment.file.name} />
+                <button
+                  type="button"
+                  aria-label={`Remove ${attachment.file.name}`}
+                  disabled={busy}
+                  onClick={() => removeImage(attachment.previewUrl)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </fieldset>
+        )}
+        <div className="composer-primary">
+          <textarea
+            aria-label="Message Pi"
+            value={text}
+            disabled={disabled || busy}
+            onChange={(event) => setText(event.target.value)}
+            onPaste={(event) => {
+              if (!attachmentsEnabled || disabled || busy) return;
+              const files = Array.from(event.clipboardData.files);
+              const itemFiles = Array.from(event.clipboardData.items).flatMap(
+                (item) => {
+                  const file = item.kind === 'file' ? item.getAsFile() : null;
+                  return file ? [file] : [];
+                },
+              );
+              const images = files.length ? files : itemFiles;
+              if (!images.length) return;
               event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
+              selectImages(images);
+            }}
+            onKeyDown={(event) => {
+              if (
+                event.key === 'Enter' &&
+                (event.metaKey || event.ctrlKey) &&
+                !event.shiftKey
+              ) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            placeholder={
+              disabled ? 'Agent is waiting for input' : 'Message Pi…'
             }
-          }}
-          placeholder={disabled ? 'Agent is waiting for input' : 'Message Pi…'}
-          rows={2}
-        />
-        <div className="composer-actions">
-          {attachmentsEnabled ? (
+            rows={2}
+          />
+          <div className="composer-actions">
             <AriaButton
               type="button"
               className="composer-attach"
-              isDisabled={disabled || busy}
+              isDisabled={!attachmentsEnabled || disabled || busy}
               onPress={() => fileInputRef.current?.click()}
-              aria-label="Attach images"
+              aria-label={
+                attachmentsEnabled
+                  ? 'Attach images'
+                  : 'Attach images (unsupported by selected model)'
+              }
             >
               <span aria-hidden="true">＋</span>
               <span className="composer-attach-label">Image</span>
             </AriaButton>
-          ) : (
             <AriaButton
-              type="button"
-              className="composer-attach"
-              isDisabled
-              aria-label="Attach images (unsupported by selected model)"
+              type="submit"
+              className="composer-send"
+              isDisabled={
+                disabled || busy || (!text.trim() && !attachments.length)
+              }
+              aria-label={
+                runtime.liveState === 'working' && !attachments.length
+                  ? 'Queue message'
+                  : 'Send'
+              }
             >
-              <span aria-hidden="true">＋</span>
-              <span className="composer-attach-label">Image</span>
+              <span aria-hidden="true">↑</span>
+              <span className="sr-only">
+                {runtime.liveState === 'working' && !attachments.length
+                  ? 'Queue'
+                  : 'Send'}
+              </span>
             </AriaButton>
-          )}
-          <AriaButton
-            type="submit"
-            className="composer-send"
-            isDisabled={
-              disabled || busy || (!text.trim() && !attachments.length)
-            }
-            aria-label={
-              runtime.liveState === 'working' && !attachments.length
-                ? 'Queue message'
-                : 'Send'
-            }
-          >
-            <span aria-hidden="true">↑</span>
-            <span className="sr-only">
-              {runtime.liveState === 'working' && !attachments.length
-                ? 'Queue'
-                : 'Send'}
-            </span>
-          </AriaButton>
+          </div>
         </div>
-      </div>
-    </form>
+        <div className="composer-secondary">
+          <div className="composer-mode">
+            {runtime.liveState === 'working' && (
+              <>
+                <span>Mode:</span>
+                <AriaButton
+                  type="button"
+                  aria-label="Steer current work instead of following up later"
+                  aria-pressed={mode === 'steer'}
+                  className={mode === 'steer' ? 'selected' : ''}
+                  onPress={() =>
+                    setMode((current) =>
+                      current === 'steer' ? 'followUp' : 'steer',
+                    )
+                  }
+                >
+                  {mode === 'steer' ? 'Steer' : 'Later'}
+                </AriaButton>
+              </>
+            )}
+            {runtime.liveState === 'idle' && <span>Prompt</span>}
+            {runtime.liveState === 'waiting' && <span>Answer above</span>}
+            <ContextIndicator usage={runtime.contextUsage} />
+          </div>
+          <div className="composer-control-row">
+            <ThinkingControl runtime={runtime} />
+          </div>
+          {error && (
+            <p className="error composer-error" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      </form>
+    </>
   );
 }
