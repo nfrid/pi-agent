@@ -520,6 +520,26 @@ h2 {
   background: #3b3028;
   box-shadow: 0 0 22px #ffb86c18;
 }
+.interaction-dock {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  display: grid;
+  place-items: end center;
+  padding: 72px 13px 148px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.interaction-dock .interaction {
+  width: min(720px, 100%);
+  max-height: min(68vh, 620px);
+  margin: 0;
+  overflow-y: auto;
+  pointer-events: auto;
+  box-shadow:
+    0 16px 52px #000a,
+    0 0 28px #ffb86c26;
+}
 .interaction h2 {
   color: var(--fg);
   font-size: 19px;
@@ -1862,6 +1882,12 @@ h2 {
   }
   .session-rename button {
     flex: none;
+  }
+  .interaction-dock {
+    padding: 58px 13px 164px;
+  }
+  .interaction-dock .interaction {
+    max-height: min(62vh, 520px);
   }
   .interaction {
     margin-left: -2px;

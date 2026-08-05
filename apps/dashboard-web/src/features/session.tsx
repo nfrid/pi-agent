@@ -197,19 +197,27 @@ export function SessionView({
           Runtime failure: {runtimeError}
         </div>
       )}
-      {runtime?.pendingInteractions.map((interaction) => (
-        <InteractionCard
-          key={interaction.id}
-          interaction={interaction}
-          runtime={runtime}
-        />
-      ))}
       <ExtensionSurfaceStack runtime={runtime} />
       <Transcript
         entries={selectLegacyTranscriptEntries(projection)}
         runtime={runtime}
       />
       <ExtensionSurfaceStack runtime={runtime} placement="composer" />
+      {runtime && runtime.pendingInteractions.length > 0 && (
+        <aside
+          className="interaction-dock"
+          aria-label="Pending questions"
+          aria-live="assertive"
+        >
+          {runtime.pendingInteractions.map((interaction) => (
+            <InteractionCard
+              key={interaction.id}
+              interaction={interaction}
+              runtime={runtime}
+            />
+          ))}
+        </aside>
+      )}
       <Composer runtime={runtime} sessionId={id} />
     </section>
   );
