@@ -93,6 +93,45 @@ describe('DashboardLiveStore', () => {
     });
   });
 
+  it('retains runtime epoch ordering across no-snapshot browser events', () => {
+    const store = new DashboardLiveStore();
+    const runtime = {
+      runtimeId: 'runtime-1',
+      liveState: 'idle',
+      pendingInteractions: [],
+      extensionSurfaces: [],
+      session: { id: 'session-1', entries: [] },
+    };
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      runtimes: [runtime],
+    } as unknown as BrowserSnapshot);
+
+    const runtimeEvent = (
+      cursor: number,
+      runtimeEpoch: string,
+      runtimeSeq: number,
+      state: 'idle' | 'working' | 'waiting',
+    ): StreamRecord =>
+      ({
+        cursor,
+        emittedAt: cursor,
+        runtimeId: 'runtime-1',
+        runtimeEpoch,
+        runtimeSeq,
+        event: { type: 'runtime.stateChanged', state, snapshot: {} },
+      }) as StreamRecord;
+
+    store.acceptStreamRecord(runtimeEvent(2, 'epoch-a', 1, 'working'));
+    store.acceptStreamRecord(runtimeEvent(3, 'epoch-b', 1, 'waiting'));
+    expect(
+      store.acceptStreamRecord(runtimeEvent(4, 'epoch-a', 99, 'idle')),
+    ).toBe(true);
+    expect(store.getSnapshot().runtimesById['runtime-1'].liveState).toBe(
+      'waiting',
+    );
+  });
+
   it('keeps entity indexes and embedded snapshot projections aligned across ingress paths', () => {
     const store = new DashboardLiveStore();
     const runtime = {

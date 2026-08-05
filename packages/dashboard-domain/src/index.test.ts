@@ -376,6 +376,28 @@ describe('dashboard domain reducers', () => {
     expect(complete.retiredEpochs).toContain('epoch-1');
   });
 
+  it('accepts a low first tagged sequence after untagged events', () => {
+    let state = hydrateTranscript([], 's');
+    state = reduceTranscriptEvent(state, {
+      cursor: 1,
+      emittedAt: 1,
+      runtimeSeq: 99,
+      sessionId: 's',
+      event: { type: 'agent.settled', sessionId: 's' },
+    } as never);
+    state = reduceTranscriptEvent(state, {
+      cursor: 2,
+      emittedAt: 2,
+      runtimeEpoch: 'epoch-first',
+      runtimeSeq: 1,
+      sessionId: 's',
+      event: { type: 'agent.settled', sessionId: 's' },
+    } as never);
+
+    expect(state.runtimeEpoch).toBe('epoch-first');
+    expect(state.lastRuntimeSeq).toBe(1);
+  });
+
   it('normalizes terminal tool status aliases on update events', () => {
     for (const status of ['complete', 'completed', 'finished'] as const) {
       const state = applyTranscriptEvent(

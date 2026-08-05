@@ -45,6 +45,10 @@ export function applyTransportOrdering(
   let runtimeEpoch = current.runtimeEpoch;
   let retiredEpochs = current.retiredEpochs;
   let replacingEpoch = false;
+  // An untagged stream has no epoch-relative sequence baseline. The first
+  // tagged epoch establishes one, even if untagged records advanced seq.
+  const initializingEpoch =
+    epoch !== undefined && current.runtimeEpoch === undefined;
   if (
     epoch !== undefined &&
     current.runtimeEpoch !== undefined &&
@@ -60,7 +64,7 @@ export function applyTransportOrdering(
     replacingEpoch = true;
     retiredEpochs = [...current.retiredEpochs, current.runtimeEpoch];
     runtimeEpoch = epoch;
-  } else if (epoch !== undefined && current.runtimeEpoch === undefined) {
+  } else if (initializingEpoch) {
     runtimeEpoch = epoch;
   }
 
@@ -77,6 +81,7 @@ export function applyTransportOrdering(
     };
   if (
     !replacingEpoch &&
+    !initializingEpoch &&
     incoming.runtimeSeq !== undefined &&
     incoming.runtimeSeq <= current.lastRuntimeSeq
   )
@@ -92,9 +97,10 @@ export function applyTransportOrdering(
       runtimeEpoch,
       retiredEpochs,
       lastCursor: incoming.cursor ?? current.lastCursor,
-      lastRuntimeSeq: replacingEpoch
-        ? (incoming.runtimeSeq ?? -1)
-        : (incoming.runtimeSeq ?? current.lastRuntimeSeq),
+      lastRuntimeSeq:
+        replacingEpoch || initializingEpoch
+          ? (incoming.runtimeSeq ?? -1)
+          : (incoming.runtimeSeq ?? current.lastRuntimeSeq),
     },
     accepted: true,
     replacingEpoch,
