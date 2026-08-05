@@ -23,9 +23,8 @@ import type {
 } from '@pi-dashboard/protocol';
 
 /**
- * Compatibility facade for Phase 2 callers. HTTP, auth, SSE parsing and the
- * live store now belong to @pi-dashboard/client; this file only keeps the
- * historical web imports stable while pages migrate.
+ * Compatibility facade for dashboard-local imports. HTTP, auth, SSE parsing,
+ * and live-store ownership belong to @pi-dashboard/client.
  */
 export const base = dashboardBaseUrl;
 export type { DashboardState };

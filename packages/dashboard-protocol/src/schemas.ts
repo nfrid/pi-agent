@@ -880,7 +880,7 @@ export type DashboardMessage =
 export const BrowserMessageSchema = DashboardMessageSchema;
 export type BrowserMessage = DashboardMessage;
 
-/** Canonical daemon event envelope used by reducers and future resumable transports. */
+/** Canonical daemon event envelope used by reducers and resumable SSE. */
 export const DashboardEventEnvelopeSchema = Type.Object(
   {
     cursor: Type.Integer({ minimum: 0 }),
