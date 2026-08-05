@@ -74,7 +74,12 @@ function ContextIndicator({
           }}
         />
       </span>
-      <strong>{indicator.text}</strong>
+      <strong>
+        <span>{indicator.percent ?? '?'}%</span>
+        <span className="context-detail">
+          {indicator.text.slice(indicator.text.indexOf(' '))}
+        </span>
+      </strong>
     </span>
   );
 }
@@ -323,6 +328,39 @@ export function Composer({
       }}
       aria-label="Send a message"
     >
+      {attachmentsEnabled && (
+        <input
+          ref={fileInputRef}
+          className="sr-only"
+          type="file"
+          accept={IMAGE_TYPES.join(',')}
+          multiple
+          aria-label="Choose images"
+          disabled={disabled || busy}
+          onChange={(event) => {
+            selectImages(Array.from(event.target.files ?? []));
+            event.target.value = '';
+          }}
+        />
+      )}
+      {attachments.length > 0 && (
+        <fieldset className="composer-previews">
+          <legend className="sr-only">Image attachments</legend>
+          {attachments.map((attachment) => (
+            <div className="composer-preview" key={attachment.previewUrl}>
+              <img src={attachment.previewUrl} alt={attachment.file.name} />
+              <button
+                type="button"
+                aria-label={`Remove ${attachment.file.name}`}
+                disabled={busy}
+                onClick={() => removeImage(attachment.previewUrl)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </fieldset>
+      )}
       <div className="composer-secondary">
         <div className="composer-mode">
           {runtime.liveState === 'working' && (
@@ -357,65 +395,9 @@ export function Composer({
           <ThinkingControl runtime={runtime} />
         </div>
         {error && (
-          <p className="error" role="alert">
+          <p className="error composer-error" role="alert">
             {error}
           </p>
-        )}
-        {attachmentsEnabled ? (
-          <>
-            <input
-              ref={fileInputRef}
-              className="sr-only"
-              type="file"
-              accept={IMAGE_TYPES.join(',')}
-              multiple
-              aria-label="Choose images"
-              disabled={disabled || busy}
-              onChange={(event) => {
-                selectImages(Array.from(event.target.files ?? []));
-                event.target.value = '';
-              }}
-            />
-            {attachments.length > 0 && (
-              <fieldset className="composer-previews">
-                <legend className="sr-only">Image attachments</legend>
-                {attachments.map((attachment) => (
-                  <div className="composer-preview" key={attachment.previewUrl}>
-                    <img
-                      src={attachment.previewUrl}
-                      alt={attachment.file.name}
-                    />
-                    <button
-                      type="button"
-                      aria-label={`Remove ${attachment.file.name}`}
-                      disabled={busy}
-                      onClick={() => removeImage(attachment.previewUrl)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </fieldset>
-            )}
-            <AriaButton
-              type="button"
-              className="composer-attach"
-              isDisabled={disabled || busy}
-              onPress={() => fileInputRef.current?.click()}
-              aria-label="Attach images"
-            >
-              + Image
-            </AriaButton>
-          </>
-        ) : (
-          <AriaButton
-            type="button"
-            className="composer-attach"
-            isDisabled
-            aria-label="Attach images (unsupported by selected model)"
-          >
-            + Image
-          </AriaButton>
         )}
       </div>
       <div className="composer-primary">
@@ -449,14 +431,42 @@ export function Composer({
             }
           }}
           placeholder={disabled ? 'Agent is waiting for input' : 'Message Pi…'}
-          rows={3}
+          rows={2}
         />
-        <AriaButton
-          type="submit"
-          isDisabled={disabled || busy || (!text.trim() && !attachments.length)}
-        >
-          Send
-        </AriaButton>
+        <div className="composer-actions">
+          {attachmentsEnabled ? (
+            <AriaButton
+              type="button"
+              className="composer-attach"
+              isDisabled={disabled || busy}
+              onPress={() => fileInputRef.current?.click()}
+              aria-label="Attach images"
+            >
+              <span aria-hidden="true">＋</span>
+              <span className="composer-attach-label">Image</span>
+            </AriaButton>
+          ) : (
+            <AriaButton
+              type="button"
+              className="composer-attach"
+              isDisabled
+              aria-label="Attach images (unsupported by selected model)"
+            >
+              <span aria-hidden="true">＋</span>
+              <span className="composer-attach-label">Image</span>
+            </AriaButton>
+          )}
+          <AriaButton
+            type="submit"
+            className="composer-send"
+            isDisabled={
+              disabled || busy || (!text.trim() && !attachments.length)
+            }
+          >
+            <span aria-hidden="true">↑</span>
+            <span className="sr-only">Send</span>
+          </AriaButton>
+        </div>
       </div>
     </form>
   );

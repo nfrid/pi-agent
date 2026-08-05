@@ -932,18 +932,26 @@ h2 {
 }
 .composer {
   display: block;
-  background: var(--bg-alt);
+  background: color-mix(in srgb, var(--bg-alt) 94%, var(--purple));
   border: 1px solid var(--line);
-  padding: 10px;
+  border-radius: 12px;
+  padding: 9px;
   position: sticky;
   bottom: max(12px, env(safe-area-inset-bottom));
   z-index: 2;
-  box-shadow: 0 5px 22px #0005;
+  box-shadow: 0 8px 28px #0006;
 }
 .composer-secondary {
   display: grid;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
   min-width: 0;
+}
+.composer-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 11px;
 }
 .composer-primary {
   position: relative;
@@ -952,43 +960,82 @@ h2 {
   align-items: flex-end;
   gap: 8px;
   min-width: 0;
-  margin-top: 7px;
+  margin-top: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 42%, transparent);
+  padding: 5px;
 }
 .composer.dragging {
   border-style: dashed;
   border-color: var(--cyan);
   background: #343746cc;
 }
+.composer-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+}
+.composer-attach,
+.composer-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease;
+}
 .composer-attach {
+  gap: 3px;
   width: max-content;
   border: 1px solid var(--line);
   background: transparent;
   color: var(--cyan);
-  padding: 5px 9px;
-  margin: 7px 0 2px;
-  cursor: pointer;
+  padding: 0 9px;
 }
 .composer-attach:hover {
   border-color: var(--cyan);
+  background: #8be9fd12;
+  transform: translateY(-1px);
 }
-.composer-attach:disabled {
-  opacity: 0.45;
+.composer-attach:disabled,
+.composer-send:disabled {
+  opacity: 0.4;
   cursor: not-allowed;
+  transform: none;
 }
 .composer-previews {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 3;
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  border: 0;
-  padding: 0;
-  margin: 9px 0 2px;
+  flex-wrap: nowrap;
+  gap: 7px;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 6px;
+  margin: 0;
   min-width: 0;
+  background: color-mix(in srgb, var(--bg-alt) 92%, transparent);
+  box-shadow: 0 6px 22px #0008;
+  backdrop-filter: blur(8px);
 }
 .composer-preview {
   position: relative;
-  width: 72px;
-  height: 72px;
+  flex: 0 0 58px;
+  width: 58px;
+  height: 58px;
+  overflow: hidden;
   border: 1px solid var(--line);
+  border-radius: 7px;
   background: var(--bg);
 }
 .composer-preview img {
@@ -1020,41 +1067,44 @@ h2 {
   flex: 1;
   min-width: 0;
   width: 100%;
-  min-height: 42px;
+  min-height: 38px;
+  max-height: 180px;
   border: 0;
   resize: vertical;
   outline: 0;
   background: transparent;
   color: var(--fg);
-  padding: 5px;
+  padding: 7px;
 }
 .composer textarea::placeholder {
   color: var(--muted);
 }
-.composer-primary > button {
+.composer-send {
   flex: none;
-  width: auto;
-  margin: 0;
+  width: 38px;
   border: 1px solid var(--purple);
   background: var(--purple);
   color: var(--bg);
-  padding: 9px 14px;
-  cursor: pointer;
-  font-weight: 700;
+  padding: 0;
+  font-size: 19px;
+  font-weight: 800;
 }
-.composer-primary > button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+.composer-send:hover {
+  background: var(--pink);
+  border-color: var(--pink);
+  transform: translateY(-1px);
 }
 .composer-mode {
   display: flex;
   gap: 6px;
   align-items: center;
+  min-width: 0;
   color: var(--muted);
   font-size: 11px;
 }
 .composer-mode button {
   border: 1px solid var(--line);
+  white-space: nowrap;
   background: transparent;
   color: var(--muted);
   padding: 4px 8px;
@@ -1260,14 +1310,16 @@ h2 {
   font-size: 11px;
 }
 .thinking-control label {
-  display: grid;
-  gap: 3px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 .thinking-control select {
-  min-width: 130px;
-  max-width: 180px;
-  padding: 5px;
+  min-width: 100px;
+  max-width: 150px;
+  padding: 4px 24px 4px 6px;
   border: 1px solid var(--line);
+  border-radius: 5px;
   background: var(--bg-alt);
   color: var(--fg);
 }
@@ -1363,54 +1415,72 @@ h2 {
     margin-left: 0;
     width: 100%;
   }
-  .activity-group > button,
-  .composer-mode {
+  .activity-group > button {
     flex-wrap: wrap;
   }
   .composer-secondary {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: end;
-    gap: 6px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 5px;
   }
   .composer-mode {
-    width: 100%;
+    overflow: hidden;
   }
   .composer-control-row {
-    flex: 0 1 150px;
-  }
-  .thinking-control {
-    display: grid;
-    gap: 6px;
-  }
-  .thinking-control label,
-  .thinking-control select {
     min-width: 0;
-    width: 100%;
-    max-width: none;
+  }
+  .thinking-control label > span {
+    display: none;
+  }
+  .thinking-control select {
+    min-width: 82px;
+    width: 82px;
+    max-width: 82px;
   }
   .activity-group > button small {
     width: 100%;
     margin-left: 28px;
   }
   .context-indicator {
-    margin-left: 0;
+    margin-left: auto;
+  }
+  .context-meter {
+    display: none;
+  }
+  .context-indicator strong {
+    font-size: 9px;
+  }
+  .context-detail {
+    display: none;
   }
   .shortcut {
     display: none;
   }
   .composer {
     bottom: max(6px, env(safe-area-inset-bottom));
-    padding: 8px;
+    padding: 7px;
   }
   .composer-primary {
-    align-items: stretch;
+    align-items: flex-end;
+    padding: 4px;
   }
   .composer-primary textarea {
-    min-height: 40px;
+    min-height: 38px;
   }
-  .composer-primary > button {
-    padding-inline: 11px;
+  .composer-actions {
+    gap: 4px;
+  }
+  .composer-attach,
+  .composer-send {
+    width: 38px;
+    padding: 0;
+  }
+  .composer-attach-label {
+    display: none;
+  }
+  .composer-preview {
+    flex-basis: 54px;
+    width: 54px;
+    height: 54px;
   }
   .session-heading-actions {
     width: 100%;

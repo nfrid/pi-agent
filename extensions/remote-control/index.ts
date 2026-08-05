@@ -490,11 +490,8 @@ export async function dispatchDashboardInput(
               throw new Error('Invalid temporary image attachment.');
             return {
               type: 'image' as const,
-              source: {
-                type: 'base64' as const,
-                mediaType: image.mediaType,
-                data: readFileSync(image.path).toString('base64'),
-              },
+              data: readFileSync(image.path).toString('base64'),
+              mimeType: image.mediaType,
             };
           }),
         ]

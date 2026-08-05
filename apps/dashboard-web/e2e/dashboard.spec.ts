@@ -657,12 +657,33 @@ test('dense mobile session keeps conversation and activity readable', async ({
     page.getByRole('button', { name: 'Attach images' }),
   ).toBeVisible();
   const imageInput = page.getByLabel('Choose images');
+  const composerHeightBeforeAttachment = await page
+    .locator('.composer')
+    .evaluate((element) => element.getBoundingClientRect().height);
   await imageInput.setInputFiles({
     name: 'picker.png',
     mimeType: 'image/png',
     buffer: Buffer.from([137, 80, 78, 71]),
   });
   await expect(page.getByAltText('picker.png')).toBeVisible();
+  const floatingAttachmentLayout = await page.evaluate(() => {
+    const composer = document.querySelector('.composer');
+    const previews = document.querySelector('.composer-previews');
+    if (!composer || !previews) throw new Error('Composer previews not found');
+    const composerRect = composer.getBoundingClientRect();
+    const previewsRect = previews.getBoundingClientRect();
+    return {
+      composerHeight: composerRect.height,
+      previewsBottom: previewsRect.bottom,
+      composerTop: composerRect.top,
+    };
+  });
+  expect(floatingAttachmentLayout.composerHeight).toBe(
+    composerHeightBeforeAttachment,
+  );
+  expect(floatingAttachmentLayout.previewsBottom).toBeLessThanOrEqual(
+    floatingAttachmentLayout.composerTop,
+  );
   await page.getByRole('button', { name: 'Remove picker.png' }).click();
   await page.evaluate(() => {
     const transfer = new DataTransfer();
