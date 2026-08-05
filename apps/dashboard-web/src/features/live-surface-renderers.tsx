@@ -1,5 +1,5 @@
 import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import type {
   DelegateStatus,
@@ -12,6 +12,7 @@ import type {
 } from '../../../../extensions/tasks/contribution';
 import { Markdown } from '../Markdown';
 import type { DashboardRendererContext } from '../renderer-registry';
+import { DashboardDialog } from './dashboard-dialog';
 
 function text(value: string | undefined, fallback = ''): string {
   return value?.trim() || fallback;
@@ -61,71 +62,6 @@ function elapsed(start: unknown, finish: unknown): string | undefined {
   return minutes < 60
     ? `${minutes}m ${seconds % 60}s`
     : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-}
-
-function SurfaceDialog({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-}) {
-  const panelRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const trigger = document.activeElement as HTMLElement | null;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const frame = window.requestAnimationFrame(() => panelRef.current?.focus());
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', onKeyDown);
-      trigger?.focus();
-    };
-  }, [onClose]);
-  return (
-    <div className="surface-dialog-layer">
-      <button
-        type="button"
-        className="surface-dialog-backdrop"
-        aria-label={`Close ${title}`}
-        onClick={onClose}
-      />
-      <section
-        ref={panelRef}
-        className="surface-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="live-surface-dialog-title"
-        tabIndex={-1}
-      >
-        <header className="surface-dialog-header">
-          <div>
-            <p className="eyebrow">Live work</p>
-            <h2 id="live-surface-dialog-title">{title}</h2>
-          </div>
-          <button
-            type="button"
-            className="session-icon-button"
-            aria-label={`Close ${title}`}
-            onClick={onClose}
-          >
-            ×
-          </button>
-        </header>
-        <div className="surface-dialog-body">{children}</div>
-      </section>
-    </div>
-  );
 }
 
 function delegateRows(
@@ -237,7 +173,7 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
         </AriaButton>
       </article>
       {open && (
-        <SurfaceDialog title={title} onClose={() => setOpen(false)}>
+        <DashboardDialog title={title} onClose={() => setOpen(false)}>
           <div
             className="surface-summary"
             role="status"
@@ -397,7 +333,7 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
               );
             })}
           </div>
-        </SurfaceDialog>
+        </DashboardDialog>
       )}
     </>
   );
@@ -449,7 +385,7 @@ function TasksSurface({ surface }: { surface: ExtensionSurface }) {
         </AriaButton>
       </article>
       {open && (
-        <SurfaceDialog title={title} onClose={() => setOpen(false)}>
+        <DashboardDialog title={title} onClose={() => setOpen(false)}>
           <div
             className="task-progress"
             role="progressbar"
@@ -503,7 +439,7 @@ function TasksSurface({ surface }: { surface: ExtensionSurface }) {
             })}
             {!rows.length && <span className="muted">No tasks reported.</span>}
           </div>
-        </SurfaceDialog>
+        </DashboardDialog>
       )}
     </>
   );

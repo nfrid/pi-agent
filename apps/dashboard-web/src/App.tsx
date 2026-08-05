@@ -57,7 +57,11 @@ export {
   buildTranscriptLandmarks,
   shouldShowActivityLead,
 } from './entities/transcript';
-export { AgentThreadNav, agentThreadRows } from './features/agent-thread-nav';
+export {
+  AgentThreadNav,
+  agentThreadRows,
+  boundedAgentThreadRows,
+} from './features/agent-thread-nav';
 export {
   addImageAttachments,
   contextIndicatorData,

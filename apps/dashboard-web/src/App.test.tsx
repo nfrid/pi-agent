@@ -31,7 +31,10 @@ import {
   activityGroupPresentation,
   buildTranscriptLandmarks,
 } from './entities/transcript';
-import { agentThreadRows } from './features/agent-thread-nav';
+import {
+  agentThreadRows,
+  boundedAgentThreadRows,
+} from './features/agent-thread-nav';
 import {
   interactionKeyAction,
   selectedInteractionPreview,
@@ -560,11 +563,25 @@ describe('workspace-first agent navigation', () => {
         { id: 'working-session', cwd: '/workspace/app', updatedAt: 3 },
       ],
     } as never;
-    expect(agentThreadRows(snapshot).map((row) => row.id)).toEqual([
+    const rows = agentThreadRows(snapshot);
+    expect(rows.map((row) => row.id)).toEqual([
       'working-session',
       'failed-session',
       'idle-session',
     ]);
+    const idle = rows[2];
+    if (!idle) throw new Error('idle row missing');
+    const history = Array.from({ length: 100 }, (_, index) => ({
+      ...idle,
+      id: `history-${index}`,
+      updatedAt: index,
+    }));
+    expect(
+      boundedAgentThreadRows([...rows.slice(0, 2), ...history]),
+    ).toHaveLength(26);
+    expect(
+      boundedAgentThreadRows([...rows.slice(0, 2), ...history], true),
+    ).toHaveLength(102);
   });
 });
 

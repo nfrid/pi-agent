@@ -664,16 +664,17 @@ test('dense mobile session keeps conversation and activity readable', async ({
   expect(compactHeader.text).not.toContain('test/');
   await expect(page.getByText('inline code', { exact: true })).toBeVisible();
   await page.evaluate(() => {
-    const handle = document.querySelector('.agent-nav-handle');
-    if (!handle) throw new Error('agent drawer handle missing');
+    const target = document;
+    if (!document.querySelector('.agent-nav-handle'))
+      throw new Error('agent drawer handle missing');
     const touch = (type: string, x: number) =>
-      handle.dispatchEvent(
+      target.dispatchEvent(
         new TouchEvent(type, {
           bubbles: true,
           changedTouches: [
             new Touch({
               identifier: 1,
-              target: handle,
+              target,
               clientX: x,
               clientY: 300,
             }),
@@ -684,7 +685,10 @@ test('dense mobile session keeps conversation and activity readable', async ({
     touch('touchend', 86);
   });
   await expect(page.locator('.agent-nav-drawer.open')).toBeVisible();
-  await page.getByRole('button', { name: 'Close agent list' }).click();
+  await page
+    .locator('.agent-nav-drawer.open .agent-thread-row')
+    .first()
+    .click();
   await expect(page.locator('.agent-nav-drawer.open')).toHaveCount(0);
   await page.getByRole('button', { name: 'Open transcript outline' }).click();
   const outline = page.getByRole('dialog', { name: 'Transcript outline' });

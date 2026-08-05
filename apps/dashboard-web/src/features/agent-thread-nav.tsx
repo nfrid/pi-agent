@@ -88,6 +88,22 @@ function statusLabel(status: AgentThreadRow['status']): string {
   return status;
 }
 
+const MAX_VISIBLE_ACTIVE_THREADS = 40;
+const MAX_VISIBLE_HISTORY_THREADS = 24;
+
+export function boundedAgentThreadRows(
+  rows: readonly AgentThreadRow[],
+  revealHistory = false,
+): AgentThreadRow[] {
+  if (revealHistory) return [...rows];
+  const active = rows.filter((row) => row.status !== 'idle');
+  const history = rows.filter((row) => row.status === 'idle');
+  return [
+    ...active.slice(0, MAX_VISIBLE_ACTIVE_THREADS),
+    ...history.slice(0, MAX_VISIBLE_HISTORY_THREADS),
+  ];
+}
+
 function shortPath(path: string): string {
   const parts = path.split('/').filter(Boolean);
   return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path;
@@ -108,7 +124,12 @@ export function AgentThreadNav({
 }) {
   const go = useDashboardNavigate();
   const [query, setQuery] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
   const touchStart = useRef<{ x: number; y: number } | undefined>(undefined);
+  const edgeTouchStart = useRef<{ x: number; y: number } | undefined>(
+    undefined,
+  );
+  const drawerRef = useRef<HTMLElement>(null);
   const rows = useMemo(() => agentThreadRows(snapshot), [snapshot]);
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -120,14 +141,19 @@ export function AgentThreadNav({
         )
       : rows;
   }, [query, rows]);
+  const visibleRows = useMemo(
+    () => boundedAgentThreadRows(filtered, showHistory),
+    [filtered, showHistory],
+  );
+  const hiddenRowCount = Math.max(0, filtered.length - visibleRows.length);
   const groups = useMemo(() => {
     const result = new Map<string, AgentThreadRow[]>();
-    for (const row of filtered) {
+    for (const row of visibleRows) {
       const key = row.workspaceId ?? `other:${row.workspaceName}`;
       result.set(key, [...(result.get(key) ?? []), row]);
     }
     return [...result.entries()];
-  }, [filtered]);
+  }, [visibleRows]);
   const onTouchStart = (event: TouchEvent) => {
     const touch = event.changedTouches[0];
     if (touch) touchStart.current = { x: touch.clientX, y: touch.clientY };
@@ -143,12 +169,71 @@ export function AgentThreadNav({
     if (open && dx < -52 && Math.abs(dx) > dy * 1.25) onOpenChange?.(false);
   };
   useEffect(() => {
+    if (mode !== 'session') return;
+    const onStart = (event: globalThis.TouchEvent) => {
+      const touch = event.changedTouches[0];
+      if (touch && touch.clientX < 32)
+        edgeTouchStart.current = { x: touch.clientX, y: touch.clientY };
+    };
+    const onEnd = (event: globalThis.TouchEvent) => {
+      const start = edgeTouchStart.current;
+      const touch = event.changedTouches[0];
+      edgeTouchStart.current = undefined;
+      if (!start || !touch) return;
+      const dx = touch.clientX - start.x;
+      const dy = Math.abs(touch.clientY - start.y);
+      if (dx > 52 && dx > dy * 1.25) onOpenChange?.(true);
+      else if (open && dx < -52 && Math.abs(dx) > dy * 1.25)
+        onOpenChange?.(false);
+    };
+    window.addEventListener('touchstart', onStart, { passive: true });
+    window.addEventListener('touchend', onEnd, { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', onStart);
+      window.removeEventListener('touchend', onEnd);
+    };
+  }, [mode, onOpenChange, open]);
+  useEffect(() => {
     if (mode !== 'session' || !open) return;
+    const trigger = document.activeElement as HTMLElement | null;
+    const mobile = window.matchMedia('(max-width: 820px)').matches;
+    const frame = mobile
+      ? window.requestAnimationFrame(() => {
+          const first = drawerRef.current?.querySelector<HTMLElement>(
+            'input, button:not(:disabled), [href]',
+          );
+          first?.focus();
+        })
+      : undefined;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onOpenChange?.(false);
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onOpenChange?.(false);
+        return;
+      }
+      if (!mobile || event.key !== 'Tab' || !drawerRef.current) return;
+      const focusable = Array.from(
+        drawerRef.current.querySelectorAll<HTMLElement>(
+          'input, button:not(:disabled), [href]',
+        ),
+      );
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    return () => {
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+      window.removeEventListener('keydown', onKeyDown);
+      if (mobile) trigger?.focus();
+    };
   }, [mode, onOpenChange, open]);
   const select = (id: string) => {
     go(`/sessions/${encodeURIComponent(id)}`);
@@ -156,6 +241,7 @@ export function AgentThreadNav({
   };
   const nav = (
     <aside
+      ref={mode === 'session' ? drawerRef : undefined}
       className={`agent-thread-nav agent-thread-nav-${mode}`}
       aria-label="Agents and threads"
       onTouchStart={onTouchStart}
@@ -180,7 +266,10 @@ export function AgentThreadNav({
         <span aria-hidden="true">⌕</span>
         <input
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setShowHistory(false);
+          }}
           placeholder="Search threads"
           type="search"
         />
@@ -232,6 +321,15 @@ export function AgentThreadNav({
           </section>
         ))}
       </div>
+      {hiddenRowCount > 0 && (
+        <button
+          type="button"
+          className="agent-nav-more"
+          onClick={() => setShowHistory(true)}
+        >
+          Show {hiddenRowCount} older thread{hiddenRowCount === 1 ? '' : 's'}
+        </button>
+      )}
       <footer className="agent-nav-footer">
         <button
           type="button"

@@ -20,6 +20,7 @@ import {
   useState,
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
+import { DashboardDialog } from '../features/dashboard-dialog';
 import { Markdown } from '../Markdown';
 import {
   isNarration,
@@ -155,27 +156,31 @@ export function TranscriptOutline({
         ? current
         : landmarks[0]?.key,
     );
+    let frame: number | undefined;
     const updateActive = () => {
-      const visible = landmarks
-        .map((landmark) => {
-          const element = Array.from(
+      if (frame !== undefined) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = undefined;
+        const elements = new Map(
+          Array.from(
             document.querySelectorAll<HTMLElement>('[data-transcript-key]'),
-          ).find(
-            (candidate) => candidate.dataset.transcriptKey === landmark.key,
-          );
-          return {
-            landmark,
-            top:
-              element?.getBoundingClientRect().top ?? Number.NEGATIVE_INFINITY,
-          };
-        })
-        .filter(({ top }) => top <= 120)
-        .at(-1);
-      if (visible) setActiveKey(visible.landmark.key);
+          ).map((element) => [element.dataset.transcriptKey, element]),
+        );
+        let active: string | undefined;
+        for (const landmark of landmarks) {
+          const element = elements.get(landmark.key);
+          if (element && element.getBoundingClientRect().top <= 120)
+            active = landmark.key;
+        }
+        if (active) setActiveKey(active);
+      });
     };
     window.addEventListener('scroll', updateActive, { passive: true });
     updateActive();
-    return () => window.removeEventListener('scroll', updateActive);
+    return () => {
+      window.removeEventListener('scroll', updateActive);
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+    };
   }, [landmarks]);
   const list = (
     <div className="transcript-outline-list">
@@ -218,36 +223,15 @@ export function TranscriptOutline({
         ))}
       </aside>
       {open && (
-        <div className="outline-sheet-layer">
-          <button
-            type="button"
-            className="outline-sheet-backdrop"
-            aria-label="Close transcript outline"
-            onClick={() => onOpenChange?.(false)}
-          />
-          <section
-            className="outline-sheet"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="transcript-outline-title"
-          >
-            <header>
-              <div>
-                <p className="eyebrow">This session</p>
-                <h2 id="transcript-outline-title">Transcript outline</h2>
-              </div>
-              <button
-                type="button"
-                className="session-icon-button"
-                aria-label="Close transcript outline"
-                onClick={() => onOpenChange?.(false)}
-              >
-                ×
-              </button>
-            </header>
-            {list}
-          </section>
-        </div>
+        <DashboardDialog
+          title="Transcript outline"
+          eyebrow="This session"
+          className="outline-sheet"
+          layerClassName="outline-sheet-layer"
+          onClose={() => onOpenChange?.(false)}
+        >
+          {list}
+        </DashboardDialog>
       )}
     </>
   );
