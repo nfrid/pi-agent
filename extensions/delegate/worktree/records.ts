@@ -27,11 +27,6 @@ export function worktreeRecordDir(id: string): string {
   return path.join(worktreeRootDir(), id);
 }
 
-/** Private retained copies of allowed ignored-file projections for snapshots. */
-export function snapshotFilesDir(id: string): string {
-  return path.join(worktreeRecordDir(id), 'snapshot-files');
-}
-
 function recordPath(id: string): string {
   return path.join(worktreeRecordDir(id), 'record.json');
 }
@@ -80,10 +75,13 @@ export function loadWorktree(id: string): WorktreeRecord | undefined {
   try {
     const parsed = JSON.parse(readFileSync(recordPath(id), 'utf8')) as unknown;
     if (!validRecord(parsed, id)) return undefined;
-    // Records created before lifecycle metrics did not retain this bounded
-    // count. Preserve their operational behavior while reporting zero.
-    parsed.dependencyProjectionCandidateCount ??= 0;
-    return parsed;
+    // Drop projection metadata from records written by older versions. It was
+    // harness policy, not lifecycle state, and must not be revived on rewrite.
+    const legacy = parsed as WorktreeRecord & Record<string, unknown>;
+    delete legacy.dependencyLinks;
+    delete legacy.dependencyProjectionCandidateCount;
+    delete legacy.carriedFiles;
+    return legacy;
   } catch {
     return undefined;
   }

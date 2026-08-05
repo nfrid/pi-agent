@@ -17,8 +17,6 @@ export let root: string;
 export let agentDir: string;
 export let repository: string;
 
-export const carriedWipPackage = path.join('packages', 'carried-wip');
-
 function restoreEnv(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
@@ -47,7 +45,10 @@ beforeEach(() => {
   git(repository, ['config', 'user.email', 'test@example.invalid']);
   git(repository, ['config', 'user.name', 'Test']);
   mkdirSync(path.join(repository, 'src'));
-  writeFileSync(path.join(repository, '.gitignore'), 'node_modules/\n.env\n');
+  writeFileSync(
+    path.join(repository, '.gitignore'),
+    'node_modules/\n.env\n.delegate-setup/\n.delegate-build/\n',
+  );
   writeFileSync(
     path.join(repository, 'package.json'),
     '{"name":"fixture","version":"1.0.0"}\n',
@@ -65,32 +66,43 @@ beforeEach(() => {
   git(repository, ['commit', '-qm', 'fixture']);
 });
 
-/** Create an untracked package with an executable available through its deps. */
-export function createCarriedWipPackage(): void {
-  const packageRoot = path.join(repository, carriedWipPackage);
-  mkdirSync(path.join(packageRoot, 'node_modules', '.bin'), {
-    recursive: true,
-  });
-  mkdirSync(path.join(packageRoot, 'node_modules', 'wip-dependency'));
-  mkdirSync(path.join(packageRoot, 'src'));
+export function configureNativeHooks(
+  options: {
+    failCheckout?: boolean;
+    failCommit?: boolean;
+    directory?: string;
+  } = {},
+): string {
+  const hooksPath = path.join(root, options.directory ?? 'custom-native-hooks');
+  mkdirSync(hooksPath, { recursive: true });
   writeFileSync(
-    path.join(packageRoot, 'package.json'),
-    '{"name":"carried-wip","private":true,"scripts":{"check":"wip-check"}}\n',
+    path.join(hooksPath, 'post-checkout'),
+    `#!/bin/sh
+set -eu
+mkdir -p node_modules/hook-local .delegate-setup .delegate-build
+printf '%s\\n' "$PWD" > .delegate-setup/worktree-path
+printf '%s\\n' "$1" "$2" "$3" > .delegate-setup/post-checkout-args
+git rev-parse HEAD > .delegate-setup/hook-head
+if [ -f src/value.txt ]; then cat src/value.txt > .delegate-setup/hook-value
+else : > .delegate-setup/hook-value
+fi
+if [ -e src/parent-only.txt ]; then printf 'present\\n' > .delegate-setup/parent-only-at-hook
+else printf 'absent\\n' > .delegate-setup/parent-only-at-hook
+fi
+[ -f node_modules/hook-local/README ] || printf 'child-local dependency\\n' > node_modules/hook-local/README
+[ -f .delegate-build/cache.txt ] || printf 'child-local build\\n' > .delegate-build/cache.txt
+${options.failCheckout ? "printf '%s\\n' 'checkout setup failed' >&2\nexit 23\n" : ''}`,
   );
-  writeFileSync(
-    path.join(packageRoot, 'src', 'value.ts'),
-    'export const value = 1;\n',
-  );
-  writeFileSync(
-    path.join(packageRoot, 'node_modules', 'wip-dependency', 'index.js'),
-    'module.exports = "dependency available";\n',
-  );
-  const check = path.join(packageRoot, 'node_modules', '.bin', 'wip-check');
-  writeFileSync(
-    check,
-    '#!/usr/bin/env node\nprocess.stdout.write(require("../wip-dependency") + "\\n");\n',
-  );
-  chmodSync(check, 0o755);
+  chmodSync(path.join(hooksPath, 'post-checkout'), 0o755);
+  if (options.failCommit) {
+    writeFileSync(
+      path.join(hooksPath, 'pre-commit'),
+      "#!/bin/sh\nprintf '%s\\n' 'commit hook ran' >&2\nexit 24\n",
+    );
+    chmodSync(path.join(hooksPath, 'pre-commit'), 0o755);
+  }
+  git(repository, ['config', 'core.hooksPath', hooksPath]);
+  return hooksPath;
 }
 
 afterEach(() => {

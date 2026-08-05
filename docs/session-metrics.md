@@ -17,7 +17,7 @@ Background completion facts come from producer details: automatic deliveries use
 
 Unknown-argument blocks are recognized only when `isError` is true and the result text has the strict `Tool "…" does not support argument "…". Remove it and retry.` shape. Tool and argument names are never emitted.
 
-Read-only review lifecycle counters cover clean snapshot retirements, same-snapshot continuations, WIP/HEAD refresh attempts and outcomes, and WIP package-review projection outcomes. Package-review attempts are partitioned into successful nonzero-link, zero-link, and failed-projection counts. Worktree summaries used for this correlation expose only the bounded snapshot base plus numeric carried-file, projection-candidate, and dependency-link counts; legacy results without these fields remain parseable.
+Read-only review lifecycle counters cover clean snapshot retirements, same-snapshot continuations, and WIP/HEAD refresh attempts and outcomes. Worktree summaries used for this correlation expose the bounded source snapshot base; legacy results with older projection fields remain parseable, but those harness-policy fields are not emitted or measured.
 
 ## Routing and ratios
 
@@ -33,7 +33,7 @@ Metrics describe observed cost and reporting, not correctness. Compare cohorts o
 
 ## Task outcome episodes
 
-The schema is `session-metrics/v7`. In addition to the existing metrics, every
+The schema is `session-metrics/v8`. In addition to the existing metrics, every
 session has an aggregate `episodeCohorts` object with `all`, `byShape`, and
 `byLanguage` buckets. Shapes are only tool-pattern observations:
 `analysis-only`, `mutation-unvalidated`, `mutation-validated`, `operations`,

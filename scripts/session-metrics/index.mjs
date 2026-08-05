@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { aggregateEpisodeCohorts, deriveEpisodes } from './episodes.mjs';
 
-export const SCHEMA_VERSION = 'session-metrics/v7';
+export const SCHEMA_VERSION = 'session-metrics/v8';
 const METRIC_KEYS = [
   'userTurns',
   'assistantTurns',
@@ -53,10 +53,6 @@ const METRIC_KEYS = [
   'delegateHeadRefreshAttempts',
   'delegateHeadRefreshSuccesses',
   'delegateHeadRefreshFailures',
-  'delegateWipPackageReviewAttempts',
-  'delegateWipPackageReviewSuccessfulNonzeroDependencyProjections',
-  'delegateWipPackageReviewZeroLinkProjections',
-  'delegateWipPackageReviewFailedDependencyProjections',
   'routedTasks',
   'childTurns',
   'childUsageInput',
@@ -488,12 +484,7 @@ function lifecycleEntries(call) {
 function hasLifecycleMetadata(worktree) {
   return (
     worktree &&
-    (worktree.snapshotBase === 'wip' || worktree.snapshotBase === 'head') &&
-    [
-      'carriedFileCount',
-      'dependencyProjectionCandidateCount',
-      'dependencyLinkCount',
-    ].every((key) => Number.isInteger(worktree[key]) && worktree[key] >= 0)
+    (worktree.snapshotBase === 'wip' || worktree.snapshotBase === 'head')
   );
 }
 
@@ -538,18 +529,6 @@ function recordLifecycleRun(state, id, entry, run, failedResult = false) {
     state.metrics[`${prefix}Attempts`] += 1;
     state.metrics[`${prefix}${successful ? 'Successes' : 'Failures'}`] += 1;
 
-    if (entry.refresh === 'wip') {
-      // Every correlated WIP refresh has one mutually exclusive package-review
-      // outcome. Successful legacy results lack bounded projection metadata, so
-      // they remain unavailable rather than being invented as zero-link runs.
-      if (successful && !metadata) return;
-      state.metrics.delegateWipPackageReviewAttempts += 1;
-      if (!successful)
-        state.metrics.delegateWipPackageReviewFailedDependencyProjections += 1;
-      else if (worktree.dependencyLinkCount > 0)
-        state.metrics.delegateWipPackageReviewSuccessfulNonzeroDependencyProjections += 1;
-      else state.metrics.delegateWipPackageReviewZeroLinkProjections += 1;
-    }
     return;
   }
 

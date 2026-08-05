@@ -77,18 +77,38 @@ A read-only delegate gets `read`, `bash`, `grep`, `find`, and `ls`, and is told 
 
 `allowWrites: true` gives the task `edit` and `write` alongside the shell, and runs it in its own git worktree on a fresh `pi/<task-name>` branch under `.worktrees/`. Parallel writable tasks therefore never collide, even on the same files — that, not security, is what the worktree is for.
 
-Setup needs no per-repository hooks:
+Setup follows the repository's native Git worktree semantics:
 
-- each package directory's `node_modules` is symlinked from the parent checkout, so nothing is reinstalled;
-- gitignored essentials (`.env` and friends) are copied in;
-- `.worktrees/` is added to `.git/info/exclude`, never to the tracked `.gitignore`;
-- checkout hooks are disabled for the worktree git creates on your behalf.
+- `git worktree add` honors the configured `core.hooksPath`, including its checkout/setup hooks;
+- the harness never symlinks or copies repository-local dependencies, build directories, or predefined `.env` files, and never runs an implicit install;
+- `.worktrees/` is added to `.git/info/exclude`, never to the tracked `.gitignore`.
 
-By default (`from: 'wip'`) the parent's uncommitted work — the tracked diff plus untracked, non-ignored files — is reproduced inside the worktree, so the child sees the repository as you see it. `from: 'head'` starts from the last commit instead.
+For a project that needs local setup, configure an ordinary idempotent
+`post-checkout` hook. It runs in the new child checkout, so its generated or
+ignored outputs remain child-local:
+
+```sh
+#!/bin/sh
+# Save as .githooks/post-checkout, chmod +x, then configure:
+# git config core.hooksPath .githooks
+set -eu
+mkdir -p node_modules/my-tool .project-build
+[ -f node_modules/my-tool/README ] || printf 'local setup\n' > node_modules/my-tool/README
+```
+
+Hook code is project code executed with the repository user's command and
+filesystem privileges; review and trust it just as you would other checkout
+commands. Hooks may materialize dependencies or generated configuration in
+each worktree while reusing package-manager or language-tool caches in their
+normal user cache locations. Do not share mutable repository-local directories
+between worktrees, and do not create secret-bearing environment files without
+an explicit project policy.
+
+By default (`from: 'wip'`) the parent's uncommitted work — the tracked diff plus untracked, non-ignored files — is reproduced inside the worktree, so the child sees the repository as you see it. `from: 'head'` starts from the last commit instead. Hook-created ignored files are setup state, not source snapshot content: exact source snapshots come from Git commits and the carried WIP commit, and snapshot rehydration reruns the native hook instead of restoring ignored files.
 
 The carry lands as its own commit rather than as pending changes. That buys two things: the child starts on a clean tree, so its own commits describe only its own work, and the parent can be shown `carryCommit..branch` on review instead of a diff with its own uncommitted changes mixed into what it is judging. `changedPaths` counts only what the child changed, for the same reason.
 
-The child is asked to commit as it goes and told explicitly not to merge, rebase, push, or switch branches. Anything it leaves uncommitted is committed for it when the run ends, so the branch is always the complete deliverable. Injected files (the `node_modules` symlink, carried `.env`) are never committed.
+The child is asked to commit as it goes and told explicitly not to merge, rebase, push, or switch branches. Anything it leaves uncommitted is committed for it when the run ends, so the branch is always the complete deliverable. Synthetic carry and finish commits suppress commit hooks deliberately; ordinary checkout/setup hooks still run when a worktree is created or rehydrated. Hook-created ignored setup files are never part of the branch's source snapshot.
 
 A continuation reuses its original worktree, working directory, route, and scope, and must repeat `allowWrites: true`. If a worktree cannot be created — no repository, or git refuses — the task still runs writably in the parent checkout and says why.
 

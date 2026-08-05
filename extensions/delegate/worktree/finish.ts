@@ -1,11 +1,9 @@
-import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
-import * as path from 'node:path';
+import { existsSync, rmSync } from 'node:fs';
 import { git, gitText, splitZ } from './git';
 import { type WorktreeRecord, workBase } from './model';
 import {
   deleteWorktreeRecord,
   loadWorktree,
-  snapshotFilesDir,
   writeWorktreeRecord,
 } from './records';
 
@@ -16,24 +14,6 @@ function commitSubject(name: string): string {
   return cleaned.length <= COMMIT_SUBJECT_MAX
     ? cleaned
     : `${cleaned.slice(0, COMMIT_SUBJECT_MAX - 1)}…`;
-}
-
-/**
- * Unstage everything preparation injected into the worktree.
- *
- * A linked `node_modules` is a symlink, so a repository's usual `node_modules/`
- * ignore rule (which only matches directories) does not cover it — without this
- * the finishing commit would sweep the symlink and the carried `.env` onto the
- * branch and hand them to the parent on merge. Staging first and dropping these
- * afterwards, rather than excluding them by pathspec, keeps git from refusing
- * the whole command when one of the names is also gitignored.
- */
-async function unstageInjectedFiles(record: WorktreeRecord): Promise<void> {
-  const injected = [...record.dependencyLinks, ...record.carriedFiles];
-  if (!injected.length) return;
-  await git(record.worktreePath, ['reset', '--quiet', '--', ...injected]).catch(
-    () => undefined,
-  );
 }
 
 /**
@@ -49,7 +29,6 @@ async function commitPendingWork(
   taskName: string,
 ): Promise<void> {
   await git(record.worktreePath, ['add', '--all']);
-  await unstageInjectedFiles(record);
   const staged = await gitText(record.worktreePath, [
     'diff',
     '--cached',
@@ -157,15 +136,6 @@ export async function retireWorktreeSnapshot(
 ): Promise<WorktreeRecord> {
   const record = loadWorktree(id);
   if (!record) throw new Error(`Unknown worktree ${id}`);
-  // Ignored projections are outside the Git ref. Preserve only the existing
-  // bounded allowlist so a same-snapshot continuation sees the same files.
-  for (const relative of record.carriedFiles) {
-    const source = path.join(record.worktreePath, relative);
-    const target = path.join(snapshotFilesDir(record.id), relative);
-    if (!existsSync(source)) continue;
-    mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-    copyFileSync(source, target);
-  }
   if (existsSync(record.worktreePath)) {
     await git(record.repositoryRoot, [
       'worktree',

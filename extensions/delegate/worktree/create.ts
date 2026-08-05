@@ -6,7 +6,6 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
-  symlinkSync,
 } from 'node:fs';
 import * as path from 'node:path';
 import {
@@ -23,23 +22,12 @@ import type {
   WorktreePreparation,
   WorktreeRecord,
 } from './model';
-import { snapshotFilesDir, writeWorktreeRecord } from './records';
+import { writeWorktreeRecord } from './records';
 
 /** Worktrees live beside the repository so `git worktree list` reads naturally. */
 const WORKTREE_DIR = '.worktrees';
 const BRANCH_PREFIX = 'pi';
-const MAX_LINKED_PACKAGE_DIRS = 100;
-
-/**
- * Gitignored files a fresh checkout needs but git will never provide. Copying
- * these is most of what makes a worktree usable without per-repo setup hooks.
- */
-const CARRIED_FILES = [
-  '.env',
-  '.env.local',
-  '.env.development',
-  '.env.development.local',
-];
+const MAX_SETUP_ERROR_CHARS = 2_000;
 
 function slugify(name: string): string {
   const slug = name
@@ -96,78 +84,6 @@ async function uniqueBranch(
   }
 }
 
-/** Symlink each package directory's node_modules from the parent checkout. */
-function linkDependencies(
-  repositoryRoot: string,
-  worktreePath: string,
-  packageDirs: string[],
-): { links: string[]; candidateCount: number } {
-  const links: string[] = [];
-  let candidateCount = 0;
-  for (const directory of packageDirs.slice(0, MAX_LINKED_PACKAGE_DIRS)) {
-    const source = path.join(repositoryRoot, directory, 'node_modules');
-    const target = path.join(worktreePath, directory, 'node_modules');
-    if (!existsSync(source)) continue;
-    candidateCount += 1;
-    if (existsSync(target)) continue;
-    try {
-      mkdirSync(path.dirname(target), { recursive: true });
-      symlinkSync(source, target, 'dir');
-      links.push(path.relative(worktreePath, target));
-    } catch {
-      // A worktree without linked dependencies still runs; it just needs an
-      // install. Never fail preparation over one link.
-    }
-  }
-  return { links, candidateCount };
-}
-
-async function packageDirectories(worktreePath: string): Promise<string[]> {
-  const files = splitZ(
-    String(
-      await git(worktreePath, [
-        'ls-files',
-        '-z',
-        '--',
-        'package.json',
-        '**/package.json',
-      ]),
-    ),
-  );
-  return [...new Set(files.map((file) => path.dirname(file)))].sort();
-}
-
-/** Copy gitignored-but-required files (.env and friends) into the worktree. */
-function carryFiles(repositoryRoot: string, worktreePath: string): string[] {
-  const carried: string[] = [];
-  for (const name of CARRIED_FILES) {
-    const source = path.join(repositoryRoot, name);
-    const target = path.join(worktreePath, name);
-    if (!existsSync(source) || existsSync(target)) continue;
-    try {
-      copyFileSync(source, target);
-      carried.push(name);
-    } catch {
-      // Best effort, same reasoning as dependency links.
-    }
-  }
-  return carried;
-}
-
-/** Restore the ignored-file projections captured with a retired snapshot. */
-function restoreSnapshotFiles(record: WorktreeRecord): string[] {
-  const restored: string[] = [];
-  for (const relative of record.carriedFiles) {
-    const source = path.join(snapshotFilesDir(record.id), relative);
-    const target = path.join(record.worktreePath, relative);
-    if (!existsSync(source) || existsSync(target)) continue;
-    mkdirSync(path.dirname(target), { recursive: true });
-    copyFileSync(source, target);
-    restored.push(relative);
-  }
-  return restored;
-}
-
 /**
  * Reproduce the parent's uncommitted work inside the worktree: the tracked diff
  * plus any untracked files git is not ignoring. This is what lets a delegate
@@ -178,8 +94,9 @@ function restoreSnapshotFiles(record: WorktreeRecord): string[] {
  * parent can review `carryCommit..branch` without its own uncommitted changes
  * mixed into the diff it is judging.
  *
- * Called before dependencies are linked and gitignored files are copied in, so
- * nothing injected can ride along on this commit.
+ * Native checkout hooks run before this carry step. Hook-created ignored setup
+ * stays local to the child and, like the parent's ignored files, cannot ride
+ * along on this commit.
  */
 async function carryWorkInProgress(
   repositoryRoot: string,
@@ -263,30 +180,14 @@ export async function prepareWorktree(options: {
 
     excludeWorktreeDir(root);
     mkdirSync(path.dirname(worktreePath), { recursive: true });
-    // core.hooksPath=/dev/null: a repo's own checkout hooks must not run for a
-    // worktree we create on the user's behalf.
-    await git(root, [
-      '-c',
-      'core.hooksPath=/dev/null',
-      'worktree',
-      'add',
-      '-b',
-      branch,
-      worktreePath,
-      baseHead,
-    ]);
+    // Do not override core.hooksPath: `worktree add` must honor the
+    // repository's native checkout/setup hooks.
+    await git(root, ['worktree', 'add', '-b', branch, worktreePath, baseHead]);
 
     const carryCommit =
       base === 'wip'
         ? await carryWorkInProgress(root, worktreePath)
         : undefined;
-    const dependencies = linkDependencies(
-      root,
-      worktreePath,
-      await packageDirectories(worktreePath),
-    );
-    const carried = carryFiles(root, worktreePath);
-
     const now = new Date().toISOString();
     const record: WorktreeRecord = {
       version: 1,
@@ -299,9 +200,6 @@ export async function prepareWorktree(options: {
       base,
       carriedWip: Boolean(carryCommit),
       ...(carryCommit ? { carryCommit } : {}),
-      dependencyLinks: dependencies.links,
-      dependencyProjectionCandidateCount: dependencies.candidateCount,
-      carriedFiles: carried,
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -310,10 +208,17 @@ export async function prepareWorktree(options: {
     return { worktree: { record, env: { PI_DELEGATE_WORKTREE: id } } };
   } catch (error) {
     await cleanupFailedPreparation(root, worktreePath, branch);
-    return {
-      fallbackReason: `Worktree setup failed: ${error instanceof Error ? error.message : String(error)}.`,
-    };
+    return { fallbackReason: setupFailure(error) };
   }
+}
+
+function setupFailure(error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  const bounded =
+    detail.length <= MAX_SETUP_ERROR_CHARS
+      ? detail
+      : `${detail.slice(0, MAX_SETUP_ERROR_CHARS - 1)}…`;
+  return `Worktree setup failed while running the repository checkout/setup hooks. Fix the hook or its project setup command and retry; no delegate was launched. ${bounded}`;
 }
 
 async function cleanupFailedPreparation(
@@ -321,7 +226,9 @@ async function cleanupFailedPreparation(
   worktreePath: string | undefined,
   branch: string | undefined,
 ): Promise<void> {
-  if (worktreePath && existsSync(worktreePath)) {
+  if (worktreePath) {
+    // Ask Git to unregister the checkout even if a failing hook removed its
+    // directory before returning; otherwise the branch can remain checked out.
     await git(repositoryRoot, [
       'worktree',
       'remove',
@@ -369,24 +276,14 @@ export async function rehydrateWorktreeSession(
     throw new Error('This worktree has already been removed.');
   try {
     mkdirSync(path.dirname(record.worktreePath), { recursive: true });
+    // Keep native Git worktree semantics for snapshot rehydration too, so the
+    // configured checkout/setup hooks can recreate ignored child-local state.
     await git(record.repositoryRoot, [
-      '-c',
-      'core.hooksPath=/dev/null',
       'worktree',
       'add',
       record.worktreePath,
       record.branch,
     ]);
-    const dependencies = linkDependencies(
-      record.repositoryRoot,
-      record.worktreePath,
-      await packageDirectories(record.worktreePath),
-    );
-    record.dependencyLinks = dependencies.links;
-    record.dependencyProjectionCandidateCount = dependencies.candidateCount;
-    record.carriedFiles = record.snapshot
-      ? restoreSnapshotFiles(record)
-      : carryFiles(record.repositoryRoot, record.worktreePath);
     record.status = 'active';
     delete record.snapshot;
     writeWorktreeRecord(record);
@@ -398,7 +295,7 @@ export async function rehydrateWorktreeSession(
       undefined,
     );
     throw new Error(
-      `Could not rehydrate the worktree snapshot: ${error instanceof Error ? error.message : String(error)}`,
+      `Could not rehydrate the worktree snapshot: ${setupFailure(error)}`,
     );
   }
 }

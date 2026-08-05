@@ -476,8 +476,6 @@ describe('delegate measurements', () => {
       childTurns: 2,
       delegateWipRefreshAttempts: 1,
       delegateWipRefreshFailures: 1,
-      delegateWipPackageReviewAttempts: 1,
-      delegateWipPackageReviewFailedDependencyProjections: 1,
     });
   });
 
@@ -801,14 +799,11 @@ describe('delegate measurements', () => {
   });
 
   it('measures clean snapshot retirement, continuations, and refresh outcomes by stable IDs', () => {
-    const snapshot = (base, links = 0) => ({
+    const snapshot = (base) => ({
       status: 'finished',
       snapshot: true,
       snapshotBase: base,
       hasWork: false,
-      carriedFileCount: 0,
-      dependencyProjectionCandidateCount: links,
-      dependencyLinkCount: links,
     });
     const success = (worktree) => ({
       allowWrites: false,
@@ -830,7 +825,7 @@ describe('delegate measurements', () => {
             continuation: 'wip-token',
             refresh: 'wip',
           },
-          details: { runs: [success(snapshot('wip', 2))] },
+          details: { runs: [success(snapshot('wip'))] },
         },
         {
           arguments: {
@@ -876,10 +871,6 @@ describe('delegate measurements', () => {
       delegateHeadRefreshAttempts: 1,
       delegateHeadRefreshSuccesses: 0,
       delegateHeadRefreshFailures: 1,
-      delegateWipPackageReviewAttempts: 4,
-      delegateWipPackageReviewSuccessfulNonzeroDependencyProjections: 1,
-      delegateWipPackageReviewZeroLinkProjections: 1,
-      delegateWipPackageReviewFailedDependencyProjections: 2,
     });
   });
 
@@ -887,9 +878,6 @@ describe('delegate measurements', () => {
     const lifecycleMetadata = {
       status: 'finished',
       snapshotBase: 'head',
-      carriedFileCount: 0,
-      dependencyProjectionCandidateCount: 0,
-      dependencyLinkCount: 0,
     };
     const result = parseSessionJsonl(
       delegateFixture([
@@ -956,7 +944,6 @@ describe('delegate measurements', () => {
     expect(result).toMatchObject({
       delegateCleanReadOnlySnapshotRetirements: 0,
       delegateWipRefreshAttempts: 0,
-      delegateWipPackageReviewAttempts: 0,
     });
   });
 
