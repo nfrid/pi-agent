@@ -1498,6 +1498,19 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(page.getByText('Live update while reading')).toBeVisible();
   await mocks.emit({
     type: 'snapshot',
+    snapshot: phase6Snapshot({ liveState: 'working', pendingInteractions: [] }),
+  });
+  const deliveryMode = page.getByRole('button', {
+    name: 'Steer current work instead of following up later',
+  });
+  await expect(deliveryMode).toHaveCount(1);
+  await expect(deliveryMode).toHaveText('Later');
+  await expect(deliveryMode).toHaveAttribute('aria-pressed', 'false');
+  await deliveryMode.click();
+  await expect(deliveryMode).toHaveText('Steer');
+  await expect(deliveryMode).toHaveAttribute('aria-pressed', 'true');
+  await mocks.emit({
+    type: 'snapshot',
     snapshot: phase6Snapshot({ liveState: 'idle', pendingInteractions: [] }),
   });
   await expect(page.getByLabel('Message Pi')).toBeEnabled();

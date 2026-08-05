@@ -1204,10 +1204,6 @@ h2 {
 .context-error .context-meter i {
   background: var(--red);
 }
-.shortcut {
-  color: var(--dim);
-  font-size: 10px;
-}
 .composer.disabled {
   display: flex;
   align-items: center;
@@ -1980,9 +1976,6 @@ h2 {
     font-size: 9px;
   }
   .context-detail {
-    display: none;
-  }
-  .shortcut {
     display: none;
   }
   .composer {

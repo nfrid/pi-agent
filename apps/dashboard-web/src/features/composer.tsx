@@ -583,28 +583,22 @@ export function Composer({
               <span>Mode:</span>
               <AriaButton
                 type="button"
-                aria-pressed={mode === 'followUp'}
-                className={mode === 'followUp' ? 'selected' : ''}
-                onPress={() => setMode('followUp')}
-              >
-                Follow-up
-              </AriaButton>
-              <AriaButton
-                type="button"
+                aria-label="Steer current work instead of following up later"
                 aria-pressed={mode === 'steer'}
                 className={mode === 'steer' ? 'selected' : ''}
-                onPress={() => setMode('steer')}
+                onPress={() =>
+                  setMode((current) =>
+                    current === 'steer' ? 'followUp' : 'steer',
+                  )
+                }
               >
-                Steer
+                {mode === 'steer' ? 'Steer' : 'Later'}
               </AriaButton>
             </>
           )}
           {runtime.liveState === 'idle' && <span>Prompt</span>}
           {runtime.liveState === 'waiting' && <span>Answer above</span>}
           <ContextIndicator usage={runtime.contextUsage} />
-          <span className="shortcut">
-            Ctrl/⌘+Enter send · Shift+Enter newline
-          </span>
         </div>
         <div className="composer-control-row">
           <ThinkingControl runtime={runtime} />
