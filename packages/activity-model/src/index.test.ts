@@ -1,5 +1,42 @@
 import { describe, expect, it } from 'vitest';
-import { groupTranscript, headersOf, projectActivityGroups } from './index.js';
+import {
+  groupTranscript,
+  headersOf,
+  projectActivityGroups,
+  toolActionSummary,
+} from './index.js';
+
+describe('tool action summaries', () => {
+  it('keeps high-signal arguments in bounded labels', () => {
+    expect(
+      toolActionSummary({ name: 'bash', args: { command: 'pnpm test' } }),
+    ).toBe('bash pnpm test');
+    expect(
+      toolActionSummary({ name: 'read', args: { path: 'src/App.tsx' } }),
+    ).toBe('read src/App.tsx');
+    expect(
+      toolActionSummary({
+        name: 'delegate',
+        args: { action: 'start', name: 'Fix queue handling' },
+      }),
+    ).toBe('delegate start: Fix queue handling');
+    expect(
+      toolActionSummary({ name: 'todo', args: { action: 'done', id: 'T2' } }),
+    ).toBe('todo done T2');
+    expect(
+      toolActionSummary({ name: 'web_search', args: { query: 'React Aria' } }),
+    ).toBe('web_search: React Aria');
+  });
+
+  it('does not emit an unbounded command or argument value', () => {
+    const summary = toolActionSummary({
+      name: 'bash',
+      args: { command: 'x'.repeat(500) },
+    });
+    expect(summary.length).toBeLessThanOrEqual(140);
+    expect(summary.endsWith('…')).toBe(true);
+  });
+});
 
 describe('shared activity model', () => {
   it('groups the same pure transcript deterministically', () => {

@@ -20,6 +20,58 @@ export const MAX_IMAGE_TOTAL_SIZE = 12 * 1024 * 1024;
 
 type ImageAttachment = { file: File; previewUrl: string };
 
+export type QueuedMessage = {
+  id: string;
+  mode: 'steer' | 'followUp';
+  text: string;
+};
+
+type RuntimeWithQueue = RuntimeSnapshot & {
+  queuedMessages?: readonly QueuedMessage[];
+};
+
+export function queuedMessagesForRuntime(
+  runtime: RuntimeSnapshot | undefined,
+): readonly QueuedMessage[] {
+  const queue = (runtime as RuntimeWithQueue | undefined)?.queuedMessages;
+  if (!Array.isArray(queue)) return [];
+  return queue.filter((item): item is QueuedMessage =>
+    Boolean(
+      item &&
+        typeof item.id === 'string' &&
+        item.id.length > 0 &&
+        (item.mode === 'steer' || item.mode === 'followUp') &&
+        typeof item.text === 'string',
+    ),
+  );
+}
+
+function newQueueId(): string {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `queue-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+}
+
+export function queueCommand(
+  type: 'queue.add' | 'queue.update',
+  queueId: string,
+  mode: 'steer' | 'followUp',
+  text: string,
+): Record<string, unknown> {
+  return {
+    id: newQueueId(),
+    type,
+    queueId,
+    mode,
+    text: text.trim(),
+  };
+}
+
+export function queueRemoveCommand(queueId: string): Record<string, unknown> {
+  return { id: newQueueId(), type: 'queue.remove', queueId };
+}
+
 export function formatContextTokens(tokens: number): string {
   if (tokens >= 1_000_000)
     return `${Number.parseFloat((tokens / 1_000_000).toFixed(1))}m`;
@@ -122,6 +174,129 @@ export function addImageAttachments(
   return { accepted, ...(error ? { error } : {}) };
 }
 
+function QueuePanel({
+  runtimeId,
+  items,
+  onItemsChange,
+}: {
+  runtimeId: string;
+  items: readonly QueuedMessage[];
+  onItemsChange: (items: QueuedMessage[]) => void;
+}) {
+  const mutation = useMutation(commandMutationOptions(dashboardHttpClient));
+  const [editingId, setEditingId] = useState<string>();
+  const [editingText, setEditingText] = useState('');
+  const [error, setError] = useState<string>();
+  const beginEdit = (item: QueuedMessage) => {
+    setEditingId(item.id);
+    setEditingText(item.text);
+    setError(undefined);
+  };
+  const save = async (item: QueuedMessage) => {
+    const text = editingText.trim();
+    if (!text || mutation.isPending) return;
+    setError(undefined);
+    try {
+      await mutation.mutateAsync({
+        runtimeId,
+        command: queueCommand('queue.update', item.id, item.mode, text),
+      });
+      onItemsChange(
+        items.map((candidate) =>
+          candidate.id === item.id ? { ...candidate, text } : candidate,
+        ),
+      );
+      setEditingId(undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+  const remove = async (item: QueuedMessage) => {
+    if (mutation.isPending) return;
+    setError(undefined);
+    try {
+      await mutation.mutateAsync({
+        runtimeId,
+        command: queueRemoveCommand(item.id),
+      });
+      onItemsChange(items.filter((candidate) => candidate.id !== item.id));
+      if (editingId === item.id) setEditingId(undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+  if (!items.length) return null;
+  return (
+    <section className="queue-panel" aria-label="Queued messages">
+      <div className="queue-heading">
+        <span className="eyebrow">Queue</span>
+        <span>{items.length} waiting</span>
+      </div>
+      <div className="queue-list">
+        {items.map((item) => {
+          const editing = editingId === item.id;
+          return (
+            <div className="queue-item" key={item.id}>
+              <span className={`queue-mode queue-${item.mode}`}>
+                {item.mode === 'steer' ? 'steer' : 'follow-up'}
+              </span>
+              {editing ? (
+                <input
+                  aria-label={`Edit queued ${item.mode} message`}
+                  value={editingText}
+                  onChange={(event) => setEditingText(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      void save(item);
+                    }
+                    if (event.key === 'Escape') setEditingId(undefined);
+                  }}
+                  disabled={mutation.isPending}
+                />
+              ) : (
+                <span className="queue-text">{item.text}</span>
+              )}
+              <div className="queue-actions">
+                {editing ? (
+                  <AriaButton
+                    type="button"
+                    isDisabled={mutation.isPending || !editingText.trim()}
+                    onPress={() => void save(item)}
+                  >
+                    Save
+                  </AriaButton>
+                ) : (
+                  <AriaButton
+                    type="button"
+                    isDisabled={mutation.isPending}
+                    onPress={() => beginEdit(item)}
+                  >
+                    Edit
+                  </AriaButton>
+                )}
+                <AriaButton
+                  type="button"
+                  className="queue-remove"
+                  isDisabled={mutation.isPending}
+                  onPress={() => void remove(item)}
+                >
+                  Remove
+                </AriaButton>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {error && (
+        <p className="error queue-error" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function ThinkingControl({ runtime }: { runtime: RuntimeSnapshot }) {
   const command = useMutation(commandMutationOptions(dashboardHttpClient));
   const [thinking, setThinking] = useState(runtime.model?.thinking ?? 'off');
@@ -193,6 +368,15 @@ export function Composer({
   const commandMutation = useMutation(
     commandMutationOptions(dashboardHttpClient),
   );
+  const serverQueue = queuedMessagesForRuntime(runtime);
+  const serverQueueKey = JSON.stringify(serverQueue);
+  const serverQueueKeyRef = useRef(serverQueueKey);
+  const [queue, setQueue] = useState<QueuedMessage[]>(() => [...serverQueue]);
+  useEffect(() => {
+    if (serverQueueKeyRef.current === serverQueueKey) return;
+    serverQueueKeyRef.current = serverQueueKey;
+    setQueue([...serverQueue]);
+  }, [serverQueue, serverQueueKey]);
   const disabled =
     !runtime ||
     runtime.online === false ||
@@ -284,8 +468,29 @@ export function Composer({
       type: runtime.liveState === 'idle' ? 'prompt' : mode,
       text: trimmedText,
     };
+    const queueTextOnly =
+      runtime.liveState === 'working' && attachments.length === 0;
     try {
-      if (attachments.length)
+      if (queueTextOnly) {
+        const queueId = newQueueId();
+        await commandMutation.mutateAsync({
+          runtimeId: runtime.runtimeId,
+          command: queueCommand(
+            'queue.add',
+            queueId,
+            mode === 'prompt' ? 'followUp' : mode,
+            trimmedText,
+          ),
+        });
+        setQueue((current) => [
+          ...current,
+          {
+            id: queueId,
+            mode: mode === 'prompt' ? 'followUp' : mode,
+            text: trimmedText,
+          },
+        ]);
+      } else if (attachments.length)
         await dashboardHttpClient.sendCommandWithImages(
           runtime.runtimeId,
           command,
@@ -341,6 +546,13 @@ export function Composer({
             selectImages(Array.from(event.target.files ?? []));
             event.target.value = '';
           }}
+        />
+      )}
+      {runtime.liveState === 'working' && (
+        <QueuePanel
+          runtimeId={runtime.runtimeId}
+          items={queue}
+          onItemsChange={setQueue}
         />
       )}
       {attachments.length > 0 && (
@@ -462,9 +674,18 @@ export function Composer({
             isDisabled={
               disabled || busy || (!text.trim() && !attachments.length)
             }
+            aria-label={
+              runtime.liveState === 'working' && !attachments.length
+                ? 'Queue message'
+                : 'Send'
+            }
           >
             <span aria-hidden="true">↑</span>
-            <span className="sr-only">Send</span>
+            <span className="sr-only">
+              {runtime.liveState === 'working' && !attachments.length
+                ? 'Queue'
+                : 'Send'}
+            </span>
           </AriaButton>
         </div>
       </div>

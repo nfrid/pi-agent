@@ -4,6 +4,7 @@ import {
   describeTools,
   headersOf,
   isNarration,
+  toolActionSummary,
 } from '@pi-dashboard/activity-model';
 export interface TranscriptModelItem {
   key: string;
@@ -367,11 +368,15 @@ export function toolOutcome(
   return 'pending';
 }
 export function toolSummary(tool: Record<string, unknown>): string {
-  const args = tool.arguments ?? tool.args;
-  if (!args || typeof args !== 'object') return 'activity';
-  const values = Object.values(args as Record<string, unknown>).filter(
-    (value) => typeof value === 'string',
-  );
-  return values[0] ? String(values[0]).slice(0, 100) : 'activity';
+  const name =
+    typeof tool.name === 'string'
+      ? tool.name
+      : typeof tool.toolName === 'string'
+        ? tool.toolName
+        : 'tool';
+  return toolActionSummary({
+    name,
+    args: tool.arguments ?? tool.args,
+  });
 }
 export { describeTools, headersOf, isNarration };

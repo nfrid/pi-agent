@@ -12,6 +12,9 @@ import {
   contextIndicatorData,
   formatContextTokens,
   isNearPageBottom,
+  queueCommand,
+  queuedMessagesForRuntime,
+  queueRemoveCommand,
   runtimeSupportsImages,
   sessionCursorRangeCovered,
   sessionDisplayTitle,
@@ -26,6 +29,34 @@ import {
   selectedInteractionPreview,
 } from './features/session';
 import { actionNeedsInput, paletteItems } from './routes/dashboard';
+
+describe('queued message commands', () => {
+  it('normalizes queue fixtures and creates explicit bridge commands', () => {
+    const runtime = {
+      queuedMessages: [
+        { id: 'q1', mode: 'steer', text: 'inspect this' },
+        { id: 'q2', mode: 'followUp', text: 'then test it' },
+        { id: '', mode: 'steer', text: 'ignore' },
+      ],
+    } as unknown as RuntimeSnapshot;
+    expect(queuedMessagesForRuntime(runtime)).toEqual([
+      { id: 'q1', mode: 'steer', text: 'inspect this' },
+      { id: 'q2', mode: 'followUp', text: 'then test it' },
+    ]);
+    expect(
+      queueCommand('queue.update', 'q1', 'steer', ' revised '),
+    ).toMatchObject({
+      type: 'queue.update',
+      queueId: 'q1',
+      mode: 'steer',
+      text: 'revised',
+    });
+    expect(queueRemoveCommand('q2')).toMatchObject({
+      type: 'queue.remove',
+      queueId: 'q2',
+    });
+  });
+});
 
 describe('image attachments', () => {
   const image = (name: string, type: string, size: number) =>

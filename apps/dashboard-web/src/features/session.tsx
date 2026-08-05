@@ -39,6 +39,7 @@ import {
   renderDashboardContribution,
   resolveDashboardRenderer,
 } from '../renderer-registry';
+import { ExtensionSurfaceStack } from './extension-surfaces';
 
 type ComposerProps = {
   runtime: RuntimeSnapshot | undefined;
@@ -203,10 +204,12 @@ export function SessionView({
           runtime={runtime}
         />
       ))}
+      <ExtensionSurfaceStack runtime={runtime} />
       <Transcript
         entries={selectLegacyTranscriptEntries(projection)}
         runtime={runtime}
       />
+      <ExtensionSurfaceStack runtime={runtime} placement="composer" />
       <Composer runtime={runtime} sessionId={id} />
     </section>
   );

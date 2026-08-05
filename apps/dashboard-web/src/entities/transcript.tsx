@@ -1,4 +1,7 @@
-import { projectActivityGroups } from '@pi-dashboard/activity-model';
+import {
+  projectActivityGroups,
+  toolActionSummary,
+} from '@pi-dashboard/activity-model';
 import { dashboardHttpClient } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
@@ -232,6 +235,9 @@ export function activityGroupMetadata(
 
 function CollapsedActivitySummary({ group }: { group: TranscriptGroup }) {
   const summary = activityGroupSummary(group);
+  const recentActions = group.tools
+    .slice(-summary.recentTools.length)
+    .map((tool) => toolActionSummary(tool));
   const stepKeyCounts = new Map<string, number>();
   return (
     <div className="activity-summary">
@@ -241,14 +247,14 @@ function CollapsedActivitySummary({ group }: { group: TranscriptGroup }) {
           {summary.earlierToolCount === 1 ? '' : 's'}
         </span>
       )}
-      {summary.recentTools.length > 0 && (
+      {recentActions.length > 0 && (
         <ol className="activity-steps">
-          {summary.recentTools.map((name) => {
-            const occurrence = (stepKeyCounts.get(name) ?? 0) + 1;
-            stepKeyCounts.set(name, occurrence);
+          {recentActions.map((action) => {
+            const occurrence = (stepKeyCounts.get(action) ?? 0) + 1;
+            stepKeyCounts.set(action, occurrence);
             return (
-              <li key={`${name}-${occurrence}`}>
-                <span aria-hidden="true">⏺</span> {name}
+              <li key={`${action}-${occurrence}`} title={action}>
+                <span aria-hidden="true">⏺</span> {action}
               </li>
             );
           })}

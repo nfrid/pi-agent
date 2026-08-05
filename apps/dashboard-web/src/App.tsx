@@ -50,8 +50,16 @@ export {
   addImageAttachments,
   contextIndicatorData,
   formatContextTokens,
+  queueCommand,
+  queuedMessagesForRuntime,
+  queueRemoveCommand,
   runtimeSupportsImages,
 } from './features/composer';
+export {
+  ExtensionSurfaceStack,
+  renderLiveExtensionSurface,
+  runtimeExtensionSurfaces,
+} from './features/extension-surfaces';
 export { toTranscriptEntries } from './transcript';
 
 const DashboardContext = createContext<
