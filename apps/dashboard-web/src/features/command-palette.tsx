@@ -138,7 +138,13 @@ export function paletteItems(snapshot: BrowserSnapshot): PaletteItem[] {
   return [...primary, ...actions, ...sessions, ...workspaces];
 }
 
-export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
+export function CommandPalette({
+  snapshot,
+  disabled = false,
+}: {
+  snapshot: BrowserSnapshot;
+  disabled?: boolean;
+}) {
   const go = useDashboardNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -147,6 +153,7 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
   const items = paletteItems(snapshot);
   const runtimeActionCount = items.filter(
@@ -170,16 +177,32 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setOpen((value) => !value);
+        if (disabled) return;
+        setOpen((value) => {
+          if (!value)
+            previousFocusRef.current = document.activeElement as HTMLElement;
+          return !value;
+        });
       }
       if (event.key === 'Escape') setOpen(false);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [disabled]);
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
   useEffect(() => {
     if (!open) {
-      if (wasOpenRef.current) triggerRef.current?.focus();
+      if (wasOpenRef.current) {
+        const previous = previousFocusRef.current;
+        if (previous?.isConnected && previous.getClientRects().length > 0)
+          previous.focus();
+        else
+          document
+            .querySelector<HTMLElement>('.composer textarea, main button')
+            ?.focus();
+      }
       wasOpenRef.current = false;
       return;
     }
@@ -232,7 +255,14 @@ export function CommandPalette({ snapshot }: { snapshot: BrowserSnapshot }) {
         className="header-action palette-trigger"
         aria-label="Open command palette"
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+        disabled={disabled}
+        onClick={() =>
+          setOpen((value) => {
+            if (!value)
+              previousFocusRef.current = document.activeElement as HTMLElement;
+            return !value;
+          })
+        }
       >
         Ctrl/⌘ K
       </button>

@@ -2,7 +2,6 @@ import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useRouterState } from '@tanstack/react-router';
 import { useDashboardNavigate } from '../routes/navigation';
 import { CommandPalette } from './command-palette';
-import { PushButton } from './notifications';
 
 export function runtimeStatusCounts(snapshot: BrowserSnapshot) {
   return {
@@ -27,6 +26,17 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
     select: (state) => state.location.pathname,
   });
   const showGlobalNew = pathname !== '/' && !pathname.startsWith('/sessions/');
+  const activeSessionId = pathname.startsWith('/sessions/')
+    ? decodeURIComponent(pathname.split('/')[2] ?? '')
+    : undefined;
+  const paletteDisabled = Boolean(
+    activeSessionId &&
+      snapshot.runtimes.some(
+        (runtime) =>
+          runtime.session?.id === activeSessionId &&
+          runtime.pendingInteractions.length > 0,
+      ),
+  );
   return (
     <header className="navigation-shell">
       <div className="global-tools">
@@ -53,8 +63,7 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
             </b>
           )}
         </button>
-        <PushButton />
-        <CommandPalette snapshot={snapshot} />
+        <CommandPalette snapshot={snapshot} disabled={paletteDisabled} />
       </div>
     </header>
   );

@@ -30,6 +30,7 @@ import {
   activityGroupMetadata,
   activityGroupPresentation,
   buildTranscriptLandmarks,
+  sampleTranscriptLandmarks,
 } from './entities/transcript';
 import {
   agentThreadRows,
@@ -580,8 +581,16 @@ describe('workspace-first agent navigation', () => {
       boundedAgentThreadRows([...rows.slice(0, 2), ...history]),
     ).toHaveLength(26);
     expect(
-      boundedAgentThreadRows([...rows.slice(0, 2), ...history], true),
-    ).toHaveLength(102);
+      boundedAgentThreadRows([...rows.slice(0, 2), ...history], 48),
+    ).toHaveLength(50);
+    const active = Array.from({ length: 60 }, (_, index) => ({
+      ...rows[0],
+      id: `active-${index}`,
+      status: 'working' as const,
+    }));
+    expect(boundedAgentThreadRows([...active, ...history], 48)).toHaveLength(
+      88,
+    );
   });
 });
 
@@ -600,8 +609,17 @@ describe('transcript outline and metadata', () => {
     const landmarks = buildTranscriptLandmarks(items, []);
     expect(landmarks.map((landmark) => landmark.label)).toEqual([
       'First request',
-      'Inspecting files',
     ]);
+    const many = Array.from({ length: 500 }, (_, index) => ({
+      key: `turn-${index}`,
+      label: `Turn ${index}`,
+      kind: 'user' as const,
+      itemIndex: index,
+    }));
+    const sampled = sampleTranscriptLandmarks(many, 48);
+    expect(sampled).toHaveLength(48);
+    expect(sampled[0]?.key).toBe('turn-0');
+    expect(sampled.at(-1)?.key).toBe('turn-499');
     expect(activityGroupMetadata({ toolCount: 1, failureCount: 0 })).toBe(
       '1 tool call',
     );

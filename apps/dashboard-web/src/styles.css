@@ -1269,7 +1269,7 @@ h2 {
 .palette-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 70;
   display: grid;
   place-items: start center;
   padding: 12vh 12px 24px;
@@ -2375,7 +2375,7 @@ h2 {
 }
 .session-inspector-layer {
   position: fixed;
-  z-index: 16;
+  z-index: 45;
   inset: 0;
   pointer-events: none;
 }
@@ -2710,9 +2710,14 @@ h2 {
   background: color-mix(in srgb, var(--bg-alt) 72%, var(--bg));
   color: var(--fg);
 }
+.agent-nav-drawer {
+  min-width: 0;
+}
 .agent-thread-nav-session {
-  position: sticky;
+  position: fixed;
   top: 14px;
+  left: max(clamp(16px, 4vw, 56px), calc(50vw - 564px));
+  width: 248px;
   max-height: calc(100vh - 28px);
 }
 .agent-nav-header {
@@ -2799,10 +2804,25 @@ h2 {
   font-size: 10px;
   font-weight: 700;
 }
-.agent-workspace-heading span {
+.agent-workspace-heading button {
+  min-width: 0;
   overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.agent-workspace-heading button:hover:not(:disabled) {
+  color: var(--fg);
+}
+.agent-workspace-heading button:disabled {
+  cursor: default;
 }
 .agent-workspace-heading small {
   color: var(--dim);
@@ -2900,29 +2920,29 @@ h2 {
   color: var(--fg);
 }
 .agent-nav-footer {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
-  gap: 7px;
+  gap: 4px;
   margin-top: auto;
   border-top: 1px solid var(--line-soft);
-  padding: 8px 10px;
+  padding: 8px;
 }
 .agent-nav-utility {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
   min-width: 0;
-  flex: 1;
   border: 0;
   padding: 5px 2px;
-  text-align: left;
-  font-size: 10px;
-}
-.agent-nav-footer .push-button {
-  margin: 0;
-  border: 0;
-  padding: 5px 2px;
+  text-align: center;
   font-size: 9px;
+}
+.agent-nav-utility b {
+  position: absolute;
+  top: 0;
+  right: 3px;
 }
 .agent-nav-drawer > .agent-thread-nav {
   height: 100%;
@@ -3117,7 +3137,7 @@ h2 {
 .surface-dialog-layer,
 .outline-sheet-layer {
   position: fixed;
-  z-index: 30;
+  z-index: 45;
   inset: 0;
   pointer-events: auto;
   background: #18192399;
@@ -3356,9 +3376,11 @@ h2 {
   right: 13px;
   z-index: 5;
   display: none;
+  max-height: calc(100vh - 96px);
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
+  overflow: hidden;
   transform: translateY(-50%);
 }
 .transcript-minimap-label {
@@ -3546,7 +3568,7 @@ h2 {
   }
   .agent-nav-drawer {
     position: fixed;
-    z-index: 25;
+    z-index: 35;
     inset: 0 auto 0 0;
     width: min(310px, calc(100vw - 34px));
     transform: translateX(-102%);
@@ -3558,6 +3580,8 @@ h2 {
     pointer-events: auto;
   }
   .agent-nav-drawer > .agent-thread-nav {
+    position: static;
+    width: 100%;
     height: 100%;
     max-height: none;
     border-width: 0 1px 0 0;
@@ -3566,7 +3590,7 @@ h2 {
   }
   .agent-nav-backdrop {
     position: fixed;
-    z-index: 24;
+    z-index: 34;
     inset: 0;
     display: block;
     width: 100%;
@@ -3683,8 +3707,17 @@ h2 {
     display: none;
   }
 }
-body:has(.session-layout) .global-tools {
-  top: 54px;
+body:has(.session-layout) .global-new-agent,
+body:has(.session-layout) .global-notifications,
+body:has(.session-layout) .global-tools > .push-button,
+body:has(.session-layout) .global-tools > .palette-trigger {
+  display: none;
+}
+.session-page.has-pending-interaction .queue-panel {
+  display: none;
+}
+.session-page.has-pending-interaction .interaction-dock {
+  z-index: 80;
 }
 @media (prefers-reduced-motion: reduce) {
   .agent-thread-row,

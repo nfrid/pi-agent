@@ -101,19 +101,19 @@ export function buildTranscriptLandmarks(
   groups: readonly TranscriptGroup[] = [],
 ): TranscriptLandmark[] {
   const result: TranscriptLandmark[] = [];
-  const groupStarts = new Set(groups.map((group) => group.start));
+  const groupByStart = new Map(groups.map((group) => [group.start, group]));
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
     if (!item) continue;
-    if (groupStarts.has(index)) {
-      const group = groups.find((candidate) => candidate.start === index);
-      if (group)
-        result.push({
-          key: `group-${item.key}`,
-          label: group.title,
-          kind: 'activity',
-          itemIndex: index,
-        });
+    const group = groupByStart.get(index);
+    if (group) {
+      result.push({
+        key: `group-${item.key}`,
+        label: group.title,
+        kind: 'activity',
+        itemIndex: index,
+      });
+      continue;
     }
     if (item.role === 'user')
       result.push({
@@ -124,9 +124,8 @@ export function buildTranscriptLandmarks(
       });
     else if (
       item.role === 'assistant' &&
-      (item.text ||
-        item.preparing ||
-        (item.entry.kind === 'assistant' && item.entry.title))
+      item.entry.kind === 'assistant' &&
+      item.entry.titleKind === 'preamble'
     )
       result.push({
         key: item.key,
@@ -136,6 +135,27 @@ export function buildTranscriptLandmarks(
       });
   }
   return result;
+}
+
+export function sampleTranscriptLandmarks(
+  landmarks: readonly TranscriptLandmark[],
+  maximum: number,
+): TranscriptLandmark[] {
+  if (maximum <= 0 || landmarks.length === 0) return [];
+  if (landmarks.length <= maximum) return [...landmarks];
+  if (maximum === 1) {
+    const last = landmarks.at(-1);
+    return last ? [last] : [];
+  }
+  const lastIndex = landmarks.length - 1;
+  const sampled: TranscriptLandmark[] = [];
+  for (let slot = 0; slot < maximum; slot += 1) {
+    const index = Math.round((slot * lastIndex) / (maximum - 1));
+    const landmark = landmarks[index];
+    if (landmark && sampled.at(-1)?.key !== landmark.key)
+      sampled.push(landmark);
+  }
+  return sampled;
 }
 
 export function TranscriptOutline({
@@ -149,12 +169,20 @@ export function TranscriptOutline({
   onOpenChange?: (open: boolean) => void;
   onJump: (landmark: TranscriptLandmark) => void;
 }) {
-  const [activeKey, setActiveKey] = useState(landmarks[0]?.key);
+  const outlineLandmarks = useMemo(
+    () => sampleTranscriptLandmarks(landmarks, 160),
+    [landmarks],
+  );
+  const minimapLandmarks = useMemo(
+    () => sampleTranscriptLandmarks(landmarks, 48),
+    [landmarks],
+  );
+  const [activeKey, setActiveKey] = useState(minimapLandmarks[0]?.key);
   useEffect(() => {
     setActiveKey((current) =>
-      landmarks.some((landmark) => landmark.key === current)
+      minimapLandmarks.some((landmark) => landmark.key === current)
         ? current
-        : landmarks[0]?.key,
+        : minimapLandmarks[0]?.key,
     );
     let frame: number | undefined;
     const updateActive = () => {
@@ -166,13 +194,18 @@ export function TranscriptOutline({
             document.querySelectorAll<HTMLElement>('[data-transcript-key]'),
           ).map((element) => [element.dataset.transcriptKey, element]),
         );
-        let active: string | undefined;
-        for (const landmark of landmarks) {
+        let active: TranscriptLandmark | undefined;
+        for (const landmark of outlineLandmarks) {
           const element = elements.get(landmark.key);
           if (element && element.getBoundingClientRect().top <= 120)
-            active = landmark.key;
+            active = landmark;
         }
-        if (active) setActiveKey(active);
+        if (active) {
+          const marker = minimapLandmarks
+            .filter((landmark) => landmark.itemIndex <= active.itemIndex)
+            .at(-1);
+          setActiveKey(marker?.key ?? minimapLandmarks[0]?.key);
+        }
       });
     };
     window.addEventListener('scroll', updateActive, { passive: true });
@@ -181,11 +214,11 @@ export function TranscriptOutline({
       window.removeEventListener('scroll', updateActive);
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
-  }, [landmarks]);
+  }, [minimapLandmarks, outlineLandmarks]);
   const list = (
     <div className="transcript-outline-list">
-      {landmarks.length ? (
-        landmarks.map((landmark) => (
+      {outlineLandmarks.length ? (
+        outlineLandmarks.map((landmark) => (
           <button
             type="button"
             className={`transcript-outline-item outline-${landmark.kind}`}
@@ -209,7 +242,7 @@ export function TranscriptOutline({
     <>
       <aside className="transcript-minimap" aria-label="Transcript outline">
         <span className="transcript-minimap-label">Outline</span>
-        {landmarks.map((landmark) => (
+        {minimapLandmarks.map((landmark) => (
           <button
             type="button"
             className={`transcript-minimap-marker outline-${landmark.kind}${activeKey === landmark.key ? ' active' : ''}`}
@@ -344,6 +377,9 @@ export function Transcript({
               >
                 <span className="activity-icon">{presentation.icon}</span>
                 <strong>{title}</strong>
+                <span className="sr-only">
+                  {group.toolCount} tool{group.toolCount === 1 ? '' : 's'}
+                </span>
                 <small>{presentation.label}</small>
               </AriaButton>
               {!expanded && <CollapsedActivitySummary group={group} />}
@@ -746,6 +782,9 @@ function VirtualizedTranscript({
         >
           <span className="activity-icon">{presentation.icon}</span>
           <strong>{title}</strong>
+          <span className="sr-only">
+            {group.toolCount} tool{group.toolCount === 1 ? '' : 's'}
+          </span>
           <small>{presentation.label}</small>
         </AriaButton>
         {!expanded && <CollapsedActivitySummary group={group} />}

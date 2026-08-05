@@ -701,9 +701,12 @@ test('dense mobile session keeps conversation and activity readable', async ({
     window.scrollTo(0, document.documentElement.scrollHeight),
   );
   const activity = page.getByRole('button', {
-    name: /Checking the mobile transcript/,
+    name: /Checking the mobile transcript.*1 tool/,
   });
   await expect(activity).toBeVisible();
+  await expect(
+    activity.locator('xpath=..').getByText('1 tool call', { exact: true }),
+  ).toHaveCount(1);
   await expect(page.getByLabel('Message Pi')).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Attach images' }),
@@ -861,7 +864,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
     },
   ]);
   await expect(
-    page.getByRole('button', { name: /Preparing live tool/ }),
+    page.getByRole('button', { name: /Preparing live tool.*1 tool/ }),
   ).toBeVisible();
   const emitMessage = async (type: string, timestamp: number, text: string) =>
     page.evaluate(
@@ -1469,6 +1472,10 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(
     page.getByRole('button', { name: 'Details', exact: true }),
   ).toBeDisabled();
+  await page.keyboard.press('Control+K');
+  await expect(
+    page.getByRole('dialog', { name: 'Command palette' }),
+  ).toHaveCount(0);
   await page.getByLabel('Thinking level').selectOption('high');
   expect(
     mocks.commands.filter((command) => command.type === 'setModel'),
@@ -1536,7 +1543,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     window.scrollTo(0, document.documentElement.scrollHeight),
   );
   const activity = page.getByRole('button', {
-    name: /Inspecting history/,
+    name: /Inspecting history.*1 tool/,
   });
   await expect(activity).toBeVisible();
   await activity.click();

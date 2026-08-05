@@ -214,18 +214,10 @@ export function SessionView({
         onOpenChange={setAgentNavOpen}
       />
       <section
-        className={`session-page ${inspectorOpen ? 'inspector-open' : ''}`}
+        className={`session-page ${inspectorOpen ? 'inspector-open' : ''} ${hasPendingInteraction ? 'has-pending-interaction' : ''}`}
       >
         <header className="session-context session-heading">
           <div className="session-context-main">
-            <button
-              type="button"
-              className="session-icon-button agent-nav-trigger"
-              aria-label="Open agent list"
-              onClick={() => setAgentNavOpen(true)}
-            >
-              ‹
-            </button>
             <div className="session-identity">
               <div className="session-breadcrumb">
                 <span>{workspaceName}</span>

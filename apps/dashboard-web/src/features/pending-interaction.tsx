@@ -150,13 +150,6 @@ function InteractionCard({
   }, [selectableChoices.length]);
   useEffect(() => {
     if (!canRenderInteraction || !canAnswer) return;
-    const active = document.activeElement;
-    if (
-      active &&
-      active !== document.body &&
-      active !== document.documentElement
-    )
-      return;
     if (selectableChoices.length > 0) interactionRef.current?.focus();
     else if (interaction.allowCustom) answerRef.current?.focus();
   }, [
