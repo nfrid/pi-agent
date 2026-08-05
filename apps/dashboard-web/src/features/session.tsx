@@ -124,7 +124,10 @@ export function SessionView({
     if (!enteringSession && !stickToBottomRef.current) return;
     scrolledSessionRef.current = id;
     const frame = window.requestAnimationFrame(() => {
-      if (!stickToBottomRef.current) return;
+      // Virtualization can increase the document height before this frame and
+      // make the scroll listener clear stickiness. Entering a session must
+      // still establish the initial tail position.
+      if (!enteringSession && !stickToBottomRef.current) return;
       window.scrollTo(0, document.documentElement.scrollHeight);
       stickToBottomRef.current = true;
     });

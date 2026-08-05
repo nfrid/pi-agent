@@ -569,6 +569,10 @@ export class DashboardLiveStore {
         ? response.runtimeSeq
         : firstResponseEpochSeq - 1;
     let projection = hydrateTranscript(response.entries, response.metadata.id, {
+      // Persisted Pi messages are not guaranteed to carry explicit IDs. The
+      // session API boundary assigns deterministic entry-index identities so
+      // the canonical projection can render and reconcile them semantically.
+      fallbackEntryIds: true,
       cursor: replayCursor,
       ...(response.runtimeEpoch === undefined
         ? {}

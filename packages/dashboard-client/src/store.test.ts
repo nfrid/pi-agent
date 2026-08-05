@@ -240,6 +240,26 @@ describe('DashboardLiveStore', () => {
     );
   });
 
+  it('assigns stable fallback identities to persisted messages without IDs', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    const projection = store.hydrateSession({
+      ...sessionResponse(1),
+      entries: [
+        {
+          type: 'message',
+          message: { role: 'user', content: 'Persisted message' },
+        },
+      ],
+    });
+    expect(projection?.items['entry-0']).toMatchObject({
+      kind: 'message',
+      messageId: 'entry-0',
+      role: 'user',
+      content: 'Persisted message',
+    });
+  });
+
   it('reconciles a terminal tool event covered by the HTTP cursor', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
