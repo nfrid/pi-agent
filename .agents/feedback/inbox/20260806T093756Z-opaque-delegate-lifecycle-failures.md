@@ -1,6 +1,6 @@
 # HF-20260806: Delegate lifecycle failures lack actionable diagnostics
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-06
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Parallel research and local forensic analysis for an OrbStack/Karing networking regression.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Two `luna-xhigh` read-only research attempts were exercised. One returned `Status: error` with only a truncated runner exception; a later focused attempt returned `Status: aborted` with no reason or outcome.
 - **Observed cost / rework:** The parent could not distinguish infrastructure failure, cancellation, task error, or retryability, and repeated the research manually.
 - **Recurrence / confidence:** Observed twice in one session through different delegate calls; high confidence in the reporting gap.
-- **Ticket:** —
+- **Ticket:** [HFM-20260806: Report actionable delegate lifecycle failures](../tickets/20260806-report-actionable-delegate-lifecycle-failures.md)
 
 ## Behavior
 

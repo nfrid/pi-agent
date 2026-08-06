@@ -1,6 +1,6 @@
 # HF-20260805: Concurrent Pi sessions in one checkout are invisible to each other
 
-- **Status:** new
+- **Status:** parked
 - **Observed date:** 2026-08-05
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Implement, test, commit, and deploy dashboard changes while another Pi session independently changed overlapping files in the same checkout.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Parent session on `gpt-5.6-sol`; completed after manually separating owned hunks and building the intended commit in a detached worktree.
 - **Observed cost / rework:** Repeated status/diff inspection, partial-hunk staging, isolated-port test reruns, and an isolated deployment build were required to avoid committing or deploying another session's work.
 - **Recurrence / confidence:** Observed directly once with several overlapping files; likely recurrent whenever multiple writable Pi sessions target the same repository. High confidence.
-- **Ticket:** —
+- **Ticket:** [HFM-20260806: Warn concurrent shared-checkout writers](../tickets/20260806-warn-concurrent-shared-checkout-writers.md)
 
 ## Behavior
 

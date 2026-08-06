@@ -2,6 +2,8 @@
 
 This repository may be used by more than one agent or terminal at the same time. Treat the checkout as shared state: preserve work you did not create, and make every commit describe only the task you own.
 
+When another writable agent or terminal is known to be working in this checkout, do not begin new writes in the shared checkout. Use a separate Git worktree. If concurrent changes become apparent after work starts, preserve them and move remaining implementation and isolated validation to a worktree when practical.
+
 ## Establish a baseline
 
 Before editing, record the current repository state:

@@ -1,6 +1,6 @@
 # HF-20260806: Command output can expose secret-bearing process environments
 
-- **Status:** new
+- **Status:** parked
 - **Observed date:** 2026-08-06
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Diagnose a macOS networking regression using bounded process and unified-log inspection.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** A targeted `log show` diagnostic succeeded, but its returned output included an application's full inherited environment with credential values.
 - **Observed cost / rework:** Secret values entered the model-visible tool transcript and could have been repeated in later summaries or responses.
 - **Recurrence / confidence:** Likely recurring whenever macOS unified logs, process dumps, crash reports, or debug endpoints include environments; high confidence.
-- **Ticket:** —
+- **Ticket:** [HFM-20260806: Redact secret-bearing tool output](../tickets/20260806-redact-secret-bearing-tool-output.md)
 
 ## Behavior
 
