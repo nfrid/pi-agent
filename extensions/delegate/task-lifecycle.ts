@@ -208,12 +208,15 @@ export async function prepareDelegateTask(
       if (!refreshedSession)
         throw new Error('The delegate session disappeared during refresh.');
       session = refreshedSession;
-      // The replacement is now authoritative. If superseded cleanup later
-      // fails, retain the old snapshot's touch for this successful refresh.
-      touchWorktreeParentSession(state.refreshSource, parentSessionId);
+      // From this point the continuation token names the replacement. Mark it
+      // authoritative before any later record write can fail so catch cleanup
+      // never deletes the worktree that durable session metadata now names.
       replacementSessionMapped = true;
       state.worktree = replacement;
       state.cwd = refreshedCwd;
+      // If superseded cleanup later fails, retain the old snapshot's touch for
+      // this successful refresh.
+      touchWorktreeParentSession(state.refreshSource, parentSessionId);
       state.snapshotNotice = `Workspace snapshot changed from ${state.refreshSource.headCommit?.slice(0, 12) ?? state.refreshSource.baseHead.slice(0, 12)} to ${replacement.record.carryCommit?.slice(0, 12) ?? replacement.record.baseHead.slice(0, 12)} (${plan.refresh}). Re-read relevant files: prior source observations may be stale.`;
     } else if (plan.resumed && state.worktree?.record.snapshot) {
       state.worktree = await rehydrateWorktreeSession(

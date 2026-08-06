@@ -228,6 +228,50 @@ describe('delegate task lifecycle', () => {
     }
   });
 
+  test('keeps a mapped refresh replacement when session-touch persistence fails', async () => {
+    const initial = await prepareDelegateTask(plan({ isolation: 'worktree' }));
+    if (!initial.worktree) throw new Error('missing initial worktree');
+    const completed = createRun('review', undefined, { allowWrites: false });
+    completed.state = 'success';
+    completed.exitCode = 0;
+    await finalizeWorktreeRun(completed, initial.worktree, 'review');
+    const oldId = initial.worktree.record.id;
+    const touch = vi
+      .spyOn(worktree, 'touchWorktreeParentSession')
+      .mockImplementationOnce(() => {
+        throw new Error('injected touch failure');
+      });
+
+    try {
+      await expect(
+        prepareDelegateTask(
+          plan({
+            context: 'continuation',
+            writeRequested: false,
+            isolation: 'worktree',
+            refresh: 'wip',
+            resumed: initial.session,
+          }),
+          undefined,
+          'refresh-session',
+        ),
+      ).rejects.toThrow(/injected touch failure/);
+      const replacementId = resolveDelegateSession(
+        initial.session.token,
+      )?.worktreeId;
+      expect(replacementId).toBeDefined();
+      expect(replacementId).not.toBe(oldId);
+      expect(loadWorktree(replacementId ?? '')).toBeDefined();
+      expect(loadWorktree(oldId)?.snapshot).toBe(true);
+    } finally {
+      touch.mockRestore();
+      const current = resolveDelegateSession(initial.session.token)?.worktreeId;
+      if (current) await removeWorktree(current, { deleteBranch: true });
+      await removeWorktree(oldId, { deleteBranch: true });
+      removeDelegateSession(initial.session);
+    }
+  });
+
   test('keeps the replacement authoritative when superseded cleanup fails', async () => {
     const initial = await prepareDelegateTask(plan({ isolation: 'worktree' }));
     if (!initial.worktree) throw new Error('missing initial worktree');
