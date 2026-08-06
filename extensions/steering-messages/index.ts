@@ -143,10 +143,10 @@ function tuiShimHost(
     userComponent:
       UserMessageComponent as unknown as SteeringShimHost['userComponent'],
     isSteering,
-    renderBorderCell: (text) =>
+    renderBorderCell: (text, steering) =>
       context.ui.theme.bg(
         'userMessageBg',
-        context.ui.theme.fg('warning', text),
+        context.ui.theme.fg(steering ? 'warning' : 'borderAccent', text),
       ),
   };
 }
