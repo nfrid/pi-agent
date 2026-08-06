@@ -2,7 +2,8 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { artifactProducer, registerArtifactView } from '../shared/artifacts';
+import { artifactProducer } from '../shared/artifacts';
+import { appendDelegateViewRegistry } from '../shared/artifacts/storage';
 import { buildParentHandoffResult } from './output';
 import { throwIfAllRunsFailed } from './param-errors';
 import {
@@ -120,7 +121,7 @@ async function publishStructuredArtifacts(
         creationSource: 'delegate.view',
       });
       assertCurrent?.();
-      registerArtifactView(pi, run.artifact, name, metadata);
+      appendDelegateViewRegistry(pi, run.artifact, name, path, metadata);
       assertCurrent?.();
       viewMetadata[name] = { handle: metadata.handle, size: metadata.size };
       changed = true;

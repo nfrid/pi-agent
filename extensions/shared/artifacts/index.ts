@@ -20,7 +20,6 @@ export {
   type PutArtifactOptions,
   putArtifact,
   recoverArtifactFromEntries,
-  registerArtifactView,
   resolveArtifact,
   resolveArtifactView,
   restoreArtifacts,

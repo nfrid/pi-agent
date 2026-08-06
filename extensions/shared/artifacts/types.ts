@@ -63,6 +63,8 @@ export interface ArtifactViewRegistryEntry {
   kind: 'view';
   source: ArtifactMetadata;
   view: string;
+  /** Canonical authorized schema path used to derive this view. */
+  path: string;
   metadata: ArtifactMetadata;
 }
 
