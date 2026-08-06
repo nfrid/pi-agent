@@ -1412,10 +1412,9 @@ function TranscriptEntry({
           <article
             className={`message-bubble message-${item.role}${item.deliveryMode === 'steer' ? ' message-steering' : ''}`}
           >
-            <span className="message-role">{item.role}</span>
-            {item.deliveryMode === 'steer' ? (
-              <span className="message-delivery-mode">steer</span>
-            ) : null}
+            <span className="message-role">
+              {item.deliveryMode === 'steer' ? 'steer' : item.role}
+            </span>
             {item.imageCount ? (
               <span className="message-attachment">
                 {item.imageCount} image{item.imageCount === 1 ? '' : 's'}{' '}

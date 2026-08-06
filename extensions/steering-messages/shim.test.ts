@@ -1,8 +1,8 @@
-import type { Component } from '@earendil-works/pi-tui';
+import { type Component, visibleWidth } from '@earendil-works/pi-tui';
 import { describe, expect, it, vi } from 'vitest';
 import {
   installSteeringMessageShim,
-  STEERING_LABEL,
+  STEERING_BORDER,
   type SteeringShimHost,
 } from './shim';
 
@@ -24,18 +24,22 @@ function host(
       onResolve?.(text, occurrence);
       return marked.has(occurrence);
     },
+    renderBorder: (text) => `\x1b[33m${text}\x1b[39m`,
   };
 }
 
 describe('steering message TUI shim', () => {
-  it('renders a width-safe separate label and leaves ordinary output untouched', () => {
+  it('renders a width-safe colored right border and leaves ordinary output untouched', () => {
     const ordinary = new FakeUser('same');
     const steering = new FakeUser('same');
     const stop = installSteeringMessageShim(host(new Set([1])));
     expect(stop).toBeDefined();
     expect(ordinary.render(80)).toEqual(['user:same']);
-    expect(steering.render(3)).toEqual(['ste', 'user:same']);
-    expect(steering.render(3)[0]?.length).toBeLessThanOrEqual(3);
+    const lines = steering.render(12);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(`\x1b[33m${STEERING_BORDER}\x1b[39m`);
+    expect(visibleWidth(lines[0] ?? '')).toBe(12);
+    expect(visibleWidth(steering.render(3)[0] ?? '')).toBe(3);
     stop?.();
     expect(steering.render(3)).toEqual(['user:same']);
   });
@@ -50,7 +54,9 @@ describe('steering message TUI shim', () => {
     expect(first.render(80)).toEqual(['user:same']);
     await new Promise<void>((done) => queueMicrotask(done));
     const second = new FakeUser('same');
-    expect(second.render(80)).toEqual([STEERING_LABEL, 'user:same']);
+    expect(second.render(80)[0]).toContain(
+      `\x1b[33m${STEERING_BORDER}\x1b[39m`,
+    );
     expect(first.render(80)).toEqual(['user:same']);
     expect(resolve).toHaveBeenCalledTimes(2);
     expect(resolutions).toEqual([
@@ -67,6 +73,7 @@ describe('steering message TUI shim', () => {
         userComponent:
           Unsupported as unknown as SteeringShimHost['userComponent'],
         isSteering: () => true,
+        renderBorder: (text) => text,
       }),
     ).toBeUndefined();
   });

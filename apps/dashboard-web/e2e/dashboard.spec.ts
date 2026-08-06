@@ -751,9 +751,20 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await page.goto('/sessions/s1');
   const steeringMessage = page.locator('.message-steering');
   await expect(steeringMessage).toContainText('Focus on mobile readability.');
-  await expect(steeringMessage.locator('.message-delivery-mode')).toHaveText(
-    'steer',
+  await expect(steeringMessage.locator('.message-role')).toHaveText('steer');
+  await expect(steeringMessage.locator('.message-delivery-mode')).toHaveCount(
+    0,
   );
+  const steeringColors = await steeringMessage.evaluate((element) => ({
+    background: getComputedStyle(element).backgroundColor,
+    border: getComputedStyle(element).borderLeftColor,
+  }));
+  const ordinaryUserBackground = await page
+    .locator('.message-user:not(.message-steering)')
+    .first()
+    .evaluate((element) => getComputedStyle(element).backgroundColor);
+  expect(steeringColors.background).toBe(ordinaryUserBackground);
+  expect(steeringColors.border).not.toBe(steeringColors.background);
   await expect(page.getByText('Check', { exact: true })).toBeVisible();
   const userLink = page.getByRole('link', { name: 'dashboard' });
   await expect(userLink).toHaveAttribute('href', 'https://example.com');

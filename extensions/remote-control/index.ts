@@ -116,12 +116,21 @@ function eventRecord(value: unknown): EventRecord {
     : {};
 }
 
-function withoutOpaqueData(event: BridgeEvent): BridgeEvent {
+export function withoutOpaqueData(event: BridgeEvent): BridgeEvent {
   if (event.type.startsWith('message.') && 'message' in event) {
     const message = event.message;
     if (message && typeof message === 'object' && !Array.isArray(message)) {
-      const { data: _data, ...canonical } = message as Record<string, unknown>;
-      return { ...event, message: canonical };
+      const { data, ...canonical } = message as Record<string, unknown>;
+      const deliveryMode = directString(eventRecord(data), 'deliveryMode');
+      return {
+        ...event,
+        message: {
+          ...canonical,
+          ...(deliveryMode === 'steer'
+            ? { data: { deliveryMode: 'steer' } }
+            : {}),
+        },
+      };
     }
   }
   if (event.type.startsWith('tool.') && 'tool' in event) {
@@ -1823,7 +1832,10 @@ export default defineExtension('remote-control', (pi) => {
       runtime.client.sendEvent({
         type: 'message.updated',
         sessionId,
-        message: runtime.eventNormalizer.normalizeMessage('updated', {
+        // Marker delivery may run after another message has become active, so
+        // derive the steering update's identity independently from its exact
+        // persisted timestamp instead of borrowing the active stream ID.
+        message: new LiveEventNormalizer().normalizeMessage('updated', {
           message: { ...message, data: { deliveryMode: 'steer' } },
         }),
       });

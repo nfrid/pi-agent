@@ -137,11 +137,13 @@ function takeSteeringInput(
 
 function tuiShimHost(
   isSteering: SteeringShimHost['isSteering'],
+  context: ExtensionContext,
 ): SteeringShimHost {
   return {
     userComponent:
       UserMessageComponent as unknown as SteeringShimHost['userComponent'],
     isSteering,
+    renderBorder: (text) => context.ui.theme.fg('warning', text),
   };
 }
 
@@ -149,6 +151,7 @@ export function registerSteeringMessageTracking(
   pi: ExtensionAPI,
   getTuiShimHost: (
     isSteering: SteeringShimHost['isSteering'],
+    context: ExtensionContext,
   ) => SteeringShimHost | undefined = tuiShimHost,
 ): void {
   let context: ExtensionContext | undefined;
@@ -169,6 +172,7 @@ export function registerSteeringMessageTracking(
         ? getTuiShimHost(
             (text, occurrence) =>
               marks.marked.get(text)?.has(occurrence) ?? false,
+            nextContext,
           )
         : undefined;
     if (host) uninstall = installSteeringMessageShim(host);

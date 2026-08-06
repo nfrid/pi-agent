@@ -32,6 +32,7 @@ import {
   LiveEventNormalizer,
   QueueDraftStore,
   shouldForwardLiveMessage,
+  withoutOpaqueData,
 } from './index';
 
 const snapshot: RuntimeSnapshot = {
@@ -218,6 +219,37 @@ describe('dashboard input dispatch', () => {
 });
 
 describe('remote event normalization', () => {
+  it('preserves only allowlisted steering metadata on the wire', () => {
+    expect(
+      withoutOpaqueData({
+        type: 'message.updated',
+        sessionId: 'session-test',
+        message: {
+          messageId: 'message-test',
+          role: 'user',
+          content: 'Redirect',
+          phase: 'updated',
+          data: { deliveryMode: 'steer', providerSecret: 'discard me' },
+        },
+      }),
+    ).toMatchObject({
+      message: { data: { deliveryMode: 'steer' } },
+    });
+    expect(
+      withoutOpaqueData({
+        type: 'message.updated',
+        sessionId: 'session-test',
+        message: {
+          messageId: 'message-test',
+          role: 'assistant',
+          content: 'Continuing',
+          phase: 'updated',
+          data: { providerSecret: 'discard me' },
+        },
+      }),
+    ).not.toHaveProperty('message.data');
+  });
+
   it('suppresses duplicate tool-result messages from the live transcript', () => {
     expect(
       shouldForwardLiveMessage({

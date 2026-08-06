@@ -706,7 +706,6 @@ h2 {
 }
 .message-steering {
   border-color: var(--orange);
-  background: color-mix(in srgb, var(--orange) 8%, transparent);
 }
 .message-assistant {
   border-color: var(--purple);
@@ -722,13 +721,8 @@ h2 {
 .message-assistant .message-role {
   color: var(--purple);
 }
-.message-delivery-mode {
-  display: inline-block;
+.message-steering .message-role {
   color: var(--orange);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin: 0 0 5px 8px;
 }
 .message-attachment {
   display: inline-block;
