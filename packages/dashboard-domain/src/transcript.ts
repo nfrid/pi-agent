@@ -622,27 +622,42 @@ function timestampKey(value: number | string): string {
   return `${typeof value}:${value}`;
 }
 
-function steeringMarkerTimestamp(
+function messageContentText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(messageContentText).join('');
+  if (!isRecord(value)) return '';
+  if (typeof value.text === 'string') return value.text;
+  return value.content === undefined ? '' : messageContentText(value.content);
+}
+
+function isSteeringMarkerEntry(entry: Record<string, unknown>): boolean {
+  return (
+    entry.type === 'custom' && entry.customType === STEERING_MESSAGE_MARKER_TYPE
+  );
+}
+
+function steeringMarkerData(
   entry: Record<string, unknown>,
-): number | string | undefined {
-  if (
-    entry.type !== 'custom' ||
-    entry.customType !== STEERING_MESSAGE_MARKER_TYPE ||
-    !isRecord(entry.data)
-  )
-    return undefined;
+): { timestamp: number | string; text: string } | undefined {
+  if (!isSteeringMarkerEntry(entry) || !isRecord(entry.data)) return undefined;
   const timestamp = entry.data.timestamp;
-  return typeof timestamp === 'number' || typeof timestamp === 'string'
-    ? timestamp
+  const text = entry.data.text;
+  return (typeof timestamp === 'number' || typeof timestamp === 'string') &&
+    typeof text === 'string'
+    ? { timestamp, text }
     : undefined;
 }
 
-function steeringTimestamps(entries: readonly unknown[]): ReadonlySet<string> {
+function steeringMarkerKey(timestamp: number | string, text: string): string {
+  return `${timestampKey(timestamp)}:${text.length}:${text}`;
+}
+
+function steeringMarkers(entries: readonly unknown[]): ReadonlySet<string> {
   const result = new Set<string>();
   for (const value of entries) {
     if (!isRecord(value)) continue;
-    const timestamp = steeringMarkerTimestamp(value);
-    if (timestamp !== undefined) result.add(timestampKey(timestamp));
+    const marker = steeringMarkerData(value);
+    if (marker) result.add(steeringMarkerKey(marker.timestamp, marker.text));
   }
   return result;
 }
@@ -686,7 +701,7 @@ export function hydrateTranscript(
   let projection = createTranscriptProjection(sessionId);
   const items = copyItems(projection);
   const order = [...projection.order];
-  const markedSteeringTimestamps = steeringTimestamps(entries);
+  const markedSteeringMarkers = steeringMarkers(entries);
   entries.forEach((raw, index) => {
     if (!isRecord(raw)) {
       const id = `entry-${index}`;
@@ -740,7 +755,9 @@ export function hydrateTranscript(
       const deliveryMode =
         role === 'user' &&
         timestamp !== undefined &&
-        markedSteeringTimestamps.has(timestampKey(timestamp))
+        markedSteeringMarkers.has(
+          steeringMarkerKey(timestamp, messageContentText(content)),
+        )
           ? ('steer' as const)
           : undefined;
       const explicitToolCallIds = Array.isArray(message.toolCallIds)
@@ -817,7 +834,7 @@ export function hydrateTranscript(
       }
       return;
     }
-    if (steeringMarkerTimestamp(raw) !== undefined) return;
+    if (isSteeringMarkerEntry(raw)) return;
     const tool =
       raw.type === 'tool' || raw.kind === 'tool'
         ? transcriptToolRecord(raw)

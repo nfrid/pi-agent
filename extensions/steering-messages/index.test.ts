@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  loadHistoryMarks,
   registerSteeringMessageTracking,
   STEERING_MESSAGE_MARKER_TYPE,
 } from './index';
@@ -38,7 +39,28 @@ describe('steering message tracking', () => {
     } as never);
     expect(appendEntry).toHaveBeenCalledWith(STEERING_MESSAGE_MARKER_TYPE, {
       timestamp: 42,
+      text: 'redirect',
     });
+  });
+
+  it('requires marker text when matching colliding history timestamps', () => {
+    const marks = loadHistoryMarks([
+      {
+        type: 'message',
+        message: { role: 'user', content: 'first', timestamp: 50 },
+      },
+      {
+        type: 'message',
+        message: { role: 'user', content: 'second', timestamp: 50 },
+      },
+      {
+        type: 'custom',
+        customType: STEERING_MESSAGE_MARKER_TYPE,
+        data: { timestamp: 50, text: 'second' },
+      },
+    ]);
+    expect(marks.marked.get('first')).toBeUndefined();
+    expect(marks.marked.get('second')).toEqual(new Set([0]));
   });
 
   it('keeps follow-up and ordinary input unmarked', () => {

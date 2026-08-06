@@ -8,14 +8,8 @@ interface UserMessageLike extends Component {
   render(width: number): string[];
 }
 
-interface ContainerLike extends Component {
-  children: Component[];
-  render(width: number): string[];
-}
-
 export interface SteeringShimHost {
   userComponent: ComponentClass<UserMessageLike>;
-  container: ComponentClass<ContainerLike>;
   isSteering(text: string, occurrence: number): boolean;
 }
 
@@ -26,55 +20,57 @@ function userText(component: UserMessageLike): string | undefined {
 
 function supported(host: SteeringShimHost): boolean {
   const userPrototype = host.userComponent.prototype as UserMessageLike;
-  const containerPrototype = host.container.prototype as ContainerLike;
-  return (
-    userPrototype instanceof host.container &&
-    typeof userPrototype.render === 'function' &&
-    typeof containerPrototype.render === 'function'
-  );
+  return typeof userPrototype.render === 'function';
 }
 
 /**
- * Patch the public user component and the Container class Pi actually uses.
- * Marking happens from the containing chat's child order, which makes the
- * timestamp-backed history markers work even though UserMessageComponent's
- * public constructor only receives text.
+ * Patch only the public user component. Pi renders the chat synchronously, so
+ * the first render of each component resolves its text occurrence against the
+ * marker index. Counters reset after that render batch; the WeakMap keeps a
+ * component's answer stable when it is measured or redrawn again.
  */
 export function installSteeringMessageShim(
   host: SteeringShimHost,
 ): (() => void) | undefined {
   if (!supported(host)) return undefined;
   const userPrototype = host.userComponent.prototype as UserMessageLike;
-  const containerPrototype = host.container.prototype as ContainerLike;
   const originalUserRender = userPrototype.render;
-  const originalContainerRender = containerPrototype.render;
-  const marked = new WeakSet<UserMessageLike>();
+  const steeringByComponent = new WeakMap<UserMessageLike, boolean>();
+  const occurrences = new Map<string, number>();
+  let resetQueued = false;
 
-  userPrototype.render = function render(width: number): string[] {
-    const lines = originalUserRender.call(this, width);
-    if (!marked.has(this) || lines.length === 0) return lines;
-    return lines.map((line, index) =>
-      index === 0 ? `${line} ${STEERING_LABEL}` : line,
-    );
+  const queueOccurrenceReset = () => {
+    if (resetQueued) return;
+    resetQueued = true;
+    queueMicrotask(() => {
+      occurrences.clear();
+      resetQueued = false;
+    });
   };
 
-  containerPrototype.render = function render(width: number): string[] {
-    const occurrences = new Map<string, number>();
-    for (const child of this.children) {
-      if (!(child instanceof host.userComponent)) continue;
-      const text = userText(child);
-      if (text === undefined) continue;
-      const occurrence = occurrences.get(text) ?? 0;
-      occurrences.set(text, occurrence + 1);
-      if (host.isSteering(text, occurrence)) marked.add(child);
+  userPrototype.render = function render(width: number): string[] {
+    let steering = steeringByComponent.get(this);
+    if (steering === undefined) {
+      const text = userText(this);
+      if (text === undefined) steering = false;
+      else {
+        const occurrence = occurrences.get(text) ?? 0;
+        occurrences.set(text, occurrence + 1);
+        steering = host.isSteering(text, occurrence);
+      }
+      steeringByComponent.set(this, steering);
     }
-    return originalContainerRender.call(this, width);
+    queueOccurrenceReset();
+
+    const lines = originalUserRender.call(this, width);
+    if (!steering) return lines;
+    const label = STEERING_LABEL.slice(0, Math.max(0, width));
+    return [label, ...lines];
   };
 
   return () => {
     userPrototype.render = originalUserRender;
-    containerPrototype.render = originalContainerRender;
   };
 }
 
-export type { ContainerLike, UserMessageLike };
+export type { UserMessageLike };

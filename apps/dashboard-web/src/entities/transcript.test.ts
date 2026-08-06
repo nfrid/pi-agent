@@ -38,7 +38,7 @@ describe('activity row views and virtual transcript construction', () => {
       {
         type: 'custom',
         customType: STEERING_MESSAGE_MARKER_TYPE,
-        data: { timestamp: 100 },
+        data: { timestamp: 100, text: 'Please redirect the current work.' },
         id: 'steer-marker',
       },
       {

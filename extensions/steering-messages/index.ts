@@ -11,6 +11,7 @@ export const STEERING_MESSAGE_MARKER_TYPE = 'steering-message';
 
 export interface SteeringMessageMarker {
   timestamp: number | string;
+  text: string;
 }
 
 type Timestamp = number | string;
@@ -49,15 +50,28 @@ function messageTimestamp(
   return timestampOf(message.timestamp ?? entry.timestamp);
 }
 
+function isSteeringMarker(entry: Record<string, unknown>): boolean {
+  return (
+    entry.type === 'custom' && entry.customType === STEERING_MESSAGE_MARKER_TYPE
+  );
+}
+
+function markerData(
+  entry: Record<string, unknown>,
+): SteeringMessageMarker | undefined {
+  if (!isSteeringMarker(entry)) return undefined;
+  const data = record(entry.data);
+  const timestamp = timestampOf(data?.timestamp);
+  const text = data?.text;
+  return timestamp === undefined || typeof text !== 'string'
+    ? undefined
+    : { timestamp, text };
+}
+
 function markerTimestamp(
   entry: Record<string, unknown>,
 ): Timestamp | undefined {
-  if (
-    entry.type !== 'custom' ||
-    entry.customType !== STEERING_MESSAGE_MARKER_TYPE
-  )
-    return undefined;
-  return timestampOf(record(entry.data)?.timestamp);
+  return markerData(entry)?.timestamp;
 }
 
 interface SteeringMarks {
@@ -83,7 +97,7 @@ function loadHistoryMarks(entries: readonly unknown[]): SteeringMarks {
   const marks = createMarks();
   const messagesByTimestamp = new Map<
     string,
-    { text: string; occurrence: number }
+    Array<{ text: string; occurrence: number }>
   >();
   for (const value of entries) {
     const entry = record(value);
@@ -93,14 +107,19 @@ function loadHistoryMarks(entries: readonly unknown[]): SteeringMarks {
     const occurrence = marks.historyCounts.get(text) ?? 0;
     marks.historyCounts.set(text, occurrence + 1);
     const timestamp = messageTimestamp(entry, message);
-    if (timestamp !== undefined)
-      messagesByTimestamp.set(timestampKey(timestamp), { text, occurrence });
+    if (timestamp !== undefined) {
+      const messages = messagesByTimestamp.get(timestampKey(timestamp)) ?? [];
+      messages.push({ text, occurrence });
+      messagesByTimestamp.set(timestampKey(timestamp), messages);
+    }
   }
   for (const value of entries) {
     const entry = record(value);
-    const timestamp = entry ? markerTimestamp(entry) : undefined;
-    if (timestamp === undefined) continue;
-    const message = messagesByTimestamp.get(timestampKey(timestamp));
+    const marker = entry ? markerData(entry) : undefined;
+    if (marker === undefined) continue;
+    const message = messagesByTimestamp
+      .get(timestampKey(marker.timestamp))
+      ?.find((candidate) => candidate.text === marker.text);
     if (message) addMarked(marks.marked, message.text, message.occurrence);
   }
   return marks;
@@ -116,26 +135,12 @@ function takeInputMode(
   return input?.mode;
 }
 
-function containerClassOf(): SteeringShimHost['container'] | undefined {
-  const base = Object.getPrototypeOf(UserMessageComponent.prototype) as
-    | object
-    | null;
-  const containerConstructor = (base as { constructor?: unknown } | null)
-    ?.constructor;
-  return typeof containerConstructor === 'function'
-    ? (containerConstructor as SteeringShimHost['container'])
-    : undefined;
-}
-
 function tuiShimHost(
   isSteering: SteeringShimHost['isSteering'],
-): SteeringShimHost | undefined {
-  const container = containerClassOf();
-  if (!container) return undefined;
+): SteeringShimHost {
   return {
     userComponent:
       UserMessageComponent as unknown as SteeringShimHost['userComponent'],
-    container,
     isSteering,
   };
 }
@@ -191,6 +196,7 @@ export function registerSteeringMessageTracking(
     if (timestamp === undefined) return;
     pi.appendEntry<SteeringMessageMarker>(STEERING_MESSAGE_MARKER_TYPE, {
       timestamp,
+      text,
     });
   });
 
@@ -208,4 +214,4 @@ export default defineExtension('steering-messages', (pi) => {
   registerSteeringMessageTracking(pi);
 });
 
-export { loadHistoryMarks, markerTimestamp, timestampKey };
+export { loadHistoryMarks, markerData, markerTimestamp, timestampKey };

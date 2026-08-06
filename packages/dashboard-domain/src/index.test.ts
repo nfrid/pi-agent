@@ -53,7 +53,7 @@ describe('dashboard domain reducers', () => {
       {
         type: 'custom',
         customType: STEERING_MESSAGE_MARKER_TYPE,
-        data: { timestamp: 200 },
+        data: { timestamp: 200, text: 'Steer this' },
         id: 'marker-1',
       },
       {
@@ -64,7 +64,7 @@ describe('dashboard domain reducers', () => {
       {
         type: 'message',
         id: 'user-2',
-        message: { role: 'user', content: 'Ordinary', timestamp: 201 },
+        message: { role: 'user', content: 'Ordinary', timestamp: 200 },
       },
     ]);
 
@@ -87,6 +87,11 @@ describe('dashboard domain reducers', () => {
           type: 'message',
           id: 'user-1',
           message: { role: 'user', content: 'Ordinary', timestamp: 200 },
+        },
+        {
+          type: 'custom',
+          customType: STEERING_MESSAGE_MARKER_TYPE,
+          data: { timestamp: 200, text: 'Different text' },
         },
       ]),
     ).items;
