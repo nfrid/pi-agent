@@ -1,6 +1,8 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
+import * as delegateChild from './delegate-child';
 import { DelegateJobManager } from './jobs';
 import { buildParentHandoff } from './output';
+import { runDelegate } from './runner';
 import { DelegateStatusStore } from './status';
 import {
   captureDelegateResultEvent,
@@ -91,6 +93,69 @@ describe('structured delegate output handoff', () => {
     );
     expect(entries).toHaveLength(1);
     expect(JSON.stringify(entries[0])).toContain('secret');
+  });
+
+  test('suppresses structured child prose from foreground progress updates', async () => {
+    const spec = normalizeDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: { ok: { type: 'boolean' } },
+        required: ['ok'],
+      },
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    const updates: Array<{ content: Array<{ text: string }> }> = [];
+    vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
+      async (run) => {
+        run.messages = [
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'earlier foreground secret' }],
+          },
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'terminal foreground secret' }],
+          },
+        ] as never;
+        run.stderr = 'foreground stderr secret';
+        run.activities.push({
+          type: 'tool',
+          label: 'delegate_result',
+          status: 'completed',
+        });
+        captureDelegateResultEvent(run, { details: { ok: true } }, false);
+        return { exitCode: 0, wasAborted: false, timedOut: false };
+      },
+    );
+    try {
+      const run = await runDelegate({
+        cwd: '/tmp',
+        task: 'foreground structured task',
+        context: 'fresh',
+        sessionPath: '/tmp/structured-progress-session.jsonl',
+        isolation: 'shared',
+        resultSpec: spec,
+        timeoutMs: 5_000,
+        maxConcurrency: 1,
+        mode: 'single',
+        onUpdate: (partial) => updates.push(partial),
+      });
+      const progress = updates.flatMap((update) =>
+        update.content.map((part) => part.text),
+      );
+      expect(progress.join('\n')).not.toMatch(
+        /earlier foreground secret|terminal foreground secret|foreground stderr secret/,
+      );
+      expect(progress.some((text) => text.includes('delegate_result'))).toBe(
+        true,
+      );
+      expect(JSON.stringify(updates)).not.toMatch(
+        /earlier foreground secret|terminal foreground secret|foreground stderr secret/,
+      );
+      expect(run.state).toBe('success');
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   test('sanitizes structured runs across details, jobs, status, and sessions', async () => {
