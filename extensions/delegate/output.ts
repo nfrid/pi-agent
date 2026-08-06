@@ -1,4 +1,12 @@
 import {
+  getDelegateResultSpec,
+  getSettledDelegateResult,
+  getStructuredArtifacts,
+  projectStructuredResult,
+  type StructuredValidationResult,
+  settleDelegateResult,
+} from './structured-result';
+import {
   continuationRecoveryNote,
   type DelegatedRun,
   getExactFinalAssistantText,
@@ -102,10 +110,39 @@ function runBody(run: DelegatedRun): {
   text: string;
   originalReport?: string;
 } {
+  // A structured child has no prose body for the parent. In particular, a
+  // malformed child must not fall back to prose that could contain an
+  // artifact-only value.
+  if (getDelegateResultSpec(run)) return { text: '' };
   const originalReport = getExactFinalAssistantText(run.messages);
   if (originalReport) return { text: originalReport, originalReport };
   return {
     text: run.errorMessage?.trim() || run.stderr.trim() || '(no output)',
+  };
+}
+
+function structuredEnvelope(run: DelegatedRun):
+  | {
+      settlement: StructuredValidationResult;
+      projection?: string;
+      omittedPaths: string[];
+    }
+  | undefined {
+  const spec = getDelegateResultSpec(run);
+  if (!spec) return undefined;
+  const settlement = getSettledDelegateResult(run) ??
+    settleDelegateResult(run, spec) ?? {
+      valid: false,
+      errors: ['/: structured result settlement is unavailable'],
+    };
+  if (!settlement.valid) return { settlement, omittedPaths: [] };
+  const projection = projectStructuredResult(spec, settlement.value);
+  return {
+    settlement,
+    omittedPaths: projection.omittedPaths,
+    ...(projection.value === undefined
+      ? {}
+      : { projection: JSON.stringify(projection.value) }),
   };
 }
 
@@ -120,10 +157,30 @@ interface PreparedRun {
 
 function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
   const { text: originalBody, originalReport } = runBody(run);
+  const structured = structuredEnvelope(run);
   const lines = [
     `Status: ${getRunState(run)}`,
-    `Outcome: ${extractReportField(originalBody, 'Outcome', 32) ?? '(not reported)'}`,
-    `Conclusion: ${extractReportField(originalBody, 'Conclusion', 600) ?? '(not reported)'}`,
+    ...(structured
+      ? [
+          `Structured result: ${structured.settlement.valid ? 'valid' : 'invalid'}`,
+          ...(structured.settlement.errors.length
+            ? [
+                `Validation errors: ${clip(structured.settlement.errors.join('; '), 900)}`,
+              ]
+            : []),
+          ...(structured.projection
+            ? [`Projection: ${structured.projection}`]
+            : getDelegateResultSpec(run)?.projection.length
+              ? ['Projection: {}']
+              : []),
+          ...(structured.omittedPaths.length
+            ? [`Projection omissions: ${structured.omittedPaths.join(', ')}`]
+            : []),
+        ]
+      : [
+          `Outcome: ${extractReportField(originalBody, 'Outcome', 32) ?? '(not reported)'}`,
+          `Conclusion: ${extractReportField(originalBody, 'Conclusion', 600) ?? '(not reported)'}`,
+        ]),
   ];
   if (run.continuation) lines.push(`Continuation: ${run.continuation}`);
   const blocked = extractReportField(originalBody, 'Blocked', 240);
@@ -135,6 +192,9 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
     lines.push(
       `Artifact: ${run.artifact.handle} (${run.artifact.size} bytes, sha256 ${run.artifact.sha256})`,
     );
+  const namedViews = getStructuredArtifacts(run)?.views;
+  if (namedViews && Object.keys(namedViews).length > 0)
+    lines.push(`Views: ${Object.keys(namedViews).sort().join(', ')}`);
   if (run.worktree) {
     if (run.worktree.snapshot) {
       lines.push(
@@ -155,8 +215,9 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
       );
   }
   if (isRunError(run)) {
-    const failure =
-      run.errorMessage?.trim() || run.stderr.trim() || originalBody;
+    const failure = structured
+      ? run.errorMessage?.trim() || 'Structured result settlement failed.'
+      : run.errorMessage?.trim() || run.stderr.trim() || originalBody;
     lines.push(`Failure: ${clip(failure, 120)}`);
   }
   const recoveryNote = continuationRecoveryNote(run);
@@ -166,10 +227,12 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
   );
   if (warnings.length)
     lines.push(`Warnings: ${clip(warnings.join('; '), 120)}`);
-  const evidence = extractReportField(originalBody, 'Evidence', 400);
-  if (evidence) lines.push(`Evidence: ${evidence}`);
-  const risks = extractReportField(originalBody, 'Risks', 240);
-  if (risks) lines.push(`Risks: ${risks}`);
+  if (!structured) {
+    const evidence = extractReportField(originalBody, 'Evidence', 400);
+    if (evidence) lines.push(`Evidence: ${evidence}`);
+    const risks = extractReportField(originalBody, 'Risks', 240);
+    if (risks) lines.push(`Risks: ${risks}`);
+  }
   lines.push('Truncation: none');
   return {
     run,

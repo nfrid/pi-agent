@@ -8,7 +8,9 @@ import { retrieveArtifact } from './retrieval';
 import {
   putArtifact,
   recoverArtifactFromEntries,
+  registerArtifactView,
   resolveArtifact,
+  resolveArtifactView,
   restoreArtifacts,
   sessionDirectory,
 } from './storage';
@@ -109,6 +111,32 @@ describe('storing artifacts', () => {
       contentClass: 'json',
     });
     expect(metadata.itemCount).toBe(3);
+  });
+
+  test('resolves named views only through the owner-session registry', async () => {
+    const owner = harness('session-one');
+    const other = harness('session-two');
+    const full = await put(owner, {
+      bytes: JSON.stringify({ findings: [{ title: 'one' }] }),
+      contentClass: 'delegate-output',
+      producer: 'delegate',
+      creationSource: 'delegate.result',
+    });
+    const view = await put(owner, {
+      bytes: JSON.stringify([{ title: 'one' }]),
+      contentClass: 'delegate-output',
+      producer: 'delegate',
+      creationSource: 'delegate.view',
+    });
+    registerArtifactView(owner.pi, full, 'titles', view);
+    expect(
+      (
+        await resolveArtifactView(owner.ctx, full.handle, 'titles', root)
+      )?.bytes.toString(),
+    ).toBe('[{"title":"one"}]');
+    expect(
+      await resolveArtifactView(other.ctx, full.handle, 'titles', root),
+    ).toBeUndefined();
   });
 
   test('refuses input the metadata could not honestly describe', async () => {

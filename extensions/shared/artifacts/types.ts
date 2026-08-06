@@ -1,4 +1,6 @@
 export const ARTIFACT_ENTRY_TYPE = 'artifact:v1';
+/** Owner-session registry for schema-selected delegate artifact views. */
+export const ARTIFACT_VIEW_ENTRY_TYPE = 'artifact-view:v1';
 export const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
 export const MAX_RESULT_BYTES = 64 * 1024;
 export const MAX_SEARCH_SCAN_BYTES = 256 * 1024;
@@ -50,6 +52,18 @@ export interface RecoveryEntry {
   kind: 'recovery';
   metadata: ArtifactMetadata;
   bytes: string;
+}
+
+/**
+ * A view registry entry contains metadata only. The view bytes remain in the
+ * ordinary owner-session artifact store and are resolved by its handle.
+ */
+export interface ArtifactViewRegistryEntry {
+  version: 1;
+  kind: 'view';
+  source: ArtifactMetadata;
+  view: string;
+  metadata: ArtifactMetadata;
 }
 
 export interface ResolvedArtifact {

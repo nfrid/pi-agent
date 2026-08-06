@@ -9,7 +9,9 @@ import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { ensureDir } from '../fs/atomic';
 import {
   ARTIFACT_ENTRY_TYPE,
+  ARTIFACT_VIEW_ENTRY_TYPE,
   type ArtifactMetadata,
+  type ArtifactViewRegistryEntry,
   type PutArtifactInput,
   type RecoveryEntry,
   type ResolvedArtifact,
@@ -132,6 +134,89 @@ export async function putArtifact(
     bytes: bytes.toString('base64'),
   } satisfies RecoveryEntry);
   return metadata;
+}
+
+/**
+ * Persist the owner-session mapping from one full artifact to a named view.
+ * This entry deliberately contains no view bytes, so a consumer must still
+ * resolve the exact owner-session artifact metadata before it can read them.
+ */
+export function registerArtifactView(
+  pi: AppendOnly,
+  source: ArtifactMetadata,
+  view: string,
+  metadata: ArtifactMetadata,
+): void {
+  if (!HANDLE_RE.test(source.handle) || !HANDLE_RE.test(metadata.handle))
+    throw new Error('Invalid artifact view handle');
+  if (!view || view.length > 64 || !/^[A-Za-z][A-Za-z0-9_-]*$/.test(view))
+    throw new Error('Invalid artifact view name');
+  pi.appendEntry(ARTIFACT_VIEW_ENTRY_TYPE, {
+    version: 1,
+    kind: 'view',
+    source,
+    view,
+    metadata,
+  } satisfies ArtifactViewRegistryEntry);
+}
+
+function viewRegistryEntries(
+  entries: Iterable<{ type: string; customType?: string; data?: unknown }>,
+): ArtifactViewRegistryEntry[] {
+  const result: ArtifactViewRegistryEntry[] = [];
+  for (const entry of entries) {
+    if (
+      entry.type !== 'custom' ||
+      entry.customType !== ARTIFACT_VIEW_ENTRY_TYPE
+    )
+      continue;
+    const data = entry.data as Partial<ArtifactViewRegistryEntry> | undefined;
+    if (
+      data?.version === 1 &&
+      data.kind === 'view' &&
+      typeof data.view === 'string' &&
+      data.source &&
+      data.metadata
+    )
+      result.push(data as ArtifactViewRegistryEntry);
+  }
+  return result;
+}
+
+/** Resolve a named view only through the current session's persisted registry. */
+export async function resolveArtifactView(
+  ctx: SessionContext,
+  sourceHandle: string,
+  view: string,
+  root = artifactRoot(),
+): Promise<ResolvedArtifact | undefined> {
+  if (
+    !HANDLE_RE.test(sourceHandle) ||
+    !view ||
+    view.length > 64 ||
+    !/^[A-Za-z][A-Za-z0-9_-]*$/.test(view)
+  )
+    return undefined;
+  const entry = viewRegistryEntries(ctx.sessionManager.getEntries()).find(
+    (candidate) =>
+      candidate.source.handle === sourceHandle && candidate.view === view,
+  );
+  if (!entry) return undefined;
+  if (
+    entry.source.producer !== 'delegate' ||
+    entry.source.contentClass !== 'delegate-output' ||
+    entry.source.encoding !== 'utf-8' ||
+    entry.metadata.producer !== 'delegate' ||
+    entry.metadata.contentClass !== 'delegate-output' ||
+    entry.metadata.encoding !== 'utf-8'
+  )
+    return undefined;
+  const source = await resolveArtifact(ctx, sourceHandle, root);
+  if (!source || !sameMetadata(source.metadata, entry.source)) return undefined;
+  const resolved = await resolveArtifact(ctx, entry.metadata.handle, root);
+  if (!resolved || !sameMetadata(resolved.metadata, entry.metadata))
+    return undefined;
+  return resolved;
 }
 
 export async function resolveArtifact(

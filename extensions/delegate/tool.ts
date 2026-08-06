@@ -67,6 +67,14 @@ const HandoffArtifactSchema = Type.Object({
         'Optional label for the upstream evidence in the child prompt',
     }),
   ),
+  view: Type.Optional(
+    Type.String({
+      minLength: 1,
+      maxLength: 64,
+      pattern: '^[A-Za-z][A-Za-z0-9_-]*$',
+      description: 'Named schema-selected view of the full delegate artifact',
+    }),
+  ),
 });
 
 const HandoffFromListSchema = Type.Array(HandoffArtifactSchema, {
@@ -82,8 +90,37 @@ const HandoffFromSchema = Type.Union([
   HandoffFromListSchema,
 ]);
 
+const ResultSpecSchema = Type.Object(
+  {
+    schema: Type.Any({
+      description:
+        'Bounded JSON-schema subset for the complete machine-readable result',
+    }),
+    projection: Type.Optional(
+      Type.Array(Type.String({ maxLength: 256 }), {
+        maxItems: 32,
+        description:
+          'Static schema paths selected for the compact parent envelope',
+      }),
+    ),
+    views: Type.Optional(
+      Type.Record(
+        Type.String({
+          minLength: 1,
+          maxLength: 64,
+          pattern: '^[A-Za-z][A-Za-z0-9_-]*$',
+        }),
+        Type.String({ maxLength: 256 }),
+        { maxProperties: 16 },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
 export type DelegateHandoffFrom = Static<typeof HandoffArtifactSchema>;
 export type DelegateHandoffInput = Static<typeof HandoffFromSchema>;
+export type DelegateResultSpec = Static<typeof ResultSpecSchema>;
 
 const BackgroundSchema = Type.Boolean({
   description:
@@ -125,6 +162,7 @@ const TaskItem = Type.Object({
   from: Type.Optional(BaseSchema),
   refresh: Type.Optional(RefreshSchema),
   handoffFrom: Type.Optional(HandoffFromSchema),
+  result: Type.Optional(ResultSpecSchema),
 });
 
 const DelegateParamsSchema = Type.Object({
@@ -155,6 +193,7 @@ const DelegateParamsSchema = Type.Object({
   from: Type.Optional(BaseSchema),
   refresh: Type.Optional(RefreshSchema),
   handoffFrom: Type.Optional(HandoffFromSchema),
+  result: Type.Optional(ResultSpecSchema),
   background: Type.Optional(BackgroundSchema),
 });
 
@@ -174,6 +213,7 @@ export function delegatePromptGuidelines(
     'A child that comes back with a "Blocked:" question is waiting on you, not failing. Answer it — from what you know, or by looking — and continue that child; re-briefing a fresh one throws away the context it already built. Decide it yourself unless it is genuinely the user\'s call.',
     "Parallelize only independent work: if one task depends on another's findings, inspect enough of the compact prerequisite envelope to confirm its outcome, relevant conclusion/evidence, assumptions, and risks; use handoffFrom only when exact upstream detail is needed. Worktree-isolated tasks each get their own checkout, so writable tasks can run in parallel even on overlapping files. Use background delegation when foreground work can continue meanwhile; use foreground delegation when the next parent action must await the result.",
     'A writable run leaves its work as commits on the branch it reports; integrate it yourself with delegate_branches rather than handing the merge to the user. A delegate-output artifact being available is not an instruction to retrieve it: use the compact envelope unless exact upstream wording would change a decision, and then use handoffFrom (or artifact retrieval) deliberately.',
+    'For machine-readable work, provide result with a bounded schema, projection paths, and named static views. The child must finish through delegate_result; the full validated JSON stays in an owner-session artifact, while only selected projections enter the parent envelope. Use handoffFrom with {handle, view} to forward a named view without retrieving the full artifact into your context. Omit result for the exact legacy prose contract.',
     'Supervise proportionally: inspect and verify high-risk or consequential work, while letting routine bounded work return a compact report. Treat child results as claims to verify: trust reported checks and concrete evidence, and re-check or continue the child when an important claim has none. A subagent can report work it did not finish, and weakening a test is a common way a task comes back "passing".',
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd, config)}`,
   ];
@@ -195,7 +235,7 @@ export function registerDelegateTool(
     name: 'delegate',
     label: 'Delegate',
     description:
-      'Delegate work to child Pi processes with their own context. Fresh tasks and fresh batch items require a name; continuations with persisted names may omit it. Fresh tasks need one exact catalog route; continuations reuse persisted route, write capability, and isolation when omitted. Fresh writable tasks default to an isolated git worktree; fresh read-only tasks default to the shared checkout, or may explicitly use a worktree snapshot. Writable shared tasks are rejected. Use handoffFrom with a prior delegate-output artifact handle when a new child deliberately needs exact upstream evidence; the bytes stay out of the parent-visible result. Set background true for independent work that should complete asynchronously.',
+      'Delegate work to child Pi processes with their own context. Fresh tasks and fresh batch items require a name; continuations with persisted names may omit it. Fresh tasks need one exact catalog route; continuations reuse persisted route, write capability, and isolation when omitted. Fresh writable tasks default to an isolated git worktree; fresh read-only tasks default to the shared checkout, or may explicitly use a worktree snapshot. Writable shared tasks are rejected. Use result for a bounded machine-readable child contract, or omit it for legacy prose. Use handoffFrom with a prior delegate-output artifact handle; {handle, view} forwards only a registered named view and the bytes stay out of the parent-visible result. Set background true for independent work that should complete asynchronously.',
     promptSnippet:
       'Hand a child implementation, exploration, review, validation, or independent parallel work whenever a subagent would save your own context.',
     promptGuidelines: delegatePromptGuidelines(cwd, promptConfig),

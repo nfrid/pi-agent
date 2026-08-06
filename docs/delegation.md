@@ -69,6 +69,73 @@ The safety bounds are 12 KiB for one result, 8 KiB per task in parallel, and 50 
 
 An exact-output artifact is created only when the parent handoff genuinely omits or truncates that original report. A report that fits does not get an artifact merely because its fields also appear in the envelope.
 
+## Schema-driven results
+
+A delegate call may include a `result` contract. It is independent for every
+parallel task; a top-level `result` is the shared default and a task-level
+`result` replaces it. A contract has this small public shape:
+
+```json
+{
+  "result": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": { "type": "string", "minLength": 1 },
+              "severity": { "type": "string", "enum": ["high", "low"] },
+              "evidence": { "type": "string" }
+            },
+            "required": ["title", "severity", "evidence"]
+          }
+        }
+      },
+      "required": ["findings"]
+    },
+    "projection": ["/findings/*/title", "/findings/*/severity"],
+    "views": { "evidence": "/findings/*/evidence" }
+  }
+}
+```
+
+The schema is a bounded JSON-compatible subset: one `type` (`object`,
+`array`, `string`, `number`, `integer`, `boolean`, or `null`), closed object
+`properties`/`required`, array `items`, `enum`, string length, array length and
+uniqueness, and numeric bounds/multiplicity. `$ref`, composition, patterns,
+formats, executable predicates, and all other keywords are rejected. Objects
+are closed by default, so undeclared result properties fail validation.
+
+Paths use canonical JSON-pointer-like syntax: `/` means the complete result,
+otherwise each segment is a declared object property. `~0` and `~1` encode `~`
+and `/`. Empty, `.`, `..`, numeric array indexes, arbitrary JSONPath, and bad
+escapes are rejected. The only wildcard is `*`, and it may select an array's
+items (`/findings/*/title`). Projection paths select the compact parent
+completion; named view paths select separate JSON artifacts. The full result
+is never copied into parent content or enumerable delegate details.
+
+The global bounds are 16 KiB schema bytes, depth 8, 128 schema nodes, 64 array
+items, 4,096 Unicode characters per string, 64 KiB result bytes, 32 projection
+paths, 8 KiB projected bytes, and 16 named views. Schema/path errors are
+reported before child setup or launch. The child receives a dynamic terminating
+`delegate_result` tool and must call it exactly once as its final action; JSON
+in prose is not a structured result. Parent settlement validates the captured
+tool details once. Missing/malformed channels, wrong types, missing required
+properties, extra properties, enum violations, and limits make the run
+non-success with bounded validation errors.
+
+A valid result is stored as an immutable owner-session `delegate-output` JSON
+artifact. Only selected projections and lifecycle metadata appear in the
+parent envelope. Each named view is stored separately and registered against
+the full artifact handle in the owner session. Forward it with
+`handoffFrom: { "handle": "...", "view": "evidence" }`; the harness verifies
+current-session ownership and the registry, then frames only that view as
+untrusted evidence. Omitting `result` preserves the legacy prose report and
+artifact behavior exactly.
+
 ## Read-only delegates
 
 A read-only delegate gets `read`, `bash`, `grep`, `find`, and `ls`, and is told in its prompt to inspect and report rather than edit. This is an intent signal, not an enforced boundary: the child has an ordinary shell and can do everything any agent with a shell can do. Use it when you want an answer, not a change.
