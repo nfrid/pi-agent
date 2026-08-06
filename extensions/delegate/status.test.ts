@@ -83,29 +83,22 @@ describe('delegate status store', () => {
     expect(onChange).toHaveBeenCalledTimes(3);
   });
 
-  test('acknowledges a settled result only after a later parent turn responds and settles', () => {
+  test('clears an entered result only on the first user message after settlement', () => {
     const store = new DelegateStatusStore();
     const run = createRun('audit');
     const [id] = store.start([run], 'foreground');
 
-    store.resultEntered([id]);
-    expect(store.list()).toHaveLength(1);
-
     run.state = 'success';
     store.update(id, run);
+    store.parentSettled();
+    store.parentUserMessage();
+    expect(store.list()).toHaveLength(1);
+
     store.resultEntered([id]);
-    store.acknowledgeSettled();
+    store.parentSettled();
     expect(store.list()).toHaveLength(1);
 
-    // An assistant message from the turn that was already in progress did
-    // not receive this result in provider context.
-    store.parentAssistantMessage();
-    store.acknowledgeSettled();
-    expect(store.list()).toHaveLength(1);
-
-    store.parentTurnStarted();
-    store.parentAssistantMessage();
-    store.acknowledgeSettled();
+    store.parentUserMessage();
     expect(store.list()).toEqual([]);
   });
 
@@ -130,14 +123,14 @@ describe('delegate status store', () => {
     store.setJobId(id, 'dj-1');
 
     // A stale notification never enters the active branch's context.
-    store.parentAssistantMessage();
-    store.acknowledgeSettled();
+    store.parentSettled();
+    store.parentUserMessage();
     expect(store.list()).toHaveLength(1);
 
     store.jobResultEntered(['dj-1']);
-    store.parentTurnStarted();
-    store.parentAssistantMessage();
-    store.acknowledgeSettled();
+    store.parentSettled();
+    expect(store.list()).toHaveLength(1);
+    store.parentUserMessage();
     expect(store.list()).toEqual([]);
   });
 
@@ -152,8 +145,7 @@ describe('delegate status store', () => {
     first.state = 'success';
     const [firstId] = store.start([first], 'foreground');
     store.resultEntered([firstId]);
-    store.parentTurnStarted();
-    store.parentAssistantMessage();
+    store.parentSettled();
 
     const continued = createRun('continue', undefined, {
       name: 'Implementation follow-up',
@@ -178,16 +170,16 @@ describe('delegate status store', () => {
       },
     ]);
 
-    store.acknowledgeSettled();
+    store.parentUserMessage();
     expect(store.list()).toHaveLength(1);
 
     continued.state = 'success';
     continued.finishedAt = 580_000;
     store.update(continuedId, continued);
     store.resultEntered([continuedId]);
-    store.parentTurnStarted();
-    store.parentAssistantMessage();
-    store.acknowledgeSettled();
+    store.parentSettled();
+    expect(store.list()).toHaveLength(1);
+    store.parentUserMessage();
     expect(store.list()).toEqual([]);
   });
 

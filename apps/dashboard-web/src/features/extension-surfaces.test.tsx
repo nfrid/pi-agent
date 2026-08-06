@@ -90,8 +90,8 @@ describe('live extension surface fixtures', () => {
       </>,
     );
     expect(markup).toContain('aria-expanded="false"');
-    expect(markup).toContain('● Compact delegate');
-    expect(markup).toContain('● Compact task');
+    expect(markup).toContain('<strong>Compact delegate</strong>');
+    expect(markup).toContain('<strong>Compact task</strong>');
     expect(markup).not.toContain('luna-high');
     expect(markup).not.toContain('task-progress');
   });
@@ -103,7 +103,19 @@ describe('live extension surface fixtures', () => {
           {
             id: 'delegate-1',
             rendererId: 'delegate.status',
-            viewModel: { version: 1, statuses: [] },
+            viewModel: {
+              version: 1,
+              statuses: [
+                {
+                  id: 'd1',
+                  name: 'Queued delegate',
+                  kind: 'background',
+                  state: 'queued',
+                  createdAt: 1,
+                  allowWrites: false,
+                },
+              ],
+            },
           },
           {
             id: 'tasks-1',
@@ -126,11 +138,84 @@ describe('live extension surface fixtures', () => {
     );
 
     expect(markup.indexOf('aria-label="Tasks"')).toBeLessThan(
-      markup.indexOf('aria-label="Delegate status"'),
+      markup.indexOf('aria-label="Delegates"'),
     );
-    expect(markup).toContain('Tasks need attention');
-    expect(markup).not.toContain('0/12 complete');
+    expect(markup).toContain('12 remaining');
+    expect(markup).not.toContain('0 of 12 complete');
     expect(markup).not.toContain('more tasks');
+  });
+
+  it('omits task and delegate widgets when their row sets are empty', () => {
+    const markup = renderToStaticMarkup(
+      <ExtensionSurfaceStack
+        runtime={runtimeFixture([
+          {
+            id: 'tasks-empty',
+            rendererId: 'tasks.current',
+            viewModel: {
+              version: 1,
+              tasks: [],
+              stats: { total: 0, active: 0, done: 0, blocked: 0, ready: 0 },
+            },
+          },
+          {
+            id: 'delegates-empty',
+            rendererId: 'delegate.status',
+            viewModel: { version: 1, statuses: [] },
+          },
+        ])}
+      />,
+    );
+
+    expect(markup).not.toContain('class="extension-surface"');
+    expect(markup).not.toContain('aria-label="Tasks"');
+    expect(markup).not.toContain('aria-label="Delegates"');
+  });
+
+  it('treats dropped tasks and aborted delegates as terminal states', () => {
+    const markup = renderToStaticMarkup(
+      <>
+        {renderLiveExtensionSurface({
+          id: 'tasks-terminal',
+          rendererId: 'tasks.current',
+          viewModel: {
+            version: 1,
+            tasks: [
+              {
+                id: 'T1',
+                text: 'Superseded task',
+                status: 'dropped',
+                dependsOn: [],
+                createdAt: 1,
+                updatedAt: 2,
+              },
+            ],
+            stats: { total: 1, active: 0, done: 0, blocked: 0, ready: 0 },
+          },
+        })}
+        {renderLiveExtensionSurface({
+          id: 'delegates-terminal',
+          rendererId: 'delegate.status',
+          viewModel: {
+            version: 1,
+            statuses: [
+              {
+                id: 'd1',
+                name: 'Stopped delegate',
+                kind: 'background',
+                state: 'aborted',
+                createdAt: 1,
+                finishedAt: 2,
+                allowWrites: false,
+              },
+            ],
+          },
+        })}
+      </>,
+    );
+
+    expect(markup).toContain('All tasks complete');
+    expect(markup).toContain('1 stopped');
   });
 
   it('renders ordered delegate transcript entries with bounded-history notice', () => {

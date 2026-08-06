@@ -1,8 +1,8 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { isGenuineAgentSettlement } from '../shared/runtime/agent-lifecycle';
 import { defineExtension } from '../shared/runtime/extension';
-import { hasPendingProcesses } from '../shared/runtime/pending-processes';
 
 const ENABLE_FOCUS_REPORTING = '\x1b[?1004h';
 const DISABLE_FOCUS_REPORTING = '\x1b[?1004l';
@@ -33,7 +33,7 @@ function isActiveTmuxPane(): boolean {
 }
 
 export function shouldNotifyAgentSettled(): boolean {
-  return !hasPendingProcesses();
+  return isGenuineAgentSettlement();
 }
 
 function playSound(): void {

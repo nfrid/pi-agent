@@ -63,9 +63,9 @@ import {
   delegateCapabilitySnapshot,
   delegateManifest,
 } from '../delegate/contribution';
+import { isGenuineAgentSettlement } from '../shared/runtime/agent-lifecycle';
 import { defineExtension } from '../shared/runtime/extension';
 import { liveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
-import { hasPendingProcesses } from '../shared/runtime/pending-processes';
 import { tasksCapabilitySnapshot, tasksManifest } from '../tasks/contribution';
 import {
   RUNTIME_ABORT_ACTION_ID,
@@ -1778,7 +1778,7 @@ export function emitAgentSettlement(
   runtime: RemoteControlRuntime,
   ctx: ExtensionContext,
 ): void {
-  if (hasPendingProcesses()) {
+  if (!isGenuineAgentSettlement()) {
     emitState(runtime, ctx, 'working');
     return;
   }

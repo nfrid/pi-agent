@@ -3,6 +3,10 @@ import type {
   ExtensionUIContext,
   ThemeColor,
 } from '@earendil-works/pi-coding-agent';
+import {
+  beginsFreshUserTurn,
+  isGenuineAgentSettlement,
+} from '../shared/runtime/agent-lifecycle';
 import { defineExtension } from '../shared/runtime/extension';
 import {
   type BackgroundCompletionCard,
@@ -209,6 +213,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   const automaticDeliveryQueued = (job: DelegateJobSnapshot) =>
     automaticDeliveryStates.get(job.id) === 'queued';
 
+  const hasQueuedAutomaticDeliveries = () =>
+    [...automaticDeliveryStates.values()].some((state) => state === 'queued');
+
   const clearUnenteredAutomaticDeliveries = () => {
     for (const [id, state] of automaticDeliveryStates) {
       if (state === 'queued') automaticDeliveryStates.delete(id);
@@ -399,16 +406,20 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   // down mid-run would discard the mounted render loop. A plain sync refreshes
   // the existing component in place.
   pi.on('agent_start', syncWidget);
-  pi.on('turn_start', () => statuses?.parentTurnStarted());
-  pi.on('message_end', (event) => {
-    if (event.message.role === 'assistant') statuses?.parentAssistantMessage();
+  pi.on('input', (event) => {
+    if (!beginsFreshUserTurn(event)) return;
+    statuses?.parentUserMessage();
+    syncWidget();
   });
   pi.on('agent_settled', () => {
+    const genuinelySettled = isGenuineAgentSettlement(
+      pendingCompletions.length > 0 || hasQueuedAutomaticDeliveries(),
+    );
     // A successfully queued steer prevents settlement until it enters context.
     // If the parent settles first, dispatch failed asynchronously and explicit
     // inspection must remain able to return the retained handoff.
     clearUnenteredAutomaticDeliveries();
-    statuses?.acknowledgeSettled();
+    if (genuinelySettled) statuses?.parentSettled();
     syncWidget();
   });
   pi.on('session_shutdown', async () => {

@@ -2099,17 +2099,158 @@ test('phase six mocked management flow covers refresh, fallback notification, la
           placement: 'composer',
           viewModel: {
             version: 1,
-            tasks: [
-              {
-                id: 'T1',
-                text: 'Inspect the new drawer',
-                status: 'doing',
-                dependsOn: [],
-                createdAt: 1,
-                updatedAt: 1,
-              },
-            ],
-            stats: { total: 1, active: 1, done: 0, blocked: 0, ready: 1 },
+            tasks: Array.from({ length: 18 }, (_, index) => ({
+              id: `T${index + 1}`,
+              text:
+                index === 0
+                  ? 'Inspect the new drawer'
+                  : `Dashboard task ${index + 1}`,
+              status: index === 0 ? 'doing' : 'todo',
+              dependsOn: [],
+              createdAt: 1,
+              updatedAt: 1,
+            })),
+            stats: { total: 18, active: 1, done: 0, blocked: 0, ready: 17 },
+          },
+        },
+        {
+          id: 'delegates-1',
+          rendererId: 'delegate.status',
+          placement: 'composer',
+          viewModel: {
+            version: 1,
+            statuses: Array.from({ length: 18 }, (_, index) => ({
+              id: `d${index + 1}`,
+              name: `Dashboard delegate ${index + 1}`,
+              kind: 'background',
+              state: index === 0 ? 'running' : 'queued',
+              createdAt: 1,
+              allowWrites: false,
+              ...(index === 0
+                ? {
+                    transcript: Array.from({ length: 14 }, (_, entryIndex) => ({
+                      id: `d1:tool:${entryIndex + 1}`,
+                      type: 'tool',
+                      label: `Validation command ${entryIndex + 1}`,
+                      text: `Command output line ${entryIndex + 1}\nAdditional diagnostic context for sticky-header scrolling.`,
+                      status: 'completed',
+                      run: 1,
+                    })),
+                  }
+                : {}),
+            })),
+          },
+        },
+      ],
+    }),
+  });
+  await expect(
+    page.getByRole('button', { name: /Inspect the new drawer/ }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: /Inspect the new drawer/ }).click();
+  const tasksPanel = page.getByRole('dialog', { name: 'Tasks' });
+  await expect(tasksPanel).toBeVisible();
+  await expect(tasksPanel).toContainText('0 of 18 complete');
+  const taskScroll = await tasksPanel
+    .locator('.surface-scroll-region')
+    .evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+  expect(taskScroll.clientHeight).toBeGreaterThan(0);
+  expect(taskScroll.scrollHeight).toBeGreaterThan(taskScroll.clientHeight);
+  const taskRowHeights = await tasksPanel
+    .locator('.task-row')
+    .evaluateAll((rows) =>
+      rows.map((row) => row.getBoundingClientRect().height),
+    );
+  expect(Math.max(...taskRowHeights)).toBeLessThan(80);
+  expect(
+    await tasksPanel.locator('.surface-scroll-region').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      return element.scrollTop;
+    }),
+  ).toBeGreaterThan(0);
+  await tasksPanel.getByRole('button', { name: 'Close Tasks' }).click();
+  await expect(tasksPanel).toHaveCount(0);
+  await page.getByRole('button', { name: /Dashboard delegate 1/ }).click();
+  const delegatesPanel = page.getByRole('dialog', { name: 'Delegates' });
+  await expect(delegatesPanel).toBeVisible();
+  const delegateScroll = await delegatesPanel
+    .locator('.surface-scroll-region')
+    .evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+  expect(delegateScroll.clientHeight).toBeGreaterThan(0);
+  expect(delegateScroll.scrollHeight).toBeGreaterThan(
+    delegateScroll.clientHeight,
+  );
+  const delegateRowHeights = await delegatesPanel
+    .locator('.delegate-row')
+    .evaluateAll((rows) =>
+      rows.map((row) => row.getBoundingClientRect().height),
+    );
+  expect(Math.max(...delegateRowHeights)).toBeLessThan(80);
+  const delegateStats = delegatesPanel.locator('.surface-stats');
+  const delegateScrollRegion = delegatesPanel.locator('.surface-scroll-region');
+  const statsTop = await delegateStats.evaluate(
+    (element) => element.getBoundingClientRect().top,
+  );
+  const expandedHeader = delegatesPanel.locator('.delegate-row-toggle').first();
+  await expandedHeader.click();
+  await delegateScrollRegion.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  const expandedHeaderTop = await expandedHeader.evaluate(
+    (element) => element.getBoundingClientRect().top,
+  );
+  await delegateScrollRegion.evaluate((element) => {
+    element.scrollTop = 240;
+  });
+  const scrolledHeaderTop = await expandedHeader.evaluate(
+    (element) => element.getBoundingClientRect().top,
+  );
+  expect(Math.abs(scrolledHeaderTop - expandedHeaderTop)).toBeLessThanOrEqual(
+    1,
+  );
+  const scrolledStatsTop = await delegateStats.evaluate(
+    (element) => element.getBoundingClientRect().top,
+  );
+  expect(Math.abs(scrolledStatsTop - statsTop)).toBeLessThanOrEqual(1);
+  await delegateScrollRegion.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await delegatesPanel.locator('.delegate-row-toggle').nth(4).hover();
+  await page.mouse.wheel(0, 320);
+  await expect
+    .poll(() => delegateScrollRegion.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  expect(
+    await delegateScrollRegion.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      return element.scrollTop;
+    }),
+  ).toBeGreaterThan(0);
+  await expect(delegateStats).toBeVisible();
+  expect(
+    await delegateStats.evaluate(
+      (element) => element.getBoundingClientRect().top,
+    ),
+  ).toBeCloseTo(statsTop, 0);
+  await mocks.emit({
+    type: 'snapshot',
+    snapshot: phase6Snapshot({
+      pendingInteractions: [],
+      extensionSurfaces: [
+        {
+          id: 'tasks-1',
+          rendererId: 'tasks.current',
+          placement: 'composer',
+          viewModel: {
+            version: 1,
+            tasks: [],
+            stats: { total: 0, active: 0, done: 0, blocked: 0, ready: 0 },
           },
         },
         {
@@ -2121,24 +2262,16 @@ test('phase six mocked management flow covers refresh, fallback notification, la
       ],
     }),
   });
-  await expect(
-    page.getByRole('button', { name: /Inspect the new drawer/ }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: /Inspect the new drawer/ }).click();
-  const tasksPanel = page.getByRole('dialog', { name: 'Tasks' });
-  await expect(tasksPanel).toBeVisible();
-  await expect(tasksPanel).toContainText('0/1 complete');
-  await tasksPanel.getByRole('button', { name: 'Close Tasks' }).click();
-  await expect(tasksPanel).toHaveCount(0);
-  await page.getByRole('button', { name: /No active delegates/ }).click();
-  await expect(
-    page.getByRole('dialog', { name: 'Delegate status' }),
-  ).toBeVisible();
+  await expect(delegatesPanel).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(
-    page.getByRole('dialog', { name: 'Delegate status' }),
-  ).toHaveCount(0);
-  await page.getByRole('button', { name: 'Details', exact: true }).click();
+  await expect(delegatesPanel).toHaveCount(0);
+  await expect(page.locator('.extension-surface')).toHaveCount(0);
+  const detailsButton = page.getByRole('button', {
+    name: 'Details',
+    exact: true,
+  });
+  await expect(detailsButton).toBeFocused();
+  await detailsButton.click();
   const inspector = page.getByRole('dialog', {
     name: 'Existing session request',
   });

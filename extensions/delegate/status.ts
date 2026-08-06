@@ -51,10 +51,8 @@ interface DelegateStatusRecord extends DelegateStatusSnapshot {
   lineageId: string;
   /** The completion has been returned or delivered into the parent context. */
   resultEntered: boolean;
-  /** A later parent turn began after the result became available. */
-  turnStarted: boolean;
-  /** The parent produced an assistant message in that later turn. */
-  assistantResponded: boolean;
+  /** The parent fully settled with this result and may clear it next run. */
+  clearOnNextUserMessage: boolean;
 }
 
 const MAX_TRANSCRIPT_ENTRIES = 128;
@@ -175,8 +173,7 @@ export class DelegateStatusStore {
         activity: displayActivity(run, undefined),
         transcript: transcript(run),
         resultEntered: false,
-        turnStarted: false,
-        assistantResponded: false,
+        clearOnNextUserMessage: false,
       });
       return id;
     });
@@ -275,36 +272,36 @@ export class DelegateStatusStore {
     this.resultEntered(ids);
   }
 
-  parentTurnStarted(): void {
-    for (const record of this.records.values()) {
-      if (record.resultEntered) record.turnStarted = true;
-    }
-  }
-
-  parentAssistantMessage(): void {
-    for (const record of this.records.values()) {
-      if (record.turnStarted) record.assistantResponded = true;
-    }
-  }
-
-  /** Acknowledge only after the parent finished a later response to the result. */
-  acknowledgeSettled(): void {
+  /** Arm complete, entered lineages only after the parent genuinely settles. */
+  parentSettled(): void {
     const lineages = new Map<string, DelegateStatusRecord[]>();
     for (const record of this.records.values()) {
       const records = lineages.get(record.lineageId) ?? [];
       records.push(record);
       lineages.set(record.lineageId, records);
     }
-    const ids = [...lineages.values()]
-      .filter((records) =>
-        records.every(
-          (record) =>
-            isSettled(record.state) &&
-            record.resultEntered &&
-            record.assistantResponded,
-        ),
+    let changed = false;
+    for (const records of lineages.values()) {
+      if (
+        !records.every(
+          (record) => isSettled(record.state) && record.resultEntered,
+        )
       )
-      .flatMap((records) => records.map((record) => record.id));
+        continue;
+      for (const record of records) {
+        if (record.clearOnNextUserMessage) continue;
+        record.clearOnNextUserMessage = true;
+        changed = true;
+      }
+    }
+    if (changed) this.onChange();
+  }
+
+  /** Clear armed lineages when the user submits the next fresh message. */
+  parentUserMessage(): void {
+    const ids = [...this.records.values()]
+      .filter((record) => record.clearOnNextUserMessage)
+      .map((record) => record.id);
     this.finish(ids);
   }
 
@@ -329,8 +326,7 @@ export class DelegateStatusStore {
       const {
         lineageId: _lineageId,
         resultEntered: _resultEntered,
-        turnStarted: _turnStarted,
-        assistantResponded: _assistantResponded,
+        clearOnNextUserMessage: _clearOnNextUserMessage,
         runCount: _runCount,
         runs: _runs,
         transcript: _transcript,

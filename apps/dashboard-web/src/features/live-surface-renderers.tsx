@@ -1,5 +1,5 @@
 import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import type {
   DelegateStatus,
@@ -29,6 +29,8 @@ function stateLabel(value: string): string {
   if (state === 'queued' || state === 'todo') return 'queued';
   if (state === 'success' || state === 'done' || state === 'completed')
     return 'done';
+  if (state === 'aborted') return 'aborted';
+  if (state === 'dropped') return 'dropped';
   if (
     state === 'error' ||
     state === 'failed' ||
@@ -43,6 +45,8 @@ function stateGlyph(state: string): string {
   if (state === 'running') return '●';
   if (state === 'done') return '✓';
   if (state === 'failed' || state === 'blocked') return '!';
+  if (state === 'aborted') return '■';
+  if (state === 'dropped') return '−';
   return '○';
 }
 
@@ -50,6 +54,8 @@ function stateClass(state: string): string {
   if (state === 'running') return 'surface-running';
   if (state === 'done') return 'surface-done';
   if (state === 'failed' || state === 'blocked') return 'surface-failed';
+  if (state === 'aborted') return 'surface-aborted';
+  if (state === 'dropped') return 'surface-dropped';
   return 'surface-queued';
 }
 
@@ -78,7 +84,104 @@ function delegateStats(rows: readonly DelegateStatus[]) {
     failed: rows.filter((row) =>
       ['failed', 'blocked'].includes(stateLabel(row.state)),
     ).length,
+    aborted: rows.filter((row) => stateLabel(row.state) === 'aborted').length,
   };
+}
+
+function focusAfterSurfaceHides(launcher: HTMLButtonElement | null) {
+  if (
+    !launcher ||
+    (document.activeElement !== launcher &&
+      document.activeElement !== document.body)
+  )
+    return;
+  const fallback = document.querySelector<HTMLElement>(
+    '[aria-label="Send a message"] [role="textbox"], .session-details-trigger:not(:disabled)',
+  );
+  if (fallback?.getClientRects().length)
+    fallback.focus({ preventScroll: true });
+}
+
+function WorkSurface({
+  title,
+  label,
+  summary,
+  count,
+  children,
+}: {
+  title: string;
+  label: string;
+  summary: string;
+  count: number;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const [visible, setVisible] = useState(count > 0);
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (count > 0) {
+      setVisible(true);
+      return;
+    }
+    if (open) return;
+    const timeout = window.setTimeout(() => {
+      focusAfterSurfaceHides(launcherRef.current);
+      setVisible(false);
+    }, 180);
+    return () => window.clearTimeout(timeout);
+  }, [count, open]);
+  if (!visible) return null;
+  return (
+    <>
+      <article className="extension-surface" aria-label={title}>
+        <AriaButton
+          ref={launcherRef}
+          type="button"
+          className="surface-launcher"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          onPress={() => setOpen((current) => !current)}
+        >
+          <span className="surface-title">
+            <span className="surface-title-line">
+              <span className="eyebrow">{label}</span>
+              <span className="surface-count">{count}</span>
+            </span>
+            <strong>{summary}</strong>
+          </span>
+          <span className="surface-chevron" aria-hidden="true">
+            ›
+          </span>
+        </AriaButton>
+      </article>
+      <DashboardDialog
+        title={title}
+        className="surface-dialog work-surface-dialog"
+        isOpen={open}
+        onClose={() => setOpen(false)}
+      >
+        <div className="work-surface-content">{children}</div>
+      </DashboardDialog>
+    </>
+  );
+}
+
+function SurfaceStats({
+  stats,
+}: {
+  stats: readonly { label: string; value: number; tone?: string }[];
+}) {
+  return (
+    <div className="surface-stats" role="status" aria-label="Status summary">
+      {stats
+        .filter((stat) => stat.value > 0)
+        .map((stat) => (
+          <span className={stat.tone} key={stat.label}>
+            <strong>{stat.value}</strong> {stat.label}
+          </span>
+        ))}
+    </div>
+  );
 }
 
 export function DelegateTranscript({
@@ -133,9 +236,8 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
   const model = surface.viewModel as DelegateStatusViewModel;
   const rows = delegateRows(model);
   const stats = delegateStats(rows);
-  const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const title = 'Delegate status';
+  const title = 'Delegates';
   const toggle = (id: string) =>
     setExpanded((current) => {
       const next = new Set(current);
@@ -144,49 +246,30 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
     });
   const active = rows.find((row) => stateLabel(row.state) === 'running');
   const summary = active
-    ? `● ${short(text(active.name, 'Subagent'), 42)}`
+    ? short(text(active.name, 'Subagent'), 42)
     : stats.failed
-      ? '! A delegate failed'
-      : stats.done
-        ? '✓ Delegates complete'
-        : 'No active delegates';
+      ? `${stats.failed} need attention`
+      : stats.aborted
+        ? `${stats.aborted} stopped`
+        : 'All delegates complete';
   return (
-    <>
-      <article
-        className="extension-surface surface-delegate"
-        aria-label={title}
-      >
-        <AriaButton
-          type="button"
-          className="surface-launcher"
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          onPress={() => setOpen((current) => !current)}
-        >
-          <span className="surface-title">
-            <span className="eyebrow">Delegates</span>
-            <strong>{summary}</strong>
-          </span>
-          <span className="surface-chevron" aria-hidden="true">
-            ›
-          </span>
-        </AriaButton>
-      </article>
-      <DashboardDialog
-        title={title}
-        isOpen={open}
-        onClose={() => setOpen(false)}
-      >
-        <div
-          className="surface-summary"
-          role="status"
-          aria-label="Delegate status summary"
-        >
-          {rows.length
-            ? 'Select a delegate to inspect its latest activity.'
-            : 'No delegate runs reported.'}
-        </div>
-        <div className="delegate-rows surface-detail-list">
+    <WorkSurface
+      title={title}
+      label="Delegates"
+      summary={summary}
+      count={rows.length}
+    >
+      <div className="delegate-scroll surface-scroll-region">
+        <SurfaceStats
+          stats={[
+            { label: 'running', value: stats.running, tone: 'surface-running' },
+            { label: 'queued', value: stats.queued },
+            { label: 'failed', value: stats.failed, tone: 'surface-failed' },
+            { label: 'stopped', value: stats.aborted, tone: 'surface-aborted' },
+            { label: 'done', value: stats.done, tone: 'surface-done' },
+          ]}
+        />
+        <div className="delegate-rows">
           {rows.map((row) => {
             const id = row.id;
             const state = stateLabel(row.state);
@@ -334,8 +417,8 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
             );
           })}
         </div>
-      </DashboardDialog>
-    </>
+      </div>
+    </WorkSurface>
   );
 }
 
@@ -347,103 +430,75 @@ function taskDependencies(row: TaskSurfaceTask): readonly string[] {
   return row.dependsOn.slice(0, 6);
 }
 
+function taskIsComplete(row: TaskSurfaceTask): boolean {
+  const state = stateLabel(row.status);
+  return state === 'done' || state === 'dropped';
+}
+
 function TasksSurface({ surface }: { surface: ExtensionSurface }) {
   const model = surface.viewModel as TaskStateViewModel;
   const rows = taskRows(model);
-  const [open, setOpen] = useState(false);
-  const completed = rows.filter(
-    (row) => stateLabel(row.status) === 'done',
-  ).length;
+  const completed = rows.filter(taskIsComplete).length;
   const total = rows.length;
   const progress = total ? Math.round((completed / total) * 100) : 0;
   const title = 'Tasks';
   const current = rows.find((row) => stateLabel(row.status) === 'running');
   const summary = current
-    ? `● ${short(text(current.text, 'Task in progress'), 42)}`
-    : total === 0
-      ? 'No tasks reported'
-      : completed === total
-        ? 'All tasks complete'
-        : 'Tasks need attention';
+    ? short(text(current.text, 'Task in progress'), 42)
+    : completed === total
+      ? 'All tasks complete'
+      : `${total - completed} remaining`;
   return (
-    <>
-      <article className="extension-surface surface-tasks" aria-label={title}>
-        <AriaButton
-          type="button"
-          className="surface-launcher"
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          onPress={() => setOpen((value) => !value)}
-        >
-          <span className="surface-title">
-            <span className="eyebrow">Tasks</span>
-            <strong>{summary}</strong>
-          </span>
-          <span className="surface-chevron" aria-hidden="true">
-            ›
-          </span>
-        </AriaButton>
-      </article>
-      <DashboardDialog
-        title={title}
-        isOpen={open}
-        onClose={() => setOpen(false)}
+    <WorkSurface title={title} label="Tasks" summary={summary} count={total}>
+      <div
+        className="task-progress"
+        role="progressbar"
+        aria-label="Task progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress}
       >
-        <div
-          className="task-progress"
-          role="progressbar"
-          aria-label="Task progress"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={progress}
-        >
-          <span>
-            {completed}/{total} complete
-          </span>
-          <span className="task-progress-track" aria-hidden="true">
-            <i style={{ width: `${progress}%` }} />
-          </span>
-        </div>
-        <div className="task-rows surface-detail-list">
-          {rows.map((row) => {
-            const state = stateLabel(row.status);
-            const id = row.id;
-            const priority = row.priority;
-            const dependencies = taskDependencies(row);
-            return (
-              <div
-                className={`task-row ${stateClass(state)}`}
-                key={`${surface.id}-${id}`}
-              >
-                <span
-                  className="surface-state"
-                  title={state}
-                  aria-hidden="true"
-                >
-                  {stateGlyph(state)}
-                </span>
-                <span className="sr-only">{state}</span>
-                <span className="task-row-main">
-                  <strong>{id}</strong>
-                  <span>{short(row.text || 'Untitled task', 180)}</span>
-                </span>
-                <span className="task-row-meta">
-                  {priority && (
-                    <b className={`priority-${priority}`}>{priority}</b>
-                  )}
-                  {dependencies.length > 0 && (
-                    <small title={`Depends on ${dependencies.join(', ')}`}>
-                      ↳ {dependencies.join(', ')}
-                    </small>
-                  )}
-                </span>
-              </div>
-            );
-          })}
-          {!rows.length && <span className="muted">No tasks reported.</span>}
-        </div>
-      </DashboardDialog>
-    </>
+        <span>
+          <strong>{completed}</strong> of {total} complete
+        </span>
+        <span className="task-progress-track" aria-hidden="true">
+          <i style={{ width: `${progress}%` }} />
+        </span>
+      </div>
+      <div className="task-rows surface-detail-list surface-scroll-region">
+        {rows.map((row) => {
+          const state = stateLabel(row.status);
+          const id = row.id;
+          const priority = row.priority;
+          const dependencies = taskDependencies(row);
+          return (
+            <div
+              className={`task-row ${stateClass(state)}`}
+              key={`${surface.id}-${id}`}
+            >
+              <span className="surface-state" title={state} aria-hidden="true">
+                {stateGlyph(state)}
+              </span>
+              <span className="sr-only">{state}</span>
+              <span className="task-row-main">
+                <strong>{id}</strong>
+                <span>{short(row.text || 'Untitled task', 180)}</span>
+              </span>
+              <span className="task-row-meta">
+                {priority && (
+                  <b className={`priority-${priority}`}>{priority}</b>
+                )}
+                {dependencies.length > 0 && (
+                  <small title={`Depends on ${dependencies.join(', ')}`}>
+                    ↳ {dependencies.join(', ')}
+                  </small>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </WorkSurface>
   );
 }
 

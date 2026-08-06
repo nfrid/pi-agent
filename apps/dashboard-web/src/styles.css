@@ -1420,6 +1420,10 @@ h2 {
 .extension-surface-slot {
   min-width: 0;
 }
+.extension-surface-slot:empty,
+.extension-surfaces:not(:has(.extension-surface)) {
+  display: none;
+}
 .extension-surface {
   min-width: 0;
   border: 1px solid var(--line-soft);
@@ -1494,6 +1498,12 @@ h2 {
 .surface-failed {
   color: var(--red);
 }
+.surface-aborted {
+  color: var(--orange);
+}
+.surface-dropped {
+  color: var(--dim);
+}
 .surface-queued {
   color: var(--muted);
 }
@@ -1501,6 +1511,8 @@ h2 {
 .task-rows {
   display: grid;
   min-width: 0;
+  align-content: start;
+  grid-auto-rows: max-content;
 }
 .surface-detail-list {
   max-height: min(260px, 42vh);
@@ -1543,6 +1555,12 @@ h2 {
 }
 .surface-failed .surface-state {
   color: var(--red);
+}
+.surface-aborted .surface-state {
+  color: var(--orange);
+}
+.surface-dropped .surface-state {
+  color: var(--dim);
 }
 .delegate-row-main {
   display: grid;
@@ -1690,6 +1708,12 @@ h2 {
 }
 .surface-state.surface-failed {
   color: var(--red);
+}
+.surface-state.surface-aborted {
+  color: var(--orange);
+}
+.surface-state.surface-dropped {
+  color: var(--dim);
 }
 .task-progress {
   display: grid;
@@ -3192,7 +3216,7 @@ h2 {
   transform: translateX(-50%);
 }
 .extension-surfaces {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 6px;
   margin: 0 0 6px;
 }
@@ -3211,13 +3235,13 @@ h2 {
   justify-content: space-between;
   width: 100%;
   min-width: 0;
-  min-height: 48px;
+  min-height: 42px;
   gap: 8px;
   border: 0;
   border-radius: 7px;
   background: transparent;
   color: var(--fg);
-  padding: 8px 10px;
+  padding: 6px 9px;
   text-align: left;
   cursor: pointer;
 }
@@ -3229,10 +3253,26 @@ h2 {
   min-width: 0;
   gap: 1px;
 }
+.surface-title-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
 .surface-launcher .eyebrow {
   margin: 0;
   color: var(--dim);
   font-size: 9px;
+}
+.surface-launcher .surface-count {
+  min-width: 16px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--purple) 14%, transparent);
+  color: var(--muted);
+  padding: 0 5px;
+  font-size: 9px;
+  line-height: 15px;
+  text-align: center;
 }
 .surface-launcher strong {
   overflow: hidden;
@@ -3317,6 +3357,83 @@ h2 {
 .surface-dialog-body .task-progress {
   padding-right: 0;
   padding-left: 0;
+}
+.work-surface-dialog .surface-dialog-body {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+.work-surface-content {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+.surface-stats {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 0 10px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.surface-stats > span {
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  padding: 4px 7px;
+}
+.surface-stats strong {
+  color: currentColor;
+  font-variant-numeric: tabular-nums;
+}
+.delegate-scroll {
+  --delegate-sticky-header-offset: 46px;
+}
+.delegate-scroll .surface-stats {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  min-height: var(--delegate-sticky-header-offset);
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-alt);
+}
+.delegate-row:has(> .delegate-row-detail) > .delegate-row-toggle {
+  position: sticky;
+  z-index: 1;
+  top: var(--delegate-sticky-header-offset);
+  background: var(--bg-alt);
+  box-shadow: 0 1px 0 var(--line-soft);
+}
+.work-surface-dialog .task-progress {
+  flex: none;
+  padding-top: 12px;
+  padding-bottom: 10px;
+}
+.work-surface-dialog .task-progress strong {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+.work-surface-dialog .surface-scroll-region {
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--line) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+.work-surface-dialog :is(.delegate-row, .task-row) {
+  border-top: 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.work-surface-dialog :is(.delegate-row, .task-row):first-child {
+  border-top: 1px solid var(--line-soft);
 }
 .utility-dialog .surface-dialog-body {
   padding-top: 14px;

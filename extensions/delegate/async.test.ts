@@ -12,6 +12,7 @@ import {
   resolveArtifact,
   restoreArtifacts,
 } from '../shared/artifacts';
+import { liveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
 import type { DelegateConfig } from './config';
 import * as configModule from './config';
 import delegate, { DELEGATES_COMMAND_DESCRIPTION } from './index';
@@ -440,20 +441,42 @@ describe('async delegate extension', () => {
     );
     expect(widget?.render(100).join('\n')).toContain('done');
 
-    // The completion was queued during an existing turn, so that turn's
-    // assistant message cannot acknowledge a result it never received.
-    handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
+    // The completion was queued during an existing turn, so that settlement
+    // cannot arm cleanup before the automatic delivery is processed.
     handlers.get('agent_settled')?.({}, ctx);
     expect(widget?.render(100).join('\n')).toContain('done');
-
-    handlers.get('turn_start')?.({}, ctx);
-    handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
-    handlers.get('agent_settled')?.({}, ctx);
-    expect(widget?.render(100)).toEqual([]);
 
     handlers.get('context')?.({
       messages: [sendMessage.mock.calls[0]?.[0]],
     });
+    handlers.get('agent_settled')?.({}, ctx);
+    expect(widget?.render(100).join('\n')).toContain('done');
+    expect(
+      (
+        liveExtensionSurfaceHub
+          .snapshot()
+          .find((surface) => surface.rendererId === 'delegate.status')
+          ?.viewModel as { statuses?: unknown[] } | undefined
+      )?.statuses,
+    ).toHaveLength(1);
+
+    handlers.get('input')?.(
+      { source: 'interactive', streamingBehavior: 'steer' },
+      ctx,
+    );
+    handlers.get('input')?.({ source: 'extension' }, ctx);
+    expect(widget?.render(100).join('\n')).toContain('done');
+
+    handlers.get('input')?.({ source: 'interactive' }, ctx);
+    expect(widget?.render(100)).toEqual([]);
+    expect(
+      (
+        liveExtensionSurfaceHub
+          .snapshot()
+          .find((surface) => surface.rendererId === 'delegate.status')
+          ?.viewModel as { statuses?: unknown[] } | undefined
+      )?.statuses,
+    ).toEqual([]);
     const peek = await tools
       .get('delegate_jobs')
       ?.execute(
@@ -1248,16 +1271,23 @@ describe('async delegate extension', () => {
       'Inline fallback (artifact unavailable)',
     );
     expect(entries).toHaveLength(0);
-    handlers.get('turn_start')?.({}, ctx);
-    handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
     handlers.get('agent_settled')?.({}, ctx);
-    const afterAcknowledgment =
+    const afterSettlement =
       widgetFactory?.(
         { requestRender: vi.fn() },
         { fg: (_color, text: string) => text },
       ).render(100) ?? [];
-    expect(afterAcknowledgment.join('\n')).not.toContain('Foreground audit');
-    expect(afterAcknowledgment.join('\n')).toContain('Subagent');
+    expect(afterSettlement.join('\n')).toContain('Subagent');
+
+    handlers.get('input')?.({ source: 'rpc' }, ctx);
+    const afterNextUserMessage =
+      widgetFactory?.(
+        { requestRender: vi.fn() },
+        { fg: (_color, text: string) => text },
+      ).render(100) ?? [];
+    // The earlier stale run shares this continuation lineage and has not been
+    // inspected yet, so neither run in the lineage is eligible for cleanup.
+    expect(afterNextUserMessage.join('\n')).toContain('Subagent');
 
     const crossBranch = await tools
       .get('delegate_jobs')
@@ -1305,9 +1335,14 @@ describe('async delegate extension', () => {
         undefined,
         ctx,
       );
-    handlers.get('turn_start')?.({}, ctx);
-    handlers.get('message_end')?.({ message: { role: 'assistant' } }, ctx);
     handlers.get('agent_settled')?.({}, ctx);
+    expect(
+      widgetFactory?.(
+        { requestRender: vi.fn() },
+        { fg: (_color, text) => text },
+      ).render(100),
+    ).not.toEqual([]);
+    handlers.get('input')?.({ source: 'interactive' }, ctx);
     expect(
       widgetFactory?.(
         { requestRender: vi.fn() },
