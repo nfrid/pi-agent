@@ -29,8 +29,11 @@ export function WorkspaceView({
           <h1>{workspace?.name ?? 'Unknown workspace'}</h1>
           <p className="muted path">{workspace?.canonicalPath}</p>
         </div>
-        <button type="button" onClick={() => go('/new')}>
-          Start agent
+        <button
+          type="button"
+          onClick={() => go(`/workspaces/${encodeURIComponent(id)}/new`)}
+        >
+          New chat
         </button>
       </div>
       {workspace && !workspace.active && (

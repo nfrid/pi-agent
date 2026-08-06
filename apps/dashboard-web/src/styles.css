@@ -2835,6 +2835,104 @@ h2 {
   gap: 24px;
   min-width: 0;
 }
+.new-chat-page {
+  min-width: 0;
+  min-height: min(680px, calc(100vh - 120px));
+}
+.new-chat-heading {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 7px 0;
+}
+.new-chat-heading .eyebrow {
+  margin-bottom: 2px;
+}
+.new-chat-heading h1 {
+  margin: 0;
+  font-size: 17px;
+}
+.new-chat-empty {
+  display: grid;
+  min-height: 500px;
+  place-content: center;
+  justify-items: center;
+  gap: 22px;
+  padding: 24px;
+}
+.new-chat-intro {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+.new-chat-intro .empty-mark {
+  margin-bottom: 12px;
+}
+.new-chat-intro h2 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 15px;
+}
+.new-chat-intro p {
+  margin: 7px 0 0;
+  font-size: 12px;
+}
+.new-chat-composer {
+  width: min(100%, 660px);
+  box-sizing: border-box;
+}
+.new-chat-composer textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 74px;
+  max-height: 220px;
+  resize: vertical;
+}
+.new-chat-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.new-chat-composer-actions .composer-send {
+  display: inline-flex;
+  width: 30px;
+  padding: 0;
+}
+.new-chat-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+.new-chat-error p {
+  margin: 0;
+}
+.new-chat-pending-state {
+  display: grid;
+  min-height: 500px;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+.new-chat-pending-state strong {
+  color: var(--fg);
+  font-size: 14px;
+}
+.new-chat-pending-state p {
+  margin: 0;
+  font-size: 12px;
+}
+.new-chat-missing {
+  max-width: 620px;
+}
+.new-chat-missing h1 {
+  margin-top: 0;
+}
 .session-transcript-loading {
   min-height: min(46vh, 420px);
   display: grid;
@@ -2900,7 +2998,6 @@ h2 {
   font-size: 14px;
   font-weight: 650;
 }
-.agent-nav-new,
 .agent-nav-utility {
   border: 1px solid var(--line-soft);
   border-radius: 6px;
@@ -2908,14 +3005,6 @@ h2 {
   color: var(--muted);
   cursor: pointer;
 }
-.agent-nav-new {
-  width: 27px;
-  height: 27px;
-  color: var(--purple);
-  font-size: 18px;
-  line-height: 1;
-}
-.agent-nav-new:hover,
 .agent-nav-utility:hover {
   border-color: var(--purple);
   color: var(--fg);
@@ -2961,12 +3050,36 @@ h2 {
 }
 .agent-workspace-heading {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 3px 7px 5px;
   color: var(--dim);
   font-size: 10px;
   font-weight: 700;
+}
+.agent-workspace-heading-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 5px;
+}
+.agent-workspace-heading .agent-workspace-new {
+  display: inline-grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--purple);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.agent-workspace-heading .agent-workspace-new:hover {
+  border-color: var(--purple);
+  color: var(--fg);
 }
 .agent-workspace-heading button {
   min-width: 0;
@@ -4223,7 +4336,6 @@ body:has(.session-page) .global-tools > .palette-trigger {
   margin-left: 8px;
 }
 .session-icon-button,
-.agent-nav-new,
 .composer-attach,
 .composer-send {
   box-sizing: border-box;
@@ -4231,10 +4343,6 @@ body:has(.session-page) .global-tools > .palette-trigger {
   justify-content: center;
   padding: 0;
   line-height: 1;
-}
-.agent-nav-new {
-  display: inline-grid;
-  place-items: center;
 }
 .session-icon-glyph {
   display: grid;

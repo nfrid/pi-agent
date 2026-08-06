@@ -2,10 +2,13 @@ import type { MDXEditorMethods } from '@mdxeditor/editor';
 import {
   commandMutationOptions,
   dashboardHttpClient,
+  startRuntimeMutationOptions,
 } from '@pi-dashboard/client';
-import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type {
+  RuntimeSnapshot,
+  StartRuntimeRequest,
+} from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
 import {
   type FormEvent,
   lazy,
@@ -15,11 +18,7 @@ import {
   useState,
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
-
-function useDashboardNavigate(): (path: string) => void {
-  const navigate = useNavigate();
-  return (path) => void navigate({ to: path });
-}
+import { useDashboardNavigate } from '../routes/navigation';
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 const MarkdownComposerEditor = lazy(() => import('./markdown-composer-editor'));
@@ -34,6 +33,21 @@ export type QueuedMessage = {
   mode: 'steer' | 'followUp';
   text: string;
 };
+
+export function resumeRuntimeRequest(
+  workspaceId: string | undefined,
+  sessionId: string,
+  acknowledgeSharedWorkingDirectory = false,
+): StartRuntimeRequest | undefined {
+  if (!workspaceId) return undefined;
+  return {
+    workspaceId,
+    sessionId,
+    ...(acknowledgeSharedWorkingDirectory
+      ? { acknowledgeSharedWorkingDirectory: true }
+      : {}),
+  };
+}
 
 export function queuedMessagesForRuntime(
   runtime: RuntimeSnapshot | undefined,
@@ -364,9 +378,12 @@ function ThinkingControl({ runtime }: { runtime: RuntimeSnapshot }) {
 
 export function Composer({
   runtime,
+  sessionId,
+  workspaceId,
 }: {
   runtime: RuntimeSnapshot | undefined;
   sessionId: string;
+  workspaceId?: string;
 }) {
   const go = useDashboardNavigate();
   const [text, setText] = useState('');
@@ -380,8 +397,14 @@ export function Composer({
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [resumeError, setResumeError] = useState<string>();
+  const [resumeWarning, setResumeWarning] = useState(false);
+  const [resumePending, setResumePending] = useState(false);
   const commandMutation = useMutation(
     commandMutationOptions(dashboardHttpClient),
+  );
+  const resumeMutation = useMutation(
+    startRuntimeMutationOptions(dashboardHttpClient),
   );
   const serverQueue = queuedMessagesForRuntime(runtime);
   const serverQueueKey = JSON.stringify(serverQueue);
@@ -419,13 +442,63 @@ export function Composer({
       return [];
     });
   }, [attachmentsEnabled]);
+  const resume = async (acknowledge = false) => {
+    const request = resumeRuntimeRequest(workspaceId, sessionId, acknowledge);
+    if (!request || resumeMutation.isPending) {
+      if (!request)
+        setResumeError('This session has no workspace association.');
+      return;
+    }
+    setResumeError(undefined);
+    setResumeWarning(false);
+    try {
+      await resumeMutation.mutateAsync(request);
+      setResumePending(true);
+    } catch (cause) {
+      const details =
+        cause instanceof Error
+          ? (cause as Error & { code?: unknown })
+          : { message: String(cause) };
+      const message = details.message;
+      setResumeError(message);
+      setResumeWarning(
+        (details as { code?: unknown }).code === 'shared-working-directory' ||
+          /shared-working-directory|both agents/i.test(message),
+      );
+    }
+  };
+  if (!runtime && resumePending)
+    return (
+      <div className="composer disabled" role="status" aria-live="polite">
+        <p>Starting agent…</p>
+      </div>
+    );
   if (!runtime)
     return (
       <div className="composer disabled">
         <p>This session is dormant.</p>
-        <button type="button" onClick={() => go('/new')}>
-          Resume in a new runtime
+        <button
+          type="button"
+          disabled={resumeMutation.isPending}
+          onClick={() => void resume()}
+        >
+          {resumeMutation.isPending ? 'Starting agent…' : 'Resume session'}
         </button>
+        {resumeError && (
+          <div className="composer-error" role="alert">
+            <p className="error">{resumeError}</p>
+            {resumeWarning && (
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={resumeMutation.isPending}
+                onClick={() => void resume(true)}
+              >
+                Continue
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
   if (runtime.online === false)

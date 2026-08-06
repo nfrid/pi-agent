@@ -34,6 +34,7 @@ import {
   DashboardUtilityProvider,
   useDashboardUtility,
 } from './features/dashboard-utility-context';
+import { NewChatView } from './features/new-chat';
 import { SessionView } from './features/session';
 import {
   Dashboard,
@@ -43,7 +44,8 @@ import {
   WorkspacesView,
   WorkspaceView,
 } from './routes/dashboard';
-import { LaunchView, RuntimeView } from './routes/runtime';
+import { newChatPath, useDashboardNavigate } from './routes/navigation';
+import { RuntimeView } from './routes/runtime';
 
 export {
   isNearPageBottom,
@@ -74,6 +76,7 @@ export {
   queueCommand,
   queuedMessagesForRuntime,
   queueRemoveCommand,
+  resumeRuntimeRequest,
   runtimeSupportsImages,
   shouldShowQueuePanel,
 } from './features/composer';
@@ -82,6 +85,12 @@ export {
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
 } from './features/extension-surfaces';
+export {
+  newChatRequest,
+  pendingChatPath,
+  sessionPathForRuntime,
+} from './features/new-chat';
+export { newChatPath } from './routes/navigation';
 export { toTranscriptEntries } from './transcript';
 
 const DashboardContext = createContext<
@@ -189,7 +198,10 @@ function RouteShell() {
   const routeState = useRouterState({
     select: (state) => ({
       isSession: state.matches.some(
-        (match) => match.routeId === '/sessions/$sessionId',
+        (match) =>
+          match.routeId === '/sessions/$sessionId' ||
+          match.routeId === '/workspaces/$workspaceId/new' ||
+          match.routeId === '/workspaces/$workspaceId/new/pending/$runtimeId',
       ),
       pathname: state.location.pathname,
     }),
@@ -307,6 +319,35 @@ function WorkspaceRoute() {
   ) : null;
 }
 
+function NewChatRoute() {
+  const { workspaceId } = useParams({
+    from: '/workspaces/$workspaceId/new',
+  });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <NewChatView
+      workspaceId={workspaceId}
+      snapshot={dashboard.snapshot}
+      store={dashboard.store}
+    />
+  ) : null;
+}
+
+function PendingNewChatRoute() {
+  const { workspaceId, runtimeId } = useParams({
+    from: '/workspaces/$workspaceId/new/pending/$runtimeId',
+  });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <NewChatView
+      workspaceId={workspaceId}
+      pendingRuntimeId={runtimeId}
+      snapshot={dashboard.snapshot}
+      store={dashboard.store}
+    />
+  ) : null;
+}
+
 function WorkspacesRoute() {
   const dashboard = useDashboardContext();
   return dashboard.snapshot ? (
@@ -339,11 +380,18 @@ function RuntimeRoute() {
   ) : null;
 }
 
-function NewRoute() {
+function LegacyNewRoute() {
   const dashboard = useDashboardContext();
-  return dashboard.snapshot ? (
-    <LaunchView snapshot={dashboard.snapshot} store={dashboard.store} />
-  ) : null;
+  const go = useDashboardNavigate();
+  const path = dashboard.snapshot
+    ? newChatPath(dashboard.snapshot)
+    : '/workspaces';
+  useEffect(() => go(path), [go, path]);
+  return (
+    <section className="new-chat-missing" role="status">
+      <p>Opening a new chat…</p>
+    </section>
+  );
 }
 
 const rootRoute = createRootRoute({ component: RouteShell });
@@ -372,6 +420,16 @@ const workspaceRoute = createRoute({
   path: '/workspaces/$workspaceId',
   component: WorkspaceRoute,
 });
+const newChatRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/workspaces/$workspaceId/new',
+  component: NewChatRoute,
+});
+const pendingNewChatRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/workspaces/$workspaceId/new/pending/$runtimeId',
+  component: PendingNewChatRoute,
+});
 const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/inbox',
@@ -382,10 +440,10 @@ const runtimeRoute = createRoute({
   path: '/runtimes/$runtimeId',
   component: RuntimeRoute,
 });
-const newRoute = createRoute({
+const legacyNewRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/new',
-  component: NewRoute,
+  component: LegacyNewRoute,
 });
 export const dashboardRouteTree = rootRoute.addChildren([
   homeRoute,
@@ -393,9 +451,11 @@ export const dashboardRouteTree = rootRoute.addChildren([
   sessionRoute,
   workspacesRoute,
   workspaceRoute,
+  newChatRoute,
+  pendingNewChatRoute,
   inboxRoute,
   runtimeRoute,
-  newRoute,
+  legacyNewRoute,
 ]);
 export const dashboardRouterInstance = createRouter({
   routeTree: dashboardRouteTree,

@@ -4,9 +4,10 @@ import {
   type RuntimeCapabilitySnapshot,
 } from '@pi-dashboard/extension-contributions';
 import type { BrowserSnapshot, RuntimeSnapshot } from '@pi-dashboard/protocol';
+import { useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { sessionDisplayTitle } from '../app-helpers';
-import { useDashboardNavigate } from '../routes/navigation';
+import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { useDashboardUtility } from './dashboard-utility-context';
 import { DASHBOARD_MOTION_MS, useOverlayPresence } from './overlay-presence';
 
@@ -69,7 +70,10 @@ function snapshotActions(snapshot: BrowserSnapshot) {
   );
 }
 
-export function paletteItems(snapshot: BrowserSnapshot): PaletteItem[] {
+export function paletteItems(
+  snapshot: BrowserSnapshot,
+  workspaceId?: string,
+): PaletteItem[] {
   const primary: PaletteItem[] = [
     {
       kind: 'navigate',
@@ -80,10 +84,10 @@ export function paletteItems(snapshot: BrowserSnapshot): PaletteItem[] {
     },
     {
       kind: 'navigate',
-      id: 'new-agent',
-      title: 'New Agent',
-      description: 'Start an agent in a workspace',
-      path: '/new',
+      id: 'new-chat',
+      title: 'New chat',
+      description: 'Start a chat in the active workspace',
+      path: newChatPath(snapshot, workspaceId),
     },
     {
       kind: 'navigate',
@@ -161,7 +165,14 @@ export function CommandPalette({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const utilityTimerRef = useRef<number | undefined>(undefined);
   const wasOpenRef = useRef(false);
-  const items = paletteItems(snapshot);
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
+  const workspaceMatch = pathname.match(/^\/workspaces\/([^/]+)(?:\/|$)/u);
+  const items = paletteItems(
+    snapshot,
+    workspaceMatch?.[1] ? decodeURIComponent(workspaceMatch[1]) : undefined,
+  );
   const runtimeActionCount = items.filter(
     (item) => item.kind === 'action',
   ).length;

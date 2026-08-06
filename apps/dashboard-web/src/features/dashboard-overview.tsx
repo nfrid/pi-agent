@@ -8,7 +8,7 @@ import { workspaceForPath } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { useState } from 'react';
 import { sessionDisplayTitle } from '../app-helpers';
-import { useDashboardNavigate } from '../routes/navigation';
+import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav, agentThreadRows } from './agent-thread-nav';
 import { SessionRow } from './workspace-session';
 
@@ -104,8 +104,8 @@ export function Dashboard({
             nav to open its transcript.
           </p>
           <div className="empty-workspace-actions">
-            <button type="button" onClick={() => go('/new')}>
-              New agent
+            <button type="button" onClick={() => go(newChatPath(snapshot))}>
+              New chat
             </button>
             {latestId && (
               <button

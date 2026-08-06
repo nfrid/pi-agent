@@ -20,4 +20,4 @@ export { InboxView } from '../features/inbox';
 export { Header, runtimeStatusCounts } from '../features/navigation';
 export { SessionRow } from '../features/workspace-session';
 export { WorkspaceView } from '../features/workspace-view';
-export { Back, useDashboardNavigate } from './navigation';
+export { Back, newChatPath, useDashboardNavigate } from './navigation';
