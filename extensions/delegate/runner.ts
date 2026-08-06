@@ -262,9 +262,12 @@ export async function runDelegate(
       run.errorMessage = `Delegated task timed out after ${Math.round(options.timeoutMs / 1000)} seconds.`;
       setDelegateLifecycle(run, 'timeout', run.errorMessage);
       run.state = 'timed-out';
-    } else if (!spawnError && exitCode !== 0 && !run.errorMessage) {
+    } else if (!spawnError && exitCode !== 0) {
+      // A child error event may have populated errorMessage before close. The
+      // observed nonzero exit is still the stable lifecycle cause; that text
+      // is evidence only, bounded inside the diagnostic.
       run.stopReason = 'error';
-      run.errorMessage = `Child Pi exited with code ${exitCode}.`;
+      run.errorMessage ||= `Child Pi exited with code ${exitCode}.`;
       setDelegateLifecycleText(
         run,
         'child-nonzero-exit',

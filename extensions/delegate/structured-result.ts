@@ -5,6 +5,7 @@ import {
   copyDelegateLifecycle,
   ensureDelegateLifecycle,
   getDelegateLifecycle,
+  hydrateDelegateLifecycle,
   setDelegateLifecycle,
 } from './lifecycle';
 import type { DelegatedRun } from './types';
@@ -1035,6 +1036,32 @@ export function serializeDelegateRunForPublic(
   }
   if (!includeArtifacts) delete publicRun.artifact;
   return publicRun;
+}
+
+/**
+ * Project a run for a stale session. The exact lifecycle capture remains in
+ * the owner run/weak-map; this clone carries only the bounded fallback and no
+ * owner artifact handle.
+ */
+export function serializeDelegateRunForStaleSession(
+  run: DelegatedRun,
+): DelegatedRun {
+  const { artifact: _artifact, ...safeRun } = serializeDelegateRunForPublic(
+    run,
+    { includeArtifacts: false },
+  );
+  const lifecycle = getDelegateLifecycle(run, {
+    includeArtifact: false,
+    includeBoundedFallback: true,
+  });
+  if (lifecycle) {
+    safeRun.lifecycle = lifecycle;
+    // Make the bounded projection authoritative for this clone. Copying the
+    // source WeakMap record would otherwise restore the exact >2 KiB capture
+    // before the stale handoff/details renderer gets to project it.
+    hydrateDelegateLifecycle(safeRun, lifecycle);
+  }
+  return safeRun;
 }
 
 /** Parse only the bounded schema passed to a child process. */

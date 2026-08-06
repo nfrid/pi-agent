@@ -3,9 +3,14 @@ import * as delegateChild from './delegate-child';
 import {
   getDelegateLifecycle,
   getDelegateLifecycleDiagnostic,
+  LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
+  LIFECYCLE_PUBLIC_FALLBACK_MARKER,
   setDelegateLifecycle,
 } from './lifecycle';
+import { getDetails } from './render-utils';
 import { runDelegate } from './runner';
+import { DelegateStatusStore } from './status';
+import { serializeDelegateRunForPublic } from './structured-result';
 import { buildArtifactBackedHandoff, makeDetails } from './tool-result';
 import { createRun } from './types';
 
@@ -44,6 +49,48 @@ describe('delegate lifecycle failure projection', () => {
     expect(JSON.stringify(details)).not.toContain('spoofed');
   });
 
+  test('retains lifecycle projections across trusted details and status snapshots', () => {
+    const run = createRun('durable lifecycle');
+    run.state = 'error';
+    run.exitCode = 1;
+    setDelegateLifecycle(run, 'provider-runner-error', 'runner failed');
+
+    const details = makeDetails('single', [run]);
+    const persisted = JSON.parse(JSON.stringify(details));
+    const hydrated = getDetails({ details: persisted });
+    const hydratedRun = hydrated?.runs[0];
+    if (!hydratedRun) throw new Error('missing hydrated run');
+    expect(serializeDelegateRunForPublic(hydratedRun).lifecycle).toMatchObject({
+      reason: 'provider-runner-error',
+      diagnostic: 'runner failed',
+    });
+
+    const statuses = new DelegateStatusStore();
+    statuses.start([run], 'foreground');
+    expect(statuses.list()[0]?.lifecycle).toMatchObject({
+      reason: 'provider-runner-error',
+      diagnostic: 'runner failed',
+    });
+  });
+
+  test('does not hydrate an arbitrary child lifecycle field as harness state', () => {
+    const run = createRun('spoof');
+    run.state = 'error';
+    (run as unknown as { lifecycle: unknown }).lifecycle = {
+      reason: 'user-cancellation',
+      diagnostic: 'child spoof',
+      continuationUsable: true,
+      writableBranchRetained: true,
+      readOnlySnapshotRetained: true,
+    };
+    const statuses = new DelegateStatusStore();
+    statuses.start([run], 'foreground');
+    expect(statuses.list()[0]?.lifecycle).toMatchObject({
+      reason: 'unknown',
+    });
+    expect(statuses.list()[0]?.lifecycle?.diagnostic).not.toBe('child spoof');
+  });
+
   test.each([
     [
       'user cancellation',
@@ -73,6 +120,32 @@ describe('delegate lifecycle failure projection', () => {
       mode: 'single',
     });
     expect(getDelegateLifecycle(run)?.reason).toBe(reason);
+  });
+
+  test('classifies a nonzero exit even when a child error event populated the message', async () => {
+    vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
+      async (run) => {
+        run.errorMessage = 'provider event says request failed';
+        run.stderr = 'raw child stderr must stay bounded evidence';
+        return { exitCode: 17, wasAborted: false, timedOut: false };
+      },
+    );
+
+    const run = await runDelegate({
+      cwd: '/tmp',
+      task: 'nonzero with event',
+      context: 'fresh',
+      sessionPath: '/tmp/lifecycle-nonzero-event.jsonl',
+      isolation: 'shared',
+      timeoutMs: 5_000,
+      maxConcurrency: 1,
+      mode: 'single',
+    });
+
+    expect(getDelegateLifecycle(run)).toMatchObject({
+      reason: 'child-nonzero-exit',
+      diagnostic: expect.stringContaining('provider event says request failed'),
+    });
   });
 
   test('distinguishes queued cancellation, runner exceptions, and unknown throws', async () => {
@@ -116,6 +189,26 @@ describe('delegate lifecycle failure projection', () => {
     });
     expect(getDelegateLifecycle(runner)?.reason).toBe('provider-runner-error');
     expect(getDelegateLifecycle(unknown)?.reason).toBe('unknown');
+  });
+
+  test('bounds a long diagnostic when lifecycle artifact publication fails', async () => {
+    const run = createRun('publication failure');
+    run.state = 'error';
+    setDelegateLifecycle(run, 'provider-runner-error', '🙂'.repeat(20_000));
+    const handoff = await buildArtifactBackedHandoff(
+      {} as never,
+      {} as never,
+      [run],
+      async () => {
+        throw new Error('publication unavailable');
+      },
+    );
+    const diagnostic = getDelegateLifecycle(run)?.diagnostic ?? '';
+    expect(Buffer.byteLength(diagnostic, 'utf8')).toBeLessThanOrEqual(
+      LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
+    );
+    expect(diagnostic).toContain(LIFECYCLE_PUBLIC_FALLBACK_MARKER);
+    expect(handoff).toContain(LIFECYCLE_PUBLIC_FALLBACK_MARKER);
   });
 
   test('artifacts an exact long Unicode diagnostic without inline clipping', async () => {

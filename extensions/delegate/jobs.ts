@@ -1,7 +1,11 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { AsyncJobRegistry, type JobRecord } from '../shared/runtime/registry';
+import { copyDelegateLifecycle } from './lifecycle';
 import { buildParentHandoff } from './output';
-import { serializeDelegateRunForPublic } from './structured-result';
+import {
+  serializeDelegateRunForPublic,
+  serializeDelegateRunForStaleSession,
+} from './structured-result';
 import type { DelegateDetails, DelegatedRun } from './types';
 import { getRunState, isRunError } from './types';
 import { failedLifecycleRun } from './worktree-lifecycle';
@@ -248,13 +252,9 @@ export class DelegateJobManager {
       ctx.sessionManager.getSessionId() === ownerSessionId
     )
       return job;
-    const runs = job.runs?.map((run) => {
-      const { artifact: _artifact, ...safeRun } = serializeDelegateRunForPublic(
-        run,
-        { includeArtifacts: false },
-      );
-      return safeRun;
-    });
+    const runs = job.runs?.map((run) =>
+      serializeDelegateRunForStaleSession(run),
+    );
     const { handoff: _handoff, ...safeJob } = job;
     return { ...safeJob, runs };
   }
@@ -315,9 +315,14 @@ function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
     createdAt: record.createdAt,
     startedAt: record.startedAt,
     settledAt: record.settledAt,
-    runs: (record.snapshotRuns ?? record.runs)?.map((run) => ({
-      ...serializeDelegateRunForPublic(run),
-    })),
+    runs: (record.snapshotRuns ?? record.runs)?.map((run) => {
+      const projected = serializeDelegateRunForPublic(run);
+      // JSON-like job snapshots clone the enumerable run, so retain the
+      // harness record for another trusted snapshot/owner-session projection.
+      const clone = { ...projected };
+      copyDelegateLifecycle(projected, clone);
+      return clone;
+    }),
     handoff: record.handoff,
     error: record.error,
     deliveryEpoch: record.deliveryEpoch,
