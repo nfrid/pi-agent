@@ -5,6 +5,11 @@ import {
   spawnDelegateChild,
 } from './delegate-child';
 import { buildDelegatePrompt } from './prompt';
+import {
+  getDelegateChannelPresent,
+  type NormalizedDelegateResultSpec,
+  setDelegateResultSpec,
+} from './structured-result';
 import { makeDetails } from './tool-result';
 import {
   createRun,
@@ -84,6 +89,8 @@ export interface RunDelegateOptions {
   contextNote?: string;
   /** Resolved upstream evidence, never included in parent-visible run details. */
   handoffText?: string;
+  /** Bounded structured result contract, kept outside parent-visible details. */
+  resultSpec?: NormalizedDelegateResultSpec;
   scope?: string[];
   continuation?: string;
   resuming?: boolean;
@@ -104,6 +111,7 @@ export function buildChildArgs(
     | 'worktree'
     | 'contextNote'
     | 'handoffText'
+    | 'resultSpec'
     | 'scope'
     | 'resuming'
   > & { timeoutMs?: number },
@@ -142,6 +150,7 @@ export function buildChildArgs(
       allowWrites,
       contextNote: options.contextNote,
       handoffText: options.handoffText,
+      resultSpec: options.resultSpec,
       scope: options.scope,
       continuation: options.resuming,
       timeoutMs: options.timeoutMs,
@@ -170,6 +179,7 @@ export async function runDelegate(
     scope: options.scope,
     continuation: options.continuation,
   });
+  setDelegateResultSpec(run, options.resultSpec);
   let releaseSlot: (() => void) | undefined;
   let releaseSession: (() => void) | undefined;
 
@@ -201,7 +211,16 @@ export async function runDelegate(
       command,
       args: [...prefixArgs, ...args],
       cwd: options.cwd,
-      env: options.worktree?.env ?? {},
+      env: {
+        ...(options.worktree?.env ?? {}),
+        ...(options.resultSpec
+          ? {
+              PI_DELEGATE_RESULT_SCHEMA: JSON.stringify(
+                options.resultSpec.schema,
+              ),
+            }
+          : {}),
+      },
     };
 
     const { exitCode, wasAborted, timedOut } = await spawnDelegateChild(run, {
@@ -226,8 +245,9 @@ export async function runDelegate(
       run.state = 'timed-out';
     } else if (exitCode !== 0 && !run.errorMessage) {
       run.stopReason = 'error';
-      run.errorMessage =
-        run.stderr.trim() || `Child Pi exited with code ${exitCode}.`;
+      run.errorMessage = options.resultSpec
+        ? `Child Pi exited with code ${exitCode}.`
+        : run.stderr.trim() || `Child Pi exited with code ${exitCode}.`;
     }
     if (run.state === 'running') {
       // Finalize the canonical state once; exitCode/stopReason remain
@@ -236,7 +256,9 @@ export async function runDelegate(
         run.stopReason === 'error' ||
         run.stopReason === 'aborted' ||
         run.exitCode !== 0 ||
-        !getFinalAssistantText(run.messages).trim();
+        (options.resultSpec
+          ? !getDelegateChannelPresent(run)
+          : !getFinalAssistantText(run.messages).trim());
       run.state = failed ? 'error' : 'success';
     }
   } catch (error) {

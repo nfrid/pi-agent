@@ -3,8 +3,19 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { artifactProducer } from '../shared/artifacts';
+import { appendDelegateViewRegistry } from '../shared/artifacts/storage';
 import { buildParentHandoffResult } from './output';
 import { throwIfAllRunsFailed } from './param-errors';
+import {
+  getDelegateResultSpec,
+  getSettledDelegateResult,
+  getStructuredArtifacts,
+  type StructuredValidationResult,
+  selectStructuredPath,
+  setDelegateResultSpec,
+  setStructuredArtifacts,
+  settleDelegateResult,
+} from './structured-result';
 import {
   type DelegateDetails,
   type DelegatedRun,
@@ -20,18 +31,136 @@ export function makeDetails(
 
 export const EXACT_OUTPUT_ARTIFACT_WARNING =
   'Exact output artifact unavailable; child session remains authoritative.';
+export const STRUCTURED_RESULT_ARTIFACT_WARNING =
+  'Structured result artifact unavailable; the validated result remains child-session-only.';
+
+function structuredErrorWarning(run: DelegatedRun): string {
+  const settlement = getSettledDelegateResult(run);
+  return settlement?.errors.length
+    ? `Structured result rejected: ${settlement.errors.join('; ')}`
+    : 'Structured result rejected before artifact publication.';
+}
+
+function replaceWarning(
+  run: DelegatedRun,
+  oldWarning: string | undefined,
+  nextWarning: string | undefined,
+): void {
+  const warnings = oldWarning
+    ? (run.warnings ?? []).filter((warning) => warning !== oldWarning)
+    : [...(run.warnings ?? [])];
+  if (nextWarning && !warnings.includes(nextWarning))
+    warnings.push(nextWarning);
+  run.warnings = warnings;
+}
+
+async function publishStructuredArtifacts(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  run: DelegatedRun,
+  put: typeof artifactProducer.put,
+  assertCurrent?: () => void,
+): Promise<boolean> {
+  const spec = getDelegateResultSpec(run);
+  if (!spec) return false;
+  const settlement: StructuredValidationResult | undefined =
+    getSettledDelegateResult(run) ?? settleDelegateResult(run, spec);
+  if (!settlement?.valid) {
+    replaceWarning(
+      run,
+      STRUCTURED_RESULT_ARTIFACT_WARNING,
+      structuredErrorWarning(run),
+    );
+    return false;
+  }
+  let changed = false;
+  if (!run.artifact) {
+    const bytes = JSON.stringify(settlement.value);
+    try {
+      assertCurrent?.();
+      run.artifact = await put(pi, ctx, {
+        bytes,
+        producer: 'delegate',
+        contentClass: 'delegate-output',
+        mediaType: 'application/json; charset=utf-8',
+        creationSource: 'delegate.result',
+      });
+      assertCurrent?.();
+      replaceWarning(run, STRUCTURED_RESULT_ARTIFACT_WARNING, undefined);
+      changed = true;
+    } catch {
+      replaceWarning(run, undefined, STRUCTURED_RESULT_ARTIFACT_WARNING);
+      return true;
+    }
+  }
+
+  const existingViews = getStructuredArtifacts(run)?.views ?? {};
+  const viewMetadata: Record<string, { handle: string; size: number }> = {
+    ...existingViews,
+  };
+  for (const [name, path] of Object.entries(spec.views)) {
+    if (viewMetadata[name]) continue;
+    const selected = selectStructuredPath(settlement.value, path);
+    if (!selected.present) {
+      replaceWarning(
+        run,
+        STRUCTURED_RESULT_ARTIFACT_WARNING,
+        `Structured result view "${name}" is unavailable because its path is absent.`,
+      );
+      changed = true;
+      continue;
+    }
+    try {
+      const viewBytes = JSON.stringify(selected.value);
+      assertCurrent?.();
+      const metadata = await put(pi, ctx, {
+        bytes: viewBytes,
+        producer: 'delegate',
+        contentClass: 'delegate-output',
+        mediaType: 'application/json; charset=utf-8',
+        creationSource: 'delegate.view',
+      });
+      assertCurrent?.();
+      appendDelegateViewRegistry(pi, run.artifact, name, path, metadata);
+      assertCurrent?.();
+      viewMetadata[name] = { handle: metadata.handle, size: metadata.size };
+      changed = true;
+    } catch {
+      replaceWarning(
+        run,
+        STRUCTURED_RESULT_ARTIFACT_WARNING,
+        `Structured result view "${name}" is unavailable; the full artifact remains authoritative.`,
+      );
+      changed = true;
+    }
+  }
+  setStructuredArtifacts(run, viewMetadata);
+  return changed;
+}
 
 export async function buildArtifactBackedHandoff(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   runs: DelegatedRun[],
   put = artifactProducer.put,
+  assertCurrent?: () => void,
 ): Promise<string> {
   let result = buildParentHandoffResult(runs);
   const failedRuns = new Set<DelegatedRun>();
-  for (let pass = 0; pass < runs.length; pass++) {
+  for (let pass = 0; pass < runs.length + 1; pass++) {
     let changed = false;
     for (const run of runs) {
+      if (getDelegateResultSpec(run)) {
+        const published = await publishStructuredArtifacts(
+          pi,
+          ctx,
+          run,
+          put,
+          assertCurrent,
+        );
+        changed ||= published;
+        continue;
+      }
       if (
         run.artifact ||
         failedRuns.has(run) ||
@@ -41,6 +170,7 @@ export async function buildArtifactBackedHandoff(
       const exact = getExactFinalAssistantText(run.messages);
       if (!exact) continue;
       try {
+        assertCurrent?.();
         run.artifact = await put(pi, ctx, {
           bytes: exact,
           producer: 'delegate',
@@ -48,6 +178,7 @@ export async function buildArtifactBackedHandoff(
           mediaType: 'text/plain; charset=utf-8',
           creationSource: 'delegate.result',
         });
+        assertCurrent?.();
         run.warnings = (run.warnings ?? []).filter(
           (warning) => warning !== EXACT_OUTPUT_ARTIFACT_WARNING,
         );
@@ -83,25 +214,34 @@ export async function buildSessionBoundArtifactBackedHandoff(
     // artifact handle owned by the launch session on that branch; retain the
     // original runs so a later inspection on the owner can publish/use it.
     const safeRuns = runs.map((run) => ({ ...run, artifact: undefined }));
+    for (const [index, run] of safeRuns.entries()) {
+      const spec = getDelegateResultSpec(runs[index]);
+      if (spec) {
+        // Weak-map state intentionally does not cross the enumerable clone.
+        // Reusing the spec keeps the stale branch artifact-only without
+        // copying the structured result into its details.
+        setDelegateResultSpec(run, spec);
+      }
+    }
     return buildArtifactBackedHandoff(pi, ctx, safeRuns, async () => {
       throw new Error('The delegate launch session is no longer current.');
     });
   }
+  const assertLaunchSession = () => {
+    if (ctx.sessionManager.getSessionId() !== launchSessionId)
+      throw new Error('The delegate launch session is no longer current.');
+  };
   const put = async (
     putPi: Parameters<typeof artifactProducer.put>[0],
     putCtx: Parameters<typeof artifactProducer.put>[1],
     input: Parameters<typeof artifactProducer.put>[2],
   ) => {
-    const assertLaunchSession = () => {
-      if (putCtx.sessionManager.getSessionId() !== launchSessionId)
-        throw new Error('The delegate launch session is no longer current.');
-    };
     assertLaunchSession();
     return artifactProducer.put(putPi, putCtx, input, {
       assertCurrent: assertLaunchSession,
     });
   };
-  return buildArtifactBackedHandoff(pi, ctx, runs, put);
+  return buildArtifactBackedHandoff(pi, ctx, runs, put, assertLaunchSession);
 }
 
 export async function delegateToolResult(
@@ -117,7 +257,11 @@ export async function delegateToolResult(
     launchSessionId,
     runs,
   );
-  throwIfAllRunsFailed(runs, handoff);
+  // A structured contract reports invalid child evidence as a non-success
+  // envelope rather than throwing away all per-run diagnostics. Legacy prose
+  // runs retain their historical all-failed throw behavior.
+  if (!runs.some((run) => getDelegateResultSpec(run)))
+    throwIfAllRunsFailed(runs, handoff);
   const visibleRuns =
     ctx.sessionManager.getSessionId() === launchSessionId
       ? runs

@@ -11,6 +11,10 @@ import {
 } from './plans';
 import { mapWithConcurrency } from './runner';
 import {
+  setDelegateResultSpec,
+  settleDelegateResult,
+} from './structured-result';
+import {
   cleanupFreshPreparedTask,
   type PreparedDelegateTask,
   prepareDelegateTask,
@@ -52,8 +56,8 @@ export interface PreparedDelegateExecution {
 export function pendingRuns(
   execution: PreparedDelegateExecution,
 ): DelegatedRun[] {
-  return execution.tasks.map((item) =>
-    createRun(item.plan.task, item.plan.routing, {
+  return execution.tasks.map((item) => {
+    const run = createRun(item.plan.task, item.plan.routing, {
       name: item.plan.name,
       cwd: item.cwd,
       context: item.plan.context,
@@ -67,8 +71,10 @@ export function pendingRuns(
         : undefined,
       continuation: item.session.token,
       warnings: item.warnings,
-    }),
-  );
+    });
+    setDelegateResultSpec(run, item.plan.resultSpec);
+    return run;
+  });
 }
 
 type RunHooks = {
@@ -165,6 +171,9 @@ async function runPreparedWithLifecycle(
     if (prepared.worktree) markLifecycleFailure(run, prepared.worktree, error);
     else throw error;
   }
+  // Settlement validation happens after the child and worktree lifecycle have
+  // both settled, and is idempotent for artifact materialization.
+  settleDelegateResult(run, prepared.plan.resultSpec);
   return run;
 }
 

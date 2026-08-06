@@ -63,6 +63,21 @@ describe('events', () => {
     expect(run.usage.turns).toBe(1);
   });
 
+  test('captures terminating structured details outside enumerable run data', () => {
+    const run = createRun('structured');
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'result-1',
+        toolName: 'delegate_result',
+        result: { details: { secret: 'artifact-only' } },
+        isError: false,
+      }),
+      run,
+    );
+    expect(JSON.stringify(run)).not.toContain('artifact-only');
+  });
+
   test('preserves detailed tool labels when end events omit args', () => {
     const run = createRun('inspect');
     processJsonLine(

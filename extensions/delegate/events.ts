@@ -1,4 +1,5 @@
 import type { Message } from '@earendil-works/pi-ai';
+import { captureDelegateResultEvent } from './structured-result';
 import type { DelegatedRun } from './types';
 
 const MAX_ACTIVITY_COUNT = 96;
@@ -64,6 +65,10 @@ function toolLabel(name: string, args: unknown): string {
 }
 
 function toolInputPreview(name: string, args: unknown): string | undefined {
+  // The terminating structured channel may contain the complete artifact-only
+  // result. Never put its arguments in a progress activity, even as a
+  // non-enumerable preview.
+  if (name === 'delegate_result') return undefined;
   if (!args || typeof args !== 'object') return undefined;
   const a = args as Record<string, unknown>;
   if (name === 'bash') return compactPreview(a.command ?? '');
@@ -341,6 +346,8 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
       });
       return true;
     case 'tool_execution_end':
+      if (event.toolName === 'delegate_result')
+        captureDelegateResultEvent(run, event.result, event.isError === true);
       upsertActivity(run, {
         id: eventId(event, 'tool'),
         type: 'tool',

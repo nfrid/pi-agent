@@ -21,16 +21,22 @@ export {
   putArtifact,
   recoverArtifactFromEntries,
   resolveArtifact,
+  resolveArtifactView,
   restoreArtifacts,
 } from './storage';
 export type {
   ArtifactMetadata,
+  ArtifactViewRegistryEntry,
   ContentClass,
   ProducerClass,
   PutArtifactInput,
   ResolvedArtifact,
 } from './types';
-export { ARTIFACT_ENTRY_TYPE, MAX_ARTIFACT_BYTES } from './types';
+export {
+  ARTIFACT_ENTRY_TYPE,
+  ARTIFACT_VIEW_ENTRY_TYPE,
+  MAX_ARTIFACT_BYTES,
+} from './types';
 export { validateMetadata } from './validation';
 
 import { putArtifact, recoverArtifactFromEntries } from './storage';

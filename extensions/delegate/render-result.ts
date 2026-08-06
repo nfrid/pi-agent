@@ -29,6 +29,10 @@ import {
   usage,
   worktreeLines,
 } from './render-utils';
+import {
+  getDelegateResultSpec,
+  getSettledDelegateResult,
+} from './structured-result';
 import type { DelegatedRun, DelegateRunState } from './types';
 import {
   continuationRecoveryNote,
@@ -117,7 +121,8 @@ function addExpandedRun(
   if (recoveryNote)
     container.addChild(new Text(fg('muted', recoveryNote), 0, 0));
 
-  const final = getFinalAssistantText(run.messages).trim();
+  const structured = getDelegateResultSpec(run);
+  const final = structured ? '' : getFinalAssistantText(run.messages).trim();
   const backgroundLaunch = isBackgroundLaunch(run);
   const blocked = blockedQuestion(run);
   if (blocked) {
@@ -127,7 +132,21 @@ function addExpandedRun(
   }
   if (!hasResultHeading(final))
     container.addChild(sectionTitle('Result', theme));
-  if (final) container.addChild(new Markdown(final, 0, 0, mdTheme));
+  if (structured) {
+    const settlement = getSettledDelegateResult(run);
+    container.addChild(
+      new Text(
+        fg(
+          settlement?.valid ? 'success' : 'warning',
+          settlement?.valid
+            ? 'Structured result valid; selected projections are in the parent handoff.'
+            : `Structured result invalid${run.errorMessage ? `: ${run.errorMessage}` : '.'}`,
+        ),
+        0,
+        0,
+      ),
+    );
+  } else if (final) container.addChild(new Markdown(final, 0, 0, mdTheme));
   else if (backgroundLaunch)
     container.addChild(
       new Text(fg('muted', 'Running independently in the background.'), 0, 0),
@@ -283,8 +302,25 @@ export function renderDelegateResult(
         ),
       );
 
-    const final = getFinalAssistantText(run.messages).trim();
-    if (final) {
+    const structured = getDelegateResultSpec(run);
+    const final = structured ? '' : getFinalAssistantText(run.messages).trim();
+    if (structured) {
+      const settlement = getSettledDelegateResult(run);
+      container.addChild(
+        new Text(
+          fieldLine(
+            'Result',
+            settlement?.valid
+              ? 'structured result valid'
+              : 'structured result invalid',
+            fg,
+            settlement?.valid ? 'success' : 'warning',
+          ),
+          0,
+          0,
+        ),
+      );
+    } else if (final) {
       if (!hasResultHeading(final))
         container.addChild(sectionTitle('Result', theme));
       container.addChild(

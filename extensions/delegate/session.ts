@@ -11,6 +11,7 @@ import {
 import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { atomicWriteFileSync, atomicWriteJsonSync } from '../shared/fs/atomic';
+import type { NormalizedDelegateResultSpec } from './structured-result';
 import type { DelegateIsolation, DelegateRouteState } from './types';
 
 interface SessionSnapshotSource {
@@ -32,6 +33,8 @@ export interface DelegateSession {
   /** Advisory paths the parent named; replayed so continuations keep them. */
   scope?: string[];
   routing?: DelegateRouteState;
+  /** Bounded result contract inherited by structured continuations. */
+  resultSpec?: NormalizedDelegateResultSpec;
 }
 
 interface DelegateSessionMetadata {
@@ -45,6 +48,7 @@ interface DelegateSessionMetadata {
   isolation?: DelegateIsolation;
   scope?: string[];
   routing?: DelegateRouteState;
+  resultSpec?: NormalizedDelegateResultSpec;
 }
 
 const SESSION_VERSION = 4;
@@ -116,6 +120,7 @@ export function createDelegateSession(options: {
   isolation?: DelegateIsolation;
   scope?: string[];
   routing?: DelegateRouteState;
+  resultSpec?: NormalizedDelegateResultSpec;
 }): DelegateSession {
   const token = randomUUID();
   const createdAt = new Date().toISOString();
@@ -140,6 +145,15 @@ export function createDelegateSession(options: {
         options.isolation ?? (options.worktreeId ? 'worktree' : 'shared'),
       ...(options.scope?.length ? { scope: options.scope } : {}),
       ...(options.routing ? { routing: options.routing } : {}),
+      ...(options.resultSpec
+        ? {
+            resultSpec: {
+              schema: options.resultSpec.schema,
+              projection: options.resultSpec.projection,
+              views: options.resultSpec.views,
+            },
+          }
+        : {}),
     };
     writeFileSync(metadataPath, `${JSON.stringify(metadata)}\n`, {
       encoding: 'utf8',
@@ -162,6 +176,7 @@ export function createDelegateSession(options: {
       options.isolation ?? (options.worktreeId ? 'worktree' : 'shared'),
     ...(options.scope?.length ? { scope: options.scope } : {}),
     ...(options.routing ? { routing: options.routing } : {}),
+    ...(options.resultSpec ? { resultSpec: options.resultSpec } : {}),
   };
 }
 
@@ -204,6 +219,9 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
       ...(Array.isArray(metadata.scope) ? { scope: metadata.scope } : {}),
       ...(metadata.routing && typeof metadata.routing === 'object'
         ? { routing: metadata.routing }
+        : {}),
+      ...(metadata.resultSpec && typeof metadata.resultSpec === 'object'
+        ? { resultSpec: metadata.resultSpec }
         : {}),
     };
   } catch {
