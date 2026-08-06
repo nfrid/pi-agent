@@ -4434,6 +4434,13 @@ details.session-event {
   color: var(--dim);
   font-size: 8px;
 }
+.activity-step.step-complete .activity-step-dot::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
 .activity-tool-name {
   border: 0;
   background: transparent;

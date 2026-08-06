@@ -828,6 +828,25 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(
     activity.locator('xpath=..').getByText('1 tool call', { exact: true }),
   ).toHaveCount(1);
+  const completedStepDot = activity
+    .locator('xpath=..')
+    .locator('.activity-step.step-complete .activity-step-dot');
+  await expect(completedStepDot).toHaveText('');
+  const completedMarkerStyle = await completedStepDot.evaluate((dot) => {
+    const marker = getComputedStyle(dot, '::before');
+    return {
+      width: marker.width,
+      height: marker.height,
+      borderRadius: marker.borderRadius,
+      backgroundColor: marker.backgroundColor,
+    };
+  });
+  expect(completedMarkerStyle).toMatchObject({
+    width: '6px',
+    height: '6px',
+    borderRadius: '50%',
+  });
+  expect(completedMarkerStyle.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
   await expect(page.getByLabel('Message Pi')).toBeVisible();
   await expect(
     page.getByRole('button', { name: 'Attach images' }),

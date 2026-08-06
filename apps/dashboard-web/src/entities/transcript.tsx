@@ -809,7 +809,7 @@ function CollapsedActivitySummary({
                     ? '!'
                     : action.state === 'pending'
                       ? '…'
-                      : '●'}
+                      : null}
                 </span>
                 <span className="activity-tool-name">{action.action}</span>
                 {action.argument && (
