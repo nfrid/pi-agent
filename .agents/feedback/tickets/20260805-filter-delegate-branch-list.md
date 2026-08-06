@@ -1,6 +1,6 @@
 # HFM-20260805: Add a session-scoped delegate branch inventory
 
-- **Status:** proposed
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-08-05
 - **Created:** 2026-08-05
 - **Source reports:** [HF-20260804: Delegate branch listing mixes unrelated historical work](../inbox/20260804T180340Z-delegate-branch-list-session-noise.md); [HF-20260805: Delegate branch listing lacks a session-scoped view](../inbox/20260805T111944Z-branch-list-needs-session-filter.md)
@@ -42,11 +42,11 @@ Default `list` to the current session and add an explicit scope selector for all
 
 ## Acceptance criteria
 
-- [ ] Default listing shows only writable branches and read-only snapshots created or touched by the current session.
-- [ ] After all current records are dropped, default listing reports no current entries even when repository history remains.
-- [ ] An explicit all-history selector returns the existing repository-wide inventory.
-- [ ] Current-session listing includes relevant continued or refreshed records according to documented session-touch semantics.
-- [ ] Review, merge, and drop behavior and ownership validation remain unchanged.
+- [x] Default listing shows only writable branches and read-only snapshots created or touched by the current session.
+- [x] After all current records are dropped, default listing reports no current entries even when repository history remains.
+- [x] An explicit all-history selector returns the existing repository-wide inventory.
+- [x] Current-session listing includes relevant continued or refreshed records according to documented session-touch semantics.
+- [x] Review, merge, and drop behavior and ownership validation remain unchanged.
 
 ## Validation
 
@@ -62,5 +62,6 @@ Compare with the baseline of more than thirty unrelated records and manual ident
 ## Implementation and resolution
 
 - **Approved implementation:** Default `delegate_branches list` to records created or touched by the current session, add an explicit all-history scope, preserve ownership and lifecycle behavior, and report an empty current-session inventory without falling back to history; approved by the user on 2026-08-05.
-- **Merged change:** —
+- **Merged change:** `4e7ba93` (feature integration), `43bd225` (post-review hardening), and `67a0448` (refresh-authority safeguard), merged 2026-08-06
+- **Implementation validation:** Focused delegate branch, integration, worktree, lifecycle, and command suites passed (75 tests). Final `npm run check` passed TypeScript, Biome lint/format, SDK alignment, and 116 Vitest files / 985 tests on 2026-08-06.
 - **Resolution:** pending evaluation

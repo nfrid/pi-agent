@@ -1,6 +1,6 @@
 # HFM-20260805: Add bounded views to delegate branch review
 
-- **Status:** proposed
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-08-05
 - **Created:** 2026-08-05
 - **Source reports:** [HF-20260805: Delegate branch review lacks bounded diff controls](../inbox/20260805T160610Z-delegate-review-needs-bounded-diff.md)
@@ -42,11 +42,11 @@ Add an explicit summary-only selector and safe path filtering. Add a bounded pat
 
 ## Acceptance criteria
 
-- [ ] Summary-only review returns provenance, state, commits, stat, and bounded changed paths without patch bodies.
-- [ ] Path filtering returns only matching delegate-authored diffs while reporting the total branch path count and active filter.
-- [ ] A caller-selected patch budget truncates deterministically and reports what was omitted.
-- [ ] Full and incremental modes retain their existing range and patch-identity semantics under every selector.
-- [ ] Unsafe path selectors and out-of-range budgets fail closed, and the unfiltered default remains available.
+- [x] Summary-only review returns provenance, state, commits, stat, and bounded changed paths without patch bodies.
+- [x] Path filtering returns only matching delegate-authored diffs while reporting the total branch path count and active filter.
+- [x] A caller-selected patch budget truncates deterministically and reports what was omitted.
+- [x] Full and incremental modes retain their existing range and patch-identity semantics under every selector.
+- [x] Unsafe path selectors and out-of-range budgets fail closed, and the unfiltered default remains available.
 
 ## Validation
 
@@ -62,5 +62,6 @@ Compare with the baseline 14-path review that required follow-up targeted reads.
 ## Implementation and resolution
 
 - **Approved implementation:** Add summary-only, safe path-filtered, and deterministically bounded patch views while preserving full and incremental provenance, explicit omission evidence, and the existing unfiltered review; approved by the user on 2026-08-05.
-- **Merged change:** —
+- **Merged change:** `4e7ba93` (feature integration), `43bd225` (post-review hardening), and `67a0448` (refresh-authority safeguard), merged 2026-08-06
+- **Implementation validation:** Focused delegate branch, integration, worktree, lifecycle, and command suites passed (75 tests), including full/incremental no-match provenance and unchanged-default regressions. Final `npm run check` passed TypeScript, Biome lint/format, SDK alignment, and 116 Vitest files / 985 tests on 2026-08-06.
 - **Resolution:** pending evaluation
