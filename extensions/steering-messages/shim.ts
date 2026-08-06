@@ -1,10 +1,6 @@
-import {
-  type Component,
-  truncateToWidth,
-  visibleWidth,
-} from '@earendil-works/pi-tui';
+import { type Component, sliceByColumn } from '@earendil-works/pi-tui';
 
-export const STEERING_BORDER = '┃';
+export const STEERING_BORDER = '▕';
 
 type ComponentClass<T> = abstract new (...args: never[]) => T;
 
@@ -15,7 +11,7 @@ interface UserMessageLike extends Component {
 export interface SteeringShimHost {
   userComponent: ComponentClass<UserMessageLike>;
   isSteering(text: string, occurrence: number): boolean;
-  renderBorder(text: string): string;
+  renderBorderCell(text: string): string;
 }
 
 function userText(component: UserMessageLike): string | undefined {
@@ -73,15 +69,10 @@ export function installSteeringMessageShim(
     const lines = originalUserRender.call(this, width);
     const steering = state.steering;
     if (!steering || width < 1) return lines;
-    const prefix = `${host.renderBorder(STEERING_BORDER)}${width > 1 ? ' ' : ''}`;
-    const contentWidth = Math.max(0, width - visibleWidth(prefix));
-    return lines.map((line) => {
-      const content = truncateToWidth(line, contentWidth, '');
-      const padding = ' '.repeat(
-        Math.max(0, contentWidth - visibleWidth(content)),
-      );
-      return `${prefix}${content}${padding}`;
-    });
+    return lines.map(
+      (line) =>
+        `${host.renderBorderCell(STEERING_BORDER)}${sliceByColumn(line, 1, width - 1)}`,
+    );
   };
 
   return () => {

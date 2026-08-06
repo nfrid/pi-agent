@@ -143,7 +143,11 @@ function tuiShimHost(
     userComponent:
       UserMessageComponent as unknown as SteeringShimHost['userComponent'],
     isSteering,
-    renderBorder: (text) => context.ui.theme.fg('warning', text),
+    renderBorderCell: (text) =>
+      context.ui.theme.bg(
+        'userMessageBg',
+        context.ui.theme.fg('warning', text),
+      ),
   };
 }
 

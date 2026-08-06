@@ -9,10 +9,12 @@ import {
 class FakeUser implements Component {
   constructor(public text: string) {}
   invalidate(): void {}
-  render(_width: number): string[] {
-    return [`user:${this.text}`];
+  render(width: number): string[] {
+    return [`user:${this.text}`.slice(0, width).padEnd(width)];
   }
 }
+
+const RENDERED_BORDER = `\x1b[43m\x1b[33m${STEERING_BORDER}\x1b[39m\x1b[49m`;
 
 function host(
   marked: ReadonlySet<number>,
@@ -24,26 +26,24 @@ function host(
       onResolve?.(text, occurrence);
       return marked.has(occurrence);
     },
-    renderBorder: (text) => `\x1b[33m${text}\x1b[39m`,
+    renderBorderCell: (text) => `\x1b[43m\x1b[33m${text}\x1b[39m\x1b[49m`,
   };
 }
 
 describe('steering message TUI shim', () => {
-  it('renders a width-safe colored right border and leaves ordinary output untouched', () => {
+  it('replaces the existing left padding cell without changing width', () => {
     const ordinary = new FakeUser('same');
     const steering = new FakeUser('same');
     const stop = installSteeringMessageShim(host(new Set([1])));
     expect(stop).toBeDefined();
-    expect(ordinary.render(80)).toEqual(['user:same']);
+    expect(ordinary.render(12)[0]?.trimEnd()).toBe('user:same');
     const lines = steering.render(12);
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(
-      new RegExp(`^\\x1b\\[33m${STEERING_BORDER}\\x1b\\[39m `),
-    );
+    expect(lines[0]?.startsWith(RENDERED_BORDER)).toBe(true);
     expect(visibleWidth(lines[0] ?? '')).toBe(12);
     expect(visibleWidth(steering.render(3)[0] ?? '')).toBe(3);
     stop?.();
-    expect(steering.render(3)).toEqual(['user:same']);
+    expect(steering.render(12)[0]?.trimEnd()).toBe('user:same');
   });
 
   it('keeps duplicate occurrence counts across microtasks and rerenders', async () => {
@@ -53,13 +53,11 @@ describe('steering message TUI shim', () => {
     });
     const stop = installSteeringMessageShim(host(new Set([1]), resolve));
     const first = new FakeUser('same');
-    expect(first.render(80)).toEqual(['user:same']);
+    expect(first.render(80)[0]?.trimEnd()).toBe('user:same');
     await new Promise<void>((done) => queueMicrotask(done));
     const second = new FakeUser('same');
-    expect(second.render(80)[0]).toContain(
-      `\x1b[33m${STEERING_BORDER}\x1b[39m`,
-    );
-    expect(first.render(80)).toEqual(['user:same']);
+    expect(second.render(80)[0]).toContain(RENDERED_BORDER);
+    expect(first.render(80)[0]?.trimEnd()).toBe('user:same');
     expect(resolve).toHaveBeenCalledTimes(3);
     expect(resolutions).toEqual([
       ['same', 0],
@@ -73,11 +71,9 @@ describe('steering message TUI shim', () => {
     const marked = new Set<number>();
     const stop = installSteeringMessageShim(host(marked));
     const message = new FakeUser('live');
-    expect(message.render(20)).toEqual(['user:live']);
+    expect(message.render(20)[0]?.trimEnd()).toBe('user:live');
     marked.add(0);
-    expect(message.render(20)[0]).toContain(
-      `\x1b[33m${STEERING_BORDER}\x1b[39m`,
-    );
+    expect(message.render(20)[0]).toContain(RENDERED_BORDER);
     stop?.();
   });
 
@@ -88,7 +84,7 @@ describe('steering message TUI shim', () => {
         userComponent:
           Unsupported as unknown as SteeringShimHost['userComponent'],
         isSteering: () => true,
-        renderBorder: (text) => text,
+        renderBorderCell: (text) => text,
       }),
     ).toBeUndefined();
   });
