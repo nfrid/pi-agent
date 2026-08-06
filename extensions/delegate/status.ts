@@ -1,3 +1,4 @@
+import { serializeDelegateRunForPublic } from './structured-result';
 import type {
   DelegateContext,
   DelegatedActivity,
@@ -156,7 +157,8 @@ export class DelegateStatusStore {
   constructor(private readonly onChange: () => void = () => {}) {}
 
   start(runs: readonly DelegatedRun[], kind: DelegateStatusKind): string[] {
-    const ids = runs.map((run) => {
+    const ids = runs.map((inputRun) => {
+      const run = serializeDelegateRunForPublic(inputRun);
       const id = `ds-${++this.counter}`;
       this.records.set(id, {
         id,
@@ -181,7 +183,8 @@ export class DelegateStatusStore {
     return ids;
   }
 
-  update(id: string, run: DelegatedRun): void {
+  update(id: string, inputRun: DelegatedRun): void {
+    const run = serializeDelegateRunForPublic(inputRun);
     const record = this.records.get(id);
     if (!record) return;
     record.name = run.name;
@@ -200,8 +203,9 @@ export class DelegateStatusStore {
     let changed = false;
     for (const [index, id] of ids.entries()) {
       const record = this.records.get(id);
-      const run = runs[index];
-      if (!record || !run) continue;
+      const inputRun = runs[index];
+      if (!record || !inputRun) continue;
+      const run = serializeDelegateRunForPublic(inputRun);
       record.name = run.name;
       record.state = getRunState(run);
       record.startedAt = run.startedAt;

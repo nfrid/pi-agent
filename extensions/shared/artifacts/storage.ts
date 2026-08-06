@@ -165,8 +165,7 @@ function decodeViewPath(pathValue: string): string[] | undefined {
   const raw = pathValue.slice(1).split('/');
   if (raw.some((segment) => !segment)) return undefined;
   const segments = raw.map((segment) => {
-    if (segment === '.' || segment === '..' || /^\d+$/.test(segment))
-      return undefined;
+    if (segment === '.' || segment === '..') return undefined;
     if (/~(?![01])/.test(segment)) return undefined;
     const decoded = segment.replaceAll('~1', '/').replaceAll('~0', '~');
     if (
@@ -346,14 +345,24 @@ export async function resolveArtifactView(
     !/^[A-Za-z][A-Za-z0-9_-]*$/.test(view)
   )
     return undefined;
-  const entries = viewRegistryEntries(ctx.sessionManager.getEntries());
-  const entry = [...entries]
-    .reverse()
-    .find(
-      (candidate) =>
-        candidate.source.handle === sourceHandle && candidate.view === view,
-    );
+  const matches = viewRegistryEntries(ctx.sessionManager.getEntries()).filter(
+    (candidate) =>
+      candidate.source.handle === sourceHandle && candidate.view === view,
+  );
+  const entry = matches[0];
   if (!entry) return undefined;
+  // A registry is append-only, so a later entry cannot shadow a legitimate
+  // mapping. Identical replay entries are harmless; any conflicting mapping
+  // fails closed instead of selecting whichever entry happens to be newest.
+  if (
+    matches.some(
+      (candidate) =>
+        candidate.path !== entry.path ||
+        !sameMetadata(candidate.source, entry.source) ||
+        !sameMetadata(candidate.metadata, entry.metadata),
+    )
+  )
+    return undefined;
   if (
     entry.source.producer !== 'delegate' ||
     entry.source.contentClass !== 'delegate-output' ||

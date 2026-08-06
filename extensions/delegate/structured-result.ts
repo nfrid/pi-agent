@@ -126,15 +126,39 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function isJsonValue(value: unknown): boolean {
-  if (value === null) return true;
-  if (typeof value === 'string' || typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(isJsonValue);
-  if (isPlainObject(value))
-    return Object.entries(value).every(
-      ([key, item]) => !DANGEROUS_PROPERTY_NAMES.has(key) && isJsonValue(item),
-    );
-  return false;
+  const pending: Array<{ value: unknown; exit?: boolean }> = [{ value }];
+  const active = new WeakSet<object>();
+  while (pending.length > 0) {
+    const frame = pending.pop();
+    if (!frame) continue;
+    const current = frame.value;
+    if (frame.exit) {
+      active.delete(current as object);
+      continue;
+    }
+    if (current === null) continue;
+    if (typeof current === 'string' || typeof current === 'boolean') continue;
+    if (typeof current === 'number') {
+      if (!Number.isFinite(current)) return false;
+      continue;
+    }
+    if (!Array.isArray(current) && !isPlainObject(current)) return false;
+    if (active.has(current)) return false;
+    active.add(current);
+    pending.push({ value: current, exit: true });
+    if (Array.isArray(current)) {
+      for (let index = current.length - 1; index >= 0; index--)
+        pending.push({ value: current[index] });
+      continue;
+    }
+    const entries = Object.entries(current);
+    for (let index = entries.length - 1; index >= 0; index--) {
+      const [key, item] = entries[index];
+      if (DANGEROUS_PROPERTY_NAMES.has(key)) return false;
+      pending.push({ value: item });
+    }
+  }
+  return true;
 }
 
 function safeInteger(value: unknown, label: string, max: number): number {
@@ -540,7 +564,11 @@ function normalizeViews(value: unknown): Record<string, string> {
       byteLength(name) > STRUCTURED_RESULT_CAPS.maxViewNameBytes
     )
       throw new Error(`Invalid result view name "${name}"`);
-    const [segments] = [decodePath(candidate)];
+    const segments = decodePath(candidate);
+    if (segments.length === 0)
+      throw new Error(
+        `Invalid result view path "${String(candidate)}": a named view cannot expose the complete result`,
+      );
     const normalized = canonicalPath(segments);
     if (normalized !== candidate)
       throw new Error(
@@ -629,13 +657,16 @@ function sameJson(left: unknown, right: unknown): boolean {
 }
 
 function freezeJson(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    for (const item of value) freezeJson(item);
-    return Object.freeze(value);
-  }
-  if (isPlainObject(value)) {
-    for (const item of Object.values(value)) freezeJson(item);
-    return Object.freeze(value);
+  const pending: unknown[] = [value];
+  const seen = new WeakSet<object>();
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!Array.isArray(current) && !isPlainObject(current)) continue;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    if (Array.isArray(current)) pending.push(...current);
+    else pending.push(...Object.values(current));
+    Object.freeze(current);
   }
   return value;
 }
@@ -665,12 +696,19 @@ export function validateStructuredResult(
     };
   const errors: string[] = [];
   const schema = asToolSchema(spec.schema);
-  if (!Value.Check(schema, value)) {
-    for (const error of Value.Errors(schema, value).slice(
-      0,
-      STRUCTURED_RESULT_CAPS.maxValidationErrors,
-    ))
-      addIssue(errors, error.instancePath, error.message);
+  try {
+    if (!Value.Check(schema, value)) {
+      for (const error of Value.Errors(schema, value).slice(
+        0,
+        STRUCTURED_RESULT_CAPS.maxValidationErrors,
+      ))
+        addIssue(errors, error.instancePath, error.message);
+    }
+  } catch {
+    return {
+      valid: false,
+      errors: ['/: result validation exceeded bounded traversal limits'],
+    };
   }
   return errors.length
     ? { valid: false, errors }
@@ -931,6 +969,27 @@ export function getStructuredArtifacts(
   run: DelegatedRun,
 ): StructuredArtifacts | undefined {
   return artifactViews.get(run);
+}
+
+/**
+ * Serialize a run for any public details/status/job surface. Structured result
+ * evidence stays in the private run for settlement and artifact publication;
+ * child messages, stderr, and activity prose never cross this boundary.
+ */
+export function serializeDelegateRunForPublic(run: DelegatedRun): DelegatedRun {
+  if (!getDelegateResultSpec(run)) return run;
+  return {
+    ...run,
+    messages: [],
+    stderr: '',
+    activities: run.activities.map(
+      ({
+        latestText: _latestText,
+        transcriptText: _transcriptText,
+        ...activity
+      }) => activity,
+    ),
+  };
 }
 
 /** Parse only the bounded schema passed to a child process. */

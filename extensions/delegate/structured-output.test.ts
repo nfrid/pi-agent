@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest';
+import { DelegateJobManager } from './jobs';
 import { buildParentHandoff } from './output';
+import { DelegateStatusStore } from './status';
 import {
   captureDelegateResultEvent,
   normalizeDelegateResultSpec,
@@ -9,6 +11,8 @@ import {
 import {
   buildArtifactBackedHandoff,
   buildSessionBoundArtifactBackedHandoff,
+  delegateToolResult,
+  makeDetails,
 } from './tool-result';
 import { createRun } from './types';
 
@@ -89,6 +93,88 @@ describe('structured delegate output handoff', () => {
     expect(JSON.stringify(entries[0])).toContain('secret');
   });
 
+  test('sanitizes structured runs across details, jobs, status, and sessions', async () => {
+    const spec = normalizeDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: { secret: { type: 'string' } },
+        required: ['secret'],
+      },
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    const run = createRun('public structured result');
+    run.state = 'success';
+    run.messages = [
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'earlier-child-secret' }],
+      },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'terminal-child-secret' }],
+      },
+    ] as never;
+    run.stderr = 'stderr-child-secret';
+    run.artifact = metadata(`art_${'a'.repeat(22)}`, 20);
+    setDelegateResultSpec(run, spec);
+    captureDelegateResultEvent(
+      run,
+      { details: { secret: 'structured-result-secret' } },
+      false,
+    );
+    settleDelegateResult(run);
+
+    expect(JSON.stringify(makeDetails('single', [run]))).not.toMatch(
+      /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
+    );
+    const statuses = new DelegateStatusStore();
+    statuses.start([run], 'foreground');
+    statuses.update('ds-1', run);
+    expect(JSON.stringify(statuses.list())).not.toMatch(
+      /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
+    );
+
+    const jobs = new DelegateJobManager();
+    const started = jobs.start({
+      name: 'Structured job',
+      mode: 'single',
+      tasks: [run.task],
+      execute: async () => ({ runs: [run], handoff: 'bounded' }),
+    });
+    const completed = await jobs.peek(started.id, 1_000);
+    expect(JSON.stringify(completed)).not.toMatch(
+      /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
+    );
+    await jobs.dispose();
+
+    const ownerCtx = {
+      sessionManager: { getSessionId: () => 'owner-session' },
+    } as never;
+    const ownerResult = await delegateToolResult(
+      {} as never,
+      ownerCtx,
+      'single',
+      [run],
+      'owner-session',
+    );
+    expect(JSON.stringify(ownerResult.details)).not.toMatch(
+      /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
+    );
+    const foreignCtx = {
+      sessionManager: { getSessionId: () => 'foreign-session' },
+    } as never;
+    const foreignResult = await delegateToolResult(
+      {} as never,
+      foreignCtx,
+      'single',
+      [run],
+      'owner-session',
+    );
+    expect(JSON.stringify(foreignResult.details)).not.toMatch(
+      /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
+    );
+  });
+
   test('rejects background publication after the owner session switches', async () => {
     const spec = normalizeDelegateResultSpec({
       schema: {
@@ -100,6 +186,13 @@ describe('structured delegate output handoff', () => {
     if (!spec) throw new Error('expected normalized result spec');
     const run = createRun('background structured result');
     run.state = 'success';
+    run.messages = [
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'stale-structured-prose' }],
+      },
+    ] as never;
+    run.stderr = 'stale-structured-stderr';
     setDelegateResultSpec(run, spec);
     captureDelegateResultEvent(
       run,
@@ -116,7 +209,9 @@ describe('structured delegate output handoff', () => {
       'owner-session',
       [run],
     );
-    expect(handoff).not.toContain('owner-only background result');
+    expect(handoff).not.toMatch(
+      /owner-only background result|stale-structured-prose|stale-structured-stderr/,
+    );
     expect(handoff).not.toContain('Artifact:');
     expect(run.artifact).toBeUndefined();
   });

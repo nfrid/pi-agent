@@ -156,6 +156,35 @@ describe('schema-driven delegate results', () => {
     ).toThrow(/array/);
   });
 
+  test('aligns numeric object paths while rejecting array indexes and full-result views', () => {
+    const numericObject = normalizeDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: {
+          '0': { type: 'string' },
+          items: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      views: { numeric: '/0' },
+    });
+    expect(numericObject?.views).toEqual({ numeric: '/0' });
+    expect(() =>
+      normalizeDelegateResultSpec({
+        schema: {
+          type: 'object',
+          properties: { items: { type: 'array', items: { type: 'string' } } },
+        },
+        views: { indexed: '/items/0' },
+      }),
+    ).toThrow(/declared|array/);
+    expect(() =>
+      normalizeDelegateResultSpec({
+        schema: { type: 'object', properties: { secret: { type: 'string' } } },
+        views: { complete: '/' },
+      }),
+    ).toThrow(/complete result/);
+  });
+
   test('reports missing, extra, wrong-type, enum, and byte-limit failures', () => {
     const spec = normalizeDelegateResultSpec({ schema });
     if (!spec) throw new Error('expected normalized result spec');
@@ -177,6 +206,19 @@ describe('schema-driven delegate results', () => {
         summary: 'x',
       }).valid,
     ).toBe(false);
+  });
+
+  test('turns deeply nested sub-64KiB JSON into bounded validation errors', () => {
+    let value: unknown = null;
+    for (let index = 0; index < 20_000; index++) value = [value];
+    const spec = normalizeDelegateResultSpec({ schema: { type: 'null' } });
+    if (!spec) throw new Error('expected normalized result spec');
+    expect(() => validateStructuredResult(spec, value)).not.toThrow(RangeError);
+    const result = validateStructuredResult(spec, value);
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeLessThanOrEqual(
+      STRUCTURED_RESULT_CAPS.maxValidationErrors,
+    );
   });
 
   test.each([

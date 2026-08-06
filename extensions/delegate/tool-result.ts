@@ -11,6 +11,7 @@ import {
   getStructuredArtifacts,
   type StructuredValidationResult,
   selectStructuredPath,
+  serializeDelegateRunForPublic,
   setDelegateResultSpec,
   setStructuredArtifacts,
   settleDelegateResult,
@@ -25,7 +26,7 @@ export function makeDetails(
   mode: DelegateDetails['mode'],
   runs: DelegatedRun[],
 ): DelegateDetails {
-  return { mode, runs };
+  return { mode, runs: runs.map(serializeDelegateRunForPublic) };
 }
 
 export const EXACT_OUTPUT_ARTIFACT_WARNING =
@@ -275,7 +276,10 @@ export async function delegateToolResult(
   const visibleRuns =
     ctx.sessionManager.getSessionId() === launchSessionId
       ? runs
-      : runs.map((run) => ({ ...run, artifact: undefined }));
+      : runs.map((run) => ({
+          ...serializeDelegateRunForPublic(run),
+          artifact: undefined,
+        }));
   return {
     content: [{ type: 'text' as const, text: handoff }],
     details: makeDetails(mode, visibleRuns),

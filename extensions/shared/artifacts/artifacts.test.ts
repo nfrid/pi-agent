@@ -138,6 +138,97 @@ describe('storing artifacts', () => {
     ).rejects.toThrow(/bytes do not match/);
   });
 
+  test('rejects a later valid conflicting mapping instead of shadowing the first', async () => {
+    const h = harness('session-conflict');
+    const full = await put(h, {
+      bytes: JSON.stringify({
+        findings: [{ title: 'one' }],
+        summary: 'public',
+      }),
+      contentClass: 'delegate-output',
+      producer: 'delegate',
+      creationSource: 'delegate.result',
+    });
+    await putArtifact(
+      h.pi,
+      h.ctx,
+      {
+        bytes: JSON.stringify([{ title: 'one' }]),
+        contentClass: 'delegate-output',
+        producer: 'delegate',
+        creationSource: 'delegate.view',
+      },
+      {
+        root,
+        delegateView: { source: full, name: 'selected', path: '/findings' },
+      },
+    );
+    await putArtifact(
+      h.pi,
+      h.ctx,
+      {
+        bytes: JSON.stringify('public'),
+        contentClass: 'delegate-output',
+        producer: 'delegate',
+        creationSource: 'delegate.view',
+      },
+      {
+        root,
+        delegateView: { source: full, name: 'selected', path: '/summary' },
+      },
+    );
+    expect(
+      await resolveArtifactView(h.ctx, full.handle, 'selected', root),
+    ).toBeUndefined();
+    const fork = harness('session-conflict-fork');
+    fork.entries.push(...h.entries);
+    await restoreArtifacts(fork.ctx, root);
+    expect(
+      await resolveArtifactView(fork.ctx, full.handle, 'selected', root),
+    ).toBeUndefined();
+  });
+
+  test('accepts numeric object properties but not array index paths', async () => {
+    const h = harness('session-numeric-property');
+    const full = await put(h, {
+      bytes: JSON.stringify({ '0': 'zero', items: ['zero'] }),
+      contentClass: 'delegate-output',
+      producer: 'delegate',
+      creationSource: 'delegate.result',
+    });
+    const view = await putArtifact(
+      h.pi,
+      h.ctx,
+      {
+        bytes: JSON.stringify('zero'),
+        contentClass: 'delegate-output',
+        producer: 'delegate',
+        creationSource: 'delegate.view',
+      },
+      { root, delegateView: { source: full, name: 'numeric', path: '/0' } },
+    );
+    expect(
+      (await resolveArtifactView(h.ctx, full.handle, 'numeric', root))
+        ?.metadata,
+    ).toEqual(view);
+    await expect(
+      putArtifact(
+        h.pi,
+        h.ctx,
+        {
+          bytes: JSON.stringify('zero'),
+          contentClass: 'delegate-output',
+          producer: 'delegate',
+          creationSource: 'delegate.view',
+        },
+        {
+          root,
+          delegateView: { source: full, name: 'arrayIndex', path: '/items/0' },
+        },
+      ),
+    ).rejects.toThrow(/bytes do not match|path/);
+  });
+
   test('resolves named views only through the owner-session registry', async () => {
     const owner = harness('session-one');
     const other = harness('session-two');
