@@ -12,6 +12,9 @@ import { loadWorktree } from './worktree';
 export const LIFECYCLE_DIAGNOSTIC_CAPTURE_BYTES = 64 * 1024;
 /** Maximum diagnostic bytes copied into the parent envelope. */
 export const LIFECYCLE_INLINE_DIAGNOSTIC_BYTES = 2 * 1024;
+/** Marker used when an exact capture cannot cross the current public boundary. */
+export const LIFECYCLE_PUBLIC_FALLBACK_MARKER =
+  '\n[Exact lifecycle diagnostic unavailable on this session/publication path; bounded fallback shown.]';
 /** Stderr is evidence for a child-exit diagnostic, never a public raw stream. */
 export const LIFECYCLE_STDERR_BYTES = 8 * 1024;
 
@@ -60,6 +63,38 @@ export function boundLifecycleText(
   while (result && byteLength(result) > maxBytes - markerBytes)
     result = result.slice(0, -1);
   return result + marker;
+}
+
+function byteBoundedWithMarker(
+  value: string,
+  maxBytes: number,
+  marker: string,
+): string {
+  if (byteLength(value) <= maxBytes) return value;
+  const markerBytes = byteLength(marker);
+  if (maxBytes <= markerBytes) {
+    let result = marker;
+    while (result && byteLength(result) > maxBytes)
+      result = result.slice(0, -1);
+    return result;
+  }
+  const contentBudget = maxBytes - markerBytes;
+  let result = value.slice(0, contentBudget);
+  while (result && byteLength(result) > contentBudget)
+    result = result.slice(0, -1);
+  return result + marker;
+}
+
+/** Keep stale/publication-failure diagnostics actionable without exposing captures. */
+export function boundLifecyclePublicFallback(
+  value: string,
+  maxBytes = LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
+): string {
+  return byteBoundedWithMarker(
+    value,
+    maxBytes,
+    LIFECYCLE_PUBLIC_FALLBACK_MARKER,
+  );
 }
 
 function stderrDiagnostic(stderr: string): string {
@@ -269,8 +304,8 @@ export function getDelegateLifecycle(
   run: DelegatedRun,
   options: {
     includeArtifact?: boolean;
-    /** Used only by stale-session projections after owner handles are removed. */
-    forceInlineDiagnostic?: boolean;
+    /** Include a <=2 KiB fallback when the exact capture cannot cross this path. */
+    includeBoundedFallback?: boolean;
   } = {},
 ): DelegateLifecycleProjection | undefined {
   const record = records.get(run);
@@ -278,11 +313,12 @@ export function getDelegateLifecycle(
   const facts = resourceFacts(run);
   const inline =
     record.diagnostic &&
-    (options.forceInlineDiagnostic === true ||
-      byteLength(record.diagnostic) <= LIFECYCLE_INLINE_DIAGNOSTIC_BYTES ||
-      record.diagnosticPublicationFailed)
+    (byteLength(record.diagnostic) <= LIFECYCLE_INLINE_DIAGNOSTIC_BYTES
       ? record.diagnostic
-      : undefined;
+      : options.includeBoundedFallback === true ||
+          record.diagnosticPublicationFailed
+        ? boundLifecyclePublicFallback(record.diagnostic)
+        : undefined);
   return {
     reason: record.reason,
     ...(inline ? { diagnostic: inline } : {}),

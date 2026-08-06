@@ -4,7 +4,11 @@ import {
   type DelegateJobResult,
   MAX_DELEGATE_JOBS,
 } from './jobs';
-import { setDelegateLifecycle } from './lifecycle';
+import {
+  LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
+  LIFECYCLE_PUBLIC_FALLBACK_MARKER,
+  setDelegateLifecycle,
+} from './lifecycle';
 import { createRun } from './types';
 
 function successfulResult(task = 'inspect'): DelegateJobResult {
@@ -113,10 +117,12 @@ describe('DelegateJobManager', () => {
       sessionManager: { getSessionId: () => 'stale-session' },
     } as never);
     const projection = stale.runs?.[0]?.lifecycle;
-    expect(projection).toMatchObject({
-      reason: 'child-nonzero-exit',
-      diagnostic,
-    });
+    expect(projection?.reason).toBe('child-nonzero-exit');
+    expect(projection?.diagnostic).not.toBe(diagnostic);
+    expect(projection?.diagnostic).toContain(LIFECYCLE_PUBLIC_FALLBACK_MARKER);
+    expect(
+      Buffer.byteLength(projection?.diagnostic ?? '', 'utf8'),
+    ).toBeLessThanOrEqual(LIFECYCLE_INLINE_DIAGNOSTIC_BYTES);
     expect(projection?.diagnosticArtifact).toBeUndefined();
     expect(
       JSON.stringify(stale).match(/actionable failure/g) ?? [],

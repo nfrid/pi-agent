@@ -4,7 +4,6 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { artifactProducer } from '../shared/artifacts';
 import {
-  copyDelegateLifecycle,
   getDelegateLifecycle,
   getDelegateLifecycleDiagnostic,
   isDelegateLifecycleDiagnosticPublicationFailed,
@@ -21,6 +20,7 @@ import {
   type StructuredValidationResult,
   selectStructuredPath,
   serializeDelegateRunForPublic,
+  serializeDelegateRunForStaleSession,
   setDelegateResultSpec,
   setStructuredArtifacts,
   settleDelegateResult,
@@ -281,9 +281,10 @@ export async function buildSessionBoundArtifactBackedHandoff(
     // A stale branch may still inspect the retained job. Never expose an
     // artifact handle owned by the launch session on that branch; retain the
     // original runs so a later inspection on the owner can publish/use it.
-    const safeRuns = runs.map((run) => ({ ...run, artifact: undefined }));
+    const safeRuns = runs.map((run) =>
+      serializeDelegateRunForStaleSession(run),
+    );
     for (const [index, run] of safeRuns.entries()) {
-      copyDelegateLifecycle(runs[index], run, { includeArtifact: false });
       const spec = getDelegateResultSpec(runs[index]);
       if (spec) {
         // Weak-map state intentionally does not cross the enumerable clone.
@@ -337,10 +338,7 @@ export async function delegateToolResult(
   const visibleRuns =
     ctx.sessionManager.getSessionId() === launchSessionId
       ? runs
-      : runs.map((run) => ({
-          ...serializeDelegateRunForPublic(run, { includeArtifacts: false }),
-          artifact: undefined,
-        }));
+      : runs.map((run) => serializeDelegateRunForStaleSession(run));
   return {
     content: [{ type: 'text' as const, text: handoff }],
     details: makeDetails(mode, visibleRuns),

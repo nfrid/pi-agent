@@ -16,6 +16,7 @@ import { liveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
 import type { DelegateConfig } from './config';
 import * as configModule from './config';
 import delegate, { DELEGATES_COMMAND_DESCRIPTION } from './index';
+import { setDelegateLifecycle } from './lifecycle';
 import * as sessionModule from './session';
 import type { PreparedDelegateTask } from './task-lifecycle';
 import * as taskLifecycle from './task-lifecycle';
@@ -88,6 +89,20 @@ function prepared(
     isolation: 'shared',
     warnings: [],
   };
+}
+
+function failedRun(): DelegatedRun {
+  const run = createRun('inspect independently', undefined, {
+    continuation: 'continuation-token',
+  });
+  run.exitCode = 7;
+  run.state = 'error';
+  setDelegateLifecycle(
+    run,
+    'child-nonzero-exit',
+    `owner diagnostic ${'x'.repeat(3_000)}`,
+  );
+  return run;
 }
 
 function successfulRun(): DelegatedRun {
@@ -206,8 +221,8 @@ function createAsyncHarness() {
 
   delegate(pi);
   handlers.get('session_start')?.({}, ctx);
-  const finish = (task: string) => {
-    const run = successfulRun();
+  const finish = (task: string, supplied?: DelegatedRun) => {
+    const run = supplied ?? successfulRun();
     run.task = task;
     run.messages[0] = {
       ...run.messages[0],
@@ -221,6 +236,49 @@ function createAsyncHarness() {
 }
 
 describe('async delegate extension', () => {
+  test('refreshes terminal live status after owner lifecycle artifact materialization', async () => {
+    const { ctx, finish, handlers, sendMessage, tools } = createAsyncHarness();
+    const launch = await tools.get('delegate')?.execute(
+      'call-lifecycle-status',
+      {
+        name: 'Lifecycle status',
+        task: 'inspect independently',
+        route: 'quick',
+        background: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(launch?.content[0]?.text).toContain('dj-1');
+
+    finish('inspect independently', failedRun());
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+
+    const status = (
+      liveExtensionSurfaceHub
+        .snapshot()
+        .find((surface) => surface.rendererId === 'delegate.status')
+        ?.viewModel as
+        | {
+            statuses?: Array<{
+              lifecycle?: {
+                reason?: string;
+                diagnostic?: string;
+                diagnosticArtifact?: { handle?: string };
+              };
+            }>;
+          }
+        | undefined
+    )?.statuses?.[0];
+    expect(status?.lifecycle).toMatchObject({
+      reason: 'child-nonzero-exit',
+      diagnosticArtifact: { handle: `art_${'a'.repeat(22)}` },
+    });
+    expect(status?.lifecycle?.diagnostic).toBeUndefined();
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
   test('returns a job immediately and steers its completion later', async () => {
     let finish!: (run: DelegatedRun) => void;
     vi.spyOn(configModule, 'loadDelegateConfig').mockReturnValue(config);

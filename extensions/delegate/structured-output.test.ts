@@ -1,7 +1,13 @@
 import { describe, expect, test, vi } from 'vitest';
 import * as delegateChild from './delegate-child';
 import { DelegateJobManager } from './jobs';
-import { buildParentHandoff } from './output';
+import {
+  LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
+  LIFECYCLE_PUBLIC_FALLBACK_MARKER,
+  setDelegateLifecycle,
+  setDelegateLifecycleDiagnosticArtifact,
+} from './lifecycle';
+import { buildParentHandoff, PARENT_HANDOFF_CAPS } from './output';
 import { runDelegate } from './runner';
 import { DelegateStatusStore } from './status';
 import {
@@ -279,6 +285,42 @@ describe('structured delegate output handoff', () => {
     );
     expect(handoff).not.toContain('Artifact:');
     expect(run.artifact).toBeUndefined();
+  });
+
+  test('stale foreground details carry the bounded fallback without the owner handle', async () => {
+    const run = createRun('stale foreground failure');
+    run.state = 'error';
+    run.exitCode = 7;
+    run.stderr = 'raw stale stderr must never cross the session boundary';
+    const diagnostic = `exact owner diagnostic ${'界'.repeat(2_000)}`;
+    setDelegateLifecycle(run, 'child-nonzero-exit', diagnostic);
+    const ownerArtifact = metadata(
+      `art_${'o'.repeat(22)}`,
+      Buffer.byteLength(diagnostic),
+    );
+    setDelegateLifecycleDiagnosticArtifact(run, ownerArtifact);
+
+    const result = await delegateToolResult(
+      {} as never,
+      { sessionManager: { getSessionId: () => 'stale-session' } } as never,
+      'single',
+      [run],
+      'owner-session',
+    );
+    const staleRun = result.details.runs[0];
+    expect(staleRun?.lifecycle?.reason).toBe('child-nonzero-exit');
+    expect(staleRun?.lifecycle?.diagnostic).toContain(
+      LIFECYCLE_PUBLIC_FALLBACK_MARKER,
+    );
+    expect(
+      Buffer.byteLength(staleRun?.lifecycle?.diagnostic ?? '', 'utf8'),
+    ).toBeLessThanOrEqual(LIFECYCLE_INLINE_DIAGNOSTIC_BYTES);
+    expect(staleRun?.lifecycle?.diagnosticArtifact).toBeUndefined();
+    expect(
+      Buffer.byteLength(result.content[0]?.text ?? '', 'utf8'),
+    ).toBeLessThanOrEqual(PARENT_HANDOFF_CAPS.singleMaxBytes);
+    expect(JSON.stringify(result)).not.toContain(ownerArtifact.handle);
+    expect(JSON.stringify(result)).not.toContain('raw stale stderr');
   });
 
   test('legacy output remains prose-shaped when no result contract is present', () => {

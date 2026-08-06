@@ -3,6 +3,8 @@ import * as delegateChild from './delegate-child';
 import {
   getDelegateLifecycle,
   getDelegateLifecycleDiagnostic,
+  LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
+  LIFECYCLE_PUBLIC_FALLBACK_MARKER,
   setDelegateLifecycle,
 } from './lifecycle';
 import { getDetails } from './render-utils';
@@ -187,6 +189,26 @@ describe('delegate lifecycle failure projection', () => {
     });
     expect(getDelegateLifecycle(runner)?.reason).toBe('provider-runner-error');
     expect(getDelegateLifecycle(unknown)?.reason).toBe('unknown');
+  });
+
+  test('bounds a long diagnostic when lifecycle artifact publication fails', async () => {
+    const run = createRun('publication failure');
+    run.state = 'error';
+    setDelegateLifecycle(run, 'provider-runner-error', '🙂'.repeat(20_000));
+    const handoff = await buildArtifactBackedHandoff(
+      {} as never,
+      {} as never,
+      [run],
+      async () => {
+        throw new Error('publication unavailable');
+      },
+    );
+    const diagnostic = getDelegateLifecycle(run)?.diagnostic ?? '';
+    expect(Buffer.byteLength(diagnostic, 'utf8')).toBeLessThanOrEqual(
+      LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
+    );
+    expect(diagnostic).toContain(LIFECYCLE_PUBLIC_FALLBACK_MARKER);
+    expect(handoff).toContain(LIFECYCLE_PUBLIC_FALLBACK_MARKER);
   });
 
   test('artifacts an exact long Unicode diagnostic without inline clipping', async () => {

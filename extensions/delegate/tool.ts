@@ -290,6 +290,7 @@ export function registerDelegateTool(
         const materializeHandoff = async (
           materializeCtx: typeof ctx,
           runs: import('./types').DelegatedRun[],
+          statusId?: string,
         ) => {
           const handoff = await buildSessionBoundArtifactBackedHandoff(
             pi,
@@ -304,6 +305,8 @@ export function registerDelegateTool(
               includeArtifacts: ownerSession,
             }),
           );
+          if (ownerSession && statusId && publicRuns[0])
+            backgroundRuntime.statuses.update(statusId, publicRuns[0]);
           return {
             runs: ownerSession
               ? publicRuns
@@ -341,9 +344,10 @@ export function registerDelegateTool(
                 const run = runs[0];
                 if (run && statusIds?.[index])
                   backgroundRuntime.statuses.update(statusIds[index], run);
-                return materializeHandoff(ctx, runs);
+                return materializeHandoff(ctx, runs, statusIds?.[index]);
               },
-              materialize: materializeHandoff,
+              materialize: (materializeCtx, runs) =>
+                materializeHandoff(materializeCtx, runs, statusIds?.[index]),
             })),
           );
         } catch (error) {
@@ -394,11 +398,24 @@ export function registerDelegateTool(
         if (statusIds) backgroundRuntime?.statuses.finish(statusIds);
         throw error;
       }
+      const result = await delegateToolResult(
+        pi,
+        ctx,
+        execution.mode,
+        runs,
+        launchSessionId,
+      );
       if (statusIds) {
-        backgroundRuntime?.statuses.updateMany(statusIds, runs);
+        // delegateToolResult publishes lifecycle diagnostics before returning;
+        // refresh terminal status with that owner-safe projection rather than
+        // leaving live status at its pre-materialization view.
+        backgroundRuntime?.statuses.updateMany(
+          statusIds,
+          result.details?.runs ?? runs,
+        );
         backgroundRuntime?.statuses.resultEntered(statusIds);
       }
-      return delegateToolResult(pi, ctx, execution.mode, runs, launchSessionId);
+      return result;
     },
   });
 }

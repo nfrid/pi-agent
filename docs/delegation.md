@@ -158,8 +158,10 @@ set or override the projection.
 
 The projection contains exactly one actionable diagnostic: complete bounded
 text in `diagnostic`, or an owner-session exact `diagnosticArtifact` when the
-text exceeds the 2 KiB inline diagnostic cap. Diagnostic capture is bounded
-at 64 KiB and
+text exceeds the 2 KiB inline diagnostic cap. A stale/non-owner or failed
+publication path may instead expose a separately bounded `diagnostic` fallback
+with an explicit exact-diagnostic-unavailable marker. Diagnostic capture is
+bounded at 64 KiB and
 child stderr is only used as a bounded child-exit diagnostic; raw stderr is
 never copied wholesale into the public contract. UTF-8 byte bounds preserve
 multiline and Unicode text without cutting an inline diagnostic in the middle.
