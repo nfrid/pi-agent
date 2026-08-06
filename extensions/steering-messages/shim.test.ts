@@ -44,7 +44,7 @@ describe('steering message TUI shim', () => {
     expect(steering.render(3)).toEqual(['user:same']);
   });
 
-  it('keeps duplicate occurrence counts across microtasks while caching rerenders', async () => {
+  it('keeps duplicate occurrence counts across microtasks and rerenders', async () => {
     const resolutions: Array<[string, number]> = [];
     const resolve = vi.fn((text: string, occurrence: number) => {
       resolutions.push([text, occurrence]);
@@ -58,11 +58,24 @@ describe('steering message TUI shim', () => {
       `\x1b[33m${STEERING_BORDER}\x1b[39m`,
     );
     expect(first.render(80)).toEqual(['user:same']);
-    expect(resolve).toHaveBeenCalledTimes(2);
+    expect(resolve).toHaveBeenCalledTimes(3);
     expect(resolutions).toEqual([
       ['same', 0],
       ['same', 1],
+      ['same', 0],
     ]);
+    stop?.();
+  });
+
+  it('picks up a live marker recorded after the component first renders', () => {
+    const marked = new Set<number>();
+    const stop = installSteeringMessageShim(host(marked));
+    const message = new FakeUser('live');
+    expect(message.render(20)).toEqual(['user:live']);
+    marked.add(0);
+    expect(message.render(20)[0]).toContain(
+      `\x1b[33m${STEERING_BORDER}\x1b[39m`,
+    );
     stop?.();
   });
 

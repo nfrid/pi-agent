@@ -32,8 +32,8 @@ function supported(host: SteeringShimHost): boolean {
  * Patch only the public user component. The first render of each component
  * resolves its text occurrence against the current session's marker index.
  * Counts live for this installation so a newly appended duplicate is not
- * mistaken for the first historical occurrence; the WeakMap keeps rerenders
- * from incrementing them.
+ * mistaken for the first historical occurrence. A negative match is retried
+ * because a live component can render just before its marker is persisted.
  */
 export function installSteeringMessageShim(
   host: SteeringShimHost,
@@ -41,23 +41,37 @@ export function installSteeringMessageShim(
   if (!supported(host)) return undefined;
   const userPrototype = host.userComponent.prototype as UserMessageLike;
   const originalUserRender = userPrototype.render;
-  const steeringByComponent = new WeakMap<UserMessageLike, boolean>();
+  const stateByComponent = new WeakMap<
+    UserMessageLike,
+    { text?: string; occurrence?: number; steering: boolean }
+  >();
   const occurrences = new Map<string, number>();
 
   userPrototype.render = function render(width: number): string[] {
-    let steering = steeringByComponent.get(this);
-    if (steering === undefined) {
+    let state = stateByComponent.get(this);
+    if (!state) {
       const text = userText(this);
-      if (text === undefined) steering = false;
+      if (text === undefined) state = { steering: false };
       else {
         const occurrence = occurrences.get(text) ?? 0;
         occurrences.set(text, occurrence + 1);
-        steering = host.isSteering(text, occurrence);
+        state = {
+          text,
+          occurrence,
+          steering: host.isSteering(text, occurrence),
+        };
       }
-      steeringByComponent.set(this, steering);
+      stateByComponent.set(this, state);
+    } else if (
+      !state.steering &&
+      state.text !== undefined &&
+      state.occurrence !== undefined
+    ) {
+      state.steering = host.isSteering(state.text, state.occurrence);
     }
 
     const lines = originalUserRender.call(this, width);
+    const steering = state.steering;
     if (!steering || width < 1) return lines;
     const contentWidth = width - 1;
     return lines.map((line) => {
