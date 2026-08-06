@@ -68,8 +68,9 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
           {
             id: 'w',
             name: 'Demo',
-            path: '/tmp',
-            canonicalPath: '/tmp',
+            path: '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
+            canonicalPath:
+              '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
             source: 'directory',
             active: false,
           },

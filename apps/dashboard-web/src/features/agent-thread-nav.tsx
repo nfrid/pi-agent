@@ -169,25 +169,10 @@ export function AgentThreadNav({
       visibleRows.filter((row) => row.status === 'idle').length,
   );
   const groups = useMemo(() => {
-    const needle = query.trim().toLowerCase();
     const result = new Map<
       string,
       { workspaceId?: string; workspaceName: string; rows: AgentThreadRow[] }
     >();
-    for (const workspace of snapshot.workspaces) {
-      if (
-        needle &&
-        !`${workspace.name} ${workspace.canonicalPath}`
-          .toLowerCase()
-          .includes(needle)
-      )
-        continue;
-      result.set(workspace.id, {
-        workspaceId: workspace.id,
-        workspaceName: workspace.name,
-        rows: [],
-      });
-    }
     for (const row of visibleRows) {
       const key = row.workspaceId ?? `other:${row.workspaceName}`;
       const group =
@@ -205,7 +190,7 @@ export function AgentThreadNav({
       result.set(key, group);
     }
     return [...result.entries()];
-  }, [query, snapshot.workspaces, visibleRows]);
+  }, [visibleRows]);
   const onTouchStart = (event: TouchEvent) => {
     const touch = event.changedTouches[0];
     if (touch) touchStart.current = { x: touch.clientX, y: touch.clientY };
