@@ -257,6 +257,22 @@ describe('remote event normalization', () => {
     expect(updated.content).toEqual([{ type: 'text', text: 'Hi there' }]);
     expect(finished.content).toBe('Hi there');
 
+    const userNormalizer = new LiveEventNormalizer('runtime-user');
+    const userStarted = userNormalizer.normalizeMessage('started', {
+      message: { role: 'user', content: 'Redirect' },
+    });
+    const userSteering = userNormalizer.normalizeMessage('updated', {
+      message: {
+        role: 'user',
+        content: 'Redirect',
+        data: { deliveryMode: 'steer' },
+      },
+    });
+    expect(userSteering).toMatchObject({
+      messageId: userStarted.messageId,
+      data: { deliveryMode: 'steer' },
+    });
+
     const deltaOnly = new LiveEventNormalizer('runtime-delta');
     deltaOnly.normalizeMessage('started', {
       message: { role: 'assistant', content: 'Hi' },

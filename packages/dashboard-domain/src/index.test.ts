@@ -80,6 +80,36 @@ describe('dashboard domain reducers', () => {
     ).toBe(false);
   });
 
+  it('applies a live steering update to an already rendered user message', () => {
+    let projection = createTranscriptProjection('s');
+    projection = reduceTranscriptEvent(projection, {
+      type: 'message.started',
+      sessionId: 's',
+      message: {
+        messageId: 'user-live',
+        role: 'user',
+        content: 'Redirect live work',
+        phase: 'started',
+      },
+    });
+    projection = reduceTranscriptEvent(projection, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        messageId: 'user-live',
+        role: 'user',
+        content: 'Redirect live work',
+        phase: 'updated',
+        data: { deliveryMode: 'steer' },
+      },
+    });
+    expect(projectTranscriptForRender(projection).items[0]).toMatchObject({
+      kind: 'message',
+      messageId: 'user-live',
+      deliveryMode: 'steer',
+    });
+  });
+
   it('does not infer steering from a timestamp without a durable marker', () => {
     const [item] = projectTranscriptForRender(
       hydrateTranscript([

@@ -1,7 +1,6 @@
 import {
   type ExtensionAPI,
   type ExtensionContext,
-  type InputEvent,
   UserMessageComponent,
 } from '@earendil-works/pi-coding-agent';
 import { defineExtension } from '../shared/runtime/extension';
@@ -125,14 +124,15 @@ function loadHistoryMarks(entries: readonly unknown[]): SteeringMarks {
   return marks;
 }
 
-function takeInputMode(
-  pending: Array<{ text: string; mode: InputEvent['streamingBehavior'] }>,
+function takeSteeringInput(
+  pending: Array<{ text: string }>,
   text: string,
-): InputEvent['streamingBehavior'] | undefined {
-  const index = pending.findIndex((input) => input.text === text);
-  if (index < 0) return undefined;
-  const [input] = pending.splice(index, 1);
-  return input?.mode;
+): boolean {
+  const exact = pending.findIndex((input) => input.text === text);
+  const index = exact >= 0 ? exact : pending.length > 0 ? 0 : -1;
+  if (index < 0) return false;
+  pending.splice(index, 1);
+  return true;
 }
 
 function tuiShimHost(
@@ -154,10 +154,7 @@ export function registerSteeringMessageTracking(
   let context: ExtensionContext | undefined;
   let marks = createMarks();
   let uninstall: (() => void) | undefined;
-  const pending: Array<{
-    text: string;
-    mode: InputEvent['streamingBehavior'];
-  }> = [];
+  const pendingSteering: Array<{ text: string }> = [];
   const liveCounts = new Map<string, number>();
 
   const resetSession = (nextContext: ExtensionContext): void => {
@@ -165,7 +162,7 @@ export function registerSteeringMessageTracking(
     uninstall = undefined;
     context = nextContext;
     marks = loadHistoryMarks(nextContext.sessionManager.buildContextEntries());
-    pending.length = 0;
+    pendingSteering.length = 0;
     liveCounts.clear();
     const host =
       nextContext.mode === 'tui'
@@ -185,17 +182,18 @@ export function registerSteeringMessageTracking(
   });
 
   pi.on('input', (event) => {
-    pending.push({ text: event.text, mode: event.streamingBehavior });
+    if (event.streamingBehavior === 'steer')
+      pendingSteering.push({ text: event.text });
   });
 
-  pi.on('message_start', (event) => {
+  pi.on('message_start', (event, eventContext) => {
     if (event.message.role !== 'user') return;
     const text = userText(event.message);
-    const mode = takeInputMode(pending, text);
+    const steering = takeSteeringInput(pendingSteering, text);
     const occurrence =
       (marks.historyCounts.get(text) ?? 0) + (liveCounts.get(text) ?? 0);
     liveCounts.set(text, (liveCounts.get(text) ?? 0) + 1);
-    if (mode !== 'steer') return;
+    if (!steering) return;
     addMarked(marks.marked, text, occurrence);
     const timestamp = timestampOf(
       (event.message as unknown as { timestamp?: unknown }).timestamp,
@@ -205,6 +203,14 @@ export function registerSteeringMessageTracking(
       timestamp,
       text,
     });
+    pi.events.emit('steering-message:marked', {
+      sessionId: eventContext.sessionManager.getSessionId(),
+      message: event.message,
+    });
+  });
+
+  pi.on('agent_settled', () => {
+    pendingSteering.length = 0;
   });
 
   pi.on('session_shutdown', (_event, shutdownContext) => {
@@ -212,7 +218,7 @@ export function registerSteeringMessageTracking(
     uninstall?.();
     uninstall = undefined;
     context = undefined;
-    pending.length = 0;
+    pendingSteering.length = 0;
     liveCounts.clear();
   });
 }

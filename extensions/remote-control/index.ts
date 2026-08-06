@@ -285,6 +285,11 @@ export class LiveEventNormalizer {
       directString(message, 'role') ??
       directString(event, 'role') ??
       'assistant';
+    const rawData = Object.hasOwn(message, 'data')
+      ? directValue(message, 'data')
+      : directValue(event, 'data');
+    const safeData =
+      rawData === undefined ? undefined : jsonSafe(rawData, MAX_FRAME_BYTES);
     const payload: NormalizedMessagePayload = {
       messageId,
       role,
@@ -299,6 +304,7 @@ export class LiveEventNormalizer {
               .slice(0, 128),
           }
         : {}),
+      ...(safeData === undefined ? {} : { data: safeData }),
     };
     if (phase === 'finished') this.activeMessage = undefined;
     return payload;
@@ -1807,6 +1813,22 @@ function onTransportEvent(
 export default defineExtension('remote-control', (pi) => {
   const runtime = createRemoteControlRuntime(pi);
   if (!runtime) return;
+  const stopSteeringUpdates = pi.events.on(
+    'steering-message:marked',
+    (value) => {
+      const update = eventRecord(value);
+      const message = eventRecord(directValue(update, 'message'));
+      const sessionId = directString(update, 'sessionId');
+      if (!message || !sessionId) return;
+      runtime.client.sendEvent({
+        type: 'message.updated',
+        sessionId,
+        message: runtime.eventNormalizer.normalizeMessage('updated', {
+          message: { ...message, data: { deliveryMode: 'steer' } },
+        }),
+      });
+    },
+  );
   const onCurrentTransportEvent = (
     event: string,
     handler: (value: unknown, ctx: ExtensionContext) => void,
@@ -1922,6 +1944,7 @@ export default defineExtension('remote-control', (pi) => {
     emitState(runtime, ctx),
   );
   pi.on('session_shutdown', (event, ctx) => {
+    stopSteeringUpdates();
     const tearsDownExtension =
       event.reason === 'quit' || event.reason === 'reload';
     const wasCurrent = runtime.isCurrent(ctx);

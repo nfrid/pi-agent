@@ -391,6 +391,15 @@ function isFinished(item: TranscriptItem | undefined): boolean {
       : false;
 }
 
+function normalizedDeliveryMode(
+  data: unknown,
+): TranscriptDeliveryMode | undefined {
+  if (!isRecord(data)) return undefined;
+  return data.deliveryMode === 'steer' || data.deliveryMode === 'followUp'
+    ? data.deliveryMode
+    : undefined;
+}
+
 function mergeMessage(
   projection: TranscriptProjection,
   payload: NormalizedMessagePayload,
@@ -405,6 +414,9 @@ function mergeMessage(
     previous?.kind === 'message' ? previous.toolCallIds : undefined,
     mergeToolCallIds(payload.toolCallIds, directToolCallIds(payload.content)),
   );
+  const deliveryMode =
+    normalizedDeliveryMode(payload.data) ??
+    (previous?.kind === 'message' ? previous.deliveryMode : undefined);
   const item: TranscriptMessageItem = {
     kind: 'message',
     messageId: payload.messageId,
@@ -415,9 +427,7 @@ function mergeMessage(
       : { timestamp: payload.timestamp }),
     ...(payload.turnId === undefined ? {} : { turnId: payload.turnId }),
     ...(toolCallIds === undefined ? {} : { toolCallIds }),
-    ...(previous?.kind === 'message' && previous.deliveryMode !== undefined
-      ? { deliveryMode: previous.deliveryMode }
-      : {}),
+    ...(deliveryMode === undefined ? {} : { deliveryMode }),
     status:
       phase === 'finished'
         ? 'finished'
