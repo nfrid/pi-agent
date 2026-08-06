@@ -10,6 +10,7 @@ import {
   hydrateTranscript,
   projectTranscriptForRender,
   reduceTranscriptEvent,
+  STEERING_MESSAGE_MARKER_TYPE,
   selectLegacyTranscriptEntries,
 } from './index.js';
 
@@ -47,6 +48,59 @@ function envelope(
 }
 
 describe('dashboard domain reducers', () => {
+  it('hydrates steering markers onto user messages without rendering marker rows', () => {
+    const projection = hydrateTranscript([
+      {
+        type: 'custom',
+        customType: STEERING_MESSAGE_MARKER_TYPE,
+        data: { timestamp: 200, text: 'Steer this' },
+        id: 'marker-1',
+      },
+      {
+        type: 'message',
+        id: 'user-1',
+        message: { role: 'user', content: 'Steer this', timestamp: 200 },
+      },
+      {
+        type: 'message',
+        id: 'user-2',
+        message: { role: 'user', content: 'Ordinary', timestamp: 200 },
+      },
+    ]);
+
+    expect(projection.order).not.toContain('marker-1');
+    expect(projectTranscriptForRender(projection).items).toMatchObject([
+      { kind: 'message', messageId: 'user-1', deliveryMode: 'steer' },
+      { kind: 'message', messageId: 'user-2' },
+    ]);
+    expect(
+      projectTranscriptForRender(projection).items.some(
+        (item) => item.kind === 'other',
+      ),
+    ).toBe(false);
+  });
+
+  it('does not infer steering from a timestamp without a durable marker', () => {
+    const [item] = projectTranscriptForRender(
+      hydrateTranscript([
+        {
+          type: 'message',
+          id: 'user-1',
+          message: { role: 'user', content: 'Ordinary', timestamp: 200 },
+        },
+        {
+          type: 'custom',
+          customType: STEERING_MESSAGE_MARKER_TYPE,
+          data: { timestamp: 200, text: 'Different text' },
+        },
+      ]),
+    ).items;
+    expect(item).toMatchObject({ kind: 'message' });
+    expect(item?.kind === 'message' ? item.deliveryMode : undefined).toBe(
+      undefined,
+    );
+  });
+
   it('replays persisted and live fixture data deterministically', () => {
     const runtimeSnapshot = fixture('snapshot.json') as RuntimeSnapshot;
     const events = readFileSync(
