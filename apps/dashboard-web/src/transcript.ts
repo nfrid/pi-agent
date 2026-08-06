@@ -9,6 +9,7 @@ import {
 import {
   hydrateTranscript,
   projectTranscriptForRender,
+  type TranscriptDeliveryMode,
   type TranscriptProjection,
   type TranscriptRenderItem,
   type TranscriptRenderToolItem,
@@ -62,6 +63,7 @@ export interface TranscriptModelItem {
   text?: string;
   thinking?: readonly string[];
   role?: 'user' | 'assistant';
+  deliveryMode?: TranscriptDeliveryMode;
   imageCount?: number;
   event?: TranscriptEvent;
   /** Canonical domain tool semantics used by the inspector presentation. */
@@ -297,6 +299,9 @@ function messageRaw(item: Extract<TranscriptRenderItem, { kind: 'message' }>) {
       content: item.content,
       ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
       ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+      ...(item.deliveryMode === undefined
+        ? {}
+        : { deliveryMode: item.deliveryMode }),
       ...(item.toolCallIds.length === 0
         ? {}
         : { toolCallIds: item.toolCallIds }),
@@ -481,6 +486,9 @@ export function toTranscriptEntries(
         raw,
         text,
         ...(role === undefined ? {} : { role }),
+        ...(item.deliveryMode === undefined
+          ? {}
+          : { deliveryMode: item.deliveryMode }),
         ...(imageCount > 0 ? { imageCount } : {}),
       });
       continue;

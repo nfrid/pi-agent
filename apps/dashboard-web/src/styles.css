@@ -704,6 +704,10 @@ h2 {
   border-color: var(--pink);
   background: var(--bg-alt);
 }
+.message-steering {
+  border-color: var(--orange);
+  background: color-mix(in srgb, var(--orange) 8%, transparent);
+}
 .message-assistant {
   border-color: var(--purple);
 }
@@ -717,6 +721,14 @@ h2 {
 }
 .message-assistant .message-role {
   color: var(--purple);
+}
+.message-delivery-mode {
+  display: inline-block;
+  color: var(--orange);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 5px 8px;
 }
 .message-attachment {
   display: inline-block;
@@ -3700,6 +3712,9 @@ h2 {
 .transcript-minimap-marker.outline-user i {
   background: var(--pink);
 }
+.transcript-minimap-marker.outline-steering i {
+  background: var(--orange);
+}
 .transcript-minimap-marker.outline-assistant i {
   background: var(--purple);
 }
@@ -3761,6 +3776,9 @@ h2 {
 }
 .transcript-outline-item.outline-user i {
   background: var(--pink);
+}
+.transcript-outline-item.outline-steering i {
+  background: var(--orange);
 }
 .transcript-outline-item.outline-assistant i {
   background: var(--purple);

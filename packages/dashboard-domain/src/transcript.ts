@@ -17,6 +17,11 @@ export type TranscriptEntityStatus =
   | 'finished'
   | 'error';
 
+/** Delivery modes represented by durable user-message markers. */
+export type TranscriptDeliveryMode = 'steer' | 'followUp';
+
+export const STEERING_MESSAGE_MARKER_TYPE = 'steering-message';
+
 export interface TranscriptMessageItem {
   kind: 'message';
   messageId: string;
@@ -25,6 +30,7 @@ export interface TranscriptMessageItem {
   timestamp?: number | string;
   turnId?: string;
   toolCallIds?: readonly string[];
+  deliveryMode?: TranscriptDeliveryMode;
   status: 'streaming' | 'finished';
   data?: unknown;
 }
@@ -84,6 +90,7 @@ export interface TranscriptRenderMessageItem {
   turnId?: string;
   toolCallIds: readonly string[];
   associatedToolCallIds: readonly string[];
+  deliveryMode?: TranscriptDeliveryMode;
   status: TranscriptMessageItem['status'];
   streaming: boolean;
   preparing: boolean;
@@ -408,6 +415,9 @@ function mergeMessage(
       : { timestamp: payload.timestamp }),
     ...(payload.turnId === undefined ? {} : { turnId: payload.turnId }),
     ...(toolCallIds === undefined ? {} : { toolCallIds }),
+    ...(previous?.kind === 'message' && previous.deliveryMode !== undefined
+      ? { deliveryMode: previous.deliveryMode }
+      : {}),
     status:
       phase === 'finished'
         ? 'finished'
@@ -608,6 +618,35 @@ function persistedMessageId(
   );
 }
 
+function timestampKey(value: number | string): string {
+  return `${typeof value}:${value}`;
+}
+
+function steeringMarkerTimestamp(
+  entry: Record<string, unknown>,
+): number | string | undefined {
+  if (
+    entry.type !== 'custom' ||
+    entry.customType !== STEERING_MESSAGE_MARKER_TYPE ||
+    !isRecord(entry.data)
+  )
+    return undefined;
+  const timestamp = entry.data.timestamp;
+  return typeof timestamp === 'number' || typeof timestamp === 'string'
+    ? timestamp
+    : undefined;
+}
+
+function steeringTimestamps(entries: readonly unknown[]): ReadonlySet<string> {
+  const result = new Set<string>();
+  for (const value of entries) {
+    if (!isRecord(value)) continue;
+    const timestamp = steeringMarkerTimestamp(value);
+    if (timestamp !== undefined) result.add(timestampKey(timestamp));
+  }
+  return result;
+}
+
 function persistedTimestamp(
   entry: Record<string, unknown>,
   message: Record<string, unknown>,
@@ -647,6 +686,7 @@ export function hydrateTranscript(
   let projection = createTranscriptProjection(sessionId);
   const items = copyItems(projection);
   const order = [...projection.order];
+  const markedSteeringTimestamps = steeringTimestamps(entries);
   entries.forEach((raw, index) => {
     if (!isRecord(raw)) {
       const id = `entry-${index}`;
@@ -697,6 +737,12 @@ export function hydrateTranscript(
         return;
       }
       const content = message.content;
+      const deliveryMode =
+        role === 'user' &&
+        timestamp !== undefined &&
+        markedSteeringTimestamps.has(timestampKey(timestamp))
+          ? ('steer' as const)
+          : undefined;
       const explicitToolCallIds = Array.isArray(message.toolCallIds)
         ? message.toolCallIds.filter(
             (id): id is string => typeof id === 'string' && id.length > 0,
@@ -711,6 +757,7 @@ export function hydrateTranscript(
         content,
         ...(timestamp === undefined ? {} : { timestamp }),
         ...(toolCallIds.length > 0 ? { toolCallIds } : {}),
+        ...(deliveryMode === undefined ? {} : { deliveryMode }),
         status:
           message.__dashboardStreaming === true ? 'streaming' : 'finished',
       };
@@ -770,6 +817,7 @@ export function hydrateTranscript(
       }
       return;
     }
+    if (steeringMarkerTimestamp(raw) !== undefined) return;
     const tool =
       raw.type === 'tool' || raw.kind === 'tool'
         ? transcriptToolRecord(raw)
@@ -923,6 +971,9 @@ export function projectTranscriptForRender(
         content: renderedMessageContent(item, projection, virtualToolCallIds),
         ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
         ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+        ...(item.deliveryMode === undefined
+          ? {}
+          : { deliveryMode: item.deliveryMode }),
         toolCallIds,
         associatedToolCallIds,
         status: item.status,
@@ -1009,6 +1060,9 @@ export function selectLegacyTranscriptEntries(
             ? {}
             : { timestamp: item.timestamp }),
           ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+          ...(item.deliveryMode === undefined
+            ? {}
+            : { deliveryMode: item.deliveryMode }),
           ...(item.toolCallIds.length === 0
             ? {}
             : { toolCallIds: item.toolCallIds }),

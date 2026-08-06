@@ -88,16 +88,22 @@ export type TranscriptLandmark = {
   label: string;
   kind: 'user' | 'assistant' | 'activity';
   itemIndex: number;
+  deliveryMode?: 'steer' | 'followUp';
   timestamp?: number | string;
 };
 
 function landmarkLabel(item: TranscriptModelItem, fallback: string): string {
   const text = item.text?.replace(/\s+/gu, ' ').trim();
-  if (text) return text.length > 240 ? `${text.slice(0, 239)}…` : text;
-  if (item.preparing) return 'Preparing activity';
-  if (item.entry.kind === 'assistant' && item.entry.title)
-    return item.entry.title;
-  return fallback;
+  const label = text
+    ? text.length > 240
+      ? `${text.slice(0, 239)}…`
+      : text
+    : item.preparing
+      ? 'Preparing activity'
+      : item.entry.kind === 'assistant' && item.entry.title
+        ? item.entry.title
+        : fallback;
+  return item.deliveryMode === 'steer' ? `Steering · ${label}` : label;
 }
 
 function landmarkTimestamp(
@@ -117,8 +123,12 @@ function landmarkTimestamp(
     : undefined;
 }
 
-function landmarkType(kind: TranscriptLandmark['kind']): string {
-  if (kind === 'user') return 'User message';
+function landmarkType(
+  kind: TranscriptLandmark['kind'],
+  deliveryMode?: TranscriptLandmark['deliveryMode'],
+): string {
+  if (kind === 'user')
+    return deliveryMode === 'steer' ? 'Steering message' : 'User message';
   if (kind === 'assistant') return 'Assistant update';
   return 'Agent activity';
 }
@@ -169,6 +179,9 @@ export function buildTranscriptLandmarks(
         label: landmarkLabel(item, 'User turn'),
         kind: 'user',
         itemIndex: index,
+        ...(item.deliveryMode === undefined
+          ? {}
+          : { deliveryMode: item.deliveryMode }),
         ...(landmarkTimestamp(item) === undefined
           ? {}
           : { timestamp: landmarkTimestamp(item) }),
@@ -275,7 +288,7 @@ export function TranscriptOutline({
         outlineLandmarks.map((landmark) => (
           <button
             type="button"
-            className={`transcript-outline-item outline-${landmark.kind}`}
+            className={`transcript-outline-item outline-${landmark.kind}${landmark.deliveryMode === 'steer' ? ' outline-steering' : ''}`}
             key={landmark.key}
             onClick={() => {
               onJump(landmark);
@@ -299,7 +312,7 @@ export function TranscriptOutline({
         {minimapLandmarks.map((landmark) => (
           <button
             type="button"
-            className={`transcript-minimap-marker outline-${landmark.kind}${activeKey === landmark.key ? ' active' : ''}`}
+            className={`transcript-minimap-marker outline-${landmark.kind}${landmark.deliveryMode === 'steer' ? ' outline-steering' : ''}${activeKey === landmark.key ? ' active' : ''}`}
             key={landmark.key}
             aria-label={landmark.label}
             title={landmark.label}
@@ -309,7 +322,7 @@ export function TranscriptOutline({
             <span
               className="transcript-minimap-preview"
               data-label={landmark.label}
-              data-meta={`${landmarkType(landmark.kind)}${landmarkTime(landmark.timestamp) ? ` · ${landmarkTime(landmark.timestamp)}` : ''}`}
+              data-meta={`${landmarkType(landmark.kind, landmark.deliveryMode)}${landmarkTime(landmark.timestamp) ? ` · ${landmarkTime(landmark.timestamp)}` : ''}`}
               aria-hidden="true"
             />
             <i aria-hidden="true" />
@@ -1396,8 +1409,13 @@ function TranscriptEntry({
           <ThinkingBlobs thinking={item.thinking} />
         ) : null}
         {item.text || item.imageCount ? (
-          <article className={`message-bubble message-${item.role}`}>
+          <article
+            className={`message-bubble message-${item.role}${item.deliveryMode === 'steer' ? ' message-steering' : ''}`}
+          >
             <span className="message-role">{item.role}</span>
+            {item.deliveryMode === 'steer' ? (
+              <span className="message-delivery-mode">steer</span>
+            ) : null}
             {item.imageCount ? (
               <span className="message-attachment">
                 {item.imageCount} image{item.imageCount === 1 ? '' : 's'}{' '}

@@ -3,6 +3,7 @@ import {
   hydrateTranscript,
   projectTranscriptForRender,
   reduceTranscriptEvent,
+  STEERING_MESSAGE_MARKER_TYPE,
 } from '@pi-dashboard/domain';
 import { Value } from 'typebox/value';
 import { describe, expect, it } from 'vitest';
@@ -23,6 +24,51 @@ import {
 } from './transcript';
 
 describe('activity row views and virtual transcript construction', () => {
+  it('labels steering messages in the transcript and outline without adding a row', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'user-steer',
+        message: {
+          role: 'user',
+          content: 'Please redirect the current work.',
+          timestamp: 100,
+        },
+      },
+      {
+        type: 'custom',
+        customType: STEERING_MESSAGE_MARKER_TYPE,
+        data: { timestamp: 100 },
+        id: 'steer-marker',
+      },
+      {
+        type: 'message',
+        id: 'user-ordinary',
+        message: {
+          role: 'user',
+          content: 'Continue normally.',
+          timestamp: 101,
+        },
+      },
+    ]);
+    const steering = items.find((item) => item.key === 'user-steer');
+    const ordinary = items.find((item) => item.key === 'user-ordinary');
+    expect(items).toHaveLength(2);
+    expect(steering).toMatchObject({
+      role: 'user',
+      deliveryMode: 'steer',
+      text: 'Please redirect the current work.',
+    });
+    expect(ordinary?.deliveryMode).toBeUndefined();
+    const [landmarkSteer, landmarkOrdinary] = buildTranscriptLandmarks(items);
+    expect(landmarkSteer).toMatchObject({
+      kind: 'user',
+      deliveryMode: 'steer',
+      label: 'Steering · Please redirect the current work.',
+    });
+    expect(landmarkOrdinary?.label).toBe('Continue normally.');
+  });
+
   it('keeps rich outline preview text and message timestamps', () => {
     const text =
       `Outline detail ${'with more useful context '.repeat(8)}`.trim();
