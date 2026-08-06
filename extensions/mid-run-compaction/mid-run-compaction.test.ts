@@ -81,6 +81,51 @@ describe('mid-run compaction', () => {
     );
   });
 
+  test('ignores a compaction callback after session shutdown', () => {
+    let turnEndHandler:
+      | ((event: TurnEndEvent, ctx: ExtensionContext) => void)
+      | undefined;
+    let shutdownHandler: (() => void) | undefined;
+    const sendMessage = vi.fn();
+    const api = {
+      on: vi.fn((name: string, handler: unknown) => {
+        if (name === 'turn_end')
+          turnEndHandler = handler as typeof turnEndHandler;
+        if (name === 'session_shutdown')
+          shutdownHandler = handler as typeof shutdownHandler;
+      }),
+      sendMessage,
+    } as unknown as ExtensionAPI;
+    midRunCompaction(api);
+
+    let onError: ((error: Error) => void) | undefined;
+    const compact = vi.fn(
+      (options: { onError?: (error: Error) => void }) =>
+        (onError = options.onError),
+    );
+    let stale = false;
+    const setStatus = vi.fn(() => {
+      if (stale) throw new Error('stale context');
+    });
+    const notify = vi.fn(() => {
+      if (stale) throw new Error('stale context');
+    });
+    const ctx = {
+      ...context(180_000),
+      compact,
+      ui: { setStatus, notify },
+    } as unknown as ExtensionContext;
+
+    turnEndHandler?.(turnEnd(1), ctx);
+    shutdownHandler?.();
+    stale = true;
+
+    expect(() => onError?.(new Error('late failure'))).not.toThrow();
+    expect(setStatus).toHaveBeenCalledTimes(1);
+    expect(notify).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   test('resumes but disables further attempts after compaction fails', () => {
     let turnEndHandler:
       | ((event: TurnEndEvent, ctx: ExtensionContext) => void)

@@ -26,24 +26,49 @@ export function shouldCompactMidRun(
 }
 
 export default function midRunCompaction(pi: ExtensionAPI): void {
+  let active = true;
   let compactionInFlight = false;
   let disabledAfterFailure = false;
 
-  const resume = () => {
+  const finish = (ctx: ExtensionContext, error?: Error) => {
     compactionInFlight = false;
-    pi.sendMessage(
-      {
-        customType: 'mid-run-compaction',
-        content: CONTINUATION_MESSAGE,
-        display: false,
-      },
-      { triggerTurn: true, deliverAs: 'followUp' },
-    );
+    // Compaction callbacks may settle after a reload or session replacement.
+    // The old extension instance receives session_shutdown first; never touch
+    // its session-bound ctx or pi after that point.
+    if (!active) return;
+    try {
+      ctx.ui.setStatus('mid-run-compaction', undefined);
+      if (error) {
+        disabledAfterFailure = true;
+        ctx.ui.notify(
+          `Mid-run compaction failed; continuing without another attempt: ${error.message}`,
+          'warning',
+        );
+      }
+      pi.sendMessage(
+        {
+          customType: 'mid-run-compaction',
+          content: CONTINUATION_MESSAGE,
+          display: false,
+        },
+        { triggerTurn: true, deliverAs: 'followUp' },
+      );
+    } catch {
+      // A replacement can race the callback after the active check. The new
+      // extension instance owns the new session; this stale callback has no
+      // valid follow-up work to perform.
+    }
   };
 
   pi.on('session_start', () => {
+    active = true;
     compactionInFlight = false;
     disabledAfterFailure = false;
+  });
+
+  pi.on('session_shutdown', () => {
+    active = false;
+    compactionInFlight = false;
   });
 
   pi.on('turn_end', (event, ctx) => {
@@ -58,19 +83,8 @@ export default function midRunCompaction(pi: ExtensionAPI): void {
     compactionInFlight = true;
     ctx.ui.setStatus('mid-run-compaction', 'compacting context…');
     ctx.compact({
-      onComplete: () => {
-        ctx.ui.setStatus('mid-run-compaction', undefined);
-        resume();
-      },
-      onError: (error) => {
-        disabledAfterFailure = true;
-        ctx.ui.setStatus('mid-run-compaction', undefined);
-        ctx.ui.notify(
-          `Mid-run compaction failed; continuing without another attempt: ${error.message}`,
-          'warning',
-        );
-        resume();
-      },
+      onComplete: () => finish(ctx),
+      onError: (error) => finish(ctx, error),
     });
   });
 }
