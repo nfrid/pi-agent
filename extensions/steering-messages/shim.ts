@@ -4,7 +4,7 @@ import {
   visibleWidth,
 } from '@earendil-works/pi-tui';
 
-export const STEERING_BORDER = '│';
+export const STEERING_BORDER = '┃';
 
 type ComponentClass<T> = abstract new (...args: never[]) => T;
 
@@ -73,13 +73,14 @@ export function installSteeringMessageShim(
     const lines = originalUserRender.call(this, width);
     const steering = state.steering;
     if (!steering || width < 1) return lines;
-    const contentWidth = width - 1;
+    const prefix = `${host.renderBorder(STEERING_BORDER)}${width > 1 ? ' ' : ''}`;
+    const contentWidth = Math.max(0, width - visibleWidth(prefix));
     return lines.map((line) => {
       const content = truncateToWidth(line, contentWidth, '');
       const padding = ' '.repeat(
         Math.max(0, contentWidth - visibleWidth(content)),
       );
-      return `${content}${padding}${host.renderBorder(STEERING_BORDER)}`;
+      return `${prefix}${content}${padding}`;
     });
   };
 

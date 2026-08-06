@@ -37,7 +37,9 @@ describe('steering message TUI shim', () => {
     expect(ordinary.render(80)).toEqual(['user:same']);
     const lines = steering.render(12);
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain(`\x1b[33m${STEERING_BORDER}\x1b[39m`);
+    expect(lines[0]).toMatch(
+      new RegExp(`^\\x1b\\[33m${STEERING_BORDER}\\x1b\\[39m `),
+    );
     expect(visibleWidth(lines[0] ?? '')).toBe(12);
     expect(visibleWidth(steering.render(3)[0] ?? '')).toBe(3);
     stop?.();
