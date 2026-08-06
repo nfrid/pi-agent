@@ -6,6 +6,7 @@ import { URL } from 'node:url';
 import {
   type BridgeEvent,
   type BrowserSnapshot,
+  type RuntimeSnapshot,
   redactImageData,
   validateBridgeCommand,
   validateSessionRenameRequest,
@@ -443,24 +444,23 @@ class DashboardServerImpl implements DashboardServer {
   private async sessionResult(id: string): Promise<unknown> {
     if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
       throw new Error('Invalid session id.');
-    const runtime = this.registry
-      .snapshots()
-      .find((item) => item.session.id === id && item.online !== false);
+    const activeRuntime = () =>
+      this.registry
+        .snapshots()
+        .find((item) => item.session.id === id && item.online !== false);
     const cursor = this.eventStream.cursor;
-    const provenance = runtime
-      ? this.registry.transportProvenance(runtime.runtimeId)
-      : undefined;
-    const runtimeTransport =
-      provenance && provenance.runtimeSeq >= 0 ? provenance : {};
-    if (
-      runtime &&
-      (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
-        true
-    ) {
+    const runtimeTransport = (runtime: RuntimeSnapshot) => {
+      const provenance = this.registry.transportProvenance(runtime.runtimeId);
+      return provenance && provenance.runtimeSeq >= 0 ? provenance : {};
+    };
+    const runtimeResult = (runtime: RuntimeSnapshot) => {
+      const entriesComplete =
+        (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
+        true;
       return {
         serverId: this.serverId,
         cursor,
-        ...runtimeTransport,
+        ...runtimeTransport(runtime),
         metadata: {
           id,
           file: runtime.session.file ?? '',
@@ -472,16 +472,42 @@ class DashboardServerImpl implements DashboardServer {
           entryCount: runtime.session.entries.length,
         },
         entries: redactImageData(runtime.session.entries),
+        entriesComplete,
       };
-    }
+    };
+    let runtime = activeRuntime();
+    if (
+      runtime &&
+      (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
+        true
+    )
+      return runtimeResult(runtime);
     try {
       const result = await this.sessions.readEntries(id);
-      if (!runtime) return { ...result, serverId: this.serverId, cursor };
+      // Runtime attachment can change while the file is being read. Recheck it
+      // before declaring disk history authoritative for the active branch.
+      runtime = activeRuntime();
+      if (!runtime)
+        return {
+          ...result,
+          entriesComplete: true,
+          serverId: this.serverId,
+          cursor,
+        };
+      if (
+        (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
+        true
+      )
+        return runtimeResult(runtime);
       return {
         ...result,
+        // The JSONL may lag or represent a different active branch while the
+        // runtime itself reports an incomplete snapshot. Keep polling and
+        // preserve the optimistic live projection until that branch is complete.
+        entriesComplete: false,
         serverId: this.serverId,
         cursor,
-        ...runtimeTransport,
+        ...runtimeTransport(runtime),
         metadata: {
           ...result.metadata,
           ...(runtime.session.name !== undefined
@@ -494,23 +520,9 @@ class DashboardServerImpl implements DashboardServer {
         },
       };
     } catch (error) {
+      runtime = activeRuntime();
       if (!runtime) throw error;
-      return {
-        serverId: this.serverId,
-        cursor,
-        ...runtimeTransport,
-        metadata: {
-          id,
-          file: runtime.session.file ?? '',
-          cwd: runtime.cwd,
-          name: runtime.session.name,
-          title: runtime.session.title,
-          updatedAt: runtime.lastSeenAt ?? Date.now(),
-          activeRuntimeId: runtime.runtimeId,
-          entryCount: runtime.session.entries.length,
-        },
-        entries: redactImageData(runtime.session.entries),
-      };
+      return runtimeResult(runtime);
     }
   }
 

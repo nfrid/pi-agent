@@ -583,19 +583,23 @@ export class DashboardLiveStore {
       firstResponseEpochSeq === undefined
         ? response.runtimeSeq
         : firstResponseEpochSeq - 1;
-    let projection = hydrateTranscript(response.entries, response.metadata.id, {
-      // Persisted Pi messages are not guaranteed to carry explicit IDs. The
-      // session API boundary assigns deterministic entry-index identities so
-      // the canonical projection can render and reconcile them semantically.
-      fallbackEntryIds: true,
-      cursor: replayCursor,
-      ...(response.runtimeEpoch === undefined
-        ? {}
-        : { runtimeEpoch: response.runtimeEpoch }),
-      ...(baselineRuntimeSeq === undefined
-        ? {}
-        : { runtimeSeq: baselineRuntimeSeq }),
-    });
+    let projection = hydrateTranscript(
+      response.entriesComplete === false ? [] : response.entries,
+      response.metadata.id,
+      {
+        // Persisted Pi messages are not guaranteed to carry explicit IDs. The
+        // session API boundary assigns deterministic entry-index identities so
+        // the canonical projection can render and reconcile them semantically.
+        fallbackEntryIds: true,
+        cursor: replayCursor,
+        ...(response.runtimeEpoch === undefined
+          ? {}
+          : { runtimeEpoch: response.runtimeEpoch }),
+        ...(baselineRuntimeSeq === undefined
+          ? {}
+          : { runtimeSeq: baselineRuntimeSeq }),
+      },
+    );
     for (const envelope of sessionEvents)
       if (envelope.cursor > projection.lastCursor)
         projection = reduceTranscriptEvent(projection, envelope);
@@ -636,22 +640,12 @@ export class DashboardLiveStore {
       ),
       retiredEpochs: [...retiredEpochs],
     };
-    const sameRuntimeGeneration =
-      currentProjection !== undefined &&
-      (currentProjection.runtimeEpoch === undefined ||
-        response.runtimeEpoch === undefined ||
-        currentProjection.runtimeEpoch === response.runtimeEpoch);
-    if (currentProjection && sameRuntimeGeneration) {
-      // A delayed/equal-generation HTTP read is not allowed to replace an
-      // already-live projection: the event that established its branch may
-      // have aged out of the bounded replay tail. HTTP can enrich transport
-      // metadata, while a genuinely new runtime epoch still rehydrates.
+    if (response.entriesComplete === false && currentProjection) {
+      // A brand-new active session can beat both branch serialization and the
+      // JSONL watcher. Its fallback response is useful metadata, not an
+      // authoritative replacement for live transcript state.
       projection = {
         ...currentProjection,
-        ...(currentProjection.runtimeEpoch === undefined &&
-        response.runtimeEpoch !== undefined
-          ? { runtimeEpoch: response.runtimeEpoch }
-          : {}),
         lastCursor: Math.max(currentProjection.lastCursor, coveredCursor),
         lastRuntimeSeq: Math.max(
           currentProjection.lastRuntimeSeq,

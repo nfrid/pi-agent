@@ -89,6 +89,7 @@ export function SessionView({
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [agentNavOpen, setAgentNavOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
+  const [incompleteRetryNonce, setIncompleteRetryNonce] = useState(0);
   const closeInspector = useCallback(() => setInspectorOpen(false), []);
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const stickToBottomRef = useRef(true);
@@ -96,11 +97,38 @@ export function SessionView({
   const outlineWasOpenRef = useRef(false);
   const sessionPageRef = useRef<HTMLElement>(null);
   const controlLayerRef = useRef<HTMLDivElement>(null);
+  const incompleteRetryCountRef = useRef(0);
+  const hydrationRetryCountRef = useRef(0);
+  const sessionRefetchRef = useRef<
+    ReturnType<typeof query.refetch> | undefined
+  >(undefined);
+  const requestSessionRefetch = useCallback(() => {
+    if (document.visibilityState !== 'visible') return undefined;
+    if (sessionRefetchRef.current) return sessionRefetchRef.current;
+    const pending = query.refetch();
+    sessionRefetchRef.current = pending;
+    void pending.then(
+      () => {
+        if (sessionRefetchRef.current === pending)
+          sessionRefetchRef.current = undefined;
+      },
+      () => {
+        if (sessionRefetchRef.current === pending)
+          sessionRefetchRef.current = undefined;
+      },
+    );
+    return pending;
+  }, [query.refetch]);
   useEffect(() => {
     if (!id) return;
     setError(undefined);
+    hydrationRetryCountRef.current = 0;
+    incompleteRetryCountRef.current = 0;
   }, [id]);
   useEffect(() => {
+    // A refetch can reuse structurally equal data; its timestamp still marks a
+    // new hydration attempt that must be evaluated.
+    void query.dataUpdatedAt;
     if (!query.data) return;
     if (query.data.metadata.id !== id) {
       void navigate({
@@ -109,16 +137,90 @@ export function SessionView({
       return;
     }
     if (store.hydrateSession(query.data)) {
-      setError(undefined);
+      hydrationRetryCountRef.current = 0;
+      if (query.data.entriesComplete !== false) setError(undefined);
       return;
     }
+    const attempt = hydrationRetryCountRef.current;
+    if (attempt >= 6) {
+      setError('Session changed repeatedly while loading. Retry when ready.');
+      return;
+    }
+    hydrationRetryCountRef.current = attempt + 1;
     setError('Session changed while loading; retrying…');
-    const retry = window.setTimeout(() => void query.refetch(), 25);
+    const retry = window.setTimeout(
+      () => void requestSessionRefetch(),
+      Math.min(8_000, 250 * 2 ** attempt),
+    );
     return () => window.clearTimeout(retry);
-  }, [id, navigate, query.data, query.refetch, store]);
+  }, [
+    id,
+    navigate,
+    query.data,
+    query.dataUpdatedAt,
+    requestSessionRefetch,
+    store,
+  ]);
   useEffect(() => {
-    if (resyncNonce > 0) void query.refetch();
-  }, [query.refetch, resyncNonce]);
+    if (resyncNonce > 0) void requestSessionRefetch();
+  }, [requestSessionRefetch, resyncNonce]);
+  useEffect(() => {
+    if (sessionChange <= 0) return;
+    // Live records provide an immediate optimistic tail. Once activity pauses,
+    // reconcile it with Pi's canonical persisted branch so custom entries,
+    // compaction records, and provider-specific tool payloads render exactly
+    // as they do after a full reload.
+    const retry = window.setTimeout(() => void requestSessionRefetch(), 250);
+    return () => window.clearTimeout(retry);
+  }, [requestSessionRefetch, sessionChange]);
+  useEffect(() => {
+    const reconcileWhenVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      hydrationRetryCountRef.current = 0;
+      incompleteRetryCountRef.current = 0;
+      setIncompleteRetryNonce((current) => current + 1);
+      void requestSessionRefetch();
+    };
+    document.addEventListener('visibilitychange', reconcileWhenVisible);
+    return () =>
+      document.removeEventListener('visibilitychange', reconcileWhenVisible);
+  }, [requestSessionRefetch]);
+  useEffect(() => {
+    // Visibility increments this nonce to restart a previously suspended retry loop.
+    void incompleteRetryNonce;
+    if (query.data?.entriesComplete !== false) {
+      incompleteRetryCountRef.current = 0;
+      return;
+    }
+    let canceled = false;
+    let timer: number | undefined;
+    const retry = () => {
+      if (canceled || document.visibilityState !== 'visible') return;
+      if (incompleteRetryCountRef.current >= 6) {
+        setError('Session history is not ready yet. Retry when ready.');
+        return;
+      }
+      const attempt = incompleteRetryCountRef.current;
+      timer = window.setTimeout(
+        async () => {
+          if (canceled || document.visibilityState !== 'visible') return;
+          incompleteRetryCountRef.current = attempt + 1;
+          const result = await requestSessionRefetch();
+          if (!canceled && result?.data?.entriesComplete === false) retry();
+        },
+        Math.min(8_000, 500 * 2 ** attempt),
+      );
+    };
+    retry();
+    return () => {
+      canceled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [
+    incompleteRetryNonce,
+    query.data?.entriesComplete,
+    requestSessionRefetch,
+  ]);
   useEffect(() => {
     if (outlineOpen) outlineWasOpenRef.current = true;
     else if (outlineWasOpenRef.current) {
@@ -237,19 +339,6 @@ export function SessionView({
         window.innerHeight,
       );
   }, [data, id, navigate, replacementSessionId, sessionChange]);
-  if (!data || !projection)
-    return (
-      <section>
-        <p>{error ?? 'Loading session…'}</p>
-      </section>
-    );
-  const runtimeError = runtime?.lastError;
-  const hasPendingInteraction = Boolean(runtime?.pendingInteractions.length);
-  const workspaceName = workspaceNameForSession(
-    snapshot,
-    data.metadata,
-    runtime,
-  );
   const status = runtime
     ? runtime.online === false
       ? 'offline'
@@ -257,6 +346,81 @@ export function SessionView({
         ? 'ready'
         : runtime.liveState
     : 'dormant';
+  const waitingForInitialHistory =
+    data?.entriesComplete === false &&
+    (!projection || projection.order.length === 0);
+  if (!data || !projection || waitingForInitialHistory) {
+    const loadingMetadata =
+      storedMetadata ?? snapshot.sessions.find((session) => session.id === id);
+    return (
+      <div className="session-layout">
+        <AgentThreadNav
+          snapshot={snapshot}
+          mode="session"
+          currentSessionId={id}
+          open={agentNavOpen}
+          onOpenChange={setAgentNavOpen}
+        />
+        <section className="session-page session-page-loading">
+          <header className="session-context session-heading">
+            <div className="session-context-main">
+              <div className="session-identity">
+                <div className="session-breadcrumb">
+                  <span className="session-workspace">Session</span>
+                  <span
+                    className="session-breadcrumb-separator"
+                    aria-hidden="true"
+                  >
+                    /
+                  </span>
+                  <h1>
+                    {loadingMetadata
+                      ? sessionDisplayTitle(loadingMetadata)
+                      : runtime?.session.title || runtime?.session.name || id}
+                  </h1>
+                </div>
+                <span className={`session-status status-${status}`}>
+                  <i aria-hidden="true">●</i> {status}
+                </span>
+              </div>
+            </div>
+          </header>
+          <div className="transcript session-transcript-loading" role="status">
+            <span className="session-loading-indicator" aria-hidden="true" />
+            <p>
+              {error ??
+                (query.error instanceof Error
+                  ? query.error.message
+                  : 'Loading session…')}
+            </p>
+            {(error || query.error) && (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => {
+                  hydrationRetryCountRef.current = 0;
+                  incompleteRetryCountRef.current = 0;
+                  setError(undefined);
+                  setIncompleteRetryNonce((current) => current + 1);
+                  void requestSessionRefetch();
+                }}
+              >
+                Retry
+              </button>
+            )}
+          </div>
+          <PendingInteractions runtime={runtime} />
+        </section>
+      </div>
+    );
+  }
+  const runtimeError = runtime?.lastError;
+  const hasPendingInteraction = Boolean(runtime?.pendingInteractions.length);
+  const workspaceName = workspaceNameForSession(
+    snapshot,
+    data.metadata,
+    runtime,
+  );
   const jumpToLatest = () => {
     window.scrollTo({
       top: document.documentElement.scrollHeight,

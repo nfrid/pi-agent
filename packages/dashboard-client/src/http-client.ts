@@ -127,9 +127,10 @@ export class DashboardHttpClient {
     return snapshot;
   }
 
-  async session(id: string): Promise<SessionApiResponse> {
+  async session(id: string, signal?: AbortSignal): Promise<SessionApiResponse> {
     const value = await this.request<unknown>(
       `/api/sessions/${encodeURIComponent(id)}`,
+      signal ? { signal } : {},
     );
     const response = tryParseSessionApiResponse(value);
     if (!response) throw new Error('Dashboard returned invalid session data.');

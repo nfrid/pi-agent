@@ -203,7 +203,12 @@ export class DashboardEventStream {
     this.timer = undefined;
     this.retryDelay = RECONNECT_MIN_MS;
     if (this.connecting) {
+      // A fetch-backed SSE consumer can remain pending forever after a mobile
+      // browser suspends the page. Abort that connection instead of waiting for
+      // it to unwind on its own; finally starts a fresh request from the latest
+      // accepted cursor.
       this.reconnectWhenUnwound = true;
+      this.controller?.abort();
       return;
     }
     void this.connect();
@@ -253,7 +258,12 @@ export class DashboardEventStream {
       await consumeSseResponse(
         response,
         (record) => {
-          if (this.stopped) return;
+          if (
+            this.stopped ||
+            controller.signal.aborted ||
+            this.controller !== controller
+          )
+            return;
           this.options.onRecord(record);
         },
         controller.signal,

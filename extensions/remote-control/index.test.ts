@@ -338,6 +338,21 @@ describe('remote event normalization', () => {
     ).toMatchObject({ content: 'Hi there', phase: 'updated' });
   });
 
+  it('does not append provider thinking deltas to visible assistant text', () => {
+    const normalizer = new LiveEventNormalizer('runtime-thinking');
+    normalizer.normalizeMessage('started', {
+      message: { role: 'assistant', content: '' },
+    });
+    expect(
+      normalizer.normalizeMessage('updated', {
+        assistantMessageEvent: {
+          type: 'thinking_delta',
+          delta: 'private reasoning',
+        },
+      }).content,
+    ).toBe('');
+  });
+
   it('uses Pi toolCallId and preserves direct tool execution fields', () => {
     const normalizer = new LiveEventNormalizer('runtime-epoch');
     expect(
@@ -356,12 +371,12 @@ describe('remote event normalization', () => {
     expect(
       normalizer.normalizeTool('finished', {
         toolCallId: 'read-1',
-        toolName: 'read',
         result: 'contents',
         isError: false,
       }),
     ).toMatchObject({
       toolCallId: 'read-1',
+      name: 'read',
       result: 'contents',
       isError: false,
       phase: 'finished',

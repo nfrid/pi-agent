@@ -59,7 +59,7 @@ export function snapshotQueryOptions(
 export function sessionQueryOptions(client: DashboardHttpClient, id: string) {
   return queryOptions<SessionApiResponse>({
     queryKey: dashboardQueryKeys.session(id),
-    queryFn: () => client.session(id),
+    queryFn: ({ signal }) => client.session(id, signal),
     staleTime: Number.POSITIVE_INFINITY,
     retry: networkRetry,
     enabled: Boolean(id),

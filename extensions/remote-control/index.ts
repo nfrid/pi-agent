@@ -220,11 +220,13 @@ export class LiveEventNormalizer {
   private activeMessage:
     | { messageId: string; identityKey?: string; content?: unknown }
     | undefined;
+  private readonly activeToolNames = new Map<string, string>();
 
   constructor(private readonly runtimeEpoch: string = randomUUID()) {}
 
   reset(): void {
     this.activeMessage = undefined;
+    this.activeToolNames.clear();
   }
 
   normalizeMessage(
@@ -280,7 +282,8 @@ export class LiveEventNormalizer {
     const rawContent =
       fullContent !== undefined
         ? fullContent
-        : Object.hasOwn(assistantEvent, 'delta')
+        : Object.hasOwn(assistantEvent, 'delta') &&
+            directString(assistantEvent, 'type') !== 'thinking_delta'
           ? appendMessageContent(
               this.activeMessage?.content,
               directValue(assistantEvent, 'delta'),
@@ -329,7 +332,10 @@ export class LiveEventNormalizer {
       typeof suppliedId === 'string' && suppliedId.length > 0
         ? suppliedId
         : `${this.runtimeEpoch}:tool:${++this.identitySequence}`;
-    const name = directString(event, 'toolName') ?? 'tool';
+    const suppliedName = directString(event, 'toolName');
+    const name = suppliedName ?? this.activeToolNames.get(toolCallId) ?? 'tool';
+    if (phase !== 'finished') this.activeToolNames.set(toolCallId, name);
+    else this.activeToolNames.delete(toolCallId);
     const suppliedStatus = directString(event, 'status');
     const status =
       suppliedStatus === 'pending' ||

@@ -37,17 +37,20 @@ function useConnectedDashboardStore(client: DashboardHttpClient) {
     const stop = store.connect(client);
     const onOnline = () => store.reconnect();
     const onOffline = () => store.setConnection('reconnecting');
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') store.reconnect();
+    };
     if (typeof window !== 'undefined') {
       window.addEventListener('online', onOnline);
       window.addEventListener('offline', onOffline);
-      document.addEventListener('visibilitychange', onOnline);
+      document.addEventListener('visibilitychange', onVisibilityChange);
     }
     return () => {
       stop();
       if (typeof window !== 'undefined') {
         window.removeEventListener('online', onOnline);
         window.removeEventListener('offline', onOffline);
-        document.removeEventListener('visibilitychange', onOnline);
+        document.removeEventListener('visibilitychange', onVisibilityChange);
       }
     };
   }, [client, store]);

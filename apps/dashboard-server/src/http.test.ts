@@ -531,15 +531,21 @@ describe('dashboard HTTP boundary', () => {
     socket.close();
   });
 
-  it('serves active session entries before the file index catches up and contains unknown-session failures', async () => {
+  it('marks stale indexed history incomplete for an active branch and contains unknown-session failures', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-active-session-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'not-indexed-yet.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'not-indexed-yet', cwd: '/tmp/project' })}\n${JSON.stringify({ type: 'message', id: 'stale-disk-entry' })}\n`,
     );
     server = await createDashboardServer({
       port: 0,
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
-      sessionDir: path.join(root, 'sessions'),
+      sessionDir,
       sesh: { list: async () => [] },
     });
     await server.start();
@@ -583,8 +589,38 @@ describe('dashboard HTTP boundary', () => {
     expect(await active.json()).toMatchObject({
       metadata: { id: 'live-session', name: 'Live session' },
       entries: [{ type: 'message', id: 'one' }],
+      entriesComplete: true,
       runtimeEpoch: expect.any(String),
       runtimeSeq: 1,
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 2,
+        event: {
+          type: 'session.changed',
+          session: {
+            id: 'not-indexed-yet',
+            name: 'Pending session',
+            entriesComplete: false,
+            entries: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const pending = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/not-indexed-yet`,
+      { headers },
+    );
+    expect(pending.status).toBe(200);
+    expect(await pending.json()).toMatchObject({
+      entries: [
+        { type: 'session', id: 'not-indexed-yet' },
+        { type: 'message', id: 'stale-disk-entry' },
+      ],
+      entriesComplete: false,
+      metadata: { id: 'not-indexed-yet', name: 'Pending session' },
     });
     const missing = await fetch(
       `http://127.0.0.1:${server.port}/api/sessions/missing`,
@@ -639,6 +675,35 @@ describe('dashboard HTTP boundary', () => {
       { headers: { 'x-dashboard-token': 'test-token' } },
     );
     await readStartedPromise;
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            runtimeId: 'late-runtime',
+            ownership: 'external',
+            pid: 123,
+            cwd: '/tmp',
+            liveState: 'working',
+            session: {
+              id: 'slow-session',
+              entriesComplete: false,
+              entries: [],
+            },
+            pendingInteractions: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
     for (let index = 0; index < 4; index += 1) await server.refreshWorkspaces();
     expect(server.snapshot().cursor).toBeGreaterThan(cursorAtRead + 2);
     releaseRead();
@@ -646,8 +711,10 @@ describe('dashboard HTTP boundary', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       cursor: cursorAtRead,
-      metadata: { id: 'slow-session' },
+      entriesComplete: false,
+      metadata: { id: 'slow-session', activeRuntimeId: 'late-runtime' },
     });
+    bridge.destroy();
   });
 
   it('forwards authenticated multipart images and removes temporary files after acknowledgement', async () => {

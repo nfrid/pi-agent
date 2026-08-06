@@ -121,6 +121,54 @@ describe('DashboardEventStream lifecycle', () => {
     stream.stop();
   });
 
+  it('aborts a suspended connection and rejects its buffered records before reconnecting', async () => {
+    let calls = 0;
+    let aborts = 0;
+    const encoder = new TextEncoder();
+    const frame = (cursor: number) =>
+      `data: ${JSON.stringify({
+        cursor,
+        emittedAt: cursor,
+        event: { type: 'agent.settled', sessionId: 'session-1' },
+      })}\n\n`;
+    const client = {
+      events: async (_cursor: number, signal: AbortSignal) => {
+        calls += 1;
+        signal.addEventListener('abort', () => {
+          aborts += 1;
+        });
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              if (calls === 1)
+                controller.enqueue(encoder.encode(frame(1) + frame(2)));
+            },
+          }),
+        );
+      },
+    } as unknown as DashboardHttpClient;
+    const records: number[] = [];
+    let stream!: DashboardEventStream;
+    stream = new DashboardEventStream({
+      client,
+      getCursor: () => records.at(-1) ?? 0,
+      getServerId: () => undefined,
+      onRecord: (record) => {
+        records.push(record.cursor);
+        if (record.cursor === 1) stream.reconnect();
+      },
+      onReplayGap: async () => undefined,
+      onState: () => undefined,
+      onError: () => undefined,
+      isOnline: () => true,
+    });
+    stream.start();
+    await expect.poll(() => calls).toBe(2);
+    expect(records).toEqual([1]);
+    expect(aborts).toBe(1);
+    stream.stop();
+  });
+
   it('keeps one active connection when a lifecycle is restarted', async () => {
     let active = 0;
     let maximum = 0;

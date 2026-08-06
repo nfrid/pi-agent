@@ -192,6 +192,109 @@ test('command palette identifies the runtime before invoking repeated actions', 
   await expect.poll(() => invokedRuntime).toBe('runtime-beta');
 });
 
+test('session loading preserves the shell and shows live status as a toast', async ({
+  page,
+}) => {
+  await page.addInitScript(() =>
+    localStorage.setItem('pi-dashboard-token', 'test-token'),
+  );
+  await page.route('**/api/usage', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/events?*', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body: ': heartbeat\n\n',
+    });
+  });
+  await page.route('**/api/snapshot', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        serverId: 'server-loading',
+        revision: 1,
+        cursor: 0,
+        runtimes: [
+          {
+            runtimeId: 'runtime-loading',
+            ownership: 'external',
+            pid: 1,
+            cwd: '/tmp',
+            liveState: 'idle',
+            online: true,
+            session: {
+              id: 'session-loading',
+              title: 'Loaded shell',
+              entries: [],
+            },
+            pendingInteractions: [],
+          },
+        ],
+        workspaces: [],
+        sessions: [
+          {
+            id: 'session-loading',
+            file: '',
+            cwd: '/tmp',
+            title: 'Loaded shell',
+            updatedAt: 1,
+          },
+        ],
+        unread: [],
+      }),
+    }),
+  );
+  await page.route('**/api/sessions/session-loading', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        serverId: 'server-loading',
+        cursor: 0,
+        metadata: {
+          id: 'session-loading',
+          file: '',
+          cwd: '/tmp',
+          title: 'Loaded shell',
+          updatedAt: 1,
+        },
+        entries: [
+          {
+            type: 'message',
+            message: {
+              id: 'history-1',
+              role: 'user',
+              content: 'Prior history',
+            },
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto('/sessions/session-loading');
+  await expect(page.locator('.session-heading h1')).toHaveText('Loaded shell');
+  await expect(page.locator('.session-transcript-loading')).toContainText(
+    'Loading session…',
+  );
+  await expect(
+    page.getByRole('button', { name: 'Open agent list' }),
+  ).toBeVisible();
+  await expect(page.getByRole('form', { name: 'Send a message' })).toHaveCount(
+    0,
+  );
+  const notice = page.locator('.sync-notice');
+  await expect(notice).toContainText('Connecting to live updates…');
+  expect(
+    await notice.evaluate((element) => ({
+      position: getComputedStyle(element).position,
+      insideMain: Boolean(element.closest('main')),
+    })),
+  ).toEqual({ position: 'fixed', insideMain: false });
+  await expect(page.locator('.transcript')).toContainText('Prior history');
+});
+
 test('live transport contains malformed data and reconnects without HTTP polling', async ({
   page,
 }) => {

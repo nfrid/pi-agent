@@ -925,6 +925,8 @@ export const SessionApiResponseSchema = Type.Object(
   {
     metadata: SessionIndexEntrySchema,
     entries: Type.Array(UnknownSchema),
+    /** False when a new active session is not indexed and its runtime branch could not be serialized completely. */
+    entriesComplete: Type.Optional(Type.Boolean()),
     /** Daemon generation that produced this response; optional for legacy clients. */
     serverId: Type.Optional(IdentifierSchema),
     /** Authoritative daemon cursor at which these entries were read. */

@@ -364,6 +364,88 @@ describe('DashboardLiveStore', () => {
     });
   });
 
+  it('installs authoritative history when a live tail arrived first', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.acceptStreamRecord({
+      cursor: 2,
+      emittedAt: 2,
+      runtimeEpoch: 'epoch-a',
+      runtimeSeq: 1,
+      sessionId: 'session-1',
+      event: {
+        type: 'message.finished',
+        sessionId: 'session-1',
+        message: {
+          messageId: 'live-answer',
+          role: 'assistant',
+          content: 'Live answer',
+          phase: 'finished',
+        },
+      },
+    } as never);
+
+    const projection = store.hydrateSession({
+      ...sessionResponse(2),
+      runtimeEpoch: 'epoch-a',
+      runtimeSeq: 1,
+      entries: [
+        {
+          type: 'message',
+          message: { id: 'history', role: 'user', content: 'Prior history' },
+        },
+      ],
+    });
+
+    expect(projection?.items.history).toBeDefined();
+    expect(projection?.items['live-answer']).toBeDefined();
+  });
+
+  it('does not replace a live projection with an explicitly incomplete session read', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    const initial = store.hydrateSession({
+      ...sessionResponse(1),
+      entriesComplete: false,
+      entries: [
+        {
+          type: 'message',
+          message: { id: 'initial-stale', role: 'user', content: 'Stale' },
+        },
+      ],
+    });
+    expect(initial?.items['initial-stale']).toBeUndefined();
+    store.acceptStreamRecord({
+      cursor: 2,
+      emittedAt: 2,
+      sessionId: 'session-1',
+      event: {
+        type: 'message.finished',
+        sessionId: 'session-1',
+        message: {
+          messageId: 'live-answer',
+          role: 'assistant',
+          content: 'Live answer',
+          phase: 'finished',
+        },
+      },
+    } as never);
+
+    const projection = store.hydrateSession({
+      ...sessionResponse(2),
+      entriesComplete: false,
+      entries: [
+        {
+          type: 'message',
+          message: { id: 'stale', role: 'user', content: 'Stale branch' },
+        },
+      ],
+    });
+
+    expect(projection?.items['live-answer']).toBeDefined();
+    expect(projection?.items.stale).toBeUndefined();
+  });
+
   it('reconciles a terminal tool event covered by the HTTP cursor', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
@@ -503,7 +585,7 @@ describe('DashboardLiveStore', () => {
     expect(projection?.items['answer-b']).toBeDefined();
   });
 
-  it('does not resurrect stale HTTP entries after a live branch ages out', () => {
+  it('lets an authoritative session read replace a live branch after replay ages out', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
     store.acceptStreamRecord({
@@ -535,8 +617,8 @@ describe('DashboardLiveStore', () => {
         },
       ],
     });
-    expect(projection?.items['new-tail']).toBeDefined();
-    expect(projection?.items['old-tail']).toBeUndefined();
+    expect(projection?.items['new-tail']).toBeUndefined();
+    expect(projection?.items['old-tail']).toBeDefined();
   });
 
   it('replays a tree replacement beyond the former 64-event overlap', () => {

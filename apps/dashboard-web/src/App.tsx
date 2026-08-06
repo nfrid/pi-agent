@@ -213,17 +213,17 @@ function RouteShell() {
         locationKey={routeState.pathname}
       >
         <Header snapshot={dashboard.snapshot} />
+        {(dashboard.error || dashboard.connectionState !== 'connected') && (
+          <div className="notice sync-notice" role="status" aria-live="polite">
+            {dashboard.error ??
+              (dashboard.connectionState === 'reconnecting'
+                ? 'Live updates disconnected; reconnecting…'
+                : 'Connecting to live updates…')}
+          </div>
+        )}
         <main
           className={`shell ${routeState.isSession ? 'session-shell' : ''}`}
         >
-          {(dashboard.error || dashboard.connectionState !== 'connected') && (
-            <div className="notice sync-notice" role="status">
-              {dashboard.error ??
-                (dashboard.connectionState === 'reconnecting'
-                  ? 'Live updates disconnected; reconnecting…'
-                  : 'Connecting to live updates…')}
-            </div>
-          )}
           <Outlet />
         </main>
         <DashboardUtilityOverlay
