@@ -299,7 +299,7 @@ function resolveReviewOptions(
 ): ResolvedReviewOptions {
   const mode = reviewMode(options);
   if (typeof options === 'string')
-    return { mode, summaryOnly: false, paths: [] };
+    return { mode, summaryOnly: false, paths: [], active: false };
   const summaryOnly = options?.summaryOnly === true;
   const paths = options?.paths ?? [];
   const patchBudget = options?.patchBudget;
@@ -589,7 +589,7 @@ export async function reviewBranch(
         ...metadata(() => pathSummary([], [])),
       };
     const patches = await Promise.all(
-      commits.map((commit) => taskPatch(root, commit)),
+      commits.map((commit) => taskPatch(root, commit, resolved.paths)),
     );
     if (!resolved.active)
       return {

@@ -53,9 +53,7 @@ export function writeWorktreeRecord(record: WorktreeRecord): void {
     delete record.creatorSessionId;
   if (record.recentParentSessionIds) {
     record.recentParentSessionIds = [
-      ...new Set(
-        record.recentParentSessionIds.filter(validParentSessionId),
-      ),
+      ...new Set(record.recentParentSessionIds.filter(validParentSessionId)),
     ].slice(-MAX_RECENT_PARENT_SESSION_IDS);
     if (record.recentParentSessionIds.length === 0)
       delete record.recentParentSessionIds;
@@ -101,8 +99,7 @@ function validRecord(value: unknown, id: string): value is WorktreeRecord {
         validParentSessionId(record.creatorSessionId))) &&
     (record.recentParentSessionIds === undefined ||
       (Array.isArray(record.recentParentSessionIds) &&
-        record.recentParentSessionIds.length <=
-          MAX_RECENT_PARENT_SESSION_IDS &&
+        record.recentParentSessionIds.length <= MAX_RECENT_PARENT_SESSION_IDS &&
         record.recentParentSessionIds.every(validParentSessionId))) &&
     (record.parentSessionIds === undefined ||
       (Array.isArray(record.parentSessionIds) &&

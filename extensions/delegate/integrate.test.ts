@@ -83,6 +83,8 @@ describe('separating carried parent work from the task own work', () => {
     // The parent's own uncommitted edit is not presented as the task's work.
     expect(review.diff).not.toContain('parent edit');
     expect(review.truncated).toBe(false);
+    expect(review.pathSummary).toBeUndefined();
+    expect(formatReview(record, review)).not.toContain('Selectors:');
   });
 
   test('says so when the task committed nothing of its own', async () => {
@@ -131,6 +133,18 @@ describe('incremental delegate review', () => {
     expect(bounded.omittedPatchChars).toBeGreaterThan(0);
     expect(bounded.diff).not.toContain('other.txt');
 
+    const noMatch = await reviewBranch(record, {
+      paths: ['src/missing.txt'],
+    });
+    expect(noMatch.log).toContain('Bounded review');
+    expect(noMatch.stat).toBe('');
+    expect(noMatch.diff).toBe('');
+    expect(noMatch.pathSummary).toMatchObject({
+      total: 2,
+      matched: 0,
+      omitted: 2,
+    });
+
     await expect(
       reviewBranch(record, { paths: ['../outside'] }),
     ).rejects.toThrow(/repository-relative/);
@@ -175,6 +189,19 @@ describe('incremental delegate review', () => {
     expect(incremental.log).toContain('Continuation fix');
     expect(incremental.diff).toContain('continuation fix');
     expect(incremental.diff).not.toContain('initial task');
+
+    const filteredIncremental = await reviewBranch(continued, {
+      incremental: true,
+      paths: ['src/initial.txt'],
+    });
+    expect(filteredIncremental.log).toContain('Continuation fix');
+    expect(filteredIncremental.stat).toBe('');
+    expect(filteredIncremental.diff).toBe('');
+    expect(filteredIncremental.pathSummary).toMatchObject({
+      total: 1,
+      matched: 0,
+      omitted: 1,
+    });
   });
 
   test('uses patch identity for carried work and excludes the carry commit', async () => {

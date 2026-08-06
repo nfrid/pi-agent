@@ -209,12 +209,17 @@ describe('delegate task lifecycle', () => {
             refresh: 'wip',
             resumed: initial.session,
           }),
+          undefined,
+          'failed-refresh-session',
         ),
       ).rejects.toThrow(/injected attach failure/);
       expect(resolveDelegateSession(initial.session.token)?.worktreeId).toBe(
         oldId,
       );
-      expect(loadWorktree(oldId)?.snapshot).toBe(true);
+      expect(loadWorktree(oldId)).toMatchObject({ snapshot: true });
+      expect(loadWorktree(oldId)?.recentParentSessionIds ?? []).not.toContain(
+        'failed-refresh-session',
+      );
       expect(listWorktrees().map((record) => record.id)).toEqual([oldId]);
     } finally {
       attach.mockRestore();

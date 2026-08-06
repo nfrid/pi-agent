@@ -50,27 +50,29 @@ describe('worktree preparation', () => {
     if (!worktree.worktree)
       throw new Error(worktree.fallbackReason ?? 'preparation failed');
     const record = worktree.worktree.record;
-    expect(loadWorktree(record.id)?.parentSessionIds).toEqual(['parent-a']);
+    expect(loadWorktree(record.id)).toMatchObject({
+      creatorSessionId: 'parent-a',
+    });
 
-    const attached = attachWorktreeSession(
-      worktree.worktree,
-      'delegate-token',
+    const attached = attachWorktreeSession(worktree.worktree, 'delegate-token');
+    touchWorktreeParentSession(attached.record, 'parent-b');
+    const restored = restoreWorktreeSession(attached.record, 'delegate-token');
+    touchWorktreeParentSession(restored.record, 'parent-c');
+    expect(loadWorktree(record.id)?.recentParentSessionIds).toEqual([
       'parent-b',
-    );
-    expect(attached.record.parentSessionIds).toEqual(['parent-a', 'parent-b']);
-    expect(
-      restoreWorktreeSession(attached.record, 'delegate-token', 'parent-c')
-        .record.parentSessionIds,
-    ).toEqual(['parent-a', 'parent-b', 'parent-c']);
+      'parent-c',
+    ]);
 
     for (let index = 0; index < 20; index += 1)
       touchWorktreeParentSession(attached.record, `parent-${index}`);
-    expect(loadWorktree(record.id)?.parentSessionIds).toHaveLength(16);
-    expect(loadWorktree(record.id)?.parentSessionIds).not.toContain('parent-a');
+    const bounded = loadWorktree(record.id);
+    expect(bounded?.recentParentSessionIds).toHaveLength(16);
+    expect(bounded?.creatorSessionId).toBe('parent-a');
 
     await retireWorktreeSnapshot(record.id);
-    await rehydrateWorktreeSession(record, 'delegate-token', 'parent-refresh');
-    expect(loadWorktree(record.id)?.parentSessionIds).toContain(
+    await rehydrateWorktreeSession(record, 'delegate-token');
+    touchWorktreeParentSession(record, 'parent-refresh');
+    expect(loadWorktree(record.id)?.recentParentSessionIds).toContain(
       'parent-refresh',
     );
   });

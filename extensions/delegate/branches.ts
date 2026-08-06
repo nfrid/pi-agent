@@ -184,7 +184,7 @@ function reviewSelectionSummary(review: BranchReview): string {
   return [
     `Selectors: mode=${review.mode}; summaryOnly=${review.summaryOnly ? 'yes' : 'no'}; paths=${selectors}; patchBudget=${budget}`,
     `Patch: ${review.summaryOnly ? 'body omitted (summaryOnly)' : `budget=${budget}; truncated=${review.patchTruncated ? 'yes' : 'no'}; omitted=${review.omittedPatchChars ?? 0} chars`}`,
-    `Changed paths: total=${summary.total}; matched=${summary.matched}; omitted=${summary.omitted}`, 
+    `Changed paths: total=${summary.total}; matched=${summary.matched}; omitted=${summary.omitted}`,
     `Matched paths:${matched.length ? `\n${matched.join('\n')}` : ' none'}`,
     `Omitted paths:${omitted.length ? `\n${omitted.join('\n')}` : ' none'}`,
   ].join('\n');
