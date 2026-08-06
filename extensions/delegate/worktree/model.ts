@@ -20,6 +20,8 @@ export interface WorktreeRecord {
   version: 1;
   id: string;
   sessionToken?: string;
+  /** Parent Pi sessions that created or later touched this retained record. */
+  parentSessionIds?: string[];
   repositoryRoot: string;
   /** Absolute path to the checkout. */
   worktreePath: string;

@@ -94,6 +94,63 @@ describe('separating carried parent work from the task own work', () => {
 });
 
 describe('incremental delegate review', () => {
+  test('supports summary and literal path-filtered reviews with a patch budget', async () => {
+    const selected = 'src/selected;$(not-a-command).txt';
+    const record = await delegated({
+      name: 'Bounded review',
+      write: (worktreePath) => {
+        writeFileSync(path.join(worktreePath, selected), 'selected\n');
+        writeFileSync(
+          path.join(worktreePath, 'src', 'other.txt'),
+          `${'other '.repeat(200)}\n`,
+        );
+      },
+    });
+
+    const summary = await reviewBranch(record, {
+      summaryOnly: true,
+      paths: [selected],
+    });
+    expect(summary.diff).toBe('');
+    expect(summary.stat).toContain(selected);
+    expect(summary.stat).not.toContain('other.txt');
+    expect(summary.pathSummary).toMatchObject({
+      total: 2,
+      matched: 1,
+      omitted: 1,
+      matchedPaths: [selected],
+      omittedPaths: ['src/other.txt'],
+    });
+
+    const bounded = await reviewBranch(record, {
+      paths: [selected],
+      patchBudget: 1,
+    });
+    expect(bounded.diff).toHaveLength(1);
+    expect(bounded.patchTruncated).toBe(true);
+    expect(bounded.omittedPatchChars).toBeGreaterThan(0);
+    expect(bounded.diff).not.toContain('other.txt');
+
+    const lineBounded = await reviewBranch(record, {
+      statOnly: false,
+      paths: [selected],
+      maxPatchLines: 1,
+    });
+    expect(lineBounded.patchTruncated).toBe(true);
+    expect(lineBounded.diff.split('\\n')).toHaveLength(1);
+    expect(lineBounded.maxPatchLines).toBe(1);
+
+    await expect(
+      reviewBranch(record, { paths: ['../outside'] }),
+    ).rejects.toThrow(/repository-relative/);
+    await expect(reviewBranch(record, { patchBudget: 60_001 })).rejects.toThrow(
+      /patchBudget/,
+    );
+    await expect(
+      reviewBranch(record, { summaryOnly: true, patchBudget: 1 }),
+    ).rejects.toThrow(/cannot be combined/);
+  });
+
   test('keeps the full review default and isolates a continuation fix', async () => {
     const record = await delegated({
       name: 'Initial task',

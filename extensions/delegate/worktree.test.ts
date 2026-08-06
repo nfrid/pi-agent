@@ -20,6 +20,7 @@ import {
   removeWorktree,
   restoreWorktreeSession,
   retireWorktreeSnapshot,
+  touchWorktreeParentSession,
   worktreeSummary,
 } from './worktree';
 import { writeWorktreeRecord } from './worktree/records';
@@ -40,6 +41,40 @@ async function prepared(
 }
 
 describe('worktree preparation', () => {
+  test('persists bounded parent-session touch identity across continuation rehydration', async () => {
+    const worktree = await prepareWorktree({
+      cwd: repository,
+      name: 'Session identity',
+      parentSessionId: 'parent-a',
+    });
+    if (!worktree.worktree)
+      throw new Error(worktree.fallbackReason ?? 'preparation failed');
+    const record = worktree.worktree.record;
+    expect(loadWorktree(record.id)?.parentSessionIds).toEqual(['parent-a']);
+
+    const attached = attachWorktreeSession(
+      worktree.worktree,
+      'delegate-token',
+      'parent-b',
+    );
+    expect(attached.record.parentSessionIds).toEqual(['parent-a', 'parent-b']);
+    expect(
+      restoreWorktreeSession(attached.record, 'delegate-token', 'parent-c')
+        .record.parentSessionIds,
+    ).toEqual(['parent-a', 'parent-b', 'parent-c']);
+
+    for (let index = 0; index < 20; index += 1)
+      touchWorktreeParentSession(attached.record, `parent-${index}`);
+    expect(loadWorktree(record.id)?.parentSessionIds).toHaveLength(16);
+    expect(loadWorktree(record.id)?.parentSessionIds).not.toContain('parent-a');
+
+    await retireWorktreeSnapshot(record.id);
+    await rehydrateWorktreeSession(record, 'delegate-token', 'parent-refresh');
+    expect(loadWorktree(record.id)?.parentSessionIds).toContain(
+      'parent-refresh',
+    );
+  });
+
   test('creates a named branch nobody else is on', async () => {
     const worktree = await prepared({ name: 'Implement the thing' });
     expect(worktree.record.branch).toBe('pi/implement-the-thing');

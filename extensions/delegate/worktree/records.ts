@@ -6,6 +6,10 @@ import type { WorktreeRecord } from './model';
 
 const ROOT = 'delegate-worktrees/v2';
 
+/** Keep record growth bounded while retaining cross-session continuations. */
+export const MAX_PARENT_SESSION_IDS = 16;
+export const MAX_PARENT_SESSION_ID_CHARS = 512;
+
 export const SAFE_ID = /^[0-9a-f-]{36}$/;
 
 export function delegateStateRoot(): string {
@@ -31,9 +35,42 @@ function recordPath(id: string): string {
   return path.join(worktreeRecordDir(id), 'record.json');
 }
 
+function validParentSessionId(sessionId: string): boolean {
+  const hasControl = [...sessionId].some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127;
+  });
+  return (
+    sessionId.length > 0 &&
+    sessionId.length <= MAX_PARENT_SESSION_ID_CHARS &&
+    !hasControl
+  );
+}
+
 export function writeWorktreeRecord(record: WorktreeRecord): void {
   record.updatedAt = new Date().toISOString();
+  if (record.parentSessionIds) {
+    record.parentSessionIds = [
+      ...new Set(record.parentSessionIds.filter(validParentSessionId)),
+    ].slice(-MAX_PARENT_SESSION_IDS);
+    if (record.parentSessionIds.length === 0) delete record.parentSessionIds;
+  }
   atomicWriteJsonSync(recordPath(record.id), record, { indent: 2 });
+}
+
+/** Record the parent Pi session that created or touched this worktree. */
+export function touchWorktreeParentSession(
+  record: WorktreeRecord,
+  sessionId: string | undefined,
+): WorktreeRecord {
+  if (!sessionId || !validParentSessionId(sessionId)) return record;
+  const current = record.parentSessionIds ?? [];
+  if (current.includes(sessionId)) return record;
+  record.parentSessionIds = [...current, sessionId].slice(
+    -MAX_PARENT_SESSION_IDS,
+  );
+  writeWorktreeRecord(record);
+  return record;
 }
 
 /**
@@ -48,6 +85,15 @@ function validRecord(value: unknown, id: string): value is WorktreeRecord {
   return (
     record.version === 1 &&
     record.id === id &&
+    (record.parentSessionIds === undefined ||
+      (Array.isArray(record.parentSessionIds) &&
+        record.parentSessionIds.length <= MAX_PARENT_SESSION_IDS &&
+        record.parentSessionIds.every(
+          (sessionId) =>
+            typeof sessionId === 'string' &&
+            sessionId.length > 0 &&
+            sessionId.length <= MAX_PARENT_SESSION_ID_CHARS,
+        ))) &&
     typeof record.repositoryRoot === 'string' &&
     path.isAbsolute(record.repositoryRoot) &&
     typeof record.worktreePath === 'string' &&

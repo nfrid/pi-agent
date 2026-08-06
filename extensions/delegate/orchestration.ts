@@ -171,11 +171,14 @@ async function runPreparedWithLifecycle(
 async function preparePlans(
   built: BuiltDelegateTask[],
   parallel: boolean,
+  parentSessionId?: string,
 ): Promise<PreparedDelegateTask[]> {
   const prepared: PreparedDelegateTask[] = [];
   try {
     for (const task of built)
-      prepared.push(await prepareDelegateTask(task.plan, task.preflight));
+      prepared.push(
+        await prepareDelegateTask(task.plan, task.preflight, parentSessionId),
+      );
     return prepared;
   } catch (error) {
     const cleanupWarnings = await rollbackPreparedDelegateTasks(prepared);
@@ -201,7 +204,11 @@ export async function prepareDelegateExecution(
   const tasks = await resolveDelegateHandoffs(runCtx.ctx, built.tasks);
   return {
     mode: built.parallel ? 'parallel' : 'single',
-    tasks: await preparePlans(tasks, built.parallel),
+    tasks: await preparePlans(
+      tasks,
+      built.parallel,
+      runCtx.launchSessionId ?? runCtx.ctx.sessionManager.getSessionId(),
+    ),
   };
 }
 

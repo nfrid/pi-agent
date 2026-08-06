@@ -23,6 +23,7 @@ import {
   rehydrateWorktreeSession,
   removeWorktree,
   restoreWorktreeSession,
+  touchWorktreeParentSession,
   type WorktreeBase,
   type WorktreeRecord,
 } from './worktree';
@@ -145,6 +146,7 @@ export function preflightDelegateContinuation(
 export async function prepareDelegateTask(
   plan: DelegateTaskPlan,
   preflight = preflightDelegateContinuation(plan),
+  parentSessionId?: string,
 ): Promise<PreparedDelegateTask> {
   const state = { ...preflight, warnings: [...preflight.warnings] };
   let session: DelegateSession | undefined;
@@ -152,11 +154,16 @@ export async function prepareDelegateTask(
   let replacementSessionMapped = false;
   let routeRollback: { routing?: DelegateRouteState } | undefined;
   try {
+    if (state.worktree)
+      touchWorktreeParentSession(state.worktree.record, parentSessionId);
+    if (state.refreshSource)
+      touchWorktreeParentSession(state.refreshSource, parentSessionId);
     if (plan.isolation === 'worktree' && !plan.resumed) {
       const prepared = await prepareWorktree({
         cwd: plan.requestedCwd,
         name: plan.name,
         base: plan.base,
+        parentSessionId,
       });
       if (!prepared.worktree)
         throw new Error(
@@ -181,6 +188,7 @@ export async function prepareDelegateTask(
         cwd: state.cwd,
         name: plan.name,
         base: plan.refresh,
+        parentSessionId,
       });
       if (!prepared.worktree)
         throw new Error(
@@ -191,7 +199,11 @@ export async function prepareDelegateTask(
       // write fails, catch cleanup removes this replacement without touching
       // the old snapshot or its session mapping.
       replacement = prepared.worktree;
-      replacement = attachWorktreeSession(replacement, plan.resumed.token);
+      replacement = attachWorktreeSession(
+        replacement,
+        plan.resumed.token,
+        parentSessionId,
+      );
       const refreshedCwd = path.join(
         replacement.record.worktreePath,
         replacement.record.workingDirectory,
@@ -212,6 +224,7 @@ export async function prepareDelegateTask(
       state.worktree = await rehydrateWorktreeSession(
         state.worktree.record,
         plan.resumed.token,
+        parentSessionId,
       );
       state.cwd = path.join(
         state.worktree.record.worktreePath,
@@ -242,7 +255,11 @@ export async function prepareDelegateTask(
         routing: plan.routing,
       });
       if (state.worktree)
-        state.worktree = attachWorktreeSession(state.worktree, session.token);
+        state.worktree = attachWorktreeSession(
+          state.worktree,
+          session.token,
+          parentSessionId,
+        );
     }
 
     return {

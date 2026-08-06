@@ -22,10 +22,52 @@ const Parameters = Type.Object({
     description:
       'List writable delegate branches and retired read-only snapshots. review and merge apply only to writable branches; snapshots can be continued or dropped. drop deletes the checkout and retained ref.',
   }),
+  scope: Type.Optional(
+    StringEnum(['session', 'all'] as const, {
+      description:
+        'For list, session (default) shows records created or touched by this parent Pi session; all shows repository history, including legacy records.',
+    }),
+  ),
   incremental: Type.Optional(
     Type.Boolean({
       description:
         'For review only, show task commits not represented in the current parent HEAD by patch identity. Omit or set false for the full recorded-range audit view.',
+    }),
+  ),
+  summaryOnly: Type.Optional(
+    Type.Boolean({
+      description:
+        'For review only, omit patch bodies while retaining provenance, state, commits, stat, and bounded changed-path evidence.',
+    }),
+  ),
+  statOnly: Type.Optional(
+    Type.Boolean({
+      description:
+        'Alias for summaryOnly: for review only, omit patch bodies while retaining bounded review evidence.',
+    }),
+  ),
+  paths: Type.Optional(
+    Type.Array(Type.String({ minLength: 1, maxLength: 4_096 }), {
+      minItems: 1,
+      maxItems: 64,
+      description:
+        'For review only, exact repository-relative paths to include. Paths are passed to Git as literal argv pathspecs; absolute and .. paths are rejected.',
+    }),
+  ),
+  patchBudget: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      maximum: 60_000,
+      description:
+        'For review only, maximum patch-body characters. The default is 60,000; summaryOnly cannot be combined with this selector.',
+    }),
+  ),
+  maxPatchLines: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      maximum: 60_000,
+      description:
+        'For review only, maximum patch-body lines. The default is the existing character bound; this is mutually exclusive with patchBudget and summaryOnly.',
     }),
   ),
   id: Type.Optional(
@@ -45,7 +87,20 @@ const Parameters = Type.Object({
 
 type BranchesDetails = {
   action: 'list' | 'review' | 'merge' | 'drop';
+  listScope?: 'session' | 'all';
   reviewMode?: 'full' | 'incremental';
+  summaryOnly?: boolean;
+  statOnly?: boolean;
+  paths?: string[];
+  patchBudget?: number;
+  maxPatchLines?: number;
+  totalChangedPaths?: number;
+  matchedChangedPaths?: number;
+  omittedChangedPaths?: number;
+  omittedPatchChars?: number;
+  omittedPatchLines?: number;
+  patchTruncated?: boolean;
+  truncated?: boolean;
   entries?: Array<{ id: string; branch: string; state: string }>;
   merged?: boolean;
 };
@@ -59,21 +114,36 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
     name: 'delegate_branches',
     label: 'Delegate Branches',
     description:
-      "Review and integrate the branches writable delegate tasks leave behind. review gives you the task's commits and diff measured from its own starting point by default; set incremental: true to show only task patches not represented in current parent HEAD. merge either lands cleanly or leaves your checkout untouched. Actions: list, review, merge, drop.",
+      "Review and integrate the branches writable delegate tasks leave behind. list defaults to this parent session; set scope: all for repository history. review gives you the task's commits and diff measured from its own starting point by default; set incremental: true to show only task patches not represented in current parent HEAD. Use summaryOnly, exact repository-relative paths, or patchBudget for bounded review. merge either lands cleanly or leaves your checkout untouched. Actions: list, review, merge, drop.",
     promptSnippet:
       'Review or merge writable delegate branches; continue or drop retired read-only snapshots',
     promptGuidelines: [
       'After a writable run, review its branch before merging, and run the check the task was given yourself. A branch that merges cleanly can still be wrong.',
-      'For a continued branch after integration, use review with incremental: true to inspect only task patches not represented in current HEAD; omit it for the full recorded-range audit.',
+      'For a continued branch after integration, use review with incremental: true to inspect only task patches not represented in current HEAD; omit it for the full recorded-range audit. Use summaryOnly or exact paths before requesting a bounded patchBudget; omitted paths are evidence that the view is partial.',
       'Merge sibling branches one at a time, reviewing between them: parallel tasks never collide in their worktrees, but their merges can.',
       'Drop a branch once its work is merged, so list stays a picture of what is still outstanding. A retired read-only snapshot is not mergeable: continue it for the same source or targeted refresh, or drop it when no longer needed.',
     ],
     parameters: Parameters,
-    async execute(_toolCallId, params) {
-      if (params.incremental && params.action !== 'review')
-        throw new Error('incremental is only valid for review.');
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const reviewSelectorUsed =
+        params.incremental === true ||
+        params.summaryOnly !== undefined ||
+        params.statOnly !== undefined ||
+        params.paths !== undefined ||
+        params.patchBudget !== undefined ||
+        params.maxPatchLines !== undefined;
+      if (params.action !== 'review' && reviewSelectorUsed)
+        throw new Error(
+          'incremental, summaryOnly, statOnly, paths, patchBudget, and maxPatchLines are only valid for review.',
+        );
+      if (params.scope !== undefined && params.action !== 'list')
+        throw new Error('scope is only valid for list.');
       if (params.action === 'list') {
-        const entries = await listBranchEntries();
+        const scope = params.scope ?? 'session';
+        const entries = await listBranchEntries({
+          scope,
+          sessionId: ctx?.sessionManager.getSessionId(),
+        });
         return {
           ...text(
             entries.length
@@ -82,6 +152,7 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
           ),
           details: {
             action: 'list' as const,
+            listScope: scope,
             entries: entries.map(({ record, state }) => ({
               id: record.id,
               branch: record.branch,
@@ -101,7 +172,18 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
 
       switch (params.action) {
         case 'review': {
-          if (record.snapshot)
+          if (record.snapshot) {
+            if (
+              params.summaryOnly !== undefined ||
+              params.statOnly !== undefined ||
+              params.paths !== undefined ||
+              params.patchBudget !== undefined ||
+              params.maxPatchLines !== undefined ||
+              params.incremental === true
+            )
+              throw new Error(
+                'Review selectors are not available for retired read-only snapshots.',
+              );
             return {
               ...text(
                 formatBranchDetail({
@@ -111,8 +193,14 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
               ),
               details: { action: 'review' as const },
             };
+          }
           const review = await reviewBranch(record, {
             mode: params.incremental ? 'incremental' : 'full',
+            summaryOnly: params.summaryOnly,
+            statOnly: params.statOnly,
+            paths: params.paths,
+            patchBudget: params.patchBudget,
+            maxPatchLines: params.maxPatchLines,
           });
           const entry: BranchEntry = { record, state: review.state };
           return {
@@ -122,6 +210,18 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
             details: {
               action: 'review' as const,
               reviewMode: review.mode,
+              summaryOnly: review.summaryOnly,
+              statOnly: params.statOnly,
+              paths: review.pathSelectors,
+              patchBudget: review.patchBudget,
+              maxPatchLines: review.maxPatchLines,
+              totalChangedPaths: review.pathSummary?.total,
+              matchedChangedPaths: review.pathSummary?.matched,
+              omittedChangedPaths: review.pathSummary?.omitted,
+              omittedPatchChars: review.omittedPatchChars,
+              omittedPatchLines: review.omittedPatchLines,
+              patchTruncated: review.patchTruncated,
+              truncated: review.truncated,
             },
           };
         }
@@ -167,9 +267,17 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
       const title =
         theme.fg('toolTitle', theme.bold('delegate_branches')) +
         (args.action ? ` ${theme.fg('muted', args.action)}` : '');
-      const selector = args.incremental
-        ? ` ${theme.fg('muted', 'incremental')}`
-        : '';
+      const selectors = [
+        args.scope === 'all' ? 'all history' : '',
+        args.incremental ? 'incremental' : '',
+        args.summaryOnly || args.statOnly ? 'summary' : '',
+        args.paths?.length ? `${args.paths.length} paths` : '',
+        args.patchBudget ? `${args.patchBudget} chars` : '',
+        args.maxPatchLines ? `${args.maxPatchLines} lines` : '',
+      ]
+        .filter(Boolean)
+        .join(', ');
+      const selector = selectors ? ` ${theme.fg('muted', selectors)}` : '';
       return new Text(
         args.id
           ? `${title}${selector} ${theme.fg('accent', args.id)}`
