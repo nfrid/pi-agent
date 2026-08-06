@@ -1,6 +1,6 @@
 # HFM-20260806: Report actionable delegate lifecycle failures
 
-- **Status:** proposed
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-08-06
 - **Created:** 2026-08-06
 - **Source reports:** [HF-20260806: Delegate lifecycle failures lack actionable diagnostics](../inbox/20260806T093756Z-opaque-delegate-lifecycle-failures.md)
@@ -49,15 +49,15 @@ Implement option 1 after schema-driven delegate outputs land. Add a small harnes
 
 ## Acceptance criteria
 
-- [ ] Non-success lifecycle metadata uses the schema-driven output foundation's validated projection, artifact ownership, and output bounds rather than an independent protocol.
-- [ ] Lifecycle metadata is authored from harness state and cannot be overridden or spoofed by child prose or structured task output.
-- [ ] Every errored, aborted, and timed-out delegate result includes a stable observed reason code.
-- [ ] Every non-success result includes one actionable diagnostic that is complete inline or available through an owned exact artifact handle, never silently clipped mid-message.
-- [ ] Results state whether the same continuation retains usable child context and whether a writable branch or read-only snapshot was retained for inspection or recovery.
-- [ ] User cancellation, queued cancellation, timeout, child nonzero exit, provider/runner error, setup failure, and lifecycle cleanup failure remain distinguishable whenever the harness observes the distinction.
-- [ ] Unknown causes are labeled unknown rather than assigned a speculative reason or retryability judgment.
-- [ ] Diagnostic capture remains bounded and does not expand to wholesale raw stderr.
-- [ ] Single and parallel delegate calls expose the same lifecycle contract, including when the child task result is missing or invalid.
+- [x] Non-success lifecycle metadata uses the schema-driven output foundation's validated projection, artifact ownership, and output bounds rather than an independent protocol.
+- [x] Lifecycle metadata is authored from harness state and cannot be overridden or spoofed by child prose or structured task output.
+- [x] Every errored, aborted, and timed-out delegate result includes a stable observed reason code.
+- [x] Every non-success result includes one actionable diagnostic that is complete inline or available through an owned exact artifact handle, never silently clipped mid-message.
+- [x] Results state whether the same continuation retains usable child context and whether a writable branch or read-only snapshot was retained for inspection or recovery.
+- [x] User cancellation, queued cancellation, timeout, child nonzero exit, provider/runner error, setup failure, and lifecycle cleanup failure remain distinguishable whenever the harness observes the distinction.
+- [x] Unknown causes are labeled unknown rather than assigned a speculative reason or retryability judgment.
+- [x] Diagnostic capture remains bounded and does not expand to wholesale raw stderr.
+- [x] Single and parallel delegate calls expose the same lifecycle contract, including when the child task result is missing or invalid.
 
 ## Validation
 
@@ -73,5 +73,6 @@ Compare with the baseline of two unclassified failures that forced manual repeti
 ## Implementation and resolution
 
 - **Approved implementation:** After schema-driven delegate outputs land, reuse their validated projection and owned-artifact primitives for harness-authored non-success lifecycle metadata containing an observed reason code, complete bounded diagnostic or exact artifact, and factual continuation/branch/snapshot availability. Do not add a speculative retryability judgment or a second result protocol; approved 2026-08-06.
-- **Merged change:** —
+- **Merged change:** `105d9ad` (lifecycle metadata foundation) and `779b577` (classification, recovery-state, durability, and public-bound hardening), merged 2026-08-06
+- **Implementation validation:** Injected cancellation, timeout, child exit, runner/setup/cleanup/unknown failures, invalid structured results, long multiline Unicode diagnostics, session switches, and retained/removed worktrees across foreground, background, single, and parallel paths. Independent reviews drove fixes for worktree reason overwrites, masked nonzero exits, durable lifecycle codes, stale-session diagnostics, truthful recovery facts, and terminal live status. Final lifecycle-branch `npm run check` passed TypeScript, Biome lint/format, SDK alignment, and 119 Vitest files / 1026 tests on 2026-08-06.
 - **Resolution:** pending evaluation

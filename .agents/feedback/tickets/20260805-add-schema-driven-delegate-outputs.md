@@ -1,6 +1,6 @@
 # HFM-20260805: Add schema-driven delegate outputs
 
-- **Status:** proposed
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-08-05
 - **Created:** 2026-08-05
 - **Source reports:** [HF-20260805: Delegate completion truncates actionable audit findings](../inbox/20260805T111944Z-delegate-audit-findings-truncated.md)
@@ -56,16 +56,16 @@ Future programmatic processing may add declarative predicates over validated fie
 
 ## Acceptance criteria
 
-- [ ] A parent can supply a bounded supported schema with required fields, arrays, enums, objects, and primitive constraints.
-- [ ] A child result is accepted only when it validates exactly; missing required findings or wrong types produce an explicit non-success result with bounded validation errors.
-- [ ] The exact validated object is stored in an immutable delegate-output artifact without being copied wholesale into parent context.
-- [ ] The compact completion contains only the parent projection plus mandatory lifecycle metadata and reports omitted/over-limit projected data deterministically.
-- [ ] A parent can forward a named artifact view to a later delegate without retrieving its bytes into parent context; ownership and untrusted-evidence framing remain enforced.
-- [ ] Schema paths cannot escape the validated result, execute code, perform arbitrary transformations, or access unselected artifact content.
-- [ ] Parallel tasks each retain independent schemas, projections, validation results, and context budgets.
-- [ ] Invalid schemas fail before child launch; invalid child results cannot be mislabeled successful.
-- [ ] Tasks without a result specification retain the current prose report and artifact behavior.
-- [ ] The original four-finding audit shape can require all finding titles/severities, show only their bounded index to the parent, and preserve detailed evidence artifact-only.
+- [x] A parent can supply a bounded supported schema with required fields, arrays, enums, objects, and primitive constraints.
+- [x] A child result is accepted only when it validates exactly; missing required findings or wrong types produce an explicit non-success result with bounded validation errors.
+- [x] The exact validated object is stored in an immutable delegate-output artifact without being copied wholesale into parent context.
+- [x] The compact completion contains only the parent projection plus mandatory lifecycle metadata and reports omitted/over-limit projected data deterministically.
+- [x] A parent can forward a named artifact view to a later delegate without retrieving its bytes into parent context; ownership and untrusted-evidence framing remain enforced.
+- [x] Schema paths cannot escape the validated result, execute code, perform arbitrary transformations, or access unselected artifact content.
+- [x] Parallel tasks each retain independent schemas, projections, validation results, and context budgets.
+- [x] Invalid schemas fail before child launch; invalid child results cannot be mislabeled successful.
+- [x] Tasks without a result specification retain the current prose report and artifact behavior.
+- [x] The original four-finding audit shape can require all finding titles/severities, show only their bounded index to the parent, and preserve detailed evidence artifact-only.
 
 ## Validation
 
@@ -81,5 +81,6 @@ Compare with the baseline where three of four findings were absent and whole art
 ## Implementation and resolution
 
 - **Approved implementation:** Add optional bounded schema-driven delegate results with exact settlement validation, immutable structured artifacts, static parent projections, and named artifact views that can be forwarded without parent retrieval. Preserve legacy prose behavior and ownership/untrusted-evidence boundaries. Defer filter functions, declarative predicates, and workflow execution until the base contract is hardened; approved by the user on 2026-08-05.
-- **Merged change:** —
+- **Merged change:** `e5e55d6` (schema foundation) and `2187199` (security and regression hardening), merged 2026-08-06
+- **Implementation validation:** Focused schema, settlement, artifact-view, ownership, continuation, projection, session-switch, and progress suites passed. Independent reviews drove fixes for forgeable/shadowable views, stale continuation contracts, TypeBox settlement agreement, structured-run leakage, and stale-session publication. Final schema-branch `npm run check` passed TypeScript, Biome lint/format, SDK alignment, and 118 Vitest files / 1008 tests on 2026-08-06.
 - **Resolution:** pending evaluation
