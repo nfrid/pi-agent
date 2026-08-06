@@ -72,6 +72,8 @@ export interface ContinuationPreflight {
 
 export interface PreparedDelegateTask extends ContinuationPreflight {
   plan: DelegateTaskPlan;
+  /** Setup failed before a child run could be created. */
+  setupFailure?: unknown;
   session: DelegateSession;
   routeRollback?: { routing?: DelegateRouteState };
 }
@@ -301,7 +303,8 @@ export async function prepareDelegateTask(
 export async function cleanupFreshPreparedTask(
   prepared: PreparedDelegateTask,
 ): Promise<{ warnings: string[] }> {
-  if (prepared.plan.resumed || !prepared.worktree) return { warnings: [] };
+  if (prepared.setupFailure || prepared.plan.resumed || !prepared.worktree)
+    return { warnings: [] };
   const warnings: string[] = [];
   const sessionWarning = removeSessionSafely(prepared.session);
   if (sessionWarning) warnings.push(sessionWarning);
@@ -349,6 +352,12 @@ export async function runPreparedDelegateTask(
     onWorktreeRunning?: (worktree: PreparedWorktree) => void;
   },
 ): Promise<DelegatedRun> {
+  if (prepared.setupFailure)
+    throw new Error(
+      prepared.setupFailure instanceof Error
+        ? prepared.setupFailure.message
+        : String(prepared.setupFailure),
+    );
   if (prepared.worktree) options.onWorktreeRunning?.(prepared.worktree);
   const run = await runDelegate({
     cwd: prepared.cwd,

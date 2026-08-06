@@ -1,4 +1,5 @@
 import { Container, Markdown, Spacer, Text } from '@earendil-works/pi-tui';
+import { ensureDelegateLifecycle } from './lifecycle';
 import { blockedQuestion } from './output';
 import {
   ACTIVITY_PREVIEW_CHARS,
@@ -122,6 +123,7 @@ function addExpandedRun(
     container.addChild(new Text(fg('muted', recoveryNote), 0, 0));
 
   const structured = getDelegateResultSpec(run);
+  const lifecycle = ensureDelegateLifecycle(run);
   const final = structured ? '' : getFinalAssistantText(run.messages).trim();
   const backgroundLaunch = isBackgroundLaunch(run);
   const blocked = blockedQuestion(run);
@@ -132,7 +134,42 @@ function addExpandedRun(
   }
   if (!hasResultHeading(final))
     container.addChild(sectionTitle('Result', theme));
-  if (structured) {
+  if (lifecycle) {
+    container.addChild(
+      new Text(
+        fg(
+          state === 'error' ? 'error' : 'warning',
+          `Observed failure: ${lifecycle.reason}`,
+        ),
+        0,
+        0,
+      ),
+    );
+    container.addChild(
+      new Text(
+        fg(
+          'warning',
+          lifecycle.diagnostic
+            ? `Diagnostic: ${lifecycle.diagnostic}`
+            : lifecycle.diagnosticArtifact
+              ? `Diagnostic artifact: ${lifecycle.diagnosticArtifact.handle}`
+              : 'Diagnostic artifact unavailable.',
+        ),
+        0,
+        0,
+      ),
+    );
+    container.addChild(
+      new Text(
+        fg(
+          'dim',
+          `Continuation usable: ${lifecycle.continuationUsable ? 'yes' : 'no'} · Writable branch retained: ${lifecycle.writableBranchRetained ? 'yes' : 'no'} · Read-only snapshot retained: ${lifecycle.readOnlySnapshotRetained ? 'yes' : 'no'}`,
+        ),
+        0,
+        0,
+      ),
+    );
+  } else if (structured) {
     const settlement = getSettledDelegateResult(run);
     container.addChild(
       new Text(
@@ -303,8 +340,28 @@ export function renderDelegateResult(
       );
 
     const structured = getDelegateResultSpec(run);
+    const lifecycle = ensureDelegateLifecycle(run);
     const final = structured ? '' : getFinalAssistantText(run.messages).trim();
-    if (structured) {
+    if (lifecycle) {
+      container.addChild(
+        new Text(fieldLine('Failure', lifecycle.reason, fg, 'error'), 0, 0),
+      );
+      container.addChild(
+        new Text(
+          fieldLine(
+            'Diagnostic',
+            lifecycle.diagnostic ??
+              (lifecycle.diagnosticArtifact
+                ? `artifact ${lifecycle.diagnosticArtifact.handle}`
+                : 'artifact unavailable'),
+            fg,
+            'warning',
+          ),
+          0,
+          0,
+        ),
+      );
+    } else if (structured) {
       const settlement = getSettledDelegateResult(run);
       container.addChild(
         new Text(

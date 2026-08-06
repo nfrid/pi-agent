@@ -1,6 +1,12 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import type { TSchema } from 'typebox';
 import { Value } from 'typebox/value';
+import {
+  copyDelegateLifecycle,
+  ensureDelegateLifecycle,
+  getDelegateLifecycle,
+  setDelegateLifecycle,
+} from './lifecycle';
 import type { DelegatedRun } from './types';
 
 /**
@@ -935,6 +941,13 @@ export function settleDelegateResult(
     : validateStructuredResult(spec, channel?.details);
   settlements.set(run, validation);
   if (!validation.valid) {
+    const lifecycle = ensureDelegateLifecycle(run);
+    if (!lifecycle || lifecycle.reason === 'unknown')
+      setDelegateLifecycle(
+        run,
+        'child-result-invalid',
+        validation.errors.join('; '),
+      );
     run.stopReason = 'error';
     const summary = validation.errors.join('; ').slice(0, 900);
     run.errorMessage = `Structured delegate result invalid: ${summary}`;
@@ -974,22 +987,54 @@ export function getStructuredArtifacts(
 /**
  * Serialize a run for any public details/status/job surface. Structured result
  * evidence stays in the private run for settlement and artifact publication;
- * child messages, stderr, and activity prose never cross this boundary.
+ * child messages, stderr, activity prose, and child-shaped lifecycle fields
+ * never cross this boundary; lifecycle projections come only from harness state.
  */
-export function serializeDelegateRunForPublic(run: DelegatedRun): DelegatedRun {
-  if (!getDelegateResultSpec(run)) return run;
-  return {
-    ...run,
-    messages: [],
-    stderr: '',
-    activities: run.activities.map(
-      ({
-        latestText: _latestText,
-        transcriptText: _transcriptText,
-        ...activity
-      }) => activity,
-    ),
-  };
+export function serializeDelegateRunForPublic(
+  run: DelegatedRun,
+  options: { includeArtifacts?: boolean } = {},
+): DelegatedRun {
+  const structured = Boolean(getDelegateResultSpec(run));
+  const lifecycle = ensureDelegateLifecycle(run);
+  const includeArtifacts = options.includeArtifacts !== false;
+  const {
+    lifecycle: _childLifecycle,
+    errorMessage: _errorMessage,
+    ...base
+  } = run;
+  const publicRun: DelegatedRun = structured
+    ? {
+        ...base,
+        messages: [],
+        stderr: '',
+        activities: run.activities.map(
+          ({
+            latestText: _latestText,
+            transcriptText: _transcriptText,
+            ...activity
+          }) => activity,
+        ),
+        ...(lifecycle || !run.errorMessage
+          ? {}
+          : { errorMessage: run.errorMessage }),
+      }
+    : lifecycle
+      ? { ...base, stderr: '' }
+      : {
+          ...base,
+          ...(run.errorMessage ? { errorMessage: run.errorMessage } : {}),
+        };
+  const projected = lifecycle
+    ? getDelegateLifecycle(run, { includeArtifact: includeArtifacts })
+    : undefined;
+  if (projected) {
+    publicRun.lifecycle = projected;
+    copyDelegateLifecycle(run, publicRun, {
+      includeArtifact: includeArtifacts,
+    });
+  }
+  if (!includeArtifacts) delete publicRun.artifact;
+  return publicRun;
 }
 
 /** Parse only the bounded schema passed to a child process. */

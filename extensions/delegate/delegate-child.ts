@@ -37,6 +37,8 @@ export interface SpawnChildResult {
   exitCode: number;
   wasAborted: boolean;
   timedOut: boolean;
+  /** A process-spawn/runner failure, distinct from a child nonzero exit. */
+  spawnError?: string;
 }
 
 /** Resolve the parent home without broadening the child environment allowlist. */
@@ -79,6 +81,7 @@ export async function spawnDelegateChild(
 ): Promise<SpawnChildResult> {
   let wasAborted = false;
   let timedOut = false;
+  let spawnError: string | undefined;
 
   const exitCode = await new Promise<number>((resolve) => {
     const isWindows = process.platform === 'win32';
@@ -177,6 +180,7 @@ export async function spawnDelegateChild(
       finish(code ?? 1);
     });
     proc.on('error', (error) => {
+      spawnError = error.message;
       run.stderr = appendTail(run.stderr, error.message, MAX_STDERR_BYTES);
       finish(1);
     });
@@ -195,5 +199,6 @@ export async function spawnDelegateChild(
     exitCode: wasAborted ? 130 : timedOut ? 124 : exitCode,
     wasAborted,
     timedOut,
+    ...(spawnError ? { spawnError } : {}),
   };
 }

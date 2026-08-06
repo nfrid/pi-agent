@@ -145,6 +145,32 @@ current-session ownership and the registry, then frames only that view as
 untrusted evidence. Omitting `result` preserves the legacy prose report and
 artifact behavior exactly.
 
+### Failed-run lifecycle contract
+
+Every errored, aborted, or timed-out run has a harness-authored `lifecycle`
+projection. Its `reason` is one of the stable observed codes
+`user-cancellation`, `queued-cancellation`, `timeout`,
+`child-nonzero-exit`, `provider-runner-error`, `setup-failure`,
+`lifecycle-cleanup-failure`, `child-result-invalid`, or `unknown`. These codes
+report only what the harness observed; they do not infer a provider-specific
+cause or retryability. Child prose and child structured-result fields cannot
+set or override the projection.
+
+The projection contains exactly one actionable diagnostic: complete bounded
+text in `diagnostic`, or an owner-session exact `diagnosticArtifact` when the
+text exceeds the 2 KiB inline diagnostic cap. Diagnostic capture is bounded
+at 64 KiB and
+child stderr is only used as a bounded child-exit diagnostic; raw stderr is
+never copied wholesale into the public contract. UTF-8 byte bounds preserve
+multiline and Unicode text without cutting an inline diagnostic in the middle.
+
+`continuationUsable`, `writableBranchRetained`, and
+`readOnlySnapshotRetained` are factual booleans derived from the durable
+session/worktree records. A setup failure or removed resource is never
+reported as retained. The same projection is rendered for single and
+parallel foreground results and for background/job completion and inspection;
+missing or invalid structured child results receive the same contract.
+
 ## Read-only delegates
 
 A read-only delegate gets `read`, `bash`, `grep`, `find`, and `ls`, and is told in its prompt to inspect and report rather than edit. This is an intent signal, not an enforced boundary: the child has an ordinary shell and can do everything any agent with a shell can do. Use it when you want an answer, not a change.

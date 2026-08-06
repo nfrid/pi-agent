@@ -1353,25 +1353,32 @@ describe('async delegate extension', () => {
     vi.spyOn(taskLifecycle, 'runPreparedDelegateTask').mockRejectedValueOnce(
       new Error('unexpected delegate failure'),
     );
-    await expect(
-      tools.get('delegate')?.execute(
-        'call-failing-foreground',
+    const failedForeground = await tools.get('delegate')?.execute(
+      'call-failing-foreground',
+      {
+        name: 'Failing foreground audit',
+        task: 'fail unexpectedly',
+        route: 'quick',
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(failedForeground?.details).toMatchObject({
+      runs: [
         {
-          name: 'Failing foreground audit',
-          task: 'fail unexpectedly',
-          route: 'quick',
+          lifecycle: { reason: 'provider-runner-error' },
         },
-        undefined,
-        undefined,
-        ctx,
-      ),
-    ).rejects.toThrow('unexpected delegate failure');
+      ],
+    });
     expect(
       widgetFactory?.(
         { requestRender: vi.fn() },
         { fg: (_color, text) => text },
-      ).render(100),
-    ).toEqual([]);
+      )
+        .render(100)
+        .join('\n'),
+    ).toContain('failed');
     await handlers.get('session_shutdown')?.({}, ctx);
   });
 });

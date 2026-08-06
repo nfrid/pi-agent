@@ -1,3 +1,4 @@
+import { ensureDelegateLifecycle } from './lifecycle';
 import {
   getDelegateResultSpec,
   getSettledDelegateResult,
@@ -215,10 +216,27 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
       );
   }
   if (isRunError(run)) {
-    const failure = structured
-      ? run.errorMessage?.trim() || 'Structured result settlement failed.'
-      : run.errorMessage?.trim() || run.stderr.trim() || originalBody;
-    lines.push(`Failure: ${clip(failure, 120)}`);
+    const lifecycle = ensureDelegateLifecycle(run);
+    if (lifecycle) {
+      lines.push(`Lifecycle reason: ${lifecycle.reason}`);
+      if (lifecycle.diagnostic) lines.push(`Failure: ${lifecycle.diagnostic}`);
+      else if (lifecycle.diagnosticArtifact)
+        lines.push(
+          `Failure artifact: ${lifecycle.diagnosticArtifact.handle} (${lifecycle.diagnosticArtifact.size} bytes, sha256 ${lifecycle.diagnosticArtifact.sha256})`,
+        );
+      else
+        lines.push('Failure: owner-session diagnostic artifact unavailable.');
+      lines.push(
+        `Continuation usable: ${lifecycle.continuationUsable ? 'yes' : 'no'}`,
+        `Writable branch retained: ${lifecycle.writableBranchRetained ? 'yes' : 'no'}`,
+        `Read-only snapshot retained: ${lifecycle.readOnlySnapshotRetained ? 'yes' : 'no'}`,
+      );
+    } else {
+      const failure = structured
+        ? run.errorMessage?.trim() || 'Structured result settlement failed.'
+        : run.errorMessage?.trim() || run.stderr.trim() || originalBody;
+      lines.push(`Failure: ${clip(failure, 120)}`);
+    }
   }
   const recoveryNote = continuationRecoveryNote(run);
   if (recoveryNote) lines.push(`Note: ${recoveryNote}`);

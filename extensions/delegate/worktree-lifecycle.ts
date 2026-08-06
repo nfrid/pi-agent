@@ -1,7 +1,13 @@
 import {
+  buildLifecycleDiagnostic,
+  setDelegateLifecycle,
+  setDelegateLifecycleText,
+} from './lifecycle';
+import {
   continuationRecoveryNote,
   createRun,
   type DelegatedRun,
+  type DelegateLifecycleReason,
   type DelegateRouteState,
   getRunState,
 } from './types';
@@ -20,17 +26,20 @@ export function failedLifecycleRun(
   routing: DelegateRouteState | undefined,
   metadata: Parameters<typeof createRun>[2],
   error: unknown,
+  reason: DelegateLifecycleReason = 'provider-runner-error',
 ): DelegatedRun {
   const now = Date.now();
-  return {
+  const failed = {
     ...createRun(task, routing, metadata),
     exitCode: 1,
     stopReason: 'error',
     errorMessage: `Delegate lifecycle failed: ${error instanceof Error ? error.message : String(error)}`,
-    state: 'error',
+    state: 'error' as const,
     startedAt: now,
     finishedAt: now,
   };
+  setDelegateLifecycle(failed, reason, failed.errorMessage);
+  return failed;
 }
 
 export function worktreeDetails(record: WorktreeRecord): WorktreeSummary {
@@ -41,12 +50,14 @@ export function markLifecycleFailure(
   run: DelegatedRun,
   worktree: PreparedWorktree,
   error: unknown,
+  reason: DelegateLifecycleReason = 'lifecycle-cleanup-failure',
 ): void {
   const record = loadWorktree(worktree.record.id) ?? worktree.record;
   run.exitCode = 1;
   run.state = 'error';
   run.stopReason = 'error';
   run.errorMessage = `Delegate lifecycle failed: ${error instanceof Error ? error.message : String(error)}`;
+  setDelegateLifecycle(run, reason, run.errorMessage);
   run.warnings = [
     ...(run.warnings ?? []),
     `Worktree ${record.branch} was retained for diagnosis.`,
@@ -69,6 +80,7 @@ export async function finalizeWorktreeRun(
     state === 'success' || state === 'aborted' || state === 'timed-out'
       ? state
       : 'error';
+  const previousError = loadWorktree(worktree.record.id)?.error;
   try {
     const record = await finishWorktree(worktree.record.id, {
       taskName,
@@ -85,7 +97,23 @@ export async function finalizeWorktreeRun(
     run.worktree = worktreeSummary(settled);
     if (settled.error && !continuationRecoveryNote(run))
       run.warnings = [...(run.warnings ?? []), settled.error];
+    if (settled.error && settled.error !== previousError) {
+      run.state = 'error';
+      run.stopReason = 'error';
+      run.exitCode = run.exitCode === 0 ? 1 : run.exitCode;
+      run.errorMessage = `Delegate lifecycle cleanup failed: ${settled.error}`;
+      setDelegateLifecycleText(
+        run,
+        'lifecycle-cleanup-failure',
+        buildLifecycleDiagnostic('lifecycle-cleanup-failure', run.errorMessage),
+      );
+    }
   } catch (error) {
+    run.state = 'error';
+    run.stopReason = 'error';
+    run.exitCode = run.exitCode === 0 ? 1 : run.exitCode;
+    run.errorMessage = `Delegate lifecycle cleanup failed: ${error instanceof Error ? error.message : String(error)}`;
+    setDelegateLifecycle(run, 'lifecycle-cleanup-failure', run.errorMessage);
     run.warnings = [
       ...(run.warnings ?? []),
       `Could not settle worktree ${worktree.record.branch}: ${error instanceof Error ? error.message : String(error)}`,

@@ -830,19 +830,26 @@ describe('executeSingleDelegate lifecycle', () => {
       .mockResolvedValueOnce(prepared())
       .mockRejectedValueOnce(new Error('prepare failed'));
 
-    await expect(
-      executeSingleDelegate(
-        runContext(),
-        {
-          tasks: [
-            { name: 'Test agent', task: 'one', route: 'quick' },
-            { name: 'Test agent', task: 'two', route: 'quick' },
-          ],
-        },
-        {},
-      ),
-    ).rejects.toThrow(
-      'Parallel delegate setup failed before launch: prepare failed Cleanup warnings: cleanup warn',
+    const result = await executeSingleDelegate(
+      runContext(),
+      {
+        tasks: [
+          { name: 'Test agent', task: 'one', route: 'quick' },
+          { name: 'Test agent', task: 'two', route: 'quick' },
+        ],
+      },
+      {},
+    );
+    expect(result.details?.runs).toHaveLength(2);
+    expect(result.details?.runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          lifecycle: expect.objectContaining({ reason: 'setup-failure' }),
+        }),
+      ]),
+    );
+    expect(result.content[0]?.text).toContain(
+      'Parallel delegate setup failed before launch: prepare failed',
     );
     expect(rollback).toHaveBeenCalledTimes(1);
   });
@@ -855,13 +862,18 @@ describe('executeSingleDelegate lifecycle', () => {
       new Error('prepare failed'),
     );
 
-    await expect(
-      executeSingleDelegate(
-        runContext(),
-        { name: 'Test agent', task: 'inspect', route: 'quick' },
-        {},
-      ),
-    ).rejects.toThrow('Delegate setup failed before launch: prepare failed');
+    const result = await executeSingleDelegate(
+      runContext(),
+      { name: 'Test agent', task: 'inspect', route: 'quick' },
+      {},
+    );
+    expect(result.details?.runs?.[0]).toMatchObject({
+      state: 'error',
+      lifecycle: { reason: 'setup-failure' },
+    });
+    expect(result.content[0]?.text).toContain(
+      'Delegate setup failed before launch: prepare failed',
+    );
   });
 
   test('returns a failed lifecycle run when launch fails before the child starts', async () => {
