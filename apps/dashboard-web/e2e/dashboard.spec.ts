@@ -2372,6 +2372,13 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   await page.goto('/sessions/s1');
   await mocks.emit({
     type: 'snapshot',
+    snapshot: phase6Snapshot({ runtimes: [], pendingInteractions: [] }),
+  });
+  await page.getByRole('button', { name: 'Resume session' }).click();
+  await expect(page.getByText('Starting agent…')).toBeVisible();
+  expect(mocks.starts[1]).toEqual({ workspaceId: 'w1', sessionId: 's1' });
+  await mocks.emit({
+    type: 'snapshot',
     snapshot: phase6Snapshot({
       pendingInteractions: [],
       extensionSurfaces: [
