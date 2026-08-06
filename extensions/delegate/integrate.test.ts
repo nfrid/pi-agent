@@ -131,15 +131,6 @@ describe('incremental delegate review', () => {
     expect(bounded.omittedPatchChars).toBeGreaterThan(0);
     expect(bounded.diff).not.toContain('other.txt');
 
-    const lineBounded = await reviewBranch(record, {
-      statOnly: false,
-      paths: [selected],
-      maxPatchLines: 1,
-    });
-    expect(lineBounded.patchTruncated).toBe(true);
-    expect(lineBounded.diff.split('\\n')).toHaveLength(1);
-    expect(lineBounded.maxPatchLines).toBe(1);
-
     await expect(
       reviewBranch(record, { paths: ['../outside'] }),
     ).rejects.toThrow(/repository-relative/);

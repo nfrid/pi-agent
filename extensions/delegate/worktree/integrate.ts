@@ -236,8 +236,6 @@ export interface BranchReview {
   truncated: boolean;
   /** True when patch bodies were deliberately omitted. */
   summaryOnly?: boolean;
-  /** Caller-selected line budget alias for bounded patch views. */
-  maxPatchLines?: number;
   /** Exact repository-relative path selectors active for this view. */
   pathSelectors?: string[];
   /** Caller-selected character budget, when supplied. */
@@ -246,8 +244,6 @@ export interface BranchReview {
   patchChars?: number;
   /** Patch-body characters omitted by the budget. */
   omittedPatchChars?: number;
-  /** Patch-body lines omitted by a line budget. */
-  omittedPatchLines?: number;
   patchTruncated?: boolean;
   pathSummary?: BranchReviewPathSummary;
 }
@@ -262,10 +258,6 @@ export interface BranchReviewOptions {
   paths?: string[];
   /** Maximum patch-body characters; the default remains 60,000. */
   patchBudget?: number;
-  /** Compatibility alias for summaryOnly. */
-  statOnly?: boolean;
-  /** Maximum patch-body lines; mutually exclusive with patchBudget. */
-  maxPatchLines?: number;
 }
 
 function reviewMode(
@@ -284,7 +276,7 @@ interface ResolvedReviewOptions {
   summaryOnly: boolean;
   paths: string[];
   patchBudget?: number;
-  patchLineBudget?: number;
+  active: boolean;
 }
 
 function safePathSelector(selector: string): boolean {
@@ -308,20 +300,9 @@ function resolveReviewOptions(
   const mode = reviewMode(options);
   if (typeof options === 'string')
     return { mode, summaryOnly: false, paths: [] };
-  const summaryOnly = options?.summaryOnly;
-  const statOnly = options?.statOnly;
-  if (
-    summaryOnly !== undefined &&
-    statOnly !== undefined &&
-    summaryOnly !== statOnly
-  )
-    throw new Error('summaryOnly and statOnly must agree when both are set.');
-  const resolvedSummaryOnly = summaryOnly ?? statOnly ?? false;
+  const summaryOnly = options?.summaryOnly === true;
   const paths = options?.paths ?? [];
   const patchBudget = options?.patchBudget;
-  const patchLineBudget = options?.maxPatchLines;
-  if (patchBudget !== undefined && patchLineBudget !== undefined)
-    throw new Error('patchBudget and maxPatchLines are mutually exclusive.');
   if (!Array.isArray(paths))
     throw new Error(
       'Review paths must be an array of repository-relative paths.',
@@ -357,28 +338,14 @@ function resolveReviewOptions(
     throw new Error(
       `patchBudget must be an integer from 1 to ${MAX_REVIEW_PATCH_BUDGET}.`,
     );
-  if (
-    patchLineBudget !== undefined &&
-    (!Number.isInteger(patchLineBudget) ||
-      patchLineBudget < 1 ||
-      patchLineBudget > MAX_REVIEW_PATCH_BUDGET)
-  )
-    throw new Error(
-      `maxPatchLines must be an integer from 1 to ${MAX_REVIEW_PATCH_BUDGET}.`,
-    );
-  if (
-    resolvedSummaryOnly &&
-    (patchBudget !== undefined || patchLineBudget !== undefined)
-  )
-    throw new Error(
-      'patchBudget/maxPatchLines cannot be combined with summaryOnly/statOnly.',
-    );
+  if (summaryOnly && patchBudget !== undefined)
+    throw new Error('patchBudget cannot be combined with summaryOnly.');
   return {
     mode,
-    summaryOnly: resolvedSummaryOnly,
+    summaryOnly,
     paths,
     patchBudget,
-    patchLineBudget,
+    active: summaryOnly || paths.length > 0 || patchBudget !== undefined,
   };
 }
 
@@ -494,66 +461,42 @@ function boundedReviewText(
   };
 }
 
-function boundedReviewLines(
-  text: string,
-  maxLines: number,
-): { text: string; truncated: boolean } {
-  const lines = text ? text.split('\n') : [];
-  const truncated = lines.length > maxLines;
-  return {
-    text: truncated ? lines.slice(0, maxLines).join('\n') : text,
-    truncated,
-  };
-}
-
 function boundedReviewOutput(
   log: string,
   stat: string,
   diff: string,
   patchBudget?: number,
-  patchLineBudget?: number,
+  includePatchMetadata = false,
 ): {
   log: string;
   stat: string;
   diff: string;
   truncated: boolean;
-  patchChars: number;
-  omittedPatchChars: number;
-  omittedPatchLines: number;
-  patchTruncated: boolean;
+  patchChars?: number;
+  omittedPatchChars?: number;
+  patchTruncated?: boolean;
 } {
   const boundedLog = boundedReviewText(log, MAX_REVIEW_LOG_CHARS);
   const boundedStat = boundedReviewText(stat, MAX_REVIEW_STAT_CHARS);
-  const lineBounded = patchLineBudget
-    ? boundedReviewLines(diff, patchLineBudget)
-    : { text: diff, truncated: false };
-  // A line budget remains subject to the historical character ceiling so a
-  // single generated line cannot make the response unbounded.
   const boundedDiff = boundedReviewText(
-    lineBounded.text,
+    diff,
     patchBudget ?? MAX_REVIEW_DIFF_CHARS,
   );
-  const patchLines = diff ? diff.split('\n').length : 0;
-  const returnedPatchLines = boundedDiff.text
-    ? boundedDiff.text.split('\n').length
-    : 0;
-  return {
+  const output = {
     log: boundedLog.text,
     stat: boundedStat.text,
     diff: boundedDiff.text,
     truncated:
-      boundedLog.truncated ||
-      boundedStat.truncated ||
-      lineBounded.truncated ||
-      boundedDiff.truncated,
-    patchChars: diff.length,
-    omittedPatchChars: Math.max(0, diff.length - boundedDiff.text.length),
-    omittedPatchLines:
-      patchLineBudget === undefined
-        ? 0
-        : Math.max(0, patchLines - returnedPatchLines),
-    patchTruncated: lineBounded.truncated || boundedDiff.truncated,
+      boundedLog.truncated || boundedStat.truncated || boundedDiff.truncated,
   };
+  return includePatchMetadata
+    ? {
+        ...output,
+        patchChars: diff.length,
+        omittedPatchChars: Math.max(0, diff.length - boundedDiff.text.length),
+        patchTruncated: boundedDiff.truncated,
+      }
+    : output;
 }
 
 function pathSummary(
@@ -578,20 +521,13 @@ function reviewMetadata(
   summary: BranchReviewPathSummary,
 ): Pick<
   BranchReview,
-  | 'summaryOnly'
-  | 'pathSelectors'
-  | 'patchBudget'
-  | 'maxPatchLines'
-  | 'pathSummary'
+  'summaryOnly' | 'pathSelectors' | 'patchBudget' | 'pathSummary'
 > {
   return {
     summaryOnly: resolved.summaryOnly,
     ...(resolved.paths.length ? { pathSelectors: resolved.paths } : {}),
     ...(resolved.patchBudget !== undefined
       ? { patchBudget: resolved.patchBudget }
-      : {}),
-    ...(resolved.patchLineBudget !== undefined
-      ? { maxPatchLines: resolved.patchLineBudget }
       : {}),
     pathSummary: summary,
   };
@@ -614,7 +550,8 @@ export async function reviewBranch(
   const resolved = resolveReviewOptions(options);
   const { mode } = resolved;
   const root = record.repositoryRoot;
-  const emptySummary = pathSummary([], []);
+  const metadata = (getSummary: () => BranchReviewPathSummary) =>
+    resolved.active ? reviewMetadata(resolved, getSummary()) : {};
   const state = await branchState(record);
   if (state === 'gone')
     return {
@@ -624,7 +561,7 @@ export async function reviewBranch(
       stat: '',
       diff: '',
       truncated: false,
-      ...reviewMetadata(resolved, emptySummary),
+      ...metadata(() => pathSummary([], [])),
     };
   const range = await workRangeFor(root, record);
   if (!range.valid)
@@ -636,7 +573,7 @@ export async function reviewBranch(
       stat: '',
       diff: '',
       truncated: false,
-      ...reviewMetadata(resolved, emptySummary),
+      ...metadata(() => pathSummary([], [])),
     };
 
   if (mode === 'incremental') {
@@ -649,27 +586,50 @@ export async function reviewBranch(
         stat: '',
         diff: '',
         truncated: false,
-        ...reviewMetadata(resolved, emptySummary),
+        ...metadata(() => pathSummary([], [])),
+      };
+    const patches = await Promise.all(
+      commits.map((commit) => taskPatch(root, commit)),
+    );
+    if (!resolved.active)
+      return {
+        state,
+        mode,
+        ...boundedReviewOutput(
+          patches.map((patch) => patch.log).join('\n'),
+          patches.map((patch) => patch.stat).join('\n'),
+          patches.map((patch) => patch.diff).join('\n'),
+        ),
       };
     const allPaths = await taskPaths(root, commits);
     const matchedPaths = resolved.paths.length
       ? await taskPaths(root, commits, resolved.paths)
       : allPaths;
-    const patches = await Promise.all(
-      commits.map((commit) => taskPatch(root, commit, resolved.paths)),
-    );
     const output = boundedReviewOutput(
       patches.map((patch) => patch.log).join('\n'),
       patches.map((patch) => patch.stat).join('\n'),
       resolved.summaryOnly ? '' : patches.map((patch) => patch.diff).join('\n'),
       resolved.patchBudget,
-      resolved.patchLineBudget,
+      true,
     );
     return {
       state,
       mode,
       ...output,
-      ...reviewMetadata(resolved, pathSummary(allPaths, matchedPaths)),
+      ...metadata(() => pathSummary(allPaths, matchedPaths)),
+    };
+  }
+
+  if (!resolved.active) {
+    const [log, stat, full] = await Promise.all([
+      gitText(root, ['log', '--oneline', '--no-decorate', range.range]),
+      gitText(root, ['diff', '--stat', range.range]),
+      gitText(root, ['diff', '--no-ext-diff', '--no-color', range.range]),
+    ]);
+    return {
+      state,
+      mode,
+      ...boundedReviewOutput(log, stat, full),
     };
   }
 
@@ -686,13 +646,9 @@ export async function reviewBranch(
     ? await paths(root, ['diff', '--name-only', '-z', range.range, ...pathArgs])
     : allPaths;
   const [log, stat, full] = await Promise.all([
-    gitText(root, [
-      'log',
-      '--oneline',
-      '--no-decorate',
-      range.range,
-      ...pathArgs,
-    ]),
+    // Commit provenance remains a complete task history even when the patch
+    // view has no matching paths.
+    gitText(root, ['log', '--oneline', '--no-decorate', range.range]),
     gitText(root, ['diff', '--stat', range.range, ...pathArgs]),
     resolved.summaryOnly
       ? Promise.resolve('')
@@ -707,14 +663,8 @@ export async function reviewBranch(
   return {
     state,
     mode,
-    ...boundedReviewOutput(
-      log,
-      stat,
-      full,
-      resolved.patchBudget,
-      resolved.patchLineBudget,
-    ),
-    ...reviewMetadata(resolved, pathSummary(allPaths, matchedPaths)),
+    ...boundedReviewOutput(log, stat, full, resolved.patchBudget, true),
+    ...metadata(() => pathSummary(allPaths, matchedPaths)),
   };
 }
 

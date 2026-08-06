@@ -122,13 +122,12 @@ A finished writable run reports its branch, its base commit, and the paths it ch
 delegate_branches list                    # current parent-session records
 delegate_branches list scope=all           # all retained repository history
 delegate_branches review <id>             # the child's commits, stat, and diff
-# review selectors: summaryOnly/statOnly, paths=[...], patchBudget=<chars>
-# or maxPatchLines=<lines>; selectors report omitted paths/truncation
+# review selectors: summaryOnly, paths=[...], patchBudget=<chars>; selectors report omitted paths/truncation
 delegate_branches merge <id>              # integrate into your checkout
 delegate_branches drop <id>               # delete the checkout and the branch
 ```
 
-`list` defaults to records created or touched by the current parent Pi session; `scope: all` is the explicit recovery view and includes legacy records. `review` measures from the child's own starting point, so carried parent work never appears as the child's. `summaryOnly`/`statOnly` returns provenance, commits, stat, and bounded path evidence without patch bodies. `paths` accepts exact safe repository-relative paths, while `patchBudget` caps patch characters and `maxPatchLines` caps patch lines (mutually exclusive); every bounded view reports active selectors, total/matched/omitted paths, and patch omission. `merge` integrates only the child's commits after `workBase`, not the carry snapshot. For `from: 'wip'`, it therefore preserves non-overlapping dirty parent state while refusing to proceed when a child-edited path is also dirty in the parent. It either lands or leaves the checkout exactly as it was: a conflict is aborted rather than parked, because an agent working on from a half-merged tree makes a worse mess than one told to resolve deliberately. `drop` refuses unmerged work without `force`.
+`list` defaults to records created or touched by the current parent Pi session; `scope: all` is the explicit recovery view and includes legacy records. `review` measures from the child's own starting point, so carried parent work never appears as the child's. `summaryOnly` returns provenance, commits, stat, and bounded path evidence without patch bodies. `paths` accepts exact safe repository-relative paths, while `patchBudget` caps patch characters; every bounded view reports active selectors, total/matched/omitted paths, and patch omission. `merge` integrates only the child's commits after `workBase`, not the carry snapshot. For `from: 'wip'`, it therefore preserves non-overlapping dirty parent state while refusing to proceed when a child-edited path is also dirty in the parent. It either lands or leaves the checkout exactly as it was: a conflict is aborted rather than parked, because an agent working on from a half-merged tree makes a worse mess than one told to resolve deliberately. `drop` refuses unmerged work without `force`.
 
 `/delegate-worktrees` inspects and cleans up from the parent session:
 

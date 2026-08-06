@@ -22,7 +22,7 @@ import type {
   WorktreePreparation,
   WorktreeRecord,
 } from './model';
-import { touchWorktreeParentSession, writeWorktreeRecord } from './records';
+import { writeWorktreeRecord } from './records';
 
 /** Worktrees live beside the repository so `git worktree list` reads naturally. */
 const WORKTREE_DIR = '.worktrees';
@@ -194,6 +194,7 @@ export async function prepareWorktree(options: {
     const record: WorktreeRecord = {
       version: 1,
       id,
+      creatorSessionId: options.parentSessionId,
       repositoryRoot: root,
       worktreePath,
       workingDirectory,
@@ -207,7 +208,6 @@ export async function prepareWorktree(options: {
       updatedAt: now,
     };
     writeWorktreeRecord(record);
-    touchWorktreeParentSession(record, options.parentSessionId);
     return { worktree: { record, env: { PI_DELEGATE_WORKTREE: id } } };
   } catch (error) {
     await cleanupFailedPreparation(root, worktreePath, branch);
@@ -248,18 +248,15 @@ async function cleanupFailedPreparation(
 export function attachWorktreeSession(
   worktree: PreparedWorktree,
   token: string,
-  parentSessionId?: string,
 ): PreparedWorktree {
   const record = { ...worktree.record, sessionToken: token };
   writeWorktreeRecord(record);
-  touchWorktreeParentSession(record, parentSessionId);
   return { record, env: worktree.env };
 }
 
 export function restoreWorktreeSession(
   record: WorktreeRecord,
   token: string,
-  parentSessionId?: string,
 ): PreparedWorktree {
   if (!existsSync(record.worktreePath))
     throw new Error('The worktree for this continuation is unavailable.');
@@ -267,17 +264,15 @@ export function restoreWorktreeSession(
     throw new Error('This worktree belongs to another delegate session.');
   if (record.status === 'removed')
     throw new Error('This worktree has already been removed.');
-  touchWorktreeParentSession(record, parentSessionId);
   return { record, env: { PI_DELEGATE_WORKTREE: record.id } };
 }
 
 export async function rehydrateWorktreeSession(
   record: WorktreeRecord,
   token: string,
-  parentSessionId?: string,
 ): Promise<PreparedWorktree> {
   if (existsSync(record.worktreePath))
-    return restoreWorktreeSession(record, token, parentSessionId);
+    return restoreWorktreeSession(record, token);
   if (record.sessionToken && record.sessionToken !== token)
     throw new Error('This worktree belongs to another delegate session.');
   if (record.status === 'removed')
@@ -295,7 +290,6 @@ export async function rehydrateWorktreeSession(
     record.status = 'active';
     delete record.snapshot;
     writeWorktreeRecord(record);
-    touchWorktreeParentSession(record, parentSessionId);
     return { record, env: { PI_DELEGATE_WORKTREE: record.id } };
   } catch (error) {
     await cleanupFailedPreparation(

@@ -21,6 +21,19 @@ export interface BranchEntry {
 
 export type BranchListScope = 'session' | 'all';
 
+function belongsToParentSession(
+  record: WorktreeRecord,
+  sessionId: string,
+): boolean {
+  return (
+    record.creatorSessionId === sessionId ||
+    record.recentParentSessionIds?.includes(sessionId) === true ||
+    // Records written by the previous implementation remain visible in the
+    // session view until they are touched again or explicitly listed as all.
+    record.parentSessionIds?.includes(sessionId) === true
+  );
+}
+
 /** Accepts a continuation token or a worktree id; the agent has both. */
 export function resolveWorktreeRecord(
   identifier: string,
@@ -40,7 +53,7 @@ export async function listBranchEntries(
       ? listWorktrees()
       : options.sessionId
         ? listWorktrees().filter((record) =>
-            record.parentSessionIds?.includes(options.sessionId as string),
+            belongsToParentSession(record, options.sessionId as string),
           )
         : [];
   return Promise.all(
@@ -130,6 +143,14 @@ export function formatBranchDetail({ record, state }: BranchEntry): string {
     .join('\n');
 }
 
+function hasBoundedReviewSelectors(review: BranchReview): boolean {
+  return (
+    review.summaryOnly === true ||
+    Boolean(review.pathSelectors?.length) ||
+    review.patchBudget !== undefined
+  );
+}
+
 function reviewSelectionSummary(review: BranchReview): string {
   const selectors = review.pathSelectors?.length
     ? review.pathSelectors
@@ -139,14 +160,12 @@ function reviewSelectionSummary(review: BranchReview): string {
     : 'none';
   const budget = review.patchBudget
     ? `${review.patchBudget} chars`
-    : review.maxPatchLines
-      ? `${review.maxPatchLines} lines`
-      : 'default (60,000 chars)';
+    : 'default (60,000 chars)';
   const summary = review.pathSummary;
   if (!summary)
     return [
       `Selectors: mode=${review.mode}; summaryOnly=${review.summaryOnly ? 'yes' : 'no'}; paths=${selectors}; patchBudget=${budget}`,
-      `Patch: ${review.summaryOnly ? 'body omitted (summaryOnly)' : `budget=${budget}; truncated=${review.patchTruncated ? 'yes' : 'no'}; omitted=${review.omittedPatchChars ?? 0} chars${review.omittedPatchLines ? `, ${review.omittedPatchLines} lines` : ''}`}`,
+      `Patch: ${review.summaryOnly ? 'body omitted (summaryOnly)' : `budget=${budget}; truncated=${review.patchTruncated ? 'yes' : 'no'}; omitted=${review.omittedPatchChars ?? 0} chars`}`,
     ].join('\n');
   const matched = summary.matchedPaths
     .slice(0, MAX_DETAIL_PATHS)
@@ -164,8 +183,8 @@ function reviewSelectionSummary(review: BranchReview): string {
     );
   return [
     `Selectors: mode=${review.mode}; summaryOnly=${review.summaryOnly ? 'yes' : 'no'}; paths=${selectors}; patchBudget=${budget}`,
-    `Patch: ${review.summaryOnly ? 'body omitted (summaryOnly)' : `budget=${budget}; truncated=${review.patchTruncated ? 'yes' : 'no'}; omitted=${review.omittedPatchChars ?? 0} chars${review.omittedPatchLines ? `, ${review.omittedPatchLines} lines` : ''}`}`,
-    `Changed paths: total=${summary.total}; matched=${summary.matched}; omitted=${summary.omitted}`,
+    `Patch: ${review.summaryOnly ? 'body omitted (summaryOnly)' : `budget=${budget}; truncated=${review.patchTruncated ? 'yes' : 'no'}; omitted=${review.omittedPatchChars ?? 0} chars`}`,
+    `Changed paths: total=${summary.total}; matched=${summary.matched}; omitted=${summary.omitted}`, 
     `Matched paths:${matched.length ? `\n${matched.join('\n')}` : ' none'}`,
     `Omitted paths:${omitted.length ? `\n${omitted.join('\n')}` : ' none'}`,
   ].join('\n');
@@ -180,11 +199,16 @@ export function formatReview(
   if (review.state === 'gone') return `Branch ${branch} no longer exists.`;
   if (review.error)
     return `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)})\n\n${bounded(review.error, MAX_DETAIL_ERROR_CHARS)}`;
-  const selection = reviewSelectionSummary(review);
-  if (review.mode === 'incremental' && !review.log)
-    return `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)}) has no unintegrated task delta relative to current HEAD.\n\n${selection}`;
-  if (!review.log)
-    return `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)}) has no commits of its own beyond ${workBase(record).slice(0, 12)}; the task committed nothing.\n\n${selection}`;
+  const boundedView = hasBoundedReviewSelectors(review);
+  const selection = boundedView ? reviewSelectionSummary(review) : undefined;
+  if (review.mode === 'incremental' && !review.log) {
+    const message = `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)}) has no unintegrated task delta relative to current HEAD.`;
+    return selection ? `${message}\n\n${selection}` : message;
+  }
+  if (!review.log) {
+    const message = `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)}) has no commits of its own beyond ${workBase(record).slice(0, 12)}; the task committed nothing.`;
+    return selection ? `${message}\n\n${selection}` : message;
+  }
   const range =
     review.mode === 'incremental'
       ? `incremental task delta relative to current HEAD (patch-aware)`
@@ -200,8 +224,7 @@ export function formatReview(
   return [
     `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)}), ${range}`,
     '',
-    selection,
-    '',
+    ...(selection ? [selection, ''] : []),
     review.log,
     '',
     review.stat,

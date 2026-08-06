@@ -154,10 +154,6 @@ export async function prepareDelegateTask(
   let replacementSessionMapped = false;
   let routeRollback: { routing?: DelegateRouteState } | undefined;
   try {
-    if (state.worktree)
-      touchWorktreeParentSession(state.worktree.record, parentSessionId);
-    if (state.refreshSource)
-      touchWorktreeParentSession(state.refreshSource, parentSessionId);
     if (plan.isolation === 'worktree' && !plan.resumed) {
       const prepared = await prepareWorktree({
         cwd: plan.requestedCwd,
@@ -199,11 +195,7 @@ export async function prepareDelegateTask(
       // write fails, catch cleanup removes this replacement without touching
       // the old snapshot or its session mapping.
       replacement = prepared.worktree;
-      replacement = attachWorktreeSession(
-        replacement,
-        plan.resumed.token,
-        parentSessionId,
-      );
+      replacement = attachWorktreeSession(replacement, plan.resumed.token);
       const refreshedCwd = path.join(
         replacement.record.worktreePath,
         replacement.record.workingDirectory,
@@ -216,6 +208,9 @@ export async function prepareDelegateTask(
       if (!refreshedSession)
         throw new Error('The delegate session disappeared during refresh.');
       session = refreshedSession;
+      // The replacement is now authoritative. If superseded cleanup later
+      // fails, retain the old snapshot's touch for this successful refresh.
+      touchWorktreeParentSession(state.refreshSource, parentSessionId);
       replacementSessionMapped = true;
       state.worktree = replacement;
       state.cwd = refreshedCwd;
@@ -224,7 +219,6 @@ export async function prepareDelegateTask(
       state.worktree = await rehydrateWorktreeSession(
         state.worktree.record,
         plan.resumed.token,
-        parentSessionId,
       );
       state.cwd = path.join(
         state.worktree.record.worktreePath,
@@ -255,12 +249,14 @@ export async function prepareDelegateTask(
         routing: plan.routing,
       });
       if (state.worktree)
-        state.worktree = attachWorktreeSession(
-          state.worktree,
-          session.token,
-          parentSessionId,
-        );
+        state.worktree = attachWorktreeSession(state.worktree, session.token);
     }
+
+    // Continuation membership is recorded only after all preparation and
+    // session mapping steps above have succeeded. Fresh records already have
+    // their immutable creatorSessionId from prepareWorktree.
+    if (plan.resumed && state.worktree)
+      touchWorktreeParentSession(state.worktree.record, parentSessionId);
 
     return {
       ...state,

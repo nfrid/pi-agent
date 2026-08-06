@@ -21,10 +21,8 @@ interface RegisteredTool {
       scope?: 'session' | 'all';
       incremental?: boolean;
       summaryOnly?: boolean;
-      statOnly?: boolean;
       paths?: string[];
       patchBudget?: number;
-      maxPatchLines?: number;
       id?: string;
       force?: boolean;
     },

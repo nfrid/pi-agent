@@ -40,12 +40,6 @@ const Parameters = Type.Object({
         'For review only, omit patch bodies while retaining provenance, state, commits, stat, and bounded changed-path evidence.',
     }),
   ),
-  statOnly: Type.Optional(
-    Type.Boolean({
-      description:
-        'Alias for summaryOnly: for review only, omit patch bodies while retaining bounded review evidence.',
-    }),
-  ),
   paths: Type.Optional(
     Type.Array(Type.String({ minLength: 1, maxLength: 4_096 }), {
       minItems: 1,
@@ -60,14 +54,6 @@ const Parameters = Type.Object({
       maximum: 60_000,
       description:
         'For review only, maximum patch-body characters. The default is 60,000; summaryOnly cannot be combined with this selector.',
-    }),
-  ),
-  maxPatchLines: Type.Optional(
-    Type.Integer({
-      minimum: 1,
-      maximum: 60_000,
-      description:
-        'For review only, maximum patch-body lines. The default is the existing character bound; this is mutually exclusive with patchBudget and summaryOnly.',
     }),
   ),
   id: Type.Optional(
@@ -90,15 +76,12 @@ type BranchesDetails = {
   listScope?: 'session' | 'all';
   reviewMode?: 'full' | 'incremental';
   summaryOnly?: boolean;
-  statOnly?: boolean;
   paths?: string[];
   patchBudget?: number;
-  maxPatchLines?: number;
   totalChangedPaths?: number;
   matchedChangedPaths?: number;
   omittedChangedPaths?: number;
   omittedPatchChars?: number;
-  omittedPatchLines?: number;
   patchTruncated?: boolean;
   truncated?: boolean;
   entries?: Array<{ id: string; branch: string; state: string }>;
@@ -128,13 +111,11 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
       const reviewSelectorUsed =
         params.incremental === true ||
         params.summaryOnly !== undefined ||
-        params.statOnly !== undefined ||
         params.paths !== undefined ||
-        params.patchBudget !== undefined ||
-        params.maxPatchLines !== undefined;
+        params.patchBudget !== undefined;
       if (params.action !== 'review' && reviewSelectorUsed)
         throw new Error(
-          'incremental, summaryOnly, statOnly, paths, patchBudget, and maxPatchLines are only valid for review.',
+          'incremental, summaryOnly, paths, and patchBudget are only valid for review.',
         );
       if (params.scope !== undefined && params.action !== 'list')
         throw new Error('scope is only valid for list.');
@@ -175,10 +156,8 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
           if (record.snapshot) {
             if (
               params.summaryOnly !== undefined ||
-              params.statOnly !== undefined ||
               params.paths !== undefined ||
               params.patchBudget !== undefined ||
-              params.maxPatchLines !== undefined ||
               params.incremental === true
             )
               throw new Error(
@@ -197,10 +176,8 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
           const review = await reviewBranch(record, {
             mode: params.incremental ? 'incremental' : 'full',
             summaryOnly: params.summaryOnly,
-            statOnly: params.statOnly,
             paths: params.paths,
             patchBudget: params.patchBudget,
-            maxPatchLines: params.maxPatchLines,
           });
           const entry: BranchEntry = { record, state: review.state };
           return {
@@ -211,15 +188,12 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
               action: 'review' as const,
               reviewMode: review.mode,
               summaryOnly: review.summaryOnly,
-              statOnly: params.statOnly,
               paths: review.pathSelectors,
               patchBudget: review.patchBudget,
-              maxPatchLines: review.maxPatchLines,
               totalChangedPaths: review.pathSummary?.total,
               matchedChangedPaths: review.pathSummary?.matched,
               omittedChangedPaths: review.pathSummary?.omitted,
               omittedPatchChars: review.omittedPatchChars,
-              omittedPatchLines: review.omittedPatchLines,
               patchTruncated: review.patchTruncated,
               truncated: review.truncated,
             },
@@ -270,10 +244,9 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
       const selectors = [
         args.scope === 'all' ? 'all history' : '',
         args.incremental ? 'incremental' : '',
-        args.summaryOnly || args.statOnly ? 'summary' : '',
+        args.summaryOnly ? 'summary' : '',
         args.paths?.length ? `${args.paths.length} paths` : '',
         args.patchBudget ? `${args.patchBudget} chars` : '',
-        args.maxPatchLines ? `${args.maxPatchLines} lines` : '',
       ]
         .filter(Boolean)
         .join(', ');

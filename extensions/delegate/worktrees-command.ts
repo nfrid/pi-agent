@@ -26,9 +26,7 @@ export function registerDelegateWorktreesCommand(pi: ExtensionAPI): void {
       const action = tokens[1] ?? 'show';
 
       if (identifier === 'list') {
-        const entries = await listBranchEntries({
-          sessionId: ctx.sessionManager.getSessionId(),
-        });
+        const entries = await listBranchEntries({ scope: 'all' });
         ctx.ui.notify(
           entries.length
             ? entries.map(formatBranchLine).join('\n')
