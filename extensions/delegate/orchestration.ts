@@ -3,7 +3,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import type { DelegateConfig } from './config';
-import { invalidParams } from './param-errors';
+import { ensureDelegateLifecycle, setDelegateLifecycle } from './lifecycle';
 import {
   type BuiltDelegateTask,
   buildDelegatePlans,
@@ -69,7 +69,9 @@ export function pendingRuns(
       worktree: item.worktree
         ? worktreeSummary(item.worktree.record)
         : undefined,
-      continuation: item.session.token,
+      continuation: item.setupFailure
+        ? item.plan.resumed?.token
+        : item.session.token,
       warnings: item.warnings,
     });
     setDelegateResultSpec(run, item.plan.resultSpec);
@@ -96,7 +98,8 @@ function continuationOnFailure(
       return { continuation: prepared.session.token };
     return {};
   }
-  if (prepared.plan.resumed) return { continuation: prepared.session.token };
+  if (!prepared.worktree || prepared.plan.resumed || markedRunning)
+    return { continuation: prepared.session.token };
   return {};
 }
 
@@ -125,6 +128,26 @@ async function runPreparedWithLifecycle(
 ): Promise<DelegatedRun> {
   const { config, signal } = runCtx;
   const parallel = mode === 'parallel';
+  if (prepared.setupFailure) {
+    return failedLifecycleRun(
+      prepared.plan.task,
+      prepared.plan.routing,
+      {
+        name: prepared.plan.name,
+        cwd: prepared.cwd,
+        context: prepared.plan.context,
+        contextNote: prepared.plan.contextNote,
+        scope: prepared.scope,
+        writeRequested: prepared.plan.writeRequested,
+        allowWrites: prepared.allowWrites,
+        isolation: prepared.isolation,
+        continuation: prepared.plan.resumed?.token,
+        warnings: prepared.warnings,
+      },
+      prepared.setupFailure,
+      'setup-failure',
+    );
+  }
   let markedRunning = false;
   let run: DelegatedRun;
   try {
@@ -140,7 +163,6 @@ async function runPreparedWithLifecycle(
       },
     });
   } catch (error) {
-    if (!parallel && (!prepared.worktree || markedRunning)) throw error;
     const cleanup = await cleanupFailedLaunch(prepared, markedRunning);
     const failed = failedLifecycleRun(
       prepared.plan.task,
@@ -160,7 +182,12 @@ async function runPreparedWithLifecycle(
       error,
     );
     if (prepared.worktree && markedRunning)
-      markLifecycleFailure(failed, prepared.worktree, error);
+      markLifecycleFailure(
+        failed,
+        prepared.worktree,
+        error,
+        'provider-runner-error',
+      );
     else failed.worktree = cleanup.worktree;
     return failed;
   }
@@ -173,8 +200,41 @@ async function runPreparedWithLifecycle(
   }
   // Settlement validation happens after the child and worktree lifecycle have
   // both settled, and is idempotent for artifact materialization.
-  settleDelegateResult(run, prepared.plan.resultSpec);
+  const lifecycleBeforeSettlement = ensureDelegateLifecycle(run);
+  const settlement = settleDelegateResult(run, prepared.plan.resultSpec);
+  if (
+    settlement &&
+    !settlement.valid &&
+    (!lifecycleBeforeSettlement ||
+      lifecycleBeforeSettlement.reason === 'unknown')
+  )
+    setDelegateLifecycle(
+      run,
+      'child-result-invalid',
+      settlement.errors.join('; '),
+    );
+  ensureDelegateLifecycle(run);
   return run;
+}
+
+function setupFailurePlans(
+  built: BuiltDelegateTask[],
+  diagnostic: string,
+  extraWarnings: string[] = [],
+): PreparedDelegateTask[] {
+  return built.map((task) => ({
+    ...task.preflight,
+    plan: task.plan,
+    worktree: undefined,
+    session: {
+      token: task.plan.resumed?.token ?? '',
+      filePath: '',
+      cwd: task.preflight.cwd,
+      isolation: task.preflight.isolation,
+    },
+    setupFailure: diagnostic,
+    warnings: [...task.plan.warnings, ...extraWarnings],
+  }));
 }
 
 async function preparePlans(
@@ -194,9 +254,11 @@ async function preparePlans(
     const prefix = parallel
       ? 'Parallel delegate setup failed before launch'
       : 'Delegate setup failed before launch';
-    return invalidParams(
-      `${prefix}: ${errorText(error)}${cleanupWarnings.length ? ` Cleanup warnings: ${cleanupWarnings.join(' ')}` : ''}`,
-    );
+    const diagnostic = `${prefix}: ${errorText(error)}${cleanupWarnings.length ? ` Cleanup warnings: ${cleanupWarnings.join(' ')}` : ''}`;
+    // Preparation is atomic, but a setup failure is still a delegate
+    // settlement. Keep one harness-created run per requested task so single,
+    // parallel, foreground, and background surfaces expose the same contract.
+    return setupFailurePlans(built, diagnostic, cleanupWarnings);
   }
 }
 
@@ -210,7 +272,18 @@ export async function prepareDelegateExecution(
     runCtx.config,
     runCtx.getSnapshot,
   );
-  const tasks = await resolveDelegateHandoffs(runCtx.ctx, built.tasks);
+  let tasks: BuiltDelegateTask[];
+  try {
+    tasks = await resolveDelegateHandoffs(runCtx.ctx, built.tasks);
+  } catch (error) {
+    return {
+      mode: built.parallel ? 'parallel' : 'single',
+      tasks: setupFailurePlans(
+        built.tasks,
+        `Delegate setup failed before launch: ${errorText(error)}`,
+      ),
+    };
+  }
   return {
     mode: built.parallel ? 'parallel' : 'single',
     tasks: await preparePlans(

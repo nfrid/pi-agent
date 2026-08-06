@@ -3,6 +3,15 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { artifactProducer } from '../shared/artifacts';
+import {
+  copyDelegateLifecycle,
+  getDelegateLifecycle,
+  getDelegateLifecycleDiagnostic,
+  isDelegateLifecycleDiagnosticPublicationFailed,
+  LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
+  markDelegateLifecycleDiagnosticPublicationFailed,
+  setDelegateLifecycleDiagnosticArtifact,
+} from './lifecycle';
 import { buildParentHandoffResult } from './output';
 import { throwIfAllRunsFailed } from './param-errors';
 import {
@@ -26,7 +35,10 @@ export function makeDetails(
   mode: DelegateDetails['mode'],
   runs: DelegatedRun[],
 ): DelegateDetails {
-  return { mode, runs: runs.map(serializeDelegateRunForPublic) };
+  return {
+    mode,
+    runs: runs.map((run) => serializeDelegateRunForPublic(run)),
+  };
 }
 
 export const EXACT_OUTPUT_ARTIFACT_WARNING =
@@ -52,6 +64,44 @@ function replaceWarning(
   if (nextWarning && !warnings.includes(nextWarning))
     warnings.push(nextWarning);
   run.warnings = warnings;
+}
+
+async function publishLifecycleDiagnostic(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  run: DelegatedRun,
+  put: typeof artifactProducer.put,
+  assertCurrent?: () => void,
+): Promise<boolean> {
+  const lifecycle = getDelegateLifecycle(run);
+  const diagnostic = getDelegateLifecycleDiagnostic(run);
+  if (
+    !lifecycle ||
+    !diagnostic ||
+    Buffer.byteLength(diagnostic, 'utf8') <=
+      LIFECYCLE_INLINE_DIAGNOSTIC_BYTES ||
+    lifecycle.diagnosticArtifact ||
+    isDelegateLifecycleDiagnosticPublicationFailed(run)
+  )
+    return false;
+  try {
+    assertCurrent?.();
+    const artifact = await put(pi, ctx, {
+      bytes: diagnostic,
+      producer: 'delegate',
+      contentClass: 'delegate-output',
+      mediaType: 'text/plain; charset=utf-8',
+      creationSource: 'delegate.failure',
+    });
+    assertCurrent?.();
+    setDelegateLifecycleDiagnosticArtifact(run, artifact);
+    return true;
+  } catch {
+    // Keep the exact bounded capture inline when publication is unavailable;
+    // silently clipping it would destroy the only actionable diagnostic.
+    markDelegateLifecycleDiagnosticPublicationFailed(run);
+    return true;
+  }
 }
 
 async function publishStructuredArtifacts(
@@ -161,6 +211,13 @@ export async function buildArtifactBackedHandoff(
   for (let pass = 0; pass < runs.length + 1; pass++) {
     let changed = false;
     for (const run of runs) {
+      changed ||= await publishLifecycleDiagnostic(
+        pi,
+        ctx,
+        run,
+        put,
+        assertCurrent,
+      );
       if (getDelegateResultSpec(run)) {
         const published = await publishStructuredArtifacts(
           pi,
@@ -226,6 +283,7 @@ export async function buildSessionBoundArtifactBackedHandoff(
     // original runs so a later inspection on the owner can publish/use it.
     const safeRuns = runs.map((run) => ({ ...run, artifact: undefined }));
     for (const [index, run] of safeRuns.entries()) {
+      copyDelegateLifecycle(runs[index], run, { includeArtifact: false });
       const spec = getDelegateResultSpec(runs[index]);
       if (spec) {
         // Weak-map state intentionally does not cross the enumerable clone.
@@ -271,13 +329,16 @@ export async function delegateToolResult(
   // A structured contract reports invalid child evidence as a non-success
   // envelope rather than throwing away all per-run diagnostics. Legacy prose
   // runs retain their historical all-failed throw behavior.
-  if (!runs.some((run) => getDelegateResultSpec(run)))
+  if (
+    !runs.some((run) => getDelegateResultSpec(run)) &&
+    !runs.some((run) => getDelegateLifecycle(run))
+  )
     throwIfAllRunsFailed(runs, handoff);
   const visibleRuns =
     ctx.sessionManager.getSessionId() === launchSessionId
       ? runs
       : runs.map((run) => ({
-          ...serializeDelegateRunForPublic(run),
+          ...serializeDelegateRunForPublic(run, { includeArtifacts: false }),
           artifact: undefined,
         }));
   return {

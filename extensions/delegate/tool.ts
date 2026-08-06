@@ -299,7 +299,11 @@ export function registerDelegateTool(
           );
           const ownerSession =
             materializeCtx.sessionManager.getSessionId() === launchSessionId;
-          const publicRuns = runs.map(serializeDelegateRunForPublic);
+          const publicRuns = runs.map((run) =>
+            serializeDelegateRunForPublic(run, {
+              includeArtifacts: ownerSession,
+            }),
+          );
           return {
             runs: ownerSession
               ? publicRuns

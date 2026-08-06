@@ -1,8 +1,10 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { AsyncJobRegistry, type JobRecord } from '../shared/runtime/registry';
+import { buildParentHandoff } from './output';
 import { serializeDelegateRunForPublic } from './structured-result';
 import type { DelegateDetails, DelegatedRun } from './types';
 import { getRunState, isRunError } from './types';
+import { failedLifecycleRun } from './worktree-lifecycle';
 
 export const MAX_DELEGATE_JOBS = 20;
 export const MAX_SETTLED_DELEGATE_JOBS = 32;
@@ -247,8 +249,10 @@ export class DelegateJobManager {
     )
       return job;
     const runs = job.runs?.map((run) => {
-      const { artifact: _artifact, ...safeRun } =
-        serializeDelegateRunForPublic(run);
+      const { artifact: _artifact, ...safeRun } = serializeDelegateRunForPublic(
+        run,
+        { includeArtifacts: false },
+      );
       return safeRun;
     });
     const { handoff: _handoff, ...safeJob } = job;
@@ -275,6 +279,26 @@ export class DelegateJobManager {
       state = aggregateState(result.runs, record.controller.signal.aborted);
     } catch (error) {
       state = record.controller.signal.aborted ? 'aborted' : 'error';
+      const runs = (record.tasks.length > 0 ? record.tasks : [record.name]).map(
+        (task) =>
+          failedLifecycleRun(
+            task,
+            undefined,
+            {
+              name: record.name,
+              backgroundJobId: record.id,
+              warnings: [],
+            },
+            error,
+            record.controller.signal.aborted
+              ? 'user-cancellation'
+              : error instanceof Error
+                ? 'provider-runner-error'
+                : 'unknown',
+          ),
+      );
+      record.runs = runs;
+      record.handoff = buildParentHandoff(runs);
       record.error = error instanceof Error ? error.message : String(error);
     }
     this.registry.settle(record, state);

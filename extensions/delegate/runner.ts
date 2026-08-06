@@ -4,6 +4,12 @@ import {
   PROGRESS_UPDATE_INTERVAL_MS,
   spawnDelegateChild,
 } from './delegate-child';
+import {
+  buildLifecycleDiagnostic,
+  getDelegateLifecycle,
+  setDelegateLifecycle,
+  setDelegateLifecycleText,
+} from './lifecycle';
 import { buildDelegatePrompt } from './prompt';
 import {
   getDelegateChannelPresent,
@@ -227,31 +233,47 @@ export async function runDelegate(
       },
     };
 
-    const { exitCode, wasAborted, timedOut } = await spawnDelegateChild(run, {
-      command: spawnTarget.command,
-      args: spawnTarget.args,
-      cwd: spawnTarget.cwd,
-      env: spawnTarget.env,
-      timeoutMs: options.timeoutMs,
-      killGraceMs: options.killGraceMs,
-      signal: options.signal,
-      onLine: emitUpdate,
-    });
+    const { exitCode, wasAborted, timedOut, spawnError } =
+      await spawnDelegateChild(run, {
+        command: spawnTarget.command,
+        args: spawnTarget.args,
+        cwd: spawnTarget.cwd,
+        env: spawnTarget.env,
+        timeoutMs: options.timeoutMs,
+        killGraceMs: options.killGraceMs,
+        signal: options.signal,
+        onLine: emitUpdate,
+      });
 
     run.exitCode = exitCode;
-    if (wasAborted) {
+    if (spawnError) {
+      run.stopReason = 'error';
+      run.errorMessage = `Delegate runner failed to start the child: ${spawnError}`;
+      setDelegateLifecycle(run, 'provider-runner-error', run.errorMessage);
+      run.state = 'error';
+    }
+    if (!spawnError && wasAborted) {
       run.stopReason = 'aborted';
       run.errorMessage = 'Delegated task was aborted.';
+      setDelegateLifecycle(run, 'user-cancellation', run.errorMessage);
       run.state = 'aborted';
-    } else if (timedOut) {
+    } else if (!spawnError && timedOut) {
       run.stopReason = 'error';
       run.errorMessage = `Delegated task timed out after ${Math.round(options.timeoutMs / 1000)} seconds.`;
+      setDelegateLifecycle(run, 'timeout', run.errorMessage);
       run.state = 'timed-out';
-    } else if (exitCode !== 0 && !run.errorMessage) {
+    } else if (!spawnError && exitCode !== 0 && !run.errorMessage) {
       run.stopReason = 'error';
-      run.errorMessage = options.resultSpec
-        ? `Child Pi exited with code ${exitCode}.`
-        : run.stderr.trim() || `Child Pi exited with code ${exitCode}.`;
+      run.errorMessage = `Child Pi exited with code ${exitCode}.`;
+      setDelegateLifecycleText(
+        run,
+        'child-nonzero-exit',
+        buildLifecycleDiagnostic(
+          'child-nonzero-exit',
+          run.errorMessage,
+          run.stderr,
+        ),
+      );
     }
     if (run.state === 'running') {
       // Finalize the canonical state once; exitCode/stopReason remain
@@ -264,9 +286,20 @@ export async function runDelegate(
           ? !getDelegateChannelPresent(run)
           : !getFinalAssistantText(run.messages).trim());
       run.state = failed ? 'error' : 'success';
+      if (failed && !getDelegateResultSpec(run) && !getDelegateLifecycle(run)) {
+        run.stopReason = 'error';
+        run.errorMessage ||=
+          'The child exited without a final assistant response.';
+        setDelegateLifecycleText(
+          run,
+          'unknown',
+          buildLifecycleDiagnostic('unknown', run.errorMessage, run.stderr),
+        );
+      }
     }
   } catch (error) {
     const aborted = options.signal?.aborted ?? false;
+    const queued = run.state === 'queued';
     run.exitCode = aborted ? 130 : 1;
     run.stopReason = aborted ? 'aborted' : 'error';
     run.errorMessage = aborted
@@ -274,6 +307,17 @@ export async function runDelegate(
       : error instanceof Error
         ? error.message
         : String(error);
+    setDelegateLifecycle(
+      run,
+      aborted
+        ? queued
+          ? 'queued-cancellation'
+          : 'user-cancellation'
+        : error instanceof Error
+          ? 'provider-runner-error'
+          : 'unknown',
+      run.errorMessage,
+    );
     run.state = aborted ? 'aborted' : 'error';
   } finally {
     if (updateTimer) clearInterval(updateTimer);

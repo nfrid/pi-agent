@@ -2,6 +2,31 @@ import type { Message } from '@earendil-works/pi-ai';
 import type { ArtifactMetadata } from '../shared/artifacts';
 import type { WorktreeSummary } from './worktree/model';
 
+/** Harness-observed causes for a non-successful delegate settlement. */
+export type DelegateLifecycleReason =
+  | 'user-cancellation'
+  | 'queued-cancellation'
+  | 'timeout'
+  | 'child-nonzero-exit'
+  | 'provider-runner-error'
+  | 'setup-failure'
+  | 'lifecycle-cleanup-failure'
+  | 'child-result-invalid'
+  | 'unknown';
+
+/** One bounded, harness-authored recovery projection for failed runs. */
+export interface DelegateLifecycleProjection {
+  /** Stable code for what the harness actually observed, not a guess. */
+  reason: DelegateLifecycleReason;
+  /** Present only when the complete bounded diagnostic fits inline. */
+  diagnostic?: string;
+  /** Owner-session exact diagnostic when it does not fit inline. */
+  diagnosticArtifact?: ArtifactMetadata;
+  continuationUsable: boolean;
+  writableBranchRetained: boolean;
+  readOnlySnapshotRetained: boolean;
+}
+
 export interface UsageStats {
   input: number;
   output: number;
@@ -88,6 +113,8 @@ export interface DelegateRunMetadata {
   worktree?: WorktreeSummary;
   /** Exact final assistant output, stored only when the parent handoff omits it. */
   artifact?: ArtifactMetadata;
+  /** Public projection; authored by the harness and ignored from child input. */
+  lifecycle?: DelegateLifecycleProjection;
 }
 
 export interface DelegatedRun extends DelegateRunMetadata {
