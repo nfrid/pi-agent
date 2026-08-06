@@ -8,6 +8,7 @@ import {
   LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
   LIFECYCLE_PUBLIC_FALLBACK_MARKER,
   setDelegateLifecycle,
+  setDelegateLifecycleDiagnosticArtifact,
 } from './lifecycle';
 import { createRun } from './types';
 
@@ -104,6 +105,18 @@ describe('DelegateJobManager', () => {
     run.exitCode = 9;
     run.stderr = 'raw stderr must not be used as the stale fallback';
     setDelegateLifecycle(run, 'child-nonzero-exit', diagnostic);
+    const ownerHandle = `art_${'o'.repeat(22)}`;
+    setDelegateLifecycleDiagnosticArtifact(run, {
+      handle: ownerHandle,
+      sha256: 'a'.repeat(64),
+      size: Buffer.byteLength(diagnostic, 'utf8'),
+      producer: 'delegate',
+      contentClass: 'delegate-output',
+      creationSource: 'delegate.failure',
+      encoding: 'utf-8',
+      lineCount: 1,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
     const manager = new DelegateJobManager();
     const started = manager.start({
       ownerSessionId: 'owner-session',
@@ -128,6 +141,7 @@ describe('DelegateJobManager', () => {
       JSON.stringify(stale).match(/actionable failure/g) ?? [],
     ).toHaveLength(1);
     expect(JSON.stringify(stale)).not.toContain('raw stderr');
+    expect(JSON.stringify(stale)).not.toContain(ownerHandle);
     expect(stale.handoff).toBeUndefined();
     await manager.dispose();
   });
