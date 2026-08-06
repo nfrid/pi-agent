@@ -1,8 +1,10 @@
+import { cloneDelegateLifecycle } from './lifecycle';
 import { serializeDelegateRunForPublic } from './structured-result';
 import type {
   DelegateContext,
   DelegatedActivity,
   DelegatedRun,
+  DelegateLifecycleProjection,
   DelegateRunState,
 } from './types';
 import { getRunState } from './types';
@@ -45,6 +47,8 @@ export interface DelegateStatusSnapshot {
   /** Ordered, bounded activity and response history across the lineage. */
   transcript?: DelegateTranscriptEntry[];
   transcriptTruncated?: boolean;
+  /** Harness-authored terminal projection retained in status snapshots. */
+  lifecycle?: DelegateLifecycleProjection;
 }
 
 interface DelegateStatusRecord extends DelegateStatusSnapshot {
@@ -174,6 +178,7 @@ export class DelegateStatusStore {
         allowWrites: run.allowWrites === true,
         activity: displayActivity(run, undefined),
         transcript: transcript(run),
+        lifecycle: cloneDelegateLifecycle(run.lifecycle),
         resultEntered: false,
         clearOnNextUserMessage: false,
       });
@@ -196,6 +201,7 @@ export class DelegateStatusStore {
     record.allowWrites = run.allowWrites === true;
     record.activity = displayActivity(run, record.activity);
     record.transcript = transcript(run);
+    record.lifecycle = cloneDelegateLifecycle(run.lifecycle);
     this.onChange();
   }
 
@@ -215,6 +221,7 @@ export class DelegateStatusStore {
       record.allowWrites = run.allowWrites === true;
       record.activity = displayActivity(run, record.activity);
       record.transcript = transcript(run);
+      record.lifecycle = cloneDelegateLifecycle(run.lifecycle);
       changed = true;
     }
     if (changed) this.onChange();

@@ -166,8 +166,11 @@ multiline and Unicode text without cutting an inline diagnostic in the middle.
 
 `continuationUsable`, `writableBranchRetained`, and
 `readOnlySnapshotRetained` are factual booleans derived from the durable
-session/worktree records. A setup failure or removed resource is never
-reported as retained. The same projection is rendered for single and
+session/worktree records. A fresh setup failure or removed resource is never
+reported as retained; a resumed setup failure may truthfully report the
+worktree still retained by its continuation session. A read-only diagnostic
+checkout and a retired read-only snapshot both count as read-only recovery
+resources until removed. The same projection is rendered for single and
 parallel foreground results and for background/job completion and inspection;
 missing or invalid structured child results receive the same contract.
 

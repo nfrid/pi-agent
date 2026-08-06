@@ -10,6 +10,7 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from '@earendil-works/pi-tui';
+import { hydrateDelegateLifecycle } from './lifecycle';
 import {
   continuationRecoveryNote,
   type DelegateDetails,
@@ -392,9 +393,13 @@ export function currentActivityLines(
 export function getDetails(
   toolResult: ToolResultLike,
 ): DelegateDetails | undefined {
-  return toolResult.details
-    ? normalizeDelegateDetails(toolResult.details)
-    : undefined;
+  if (!toolResult.details) return undefined;
+  const details = normalizeDelegateDetails(toolResult.details);
+  // Host persistence/replay strips WeakMap state. Rehydrate only at this
+  // trusted public-details boundary; child-shaped lifecycle input is still
+  // ignored by serializeDelegateRunForPublic and ensureDelegateLifecycle.
+  for (const run of details.runs) hydrateDelegateLifecycle(run, run.lifecycle);
+  return details;
 }
 
 export function fallbackText(toolResult: ToolResultLike): string {

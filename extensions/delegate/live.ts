@@ -109,6 +109,26 @@ function statusSnapshot(
           })),
         }
       : {}),
+    ...(status.lifecycle
+      ? {
+          lifecycle: {
+            reason: status.lifecycle.reason,
+            ...(status.lifecycle.diagnostic !== undefined
+              ? { diagnostic: status.lifecycle.diagnostic }
+              : {}),
+            ...(status.lifecycle.diagnosticArtifact
+              ? {
+                  diagnosticArtifact: {
+                    ...status.lifecycle.diagnosticArtifact,
+                  },
+                }
+              : {}),
+            continuationUsable: status.lifecycle.continuationUsable,
+            writableBranchRetained: status.lifecycle.writableBranchRetained,
+            readOnlySnapshotRetained: status.lifecycle.readOnlySnapshotRetained,
+          },
+        }
+      : {}),
     ...transcriptSnapshot(status, transcriptBudget),
   };
 }

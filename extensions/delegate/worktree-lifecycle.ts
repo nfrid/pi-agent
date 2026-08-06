@@ -65,6 +65,27 @@ export function markLifecycleFailure(
   run.worktree = worktreeSummary(record);
 }
 
+function isExpectedRunOutcomeError(
+  record: WorktreeRecord,
+  state: ReturnType<typeof getRunState>,
+): boolean {
+  if (!record.error || state === 'success') return false;
+  if (state === 'timed-out')
+    return (
+      record.runOutcome === 'timed-out' &&
+      record.error.startsWith('The delegate run timed out;')
+    );
+  if (state === 'aborted')
+    return (
+      record.runOutcome === 'aborted' &&
+      record.error.startsWith('The delegate run ended with aborted;')
+    );
+  return (
+    record.runOutcome === 'error' &&
+    record.error.startsWith('The delegate run ended with error;')
+  );
+}
+
 /**
  * Settle the branch once the child exits. The parent integrates it from here,
  * so the only job is to make sure the work is committed and described.
@@ -97,7 +118,11 @@ export async function finalizeWorktreeRun(
     run.worktree = worktreeSummary(settled);
     if (settled.error && !continuationRecoveryNote(run))
       run.warnings = [...(run.warnings ?? []), settled.error];
-    if (settled.error && settled.error !== previousError) {
+    if (
+      settled.error &&
+      settled.error !== previousError &&
+      !isExpectedRunOutcomeError(settled, state)
+    ) {
       run.state = 'error';
       run.stopReason = 'error';
       run.exitCode = run.exitCode === 0 ? 1 : run.exitCode;

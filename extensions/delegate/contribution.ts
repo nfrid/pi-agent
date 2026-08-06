@@ -17,6 +17,30 @@ const DelegateRunStateSchema = Type.Union([
   Type.Literal('aborted'),
   Type.Literal('timed-out'),
 ]);
+const DelegateLifecycleReasonSchema = Type.Union([
+  Type.Literal('user-cancellation'),
+  Type.Literal('queued-cancellation'),
+  Type.Literal('timeout'),
+  Type.Literal('child-nonzero-exit'),
+  Type.Literal('provider-runner-error'),
+  Type.Literal('setup-failure'),
+  Type.Literal('lifecycle-cleanup-failure'),
+  Type.Literal('child-result-invalid'),
+  Type.Literal('unknown'),
+]);
+const DelegateLifecycleSchema = Type.Object(
+  {
+    reason: DelegateLifecycleReasonSchema,
+    diagnostic: Type.Optional(Type.String({ maxLength: 65_536 })),
+    diagnosticArtifact: Type.Optional(
+      Type.Record(Type.String(), Type.Unknown()),
+    ),
+    continuationUsable: Type.Boolean(),
+    writableBranchRetained: Type.Boolean(),
+    readOnlySnapshotRetained: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
 const DelegateActivitySchema = Type.Object(
   {
     id: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
@@ -93,6 +117,7 @@ export const DelegateStatusSchema = Type.Object(
       ),
     ),
     transcriptTruncated: Type.Optional(Type.Boolean()),
+    lifecycle: Type.Optional(DelegateLifecycleSchema),
   },
   { additionalProperties: false },
 );

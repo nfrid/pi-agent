@@ -17,12 +17,25 @@ export const LIFECYCLE_STDERR_BYTES = 8 * 1024;
 
 interface LifecycleRecord {
   reason: DelegateLifecycleReason;
-  diagnostic: string;
+  /** Undefined when a persisted projection retained only its artifact handle. */
+  diagnostic?: string;
   diagnosticArtifact?: ArtifactMetadata;
   diagnosticPublicationFailed?: boolean;
 }
 
 const records = new WeakMap<DelegatedRun, LifecycleRecord>();
+const TRUSTED_LIFECYCLE = Symbol('trusted delegate lifecycle projection');
+const LIFECYCLE_REASONS: readonly DelegateLifecycleReason[] = [
+  'user-cancellation',
+  'queued-cancellation',
+  'timeout',
+  'child-nonzero-exit',
+  'provider-runner-error',
+  'setup-failure',
+  'lifecycle-cleanup-failure',
+  'child-result-invalid',
+  'unknown',
+];
 
 function byteLength(text: string): number {
   return Buffer.byteLength(text, 'utf8');
@@ -97,32 +110,29 @@ function resourceFacts(
   DelegateLifecycleProjection,
   'continuationUsable' | 'writableBranchRetained' | 'readOnlySnapshotRetained'
 > {
-  if (records.get(run)?.reason === 'setup-failure')
-    return {
-      continuationUsable: false,
-      writableBranchRetained: false,
-      readOnlySnapshotRetained: false,
-    };
   const session = run.continuation
     ? resolveDelegateSession(run.continuation)
     : null;
-  const record = run.worktree?.id ? loadWorktree(run.worktree.id) : undefined;
-  const continuationUsable = Boolean(
-    session &&
-      (!session.worktreeId ||
-        (record && record.status !== 'removed' && Boolean(record.branch))),
-  );
+  // A resumed setup can fail before the run receives a worktree summary. The
+  // durable continuation metadata is still authoritative for recovery facts.
+  const worktreeId = run.worktree?.id ?? session?.worktreeId;
+  const record = worktreeId ? loadWorktree(worktreeId) : undefined;
   const retained = Boolean(
     record && record.status !== 'removed' && Boolean(record.branch),
+  );
+  const allowWrites = run.allowWrites ?? session?.allowWrites;
+  const continuationUsable = Boolean(
+    session && (!session.worktreeId || retained),
   );
   return {
     continuationUsable,
     writableBranchRetained: Boolean(
-      retained && run.allowWrites === true && !record?.snapshot,
+      retained && allowWrites === true && !record?.snapshot,
     ),
-    readOnlySnapshotRetained: Boolean(
-      retained && run.allowWrites !== true && record?.snapshot === true,
-    ),
+    // A failed read-only run keeps its checkout for diagnosis; a clean one
+    // retires that checkout as a resumable snapshot. Both are read-only
+    // recovery resources until the record is removed.
+    readOnlySnapshotRetained: Boolean(retained && allowWrites !== true),
   };
 }
 
@@ -135,6 +145,68 @@ export function setDelegateLifecycleText(
     reason,
     diagnostic: boundLifecycleText(diagnostic),
   });
+  Object.defineProperty(run, TRUSTED_LIFECYCLE, {
+    value: true,
+    configurable: true,
+  });
+}
+
+function isLifecycleReason(value: unknown): value is DelegateLifecycleReason {
+  return (
+    typeof value === 'string' &&
+    LIFECYCLE_REASONS.includes(value as DelegateLifecycleReason)
+  );
+}
+
+/**
+ * Rehydrate a projection that crossed a trusted persistence boundary.
+ *
+ * This is intentionally not part of ensureDelegateLifecycle: arbitrary child
+ * input may contain a lifecycle-shaped field and must never be allowed to
+ * author harness state. Callers use this only for details/job snapshots that
+ * were already produced by the harness.
+ */
+export function hydrateDelegateLifecycle(
+  run: DelegatedRun,
+  projection: unknown,
+): boolean {
+  if (!projection || typeof projection !== 'object') return false;
+  const value = projection as Partial<DelegateLifecycleProjection>;
+  if (
+    !isLifecycleReason(value.reason) ||
+    typeof value.continuationUsable !== 'boolean' ||
+    typeof value.writableBranchRetained !== 'boolean' ||
+    typeof value.readOnlySnapshotRetained !== 'boolean'
+  )
+    return false;
+  if (
+    value.diagnostic !== undefined &&
+    (typeof value.diagnostic !== 'string' ||
+      byteLength(value.diagnostic) > LIFECYCLE_DIAGNOSTIC_CAPTURE_BYTES)
+  )
+    return false;
+  const record: LifecycleRecord = {
+    reason: value.reason,
+    ...(value.diagnostic !== undefined ? { diagnostic: value.diagnostic } : {}),
+    ...(value.diagnosticArtifact
+      ? { diagnosticArtifact: value.diagnosticArtifact }
+      : {}),
+  };
+  records.set(run, record);
+  Object.defineProperty(run, TRUSTED_LIFECYCLE, {
+    value: true,
+    configurable: true,
+  });
+  return true;
+}
+
+/** Whether this run was produced by a harness serialization boundary. */
+export function hasTrustedDelegateLifecycle(run: DelegatedRun): boolean {
+  return (
+    (run as DelegatedRun & { [TRUSTED_LIFECYCLE]?: boolean })[
+      TRUSTED_LIFECYCLE
+    ] === true
+  );
 }
 
 export function setDelegateLifecycle(
@@ -195,14 +267,20 @@ export function ensureDelegateLifecycle(
 
 export function getDelegateLifecycle(
   run: DelegatedRun,
-  options: { includeArtifact?: boolean } = {},
+  options: {
+    includeArtifact?: boolean;
+    /** Used only by stale-session projections after owner handles are removed. */
+    forceInlineDiagnostic?: boolean;
+  } = {},
 ): DelegateLifecycleProjection | undefined {
   const record = records.get(run);
   if (!record) return undefined;
   const facts = resourceFacts(run);
   const inline =
-    byteLength(record.diagnostic) <= LIFECYCLE_INLINE_DIAGNOSTIC_BYTES ||
-    record.diagnosticPublicationFailed
+    record.diagnostic &&
+    (options.forceInlineDiagnostic === true ||
+      byteLength(record.diagnostic) <= LIFECYCLE_INLINE_DIAGNOSTIC_BYTES ||
+      record.diagnosticPublicationFailed)
       ? record.diagnostic
       : undefined;
   return {
@@ -217,6 +295,28 @@ export function getDelegateLifecycle(
   };
 }
 
+/** Copy a public projection without retaining a mutable caller-owned object. */
+export function cloneDelegateLifecycle(
+  projection: DelegateLifecycleProjection | undefined,
+  options: { includeArtifact?: boolean } = {},
+): DelegateLifecycleProjection | undefined {
+  if (!projection) return undefined;
+  return {
+    reason: projection.reason,
+    ...(projection.diagnostic !== undefined
+      ? { diagnostic: projection.diagnostic }
+      : {}),
+    ...(options.includeArtifact === false
+      ? {}
+      : projection.diagnosticArtifact
+        ? { diagnosticArtifact: { ...projection.diagnosticArtifact } }
+        : {}),
+    continuationUsable: projection.continuationUsable,
+    writableBranchRetained: projection.writableBranchRetained,
+    readOnlySnapshotRetained: projection.readOnlySnapshotRetained,
+  };
+}
+
 /** Copy only harness-owned lifecycle state when session-bound sanitization clones a run. */
 export function copyDelegateLifecycle(
   source: DelegatedRun,
@@ -227,14 +327,20 @@ export function copyDelegateLifecycle(
   if (!record) return;
   records.set(target, {
     reason: record.reason,
-    diagnostic: record.diagnostic,
+    ...(record.diagnostic !== undefined
+      ? { diagnostic: record.diagnostic }
+      : {}),
     ...(options.includeArtifact === false
       ? {}
       : record.diagnosticArtifact
-        ? { diagnosticArtifact: record.diagnosticArtifact }
+        ? { diagnosticArtifact: { ...record.diagnosticArtifact } }
         : {}),
     ...(record.diagnosticPublicationFailed
       ? { diagnosticPublicationFailed: true }
       : {}),
+  });
+  Object.defineProperty(target, TRUSTED_LIFECYCLE, {
+    value: true,
+    configurable: true,
   });
 }

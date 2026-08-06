@@ -1,5 +1,6 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { AsyncJobRegistry, type JobRecord } from '../shared/runtime/registry';
+import { copyDelegateLifecycle, getDelegateLifecycle } from './lifecycle';
 import { buildParentHandoff } from './output';
 import { serializeDelegateRunForPublic } from './structured-result';
 import type { DelegateDetails, DelegatedRun } from './types';
@@ -253,6 +254,14 @@ export class DelegateJobManager {
         run,
         { includeArtifacts: false },
       );
+      // This is the only projection where the owner artifact handle and
+      // handoff are intentionally hidden. Keep one bounded harness capture so
+      // a stale-session peek remains actionable without exposing stderr.
+      const lifecycle = getDelegateLifecycle(run, {
+        includeArtifact: false,
+        forceInlineDiagnostic: true,
+      });
+      if (lifecycle) safeRun.lifecycle = lifecycle;
       return safeRun;
     });
     const { handoff: _handoff, ...safeJob } = job;
@@ -315,9 +324,14 @@ function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
     createdAt: record.createdAt,
     startedAt: record.startedAt,
     settledAt: record.settledAt,
-    runs: (record.snapshotRuns ?? record.runs)?.map((run) => ({
-      ...serializeDelegateRunForPublic(run),
-    })),
+    runs: (record.snapshotRuns ?? record.runs)?.map((run) => {
+      const projected = serializeDelegateRunForPublic(run);
+      // JSON-like job snapshots clone the enumerable run, so retain the
+      // harness record for another trusted snapshot/owner-session projection.
+      const clone = { ...projected };
+      copyDelegateLifecycle(projected, clone);
+      return clone;
+    }),
     handoff: record.handoff,
     error: record.error,
     deliveryEpoch: record.deliveryEpoch,

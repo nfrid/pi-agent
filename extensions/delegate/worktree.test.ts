@@ -7,6 +7,8 @@ import {
 } from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, test } from 'vitest';
+import { getDelegateLifecycle, setDelegateLifecycle } from './lifecycle';
+import { createDelegateSession, removeDelegateSession } from './session';
 import { configureNativeHooks, git, repository } from './test/worktree-fixture';
 import { continuationRecoveryNote, createRun } from './types';
 import {
@@ -400,6 +402,96 @@ describe('finishing a worktree', () => {
     expect(record.error).toMatch(/ended with error/);
     expect(record.runOutcome).toBe('error');
     expect(worktreeSummary(record).hasWork).toBe(true);
+  });
+
+  test('recovers retained resources from a resumed session when the run summary is missing', async () => {
+    const writable = await prepared({ name: 'Resumed setup failure' });
+    const session = createDelegateSession({
+      cwd: repository,
+      worktreeId: writable.record.id,
+      allowWrites: true,
+      isolation: 'worktree',
+    });
+    try {
+      const run = createRun('resumed setup failure', undefined, {
+        continuation: session.token,
+        context: 'continuation',
+        allowWrites: true,
+      });
+      run.state = 'error';
+      setDelegateLifecycle(run, 'setup-failure', 'refresh failed');
+
+      expect(getDelegateLifecycle(run)).toMatchObject({
+        reason: 'setup-failure',
+        continuationUsable: true,
+        writableBranchRetained: true,
+        readOnlySnapshotRetained: false,
+      });
+
+      await removeWorktree(writable.record.id, { deleteBranch: true });
+      expect(getDelegateLifecycle(run)).toMatchObject({
+        continuationUsable: false,
+        writableBranchRetained: false,
+        readOnlySnapshotRetained: false,
+      });
+    } finally {
+      removeDelegateSession(session);
+    }
+  });
+
+  test('reports a retained read-only diagnostic checkout and not a removed one', async () => {
+    const readOnly = await prepared({ name: 'Read-only setup failure' });
+    const session = createDelegateSession({
+      cwd: repository,
+      worktreeId: readOnly.record.id,
+      allowWrites: false,
+      isolation: 'worktree',
+    });
+    try {
+      const run = createRun('read-only setup failure', undefined, {
+        continuation: session.token,
+        context: 'continuation',
+        allowWrites: false,
+      });
+      run.state = 'error';
+      setDelegateLifecycle(run, 'setup-failure', 'refresh failed');
+      expect(getDelegateLifecycle(run)).toMatchObject({
+        continuationUsable: true,
+        writableBranchRetained: false,
+        readOnlySnapshotRetained: true,
+      });
+
+      await removeWorktree(readOnly.record.id, { deleteBranch: true });
+      expect(getDelegateLifecycle(run)).toMatchObject({
+        continuationUsable: false,
+        writableBranchRetained: false,
+        readOnlySnapshotRetained: false,
+      });
+    } finally {
+      removeDelegateSession(session);
+    }
+  });
+
+  test.each([
+    ['timed-out', 'timed-out', 'timeout'],
+    ['aborted', 'aborted', 'user-cancellation'],
+    ['error', 'error', 'child-nonzero-exit'],
+  ] as const)('preserves the child outcome when finalizing a %s worktree run', async (outcome, state, reason) => {
+    const worktree = await prepared();
+    const run = createRun('failed attempt', undefined, {
+      allowWrites: true,
+    });
+    run.state = state;
+    run.exitCode = state === 'aborted' ? 130 : state === 'timed-out' ? 124 : 7;
+    setDelegateLifecycle(run, reason, `child ${reason}`);
+
+    await finalizeWorktreeRun(run, worktree, 'failed attempt');
+
+    expect(getDelegateLifecycle(run)?.reason).toBe(reason);
+    expect(getDelegateLifecycle(run)?.reason).not.toBe(
+      'lifecycle-cleanup-failure',
+    );
+    expect(run.worktree?.runOutcome).toBe(outcome);
   });
 
   test('keeps the latest failed attempt through repeated continuation and recovery', async () => {
