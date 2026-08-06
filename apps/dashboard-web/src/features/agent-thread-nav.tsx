@@ -169,13 +169,43 @@ export function AgentThreadNav({
       visibleRows.filter((row) => row.status === 'idle').length,
   );
   const groups = useMemo(() => {
-    const result = new Map<string, AgentThreadRow[]>();
+    const needle = query.trim().toLowerCase();
+    const result = new Map<
+      string,
+      { workspaceId?: string; workspaceName: string; rows: AgentThreadRow[] }
+    >();
+    for (const workspace of snapshot.workspaces) {
+      if (
+        needle &&
+        !`${workspace.name} ${workspace.canonicalPath}`
+          .toLowerCase()
+          .includes(needle)
+      )
+        continue;
+      result.set(workspace.id, {
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        rows: [],
+      });
+    }
     for (const row of visibleRows) {
       const key = row.workspaceId ?? `other:${row.workspaceName}`;
-      result.set(key, [...(result.get(key) ?? []), row]);
+      const group =
+        result.get(key) ??
+        ({
+          workspaceId: row.workspaceId,
+          workspaceName: row.workspaceName,
+          rows: [],
+        } satisfies {
+          workspaceId?: string;
+          workspaceName: string;
+          rows: AgentThreadRow[];
+        });
+      group.rows.push(row);
+      result.set(key, group);
     }
     return [...result.entries()];
-  }, [visibleRows]);
+  }, [query, snapshot.workspaces, visibleRows]);
   const onTouchStart = (event: TouchEvent) => {
     const touch = event.changedTouches[0];
     if (touch) touchStart.current = { x: touch.clientX, y: touch.clientY };
@@ -289,14 +319,6 @@ export function AgentThreadNav({
           <p className="eyebrow">Workspace threads</p>
           <strong>Agents</strong>
         </div>
-        <button
-          type="button"
-          className="agent-nav-new"
-          aria-label="New agent"
-          onClick={() => go('/new')}
-        >
-          +
-        </button>
       </div>
       <label className="agent-nav-search">
         <span className="sr-only">Search agents and threads</span>
@@ -329,19 +351,36 @@ export function AgentThreadNav({
             <div className="agent-workspace-heading">
               <button
                 type="button"
-                disabled={!group[0]?.workspaceId}
+                disabled={!group.workspaceId}
                 onClick={() => {
-                  const workspaceId = group[0]?.workspaceId;
+                  const workspaceId = group.workspaceId;
                   if (!workspaceId) return;
                   go(`/workspaces/${encodeURIComponent(workspaceId)}`);
                   if (mode === 'session') onOpenChange?.(false);
                 }}
               >
-                {group[0]?.workspaceName ?? 'Other workspace'}
+                {group.workspaceName}
               </button>
-              <small>{group.length}</small>
+              <span className="agent-workspace-heading-actions">
+                <small>{group.rows.length}</small>
+                {group.workspaceId && (
+                  <button
+                    type="button"
+                    className="agent-workspace-new"
+                    aria-label={`New chat in ${group.workspaceName}`}
+                    onClick={() => {
+                      go(
+                        `/workspaces/${encodeURIComponent(group.workspaceId as string)}/new`,
+                      );
+                      if (mode === 'session') onOpenChange?.(false);
+                    }}
+                  >
+                    +
+                  </button>
+                )}
+              </span>
             </div>
-            {group.map((row) => {
+            {group.rows.map((row) => {
               const selected = row.id === currentSessionId;
               return (
                 <button

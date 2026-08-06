@@ -6,10 +6,11 @@ import {
   sessionQueryOptions,
   useDashboardStore,
 } from '@pi-dashboard/client';
-import type {
-  BrowserSnapshot,
-  RuntimeSnapshot,
-  SessionApiResponse,
+import {
+  type BrowserSnapshot,
+  type RuntimeSnapshot,
+  type SessionApiResponse,
+  workspaceForPath,
 } from '@pi-dashboard/protocol';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
@@ -44,6 +45,7 @@ export {
 type ComposerProps = {
   runtime: RuntimeSnapshot | undefined;
   sessionId: string;
+  workspaceId?: string;
 };
 
 export function visualViewportKeyboardInset(
@@ -422,6 +424,10 @@ export function SessionView({
     data.metadata,
     runtime,
   );
+  const workspaceId =
+    data.metadata.workspaceId ??
+    workspaceForPath(runtime?.cwd ?? data.metadata.cwd, snapshot.workspaces)
+      ?.id;
   const jumpToLatest = () => {
     window.scrollTo({
       top: document.documentElement.scrollHeight,
@@ -531,7 +537,11 @@ export function SessionView({
             </button>
           )}
           <ExtensionSurfaceStack runtime={runtime} placement="composer" />
-          <Composer runtime={runtime} sessionId={id} />
+          <Composer
+            runtime={runtime}
+            sessionId={id}
+            workspaceId={workspaceId}
+          />
         </div>
         <PendingInteractions runtime={runtime} />
       </section>

@@ -36,7 +36,7 @@ async function swipe(
   );
 }
 
-test('mobile dashboard renders and supports the new-agent route', async ({
+test('mobile dashboard renders and supports project-scoped new chat', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 320, height: 720 });
@@ -101,7 +101,7 @@ test('mobile dashboard renders and supports the new-agent route', async ({
   await expect(
     page
       .getByRole('complementary', { name: 'Agents and threads' })
-      .getByRole('button', { name: 'New agent', exact: true }),
+      .getByRole('button', { name: 'New chat in Demo', exact: true }),
   ).toBeVisible();
   await page.locator('.agent-nav-backdrop').click();
   await expect(page.locator('.agent-nav-backdrop')).toHaveCount(0);
@@ -114,7 +114,7 @@ test('mobile dashboard renders and supports the new-agent route', async ({
     page.getByRole('dialog', { name: 'Command palette' }),
   ).toBeVisible();
   await expect(page.getByRole('option', { name: /Dashboard/ })).toBeVisible();
-  await expect(page.getByRole('option', { name: /New Agent/ })).toBeVisible();
+  await expect(page.getByRole('option', { name: /New chat/ })).toBeVisible();
   await expect(
     page.getByRole('option', { name: /Workspace: Demo/ }),
   ).toBeVisible();
@@ -147,18 +147,27 @@ test('mobile dashboard renders and supports the new-agent route', async ({
   ).toHaveCount(0);
   await paletteTrigger.focus();
   await page.keyboard.press('Enter');
-  await page.getByRole('option', { name: /New Agent/ }).click();
+  await page.getByRole('option', { name: /New chat/ }).click();
+  const workspaceDialog = page.getByRole('dialog', { name: 'Workspaces' });
+  await expect(workspaceDialog).toBeVisible();
+  await workspaceDialog.getByRole('button', { name: /Demo/ }).click();
+  await expect(page).toHaveURL(/\/workspaces\/w$/u);
+  await page
+    .locator('.section-heading')
+    .getByRole('button', { name: 'New chat', exact: true })
+    .click();
   expect(
     await page
       .locator('body')
       .evaluate((element) => element.scrollWidth <= element.clientWidth),
   ).toBe(true);
+  await expect(page).toHaveURL(/\/workspaces\/w\/new$/u);
+  await expect(page.getByRole('heading', { name: 'New chat' })).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Start an agent' }),
+    page.getByRole('textbox', { name: 'Message', exact: true }),
   ).toBeVisible();
-  await expect(page.getByLabel('Workspace')).toBeVisible();
   await expect(
-    page.getByRole('button', { name: 'Start in a new tmux window' }),
+    page.getByRole('button', { name: 'Send first message' }),
   ).toBeVisible();
 });
 
@@ -1596,13 +1605,14 @@ function phase6Snapshot(
     workspaces?: unknown[];
     unread?: unknown[];
     extensionSurfaces?: unknown[];
+    runtimes?: unknown[];
   } = {},
 ) {
   return {
     serverId: 'phase-six',
     revision: 1,
     cursor: 1,
-    runtimes: [
+    runtimes: overrides.runtimes ?? [
       {
         runtimeId: 'r1',
         ownership: 'managed',
@@ -2261,7 +2271,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   );
 });
 
-test('phase six mocked management flow covers refresh, fallback notification, launch, resume, and runtime lifecycle', async ({
+test('phase six mocked management flow covers refresh, fallback notification, project launch, and runtime lifecycle', async ({
   page,
 }) => {
   test.setTimeout(30_000);
@@ -2305,13 +2315,56 @@ test('phase six mocked management flow covers refresh, fallback notification, la
   await expect(
     page.getByRole('button', { name: /Browser alerts on|Alerts unavailable/ }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'New agent', exact: true }).click();
-  await page.getByLabel('Resume session (optional)').selectOption('s1');
+  await page.getByRole('button', { name: 'New chat', exact: true }).click();
+  await expect(page).toHaveURL(/\/workspaces\/w1\/new$/);
   await page
-    .getByRole('button', { name: 'Start in a new tmux window' })
-    .click();
-  await expect(page).toHaveURL(/\/runtimes\/r-launched$/);
-  expect(mocks.starts[0]).toMatchObject({ workspaceId: 'w1', sessionId: 's1' });
+    .getByRole('textbox', { name: 'Message', exact: true })
+    .fill('Inspect the project setup');
+  await page.getByRole('button', { name: 'Send first message' }).click();
+  await expect(page.getByText('Starting agent…')).toBeVisible();
+  await expect(page).not.toHaveURL(/\/runtimes\//u);
+  expect(mocks.starts[0]).toEqual({
+    workspaceId: 'w1',
+    initialPrompt: 'Inspect the project setup',
+  });
+  await page.route('**/api/sessions/s-launched', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        serverId: 'phase-six',
+        cursor: 2,
+        metadata: {
+          id: 's-launched',
+          file: '/tmp/project/launched.jsonl',
+          cwd: '/tmp/project',
+          title: 'Inspect the project setup',
+          updatedAt: 2,
+          workspaceId: 'w1',
+          entryCount: 1,
+        },
+        entries: [],
+      }),
+    }),
+  );
+  const launchedRuntime = {
+    ...((phase6Snapshot({}).runtimes as unknown[])[0] as Record<
+      string,
+      unknown
+    >),
+    runtimeId: 'r-launched',
+    liveState: 'working',
+    pendingInteractions: [],
+    session: { id: 's-launched', entries: [] },
+  };
+  await mocks.emit({
+    type: 'snapshot',
+    snapshot: phase6Snapshot({
+      runtimes: [launchedRuntime],
+      pendingInteractions: [],
+    }),
+  });
+  await expect(page).toHaveURL(/\/sessions\/s-launched$/);
+  await expect(page).not.toHaveURL(/\/runtimes\//u);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/sessions/s1');
   await mocks.emit({

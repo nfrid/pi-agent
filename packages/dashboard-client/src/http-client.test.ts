@@ -50,6 +50,34 @@ describe('DashboardHttpClient command requests', () => {
       id: 'restart-id',
     });
   });
+
+  it('posts a project-scoped first-message runtime request', async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ runtimeId: 'runtime-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: {
+        get: () => 'test-token',
+        set: () => undefined,
+        clear: () => undefined,
+      },
+    });
+    await client.startRuntime({
+      workspaceId: 'workspace-1',
+      initialPrompt: 'inspect this',
+    });
+    const call = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
+    expect(call[0]?.[0]).toBe('/api/runtimes/start');
+    expect(JSON.parse(String(call[0]?.[1]?.body))).toEqual({
+      workspaceId: 'workspace-1',
+      initialPrompt: 'inspect this',
+    });
+  });
 });
 
 describe('DashboardHttpClient event requests', () => {

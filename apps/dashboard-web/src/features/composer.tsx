@@ -364,9 +364,11 @@ function ThinkingControl({ runtime }: { runtime: RuntimeSnapshot }) {
 
 export function Composer({
   runtime,
+  workspaceId,
 }: {
   runtime: RuntimeSnapshot | undefined;
   sessionId: string;
+  workspaceId?: string;
 }) {
   const go = useDashboardNavigate();
   const [text, setText] = useState('');
@@ -423,8 +425,17 @@ export function Composer({
     return (
       <div className="composer disabled">
         <p>This session is dormant.</p>
-        <button type="button" onClick={() => go('/new')}>
-          Resume in a new runtime
+        <button
+          type="button"
+          onClick={() =>
+            go(
+              workspaceId
+                ? `/workspaces/${encodeURIComponent(workspaceId)}/new`
+                : '/workspaces',
+            )
+          }
+        >
+          Resume in a new chat
         </button>
       </div>
     );

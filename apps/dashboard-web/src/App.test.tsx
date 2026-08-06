@@ -12,6 +12,8 @@ import {
   contextIndicatorData,
   formatContextTokens,
   isNearPageBottom,
+  newChatPath,
+  newChatRequest,
   queueCommand,
   queuedMessagesForRuntime,
   queueRemoveCommand,
@@ -19,6 +21,7 @@ import {
   sessionCursorRangeCovered,
   sessionDisplayTitle,
   sessionNavigationTarget,
+  sessionPathForRuntime,
   shouldApplySessionMetadata,
   shouldShowActivityLead,
   shouldShowJumpToLatest,
@@ -140,6 +143,41 @@ describe('image attachments', () => {
   });
 });
 
+describe('project-scoped new chat', () => {
+  it('uses the active workspace for context-free new chat entries', () => {
+    const snapshot = {
+      workspaces: [
+        { id: 'dormant', active: false },
+        { id: 'active', active: true },
+      ],
+    } as never;
+    expect(newChatPath(snapshot)).toBe('/workspaces/active/new');
+    expect(newChatPath({ workspaces: [] } as never)).toBe('/workspaces');
+    expect(newChatPath(snapshot, 'dormant')).toBe('/workspaces/dormant/new');
+  });
+
+  it('builds the first-message start request and explicit warning continuation', () => {
+    expect(newChatRequest('workspace-1', '  inspect this  ')).toEqual({
+      workspaceId: 'workspace-1',
+      initialPrompt: '  inspect this  ',
+    });
+    expect(newChatRequest('workspace-1', 'inspect this', true)).toEqual({
+      workspaceId: 'workspace-1',
+      initialPrompt: 'inspect this',
+      acknowledgeSharedWorkingDirectory: true,
+    });
+  });
+
+  it('waits for a runtime session identity before choosing the session route', () => {
+    expect(sessionPathForRuntime(undefined)).toBeUndefined();
+    expect(
+      sessionPathForRuntime({
+        session: { id: 'session/1' },
+      } as RuntimeSnapshot),
+    ).toBe('/sessions/session%2F1');
+  });
+});
+
 describe('command palette', () => {
   it('keeps navigation available without runtime capabilities and bounds sessions', () => {
     const snapshot = {
@@ -160,7 +198,7 @@ describe('command palette', () => {
     const items = paletteItems(snapshot);
     expect(items.slice(0, 2).map((item) => item.title)).toEqual([
       'Dashboard',
-      'New Agent',
+      'New chat',
     ]);
     expect(items.filter((item) => item.kind === 'navigate')).toHaveLength(30);
     expect(items[5]?.title).toBe('Session: Untitled session');

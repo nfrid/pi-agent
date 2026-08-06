@@ -1,6 +1,6 @@
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useRouterState } from '@tanstack/react-router';
-import { useDashboardNavigate } from '../routes/navigation';
+import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { CommandPalette } from './command-palette';
 import { useDashboardUtility } from './dashboard-utility-context';
 
@@ -27,7 +27,10 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
-  const showGlobalNew = pathname !== '/' && !pathname.startsWith('/sessions/');
+  const showGlobalNew =
+    pathname !== '/' &&
+    !pathname.startsWith('/sessions/') &&
+    !pathname.endsWith('/new');
   const activeSessionId = pathname.startsWith('/sessions/')
     ? decodeURIComponent(pathname.split('/')[2] ?? '')
     : undefined;
@@ -46,8 +49,18 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
           <button
             type="button"
             className="global-new-agent"
-            aria-label="New agent"
-            onClick={() => go('/new')}
+            aria-label="New chat"
+            onClick={() => {
+              const workspaceMatch = pathname.match(/^\/workspaces\/([^/]+)$/u);
+              go(
+                newChatPath(
+                  snapshot,
+                  workspaceMatch?.[1]
+                    ? decodeURIComponent(workspaceMatch[1])
+                    : undefined,
+                ),
+              );
+            }}
           >
             +
           </button>
