@@ -1,5 +1,8 @@
 import type { Message } from '@earendil-works/pi-ai';
-import { captureDelegateResultEvent } from './structured-result';
+import {
+  captureDelegateResultEvent,
+  redactDelegateResultTerminalProse,
+} from './structured-result';
 import type { DelegatedRun } from './types';
 
 const MAX_ACTIVITY_COUNT = 96;
@@ -241,6 +244,7 @@ function addMessage(run: DelegatedRun, message: Message) {
         }
       : message;
   run.messages.push(sanitized as Message);
+  redactDelegateResultTerminalProse(run);
   while (
     run.messages.length > 1 &&
     (run.messages.length > MAX_MESSAGE_COUNT ||

@@ -1,5 +1,7 @@
+import { Value } from 'typebox/value';
 import { describe, expect, test } from 'vitest';
 import {
+  asToolSchema,
   captureDelegateResultEvent,
   getDelegateResultSpec,
   getSettledDelegateResult,
@@ -99,6 +101,90 @@ describe('schema-driven delegate results', () => {
     ).toThrow(/declared|array/);
   });
 
+  test('omits an overflowing projection without leaking its selected value', () => {
+    const spec = normalizeDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { secret: { type: 'string' } },
+            },
+          },
+        },
+        required: ['items'],
+      },
+      projection: ['/items/*/secret'],
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    const secret = `private-${'x'.repeat(4088)}`;
+    const result = { items: Array.from({ length: 3 }, () => ({ secret })) };
+    const checked = validateStructuredResult(spec, result);
+    expect(checked.valid).toBe(true);
+    const projection = projectStructuredResult(spec, checked.value);
+    expect(projection.value).toBeUndefined();
+    expect(projection.omittedPaths).toEqual(['/items/*/secret']);
+    expect(JSON.stringify(projection.value ?? null)).not.toContain('private-');
+  });
+
+  test('rejects escaping and invalid wildcard projection paths', () => {
+    expect(() =>
+      normalizeDelegateResultSpec({
+        schema: {
+          type: 'object',
+          properties: { items: { type: 'array', items: { type: 'string' } } },
+        },
+        projection: ['/items/0'],
+      }),
+    ).toThrow(/declared|array/);
+    expect(() =>
+      normalizeDelegateResultSpec({
+        schema: {
+          type: 'object',
+          properties: { items: { type: 'array', items: { type: 'string' } } },
+        },
+        projection: ['/items/../secret'],
+      }),
+    ).toThrow(/escaping/);
+    expect(() =>
+      normalizeDelegateResultSpec({
+        schema: { type: 'object', properties: { item: { type: 'string' } } },
+        projection: ['/*/item'],
+      }),
+    ).toThrow(/array/);
+  });
+
+  test('aligns numeric object paths while rejecting array indexes and full-result views', () => {
+    const numericObject = normalizeDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: {
+          '0': { type: 'string' },
+          items: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      views: { numeric: '/0' },
+    });
+    expect(numericObject?.views).toEqual({ numeric: '/0' });
+    expect(() =>
+      normalizeDelegateResultSpec({
+        schema: {
+          type: 'object',
+          properties: { items: { type: 'array', items: { type: 'string' } } },
+        },
+        views: { indexed: '/items/0' },
+      }),
+    ).toThrow(/declared|array/);
+    expect(() =>
+      normalizeDelegateResultSpec({
+        schema: { type: 'object', properties: { secret: { type: 'string' } } },
+        views: { complete: '/' },
+      }),
+    ).toThrow(/complete result/);
+  });
+
   test('reports missing, extra, wrong-type, enum, and byte-limit failures', () => {
     const spec = normalizeDelegateResultSpec({ schema });
     if (!spec) throw new Error('expected normalized result spec');
@@ -120,6 +206,56 @@ describe('schema-driven delegate results', () => {
         summary: 'x',
       }).valid,
     ).toBe(false);
+  });
+
+  test('turns deeply nested sub-64KiB JSON into bounded validation errors', () => {
+    let value: unknown = null;
+    for (let index = 0; index < 20_000; index++) value = [value];
+    const spec = normalizeDelegateResultSpec({ schema: { type: 'null' } });
+    if (!spec) throw new Error('expected normalized result spec');
+    expect(() => validateStructuredResult(spec, value)).not.toThrow(RangeError);
+    const result = validateStructuredResult(spec, value);
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeLessThanOrEqual(
+      STRUCTURED_RESULT_CAPS.maxValidationErrors,
+    );
+  });
+
+  test.each([
+    ['missing', [] as const],
+    ['multiple', [1, 2] as const],
+  ])('rejects a %s delegate_result channel', (_label, calls) => {
+    const spec = normalizeDelegateResultSpec({
+      schema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    const run = createRun('channel');
+    setDelegateResultSpec(run, spec);
+    for (let index = 0; index < calls.length; index++)
+      captureDelegateResultEvent(run, { details: { ok: true } }, false);
+    const settled = settleDelegateResult(run);
+    expect(settled?.valid).toBe(false);
+    expect(settled?.errors.join('; ')).toMatch(
+      calls.length === 0 ? /missing/ : /exactly once.*2/,
+    );
+  });
+
+  test('uses the child TypeBox contract for decimal multipleOf settlement', () => {
+    const spec = normalizeDelegateResultSpec({
+      schema: { type: 'number', multipleOf: 0.1 },
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    const childSchema = asToolSchema(spec.schema);
+    for (const value of [0.3, 0.30000000000000004]) {
+      expect(Value.Check(childSchema, value)).toBe(
+        validateStructuredResult(spec, value).valid,
+      );
+      expect(validateStructuredResult(spec, value).valid).toBe(true);
+    }
+    expect(Value.Check(childSchema, 0.31)).toBe(
+      validateStructuredResult(spec, 0.31).valid,
+    );
+    expect(validateStructuredResult(spec, 0.31).valid).toBe(false);
   });
 
   test('captures only tool details and makes malformed settlement non-success', () => {

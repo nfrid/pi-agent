@@ -25,6 +25,7 @@ import {
   assertDistinctContinuationTokens,
   throwIfAllRunsFailed,
 } from './param-errors';
+import { buildDelegatePlans } from './plans';
 import { buildDelegatePrompt } from './prompt';
 import { formatDelegateRoutingConfig } from './routing';
 import { mergeDelegateRouteRequest } from './routing-warnings';
@@ -471,6 +472,83 @@ describe('delegate', () => {
       const dir = path.join(getAgentDir(), '.delegate-sessions');
       rmSync(path.join(dir, `${session.token}.jsonl`), { force: true });
       rmSync(path.join(dir, `${session.token}.json`), { force: true });
+    }
+  });
+
+  test('keeps result contracts invocation-scoped across continuations', () => {
+    const session = createDelegateSession({
+      cwd: '/tmp/project',
+      name: 'Structured follow-up',
+      routing: {
+        route: 'quick-high',
+        provider: 'openai-codex',
+        model: 'quick',
+        thinking: 'high',
+        relativeCost: 1,
+      },
+    });
+    const config = parseDelegateConfig({
+      modelCatalog: {
+        'quick-high': {
+          provider: 'openai-codex',
+          model: 'quick',
+          thinking: 'high',
+          relativeCost: 1,
+          useFor: 'checks',
+          avoid: 'none',
+        },
+      },
+    });
+    const context = { cwd: '/tmp/project' } as never;
+    try {
+      const legacy = buildDelegatePlans(
+        { task: 'continue the audit', continuation: session.token } as never,
+        context,
+        config,
+        () => null,
+      );
+      expect(legacy.tasks[0]?.plan.resultSpec).toBeUndefined();
+
+      const structured = buildDelegatePlans(
+        {
+          task: 'return a fresh machine-readable audit',
+          continuation: session.token,
+          result: { schema: { type: 'string' } },
+        } as never,
+        context,
+        config,
+        () => null,
+      );
+      expect(structured.tasks[0]?.plan.resultSpec?.schema).toEqual({
+        type: 'string',
+        maxLength: 4096,
+      });
+
+      const parallel = buildDelegatePlans(
+        {
+          route: 'quick-high',
+          tasks: [
+            {
+              name: 'text',
+              task: 'text contract',
+              result: { schema: { type: 'string' } },
+            },
+            {
+              name: 'count',
+              task: 'count contract',
+              result: { schema: { type: 'integer' } },
+            },
+          ],
+        } as never,
+        context,
+        config,
+        () => null,
+      );
+      expect(
+        parallel.tasks.map((task) => task.plan.resultSpec?.schema.type),
+      ).toEqual(['string', 'integer']);
+    } finally {
+      removeDelegateSession(session);
     }
   });
 

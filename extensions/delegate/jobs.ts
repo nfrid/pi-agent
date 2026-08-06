@@ -1,5 +1,6 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { AsyncJobRegistry, type JobRecord } from '../shared/runtime/registry';
+import { serializeDelegateRunForPublic } from './structured-result';
 import type { DelegateDetails, DelegatedRun } from './types';
 import { getRunState, isRunError } from './types';
 
@@ -246,7 +247,8 @@ export class DelegateJobManager {
     )
       return job;
     const runs = job.runs?.map((run) => {
-      const { artifact: _artifact, ...safeRun } = run;
+      const { artifact: _artifact, ...safeRun } =
+        serializeDelegateRunForPublic(run);
       return safeRun;
     });
     const { handoff: _handoff, ...safeJob } = job;
@@ -289,7 +291,9 @@ function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
     createdAt: record.createdAt,
     startedAt: record.startedAt,
     settledAt: record.settledAt,
-    runs: (record.snapshotRuns ?? record.runs)?.map((run) => ({ ...run })),
+    runs: (record.snapshotRuns ?? record.runs)?.map((run) => ({
+      ...serializeDelegateRunForPublic(run),
+    })),
     handoff: record.handoff,
     error: record.error,
     deliveryEpoch: record.deliveryEpoch,

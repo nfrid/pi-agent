@@ -71,9 +71,12 @@ An exact-output artifact is created only when the parent handoff genuinely omits
 
 ## Schema-driven results
 
-A delegate call may include a `result` contract. It is independent for every
-parallel task; a top-level `result` is the shared default and a task-level
-`result` replaces it. A contract has this small public shape:
+A delegate call may include a `result` contract. Contracts are scoped to that
+invocation only: a continuation does not inherit the prior call's contract.
+Omit `result` on a continuation to return to the legacy prose contract, or
+supply a new task-level/top-level contract explicitly. The contract is
+independent for every parallel task; a top-level `result` is the shared default
+and a task-level `result` replaces it. A contract has this small public shape:
 
 ```json
 {
@@ -112,9 +115,12 @@ are closed by default, so undeclared result properties fail validation.
 Paths use canonical JSON-pointer-like syntax: `/` means the complete result,
 otherwise each segment is a declared object property. `~0` and `~1` encode `~`
 and `/`. Empty, `.`, `..`, numeric array indexes, arbitrary JSONPath, and bad
-escapes are rejected. The only wildcard is `*`, and it may select an array's
-items (`/findings/*/title`). Projection paths select the compact parent
-completion; named view paths select separate JSON artifacts. The full result
+escapes are rejected. Numeric object-property names are allowed when declared;
+array indexes must use `*`, not a numeric segment. The only wildcard is `*`,
+and it may select an array's items (`/findings/*/title`). A named view cannot
+use `/`, because that would expose the complete result. Projection paths select
+the compact parent completion; named view paths select separate JSON artifacts.
+The full result
 is never copied into parent content or enumerable delegate details.
 
 The global bounds are 16 KiB schema bytes, depth 8, 128 schema nodes, 64 array
@@ -130,7 +136,10 @@ non-success with bounded validation errors.
 A valid result is stored as an immutable owner-session `delegate-output` JSON
 artifact. Only selected projections and lifecycle metadata appear in the
 parent envelope. Each named view is stored separately and registered against
-the full artifact handle in the owner session. Forward it with
+the full artifact handle in the owner session. The storage layer verifies
+that the selected bytes equal the declared source path; callers cannot write an
+arbitrary registry mapping. A source/name mapping is non-shadowable: conflicting
+append-only entries fail closed rather than remapping an existing view. Forward it with
 `handoffFrom: { "handle": "...", "view": "evidence" }`; the harness verifies
 current-session ownership and the registry, then frames only that view as
 untrusted evidence. Omitting `result` preserves the legacy prose report and

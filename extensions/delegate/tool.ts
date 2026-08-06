@@ -13,6 +13,7 @@ import { renderDelegateCall, renderDelegateResult } from './render';
 import { formatDelegateRoutingPrompt } from './routing';
 import { buildSessionSnapshotJsonl } from './session';
 import type { DelegateStatusStore } from './status';
+import { serializeDelegateRunForPublic } from './structured-result';
 import { rollbackPreparedDelegateTasks } from './task-lifecycle';
 import {
   buildSessionBoundArtifactBackedHandoff,
@@ -298,10 +299,11 @@ export function registerDelegateTool(
           );
           const ownerSession =
             materializeCtx.sessionManager.getSessionId() === launchSessionId;
+          const publicRuns = runs.map(serializeDelegateRunForPublic);
           return {
             runs: ownerSession
-              ? runs
-              : runs.map((run) => ({ ...run, artifact: undefined })),
+              ? publicRuns
+              : publicRuns.map((run) => ({ ...run, artifact: undefined })),
             retainedRuns: runs,
             handoff,
           };

@@ -295,12 +295,11 @@ export function buildDelegatePlans(
   }));
 
   namedTasks = namedTasks.map((task) => {
+    // Result contracts belong to this invocation only. A continuation may
+    // explicitly request a new contract, but its prior session never supplies
+    // an implicit fallback.
     const raw =
-      task.input.result !== undefined
-        ? task.input.result
-        : shared.result !== undefined
-          ? shared.result
-          : task.resumed?.resultSpec;
+      task.input.result !== undefined ? task.input.result : shared.result;
     try {
       return {
         ...task,

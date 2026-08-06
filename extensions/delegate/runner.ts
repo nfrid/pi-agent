@@ -7,6 +7,7 @@ import {
 import { buildDelegatePrompt } from './prompt';
 import {
   getDelegateChannelPresent,
+  getDelegateResultSpec,
   type NormalizedDelegateResultSpec,
   setDelegateResultSpec,
 } from './structured-result';
@@ -55,9 +56,12 @@ export function resolvePiSpawn(): { command: string; prefixArgs: string[] } {
 }
 
 function progressText(run: DelegatedRun): string {
-  const final = getFinalAssistantText(run.messages).trim();
+  // Structured results are artifact-only. Assistant prose can arrive before
+  // the terminating delegate_result event, so never use it for live progress.
+  const structured = Boolean(getDelegateResultSpec(run));
+  const final = structured ? '' : getFinalAssistantText(run.messages).trim();
   if (final) return final;
-  if (run.errorMessage?.trim()) return run.errorMessage.trim();
+  if (!structured && run.errorMessage?.trim()) return run.errorMessage.trim();
   const recent = run.activities.slice(-8);
   if (recent.length > 0) {
     return recent
