@@ -583,23 +583,19 @@ export class DashboardLiveStore {
       firstResponseEpochSeq === undefined
         ? response.runtimeSeq
         : firstResponseEpochSeq - 1;
-    let projection = hydrateTranscript(
-      response.entriesComplete === false ? [] : response.entries,
-      response.metadata.id,
-      {
-        // Persisted Pi messages are not guaranteed to carry explicit IDs. The
-        // session API boundary assigns deterministic entry-index identities so
-        // the canonical projection can render and reconcile them semantically.
-        fallbackEntryIds: true,
-        cursor: replayCursor,
-        ...(response.runtimeEpoch === undefined
-          ? {}
-          : { runtimeEpoch: response.runtimeEpoch }),
-        ...(baselineRuntimeSeq === undefined
-          ? {}
-          : { runtimeSeq: baselineRuntimeSeq }),
-      },
-    );
+    let projection = hydrateTranscript(response.entries, response.metadata.id, {
+      // Persisted Pi messages are not guaranteed to carry explicit IDs. The
+      // session API boundary assigns deterministic entry-index identities so
+      // the canonical projection can render and reconcile them semantically.
+      fallbackEntryIds: true,
+      cursor: replayCursor,
+      ...(response.runtimeEpoch === undefined
+        ? {}
+        : { runtimeEpoch: response.runtimeEpoch }),
+      ...(baselineRuntimeSeq === undefined
+        ? {}
+        : { runtimeSeq: baselineRuntimeSeq }),
+    });
     for (const envelope of sessionEvents)
       if (envelope.cursor > projection.lastCursor)
         projection = reduceTranscriptEvent(projection, envelope);

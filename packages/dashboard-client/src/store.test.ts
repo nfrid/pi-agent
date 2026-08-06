@@ -401,7 +401,7 @@ describe('DashboardLiveStore', () => {
     expect(projection?.items['live-answer']).toBeDefined();
   });
 
-  it('does not replace a live projection with an explicitly incomplete session read', () => {
+  it('uses an incomplete initial baseline without replacing the later live projection', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
     const initial = store.hydrateSession({
@@ -414,7 +414,7 @@ describe('DashboardLiveStore', () => {
         },
       ],
     });
-    expect(initial?.items['initial-stale']).toBeUndefined();
+    expect(initial?.items['initial-stale']).toBeDefined();
     store.acceptStreamRecord({
       cursor: 2,
       emittedAt: 2,
