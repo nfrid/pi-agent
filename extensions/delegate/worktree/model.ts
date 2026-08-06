@@ -20,6 +20,12 @@ export interface WorktreeRecord {
   version: 1;
   id: string;
   sessionToken?: string;
+  /** Parent Pi session that first created this retained record. */
+  creatorSessionId?: string;
+  /** Bounded recent parent-session touches; creatorSessionId is never evicted. */
+  recentParentSessionIds?: string[];
+  /** Legacy touch projection retained for backwards-compatible reads. */
+  parentSessionIds?: string[];
   repositoryRoot: string;
   /** Absolute path to the checkout. */
   worktreePath: string;

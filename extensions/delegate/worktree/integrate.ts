@@ -18,6 +18,10 @@ const MAX_REVIEW_DIFF_CHARS = 60_000;
 // tool result unbounded.
 const MAX_REVIEW_LOG_CHARS = 20_000;
 const MAX_REVIEW_STAT_CHARS = 20_000;
+export const MAX_REVIEW_PATCH_BUDGET = MAX_REVIEW_DIFF_CHARS;
+const MAX_REVIEW_PATHS = 80;
+const MAX_REVIEW_SELECTOR_CHARS = 4_096;
+const MAX_REVIEW_SELECTOR_TOTAL_CHARS = 16_384;
 
 export type BranchReviewMode = 'full' | 'incremental';
 
@@ -207,6 +211,19 @@ async function dirtyPaths(root: string): Promise<string[]> {
   return [...new Set([...tracked, ...untracked])];
 }
 
+export interface BranchReviewPathSummary {
+  /** Number of changed paths in the unfiltered review range. */
+  total: number;
+  /** Number of paths selected for this view. */
+  matched: number;
+  /** Number omitted by the active path selector. */
+  omitted: number;
+  /** Bounded evidence for selected paths. */
+  matchedPaths: string[];
+  /** Bounded evidence for paths omitted by the selector. */
+  omittedPaths: string[];
+}
+
 export interface BranchReview {
   state: BranchState;
   mode: BranchReviewMode;
@@ -217,12 +234,30 @@ export interface BranchReview {
   stat: string;
   diff: string;
   truncated: boolean;
+  /** True when patch bodies were deliberately omitted. */
+  summaryOnly?: boolean;
+  /** Exact repository-relative path selectors active for this view. */
+  pathSelectors?: string[];
+  /** Caller-selected character budget, when supplied. */
+  patchBudget?: number;
+  /** Size before the patch-body budget was applied. */
+  patchChars?: number;
+  /** Patch-body characters omitted by the budget. */
+  omittedPatchChars?: number;
+  patchTruncated?: boolean;
+  pathSummary?: BranchReviewPathSummary;
 }
 
 export interface BranchReviewOptions {
   mode?: BranchReviewMode;
   /** Convenience form for callers that expose the tool's boolean selector. */
   incremental?: boolean;
+  /** Return provenance/stat/path evidence without patch bodies. */
+  summaryOnly?: boolean;
+  /** Exact repository-relative path selectors. */
+  paths?: string[];
+  /** Maximum patch-body characters; the default remains 60,000. */
+  patchBudget?: number;
 }
 
 function reviewMode(
@@ -234,6 +269,90 @@ function reviewMode(
     if (options.mode) return options.mode;
   }
   return 'full';
+}
+
+interface ResolvedReviewOptions {
+  mode: BranchReviewMode;
+  summaryOnly: boolean;
+  paths: string[];
+  patchBudget?: number;
+  active: boolean;
+}
+
+function safePathSelector(selector: string): boolean {
+  const hasControl = [...selector].some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127;
+  });
+  return (
+    selector.length > 0 &&
+    selector.length <= MAX_REVIEW_SELECTOR_CHARS &&
+    !selector.startsWith('/') &&
+    !/^[A-Za-z]:/.test(selector) &&
+    !hasControl &&
+    !selector.split(/[\\/]/).some((part) => part === '..')
+  );
+}
+
+function resolveReviewOptions(
+  options?: BranchReviewMode | BranchReviewOptions,
+): ResolvedReviewOptions {
+  const mode = reviewMode(options);
+  if (typeof options === 'string')
+    return { mode, summaryOnly: false, paths: [] };
+  const summaryOnly = options?.summaryOnly === true;
+  const paths = options?.paths ?? [];
+  const patchBudget = options?.patchBudget;
+  if (!Array.isArray(paths))
+    throw new Error(
+      'Review paths must be an array of repository-relative paths.',
+    );
+  if (options?.paths !== undefined && paths.length === 0)
+    throw new Error('Review paths must include at least one path selector.');
+  if (paths.length > 64)
+    throw new Error('Review path selectors are limited to 64 entries.');
+  if (
+    paths.reduce(
+      (total, selector) =>
+        total + (typeof selector === 'string' ? selector.length : 0),
+      0,
+    ) > MAX_REVIEW_SELECTOR_TOTAL_CHARS
+  )
+    throw new Error(
+      `Review path selectors are limited to ${MAX_REVIEW_SELECTOR_TOTAL_CHARS} characters in total.`,
+    );
+  if (
+    paths.some(
+      (selector) => typeof selector !== 'string' || !safePathSelector(selector),
+    )
+  )
+    throw new Error(
+      'Review paths must be safe repository-relative paths without control characters or .. components.',
+    );
+  if (
+    patchBudget !== undefined &&
+    (!Number.isInteger(patchBudget) ||
+      patchBudget < 1 ||
+      patchBudget > MAX_REVIEW_PATCH_BUDGET)
+  )
+    throw new Error(
+      `patchBudget must be an integer from 1 to ${MAX_REVIEW_PATCH_BUDGET}.`,
+    );
+  if (summaryOnly && patchBudget !== undefined)
+    throw new Error('patchBudget cannot be combined with summaryOnly.');
+  return {
+    mode,
+    summaryOnly,
+    paths,
+    patchBudget,
+    active: summaryOnly || paths.length > 0 || patchBudget !== undefined,
+  };
+}
+
+function pathspecArgs(selectors: string[]): string[] {
+  // Literal pathspecs prevent Git pathspec magic from changing the requested
+  // repository-relative path, while execFile keeps shell metacharacters data.
+  return selectors.map((selector) => `:(top,literal)${selector}`);
 }
 
 interface UnintegratedTaskPatch {
@@ -282,10 +401,21 @@ async function unintegratedTaskCommits(
   return originalOrder.filter((commit) => unintegrated.has(commit));
 }
 
-async function taskPaths(root: string, commits: string[]): Promise<string[]> {
+async function taskPaths(
+  root: string,
+  commits: string[],
+  selectors: string[] = [],
+): Promise<string[]> {
   const changed = await Promise.all(
     commits.map((commit) =>
-      paths(root, ['diff', '--name-only', '-z', `${commit}^`, commit]),
+      paths(root, [
+        'diff',
+        '--name-only',
+        '-z',
+        `${commit}^`,
+        commit,
+        ...(selectors.length ? ['--', ...pathspecArgs(selectors)] : []),
+      ]),
     ),
   );
   return [...new Set(changed.flat())];
@@ -294,6 +424,7 @@ async function taskPaths(root: string, commits: string[]): Promise<string[]> {
 async function taskPatch(
   root: string,
   commit: string,
+  selectors: string[] = [],
 ): Promise<UnintegratedTaskPatch> {
   const parent = `${commit}^`;
   const [log, stat, diff] = await Promise.all([
@@ -305,8 +436,16 @@ async function taskPatch(
       '--stat',
       parent,
       commit,
+      ...(selectors.length ? ['--', ...pathspecArgs(selectors)] : []),
     ]),
-    gitText(root, ['diff', '--no-ext-diff', '--no-color', parent, commit]),
+    gitText(root, [
+      'diff',
+      '--no-ext-diff',
+      '--no-color',
+      parent,
+      commit,
+      ...(selectors.length ? ['--', ...pathspecArgs(selectors)] : []),
+    ]),
   ]);
   return { commit, log, stat, diff };
 }
@@ -326,21 +465,71 @@ function boundedReviewOutput(
   log: string,
   stat: string,
   diff: string,
+  patchBudget?: number,
+  includePatchMetadata = false,
 ): {
   log: string;
   stat: string;
   diff: string;
   truncated: boolean;
+  patchChars?: number;
+  omittedPatchChars?: number;
+  patchTruncated?: boolean;
 } {
   const boundedLog = boundedReviewText(log, MAX_REVIEW_LOG_CHARS);
   const boundedStat = boundedReviewText(stat, MAX_REVIEW_STAT_CHARS);
-  const boundedDiff = boundedReviewText(diff, MAX_REVIEW_DIFF_CHARS);
-  return {
+  const boundedDiff = boundedReviewText(
+    diff,
+    patchBudget ?? MAX_REVIEW_DIFF_CHARS,
+  );
+  const output = {
     log: boundedLog.text,
     stat: boundedStat.text,
     diff: boundedDiff.text,
     truncated:
       boundedLog.truncated || boundedStat.truncated || boundedDiff.truncated,
+  };
+  return includePatchMetadata
+    ? {
+        ...output,
+        patchChars: diff.length,
+        omittedPatchChars: Math.max(0, diff.length - boundedDiff.text.length),
+        patchTruncated: boundedDiff.truncated,
+      }
+    : output;
+}
+
+function pathSummary(
+  allPaths: string[],
+  matchedPaths: string[],
+): BranchReviewPathSummary {
+  const all = [...new Set(allPaths)];
+  const matched = [...new Set(matchedPaths)];
+  const matchedSet = new Set(matched);
+  const omitted = all.filter((candidate) => !matchedSet.has(candidate));
+  return {
+    total: all.length,
+    matched: matched.length,
+    omitted: omitted.length,
+    matchedPaths: matched.slice(0, MAX_REVIEW_PATHS),
+    omittedPaths: omitted.slice(0, MAX_REVIEW_PATHS),
+  };
+}
+
+function reviewMetadata(
+  resolved: ResolvedReviewOptions,
+  summary: BranchReviewPathSummary,
+): Pick<
+  BranchReview,
+  'summaryOnly' | 'pathSelectors' | 'patchBudget' | 'pathSummary'
+> {
+  return {
+    summaryOnly: resolved.summaryOnly,
+    ...(resolved.paths.length ? { pathSelectors: resolved.paths } : {}),
+    ...(resolved.patchBudget !== undefined
+      ? { patchBudget: resolved.patchBudget }
+      : {}),
+    pathSummary: summary,
   };
 }
 
@@ -358,11 +547,22 @@ export async function reviewBranch(
   record: WorktreeRecord,
   options?: BranchReviewMode | BranchReviewOptions,
 ): Promise<BranchReview> {
-  const mode = reviewMode(options);
+  const resolved = resolveReviewOptions(options);
+  const { mode } = resolved;
   const root = record.repositoryRoot;
+  const metadata = (getSummary: () => BranchReviewPathSummary) =>
+    resolved.active ? reviewMetadata(resolved, getSummary()) : {};
   const state = await branchState(record);
   if (state === 'gone')
-    return { state, mode, log: '', stat: '', diff: '', truncated: false };
+    return {
+      state,
+      mode,
+      log: '',
+      stat: '',
+      diff: '',
+      truncated: false,
+      ...metadata(() => pathSummary([], [])),
+    };
   const range = await workRangeFor(root, record);
   if (!range.valid)
     return {
@@ -373,35 +573,98 @@ export async function reviewBranch(
       stat: '',
       diff: '',
       truncated: false,
+      ...metadata(() => pathSummary([], [])),
     };
 
   if (mode === 'incremental') {
     const commits = await unintegratedTaskCommits(root, record);
     if (commits.length === 0)
-      return { state, mode, log: '', stat: '', diff: '', truncated: false };
+      return {
+        state,
+        mode,
+        log: '',
+        stat: '',
+        diff: '',
+        truncated: false,
+        ...metadata(() => pathSummary([], [])),
+      };
     const patches = await Promise.all(
       commits.map((commit) => taskPatch(root, commit)),
+    );
+    if (!resolved.active)
+      return {
+        state,
+        mode,
+        ...boundedReviewOutput(
+          patches.map((patch) => patch.log).join('\n'),
+          patches.map((patch) => patch.stat).join('\n'),
+          patches.map((patch) => patch.diff).join('\n'),
+        ),
+      };
+    const allPaths = await taskPaths(root, commits);
+    const matchedPaths = resolved.paths.length
+      ? await taskPaths(root, commits, resolved.paths)
+      : allPaths;
+    const output = boundedReviewOutput(
+      patches.map((patch) => patch.log).join('\n'),
+      patches.map((patch) => patch.stat).join('\n'),
+      resolved.summaryOnly ? '' : patches.map((patch) => patch.diff).join('\n'),
+      resolved.patchBudget,
+      true,
     );
     return {
       state,
       mode,
-      ...boundedReviewOutput(
-        patches.map((patch) => patch.log).join('\n'),
-        patches.map((patch) => patch.stat).join('\n'),
-        patches.map((patch) => patch.diff).join('\n'),
-      ),
+      ...output,
+      ...metadata(() => pathSummary(allPaths, matchedPaths)),
     };
   }
 
+  if (!resolved.active) {
+    const [log, stat, full] = await Promise.all([
+      gitText(root, ['log', '--oneline', '--no-decorate', range.range]),
+      gitText(root, ['diff', '--stat', range.range]),
+      gitText(root, ['diff', '--no-ext-diff', '--no-color', range.range]),
+    ]);
+    return {
+      state,
+      mode,
+      ...boundedReviewOutput(log, stat, full),
+    };
+  }
+
+  const pathArgs = resolved.paths.length
+    ? ['--', ...pathspecArgs(resolved.paths)]
+    : [];
+  const allPaths = await paths(root, [
+    'diff',
+    '--name-only',
+    '-z',
+    range.range,
+  ]);
+  const matchedPaths = resolved.paths.length
+    ? await paths(root, ['diff', '--name-only', '-z', range.range, ...pathArgs])
+    : allPaths;
   const [log, stat, full] = await Promise.all([
+    // Commit provenance remains a complete task history even when the patch
+    // view has no matching paths.
     gitText(root, ['log', '--oneline', '--no-decorate', range.range]),
-    gitText(root, ['diff', '--stat', range.range]),
-    gitText(root, ['diff', '--no-ext-diff', '--no-color', range.range]),
+    gitText(root, ['diff', '--stat', range.range, ...pathArgs]),
+    resolved.summaryOnly
+      ? Promise.resolve('')
+      : gitText(root, [
+          'diff',
+          '--no-ext-diff',
+          '--no-color',
+          range.range,
+          ...pathArgs,
+        ]),
   ]);
   return {
     state,
     mode,
-    ...boundedReviewOutput(log, stat, full),
+    ...boundedReviewOutput(log, stat, full, resolved.patchBudget, true),
+    ...metadata(() => pathSummary(allPaths, matchedPaths)),
   };
 }
 

@@ -150,6 +150,8 @@ export async function prepareWorktree(options: {
   cwd: string;
   name: string;
   base?: WorktreeBase;
+  /** Parent Pi session creating this fresh or refreshed record. */
+  parentSessionId?: string;
 }): Promise<WorktreePreparation> {
   let root: string;
   try {
@@ -192,6 +194,7 @@ export async function prepareWorktree(options: {
     const record: WorktreeRecord = {
       version: 1,
       id,
+      creatorSessionId: options.parentSessionId,
       repositoryRoot: root,
       worktreePath,
       workingDirectory,

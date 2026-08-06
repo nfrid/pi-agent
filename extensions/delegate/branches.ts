@@ -19,6 +19,21 @@ export interface BranchEntry {
   state: BranchState;
 }
 
+export type BranchListScope = 'session' | 'all';
+
+function belongsToParentSession(
+  record: WorktreeRecord,
+  sessionId: string,
+): boolean {
+  return (
+    record.creatorSessionId === sessionId ||
+    record.recentParentSessionIds?.includes(sessionId) === true ||
+    // Records written by the previous implementation remain visible in the
+    // session view until they are touched again or explicitly listed as all.
+    record.parentSessionIds?.includes(sessionId) === true
+  );
+}
+
 /** Accepts a continuation token or a worktree id; the agent has both. */
 export function resolveWorktreeRecord(
   identifier: string,
@@ -27,8 +42,20 @@ export function resolveWorktreeRecord(
   return loadWorktree(session?.worktreeId ?? identifier);
 }
 
-export async function listBranchEntries(): Promise<BranchEntry[]> {
-  const records = listWorktrees();
+export async function listBranchEntries(
+  options: { scope?: BranchListScope; sessionId?: string } = {},
+): Promise<BranchEntry[]> {
+  const scope = options.scope ?? 'session';
+  // An absent session identity cannot safely mean "all history". This also
+  // makes an empty current-session inventory explicit instead of falling back.
+  const records =
+    scope === 'all'
+      ? listWorktrees()
+      : options.sessionId
+        ? listWorktrees().filter((record) =>
+            belongsToParentSession(record, options.sessionId as string),
+          )
+        : [];
   return Promise.all(
     records.map(async (record) => ({
       record,
@@ -116,6 +143,53 @@ export function formatBranchDetail({ record, state }: BranchEntry): string {
     .join('\n');
 }
 
+function hasBoundedReviewSelectors(review: BranchReview): boolean {
+  return (
+    review.summaryOnly === true ||
+    Boolean(review.pathSelectors?.length) ||
+    review.patchBudget !== undefined
+  );
+}
+
+function reviewSelectionSummary(review: BranchReview): string {
+  const selectors = review.pathSelectors?.length
+    ? review.pathSelectors
+        .slice(0, MAX_DETAIL_PATHS)
+        .map((selector) => bounded(selector, MAX_DETAIL_PATH_CHARS))
+        .join(', ')
+    : 'none';
+  const budget = review.patchBudget
+    ? `${review.patchBudget} chars`
+    : 'default (60,000 chars)';
+  const summary = review.pathSummary;
+  if (!summary)
+    return [
+      `Selectors: mode=${review.mode}; summaryOnly=${review.summaryOnly ? 'yes' : 'no'}; paths=${selectors}; patchBudget=${budget}`,
+      `Patch: ${review.summaryOnly ? 'body omitted (summaryOnly)' : `budget=${budget}; truncated=${review.patchTruncated ? 'yes' : 'no'}; omitted=${review.omittedPatchChars ?? 0} chars`}`,
+    ].join('\n');
+  const matched = summary.matchedPaths
+    .slice(0, MAX_DETAIL_PATHS)
+    .map((path) => `  - ${bounded(path, MAX_DETAIL_PATH_CHARS)}`);
+  const omitted = summary.omittedPaths
+    .slice(0, MAX_DETAIL_PATHS)
+    .map((path) => `  - ${bounded(path, MAX_DETAIL_PATH_CHARS)}`);
+  if (summary.matched > matched.length)
+    matched.push(
+      `  - … and ${summary.matched - matched.length} more matched paths (path list bounded)`,
+    );
+  if (summary.omitted > omitted.length)
+    omitted.push(
+      `  - … and ${summary.omitted - omitted.length} more omitted paths (path list bounded)`,
+    );
+  return [
+    `Selectors: mode=${review.mode}; summaryOnly=${review.summaryOnly ? 'yes' : 'no'}; paths=${selectors}; patchBudget=${budget}`,
+    `Patch: ${review.summaryOnly ? 'body omitted (summaryOnly)' : `budget=${budget}; truncated=${review.patchTruncated ? 'yes' : 'no'}; omitted=${review.omittedPatchChars ?? 0} chars`}`,
+    `Changed paths: total=${summary.total}; matched=${summary.matched}; omitted=${summary.omitted}`, 
+    `Matched paths:${matched.length ? `\n${matched.join('\n')}` : ' none'}`,
+    `Omitted paths:${omitted.length ? `\n${omitted.join('\n')}` : ' none'}`,
+  ].join('\n');
+}
+
 export function formatReview(
   record: WorktreeRecord,
   review: BranchReview,
@@ -125,27 +199,37 @@ export function formatReview(
   if (review.state === 'gone') return `Branch ${branch} no longer exists.`;
   if (review.error)
     return `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)})\n\n${bounded(review.error, MAX_DETAIL_ERROR_CHARS)}`;
-  if (review.mode === 'incremental' && !review.log)
-    return `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)}) has no unintegrated task delta relative to current HEAD.`;
-  if (!review.log)
-    return `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)}) has no commits of its own beyond ${workBase(record).slice(0, 12)}; the task committed nothing.`;
+  const boundedView = hasBoundedReviewSelectors(review);
+  const selection = boundedView ? reviewSelectionSummary(review) : undefined;
+  if (review.mode === 'incremental' && !review.log) {
+    const message = `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)}) has no unintegrated task delta relative to current HEAD.`;
+    return selection ? `${message}\n\n${selection}` : message;
+  }
+  if (!review.log) {
+    const message = `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)}) has no commits of its own beyond ${workBase(record).slice(0, 12)}; the task committed nothing.`;
+    return selection ? `${message}\n\n${selection}` : message;
+  }
   const range =
     review.mode === 'incremental'
       ? `incremental task delta relative to current HEAD (patch-aware)`
       : `${workBase(record).slice(0, 12)}..${branch}`;
   const truncation = review.truncated
     ? review.mode === 'incremental'
-      ? `\n[review truncated — log/stat/diff output is bounded; inspect the complete task branch with: git -C ${repository} log --oneline ${workBase(record)}..${branch}]`
-      : `\n[review truncated — log/stat/diff output is bounded; inspect the complete review with: git -C ${repository} log --oneline ${workBase(record)}..${branch} and git -C ${repository} diff ${workBase(record)}..${branch}]`
+      ? `\n[review truncated — log/stat/diff output is bounded${review.patchBudget ? `; patch budget=${review.patchBudget} chars` : ''}; inspect the complete task branch with: git -C ${repository} log --oneline ${workBase(record)}..${branch}]`
+      : `\n[review truncated — log/stat/diff output is bounded${review.patchBudget ? `; patch budget=${review.patchBudget} chars` : ''}; inspect the complete review with: git -C ${repository} log --oneline ${workBase(record)}..${branch} and git -C ${repository} diff ${workBase(record)}..${branch}]`
     : '';
+  const patch = review.summaryOnly
+    ? '[patch body omitted — summaryOnly is active]'
+    : review.diff;
   return [
     `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)}), ${range}`,
     '',
+    ...(selection ? [selection, ''] : []),
     review.log,
     '',
     review.stat,
     '',
-    review.diff,
+    patch,
     truncation,
   ]
     .join('\n')

@@ -25,6 +25,7 @@ export type {
   BranchReview,
   BranchReviewMode,
   BranchReviewOptions,
+  BranchReviewPathSummary,
   BranchState,
   MergeOutcome,
 } from './integrate';
@@ -43,5 +44,6 @@ export {
   deleteWorktreeRecord,
   listWorktrees,
   loadWorktree,
+  touchWorktreeParentSession,
   writeWorktreeRecord,
 } from './records';

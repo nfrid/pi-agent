@@ -23,6 +23,7 @@ import {
   rehydrateWorktreeSession,
   removeWorktree,
   restoreWorktreeSession,
+  touchWorktreeParentSession,
   type WorktreeBase,
   type WorktreeRecord,
 } from './worktree';
@@ -145,6 +146,7 @@ export function preflightDelegateContinuation(
 export async function prepareDelegateTask(
   plan: DelegateTaskPlan,
   preflight = preflightDelegateContinuation(plan),
+  parentSessionId?: string,
 ): Promise<PreparedDelegateTask> {
   const state = { ...preflight, warnings: [...preflight.warnings] };
   let session: DelegateSession | undefined;
@@ -157,6 +159,7 @@ export async function prepareDelegateTask(
         cwd: plan.requestedCwd,
         name: plan.name,
         base: plan.base,
+        parentSessionId,
       });
       if (!prepared.worktree)
         throw new Error(
@@ -181,6 +184,7 @@ export async function prepareDelegateTask(
         cwd: state.cwd,
         name: plan.name,
         base: plan.refresh,
+        parentSessionId,
       });
       if (!prepared.worktree)
         throw new Error(
@@ -204,6 +208,9 @@ export async function prepareDelegateTask(
       if (!refreshedSession)
         throw new Error('The delegate session disappeared during refresh.');
       session = refreshedSession;
+      // The replacement is now authoritative. If superseded cleanup later
+      // fails, retain the old snapshot's touch for this successful refresh.
+      touchWorktreeParentSession(state.refreshSource, parentSessionId);
       replacementSessionMapped = true;
       state.worktree = replacement;
       state.cwd = refreshedCwd;
@@ -244,6 +251,12 @@ export async function prepareDelegateTask(
       if (state.worktree)
         state.worktree = attachWorktreeSession(state.worktree, session.token);
     }
+
+    // Continuation membership is recorded only after all preparation and
+    // session mapping steps above have succeeded. Fresh records already have
+    // their immutable creatorSessionId from prepareWorktree.
+    if (plan.resumed && state.worktree)
+      touchWorktreeParentSession(state.worktree.record, parentSessionId);
 
     return {
       ...state,

@@ -11,15 +11,24 @@ import {
   type WorktreeRecord,
 } from './worktree';
 
+const PARENT_SESSION = 'parent-session';
+
 interface RegisteredTool {
   execute: (
     id: string,
     params: {
       action: 'list' | 'review' | 'merge' | 'drop';
+      scope?: 'session' | 'all';
       incremental?: boolean;
+      summaryOnly?: boolean;
+      paths?: string[];
+      patchBudget?: number;
       id?: string;
       force?: boolean;
     },
+    signal?: unknown,
+    onUpdate?: unknown,
+    ctx?: { sessionManager: { getSessionId: () => string } },
   ) => Promise<{
     content: Array<{ type: string; text: string }>;
     details?: Record<string, unknown>;
@@ -34,14 +43,25 @@ function captureTool(): RegisteredTool {
     },
   } as unknown as ExtensionAPI);
   if (!captured) throw new Error('delegate_branches was not registered');
-  return captured;
+  const definition = captured;
+  return {
+    ...definition,
+    execute: (id, params) =>
+      definition.execute(id, params, undefined, undefined, {
+        sessionManager: { getSessionId: () => PARENT_SESSION },
+      }),
+  };
 }
 
 async function delegated(
   name: string,
   change?: string,
 ): Promise<WorktreeRecord> {
-  const preparation = await prepareWorktree({ cwd: repository, name });
+  const preparation = await prepareWorktree({
+    cwd: repository,
+    name,
+    parentSessionId: PARENT_SESSION,
+  });
   const worktree = preparation.worktree;
   if (!worktree)
     throw new Error(preparation.fallbackReason ?? 'preparation failed');
@@ -75,6 +95,46 @@ describe('delegate_branches', () => {
     });
   });
 
+  test('defaults to the current parent session without hiding all history', async () => {
+    const tool = captureTool();
+    const current = await delegated('Current task', 'src/current.txt');
+    const foreignPreparation = await prepareWorktree({
+      cwd: repository,
+      name: 'Foreign task',
+      parentSessionId: 'foreign-session',
+    });
+    const foreign = foreignPreparation.worktree;
+    if (!foreign)
+      throw new Error(
+        foreignPreparation.fallbackReason ?? 'preparation failed',
+      );
+    writeFileSync(
+      path.join(foreign.record.worktreePath, 'src', 'foreign.txt'),
+      'work\n',
+    );
+    const foreignRecord = await finishWorktree(foreign.record.id, {
+      taskName: 'Foreign task',
+      outcome: 'success',
+    });
+
+    const scoped = await tool.execute('c1', { action: 'list' });
+    expect(body(scoped)).toContain(current.branch);
+    expect(body(scoped)).not.toContain(foreignRecord.branch);
+    expect(scoped.details).toMatchObject({ listScope: 'session' });
+
+    await tool.execute('c2', {
+      action: 'drop',
+      id: current.id,
+      force: true,
+    });
+    expect(body(await tool.execute('c3', { action: 'list' }))).toBe(
+      'No delegate branches.',
+    );
+    const all = await tool.execute('c4', { action: 'list', scope: 'all' });
+    expect(body(all)).toContain(foreignRecord.branch);
+    expect(all.details).toMatchObject({ listScope: 'all' });
+  });
+
   test('bounds a large changed-path list while showing omission evidence', async () => {
     const tool = captureTool();
     const preparation = await prepareWorktree({
@@ -105,6 +165,65 @@ describe('delegate_branches', () => {
     expect(response).toContain('… and 80 more paths (path list bounded)');
     expect(response).toContain('evidence-path-');
     expect(response.length).toBeLessThan(100_000);
+  });
+
+  test('supports summary, safe path filtering, and a selected patch budget', async () => {
+    const tool = captureTool();
+    const selected = 'src/selected;$(not-a-command).txt';
+    const record = await delegated('Bounded review', selected);
+    writeFileSync(
+      path.join(record.worktreePath, 'src', 'other.txt'),
+      'other\n',
+    );
+    await finishWorktree(record.id, {
+      taskName: 'Bounded review continuation',
+      outcome: 'success',
+    });
+
+    const summary = await tool.execute('c1', {
+      action: 'review',
+      id: record.id,
+      summaryOnly: true,
+      paths: [selected],
+    });
+    const summaryBody = body(summary);
+    expect(summaryBody).toContain('summaryOnly=yes');
+    expect(summaryBody).toContain(
+      'Changed paths: total=2; matched=1; omitted=1',
+    );
+    expect(summaryBody).toContain('[patch body omitted');
+    expect(summaryBody).toContain(selected);
+    expect(summaryBody).not.toContain('@@');
+
+    const bounded = await tool.execute('c2', {
+      action: 'review',
+      id: record.id,
+      paths: [selected],
+      patchBudget: 64,
+    });
+    expect(body(bounded)).toContain('patchBudget=64 chars');
+    expect(body(bounded)).toContain('[review truncated');
+    expect(bounded.details).toMatchObject({
+      totalChangedPaths: 2,
+      matchedChangedPaths: 1,
+      omittedChangedPaths: 1,
+      patchBudget: 64,
+    });
+
+    await expect(
+      tool.execute('c3', {
+        action: 'review',
+        id: record.id,
+        paths: ['../outside'],
+      }),
+    ).rejects.toThrow(/repository-relative/);
+    await expect(
+      tool.execute('c4', {
+        action: 'merge',
+        id: record.id,
+        patchBudget: 64,
+      }),
+    ).rejects.toThrow(/only valid for review/);
   });
 
   test('reviews, merges, then drops', async () => {
