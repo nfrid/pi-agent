@@ -167,6 +167,11 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(
     page.getByRole('textbox', { name: 'Message', exact: true }),
   ).toBeVisible();
+  const composerWidth = await page
+    .locator('.new-chat-composer')
+    .evaluate((element) => element.getBoundingClientRect().width);
+  const viewportWidth = await page.evaluate(() => window.innerWidth);
+  expect(composerWidth / viewportWidth).toBeGreaterThan(0.8);
   await expect(
     page.getByRole('button', { name: 'Send first message' }),
   ).toBeVisible();

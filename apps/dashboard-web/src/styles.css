@@ -2855,12 +2855,13 @@ h2 {
   font-size: 17px;
 }
 .new-chat-empty {
-  display: grid;
+  display: flex;
   min-height: 500px;
-  place-content: center;
-  justify-items: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 22px;
-  padding: 24px;
+  padding: 24px 0;
 }
 .new-chat-intro {
   display: grid;
