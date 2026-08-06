@@ -3,7 +3,6 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { artifactProducer } from '../shared/artifacts';
-import { appendDelegateViewRegistry } from '../shared/artifacts/storage';
 import { buildParentHandoffResult } from './output';
 import { throwIfAllRunsFailed } from './param-errors';
 import {
@@ -94,6 +93,11 @@ async function publishStructuredArtifacts(
     }
   }
 
+  const sourceArtifact = run.artifact;
+  if (!sourceArtifact) {
+    replaceWarning(run, undefined, STRUCTURED_RESULT_ARTIFACT_WARNING);
+    return true;
+  }
   const existingViews = getStructuredArtifacts(run)?.views ?? {};
   const viewMetadata: Record<string, { handle: string; size: number }> = {
     ...existingViews,
@@ -113,17 +117,23 @@ async function publishStructuredArtifacts(
     try {
       const viewBytes = JSON.stringify(selected.value);
       assertCurrent?.();
-      const metadata = await put(pi, ctx, {
-        bytes: viewBytes,
-        producer: 'delegate',
-        contentClass: 'delegate-output',
-        mediaType: 'application/json; charset=utf-8',
-        creationSource: 'delegate.view',
-      });
-      assertCurrent?.();
-      appendDelegateViewRegistry(pi, run.artifact, name, path, metadata);
-      assertCurrent?.();
+      const metadata = await put(
+        pi,
+        ctx,
+        {
+          bytes: viewBytes,
+          producer: 'delegate',
+          contentClass: 'delegate-output',
+          mediaType: 'application/json; charset=utf-8',
+          creationSource: 'delegate.view',
+        },
+        {
+          assertCurrent,
+          delegateView: { source: sourceArtifact, name, path },
+        },
+      );
       viewMetadata[name] = { handle: metadata.handle, size: metadata.size };
+      assertCurrent?.();
       changed = true;
     } catch {
       replaceWarning(

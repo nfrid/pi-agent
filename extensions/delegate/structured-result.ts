@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import type { TSchema } from 'typebox';
+import { Value } from 'typebox/value';
 import type { DelegatedRun } from './types';
 
 /**
@@ -350,16 +351,16 @@ function normalizeSchemaNode(
           );
     const maxItems =
       input.maxItems === undefined
-        ? undefined
+        ? STRUCTURED_RESULT_CAPS.maxArrayItems
         : safeInteger(
             input.maxItems,
             'result schema maxItems',
             STRUCTURED_RESULT_CAPS.maxArrayItems,
           );
-    if (minItems !== undefined && maxItems !== undefined && minItems > maxItems)
+    if (minItems !== undefined && minItems > maxItems)
       throw new Error('result schema minItems cannot exceed maxItems');
     if (minItems !== undefined) entries.push(['minItems', minItems]);
-    if (maxItems !== undefined) entries.push(['maxItems', maxItems]);
+    entries.push(['maxItems', maxItems]);
     if (input.uniqueItems !== undefined) {
       if (typeof input.uniqueItems !== 'boolean')
         throw new Error('result schema uniqueItems must be boolean');
@@ -383,20 +384,16 @@ function normalizeSchemaNode(
           );
     const maxLength =
       input.maxLength === undefined
-        ? undefined
+        ? STRUCTURED_RESULT_CAPS.maxStringLength
         : safeInteger(
             input.maxLength,
             'result schema maxLength',
             STRUCTURED_RESULT_CAPS.maxStringLength,
           );
-    if (
-      minLength !== undefined &&
-      maxLength !== undefined &&
-      minLength > maxLength
-    )
+    if (minLength !== undefined && minLength > maxLength)
       throw new Error('result schema minLength cannot exceed maxLength');
     if (minLength !== undefined) entries.push(['minLength', minLength]);
-    if (maxLength !== undefined) entries.push(['maxLength', maxLength]);
+    entries.push(['maxLength', maxLength]);
   } else if (type === 'number' || type === 'integer') {
     const numericKeys = [
       'minimum',
@@ -631,154 +628,6 @@ function sameJson(left: unknown, right: unknown): boolean {
   return false;
 }
 
-function stringLength(value: string): number {
-  return Array.from(value).length;
-}
-
-function validateNode(
-  schema: JsonSchemaNode,
-  value: unknown,
-  path: string,
-  issues: string[],
-): void {
-  if (issues.length >= STRUCTURED_RESULT_CAPS.maxValidationErrors) return;
-  if (
-    Array.isArray(schema.enum) &&
-    !schema.enum.some((item) => sameJson(item, value))
-  ) {
-    addIssue(issues, path, 'value is not one of the declared enum values');
-    return;
-  }
-  const type = schema.type;
-  const matches =
-    (type === 'null' && value === null) ||
-    (type === 'object' && isPlainObject(value)) ||
-    (type === 'array' && Array.isArray(value)) ||
-    (type === 'string' && typeof value === 'string') ||
-    (type === 'number' &&
-      typeof value === 'number' &&
-      Number.isFinite(value)) ||
-    (type === 'integer' &&
-      typeof value === 'number' &&
-      Number.isSafeInteger(value));
-  if (type === 'boolean' && typeof value === 'boolean') return;
-  if (!matches) {
-    addIssue(issues, path, `expected ${String(type)}`);
-    return;
-  }
-  if (type === 'object') {
-    if (!isPlainObject(value)) return;
-    const objectValue = value;
-    const properties = (schema.properties ?? {}) as Record<
-      string,
-      JsonSchemaNode
-    >;
-    const required = Array.isArray(schema.required) ? schema.required : [];
-    for (const key of required)
-      if (!Object.hasOwn(objectValue, key))
-        addIssue(
-          issues,
-          `${path}/${encodePathSegment(String(key))}`,
-          'required property is missing',
-        );
-    for (const key of Object.keys(objectValue)) {
-      if (!Object.hasOwn(properties, key)) {
-        addIssue(
-          issues,
-          `${path}/${encodePathSegment(key)}`,
-          'additional property is not allowed',
-        );
-        continue;
-      }
-      validateNode(
-        properties[key],
-        objectValue[key],
-        `${path}/${encodePathSegment(key)}`,
-        issues,
-      );
-    }
-    return;
-  }
-  if (type === 'array') {
-    if (!Array.isArray(value)) return;
-    const arrayValue = value;
-    const minItems = schema.minItems as number | undefined;
-    const maxItems = schema.maxItems as number | undefined;
-    if (arrayValue.length > STRUCTURED_RESULT_CAPS.maxArrayItems)
-      addIssue(
-        issues,
-        path,
-        `must contain at most ${STRUCTURED_RESULT_CAPS.maxArrayItems} item(s)`,
-      );
-    if (minItems !== undefined && arrayValue.length < minItems)
-      addIssue(issues, path, `must contain at least ${minItems} item(s)`);
-    if (maxItems !== undefined && arrayValue.length > maxItems)
-      addIssue(issues, path, `must contain at most ${maxItems} item(s)`);
-    if (schema.uniqueItems === true) {
-      for (let index = 0; index < arrayValue.length; index++) {
-        if (
-          arrayValue.findIndex((item) => sameJson(item, arrayValue[index])) !==
-          index
-        ) {
-          addIssue(issues, path, 'items must be unique');
-          break;
-        }
-      }
-    }
-    if (isPlainObject(schema.items)) {
-      arrayValue.forEach((item, index) => {
-        validateNode(
-          schema.items as JsonSchemaNode,
-          item,
-          `${path}/${index}`,
-          issues,
-        );
-      });
-    }
-    return;
-  }
-  if (type === 'string') {
-    if (typeof value !== 'string') return;
-    const stringValue = value;
-    const length = stringLength(stringValue);
-    const minLength = schema.minLength as number | undefined;
-    const maxLength = schema.maxLength as number | undefined;
-    if (length > STRUCTURED_RESULT_CAPS.maxStringLength)
-      addIssue(
-        issues,
-        path,
-        `must contain at most ${STRUCTURED_RESULT_CAPS.maxStringLength} character(s)`,
-      );
-    if (minLength !== undefined && length < minLength)
-      addIssue(issues, path, `must contain at least ${minLength} character(s)`);
-    if (maxLength !== undefined && length > maxLength)
-      addIssue(issues, path, `must contain at most ${maxLength} character(s)`);
-    return;
-  }
-  if (type === 'number' || type === 'integer') {
-    if (typeof value !== 'number') return;
-    const number = value;
-    const minimum = schema.minimum as number | undefined;
-    const maximum = schema.maximum as number | undefined;
-    const exclusiveMinimum = schema.exclusiveMinimum as number | undefined;
-    const exclusiveMaximum = schema.exclusiveMaximum as number | undefined;
-    const multipleOf = schema.multipleOf as number | undefined;
-    if (minimum !== undefined && number < minimum)
-      addIssue(issues, path, `must be at least ${minimum}`);
-    if (maximum !== undefined && number > maximum)
-      addIssue(issues, path, `must be at most ${maximum}`);
-    if (exclusiveMinimum !== undefined && number <= exclusiveMinimum)
-      addIssue(issues, path, `must be greater than ${exclusiveMinimum}`);
-    if (exclusiveMaximum !== undefined && number >= exclusiveMaximum)
-      addIssue(issues, path, `must be less than ${exclusiveMaximum}`);
-    if (multipleOf !== undefined) {
-      const quotient = number / multipleOf;
-      if (Math.abs(quotient - Math.round(quotient)) > 1e-9)
-        addIssue(issues, path, `must be a multiple of ${multipleOf}`);
-    }
-  }
-}
-
 function freezeJson(value: unknown): unknown {
   if (Array.isArray(value)) {
     for (const item of value) freezeJson(item);
@@ -815,7 +664,14 @@ export function validateStructuredResult(
       ],
     };
   const errors: string[] = [];
-  validateNode(spec.schema, value, '', errors);
+  const schema = asToolSchema(spec.schema);
+  if (!Value.Check(schema, value)) {
+    for (const error of Value.Errors(schema, value).slice(
+      0,
+      STRUCTURED_RESULT_CAPS.maxValidationErrors,
+    ))
+      addIssue(errors, error.instancePath, error.message);
+  }
   return errors.length
     ? { valid: false, errors }
     : { valid: true, value: freezeJson(value), errors: [] };
@@ -951,6 +807,7 @@ interface StructuredChannel {
 
 const resultSpecs = new WeakMap<DelegatedRun, NormalizedDelegateResultSpec>();
 const channels = new WeakMap<DelegatedRun, StructuredChannel>();
+const structuredChannelRuns = new WeakSet<DelegatedRun>();
 const settlements = new WeakMap<DelegatedRun, StructuredValidationResult>();
 const artifactViews = new WeakMap<DelegatedRun, StructuredArtifacts>();
 
@@ -981,6 +838,7 @@ export function captureDelegateResultEvent(
   };
   channel.calls++;
   channel.toolError ||= isError;
+  structuredChannelRuns.add(run);
   if (
     result &&
     typeof result === 'object' &&
@@ -990,7 +848,24 @@ export function captureDelegateResultEvent(
     channel.detailsPresent = true;
     channel.details = (result as { details?: unknown }).details;
   }
+  redactDelegateResultTerminalProse(run);
   channels.set(run, channel);
+}
+
+export function redactDelegateResultTerminalProse(run: DelegatedRun): void {
+  if (!structuredChannelRuns.has(run)) return;
+  for (let index = run.messages.length - 1; index >= 0; index--) {
+    const message = run.messages[index];
+    if (message.role !== 'assistant') continue;
+    // The terminating action owns the structured channel. Any prose in that
+    // assistant turn is neither part of the contract nor safe to expose next
+    // to an artifact-only result.
+    run.messages[index] = {
+      ...message,
+      content: message.content.filter((part) => part.type !== 'text'),
+    };
+    return;
+  }
 }
 
 function channelError(channel: StructuredChannel | undefined): string[] {

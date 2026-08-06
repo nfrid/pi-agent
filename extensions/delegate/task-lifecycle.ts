@@ -253,7 +253,6 @@ export async function prepareDelegateTask(
         isolation: state.isolation,
         scope: state.scope,
         routing: plan.routing,
-        resultSpec: plan.resultSpec,
       });
       if (state.worktree)
         state.worktree = attachWorktreeSession(state.worktree, session.token);

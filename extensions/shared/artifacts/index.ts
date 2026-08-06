@@ -15,6 +15,7 @@ export {
   retrieveArtifact,
 } from './retrieval';
 export {
+  type ArtifactViewPublication,
   artifactRoot,
   clearArtifactRoot,
   type PutArtifactOptions,

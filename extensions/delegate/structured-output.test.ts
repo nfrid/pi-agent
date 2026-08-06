@@ -53,14 +53,18 @@ describe('structured delegate output handoff', () => {
         entries.push({ type, data });
       },
     } as never;
+    let putCalls = 0;
     const put = async (
       _pi: unknown,
       _ctx: unknown,
       input: { bytes: string },
+      options?: { delegateView?: { name: string; path: string } },
     ) => {
-      const index = entries.length;
+      putCalls++;
+      if (options?.delegateView)
+        entries.push({ type: 'artifact-view:v1', data: options.delegateView });
       return metadata(
-        `art_${String(index + 1).padStart(22, 'a')}`,
+        `art_${String(putCalls).padStart(22, 'a')}`,
         Buffer.byteLength(input.bytes),
       );
     };

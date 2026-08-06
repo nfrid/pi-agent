@@ -78,6 +78,33 @@ describe('events', () => {
     expect(JSON.stringify(run)).not.toContain('artifact-only');
   });
 
+  test('redacts prose from the terminating structured tool turn', () => {
+    const run = createRun('structured');
+    processJsonLine(
+      JSON.stringify({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'prose and {"secret":"result"}' }],
+          usage: {},
+        },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'result-1',
+        toolName: 'delegate_result',
+        result: { details: { secret: 'result' } },
+        isError: false,
+      }),
+      run,
+    );
+    expect(JSON.stringify(run)).not.toContain('prose');
+    expect(JSON.stringify(run)).not.toContain('secret');
+  });
+
   test('preserves detailed tool labels when end events omit args', () => {
     const run = createRun('inspect');
     processJsonLine(

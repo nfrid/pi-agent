@@ -71,9 +71,12 @@ An exact-output artifact is created only when the parent handoff genuinely omits
 
 ## Schema-driven results
 
-A delegate call may include a `result` contract. It is independent for every
-parallel task; a top-level `result` is the shared default and a task-level
-`result` replaces it. A contract has this small public shape:
+A delegate call may include a `result` contract. Contracts are scoped to that
+invocation only: a continuation does not inherit the prior call's contract.
+Omit `result` on a continuation to return to the legacy prose contract, or
+supply a new task-level/top-level contract explicitly. The contract is
+independent for every parallel task; a top-level `result` is the shared default
+and a task-level `result` replaces it. A contract has this small public shape:
 
 ```json
 {
@@ -130,7 +133,9 @@ non-success with bounded validation errors.
 A valid result is stored as an immutable owner-session `delegate-output` JSON
 artifact. Only selected projections and lifecycle metadata appear in the
 parent envelope. Each named view is stored separately and registered against
-the full artifact handle in the owner session. Forward it with
+the full artifact handle in the owner session. The storage layer verifies
+that the selected bytes equal the declared source path; callers cannot write an
+arbitrary registry mapping. Forward it with
 `handoffFrom: { "handle": "...", "view": "evidence" }`; the harness verifies
 current-session ownership and the registry, then frames only that view as
 untrusted evidence. Omitting `result` preserves the legacy prose report and

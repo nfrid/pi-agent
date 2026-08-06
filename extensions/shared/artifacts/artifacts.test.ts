@@ -8,7 +8,6 @@ import { retrieveArtifact } from './retrieval';
 import {
   putArtifact,
   recoverArtifactFromEntries,
-  registerArtifactView,
   resolveArtifact,
   resolveArtifactView,
   restoreArtifacts,
@@ -113,6 +112,32 @@ describe('storing artifacts', () => {
     expect(metadata.itemCount).toBe(3);
   });
 
+  test('rejects publishing the full source bytes as a selected view', async () => {
+    const h = harness('session-one');
+    const full = await put(h, {
+      bytes: JSON.stringify({ findings: [{ title: 'one' }] }),
+      contentClass: 'delegate-output',
+      producer: 'delegate',
+      creationSource: 'delegate.result',
+    });
+    await expect(
+      putArtifact(
+        h.pi,
+        h.ctx,
+        {
+          bytes: JSON.stringify({ findings: [{ title: 'one' }] }),
+          contentClass: 'delegate-output',
+          producer: 'delegate',
+          creationSource: 'delegate.view',
+        },
+        {
+          root,
+          delegateView: { source: full, name: 'titles', path: '/findings' },
+        },
+      ),
+    ).rejects.toThrow(/bytes do not match/);
+  });
+
   test('resolves named views only through the owner-session registry', async () => {
     const owner = harness('session-one');
     const other = harness('session-two');
@@ -122,21 +147,52 @@ describe('storing artifacts', () => {
       producer: 'delegate',
       creationSource: 'delegate.result',
     });
-    const view = await put(owner, {
-      bytes: JSON.stringify([{ title: 'one' }]),
-      contentClass: 'delegate-output',
-      producer: 'delegate',
-      creationSource: 'delegate.view',
-    });
-    registerArtifactView(owner.pi, full, 'titles', view);
+    const view = await putArtifact(
+      owner.pi,
+      owner.ctx,
+      {
+        bytes: JSON.stringify([{ title: 'one' }]),
+        contentClass: 'delegate-output',
+        producer: 'delegate',
+        creationSource: 'delegate.view',
+      },
+      {
+        root,
+        delegateView: { source: full, name: 'titles', path: '/findings' },
+      },
+    );
+    expect(view.creationSource).toBe('delegate.view');
     expect(
       (
         await resolveArtifactView(owner.ctx, full.handle, 'titles', root)
       )?.bytes.toString(),
     ).toBe('[{"title":"one"}]');
+    owner.pi.appendEntry('artifact-view:v1', {
+      version: 1,
+      kind: 'view',
+      source: full,
+      view: 'forged',
+      path: '/findings',
+      metadata: full,
+    });
+    expect(
+      await resolveArtifactView(owner.ctx, full.handle, 'forged', root),
+    ).toBeUndefined();
     expect(
       await resolveArtifactView(other.ctx, full.handle, 'titles', root),
     ).toBeUndefined();
+
+    const fork = harness('session-fork');
+    fork.entries.push(...owner.entries);
+    expect(
+      await resolveArtifactView(fork.ctx, full.handle, 'titles', root),
+    ).toBeUndefined();
+    await restoreArtifacts(fork.ctx, root);
+    expect(
+      (
+        await resolveArtifactView(fork.ctx, full.handle, 'titles', root)
+      )?.bytes.toString(),
+    ).toBe('[{"title":"one"}]');
   });
 
   test('refuses input the metadata could not honestly describe', async () => {
