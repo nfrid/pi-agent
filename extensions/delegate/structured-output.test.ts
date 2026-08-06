@@ -6,7 +6,10 @@ import {
   setDelegateResultSpec,
   settleDelegateResult,
 } from './structured-result';
-import { buildArtifactBackedHandoff } from './tool-result';
+import {
+  buildArtifactBackedHandoff,
+  buildSessionBoundArtifactBackedHandoff,
+} from './tool-result';
 import { createRun } from './types';
 
 function metadata(handle: string, size: number) {
@@ -84,6 +87,38 @@ describe('structured delegate output handoff', () => {
     );
     expect(entries).toHaveLength(1);
     expect(JSON.stringify(entries[0])).toContain('secret');
+  });
+
+  test('rejects background publication after the owner session switches', async () => {
+    const spec = normalizeDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: { secret: { type: 'string' } },
+        required: ['secret'],
+      },
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    const run = createRun('background structured result');
+    run.state = 'success';
+    setDelegateResultSpec(run, spec);
+    captureDelegateResultEvent(
+      run,
+      { details: { secret: 'owner-only background result' } },
+      false,
+    );
+    settleDelegateResult(run);
+    const ctx = {
+      sessionManager: { getSessionId: () => 'other-session' },
+    } as never;
+    const handoff = await buildSessionBoundArtifactBackedHandoff(
+      {} as never,
+      ctx,
+      'owner-session',
+      [run],
+    );
+    expect(handoff).not.toContain('owner-only background result');
+    expect(handoff).not.toContain('Artifact:');
+    expect(run.artifact).toBeUndefined();
   });
 
   test('legacy output remains prose-shaped when no result contract is present', () => {
