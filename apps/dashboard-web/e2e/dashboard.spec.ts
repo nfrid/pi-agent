@@ -687,6 +687,19 @@ test('dense mobile session keeps conversation and activity readable', async ({
             type: 'message',
             message: {
               role: 'user',
+              content: [{ type: 'text', text: 'Focus on mobile readability.' }],
+              timestamp: 100,
+            },
+          },
+          {
+            type: 'custom',
+            customType: 'steering-message',
+            data: { timestamp: 100, text: 'Focus on mobile readability.' },
+          },
+          {
+            type: 'message',
+            message: {
+              role: 'user',
               content: [
                 {
                   type: 'text',
@@ -736,6 +749,11 @@ test('dense mobile session keeps conversation and activity readable', async ({
     });
   });
   await page.goto('/sessions/s1');
+  const steeringMessage = page.locator('.message-steering');
+  await expect(steeringMessage).toContainText('Focus on mobile readability.');
+  await expect(steeringMessage.locator('.message-delivery-mode')).toHaveText(
+    'steer',
+  );
   await expect(page.getByText('Check', { exact: true })).toBeVisible();
   const userLink = page.getByRole('link', { name: 'dashboard' });
   await expect(userLink).toHaveAttribute('href', 'https://example.com');
@@ -799,6 +817,11 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await page.getByRole('button', { name: 'Open transcript outline' }).click();
   const outline = page.getByRole('dialog', { name: 'Transcript outline' });
   await expect(outline).toBeVisible();
+  const steeringOutlineItem = outline.getByRole('button', {
+    name: 'Steering · Focus on mobile readability.',
+    exact: true,
+  });
+  await expect(steeringOutlineItem).toHaveClass(/outline-steering/u);
   await outline
     .getByRole('button', { name: 'Earlier message 1', exact: true })
     .click();
