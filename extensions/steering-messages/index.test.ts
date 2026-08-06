@@ -63,6 +63,56 @@ describe('steering message tracking', () => {
     expect(marks.marked.get('second')).toEqual(new Set([0]));
   });
 
+  it('reloads marker marks when session tree navigation replaces the branch', () => {
+    const handlers = new Map<string, Handler>();
+    const pi = {
+      on: (event: string, handler: Handler) => handlers.set(event, handler),
+    } as unknown as ExtensionAPI;
+    const resolvers: Array<(text: string, occurrence: number) => boolean> = [];
+    registerSteeringMessageTracking(pi, (isSteering) => {
+      resolvers.push(isSteering);
+      return undefined;
+    });
+    const context = (entries: unknown[]) =>
+      ({
+        mode: 'tui',
+        sessionManager: { buildContextEntries: () => entries },
+      }) as never;
+    const start = handlers.get('session_start');
+    const tree = handlers.get('session_tree');
+    start?.(
+      {} as never,
+      context([
+        {
+          type: 'message',
+          message: { role: 'user', content: 'first', timestamp: 1 },
+        },
+        {
+          type: 'custom',
+          customType: STEERING_MESSAGE_MARKER_TYPE,
+          data: { timestamp: 1, text: 'first' },
+        },
+      ]),
+    );
+    expect(resolvers[0]?.('first', 0)).toBe(true);
+    tree?.(
+      {} as never,
+      context([
+        {
+          type: 'message',
+          message: { role: 'user', content: 'second', timestamp: 2 },
+        },
+        {
+          type: 'custom',
+          customType: STEERING_MESSAGE_MARKER_TYPE,
+          data: { timestamp: 2, text: 'second' },
+        },
+      ]),
+    );
+    expect(resolvers).toHaveLength(2);
+    expect(resolvers[1]?.('second', 0)).toBe(true);
+  });
+
   it('keeps follow-up and ordinary input unmarked', () => {
     const { appendEntry, handlers } = harness();
     const start = handlers.get('message_start');

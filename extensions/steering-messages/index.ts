@@ -160,7 +160,7 @@ export function registerSteeringMessageTracking(
   }> = [];
   const liveCounts = new Map<string, number>();
 
-  pi.on('session_start', (_event, nextContext) => {
+  const resetSession = (nextContext: ExtensionContext): void => {
     uninstall?.();
     uninstall = undefined;
     context = nextContext;
@@ -175,6 +175,13 @@ export function registerSteeringMessageTracking(
           )
         : undefined;
     if (host) uninstall = installSteeringMessageShim(host);
+  };
+
+  pi.on('session_start', (_event, nextContext) => {
+    resetSession(nextContext);
+  });
+  pi.on('session_tree', (_event, nextContext) => {
+    resetSession(nextContext);
   });
 
   pi.on('input', (event) => {

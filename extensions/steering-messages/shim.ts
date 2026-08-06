@@ -24,10 +24,11 @@ function supported(host: SteeringShimHost): boolean {
 }
 
 /**
- * Patch only the public user component. Pi renders the chat synchronously, so
- * the first render of each component resolves its text occurrence against the
- * marker index. Counters reset after that render batch; the WeakMap keeps a
- * component's answer stable when it is measured or redrawn again.
+ * Patch only the public user component. The first render of each component
+ * resolves its text occurrence against the current session's marker index.
+ * Counts live for this installation so a newly appended duplicate is not
+ * mistaken for the first historical occurrence; the WeakMap keeps rerenders
+ * from incrementing them.
  */
 export function installSteeringMessageShim(
   host: SteeringShimHost,
@@ -37,16 +38,6 @@ export function installSteeringMessageShim(
   const originalUserRender = userPrototype.render;
   const steeringByComponent = new WeakMap<UserMessageLike, boolean>();
   const occurrences = new Map<string, number>();
-  let resetQueued = false;
-
-  const queueOccurrenceReset = () => {
-    if (resetQueued) return;
-    resetQueued = true;
-    queueMicrotask(() => {
-      occurrences.clear();
-      resetQueued = false;
-    });
-  };
 
   userPrototype.render = function render(width: number): string[] {
     let steering = steeringByComponent.get(this);
@@ -60,7 +51,6 @@ export function installSteeringMessageShim(
       }
       steeringByComponent.set(this, steering);
     }
-    queueOccurrenceReset();
 
     const lines = originalUserRender.call(this, width);
     if (!steering) return lines;
@@ -70,6 +60,7 @@ export function installSteeringMessageShim(
 
   return () => {
     userPrototype.render = originalUserRender;
+    occurrences.clear();
   };
 }
 

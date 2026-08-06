@@ -40,23 +40,22 @@ describe('steering message TUI shim', () => {
     expect(steering.render(3)).toEqual(['user:same']);
   });
 
-  it('caches component status across the microtask reset and resolves new batches', async () => {
+  it('keeps duplicate occurrence counts across microtasks while caching rerenders', async () => {
     const resolutions: Array<[string, number]> = [];
     const resolve = vi.fn((text: string, occurrence: number) => {
       resolutions.push([text, occurrence]);
     });
-    const stop = installSteeringMessageShim(host(new Set([0]), resolve));
-    const first = new FakeUser('history');
-    expect(first.render(80)).toEqual([STEERING_LABEL, 'user:history']);
-    expect(first.render(80)).toEqual([STEERING_LABEL, 'user:history']);
-    expect(resolve).toHaveBeenCalledTimes(1);
-
+    const stop = installSteeringMessageShim(host(new Set([1]), resolve));
+    const first = new FakeUser('same');
+    expect(first.render(80)).toEqual(['user:same']);
     await new Promise<void>((done) => queueMicrotask(done));
-    const next = new FakeUser('live');
-    expect(next.render(80)).toEqual([STEERING_LABEL, 'user:live']);
+    const second = new FakeUser('same');
+    expect(second.render(80)).toEqual([STEERING_LABEL, 'user:same']);
+    expect(first.render(80)).toEqual(['user:same']);
+    expect(resolve).toHaveBeenCalledTimes(2);
     expect(resolutions).toEqual([
-      ['history', 0],
-      ['live', 0],
+      ['same', 0],
+      ['same', 1],
     ]);
     stop?.();
   });
