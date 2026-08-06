@@ -3245,11 +3245,17 @@ h2 {
 .session-details-trigger {
   font-size: 20px;
 }
-.session-context .jump-latest {
-  width: 30px;
-  height: 30px;
+.session-control-layer > .jump-latest {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 36px;
+  height: 36px;
   border-color: var(--cyan);
-  border-radius: 6px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
+  box-shadow: 0 7px 20px #0008;
+  color: var(--cyan);
   padding: 0;
 }
 
@@ -3343,6 +3349,9 @@ h2 {
   inset: 0;
   pointer-events: auto;
   background: #18192399;
+}
+[data-swipe-dismiss="right"] {
+  touch-action: pan-y;
 }
 .surface-dialog {
   position: absolute;
@@ -4053,6 +4062,14 @@ h2 {
   .session-icon-button {
     width: 28px;
     height: 28px;
+  }
+  .session-control-layer > .jump-latest {
+    bottom: calc(100% + 10px);
+    width: 48px;
+    height: 48px;
+    border-color: color-mix(in srgb, var(--cyan) 72%, var(--line));
+    box-shadow: 0 8px 24px #0009;
+    font-size: 22px;
   }
   .session-control-layer {
     right: 13px;

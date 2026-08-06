@@ -1,4 +1,40 @@
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
+
+async function swipe(
+  target: Locator,
+  { dx, dy = 0 }: { dx: number; dy?: number },
+) {
+  await target.evaluate(
+    (element, movement) => {
+      const point = (x: number, y: number) =>
+        new Touch({
+          identifier: 1,
+          target: element,
+          clientX: x,
+          clientY: y,
+        });
+      const dispatch = (
+        type: 'touchstart' | 'touchmove' | 'touchend',
+        touches: Touch[],
+        changedTouches: Touch[],
+      ) =>
+        element.dispatchEvent(
+          new TouchEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            touches,
+            changedTouches,
+          }),
+        );
+      const start = point(24, 180);
+      const end = point(24 + movement.dx, 180 + movement.dy);
+      dispatch('touchstart', [start], [start]);
+      dispatch('touchmove', [end], [end]);
+      dispatch('touchend', [], [end]);
+    },
+    { dx, dy },
+  );
+}
 
 test('mobile dashboard renders and supports the new-agent route', async ({
   page,
@@ -931,18 +967,52 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await page.getByRole('button', { name: 'Open transcript outline' }).click();
   const outline = page.getByRole('dialog', { name: 'Transcript outline' });
   await expect(outline).toBeVisible();
-  const steeringOutlineItem = outline.getByRole('button', {
+  await swipe(outline, { dx: 44 });
+  await expect(outline).toBeVisible();
+  await swipe(outline, { dx: 104, dy: 8 });
+  await expect(outline).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open transcript outline' }).click();
+  const reopenedOutline = page.getByRole('dialog', {
+    name: 'Transcript outline',
+  });
+  const steeringOutlineItem = reopenedOutline.getByRole('button', {
     name: 'Steering · Focus on mobile readability.',
     exact: true,
   });
   await expect(steeringOutlineItem).toHaveClass(/outline-steering/u);
-  await outline
+  await reopenedOutline
     .getByRole('button', { name: 'Earlier message 1', exact: true })
     .click();
-  await expect(outline).toHaveCount(0);
-  await page.evaluate(() =>
-    window.scrollTo(0, document.documentElement.scrollHeight),
-  );
+  await expect(reopenedOutline).toHaveCount(0);
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    window.dispatchEvent(new Event('scroll'));
+  });
+  const jumpLatest = page.getByRole('button', {
+    name: 'Jump to latest transcript activity',
+  });
+  await expect(jumpLatest).toBeVisible();
+  const jumpGeometry = await jumpLatest.evaluate((button) => {
+    const buttonRect = button.getBoundingClientRect();
+    const composerRect = document
+      .querySelector('.composer')
+      ?.getBoundingClientRect();
+    return {
+      width: buttonRect.width,
+      height: buttonRect.height,
+      rightGap: window.innerWidth - buttonRect.right,
+      bottom: buttonRect.bottom,
+      composerTop: composerRect?.top,
+      borderRadius: getComputedStyle(button).borderRadius,
+    };
+  });
+  expect(jumpGeometry.borderRadius).toBe('50%');
+  expect(jumpGeometry.width).toBeCloseTo(48, 1);
+  expect(jumpGeometry.height).toBeCloseTo(48, 1);
+  expect(jumpGeometry.rightGap).toBeCloseTo(13, 1);
+  expect(jumpGeometry.bottom).toBeLessThan(jumpGeometry.composerTop ?? 0);
+  await jumpLatest.click();
+  await expect(jumpLatest).toHaveCount(0);
   const activity = page.getByRole('button', {
     name: /Checking the mobile transcript.*1 tool/,
   });
@@ -2435,6 +2505,12 @@ test('phase six mocked management flow covers refresh, fallback notification, la
   await expect(inspector).toContainText('Runtime controls');
   await expect(inspector).not.toContainText('Live work');
   await expect(inspector).not.toContainText('test/vision');
+  await swipe(inspector, { dx: 44 });
+  await expect(inspector).toBeVisible();
+  await swipe(inspector, { dx: 104, dy: 8 });
+  await expect(inspector).toHaveCount(0);
+  await detailsButton.click();
+  await expect(inspector).toBeVisible();
   const readDesktopGeometry = () =>
     page.evaluate(() => {
       const rail = document

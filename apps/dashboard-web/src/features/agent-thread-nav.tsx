@@ -193,6 +193,11 @@ export function AgentThreadNav({
   useEffect(() => {
     if (mode !== 'session') return;
     const onStart = (event: globalThis.TouchEvent) => {
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[data-swipe-dismiss="right"]')
+      )
+        return;
       const touch = event.changedTouches[0];
       if (touch && touch.clientX < 32) {
         event.preventDefault();

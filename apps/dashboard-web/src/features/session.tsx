@@ -33,6 +33,7 @@ import { useOverlayPresence } from './overlay-presence';
 import { PendingInteractions } from './pending-interaction';
 import { RuntimeActions } from './runtime-actions';
 import { SessionRename } from './session-rename';
+import { useSwipeToDismiss } from './swipe-to-dismiss';
 
 export type { InteractionKeyAction } from './pending-interaction';
 export {
@@ -463,17 +464,6 @@ export function SessionView({
             </div>
           </div>
           <div className="session-heading-actions">
-            {awayFromLatest && (
-              <button
-                type="button"
-                className="session-icon-button jump-latest"
-                onClick={jumpToLatest}
-                aria-label="Jump to latest transcript activity"
-                title="Jump to latest"
-              >
-                ↓
-              </button>
-            )}
             <button
               type="button"
               ref={outlineTriggerRef}
@@ -529,6 +519,17 @@ export function SessionView({
           onOutlineOpenChange={setOutlineOpen}
         />
         <div ref={controlLayerRef} className="session-control-layer">
+          {awayFromLatest && (
+            <button
+              type="button"
+              className="session-icon-button jump-latest"
+              onClick={jumpToLatest}
+              aria-label="Jump to latest transcript activity"
+              title="Jump to latest"
+            >
+              ↓
+            </button>
+          )}
           <ExtensionSurfaceStack runtime={runtime} placement="composer" />
           <Composer runtime={runtime} sessionId={id} />
         </div>
@@ -560,6 +561,7 @@ export function SessionInspector({
   const panelRef = useRef<HTMLElement>(null);
   const triggerFocusRef = useRef<HTMLElement | null>(null);
   const { present, exiting } = useOverlayPresence(open);
+  const swipeHandlers = useSwipeToDismiss(onClose);
   useEffect(() => {
     if (!open) return;
     triggerFocusRef.current = document.activeElement as HTMLElement | null;
@@ -619,13 +621,17 @@ export function SessionInspector({
         onClick={onClose}
       />
       <section
-        ref={panelRef}
+        ref={(element) => {
+          panelRef.current = element;
+          swipeHandlers.ref(element);
+        }}
         id="session-inspector"
         className={`session-inspector${exiting ? ' is-exiting' : ''}`}
         role="dialog"
         aria-hidden={exiting || undefined}
         aria-modal="true"
         aria-labelledby="session-inspector-title"
+        data-swipe-dismiss="right"
         tabIndex={-1}
       >
         <header className="inspector-header">

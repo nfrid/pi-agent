@@ -7,6 +7,7 @@ import {
 } from 'react';
 import { Dialog as AriaDialog, ModalOverlay } from 'react-aria-components';
 import { useOverlayPresence } from './overlay-presence';
+import { useSwipeToDismiss } from './swipe-to-dismiss';
 
 /** Shared overlay primitive for dashboard sheets and panels. */
 export function DashboardDialog({
@@ -30,6 +31,7 @@ export function DashboardDialog({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
   const { present, exiting } = useOverlayPresence(isOpen);
+  const swipeHandlers = useSwipeToDismiss(onClose);
   useEffect(() => {
     if (isOpen && !wasOpenRef.current) {
       previousFocusRef.current = document.activeElement as HTMLElement | null;
@@ -74,9 +76,11 @@ export function DashboardDialog({
         }}
       >
         <AriaDialog
+          ref={swipeHandlers.ref}
           className={className}
           aria-labelledby={titleId}
           aria-modal="true"
+          data-swipe-dismiss="right"
         >
           <header className="surface-dialog-header">
             <div>
