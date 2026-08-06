@@ -76,6 +76,7 @@ export {
   queueCommand,
   queuedMessagesForRuntime,
   queueRemoveCommand,
+  resumeRuntimeRequest,
   runtimeSupportsImages,
   shouldShowQueuePanel,
 } from './features/composer';
@@ -84,7 +85,11 @@ export {
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
 } from './features/extension-surfaces';
-export { newChatRequest, sessionPathForRuntime } from './features/new-chat';
+export {
+  newChatRequest,
+  pendingChatPath,
+  sessionPathForRuntime,
+} from './features/new-chat';
 export { newChatPath } from './routes/navigation';
 export { toTranscriptEntries } from './transcript';
 
@@ -195,7 +200,8 @@ function RouteShell() {
       isSession: state.matches.some(
         (match) =>
           match.routeId === '/sessions/$sessionId' ||
-          match.routeId === '/workspaces/$workspaceId/new',
+          match.routeId === '/workspaces/$workspaceId/new' ||
+          match.routeId === '/workspaces/$workspaceId/new/pending/$runtimeId',
       ),
       pathname: state.location.pathname,
     }),
@@ -327,6 +333,21 @@ function NewChatRoute() {
   ) : null;
 }
 
+function PendingNewChatRoute() {
+  const { workspaceId, runtimeId } = useParams({
+    from: '/workspaces/$workspaceId/new/pending/$runtimeId',
+  });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <NewChatView
+      workspaceId={workspaceId}
+      pendingRuntimeId={runtimeId}
+      snapshot={dashboard.snapshot}
+      store={dashboard.store}
+    />
+  ) : null;
+}
+
 function WorkspacesRoute() {
   const dashboard = useDashboardContext();
   return dashboard.snapshot ? (
@@ -404,6 +425,11 @@ const newChatRoute = createRoute({
   path: '/workspaces/$workspaceId/new',
   component: NewChatRoute,
 });
+const pendingNewChatRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/workspaces/$workspaceId/new/pending/$runtimeId',
+  component: PendingNewChatRoute,
+});
 const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/inbox',
@@ -426,6 +452,7 @@ export const dashboardRouteTree = rootRoute.addChildren([
   workspacesRoute,
   workspaceRoute,
   newChatRoute,
+  pendingNewChatRoute,
   inboxRoute,
   runtimeRoute,
   legacyNewRoute,

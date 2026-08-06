@@ -30,7 +30,8 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
   const showGlobalNew =
     pathname !== '/' &&
     !pathname.startsWith('/sessions/') &&
-    !pathname.endsWith('/new');
+    !pathname.endsWith('/new') &&
+    !pathname.includes('/new/pending/');
   const activeSessionId = pathname.startsWith('/sessions/')
     ? decodeURIComponent(pathname.split('/')[2] ?? '')
     : undefined;

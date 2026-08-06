@@ -78,6 +78,33 @@ describe('DashboardHttpClient command requests', () => {
       initialPrompt: 'inspect this',
     });
   });
+
+  it('posts a resume request with the existing session identity', async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ runtimeId: 'runtime-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: {
+        get: () => 'test-token',
+        set: () => undefined,
+        clear: () => undefined,
+      },
+    });
+    await client.startRuntime({
+      workspaceId: 'workspace-1',
+      sessionId: 'session-1',
+    });
+    const call = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
+    expect(JSON.parse(String(call[0]?.[1]?.body))).toEqual({
+      workspaceId: 'workspace-1',
+      sessionId: 'session-1',
+    });
+  });
 });
 
 describe('DashboardHttpClient event requests', () => {

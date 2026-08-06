@@ -53,12 +53,21 @@ export function sessionPathForRuntime(
   return sessionId ? `/sessions/${encodeURIComponent(sessionId)}` : undefined;
 }
 
+export function pendingChatPath(
+  workspaceId: string,
+  runtimeId: string,
+): string {
+  return `/workspaces/${encodeURIComponent(workspaceId)}/new/pending/${encodeURIComponent(runtimeId)}`;
+}
+
 export function NewChatView({
   workspaceId,
+  pendingRuntimeId,
   snapshot,
   store,
 }: {
   workspaceId: string;
+  pendingRuntimeId?: string;
   snapshot: BrowserSnapshot;
   store: DashboardLiveStore;
 }) {
@@ -68,7 +77,6 @@ export function NewChatView({
   const [text, setText] = useState('');
   const [error, setError] = useState<string>();
   const [sharedWarning, setSharedWarning] = useState(false);
-  const [pendingRuntimeId, setPendingRuntimeId] = useState<string>();
   const runtime = useDashboardStore(
     store,
     (state) =>
@@ -77,12 +85,12 @@ export function NewChatView({
   const mutation = useMutation(
     startRuntimeMutationOptions(dashboardHttpClient),
   );
+  const sessionPath = sessionPathForRuntime(runtime);
 
   useEffect(() => {
-    const path = sessionPathForRuntime(runtime);
-    if (!pendingRuntimeId || !path) return;
-    go(path);
-  }, [go, pendingRuntimeId, runtime]);
+    if (!pendingRuntimeId || !sessionPath) return;
+    go(sessionPath);
+  }, [go, pendingRuntimeId, sessionPath]);
 
   if (!workspace) {
     return (
@@ -108,7 +116,7 @@ export function NewChatView({
       const result = await mutation.mutateAsync(
         newChatRequest(workspaceId, initialPrompt, acknowledge),
       );
-      setPendingRuntimeId(result.runtimeId);
+      go(pendingChatPath(workspaceId, result.runtimeId));
     } catch (cause) {
       const details = errorDetails(cause);
       setError(details.message);
@@ -188,7 +196,6 @@ export function NewChatView({
                 aria-label="Send first message"
               >
                 <span aria-hidden="true">↑</span>
-                <span>Send</span>
               </button>
             </div>
             {error && (

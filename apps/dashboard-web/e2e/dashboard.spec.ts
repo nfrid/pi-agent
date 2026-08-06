@@ -2327,6 +2327,9 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
     workspaceId: 'w1',
     initialPrompt: 'Inspect the project setup',
   });
+  await page.reload();
+  await expect(page.getByText('Starting agent…')).toBeVisible();
+  await expect(page).not.toHaveURL(/\/runtimes\//u);
   await page.route('**/api/sessions/s-launched', (route) =>
     route.fulfill({
       contentType: 'application/json',

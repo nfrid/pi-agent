@@ -22,6 +22,13 @@ describe('dashboard route tree', () => {
     });
     expect(router.state.location.pathname).toBe('/workspaces/workspace-1/new');
     await router.navigate({
+      to: '/workspaces/$workspaceId/new/pending/$runtimeId',
+      params: { workspaceId: 'workspace-1', runtimeId: 'runtime-1' },
+    });
+    expect(router.state.location.pathname).toBe(
+      '/workspaces/workspace-1/new/pending/runtime-1',
+    );
+    await router.navigate({
       to: '/sessions/$sessionId',
       params: { sessionId: 's1' },
     });

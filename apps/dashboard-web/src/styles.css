@@ -2898,9 +2898,8 @@ h2 {
 }
 .new-chat-composer-actions .composer-send {
   display: inline-flex;
-  width: auto;
-  gap: 6px;
-  padding: 0 12px;
+  width: 30px;
+  padding: 0;
 }
 .new-chat-error {
   display: flex;
