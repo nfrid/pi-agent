@@ -166,6 +166,11 @@ export function SessionView({
     setHistory(undefined);
     setHistoryLoading(false);
     setHistoryError(undefined);
+    return () => {
+      historyGenerationRef.current += 1;
+      historyRequestRef.current?.controller.abort();
+      historyRequestRef.current = undefined;
+    };
   }, [id]);
   useEffect(() => {
     if (

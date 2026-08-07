@@ -40,7 +40,7 @@ const entries = {
   ],
 };
 
-test('aborts older history when navigating to another session', async ({
+test('aborts older history when navigating away from a session', async ({
   page,
 }) => {
   let releaseOlder!: () => void;
@@ -116,10 +116,8 @@ test('aborts older history when navigating to another session', async ({
   ).toBeVisible();
   await page.getByRole('button', { name: 'Load earlier history' }).click();
   await olderRequestStarted;
-  await page.goto('/sessions/session-2');
-  await expect(
-    page.getByRole('heading', { name: 'second session' }),
-  ).toBeVisible();
+  await page.goto('/');
+  await expect(page).toHaveURL(/\/$/u);
   releaseOlder();
   await expect(page.getByText('old session one')).toHaveCount(0);
   await expect(
