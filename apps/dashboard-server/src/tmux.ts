@@ -106,6 +106,7 @@ export class TmuxAdapter {
     identityToken?: string;
     sessionFile?: string;
     model?: { provider: string; model: string; thinking?: string };
+    mode?: 'read' | 'write';
   }): Promise<ManagedPlacement> {
     const session = input.workspace.tmuxSession;
     if (!session || !(await this.hasSession(session)))
@@ -128,6 +129,7 @@ export class TmuxAdapter {
       `PI_DASHBOARD_IDENTITY_TOKEN=${identityToken}`,
     ];
     const piArgs = ['--approve'];
+    if (input.mode === 'read') piArgs.push('--tools', 'read');
     if (input.sessionFile) piArgs.push('--session', input.sessionFile);
     if (input.model) {
       piArgs.push(
@@ -239,6 +241,7 @@ export class TmuxRuntimeProvider implements AgentRuntimeProvider {
       identityToken: input.identityToken,
       sessionFile: input.sessionFile,
       model: input.model,
+      mode: input.mode,
     });
     return this.binding(input.runtimeId, placement);
   }

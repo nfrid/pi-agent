@@ -27,6 +27,8 @@ interface LaunchRecord {
   binding: RuntimeBinding;
   /** Tmux placement is an optional compatibility projection of the binding. */
   placement?: ManagedPlacement;
+  /** Preserve the launch capability when restarting within this daemon. */
+  mode: 'read' | 'write';
   metadataRecorded: boolean;
   createdAt: number;
 }
@@ -105,6 +107,8 @@ export class RuntimeManager {
       },
       binding: bindingFromPlacement(record.runtimeId, record.placement),
       placement: record.placement,
+      // Older persisted launches have no mode provenance and remain writable.
+      mode: 'write',
       metadataRecorded: true,
       createdAt: record.launchedAt,
     };
@@ -168,6 +172,7 @@ export class RuntimeManager {
     name?: string;
     initialPrompt?: string;
     model?: { provider: string; model: string; thinking?: string };
+    mode?: 'read' | 'write';
   }): Promise<{ runtimeId: string; placement?: ManagedPlacement }> {
     return this.launch(input);
   }
@@ -268,6 +273,7 @@ export class RuntimeManager {
         identityToken,
         sessionFile,
         model: request.model,
+        mode: request.mode,
       });
       placement = placementFromBinding(binding);
       const launch: LaunchRecord = {
@@ -277,6 +283,7 @@ export class RuntimeManager {
         workspace,
         binding,
         ...(placement ? { placement } : {}),
+        mode: request.mode ?? 'write',
         metadataRecorded: false,
         createdAt: Date.now(),
       };
@@ -381,6 +388,7 @@ export class RuntimeManager {
             },
           }
         : {}),
+      mode: launch.mode,
     };
     await this.stop(runtimeId);
     return this.launch(request);

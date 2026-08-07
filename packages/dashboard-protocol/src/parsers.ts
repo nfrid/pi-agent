@@ -346,6 +346,7 @@ export function parseStartRuntimeRequest(value: unknown): StartRuntimeRequest {
     throw new Error('Invalid checkout cwd.');
   if (input.runtimeId) result.runtimeId = input.runtimeId;
   if (input.checkoutCwd) result.checkoutCwd = input.checkoutCwd;
+  if (input.mode !== undefined) result.mode = input.mode;
   if (input.sessionId !== undefined && !safeIdentifier(input.sessionId, 256))
     throw new Error('Invalid sessionId.');
   if (input.name !== undefined && !safeIdentifier(input.name, 120))

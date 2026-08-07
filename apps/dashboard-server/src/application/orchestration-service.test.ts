@@ -248,6 +248,7 @@ async function waitFor(condition: () => boolean): Promise<void> {
 async function isolatedServiceFixture(
   options: {
     failingHook?: boolean;
+    defaultBaseBranch?: string;
     beforeWorktreePreparation?: () => Promise<void>;
     beforeWorktreeFinish?: () => Promise<void>;
   } = {},
@@ -300,6 +301,9 @@ async function isolatedServiceFixture(
   const adopted = (await service.adoptProject({
     commandId: `adopt-${Date.now()}-${Math.random()}`,
     rootPath: root,
+    ...(options.defaultBaseBranch
+      ? { defaultBaseBranch: options.defaultBaseBranch }
+      : {}),
     maxParallelRuns: 1,
   })) as { project: { id: string } };
   return {
@@ -349,6 +353,49 @@ describe('OrchestrationService', () => {
         fixture.metadata.orchestration.listThreads(fixture.projectId),
       ).toHaveLength(1);
       expect(fixture.metadata.orchestration.listRuns()).toHaveLength(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('passes a read run mode through orchestration to the managed launch', async () => {
+    const fixture = await isolatedServiceFixture();
+    try {
+      await fixture.service.start();
+      await fixture.service.createThread(fixture.projectId, {
+        commandId: 'read-mode-thread',
+        title: 'Read only',
+        prompt: 'Inspect only.',
+        mode: 'read',
+      });
+      await waitFor(() => fixture.launches.length === 1);
+      expect(fixture.launches[0]).toMatchObject({ mode: 'read' });
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('uses an explicit project base branch without carrying current WIP', async () => {
+    const fixture = await isolatedServiceFixture({ defaultBaseBranch: 'main' });
+    try {
+      await writeFile(path.join(fixture.root, 'tracked.txt'), 'uncommitted\n');
+      await fixture.service.start();
+      await fixture.service.createThread(fixture.projectId, {
+        commandId: 'configured-base-thread',
+        title: 'Configured base',
+        prompt: 'Start from main.',
+      });
+      await waitFor(() => fixture.launches.length === 1);
+      const launchPath = fixture.launches[0]?.checkoutCwd;
+      if (typeof launchPath !== 'string')
+        throw new Error('Missing launch cwd.');
+      expect(await readFile(path.join(launchPath, 'tracked.txt'), 'utf8')).toBe(
+        'base\n',
+      );
+      const checkout = fixture.metadata.orchestration
+        .listCheckouts(fixture.projectId)
+        .find((item) => item.kind === 'worktree');
+      expect(checkout?.baseSha).toBeDefined();
     } finally {
       await fixture.close();
     }

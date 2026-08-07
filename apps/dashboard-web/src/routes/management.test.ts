@@ -1,6 +1,7 @@
 import type { RunSummary, ThreadSummary } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import {
+  globalAttentionAndFailureShelves,
   groupThreads,
   managementStatusCounts,
   pathWithin,
@@ -110,6 +111,23 @@ describe('management projections', () => {
     expect(pathWithin('/repo/worktree-copy', '/repo/worktree')).toBe(false);
   });
 
+  it('keeps failed threads out of the attention shelf without losing counts', () => {
+    const failed = thread('failed', 'failed', 1);
+    const waiting = thread('waiting', 'active', 2);
+    const result = globalAttentionAndFailureShelves(
+      [failed, waiting],
+      [
+        run('failed-run', 'failed', 'failed'),
+        run('waiting-run', 'waiting', 'waiting'),
+      ],
+    );
+    expect(result.attention.map((item) => item.id)).toEqual(['waiting']);
+    expect(result.failedOrInterrupted.map((item) => item.id)).toEqual([
+      'failed',
+    ]);
+    expect(result.attentionCount).toBe(2);
+  });
+
   it('makes checkout action safety explicit', () => {
     const activeRun = run('active', 't', 'running');
     const terminalRun = run('terminal', 't', 'settled');
@@ -125,6 +143,16 @@ describe('management projections', () => {
     const main = { ...worktree, kind: 'main' as const };
     expect(threadActionAvailability(activeRun, worktree)).toMatchObject({
       canInterrupt: true,
+      canReview: false,
+      canMerge: false,
+      canRetire: false,
+    });
+    expect(
+      threadActionAvailability(terminalRun, {
+        ...worktree,
+        activeRunId: 'another-active-run',
+      }),
+    ).toMatchObject({
       canReview: false,
       canMerge: false,
       canRetire: false,

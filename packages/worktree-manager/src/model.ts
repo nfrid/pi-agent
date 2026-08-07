@@ -28,6 +28,8 @@ export interface WorktreeRecord {
   /** Commit the branch was created from. */
   baseHead: string;
   base: WorktreeBase;
+  /** Explicit branch/ref selected as the base, when configured by the caller. */
+  baseRef?: string;
   /** Whether the parent's uncommitted work was carried in. */
   carriedWip: boolean;
   status: WorktreeStatus;
@@ -78,6 +80,8 @@ export interface WorktreeSummary {
   worktreePath: string;
   repositoryRoot: string;
   baseHead: string;
+  /** Explicit branch/ref selected as the base, when configured by the caller. */
+  baseRef?: string;
   /** Where the agent's own work starts: the carry commit, or baseHead. */
   workBase: string;
   status: WorktreeStatus;
@@ -102,6 +106,7 @@ export function worktreeSummary(record: WorktreeRecord): WorktreeSummary {
     worktreePath: record.worktreePath,
     repositoryRoot: record.repositoryRoot,
     baseHead: record.baseHead,
+    baseRef: record.baseRef,
     workBase: base,
     status: record.status,
     headCommit: record.headCommit,

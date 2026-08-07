@@ -111,6 +111,10 @@ export const ProjectSummarySchema = Type.Object(
     id: IdentifierSchema,
     title: Type.String({ minLength: 1, maxLength: 512 }),
     rootPath: PathSchema,
+    /** Default checkout isolation used by the new-thread form. */
+    defaultIsolation: Type.Optional(
+      Type.Union([Type.Literal('worktree'), Type.Literal('main')]),
+    ),
     status: ProjectStatusSchema,
     maxParallelRuns: Type.Integer({ minimum: 1, maximum: 1024 }),
     activeRunCount: Type.Integer({ minimum: 0 }),
@@ -276,6 +280,8 @@ export interface RuntimeBinding {
 
 export interface RuntimeStartInput {
   readonly runtimeId: string;
+  /** Managed orchestration runs may restrict the Pi tool set. */
+  readonly mode?: RunMode;
   readonly cwd: string;
   readonly name?: string;
   readonly socketPath: string;

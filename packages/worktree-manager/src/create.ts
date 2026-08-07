@@ -24,6 +24,8 @@ const MAX_SETUP_ERROR_CHARS = 2_000;
 const DEFAULT_WORKTREE_ENVIRONMENT_VARIABLE = 'PI_WORKTREE_ID';
 const DEFAULT_CARRY_COMMIT_MESSAGE =
   'Carried uncommitted parent work\n\nApplied by pi worktree manager so the task starts from the parent working state.';
+const MAX_BASE_REF_CHARS = 512;
+const SAFE_BASE_REF = /^[A-Za-z0-9][A-Za-z0-9._/@+-]*$/;
 
 function slugify(name: string): string {
   const slug = name
@@ -157,6 +159,8 @@ export interface WorktreeCreator<
     cwd: string;
     name: string;
     base?: WorktreeBase;
+    /** Safe branch/ref to resolve instead of the parent's current HEAD. */
+    baseRef?: string;
   }): Promise<WorktreePreparation<Record>>;
   /** Recreate a retired checkout from its retained branch ref. */
   rehydrateWorktree(record: Record): Promise<PreparedWorktree<Record>>;
@@ -191,6 +195,7 @@ export function createWorktreeCreator<
     cwd: string;
     name: string;
     base?: WorktreeBase;
+    baseRef?: string;
   }): Promise<WorktreePreparation<Record>> {
     let root: string;
     try {
@@ -202,14 +207,39 @@ export function createWorktreeCreator<
     }
 
     const id = randomUUID();
-    const base = options.base ?? 'wip';
+    const baseRef = options.baseRef;
+    if (
+      baseRef !== undefined &&
+      (baseRef.length === 0 ||
+        baseRef.length > MAX_BASE_REF_CHARS ||
+        !SAFE_BASE_REF.test(baseRef) ||
+        baseRef.includes('..') ||
+        baseRef.includes('@{') ||
+        baseRef.endsWith('.') ||
+        baseRef.endsWith('/') ||
+        baseRef.includes('//'))
+    )
+      return {
+        fallbackReason: 'Worktree unavailable: invalid base branch/ref.',
+      };
+    const base = baseRef === undefined ? (options.base ?? 'wip') : 'head';
     const canonicalCwd = canonical(options.cwd);
     const workingDirectory = path.relative(root, canonicalCwd);
     let worktreePath: string | undefined;
     let branch: string | undefined;
 
     try {
-      const baseHead = await gitText(root, ['rev-parse', 'HEAD']);
+      const baseHead = await gitText(
+        root,
+        baseRef === undefined
+          ? ['rev-parse', 'HEAD']
+          : [
+              'rev-parse',
+              '--verify',
+              '--end-of-options',
+              `${baseRef}^{commit}`,
+            ],
+      );
       branch = await uniqueBranch(root, slugify(options.name));
       worktreePath = path.join(root, WORKTREE_DIR, path.basename(branch));
       if (existsSync(worktreePath))
@@ -246,6 +276,7 @@ export function createWorktreeCreator<
         branch,
         baseHead,
         base,
+        ...(baseRef ? { baseRef } : {}),
         carriedWip: Boolean(carryCommit),
         ...(carryCommit ? { carryCommit } : {}),
         status: 'active' as const,

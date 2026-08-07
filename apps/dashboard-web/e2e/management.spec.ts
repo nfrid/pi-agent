@@ -6,6 +6,7 @@ const project = {
   rootPath: '/workspace/demo',
   status: 'active',
   maxParallelRuns: 2,
+  defaultIsolation: 'main',
   activeRunCount: 1,
   updatedAt: 10,
 };
@@ -379,6 +380,33 @@ test('managed thread reuses transcript and blocks pending ask-user without agent
   ).toHaveCount(0);
 });
 
+test('global new thread uses the managed thread project', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const secondProject = {
+    ...project,
+    id: 'p2',
+    title: 'Second project',
+    rootPath: '/workspace/second',
+    defaultIsolation: 'worktree',
+  };
+  const multiProject = {
+    ...snapshot,
+    projects: [project, secondProject],
+    threads: snapshot.threads.map((thread) =>
+      thread.id === 't-running' ? { ...thread, projectId: 'p2' } : thread,
+    ),
+  };
+  await page.route('**/api/snapshot', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(multiProject),
+    }),
+  );
+  await page.goto('/threads/t-running');
+  await page.getByRole('button', { name: 'New thread' }).click();
+  await expect(page).toHaveURL(/\/projects\/p2\/new$/u);
+});
+
 test('@desktop management desktop has persistent rail and queues a complete prompt', async ({
   page,
 }) => {
@@ -410,6 +438,7 @@ test('@desktop management desktop has persistent rail and queues a complete prom
   await page
     .getByRole('textbox', { name: 'Complete prompt' })
     .fill('Implement the complete task with all constraints.');
+  await expect(page.getByRole('radio', { name: 'Main' })).toBeChecked();
   await page.getByRole('button', { name: 'Queue thread' }).click();
   await expect(page).toHaveURL(/\/threads\/t-new$/u);
 });

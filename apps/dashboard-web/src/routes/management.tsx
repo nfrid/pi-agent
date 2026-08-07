@@ -21,7 +21,7 @@ import type {
   ThreadSummary,
 } from '@pi-dashboard/protocol';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useCallback, useState } from 'react';
 import { Composer } from '../features/composer';
 import { SessionView } from '../features/session';
 import { useDashboardNavigate } from './navigation';
@@ -157,7 +157,9 @@ export function threadActionAvailability(
   run: RunSummary | undefined,
   checkout: CheckoutSummary | undefined,
 ): ThreadActionAvailability {
-  const active = Boolean(run && activeRunStatuses.has(run.status));
+  const active = Boolean(
+    (run && activeRunStatuses.has(run.status)) || checkout?.activeRunId,
+  );
   const reviewable = Boolean(
     checkout &&
       checkout.kind === 'worktree' &&
@@ -702,7 +704,9 @@ export function NewThreadRoute({
   });
   const [title, setTitle] = useState('');
   const [prompt, setPrompt] = useState('');
-  const [isolation, setIsolation] = useState<'worktree' | 'main'>('worktree');
+  const [isolation, setIsolation] = useState<'worktree' | 'main'>(
+    project?.defaultIsolation ?? 'worktree',
+  );
   const [mode, setMode] = useState<'read' | 'write'>('write');
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
@@ -850,6 +854,7 @@ export function ThreadRoute({
 }) {
   const thread = snapshot.threads?.find((item) => item.id === threadId);
   const go = useDashboardNavigate();
+  const keepThreadRoute = useCallback(() => undefined, []);
   const queryClient = useQueryClient();
   const runs = (snapshot.runs ?? [])
     .filter((run) => run.threadId === threadId)
@@ -1102,12 +1107,44 @@ export function ThreadRoute({
               store={store}
               Composer={Composer}
               embedded
+              onSessionReplacement={keepThreadRoute}
             />
           </section>
         )}
       </section>
     </>
   );
+}
+
+export function globalAttentionAndFailureShelves(
+  threads: readonly ThreadSummary[],
+  runs: readonly RunSummary[],
+): {
+  attention: readonly ThreadSummary[];
+  failedOrInterrupted: readonly ThreadSummary[];
+  attentionCount: number;
+} {
+  const latest = (thread: ThreadSummary) => runFor(thread, runs);
+  const failedOrInterrupted = threads.filter((thread) => {
+    const status = latest(thread)?.status ?? thread.status;
+    return (
+      thread.status === 'failed' ||
+      status === 'failed' ||
+      status === 'interrupted'
+    );
+  });
+  const attentionCount = threads.filter((thread) =>
+    threadNeedsAttention(thread, runs),
+  ).length;
+  return {
+    attention: threads.filter(
+      (thread) =>
+        threadNeedsAttention(thread, runs) &&
+        !failedOrInterrupted.includes(thread),
+    ),
+    failedOrInterrupted,
+    attentionCount,
+  };
 }
 
 function GlobalOverview({ snapshot }: { snapshot: BrowserSnapshot }) {
@@ -1131,17 +1168,8 @@ function GlobalOverview({ snapshot }: { snapshot: BrowserSnapshot }) {
       !threadNeedsAttention(thread, runs) &&
       (latest(thread)?.status ?? thread.status) === 'queued',
   );
-  const attention = threads.filter((thread) =>
-    threadNeedsAttention(thread, runs),
-  );
-  const failedOrInterrupted = threads.filter((thread) => {
-    const status = latest(thread)?.status ?? thread.status;
-    return (
-      thread.status === 'failed' ||
-      status === 'failed' ||
-      status === 'interrupted'
-    );
-  });
+  const globalShelves = globalAttentionAndFailureShelves(threads, runs);
+  const { attention, failedOrInterrupted, attentionCount } = globalShelves;
   const settled = threads.filter((thread) => {
     const status = latest(thread)?.status ?? thread.status;
     return (
@@ -1189,7 +1217,7 @@ function GlobalOverview({ snapshot }: { snapshot: BrowserSnapshot }) {
             </p>
             <p className="management-summary">
               {running.length} active · {queued.length} queued ·{' '}
-              {attention.length} needs attention
+              {attentionCount} needs attention
             </p>
           </div>
           <button type="button" onClick={() => go('/projects')}>

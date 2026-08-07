@@ -63,6 +63,7 @@ export function SessionView({
   store,
   Composer,
   embedded = false,
+  onSessionReplacement,
 }: {
   id: string;
   snapshot: BrowserSnapshot;
@@ -70,8 +71,22 @@ export function SessionView({
   Composer: ComponentType<ComposerProps>;
   /** Render transcript controls without the full-page agent navigation shell. */
   embedded?: boolean;
+  /** Managed thread routes handle replacement without leaving their thread URL. */
+  onSessionReplacement?: (sessionId: string) => void;
 }) {
   const navigate = useNavigate();
+  const replaceSession = useCallback(
+    (sessionId: string) => {
+      if (onSessionReplacement) {
+        onSessionReplacement(sessionId);
+        return;
+      }
+      void navigate({
+        to: `/sessions/${encodeURIComponent(sessionId)}`,
+      });
+    },
+    [navigate, onSessionReplacement],
+  );
   const query = useQuery(sessionQueryOptions(dashboardHttpClient, id));
   const projection = useDashboardStore(
     store,
@@ -138,9 +153,7 @@ export function SessionView({
     void query.dataUpdatedAt;
     if (!query.data) return;
     if (query.data.metadata.id !== id) {
-      void navigate({
-        to: `/sessions/${encodeURIComponent(query.data.metadata.id)}`,
-      });
+      replaceSession(query.data.metadata.id);
       return;
     }
     if (store.hydrateSession(query.data)) {
@@ -162,9 +175,9 @@ export function SessionView({
     return () => window.clearTimeout(retry);
   }, [
     id,
-    navigate,
     query.data,
     query.dataUpdatedAt,
+    replaceSession,
     requestSessionRefetch,
     store,
   ]);
@@ -334,9 +347,7 @@ export function SessionView({
   }, [sessionMounted]);
   useEffect(() => {
     if (replacementSessionId && replacementSessionId !== id) {
-      void navigate({
-        to: `/sessions/${encodeURIComponent(replacementSessionId)}`,
-      });
+      replaceSession(replacementSessionId);
       return;
     }
     if (data && sessionChange > 0)
@@ -345,7 +356,7 @@ export function SessionView({
         window.scrollY,
         window.innerHeight,
       );
-  }, [data, id, navigate, replacementSessionId, sessionChange]);
+  }, [data, id, replaceSession, replacementSessionId, sessionChange]);
   const status = runtime
     ? runtime.online === false
       ? 'offline'

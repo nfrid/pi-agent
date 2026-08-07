@@ -248,8 +248,9 @@ export class OrchestrationService {
       title: command.title ?? path.basename(root),
       rootPath: root,
       repositoryIdentity: identity,
-      defaultBaseBranch:
-        command.defaultBaseBranch ?? (branch === 'HEAD' ? undefined : branch),
+      // An inferred current branch is not a configured base selector. Keep
+      // fresh worktrees on the current-WIP default unless explicitly supplied.
+      defaultBaseBranch: command.defaultBaseBranch,
       defaultModel: command.defaultModel,
       defaultIsolation: command.defaultIsolation ?? 'worktree',
       maxParallelRuns: command.maxParallelRuns ?? 1,
@@ -1080,7 +1081,9 @@ export class OrchestrationService {
             return creator.prepareWorktree({
               cwd: project.rootPath,
               name: this.requireThread(run.threadId).title,
-              base: 'wip',
+              ...(project.defaultBaseBranch
+                ? { baseRef: project.defaultBaseBranch }
+                : { base: 'wip' as const }),
             });
           });
           if (!fresh.worktree) {
@@ -1181,6 +1184,7 @@ export class OrchestrationService {
         runtimeId,
         checkoutCwd: cwd,
         name: this.requireThread(run.threadId).title,
+        mode: run.mode,
         model: run.model,
       });
 

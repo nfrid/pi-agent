@@ -248,6 +248,10 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       id: stringValue(row, 'id'),
       title: stringValue(row, 'title'),
       rootPath: stringValue(row, 'root_path'),
+      defaultIsolation: stringValue(
+        row,
+        'default_isolation',
+      ) as Project['defaultIsolation'],
       status: stringValue(row, 'status') as Project['status'],
       maxParallelRuns: Number(row.max_parallel_runs),
       activeRunCount: Number(row.active_run_count),

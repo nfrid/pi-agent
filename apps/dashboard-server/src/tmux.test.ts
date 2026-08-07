@@ -64,6 +64,32 @@ describe('tmux adapter', () => {
       ]),
     );
     expect(runner.calls.at(-1)?.join(' ')).not.toContain('mobile; no shell');
+    expect(runner.calls.at(-1)).not.toContain('--tools');
+  });
+
+  it('uses a fail-closed read-only Pi tool allowlist for read launches', async () => {
+    const runner = new FakeRunner();
+    const adapter = new TmuxAdapter(runner);
+    await adapter.newManagedWindow({
+      workspace: {
+        id: 'w',
+        name: 'project',
+        path: '/tmp',
+        canonicalPath: '/tmp',
+        source: 'tmux',
+        tmuxSession: 'project',
+        active: true,
+      },
+      runtimeId: 'read-runtime',
+      socketPath: '/tmp/socket',
+      token: 'token',
+      mode: 'read',
+    });
+    const args = runner.calls.at(-1) ?? [];
+    expect(args).toContain('--tools');
+    expect(args[args.indexOf('--tools') + 1]).toBe('read');
+    expect(args).not.toEqual(expect.arrayContaining(['bash', 'edit', 'write']));
+    expect(args).not.toContain('--extension');
   });
 
   it('exposes the tmux launch through the provider-neutral lifecycle contract', async () => {

@@ -506,6 +506,13 @@ describe('dashboard protocol', () => {
     expect(
       validateStartRuntimeRequest({
         workspaceId: 'w',
+        mode: 'read',
+        model: { provider: 'p', model: 'm' },
+      }).mode,
+    ).toBe('read');
+    expect(
+      validateStartRuntimeRequest({
+        workspaceId: 'w',
         model: { provider: 'p', model: 'm' },
       }).workspaceId,
     ).toBe('w');

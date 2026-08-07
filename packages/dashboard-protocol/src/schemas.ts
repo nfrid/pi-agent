@@ -1046,6 +1046,10 @@ export const StartRuntimeRequestSchema = Type.Object(
     checkoutCwd: Type.Optional(
       Type.String({ minLength: 1, maxLength: MAX_PATH }),
     ),
+    /** Managed orchestration launches may restrict Pi to read-only tools. */
+    mode: Type.Optional(
+      Type.Union([Type.Literal('read'), Type.Literal('write')]),
+    ),
     sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
     model: Type.Optional(

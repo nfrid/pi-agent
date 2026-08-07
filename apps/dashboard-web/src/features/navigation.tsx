@@ -98,9 +98,20 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
                 const projectMatch = pathname.match(
                   /^\/projects\/([^/]+)(?:\/|$)/u,
                 );
+                const threadMatch = pathname.match(
+                  /^\/threads\/([^/]+)(?:\/|$)/u,
+                );
+                const threadProjectId = threadMatch?.[1]
+                  ? snapshot.threads?.find(
+                      (thread) =>
+                        thread.id === decodeURIComponent(threadMatch[1]),
+                    )?.projectId
+                  : undefined;
                 const projectId = projectMatch?.[1]
                   ? decodeURIComponent(projectMatch[1])
-                  : snapshot.projects?.[0]?.id;
+                  : threadMatch
+                    ? threadProjectId
+                    : snapshot.projects?.[0]?.id;
                 if (projectId)
                   go(`/projects/${encodeURIComponent(projectId)}/new`);
                 return;
