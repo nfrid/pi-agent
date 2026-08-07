@@ -37,4 +37,30 @@ describe('delegate live surface', () => {
       },
     });
   });
+
+  it('prioritizes active work and bounds historical dashboard payloads', () => {
+    const store = new DelegateStatusStore();
+    const active = createRun('active task');
+    const [activeId] = store.start([active], 'background');
+    active.state = 'running';
+    store.update(activeId, active);
+
+    for (let index = 0; index < 30; index += 1) {
+      const run = createRun(`historical task ${index}`);
+      run.queuedAt = (active.queuedAt ?? 0) + index + 1;
+      const [id] = store.start([run], 'background');
+      run.state = 'success';
+      run.finishedAt = Date.now() + index;
+      store.update(id, run);
+    }
+
+    const statuses = (
+      delegateSurface(store).viewModel as {
+        statuses: Array<{ id: string; state: string }>;
+      }
+    ).statuses;
+    expect(statuses).toHaveLength(24);
+    expect(statuses[0]).toMatchObject({ id: activeId, state: 'running' });
+    expect(statuses.some((status) => status.id === 'ds-2')).toBe(false);
+  });
 });

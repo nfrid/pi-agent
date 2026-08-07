@@ -20,16 +20,26 @@ export function dashboardUpdateAvailable(
   return latestVersion !== undefined && latestVersion !== currentVersion;
 }
 
-export async function fetchDashboardVersion(
+let pendingVersionRequest: Promise<string | undefined> | undefined;
+
+export function fetchDashboardVersion(
   fetcher: typeof fetch = fetch,
 ): Promise<string | undefined> {
-  try {
-    const response = await fetcher(VERSION_URL, { cache: 'no-store' });
-    if (!response.ok) return undefined;
-    return dashboardVersion(await response.json());
-  } catch {
-    return undefined;
-  }
+  if (pendingVersionRequest) return pendingVersionRequest;
+  const request = (async () => {
+    try {
+      const response = await fetcher(VERSION_URL, { cache: 'no-store' });
+      if (!response.ok) return undefined;
+      return dashboardVersion(await response.json());
+    } catch {
+      return undefined;
+    }
+  })();
+  pendingVersionRequest = request;
+  void request.finally(() => {
+    if (pendingVersionRequest === request) pendingVersionRequest = undefined;
+  });
+  return request;
 }
 
 async function reloadDashboard(): Promise<void> {
@@ -48,6 +58,7 @@ export function UpdateAvailablePrompt() {
   useEffect(() => {
     let active = true;
     const check = async () => {
+      if (document.visibilityState !== 'visible') return;
       const latestVersion = await fetchDashboardVersion();
       if (
         active &&
@@ -60,13 +71,16 @@ export function UpdateAvailablePrompt() {
     };
 
     void check();
-    const interval = window.setInterval(check, UPDATE_POLL_INTERVAL_MS);
-    window.addEventListener('focus', check);
+    const interval = window.setInterval(
+      () => void check(),
+      UPDATE_POLL_INTERVAL_MS,
+    );
+    window.addEventListener('focus', checkWhenVisible);
     document.addEventListener('visibilitychange', checkWhenVisible);
     return () => {
       active = false;
       window.clearInterval(interval);
-      window.removeEventListener('focus', check);
+      window.removeEventListener('focus', checkWhenVisible);
       document.removeEventListener('visibilitychange', checkWhenVisible);
     };
   }, []);

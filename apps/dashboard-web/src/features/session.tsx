@@ -117,6 +117,7 @@ export function SessionView({
   const [historyError, setHistoryError] = useState<string>();
   const closeInspector = useCallback(() => setInspectorOpen(false), []);
   const scrolledSessionRef = useRef<string | undefined>(undefined);
+  const autoScrollFrameRef = useRef<number | undefined>(undefined);
   const stickToBottomRef = useRef(true);
   const outlineTriggerRef = useRef<HTMLButtonElement>(null);
   const outlineWasOpenRef = useRef(false);
@@ -318,9 +319,15 @@ export function SessionView({
   useLayoutEffect(() => {
     if (!data || !projection) return;
     const enteringSession = scrolledSessionRef.current !== id;
+    if (enteringSession && autoScrollFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(autoScrollFrameRef.current);
+      autoScrollFrameRef.current = undefined;
+    }
     if (!enteringSession && !stickToBottomRef.current) return;
     scrolledSessionRef.current = id;
-    const frame = window.requestAnimationFrame(() => {
+    if (autoScrollFrameRef.current !== undefined) return;
+    autoScrollFrameRef.current = window.requestAnimationFrame(() => {
+      autoScrollFrameRef.current = undefined;
       // Virtualization can increase the document height before this frame and
       // make the scroll listener clear stickiness. Entering a session must
       // still establish the initial tail position.
@@ -328,8 +335,14 @@ export function SessionView({
       window.scrollTo(0, document.documentElement.scrollHeight);
       stickToBottomRef.current = true;
     });
-    return () => window.cancelAnimationFrame(frame);
   }, [data, projection, id]);
+  useEffect(
+    () => () => {
+      if (autoScrollFrameRef.current !== undefined)
+        window.cancelAnimationFrame(autoScrollFrameRef.current);
+    },
+    [],
+  );
   const sessionMounted = Boolean(data && projection);
   useLayoutEffect(() => {
     if (!sessionMounted) return;

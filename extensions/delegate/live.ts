@@ -16,7 +16,8 @@ import {
 import type { DelegateStatusSnapshot, DelegateStatusStore } from './status';
 
 export const DELEGATE_EXTENSION_ID = 'delegate';
-const MAX_TRANSCRIPT_SURFACE_CHARS = 240_000;
+const MAX_SURFACE_STATUSES = 24;
+const MAX_TRANSCRIPT_SURFACE_CHARS = 96_000;
 
 function text(value: string, max: number): string {
   return value.slice(0, max);
@@ -136,12 +137,20 @@ function statusSnapshot(
 
 export function delegateSurface(store: DelegateStatusStore): ExtensionSurface {
   const transcriptBudget = { remaining: MAX_TRANSCRIPT_SURFACE_CHARS };
+  const statuses = store
+    .list()
+    .sort((left, right) => {
+      const leftActive = left.state === 'queued' || left.state === 'running';
+      const rightActive = right.state === 'queued' || right.state === 'running';
+      if (leftActive !== rightActive) return leftActive ? -1 : 1;
+      return right.createdAt - left.createdAt;
+    })
+    .slice(0, MAX_SURFACE_STATUSES);
   const viewModel = {
     version: 1 as const,
-    statuses: store
-      .list()
-      .slice(0, 64)
-      .map((status) => statusSnapshot(status, transcriptBudget)),
+    statuses: statuses.map((status) =>
+      statusSnapshot(status, transcriptBudget),
+    ),
   };
   // Keep this check next to the adapter so a future status field cannot leak
   // into the bridge without a corresponding renderer contract change.

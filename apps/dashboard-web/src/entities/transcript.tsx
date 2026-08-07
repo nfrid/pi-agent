@@ -245,33 +245,46 @@ export function TranscriptOutline({
     [landmarks],
   );
   const [activeKey, setActiveKey] = useState(minimapLandmarks[0]?.key);
+  const outlineLandmarksRef = useRef(outlineLandmarks);
+  const minimapLandmarksRef = useRef(minimapLandmarks);
+  outlineLandmarksRef.current = outlineLandmarks;
+  minimapLandmarksRef.current = minimapLandmarks;
+  const landmarkRevision = useMemo(
+    () =>
+      `${outlineLandmarks.map((landmark) => `${landmark.key}:${landmark.itemIndex}`).join('|')}::${minimapLandmarks.map((landmark) => landmark.key).join('|')}`,
+    [minimapLandmarks, outlineLandmarks],
+  );
   useEffect(() => {
+    void landmarkRevision;
+    const currentMinimap = minimapLandmarksRef.current;
     setActiveKey((current) =>
-      minimapLandmarks.some((landmark) => landmark.key === current)
+      currentMinimap.some((landmark) => landmark.key === current)
         ? current
-        : minimapLandmarks[0]?.key,
+        : currentMinimap[0]?.key,
     );
     let frame: number | undefined;
     const updateActive = () => {
       if (frame !== undefined) return;
       frame = window.requestAnimationFrame(() => {
         frame = undefined;
+        const currentOutline = outlineLandmarksRef.current;
+        const currentMinimap = minimapLandmarksRef.current;
         const elements = new Map(
           Array.from(
             document.querySelectorAll<HTMLElement>('[data-transcript-key]'),
           ).map((element) => [element.dataset.transcriptKey, element]),
         );
         let active: TranscriptLandmark | undefined;
-        for (const landmark of outlineLandmarks) {
+        for (const landmark of currentOutline) {
           const element = elements.get(landmark.key);
           if (element && element.getBoundingClientRect().top <= 120)
             active = landmark;
         }
         if (active) {
-          const marker = minimapLandmarks
+          const marker = currentMinimap
             .filter((landmark) => landmark.itemIndex <= active.itemIndex)
             .at(-1);
-          setActiveKey(marker?.key ?? minimapLandmarks[0]?.key);
+          setActiveKey(marker?.key ?? currentMinimap[0]?.key);
         }
       });
     };
@@ -281,7 +294,7 @@ export function TranscriptOutline({
       window.removeEventListener('scroll', updateActive);
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
-  }, [minimapLandmarks, outlineLandmarks]);
+  }, [landmarkRevision]);
   const list = (
     <div className="transcript-outline-list">
       {outlineLandmarks.length ? (

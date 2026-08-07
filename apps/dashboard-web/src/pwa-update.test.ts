@@ -35,4 +35,32 @@ describe('dashboard PWA updates', () => {
     fetcher.mockRejectedValueOnce(new Error('offline'));
     await expect(fetchDashboardVersion(fetcher)).resolves.toBeUndefined();
   });
+
+  it('shares overlapping focus, visibility, and interval checks', async () => {
+    let resolve!: (response: Response) => void;
+    const fetcher = vi.fn<typeof fetch>(
+      () =>
+        new Promise<Response>((next) => {
+          resolve = next;
+        }),
+    );
+    const checks = [
+      fetchDashboardVersion(fetcher),
+      fetchDashboardVersion(fetcher),
+      fetchDashboardVersion(fetcher),
+    ];
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    resolve(
+      new Response(JSON.stringify({ version: 'release-2' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await expect(Promise.all(checks)).resolves.toEqual([
+      'release-2',
+      'release-2',
+      'release-2',
+    ]);
+  });
 });
