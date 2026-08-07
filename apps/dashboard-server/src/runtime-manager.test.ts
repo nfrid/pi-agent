@@ -54,6 +54,54 @@ describe('runtime stopping', () => {
     expect(forget).toHaveBeenCalledOnce();
   });
 
+  it('retains recovered evidence when provider cleanup fails and retries it', async () => {
+    const restoredBinding = {
+      runtimeId: 'runtime-recovered-retry',
+      location: { id: 'provider:opaque-retry-location' },
+    };
+    const stop = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('provider stop failed'))
+      .mockResolvedValue(undefined);
+    const forget = vi.fn();
+    const manager = new RuntimeManager(
+      { forget } as never,
+      {
+        attach: vi.fn().mockResolvedValue(restoredBinding),
+        stop,
+      } as never,
+      {} as never,
+      {
+        managedLaunches: () => [
+          {
+            runtimeId: restoredBinding.runtimeId,
+            workspaceId: 'workspace-retry',
+            placement: {
+              tmuxSession: 'sesh',
+              tmuxWindowId: '@retry',
+              tmuxPaneId: '%retry',
+            },
+            identityTokenHash: 'identity-hash',
+            launchTokenHash: 'launch-hash',
+            launchConsumed: true,
+            launchedAt: 1,
+          },
+        ],
+        markManagedStopped: vi.fn(),
+      } as never,
+      '/tmp/bridge.sock',
+    );
+    await manager.recover(restoredBinding.runtimeId);
+    await expect(
+      manager.stopRecovered(restoredBinding.runtimeId),
+    ).rejects.toThrow('provider stop failed');
+    expect(manager.placement(restoredBinding.runtimeId)).toBeDefined();
+    expect(forget).not.toHaveBeenCalled();
+    await manager.stopRecovered(restoredBinding.runtimeId);
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(forget).toHaveBeenCalledOnce();
+  });
+
   it('forgets an external runtime even when its stale bridge rejects shutdown', async () => {
     const forget = vi.fn();
     const manager = new RuntimeManager(

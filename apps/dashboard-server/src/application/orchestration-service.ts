@@ -9,6 +9,7 @@ import type {
   CommandReceipt,
   Project,
   Run,
+  RuntimeSnapshot,
   Thread,
   WorkspaceTarget,
 } from '@pi-dashboard/protocol';
@@ -109,9 +110,11 @@ export class OrchestrationService {
   private readonly pollMs: number;
   private readonly reconnectGraceMs: number;
   private readonly inFlight = new Set<string>();
+  /** Execution remains observable while preparation or manager.launch is pending. */
+  private readonly executionTasks = new Map<string, Promise<void>>();
   private readonly registryTasks = new Set<Promise<void>>();
-  /** One prompt handoff may be shared by several concurrent hello callbacks. */
-  private readonly registryRunTasks = new Map<string, Promise<void>>();
+  /** Registry callbacks for one durable run are reduced in bridge arrival order. */
+  private readonly registryRunQueues = new Map<string, Promise<void>>();
   /** Concurrent cancellation requests for one command share all side effects. */
   private readonly cancelTasks = new Map<
     string,
@@ -382,21 +385,30 @@ export class OrchestrationService {
 
   private async performCancel(runId: string, commandId: string): Promise<Run> {
     const run = this.requireRun(runId);
+    const execution = this.executionTasks.get(runId);
     if (!TERMINAL_RUN_STATUSES.includes(run.status)) {
-      if (run.runtimeId)
-        await this.manager.stop(run.runtimeId, true).catch(() => undefined);
-      const current = this.repository.getRun(runId);
-      if (current && !TERMINAL_RUN_STATUSES.includes(current.status)) {
+      // Publish cancellation before waiting. The worker rechecks this durable
+      // intent after every side-effect boundary and will stop a launch that
+      // was already in flight rather than letting it become orphaned.
+      try {
+        this.repository.transitionRun(runId, 'cancelled');
+      } catch {
         try {
-          this.repository.transitionRun(runId, 'cancelled');
-        } catch {
           this.repository.transitionRun(runId, 'interrupted');
+        } catch {
+          /* another lifecycle transition won */
         }
       }
     }
+    if (execution) await execution;
+    else if (run.runtimeId) await this.manager.stop(run.runtimeId, true);
+
     const result = this.repository.getRun(runId) as Run;
     const checkout = this.repository.getCheckout(result.checkoutId);
-    if (checkout?.kind === 'worktree') {
+    // An execution task owns fresh-worktree cleanup. In particular, do not
+    // finish a fresh checkout after its provider stop failed: retaining the
+    // record is the retry handle for the leaked placement.
+    if (!execution && checkout?.kind === 'worktree') {
       const record = this.worktreeRecord(checkout);
       if (record) {
         await createWorktreeFinisher(this.storeFor(checkout)).finishWorktree(
@@ -563,46 +575,47 @@ export class OrchestrationService {
     );
   }
 
-  private async handleRegistryChange(change: RegistryChange): Promise<void> {
+  private handleRegistryChange(change: RegistryChange): Promise<void> {
     const runtimeId =
       change.kind === 'registered' || change.kind === 'offline'
         ? change.snapshot.runtimeId
         : change.runtimeId;
     const run = this.repository.getRunByRuntimeId(runtimeId);
+    if (!run) return Promise.resolve();
+    const prior = this.registryRunQueues.get(run.id) ?? Promise.resolve();
+    const task = prior
+      .catch(() => undefined)
+      .then(() => this.reduceRegistryChange(run.id, runtimeId, change));
+    this.registryRunQueues.set(run.id, task);
+    void task.then(
+      () => {
+        if (this.registryRunQueues.get(run.id) === task)
+          this.registryRunQueues.delete(run.id);
+      },
+      () => {
+        if (this.registryRunQueues.get(run.id) === task)
+          this.registryRunQueues.delete(run.id);
+      },
+    );
+    return task;
+  }
+
+  private async reduceRegistryChange(
+    runId: string,
+    runtimeId: string,
+    change: RegistryChange,
+  ): Promise<void> {
+    const run = this.repository.getRun(runId);
     if (!run) return;
     try {
       if (change.kind === 'registered') {
-        const existing = this.registryRunTasks.get(run.id);
-        if (existing) {
-          await existing;
-        } else {
-          const task = this.bindAndDeliverPrompt(
-            run.id,
-            runtimeId,
-            change.snapshot.session.id,
-          );
-          this.registryRunTasks.set(run.id, task);
-          void task.then(
-            () => {
-              if (this.registryRunTasks.get(run.id) === task)
-                this.registryRunTasks.delete(run.id);
-            },
-            () => {
-              if (this.registryRunTasks.get(run.id) === task)
-                this.registryRunTasks.delete(run.id);
-            },
-          );
-          await task;
-        }
+        await this.bindAndDeliverPrompt(
+          run.id,
+          runtimeId,
+          change.snapshot.session.id,
+          change.snapshot,
+        );
       } else if (change.kind === 'event') {
-        const current = this.repository.getRun(run.id);
-        const promptPending =
-          current &&
-          (current.status === 'preparing' || current.status === 'starting') &&
-          !this.repository.getCommandReceipt(this.promptReceiptId(run.id));
-        // Runtime state events can race the hello prompt ACK. They must not
-        // promote a run to running (or settled through running) first.
-        if (promptPending) return;
         if (change.event.type === 'agent.settled') await this.settle(run.id);
         else if (change.event.type === 'interaction.requested') {
           this.transitionIfPossible(run.id, 'waiting');
@@ -622,16 +635,26 @@ export class OrchestrationService {
           } else if (state === 'working') {
             this.transitionIfPossible(run.id, 'running');
           }
+        } else if (
+          change.event.type === 'runtime.goodbye' &&
+          change.event.reason !== 'reload'
+        ) {
+          this.repository.stopRuntime(runtimeId);
+          if (ACTIVE_RUN_STATUSES.includes(run.status))
+            this.failRun(
+              run.id,
+              'interrupted',
+              `Runtime exited before the run settled${change.event.reason ? ` (${change.event.reason})` : ''}.`,
+            );
         }
-      } else if (
-        change.kind === 'offline' &&
-        ACTIVE_RUN_STATUSES.includes(run.status)
-      ) {
-        this.failRun(
-          run.id,
-          'interrupted',
-          'Runtime disconnected before the run settled.',
-        );
+      } else {
+        this.repository.stopRuntime(runtimeId);
+        if (ACTIVE_RUN_STATUSES.includes(run.status))
+          this.failRun(
+            run.id,
+            'interrupted',
+            'Runtime disconnected before the run settled.',
+          );
       }
     } catch (error) {
       this.repository.setRunError(run.id, boundedErrorText(error));
@@ -649,6 +672,7 @@ export class OrchestrationService {
     runId: string,
     runtimeId: string,
     piSessionId: string,
+    registeredSnapshot?: RuntimeSnapshot,
   ): Promise<void> {
     const run = this.repository.getRun(runId);
     if (!run || TERMINAL_RUN_STATUSES.includes(run.status)) return;
@@ -674,7 +698,14 @@ export class OrchestrationService {
     if (!current || TERMINAL_RUN_STATUSES.includes(current.status)) return;
     if (current.status === 'preparing')
       this.transitionIfPossible(runId, 'starting');
-    if (this.repository.getRun(runId)?.status === 'starting')
+    const authoritative = this.registry.get(runtimeId);
+    const pendingInteractions =
+      authoritative?.pendingInteractions ??
+      registeredSnapshot?.pendingInteractions ??
+      [];
+    if (pendingInteractions.length > 0)
+      this.transitionIfPossible(runId, 'waiting');
+    else if (this.repository.getRun(runId)?.status === 'starting')
       this.repository.transitionRun(runId, 'running');
     this.repository.transitionRuntime(runtimeId, 'running');
   }
@@ -783,10 +814,22 @@ export class OrchestrationService {
         const claimed = this.repository.claimQueuedRun(run.id);
         if (!claimed) continue;
         this.inFlight.add(run.id);
-        void this.execute(claimed).finally(() => {
-          this.inFlight.delete(run.id);
-          void this.drain();
-        });
+        const task = this.execute(claimed);
+        this.executionTasks.set(run.id, task);
+        void task.then(
+          () => {
+            if (this.executionTasks.get(run.id) === task)
+              this.executionTasks.delete(run.id);
+            this.inFlight.delete(run.id);
+            void this.drain();
+          },
+          () => {
+            if (this.executionTasks.get(run.id) === task)
+              this.executionTasks.delete(run.id);
+            this.inFlight.delete(run.id);
+            void this.drain();
+          },
+        );
       }
     } finally {
       this.draining = false;
@@ -809,6 +852,13 @@ export class OrchestrationService {
     );
     const existingRecord =
       checkout.kind === 'worktree' ? this.worktreeRecord(checkout) : undefined;
+    let freshPrepared = false;
+    let runtimeId = run.runtimeId;
+    // Once a terminal run has reached this boundary, a failed stop must retain
+    // the fresh worktree as evidence rather than allowing the catch path to
+    // discard the provider's still-live placement.
+    let terminalStopAttempted = false;
+    let launchAttempted = false;
     try {
       let cwd = checkout.path;
       if (checkout.kind === 'worktree') {
@@ -853,6 +903,7 @@ export class OrchestrationService {
             return;
           }
           prepared = fresh.worktree.record;
+          freshPrepared = true;
         }
         cwd = prepared.worktreePath;
         this.repository.updateCheckout(checkout.id, {
@@ -866,6 +917,36 @@ export class OrchestrationService {
         if (this.repository.getCheckout(checkout.id)?.status !== 'ready')
           this.repository.transitionCheckout(checkout.id, 'ready');
       }
+
+      // Preparation is an irreversible Git side effect. A cancellation may
+      // have won while it was pending, so never proceed to launch on stale
+      // claimed state.
+      const afterPreparation = this.repository.getRun(run.id);
+      if (
+        afterPreparation &&
+        TERMINAL_RUN_STATUSES.includes(afterPreparation.status)
+      ) {
+        if (runtimeId) {
+          terminalStopAttempted = true;
+          await this.manager.stop(runtimeId, true);
+        }
+        if (freshPrepared) {
+          const record = this.worktreeRecord(
+            this.repository.getCheckout(checkout.id) ?? checkout,
+          );
+          if (record)
+            await createWorktreeFinisher(
+              this.storeFor(checkout),
+            ).discardFreshWorktree(record.id);
+          try {
+            this.repository.transitionCheckout(checkout.id, 'dirty');
+          } catch {
+            /* terminal cancellation remains durable */
+          }
+        }
+        return;
+      }
+
       const anchor = this.workspaces().find((item) => {
         try {
           return (
@@ -883,7 +964,7 @@ export class OrchestrationService {
         throw new Error(
           'The project parent workspace is not available as a launch anchor.',
         );
-      const runtimeId = run.runtimeId ?? `runtime-${randomUUID()}`;
+      runtimeId = runtimeId ?? `runtime-${randomUUID()}`;
       this.repository.setRunRuntime(run.id, runtimeId);
       this.repository.transitionRun(run.id, 'starting');
       // Orchestration owns durable prompt delivery after hello. Do not route
@@ -895,10 +976,43 @@ export class OrchestrationService {
         name: this.requireThread(run.threadId).title,
         model: run.model,
       });
+
+      // Cancellation can race the provider start itself. The manager now
+      // accepts stopping a managed launch before hello/registry registration.
+      launchAttempted = true;
+      const afterLaunch = this.repository.getRun(run.id);
+      if (afterLaunch && TERMINAL_RUN_STATUSES.includes(afterLaunch.status)) {
+        terminalStopAttempted = true;
+        await this.manager.stop(runtimeId, true);
+        if (freshPrepared) {
+          const record = this.worktreeRecord(
+            this.repository.getCheckout(checkout.id) ?? checkout,
+          );
+          if (record)
+            await createWorktreeFinisher(
+              this.storeFor(checkout),
+            ).discardFreshWorktree(record.id);
+          try {
+            this.repository.transitionCheckout(checkout.id, 'dirty');
+          } catch {
+            /* terminal cancellation remains durable */
+          }
+        }
+      }
     } catch (error) {
-      this.failRun(run.id, 'failed', errorText(error));
+      const current = this.repository.getRun(run.id);
+      if (!current || !TERMINAL_RUN_STATUSES.includes(current.status))
+        this.failRun(run.id, 'failed', errorText(error));
       if (checkout.kind === 'worktree') {
-        if (!existingRecord) {
+        // Do not remove a fresh checkout while a manager launch remains
+        // retained after cleanup failure. That record is the retry evidence.
+        const manager = this.manager as RuntimeManager & {
+          hasLaunch?: (id: string) => boolean;
+        };
+        const retainedLaunch = runtimeId
+          ? (manager.hasLaunch?.(runtimeId) ?? false)
+          : false;
+        if (!terminalStopAttempted && !retainedLaunch) {
           const record = this.worktreeRecord(
             this.repository.getCheckout(checkout.id) ?? checkout,
           );
@@ -907,11 +1021,17 @@ export class OrchestrationService {
               this.storeFor(checkout),
             ).discardFreshWorktree(record.id);
         }
-        if (this.repository.getCheckout(checkout.id)?.status !== 'failed') {
-          try {
-            this.repository.transitionCheckout(checkout.id, 'failed');
-          } catch {
-            /* preserve error */
+        if (
+          !current ||
+          !TERMINAL_RUN_STATUSES.includes(current.status) ||
+          (!terminalStopAttempted && !retainedLaunch && launchAttempted)
+        ) {
+          if (this.repository.getCheckout(checkout.id)?.status !== 'failed') {
+            try {
+              this.repository.transitionCheckout(checkout.id, 'failed');
+            } catch {
+              /* preserve error */
+            }
           }
         }
       }
@@ -953,8 +1073,7 @@ export class OrchestrationService {
     // Compatibility for provider-manager test doubles and older managers that
     // expose only stop(). A restored runtime has no live registry snapshot, so
     // force is the only meaningful cleanup request.
-    if (manager.stop)
-      await manager.stop(runtimeId, true).catch(() => undefined);
+    if (manager.stop) await manager.stop(runtimeId, true);
   }
 
   private async serializedPreparation<T>(

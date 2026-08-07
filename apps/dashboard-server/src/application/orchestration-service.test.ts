@@ -377,6 +377,123 @@ describe('OrchestrationService', () => {
     }
   });
 
+  it('serializes hello prompt ACK before consecutive interaction and settled events', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.setRunRuntime(fixture.runId, 'runtime-ordered');
+      let releasePrompt!: () => void;
+      const prompt = new Promise<undefined>((resolve) => {
+        releasePrompt = () => resolve(undefined);
+      });
+      fixture.registry.sendCommand.mockImplementationOnce(async () => prompt);
+      const handle = (
+        fixture.service as unknown as {
+          handleRegistryChange: (value: never) => Promise<void>;
+        }
+      ).handleRegistryChange.bind(fixture.service);
+      const interaction = { id: 'ordered-question', type: 'ask_user' };
+      const registered = handle({
+        kind: 'registered',
+        snapshot: {
+          ...runtimeHello('runtime-ordered'),
+          pendingInteractions: [interaction],
+        },
+      } as never);
+      const requested = handle({
+        kind: 'event',
+        runtimeId: 'runtime-ordered',
+        event: { type: 'interaction.requested', interaction },
+        snapshot: {
+          ...runtimeHello('runtime-ordered'),
+          pendingInteractions: [interaction],
+        },
+      } as never);
+      const settled = handle({
+        kind: 'event',
+        runtimeId: 'runtime-ordered',
+        event: { type: 'agent.settled', sessionId: 'ordered-session' },
+        snapshot: {
+          ...runtimeHello('runtime-ordered'),
+          pendingInteractions: [],
+        },
+      } as never);
+      await Promise.resolve();
+      expect(repository.getRun(fixture.runId)?.status).toBe('starting');
+      releasePrompt();
+      await Promise.all([registered, requested, settled]);
+      expect(repository.getRun(fixture.runId)?.status).toBe('settled');
+      expect(
+        repository.getThread(repository.getRun(fixture.runId)?.threadId ?? '')
+          ?.status,
+      ).toBe('settled');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('stops durable runtime on goodbye but preserves reload reconnect intent', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.setRunRuntime(fixture.runId, 'runtime-goodbye');
+      const handle = (
+        fixture.service as unknown as {
+          handleRegistryChange: (value: never) => Promise<void>;
+        }
+      ).handleRegistryChange.bind(fixture.service);
+      await handle({
+        kind: 'registered',
+        snapshot: runtimeHello('runtime-goodbye'),
+      } as never);
+      await handle({
+        kind: 'event',
+        runtimeId: 'runtime-goodbye',
+        event: { type: 'runtime.goodbye', reason: 'quit' },
+        snapshot: { ...runtimeHello('runtime-goodbye'), online: false },
+      } as never);
+      expect(repository.getRun(fixture.runId)?.status).toBe('interrupted');
+      expect(repository.getRuntime('runtime-goodbye')?.status).toBe('stopped');
+    } finally {
+      await fixture.close();
+    }
+
+    const reload = await orchestrationFixture();
+    try {
+      const repository = reload.metadata.orchestration;
+      repository.transitionRun(reload.runId, 'preparing');
+      repository.transitionRun(reload.runId, 'starting');
+      repository.setRunRuntime(reload.runId, 'runtime-reload');
+      const handle = (
+        reload.service as unknown as {
+          handleRegistryChange: (value: never) => Promise<void>;
+        }
+      ).handleRegistryChange.bind(reload.service);
+      await handle({
+        kind: 'registered',
+        snapshot: runtimeHello('runtime-reload'),
+      } as never);
+      await handle({
+        kind: 'event',
+        runtimeId: 'runtime-reload',
+        event: { type: 'runtime.goodbye', reason: 'reload' },
+        snapshot: { ...runtimeHello('runtime-reload'), online: false },
+      } as never);
+      expect(repository.getRun(reload.runId)?.status).toBe('running');
+      await handle({
+        kind: 'registered',
+        snapshot: runtimeHello('runtime-reload'),
+      } as never);
+      expect(repository.getRun(reload.runId)?.status).toBe('running');
+    } finally {
+      await reload.close();
+    }
+  });
+
   it('does not record a rejected prompt and retries it on a later hello', async () => {
     const fixture = await orchestrationFixture();
     try {
@@ -514,6 +631,51 @@ describe('OrchestrationService', () => {
         await fixture.service.cancelRun(fixture.runId, 'cancel-once'),
       ).toEqual(one);
       expect(fixture.manager.stop).toHaveBeenCalledOnce();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('cancels a worktree run while launch is pending and stops the eventual placement', async () => {
+    const fixture = await isolatedServiceFixture();
+    try {
+      let resolveLaunch!: (value: { runtimeId: string }) => void;
+      const launch = new Promise<{ runtimeId: string }>((resolve) => {
+        resolveLaunch = resolve;
+      });
+      fixture.manager.launch.mockImplementationOnce(async (input) => {
+        fixture.launches.push(input);
+        return launch;
+      });
+      await fixture.service.start();
+      const created = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'cancel-pending-launch-thread',
+        title: 'Cancel pending launch',
+        prompt: 'Cancel me.',
+      })) as { run: { id: string; checkoutId: string } };
+      await waitFor(() => fixture.launches.length === 1);
+      const runtimeId = fixture.launches[0]?.runtimeId as string;
+      const cancellation = fixture.service.cancelRun(
+        created.run.id,
+        'cancel-pending-launch',
+      );
+      await waitFor(
+        () =>
+          fixture.metadata.orchestration.getRun(created.run.id)?.status ===
+          'cancelled',
+      );
+      resolveLaunch({ runtimeId });
+      await cancellation;
+      expect(fixture.manager.stop).toHaveBeenCalledOnce();
+      expect(fixture.manager.stop).toHaveBeenCalledWith(runtimeId, true);
+      expect(
+        fixture.metadata.orchestration.loadWorktreeRecord(
+          created.run.checkoutId,
+        ),
+      ).toBeUndefined();
+      expect(
+        await readdir(path.join(fixture.root, '.worktrees')).catch(() => []),
+      ).toEqual([]);
     } finally {
       await fixture.close();
     }

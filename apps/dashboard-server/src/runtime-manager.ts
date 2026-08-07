@@ -294,26 +294,12 @@ export class RuntimeManager {
       return { runtimeId, ...(placement ? { placement } : {}) };
     } catch (error) {
       this.tokens.delete(launchToken);
+      if (binding) {
+        await this.provider.stop(binding);
+        if (metadataRecorded) this.metadata.markManagedStopped(runtimeId);
+      }
       this.initialPrompts.delete(runtimeId);
       this.launches.delete(runtimeId);
-      if (binding) {
-        if (placement) {
-          try {
-            // This is harmless when persistence failed before inserting a row,
-            // and closes the metadata window when it did insert one.
-            this.metadata.markManagedStopped(runtimeId);
-          } catch {
-            /* rollback must still attempt provider cleanup */
-          }
-        }
-        await this.provider.stop(binding).catch(() => undefined);
-      } else if (metadataRecorded) {
-        try {
-          this.metadata.markManagedStopped(runtimeId);
-        } catch {
-          /* best effort */
-        }
-      }
       throw error;
     }
   }
@@ -341,9 +327,8 @@ export class RuntimeManager {
       // A restored placement that cannot be attached is unrecoverable. Remove
       // the managed side effect rather than letting reconciliation relaunch a
       // second runtime against an unknown tmux window.
-      await this.provider.stop(launch.binding).catch(() => undefined);
-      if (launch.metadataRecorded)
-        this.metadata.markManagedStopped?.(runtimeId);
+      await this.provider.stop(launch.binding);
+      if (launch.metadataRecorded) this.metadata.markManagedStopped(runtimeId);
       this.launches.delete(runtimeId);
       return false;
     }
@@ -358,14 +343,12 @@ export class RuntimeManager {
   async stopRecovered(runtimeId: string): Promise<void> {
     const launch = this.launches.get(runtimeId);
     if (!launch) return;
-    try {
-      await this.provider.stop(launch.binding).catch(() => undefined);
-      if (launch.metadataRecorded) this.metadata.markManagedStopped(runtimeId);
-    } finally {
-      this.initialPrompts.delete(runtimeId);
-      this.launches.delete(runtimeId);
-      this.registry.forget(runtimeId);
-    }
+    // Do not forget evidence until provider and metadata cleanup both succeed.
+    await this.provider.stop(launch.binding);
+    if (launch.metadataRecorded) this.metadata.markManagedStopped(runtimeId);
+    this.initialPrompts.delete(runtimeId);
+    this.launches.delete(runtimeId);
+    this.registry.forget(runtimeId);
   }
 
   /** Used by durable orchestration when hello arrives after a restart. */
@@ -405,13 +388,13 @@ export class RuntimeManager {
 
   async stop(runtimeId: string, force = false): Promise<void> {
     const snapshot = this.registry.get(runtimeId);
-    if (!snapshot) throw new Error('Unknown runtime.');
-    if (snapshot.ownership === 'external' && force)
+    const launch = this.launches.get(runtimeId);
+    if (!snapshot && !launch) throw new Error('Unknown runtime.');
+    if (snapshot?.ownership === 'external' && force)
       throw new Error(
         'Force-stop is only available for dashboard-managed runtimes.',
       );
-    const launch = this.launches.get(runtimeId);
-    if (snapshot.ownership === 'external') {
+    if (snapshot?.ownership === 'external') {
       // An external Pi may have an old extension context and reject shutdown.
       // Stop still means "remove this runtime from the dashboard"; tombstoning
       // also prevents a leaked bridge instance from immediately reconnecting.
@@ -422,7 +405,7 @@ export class RuntimeManager {
       this.registry.forget(runtimeId);
       return;
     }
-    if (!force) {
+    if (snapshot && !force) {
       try {
         await this.registry.sendCommand(runtimeId, { type: 'shutdown' });
       } catch {
@@ -432,24 +415,34 @@ export class RuntimeManager {
       while (this.registry.isOnline(runtimeId) && Date.now() < gracefulDeadline)
         await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    if (this.registry.isOnline(runtimeId) && this.safePid(snapshot.pid))
+    if (
+      snapshot &&
+      this.registry.isOnline(runtimeId) &&
+      this.safePid(snapshot.pid)
+    )
       this.signalManagedProcess(snapshot.pid, 'SIGTERM');
     const termDeadline = Date.now() + (force ? 500 : 2_000);
-    while (this.registry.isOnline(runtimeId) && Date.now() < termDeadline)
+    while (
+      snapshot &&
+      this.registry.isOnline(runtimeId) &&
+      Date.now() < termDeadline
+    )
       await new Promise((resolve) => setTimeout(resolve, 100));
-    if (this.registry.isOnline(runtimeId) && this.safePid(snapshot.pid))
+    if (
+      snapshot &&
+      this.registry.isOnline(runtimeId) &&
+      this.safePid(snapshot.pid)
+    )
       this.signalManagedProcess(snapshot.pid, 'SIGKILL');
-    try {
-      if (launch) {
-        await this.provider.stop(launch.binding).catch(() => undefined);
-        if (launch.metadataRecorded)
-          this.metadata.markManagedStopped(runtimeId);
-      }
-    } finally {
-      this.initialPrompts.delete(runtimeId);
-      if (launch) this.launches.delete(runtimeId);
-      this.registry.forget(runtimeId);
+    // Provider failure is intentionally allowed to reject. In that case the
+    // launch, metadata, and registry snapshot remain available for retry.
+    if (launch) {
+      await this.provider.stop(launch.binding);
+      if (launch.metadataRecorded) this.metadata.markManagedStopped(runtimeId);
     }
+    this.initialPrompts.delete(runtimeId);
+    if (launch) this.launches.delete(runtimeId);
+    this.registry.forget(runtimeId);
   }
 
   private signalManagedProcess(pid: number, signal: NodeJS.Signals): void {
@@ -506,6 +499,11 @@ export class RuntimeManager {
 
   placement(runtimeId: string): ManagedPlacement | undefined {
     return this.launches.get(runtimeId)?.placement;
+  }
+
+  /** Whether a provider launch remains owned and retryable by this manager. */
+  hasLaunch(runtimeId: string): boolean {
+    return this.launches.has(runtimeId);
   }
 
   private safePid(pid: number): boolean {
