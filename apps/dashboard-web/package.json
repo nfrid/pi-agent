@@ -8,7 +8,7 @@
     "preview": "vite preview",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --passWithNoTests --exclude e2e/**",
+    "test": "vitest run --passWithNoTests --exclude 'e2e/**'",
     "test:e2e": "playwright test"
   },
   "dependencies": {
