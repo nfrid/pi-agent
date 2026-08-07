@@ -149,6 +149,7 @@ async function isolatedServiceFixture(options: { failingHook?: boolean } = {}) {
     await chmod(hook, 0o755);
   }
   const launches: Array<Record<string, unknown>> = [];
+  let live: Record<string, unknown> | undefined;
   const manager = {
     launch: vi.fn(async (input: Record<string, unknown>) => {
       launches.push(input);
@@ -159,7 +160,8 @@ async function isolatedServiceFixture(options: { failingHook?: boolean } = {}) {
     stop: vi.fn(async () => undefined),
   };
   const registry = {
-    get: () => undefined,
+    get: (runtimeId: string) =>
+      live?.runtimeId === runtimeId ? (live as never) : undefined,
     sendCommand: vi.fn(async () => ({ accepted: true })),
   };
   const service = new OrchestrationService({
@@ -183,6 +185,9 @@ async function isolatedServiceFixture(options: { failingHook?: boolean } = {}) {
     registry,
     projectId: adopted.project.id,
     launches,
+    setLive(value: Record<string, unknown> | undefined) {
+      live = value;
+    },
     async close() {
       await service.stop();
       metadata.close();
@@ -406,6 +411,26 @@ describe('OrchestrationService', () => {
     }
   });
 
+  it('rejects merge and retire while a checkout still has an active run', async () => {
+    const fixture = await isolatedServiceFixture();
+    try {
+      const created = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'active-checkout-thread',
+        title: 'Active checkout',
+        prompt: 'Still queued.',
+      })) as { run: { checkoutId: string } };
+      await expect(
+        fixture.service.mergeCheckout(created.run.checkoutId, 'active-merge'),
+      ).rejects.toMatchObject({ code: 'orchestration-conflict' });
+      await expect(
+        fixture.service.retireCheckout(created.run.checkoutId, 'active-retire'),
+      ).rejects.toMatchObject({ code: 'orchestration-conflict' });
+      expect(fixture.manager.stopRecovered).not.toHaveBeenCalled();
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('holds the second isolated run at maxParallelRuns until the first settles', async () => {
     const fixture = await isolatedServiceFixture();
     try {
@@ -480,10 +505,15 @@ describe('OrchestrationService', () => {
         repository.loadWorktreeRecord(checkout?.id as string),
       ).toBeUndefined();
       expect(
-        (
-          await readdir(path.join(fixture.root, '.worktrees')).catch(() => [])
-        ).some((entry) => entry.includes('pending') || entry.startsWith('pi-')),
-      ).toBe(false);
+        await readdir(path.join(fixture.root, '.worktrees')).catch(() => []),
+      ).toEqual([]);
+      const worktreeLines = (
+        await gitOutput(fixture.root, 'worktree', 'list', '--porcelain')
+      )
+        .split('\n')
+        .filter((line) => line.startsWith('worktree '));
+      expect(worktreeLines).toHaveLength(1);
+      expect(worktreeLines[0]).toContain(fixture.root);
       expect(await gitOutput(fixture.root, 'branch', '--list', 'pi/*')).toBe(
         '',
       );
@@ -561,6 +591,14 @@ describe('OrchestrationService', () => {
         'lifecycle-merge',
       )) as { checkout: { status: string } };
       expect(mergedResult.checkout.status).toBe('retired');
+      expect(
+        await readFile(path.join(fixture.root, 'merged.txt'), 'utf8'),
+      ).toBe('merged\n');
+      await expect(access(merged.checkoutPath)).rejects.toBeDefined();
+      expect(
+        repository.loadWorktreeRecord(merged.run.checkoutId),
+      ).toBeUndefined();
+      expect(fixture.manager.stopRecovered).toHaveBeenCalledTimes(1);
       expect(repository.getRun(merged.run.id)?.piSessionId).toBe(
         'lifecycle-session-1',
       );
@@ -579,6 +617,8 @@ describe('OrchestrationService', () => {
         'retired\n',
         'lifecycle-session-2',
       );
+      fixture.setLive(runtimeHello(retired.runtimeId));
+      const liveStopCount = fixture.manager.stop.mock.calls.length;
       await fixture.service.retireCheckout(
         retired.run.checkoutId,
         'lifecycle-retire',
@@ -587,6 +627,11 @@ describe('OrchestrationService', () => {
       expect(repository.getCheckout(retired.run.checkoutId)?.status).toBe(
         'retired',
       );
+      expect(
+        repository.loadWorktreeRecord(retired.run.checkoutId),
+      ).toBeUndefined();
+      expect(fixture.manager.stop).toHaveBeenCalledTimes(liveStopCount + 1);
+      expect(fixture.manager.stopRecovered).toHaveBeenCalledTimes(1);
       expect(repository.getThread(retired.thread.id)).toBeDefined();
       expect(repository.getRun(retired.run.id)).toBeDefined();
 

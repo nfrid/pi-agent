@@ -424,6 +424,7 @@ export class OrchestrationService {
     const prior = this.receipt(commandId, 'checkout.merge');
     if (prior) return prior.result;
     const checkout = this.requireCheckout(checkoutId);
+    this.assertCheckoutQuiescent(checkoutId);
     const record = this.worktreeRecord(checkout);
     if (!record) throw new Error('Checkout has no prepared worktree record.');
     this.repository.transitionCheckout(checkoutId, 'merging');
@@ -439,6 +440,7 @@ export class OrchestrationService {
           },
         );
       }
+      await this.quiesceCheckoutRuntimes(checkoutId);
       await createWorktreeFinisher(this.storeFor(checkout)).removeWorktree(
         record.id,
       );
@@ -464,6 +466,7 @@ export class OrchestrationService {
     const prior = this.receipt(commandId, 'checkout.retire');
     if (prior) return prior.result;
     const checkout = this.requireCheckout(checkoutId);
+    this.assertCheckoutQuiescent(checkoutId);
     if (checkout.kind === 'main') {
       throw Object.assign(new Error('The main checkout cannot be retired.'), {
         code: 'orchestration-conflict',
@@ -476,6 +479,7 @@ export class OrchestrationService {
       return result;
     }
     const record = this.worktreeRecord(checkout);
+    await this.quiesceCheckoutRuntimes(checkoutId);
     if (record)
       await createWorktreeFinisher(this.storeFor(checkout)).removeWorktree(
         record.id,
@@ -976,6 +980,45 @@ export class OrchestrationService {
       if (existing.commandType !== type)
         throw idempotencyConflict(id, existing.commandType);
       return existing.result;
+    }
+  }
+
+  private assertCheckoutQuiescent(checkoutId: string): void {
+    const active = this.repository
+      .listRuns()
+      .filter(
+        (run) =>
+          run.checkoutId === checkoutId &&
+          !TERMINAL_RUN_STATUSES.includes(run.status),
+      );
+    if (active.length > 0)
+      throw Object.assign(
+        new Error('A checkout with an active run cannot be changed.'),
+        { code: 'orchestration-conflict' },
+      );
+  }
+
+  private async quiesceCheckoutRuntimes(checkoutId: string): Promise<void> {
+    const runtimeIds = new Set(
+      this.repository
+        .listRuns()
+        .filter(
+          (run) => run.checkoutId === checkoutId && run.runtimeId !== undefined,
+        )
+        .map((run) => run.runtimeId as string),
+    );
+    const manager = this.manager as RuntimeManager & {
+      stopRecovered?: (id: string) => Promise<void>;
+    };
+    for (const runtimeId of runtimeIds) {
+      const live = this.registry.get(runtimeId);
+      if (live && live.online !== false) {
+        await this.manager.stop(runtimeId, true);
+      } else if (manager.stopRecovered) {
+        await manager.stopRecovered(runtimeId);
+      } else {
+        await this.manager.stop(runtimeId, true);
+      }
     }
   }
 
