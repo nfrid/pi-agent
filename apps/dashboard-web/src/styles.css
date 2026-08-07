@@ -4112,9 +4112,9 @@ h2 {
   .agent-nav-backdrop {
     position: fixed;
     z-index: 34;
-    inset: 0;
+    inset: 0 0 0 min(310px, calc(100vw - 34px));
     display: block;
-    width: 100%;
+    width: auto;
     height: 100%;
     border: 0;
     background: #18192399;
