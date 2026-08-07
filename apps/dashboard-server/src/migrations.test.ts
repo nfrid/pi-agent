@@ -42,7 +42,7 @@ it('applies numbered dashboard migrations idempotently', async () => {
 describe('migration metadata', () => {
   it('uses stable ascending migration numbers', () => {
     expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3,
+      1, 2, 3, 4,
     ]);
   });
 
@@ -64,6 +64,22 @@ describe('migration metadata', () => {
         { name: 'orchestration_run' },
         { name: 'project' },
         { name: 'thread' },
+      ]);
+      expect(
+        db
+          .prepare('PRAGMA table_info(thread)')
+          .all()
+          .map((row) => row.name),
+      ).toContain('pinned_at');
+      expect(
+        db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('active_runtime_per_run','orchestration_run_thread_attempt_unique') ORDER BY name",
+          )
+          .all(),
+      ).toEqual([
+        { name: 'active_runtime_per_run' },
+        { name: 'orchestration_run_thread_attempt_unique' },
       ]);
     } finally {
       db.close();

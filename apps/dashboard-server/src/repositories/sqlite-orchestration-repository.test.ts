@@ -48,6 +48,7 @@ describe('SqliteOrchestrationRepository', () => {
       projectId: value.project.id,
       title: 'First task',
       checkoutId: value.checkout.id,
+      pinnedAt: 123,
     });
     const run = value.repository.createRun({
       id: 'run-1',
@@ -62,10 +63,11 @@ describe('SqliteOrchestrationRepository', () => {
       value.repository.updateThread(thread.id, { title: 'Renamed' }).title,
     ).toBe('Renamed');
     expect(
-      value.repository.updateCheckout(value.checkout.id, { status: 'dirty' })
-        .status,
+      value.repository.transitionCheckout(value.checkout.id, 'dirty').status,
     ).toBe('dirty');
     expect(value.repository.getRun(run.id)?.initialPrompt).toBe(prompt);
+    expect(value.repository.getThread(thread.id)?.pinnedAt).toBe(123);
+    expect(value.repository.threadSummaries()[0]?.pinnedAt).toBe(123);
     const disposable = value.repository.createProject({
       id: 'project-disposable',
       title: 'Disposable',
@@ -114,6 +116,35 @@ describe('SqliteOrchestrationRepository', () => {
     expect(repeated.run).toEqual(result.run);
     expect(value.repository.listThreads()).toHaveLength(1);
     expect(value.repository.getCommandReceipt('command-1')).toBeDefined();
+    expect(() =>
+      value.repository.createRunIdempotent('command-1', {
+        threadId: 'thread-idempotent',
+        initialPrompt: 'Wrong command.',
+        mode: 'read',
+      }),
+    ).toThrow('belongs to thread.create');
+
+    const runThread = value.repository.createThread({
+      id: 'thread-run-command',
+      projectId: value.project.id,
+      title: 'Run command',
+      checkoutId: value.checkout.id,
+    });
+    value.repository.createRunIdempotent('run-command-1', {
+      threadId: runThread.id,
+      initialPrompt: 'Run once.',
+      mode: 'read',
+    });
+    expect(() =>
+      value.repository.createThreadWithRun('run-command-1', {
+        thread: {
+          projectId: value.project.id,
+          title: 'Wrong command',
+          checkoutId: value.checkout.id,
+        },
+        run: { initialPrompt: 'Must not be cast.' },
+      }),
+    ).toThrow('belongs to run.create');
   });
 
   it('enforces legal transitions and rejects illegal transitions', async () => {
@@ -223,14 +254,23 @@ describe('SqliteOrchestrationRepository', () => {
       }),
     ).toThrow();
 
+    expect(() =>
+      value.repository.bindRuntime({
+        runtimeId: 'runtime-missing-run',
+        piSessionId: 'pi-session-missing-run',
+        runId: 'missing-run',
+      }),
+    ).toThrow('does not exist');
     value.repository.bindRuntime({
       runtimeId: 'runtime-1',
       piSessionId: 'pi-session-1',
+      runId: 'run-unique-1',
     });
     expect(() =>
       value.repository.bindRuntime({
         runtimeId: 'runtime-2',
         piSessionId: 'pi-session-1',
+        runId: 'run-unique-writer',
       }),
     ).toThrow();
     value.repository.stopRuntime('runtime-1');
@@ -238,8 +278,21 @@ describe('SqliteOrchestrationRepository', () => {
       value.repository.bindRuntime({
         runtimeId: 'runtime-2',
         piSessionId: 'pi-session-1',
+        runId: 'run-unique-writer',
       }),
     ).not.toThrow();
+    value.repository.bindRuntime({
+      runtimeId: 'runtime-3',
+      piSessionId: 'pi-session-3',
+      runId: 'run-unique-1',
+    });
+    expect(() =>
+      value.repository.bindRuntime({
+        runtimeId: 'runtime-4',
+        piSessionId: 'pi-session-4',
+        runId: 'run-unique-1',
+      }),
+    ).toThrow();
   });
 
   it('records retry attempt lineage after the first run settles', async () => {
@@ -259,6 +312,42 @@ describe('SqliteOrchestrationRepository', () => {
     value.repository.transitionRun(first.id, 'starting');
     value.repository.transitionRun(first.id, 'running');
     value.repository.transitionRun(first.id, 'settled');
+    expect(() =>
+      value.repository.createRun({
+        id: 'run-lineage-bad-attempt',
+        threadId: thread.id,
+        attempt: 3,
+        initialPrompt: 'Bad attempt.',
+      }),
+    ).toThrow('continue immediately from 2');
+    expect(() =>
+      value.repository.createRun({
+        id: 'run-lineage-bad-parent',
+        threadId: thread.id,
+        parentRunId: 'missing-parent',
+        initialPrompt: 'Bad parent.',
+      }),
+    ).toThrow('does not exist');
+    const otherThread = value.repository.createThread({
+      id: 'thread-other-lineage',
+      projectId: value.project.id,
+      title: 'Other lineage',
+      checkoutId: value.checkout.id,
+    });
+    const otherRun = value.repository.createRun({
+      id: 'run-other-lineage',
+      threadId: otherThread.id,
+      initialPrompt: 'Other prompt.',
+      mode: 'read',
+    });
+    expect(() =>
+      value.repository.createRun({
+        id: 'run-lineage-cross-thread',
+        threadId: thread.id,
+        parentRunId: otherRun.id,
+        initialPrompt: 'Cross-thread parent.',
+      }),
+    ).toThrow('same thread');
     const retry = value.repository.createRun({
       id: 'run-lineage-2',
       threadId: thread.id,
@@ -266,5 +355,17 @@ describe('SqliteOrchestrationRepository', () => {
     });
     expect(retry.attempt).toBe(2);
     expect(retry.parentRunId).toBe(first.id);
+    value.repository.transitionRun(retry.id, 'preparing');
+    value.repository.transitionRun(retry.id, 'starting');
+    value.repository.transitionRun(retry.id, 'running');
+    value.repository.transitionRun(retry.id, 'settled');
+    expect(() =>
+      value.repository.createRun({
+        id: 'run-lineage-non-immediate-parent',
+        threadId: thread.id,
+        parentRunId: first.id,
+        initialPrompt: 'Non-immediate parent.',
+      }),
+    ).toThrow('immediately preceding');
   });
 });

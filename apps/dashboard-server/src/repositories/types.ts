@@ -10,6 +10,7 @@ import type {
   Run,
   RunStatus,
   RunSummary,
+  RuntimeProvider,
   SessionIndexEntry,
   Thread,
   ThreadSummary,
@@ -91,6 +92,7 @@ export interface CreateThreadInput {
   projectId: string;
   title: string;
   checkoutId?: string;
+  pinnedAt?: number;
   status?: Thread['status'];
   createdAt?: number;
   updatedAt?: number;
@@ -105,7 +107,7 @@ export interface CreateRunInput {
   mode?: 'read' | 'write';
   /** Compatibility spelling for callers that model writer ownership as a flag. */
   isWriter?: boolean;
-  runtimeProvider?: string;
+  runtimeProvider?: RuntimeProvider;
   runtimeId?: string;
   piSessionId?: string;
   initialPrompt: string;
@@ -129,20 +131,19 @@ export type ProjectPatch = Partial<
     | 'defaultModel'
     | 'defaultIsolation'
     | 'maxParallelRuns'
-    | 'status'
   >
 >;
 export type CheckoutPatch = Partial<
-  Pick<Checkout, 'kind' | 'path' | 'branch' | 'baseSha' | 'status'>
+  Pick<Checkout, 'kind' | 'path' | 'branch' | 'baseSha'>
 >;
 export type ThreadPatch = Partial<
-  Pick<Thread, 'title' | 'checkoutId' | 'status'>
+  Pick<Thread, 'title' | 'checkoutId' | 'pinnedAt'>
 >;
 
 export interface BindRuntimeInput {
   runtimeId: string;
   piSessionId: string;
-  runId?: string;
+  runId: string;
   status?: OrchestrationRuntime['status'];
   createdAt?: number;
   updatedAt?: number;

@@ -149,12 +149,12 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
           : { defaultModel: patch.defaultModel }),
         defaultIsolation: patch.defaultIsolation ?? current.defaultIsolation,
         maxParallelRuns: patch.maxParallelRuns ?? current.maxParallelRuns,
-        status: patch.status ?? current.status,
+        status: current.status,
         updatedAt: now,
       };
       this.db
         .prepare(
-          `UPDATE project SET title=?,root_path=?,repository_identity=?,default_base_branch=?,default_model_json=?,default_isolation=?,max_parallel_runs=?,status=?,updated_at=?
+          `UPDATE project SET title=?,root_path=?,repository_identity=?,default_base_branch=?,default_model_json=?,default_isolation=?,max_parallel_runs=?,updated_at=?
            WHERE id=?`,
         )
         .run(
@@ -167,7 +167,6 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
             : JSON.stringify(project.defaultModel),
           project.defaultIsolation,
           project.maxParallelRuns,
-          project.status,
           project.updatedAt,
           id,
         );
@@ -294,19 +293,18 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
             ? {}
             : { baseSha: current.baseSha }
           : { baseSha: patch.baseSha }),
-        status: patch.status ?? current.status,
+        status: current.status,
         updatedAt: now,
       };
       this.db
         .prepare(
-          'UPDATE checkout SET kind=?,path=?,branch=?,base_sha=?,status=?,updated_at=? WHERE id=?',
+          'UPDATE checkout SET kind=?,path=?,branch=?,base_sha=?,updated_at=? WHERE id=?',
         )
         .run(
           checkout.kind,
           checkout.path,
           checkout.branch ?? null,
           checkout.baseSha ?? null,
-          checkout.status,
           checkout.updatedAt,
           id,
         );
@@ -356,14 +354,15 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(input.checkoutId === undefined
         ? {}
         : { checkoutId: input.checkoutId }),
+      ...(input.pinnedAt === undefined ? {} : { pinnedAt: input.pinnedAt }),
       status: input.status ?? 'draft',
       createdAt: input.createdAt ?? now,
       updatedAt: input.updatedAt ?? now,
     };
     this.db
       .prepare(
-        `INSERT INTO thread (id,project_id,title,checkout_id,status,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?)`,
+        `INSERT INTO thread (id,project_id,title,checkout_id,status,pinned_at,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?)`,
       )
       .run(
         thread.id,
@@ -371,6 +370,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         thread.title,
         thread.checkoutId ?? null,
         thread.status,
+        thread.pinnedAt ?? null,
         thread.createdAt,
         thread.updatedAt,
       );
@@ -407,17 +407,21 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
             ? {}
             : { checkoutId: current.checkoutId }
           : { checkoutId: patch.checkoutId }),
-        status: patch.status ?? current.status,
+        ...(patch.pinnedAt === undefined
+          ? current.pinnedAt === undefined
+            ? {}
+            : { pinnedAt: current.pinnedAt }
+          : { pinnedAt: patch.pinnedAt }),
         updatedAt: now,
       };
       this.db
         .prepare(
-          'UPDATE thread SET title=?,checkout_id=?,status=?,updated_at=? WHERE id=?',
+          'UPDATE thread SET title=?,checkout_id=?,pinned_at=?,updated_at=? WHERE id=?',
         )
         .run(
           thread.title,
           thread.checkoutId ?? null,
-          thread.status,
+          thread.pinnedAt ?? null,
           thread.updatedAt,
           id,
         );
@@ -450,6 +454,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         ? {}
         : { checkoutId: optionalString(row, 'checkout_id') }),
       status: stringValue(row, 'status') as Thread['status'],
+      ...(row.pinned_at == null ? {} : { pinnedAt: Number(row.pinned_at) }),
       ...(optionalString(row, 'active_run_id') === undefined
         ? {}
         : { activeRunId: optionalString(row, 'active_run_id') }),
@@ -464,7 +469,13 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
   createRunIdempotent(idempotencyKey: string, input: CreateRunInput): Run {
     return this.withTransaction(() => {
       const receipt = this.getCommandReceipt(idempotencyKey);
-      if (receipt) return receipt.result as Run;
+      if (receipt) {
+        if (receipt.commandType !== 'run.create')
+          throw new Error(
+            `Idempotency key ${idempotencyKey} belongs to ${receipt.commandType}.`,
+          );
+        return receipt.result as Run;
+      }
       const run = this.insertRun(input);
       this.insertReceipt({
         idempotencyKey,
@@ -595,6 +606,10 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     return this.withTransaction(() => {
       const existing = this.getCommandReceipt(idempotencyKey);
       if (existing) {
+        if (existing.commandType !== 'thread.create')
+          throw new Error(
+            `Idempotency key ${idempotencyKey} belongs to ${existing.commandType}.`,
+          );
         const result = existing.result as { thread: Thread; run: Run };
         return { ...result, receipt: existing };
       }
@@ -639,35 +654,40 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
   }
 
   bindRuntime(input: BindRuntimeInput): OrchestrationRuntime {
-    const now = input.createdAt ?? input.updatedAt ?? Date.now();
-    const runtime: OrchestrationRuntime = {
-      runtimeId: input.runtimeId,
-      piSessionId: input.piSessionId,
-      ...(input.runId === undefined ? {} : { runId: input.runId }),
-      status: input.status ?? 'starting',
-      createdAt: input.createdAt ?? now,
-      updatedAt: input.updatedAt ?? now,
-    };
-    this.db
-      .prepare(
-        `INSERT INTO orchestration_runtime (runtime_id,pi_session_id,run_id,status,created_at,updated_at)
-         VALUES (?,?,?,?,?,?)`,
-      )
-      .run(
-        runtime.runtimeId,
-        runtime.piSessionId,
-        runtime.runId ?? null,
-        runtime.status,
-        runtime.createdAt,
-        runtime.updatedAt,
-      );
-    if (runtime.runId)
+    return this.withTransaction(() => {
+      const run = this.getRun(input.runId);
+      if (!run) throw new Error(`Run ${input.runId} does not exist.`);
+      const now = input.createdAt ?? input.updatedAt ?? Date.now();
+      const runtime: OrchestrationRuntime = {
+        runtimeId: input.runtimeId,
+        piSessionId: input.piSessionId,
+        runId: input.runId,
+        status: input.status ?? 'starting',
+        createdAt: input.createdAt ?? now,
+        updatedAt: input.updatedAt ?? now,
+      };
       this.db
+        .prepare(
+          `INSERT INTO orchestration_runtime (runtime_id,pi_session_id,run_id,status,created_at,updated_at)
+           VALUES (?,?,?,?,?,?)`,
+        )
+        .run(
+          runtime.runtimeId,
+          runtime.piSessionId,
+          input.runId,
+          runtime.status,
+          runtime.createdAt,
+          runtime.updatedAt,
+        );
+      const result = this.db
         .prepare(
           'UPDATE orchestration_run SET runtime_id=?,pi_session_id=? WHERE id=?',
         )
-        .run(runtime.runtimeId, runtime.piSessionId, runtime.runId);
-    return runtime;
+        .run(runtime.runtimeId, runtime.piSessionId, input.runId);
+      if (Number(result.changes) !== 1)
+        throw new Error(`Run ${input.runId} disappeared.`);
+      return runtime;
+    });
   }
 
   transitionRuntime(
@@ -737,14 +757,15 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(input.checkoutId === undefined
         ? {}
         : { checkoutId: input.checkoutId }),
+      ...(input.pinnedAt === undefined ? {} : { pinnedAt: input.pinnedAt }),
       status: input.status ?? 'draft',
       createdAt: input.createdAt ?? now,
       updatedAt: input.updatedAt ?? now,
     };
     this.db
       .prepare(
-        `INSERT INTO thread (id,project_id,title,checkout_id,status,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?)`,
+        `INSERT INTO thread (id,project_id,title,checkout_id,status,pinned_at,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?)`,
       )
       .run(
         thread.id,
@@ -752,6 +773,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         thread.title,
         thread.checkoutId ?? null,
         thread.status,
+        thread.pinnedAt ?? null,
         thread.createdAt,
         thread.updatedAt,
       );
@@ -769,11 +791,28 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       throw new Error('Run checkout must belong to the thread project.');
     const previous = this.db
       .prepare(
-        'SELECT id,attempt FROM orchestration_run WHERE thread_id=? ORDER BY attempt DESC LIMIT 1',
+        'SELECT id,thread_id,attempt FROM orchestration_run WHERE thread_id=? ORDER BY attempt DESC LIMIT 1',
       )
       .get(thread.id) as Record<string, unknown> | undefined;
-    const attempt =
-      input.attempt ?? (previous ? Number(previous.attempt) + 1 : 1);
+    const expectedAttempt = previous ? Number(previous.attempt) + 1 : 1;
+    if (input.attempt !== undefined && input.attempt !== expectedAttempt)
+      throw new Error(
+        `Run attempt must continue immediately from ${expectedAttempt}.`,
+      );
+    if (input.parentRunId !== undefined) {
+      const parent = this.db
+        .prepare('SELECT id,thread_id FROM orchestration_run WHERE id=?')
+        .get(input.parentRunId) as Record<string, unknown> | undefined;
+      if (!parent)
+        throw new Error(`Parent run ${input.parentRunId} does not exist.`);
+      if (String(parent.thread_id) !== thread.id)
+        throw new Error('Parent run must belong to the same thread.');
+      if (!previous || String(previous.id) !== input.parentRunId)
+        throw new Error(
+          'Parent run must be the immediately preceding attempt.',
+        );
+    }
+    const attempt = expectedAttempt;
     const parentRunId =
       input.parentRunId ?? (previous ? String(previous.id) : undefined);
     const now = input.createdAt ?? Date.now();
@@ -927,6 +966,7 @@ function threadFromRow(row: Record<string, unknown>): Thread {
       ? {}
       : { checkoutId: optionalString(row, 'checkout_id') }),
     status: stringValue(row, 'status') as Thread['status'],
+    ...(row.pinned_at == null ? {} : { pinnedAt: Number(row.pinned_at) }),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
@@ -942,7 +982,10 @@ function runFromRow(row: Record<string, unknown>): Run {
       ? {}
       : { parentRunId: optionalString(row, 'parent_run_id') }),
     mode: stringValue(row, 'mode') as Run['mode'],
-    runtimeProvider: stringValue(row, 'runtime_provider'),
+    runtimeProvider: stringValue(
+      row,
+      'runtime_provider',
+    ) as Run['runtimeProvider'],
     ...(optionalString(row, 'runtime_id') === undefined
       ? {}
       : { runtimeId: optionalString(row, 'runtime_id') }),

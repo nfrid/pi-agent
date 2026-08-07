@@ -141,6 +141,7 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
           title TEXT NOT NULL,
           checkout_id TEXT REFERENCES checkout(id),
           status TEXT NOT NULL CHECK (status IN ('draft','queued','active','needs-input','settled','failed','stopped','archived')),
+          pinned_at INTEGER,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL
         );
@@ -151,7 +152,7 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
           attempt INTEGER NOT NULL CHECK (attempt >= 1),
           parent_run_id TEXT REFERENCES orchestration_run(id),
           mode TEXT NOT NULL CHECK (mode IN ('read','write')),
-          runtime_provider TEXT NOT NULL,
+          runtime_provider TEXT NOT NULL CHECK (runtime_provider IN ('extension-bridge','pi-server')),
           runtime_id TEXT,
           pi_session_id TEXT,
           initial_prompt TEXT NOT NULL CHECK (length(initial_prompt) BETWEEN 1 AND 100000),
@@ -189,10 +190,38 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
         CREATE UNIQUE INDEX IF NOT EXISTS active_runtime_per_pi_session
           ON orchestration_runtime(pi_session_id)
           WHERE status IN ('starting','running');
+        CREATE UNIQUE INDEX IF NOT EXISTS active_runtime_per_run
+          ON orchestration_runtime(run_id)
+          WHERE run_id IS NOT NULL AND status IN ('starting','running');
+        CREATE UNIQUE INDEX IF NOT EXISTS orchestration_run_thread_attempt_unique
+          ON orchestration_run(thread_id, attempt);
         CREATE INDEX IF NOT EXISTS run_thread_attempt
           ON orchestration_run(thread_id, attempt);
         CREATE INDEX IF NOT EXISTS run_checkout_status
           ON orchestration_run(checkout_id, status);
+      `);
+    },
+  },
+  {
+    version: 4,
+    name: 'orchestration-correctness-constraints',
+    up(db) {
+      if (!columns(db, 'thread').has('pinned_at'))
+        db.exec('ALTER TABLE thread ADD COLUMN pinned_at INTEGER');
+      db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS active_runtime_per_run
+          ON orchestration_runtime(run_id)
+          WHERE run_id IS NOT NULL AND status IN ('starting','running');
+        CREATE UNIQUE INDEX IF NOT EXISTS orchestration_run_thread_attempt_unique
+          ON orchestration_run(thread_id, attempt);
+        CREATE TRIGGER IF NOT EXISTS orchestration_run_runtime_provider_insert
+          BEFORE INSERT ON orchestration_run
+          WHEN NEW.runtime_provider NOT IN ('extension-bridge','pi-server')
+          BEGIN SELECT RAISE(ABORT, 'invalid runtime provider'); END;
+        CREATE TRIGGER IF NOT EXISTS orchestration_run_runtime_provider_update
+          BEFORE UPDATE OF runtime_provider ON orchestration_run
+          WHEN NEW.runtime_provider NOT IN ('extension-bridge','pi-server')
+          BEGIN SELECT RAISE(ABORT, 'invalid runtime provider'); END;
       `);
     },
   },

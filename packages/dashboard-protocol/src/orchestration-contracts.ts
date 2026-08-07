@@ -66,6 +66,12 @@ export const RunModeSchema = Type.Union([
 ]);
 export type RunMode = Static<typeof RunModeSchema>;
 
+export const RuntimeProviderSchema = Type.Union([
+  Type.Literal('extension-bridge'),
+  Type.Literal('pi-server'),
+]);
+export type RuntimeProvider = Static<typeof RuntimeProviderSchema>;
+
 const IdentifierSchema = Type.String({
   minLength: 1,
   maxLength: MAX_ID,
@@ -151,6 +157,7 @@ export const ThreadSchema = Type.Object(
     title: Type.String({ minLength: 1, maxLength: 512 }),
     checkoutId: Type.Optional(IdentifierSchema),
     status: ThreadStatusSchema,
+    pinnedAt: Type.Optional(TimestampSchema),
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
   },
@@ -164,6 +171,7 @@ export const ThreadSummarySchema = Type.Object(
     title: Type.String({ minLength: 1, maxLength: 512 }),
     checkoutId: Type.Optional(IdentifierSchema),
     status: ThreadStatusSchema,
+    pinnedAt: Type.Optional(TimestampSchema),
     activeRunId: Type.Optional(IdentifierSchema),
     updatedAt: TimestampSchema,
   },
@@ -180,7 +188,7 @@ export const RunSchema = Type.Object(
     /** Previous attempt in the same thread, if this run is a retry/resume. */
     parentRunId: Type.Optional(IdentifierSchema),
     mode: RunModeSchema,
-    runtimeProvider: Type.String({ minLength: 1, maxLength: 128 }),
+    runtimeProvider: RuntimeProviderSchema,
     runtimeId: Type.Optional(IdentifierSchema),
     piSessionId: Type.Optional(IdentifierSchema),
     /** Complete user intent; never replace this with a rendered transcript. */
@@ -203,7 +211,7 @@ export const RunSummarySchema = Type.Object(
     attempt: Type.Integer({ minimum: 1 }),
     parentRunId: Type.Optional(IdentifierSchema),
     mode: RunModeSchema,
-    runtimeProvider: Type.String({ minLength: 1, maxLength: 128 }),
+    runtimeProvider: RuntimeProviderSchema,
     runtimeId: Type.Optional(IdentifierSchema),
     piSessionId: Type.Optional(IdentifierSchema),
     model: Type.Optional(ModelSelectionSchema),
