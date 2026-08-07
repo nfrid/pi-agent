@@ -5,7 +5,7 @@ import {
 import type { DashboardHttpClient } from './http-client.js';
 import { DashboardHttpError, ReplayGapError } from './http-client.js';
 
-export const SSE_FRAME_LIMIT = 4 * 1024 * 1024;
+export const SSE_FRAME_LIMIT = 2 * 1024 * 1024;
 export const SSE_RECORDS_PER_YIELD = 32;
 export const RECONNECT_MIN_MS = 500;
 export const RECONNECT_MAX_MS = 30_000;

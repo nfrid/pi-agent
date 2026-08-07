@@ -25,6 +25,7 @@ import type { RegistryChange } from './runtime-registry.js';
 import { allowedOrigin, safeTokenEqual } from './security.js';
 
 const MAX_WS_BUFFER = 1024 * 1024;
+const MAX_SSE_FRAME_BYTES = 2 * 1024 * 1024;
 const WS_HEARTBEAT_MS = 30_000;
 const WS_PATH = '/ws';
 
@@ -668,11 +669,17 @@ class DashboardServerImpl implements DashboardServer {
       return;
     }
     const replayFrames = replay.events.map(serializeSseRecord);
-    const replayBytes = replayFrames.reduce(
-      (total, frame) => total + Buffer.byteLength(frame),
+    const replayFrameBytes = replayFrames.map((frame) =>
+      Buffer.byteLength(frame),
+    );
+    const replayBytes = replayFrameBytes.reduce(
+      (total, bytes) => total + bytes,
       0,
     );
-    if (replayBytes > this.sseBufferBytes) {
+    if (
+      replayFrameBytes.some((bytes) => bytes > MAX_SSE_FRAME_BYTES) ||
+      replayBytes > this.sseBufferBytes
+    ) {
       this.json(response, 409, {
         error: 'The requested event replay is too large for this stream.',
         code: 'replay-gap',
@@ -742,7 +749,7 @@ class DashboardServerImpl implements DashboardServer {
     const writeRaw = (value: string): boolean => {
       if (closed || response.writableEnded) return false;
       const bytes = Buffer.byteLength(value);
-      if (bytes > this.sseBufferBytes) {
+      if (bytes > MAX_SSE_FRAME_BYTES || bytes > this.sseBufferBytes) {
         closeSlowClient();
         return false;
       }
@@ -781,7 +788,11 @@ class DashboardServerImpl implements DashboardServer {
     const writeHeartbeat = () => writeRaw(': heartbeat\n\n');
     const queueRecord = (record: DashboardEventStreamRecord): boolean => {
       const bytes = Buffer.byteLength(serializeSseRecord(record));
-      if (queuedBytes + bytes > this.sseBufferBytes) return false;
+      if (
+        bytes > MAX_SSE_FRAME_BYTES ||
+        queuedBytes + bytes > this.sseBufferBytes
+      )
+        return false;
       queued.push(record);
       queuedBytes += bytes;
       return true;

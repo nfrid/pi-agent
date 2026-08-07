@@ -259,6 +259,51 @@ describe('dashboard HTTP boundary', () => {
     });
   });
 
+  it('rejects a replay frame larger than the browser parser limit', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-sse-frame-size-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      sseBufferBytes: 4 * 1024 * 1024,
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const implementation = server as unknown as {
+      eventStream: {
+        publish(factory: (cursor: number, emittedAt: number) => unknown): {
+          cursor: number;
+        };
+      };
+      snapshot(
+        cursor?: number,
+      ): import('@pi-dashboard/protocol').BrowserSnapshot;
+    };
+    const oversized = implementation.eventStream.publish(
+      (cursor, emittedAt) => ({
+        type: 'snapshot',
+        cursor,
+        emittedAt,
+        snapshot: {
+          ...implementation.snapshot(cursor),
+          usage: 'x'.repeat(2 * 1024 * 1024 + 1),
+        },
+      }),
+    );
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/events?cursor=${oversized.cursor - 1}`,
+      { headers: { 'x-dashboard-token': 'test-token' } },
+    );
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'replay-gap',
+      reason: 'replay-too-large',
+    });
+  });
+
   it('constructs one browser snapshot for each changed SSE/legacy update', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-snapshot-count-'),
