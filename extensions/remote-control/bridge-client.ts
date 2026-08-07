@@ -175,8 +175,9 @@ export class BridgeClient {
     this.unsubscribeBroker = undefined;
     this.unsubscribeLiveSurfaces?.();
     this.unsubscribeLiveSurfaces = undefined;
+    for (const item of this.commandQueue) this.discardSemanticCommand(item);
     this.commandQueue = [];
-    this.semanticCommandsInFlight.clear();
+    this.resolveInFlightSemanticCommandsAsStale();
     this.completedSemanticCommands.clear();
     this.clearOutboundQueue();
     this.socket?.destroy();
@@ -450,9 +451,17 @@ export class BridgeClient {
     scope?: string;
   }): void {
     if (!isSemanticCommand(item.command)) return;
-    this.semanticCommandsInFlight.delete(
-      this.semanticCommandKey(item.command, item.scope),
-    );
+    const key = this.semanticCommandKey(item.command, item.scope);
+    const record = this.semanticCommandsInFlight.get(key);
+    if (!record) return;
+    record.resolve({ status: 'stale' });
+    this.semanticCommandsInFlight.delete(key);
+  }
+
+  private resolveInFlightSemanticCommandsAsStale(): void {
+    for (const record of this.semanticCommandsInFlight.values())
+      record.resolve({ status: 'stale' });
+    this.semanticCommandsInFlight.clear();
   }
 
   private completeSemanticCommand(

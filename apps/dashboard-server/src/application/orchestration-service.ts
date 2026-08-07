@@ -698,18 +698,6 @@ export class OrchestrationService {
           }
           prepared = fresh.worktree.record;
         }
-        // Retried runs can reuse an extant record whose checkout was settled
-        // or marked as a snapshot. Make the ownership active and refresh its
-        // durable timestamp before any runtime launch side effect.
-        prepared.status = 'active';
-        const previousUpdatedAt = Date.parse(prepared.updatedAt);
-        prepared.updatedAt = new Date(
-          Math.max(
-            Date.now(),
-            Number.isNaN(previousUpdatedAt) ? 0 : previousUpdatedAt + 1,
-          ),
-        ).toISOString();
-        this.repository.writeWorktreeRecord(checkout.id, prepared);
         cwd = prepared.worktreePath;
         this.repository.updateCheckout(checkout.id, {
           path: cwd,

@@ -25,7 +25,238 @@ function workspace(root: string) {
   };
 }
 
+async function orchestrationFixture() {
+  const root = await mkdtemp(
+    path.join(os.tmpdir(), 'pi-orchestration-matrix-'),
+  );
+  const state = await mkdtemp(
+    path.join(os.tmpdir(), 'pi-orchestration-matrix-state-'),
+  );
+  const metadata = new MetadataStore(path.join(state, 'dashboard.sqlite'));
+  await git(root, 'init', '-b', 'main');
+  await git(root, 'config', 'user.email', 'test@example.test');
+  await git(root, 'config', 'user.name', 'Test');
+  await writeFile(path.join(root, 'tracked.txt'), 'base\\n');
+  await git(root, 'add', '.');
+  await git(root, 'commit', '-m', 'base');
+  let live: Record<string, unknown> | undefined;
+  const registry = {
+    get: (runtimeId: string) =>
+      live?.runtimeId === runtimeId ? (live as never) : undefined,
+    sendCommand: vi.fn(async () => ({ accepted: true })),
+  };
+  const manager = {
+    launch: vi.fn(async (input: { runtimeId?: string }) => ({
+      runtimeId: input.runtimeId,
+    })),
+    recover: vi.fn(async () => false),
+    stopRecovered: vi.fn(async () => undefined),
+    stop: vi.fn(async () => undefined),
+  };
+  const service = new OrchestrationService({
+    repository: metadata.orchestration,
+    manager: manager as never,
+    registry: registry as never,
+    workspaces: () => [workspace(root)],
+    reconnectGraceMs: 25,
+  });
+  const adopted = (await service.adoptProject({
+    commandId: 'matrix-adopt',
+    rootPath: root,
+  })) as { project: { id: string } };
+  const created = (await service.createThread(adopted.project.id, {
+    commandId: 'matrix-thread',
+    title: 'Matrix run',
+    prompt: 'Matrix prompt',
+    isolation: 'main',
+  })) as { run: { id: string } };
+  return {
+    root,
+    state,
+    metadata,
+    service,
+    manager,
+    registry,
+    runId: created.run.id,
+    setLive(value: Record<string, unknown> | undefined) {
+      live = value;
+    },
+    async close() {
+      await service.stop();
+      metadata.close();
+      await rm(root, { recursive: true, force: true });
+      await rm(state, { recursive: true, force: true });
+    },
+  };
+}
+
+async function reconcile(service: OrchestrationService): Promise<void> {
+  await (service as unknown as { reconcile: () => Promise<void> }).reconcile();
+}
+
+function runtimeHello(runtimeId: string): Record<string, unknown> {
+  return {
+    runtimeId,
+    ownership: 'managed',
+    pid: 1,
+    cwd: '/tmp',
+    liveState: 'working',
+    session: { id: `${runtimeId}-session`, entries: [] },
+    pendingInteractions: [],
+    online: true,
+  };
+}
+
 describe('OrchestrationService', () => {
+  it('requeues preparing runs and leaves them claimable during reconciliation', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      await reconcile(fixture.service);
+      expect(repository.getRun(fixture.runId)?.status).toBe('queued');
+      expect(repository.claimQueuedRun(fixture.runId)?.status).toBe(
+        'preparing',
+      );
+      expect(fixture.manager.launch).not.toHaveBeenCalled();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('interrupts a starting run with no durable runtime identity', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      await reconcile(fixture.service);
+      expect(repository.getRun(fixture.runId)?.status).toBe('interrupted');
+      expect(fixture.manager.launch).not.toHaveBeenCalled();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('binds a live running run without launching another manager runtime', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.transitionRun(fixture.runId, 'running');
+      repository.setRunRuntime(fixture.runId, 'runtime-live');
+      fixture.setLive(runtimeHello('runtime-live'));
+      await reconcile(fixture.service);
+      expect(fixture.manager.launch).not.toHaveBeenCalled();
+      expect(repository.getRuntime('runtime-live')?.piSessionId).toBe(
+        'runtime-live-session',
+      );
+      expect(repository.getRun(fixture.runId)?.status).toBe('running');
+      expect(
+        repository.getCommandReceipt(`run-prompt:${fixture.runId}`),
+      ).toBeDefined();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('waits for a recovered runtime hello and binds without launching', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.transitionRun(fixture.runId, 'running');
+      repository.setRunRuntime(fixture.runId, 'runtime-restored');
+      fixture.manager.recover.mockResolvedValueOnce(true);
+      const reconciliation = reconcile(fixture.service);
+      expect(fixture.manager.recover).toHaveBeenCalledWith('runtime-restored');
+      queueMicrotask(() => fixture.setLive(runtimeHello('runtime-restored')));
+      await reconciliation;
+      expect(fixture.manager.launch).not.toHaveBeenCalled();
+      expect(repository.getRun(fixture.runId)?.status).toBe('running');
+      expect(repository.getRuntime('runtime-restored')?.status).toBe('running');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('interrupts and stops an unreconnected recovered runtime after grace', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.transitionRun(fixture.runId, 'running');
+      repository.setRunRuntime(fixture.runId, 'runtime-lost');
+      fixture.manager.recover.mockResolvedValueOnce(true);
+      await reconcile(fixture.service);
+      expect(fixture.manager.launch).not.toHaveBeenCalled();
+      expect(fixture.manager.stopRecovered).toHaveBeenCalledOnce();
+      expect(repository.getRun(fixture.runId)?.status).toBe('interrupted');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('shares concurrent registered callbacks and sends one initial prompt', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.setRunRuntime(fixture.runId, 'runtime-duplicate');
+      const change = {
+        kind: 'registered' as const,
+        snapshot: runtimeHello('runtime-duplicate'),
+      };
+      const handle = (
+        fixture.service as unknown as {
+          handleRegistryChange: (value: typeof change) => Promise<void>;
+        }
+      ).handleRegistryChange.bind(fixture.service);
+      await Promise.all([handle(change), handle(change)]);
+      expect(fixture.registry.sendCommand).toHaveBeenCalledOnce();
+      expect(repository.getRun(fixture.runId)?.status).toBe('running');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('does not record a rejected prompt and retries it on a later hello', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.setRunRuntime(fixture.runId, 'runtime-retry');
+      fixture.registry.sendCommand.mockRejectedValueOnce(new Error('ACK lost'));
+      const change = {
+        kind: 'registered' as const,
+        snapshot: runtimeHello('runtime-retry'),
+      };
+      const handle = (
+        fixture.service as unknown as {
+          handleRegistryChange: (value: typeof change) => Promise<void>;
+        }
+      ).handleRegistryChange.bind(fixture.service);
+      await handle(change);
+      expect(
+        repository.getCommandReceipt(`run-prompt:${fixture.runId}`),
+      ).toBeUndefined();
+      expect(repository.getRun(fixture.runId)?.status).toBe('starting');
+      await handle(change);
+      expect(fixture.registry.sendCommand).toHaveBeenCalledTimes(2);
+      expect(
+        repository.getCommandReceipt(`run-prompt:${fixture.runId}`),
+      ).toBeDefined();
+      expect(repository.getRun(fixture.runId)?.status).toBe('running');
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('persists prompts before preparing distinct isolated WIP checkouts', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-orchestration-service-'),

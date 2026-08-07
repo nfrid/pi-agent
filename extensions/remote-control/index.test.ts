@@ -971,6 +971,91 @@ describe('remote-control bridge', () => {
     firstSocket.destroy();
   });
 
+  it('retries failed prompts and isolates duplicate IDs by session scope', async () => {
+    const handleCommand = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Pi rejected the prompt'))
+      .mockResolvedValue({ accepted: true });
+    let scope = 'session-one';
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      commandScope: () => scope,
+      handleCommand,
+    });
+    const socket = new net.Socket();
+    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', socket);
+    const enqueue = (
+      Reflect.get(client, 'enqueue') as (
+        command: BridgeCommand,
+        socket: net.Socket,
+      ) => void
+    ).bind(client);
+    const prompt = {
+      id: 'retry-prompt',
+      type: 'prompt',
+      text: 'Retry',
+    } as const;
+    enqueue(prompt, socket);
+    await waitFor(() => handleCommand.mock.calls.length === 1);
+    await waitFor(
+      () =>
+        (
+          Reflect.get(client, 'semanticCommandsInFlight') as Map<
+            unknown,
+            unknown
+          >
+        ).size === 0,
+    );
+    enqueue(prompt, socket);
+    await waitFor(() => handleCommand.mock.calls.length === 2);
+    expect(handleCommand).toHaveBeenCalledTimes(2);
+    scope = 'session-two';
+    enqueue(prompt, socket);
+    await waitFor(() => handleCommand.mock.calls.length === 3);
+    expect(
+      write.mock.calls.filter((call) =>
+        String(call[0]).includes('retry-prompt'),
+      ),
+    ).toHaveLength(3);
+    client.stop();
+  });
+
+  it('resolves queued duplicate waiters as stale when the bridge stops', async () => {
+    let release!: () => void;
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      commandScope: () => 'session-stop',
+      handleCommand: async () =>
+        new Promise<unknown>((resolve) => {
+          release = () => resolve({ accepted: true });
+        }),
+    });
+    const socket = new net.Socket();
+    vi.spyOn(socket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', socket);
+    const enqueue = (
+      Reflect.get(client, 'enqueue') as (
+        command: BridgeCommand,
+        socket: net.Socket,
+      ) => void
+    ).bind(client);
+    const prompt = { id: 'stop-prompt', type: 'prompt', text: 'Stop' } as const;
+    enqueue(prompt, socket);
+    await waitFor(() => Boolean(release));
+    enqueue(prompt, socket);
+    client.stop();
+    expect(
+      (Reflect.get(client, 'semanticCommandsInFlight') as Map<unknown, unknown>)
+        .size,
+    ).toBe(0);
+    release();
+  });
+
   it('pushes live surface patches and unsubscribes on stop', () => {
     const hub = new LiveSurfaceHub();
     const client = new BridgeClient({

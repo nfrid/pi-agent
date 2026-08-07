@@ -175,6 +175,18 @@ export function createWorktreeCreator<
   const environment = (id: string): NodeJS.ProcessEnv => ({
     [environmentVariable]: id,
   });
+  function activateRecord(record: Record): void {
+    record.status = 'active';
+    delete record.snapshot;
+    const previousUpdatedAt = Date.parse(record.updatedAt);
+    record.updatedAt = new Date(
+      Math.max(
+        Date.now(),
+        Number.isNaN(previousUpdatedAt) ? 0 : previousUpdatedAt + 1,
+      ),
+    ).toISOString();
+    store.writeWorktreeRecord(record);
+  }
   async function prepareWorktree(options: {
     cwd: string;
     name: string;
@@ -255,16 +267,7 @@ export function createWorktreeCreator<
       // A retry may reuse a settled checkout without recreating its directory.
       // Persist the active ownership and a fresh lifecycle timestamp before the
       // caller launches a new agent against it.
-      record.status = 'active';
-      delete record.snapshot;
-      const previousUpdatedAt = Date.parse(record.updatedAt);
-      record.updatedAt = new Date(
-        Math.max(
-          Date.now(),
-          Number.isNaN(previousUpdatedAt) ? 0 : previousUpdatedAt + 1,
-        ),
-      ).toISOString();
-      store.writeWorktreeRecord(record);
+      activateRecord(record);
       return { record, env: environment(record.id) };
     }
     if (record.status === 'removed')
@@ -279,9 +282,7 @@ export function createWorktreeCreator<
         record.worktreePath,
         record.branch,
       ]);
-      record.status = 'active';
-      delete record.snapshot;
-      store.writeWorktreeRecord(record);
+      activateRecord(record);
       return { record, env: environment(record.id) };
     } catch (error) {
       await cleanupFailedPreparation(

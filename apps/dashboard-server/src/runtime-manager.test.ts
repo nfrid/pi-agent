@@ -7,6 +7,53 @@ import { MetadataStore } from './metadata.js';
 import { RuntimeManager } from './runtime-manager.js';
 
 describe('runtime stopping', () => {
+  it('stops the exact restored opaque binding once when hello never arrives', async () => {
+    const restoredBinding = {
+      runtimeId: 'runtime-restored-opaque',
+      location: { id: 'provider:opaque-restored-location' },
+    };
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const markManagedStopped = vi.fn();
+    const forget = vi.fn();
+    const manager = new RuntimeManager(
+      { forget } as never,
+      {
+        attach: vi.fn().mockResolvedValue(restoredBinding),
+        stop,
+      } as never,
+      {} as never,
+      {
+        managedLaunches: () => [
+          {
+            runtimeId: restoredBinding.runtimeId,
+            workspaceId: 'workspace-restored',
+            placement: {
+              tmuxSession: 'sesh',
+              tmuxWindowId: '@restored',
+              tmuxPaneId: '%restored',
+              displayTarget: 'sesh:@restored',
+            },
+            identityTokenHash: 'identity-hash',
+            launchTokenHash: 'launch-hash',
+            launchConsumed: true,
+            launchedAt: 1,
+          },
+        ],
+        markManagedStopped,
+      } as never,
+      '/tmp/bridge.sock',
+    );
+    await expect(manager.recover(restoredBinding.runtimeId)).resolves.toBe(
+      true,
+    );
+    await manager.stopRecovered(restoredBinding.runtimeId);
+    expect(stop).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledWith(restoredBinding);
+    expect(markManagedStopped).toHaveBeenCalledOnce();
+    expect(markManagedStopped).toHaveBeenCalledWith(restoredBinding.runtimeId);
+    expect(forget).toHaveBeenCalledOnce();
+  });
+
   it('forgets an external runtime even when its stale bridge rejects shutdown', async () => {
     const forget = vi.fn();
     const manager = new RuntimeManager(
