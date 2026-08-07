@@ -9,6 +9,18 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./dist/index.js"
+    },
+    "./pi-runtime-protocol": {
+      "types": "./src/pi-runtime-protocol.ts",
+      "default": "./dist/pi-runtime-protocol.js"
+    },
+    "./orchestration-contracts": {
+      "types": "./src/orchestration-contracts.ts",
+      "default": "./dist/orchestration-contracts.js"
+    },
+    "./dashboard-api": {
+      "types": "./src/dashboard-api.ts",
+      "default": "./dist/dashboard-api.js"
     }
   },
   "scripts": {

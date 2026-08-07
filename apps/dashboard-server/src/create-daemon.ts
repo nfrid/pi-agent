@@ -17,7 +17,7 @@ import { RuntimeManager } from './runtime-manager.js';
 import { type RegistryChange, RuntimeRegistry } from './runtime-registry.js';
 import { CliSeshAdapter } from './sesh.js';
 import { SessionIndex } from './session-index.js';
-import { TmuxAdapter } from './tmux.js';
+import { TmuxAdapter, TmuxRuntimeProvider } from './tmux.js';
 import { CodexUsageProvider } from './usage.js';
 
 const SSE_HEARTBEAT_MS = 15_000;
@@ -112,6 +112,8 @@ function dependencies(
     );
   const sesh = options.sesh ?? new CliSeshAdapter();
   const tmux = options.tmux ?? new TmuxAdapter();
+  const runtimeProvider =
+    options.runtimeProvider ?? new TmuxRuntimeProvider(tmux);
   const usage = options.usage ?? new CodexUsageProvider();
   const eventStream = new DashboardEventStream(options.eventBufferSize ?? 256);
   const pushConfigured = Boolean(options.push);
@@ -128,7 +130,7 @@ function dependencies(
     });
   manager = new RuntimeManager(
     registry,
-    tmux,
+    runtimeProvider,
     sessions,
     metadata,
     config.socketPath,
@@ -152,6 +154,7 @@ function dependencies(
       sessions,
       sesh,
       tmux,
+      runtimeProvider,
       usage,
       push,
       pushConfigured,

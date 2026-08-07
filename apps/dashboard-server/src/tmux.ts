@@ -2,7 +2,16 @@ import { execFile } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { WorkspaceTarget } from '@pi-dashboard/protocol';
+import type {
+  AgentRuntimeProvider,
+  RuntimeAttachInput,
+  RuntimeBinding,
+  RuntimeCommand,
+  RuntimeLocation,
+  RuntimeProviderEvent,
+  RuntimeStartInput,
+  WorkspaceTarget,
+} from '@pi-dashboard/protocol';
 import { sanitizeDisplayName } from './security.js';
 
 const execFileAsync = promisify(execFile);
@@ -193,4 +202,110 @@ export class TmuxAdapter {
   async attachTarget(placement: ManagedPlacement): Promise<string> {
     return `tmux attach-session -t ${placement.tmuxSession}:${placement.tmuxWindowId}`;
   }
+}
+
+/**
+ * The concrete runtime provider for the current Pi + Sesh + tmux launch path.
+ * Its public lifecycle contract contains only opaque location IDs; tmux
+ * placements remain an implementation detail of this module.
+ */
+export class TmuxRuntimeProvider implements AgentRuntimeProvider {
+  constructor(private readonly tmux: TmuxAdapter = new TmuxAdapter()) {}
+
+  async start(input: RuntimeStartInput): Promise<RuntimeBinding> {
+    const session = input.workspace.sessionId;
+    if (!session || !input.workspace.active)
+      throw new Error(
+        'This workspace has no active tmux session yet. Open it through Sesh on the Mac first.',
+      );
+    const placement = await this.tmux.newManagedWindow({
+      workspace: {
+        id: input.workspace.id,
+        name: input.workspace.name,
+        path: input.cwd,
+        canonicalPath: input.cwd,
+        source: 'tmux',
+        tmuxSession: session,
+        active: true,
+      },
+      name: input.name,
+      runtimeId: input.runtimeId,
+      socketPath: input.socketPath,
+      launchToken: input.launchToken,
+      identityToken: input.identityToken,
+      sessionFile: input.sessionFile,
+      model: input.model,
+    });
+    return this.binding(input.runtimeId, placement);
+  }
+
+  async attach(input: RuntimeAttachInput): Promise<RuntimeBinding> {
+    const placement = placementFromLocation(input.location);
+    if (!(await this.tmux.windowExists(placement)))
+      throw new Error('Managed runtime placement no longer exists.');
+    return { runtimeId: input.runtimeId, location: input.location };
+  }
+
+  async stop(binding: RuntimeBinding): Promise<void> {
+    const location = binding.location;
+    if (!location) return;
+    await this.tmux.killManagedWindow(placementFromLocation(location));
+  }
+
+  async send(
+    _binding: RuntimeBinding,
+    _command: RuntimeCommand,
+  ): Promise<void> {
+    throw new Error('Tmux runtime commands are sent through the Pi bridge.');
+  }
+
+  subscribe(
+    _binding: RuntimeBinding,
+    _listener: (event: RuntimeProviderEvent) => void,
+  ): () => void {
+    return () => undefined;
+  }
+
+  private binding(
+    runtimeId: string,
+    placement: ManagedPlacement,
+  ): RuntimeBinding {
+    return {
+      runtimeId,
+      location: {
+        id: encodePlacement(placement),
+        sessionId: placement.tmuxSession,
+        windowId: placement.tmuxWindowId,
+        paneId: placement.tmuxPaneId,
+        displayTarget: placement.displayTarget,
+      },
+    };
+  }
+}
+
+function encodePlacement(placement: ManagedPlacement): string {
+  return [
+    placement.tmuxSession,
+    placement.tmuxWindowId,
+    placement.tmuxPaneId,
+  ].join('|');
+}
+
+function placementFromLocation(location: RuntimeLocation): ManagedPlacement {
+  if (
+    typeof location.sessionId !== 'string' ||
+    typeof location.windowId !== 'string' ||
+    typeof location.paneId !== 'string' ||
+    !TMUX_NAME.test(location.sessionId) ||
+    !/^@[0-9]+$/.test(location.windowId) ||
+    !/^%[0-9]+$/.test(location.paneId)
+  )
+    throw new Error('Invalid managed runtime location.');
+  return {
+    tmuxSession: location.sessionId,
+    tmuxWindowId: location.windowId,
+    tmuxPaneId: location.paneId,
+    displayTarget:
+      location.displayTarget ?? `${location.sessionId}:${location.windowId}`,
+  };
 }

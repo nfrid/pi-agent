@@ -1,0 +1,341 @@
+import { randomUUID } from 'node:crypto';
+import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
+import {
+  type BridgeEvent,
+  MAX_FRAME_BYTES,
+  type NormalizedMessagePayload,
+  type NormalizedToolPayload,
+  redactImageData,
+} from '../../packages/dashboard-protocol/src/pi-runtime-protocol';
+
+type EventRecord = Record<string, unknown>;
+
+export function eventRecord(value: unknown): EventRecord {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as EventRecord)
+    : {};
+}
+
+function jsonSafe(value: unknown, max = MAX_FRAME_BYTES): unknown {
+  try {
+    const text = JSON.stringify(redactImageData(value));
+    if (!text || Buffer.byteLength(text) > max) return null;
+    return JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+export function withoutOpaqueData(event: BridgeEvent): BridgeEvent {
+  if (event.type.startsWith('message.') && 'message' in event) {
+    const message = event.message;
+    if (message && typeof message === 'object' && !Array.isArray(message)) {
+      const { data, ...canonical } = message as Record<string, unknown>;
+      const deliveryMode = directString(eventRecord(data), 'deliveryMode');
+      return {
+        ...event,
+        message: {
+          ...canonical,
+          ...(deliveryMode === 'steer'
+            ? { data: { deliveryMode: 'steer' } }
+            : {}),
+        },
+      };
+    }
+  }
+  if (event.type.startsWith('tool.') && 'tool' in event) {
+    const tool = event.tool;
+    if (tool && typeof tool === 'object' && !Array.isArray(tool)) {
+      const { data: _data, ...canonical } = tool as Record<string, unknown>;
+      return { ...event, tool: canonical };
+    }
+  }
+  return event;
+}
+
+export function directValue(record: EventRecord, key: string): unknown {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
+export function directString(
+  record: EventRecord,
+  key: string,
+): string | undefined {
+  const value = directValue(record, key);
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Tool execution events already carry the canonical live result. Forwarding
+ * Pi's later toolResult message as a second transcript entity would duplicate
+ * the tool and introduce a false activity-group boundary.
+ */
+export function shouldForwardLiveMessage(value: unknown): boolean {
+  const event = eventRecord(value);
+  const message = eventRecord(directValue(event, 'message'));
+  const role = directString(message, 'role') ?? directString(event, 'role');
+  return role !== 'toolResult';
+}
+
+function directIdentifier(
+  record: EventRecord,
+  key: string,
+): string | number | undefined {
+  const value = directValue(record, key);
+  return (typeof value === 'string' && value.length > 0) ||
+    (typeof value === 'number' && Number.isFinite(value))
+    ? value
+    : undefined;
+}
+
+function safeIdentityPart(value: string | number): string {
+  return Array.from(String(value), (character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127 ? '?' : character;
+  })
+    .join('')
+    .slice(0, 240);
+}
+
+function textBlockAt(content: unknown, contentIndex: number): unknown {
+  if (!Array.isArray(content)) return undefined;
+  return content[contentIndex];
+}
+
+function setTextBlock(
+  content: unknown,
+  contentIndex: number,
+  text: string,
+): unknown {
+  if (typeof content === 'string' && contentIndex === 0) return text;
+  const next = Array.isArray(content) ? [...content] : [];
+  next[contentIndex] = { type: 'text', text };
+  return next;
+}
+
+function textEventContent(
+  previous: unknown,
+  contentIndex: number,
+  delta: string,
+  mode: 'start' | 'delta' | 'end',
+): unknown {
+  if (mode === 'start') return setTextBlock(previous, contentIndex, '');
+  if (mode === 'end') return setTextBlock(previous, contentIndex, delta);
+
+  if (typeof previous === 'string' && contentIndex === 0)
+    return `${previous}${delta}`;
+  const block = textBlockAt(previous, contentIndex);
+  const currentText =
+    block && typeof block === 'object' && !Array.isArray(block)
+      ? (block as Record<string, unknown>).text
+      : undefined;
+  if (
+    Array.isArray(previous) &&
+    block !== undefined &&
+    typeof currentText !== 'string'
+  )
+    return previous;
+  return setTextBlock(
+    previous,
+    contentIndex,
+    `${typeof currentText === 'string' ? currentText : ''}${delta}`,
+  );
+}
+
+/**
+ * Apply only the visible-text cases from Pi's AssistantMessageEvent union.
+ * Thinking and tool-call streams are deliberately not transcript text; the
+ * message_end wrapper remains the authoritative final assistant message.
+ */
+function applyAssistantMessageEvent(
+  previous: unknown,
+  event: AssistantMessageEvent,
+): unknown {
+  switch (event.type) {
+    case 'text_start':
+      return textEventContent(previous, event.contentIndex, '', 'start');
+    case 'text_delta':
+      return textEventContent(
+        previous,
+        event.contentIndex,
+        event.delta,
+        'delta',
+      );
+    case 'text_end':
+      return textEventContent(
+        previous,
+        event.contentIndex,
+        event.content,
+        'end',
+      );
+    case 'thinking_start':
+    case 'thinking_delta':
+    case 'thinking_end':
+    case 'toolcall_start':
+    case 'toolcall_delta':
+    case 'toolcall_end':
+    case 'start':
+    case 'done':
+    case 'error':
+      return previous;
+  }
+}
+
+/**
+ * Converts Pi's live event wrappers to the protocol's explicit live payloads.
+ * Identity lookup intentionally only examines documented, named wrapper fields;
+ * provider data is opaque and is never searched recursively for IDs.
+ */
+export class LiveEventNormalizer {
+  private identitySequence = 0;
+  private activeMessage:
+    | { messageId: string; identityKey?: string; content?: unknown }
+    | undefined;
+  private readonly activeToolNames = new Map<string, string>();
+
+  constructor(private readonly runtimeEpoch: string = randomUUID()) {}
+
+  reset(): void {
+    this.activeMessage = undefined;
+    this.activeToolNames.clear();
+  }
+
+  normalizeMessage(
+    phase: 'started' | 'updated' | 'finished',
+    value: unknown,
+  ): NormalizedMessagePayload {
+    const event = eventRecord(value);
+    const message = eventRecord(directValue(event, 'message'));
+    const assistantEventValue = directValue(event, 'assistantMessageEvent');
+    const assistantEvent = eventRecord(assistantEventValue);
+    const responseId =
+      directIdentifier(event, 'responseId') ??
+      directIdentifier(message, 'responseId') ??
+      directIdentifier(assistantEvent, 'responseId');
+    const timestamp =
+      directIdentifier(event, 'timestamp') ??
+      directIdentifier(message, 'timestamp');
+    const identityKey =
+      responseId !== undefined
+        ? `response:${safeIdentityPart(responseId)}`
+        : timestamp !== undefined
+          ? `timestamp:${safeIdentityPart(timestamp)}`
+          : undefined;
+
+    let messageId: string;
+    if (phase === 'started') {
+      messageId = identityKey
+        ? identityKey
+        : `${this.runtimeEpoch}:${++this.identitySequence}`;
+      this.activeMessage = { messageId, identityKey };
+    } else if (this.activeMessage) {
+      // A responseId is often only present on the final message wrapper. The
+      // live ID established by start remains authoritative for this stream.
+      messageId = this.activeMessage.messageId;
+      this.activeMessage.identityKey ??= identityKey;
+    } else {
+      messageId = identityKey
+        ? identityKey
+        : `${this.runtimeEpoch}:${++this.identitySequence}`;
+    }
+
+    const role =
+      directString(message, 'role') ??
+      directString(event, 'role') ??
+      'assistant';
+    const fullContent = Object.hasOwn(message, 'content')
+      ? directValue(message, 'content')
+      : Object.hasOwn(event, 'content')
+        ? directValue(event, 'content')
+        : undefined;
+    let rawContent: unknown = this.activeMessage?.content ?? null;
+    if (phase === 'started' || phase === 'finished' || role !== 'assistant') {
+      // message_end is authoritative; user steering updates also carry their
+      // complete message rather than an AssistantMessageEvent delta.
+      if (fullContent !== undefined) rawContent = fullContent;
+    } else if (assistantEventValue && typeof assistantEventValue === 'object') {
+      // 0.84's event union is intentionally handled case-by-case. In
+      // particular, a toolcall_delta is not a visible text delta.
+      rawContent = applyAssistantMessageEvent(
+        rawContent,
+        assistantEventValue as AssistantMessageEvent,
+      );
+    }
+    const safeContent = jsonSafe(rawContent, MAX_FRAME_BYTES);
+    if (this.activeMessage) this.activeMessage.content = safeContent;
+    const turnId =
+      directIdentifier(event, 'turnId') ?? directIdentifier(message, 'turnId');
+    const rawData = Object.hasOwn(message, 'data')
+      ? directValue(message, 'data')
+      : directValue(event, 'data');
+    const safeData =
+      rawData === undefined ? undefined : jsonSafe(rawData, MAX_FRAME_BYTES);
+    const payload: NormalizedMessagePayload = {
+      messageId,
+      role,
+      content: safeContent,
+      phase,
+      ...(timestamp !== undefined ? { timestamp } : {}),
+      ...(turnId !== undefined ? { turnId: String(turnId) } : {}),
+      ...(Array.isArray(directValue(message, 'toolCallIds'))
+        ? {
+            toolCallIds: (directValue(message, 'toolCallIds') as unknown[])
+              .filter((item): item is string => typeof item === 'string')
+              .slice(0, 128),
+          }
+        : {}),
+      ...(safeData === undefined ? {} : { data: safeData }),
+    };
+    if (phase === 'finished') this.activeMessage = undefined;
+    return payload;
+  }
+
+  normalizeTool(
+    phase: 'started' | 'updated' | 'finished',
+    value: unknown,
+  ): NormalizedToolPayload {
+    const event = eventRecord(value);
+    const suppliedId = directValue(event, 'toolCallId');
+    const toolCallId =
+      typeof suppliedId === 'string' && suppliedId.length > 0
+        ? suppliedId
+        : `${this.runtimeEpoch}:tool:${++this.identitySequence}`;
+    const suppliedName = directString(event, 'toolName');
+    const name = suppliedName ?? this.activeToolNames.get(toolCallId) ?? 'tool';
+    if (phase !== 'finished') this.activeToolNames.set(toolCallId, name);
+    else this.activeToolNames.delete(toolCallId);
+    const suppliedStatus = directString(event, 'status');
+    const status =
+      suppliedStatus === 'pending' ||
+      suppliedStatus === 'running' ||
+      suppliedStatus === 'completed' ||
+      suppliedStatus === 'success' ||
+      suppliedStatus === 'error' ||
+      suppliedStatus === 'failed'
+        ? suppliedStatus
+        : phase === 'finished'
+          ? directValue(event, 'isError') === true
+            ? 'error'
+            : 'completed'
+          : 'running';
+    const payload: NormalizedToolPayload = {
+      toolCallId,
+      name,
+      phase,
+      ...(directValue(event, 'args') !== undefined
+        ? { arguments: jsonSafe(directValue(event, 'args'), MAX_FRAME_BYTES) }
+        : {}),
+      ...(directValue(event, 'result') !== undefined
+        ? { result: jsonSafe(directValue(event, 'result'), MAX_FRAME_BYTES) }
+        : {}),
+      ...(typeof directValue(event, 'isError') === 'boolean'
+        ? { isError: directValue(event, 'isError') as boolean }
+        : {}),
+      status,
+      ...(directIdentifier(event, 'turnId') !== undefined
+        ? { turnId: String(directIdentifier(event, 'turnId')) }
+        : {}),
+    };
+    return payload;
+  }
+}

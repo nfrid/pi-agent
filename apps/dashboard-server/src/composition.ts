@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { AgentRuntimeProvider } from '@pi-dashboard/protocol';
 import type { DashboardApplication } from './application/dashboard-application.js';
 import type { DashboardEventStream } from './event-stream.js';
 import type { MetadataStore } from './metadata.js';
@@ -19,7 +20,9 @@ export interface DashboardServerOptions {
   stateDir?: string;
   sessionDir?: string;
   sesh?: SeshAdapter;
+  /** Legacy tmux runner seam retained for callers that customize launch. */
   tmux?: TmuxAdapter;
+  runtimeProvider?: AgentRuntimeProvider;
   metadata?: MetadataStore;
   sessions?: SessionIndex;
   registry?: RuntimeRegistry;
@@ -49,6 +52,7 @@ export interface DashboardDependencies {
   readonly sessions: SessionIndex;
   readonly sesh: SeshAdapter;
   readonly tmux: TmuxAdapter;
+  readonly runtimeProvider: AgentRuntimeProvider;
   readonly usage: UsageProvider;
   push: PushSender;
   readonly pushConfigured: boolean;

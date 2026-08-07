@@ -5,6 +5,7 @@ import {
   sanitizeTmuxName,
   TmuxAdapter,
   type TmuxCommandRunner,
+  TmuxRuntimeProvider,
 } from './tmux.js';
 
 class FakeRunner implements TmuxCommandRunner {
@@ -12,7 +13,12 @@ class FakeRunner implements TmuxCommandRunner {
   async run(args: readonly string[]) {
     this.calls.push([...args]);
     return {
-      stdout: args[0] === 'list-sessions' ? 'project\n' : '@4:%9\n',
+      stdout:
+        args[0] === 'list-sessions'
+          ? 'project\n'
+          : args[0] === 'list-windows'
+            ? '@4\n'
+            : '@4:%9\n',
       stderr: '',
     };
   }
@@ -58,6 +64,36 @@ describe('tmux adapter', () => {
       ]),
     );
     expect(runner.calls.at(-1)?.join(' ')).not.toContain('mobile; no shell');
+  });
+
+  it('exposes the tmux launch through the provider-neutral lifecycle contract', async () => {
+    const runner = new FakeRunner();
+    const provider = new TmuxRuntimeProvider(new TmuxAdapter(runner));
+    const binding = await provider.start({
+      runtimeId: 'runtime-1',
+      cwd: '/tmp',
+      socketPath: '/tmp/socket',
+      launchToken: 'launch',
+      identityToken: 'identity',
+      workspace: {
+        id: 'w',
+        name: 'project',
+        sessionId: 'project',
+        active: true,
+      },
+    });
+    expect(binding).toEqual({
+      runtimeId: 'runtime-1',
+      location: {
+        id: 'project|@4|%9',
+        sessionId: 'project',
+        windowId: '@4',
+        paneId: '%9',
+        displayTarget: 'project:@4',
+      },
+    });
+    await provider.stop(binding);
+    expect(runner.calls.at(-1)).toEqual(['kill-window', '-t', 'project:@4']);
   });
 
   it('parses the literal-delimited placement format', () => {

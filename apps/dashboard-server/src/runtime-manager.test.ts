@@ -55,6 +55,16 @@ describe('managed runtime launch safety', () => {
     session: { id: sessionId, entries: [] },
     pendingInteractions: [],
   });
+  const binding = (runtimeId: string) => ({
+    runtimeId,
+    location: {
+      id: `${runtimeId}:location`,
+      sessionId: 'sesh',
+      windowId: '@1',
+      paneId: '%1',
+      displayTarget: 'sesh:@1',
+    },
+  });
 
   it('rejects resuming a session already owned by an active runtime', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-active-'));
@@ -67,7 +77,7 @@ describe('managed runtime launch safety', () => {
     const sessions = { get: () => ({ id: 'session-1', file: sessionFile }) };
     const manager = new RuntimeManager(
       registry as never,
-      { hasSession: async () => true, newManagedWindow } as never,
+      { start: newManagedWindow } as never,
       sessions as never,
       { managedLaunches: () => [] } as never,
       '/tmp/bridge.sock',
@@ -89,24 +99,18 @@ describe('managed runtime launch safety', () => {
       sendCommand,
     };
     const runtimeSnapshot = runtime('new-session');
-    const tmux = {
-      hasSession: async () => true,
-      newManagedWindow: async ({ runtimeId }: { runtimeId: string }) => {
+    const provider = {
+      start: async ({ runtimeId }: { runtimeId: string }) => {
         manager.onRegistryChange({
           kind: 'registered',
           snapshot: { ...runtimeSnapshot, runtimeId },
         });
-        return {
-          tmuxSession: 'sesh',
-          tmuxWindowId: '@1',
-          tmuxPaneId: '%1',
-          displayTarget: 'sesh:@1',
-        };
+        return binding(runtimeId);
       },
     };
     manager = new RuntimeManager(
       registry as never,
-      tmux as never,
+      provider as never,
       {} as never,
       {
         managedLaunches: () => [],
@@ -141,15 +145,9 @@ describe('managed runtime launch safety', () => {
         sendCommand,
       } as never,
       {
-        hasSession: async () => true,
-        newManagedWindow: async ({ runtimeId: id }: { runtimeId: string }) => {
+        start: async ({ runtimeId: id }: { runtimeId: string }) => {
           runtimeId = id;
-          return {
-            tmuxSession: 'sesh',
-            tmuxWindowId: '@1',
-            tmuxPaneId: '%1',
-            displayTarget: 'sesh:@1',
-          };
+          return binding(id);
         },
       } as never,
       {} as never,
@@ -182,7 +180,7 @@ describe('managed runtime launch safety', () => {
       tmuxPaneId: '%1',
       displayTarget: 'sesh:@1',
     };
-    const killManagedWindow = vi.fn().mockResolvedValue(undefined);
+    const stop = vi.fn().mockResolvedValue(undefined);
     const metadata = {
       managedLaunches: () => [],
       recordManagedLaunch: () => {
@@ -192,9 +190,17 @@ describe('managed runtime launch safety', () => {
     const manager = new RuntimeManager(
       { snapshots: () => [] } as never,
       {
-        hasSession: async () => true,
-        newManagedWindow: async () => placement,
-        killManagedWindow,
+        start: async ({ runtimeId }: { runtimeId: string }) => ({
+          runtimeId,
+          location: {
+            id: `${runtimeId}:location`,
+            sessionId: placement.tmuxSession,
+            windowId: placement.tmuxWindowId,
+            paneId: placement.tmuxPaneId,
+            displayTarget: placement.displayTarget,
+          },
+        }),
+        stop,
       } as never,
       {} as never,
       metadata as never,
@@ -204,7 +210,14 @@ describe('managed runtime launch safety', () => {
     await expect(
       manager.launch({ workspaceId: 'workspace-1' }),
     ).rejects.toThrow('disk full');
-    expect(killManagedWindow).toHaveBeenCalledWith(placement);
+    expect(stop).toHaveBeenCalledOnce();
+    expect(stop.mock.calls[0]?.[0]).toMatchObject({
+      location: {
+        sessionId: placement.tmuxSession,
+        windowId: placement.tmuxWindowId,
+        paneId: placement.tmuxPaneId,
+      },
+    });
     await rm(root, { recursive: true, force: true });
   });
 });

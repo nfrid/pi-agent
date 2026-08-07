@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
-import type { WorkspaceTarget } from '@pi-dashboard/protocol';
+import type {
+  AgentRuntimeProvider,
+  RuntimeBinding,
+  WorkspaceTarget,
+} from '@pi-dashboard/protocol';
 import { validateStartRuntimeRequest } from '@pi-dashboard/protocol';
 import {
   credentialHash,
@@ -10,7 +14,7 @@ import {
 import type { RegistryChange, RuntimeRegistry } from './runtime-registry.js';
 import { sanitizeDisplayName } from './security.js';
 import type { SessionIndex } from './session-index.js';
-import type { ManagedPlacement, TmuxAdapter } from './tmux.js';
+import type { ManagedPlacement } from './tmux.js';
 
 interface LaunchRecord {
   runtimeId: string;
@@ -21,6 +25,35 @@ interface LaunchRecord {
   workspace: WorkspaceTarget;
   placement: ManagedPlacement;
   createdAt: number;
+}
+
+function placementFromBinding(binding: RuntimeBinding): ManagedPlacement {
+  const location = binding.location;
+  if (!location?.sessionId || !location.windowId || !location.paneId)
+    throw new Error('Runtime provider did not return a managed location.');
+  return {
+    tmuxSession: location.sessionId,
+    tmuxWindowId: location.windowId,
+    tmuxPaneId: location.paneId,
+    displayTarget:
+      location.displayTarget ?? `${location.sessionId}:${location.windowId}`,
+  };
+}
+
+function bindingFromPlacement(
+  runtimeId: string,
+  placement: ManagedPlacement,
+): RuntimeBinding {
+  return {
+    runtimeId,
+    location: {
+      id: `${runtimeId}:location`,
+      sessionId: placement.tmuxSession,
+      windowId: placement.tmuxWindowId,
+      paneId: placement.tmuxPaneId,
+      displayTarget: placement.displayTarget,
+    },
+  };
 }
 
 export class RuntimeManager {
@@ -37,7 +70,7 @@ export class RuntimeManager {
 
   constructor(
     private readonly registry: RuntimeRegistry,
-    private readonly tmux: TmuxAdapter,
+    private readonly provider: AgentRuntimeProvider,
     private readonly sessions: SessionIndex,
     private readonly metadata: MetadataStore,
     private readonly socketPath: string,
@@ -126,11 +159,7 @@ export class RuntimeManager {
     const workspace = this.workspaces.get(request.workspaceId);
     if (!workspace)
       throw new Error('Workspace is not in the current Sesh catalogue.');
-    if (
-      !workspace.tmuxSession ||
-      !workspace.active ||
-      !(await this.tmux.hasSession(workspace.tmuxSession))
-    )
+    if (!workspace.tmuxSession || !workspace.active)
       throw new Error(
         'This workspace has no active tmux session yet. Open it through Sesh on the Mac first.',
       );
@@ -192,8 +221,14 @@ export class RuntimeManager {
     let placement: ManagedPlacement | undefined;
     let metadataRecorded = false;
     try {
-      placement = await this.tmux.newManagedWindow({
-        workspace,
+      const binding = await this.provider.start({
+        workspace: {
+          id: workspace.id,
+          name: workspace.name,
+          sessionId: workspace.tmuxSession,
+          active: workspace.active,
+        },
+        cwd,
         name: sanitizeDisplayName(
           request.name,
           request.sessionId ? 'resume-agent' : 'pi-agent',
@@ -205,6 +240,7 @@ export class RuntimeManager {
         sessionFile,
         model: request.model,
       });
+      placement = placementFromBinding(binding);
       const launch: LaunchRecord = {
         runtimeId,
         launchToken,
@@ -234,7 +270,9 @@ export class RuntimeManager {
         } catch {
           /* rollback must still attempt tmux cleanup */
         }
-        await this.tmux.killManagedWindow(placement).catch(() => undefined);
+        await this.provider
+          .stop(bindingFromPlacement(runtimeId, placement))
+          .catch(() => undefined);
       } else if (metadataRecorded) {
         try {
           this.metadata.markManagedStopped(runtimeId);
@@ -321,8 +359,8 @@ export class RuntimeManager {
       this.signalManagedProcess(snapshot.pid, 'SIGKILL');
     try {
       if (launch) {
-        await this.tmux
-          .killManagedWindow(launch.placement)
+        await this.provider
+          .stop(bindingFromPlacement(runtimeId, launch.placement))
           .catch(() => undefined);
         this.metadata.markManagedStopped(runtimeId);
       }
