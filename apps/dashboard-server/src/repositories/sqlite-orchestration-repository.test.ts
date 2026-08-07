@@ -66,6 +66,8 @@ describe('SqliteOrchestrationRepository', () => {
       value.repository.transitionCheckout(value.checkout.id, 'dirty').status,
     ).toBe('dirty');
     expect(value.repository.getRun(run.id)?.initialPrompt).toBe(prompt);
+    value.repository.setRunError(run.id, 'stale ACK failure');
+    expect(value.repository.clearRunError(run.id).error).toBeUndefined();
     expect(value.repository.getThread(thread.id)?.pinnedAt).toBe(123);
     expect(value.repository.threadSummaries()[0]?.pinnedAt).toBe(123);
     const disposable = value.repository.createProject({
@@ -145,6 +147,49 @@ describe('SqliteOrchestrationRepository', () => {
         run: { initialPrompt: 'Must not be cast.' },
       }),
     ).toThrow('belongs to run.create');
+  });
+
+  it('keeps a second isolated run queued until the project parallel slot settles', async () => {
+    const value = await fixture();
+    value.repository.updateProject(value.project.id, { maxParallelRuns: 1 });
+    const secondCheckout = value.repository.createCheckout({
+      id: 'checkout-parallel-2',
+      projectId: value.project.id,
+      kind: 'worktree',
+      path: '/repo/.worktrees/parallel-two',
+      branch: 'pi/parallel-two',
+      status: 'ready',
+    });
+    const firstThread = value.repository.createThread({
+      id: 'thread-parallel-1',
+      projectId: value.project.id,
+      title: 'First',
+      checkoutId: value.checkout.id,
+    });
+    const secondThread = value.repository.createThread({
+      id: 'thread-parallel-2',
+      projectId: value.project.id,
+      title: 'Second',
+      checkoutId: secondCheckout.id,
+    });
+    const first = value.repository.createRun({
+      id: 'run-parallel-1',
+      threadId: firstThread.id,
+      initialPrompt: 'First',
+    });
+    const second = value.repository.createRun({
+      id: 'run-parallel-2',
+      threadId: secondThread.id,
+      initialPrompt: 'Second',
+    });
+    expect(value.repository.claimQueuedRun(first.id)?.status).toBe('preparing');
+    expect(value.repository.claimQueuedRun(second.id)).toBeUndefined();
+    value.repository.transitionRun(first.id, 'starting');
+    value.repository.transitionRun(first.id, 'running');
+    value.repository.transitionRun(first.id, 'settled');
+    expect(value.repository.claimQueuedRun(second.id)?.status).toBe(
+      'preparing',
+    );
   });
 
   it('enforces legal transitions and rejects illegal transitions', async () => {
@@ -234,7 +279,7 @@ describe('SqliteOrchestrationRepository', () => {
         threadId: checkoutConflictThread.id,
         initialPrompt: 'Writer conflict',
       }),
-    ).toThrow();
+    ).toThrowError(expect.objectContaining({ code: 'active-writer' }));
     expect(() =>
       value.repository.createCheckout({
         id: 'checkout-duplicate-path',

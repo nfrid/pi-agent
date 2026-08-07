@@ -43,6 +43,35 @@ const TERMINAL_RUN_STATUSES: readonly RunStatus[] = [
   'interrupted',
 ];
 
+function idempotencyConflict(
+  key: string,
+  owner: string,
+): Error & { code: string } {
+  return Object.assign(
+    new Error(`Idempotency key ${key} belongs to ${owner}.`),
+    { code: 'idempotency-conflict' },
+  );
+}
+
+function normalizeSqliteError(error: unknown): unknown {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+  if (!lower.includes('unique') && !lower.includes('constraint')) return error;
+  const code =
+    lower.includes('active_writer_per_checkout') ||
+    lower.includes('orchestration_run.checkout_id')
+      ? 'active-writer'
+      : 'sqlite-constraint';
+  return Object.assign(
+    new Error(
+      code === 'active-writer'
+        ? 'The checkout already has an active writer.'
+        : 'The orchestration request conflicts with existing state.',
+    ),
+    { code },
+  );
+}
+
 function stringValue(row: Record<string, unknown>, key: string): string {
   return String(row[key]);
 }
@@ -494,9 +523,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       const receipt = this.getCommandReceipt(idempotencyKey);
       if (receipt) {
         if (receipt.commandType !== 'run.create')
-          throw new Error(
-            `Idempotency key ${idempotencyKey} belongs to ${receipt.commandType}.`,
-          );
+          throw idempotencyConflict(idempotencyKey, receipt.commandType);
         return receipt.result as Run;
       }
       const run = this.insertRun(input);
@@ -520,9 +547,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       const existing = this.getCommandReceipt(idempotencyKey);
       if (existing) {
         if (existing.commandType !== 'run.retry')
-          throw new Error(
-            `Idempotency key ${idempotencyKey} belongs to ${existing.commandType}.`,
-          );
+          throw idempotencyConflict(idempotencyKey, existing.commandType);
         const result = existing.result as { run: Run; thread: Thread };
         return { ...result, receipt: existing };
       }
@@ -727,9 +752,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       const existing = this.getCommandReceipt(idempotencyKey);
       if (existing) {
         if (existing.commandType !== 'thread.create')
-          throw new Error(
-            `Idempotency key ${idempotencyKey} belongs to ${existing.commandType}.`,
-          );
+          throw idempotencyConflict(idempotencyKey, existing.commandType);
         const result = existing.result as { thread: Thread; run: Run };
         return { ...result, receipt: existing };
       }
@@ -774,7 +797,12 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
   }
 
   recordCommandReceipt(receipt: CommandReceipt): void {
-    this.withTransaction(() => this.insertReceipt(receipt));
+    this.withTransaction(() => {
+      const existing = this.getCommandReceipt(receipt.idempotencyKey);
+      if (existing && existing.commandType !== receipt.commandType)
+        throw idempotencyConflict(receipt.idempotencyKey, existing.commandType);
+      this.insertReceipt(receipt);
+    });
   }
 
   setRunRuntime(id: string, runtimeId: string): Run {
@@ -793,6 +821,17 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       const result = this.db
         .prepare('UPDATE orchestration_run SET error=? WHERE id=?')
         .run(error, id);
+      if (Number(result.changes) !== 1)
+        throw new Error(`Run ${id} does not exist.`);
+      return this.getRun(id) as Run;
+    });
+  }
+
+  clearRunError(id: string): Run {
+    return this.withTransaction(() => {
+      const result = this.db
+        .prepare('UPDATE orchestration_run SET error=NULL WHERE id=?')
+        .run(id);
       if (Number(result.changes) !== 1)
         throw new Error(`Run ${id} does not exist.`);
       return this.getRun(id) as Run;
@@ -1114,8 +1153,12 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       this.db.exec('COMMIT');
       return result;
     } catch (error) {
-      this.db.exec('ROLLBACK');
-      throw error;
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {
+        /* preserve the original database error */
+      }
+      throw normalizeSqliteError(error);
     }
   }
 }

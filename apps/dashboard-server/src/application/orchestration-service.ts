@@ -67,6 +67,21 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function boundedErrorText(error: unknown): string {
+  const text = errorText(error);
+  return text.length <= 2_000 ? text : `${text.slice(0, 1_999)}…`;
+}
+
+function idempotencyConflict(
+  id: string,
+  owner: string,
+): Error & { code: string } {
+  return Object.assign(
+    new Error(`Idempotency key ${id} belongs to ${owner}.`),
+    { code: 'idempotency-conflict' },
+  );
+}
+
 function commandReceipt(
   id: string,
   type: string,
@@ -97,6 +112,11 @@ export class OrchestrationService {
   private readonly registryTasks = new Set<Promise<void>>();
   /** One prompt handoff may be shared by several concurrent hello callbacks. */
   private readonly registryRunTasks = new Map<string, Promise<void>>();
+  /** Concurrent cancellation requests for one command share all side effects. */
+  private readonly cancelTasks = new Map<
+    string,
+    { runId: string; task: Promise<unknown> }
+  >();
   private readonly tools = new Map<
     string,
     {
@@ -311,7 +331,34 @@ export class OrchestrationService {
 
   async cancelRun(runId: string, commandId: string): Promise<unknown> {
     const prior = this.receipt(commandId, 'run.cancel');
-    if (prior) return prior.result;
+    if (prior) {
+      const result = prior.result as Run;
+      if (result.id !== runId)
+        throw idempotencyConflict(commandId, 'run.cancel');
+      return prior.result;
+    }
+    const active = this.cancelTasks.get(commandId);
+    if (active) {
+      if (active.runId !== runId)
+        throw idempotencyConflict(commandId, 'run.cancel');
+      return active.task;
+    }
+    const task = this.performCancel(runId, commandId);
+    this.cancelTasks.set(commandId, { runId, task });
+    void task.then(
+      () => {
+        if (this.cancelTasks.get(commandId)?.task === task)
+          this.cancelTasks.delete(commandId);
+      },
+      () => {
+        if (this.cancelTasks.get(commandId)?.task === task)
+          this.cancelTasks.delete(commandId);
+      },
+    );
+    return task;
+  }
+
+  private async performCancel(runId: string, commandId: string): Promise<Run> {
     const run = this.requireRun(runId);
     if (!TERMINAL_RUN_STATUSES.includes(run.status)) {
       if (run.runtimeId)
@@ -405,6 +452,7 @@ export class OrchestrationService {
     } catch (error) {
       if (this.repository.getCheckout(checkoutId)?.status === 'merging')
         this.repository.transitionCheckout(checkoutId, 'dirty');
+      this.changed();
       throw error;
     }
   }
@@ -416,6 +464,11 @@ export class OrchestrationService {
     const prior = this.receipt(commandId, 'checkout.retire');
     if (prior) return prior.result;
     const checkout = this.requireCheckout(checkoutId);
+    if (checkout.kind === 'main') {
+      throw Object.assign(new Error('The main checkout cannot be retired.'), {
+        code: 'orchestration-conflict',
+      });
+    }
     if (checkout.kind !== 'worktree') {
       const result = this.repository.transitionCheckout(checkoutId, 'retired');
       this.saveReceipt(commandId, 'checkout.retire', result);
@@ -501,7 +554,7 @@ export class OrchestrationService {
         );
       }
     } catch (error) {
-      this.repository.setRunError(run.id, errorText(error));
+      this.repository.setRunError(run.id, boundedErrorText(error));
     }
     this.changed();
     this.kick();
@@ -533,6 +586,9 @@ export class OrchestrationService {
         text: run.initialPrompt,
       });
       this.saveReceipt(promptReceiptId, 'run.prompt', { runId: run.id });
+      // A prior ACK failure is no longer actionable once this retry was
+      // acknowledged by the runtime.
+      this.repository.clearRunError(run.id);
     }
     const current = this.repository.getRun(runId);
     if (!current || TERMINAL_RUN_STATUSES.includes(current.status)) return;
@@ -692,7 +748,18 @@ export class OrchestrationService {
               'failed',
               fresh.fallbackReason ?? 'Requested worktree preparation failed.',
             );
-            this.repository.transitionCheckout(checkout.id, 'failed');
+            const failedCheckout = this.repository.getCheckout(checkout.id);
+            const record =
+              failedCheckout && this.worktreeRecord(failedCheckout);
+            if (record)
+              await createWorktreeFinisher(
+                this.storeFor(checkout),
+              ).discardFreshWorktree(record.id);
+            try {
+              this.repository.transitionCheckout(checkout.id, 'failed');
+            } catch {
+              /* preserve the run failure if another lifecycle update won */
+            }
             this.changed();
             return;
           }
@@ -741,14 +808,16 @@ export class OrchestrationService {
       });
     } catch (error) {
       this.failRun(run.id, 'failed', errorText(error));
-      if (checkout.kind === 'worktree' && !existingRecord) {
-        const record = this.worktreeRecord(
-          this.repository.getCheckout(checkout.id) ?? checkout,
-        );
-        if (record)
-          await createWorktreeFinisher(
-            this.storeFor(checkout),
-          ).discardFreshWorktree(record.id);
+      if (checkout.kind === 'worktree') {
+        if (!existingRecord) {
+          const record = this.worktreeRecord(
+            this.repository.getCheckout(checkout.id) ?? checkout,
+          );
+          if (record)
+            await createWorktreeFinisher(
+              this.storeFor(checkout),
+            ).discardFreshWorktree(record.id);
+        }
         if (this.repository.getCheckout(checkout.id)?.status !== 'failed') {
           try {
             this.repository.transitionCheckout(checkout.id, 'failed');
@@ -893,7 +962,7 @@ export class OrchestrationService {
   private receipt(id: string, type: string): CommandReceipt | undefined {
     const value = this.repository.getCommandReceipt(id);
     if (value && value.commandType !== type)
-      throw new Error(`Idempotency key ${id} belongs to ${value.commandType}.`);
+      throw idempotencyConflict(id, value.commandType);
     return value;
   }
 
@@ -905,9 +974,7 @@ export class OrchestrationService {
       const existing = this.repository.getCommandReceipt(id);
       if (!existing) throw error;
       if (existing.commandType !== type)
-        throw new Error(
-          `Idempotency key ${id} belongs to ${existing.commandType}.`,
-        );
+        throw idempotencyConflict(id, existing.commandType);
       return existing.result;
     }
   }
@@ -954,7 +1021,7 @@ export class OrchestrationService {
     } catch {
       /* another reconciler won */
     }
-    this.repository.setRunError(id, error);
+    this.repository.setRunError(id, boundedErrorText(error));
   }
 
   private transitionIfPossible(id: string, status: Run['status']): void {

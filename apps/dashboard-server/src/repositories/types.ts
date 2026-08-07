@@ -212,6 +212,7 @@ export interface OrchestrationRepository {
   recordCommandReceipt(receipt: CommandReceipt): void;
   setRunRuntime(id: string, runtimeId: string): Run;
   setRunError(id: string, error: string): Run;
+  clearRunError(id: string): Run;
   getRunByRuntimeId(runtimeId: string): Run | undefined;
   loadWorktreeRecord(checkoutId: string): WorktreeRecord | undefined;
   writeWorktreeRecord(checkoutId: string, record: WorktreeRecord): void;

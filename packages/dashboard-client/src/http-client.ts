@@ -188,10 +188,7 @@ export class DashboardHttpClient {
   async reviewCheckout(checkoutId: string): Promise<unknown> {
     return this.request(
       `/api/checkouts/${encodeURIComponent(checkoutId)}/review`,
-      {
-        method: 'POST',
-        body: '{}',
-      },
+      { method: 'GET' },
     );
   }
 

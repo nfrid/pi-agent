@@ -140,6 +140,35 @@ describe('Fastify dashboard route plugin', () => {
     ).resolves.toMatchObject({ statusCode: 400 });
   });
 
+  it('serves checkout review over GET and keeps empty review POST compatibility', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.reviewCheckout = vi.fn(async () => ({ state: 'unmerged' }));
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+    await expect(
+      app.inject({
+        method: 'GET',
+        url: '/api/checkouts/checkout-1/review',
+        headers,
+      }),
+    ).resolves.toMatchObject({ statusCode: 200 });
+    await expect(
+      app.inject({
+        method: 'POST',
+        url: '/api/checkouts/checkout-1/review',
+        headers: { ...headers, 'content-type': 'application/json' },
+        payload: '',
+      }),
+    ).resolves.toMatchObject({ statusCode: 200 });
+    expect(routeContext.reviewCheckout).toHaveBeenCalledTimes(2);
+  });
+
   it('accepts empty stop/cancel bodies but rejects malformed JSON bodies', async () => {
     const app = Fastify();
     apps.push(app);

@@ -56,7 +56,8 @@ function parseJsonBody(
     const path = request.raw.url?.split('?', 1)[0];
     if (
       /^\/api\/runtimes\/[^/]+\/stop$/.test(path ?? '') ||
-      /^\/api\/interactions\/[^/]+\/cancel$/.test(path ?? '')
+      /^\/api\/interactions\/[^/]+\/cancel$/.test(path ?? '') ||
+      /^\/api\/checkouts\/[^/]+\/review$/.test(path ?? '')
     ) {
       done(null, {});
       return;
@@ -120,21 +121,41 @@ function requestUrl(request: FastifyRequest): URL {
   );
 }
 
+function errorCode(error: unknown): string | undefined {
+  const explicit = (error as { code?: unknown }).code;
+  if (typeof explicit === 'string') return explicit;
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+  if (lower.includes('unique constraint') || lower.includes('sqlite'))
+    return 'sqlite-constraint';
+  return undefined;
+}
+
 function errorStatus(error: unknown): number {
-  const code = (error as { code?: string }).code;
+  const code = errorCode(error);
   return code === 'shared-working-directory' ||
     code === 'active-session' ||
     code === 'merge-conflict' ||
     code === 'restart-precondition' ||
-    code === 'idempotency-conflict'
+    code === 'idempotency-conflict' ||
+    code === 'active-writer' ||
+    code === 'sqlite-constraint' ||
+    code === 'orchestration-conflict'
     ? 409
     : 400;
 }
 
 function sendError(reply: FastifyReply, error: unknown): FastifyReply {
+  const code = errorCode(error);
+  const databaseDetail =
+    code === 'active-writer' || code === 'sqlite-constraint';
   return reply.code(errorStatus(error)).send({
-    error: error instanceof Error ? error.message : String(error),
-    code: (error as { code?: string }).code,
+    error: databaseDetail
+      ? 'The orchestration request conflicts with existing state.'
+      : error instanceof Error
+        ? error.message
+        : String(error),
+    ...(code === undefined ? {} : { code }),
   });
 }
 
@@ -356,14 +377,21 @@ export const dashboardRoutes: FastifyPluginAsync<{
       },
     );
   }
+  app.get<{ Params: { checkoutId: string } }>(
+    '/api/checkouts/:checkoutId/review',
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.reviewCheckout)(
+          request.params.checkoutId,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
   app.post<{ Params: { checkoutId: string } }>(
     '/api/checkouts/:checkoutId/review',
-    {
-      preValidation: async (request) => {
-        if (request.body === undefined) request.body = {};
-      },
-      schema: { body: CheckoutReviewCommandSchema },
-    },
+    { schema: { body: CheckoutReviewCommandSchema } },
     async (request, reply) => {
       try {
         return await requireOperation(context.reviewCheckout)(

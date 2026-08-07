@@ -252,6 +252,70 @@ describe('OrchestrationService', () => {
         repository.getCommandReceipt(`run-prompt:${fixture.runId}`),
       ).toBeDefined();
       expect(repository.getRun(fixture.runId)?.status).toBe('running');
+      expect(repository.getRun(fixture.runId)?.error).toBeUndefined();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('makes concurrent and sequential cancellation replay the same result', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.setRunRuntime(fixture.runId, 'cancel-runtime');
+      let release!: () => void;
+      const stopped = new Promise<undefined>((resolve) => {
+        release = () => resolve(undefined);
+      });
+      fixture.manager.stop.mockImplementationOnce(async () => stopped);
+      const first = fixture.service.cancelRun(fixture.runId, 'cancel-once');
+      const second = fixture.service.cancelRun(fixture.runId, 'cancel-once');
+      await Promise.resolve();
+      expect(fixture.manager.stop).toHaveBeenCalledOnce();
+      release();
+      const [one, two] = await Promise.all([first, second]);
+      expect(two).toEqual(one);
+      expect(
+        await fixture.service.cancelRun(fixture.runId, 'cancel-once'),
+      ).toEqual(one);
+      expect(fixture.manager.stop).toHaveBeenCalledOnce();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('returns a coded conflict when a command receipt belongs to another command', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.recordCommandReceipt({
+        idempotencyKey: 'owned-command',
+        commandType: 'thread.archive',
+        resourceType: 'thread',
+        resourceId: 'thread-1',
+        result: {},
+        createdAt: Date.now(),
+      });
+      await expect(
+        fixture.service.cancelRun(fixture.runId, 'owned-command'),
+      ).rejects.toMatchObject({ code: 'idempotency-conflict' });
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('rejects retiring the project main checkout as an orchestration conflict', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const main = fixture.metadata.orchestration
+        .listCheckouts()
+        .find((checkout) => checkout.kind === 'main');
+      expect(main).toBeDefined();
+      await expect(
+        fixture.service.retireCheckout(main?.id as string, 'retire-main'),
+      ).rejects.toMatchObject({ code: 'orchestration-conflict' });
     } finally {
       await fixture.close();
     }
