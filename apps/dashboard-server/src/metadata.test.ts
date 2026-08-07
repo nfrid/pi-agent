@@ -47,18 +47,26 @@ describe('dashboard metadata wire boundaries', () => {
         launchToken: 'launch-read',
         mode: 'read',
       });
-      store.recordManagedLaunch('write-runtime', 'workspace', {
-        ...placement,
-        tmuxWindowId: '@2',
-        tmuxPaneId: '%2',
-      }, {
-        identityToken: 'identity-write',
-        launchToken: 'launch-write',
-      });
+      store.recordManagedLaunch(
+        'write-runtime',
+        'workspace',
+        {
+          ...placement,
+          tmuxWindowId: '@2',
+          tmuxPaneId: '%2',
+        },
+        {
+          identityToken: 'identity-write',
+          launchToken: 'launch-write',
+        },
+      );
       expect(store.managedLaunches()).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ runtimeId: 'read-runtime', mode: 'read' }),
-          expect.objectContaining({ runtimeId: 'write-runtime', mode: 'write' }),
+          expect.objectContaining({
+            runtimeId: 'write-runtime',
+            mode: 'write',
+          }),
         ]),
       );
     } finally {
