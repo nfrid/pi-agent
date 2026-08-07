@@ -181,6 +181,7 @@ describe('Fastify dashboard route plugin', () => {
     };
     const created = { thread: { id: 'thread-1' }, run: { id: 'run-1' } };
     routeContext.adoptProject = vi.fn(async () => adopted);
+    routeContext.adoptSession = vi.fn(async () => created);
     routeContext.createThread = vi.fn(async () => created);
     routeContext.retryRun = vi.fn(async () => created);
     routeContext.cancelRun = vi.fn(async () => ({
@@ -275,6 +276,25 @@ describe('Fastify dashboard route plugin', () => {
         })
       ).statusCode,
     ).toBe(201);
+    const adoption = await app.inject({
+      method: 'POST',
+      url: '/api/projects/project-1/sessions/session-1/adopt',
+      headers,
+      payload: { commandId: 'session-adopt-1', title: 'Legacy session' },
+    });
+    expect(adoption.statusCode).toBe(201);
+    expect(routeContext.adoptSession).toHaveBeenCalledWith(
+      'project-1',
+      'session-1',
+      { commandId: 'session-adopt-1', title: 'Legacy session' },
+    );
+    const extraAdoption = await app.inject({
+      method: 'POST',
+      url: '/api/projects/project-1/sessions/session-1/adopt',
+      headers,
+      payload: { commandId: 'session-adopt-2', extra: true },
+    });
+    expect(extraAdoption.statusCode).toBe(400);
     const threadRequest = {
       commandId: 'thread-1',
       title: 'Thread',

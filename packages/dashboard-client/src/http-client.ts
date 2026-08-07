@@ -1,8 +1,19 @@
 import {
   type BrowserSnapshot,
+  type CancelCommand,
+  type Checkout,
+  type CommandReceipt,
   type DashboardStreamMessage,
+  type Project,
+  type ProjectAdoptCommand,
+  type ProjectCreateCommand,
+  type RetryCommand,
+  type Run,
+  type SessionAdoptCommand,
   type SessionApiResponse,
   type StartRuntimeRequest,
+  type Thread,
+  type ThreadCreateCommand,
   tryParseBrowserSnapshot,
   tryParseDashboardStreamMessage,
   tryParseSessionApiResponse,
@@ -141,14 +152,22 @@ export class DashboardHttpClient {
     return this.request('/api/usage');
   }
 
-  async createProject(command: Record<string, unknown>): Promise<unknown> {
+  async createProject(command: ProjectCreateCommand): Promise<{
+    project: Project;
+    checkout: Checkout;
+    receipt?: CommandReceipt;
+  }> {
     return this.request('/api/projects', {
       method: 'POST',
       body: JSON.stringify(command),
     });
   }
 
-  async adoptProject(command: Record<string, unknown>): Promise<unknown> {
+  async adoptProject(command: ProjectAdoptCommand): Promise<{
+    project: Project;
+    checkout: Checkout;
+    receipt?: CommandReceipt;
+  }> {
     return this.request('/api/projects/adopt', {
       method: 'POST',
       body: JSON.stringify(command),
@@ -157,8 +176,8 @@ export class DashboardHttpClient {
 
   async createThread(
     projectId: string,
-    command: Record<string, unknown>,
-  ): Promise<unknown> {
+    command: ThreadCreateCommand,
+  ): Promise<{ thread: Thread; run: Run; receipt: CommandReceipt }> {
     return this.request(
       `/api/projects/${encodeURIComponent(projectId)}/threads`,
       {
@@ -170,18 +189,22 @@ export class DashboardHttpClient {
 
   async retryThread(
     threadId: string,
-    command: Record<string, unknown>,
-  ): Promise<unknown> {
+    command: RetryCommand,
+  ): Promise<{ thread: Thread; run: Run; receipt?: CommandReceipt }> {
     return this.request(`/api/threads/${encodeURIComponent(threadId)}/retry`, {
       method: 'POST',
       body: JSON.stringify(command),
     });
   }
 
-  async cancelRun(runId: string, commandId: string): Promise<unknown> {
+  async cancelRun(
+    runId: string,
+    command: CancelCommand | string,
+  ): Promise<Run> {
+    const body = typeof command === 'string' ? { commandId: command } : command;
     return this.request(`/api/runs/${encodeURIComponent(runId)}/cancel`, {
       method: 'POST',
-      body: JSON.stringify({ commandId }),
+      body: JSON.stringify(body),
     });
   }
 
@@ -192,36 +215,47 @@ export class DashboardHttpClient {
     );
   }
 
-  async mergeCheckout(checkoutId: string, commandId: string): Promise<unknown> {
+  async mergeCheckout(
+    checkoutId: string,
+    command: { commandId: string } | string,
+  ): Promise<{ checkout: Checkout; outcome: unknown }> {
+    const body = typeof command === 'string' ? { commandId: command } : command;
     return this.request(
       `/api/checkouts/${encodeURIComponent(checkoutId)}/merge`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ commandId }),
-      },
+      { method: 'POST', body: JSON.stringify(body) },
     );
   }
 
   async retireCheckout(
     checkoutId: string,
-    commandId: string,
-  ): Promise<unknown> {
+    command: { commandId: string } | string,
+  ): Promise<Checkout> {
+    const body = typeof command === 'string' ? { commandId: command } : command;
     return this.request(
       `/api/checkouts/${encodeURIComponent(checkoutId)}/retire`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ commandId }),
-      },
+      { method: 'POST', body: JSON.stringify(body) },
     );
   }
 
-  async archiveThread(threadId: string, commandId: string): Promise<unknown> {
+  async archiveThread(
+    threadId: string,
+    command: { commandId: string } | string,
+  ): Promise<Thread> {
+    const body = typeof command === 'string' ? { commandId: command } : command;
     return this.request(
       `/api/threads/${encodeURIComponent(threadId)}/archive`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ commandId }),
-      },
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+  }
+
+  async adoptSession(
+    projectId: string,
+    sessionId: string,
+    command: SessionAdoptCommand,
+  ): Promise<{ thread: Thread; run: Run; receipt: CommandReceipt }> {
+    return this.request(
+      `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/adopt`,
+      { method: 'POST', body: JSON.stringify(command) },
     );
   }
 

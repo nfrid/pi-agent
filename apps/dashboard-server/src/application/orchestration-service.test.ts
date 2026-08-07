@@ -56,6 +56,7 @@ async function orchestrationFixture() {
   const registry = {
     get: (runtimeId: string) =>
       live?.runtimeId === runtimeId ? (live as never) : undefined,
+    snapshots: () => (live ? [live as never] : []),
     sendCommand: vi.fn(async () => ({ accepted: true })),
   };
   const manager = {
@@ -71,6 +72,23 @@ async function orchestrationFixture() {
     manager: manager as never,
     registry: registry as never,
     workspaces: () => [workspace(root)],
+    readSession: async (id) => ({
+      metadata: {
+        id,
+        file: path.join(root, `${id}.jsonl`),
+        cwd: metadata.orchestration.listProjects()[0]?.rootPath ?? root,
+        updatedAt: Date.now(),
+      },
+      entries: [
+        {
+          type: 'message',
+          message: {
+            role: 'user',
+            content: 'A complete legacy prompt with all its details.',
+          },
+        },
+      ],
+    }),
     reconnectGraceMs: 25,
   });
   const adopted = (await service.adoptProject({
@@ -91,6 +109,7 @@ async function orchestrationFixture() {
     manager,
     registry,
     runId: created.run.id,
+    projectId: adopted.project.id,
     setLive(value: Record<string, unknown> | undefined) {
       live = value;
     },
@@ -102,6 +121,74 @@ async function orchestrationFixture() {
     },
   };
 }
+
+it('adopts an inactive legacy session without launching or duplicating rows', async () => {
+  const fixture = await orchestrationFixture();
+  try {
+    await fixture.service.cancelRun(fixture.runId, 'cancel-before-adopt');
+    const checkout = fixture.metadata.orchestration
+      .listCheckouts(fixture.projectId)
+      .find((item) => item.kind === 'main');
+    if (!checkout) throw new Error('Missing fixture checkout.');
+    const first = await fixture.service.adoptSession(
+      fixture.projectId,
+      'legacy-session',
+      { commandId: 'adopt-legacy', checkoutId: checkout.id },
+    );
+    const replay = await fixture.service.adoptSession(
+      fixture.projectId,
+      'legacy-session',
+      { commandId: 'adopt-legacy', title: 'ignored on replay' },
+    );
+    expect(first).toEqual(replay);
+    expect(first.run.initialPrompt).toBe(
+      'A complete legacy prompt with all its details.',
+    );
+    expect(first.run.status).toBe('interrupted');
+    expect(
+      fixture.metadata.orchestration.listThreads(fixture.projectId),
+    ).toHaveLength(2);
+    expect(fixture.metadata.orchestration.listRuns()).toHaveLength(2);
+    expect(fixture.manager.launch).not.toHaveBeenCalled();
+  } finally {
+    await fixture.close();
+  }
+});
+
+it('maps a live legacy runtime with pending interaction to waiting and binds it', async () => {
+  const fixture = await orchestrationFixture();
+  try {
+    await fixture.service.cancelRun(fixture.runId, 'cancel-before-live-adopt');
+    const checkout = fixture.metadata.orchestration
+      .listCheckouts(fixture.projectId)
+      .find((item) => item.kind === 'main');
+    if (!checkout) throw new Error('Missing fixture checkout.');
+    fixture.setLive({
+      runtimeId: 'legacy-runtime',
+      session: { id: 'active-legacy-session' },
+      liveState: 'working',
+      pendingInteractions: [{}],
+      online: true,
+    });
+    const adopted = await fixture.service.adoptSession(
+      fixture.projectId,
+      'active-legacy-session',
+      { commandId: 'adopt-live', checkoutId: checkout.id },
+    );
+    expect(adopted.run.status).toBe('waiting');
+    expect(adopted.run.runtimeId).toBe('legacy-runtime');
+    expect(
+      fixture.metadata.orchestration.getRuntime('legacy-runtime'),
+    ).toMatchObject({
+      piSessionId: 'active-legacy-session',
+      runId: adopted.run.id,
+      status: 'running',
+    });
+    expect(fixture.manager.launch).not.toHaveBeenCalled();
+  } finally {
+    await fixture.close();
+  }
+});
 
 async function reconcile(service: OrchestrationService): Promise<void> {
   await (service as unknown as { reconcile: () => Promise<void> }).reconcile();

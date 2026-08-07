@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveSessionTitle,
   ExtensionSurfaceSchema,
+  firstUserMessageText,
   isBridgeEvent,
   LiveExtensionSurfaceSchema,
   MAX_FRAME_BYTES,
@@ -15,6 +16,7 @@ import {
   parseNormalizedMessagePayload,
   parseRuntimeExtensionSurface,
   parseRuntimeSnapshot,
+  parseSessionAdoptCommand,
   RuntimeExtensionSurfaceSchema,
   redactImageData,
   serializeFrame,
@@ -27,6 +29,32 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('bounds and rejects unknown session adoption command properties', () => {
+    const command = {
+      commandId: 'adopt-1',
+      title: 'Legacy session',
+      checkoutId: 'checkout-1',
+    };
+    expect(parseSessionAdoptCommand(command)).toEqual(command);
+    expect(() =>
+      parseSessionAdoptCommand({ ...command, extra: true }),
+    ).toThrow();
+    expect(() =>
+      parseSessionAdoptCommand({ ...command, title: 'x'.repeat(513) }),
+    ).toThrow();
+  });
+
+  it('preserves the complete first user prompt while deriving a short title', () => {
+    const prompt = '  first line\nsecond line with full intent  ';
+    const entries = [
+      { type: 'message', message: { role: 'user', content: prompt } },
+    ];
+    expect(firstUserMessageText(entries)).toBe(prompt);
+    expect(deriveSessionTitle(entries)).toBe(
+      'first line second line with full intent',
+    );
+  });
+
   it('matches the closest workspace and uses explicit sources as tie-breakers', () => {
     const workspace = (
       id: string,

@@ -13,6 +13,8 @@ import {
   ProjectCreateCommandSchema,
   type RetryCommand,
   RetryCommandSchema,
+  type SessionAdoptCommand,
+  SessionAdoptCommandSchema,
   type ThreadCreateCommand,
   ThreadCreateCommandSchema,
 } from './orchestration-commands.js';
@@ -67,6 +69,12 @@ export const tryParseProjectAdoptCommand = (
   value: unknown,
 ): ProjectAdoptCommand | undefined =>
   tryParseSchema(ProjectAdoptCommandSchema, value);
+export const parseSessionAdoptCommand = (value: unknown): SessionAdoptCommand =>
+  parseSchema(SessionAdoptCommandSchema, value, 'session adopt command');
+export const tryParseSessionAdoptCommand = (
+  value: unknown,
+): SessionAdoptCommand | undefined =>
+  tryParseSchema(SessionAdoptCommandSchema, value);
 export const parseThreadCreateCommand = (value: unknown): ThreadCreateCommand =>
   parseSchema(ThreadCreateCommandSchema, value, 'thread create command');
 export const tryParseThreadCreateCommand = (

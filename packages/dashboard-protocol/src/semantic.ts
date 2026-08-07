@@ -76,8 +76,8 @@ function textFromMessageContent(content: unknown): string | undefined {
   return text || undefined;
 }
 
-/** Return the first non-empty user message title in Pi session entries. */
-export function deriveSessionTitle(
+/** Return the complete first non-empty user message in Pi session entries. */
+export function firstUserMessageText(
   entries: readonly unknown[],
 ): string | undefined {
   for (const entry of entries) {
@@ -85,8 +85,15 @@ export function deriveSessionTitle(
     const message = isRecord(entry.message) ? entry.message : entry;
     if (message.role !== 'user') continue;
     const text = textFromMessageContent(message.content);
-    const title = text ? normalizeSessionTitle(text) : undefined;
-    if (title) return title;
+    if (text?.trim()) return text;
   }
   return undefined;
+}
+
+/** Return the first non-empty user message title in Pi session entries. */
+export function deriveSessionTitle(
+  entries: readonly unknown[],
+): string | undefined {
+  const text = firstUserMessageText(entries);
+  return text ? normalizeSessionTitle(text) : undefined;
 }

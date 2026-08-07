@@ -1,7 +1,12 @@
 import type {
   BrowserSnapshot,
+  ProjectAdoptCommand,
+  ProjectCreateCommand,
+  RetryCommand,
+  SessionAdoptCommand,
   SessionApiResponse,
   StartRuntimeRequest,
+  ThreadCreateCommand,
 } from '@pi-dashboard/protocol';
 import {
   mutationOptions,
@@ -19,7 +24,36 @@ export const dashboardQueryKeys = {
   runtime: (id: string) => ['dashboard', 'runtime', id] as const,
   notifications: () => ['dashboard', 'notifications'] as const,
   settings: () => ['dashboard', 'settings'] as const,
+  projects: () => ['dashboard', 'projects'] as const,
+  checkouts: () => ['dashboard', 'checkouts'] as const,
+  threads: () => ['dashboard', 'threads'] as const,
+  runs: () => ['dashboard', 'runs'] as const,
+  project: (id: string) => ['dashboard', 'project', id] as const,
+  checkout: (id: string) => ['dashboard', 'checkout', id] as const,
+  thread: (id: string) => ['dashboard', 'thread', id] as const,
+  run: (id: string) => ['dashboard', 'run', id] as const,
 };
+
+type CommandInput<T extends { commandId: string }> = Omit<T, 'commandId'> & {
+  commandId?: string;
+};
+
+function mutationCommandId(prefix: string): string {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  );
+}
+
+function withMutationCommandId<T extends { commandId: string }>(
+  prefix: string,
+  command: CommandInput<T>,
+): T {
+  return {
+    ...command,
+    commandId: command.commandId ?? mutationCommandId(prefix),
+  } as T;
+}
 
 const snapshotRequestGenerations = new WeakMap<object, number>();
 
@@ -226,6 +260,148 @@ export function notificationReadMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
     mutationFn: ({ id, all }: { id?: string; all?: boolean }) =>
       all ? client.readAllNotifications() : client.readNotification(id ?? ''),
+    retry: false,
+  });
+}
+
+export function adoptProjectMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: (command: CommandInput<ProjectAdoptCommand>) =>
+      client.adoptProject(
+        withMutationCommandId<ProjectAdoptCommand>('project-adopt', command),
+      ),
+    retry: false,
+  });
+}
+
+export function adoptSessionMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: ({
+      projectId,
+      sessionId,
+      command,
+    }: {
+      projectId: string;
+      sessionId: string;
+      command?: CommandInput<SessionAdoptCommand>;
+    }) =>
+      client.adoptSession(
+        projectId,
+        sessionId,
+        withMutationCommandId<SessionAdoptCommand>(
+          'session-adopt',
+          command ?? {},
+        ),
+      ),
+    retry: false,
+  });
+}
+
+export function createProjectMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: (command: CommandInput<ProjectCreateCommand>) =>
+      client.createProject(
+        withMutationCommandId<ProjectCreateCommand>('project-create', command),
+      ),
+    retry: false,
+  });
+}
+
+export function createThreadMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: ({
+      projectId,
+      command,
+    }: {
+      projectId: string;
+      command: CommandInput<ThreadCreateCommand>;
+    }) =>
+      client.createThread(
+        projectId,
+        withMutationCommandId<ThreadCreateCommand>('thread-create', command),
+      ),
+    retry: false,
+  });
+}
+
+export function retryThreadMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: ({
+      threadId,
+      command = {},
+    }: {
+      threadId: string;
+      command?: CommandInput<RetryCommand>;
+    }) =>
+      client.retryThread(
+        threadId,
+        withMutationCommandId<RetryCommand>('run-retry', command),
+      ),
+    retry: false,
+  });
+}
+
+export function cancelRunMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: ({ runId, commandId }: { runId: string; commandId?: string }) =>
+      client.cancelRun(runId, {
+        commandId: commandId ?? mutationCommandId('run-cancel'),
+      }),
+    retry: false,
+  });
+}
+
+export function reviewCheckoutMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: (checkoutId: string) => client.reviewCheckout(checkoutId),
+    retry: false,
+  });
+}
+
+export function mergeCheckoutMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: ({
+      checkoutId,
+      commandId,
+    }: {
+      checkoutId: string;
+      commandId?: string;
+    }) =>
+      client.mergeCheckout(checkoutId, {
+        commandId: commandId ?? mutationCommandId('checkout-merge'),
+      }),
+    retry: false,
+  });
+}
+
+export function retireCheckoutMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: ({
+      checkoutId,
+      commandId,
+    }: {
+      checkoutId: string;
+      commandId?: string;
+    }) =>
+      client.retireCheckout(checkoutId, {
+        commandId: commandId ?? mutationCommandId('checkout-retire'),
+      }),
+    retry: false,
+  });
+}
+
+export function archiveThreadMutationOptions(client: DashboardHttpClient) {
+  return mutationOptions({
+    mutationFn: ({
+      threadId,
+      commandId,
+    }: {
+      threadId: string;
+      commandId?: string;
+    }) =>
+      client.archiveThread(threadId, {
+        commandId: commandId ?? mutationCommandId('thread-archive'),
+      }),
     retry: false,
   });
 }

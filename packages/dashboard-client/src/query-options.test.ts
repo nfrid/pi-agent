@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DashboardHttpClient } from './http-client.js';
 import {
   commandMutationOptions,
+  createThreadMutationOptions,
   renameSessionMutationOptions,
   snapshotQueryOptions,
   snapshotRequestGeneration,
@@ -20,6 +21,25 @@ describe('dashboard query and mutation factories', () => {
     expect(snapshotQueryOptions(client).staleTime).toBe(
       Number.POSITIVE_INFINITY,
     );
+  });
+
+  it('allocates one stable command ID per orchestration mutation call', async () => {
+    const createThread = vi.fn(async () => ({}) as never);
+    const mutationClient = { createThread } as unknown as DashboardHttpClient;
+    const options = createThreadMutationOptions(mutationClient);
+    if (!options.mutationFn) throw new Error('Mutation function is missing.');
+    await (
+      options.mutationFn as unknown as (value: unknown) => Promise<unknown>
+    )({
+      projectId: 'project-1',
+      command: { title: 'Thread', prompt: 'Prompt' },
+    });
+    const calls = createThread.mock.calls as unknown as Array<
+      [string, { commandId?: string }]
+    >;
+    const command = calls[0]?.[1];
+    expect(command.commandId).toBeTruthy();
+    expect(createThread).toHaveBeenCalledOnce();
   });
 
   it('never retries prompt, command, launch, or rename mutations', () => {

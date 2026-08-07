@@ -5,13 +5,17 @@ import {
   ACTIVE_RUN_STATUSES,
   TERMINAL_RUN_STATUSES,
 } from '@pi-dashboard/domain';
-import type {
-  CommandReceipt,
-  Project,
-  Run,
-  RuntimeSnapshot,
-  Thread,
-  WorkspaceTarget,
+import {
+  type CommandReceipt,
+  deriveSessionTitle,
+  firstUserMessageText,
+  MAX_TEXT,
+  type Project,
+  type Run,
+  type RuntimeSnapshot,
+  type SessionAdoptCommand,
+  type Thread,
+  type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import {
   createWorktreeCreator,
@@ -44,6 +48,11 @@ export interface OrchestrationServiceOptions {
   beforeWorktreePreparation?: () => Promise<void>;
   /** Test seam for deterministically racing goodbye with worktree settlement. */
   beforeWorktreeFinish?: () => Promise<void>;
+  /** Legacy transcript access used by session adoption. */
+  readSession?: (id: string) => Promise<{
+    metadata: import('@pi-dashboard/protocol').SessionIndexEntry;
+    entries: unknown[];
+  }>;
 }
 
 export interface CreateProjectCommand {
@@ -115,6 +124,7 @@ export class OrchestrationService {
   private readonly reconnectGraceMs: number;
   private readonly beforeWorktreePreparation?: () => Promise<void>;
   private readonly beforeWorktreeFinish?: () => Promise<void>;
+  private readonly readSession?: OrchestrationServiceOptions['readSession'];
   private readonly inFlight = new Set<string>();
   /** Execution remains observable while preparation or manager.launch is pending. */
   private readonly executionTasks = new Map<string, Promise<void>>();
@@ -158,6 +168,7 @@ export class OrchestrationService {
       : 5_000;
     this.beforeWorktreePreparation = options.beforeWorktreePreparation;
     this.beforeWorktreeFinish = options.beforeWorktreeFinish;
+    this.readSession = options.readSession;
   }
 
   async start(): Promise<void> {
@@ -275,6 +286,110 @@ export class OrchestrationService {
       this.changed();
       return persisted as typeof result;
     }
+  }
+
+  async adoptSession(
+    projectId: string,
+    sessionId: string,
+    command: SessionAdoptCommand,
+  ): Promise<{ thread: Thread; run: Run; receipt: CommandReceipt }> {
+    const prior = this.receipt(command.commandId, 'session.adopt');
+    if (prior) {
+      const result = prior.result as { thread: Thread; run: Run };
+      if (result.run.piSessionId !== sessionId)
+        throw idempotencyConflict(command.commandId, 'another-session');
+      return { ...result, receipt: prior };
+    }
+    if (!this.readSession) throw new Error('Session adoption is unavailable.');
+    const project = this.requireProject(projectId);
+    if (project.status !== 'active') throw new Error('Project is archived.');
+    const { metadata, entries } = await this.readSession(sessionId);
+    const initialPrompt = firstUserMessageText(entries);
+    if (!initialPrompt)
+      throw new Error('Session has no non-empty user message.');
+    if (initialPrompt.length > MAX_TEXT)
+      throw new Error('The initial user message is too long.');
+    const assigned = this.repository.getRunByPiSessionId(sessionId);
+    if (assigned)
+      throw Object.assign(new Error('The session is already assigned.'), {
+        code: 'session-assigned',
+      });
+    const cwd = path.resolve(metadata.cwd);
+    const checkouts = this.repository.listCheckouts(projectId);
+    const checkout = command.checkoutId
+      ? this.requireCheckout(command.checkoutId)
+      : [...checkouts]
+          .filter(
+            (item) =>
+              item.status !== 'retired' && this.containsPath(item.path, cwd),
+          )
+          .sort(
+            (a, b) => path.resolve(b.path).length - path.resolve(a.path).length,
+          )[0];
+    if (!checkout)
+      throw new Error('Session cwd is outside a known project checkout.');
+    if (checkout.projectId !== projectId)
+      throw new Error('Checkout does not belong to this project.');
+    if (checkout.status === 'retired')
+      throw Object.assign(
+        new Error('A retired checkout cannot receive a session.'),
+        { code: 'orchestration-conflict' },
+      );
+    if (!this.containsPath(checkout.path, cwd))
+      throw new Error('Session cwd is outside the selected checkout.');
+    const runtime = this.registry
+      .snapshots()
+      .find((item) => item.session.id === sessionId && item.online !== false);
+    const waiting =
+      runtime !== undefined &&
+      (runtime.liveState === 'waiting' ||
+        (runtime.pendingInteractions?.length ?? 0) > 0);
+    const status = waiting ? 'waiting' : runtime ? 'running' : 'interrupted';
+    const threadStatus =
+      status === 'waiting'
+        ? 'needs-input'
+        : status === 'running'
+          ? 'active'
+          : 'stopped';
+    const title =
+      command.title ??
+      metadata.name ??
+      metadata.title ??
+      deriveSessionTitle(entries) ??
+      `Session ${sessionId}`;
+    const result = this.repository.adoptSessionWithThreadAndRun(
+      command.commandId,
+      {
+        thread: {
+          id: `thread-${randomUUID()}`,
+          projectId,
+          title: title ?? sessionId,
+          checkoutId: checkout.id,
+          status: threadStatus,
+        },
+        run: {
+          id: `run-${randomUUID()}`,
+          checkoutId: checkout.id,
+          initialPrompt,
+          mode: 'write',
+          runtimeProvider: 'extension-bridge',
+          ...(runtime ? { runtimeId: runtime.runtimeId } : {}),
+          piSessionId: sessionId,
+          status,
+        },
+        ...(runtime
+          ? {
+              runtime: {
+                runtimeId: runtime.runtimeId,
+                piSessionId: sessionId,
+                status: 'running' as const,
+              },
+            }
+          : {}),
+      },
+    );
+    this.changed();
+    return result;
   }
 
   async createThread(
@@ -1215,6 +1330,21 @@ export class OrchestrationService {
     };
     this.tools.set(checkoutId, value);
     return value;
+  }
+
+  private containsPath(root: string, target: string): boolean {
+    const canonical = (value: string): string => {
+      try {
+        return realpathSync.native(value);
+      } catch {
+        return path.resolve(value);
+      }
+    };
+    const relative = path.relative(canonical(root), canonical(target));
+    return (
+      relative === '' ||
+      (!relative.startsWith('..') && !path.isAbsolute(relative))
+    );
   }
 
   private mainCheckout(projectId: string) {

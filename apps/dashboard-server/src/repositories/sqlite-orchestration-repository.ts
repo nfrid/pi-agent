@@ -22,6 +22,7 @@ import type {
 } from '@pi-dashboard/protocol';
 import type { WorktreeRecord } from '@pi-dashboard/worktree-manager';
 import type {
+  AdoptSessionWithThreadAndRunInput,
   BindRuntimeInput,
   CheckoutPatch,
   CreateCheckoutInput,
@@ -607,6 +608,18 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     return row === undefined ? undefined : runFromRow(row);
   }
 
+  getRunByPiSessionId(piSessionId: string): Run | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT r.* FROM orchestration_run r
+         LEFT JOIN orchestration_runtime o ON o.run_id=r.id
+         WHERE r.pi_session_id=? OR o.pi_session_id=?
+         ORDER BY r.created_at,r.id LIMIT 1`,
+      )
+      .get(piSessionId, piSessionId) as Record<string, unknown> | undefined;
+    return row === undefined ? undefined : runFromRow(row);
+  }
+
   listRuns(threadId?: string): Run[] {
     const query = threadId
       ? this.db.prepare(
@@ -786,6 +799,79 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       const receipt: CommandReceipt = {
         idempotencyKey,
         commandType: 'thread.create',
+        resourceType: 'thread',
+        resourceId: thread.id,
+        result: { thread, run },
+        createdAt: Date.now(),
+      };
+      this.insertReceipt(receipt);
+      return { thread, run, receipt };
+    });
+  }
+
+  adoptSessionWithThreadAndRun(
+    idempotencyKey: string,
+    input: AdoptSessionWithThreadAndRunInput,
+  ): { thread: Thread; run: Run; receipt: CommandReceipt } {
+    return this.withTransaction(() => {
+      const existing = this.getCommandReceipt(idempotencyKey);
+      if (existing) {
+        if (existing.commandType !== 'session.adopt')
+          throw idempotencyConflict(idempotencyKey, existing.commandType);
+        const result = existing.result as { thread: Thread; run: Run };
+        if (result.run.piSessionId !== input.run.piSessionId)
+          throw idempotencyConflict(idempotencyKey, 'another-session');
+        return { ...result, receipt: existing };
+      }
+      const piSessionId = input.run.piSessionId;
+      if (!piSessionId) throw new Error('Adoption requires a Pi session ID.');
+      if (this.getRunByPiSessionId(piSessionId))
+        throw Object.assign(new Error('The session is already assigned.'), {
+          code: 'session-assigned',
+        });
+      const thread = this.insertThread({
+        ...input.thread,
+        status: input.thread.status ?? 'stopped',
+      });
+      const run = this.insertRun({ ...input.run, threadId: thread.id });
+      if (input.runtime) {
+        const now = Date.now();
+        const existingRuntime = this.db
+          .prepare('SELECT * FROM orchestration_runtime WHERE runtime_id=?')
+          .get(input.runtime.runtimeId) as Record<string, unknown> | undefined;
+        if (existingRuntime) {
+          if (
+            String(existingRuntime.pi_session_id) !==
+              input.runtime.piSessionId ||
+            existingRuntime.run_id != null
+          )
+            throw Object.assign(new Error('Runtime is already assigned.'), {
+              code: 'session-assigned',
+            });
+          this.db
+            .prepare(
+              'UPDATE orchestration_runtime SET run_id=?,updated_at=?,status=? WHERE runtime_id=?',
+            )
+            .run(run.id, now, input.runtime.status, input.runtime.runtimeId);
+        } else {
+          this.db
+            .prepare(
+              `INSERT INTO orchestration_runtime (runtime_id,pi_session_id,run_id,status,created_at,updated_at)
+               VALUES (?,?,?,?,?,?)`,
+            )
+            .run(
+              input.runtime.runtimeId,
+              input.runtime.piSessionId,
+              run.id,
+              input.runtime.status,
+              now,
+              now,
+            );
+        }
+      }
+      const receipt: CommandReceipt = {
+        idempotencyKey,
+        commandType: 'session.adopt',
         resourceType: 'thread',
         resourceId: thread.id,
         result: { thread, run },

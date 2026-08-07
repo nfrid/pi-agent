@@ -290,6 +290,15 @@ class DashboardServerImpl implements DashboardServer {
           command as Parameters<typeof service.createThread>[1],
         );
       },
+      adoptSession: (projectId, sessionId, command) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.adoptSession(
+          projectId,
+          sessionId,
+          command as Parameters<typeof service.adoptSession>[2],
+        );
+      },
       retryRun: (threadId, command) => {
         const service = this.application.orchestrationService;
         if (!service) throw new Error('Orchestration is unavailable.');

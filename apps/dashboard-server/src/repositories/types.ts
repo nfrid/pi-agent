@@ -122,6 +122,16 @@ export interface CreateThreadWithRunInput {
   run: Omit<CreateRunInput, 'threadId'> & { threadId?: string };
 }
 
+export interface AdoptSessionWithThreadAndRunInput {
+  thread: CreateThreadInput;
+  run: Omit<CreateRunInput, 'threadId'> & { threadId?: string };
+  runtime?: {
+    runtimeId: string;
+    piSessionId: string;
+    status: 'running';
+  };
+}
+
 export interface CreateIsolatedThreadWithRunInput {
   checkout: Omit<CreateCheckoutInput, 'projectId'>;
   thread: Omit<CreateThreadInput, 'checkoutId'>;
@@ -219,6 +229,10 @@ export interface OrchestrationRepository {
     idempotencyKey: string,
     input: CreateThreadWithRunInput,
   ): { thread: Thread; run: Run; receipt: CommandReceipt };
+  adoptSessionWithThreadAndRun(
+    idempotencyKey: string,
+    input: AdoptSessionWithThreadAndRunInput,
+  ): { thread: Thread; run: Run; receipt: CommandReceipt };
   createIsolatedThreadWithRun(
     idempotencyKey: string,
     input: CreateIsolatedThreadWithRunInput,
@@ -229,6 +243,7 @@ export interface OrchestrationRepository {
   setRunError(id: string, error: string): Run;
   clearRunError(id: string): Run;
   getRunByRuntimeId(runtimeId: string): Run | undefined;
+  getRunByPiSessionId(piSessionId: string): Run | undefined;
   loadWorktreeRecord(checkoutId: string): WorktreeRecord | undefined;
   writeWorktreeRecord(checkoutId: string, record: WorktreeRecord): void;
   deleteWorktreeRecord(checkoutId: string): void;

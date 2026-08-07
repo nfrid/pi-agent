@@ -9,6 +9,7 @@ import {
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
   RetryCommandSchema,
+  SessionAdoptCommandSchema,
   ThreadCreateCommandSchema,
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
@@ -106,6 +107,11 @@ export interface DashboardRouteContext {
   handleSse(request: IncomingMessage, response: ServerResponse, url: URL): void;
   adoptProject?(command: unknown): Promise<unknown>;
   createThread?(projectId: string, command: unknown): Promise<unknown>;
+  adoptSession?(
+    projectId: string,
+    sessionId: string,
+    command: unknown,
+  ): Promise<unknown>;
   retryRun?(threadId: string, command: unknown): Promise<unknown>;
   cancelRun?(runId: string, commandId: string): Promise<unknown>;
   reviewCheckout?(checkoutId: string): Promise<unknown>;
@@ -140,7 +146,8 @@ function errorStatus(error: unknown): number {
     code === 'idempotency-conflict' ||
     code === 'active-writer' ||
     code === 'sqlite-constraint' ||
-    code === 'orchestration-conflict'
+    code === 'orchestration-conflict' ||
+    code === 'session-assigned'
     ? 409
     : 400;
 }
@@ -331,6 +338,27 @@ export const dashboardRoutes: FastifyPluginAsync<{
           .send(
             await requireOperation(context.createThread)(
               request.params.projectId,
+              request.body,
+            ),
+          );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{
+    Params: { projectId: string; sessionId: string };
+  }>(
+    '/api/projects/:projectId/sessions/:sessionId/adopt',
+    { schema: { body: SessionAdoptCommandSchema } },
+    async (request, reply) => {
+      try {
+        return reply
+          .code(201)
+          .send(
+            await requireOperation(context.adoptSession)(
+              request.params.projectId,
+              request.params.sessionId,
               request.body,
             ),
           );

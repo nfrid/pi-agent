@@ -141,6 +141,7 @@ function dependencies(
     manager,
     registry,
     workspaces: () => manager.activeWorkspaces(),
+    readSession: (id) => sessions.readEntries(id),
     onChange: () => applicationChanges.publish(undefined),
   });
   const application = new DashboardApplication({

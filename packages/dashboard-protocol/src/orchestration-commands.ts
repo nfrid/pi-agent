@@ -48,6 +48,17 @@ export const ProjectAdoptCommandSchema = Type.Object(
 );
 export type ProjectAdoptCommand = Static<typeof ProjectAdoptCommandSchema>;
 
+/** Adopt an existing unassigned Pi transcript without launching a runtime. */
+export const SessionAdoptCommandSchema = Type.Object(
+  {
+    commandId: CommandIdSchema,
+    title: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    checkoutId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_ID })),
+  },
+  { additionalProperties: false },
+);
+export type SessionAdoptCommand = Static<typeof SessionAdoptCommandSchema>;
+
 export const ThreadCreateCommandSchema = Type.Object(
   {
     commandId: CommandIdSchema,

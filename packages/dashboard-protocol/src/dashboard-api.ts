@@ -1,5 +1,7 @@
 /** Contracts exposed by the dashboard daemon to HTTP, SSE, and browsers. */
 
+export { MAX_TEXT } from './limits.js';
+
 export type {
   ArchiveThreadCommand,
   CancelCommand,
@@ -9,6 +11,7 @@ export type {
   ProjectAdoptCommand,
   ProjectCreateCommand,
   RetryCommand,
+  SessionAdoptCommand,
   ThreadCreateCommand,
 } from './orchestration-commands.js';
 export {
@@ -20,6 +23,7 @@ export {
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
   RetryCommandSchema,
+  SessionAdoptCommandSchema,
   ThreadCreateCommandSchema,
 } from './orchestration-commands.js';
 export type {
@@ -71,6 +75,7 @@ export {
   parseProjectCreateCommand,
   parseRetryCommand,
   parseRun,
+  parseSessionAdoptCommand,
   parseThread,
   parseThreadCreateCommand,
   tryParseArchiveThreadCommand,
@@ -83,6 +88,7 @@ export {
   tryParseProjectCreateCommand,
   tryParseRetryCommand,
   tryParseRun,
+  tryParseSessionAdoptCommand,
   tryParseThread,
   tryParseThreadCreateCommand,
 } from './orchestration-parsers.js';
@@ -146,6 +152,7 @@ export {
 } from './schemas.js';
 export {
   deriveSessionTitle,
+  firstUserMessageText,
   normalizeSessionTitle,
   SESSION_NAME_MAX_LENGTH,
   SESSION_TITLE_MAX_LENGTH,
