@@ -184,6 +184,100 @@ function sessionIdForEvent(
   return undefined;
 }
 
+function liveMessageIdentity(envelope: DashboardEventEnvelope):
+  | {
+      messageId: string;
+      role: string;
+      content: unknown;
+      timestamp?: string | number;
+    }
+  | undefined {
+  const event = envelope.event;
+  if (
+    event.type !== 'message.started' &&
+    event.type !== 'message.updated' &&
+    event.type !== 'message.finished'
+  )
+    return undefined;
+  if (!event.message || typeof event.message !== 'object') return undefined;
+  const message = event.message as Record<string, unknown>;
+  if (typeof message.messageId !== 'string' || typeof message.role !== 'string')
+    return undefined;
+  const timestamp = message.timestamp;
+  return {
+    messageId: message.messageId,
+    role: message.role,
+    content: message.content,
+    ...((typeof timestamp === 'string' && timestamp.length > 0) ||
+    (typeof timestamp === 'number' && Number.isFinite(timestamp))
+      ? { timestamp }
+      : {}),
+  };
+}
+
+function messageContentKey(value: unknown): string | undefined {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function persistedMessageIdForLive(
+  projection: TranscriptProjection,
+  live: ReturnType<typeof liveMessageIdentity>,
+): string | undefined {
+  if (!live || live.timestamp === undefined) return undefined;
+  const liveContent = messageContentKey(live.content);
+  if (liveContent === undefined) return undefined;
+  let matchedId: string | undefined;
+  for (const item of Object.values(projection.items)) {
+    if (
+      item.kind !== 'message' ||
+      item.messageId === live.messageId ||
+      item.role !== live.role ||
+      item.timestamp === undefined ||
+      typeof item.timestamp !== typeof live.timestamp ||
+      item.timestamp !== live.timestamp ||
+      messageContentKey(item.content) !== liveContent
+    )
+      continue;
+    // Ambiguous repeated messages must fail open. A visible duplicate is safer
+    // than suppressing a distinct response that happens to serialize equally.
+    if (matchedId !== undefined) return undefined;
+    matchedId = item.messageId;
+  }
+  return matchedId;
+}
+
+function withoutTranscriptMessage(
+  projection: TranscriptProjection,
+  messageId: string,
+): TranscriptProjection {
+  if (!projection.items[messageId]) return projection;
+  const items = { ...projection.items };
+  delete items[messageId];
+  return {
+    ...projection,
+    items,
+    order: projection.order.filter((id) => id !== messageId),
+  };
+}
+
+function persistedLiveMessageIds(
+  projection: TranscriptProjection,
+  events: readonly DashboardEventEnvelope[],
+): ReadonlySet<string> {
+  const matched = new Set<string>();
+  for (const envelope of events) {
+    if (envelope.event.type !== 'message.finished') continue;
+    const live = liveMessageIdentity(envelope);
+    if (live && persistedMessageIdForLive(projection, live))
+      matched.add(live.messageId);
+  }
+  return matched;
+}
+
 /**
  * The sole normalized live-state owner. It has no rendering or route logic;
  * React consumes it through useSyncExternalStore selectors.
@@ -451,7 +545,15 @@ export class DashboardLiveStore {
         currentProjection ??
         (canSeedSnapshot ? hydrateTranscript([], sessionId) : undefined);
       if (baseProjection) {
-        const nextProjection = reduceTranscriptEvent(baseProjection, envelope);
+        const liveMessage = liveMessageIdentity(envelope);
+        const persistedMessageId =
+          envelope.event.type === 'message.finished'
+            ? persistedMessageIdForLive(baseProjection, liveMessage)
+            : undefined;
+        const nextProjection =
+          persistedMessageId && liveMessage
+            ? withoutTranscriptMessage(baseProjection, liveMessage.messageId)
+            : reduceTranscriptEvent(baseProjection, envelope);
         if (nextProjection !== baseProjection)
           nextState = this.installTranscriptProjection(
             nextState,
@@ -626,9 +728,17 @@ export class DashboardLiveStore {
         ? {}
         : { runtimeSeq: baselineRuntimeSeq }),
     });
-    for (const envelope of sessionEvents)
-      if (envelope.cursor > projection.lastCursor)
-        projection = reduceTranscriptEvent(projection, envelope);
+    const canonicalLiveMessageIds = persistedLiveMessageIds(
+      projection,
+      sessionEvents,
+    );
+    for (const envelope of sessionEvents) {
+      if (envelope.cursor <= projection.lastCursor) continue;
+      const liveMessage = liveMessageIdentity(envelope);
+      if (liveMessage && canonicalLiveMessageIds.has(liveMessage.messageId))
+        continue;
+      projection = reduceTranscriptEvent(projection, envelope);
+    }
     const retiredEpochs = new Set([
       ...projection.retiredEpochs,
       ...(currentProjection?.retiredEpochs ?? []),

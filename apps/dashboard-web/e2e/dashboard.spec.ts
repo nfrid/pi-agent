@@ -56,6 +56,11 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
             cwd: '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
             liveState: 'idle',
             online: false,
+            model: { provider: 'test', model: 'fast' },
+            modelCatalog: [
+              { provider: 'test', model: 'fast', name: 'Fast' },
+              { provider: 'test', model: 'careful', name: 'Careful' },
+            ],
             session: {
               id: 'ghost-session',
               title: 'A deliberately long session title that must wrap safely',
@@ -172,6 +177,9 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     .evaluate((element) => element.getBoundingClientRect().width);
   const viewportWidth = await page.evaluate(() => window.innerWidth);
   expect(composerWidth / viewportWidth).toBeGreaterThan(0.8);
+  await expect(page.getByLabel('Model')).toHaveValue('test/fast');
+  await page.getByLabel('Model').selectOption('test/careful');
+  await expect(page.getByLabel('Model')).toHaveValue('test/careful');
   await expect(
     page.getByRole('button', { name: 'Send first message' }),
   ).toBeVisible();
@@ -1933,7 +1941,17 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     'Existing session request',
   );
   await mocks.emit({ type: 'snapshot', snapshot: phase6Snapshot() });
-  await expect(page.getByLabel('Model')).toHaveCount(0);
+  await expect(page.getByLabel('Model')).toHaveValue('test/vision');
+  await page.getByLabel('Model').selectOption('test/text');
+  await expect
+    .poll(() => mocks.commands.filter((command) => command.type === 'setModel'))
+    .toEqual([
+      expect.objectContaining({
+        type: 'setModel',
+        provider: 'test',
+        model: 'text',
+      }),
+    ]);
   await expect(page.locator('.session-heading')).toContainText('Project');
   await expect(page.locator('.session-heading')).not.toContainText(
     'test/vision',
@@ -1944,9 +1962,6 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     page.getByRole('dialog', { name: 'Command palette' }),
   ).toHaveCount(0);
   await page.getByLabel('Thinking level').selectOption('high');
-  expect(
-    mocks.commands.filter((command) => command.type === 'setModel'),
-  ).toHaveLength(0);
   await expect
     .poll(
       () =>
@@ -2323,6 +2338,7 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   ).toBeVisible();
   await page.getByRole('button', { name: 'New chat', exact: true }).click();
   await expect(page).toHaveURL(/\/workspaces\/w1\/new$/);
+  await page.getByLabel('Model').selectOption('test/text');
   await page
     .getByRole('textbox', { name: 'Message', exact: true })
     .fill('Inspect the project setup');
@@ -2332,6 +2348,7 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   expect(mocks.starts[0]).toEqual({
     workspaceId: 'w1',
     initialPrompt: 'Inspect the project setup',
+    model: { provider: 'test', model: 'text' },
   });
   await page.reload();
   await expect(page.getByText('Starting agent…')).toBeVisible();

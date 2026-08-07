@@ -492,6 +492,214 @@ describe('DashboardLiveStore', () => {
     expect(projection?.items['live-answer']).toBeDefined();
   });
 
+  it('does not duplicate a persisted final message when replaying its live updates', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.hydrateSession(sessionResponse(1));
+    for (const [cursor, type, content] of [
+      [2, 'message.started', ''],
+      [3, 'message.updated', 'Final answer'],
+      [4, 'message.finished', 'Final answer'],
+    ] as const)
+      store.acceptStreamRecord({
+        cursor,
+        emittedAt: cursor,
+        runtimeEpoch: 'epoch-a',
+        runtimeSeq: cursor - 1,
+        sessionId: 'session-1',
+        event: {
+          type,
+          sessionId: 'session-1',
+          message: {
+            messageId: 'timestamp:1720000000000',
+            role: 'assistant',
+            content,
+            timestamp: 1720000000000,
+            phase: type.split('.')[1],
+          },
+        },
+      } as StreamRecord);
+
+    const projection = store.hydrateSession({
+      ...sessionResponse(4),
+      runtimeEpoch: 'epoch-a',
+      runtimeSeq: 3,
+      entries: [
+        {
+          id: 'persisted-answer',
+          type: 'message',
+          message: {
+            role: 'assistant',
+            content: 'Final answer',
+            timestamp: 1720000000000,
+          },
+        },
+      ],
+    });
+
+    expect(projection?.order).toEqual(['persisted-answer']);
+    expect(projection?.items['persisted-answer']).toMatchObject({
+      content: 'Final answer',
+      status: 'finished',
+    });
+    expect(projection?.items['timestamp:1720000000000']).toBeUndefined();
+  });
+
+  it('removes a delayed live final when HTTP already installed its persisted twin', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 4));
+    store.hydrateSession({
+      ...sessionResponse(5),
+      entries: [
+        {
+          id: 'persisted-answer',
+          type: 'message',
+          message: {
+            role: 'assistant',
+            content: 'Final answer',
+            timestamp: 1720000000000,
+          },
+        },
+      ],
+    });
+
+    store.acceptStreamRecord({
+      cursor: 5,
+      emittedAt: 5,
+      sessionId: 'session-1',
+      event: {
+        type: 'message.finished',
+        sessionId: 'session-1',
+        message: {
+          messageId: 'epoch-a:1',
+          role: 'assistant',
+          content: 'Final answer',
+          timestamp: 1720000000000,
+          phase: 'finished',
+        },
+      },
+    } as StreamRecord);
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual(['persisted-answer']);
+    expect(projection?.items['epoch-a:1']).toBeUndefined();
+  });
+
+  it('does not merge distinct messages that happen to share a timestamp', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 4));
+    store.hydrateSession({
+      ...sessionResponse(5),
+      entries: [
+        {
+          id: 'persisted-answer',
+          type: 'message',
+          message: {
+            role: 'assistant',
+            content: 'Earlier answer',
+            timestamp: 1720000000000,
+          },
+        },
+      ],
+    });
+
+    store.acceptStreamRecord({
+      cursor: 5,
+      emittedAt: 5,
+      sessionId: 'session-1',
+      event: {
+        type: 'message.finished',
+        sessionId: 'session-1',
+        message: {
+          messageId: 'epoch-a:2',
+          role: 'assistant',
+          content: 'Different answer',
+          timestamp: 1720000000000,
+          phase: 'finished',
+        },
+      },
+    } as StreamRecord);
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual(['persisted-answer', 'epoch-a:2']);
+  });
+
+  it('keeps numeric and string timestamps as distinct message identities', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 4));
+    store.hydrateSession({
+      ...sessionResponse(5),
+      entries: [
+        {
+          id: 'persisted-answer',
+          type: 'message',
+          message: {
+            role: 'assistant',
+            content: 'Same answer',
+            timestamp: '1720000000000',
+          },
+        },
+      ],
+    });
+
+    store.acceptStreamRecord({
+      cursor: 5,
+      emittedAt: 5,
+      sessionId: 'session-1',
+      event: {
+        type: 'message.finished',
+        sessionId: 'session-1',
+        message: {
+          messageId: 'epoch-a:typed',
+          role: 'assistant',
+          content: 'Same answer',
+          timestamp: 1720000000000,
+          phase: 'finished',
+        },
+      },
+    } as StreamRecord);
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual(['persisted-answer', 'epoch-a:typed']);
+  });
+
+  it('fails open when repeated persisted messages make identity ambiguous', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 4));
+    store.hydrateSession({
+      ...sessionResponse(5),
+      entries: ['first', 'second'].map((id) => ({
+        id,
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: 'Repeated answer',
+          timestamp: 1720000000000,
+        },
+      })),
+    });
+
+    store.acceptStreamRecord({
+      cursor: 5,
+      emittedAt: 5,
+      sessionId: 'session-1',
+      event: {
+        type: 'message.finished',
+        sessionId: 'session-1',
+        message: {
+          messageId: 'epoch-a:3',
+          role: 'assistant',
+          content: 'Repeated answer',
+          timestamp: 1720000000000,
+          phase: 'finished',
+        },
+      },
+    } as StreamRecord);
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual(['first', 'second', 'epoch-a:3']);
+  });
+
   it('uses an incomplete initial baseline without replacing the later live projection', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

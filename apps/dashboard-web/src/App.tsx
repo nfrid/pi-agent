@@ -94,6 +94,7 @@ export {
   runtimeExtensionSurfaces,
 } from './features/extension-surfaces';
 export {
+  newChatModelOptions,
   newChatRequest,
   pendingChatPath,
   sessionPathForRuntime,

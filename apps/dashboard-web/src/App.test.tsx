@@ -12,6 +12,7 @@ import {
   contextIndicatorData,
   formatContextTokens,
   isNearPageBottom,
+  newChatModelOptions,
   newChatPath,
   newChatRequest,
   pendingChatPath,
@@ -171,6 +172,37 @@ describe('project-scoped new chat', () => {
       initialPrompt: 'inspect this',
       acknowledgeSharedWorkingDirectory: true,
     });
+    expect(
+      newChatRequest('workspace-1', 'use luna', false, {
+        provider: 'openai-codex',
+        model: 'gpt-5.6-luna',
+      }),
+    ).toEqual({
+      workspaceId: 'workspace-1',
+      initialPrompt: 'use luna',
+      model: { provider: 'openai-codex', model: 'gpt-5.6-luna' },
+    });
+  });
+
+  it('deduplicates model options exposed by connected runtimes', () => {
+    expect(
+      newChatModelOptions([
+        {
+          model: { provider: 'openai-codex', model: 'gpt-5.6-luna' },
+          modelCatalog: [
+            {
+              provider: 'openai-codex',
+              model: 'gpt-5.6-luna',
+              name: 'Luna',
+            },
+            { provider: 'anthropic', model: 'claude-opus-4-6' },
+          ],
+        } as RuntimeSnapshot,
+        {
+          modelCatalog: [{ provider: 'anthropic', model: 'claude-opus-4-6' }],
+        } as RuntimeSnapshot,
+      ]).map((model) => `${model.provider}/${model.model}`),
+    ).toEqual(['openai-codex/gpt-5.6-luna', 'anthropic/claude-opus-4-6']);
   });
 
   it('builds a resume request for the existing session', () => {

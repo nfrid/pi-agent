@@ -10,9 +10,10 @@ import type {
   StartRuntimeRequest,
 } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav } from './agent-thread-nav';
+import { modelOptionValue } from './model-option';
 
 function errorDetails(cause: unknown): { message: string; code?: string } {
   if (cause instanceof Error) {
@@ -32,14 +33,43 @@ function isSharedWorkingDirectoryWarning(message: string, code?: string) {
   );
 }
 
+type NewChatModel = NonNullable<StartRuntimeRequest['model']>;
+type RuntimeModelOption = NonNullable<RuntimeSnapshot['modelCatalog']>[number];
+
+export function newChatModelOptions(
+  runtimes: readonly RuntimeSnapshot[],
+): readonly RuntimeModelOption[] {
+  const options = new Map<string, RuntimeModelOption>();
+  for (const runtime of runtimes) {
+    if (runtime.model) {
+      const value = modelOptionValue(
+        runtime.model.provider,
+        runtime.model.model,
+      );
+      options.set(value, {
+        provider: runtime.model.provider,
+        model: runtime.model.model,
+        supportsImages: runtime.model.supportsImages,
+      });
+    }
+    for (const model of runtime.modelCatalog ?? []) {
+      const value = modelOptionValue(model.provider, model.model);
+      options.set(value, model);
+    }
+  }
+  return [...options.values()];
+}
+
 export function newChatRequest(
   workspaceId: string,
   initialPrompt: string,
   acknowledgeSharedWorkingDirectory = false,
+  model?: NewChatModel,
 ): StartRuntimeRequest {
   return {
     workspaceId,
     initialPrompt,
+    ...(model ? { model } : {}),
     ...(acknowledgeSharedWorkingDirectory
       ? { acknowledgeSharedWorkingDirectory: true }
       : {}),
@@ -74,7 +104,15 @@ export function NewChatView({
   const go = useDashboardNavigate();
   const workspace = snapshot.workspaces.find((item) => item.id === workspaceId);
   const [agentNavOpen, setAgentNavOpen] = useState(false);
+  const modelOptions = useMemo(
+    () => newChatModelOptions(snapshot.runtimes),
+    [snapshot.runtimes],
+  );
   const [text, setText] = useState('');
+  const [modelValue, setModelValue] = useState(() => {
+    const model = modelOptions[0];
+    return model ? modelOptionValue(model.provider, model.model) : '';
+  });
   const [error, setError] = useState<string>();
   const [sharedWarning, setSharedWarning] = useState(false);
   const runtime = useDashboardStore(
@@ -87,6 +125,16 @@ export function NewChatView({
   );
   const sessionPath = sessionPathForRuntime(runtime);
 
+  useEffect(() => {
+    if (
+      modelOptions.some(
+        (model) => modelOptionValue(model.provider, model.model) === modelValue,
+      )
+    )
+      return;
+    const model = modelOptions[0];
+    setModelValue(model ? modelOptionValue(model.provider, model.model) : '');
+  }, [modelOptions, modelValue]);
   useEffect(() => {
     if (!pendingRuntimeId || !sessionPath) return;
     go(sessionPath);
@@ -113,8 +161,19 @@ export function NewChatView({
     setError(undefined);
     setSharedWarning(false);
     try {
+      const selectedModel = modelOptions.find(
+        (model) => modelOptionValue(model.provider, model.model) === modelValue,
+      );
       const result = await mutation.mutateAsync(
-        newChatRequest(workspaceId, initialPrompt, acknowledge),
+        newChatRequest(
+          workspaceId,
+          initialPrompt,
+          acknowledge,
+          selectedModel && {
+            provider: selectedModel.provider,
+            model: selectedModel.model,
+          },
+        ),
       );
       go(pendingChatPath(workspaceId, result.runtimeId));
     } catch (cause) {
@@ -189,6 +248,29 @@ export function NewChatView({
               disabled={mutation.isPending}
             />
             <div className="new-chat-composer-actions">
+              {modelOptions.length > 0 && (
+                <label>
+                  <span>Model</span>
+                  <select
+                    aria-label="Model"
+                    value={modelValue}
+                    disabled={mutation.isPending}
+                    onChange={(event) => setModelValue(event.target.value)}
+                  >
+                    {modelOptions.map((model) => {
+                      const value = modelOptionValue(
+                        model.provider,
+                        model.model,
+                      );
+                      return (
+                        <option key={value} value={value}>
+                          {model.name ?? value}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </label>
+              )}
               <button
                 type="submit"
                 className="composer-send"

@@ -19,6 +19,7 @@ import {
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { useDashboardNavigate } from '../routes/navigation';
+import { modelOptionValue, parseModelOptionValue } from './model-option';
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 const MarkdownComposerEditor = lazy(() => import('./markdown-composer-editor'));
@@ -320,6 +321,80 @@ function QueuePanel({
         </p>
       )}
     </section>
+  );
+}
+
+function ModelControl({ runtime }: { runtime: RuntimeSnapshot }) {
+  const command = useMutation(commandMutationOptions(dashboardHttpClient));
+  const [modelValue, setModelValue] = useState(
+    runtime.model
+      ? modelOptionValue(runtime.model.provider, runtime.model.model)
+      : '',
+  );
+  const [error, setError] = useState<string>();
+  useEffect(
+    () =>
+      setModelValue(
+        runtime.model
+          ? modelOptionValue(runtime.model.provider, runtime.model.model)
+          : '',
+      ),
+    [runtime.model],
+  );
+  const models =
+    runtime.modelCatalog ??
+    (runtime.model
+      ? [
+          {
+            provider: runtime.model.provider,
+            model: runtime.model.model,
+          },
+        ]
+      : []);
+  if (!models.length && !error) return null;
+  const unavailable =
+    runtime.online === false || runtime.liveState === 'stopping';
+  const setModel = async (value: string) => {
+    const selected = parseModelOptionValue(value);
+    if (!selected) return;
+    setError(undefined);
+    try {
+      await command.mutateAsync({
+        runtimeId: runtime.runtimeId,
+        command: { type: 'setModel', ...selected },
+      });
+      setModelValue(value);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+  return (
+    <fieldset className="model-control">
+      <legend className="sr-only">Model control</legend>
+      <label>
+        <span>Model</span>
+        <select
+          aria-label="Model"
+          value={modelValue}
+          disabled={unavailable || command.isPending}
+          onChange={(event) => void setModel(event.target.value)}
+        >
+          {models.map((model) => {
+            const value = modelOptionValue(model.provider, model.model);
+            return (
+              <option value={value} key={value}>
+                {model.name ?? value}
+              </option>
+            );
+          })}
+        </select>
+      </label>
+      {error && (
+        <span className="error" role="alert">
+          {error}
+        </span>
+      )}
+    </fieldset>
   );
 }
 
@@ -767,6 +842,7 @@ export function Composer({
             <ContextIndicator usage={runtime.contextUsage} />
           </div>
           <div className="composer-control-row">
+            <ModelControl runtime={runtime} />
             <ThinkingControl runtime={runtime} />
           </div>
           {error && (
