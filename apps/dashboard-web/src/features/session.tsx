@@ -385,8 +385,17 @@ export function SessionView({
         id,
         currentHistory.nextBefore,
       );
-      if (page.metadata.id !== id || !page.history)
-        throw new Error('Dashboard returned invalid older history.');
+      if (
+        page.metadata.id !== id ||
+        !page.history ||
+        page.history.version !== currentHistory.version ||
+        page.history.end !== currentHistory.start ||
+        page.history.start >= currentHistory.start ||
+        (page.history.hasOlder &&
+          (!page.history.nextBefore ||
+            page.history.nextBefore === currentHistory.nextBefore))
+      )
+        throw new Error('Dashboard returned non-contiguous older history.');
       if (!store.prependSessionHistory(page))
         throw new Error('Session changed while loading older history.');
       setHistory(page.history);

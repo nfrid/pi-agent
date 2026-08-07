@@ -67,6 +67,8 @@ describe('session index', () => {
     const session = await index.readEntries('session-id');
     expect(session).toMatchObject({
       entries: [{ type: 'session' }, { type: 'message' }],
+      entriesComplete: true,
+      history: { start: 0, end: 2, hasOlder: false },
     });
     expect(session.entries[1]).toMatchObject({
       message: {
@@ -96,6 +98,8 @@ describe('session index', () => {
 
     const session = await index.readEntries('large-id');
     expect(session.entriesComplete).toBe(false);
+    expect(session.history.start).toBeGreaterThan(0);
+    expect(session.history.end).toBe(11);
     expect(session.entries.length).toBeGreaterThan(0);
     expect(JSON.stringify(session.entries).length).toBeLessThanOrEqual(
       8 * 1024 * 1024,
@@ -153,6 +157,20 @@ describe('session index', () => {
         (entry) => (entry as { id?: string }).id === 'large-9',
       ),
     ).toBe(false);
+    expect(older.entriesComplete).toBe(false);
+    await writeFile(
+      firstFile,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n${JSON.stringify({ type: 'message', id: 'newer-entry', message: { role: 'assistant', content: 'newer' } })}\n`,
+    );
+    await index.refresh();
+    const olderAfterAppend = await index.readEntries(
+      'paged-id',
+      recent.history.nextBefore,
+    );
+    expect(olderAfterAppend.history.end).toBe(recent.history.start);
+    expect(
+      olderAfterAppend.entries.map((entry) => (entry as { id?: string }).id),
+    ).toEqual(older.entries.map((entry) => (entry as { id?: string }).id));
     await expect(index.readEntries('paged-id', 'not-a-cursor')).rejects.toThrow(
       'Invalid history cursor',
     );

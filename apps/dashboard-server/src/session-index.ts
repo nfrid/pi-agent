@@ -172,10 +172,20 @@ export class SessionIndex {
       throw new Error('Stale history cursor.');
     const upperBound = cursor?.before;
     const { header: _header, lastEntryId: _lastEntryId, ...metadata } = indexed;
-    const allEntries: { ordinal: number; entry: unknown; bytes: number }[] = [];
+    type PageEntry = {
+      ordinal: number;
+      entry: unknown;
+      serialized: string;
+      bytes: number;
+    };
+    const page: PageEntry[] = [];
+    let pageBytes = 0;
     let ordinal = 0;
-    const prefixHasher = createHash('sha256');
-    let prefixHash: string | undefined;
+    // The shifted hash is the prefix represented by nextBefore. The seen hash
+    // validates a cursor before its page has necessarily filled the budget.
+    const shiftedHasher = createHash('sha256');
+    const seenHasher = createHash('sha256');
+    let reachedUpperBound = false;
     const input = createReadStream(indexed.file, { encoding: 'utf8' });
     const lines = readline.createInterface({
       input,
@@ -184,16 +194,25 @@ export class SessionIndex {
     try {
       for await (const line of lines) {
         if (!line.trim()) continue;
+        if (upperBound !== undefined && ordinal === upperBound) {
+          reachedUpperBound = true;
+          break;
+        }
         if (Buffer.byteLength(line) > 24 * 1024 * 1024)
           throw new Error('A session entry is too large to open remotely.');
         try {
           const entry = redactImageData(JSON.parse(line) as unknown);
           const serialized = JSON.stringify(entry);
           const bytes = Buffer.byteLength(serialized);
-          if (upperBound !== undefined && ordinal === upperBound)
-            prefixHash = prefixHasher.copy().digest('hex');
-          prefixHasher.update(serialized);
-          allEntries.push({ ordinal, entry, bytes });
+          seenHasher.update(serialized);
+          page.push({ ordinal, entry, serialized, bytes });
+          pageBytes += bytes;
+          while (pageBytes > HISTORY_PAGE_BYTES && page.length > 0) {
+            const shifted = page.shift();
+            if (!shifted) break;
+            shiftedHasher.update(shifted.serialized);
+            pageBytes -= shifted.bytes;
+          }
           ordinal += 1;
         } catch (error) {
           if (error instanceof SyntaxError) continue;
@@ -204,26 +223,15 @@ export class SessionIndex {
       lines.close();
       input.destroy();
     }
-    if (upperBound !== undefined && upperBound === ordinal)
-      prefixHash = prefixHasher.copy().digest('hex');
+    if (upperBound !== undefined && ordinal === upperBound)
+      reachedUpperBound = true;
     if (
       upperBound !== undefined &&
-      (upperBound > ordinal || prefixHash !== cursor?.prefixHash)
+      (!reachedUpperBound ||
+        seenHasher.copy().digest('hex') !== cursor?.prefixHash)
     )
       throw new Error('Stale history cursor.');
     const end = upperBound ?? ordinal;
-    const page: { ordinal: number; entry: unknown; bytes: number }[] = [];
-    let responseBytes = 0;
-    let entriesComplete = true;
-    for (const item of allEntries) {
-      if (item.ordinal >= end) break;
-      page.push(item);
-      responseBytes += item.bytes;
-      while (responseBytes > HISTORY_PAGE_BYTES && page.length > 0) {
-        entriesComplete = false;
-        responseBytes -= page.shift()?.bytes ?? 0;
-      }
-    }
     const start = page[0]?.ordinal ?? end;
     const hasOlder = start > 0;
     const nextBefore = hasOlder
@@ -234,17 +242,11 @@ export class SessionIndex {
           dev: stat.dev,
           ino: stat.ino,
           size: stat.size,
-          prefixHash: createHash('sha256')
-            .update(
-              allEntries
-                .filter((item) => item.ordinal < start)
-                .map((item) => JSON.stringify(item.entry))
-                .join(''),
-            )
-            .digest('hex'),
+          prefixHash: shiftedHasher.copy().digest('hex'),
           before: start,
         })
       : undefined;
+    const entriesComplete = before === undefined && start === 0;
     return {
       metadata,
       entries: page.map((item) => item.entry),
