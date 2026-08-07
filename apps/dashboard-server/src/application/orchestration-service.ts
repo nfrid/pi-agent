@@ -37,6 +37,8 @@ export interface OrchestrationServiceOptions {
   workspaces: () => readonly WorkspaceTarget[];
   onChange?: () => void;
   pollMs?: number;
+  /** How long startup waits for a restored provider runtime to say hello. */
+  reconnectGraceMs?: number;
 }
 
 export interface CreateProjectCommand {
@@ -80,8 +82,8 @@ function commandReceipt(
 
 /**
  * Durable project/thread/run application boundary and its deliberately small
- * worker. Side effects happen only after the queued run and complete prompt
- * have committed to SQLite.
+ * worker. Runtime launch happens after the queued run commits; the durable
+ * initial prompt is acknowledged and recorded only after the runtime says hello.
  */
 export class OrchestrationService {
   private readonly repository: OrchestrationRepository;
@@ -90,8 +92,11 @@ export class OrchestrationService {
   private readonly workspaces: () => readonly WorkspaceTarget[];
   private readonly onChange?: () => void;
   private readonly pollMs: number;
+  private readonly reconnectGraceMs: number;
   private readonly inFlight = new Set<string>();
   private readonly registryTasks = new Set<Promise<void>>();
+  /** One prompt handoff may be shared by several concurrent hello callbacks. */
+  private readonly registryRunTasks = new Map<string, Promise<void>>();
   private readonly tools = new Map<
     string,
     {
@@ -111,6 +116,10 @@ export class OrchestrationService {
     this.workspaces = options.workspaces;
     this.onChange = options.onChange;
     this.pollMs = options.pollMs ?? 500;
+    const reconnectGraceMs = options.reconnectGraceMs ?? 5_000;
+    this.reconnectGraceMs = Number.isFinite(reconnectGraceMs)
+      ? Math.min(60_000, Math.max(0, reconnectGraceMs))
+      : 5_000;
   }
 
   async start(): Promise<void> {
@@ -443,36 +452,37 @@ export class OrchestrationService {
     if (!run) return;
     try {
       if (change.kind === 'registered') {
-        const piSessionId = change.snapshot.session.id;
-        const wasStarting =
-          run.status === 'starting' || run.status === 'preparing';
-        const promptReceiptId = this.promptReceiptId(run.id);
-        const promptAlreadyRecorded = Boolean(
-          this.repository.getCommandReceipt(promptReceiptId),
-        );
-        this.repository.bindRuntime({
-          runtimeId,
-          piSessionId,
-          runId: run.id,
-          status: 'starting',
-        });
-        if (wasStarting && !promptAlreadyRecorded) {
-          this.saveReceipt(promptReceiptId, 'run.prompt', {
-            runId: run.id,
-          });
-          const sendPrompt = (
-            this.manager as RuntimeManager & {
-              sendInitialPromptOnce?: (id: string, prompt: string) => void;
-            }
-          ).sendInitialPromptOnce;
-          sendPrompt?.call(this.manager, runtimeId, run.initialPrompt);
+        const existing = this.registryRunTasks.get(run.id);
+        if (existing) {
+          await existing;
+        } else {
+          const task = this.bindAndDeliverPrompt(
+            run.id,
+            runtimeId,
+            change.snapshot.session.id,
+          );
+          this.registryRunTasks.set(run.id, task);
+          void task.then(
+            () => {
+              if (this.registryRunTasks.get(run.id) === task)
+                this.registryRunTasks.delete(run.id);
+            },
+            () => {
+              if (this.registryRunTasks.get(run.id) === task)
+                this.registryRunTasks.delete(run.id);
+            },
+          );
+          await task;
         }
-        if (run.status === 'preparing')
-          this.transitionIfPossible(run.id, 'starting');
-        if (run.status === 'starting')
-          this.repository.transitionRun(run.id, 'running');
-        this.repository.transitionRuntime(runtimeId, 'running');
       } else if (change.kind === 'event') {
+        const current = this.repository.getRun(run.id);
+        const promptPending =
+          current &&
+          (current.status === 'preparing' || current.status === 'starting') &&
+          !this.repository.getCommandReceipt(this.promptReceiptId(run.id));
+        // Runtime state events can race the hello prompt ACK. They must not
+        // promote a run to running (or settled through running) first.
+        if (promptPending) return;
         if (change.event.type === 'agent.settled') await this.settle(run.id);
         else if (change.event.type === 'runtime.stateChanged') {
           const state = change.event.state;
@@ -495,6 +505,42 @@ export class OrchestrationService {
     }
     this.changed();
     this.kick();
+  }
+
+  /**
+   * A hello is the durable prompt handoff boundary. The receipt is written
+   * only after RuntimeRegistry has acknowledged the command, so a reconnect
+   * can safely retry the same stable command ID.
+   */
+  private async bindAndDeliverPrompt(
+    runId: string,
+    runtimeId: string,
+    piSessionId: string,
+  ): Promise<void> {
+    const run = this.repository.getRun(runId);
+    if (!run || TERMINAL_RUN_STATUSES.includes(run.status)) return;
+    this.repository.bindRuntime({
+      runtimeId,
+      piSessionId,
+      runId,
+      status: 'starting',
+    });
+    const promptReceiptId = this.promptReceiptId(run.id);
+    if (!this.repository.getCommandReceipt(promptReceiptId)) {
+      await this.registry.sendCommand(runtimeId, {
+        id: promptReceiptId,
+        type: 'prompt',
+        text: run.initialPrompt,
+      });
+      this.saveReceipt(promptReceiptId, 'run.prompt', { runId: run.id });
+    }
+    const current = this.repository.getRun(runId);
+    if (!current || TERMINAL_RUN_STATUSES.includes(current.status)) return;
+    if (current.status === 'preparing')
+      this.transitionIfPossible(runId, 'starting');
+    if (this.repository.getRun(runId)?.status === 'starting')
+      this.repository.transitionRun(runId, 'running');
+    this.repository.transitionRuntime(runtimeId, 'running');
   }
 
   private async settle(runId: string): Promise<void> {
@@ -558,7 +604,24 @@ export class OrchestrationService {
           });
           continue;
         }
-        if (await this.recoverManagedRuntime(run.runtimeId)) continue;
+        if (await this.recoverManagedRuntime(run.runtimeId)) {
+          if (await this.waitForRuntimeHello(run.runtimeId)) {
+            const restored = this.registry.get(run.runtimeId);
+            if (restored && restored.online !== false)
+              await this.handleRegistryChange({
+                kind: 'registered',
+                snapshot: restored,
+              });
+          } else {
+            await this.stopRecoveredRuntime(run.runtimeId);
+            this.failRun(
+              run.id,
+              'interrupted',
+              'Restored runtime did not reconnect during startup grace.',
+            );
+          }
+          continue;
+        }
         this.failRun(
           run.id,
           'interrupted',
@@ -635,6 +698,18 @@ export class OrchestrationService {
           }
           prepared = fresh.worktree.record;
         }
+        // Retried runs can reuse an extant record whose checkout was settled
+        // or marked as a snapshot. Make the ownership active and refresh its
+        // durable timestamp before any runtime launch side effect.
+        prepared.status = 'active';
+        const previousUpdatedAt = Date.parse(prepared.updatedAt);
+        prepared.updatedAt = new Date(
+          Math.max(
+            Date.now(),
+            Number.isNaN(previousUpdatedAt) ? 0 : previousUpdatedAt + 1,
+          ),
+        ).toISOString();
+        this.repository.writeWorktreeRecord(checkout.id, prepared);
         cwd = prepared.worktreePath;
         this.repository.updateCheckout(checkout.id, {
           path: cwd,
@@ -667,19 +742,13 @@ export class OrchestrationService {
       const runtimeId = run.runtimeId ?? `runtime-${randomUUID()}`;
       this.repository.setRunRuntime(run.id, runtimeId);
       this.repository.transitionRun(run.id, 'starting');
-      // Record the at-most-once prompt handoff before launch. If the daemon
-      // dies after tmux starts, reconciliation will not send a second turn to
-      // a runtime that may already have accepted this prompt.
-      if (!this.repository.getCommandReceipt(this.promptReceiptId(run.id)))
-        this.saveReceipt(this.promptReceiptId(run.id), 'run.prompt', {
-          runId: run.id,
-        });
+      // Orchestration owns durable prompt delivery after hello. Do not route
+      // the prompt through RuntimeManager's legacy memory-only launch path.
       await this.manager.launch({
         workspaceId: anchor.id,
         runtimeId,
         checkoutCwd: cwd,
         name: this.requireThread(run.threadId).title,
-        initialPrompt: run.initialPrompt,
         model: run.model,
       });
     } catch (error) {
@@ -711,6 +780,35 @@ export class OrchestrationService {
     };
     if (manager.recover) return manager.recover(runtimeId);
     return Boolean(manager.placement?.(runtimeId));
+  }
+
+  private async waitForRuntimeHello(runtimeId: string): Promise<boolean> {
+    const deadline = Date.now() + this.reconnectGraceMs;
+    while (true) {
+      const live = this.registry.get(runtimeId);
+      if (live && live.online !== false) return true;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return false;
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, Math.min(10, remaining)),
+      );
+    }
+  }
+
+  private async stopRecoveredRuntime(runtimeId: string): Promise<void> {
+    const manager = this.manager as RuntimeManager & {
+      stopRecovered?: (id: string) => Promise<void>;
+      stop?: (id: string, force?: boolean) => Promise<void>;
+    };
+    if (manager.stopRecovered) {
+      await manager.stopRecovered(runtimeId);
+      return;
+    }
+    // Compatibility for provider-manager test doubles and older managers that
+    // expose only stop(). A restored runtime has no live registry snapshot, so
+    // force is the only meaningful cleanup request.
+    if (manager.stop)
+      await manager.stop(runtimeId, true).catch(() => undefined);
   }
 
   private async serializedPreparation<T>(

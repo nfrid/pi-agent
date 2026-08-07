@@ -349,6 +349,25 @@ export class RuntimeManager {
     }
   }
 
+  /**
+   * Stop a provider placement that was reattached during startup but never
+   * produced a hello. There is no registry snapshot to pass through stop(),
+   * so this path closes the restored side effect directly and tombstones the
+   * runtime identity for this daemon lifetime.
+   */
+  async stopRecovered(runtimeId: string): Promise<void> {
+    const launch = this.launches.get(runtimeId);
+    if (!launch) return;
+    try {
+      await this.provider.stop(launch.binding).catch(() => undefined);
+      if (launch.metadataRecorded) this.metadata.markManagedStopped(runtimeId);
+    } finally {
+      this.initialPrompts.delete(runtimeId);
+      this.launches.delete(runtimeId);
+      this.registry.forget(runtimeId);
+    }
+  }
+
   /** Used by durable orchestration when hello arrives after a restart. */
   sendInitialPromptOnce(runtimeId: string, text: string): void {
     if (!this.initialPrompts.has(runtimeId))

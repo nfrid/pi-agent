@@ -906,6 +906,71 @@ describe('remote-control bridge', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('replays a stable prompt ACK after reconnect without executing Pi twice', async () => {
+    let release!: () => void;
+    const handleCommand = vi.fn(
+      () =>
+        new Promise<unknown>((resolve) => {
+          release = () => resolve({ accepted: true });
+        }),
+    );
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      commandScope: () => 'session-stable',
+      handleCommand,
+    });
+    const firstSocket = new net.Socket();
+    const firstWrite = vi.spyOn(firstSocket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', firstSocket);
+    const enqueue = (
+      Reflect.get(client, 'enqueue') as (
+        command: BridgeCommand,
+        socket: net.Socket,
+      ) => void
+    ).bind(client);
+    const prompt = {
+      id: 'run-prompt:run-1',
+      type: 'prompt',
+      text: 'Do it.',
+    } as const;
+    enqueue(prompt, firstSocket);
+    await waitFor(() => handleCommand.mock.calls.length === 1);
+
+    const replacement = new net.Socket();
+    const replacementWrite = vi
+      .spyOn(replacement, 'write')
+      .mockReturnValue(true);
+    Reflect.set(client, 'socket', replacement);
+    enqueue(prompt, replacement);
+    release();
+    await waitFor(() =>
+      replacementWrite.mock.calls.some((call) =>
+        String(call[0]).includes('run-prompt:run-1'),
+      ),
+    );
+    expect(handleCommand).toHaveBeenCalledOnce();
+    expect(firstWrite).not.toHaveBeenCalledWith(
+      expect.stringContaining('run-prompt:run-1'),
+    );
+    enqueue({ ...prompt, text: 'different payload' }, replacement);
+    await waitFor(() =>
+      replacementWrite.mock.calls.some((call) =>
+        String(call[0]).includes('duplicate-command-id'),
+      ),
+    );
+    enqueue(prompt, replacement);
+    await waitFor(
+      () =>
+        replacementWrite.mock.calls.filter((call) =>
+          String(call[0]).includes('run-prompt:run-1'),
+        ).length >= 2,
+    );
+    client.stop();
+    firstSocket.destroy();
+  });
+
   it('pushes live surface patches and unsubscribes on stop', () => {
     const hub = new LiveSurfaceHub();
     const client = new BridgeClient({

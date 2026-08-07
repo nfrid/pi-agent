@@ -28,6 +28,29 @@ export const BRIDGE_COMMAND_QUEUE_LIMIT = 64;
 const BRIDGE_WRITE_QUEUE_LIMIT = 128;
 const BRIDGE_WRITE_QUEUE_BYTES = 1 * 1024 * 1024;
 const HEARTBEAT_INTERVAL_MS = 5_000;
+const COMPLETED_SEMANTIC_COMMAND_LIMIT = 128;
+
+type SemanticCommand = Extract<
+  BridgeCommand,
+  { type: 'prompt' | 'steer' | 'followUp' }
+>;
+type CommandExecution =
+  | { status: 'success'; result: unknown }
+  | { status: 'failed'; error: string; code?: string }
+  | { status: 'stale' };
+type SemanticCommandRecord = {
+  fingerprint: string;
+  promise: Promise<CommandExecution>;
+  resolve: (outcome: CommandExecution) => void;
+};
+
+function isSemanticCommand(command: BridgeCommand): command is SemanticCommand {
+  return (
+    command.type === 'prompt' ||
+    command.type === 'steer' ||
+    command.type === 'followUp'
+  );
+}
 
 export interface BridgeClientOptions {
   socketPath: string;
@@ -68,6 +91,16 @@ export class BridgeClient {
   private commandRunning = false;
   private queueDraftCommandsRunning = 0;
   private readonly actionCommandIds = new NonIdempotentActionIdGuard();
+  /** Successful prompt-family commands survive socket churn in this client. */
+  private readonly completedSemanticCommands = new Map<
+    string,
+    { fingerprint: string; result: unknown }
+  >();
+  /** Captured scope is part of the key, so replacement sessions cannot replay. */
+  private readonly semanticCommandsInFlight = new Map<
+    string,
+    SemanticCommandRecord
+  >();
   private readonly effectiveCapabilities: RuntimeCapabilitySnapshot;
   private outboundQueue: Array<{
     socket: net.Socket;
@@ -143,6 +176,8 @@ export class BridgeClient {
     this.unsubscribeLiveSurfaces?.();
     this.unsubscribeLiveSurfaces = undefined;
     this.commandQueue = [];
+    this.semanticCommandsInFlight.clear();
+    this.completedSemanticCommands.clear();
     this.clearOutboundQueue();
     this.socket?.destroy();
     this.socket = undefined;
@@ -228,9 +263,13 @@ export class BridgeClient {
     socket.once('close', () => {
       if (this.socket !== socket) return;
       this.stopHeartbeat();
+      const abandoned = this.commandQueue.filter(
+        (item) => item.socket === socket,
+      );
       this.commandQueue = this.commandQueue.filter(
         (item) => item.socket !== socket,
       );
+      for (const item of abandoned) this.discardSemanticCommand(item);
       this.clearOutboundQueue();
       this.socket = undefined;
       this.buffer = '';
@@ -271,6 +310,9 @@ export class BridgeClient {
       socket,
       scope: this.options.commandScope?.(),
     };
+    // Completed and in-flight prompt-family duplicates are checked before
+    // queue admission so an ACK resend cannot be rejected by unrelated load.
+    if (this.handleSemanticDuplicate(item)) return;
     // Draft edits are dashboard-owned state and must remain responsive while a
     // long-running semantic command is awaiting completion. Their store is
     // synchronous and independently bounded, so they can safely bypass the
@@ -326,19 +368,143 @@ export class BridgeClient {
         }
       }
     }
+    if (isSemanticCommand(command)) this.reserveSemanticCommand(item);
     this.commandQueue.push(item);
     this.pumpCommands();
   }
 
-  private async executeCommand(item: {
+  private semanticCommandKey(command: SemanticCommand, scope?: string): string {
+    return JSON.stringify([scope, command.id]);
+  }
+
+  private semanticCommandFingerprint(command: SemanticCommand): string {
+    return JSON.stringify(command);
+  }
+
+  private handleSemanticDuplicate(item: {
     command: BridgeCommand;
     socket: net.Socket;
     scope?: string;
-  }): Promise<void> {
-    // Commands received on a replaced generation are abandoned rather than
-    // replayed. Replaying could duplicate a prompt after a daemon retry.
-    if (item.socket !== this.socket || item.socket.destroyed) return;
-    if (item.scope !== this.options.commandScope?.()) {
+  }): boolean {
+    if (!isSemanticCommand(item.command)) return false;
+    const key = this.semanticCommandKey(item.command, item.scope);
+    const fingerprint = this.semanticCommandFingerprint(item.command);
+    const completed = this.completedSemanticCommands.get(key);
+    if (completed) {
+      // Refresh the bounded LRU entry when a valid resend arrives.
+      this.completedSemanticCommands.delete(key);
+      this.completedSemanticCommands.set(key, completed);
+      if (completed.fingerprint !== fingerprint) {
+        this.sendAck(
+          item.socket,
+          item.command.id,
+          false,
+          'A command ID was already used with a different payload.',
+          'duplicate-command-id',
+        );
+      } else {
+        this.sendAck(item.socket, item.command.id, true, completed.result);
+      }
+      return true;
+    }
+    const inFlight = this.semanticCommandsInFlight.get(key);
+    if (inFlight) {
+      if (inFlight.fingerprint !== fingerprint) {
+        this.sendAck(
+          item.socket,
+          item.command.id,
+          false,
+          'A command ID is already in flight with a different payload.',
+          'duplicate-command-id',
+        );
+      } else {
+        void inFlight.promise.then((outcome) =>
+          this.sendSemanticExecutionAck(item, outcome),
+        );
+      }
+      return true;
+    }
+    return false;
+  }
+
+  private reserveSemanticCommand(item: {
+    command: BridgeCommand;
+    socket: net.Socket;
+    scope?: string;
+  }): void {
+    if (!isSemanticCommand(item.command)) return;
+    const key = this.semanticCommandKey(item.command, item.scope);
+    let resolve!: (outcome: CommandExecution) => void;
+    const promise = new Promise<CommandExecution>((complete) => {
+      resolve = (outcome) => complete(outcome);
+    });
+    this.semanticCommandsInFlight.set(key, {
+      fingerprint: this.semanticCommandFingerprint(item.command),
+      promise,
+      resolve,
+    });
+  }
+
+  private discardSemanticCommand(item: {
+    command: BridgeCommand;
+    scope?: string;
+  }): void {
+    if (!isSemanticCommand(item.command)) return;
+    this.semanticCommandsInFlight.delete(
+      this.semanticCommandKey(item.command, item.scope),
+    );
+  }
+
+  private completeSemanticCommand(
+    item: {
+      command: BridgeCommand;
+      socket: net.Socket;
+      scope?: string;
+    },
+    outcome: CommandExecution,
+  ): void {
+    if (!isSemanticCommand(item.command)) return;
+    const key = this.semanticCommandKey(item.command, item.scope);
+    const record = this.semanticCommandsInFlight.get(key);
+    if (!record) return;
+    record.resolve(outcome);
+    this.semanticCommandsInFlight.delete(key);
+    // A command that completed after a session replacement belongs only to the
+    // old captured scope. Do not retain it as a replay for the new session.
+    if (
+      outcome.status === 'success' &&
+      item.scope === this.options.commandScope?.()
+    ) {
+      this.completedSemanticCommands.delete(key);
+      this.completedSemanticCommands.set(key, {
+        fingerprint: record.fingerprint,
+        result: outcome.result,
+      });
+      while (
+        this.completedSemanticCommands.size > COMPLETED_SEMANTIC_COMMAND_LIMIT
+      ) {
+        const oldest = this.completedSemanticCommands.keys().next().value;
+        if (oldest === undefined) break;
+        this.completedSemanticCommands.delete(oldest);
+      }
+    }
+  }
+
+  private sendSemanticExecutionAck(
+    item: { command: BridgeCommand; socket: net.Socket },
+    outcome: CommandExecution,
+  ): void {
+    if (outcome.status === 'success')
+      this.sendAck(item.socket, item.command.id, true, outcome.result);
+    else if (outcome.status === 'failed')
+      this.sendAck(
+        item.socket,
+        item.command.id,
+        false,
+        outcome.error,
+        outcome.code,
+      );
+    else
       this.sendAck(
         item.socket,
         item.command.id,
@@ -346,24 +512,40 @@ export class BridgeClient {
         'Command belongs to a replaced session.',
         'stale-session',
       );
-      return;
+  }
+
+  private async executeCommand(item: {
+    command: BridgeCommand;
+    socket: net.Socket;
+    scope?: string;
+  }): Promise<CommandExecution> {
+    // Commands received on a replaced generation are abandoned rather than
+    // replayed. Replaying could duplicate a prompt after a daemon retry.
+    if (item.socket !== this.socket || item.socket.destroyed)
+      return { status: 'stale' };
+    if (item.scope !== this.options.commandScope?.()) {
+      const outcome: CommandExecution = { status: 'stale' };
+      this.sendSemanticExecutionAck(item, outcome);
+      return outcome;
     }
     try {
       const result = await this.options.handleCommand(
         item.command,
         this.effectiveCapabilities,
       );
+      const outcome: CommandExecution = { status: 'success', result };
       this.sendAck(item.socket, item.command.id, true, result);
+      return outcome;
     } catch (error) {
-      this.sendAck(
-        item.socket,
-        item.command.id,
-        false,
-        error instanceof Error ? error.message : String(error),
-        error && typeof error === 'object' && 'code' in error
-          ? String((error as { code: unknown }).code)
-          : undefined,
-      );
+      const outcome: CommandExecution = {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        ...(error && typeof error === 'object' && 'code' in error
+          ? { code: String((error as { code: unknown }).code) }
+          : {}),
+      };
+      this.sendSemanticExecutionAck(item, outcome);
+      return outcome;
     }
   }
 
@@ -372,10 +554,12 @@ export class BridgeClient {
     const item = this.commandQueue.shift();
     if (!item) return;
     this.commandRunning = true;
-    void this.executeCommand(item).finally(() => {
-      this.commandRunning = false;
-      this.pumpCommands();
-    });
+    void this.executeCommand(item)
+      .then((outcome) => this.completeSemanticCommand(item, outcome))
+      .finally(() => {
+        this.commandRunning = false;
+        this.pumpCommands();
+      });
   }
 
   private sendAck(

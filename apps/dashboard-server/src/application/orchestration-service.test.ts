@@ -55,7 +55,10 @@ describe('OrchestrationService', () => {
         recover: vi.fn(async () => false),
         sendInitialPromptOnce: vi.fn(),
       };
-      const registry = { get: () => undefined };
+      const registry = {
+        get: () => undefined,
+        sendCommand: vi.fn(async () => ({ accepted: true })),
+      };
       const service = new OrchestrationService({
         repository: metadata.orchestration,
         manager: manager as never,
@@ -96,6 +99,7 @@ describe('OrchestrationService', () => {
         );
       const paths = launches.map((input) => String(input.checkoutCwd));
       expect(new Set(paths).size).toBe(2);
+      expect(launches[0]).not.toHaveProperty('initialPrompt');
       expect(
         await readFile(path.join(paths[0] as string, 'untracked.txt'), 'utf8'),
       ).toBe('also carried\n');
@@ -123,6 +127,17 @@ describe('OrchestrationService', () => {
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
       const bound = metadata.orchestration.getRun(first.run.id);
+      expect(registry.sendCommand).toHaveBeenCalledWith(
+        runtimeId,
+        expect.objectContaining({
+          id: `run-prompt:${first.run.id}`,
+          type: 'prompt',
+          text: 'complete prompt one',
+        }),
+      );
+      expect(
+        metadata.orchestration.getCommandReceipt(`run-prompt:${first.run.id}`),
+      ).toBeDefined();
       if (bound?.status !== 'running')
         throw new Error(
           JSON.stringify({
@@ -180,13 +195,19 @@ describe('OrchestrationService', () => {
       const first = new OrchestrationService({
         repository: firstMetadata.orchestration,
         manager: manager as never,
-        registry: { get: () => undefined } as never,
+        registry: {
+          get: () => undefined,
+          sendCommand: vi.fn(async () => ({ accepted: true })),
+        } as never,
         workspaces: () => [workspace(root)],
       });
       const second = new OrchestrationService({
         repository: secondMetadata.orchestration,
         manager: manager as never,
-        registry: { get: () => undefined } as never,
+        registry: {
+          get: () => undefined,
+          sendCommand: vi.fn(async () => ({ accepted: true })),
+        } as never,
         workspaces: () => [workspace(root)],
       });
       const results = await Promise.all([
@@ -249,7 +270,10 @@ describe('OrchestrationService', () => {
       const service = new OrchestrationService({
         repository: metadata.orchestration,
         manager: manager as never,
-        registry: { get: () => undefined } as never,
+        registry: {
+          get: () => undefined,
+          sendCommand: vi.fn(async () => ({ accepted: true })),
+        } as never,
         workspaces: () => [workspace(root)],
         pollMs: 5,
       });
@@ -320,6 +344,13 @@ describe('OrchestrationService', () => {
         await new Promise((resolve) => setTimeout(resolve, 5));
       expect(launches).toHaveLength(2);
       expect(launches[1]?.checkoutCwd).toBe(firstPath);
+      const activeRecord = metadata.orchestration.loadWorktreeRecord(
+        retried.run.checkoutId,
+      );
+      expect(activeRecord?.status).toBe('active');
+      expect(Date.parse(activeRecord?.updatedAt ?? '')).toBeGreaterThanOrEqual(
+        Date.parse(firstRecord?.updatedAt ?? ''),
+      );
       const secondRun = metadata.orchestration.getRun(retried.run.id);
       const secondRuntime = secondRun?.runtimeId as string;
       service.onRegistryChange({

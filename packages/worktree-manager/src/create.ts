@@ -251,8 +251,22 @@ export function createWorktreeCreator<
   async function rehydrateWorktree(
     record: Record,
   ): Promise<PreparedWorktree<Record>> {
-    if (existsSync(record.worktreePath))
+    if (existsSync(record.worktreePath)) {
+      // A retry may reuse a settled checkout without recreating its directory.
+      // Persist the active ownership and a fresh lifecycle timestamp before the
+      // caller launches a new agent against it.
+      record.status = 'active';
+      delete record.snapshot;
+      const previousUpdatedAt = Date.parse(record.updatedAt);
+      record.updatedAt = new Date(
+        Math.max(
+          Date.now(),
+          Number.isNaN(previousUpdatedAt) ? 0 : previousUpdatedAt + 1,
+        ),
+      ).toISOString();
+      store.writeWorktreeRecord(record);
       return { record, env: environment(record.id) };
+    }
     if (record.status === 'removed')
       throw new Error('This worktree has already been removed.');
     try {
