@@ -40,6 +40,10 @@ export interface OrchestrationServiceOptions {
   pollMs?: number;
   /** How long startup waits for a restored provider runtime to say hello. */
   reconnectGraceMs?: number;
+  /** Test seam for deterministically racing cancellation with worktree setup. */
+  beforeWorktreePreparation?: () => Promise<void>;
+  /** Test seam for deterministically racing goodbye with worktree settlement. */
+  beforeWorktreeFinish?: () => Promise<void>;
 }
 
 export interface CreateProjectCommand {
@@ -109,9 +113,13 @@ export class OrchestrationService {
   private readonly onChange?: () => void;
   private readonly pollMs: number;
   private readonly reconnectGraceMs: number;
+  private readonly beforeWorktreePreparation?: () => Promise<void>;
+  private readonly beforeWorktreeFinish?: () => Promise<void>;
   private readonly inFlight = new Set<string>();
   /** Execution remains observable while preparation or manager.launch is pending. */
   private readonly executionTasks = new Map<string, Promise<void>>();
+  /** Fresh WIP branches are discarded on cancellation, unlike resumable records. */
+  private readonly freshWorktreeRuns = new Set<string>();
   private readonly registryTasks = new Set<Promise<void>>();
   /** Registry callbacks for one durable run are reduced in bridge arrival order. */
   private readonly registryRunQueues = new Map<string, Promise<void>>();
@@ -148,6 +156,8 @@ export class OrchestrationService {
     this.reconnectGraceMs = Number.isFinite(reconnectGraceMs)
       ? Math.min(60_000, Math.max(0, reconnectGraceMs))
       : 5_000;
+    this.beforeWorktreePreparation = options.beforeWorktreePreparation;
+    this.beforeWorktreeFinish = options.beforeWorktreeFinish;
   }
 
   async start(): Promise<void> {
@@ -163,10 +173,15 @@ export class OrchestrationService {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     this.started = false;
-    await Promise.allSettled([
-      ...[...this.inFlight].map((id) => this.waitForRun(id)),
-      ...this.registryTasks,
-    ]);
+    // Registry callbacks can enqueue another per-run reduction while the
+    // current one completes. Drain until both the execution and callback sets
+    // are empty so shutdown cannot leave a queued lifecycle task behind.
+    while (this.inFlight.size > 0 || this.registryTasks.size > 0) {
+      await Promise.allSettled([
+        ...[...this.inFlight].map((id) => this.waitForRun(id)),
+        ...this.registryTasks,
+      ]);
+    }
   }
 
   /** Wake the worker after a command or a projection mutation. */
@@ -407,10 +422,24 @@ export class OrchestrationService {
     const checkout = this.repository.getCheckout(result.checkoutId);
     // An execution task owns fresh-worktree cleanup. In particular, do not
     // finish a fresh checkout after its provider stop failed: retaining the
-    // record is the retry handle for the leaked placement.
+    // record is the retry handle for the leaked placement. A later retry of
+    // the same cancellation reaches this branch after stop succeeds.
     if (!execution && checkout?.kind === 'worktree') {
       const record = this.worktreeRecord(checkout);
-      if (record) {
+      if (this.freshWorktreeRuns.has(runId)) {
+        if (record) {
+          const discarded = await createWorktreeFinisher(
+            this.storeFor(checkout),
+          ).discardFreshWorktree(record.id);
+          if (discarded.warning) throw new Error(discarded.warning);
+        }
+        this.freshWorktreeRuns.delete(runId);
+        try {
+          this.repository.transitionCheckout(checkout.id, 'retired');
+        } catch {
+          /* retain terminal state */
+        }
+      } else if (record) {
         await createWorktreeFinisher(this.storeFor(checkout)).finishWorktree(
           record.id,
           {
@@ -423,8 +452,15 @@ export class OrchestrationService {
         } catch {
           /* retain terminal state */
         }
+      } else {
+        try {
+          this.repository.transitionCheckout(checkout.id, 'retired');
+        } catch {
+          /* retain terminal state */
+        }
       }
     }
+    this.repository.clearRunError(runId);
     this.saveReceipt(commandId, 'run.cancel', result);
     this.changed();
     this.kick();
@@ -725,6 +761,7 @@ export class OrchestrationService {
     if (checkout.kind === 'worktree') {
       const record = this.worktreeRecord(checkout);
       if (record) {
+        await this.beforeWorktreeFinish?.();
         await createWorktreeFinisher(this.storeFor(checkout)).finishWorktree(
           record.id,
           {
@@ -733,6 +770,7 @@ export class OrchestrationService {
           },
         );
         this.repository.transitionCheckout(checkout.id, 'dirty');
+        this.freshWorktreeRuns.delete(runId);
       }
     }
     if (run.runtimeId) {
@@ -874,13 +912,14 @@ export class OrchestrationService {
             )
           ).record;
         } else {
-          const fresh = await this.serializedPreparation(() =>
-            creator.prepareWorktree({
+          const fresh = await this.serializedPreparation(async () => {
+            await this.beforeWorktreePreparation?.();
+            return creator.prepareWorktree({
               cwd: project.rootPath,
               name: this.requireThread(run.threadId).title,
               base: 'wip',
-            }),
-          );
+            });
+          });
           if (!fresh.worktree) {
             this.failRun(
               run.id,
@@ -904,6 +943,7 @@ export class OrchestrationService {
           }
           prepared = fresh.worktree.record;
           freshPrepared = true;
+          this.freshWorktreeRuns.add(run.id);
         }
         cwd = prepared.worktreePath;
         this.repository.updateCheckout(checkout.id, {
@@ -934,14 +974,18 @@ export class OrchestrationService {
           const record = this.worktreeRecord(
             this.repository.getCheckout(checkout.id) ?? checkout,
           );
-          if (record)
-            await createWorktreeFinisher(
-              this.storeFor(checkout),
-            ).discardFreshWorktree(record.id);
-          try {
-            this.repository.transitionCheckout(checkout.id, 'dirty');
-          } catch {
-            /* terminal cancellation remains durable */
+          const discarded = record
+            ? await createWorktreeFinisher(
+                this.storeFor(checkout),
+              ).discardFreshWorktree(record.id)
+            : {};
+          if (!discarded.warning) {
+            this.freshWorktreeRuns.delete(run.id);
+            try {
+              this.repository.transitionCheckout(checkout.id, 'retired');
+            } catch {
+              /* terminal cancellation remains durable */
+            }
           }
         }
         return;
@@ -988,14 +1032,18 @@ export class OrchestrationService {
           const record = this.worktreeRecord(
             this.repository.getCheckout(checkout.id) ?? checkout,
           );
-          if (record)
-            await createWorktreeFinisher(
-              this.storeFor(checkout),
-            ).discardFreshWorktree(record.id);
-          try {
-            this.repository.transitionCheckout(checkout.id, 'dirty');
-          } catch {
-            /* terminal cancellation remains durable */
+          const discarded = record
+            ? await createWorktreeFinisher(
+                this.storeFor(checkout),
+              ).discardFreshWorktree(record.id)
+            : {};
+          if (!discarded.warning) {
+            this.freshWorktreeRuns.delete(run.id);
+            try {
+              this.repository.transitionCheckout(checkout.id, 'retired');
+            } catch {
+              /* terminal cancellation remains durable */
+            }
           }
         }
       }
@@ -1003,23 +1051,31 @@ export class OrchestrationService {
       const current = this.repository.getRun(run.id);
       if (!current || !TERMINAL_RUN_STATUSES.includes(current.status))
         this.failRun(run.id, 'failed', errorText(error));
+      // Do not swallow a failed terminal stop while the manager still owns a
+      // launch. The durable run error and retained provider/worktree evidence
+      // make the same cancellation command retryable.
+      const manager = this.manager as RuntimeManager & {
+        hasLaunch?: (id: string) => boolean;
+      };
+      const retainedLaunch = runtimeId
+        ? (manager.hasLaunch?.(runtimeId) ?? false)
+        : false;
+      if (terminalStopAttempted && retainedLaunch) {
+        this.repository.setRunError(run.id, boundedErrorText(error));
+        this.changed();
+        throw error;
+      }
       if (checkout.kind === 'worktree') {
-        // Do not remove a fresh checkout while a manager launch remains
-        // retained after cleanup failure. That record is the retry evidence.
-        const manager = this.manager as RuntimeManager & {
-          hasLaunch?: (id: string) => boolean;
-        };
-        const retainedLaunch = runtimeId
-          ? (manager.hasLaunch?.(runtimeId) ?? false)
-          : false;
         if (!terminalStopAttempted && !retainedLaunch) {
           const record = this.worktreeRecord(
             this.repository.getCheckout(checkout.id) ?? checkout,
           );
-          if (record)
-            await createWorktreeFinisher(
+          if (record) {
+            const discarded = await createWorktreeFinisher(
               this.storeFor(checkout),
             ).discardFreshWorktree(record.id);
+            if (!discarded.warning) this.freshWorktreeRuns.delete(run.id);
+          }
         }
         if (
           !current ||

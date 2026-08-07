@@ -128,7 +128,13 @@ async function waitFor(condition: () => boolean): Promise<void> {
   throw new Error('Timed out waiting for orchestration state.');
 }
 
-async function isolatedServiceFixture(options: { failingHook?: boolean } = {}) {
+async function isolatedServiceFixture(
+  options: {
+    failingHook?: boolean;
+    beforeWorktreePreparation?: () => Promise<void>;
+    beforeWorktreeFinish?: () => Promise<void>;
+  } = {},
+) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'pi-orchestration-git-'));
   const state = await mkdtemp(
     path.join(os.tmpdir(), 'pi-orchestration-git-state-'),
@@ -155,6 +161,7 @@ async function isolatedServiceFixture(options: { failingHook?: boolean } = {}) {
       launches.push(input);
       return { runtimeId: input.runtimeId as string };
     }),
+    hasLaunch: vi.fn(() => false),
     recover: vi.fn(async () => false),
     stopRecovered: vi.fn(async () => undefined),
     stop: vi.fn(async () => undefined),
@@ -170,6 +177,8 @@ async function isolatedServiceFixture(options: { failingHook?: boolean } = {}) {
     registry: registry as never,
     workspaces: () => [workspace(root)],
     pollMs: 5,
+    beforeWorktreePreparation: options.beforeWorktreePreparation,
+    beforeWorktreeFinish: options.beforeWorktreeFinish,
   });
   const adopted = (await service.adoptProject({
     commandId: `adopt-${Date.now()}-${Math.random()}`,
@@ -494,6 +503,97 @@ describe('OrchestrationService', () => {
     }
   });
 
+  it('stops and interrupts durable state when a runtime goes offline', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.setRunRuntime(fixture.runId, 'runtime-offline');
+      const handle = (
+        fixture.service as unknown as {
+          handleRegistryChange: (value: never) => Promise<void>;
+        }
+      ).handleRegistryChange.bind(fixture.service);
+      await handle({
+        kind: 'registered',
+        snapshot: runtimeHello('runtime-offline'),
+      } as never);
+      await handle({
+        kind: 'offline',
+        snapshot: { ...runtimeHello('runtime-offline'), online: false },
+      } as never);
+      expect(repository.getRun(fixture.runId)?.status).toBe('interrupted');
+      expect(repository.getRuntime('runtime-offline')?.status).toBe('stopped');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('serializes settled work before a following normal goodbye', async () => {
+    let enteredFinish = false;
+    let releaseFinish!: () => void;
+    const finish = new Promise<void>((resolve) => {
+      releaseFinish = resolve;
+    });
+    const fixture = await isolatedServiceFixture({
+      beforeWorktreeFinish: async () => {
+        enteredFinish = true;
+        await finish;
+      },
+    });
+    try {
+      await fixture.service.start();
+      const created = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'settled-goodbye-thread',
+        title: 'Settled goodbye',
+        prompt: 'Settle before goodbye.',
+      })) as { run: { id: string; checkoutId: string } };
+      await waitFor(() => fixture.launches.length === 1);
+      const runtimeId = fixture.launches[0]?.runtimeId as string;
+      const handle = (
+        fixture.service as unknown as {
+          handleRegistryChange: (value: never) => Promise<void>;
+        }
+      ).handleRegistryChange.bind(fixture.service);
+      await handle({
+        kind: 'registered',
+        snapshot: runtimeHello(runtimeId),
+      } as never);
+      await waitFor(
+        () =>
+          fixture.metadata.orchestration.getRun(created.run.id)?.status ===
+          'running',
+      );
+      fixture.service.onRegistryChange({
+        kind: 'event',
+        runtimeId,
+        event: { type: 'agent.settled', sessionId: `${runtimeId}-session` },
+        snapshot: {} as never,
+      });
+      await waitFor(() => enteredFinish);
+      expect(
+        fixture.metadata.orchestration.getRun(created.run.id)?.status,
+      ).toBe('settled');
+      fixture.service.onRegistryChange({
+        kind: 'event',
+        runtimeId,
+        event: { type: 'runtime.goodbye', reason: 'quit' },
+        snapshot: { ...runtimeHello(runtimeId), online: false },
+      });
+      releaseFinish();
+      await fixture.service.stop();
+      expect(
+        fixture.metadata.orchestration.getRun(created.run.id)?.status,
+      ).toBe('settled');
+      expect(fixture.metadata.orchestration.getRuntime(runtimeId)?.status).toBe(
+        'stopped',
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('does not record a rejected prompt and retries it on a later hello', async () => {
     const fixture = await orchestrationFixture();
     try {
@@ -676,6 +776,145 @@ describe('OrchestrationService', () => {
       expect(
         await readdir(path.join(fixture.root, '.worktrees')).catch(() => []),
       ).toEqual([]);
+      expect(
+        fixture.metadata.orchestration.getCheckout(created.run.checkoutId)
+          ?.status,
+      ).toBe('retired');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('retains cancellation evidence after stop failure and retries cleanup', async () => {
+    const fixture = await isolatedServiceFixture();
+    try {
+      fixture.manager.hasLaunch.mockReturnValue(true);
+      fixture.manager.stop
+        .mockRejectedValueOnce(new Error('first provider stop failed'))
+        .mockResolvedValue(undefined);
+      let resolveLaunch!: (value: { runtimeId: string }) => void;
+      const launch = new Promise<{ runtimeId: string }>((resolve) => {
+        resolveLaunch = resolve;
+      });
+      fixture.manager.launch.mockImplementationOnce(async (input) => {
+        fixture.launches.push(input);
+        return launch;
+      });
+      await fixture.service.start();
+      const created = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'cancel-stop-retry-thread',
+        title: 'Cancel stop retry',
+        prompt: 'Cancel with retry.',
+      })) as { run: { id: string; checkoutId: string } };
+      await waitFor(() => fixture.launches.length === 1);
+      const runtimeId = fixture.launches[0]?.runtimeId as string;
+      const first = fixture.service.cancelRun(
+        created.run.id,
+        'cancel-stop-retry',
+      );
+      await waitFor(
+        () =>
+          fixture.metadata.orchestration.getRun(created.run.id)?.status ===
+          'cancelled',
+      );
+      resolveLaunch({ runtimeId });
+      await expect(first).rejects.toThrow('first provider stop failed');
+      expect(
+        fixture.metadata.orchestration.getCommandReceipt('cancel-stop-retry'),
+      ).toBeUndefined();
+      expect(
+        fixture.metadata.orchestration.getRun(created.run.id)?.error,
+      ).toContain('first provider stop failed');
+      const retained = fixture.metadata.orchestration.loadWorktreeRecord(
+        created.run.checkoutId,
+      );
+      expect(retained).toBeDefined();
+      await expect(
+        access(retained?.worktreePath as string),
+      ).resolves.toBeUndefined();
+
+      await expect(
+        fixture.service.cancelRun(created.run.id, 'cancel-stop-retry'),
+      ).resolves.toMatchObject({ status: 'cancelled' });
+      expect(fixture.manager.stop).toHaveBeenCalledTimes(2);
+      expect(
+        fixture.metadata.orchestration.getCommandReceipt('cancel-stop-retry'),
+      ).toBeDefined();
+      expect(
+        fixture.metadata.orchestration.loadWorktreeRecord(
+          created.run.checkoutId,
+        ),
+      ).toBeUndefined();
+      await expect(
+        access(retained?.worktreePath as string),
+      ).rejects.toBeDefined();
+      expect(
+        fixture.metadata.orchestration.getCheckout(created.run.checkoutId)
+          ?.status,
+      ).toBe('retired');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('cancels during preparation without leaking a worktree or branch', async () => {
+    let enteredPreparation = false;
+    let releasePreparation!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      releasePreparation = resolve;
+    });
+    const fixture = await isolatedServiceFixture({
+      beforeWorktreePreparation: async () => {
+        enteredPreparation = true;
+        await preparation;
+      },
+    });
+    try {
+      await fixture.service.start();
+      const created = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'cancel-preparation-thread',
+        title: 'Cancel preparation',
+        prompt: 'Cancel before launch.',
+      })) as { run: { id: string; checkoutId: string } };
+      await waitFor(() => enteredPreparation);
+      const cancellation = fixture.service.cancelRun(
+        created.run.id,
+        'cancel-preparation',
+      );
+      await waitFor(
+        () =>
+          fixture.metadata.orchestration.getRun(created.run.id)?.status ===
+          'cancelled',
+      );
+      expect(fixture.manager.launch).not.toHaveBeenCalled();
+      releasePreparation();
+      await expect(cancellation).resolves.toMatchObject({
+        status: 'cancelled',
+      });
+      expect(
+        fixture.metadata.orchestration.getCommandReceipt('cancel-preparation'),
+      ).toBeDefined();
+      expect(
+        fixture.metadata.orchestration.loadWorktreeRecord(
+          created.run.checkoutId,
+        ),
+      ).toBeUndefined();
+      expect(
+        await readdir(path.join(fixture.root, '.worktrees')).catch(() => []),
+      ).toEqual([]);
+      expect(await gitOutput(fixture.root, 'branch', '--list', 'pi/*')).toBe(
+        '',
+      );
+      const worktreeLines = (
+        await gitOutput(fixture.root, 'worktree', 'list', '--porcelain')
+      )
+        .split('\n')
+        .filter((line) => line.startsWith('worktree '));
+      expect(worktreeLines).toHaveLength(1);
+      expect(
+        fixture.metadata.orchestration.getCheckout(created.run.checkoutId)
+          ?.status,
+      ).toBe('retired');
     } finally {
       await fixture.close();
     }
