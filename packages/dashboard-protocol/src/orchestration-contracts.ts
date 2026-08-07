@@ -144,6 +144,8 @@ export const CheckoutSummarySchema = Type.Object(
     branch: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
     status: CheckoutStatusSchema,
     activeRunId: Type.Optional(IdentifierSchema),
+    /** Number of changed paths persisted in the worktree record, when known. */
+    changedFileCount: Type.Optional(Type.Integer({ minimum: 0 })),
     updatedAt: TimestampSchema,
   },
   { additionalProperties: false },

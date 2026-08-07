@@ -34,7 +34,22 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
     !pathname.includes('/new/pending/');
   const activeSessionId = pathname.startsWith('/sessions/')
     ? decodeURIComponent(pathname.split('/')[2] ?? '')
-    : undefined;
+    : pathname.startsWith('/threads/')
+      ? snapshot.runs?.find(
+          (run) =>
+            run.threadId === decodeURIComponent(pathname.split('/')[2] ?? '') &&
+            run.piSessionId,
+        )?.piSessionId
+      : undefined;
+  const hasProjects = (snapshot.projects?.length ?? 0) > 0;
+  const managedActive = (snapshot.runs ?? []).filter(
+    (run) =>
+      run.status !== 'queued' &&
+      ['preparing', 'starting', 'running', 'waiting'].includes(run.status),
+  ).length;
+  const managedAttention = (snapshot.threads ?? []).filter(
+    (thread) => thread.status === 'needs-input' || thread.status === 'failed',
+  ).length;
   const paletteDisabled = Boolean(
     activeSessionId &&
       snapshot.runtimes.some(
@@ -46,12 +61,42 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
   return (
     <header className="navigation-shell">
       <div className="global-tools">
+        {hasProjects && (
+          <>
+            <button
+              type="button"
+              className="header-management-link"
+              onClick={() => go('/')}
+            >
+              Projects <b>{managedAttention}</b>
+            </button>
+            <span className="header-management-count">
+              {managedActive} active ·{' '}
+              {
+                (snapshot.runs ?? []).filter((run) => run.status === 'queued')
+                  .length
+              }{' '}
+              queued
+            </span>
+          </>
+        )}
         {showGlobalNew && (
           <button
             type="button"
             className="global-new-agent"
-            aria-label="New chat"
+            aria-label={hasProjects ? 'New thread' : 'New chat'}
             onClick={() => {
+              if (hasProjects) {
+                const projectMatch = pathname.match(
+                  /^\/projects\/([^/]+)(?:\/|$)/u,
+                );
+                const projectId = projectMatch?.[1]
+                  ? decodeURIComponent(projectMatch[1])
+                  : snapshot.projects?.[0]?.id;
+                if (projectId)
+                  go(`/projects/${encodeURIComponent(projectId)}/new`);
+                return;
+              }
               const workspaceMatch = pathname.match(/^\/workspaces\/([^/]+)$/u);
               go(
                 newChatPath(

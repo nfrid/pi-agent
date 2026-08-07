@@ -16,5 +16,16 @@ export default defineConfig({
     port,
     reuseExistingServer: false,
   },
-  projects: [{ name: 'mobile', use: { ...devices['Pixel 5'] } }],
+  projects: [
+    {
+      name: 'mobile',
+      use: { ...devices['Pixel 5'] },
+      testIgnore: '**/management.spec.ts',
+    },
+    {
+      name: 'desktop-management',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: '**/management.spec.ts',
+    },
+  ],
 });

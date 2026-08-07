@@ -40,6 +40,26 @@ async function fixture() {
 }
 
 describe('SqliteOrchestrationRepository', () => {
+  it('projects changed file count from the persisted worktree record', async () => {
+    const value = await fixture();
+    value.db
+      .prepare(
+        'INSERT INTO worktree_record (id,checkout_id,record_json,updated_at) VALUES (?,?,?,?)',
+      )
+      .run(
+        'record-1',
+        value.checkout.id,
+        JSON.stringify({ changedPaths: ['src/a.ts', 'src/b.ts', 'README.md'] }),
+        Date.now(),
+      );
+    expect(
+      value.repository
+        .checkoutSummaries()
+        .find((item) => item.id === value.checkout.id),
+    ).toMatchObject({ changedFileCount: 3 });
+    value.db.close();
+  });
+
   it('round-trips durable entities and preserves the complete prompt after reopen', async () => {
     const value = await fixture();
     const prompt = 'Keep every character, including trailing spaces.  ';

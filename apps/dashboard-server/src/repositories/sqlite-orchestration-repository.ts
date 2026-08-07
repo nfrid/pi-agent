@@ -379,8 +379,12 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
           `SELECT c.*,
              (SELECT r.id FROM orchestration_run r
               WHERE r.checkout_id=c.id AND r.status IN ${ACTIVE_RUN_SQL}
-              ORDER BY r.created_at LIMIT 1) AS active_run_id
-           FROM checkout c ORDER BY c.updated_at DESC,c.id`,
+              ORDER BY r.created_at LIMIT 1) AS active_run_id,
+             CASE WHEN json_type(w.record_json, '$.changedPaths') = 'array'
+               THEN json_array_length(json_extract(w.record_json, '$.changedPaths'))
+               ELSE NULL END AS changed_file_count
+           FROM checkout c LEFT JOIN worktree_record w ON w.checkout_id=c.id
+           ORDER BY c.updated_at DESC,c.id`,
         )
         .all(),
     ).map((row) => ({
@@ -395,6 +399,9 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(optionalString(row, 'active_run_id') === undefined
         ? {}
         : { activeRunId: optionalString(row, 'active_run_id') }),
+      ...(row.changed_file_count == null
+        ? {}
+        : { changedFileCount: Number(row.changed_file_count) }),
       updatedAt: Number(row.updated_at),
     }));
   }

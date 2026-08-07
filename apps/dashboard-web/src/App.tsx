@@ -46,6 +46,14 @@ import {
 } from './routes/dashboard';
 import { newChatPath, useDashboardNavigate } from './routes/navigation';
 import { RuntimeView } from './routes/runtime';
+import './management.css';
+import {
+  ManagementHome,
+  NewThreadRoute,
+  ProjectRoute,
+  ProjectsRoute,
+  ThreadRoute,
+} from './routes/management';
 
 export {
   isNearPageBottom,
@@ -90,6 +98,15 @@ export {
   pendingChatPath,
   sessionPathForRuntime,
 } from './features/new-chat';
+export {
+  groupThreads,
+  isTerminalRun,
+  latestRunForThread,
+  managementStatusCounts,
+  runTiming,
+  sessionRouteTarget,
+  unassignedSessions,
+} from './routes/management';
 export { newChatPath } from './routes/navigation';
 export { toTranscriptEntries } from './transcript';
 
@@ -200,6 +217,7 @@ function RouteShell() {
       isSession: state.matches.some(
         (match) =>
           match.routeId === '/sessions/$sessionId' ||
+          match.routeId === '/threads/$threadId' ||
           match.routeId === '/workspaces/$workspaceId/new' ||
           match.routeId === '/workspaces/$workspaceId/new/pending/$runtimeId',
       ),
@@ -209,7 +227,14 @@ function RouteShell() {
   if (!dashboard.snapshot) return null;
   const activeSessionId = routeState.pathname.startsWith('/sessions/')
     ? decodeURIComponent(routeState.pathname.split('/')[2] ?? '')
-    : undefined;
+    : routeState.pathname.startsWith('/threads/')
+      ? dashboard.snapshot.runs?.find(
+          (run) =>
+            run.threadId ===
+              decodeURIComponent(routeState.pathname.split('/')[2] ?? '') &&
+            run.piSessionId,
+        )?.piSessionId
+      : undefined;
   const pendingQuestions = Boolean(
     activeSessionId &&
       dashboard.snapshot.runtimes.some(
@@ -288,6 +313,10 @@ function DashboardUtilityOverlay({
 function HomeRoute() {
   const dashboard = useDashboardContext();
   if (!dashboard.snapshot) return null;
+  if ((dashboard.snapshot.projects?.length ?? 0) > 0)
+    return (
+      <ManagementHome snapshot={dashboard.snapshot} store={dashboard.store} />
+    );
   return (
     <Dashboard
       snapshot={dashboard.snapshot}
@@ -300,7 +329,15 @@ function HomeRoute() {
 function SessionRoute() {
   const { sessionId } = useParams({ from: '/sessions/$sessionId' });
   const dashboard = useDashboardContext();
+  const ownedRun = dashboard.snapshot?.runs?.find(
+    (run) => run.piSessionId === sessionId,
+  );
+  const go = useDashboardNavigate();
+  useEffect(() => {
+    if (ownedRun) go(`/threads/${encodeURIComponent(ownedRun.threadId)}`);
+  }, [go, ownedRun]);
   if (!dashboard.snapshot) return null;
+  if (ownedRun) return <section role="status">Opening managed thread…</section>;
   return (
     <SessionView
       id={sessionId}
@@ -372,6 +409,38 @@ function InboxRoute() {
   ) : null;
 }
 
+function ManagementProjectsRoute() {
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <ProjectsRoute snapshot={dashboard.snapshot} />
+  ) : null;
+}
+function ManagementProjectRoute() {
+  const { projectId } = useParams({ from: '/projects/$projectId' });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <ProjectRoute projectId={projectId} snapshot={dashboard.snapshot} />
+  ) : null;
+}
+function ManagementNewThreadRoute() {
+  const { projectId } = useParams({ from: '/projects/$projectId/new' });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <NewThreadRoute projectId={projectId} snapshot={dashboard.snapshot} />
+  ) : null;
+}
+function ManagementThreadRoute() {
+  const { threadId } = useParams({ from: '/threads/$threadId' });
+  const dashboard = useDashboardContext();
+  return dashboard.snapshot ? (
+    <ThreadRoute
+      threadId={threadId}
+      snapshot={dashboard.snapshot}
+      store={dashboard.store}
+    />
+  ) : null;
+}
+
 function RuntimeRoute() {
   const { runtimeId } = useParams({ from: '/runtimes/$runtimeId' });
   const dashboard = useDashboardContext();
@@ -399,6 +468,26 @@ const homeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   component: HomeRoute,
+});
+const projectsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/projects',
+  component: ManagementProjectsRoute,
+});
+const projectRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/projects/$projectId',
+  component: ManagementProjectRoute,
+});
+const projectNewThreadRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/projects/$projectId/new',
+  component: ManagementNewThreadRoute,
+});
+const threadRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/threads/$threadId',
+  component: ManagementThreadRoute,
 });
 const sessionsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -447,6 +536,10 @@ const legacyNewRoute = createRoute({
 });
 export const dashboardRouteTree = rootRoute.addChildren([
   homeRoute,
+  projectsRoute,
+  projectRoute,
+  projectNewThreadRoute,
+  threadRoute,
   sessionsRoute,
   sessionRoute,
   workspacesRoute,
