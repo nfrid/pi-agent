@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   consumeSseResponse,
   DashboardEventStream,
+  RECONNECT_MIN_MS,
   yieldToBrowser,
 } from './event-stream.js';
 import type { DashboardHttpClient } from './http-client.js';
@@ -201,6 +202,46 @@ describe('DashboardEventStream lifecycle', () => {
     await wait();
     expect(maximum).toBe(1);
     secondStop();
+  });
+
+  it('keeps exponential backoff when replay-gap resync fails', async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const client = {
+        events: async () => {
+          calls += 1;
+          throw new ReplayGapError();
+        },
+      } as unknown as DashboardHttpClient;
+      const stream = new DashboardEventStream({
+        client,
+        getCursor: () => 4,
+        getServerId: () => 'daemon-a',
+        onRecord: () => undefined,
+        onReplayGap: async () => {
+          throw new Error('snapshot failed');
+        },
+        onState: () => undefined,
+        onError: () => undefined,
+        isOnline: () => true,
+        random: () => 0.5,
+      });
+      stream.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls).toBe(1);
+      await vi.advanceTimersByTimeAsync(RECONNECT_MIN_MS - 1);
+      expect(calls).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls).toBe(2);
+      await vi.advanceTimersByTimeAsync(RECONNECT_MIN_MS * 2 - 1);
+      expect(calls).toBe(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(calls).toBe(3);
+      stream.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('supplies the daemon generation and treats a collision as a replay gap', async () => {

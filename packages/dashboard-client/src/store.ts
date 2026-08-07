@@ -191,6 +191,7 @@ export class DashboardLiveStore {
   /** Runtime snapshots omit transport metadata; retain it outside the wire model. */
   private runtimeReducerStates = new Map<string, RuntimeReducerState>();
   private stream?: DashboardEventStream;
+  private connectionAttempt = 0;
 
   getGeneration(): number {
     return this.generation;
@@ -754,35 +755,80 @@ export class DashboardLiveStore {
 
   connect(client: DashboardHttpClient): () => void {
     this.stream?.stop();
-    this.stream = new DashboardEventStream({
-      client,
-      getCursor: () => this.state.cursor,
-      getServerId: () => this.state.serverId,
-      onRecord: (record) => {
-        this.acceptStreamRecord(record);
-      },
-      onReplayGap: async () => {
-        const requestGeneration = this.generation;
-        try {
-          const snapshot = await client.snapshot();
-          this.installSnapshot(snapshot, {
+    this.stream = undefined;
+    const attempt = ++this.connectionAttempt;
+    const requestGeneration = this.generation;
+    let stopped = false;
+    let eventStream: DashboardEventStream | undefined;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      if (this.connectionAttempt !== attempt) return;
+      this.connectionAttempt += 1;
+      eventStream?.stop();
+      if (this.stream === eventStream) this.stream = undefined;
+    };
+
+    // The initial snapshot establishes both the authoritative projection and
+    // the cursor baseline. Only then can SSE replay begin without asking an
+    // established daemon for cursor zero.
+    void client
+      .snapshot()
+      .then((snapshot) => {
+        if (stopped || this.connectionAttempt !== attempt) return;
+        if (
+          !this.installSnapshot(snapshot, {
             source: 'http',
             requestGeneration,
-            currentGeneration: this.generation,
             rebaseCursor: true,
-          });
-          this.publish({
-            ...this.state,
-            resyncNonce: this.state.resyncNonce + 1,
-          });
-        } catch (cause) {
-          this.setError(cause instanceof Error ? cause.message : String(cause));
-        }
-      },
-      onState: (status) => this.setConnection(status),
-      onError: (error) => this.setError(error?.message),
-    });
-    return this.stream.start();
+          })
+        )
+          return;
+        if (stopped || this.connectionAttempt !== attempt) return;
+        eventStream = new DashboardEventStream({
+          client,
+          getCursor: () => this.state.cursor,
+          getServerId: () => this.state.serverId,
+          onRecord: (record) => {
+            this.acceptStreamRecord(record);
+          },
+          onReplayGap: async () => {
+            const resyncGeneration = this.generation;
+            if (this.stream !== eventStream) return;
+            try {
+              const next = await client.snapshot();
+              if (this.stream !== eventStream) return;
+              const accepted = this.installSnapshot(next, {
+                source: 'http',
+                requestGeneration: resyncGeneration,
+                rebaseCursor: true,
+              });
+              if (!accepted)
+                throw new Error('Dashboard resync snapshot was not accepted.');
+              this.publish({
+                ...this.state,
+                resyncNonce: this.state.resyncNonce + 1,
+              });
+            } catch (cause) {
+              this.setError(
+                cause instanceof Error ? cause.message : String(cause),
+              );
+              // A failed rebase must reach the reconnect loop so its existing
+              // exponential delay is retained instead of being reset.
+              throw cause;
+            }
+          },
+          onState: (status) => this.setConnection(status),
+          onError: (error) => this.setError(error?.message),
+        });
+        this.stream = eventStream;
+        eventStream.start();
+      })
+      .catch((cause) => {
+        if (stopped || this.connectionAttempt !== attempt) return;
+        this.setError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return stop;
   }
 
   reconnect(): void {

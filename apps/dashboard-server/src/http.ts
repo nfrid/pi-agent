@@ -36,6 +36,10 @@ function isTranscriptEvent(change: RegistryChange): boolean {
   );
 }
 
+function serializeSseRecord(record: DashboardEventStreamRecord): string {
+  return `id: ${record.cursor}\nevent: dashboard\ndata: ${JSON.stringify(record)}\n\n`;
+}
+
 export interface DashboardServer {
   readonly token: string;
   readonly socketPath: string;
@@ -663,6 +667,21 @@ class DashboardServerImpl implements DashboardServer {
       });
       return;
     }
+    const replayFrames = replay.events.map(serializeSseRecord);
+    const replayBytes = replayFrames.reduce(
+      (total, frame) => total + Buffer.byteLength(frame),
+      0,
+    );
+    if (replayBytes > this.sseBufferBytes) {
+      this.json(response, 409, {
+        error: 'The requested event replay is too large for this stream.',
+        code: 'replay-gap',
+        reason: 'replay-too-large',
+        cursor: replay.currentCursor,
+        oldestCursor: replay.oldestCursor,
+      });
+      return;
+    }
 
     response.writeHead(200, {
       'content-type': 'text/event-stream; charset=utf-8',
@@ -765,12 +784,8 @@ class DashboardServerImpl implements DashboardServer {
         return false;
       }
     };
-    const writeRecord = (record: DashboardEventStreamRecord): boolean => {
-      const text = JSON.stringify(record);
-      return writeRaw(
-        `id: ${record.cursor}\nevent: dashboard\ndata: ${text}\n\n`,
-      );
-    };
+    const writeRecord = (record: DashboardEventStreamRecord): boolean =>
+      writeRaw(serializeSseRecord(record));
     const writeHeartbeat = () => writeRaw(': heartbeat\n\n');
     const onRecord = (record: DashboardEventStreamRecord) => {
       if (replaying) {
@@ -790,8 +805,8 @@ class DashboardServerImpl implements DashboardServer {
     response.once('close', cleanup);
     request.once('aborted', cleanup);
     if (!writeHeartbeat()) return;
-    for (const record of replay.events) {
-      if (!writeRecord(record)) return;
+    for (const frame of replayFrames) {
+      if (!writeRaw(frame)) return;
     }
     replaying = false;
     for (const record of queued) {
@@ -883,24 +898,27 @@ class DashboardServerImpl implements DashboardServer {
         record.snapshot !== undefined && typeof record.snapshot === 'object';
       let streamRecord: DashboardEventStreamRecord;
       try {
-        streamRecord = this.eventStream.publish((cursor, emittedAt) => ({
-          cursor,
-          emittedAt,
-          event: record.event as BridgeEvent,
-          ...(record.runtimeId === undefined
-            ? {}
-            : { runtimeId: record.runtimeId as string }),
-          ...(record.runtimeEpoch === undefined
-            ? {}
-            : { runtimeEpoch: record.runtimeEpoch as string }),
-          ...(record.runtimeSeq === undefined
-            ? {}
-            : { runtimeSeq: record.runtimeSeq as number }),
-          ...(record.sessionId === undefined
-            ? {}
-            : { sessionId: record.sessionId as string }),
-          ...(includeSnapshot ? { snapshot: this.snapshot(cursor) } : {}),
-        }));
+        streamRecord = this.eventStream.publish((cursor, emittedAt) => {
+          const snapshot = includeSnapshot ? this.snapshot(cursor) : undefined;
+          return {
+            cursor,
+            emittedAt,
+            event: record.event as BridgeEvent,
+            ...(record.runtimeId === undefined
+              ? {}
+              : { runtimeId: record.runtimeId as string }),
+            ...(record.runtimeEpoch === undefined
+              ? {}
+              : { runtimeEpoch: record.runtimeEpoch as string }),
+            ...(record.runtimeSeq === undefined
+              ? {}
+              : { runtimeSeq: record.runtimeSeq as number }),
+            ...(record.sessionId === undefined
+              ? {}
+              : { sessionId: record.sessionId as string }),
+            ...(snapshot === undefined ? {} : { snapshot }),
+          };
+        });
       } catch {
         // A malformed optional provider payload must not escape a runtime
         // callback and take down the daemon.
@@ -910,8 +928,8 @@ class DashboardServerImpl implements DashboardServer {
         ...record,
         serverId: this.serverId,
         revision: this.revision,
-        ...(includeSnapshot
-          ? { snapshot: this.snapshot(streamRecord.cursor) }
+        ...(includeSnapshot && streamRecord.snapshot !== undefined
+          ? { snapshot: streamRecord.snapshot }
           : {}),
       });
       return;
@@ -924,7 +942,7 @@ class DashboardServerImpl implements DashboardServer {
     }));
     this.publishLegacy({
       type: 'snapshot',
-      snapshot: this.snapshot(streamRecord.cursor),
+      snapshot: streamRecord.snapshot,
     });
   }
 

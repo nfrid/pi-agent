@@ -149,6 +149,48 @@ describe('DashboardHttpClient command requests', () => {
   });
 });
 
+describe('DashboardHttpClient snapshot requests', () => {
+  it('coalesces concurrent snapshot reads without caching the result', async () => {
+    let release!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetch = vi.fn(async () => {
+      await ready;
+      return new Response(
+        JSON.stringify({
+          serverId: 'daemon-1',
+          revision: 1,
+          cursor: 7,
+          runtimes: [],
+          workspaces: [],
+          sessions: [],
+          unread: [],
+        }),
+        { status: 200 },
+      );
+    });
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: {
+        get: () => 'test-token',
+        set: () => undefined,
+        clear: () => undefined,
+      },
+    });
+    const first = client.snapshot();
+    const second = client.snapshot();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    release();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ cursor: 7 }),
+      expect.objectContaining({ cursor: 7 }),
+    ]);
+    await client.snapshot();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('DashboardHttpClient event requests', () => {
   it('sends the known daemon generation with the replay cursor', async () => {
     const fetch = vi.fn(async () => new Response(null, { status: 200 }));

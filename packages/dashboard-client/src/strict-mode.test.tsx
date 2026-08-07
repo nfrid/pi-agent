@@ -3,7 +3,7 @@ import { parseHTML } from 'linkedom';
 import { act, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it } from 'vitest';
-import type { DashboardHttpClient } from './http-client.js';
+import { DashboardHttpClient } from './http-client.js';
 import {
   type DashboardShellState,
   useDashboard,
@@ -33,32 +33,53 @@ describe('useDashboard StrictMode lifecycle', () => {
     let active = 0;
     let maximum = 0;
     let calls = 0;
-    const client = {
-      events: async (
-        _cursor: number,
-        signal: AbortSignal,
-        serverId?: string,
-      ) => {
-        expect(serverId).toBeUndefined();
+    let snapshots = 0;
+    let releaseSnapshot!: () => void;
+    const snapshotReady = new Promise<void>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    const client = new DashboardHttpClient({
+      fetch: async (input, init) => {
+        if (String(input) === '/api/snapshot') {
+          snapshots += 1;
+          await snapshotReady;
+          return new Response(
+            JSON.stringify({
+              serverId: 'daemon-1',
+              revision: 7,
+              cursor: 7,
+              runtimes: [],
+              workspaces: [],
+              sessions: [],
+              unread: [],
+            }),
+            { status: 200 },
+          );
+        }
+        expect(String(input)).toBe('/api/events?cursor=7&serverId=daemon-1');
         calls += 1;
         active += 1;
         maximum = Math.max(maximum, active);
-        signal.addEventListener('abort', () => {
-          active -= 1;
-        });
-        if (calls === 1)
-          await new Promise<never>((_, reject) =>
-            signal.addEventListener(
-              'abort',
-              () => reject(new DOMException('aborted', 'AbortError')),
-              { once: true },
-            ),
-          );
-        return new Response(
-          new ReadableStream<Uint8Array>({ start: () => undefined }),
+        const signal = init?.signal;
+        if (!signal) throw new Error('Expected an SSE abort signal.');
+        await new Promise<never>((_, reject) =>
+          signal.addEventListener(
+            'abort',
+            () => {
+              active -= 1;
+              reject(new DOMException('aborted', 'AbortError'));
+            },
+            { once: true },
+          ),
         );
+        throw new Error('unreachable');
       },
-    } as unknown as DashboardHttpClient;
+      tokenStore: {
+        get: () => 'test-token',
+        set: () => undefined,
+        clear: () => undefined,
+      },
+    });
     function Probe() {
       useDashboard(client);
       return null;
@@ -74,8 +95,11 @@ describe('useDashboard StrictMode lifecycle', () => {
         </StrictMode>,
       );
       await new Promise((resolve) => setTimeout(resolve, 10));
+      releaseSnapshot();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
-    expect(calls).toBeGreaterThanOrEqual(2);
+    expect(snapshots).toBe(1);
+    expect(calls).toBe(1);
     expect(maximum).toBe(1);
     expect(active).toBe(1);
     await act(async () => {
@@ -87,6 +111,15 @@ describe('useDashboard StrictMode lifecycle', () => {
 
   it('does not rerender the application shell for transcript-only records', async () => {
     const client = {
+      snapshot: async () => ({
+        serverId: 'daemon-1',
+        revision: 1,
+        cursor: 1,
+        runtimes: [],
+        workspaces: [],
+        sessions: [],
+        unread: [],
+      }),
       events: async () =>
         new Response(
           new ReadableStream<Uint8Array>({ start: () => undefined }),

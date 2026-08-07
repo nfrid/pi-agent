@@ -292,8 +292,15 @@ export class DashboardEventStream {
         this.options.onError(
           new Error('Live replay window expired; resynchronizing…'),
         );
-        await this.options.onReplayGap();
-        this.retryDelay = RECONNECT_MIN_MS;
+        try {
+          await this.options.onReplayGap();
+          // A successful authoritative rebase gives the next connection a
+          // fresh baseline. Failed rebases must retain exponential backoff.
+          this.retryDelay = RECONNECT_MIN_MS;
+        } catch (resyncCause) {
+          if (resyncCause instanceof Error) this.options.onError(resyncCause);
+          else this.options.onError(new Error(String(resyncCause)));
+        }
       } else if (cause instanceof Error) this.options.onError(cause);
       else this.options.onError(new Error(String(cause)));
       this.scheduleReconnect();

@@ -213,6 +213,79 @@ describe('dashboard HTTP boundary', () => {
     await expect(gap.json()).resolves.toMatchObject({ code: 'replay-gap' });
   });
 
+  it('rejects an oversized replay before starting SSE', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-sse-replay-size-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      sseBufferBytes: 1_024,
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const implementation = server as unknown as {
+      eventStream: {
+        publish(factory: (cursor: number, emittedAt: number) => unknown): {
+          cursor: number;
+        };
+      };
+      snapshot(
+        cursor?: number,
+      ): import('@pi-dashboard/protocol').BrowserSnapshot;
+    };
+    const oversized = implementation.eventStream.publish(
+      (cursor, emittedAt) => ({
+        type: 'snapshot',
+        cursor,
+        emittedAt,
+        snapshot: {
+          ...implementation.snapshot(cursor),
+          usage: 'x'.repeat(2_000),
+        },
+      }),
+    );
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/events?cursor=${oversized.cursor - 1}`,
+      { headers: { 'x-dashboard-token': 'test-token' } },
+    );
+    expect(response.status).toBe(409);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'replay-gap',
+      reason: 'replay-too-large',
+    });
+  });
+
+  it('constructs one browser snapshot for each changed SSE/legacy update', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-snapshot-count-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const implementation = server as unknown as {
+      snapshot(
+        cursor?: number,
+      ): import('@pi-dashboard/protocol').BrowserSnapshot;
+    };
+    const originalSnapshot = implementation.snapshot.bind(server);
+    let constructions = 0;
+    implementation.snapshot = (cursor) => {
+      constructions += 1;
+      return originalSnapshot(cursor);
+    };
+    server.publishChange({ type: 'snapshot' });
+    expect(constructions).toBe(1);
+  });
+
   it('bounds slow SSE subscribers and resumes queued records after drain', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-sse-backpressure-'),

@@ -90,6 +90,7 @@ export class DashboardHttpClient {
   readonly baseUrl: string;
   readonly tokenStore: DashboardTokenStore;
   private readonly fetchImpl: FetchLike;
+  private snapshotInFlight?: Promise<BrowserSnapshot>;
 
   constructor(options: DashboardHttpClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? '').replace(/\/$/u, '');
@@ -129,13 +130,27 @@ export class DashboardHttpClient {
     return this.request<T>(path, { method: 'POST', body });
   }
 
-  async snapshot(): Promise<BrowserSnapshot> {
-    const value = normalizeLegacySnapshot(
-      await this.request<unknown>('/api/snapshot'),
+  snapshot(): Promise<BrowserSnapshot> {
+    if (this.snapshotInFlight) return this.snapshotInFlight;
+    const request = this.request<unknown>('/api/snapshot').then((value) => {
+      const snapshot = tryParseBrowserSnapshot(normalizeLegacySnapshot(value));
+      if (!snapshot) throw new Error('Dashboard returned an invalid snapshot.');
+      return snapshot;
+    });
+    this.snapshotInFlight = request;
+    // Keep only the in-flight request. Failed and successful reads must both
+    // be eligible for a later refresh while concurrent callers share one read.
+    void request.then(
+      () => {
+        if (this.snapshotInFlight === request)
+          this.snapshotInFlight = undefined;
+      },
+      () => {
+        if (this.snapshotInFlight === request)
+          this.snapshotInFlight = undefined;
+      },
     );
-    const snapshot = tryParseBrowserSnapshot(value);
-    if (!snapshot) throw new Error('Dashboard returned an invalid snapshot.');
-    return snapshot;
+    return request;
   }
 
   async session(
