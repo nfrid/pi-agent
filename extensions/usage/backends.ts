@@ -1,4 +1,5 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { fetchHeaders } from '../shared/provider-headers';
 import { withAbort } from '../shared/runtime/async';
 import { queryViaCodexAppServer } from './app-server';
 import { CODEX_USAGE_URL, TIMEOUT_MS } from './constants';
@@ -47,7 +48,7 @@ async function resolvePiCodexHeaders(
   for (const model of candidates) {
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok) continue;
-    const headers = { ...(auth.headers ?? {}) };
+    const headers = fetchHeaders(auth.headers);
     if (!hasHeader(headers, 'Authorization') && auth.apiKey) {
       headers.Authorization = `Bearer ${auth.apiKey}`;
     }

@@ -30,8 +30,10 @@ import {
   expandDashboardInput,
   flushQueueDrafts,
   LiveEventNormalizer,
+  modelCatalogSnapshot,
   QueueDraftStore,
   shouldForwardLiveMessage,
+  thinkingLevelsSnapshot,
   withoutOpaqueData,
 } from './index';
 
@@ -276,7 +278,11 @@ describe('remote event normalization', () => {
       message: { role: 'assistant', content: [{ type: 'text', text: 'Hi' }] },
     });
     const updated = normalizer.normalizeMessage('updated', {
-      assistantMessageEvent: { type: 'text_delta', delta: ' there' },
+      assistantMessageEvent: {
+        type: 'text_delta',
+        contentIndex: 0,
+        delta: ' there',
+      },
     });
     const finished = normalizer.normalizeMessage('finished', {
       message: { role: 'assistant', content: 'Hi there' },
@@ -311,7 +317,11 @@ describe('remote event normalization', () => {
     });
     expect(
       deltaOnly.normalizeMessage('updated', {
-        assistantMessageEvent: { delta: ' there' },
+        assistantMessageEvent: {
+          type: 'text_delta',
+          contentIndex: 0,
+          delta: ' there',
+        },
       }).content,
     ).toBe('Hi there');
 
@@ -326,16 +336,75 @@ describe('remote event normalization', () => {
     expect(nextStarted.messageId).not.toBe(started.messageId);
   });
 
-  it('accumulates delta-only updates even when no final event arrives', () => {
+  it('handles 0.84 delta-only events without requiring partial', () => {
     const normalizer = new LiveEventNormalizer('runtime-delta-only');
     normalizer.normalizeMessage('started', {
       message: { role: 'assistant', content: 'Hi' },
     });
     expect(
       normalizer.normalizeMessage('updated', {
-        assistantMessageEvent: { delta: ' there' },
+        assistantMessageEvent: {
+          type: 'text_delta',
+          contentIndex: 0,
+          delta: ' there',
+        },
       }),
     ).toMatchObject({ content: 'Hi there', phase: 'updated' });
+  });
+
+  it('does not leak 0.84 tool-call deltas into visible assistant text', () => {
+    const normalizer = new LiveEventNormalizer('runtime-toolcall');
+    normalizer.normalizeMessage('started', {
+      message: { role: 'assistant', content: 'Visible' },
+    });
+    expect(
+      normalizer.normalizeMessage('updated', {
+        assistantMessageEvent: {
+          type: 'toolcall_delta',
+          contentIndex: 1,
+          delta: '{"path":"private"}',
+        },
+      }).content,
+    ).toBe('Visible');
+    expect(
+      normalizer.normalizeMessage('updated', {
+        assistantMessageEvent: {
+          type: 'thinking_delta',
+          contentIndex: 0,
+          delta: 'private reasoning',
+        },
+      }).content,
+    ).toBe('Visible');
+  });
+
+  it('uses text_start and text_end block boundaries', () => {
+    const normalizer = new LiveEventNormalizer('runtime-text-blocks');
+    normalizer.normalizeMessage('started', {
+      message: { role: 'assistant', content: [] },
+    });
+    normalizer.normalizeMessage('updated', {
+      assistantMessageEvent: {
+        type: 'text_start',
+        contentIndex: 0,
+      },
+    });
+    const delta = normalizer.normalizeMessage('updated', {
+      assistantMessageEvent: {
+        type: 'text_delta',
+        contentIndex: 0,
+        delta: 'draft',
+      },
+    });
+    expect(delta.content).toEqual([{ type: 'text', text: 'draft' }]);
+    expect(
+      normalizer.normalizeMessage('updated', {
+        assistantMessageEvent: {
+          type: 'text_end',
+          contentIndex: 0,
+          content: 'authoritative',
+        },
+      }).content,
+    ).toEqual([{ type: 'text', text: 'authoritative' }]);
   });
 
   it('does not append provider thinking deltas to visible assistant text', () => {
@@ -382,6 +451,53 @@ describe('remote event normalization', () => {
       phase: 'finished',
       status: 'completed',
     });
+  });
+});
+
+describe('Pi 0.84 runtime catalogues', () => {
+  it('publishes scoped models instead of the full available catalogue', () => {
+    const scoped = {
+      provider: 'scoped-provider',
+      id: 'scoped-model',
+      name: 'Scoped model',
+      input: ['text'],
+    };
+    const available = {
+      provider: 'other-provider',
+      id: 'other-model',
+      input: ['image'],
+    };
+    const ctx = {
+      scopedModels: [{ model: scoped }],
+      modelRegistry: { getAvailable: () => [scoped, available] },
+    } as unknown as ExtensionContext;
+
+    expect(modelCatalogSnapshot(ctx)).toEqual([
+      {
+        provider: 'scoped-provider',
+        model: 'scoped-model',
+        name: 'Scoped model',
+        supportsImages: false,
+      },
+    ]);
+  });
+
+  it('falls back to the available catalogue when scope is empty', () => {
+    const ctx = {
+      scopedModels: [],
+      modelRegistry: {
+        getAvailable: () => [
+          { provider: 'available', id: 'model', input: ['image'] },
+        ],
+      },
+    } as unknown as ExtensionContext;
+    expect(modelCatalogSnapshot(ctx)).toMatchObject([
+      { provider: 'available', model: 'model', supportsImages: true },
+    ]);
+  });
+
+  it('includes Pi 0.84 max thinking', () => {
+    expect(thinkingLevelsSnapshot()).toContain('max');
   });
 });
 
@@ -445,6 +561,9 @@ describe('dashboard-owned queue drafts', () => {
       }) as unknown as ExtensionContext;
     const first = contextFor('session-queue-1');
     runtime.setContext(first);
+    runtime.eventNormalizer.normalizeMessage('started', {
+      message: { role: 'assistant', content: 'old session text' },
+    });
     runtime.queueDrafts.add({
       clientId: 'steer-1',
       mode: 'steer',
@@ -497,6 +616,16 @@ describe('dashboard-owned queue drafts', () => {
     });
     const second = contextFor('session-queue-2');
     runtime.setContext(second);
+    expect(runtime.isCurrent(first)).toBe(false);
+    expect(
+      runtime.eventNormalizer.normalizeMessage('updated', {
+        assistantMessageEvent: {
+          type: 'text_delta',
+          contentIndex: 0,
+          delta: 'new session text',
+        },
+      }).content,
+    ).toEqual([{ type: 'text', text: 'new session text' }]);
     runtime.queueDrafts.add({
       clientId: 'new-session',
       mode: 'steer',
@@ -513,6 +642,10 @@ describe('dashboard-owned queue drafts', () => {
     expect(runtime.queueDrafts.list()).toEqual([
       { clientId: 'new-session', mode: 'steer', text: 'new' },
     ]);
+    // A late shutdown callback from the replaced context must not clear the
+    // active session's bridge state.
+    runtime.clearContext(first);
+    expect(runtime.snapshot().session.id).toBe('session-queue-2');
     runtime.clearContext(second);
     expect(runtime.queueDrafts.list()).toEqual([]);
   });

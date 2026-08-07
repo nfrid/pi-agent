@@ -76,6 +76,32 @@ describe('session index', () => {
     expect(JSON.stringify(session.entries)).not.toContain('base64-bytes');
   });
 
+  it('accepts compaction entries with a materialized retainedTail', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-retained-tail-'),
+    );
+    const file = path.join(root, 'compacted.jsonl');
+    const retainedTail = [
+      {
+        type: 'message',
+        id: 'tail-message',
+        message: { role: 'user', content: 'Continue from here.' },
+      },
+    ];
+    await writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', version: 3, id: 'tail-id', cwd: '/tmp' })}\n${JSON.stringify({ type: 'compaction', id: 'compact-1', summary: 'Earlier work.', retainedTail })}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+
+    const session = await index.readEntries('tail-id');
+    expect(session.entries[1]).toMatchObject({
+      type: 'compaction',
+      retainedTail,
+    });
+  });
+
   it('uses latest session_info and first user message, not header.name', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-titles-'));
     const file = path.join(root, 'session.jsonl');

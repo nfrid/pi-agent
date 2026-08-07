@@ -30,18 +30,18 @@
     "test": "node scripts/clean-npm-env.mjs sh -c \"node scripts/check-node.mjs && vitest run\"",
     "session:metrics": "node scripts/session-metrics/index.mjs",
     "pi:update": "pi update && pnpm run pi:sdk-sync",
-    "pi:sdk-sync": "VERSION=$(pi --version) && pnpm add -E @earendil-works/pi-ai@$VERSION @earendil-works/pi-coding-agent@$VERSION @earendil-works/pi-tui@$VERSION"
+    "pi:sdk-sync": "VERSION=$(pi --version) && TYPEBOX_VERSION=1.3.7 && pnpm add -E @earendil-works/pi-ai@$VERSION @earendil-works/pi-coding-agent@$VERSION @earendil-works/pi-tui@$VERSION typebox@$TYPEBOX_VERSION && pnpm --filter @pi-dashboard/activity-model add -E @earendil-works/pi-ai@$VERSION && pnpm --filter @pi-dashboard/server --filter @pi-dashboard/web --filter @pi-dashboard/extension-contributions add -E typebox@$TYPEBOX_VERSION"
   },
   "dependencies": {
     "@pi-dashboard/extension-contributions": "workspace:*",
-    "@earendil-works/pi-ai": "0.82.1",
-    "@earendil-works/pi-coding-agent": "0.82.1",
-    "@earendil-works/pi-tui": "0.82.1",
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@earendil-works/pi-tui": "0.84.1",
     "@mozilla/readability": "^0.6.0",
     "linkedom": "^0.16.11",
     "p-limit": "^6.2.0",
     "turndown": "^7.2.4",
-    "typebox": "1.1.38"
+    "typebox": "1.3.7"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.16",

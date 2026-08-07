@@ -3,6 +3,7 @@ import { readFileSync, statSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import type { AssistantMessageEvent } from '@earendil-works/pi-ai';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -184,30 +185,88 @@ function safeIdentityPart(value: string | number): string {
     .slice(0, 240);
 }
 
-function appendMessageContent(previous: unknown, delta: unknown): unknown {
-  if (typeof delta !== 'string') return previous ?? delta ?? null;
-  if (typeof previous === 'string') return previous + delta;
-  if (previous === undefined || previous === null) return delta;
-  if (Array.isArray(previous)) {
-    const next = [...previous];
-    const last = next.at(-1);
-    if (
-      last &&
-      typeof last === 'object' &&
-      !Array.isArray(last) &&
-      (last as Record<string, unknown>).type === 'text' &&
-      typeof (last as Record<string, unknown>).text === 'string'
-    ) {
-      next[next.length - 1] = {
-        ...(last as Record<string, unknown>),
-        text: `${(last as Record<string, unknown>).text}${delta}`,
-      };
-      return next;
-    }
-    next.push({ type: 'text', text: delta });
-    return next;
+function textBlockAt(content: unknown, contentIndex: number): unknown {
+  if (!Array.isArray(content)) return undefined;
+  return content[contentIndex];
+}
+
+function setTextBlock(
+  content: unknown,
+  contentIndex: number,
+  text: string,
+): unknown {
+  if (typeof content === 'string' && contentIndex === 0) return text;
+  const next = Array.isArray(content) ? [...content] : [];
+  next[contentIndex] = { type: 'text', text };
+  return next;
+}
+
+function textEventContent(
+  previous: unknown,
+  contentIndex: number,
+  delta: string,
+  mode: 'start' | 'delta' | 'end',
+): unknown {
+  if (mode === 'start') return setTextBlock(previous, contentIndex, '');
+  if (mode === 'end') return setTextBlock(previous, contentIndex, delta);
+
+  if (typeof previous === 'string' && contentIndex === 0)
+    return `${previous}${delta}`;
+  const block = textBlockAt(previous, contentIndex);
+  const currentText =
+    block && typeof block === 'object' && !Array.isArray(block)
+      ? (block as Record<string, unknown>).text
+      : undefined;
+  if (
+    Array.isArray(previous) &&
+    block !== undefined &&
+    typeof currentText !== 'string'
+  )
+    return previous;
+  return setTextBlock(
+    previous,
+    contentIndex,
+    `${typeof currentText === 'string' ? currentText : ''}${delta}`,
+  );
+}
+
+/**
+ * Apply only the visible-text cases from Pi's AssistantMessageEvent union.
+ * Thinking and tool-call streams are deliberately not transcript text; the
+ * message_end wrapper remains the authoritative final assistant message.
+ */
+function applyAssistantMessageEvent(
+  previous: unknown,
+  event: AssistantMessageEvent,
+): unknown {
+  switch (event.type) {
+    case 'text_start':
+      return textEventContent(previous, event.contentIndex, '', 'start');
+    case 'text_delta':
+      return textEventContent(
+        previous,
+        event.contentIndex,
+        event.delta,
+        'delta',
+      );
+    case 'text_end':
+      return textEventContent(
+        previous,
+        event.contentIndex,
+        event.content,
+        'end',
+      );
+    case 'thinking_start':
+    case 'thinking_delta':
+    case 'thinking_end':
+    case 'toolcall_start':
+    case 'toolcall_delta':
+    case 'toolcall_end':
+    case 'start':
+    case 'done':
+    case 'error':
+      return previous;
   }
-  return `${String(previous)}${delta}`;
 }
 
 /**
@@ -235,9 +294,8 @@ export class LiveEventNormalizer {
   ): NormalizedMessagePayload {
     const event = eventRecord(value);
     const message = eventRecord(directValue(event, 'message'));
-    const assistantEvent = eventRecord(
-      directValue(event, 'assistantMessageEvent'),
-    );
+    const assistantEventValue = directValue(event, 'assistantMessageEvent');
+    const assistantEvent = eventRecord(assistantEventValue);
     const responseId =
       directIdentifier(event, 'responseId') ??
       directIdentifier(message, 'responseId') ??
@@ -269,34 +327,32 @@ export class LiveEventNormalizer {
         : `${this.runtimeEpoch}:${++this.identitySequence}`;
     }
 
-    // Pi's message wrapper contains the complete message. Only use a delta
-    // when no complete content is present, and accumulate it for the active
-    // message so an update never replaces the already-rendered prefix.
-    const fullContent = Object.hasOwn(message, 'content')
-      ? directValue(message, 'content')
-      : Object.hasOwn(event, 'content')
-        ? directValue(event, 'content')
-        : Object.hasOwn(assistantEvent, 'content')
-          ? directValue(assistantEvent, 'content')
-          : undefined;
-    const rawContent =
-      fullContent !== undefined
-        ? fullContent
-        : Object.hasOwn(assistantEvent, 'delta') &&
-            directString(assistantEvent, 'type') !== 'thinking_delta'
-          ? appendMessageContent(
-              this.activeMessage?.content,
-              directValue(assistantEvent, 'delta'),
-            )
-          : (this.activeMessage?.content ?? null);
-    const safeContent = jsonSafe(rawContent, MAX_FRAME_BYTES);
-    if (this.activeMessage) this.activeMessage.content = safeContent;
-    const turnId =
-      directIdentifier(event, 'turnId') ?? directIdentifier(message, 'turnId');
     const role =
       directString(message, 'role') ??
       directString(event, 'role') ??
       'assistant';
+    const fullContent = Object.hasOwn(message, 'content')
+      ? directValue(message, 'content')
+      : Object.hasOwn(event, 'content')
+        ? directValue(event, 'content')
+        : undefined;
+    let rawContent: unknown = this.activeMessage?.content ?? null;
+    if (phase === 'started' || phase === 'finished' || role !== 'assistant') {
+      // message_end is authoritative; user steering updates also carry their
+      // complete message rather than an AssistantMessageEvent delta.
+      if (fullContent !== undefined) rawContent = fullContent;
+    } else if (assistantEventValue && typeof assistantEventValue === 'object') {
+      // 0.84's event union is intentionally handled case-by-case. In
+      // particular, a toolcall_delta is not a visible text delta.
+      rawContent = applyAssistantMessageEvent(
+        rawContent,
+        assistantEventValue as AssistantMessageEvent,
+      );
+    }
+    const safeContent = jsonSafe(rawContent, MAX_FRAME_BYTES);
+    if (this.activeMessage) this.activeMessage.content = safeContent;
+    const turnId =
+      directIdentifier(event, 'turnId') ?? directIdentifier(message, 'turnId');
     const rawData = Object.hasOwn(message, 'data')
       ? directValue(message, 'data')
       : directValue(event, 'data');
@@ -1106,15 +1162,24 @@ function modelSnapshot(ctx: ExtensionContext): RuntimeSnapshot['model'] {
   };
 }
 
-function modelCatalogSnapshot(
+export function modelCatalogSnapshot(
   ctx: ExtensionContext,
 ): RuntimeSnapshot['modelCatalog'] {
   const registry = (
     ctx as unknown as {
-      modelRegistry?: { getAll?: () => readonly unknown[] };
+      modelRegistry?: { getAvailable?: () => readonly unknown[] };
+      scopedModels?: readonly { model: unknown }[];
     }
   ).modelRegistry;
-  const models = registry?.getAll?.() ?? [];
+  const scopedModels = (
+    ctx as unknown as {
+      scopedModels?: readonly { model: unknown }[];
+    }
+  ).scopedModels;
+  const models =
+    scopedModels && scopedModels.length > 0
+      ? scopedModels.map(({ model }) => model)
+      : (registry?.getAvailable?.() ?? []);
   return models.slice(0, 256).flatMap((candidate) => {
     if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate))
       return [];
@@ -1133,10 +1198,10 @@ function modelCatalogSnapshot(
   });
 }
 
-function thinkingLevelsSnapshot(): string[] {
-  // These are the stable ThinkingLevel values accepted by Pi 0.82.1. They
-  // are data controls, not command names, and remain bounded on the wire.
-  return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+export function thinkingLevelsSnapshot(): string[] {
+  // Keep this bounded wire data in sync with the installed Pi ThinkingLevel
+  // union. `off` remains a dashboard control for disabling reasoning.
+  return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 }
 
 function liveState(

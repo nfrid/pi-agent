@@ -208,6 +208,47 @@ describe('events', () => {
     expect(JSON.stringify(run)).toContain('safe handoff');
   });
 
+  test('accepts Pi 0.84 delta-only and tool-call event fixtures', () => {
+    const run = createRun('pi-084');
+    const send = (assistantMessageEvent: Record<string, unknown>) =>
+      processJsonLine(
+        JSON.stringify({ type: 'message_update', assistantMessageEvent }),
+        run,
+      );
+
+    expect(send({ type: 'text_start', contentIndex: 0 })).toBe(false);
+    expect(
+      send({ type: 'text_delta', contentIndex: 0, delta: 'visible' }),
+    ).toBe(false);
+    expect(
+      send({
+        type: 'toolcall_start',
+        contentIndex: 1,
+      }),
+    ).toBe(false);
+    expect(
+      send({
+        type: 'toolcall_delta',
+        contentIndex: 1,
+        delta: '{"path":"private"}',
+      }),
+    ).toBe(false);
+    expect(
+      send({
+        type: 'toolcall_end',
+        contentIndex: 1,
+        toolCall: {
+          type: 'toolCall',
+          id: 'call-1',
+          name: 'read',
+          arguments: { path: 'private' },
+        },
+      }),
+    ).toBe(false);
+    expect(run.messages).toEqual([]);
+    expect(run.activities).toEqual([]);
+  });
+
   test('previews the newest thinking paragraph instead of the whole block', () => {
     const run = createRun('think');
     const delta = (delta: string) =>

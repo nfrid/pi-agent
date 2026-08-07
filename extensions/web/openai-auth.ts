@@ -1,4 +1,5 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { fetchHeaders } from '../shared/provider-headers';
 import {
   getWebSearchConfigPath,
   loadWebSearchConfig,
@@ -79,7 +80,7 @@ export async function resolveOpenAIAuth(
               provider: candidate.provider,
               apiKey: resolved.apiKey,
               model: modelId,
-              headers: resolved.headers ?? {},
+              headers: fetchHeaders(resolved.headers),
             };
           }
         } catch {

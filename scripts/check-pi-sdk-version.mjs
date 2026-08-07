@@ -9,13 +9,24 @@ export const PI_SDK_PACKAGES = [
   '@earendil-works/pi-tui',
 ];
 
+// Pi 0.84.x imports this exact TypeBox release. Keep it in the same check as
+// the SDK packages so a later SDK sync cannot silently reintroduce a drift.
+export const PI_SDK_TYPEBOX_VERSION = '1.3.7';
+
 export function sdkVersionMismatches(manifest, runtimeVersion) {
-  return PI_SDK_PACKAGES.flatMap((packageName) => {
+  const sdkMismatches = PI_SDK_PACKAGES.flatMap((packageName) => {
     const declaredVersion = manifest.dependencies?.[packageName];
     return declaredVersion === runtimeVersion
       ? []
       : [{ packageName, declaredVersion }];
   });
+  const declaredTypeboxVersion = manifest.dependencies?.typebox;
+  return declaredTypeboxVersion === PI_SDK_TYPEBOX_VERSION
+    ? sdkMismatches
+    : [
+        ...sdkMismatches,
+        { packageName: 'typebox', declaredVersion: declaredTypeboxVersion },
+      ];
 }
 
 export function checkPiSdkVersions({

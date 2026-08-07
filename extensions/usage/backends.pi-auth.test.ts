@@ -1,8 +1,43 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { queryViaPiAuth } from './backends';
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe('Pi auth cancellation', () => {
+  it('filters nullable provider headers before ordinary usage fetch', async () => {
+    let requestHeaders: Headers | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        requestHeaders = new Headers(init?.headers);
+        return Response.json({
+          rate_limit: { primary_window: { used_percent: 12 } },
+        });
+      }),
+    );
+    const ctx = {
+      model: { provider: 'openai-codex', id: 'gpt-test' },
+      modelRegistry: {
+        getAvailable: () => [],
+        getAll: () => [],
+        getApiKeyAndHeaders: async () => ({
+          ok: true,
+          headers: {
+            Authorization: 'Bearer registry-key',
+            'x-delete': null,
+          },
+        }),
+      },
+    } as unknown as ExtensionContext;
+
+    await expect(
+      queryViaPiAuth(ctx, new AbortController().signal),
+    ).resolves.toMatchObject({ snapshots: [{ primary: { usedPercent: 12 } }] });
+    expect(requestHeaders?.get('authorization')).toBe('Bearer registry-key');
+    expect(requestHeaders?.has('x-delete')).toBe(false);
+  });
+
   it('stops waiting for unresolved credential lookup when aborted', async () => {
     let rejectAuth!: (error: Error) => void;
     const auth = new Promise<never>((_resolve, reject) => {
