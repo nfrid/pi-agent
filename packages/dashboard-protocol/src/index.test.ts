@@ -17,6 +17,7 @@ import {
   parseRuntimeExtensionSurface,
   parseRuntimeSnapshot,
   parseSessionAdoptCommand,
+  parseSessionApiResponse,
   RuntimeExtensionSurfaceSchema,
   redactImageData,
   serializeFrame,
@@ -29,6 +30,33 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('validates optional paginated session history metadata', () => {
+    const response = {
+      metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
+      entries: [],
+      history: {
+        version: 1,
+        start: 10,
+        end: 20,
+        hasOlder: true,
+        nextBefore: 'opaque-token',
+      },
+    };
+    expect(parseSessionApiResponse(response).history).toEqual(response.history);
+    expect(() =>
+      parseSessionApiResponse({
+        ...response,
+        history: { ...response.history, version: 2 },
+      }),
+    ).toThrow();
+    expect(() =>
+      parseSessionApiResponse({
+        ...response,
+        history: { ...response.history, extra: true },
+      }),
+    ).toThrow();
+  });
+
   it('bounds and rejects unknown session adoption command properties', () => {
     const command = {
       commandId: 'adopt-1',

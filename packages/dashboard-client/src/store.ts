@@ -101,6 +101,52 @@ function runtimeIndex(
   return Object.fromEntries(items.map((item) => [item.runtimeId, item]));
 }
 
+function mergePrependedTranscript(
+  current: TranscriptProjection,
+  older: TranscriptProjection,
+): TranscriptProjection {
+  const items: Record<string, TranscriptProjection['items'][string]> = {
+    ...older.items,
+  };
+  for (const [id, item] of Object.entries(current.items)) {
+    const previous = items[id];
+    if (previous?.kind === 'tool' && item.kind === 'tool') {
+      items[id] = {
+        ...previous,
+        ...item,
+        // A page boundary commonly contains the tool start followed by a
+        // newer generic result. Keep the useful start metadata while the live
+        // result/status remains authoritative.
+        name:
+          item.name === 'tool' && previous.name !== 'tool'
+            ? previous.name
+            : item.name,
+        ...(item.arguments === undefined && previous.arguments !== undefined
+          ? { arguments: previous.arguments }
+          : {}),
+        ...(item.result === undefined && previous.result !== undefined
+          ? { result: previous.result }
+          : {}),
+        ...(item.isError === undefined && previous.isError !== undefined
+          ? { isError: previous.isError }
+          : {}),
+        ...(item.data === undefined && previous.data !== undefined
+          ? { data: previous.data }
+          : {}),
+      };
+    } else items[id] = item;
+  }
+  const currentIds = new Set(current.order);
+  return {
+    ...current,
+    order: [
+      ...older.order.filter((id) => !currentIds.has(id)),
+      ...current.order,
+    ],
+    items,
+  };
+}
+
 function emptyState(): DashboardLiveState {
   return {
     revision: 0,
@@ -549,6 +595,7 @@ export class DashboardLiveStore {
       // session API boundary assigns deterministic entry-index identities so
       // the canonical projection can render and reconcile them semantically.
       fallbackEntryIds: true,
+      fallbackEntryOffset: response.history?.start ?? 0,
       cursor: replayCursor,
       ...(response.runtimeEpoch === undefined
         ? {}
@@ -619,6 +666,39 @@ export class DashboardLiveStore {
     nextState = this.installTranscriptProjection(
       nextState,
       response.metadata.id,
+      projection,
+    );
+    this.publish(nextState);
+    return projection;
+  }
+
+  /** Prepend a bounded disk page without replacing the live transcript baseline. */
+  prependSessionHistory(
+    response: SessionApiResponse,
+  ): TranscriptProjection | undefined {
+    if (!response.history) return undefined;
+    if (
+      response.serverId !== undefined &&
+      this.state.serverId !== undefined &&
+      response.serverId !== this.state.serverId
+    )
+      return undefined;
+    const sessionId = response.metadata.id;
+    const current = this.state.transcriptsBySessionId[sessionId];
+    if (!current) return undefined;
+    const older = hydrateTranscript(response.entries, sessionId, {
+      fallbackEntryIds: true,
+      fallbackEntryOffset: response.history.start,
+    });
+    const projection = mergePrependedTranscript(current, older);
+    const currentMetadata = this.state.sessionsById[sessionId];
+    const metadata = currentMetadata
+      ? { ...response.metadata, ...currentMetadata }
+      : response.metadata;
+    let nextState = this.installSessionProjection(this.state, metadata);
+    nextState = this.installTranscriptProjection(
+      nextState,
+      sessionId,
       projection,
     );
     this.publish(nextState);

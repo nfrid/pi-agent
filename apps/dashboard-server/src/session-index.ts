@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, type Hash, randomUUID } from 'node:crypto';
 import { createReadStream, promises as fs } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -16,6 +16,71 @@ import type { MetadataStore } from './metadata.js';
 interface IndexedFile extends SessionIndexEntry {
   header: Record<string, unknown>;
   lastEntryId?: string;
+}
+
+export interface SessionHistoryPage {
+  version: 1;
+  start: number;
+  end: number;
+  hasOlder: boolean;
+  nextBefore?: string;
+}
+
+interface HistoryCursor {
+  version: 1;
+  sessionId: string;
+  file: string;
+  dev: number;
+  ino: number;
+  size: number;
+  prefixHash: string;
+  before: number;
+}
+
+const HISTORY_PAGE_BYTES = 8 * 1024 * 1024;
+
+function updateHistoryHash(hash: Hash, serialized: string): void {
+  const bytes = Buffer.byteLength(serialized);
+  hash.update(`${bytes}:`, 'utf8');
+  hash.update(serialized, 'utf8');
+}
+
+function encodeHistoryCursor(cursor: HistoryCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+
+function decodeHistoryCursor(value: string): HistoryCursor {
+  if (
+    typeof value !== 'string' ||
+    !/^[A-Za-z0-9_-]+$/.test(value) ||
+    value.length > 4096
+  )
+    throw new Error('Invalid history cursor.');
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(value, 'base64url').toString('utf8'),
+    ) as Partial<HistoryCursor>;
+    if (
+      decoded.version !== 1 ||
+      typeof decoded.sessionId !== 'string' ||
+      typeof decoded.file !== 'string' ||
+      typeof decoded.dev !== 'number' ||
+      !Number.isSafeInteger(decoded.dev) ||
+      typeof decoded.ino !== 'number' ||
+      !Number.isSafeInteger(decoded.ino) ||
+      typeof decoded.size !== 'number' ||
+      !Number.isSafeInteger(decoded.size) ||
+      typeof decoded.prefixHash !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(decoded.prefixHash) ||
+      typeof decoded.before !== 'number' ||
+      !Number.isSafeInteger(decoded.before) ||
+      decoded.before <= 0
+    )
+      throw new Error();
+    return decoded as HistoryCursor;
+  } catch {
+    throw new Error('Invalid history cursor.');
+  }
 }
 
 function within(root: string, file: string): boolean {
@@ -86,19 +151,49 @@ export class SessionIndex {
     return publicEntry;
   }
 
-  async readEntries(id: string): Promise<{
+  // TODO: switch older pages to reverse-file reads if page counts grow; the
+  // bounded streaming scan keeps current history sizes simple and safe.
+  async readEntries(
+    id: string,
+    before?: string,
+  ): Promise<{
     metadata: SessionIndexEntry;
     entries: unknown[];
     entriesComplete: boolean;
+    history: SessionHistoryPage;
   }> {
     const indexed = this.files.get(id);
     if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
       throw new Error('Unknown session.');
+    const stat = await fs.stat(indexed.file).catch(() => undefined);
+    if (!stat) throw new Error('Unknown session.');
+    const cursor =
+      before === undefined ? undefined : decodeHistoryCursor(before);
+    if (
+      cursor &&
+      (cursor.sessionId !== id ||
+        cursor.file !== indexed.file ||
+        cursor.dev !== stat.dev ||
+        cursor.ino !== stat.ino ||
+        stat.size < cursor.size)
+    )
+      throw new Error('Stale history cursor.');
+    const upperBound = cursor?.before;
     const { header: _header, lastEntryId: _lastEntryId, ...metadata } = indexed;
-    const entries: unknown[] = [];
-    const entryBytes: number[] = [];
-    let responseBytes = 0;
-    let entriesComplete = true;
+    type PageEntry = {
+      ordinal: number;
+      entry: unknown;
+      prefixHash: string;
+      bytes: number;
+    };
+    const page: PageEntry[] = [];
+    let pageBytes = 0;
+    let ordinal = 0;
+    // The seen hash validates a cursor before its page has necessarily filled
+    // the budget. Each retained entry snapshots the hash before its ordinal,
+    // so nextBefore needs no retained original serialization.
+    const seenHasher = createHash('sha256');
+    let reachedUpperBound = false;
     const input = createReadStream(indexed.file, { encoding: 'utf8' });
     const lines = readline.createInterface({
       input,
@@ -107,19 +202,46 @@ export class SessionIndex {
     try {
       for await (const line of lines) {
         if (!line.trim()) continue;
+        if (upperBound !== undefined && ordinal === upperBound) {
+          reachedUpperBound = true;
+          break;
+        }
         if (Buffer.byteLength(line) > 24 * 1024 * 1024)
           throw new Error('A session entry is too large to open remotely.');
         try {
           const entry = redactImageData(JSON.parse(line) as unknown);
-          const serializedBytes = Buffer.byteLength(JSON.stringify(entry));
-          entries.push(entry);
-          entryBytes.push(serializedBytes);
-          responseBytes += serializedBytes;
-          while (responseBytes > 8 * 1024 * 1024 && entries.length > 0) {
-            entriesComplete = false;
-            entries.shift();
-            responseBytes -= entryBytes.shift() ?? 0;
+          const serialized = JSON.stringify(entry);
+          const originalBytes = Buffer.byteLength(serialized);
+          const outputEntry =
+            originalBytes > HISTORY_PAGE_BYTES
+              ? {
+                  type: 'history_omission',
+                  ...(isRecord(entry) && typeof entry.id === 'string'
+                    ? { id: entry.id }
+                    : {}),
+                  ...(isRecord(entry) && typeof entry.type === 'string'
+                    ? { originalType: entry.type }
+                    : {}),
+                  reason: 'entry-exceeds-page-budget',
+                  originalBytes,
+                }
+              : entry;
+          const prefixHash = seenHasher.copy().digest('hex');
+          updateHistoryHash(seenHasher, serialized);
+          const outputBytes = Buffer.byteLength(JSON.stringify(outputEntry));
+          page.push({
+            ordinal,
+            entry: outputEntry,
+            prefixHash,
+            bytes: outputBytes,
+          });
+          pageBytes += outputBytes;
+          while (pageBytes > HISTORY_PAGE_BYTES && page.length > 0) {
+            const shifted = page.shift();
+            if (!shifted) break;
+            pageBytes -= shifted.bytes;
           }
+          ordinal += 1;
         } catch (error) {
           if (error instanceof SyntaxError) continue;
           throw error;
@@ -129,7 +251,42 @@ export class SessionIndex {
       lines.close();
       input.destroy();
     }
-    return { metadata, entries, entriesComplete };
+    if (upperBound !== undefined && ordinal === upperBound)
+      reachedUpperBound = true;
+    if (
+      upperBound !== undefined &&
+      (!reachedUpperBound ||
+        seenHasher.copy().digest('hex') !== cursor?.prefixHash)
+    )
+      throw new Error('Stale history cursor.');
+    const end = upperBound ?? ordinal;
+    const start = page[0]?.ordinal ?? end;
+    const hasOlder = start > 0;
+    const nextBefore = hasOlder
+      ? encodeHistoryCursor({
+          version: 1,
+          sessionId: id,
+          file: indexed.file,
+          dev: stat.dev,
+          ino: stat.ino,
+          size: stat.size,
+          prefixHash: page[0]?.prefixHash ?? seenHasher.copy().digest('hex'),
+          before: start,
+        })
+      : undefined;
+    const entriesComplete = before === undefined && start === 0;
+    return {
+      metadata,
+      entries: page.map((item) => item.entry),
+      entriesComplete,
+      history: {
+        version: 1,
+        start,
+        end,
+        hasOlder,
+        ...(nextBefore === undefined ? {} : { nextBefore }),
+      },
+    };
   }
 
   /** Rename a known dormant session by appending a normal Pi session_info entry. */

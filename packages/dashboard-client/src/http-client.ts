@@ -138,14 +138,28 @@ export class DashboardHttpClient {
     return snapshot;
   }
 
-  async session(id: string, signal?: AbortSignal): Promise<SessionApiResponse> {
+  async session(
+    id: string,
+    signal?: AbortSignal,
+    before?: string,
+  ): Promise<SessionApiResponse> {
+    const query =
+      before === undefined ? '' : `?before=${encodeURIComponent(before)}`;
     const value = await this.request<unknown>(
-      `/api/sessions/${encodeURIComponent(id)}`,
+      `/api/sessions/${encodeURIComponent(id)}${query}`,
       signal ? { signal } : {},
     );
     const response = tryParseSessionApiResponse(value);
     if (!response) throw new Error('Dashboard returned invalid session data.');
     return response;
+  }
+
+  async sessionBefore(
+    id: string,
+    before: string,
+    signal?: AbortSignal,
+  ): Promise<SessionApiResponse> {
+    return this.session(id, signal, before);
   }
 
   async usage(): Promise<{ usage?: unknown; error?: string }> {

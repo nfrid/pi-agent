@@ -293,6 +293,25 @@ describe('dashboard snapshots', () => {
     ).toBeUndefined();
   });
 
+  it('accepts paginated session history metadata for the web adapter', () => {
+    const response = asSessionResponse({
+      metadata: { id: 's1', file: '', cwd: '/tmp', updatedAt: 1 },
+      entries: [],
+      history: {
+        version: 1,
+        start: 0,
+        end: 10,
+        hasOlder: false,
+      },
+    });
+    expect(response?.history).toMatchObject({
+      version: 1,
+      start: 0,
+      end: 10,
+      hasOlder: false,
+    });
+  });
+
   it('rejects malformed runtime snapshots and defaults legacy HTTP collections', () => {
     expect(asBrowserSnapshot({ runtimeId: 'runtime-1' })).toBeUndefined();
     expect(
