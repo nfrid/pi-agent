@@ -71,8 +71,8 @@ describe('useDashboard StrictMode lifecycle', () => {
           return new Response(
             JSON.stringify({
               serverId: 'daemon-1',
-              revision: 7,
-              cursor: 7,
+              revision: 200,
+              cursor: 200,
               runtimes: [],
               workspaces: [],
               sessions: [],
@@ -81,7 +81,7 @@ describe('useDashboard StrictMode lifecycle', () => {
             { status: 200 },
           );
         }
-        expect(String(input)).toBe('/api/events?cursor=7&serverId=daemon-1');
+        expect(String(input)).toBe('/api/events?cursor=72&serverId=daemon-1');
         calls += 1;
         active += 1;
         maximum = Math.max(maximum, active);

@@ -133,6 +133,16 @@ describe('shared activity model', () => {
     expect(headersOf(message)).toEqual(['Inspecting files']);
   });
 
+  it('ignores nullable provider placeholders while a message streams', () => {
+    const message = {
+      content: [
+        null,
+        { type: 'thinking', thinking: '**Planning the response**' },
+      ],
+    } as never;
+    expect(headersOf(message)).toEqual(['Planning the response']);
+  });
+
   it('keeps boundaries, titles, status, and expansion semantic across surfaces', () => {
     const entries = [
       {

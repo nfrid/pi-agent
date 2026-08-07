@@ -841,6 +841,43 @@ describe('DashboardLiveStore', () => {
     ).toBe('new-session');
   });
 
+  it('retries bootstrap immediately when connectivity returns after a snapshot failure', async () => {
+    vi.stubGlobal('navigator', { onLine: true });
+    const store = new DashboardLiveStore();
+    let snapshots = 0;
+    let streams = 0;
+    const client = {
+      snapshot: async () => {
+        snapshots += 1;
+        if (snapshots === 1) throw new Error('offline');
+        return snapshot('daemon-1', 200);
+      },
+      events: async (
+        cursor: number,
+        _signal: AbortSignal,
+        serverId?: string,
+      ) => {
+        streams += 1;
+        expect(cursor).toBe(72);
+        expect(serverId).toBe('daemon-1');
+        return new Response(
+          new ReadableStream<Uint8Array>({ start: () => undefined }),
+        );
+      },
+    } as never;
+
+    const stop = store.connect(client);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(snapshots).toBe(1);
+    expect(streams).toBe(0);
+    store.reconnect();
+    await expect.poll(() => snapshots).toBe(2);
+    await expect.poll(() => streams).toBe(1);
+    expect(store.getSnapshot().connection.status).toBe('connected');
+    stop();
+    vi.unstubAllGlobals();
+  });
+
   it('resets state for daemon replacement and refuses stale HTTP generations', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 12));

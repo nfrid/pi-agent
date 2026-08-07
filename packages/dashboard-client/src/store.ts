@@ -26,6 +26,9 @@ import { type DashboardHttpClient, ReplayGapError } from './http-client.js';
 
 export const LIVE_BUFFER_LIMIT = 256;
 export const LIVE_RENDER_INTERVAL_MS = 32;
+export const INITIAL_REPLAY_OVERLAP = 128;
+const BOOTSTRAP_RETRY_MIN_MS = 500;
+const BOOTSTRAP_RETRY_MAX_MS = 30_000;
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting';
 
@@ -193,6 +196,7 @@ export class DashboardLiveStore {
   private runtimeReducerStates = new Map<string, RuntimeReducerState>();
   private stream?: DashboardEventStream;
   private connectionAttempt = 0;
+  private bootstrapReconnect?: () => void;
   private deferredNotification?: ReturnType<typeof setTimeout>;
 
   getGeneration(): number {
@@ -773,35 +777,74 @@ export class DashboardLiveStore {
   connect(client: DashboardHttpClient): () => void {
     this.stream?.stop();
     this.stream = undefined;
+    this.bootstrapReconnect = undefined;
     const attempt = ++this.connectionAttempt;
-    const requestGeneration = this.generation;
     let stopped = false;
     let eventStream: DashboardEventStream | undefined;
+    let bootstrapTimer: ReturnType<typeof setTimeout> | undefined;
+    let bootstrapDelay = BOOTSTRAP_RETRY_MIN_MS;
     const stop = () => {
       if (stopped) return;
       stopped = true;
+      if (bootstrapTimer !== undefined) clearTimeout(bootstrapTimer);
       if (this.connectionAttempt !== attempt) return;
       this.connectionAttempt += 1;
       eventStream?.stop();
       if (this.stream === eventStream) this.stream = undefined;
+      if (this.bootstrapReconnect === reconnectBootstrap)
+        this.bootstrapReconnect = undefined;
     };
-
-    // The initial snapshot establishes both the authoritative projection and
-    // the cursor baseline. Only then can SSE replay begin without asking an
-    // established daemon for cursor zero.
-    void client
-      .snapshot()
-      .then((snapshot) => {
-        if (stopped || this.connectionAttempt !== attempt) return;
+    const scheduleBootstrap = () => {
+      if (stopped || this.connectionAttempt !== attempt) return;
+      if (bootstrapTimer !== undefined) clearTimeout(bootstrapTimer);
+      bootstrapTimer = setTimeout(() => {
+        bootstrapTimer = undefined;
+        void bootstrap();
+      }, bootstrapDelay);
+      bootstrapDelay = Math.min(BOOTSTRAP_RETRY_MAX_MS, bootstrapDelay * 2);
+    };
+    const reconnectBootstrap = () => {
+      if (stopped || eventStream) return;
+      if (bootstrapTimer !== undefined) clearTimeout(bootstrapTimer);
+      bootstrapTimer = undefined;
+      bootstrapDelay = BOOTSTRAP_RETRY_MIN_MS;
+      void bootstrap();
+    };
+    const bootstrap = async () => {
+      if (stopped || this.connectionAttempt !== attempt || eventStream) return;
+      const requestGeneration = this.generation;
+      try {
+        const snapshot = await client.snapshot();
+        if (stopped || this.connectionAttempt !== attempt || eventStream)
+          return;
+        const priorTransportCursor =
+          this.state.serverId === snapshot.serverId ? this.state.cursor : 0;
         if (
           !this.installSnapshot(snapshot, {
             source: 'http',
             requestGeneration,
-            rebaseCursor: true,
           })
         )
-          return;
+          throw new Error('Dashboard bootstrap snapshot was not accepted.');
+        // Browser snapshots intentionally omit transcript entries. Replay a
+        // bounded live overlap so a terminal message published at the HTTP
+        // snapshot cursor still reaches transcript reconciliation.
+        const replayCursor = Math.max(
+          priorTransportCursor,
+          snapshot.cursor - INITIAL_REPLAY_OVERLAP,
+          0,
+        );
+        this.publish({
+          ...this.state,
+          cursor: replayCursor,
+          connection: {
+            ...this.state.connection,
+            lastCursor: replayCursor,
+          },
+          cursorHistory: [replayCursor],
+        });
         if (stopped || this.connectionAttempt !== attempt) return;
+        bootstrapDelay = BOOTSTRAP_RETRY_MIN_MS;
         eventStream = new DashboardEventStream({
           client,
           getCursor: () => this.state.cursor,
@@ -839,17 +882,23 @@ export class DashboardLiveStore {
           onError: (error) => this.setError(error?.message),
         });
         this.stream = eventStream;
+        this.bootstrapReconnect = undefined;
         eventStream.start();
-      })
-      .catch((cause) => {
-        if (stopped || this.connectionAttempt !== attempt) return;
+      } catch (cause) {
+        if (stopped || this.connectionAttempt !== attempt || eventStream)
+          return;
         this.setError(cause instanceof Error ? cause.message : String(cause));
-      });
+        scheduleBootstrap();
+      }
+    };
+    this.bootstrapReconnect = reconnectBootstrap;
+    void bootstrap();
     return stop;
   }
 
   reconnect(): void {
-    this.stream?.reconnect();
+    if (this.stream) this.stream.reconnect();
+    else this.bootstrapReconnect?.();
   }
 }
 

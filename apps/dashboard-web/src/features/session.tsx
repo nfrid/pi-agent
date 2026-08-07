@@ -338,8 +338,10 @@ export function SessionView({
   }, [data, projection, id]);
   useEffect(
     () => () => {
-      if (autoScrollFrameRef.current !== undefined)
+      if (autoScrollFrameRef.current !== undefined) {
         window.cancelAnimationFrame(autoScrollFrameRef.current);
+        autoScrollFrameRef.current = undefined;
+      }
     },
     [],
   );

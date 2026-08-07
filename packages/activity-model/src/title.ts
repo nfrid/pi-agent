@@ -83,6 +83,9 @@ export function headersOf(
 ): string[] {
   const headers: string[] = [];
   for (const content of message.content) {
+    // Provider streaming payloads can briefly contain null placeholders even
+    // though the settled AssistantMessage type does not advertise them.
+    if (!content || typeof content !== 'object') continue;
     if (channel && content.type !== channel) continue;
     const value =
       content.type === 'thinking'
