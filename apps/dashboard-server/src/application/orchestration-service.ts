@@ -1065,16 +1065,16 @@ export class OrchestrationService {
       const current = this.repository.getRun(run.id);
       if (!current || !TERMINAL_RUN_STATUSES.includes(current.status))
         this.failRun(run.id, 'failed', errorText(error));
-      // Do not swallow a failed terminal stop while the manager still owns a
+      // Do not swallow a provider failure while the manager still owns a
       // launch. The durable run error and retained provider/worktree evidence
-      // make the same cancellation command retryable.
+      // make the same command retryable.
       const manager = this.manager as RuntimeManager & {
         hasLaunch?: (id: string) => boolean;
       };
       const retainedLaunch = runtimeId
         ? (manager.hasLaunch?.(runtimeId) ?? false)
         : false;
-      if (terminalStopAttempted && retainedLaunch) {
+      if (retainedLaunch) {
         this.repository.setRunError(run.id, boundedErrorText(error));
         this.changed();
         throw error;
