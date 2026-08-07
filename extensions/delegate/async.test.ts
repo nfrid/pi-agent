@@ -12,7 +12,7 @@ import {
   resolveArtifact,
   restoreArtifacts,
 } from '../shared/artifacts';
-import { liveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
+import { getLiveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
 import type { DelegateConfig } from './config';
 import * as configModule from './config';
 import delegate, { DELEGATES_COMMAND_DESCRIPTION } from './index';
@@ -172,7 +172,7 @@ afterEach(() => {
   rmSync(artifactRoot, { recursive: true, force: true });
 });
 
-function createAsyncHarness() {
+function createAsyncHarness(initialScope = 'parent') {
   vi.spyOn(configModule, 'loadDelegateConfig').mockReturnValue({
     ...config,
     maxParallelTasks: 3,
@@ -212,7 +212,7 @@ function createAsyncHarness() {
     hasUI: false,
     mode: 'print',
     sessionManager: {
-      getSessionId: () => 'parent',
+      getSessionId: () => initialScope,
       getEntries: () => entries,
       getHeader: () => ({}),
       getBranch: () => [],
@@ -232,10 +232,48 @@ function createAsyncHarness() {
     if (!resolve) throw new Error(`No delegate running task ${task}.`);
     resolve(run);
   };
-  return { ctx, finish, handlers, sendMessage, tools };
+  return {
+    ctx,
+    finish,
+    handlers,
+    sendMessage,
+    tools,
+  };
 }
 
 describe('async delegate extension', () => {
+  test('ignores a late shutdown from a replaced session scope', async () => {
+    const { ctx, finish, handlers, sendMessage, tools } =
+      createAsyncHarness('scope-A');
+    const replacementContext = {
+      ...ctx,
+      sessionManager: {
+        ...ctx.sessionManager,
+        getSessionId: () => 'scope-B',
+      },
+    };
+    handlers.get('session_start')?.({}, replacementContext);
+
+    await tools.get('delegate')?.execute(
+      'call-replacement',
+      {
+        name: 'Replacement status',
+        task: 'inspect independently',
+        route: 'quick',
+        background: true,
+      },
+      undefined,
+      undefined,
+      replacementContext,
+    );
+
+    await handlers.get('session_shutdown')?.({}, ctx);
+
+    finish('inspect independently');
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+    await handlers.get('session_shutdown')?.({}, replacementContext);
+  });
+
   test('refreshes terminal live status after owner lifecycle artifact materialization', async () => {
     const { ctx, finish, handlers, sendMessage, tools } = createAsyncHarness();
     const launch = await tools.get('delegate')?.execute(
@@ -256,7 +294,7 @@ describe('async delegate extension', () => {
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
 
     const status = (
-      liveExtensionSurfaceHub
+      getLiveExtensionSurfaceHub('parent')
         .snapshot()
         .find((surface) => surface.rendererId === 'delegate.status')
         ?.viewModel as
@@ -511,7 +549,7 @@ describe('async delegate extension', () => {
     expect(widget?.render(100).join('\n')).toContain('done');
     expect(
       (
-        liveExtensionSurfaceHub
+        getLiveExtensionSurfaceHub('parent')
           .snapshot()
           .find((surface) => surface.rendererId === 'delegate.status')
           ?.viewModel as { statuses?: unknown[] } | undefined
@@ -529,7 +567,7 @@ describe('async delegate extension', () => {
     expect(widget?.render(100)).toEqual([]);
     expect(
       (
-        liveExtensionSurfaceHub
+        getLiveExtensionSurfaceHub('parent')
           .snapshot()
           .find((surface) => surface.rendererId === 'delegate.status')
           ?.viewModel as { statuses?: unknown[] } | undefined

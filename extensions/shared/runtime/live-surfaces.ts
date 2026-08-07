@@ -1,4 +1,5 @@
 import {
+  DEFAULT_SESSION_SCOPE_ID,
   findScopedServices,
   getScopedServices,
   type SessionScopeId,
@@ -14,29 +15,32 @@ export {
 
 type Hub = import('./live-surfaces-core').LiveSurfaceHub;
 
-// The no-argument facade follows the one active session for compatibility
+// The no-argument facade always addresses the default scope for compatibility
 // with older extension callers. Explicit scope lookups are always isolated.
-let activeDefaultScope: SessionScopeId = 'default';
 const defaultHubFacade = {
   publish(extensionId: string, surfaces: Parameters<Hub['publish']>[1]): void {
-    getScopedServices(activeDefaultScope).liveSurfaceHub.publish(
+    getScopedServices(DEFAULT_SESSION_SCOPE_ID).liveSurfaceHub.publish(
       extensionId,
       surfaces,
     );
   },
   clear(extensionId: string): void {
-    getScopedServices(activeDefaultScope).liveSurfaceHub.clear(extensionId);
+    getScopedServices(DEFAULT_SESSION_SCOPE_ID).liveSurfaceHub.clear(
+      extensionId,
+    );
   },
   clearAll(): void {
-    getScopedServices(activeDefaultScope).liveSurfaceHub.clearAll();
+    getScopedServices(DEFAULT_SESSION_SCOPE_ID).liveSurfaceHub.clearAll();
   },
   snapshot(): ReturnType<Hub['snapshot']> {
-    return getScopedServices(activeDefaultScope).liveSurfaceHub.snapshot();
+    return getScopedServices(
+      DEFAULT_SESSION_SCOPE_ID,
+    ).liveSurfaceHub.snapshot();
   },
   subscribe(
     listener: Parameters<Hub['subscribe']>[0],
   ): ReturnType<Hub['subscribe']> {
-    return getScopedServices(activeDefaultScope).liveSurfaceHub.subscribe(
+    return getScopedServices(DEFAULT_SESSION_SCOPE_ID).liveSurfaceHub.subscribe(
       listener,
     );
   },
@@ -58,7 +62,6 @@ export function publishLiveExtensionSurfaces(
   surfaces: readonly import('@pi-dashboard/extension-contributions').ExtensionSurface[],
   scopeId: SessionScopeId = 'default',
 ): void {
-  activeDefaultScope = scopeId;
   getScopedServices(scopeId).liveSurfaceHub.publish(extensionId, surfaces);
 }
 
@@ -66,7 +69,6 @@ export function clearLiveExtensionSurfaces(
   extensionId: string,
   scopeId: SessionScopeId = 'default',
 ): void {
-  activeDefaultScope = scopeId;
   findScopedServices(scopeId)?.liveSurfaceHub.clear(extensionId);
 }
 

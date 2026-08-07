@@ -452,6 +452,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     syncWidget();
   });
   pi.on('session_shutdown', async (_event, ctx) => {
+    const closingScopeId = getSessionScopeId(ctx);
+    if (scopeId !== closingScopeId) return;
     runtimeActive = false;
     if (completionTimer) clearTimeout(completionTimer);
     completionTimer = undefined;
@@ -465,7 +467,6 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     statuses = undefined;
     await closing?.dispose();
     closingStatuses?.clear();
-    const closingScopeId = getSessionScopeId(ctx);
     clearDelegateSurface(closingScopeId);
     ui = undefined;
     if (scopeId === closingScopeId) scopeId = 'default';

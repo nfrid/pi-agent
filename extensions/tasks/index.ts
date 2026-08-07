@@ -53,6 +53,7 @@ export default defineExtension('tasks', (pi: ExtensionAPI) => {
   });
   pi.on('session_shutdown', (_event, ctx) => {
     const closingScope = getSessionScopeId(ctx);
+    if (scopeId !== closingScope) return;
     if (ctx.hasUI) ctx.ui.setStatus(EXT, undefined);
     teardownUi();
     clearTaskSurface(closingScope);

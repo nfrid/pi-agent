@@ -95,6 +95,65 @@ describe('background terminals extension', () => {
     await handlers.get('session_shutdown')?.({});
   });
 
+  it('ignores a late shutdown from a replaced session scope', async () => {
+    const handlers = new Map<string, Handler>();
+    let tool: RegisteredTool | undefined;
+    const pi = {
+      on(event: string, handler: Handler) {
+        handlers.set(event, handler);
+      },
+      registerTool(definition: RegisteredTool) {
+        tool = definition;
+      },
+      registerCommand: vi.fn(),
+      registerMessageRenderer: vi.fn(),
+      sendMessage: vi.fn(),
+    } as unknown as ExtensionAPI;
+    backgroundTerminals(pi);
+    const context = (scope: string) => ({
+      cwd: process.cwd(),
+      hasUI: false,
+      mode: 'print' as const,
+      sessionManager: { getSessionId: () => scope },
+    });
+    const start = handlers.get('session_start');
+    const shutdown = handlers.get('session_shutdown');
+    start?.({}, context('scope-A'));
+    start?.({}, context('scope-B'));
+    try {
+      const result = await tool?.execute(
+        'call-1',
+        {
+          action: 'start',
+          command: 'while true; do sleep 1; done',
+          title: 'scope B server',
+        },
+        undefined,
+        undefined,
+        { cwd: process.cwd() },
+      );
+      const processId = (result as { details?: { process?: { id: string } } })
+        .details?.process?.id;
+      expect(processId).toBeDefined();
+
+      await shutdown?.({}, context('scope-A'));
+      const listed = await tool?.execute(
+        'call-2',
+        { action: 'list' },
+        undefined,
+        undefined,
+        { cwd: process.cwd() },
+      );
+      expect(
+        (listed as { details?: { processes?: unknown[] } }).details?.processes,
+      ).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: processId })]),
+      );
+    } finally {
+      await shutdown?.({}, context('scope-B'));
+    }
+  });
+
   it('renders automatic completions as padded status cards', () => {
     let completionRenderer:
       | ((

@@ -133,6 +133,69 @@ describe('managed runtime launch safety', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it('launches and stops a provider with an opaque location', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-opaque-'));
+    let launchedBinding!: {
+      runtimeId: string;
+      location: { id: string };
+    };
+    const stop = vi.fn().mockResolvedValue(undefined);
+    const recordManagedLaunch = vi.fn();
+    let launchedRuntimeId = '';
+    const snapshot = {
+      runtimeId: 'runtime-opaque',
+      ownership: 'managed' as const,
+      pid: 0,
+      cwd: '/other',
+      liveState: 'idle' as const,
+      session: { id: 'opaque-session', entries: [] },
+      pendingInteractions: [],
+    };
+    const registry = {
+      snapshots: () => [],
+      get: (id: string) =>
+        id === launchedRuntimeId ? { ...snapshot, runtimeId: id } : undefined,
+      sendCommand: vi.fn().mockResolvedValue(undefined),
+      isOnline: () => false,
+      forget: vi.fn(),
+    };
+    const provider = {
+      start: async ({ runtimeId: id }: { runtimeId: string }) => {
+        launchedRuntimeId = id;
+        launchedBinding = { runtimeId: id, location: { id: 'opaque:abc' } };
+        return launchedBinding;
+      },
+      stop,
+    };
+    const manager = new RuntimeManager(
+      registry as never,
+      provider as never,
+      { get: () => undefined } as never,
+      {
+        managedLaunches: () => [],
+        recordManagedLaunch,
+      } as never,
+      '/tmp/bridge.sock',
+    );
+    manager.setWorkspaces([
+      {
+        ...workspace(root),
+        tmuxSession: undefined,
+        active: false,
+      },
+    ]);
+
+    const result = await manager.launch({ workspaceId: 'workspace-1' });
+    expect(result).toEqual({ runtimeId: expect.any(String) });
+    expect(result.placement).toBeUndefined();
+    expect(recordManagedLaunch).not.toHaveBeenCalled();
+
+    await manager.stop(result.runtimeId);
+    expect(stop).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledWith(launchedBinding);
+    await rm(root, { recursive: true, force: true });
+  });
+
   it('does not resend an initial prompt after an acknowledgement loss', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-once-'));
     const sendCommand = vi

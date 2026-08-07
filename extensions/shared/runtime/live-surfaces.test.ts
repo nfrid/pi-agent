@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clearLiveExtensionSurfaces,
   getLiveExtensionSurfaceHub,
   LiveSurfaceHub,
   liveExtensionSurfaceHub,
   MAX_LIVE_EXTENSION_SURFACES_PER_EXTENSION,
+  publishLiveExtensionSurfaces,
 } from './live-surfaces';
 
 describe('live surface hub', () => {
@@ -15,6 +17,42 @@ describe('live surface hub', () => {
         Symbol.for('pi.dashboard.live-extension-surfaces'),
       ),
     ).toBe(liveExtensionSurfaceHub);
+  });
+
+  it('keeps no-arg compatibility readers on the default scope', () => {
+    const oldScope = getLiveExtensionSurfaceHub('compat-old-scope');
+    oldScope.clearAll();
+    liveExtensionSurfaceHub.clearAll();
+
+    publishLiveExtensionSurfaces(
+      'old-session',
+      [
+        {
+          id: 'old-session.surface',
+          rendererId: 'test.renderer',
+          viewModel: {},
+        },
+      ],
+      'compat-old-scope',
+    );
+    expect(liveExtensionSurfaceHub.snapshot()).toEqual([]);
+
+    liveExtensionSurfaceHub.publish('default-session', [
+      {
+        id: 'default-session.surface',
+        rendererId: 'test.renderer',
+        viewModel: {},
+      },
+    ]);
+    expect(
+      liveExtensionSurfaceHub.snapshot().map((surface) => surface.id),
+    ).toEqual(['default-session.surface']);
+    expect(oldScope.snapshot().map((surface) => surface.id)).toEqual([
+      'old-session.surface',
+    ]);
+
+    clearLiveExtensionSurfaces('old-session', 'compat-old-scope');
+    liveExtensionSurfaceHub.clearAll();
   });
 
   it('publishes bounded source slots and removes them on clear', () => {

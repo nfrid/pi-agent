@@ -111,14 +111,13 @@ export default defineExtension(
     pi.on('agent_settled', () => widget.reassert());
 
     pi.on('session_shutdown', async (_event, ctx) => {
-      const closing = manager;
       const closingScope = getSessionScopeId(ctx);
+      if (scopeId !== closingScope) return;
+      const closing = manager;
       const closingServices = scopedServices;
-      if (scopeId === closingScope) {
-        manager = undefined;
-        scopeId = undefined;
-        scopedServices = undefined;
-      }
+      manager = undefined;
+      scopeId = undefined;
+      scopedServices = undefined;
       widget.detach();
       ui = undefined;
       await closing?.dispose();

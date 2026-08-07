@@ -23,14 +23,20 @@ interface LaunchRecord {
   /** Runtime identity survives reconnects and daemon restarts. */
   identityToken: string;
   workspace: WorkspaceTarget;
-  placement: ManagedPlacement;
+  /** The provider-owned binding must remain opaque to the manager. */
+  binding: RuntimeBinding;
+  /** Tmux placement is an optional compatibility projection of the binding. */
+  placement?: ManagedPlacement;
+  metadataRecorded: boolean;
   createdAt: number;
 }
 
-function placementFromBinding(binding: RuntimeBinding): ManagedPlacement {
+function placementFromBinding(
+  binding: RuntimeBinding,
+): ManagedPlacement | undefined {
   const location = binding.location;
   if (!location?.sessionId || !location.windowId || !location.paneId)
-    throw new Error('Runtime provider did not return a managed location.');
+    return undefined;
   return {
     tmuxSession: location.sessionId,
     tmuxWindowId: location.windowId,
@@ -97,7 +103,9 @@ export class RuntimeManager {
         source: 'directory',
         active: false,
       },
+      binding: bindingFromPlacement(record.runtimeId, record.placement),
       placement: record.placement,
+      metadataRecorded: true,
       createdAt: record.launchedAt,
     };
   }
@@ -154,15 +162,11 @@ export class RuntimeManager {
 
   async launch(
     input: unknown,
-  ): Promise<{ runtimeId: string; placement: ManagedPlacement }> {
+  ): Promise<{ runtimeId: string; placement?: ManagedPlacement }> {
     const request = validateStartRuntimeRequest(input);
     const workspace = this.workspaces.get(request.workspaceId);
     if (!workspace)
       throw new Error('Workspace is not in the current Sesh catalogue.');
-    if (!workspace.tmuxSession || !workspace.active)
-      throw new Error(
-        'This workspace has no active tmux session yet. Open it through Sesh on the Mac first.',
-      );
     const cwd = realpathSync.native(workspace.canonicalPath);
     const conflict = this.registry
       .snapshots()
@@ -218,10 +222,11 @@ export class RuntimeManager {
         text: request.initialPrompt,
         sent: false,
       });
+    let binding: RuntimeBinding | undefined;
     let placement: ManagedPlacement | undefined;
     let metadataRecorded = false;
     try {
-      const binding = await this.provider.start({
+      binding = await this.provider.start({
         workspace: {
           id: workspace.id,
           name: workspace.name,
@@ -246,33 +251,38 @@ export class RuntimeManager {
         launchToken,
         identityToken,
         workspace,
-        placement,
+        binding,
+        ...(placement ? { placement } : {}),
+        metadataRecorded: false,
         createdAt: Date.now(),
       };
       this.launches.set(runtimeId, launch);
-      this.metadata.recordManagedLaunch(runtimeId, workspace.id, placement, {
-        identityToken,
-        launchToken,
-        launchConsumed: !this.tokens.has(launchToken),
-      });
-      metadataRecorded = true;
+      if (placement) {
+        this.metadata.recordManagedLaunch(runtimeId, workspace.id, placement, {
+          identityToken,
+          launchToken,
+          launchConsumed: !this.tokens.has(launchToken),
+        });
+        metadataRecorded = true;
+        launch.metadataRecorded = true;
+      }
       this.dispatchInitialPrompt(runtimeId);
-      return { runtimeId, placement };
+      return { runtimeId, ...(placement ? { placement } : {}) };
     } catch (error) {
       this.tokens.delete(launchToken);
       this.initialPrompts.delete(runtimeId);
       this.launches.delete(runtimeId);
-      if (placement) {
-        try {
-          // This is harmless when persistence failed before inserting a row,
-          // and closes the metadata window when it did insert one.
-          this.metadata.markManagedStopped(runtimeId);
-        } catch {
-          /* rollback must still attempt tmux cleanup */
+      if (binding) {
+        if (placement) {
+          try {
+            // This is harmless when persistence failed before inserting a row,
+            // and closes the metadata window when it did insert one.
+            this.metadata.markManagedStopped(runtimeId);
+          } catch {
+            /* rollback must still attempt provider cleanup */
+          }
         }
-        await this.provider
-          .stop(bindingFromPlacement(runtimeId, placement))
-          .catch(() => undefined);
+        await this.provider.stop(binding).catch(() => undefined);
       } else if (metadataRecorded) {
         try {
           this.metadata.markManagedStopped(runtimeId);
@@ -295,7 +305,7 @@ export class RuntimeManager {
 
   async restart(
     runtimeId: string,
-  ): Promise<{ runtimeId: string; placement: ManagedPlacement }> {
+  ): Promise<{ runtimeId: string; placement?: ManagedPlacement }> {
     const snapshot = this.registry.get(runtimeId);
     const launch = this.launches.get(runtimeId);
     if (!snapshot || !launch)
@@ -359,10 +369,9 @@ export class RuntimeManager {
       this.signalManagedProcess(snapshot.pid, 'SIGKILL');
     try {
       if (launch) {
-        await this.provider
-          .stop(bindingFromPlacement(runtimeId, launch.placement))
-          .catch(() => undefined);
-        this.metadata.markManagedStopped(runtimeId);
+        await this.provider.stop(launch.binding).catch(() => undefined);
+        if (launch.metadataRecorded)
+          this.metadata.markManagedStopped(runtimeId);
       }
     } finally {
       this.initialPrompts.delete(runtimeId);
