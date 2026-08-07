@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
+import type { WorktreeStore } from '@pi-dashboard/worktree-manager';
 import { atomicWriteJsonSync } from '../../shared/fs/atomic';
 import type { WorktreeRecord } from './model';
 
@@ -157,3 +158,10 @@ export function listWorktrees(): WorktreeRecord[] {
 export function deleteWorktreeRecord(id: string): void {
   rmSync(worktreeRecordDir(id), { recursive: true, force: true });
 }
+
+/** Adapter for the reusable Git/worktree lifecycle mechanics. */
+export const delegateWorktreeStore: WorktreeStore<WorktreeRecord> = {
+  loadWorktree,
+  writeWorktreeRecord,
+  deleteWorktreeRecord,
+};

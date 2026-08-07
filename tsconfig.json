@@ -17,6 +17,7 @@
     "packages/dashboard-client/src/**/*.ts",
     "packages/activity-model/src/**/*.ts",
     "packages/codex-usage/src/**/*.ts",
+    "packages/worktree-manager/src/**/*.ts",
     "apps/dashboard-server/src/**/*.ts"
   ],
   "exclude": ["apps/dashboard-web/**", "**/dist/**"]

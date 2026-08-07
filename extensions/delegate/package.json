@@ -1,0 +1,11 @@
+{
+  "name": "@pi-dashboard/delegate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "./index.ts",
+  "dependencies": {
+    "@pi-dashboard/extension-contributions": "workspace:*",
+    "@pi-dashboard/worktree-manager": "workspace:*"
+  }
+}

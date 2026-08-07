@@ -22,6 +22,9 @@ export default defineConfig({
       '@pi-dashboard/extension-contributions': path.resolve(
         'packages/extension-contributions/src/index.ts',
       ),
+      '@pi-dashboard/worktree-manager': path.resolve(
+        'packages/worktree-manager/src/index.ts',
+      ),
     },
   },
   test: {
