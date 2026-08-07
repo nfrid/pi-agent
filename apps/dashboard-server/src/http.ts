@@ -683,14 +683,6 @@ class DashboardServerImpl implements DashboardServer {
       return;
     }
 
-    response.writeHead(200, {
-      'content-type': 'text/event-stream; charset=utf-8',
-      'cache-control': 'no-cache, no-store',
-      connection: 'keep-alive',
-      'x-accel-buffering': 'no',
-    });
-    response.flushHeaders?.();
-    this.sseResponses.add(response);
     let closed = false;
     let replaying = true;
     const queued: DashboardEventStreamRecord[] = [];
@@ -787,21 +779,50 @@ class DashboardServerImpl implements DashboardServer {
     const writeRecord = (record: DashboardEventStreamRecord): boolean =>
       writeRaw(serializeSseRecord(record));
     const writeHeartbeat = () => writeRaw(': heartbeat\n\n');
+    const queueRecord = (record: DashboardEventStreamRecord): boolean => {
+      const bytes = Buffer.byteLength(serializeSseRecord(record));
+      if (queuedBytes + bytes > this.sseBufferBytes) return false;
+      queued.push(record);
+      queuedBytes += bytes;
+      return true;
+    };
     const onRecord = (record: DashboardEventStreamRecord) => {
       if (replaying) {
-        const bytes =
-          Buffer.byteLength(JSON.stringify(record)) +
-          Buffer.byteLength(
-            `id: ${record.cursor}\nevent: dashboard\ndata: \n\n`,
-          );
-        if (queuedBytes + bytes > this.sseBufferBytes) return closeSlowClient();
-        queued.push(record);
-        queuedBytes += bytes;
+        if (!queueRecord(record)) closeSlowClient();
         return;
       }
       writeRecord(record);
     };
     unsubscribe = this.eventStream.subscribe(onRecord);
+    // Close the small replayAfter/subscribe race before committing 200 headers.
+    // Records published in that interval are replayed after the original
+    // window; subsequent records are already captured by the subscription.
+    const catchup = this.eventStream.replayAfter(replay.currentCursor);
+    const catchupFits =
+      !catchup.gap && catchup.events.every((record) => queueRecord(record));
+    if (
+      !catchupFits ||
+      replayBytes + queuedBytes + Buffer.byteLength(': heartbeat\n\n') >
+        this.sseBufferBytes
+    ) {
+      unsubscribe();
+      this.json(response, 409, {
+        error: 'The requested event replay changed before streaming began.',
+        code: 'replay-gap',
+        reason: 'replay-too-large',
+        cursor: this.eventStream.cursor,
+        oldestCursor: this.eventStream.oldestCursor,
+      });
+      return;
+    }
+    response.writeHead(200, {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache, no-store',
+      connection: 'keep-alive',
+      'x-accel-buffering': 'no',
+    });
+    response.flushHeaders?.();
+    this.sseResponses.add(response);
     response.once('close', cleanup);
     request.once('aborted', cleanup);
     if (!writeHeartbeat()) return;

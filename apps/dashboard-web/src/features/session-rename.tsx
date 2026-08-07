@@ -1,10 +1,9 @@
 import {
   type DashboardLiveStore,
   dashboardHttpClient,
-  invalidateDashboardQueries,
   renameSessionMutationOptions,
 } from '@pi-dashboard/client';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useState } from 'react';
 
 export function SessionRename({
@@ -23,7 +22,6 @@ export function SessionRename({
   const mutation = useMutation(
     renameSessionMutationOptions(dashboardHttpClient),
   );
-  const queryClient = useQueryClient();
   const busy = mutation.isPending;
   useEffect(() => setName(initialName ?? ''), [initialName]);
   const submit = async (event: FormEvent) => {
@@ -36,7 +34,6 @@ export function SessionRename({
       const result = await mutation.mutateAsync({ id, name: value });
       store.applyMutationResult(result, requestGeneration);
       onRenamed(value);
-      await invalidateDashboardQueries(queryClient);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }

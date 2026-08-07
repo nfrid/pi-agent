@@ -32,6 +32,19 @@ export type DashboardShellState = Omit<
   'events' | 'cursorHistory' | 'cursor' | 'resyncNonce'
 >;
 
+export const HIDDEN_STREAM_STALE_MS = 15_000;
+
+export function shouldReconnectAfterVisibility(
+  status: ReturnType<DashboardLiveStore['getSnapshot']>['connection']['status'],
+  hiddenAt: number | undefined,
+  now: number,
+): boolean {
+  return (
+    status !== 'connected' ||
+    (hiddenAt !== undefined && now - hiddenAt >= HIDDEN_STREAM_STALE_MS)
+  );
+}
+
 function useConnectedDashboardStore(client: DashboardHttpClient) {
   const storeRef = useRef<DashboardLiveStore | undefined>(undefined);
   if (!storeRef.current) storeRef.current = new DashboardLiveStore();
@@ -39,10 +52,24 @@ function useConnectedDashboardStore(client: DashboardHttpClient) {
 
   useEffect(() => {
     const stop = store.connect(client);
+    let hiddenAt: number | undefined;
     const onOnline = () => store.reconnect();
     const onOffline = () => store.setConnection('reconnecting');
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') store.reconnect();
+      if (document.visibilityState !== 'visible') {
+        hiddenAt = Date.now();
+        return;
+      }
+      const now = Date.now();
+      if (
+        shouldReconnectAfterVisibility(
+          store.getSnapshot().connection.status,
+          hiddenAt,
+          now,
+        )
+      )
+        store.reconnect();
+      hiddenAt = undefined;
     };
     if (typeof window !== 'undefined') {
       window.addEventListener('online', onOnline);

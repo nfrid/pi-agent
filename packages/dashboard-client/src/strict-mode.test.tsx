@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { DashboardHttpClient } from './http-client.js';
 import {
   type DashboardShellState,
+  HIDDEN_STREAM_STALE_MS,
+  shouldReconnectAfterVisibility,
   useDashboard,
   useDashboardShell,
 } from './index.js';
@@ -29,6 +31,29 @@ Object.defineProperty(globalThis, 'navigator', {
 });
 
 describe('useDashboard StrictMode lifecycle', () => {
+  it('reconnects only stale or disconnected visible streams', () => {
+    expect(shouldReconnectAfterVisibility('connected', undefined, 20_000)).toBe(
+      false,
+    );
+    expect(
+      shouldReconnectAfterVisibility('reconnecting', undefined, 20_000),
+    ).toBe(true);
+    expect(
+      shouldReconnectAfterVisibility(
+        'connected',
+        5_000,
+        5_000 + HIDDEN_STREAM_STALE_MS - 1,
+      ),
+    ).toBe(false);
+    expect(
+      shouldReconnectAfterVisibility(
+        'connected',
+        5_000,
+        5_000 + HIDDEN_STREAM_STALE_MS,
+      ),
+    ).toBe(true);
+  });
+
   it('keeps one active SSE stream and removes listeners on unmount', async () => {
     let active = 0;
     let maximum = 0;

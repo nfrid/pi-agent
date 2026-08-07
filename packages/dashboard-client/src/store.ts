@@ -25,6 +25,7 @@ import { DashboardEventStream } from './event-stream.js';
 import { type DashboardHttpClient, ReplayGapError } from './http-client.js';
 
 export const LIVE_BUFFER_LIMIT = 256;
+export const LIVE_RENDER_INTERVAL_MS = 32;
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting';
 
@@ -192,6 +193,7 @@ export class DashboardLiveStore {
   private runtimeReducerStates = new Map<string, RuntimeReducerState>();
   private stream?: DashboardEventStream;
   private connectionAttempt = 0;
+  private deferredNotification?: ReturnType<typeof setTimeout>;
 
   getGeneration(): number {
     return this.generation;
@@ -204,8 +206,20 @@ export class DashboardLiveStore {
 
   getSnapshot = (): DashboardLiveState => this.state;
 
-  private publish(next: DashboardLiveState): void {
+  private publish(next: DashboardLiveState, deferNotification = false): void {
     this.state = next;
+    if (deferNotification) {
+      if (this.deferredNotification !== undefined) return;
+      this.deferredNotification = setTimeout(() => {
+        this.deferredNotification = undefined;
+        for (const listener of this.listeners) listener();
+      }, LIVE_RENDER_INTERVAL_MS);
+      return;
+    }
+    if (this.deferredNotification !== undefined) {
+      clearTimeout(this.deferredNotification);
+      this.deferredNotification = undefined;
+    }
     for (const listener of this.listeners) listener();
   }
 
@@ -476,8 +490,8 @@ export class DashboardLiveStore {
     const event = envelope.event;
     const semanticSessionUpdate =
       Boolean(sessionId) &&
-      (event.type.startsWith('message.') ||
-        event.type.startsWith('tool.') ||
+      (event.type === 'message.finished' ||
+        event.type === 'tool.finished' ||
         event.type === 'agent.settled' ||
         event.type === 'session.changed' ||
         event.type === 'session.snapshot');
@@ -515,20 +529,23 @@ export class DashboardLiveStore {
           [previousRuntimeSessionId]: sessionId,
         };
     }
-    this.publish({
-      ...nextState,
-      sessionChangeById,
-      sessionReplacementByRuntimeId,
-      sessionReplacementBySessionId,
-      cursor: envelope.cursor,
-      connection: { ...nextState.connection, lastCursor: envelope.cursor },
-      cursorHistory: [...nextState.cursorHistory, envelope.cursor].slice(
-        -LIVE_BUFFER_LIMIT,
-      ),
-      recentEvents: [...nextState.recentEvents, envelope].slice(
-        -LIVE_BUFFER_LIMIT,
-      ),
-    });
+    this.publish(
+      {
+        ...nextState,
+        sessionChangeById,
+        sessionReplacementByRuntimeId,
+        sessionReplacementBySessionId,
+        cursor: envelope.cursor,
+        connection: { ...nextState.connection, lastCursor: envelope.cursor },
+        cursorHistory: [...nextState.cursorHistory, envelope.cursor].slice(
+          -LIVE_BUFFER_LIMIT,
+        ),
+        recentEvents: [...nextState.recentEvents, envelope].slice(
+          -LIVE_BUFFER_LIMIT,
+        ),
+      },
+      event.type === 'message.updated' || event.type === 'tool.updated',
+    );
     return true;
   }
 

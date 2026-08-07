@@ -2,7 +2,7 @@ import type {
   BrowserSnapshot,
   SessionApiResponse,
 } from '@pi-dashboard/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   DashboardLiveStore,
   selectSnapshot,
@@ -337,6 +337,56 @@ describe('DashboardLiveStore', () => {
         'answer-1'
       ],
     ).toMatchObject({ content: 'hello', status: 'finished' });
+  });
+
+  it('coalesces live token notifications and reconciles only terminal events', () => {
+    vi.useFakeTimers();
+    try {
+      const store = new DashboardLiveStore();
+      store.installSnapshot(snapshot('daemon-1', 0));
+      store.hydrateSession(sessionResponse(0));
+      let notifications = 0;
+      const unsubscribe = store.subscribe(() => {
+        notifications += 1;
+      });
+      const message = (
+        cursor: number,
+        type: 'message.started' | 'message.updated' | 'message.finished',
+        content: string,
+      ) =>
+        store.acceptStreamRecord({
+          cursor,
+          emittedAt: cursor,
+          sessionId: 'session-1',
+          event: {
+            type,
+            sessionId: 'session-1',
+            message: {
+              messageId: 'answer-1',
+              role: 'assistant',
+              content,
+            },
+          },
+        } as StreamRecord);
+
+      message(1, 'message.started', '');
+      message(2, 'message.updated', 'hel');
+      message(3, 'message.updated', 'hello');
+      expect(notifications).toBe(1);
+      expect(store.getSnapshot().cursor).toBe(3);
+      expect(
+        store.getSnapshot().sessionChangeById['session-1'],
+      ).toBeUndefined();
+
+      vi.advanceTimersByTime(32);
+      expect(notifications).toBe(2);
+      message(4, 'message.finished', 'hello');
+      expect(notifications).toBe(3);
+      expect(store.getSnapshot().sessionChangeById['session-1']).toBe(1);
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('advances replay without regressing a newer HTTP projection', () => {

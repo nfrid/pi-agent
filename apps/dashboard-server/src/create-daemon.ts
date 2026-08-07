@@ -26,7 +26,9 @@ import { TmuxAdapter, TmuxRuntimeProvider } from './tmux.js';
 import { CodexUsageProvider } from './usage.js';
 
 const SSE_HEARTBEAT_MS = 15_000;
-const SSE_BUFFER_BYTES = 1024 * 1024;
+// Runtime contribution snapshots can approach 1 MiB; retain bounded headroom
+// for one snapshot plus live records while the browser drains the response.
+const SSE_BUFFER_BYTES = 4 * 1024 * 1024;
 
 function loadOrCreateToken(stateDir: string): string {
   const file = path.join(stateDir, 'browser-token');
