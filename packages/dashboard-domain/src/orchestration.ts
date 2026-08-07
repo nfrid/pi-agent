@@ -50,8 +50,8 @@ const threadTransitions: Readonly<
 };
 const runTransitions: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   queued: ['preparing', 'cancelled', 'interrupted'],
-  preparing: ['starting', 'failed', 'cancelled', 'interrupted'],
-  starting: ['running', 'failed', 'cancelled', 'interrupted'],
+  preparing: ['queued', 'starting', 'failed', 'cancelled', 'interrupted'],
+  starting: ['queued', 'running', 'failed', 'cancelled', 'interrupted'],
   running: ['waiting', 'settled', 'failed', 'cancelled', 'interrupted'],
   waiting: ['running', 'settled', 'failed', 'cancelled', 'interrupted'],
   settled: [],

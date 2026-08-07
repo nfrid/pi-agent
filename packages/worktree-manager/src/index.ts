@@ -21,6 +21,7 @@ export {
   git,
   gitText,
   isInside,
+  repositoryIdentity,
   repositoryRoot,
   splitZ,
 } from './git';

@@ -48,6 +48,18 @@ export async function repositoryRoot(cwd: string): Promise<string> {
 }
 
 /**
+ * Stable identity for a repository and all of its linked worktrees. Git's
+ * common directory, rather than the discovered checkout path, is the durable
+ * project key used by dashboard adoption.
+ */
+export async function repositoryIdentity(cwd: string): Promise<string> {
+  const raw = await gitText(cwd, ['rev-parse', '--git-common-dir']);
+  const root = await repositoryRoot(cwd);
+  const resolved = path.isAbsolute(raw) ? raw : path.resolve(root, raw);
+  return canonical(resolved);
+}
+
+/**
  * Split a NUL-delimited git output list.
  *
  * Entries are trimmed because a few plumbing commands (`for-each-ref` with a

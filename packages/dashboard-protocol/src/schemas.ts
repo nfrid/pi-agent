@@ -1040,6 +1040,12 @@ export type DashboardStreamMessage = Static<
 export const StartRuntimeRequestSchema = Type.Object(
   {
     workspaceId: Type.String({ minLength: 1, maxLength: 256 }),
+    /** Internal orchestration identity. Browser launches may omit it. */
+    runtimeId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_ID })),
+    /** Explicit isolated checkout cwd; tmux placement still uses workspaceId. */
+    checkoutCwd: Type.Optional(
+      Type.String({ minLength: 1, maxLength: MAX_PATH }),
+    ),
     sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
     model: Type.Optional(

@@ -16,6 +16,7 @@ import type {
   ThreadSummary,
   WorkspaceTarget,
 } from '@pi-dashboard/protocol';
+import type { WorktreeRecord } from '@pi-dashboard/worktree-manager';
 
 export interface PushSubscriptionRecord {
   endpoint: string;
@@ -180,6 +181,8 @@ export interface OrchestrationRepository {
   deleteRun(id: string): void;
   runSummaries(): RunSummary[];
   transitionRun(id: string, status: RunStatus, now?: number): Run;
+  /** Atomically claim a queued run while respecting its project's parallelism. */
+  claimQueuedRun(id: string, now?: number): Run | undefined;
   transitionThread(id: string, status: Thread['status'], now?: number): Thread;
   transitionCheckout(
     id: string,
@@ -191,6 +194,13 @@ export interface OrchestrationRepository {
     input: CreateThreadWithRunInput,
   ): { thread: Thread; run: Run; receipt: CommandReceipt };
   getCommandReceipt(idempotencyKey: string): CommandReceipt | undefined;
+  recordCommandReceipt(receipt: CommandReceipt): void;
+  setRunRuntime(id: string, runtimeId: string): Run;
+  setRunError(id: string, error: string): Run;
+  getRunByRuntimeId(runtimeId: string): Run | undefined;
+  loadWorktreeRecord(checkoutId: string): WorktreeRecord | undefined;
+  writeWorktreeRecord(checkoutId: string, record: WorktreeRecord): void;
+  deleteWorktreeRecord(checkoutId: string): void;
   bindRuntime(input: BindRuntimeInput): OrchestrationRuntime;
   transitionRuntime(
     runtimeId: string,

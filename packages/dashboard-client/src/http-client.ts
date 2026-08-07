@@ -141,6 +141,93 @@ export class DashboardHttpClient {
     return this.request('/api/usage');
   }
 
+  async createProject(command: Record<string, unknown>): Promise<unknown> {
+    return this.request('/api/projects', {
+      method: 'POST',
+      body: JSON.stringify(command),
+    });
+  }
+
+  async adoptProject(command: Record<string, unknown>): Promise<unknown> {
+    return this.request('/api/projects/adopt', {
+      method: 'POST',
+      body: JSON.stringify(command),
+    });
+  }
+
+  async createThread(
+    projectId: string,
+    command: Record<string, unknown>,
+  ): Promise<unknown> {
+    return this.request(
+      `/api/projects/${encodeURIComponent(projectId)}/threads`,
+      {
+        method: 'POST',
+        body: JSON.stringify(command),
+      },
+    );
+  }
+
+  async retryThread(
+    threadId: string,
+    command: Record<string, unknown>,
+  ): Promise<unknown> {
+    return this.request(`/api/threads/${encodeURIComponent(threadId)}/retry`, {
+      method: 'POST',
+      body: JSON.stringify(command),
+    });
+  }
+
+  async cancelRun(runId: string, commandId: string): Promise<unknown> {
+    return this.request(`/api/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ commandId }),
+    });
+  }
+
+  async reviewCheckout(checkoutId: string): Promise<unknown> {
+    return this.request(
+      `/api/checkouts/${encodeURIComponent(checkoutId)}/review`,
+      {
+        method: 'POST',
+        body: '{}',
+      },
+    );
+  }
+
+  async mergeCheckout(checkoutId: string, commandId: string): Promise<unknown> {
+    return this.request(
+      `/api/checkouts/${encodeURIComponent(checkoutId)}/merge`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ commandId }),
+      },
+    );
+  }
+
+  async retireCheckout(
+    checkoutId: string,
+    commandId: string,
+  ): Promise<unknown> {
+    return this.request(
+      `/api/checkouts/${encodeURIComponent(checkoutId)}/retire`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ commandId }),
+      },
+    );
+  }
+
+  async archiveThread(threadId: string, commandId: string): Promise<unknown> {
+    return this.request(
+      `/api/threads/${encodeURIComponent(threadId)}/archive`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ commandId }),
+      },
+    );
+  }
+
   async sendCommand(
     runtimeId: string,
     command: Record<string, unknown>,

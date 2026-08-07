@@ -15,6 +15,7 @@ import type { SeshAdapter } from '../sesh.js';
 import type { SessionIndex } from '../session-index.js';
 import type { UsageProvider } from '../usage.js';
 import { NotificationService } from './notification-service.js';
+import type { OrchestrationService } from './orchestration-service.js';
 import { RuntimeService } from './runtime-service.js';
 import { SessionService } from './session-service.js';
 import { UploadService } from './upload-service.js';
@@ -41,6 +42,7 @@ export interface DashboardApplicationOptions {
   stateDir: string;
   eventStream?: DashboardEventStream;
   onChange?: () => void;
+  orchestration?: OrchestrationService;
 }
 
 /** Framework-independent application boundary for the dashboard daemon. */
@@ -57,6 +59,7 @@ export class DashboardApplication {
   private readonly metadata: MetadataStore;
   readonly orchestration: SqliteOrchestrationRepository;
   private readonly sessionIndex: SessionIndex;
+  readonly orchestrationService?: OrchestrationService;
 
   constructor(options: DashboardApplicationOptions) {
     this.registry = options.registry;
@@ -64,6 +67,7 @@ export class DashboardApplication {
     this.metadata = options.metadata;
     this.orchestration = options.metadata.orchestration;
     this.sessionIndex = options.sessions;
+    this.orchestrationService = options.orchestration;
     this.eventStream = options.eventStream ?? new DashboardEventStream(256);
     this.runtime = new RuntimeService(
       options.registry,
@@ -145,6 +149,7 @@ export class DashboardApplication {
   }
 
   onRegistryChange(change: RegistryChange): ApplicationChange {
+    this.orchestrationService?.onRegistryChange(change);
     if (this.notifications.shouldPersistRuntime(change))
       this.metadata.saveRuntime(change.snapshot);
     this.manager.onRegistryChange(change);
@@ -179,6 +184,7 @@ export class DashboardApplication {
   }
 
   async close(): Promise<void> {
+    await this.orchestrationService?.stop();
     await this.uploads.close();
     this.sessionIndex.close();
     this.eventStream.close();

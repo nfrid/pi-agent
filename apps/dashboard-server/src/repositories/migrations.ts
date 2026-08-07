@@ -163,6 +163,12 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
           finished_at INTEGER,
           error TEXT
         );
+        CREATE TABLE IF NOT EXISTS worktree_record (
+          id TEXT PRIMARY KEY,
+          checkout_id TEXT NOT NULL UNIQUE REFERENCES checkout(id),
+          record_json TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS orchestration_runtime (
           runtime_id TEXT PRIMARY KEY,
           pi_session_id TEXT NOT NULL,
@@ -236,4 +242,15 @@ export function runMigrations(
       throw error;
     }
   }
+  // This table was added to the durable foundation without changing the
+  // public migration numbering. The postcondition also upgrades databases
+  // that already recorded version 3 before worktree persistence existed.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS worktree_record (
+      id TEXT PRIMARY KEY,
+      checkout_id TEXT NOT NULL UNIQUE REFERENCES checkout(id),
+      record_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
 }

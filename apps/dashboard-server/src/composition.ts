@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { AgentRuntimeProvider } from '@pi-dashboard/protocol';
 import type { DashboardApplication } from './application/dashboard-application.js';
+import type { OrchestrationService } from './application/orchestration-service.js';
 import type { DashboardEventStream } from './event-stream.js';
 import type { MetadataStore } from './metadata.js';
 import type { PushSender } from './push.js';
@@ -61,6 +62,7 @@ export interface DashboardDependencies {
   readonly eventStream: DashboardEventStream;
   readonly registry: RuntimeRegistry;
   readonly manager: RuntimeManager;
+  readonly orchestrationService: OrchestrationService;
   readonly application: DashboardApplication;
 }
 

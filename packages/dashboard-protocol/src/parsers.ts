@@ -319,6 +319,16 @@ export function parseStartRuntimeRequest(value: unknown): StartRuntimeRequest {
       !nonEmptyString(value.initialPrompt, 100_000)
     )
       throw new Error('Invalid initial prompt.');
+    if (
+      value.runtimeId !== undefined &&
+      !safeIdentifier(value.runtimeId, MAX_ID)
+    )
+      throw new Error('Invalid runtimeId.');
+    if (
+      value.checkoutCwd !== undefined &&
+      !safeIdentifier(value.checkoutCwd, MAX_PATH)
+    )
+      throw new Error('Invalid checkout cwd.');
     if (value.sessionId !== undefined && !safeIdentifier(value.sessionId, 256))
       throw new Error('Invalid sessionId.');
     if (value.name !== undefined && !safeIdentifier(value.name, 120))
@@ -327,6 +337,15 @@ export function parseStartRuntimeRequest(value: unknown): StartRuntimeRequest {
   }
   const input = value as StartRuntimeRequest;
   const result: StartRuntimeRequest = { workspaceId: input.workspaceId };
+  if (input.runtimeId !== undefined && !safeIdentifier(input.runtimeId, MAX_ID))
+    throw new Error('Invalid runtimeId.');
+  if (
+    input.checkoutCwd !== undefined &&
+    !safeIdentifier(input.checkoutCwd, MAX_PATH)
+  )
+    throw new Error('Invalid checkout cwd.');
+  if (input.runtimeId) result.runtimeId = input.runtimeId;
+  if (input.checkoutCwd) result.checkoutCwd = input.checkoutCwd;
   if (input.sessionId !== undefined && !safeIdentifier(input.sessionId, 256))
     throw new Error('Invalid sessionId.');
   if (input.name !== undefined && !safeIdentifier(input.name, 120))

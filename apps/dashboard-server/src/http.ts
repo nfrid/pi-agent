@@ -272,6 +272,54 @@ class DashboardServerImpl implements DashboardServer {
       vapidPublicKey: () => process.env.PI_DASHBOARD_VAPID_PUBLIC_KEY ?? null,
       handleSse: (request, response, url) =>
         this.handleSse(request, response, url),
+      adoptProject: (command) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.adoptProject(
+          command as Parameters<typeof service.adoptProject>[0],
+        );
+      },
+      createThread: (projectId, command) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.createThread(
+          projectId,
+          command as Parameters<typeof service.createThread>[1],
+        );
+      },
+      retryRun: (threadId, command) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.retryRun(
+          threadId,
+          command as Parameters<typeof service.retryRun>[1],
+        );
+      },
+      cancelRun: (runId, commandId) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.cancelRun(runId, commandId);
+      },
+      reviewCheckout: (checkoutId) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.reviewCheckout(checkoutId);
+      },
+      mergeCheckout: (checkoutId, commandId) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.mergeCheckout(checkoutId, commandId);
+      },
+      retireCheckout: (checkoutId, commandId) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.retireCheckout(checkoutId, commandId);
+      },
+      archiveThread: (threadId, commandId) => {
+        const service = this.application.orchestrationService;
+        if (!service) throw new Error('Orchestration is unavailable.');
+        return service.archiveThread(threadId, commandId);
+      },
     };
   }
 
@@ -327,6 +375,7 @@ class DashboardServerImpl implements DashboardServer {
       }
       await this.refreshWorkspaces();
       await this.sessions.start(this.workspaces);
+      await this.application.orchestrationService?.start();
       if (!this.pushConfigured)
         this.push = await createPushSender(this.metadata);
       this.application.setPush(this.push);
@@ -387,6 +436,7 @@ class DashboardServerImpl implements DashboardServer {
 
   private async stopInternal(): Promise<void> {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    await this.application.orchestrationService?.stop();
     this.heartbeatTimer = undefined;
     this.sessions.close();
     this.eventStream.close();
@@ -416,6 +466,7 @@ class DashboardServerImpl implements DashboardServer {
 
   private async cleanupFailedStart(): Promise<void> {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    await this.application.orchestrationService?.stop();
     this.heartbeatTimer = undefined;
     this.sessions.close();
     this.eventStream.close();

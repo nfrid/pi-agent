@@ -19,6 +19,7 @@
     "@pi-dashboard/extension-contributions": "workspace:*",
     "@pi-dashboard/domain": "workspace:*",
     "@pi-dashboard/protocol": "workspace:*",
+    "@pi-dashboard/worktree-manager": "workspace:*",
     "fastify": "5.11.2",
     "typebox": "1.3.7",
     "web-push": "^3.6.7",

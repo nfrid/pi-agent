@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { createDaemon } from './create-daemon.js';
 
 export * from './application/dashboard-application.js';
+export * from './application/orchestration-service.js';
 export type {
   DashboardConfiguration,
   DashboardDependencies,

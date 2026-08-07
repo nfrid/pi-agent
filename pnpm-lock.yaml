@@ -66,6 +66,9 @@ importers:
       '@pi-dashboard/protocol':
         specifier: workspace:*
         version: link:../../packages/dashboard-protocol
+      '@pi-dashboard/worktree-manager':
+        specifier: workspace:*
+        version: link:../../packages/worktree-manager
       fastify:
         specifier: 5.11.2
         version: 5.11.2

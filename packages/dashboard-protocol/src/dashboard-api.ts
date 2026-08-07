@@ -1,6 +1,28 @@
 /** Contracts exposed by the dashboard daemon to HTTP, SSE, and browsers. */
 
 export type {
+  ArchiveThreadCommand,
+  CancelCommand,
+  CheckoutActionCommand,
+  CheckoutReviewCommand,
+  CommandId,
+  ProjectAdoptCommand,
+  ProjectCreateCommand,
+  RetryCommand,
+  ThreadCreateCommand,
+} from './orchestration-commands.js';
+export {
+  ArchiveThreadCommandSchema,
+  CancelCommandSchema,
+  CheckoutActionCommandSchema,
+  CheckoutReviewCommandSchema,
+  CommandIdSchema,
+  ProjectAdoptCommandSchema,
+  ProjectCreateCommandSchema,
+  RetryCommandSchema,
+  ThreadCreateCommandSchema,
+} from './orchestration-commands.js';
+export type {
   Checkout,
   CheckoutKind,
   CheckoutStatus,
@@ -39,14 +61,30 @@ export {
   ThreadSummarySchema,
 } from './orchestration-contracts.js';
 export {
+  parseArchiveThreadCommand,
+  parseCancelCommand,
   parseCheckout,
+  parseCheckoutActionCommand,
+  parseCheckoutReviewCommand,
   parseProject,
+  parseProjectAdoptCommand,
+  parseProjectCreateCommand,
+  parseRetryCommand,
   parseRun,
   parseThread,
+  parseThreadCreateCommand,
+  tryParseArchiveThreadCommand,
+  tryParseCancelCommand,
   tryParseCheckout,
+  tryParseCheckoutActionCommand,
+  tryParseCheckoutReviewCommand,
   tryParseProject,
+  tryParseProjectAdoptCommand,
+  tryParseProjectCreateCommand,
+  tryParseRetryCommand,
   tryParseRun,
   tryParseThread,
+  tryParseThreadCreateCommand,
 } from './orchestration-parsers.js';
 export {
   parseBrowserSnapshot,

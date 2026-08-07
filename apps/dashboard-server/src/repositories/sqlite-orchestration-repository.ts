@@ -20,6 +20,7 @@ import type {
   Thread,
   ThreadSummary,
 } from '@pi-dashboard/protocol';
+import type { WorktreeRecord } from '@pi-dashboard/worktree-manager';
 import type {
   BindRuntimeInput,
   CheckoutPatch,
@@ -551,6 +552,46 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     });
   }
 
+  claimQueuedRun(id: string, now = Date.now()): Run | undefined {
+    return this.withTransaction(() => {
+      const current = this.getRun(id);
+      if (current?.status !== 'queued') return undefined;
+      const project = this.db
+        .prepare(
+          `SELECT p.max_parallel_runs AS max_parallel_runs, t.project_id AS project_id
+           FROM thread t JOIN project p ON p.id=t.project_id
+           WHERE t.id=?`,
+        )
+        .get(current.threadId) as Record<string, unknown> | undefined;
+      if (!project || String(project.project_id) === '') return undefined;
+      const active = this.db
+        .prepare(
+          `SELECT count(*) AS count FROM orchestration_run r
+           JOIN thread t ON t.id=r.thread_id
+           WHERE t.project_id=? AND r.status IN ('preparing','starting','running','waiting')`,
+        )
+        .get(String(project.project_id)) as Record<string, unknown>;
+      if (Number(active.count) >= Number(project.max_parallel_runs))
+        return undefined;
+      try {
+        const result = this.db
+          .prepare(
+            `UPDATE orchestration_run SET status='preparing',started_at=COALESCE(started_at,?)
+             WHERE id=? AND status='queued'`,
+          )
+          .run(now, id);
+        if (Number(result.changes) !== 1) return undefined;
+      } catch (error) {
+        // The partial unique writer index is the second concurrency guard. A
+        // queued main-checkout writer remains queued rather than falling back.
+        if (String(error).toLowerCase().includes('unique')) return undefined;
+        throw error;
+      }
+      this.syncThreadStatus(current.threadId, 'preparing', now);
+      return this.getRun(id);
+    });
+  }
+
   transitionThread(
     id: string,
     status: Thread['status'],
@@ -653,10 +694,79 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     };
   }
 
+  recordCommandReceipt(receipt: CommandReceipt): void {
+    this.withTransaction(() => this.insertReceipt(receipt));
+  }
+
+  setRunRuntime(id: string, runtimeId: string): Run {
+    return this.withTransaction(() => {
+      const result = this.db
+        .prepare('UPDATE orchestration_run SET runtime_id=? WHERE id=?')
+        .run(runtimeId, id);
+      if (Number(result.changes) !== 1)
+        throw new Error(`Run ${id} does not exist.`);
+      return this.getRun(id) as Run;
+    });
+  }
+
+  setRunError(id: string, error: string): Run {
+    return this.withTransaction(() => {
+      const result = this.db
+        .prepare('UPDATE orchestration_run SET error=? WHERE id=?')
+        .run(error, id);
+      if (Number(result.changes) !== 1)
+        throw new Error(`Run ${id} does not exist.`);
+      return this.getRun(id) as Run;
+    });
+  }
+
+  getRunByRuntimeId(runtimeId: string): Run | undefined {
+    const row = this.db
+      .prepare(
+        'SELECT * FROM orchestration_run WHERE runtime_id=? ORDER BY attempt DESC LIMIT 1',
+      )
+      .get(runtimeId) as Record<string, unknown> | undefined;
+    return row === undefined ? undefined : runFromRow(row);
+  }
+
+  loadWorktreeRecord(checkoutId: string): WorktreeRecord | undefined {
+    const row = this.db
+      .prepare('SELECT record_json FROM worktree_record WHERE checkout_id=?')
+      .get(checkoutId) as Record<string, unknown> | undefined;
+    return row === undefined
+      ? undefined
+      : (JSON.parse(String(row.record_json)) as WorktreeRecord);
+  }
+
+  writeWorktreeRecord(checkoutId: string, record: WorktreeRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO worktree_record (id,checkout_id,record_json,updated_at)
+         VALUES (?,?,?,?)
+         ON CONFLICT(checkout_id) DO UPDATE SET id=excluded.id,record_json=excluded.record_json,updated_at=excluded.updated_at`,
+      )
+      .run(record.id, checkoutId, JSON.stringify(record), Date.now());
+  }
+
+  deleteWorktreeRecord(checkoutId: string): void {
+    this.db
+      .prepare('DELETE FROM worktree_record WHERE checkout_id=?')
+      .run(checkoutId);
+  }
+
   bindRuntime(input: BindRuntimeInput): OrchestrationRuntime {
     return this.withTransaction(() => {
       const run = this.getRun(input.runId);
       if (!run) throw new Error(`Run ${input.runId} does not exist.`);
+      const existing = this.getRuntime(input.runtimeId);
+      if (existing) {
+        if (
+          existing.runId !== input.runId ||
+          existing.piSessionId !== input.piSessionId
+        )
+          throw new Error(`Runtime ${input.runtimeId} is already bound.`);
+        return existing;
+      }
       const now = input.createdAt ?? input.updatedAt ?? Date.now();
       const runtime: OrchestrationRuntime = {
         runtimeId: input.runtimeId,

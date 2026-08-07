@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { DashboardApplication } from './application/dashboard-application.js';
+import { OrchestrationService } from './application/orchestration-service.js';
 import {
   ChangeRelay,
   type DashboardConfiguration,
@@ -135,6 +136,13 @@ function dependencies(
     metadata,
     config.socketPath,
   );
+  const orchestrationService = new OrchestrationService({
+    repository: metadata.orchestration,
+    manager,
+    registry,
+    workspaces: () => manager.activeWorkspaces(),
+    onChange: () => applicationChanges.publish(undefined),
+  });
   const application = new DashboardApplication({
     registry,
     manager,
@@ -145,6 +153,7 @@ function dependencies(
     push,
     stateDir: config.stateDir,
     eventStream,
+    orchestration: orchestrationService,
     onChange: () => applicationChanges.publish(undefined),
   });
   return {
@@ -162,6 +171,7 @@ function dependencies(
       eventStream,
       registry,
       manager,
+      orchestrationService,
       application,
     },
     registryChanges,

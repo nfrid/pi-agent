@@ -160,6 +160,18 @@ export class RuntimeManager {
     return [...this.workspaces.values()];
   }
 
+  async launchInCheckout(input: {
+    workspaceId: string;
+    checkoutCwd: string;
+    runtimeId?: string;
+    sessionId?: string;
+    name?: string;
+    initialPrompt?: string;
+    model?: { provider: string; model: string; thinking?: string };
+  }): Promise<{ runtimeId: string; placement?: ManagedPlacement }> {
+    return this.launch(input);
+  }
+
   async launch(
     input: unknown,
   ): Promise<{ runtimeId: string; placement?: ManagedPlacement }> {
@@ -167,7 +179,12 @@ export class RuntimeManager {
     const workspace = this.workspaces.get(request.workspaceId);
     if (!workspace)
       throw new Error('Workspace is not in the current Sesh catalogue.');
-    const cwd = realpathSync.native(workspace.canonicalPath);
+    // The discovered workspace remains the tmux/session launch anchor. A
+    // durable orchestration run may supply an isolated checkout cwd; never
+    // silently substitute the shared project checkout when it does not.
+    const cwd = realpathSync.native(
+      request.checkoutCwd ?? workspace.canonicalPath,
+    );
     const conflict = this.registry
       .snapshots()
       .find(
@@ -213,7 +230,14 @@ export class RuntimeManager {
         throw error;
       }
     }
-    const runtimeId = `runtime-${randomUUID()}`;
+    const runtimeId = request.runtimeId ?? `runtime-${randomUUID()}`;
+    const registered = (
+      this.registry as RuntimeRegistry & {
+        get?: (id: string) => unknown;
+      }
+    ).get?.(runtimeId);
+    if (this.launches.has(runtimeId) || registered)
+      throw new Error('This runtime identity is already active.');
     const launchToken = randomUUID();
     const identityToken = randomUUID();
     this.tokens.set(launchToken, { runtimeId, expiresAt: Date.now() + 60_000 });
@@ -301,6 +325,35 @@ export class RuntimeManager {
         snapshot.ownership === 'managed' &&
         this.launches.has(runtimeId),
     );
+  }
+
+  /** Reattach a restored managed placement after a daemon restart. */
+  async recover(runtimeId: string): Promise<boolean> {
+    const launch = this.launches.get(runtimeId);
+    const location = launch?.binding.location;
+    if (!launch || !location) return false;
+    try {
+      launch.binding = await this.provider.attach({ runtimeId, location });
+      launch.placement =
+        placementFromBinding(launch.binding) ?? launch.placement;
+      return true;
+    } catch {
+      // A restored placement that cannot be attached is unrecoverable. Remove
+      // the managed side effect rather than letting reconciliation relaunch a
+      // second runtime against an unknown tmux window.
+      await this.provider.stop(launch.binding).catch(() => undefined);
+      if (launch.metadataRecorded)
+        this.metadata.markManagedStopped?.(runtimeId);
+      this.launches.delete(runtimeId);
+      return false;
+    }
+  }
+
+  /** Used by durable orchestration when hello arrives after a restart. */
+  sendInitialPromptOnce(runtimeId: string, text: string): void {
+    if (!this.initialPrompts.has(runtimeId))
+      this.initialPrompts.set(runtimeId, { text, sent: false });
+    this.dispatchInitialPrompt(runtimeId);
   }
 
   async restart(

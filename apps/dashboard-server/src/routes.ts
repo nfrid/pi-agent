@@ -1,6 +1,17 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
-import type { BrowserSnapshot, WorkspaceTarget } from '@pi-dashboard/protocol';
+import {
+  ArchiveThreadCommandSchema,
+  type BrowserSnapshot,
+  CancelCommandSchema,
+  CheckoutActionCommandSchema,
+  CheckoutReviewCommandSchema,
+  ProjectAdoptCommandSchema,
+  ProjectCreateCommandSchema,
+  RetryCommandSchema,
+  ThreadCreateCommandSchema,
+  type WorkspaceTarget,
+} from '@pi-dashboard/protocol';
 import type {
   FastifyInstance,
   FastifyPluginAsync,
@@ -92,6 +103,14 @@ export interface DashboardRouteContext {
   pushSubscribe(body: unknown): void;
   vapidPublicKey(): string | null;
   handleSse(request: IncomingMessage, response: ServerResponse, url: URL): void;
+  adoptProject?(command: unknown): Promise<unknown>;
+  createThread?(projectId: string, command: unknown): Promise<unknown>;
+  retryRun?(threadId: string, command: unknown): Promise<unknown>;
+  cancelRun?(runId: string, commandId: string): Promise<unknown>;
+  reviewCheckout?(checkoutId: string): Promise<unknown>;
+  mergeCheckout?(checkoutId: string, commandId: string): Promise<unknown>;
+  retireCheckout?(checkoutId: string, commandId: string): Promise<unknown>;
+  archiveThread?(threadId: string, commandId: string): Promise<unknown>;
 }
 
 function requestUrl(request: FastifyRequest): URL {
@@ -103,7 +122,11 @@ function requestUrl(request: FastifyRequest): URL {
 
 function errorStatus(error: unknown): number {
   const code = (error as { code?: string }).code;
-  return code === 'shared-working-directory' || code === 'active-session'
+  return code === 'shared-working-directory' ||
+    code === 'active-session' ||
+    code === 'merge-conflict' ||
+    code === 'restart-precondition' ||
+    code === 'idempotency-conflict'
     ? 409
     : 400;
 }
@@ -113,6 +136,13 @@ function sendError(reply: FastifyReply, error: unknown): FastifyReply {
     error: error instanceof Error ? error.message : String(error),
     code: (error as { code?: string }).code,
   });
+}
+
+function requireOperation<T extends (...args: never[]) => unknown>(
+  operation: T | undefined,
+): T {
+  if (!operation) throw new Error('Orchestration is unavailable.');
+  return operation;
 }
 
 async function multipartPayload(
@@ -249,6 +279,143 @@ export const dashboardRoutes: FastifyPluginAsync<{
   app.get('/api/push/vapid-public-key', async () => ({
     publicKey: context.vapidPublicKey(),
   }));
+
+  const projectBody = { schema: { body: ProjectCreateCommandSchema } };
+  const adoptBody = { schema: { body: ProjectAdoptCommandSchema } };
+  app.post('/api/projects', projectBody, async (request, reply) => {
+    try {
+      return reply
+        .code(201)
+        .send(await requireOperation(context.adoptProject)(request.body));
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+  app.post('/api/projects/adopt', adoptBody, async (request, reply) => {
+    try {
+      return reply
+        .code(201)
+        .send(await requireOperation(context.adoptProject)(request.body));
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
+  app.post<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/threads',
+    { schema: { body: ThreadCreateCommandSchema } },
+    async (request, reply) => {
+      try {
+        return reply
+          .code(202)
+          .send(
+            await requireOperation(context.createThread)(
+              request.params.projectId,
+              request.body,
+            ),
+          );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{ Params: { threadId: string } }>(
+    '/api/threads/:threadId/retry',
+    { schema: { body: RetryCommandSchema } },
+    async (request, reply) => {
+      try {
+        return reply
+          .code(202)
+          .send(
+            await requireOperation(context.retryRun)(
+              request.params.threadId,
+              request.body,
+            ),
+          );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  for (const route of ['/cancel', '/interrupt'] as const) {
+    app.post<{ Params: { runId: string } }>(
+      `/api/runs/:runId${route}`,
+      { schema: { body: CancelCommandSchema } },
+      async (request, reply) => {
+        try {
+          return reply
+            .code(202)
+            .send(
+              await requireOperation(context.cancelRun)(
+                request.params.runId,
+                (request.body as { commandId: string }).commandId,
+              ),
+            );
+        } catch (error) {
+          return sendError(reply, error);
+        }
+      },
+    );
+  }
+  app.post<{ Params: { checkoutId: string } }>(
+    '/api/checkouts/:checkoutId/review',
+    {
+      preValidation: async (request) => {
+        if (request.body === undefined) request.body = {};
+      },
+      schema: { body: CheckoutReviewCommandSchema },
+    },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.reviewCheckout)(
+          request.params.checkoutId,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{ Params: { checkoutId: string } }>(
+    '/api/checkouts/:checkoutId/merge',
+    { schema: { body: CheckoutActionCommandSchema } },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.mergeCheckout)(
+          request.params.checkoutId,
+          (request.body as { commandId: string }).commandId,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{ Params: { checkoutId: string } }>(
+    '/api/checkouts/:checkoutId/retire',
+    { schema: { body: CheckoutActionCommandSchema } },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.retireCheckout)(
+          request.params.checkoutId,
+          (request.body as { commandId: string }).commandId,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.post<{ Params: { threadId: string } }>(
+    '/api/threads/:threadId/archive',
+    { schema: { body: ArchiveThreadCommandSchema } },
+    async (request, reply) => {
+      try {
+        return await requireOperation(context.archiveThread)(
+          request.params.threadId,
+          (request.body as { commandId: string }).commandId,
+        );
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
 
   app.get<{ Params: { id: string } }>(
     '/api/sessions/:id',

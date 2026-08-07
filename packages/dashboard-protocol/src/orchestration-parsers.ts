@@ -1,4 +1,22 @@
 import {
+  type ArchiveThreadCommand,
+  ArchiveThreadCommandSchema,
+  type CancelCommand,
+  CancelCommandSchema,
+  type CheckoutActionCommand,
+  CheckoutActionCommandSchema,
+  type CheckoutReviewCommand,
+  CheckoutReviewCommandSchema,
+  type ProjectAdoptCommand,
+  ProjectAdoptCommandSchema,
+  type ProjectCreateCommand,
+  ProjectCreateCommandSchema,
+  type RetryCommand,
+  RetryCommandSchema,
+  type ThreadCreateCommand,
+  ThreadCreateCommandSchema,
+} from './orchestration-commands.js';
+import {
   type Checkout,
   CheckoutSchema,
   type Project,
@@ -34,3 +52,58 @@ export function parseRun(value: unknown): Run {
 export function tryParseRun(value: unknown): Run | undefined {
   return tryParseSchema(RunSchema, value);
 }
+
+export const parseProjectCreateCommand = (
+  value: unknown,
+): ProjectCreateCommand =>
+  parseSchema(ProjectCreateCommandSchema, value, 'project create command');
+export const tryParseProjectCreateCommand = (
+  value: unknown,
+): ProjectCreateCommand | undefined =>
+  tryParseSchema(ProjectCreateCommandSchema, value);
+export const parseProjectAdoptCommand = (value: unknown): ProjectAdoptCommand =>
+  parseSchema(ProjectAdoptCommandSchema, value, 'project adopt command');
+export const tryParseProjectAdoptCommand = (
+  value: unknown,
+): ProjectAdoptCommand | undefined =>
+  tryParseSchema(ProjectAdoptCommandSchema, value);
+export const parseThreadCreateCommand = (value: unknown): ThreadCreateCommand =>
+  parseSchema(ThreadCreateCommandSchema, value, 'thread create command');
+export const tryParseThreadCreateCommand = (
+  value: unknown,
+): ThreadCreateCommand | undefined =>
+  tryParseSchema(ThreadCreateCommandSchema, value);
+export const parseRetryCommand = (value: unknown): RetryCommand =>
+  parseSchema(RetryCommandSchema, value, 'retry command');
+export const tryParseRetryCommand = (
+  value: unknown,
+): RetryCommand | undefined => tryParseSchema(RetryCommandSchema, value);
+export const parseCancelCommand = (value: unknown): CancelCommand =>
+  parseSchema(CancelCommandSchema, value, 'cancel command');
+export const tryParseCancelCommand = (
+  value: unknown,
+): CancelCommand | undefined => tryParseSchema(CancelCommandSchema, value);
+export const parseCheckoutActionCommand = (
+  value: unknown,
+): CheckoutActionCommand =>
+  parseSchema(CheckoutActionCommandSchema, value, 'checkout command');
+export const tryParseCheckoutActionCommand = (
+  value: unknown,
+): CheckoutActionCommand | undefined =>
+  tryParseSchema(CheckoutActionCommandSchema, value);
+export const parseCheckoutReviewCommand = (
+  value: unknown,
+): CheckoutReviewCommand =>
+  parseSchema(CheckoutReviewCommandSchema, value, 'checkout review command');
+export const tryParseCheckoutReviewCommand = (
+  value: unknown,
+): CheckoutReviewCommand | undefined =>
+  tryParseSchema(CheckoutReviewCommandSchema, value);
+export const parseArchiveThreadCommand = (
+  value: unknown,
+): ArchiveThreadCommand =>
+  parseSchema(ArchiveThreadCommandSchema, value, 'thread archive command');
+export const tryParseArchiveThreadCommand = (
+  value: unknown,
+): ArchiveThreadCommand | undefined =>
+  tryParseSchema(ArchiveThreadCommandSchema, value);
