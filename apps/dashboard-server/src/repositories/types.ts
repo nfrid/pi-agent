@@ -34,6 +34,8 @@ export interface ManagedLaunchRecord {
     tmuxPaneId: string;
     displayTarget: string;
   };
+  /** Managed Pi tool capability; old rows are treated as writable. */
+  mode: 'read' | 'write';
   identityTokenHash: string;
   launchTokenHash: string;
   launchConsumed: boolean;
@@ -55,6 +57,7 @@ export interface MetadataRepository {
       identityToken: string;
       launchToken: string;
       launchConsumed?: boolean;
+      mode?: 'read' | 'write';
     },
   ): void;
   managedLaunches(): ManagedLaunchRecord[];

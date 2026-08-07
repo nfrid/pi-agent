@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { RuntimeSnapshot, WorkspaceTarget } from '@pi-dashboard/protocol';
@@ -327,6 +327,70 @@ describe('managed runtime launch safety', () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(sendCommand).toHaveBeenCalledOnce();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('preserves restored read mode and isolated cwd when restarting', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-restart-'));
+    const checkout = path.join(root, 'isolated-checkout');
+    await mkdir(checkout, { recursive: true });
+    const sessionFile = path.join(root, 'session.jsonl');
+    await writeFile(sessionFile, '{}\n');
+    const runtimeId = 'runtime-restored-read';
+    const snapshot = {
+      ...runtime('session-restored'),
+      runtimeId,
+      cwd: checkout,
+    };
+    const start = vi.fn(async ({ runtimeId: nextId }: { runtimeId: string }) =>
+      binding(nextId),
+    );
+    const manager = new RuntimeManager(
+      {
+        get: (id: string) => (id === runtimeId ? snapshot : undefined),
+        snapshots: () => [],
+        isOnline: () => false,
+        forget: vi.fn(),
+      } as never,
+      { start, stop: vi.fn().mockResolvedValue(undefined) } as never,
+      {
+        get: (id: string) =>
+          id === snapshot.session.id
+            ? { id, file: sessionFile, cwd: checkout }
+            : undefined,
+      } as never,
+      {
+        managedLaunches: () => [
+          {
+            runtimeId,
+            workspaceId: 'workspace-1',
+            placement: {
+              tmuxSession: 'sesh',
+              tmuxWindowId: '@1',
+              tmuxPaneId: '%1',
+              displayTarget: 'sesh:@1',
+            },
+            mode: 'read',
+            identityTokenHash: 'identity-hash',
+            launchTokenHash: 'launch-hash',
+            launchConsumed: true,
+            launchedAt: 1,
+          },
+        ],
+        markManagedStopped: vi.fn(),
+        recordManagedLaunch: vi.fn(),
+      } as never,
+      '/tmp/bridge.sock',
+    );
+    manager.setWorkspaces([workspace(root)]);
+
+    await manager.restart(runtimeId);
+
+    expect(start).toHaveBeenCalledOnce();
+    expect(start.mock.calls[0]?.[0]).toMatchObject({
+      cwd: await realpath(checkout),
+      mode: 'read',
+    });
     await rm(root, { recursive: true, force: true });
   });
 

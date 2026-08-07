@@ -47,7 +47,8 @@ const BASE_SCHEMA = `
     stopped_at INTEGER,
     identity_token_hash TEXT,
     launch_token_hash TEXT,
-    launch_consumed INTEGER NOT NULL DEFAULT 0
+    launch_consumed INTEGER NOT NULL DEFAULT 0,
+    mode TEXT NOT NULL DEFAULT 'write' CHECK (mode IN ('read','write'))
   );
   CREATE TABLE IF NOT EXISTS interaction (
     id TEXT PRIMARY KEY,
@@ -249,6 +250,17 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
         CREATE UNIQUE INDEX checkout_project_branch_unique
           ON checkout(project_id,branch) WHERE branch IS NOT NULL;
       `);
+    },
+  },
+  {
+    version: 6,
+    name: 'managed-launch-mode',
+    up(db) {
+      const existing = columns(db, 'managed_launch');
+      if (!existing.has('mode'))
+        db.exec(
+          "ALTER TABLE managed_launch ADD COLUMN mode TEXT NOT NULL DEFAULT 'write' CHECK (mode IN ('read','write'))",
+        );
     },
   },
 ];

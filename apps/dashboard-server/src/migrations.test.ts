@@ -32,6 +32,7 @@ it('applies numbered dashboard migrations idempotently', async () => {
         'identity_token_hash',
         'launch_token_hash',
         'launch_consumed',
+        'mode',
       ]),
     );
   } finally {
@@ -42,8 +43,44 @@ it('applies numbered dashboard migrations idempotently', async () => {
 describe('migration metadata', () => {
   it('uses stable ascending migration numbers', () => {
     expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4, 5,
+      1, 2, 3, 4, 5, 6,
     ]);
+  });
+
+  it('adds writable mode to an old managed-launch table', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      db.exec(`
+        CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL);
+        INSERT INTO schema_migrations VALUES
+          (1,'base-dashboard-metadata',1),
+          (2,'managed-launch-credentials',2),
+          (3,'durable-orchestration-foundation',3),
+          (4,'durable-worktree-records-and-project-identity',4),
+          (5,'project-scoped-checkout-branches',5);
+        CREATE TABLE managed_launch (
+          runtime_id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          tmux_session TEXT NOT NULL,
+          tmux_window_id TEXT NOT NULL,
+          tmux_pane_id TEXT NOT NULL,
+          launched_at INTEGER NOT NULL,
+          stopped_at INTEGER,
+          identity_token_hash TEXT,
+          launch_token_hash TEXT,
+          launch_consumed INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT INTO managed_launch
+          (runtime_id,workspace_id,tmux_session,tmux_window_id,tmux_pane_id,launched_at)
+          VALUES ('old-runtime','workspace','sesh','@1','%1',1);
+      `);
+      runMigrations(db);
+      expect(db.prepare('SELECT mode FROM managed_launch').get()).toEqual({
+        mode: 'write',
+      });
+    } finally {
+      db.close();
+    }
   });
 
   it('upgrades a database that already has the phase-one migrations', async () => {

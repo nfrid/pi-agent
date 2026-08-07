@@ -82,6 +82,7 @@ export class MetadataStore {
       identityToken: string;
       launchToken: string;
       launchConsumed?: boolean;
+      mode?: 'read' | 'write';
     },
   ): void {
     this.metadata.recordManagedLaunch(

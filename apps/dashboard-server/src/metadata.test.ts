@@ -31,6 +31,42 @@ describe('dashboard metadata wire boundaries', () => {
     }
   });
 
+  it('persists managed launch mode and defaults omitted mode to write', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-metadata-'),
+    );
+    const store = new MetadataStore(path.join(root, 'dashboard.sqlite'));
+    try {
+      const placement = {
+        tmuxSession: 'sesh',
+        tmuxWindowId: '@1',
+        tmuxPaneId: '%1',
+      };
+      store.recordManagedLaunch('read-runtime', 'workspace', placement, {
+        identityToken: 'identity-read',
+        launchToken: 'launch-read',
+        mode: 'read',
+      });
+      store.recordManagedLaunch('write-runtime', 'workspace', {
+        ...placement,
+        tmuxWindowId: '@2',
+        tmuxPaneId: '%2',
+      }, {
+        identityToken: 'identity-write',
+        launchToken: 'launch-write',
+      });
+      expect(store.managedLaunches()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ runtimeId: 'read-runtime', mode: 'read' }),
+          expect.objectContaining({ runtimeId: 'write-runtime', mode: 'write' }),
+        ]),
+      );
+    } finally {
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('omits nullable SQLite notification fields from browser snapshots', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-metadata-'),

@@ -108,7 +108,7 @@ export class RuntimeManager {
       binding: bindingFromPlacement(record.runtimeId, record.placement),
       placement: record.placement,
       // Older persisted launches have no mode provenance and remain writable.
-      mode: 'write',
+      mode: record.mode ?? 'write',
       metadataRecorded: true,
       createdAt: record.launchedAt,
     };
@@ -293,6 +293,7 @@ export class RuntimeManager {
           identityToken,
           launchToken,
           launchConsumed: !this.tokens.has(launchToken),
+          mode: request.mode ?? 'write',
         });
         metadataRecorded = true;
         launch.metadataRecorded = true;
@@ -375,6 +376,7 @@ export class RuntimeManager {
     const session = this.sessions.get(snapshot.session.id);
     const request = {
       workspaceId: launch.workspace.id,
+      checkoutCwd: snapshot.cwd,
       ...(session ? { sessionId: session.id } : {}),
       ...(snapshot.session.name ? { name: snapshot.session.name } : {}),
       ...(snapshot.model

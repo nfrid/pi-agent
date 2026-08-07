@@ -72,11 +72,12 @@ export class SqliteMetadataRepository implements MetadataRepository {
       identityToken: string;
       launchToken: string;
       launchConsumed?: boolean;
+      mode?: 'read' | 'write';
     },
   ): void {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO managed_launch (runtime_id,workspace_id,tmux_session,tmux_window_id,tmux_pane_id,launched_at,stopped_at,identity_token_hash,launch_token_hash,launch_consumed) VALUES (?,?,?,?,?,?,NULL,?,?,?)`,
+        `INSERT OR REPLACE INTO managed_launch (runtime_id,workspace_id,tmux_session,tmux_window_id,tmux_pane_id,launched_at,stopped_at,identity_token_hash,launch_token_hash,launch_consumed,mode) VALUES (?,?,?,?,?,?,NULL,?,?,?,?)`,
       )
       .run(
         runtimeId,
@@ -88,6 +89,7 @@ export class SqliteMetadataRepository implements MetadataRepository {
         credentialHash(credentials.identityToken),
         credentialHash(credentials.launchToken),
         credentials.launchConsumed ? 1 : 0,
+        credentials.mode ?? 'write',
       );
   }
 
@@ -95,7 +97,7 @@ export class SqliteMetadataRepository implements MetadataRepository {
     return (
       this.db
         .prepare(
-          'SELECT runtime_id as runtimeId,workspace_id as workspaceId,tmux_session as tmuxSession,tmux_window_id as tmuxWindowId,tmux_pane_id as tmuxPaneId,launched_at as launchedAt,stopped_at as stoppedAt,identity_token_hash as identityTokenHash,launch_token_hash as launchTokenHash,launch_consumed as launchConsumed FROM managed_launch WHERE stopped_at IS NULL',
+          'SELECT runtime_id as runtimeId,workspace_id as workspaceId,tmux_session as tmuxSession,tmux_window_id as tmuxWindowId,tmux_pane_id as tmuxPaneId,launched_at as launchedAt,stopped_at as stoppedAt,identity_token_hash as identityTokenHash,launch_token_hash as launchTokenHash,launch_consumed as launchConsumed,mode FROM managed_launch WHERE stopped_at IS NULL',
         )
         .all() as Array<Record<string, unknown>>
     ).map((row) => ({
@@ -110,6 +112,7 @@ export class SqliteMetadataRepository implements MetadataRepository {
       identityTokenHash: String(row.identityTokenHash ?? ''),
       launchTokenHash: String(row.launchTokenHash ?? ''),
       launchConsumed: Number(row.launchConsumed) === 1,
+      mode: row.mode === 'read' ? 'read' : 'write',
       launchedAt: Number(row.launchedAt),
       ...(row.stoppedAt == null ? {} : { stoppedAt: Number(row.stoppedAt) }),
     }));
