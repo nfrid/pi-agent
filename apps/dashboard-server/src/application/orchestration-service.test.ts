@@ -348,6 +348,86 @@ describe('OrchestrationService', () => {
     }
   });
 
+  it('projects interaction requests and resolutions from authoritative snapshots', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      repository.transitionRun(fixture.runId, 'preparing');
+      repository.transitionRun(fixture.runId, 'starting');
+      repository.setRunRuntime(fixture.runId, 'runtime-attention');
+      repository.transitionRun(fixture.runId, 'running');
+      const handle = (
+        fixture.service as unknown as {
+          handleRegistryChange: (value: never) => Promise<void>;
+        }
+      ).handleRegistryChange.bind(fixture.service);
+      const interaction = { id: 'question-1', type: 'ask_user' };
+      const secondInteraction = { id: 'question-2', type: 'ask_user' };
+      const change = (event: unknown, pendingInteractions: unknown[]) =>
+        ({
+          kind: 'event',
+          runtimeId: 'runtime-attention',
+          event,
+          snapshot: {
+            ...runtimeHello('runtime-attention'),
+            pendingInteractions,
+          },
+        }) as never;
+
+      await handle(
+        change({ type: 'interaction.requested', interaction }, [interaction]),
+      );
+      expect(repository.getRun(fixture.runId)?.status).toBe('waiting');
+      expect(
+        repository.getThread(repository.getRun(fixture.runId)?.threadId ?? '')
+          ?.status,
+      ).toBe('needs-input');
+
+      await handle(
+        change(
+          { type: 'interaction.requested', interaction: secondInteraction },
+          [interaction, secondInteraction],
+        ),
+      );
+      await handle(
+        change(
+          {
+            type: 'interaction.resolved',
+            interactionId: 'question-1',
+            resolution: 'yes',
+          },
+          [secondInteraction],
+        ),
+      );
+      expect(repository.getRun(fixture.runId)?.status).toBe('waiting');
+
+      await handle(
+        change({ type: 'runtime.stateChanged', state: 'working' }, [
+          secondInteraction,
+        ]),
+      );
+      expect(repository.getRun(fixture.runId)?.status).toBe('waiting');
+
+      await handle(
+        change(
+          {
+            type: 'interaction.resolved',
+            interactionId: 'question-2',
+            resolution: 'no',
+          },
+          [],
+        ),
+      );
+      expect(repository.getRun(fixture.runId)?.status).toBe('running');
+      expect(
+        repository.getThread(repository.getRun(fixture.runId)?.threadId ?? '')
+          ?.status,
+      ).toBe('active');
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('makes concurrent and sequential cancellation replay the same result', async () => {
     const fixture = await orchestrationFixture();
     try {

@@ -543,11 +543,24 @@ export class OrchestrationService {
         // promote a run to running (or settled through running) first.
         if (promptPending) return;
         if (change.event.type === 'agent.settled') await this.settle(run.id);
-        else if (change.event.type === 'runtime.stateChanged') {
-          const state = change.event.state;
-          if (state === 'waiting') this.transitionIfPossible(run.id, 'waiting');
-          else if (state === 'working')
+        else if (change.event.type === 'interaction.requested') {
+          this.transitionIfPossible(run.id, 'waiting');
+        } else if (change.event.type === 'interaction.resolved') {
+          // The event itself only identifies the interaction. The reducer's
+          // post-event snapshot is authoritative when several questions are
+          // pending at once.
+          if (change.snapshot.pendingInteractions.length === 0)
             this.transitionIfPossible(run.id, 'running');
+        } else if (change.event.type === 'runtime.stateChanged') {
+          const state = change.event.state;
+          // A working state cannot override an outstanding ask-user request.
+          if (change.snapshot.pendingInteractions.length > 0) {
+            this.transitionIfPossible(run.id, 'waiting');
+          } else if (state === 'waiting') {
+            this.transitionIfPossible(run.id, 'waiting');
+          } else if (state === 'working') {
+            this.transitionIfPossible(run.id, 'running');
+          }
         }
       } else if (
         change.kind === 'offline' &&
