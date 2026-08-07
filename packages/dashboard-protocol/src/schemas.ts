@@ -976,10 +976,24 @@ export const SessionProjectionSchema = Type.Object(
 );
 export type SessionProjection = Static<typeof SessionProjectionSchema>;
 
+export const SessionHistorySchema = Type.Object(
+  {
+    version: Type.Literal(1),
+    start: Type.Integer({ minimum: 0 }),
+    end: Type.Integer({ minimum: 0 }),
+    hasOlder: Type.Boolean(),
+    nextBefore: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+  },
+  { additionalProperties: false },
+);
+export type SessionHistory = Static<typeof SessionHistorySchema>;
+
 export const SessionApiResponseSchema = Type.Object(
   {
     metadata: SessionIndexEntrySchema,
     entries: Type.Array(UnknownSchema),
+    /** Bounded history range and opaque cursor for explicit older-page loads. */
+    history: Type.Optional(SessionHistorySchema),
     /** False when a new active session is not indexed and its runtime branch could not be serialized completely. */
     entriesComplete: Type.Optional(Type.Boolean()),
     /** Daemon generation that produced this response; optional for legacy clients. */

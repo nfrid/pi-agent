@@ -85,7 +85,7 @@ export interface DashboardRouteContext {
   workspaces(): WorkspaceTarget[];
   refreshWorkspaces(): Promise<WorkspaceTarget[]>;
   usage(): Promise<{ usage: unknown; error?: string }>;
-  readSession(id: string): Promise<unknown>;
+  readSession(id: string, before?: string): Promise<unknown>;
   renameSession(id: string, name: string): Promise<unknown>;
   startRuntime(input: unknown): Promise<unknown>;
   restartRuntime?(runtimeId: string, commandId: string): Promise<unknown>;
@@ -473,16 +473,16 @@ export const dashboardRoutes: FastifyPluginAsync<{
     },
   );
 
-  app.get<{ Params: { id: string } }>(
-    '/api/sessions/:id',
-    async (request, reply) => {
-      try {
-        return await context.readSession(request.params.id);
-      } catch (error) {
-        return sendError(reply, error);
-      }
-    },
-  );
+  app.get<{
+    Params: { id: string };
+    Querystring: { before?: string };
+  }>('/api/sessions/:id', async (request, reply) => {
+    try {
+      return await context.readSession(request.params.id, request.query.before);
+    } catch (error) {
+      return sendError(reply, error);
+    }
+  });
   app.post<{
     Params: { id: string };
     Body: { name?: unknown };

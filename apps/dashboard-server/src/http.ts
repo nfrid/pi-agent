@@ -190,7 +190,7 @@ class DashboardServerImpl implements DashboardServer {
       workspaces: () => this.application.workspaces.list(),
       refreshWorkspaces: () => this.refreshWorkspaces(),
       usage: () => this.application.usage.get(),
-      readSession: (id) => this.sessionResult(id),
+      readSession: (id, before) => this.sessionResult(id, before),
       renameSession: async (id, name) => {
         if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
           throw new Error('Invalid session id.');
@@ -516,7 +516,7 @@ class DashboardServerImpl implements DashboardServer {
     return workspaces;
   }
 
-  private async sessionResult(id: string): Promise<unknown> {
+  private async sessionResult(id: string, before?: string): Promise<unknown> {
     if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
       throw new Error('Invalid session id.');
     const activeRuntime = () =>
@@ -550,18 +550,19 @@ class DashboardServerImpl implements DashboardServer {
         entriesComplete,
       };
     };
-    let runtime = activeRuntime();
+    let runtime = before === undefined ? activeRuntime() : undefined;
     if (
+      before === undefined &&
       runtime &&
       (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
         true
     )
       return runtimeResult(runtime);
     try {
-      const result = await this.sessions.readEntries(id);
+      const result = await this.sessions.readEntries(id, before);
       // Runtime attachment can change while the file is being read. Recheck it
       // before declaring disk history authoritative for the active branch.
-      runtime = activeRuntime();
+      runtime = before === undefined ? activeRuntime() : undefined;
       if (!runtime)
         return {
           ...result,
@@ -594,7 +595,7 @@ class DashboardServerImpl implements DashboardServer {
         },
       };
     } catch (error) {
-      runtime = activeRuntime();
+      runtime = before === undefined ? activeRuntime() : undefined;
       if (!runtime) throw error;
       return runtimeResult(runtime);
     }

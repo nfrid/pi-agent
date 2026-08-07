@@ -2,6 +2,31 @@ import { describe, expect, it, vi } from 'vitest';
 import { DashboardHttpClient } from './http-client.js';
 
 describe('DashboardHttpClient command requests', () => {
+  it('requests an older session page with an encoded opaque cursor', async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
+            entries: [],
+            history: { version: 1, start: 0, end: 1, hasOlder: false },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: {
+        get: () => undefined,
+        set: () => undefined,
+        clear: () => undefined,
+      },
+    });
+    await client.sessionBefore('session-1', 'opaque token');
+    const calls = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
+    expect(calls[0]?.[0]).toBe('/api/sessions/session-1?before=opaque%20token');
+  });
+
   it('allocates one command ID without changing caller-owned IDs', async () => {
     const fetch = vi.fn(
       async () =>

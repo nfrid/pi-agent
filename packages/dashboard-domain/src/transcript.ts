@@ -706,15 +706,19 @@ export function hydrateTranscript(
     runtimeEpoch?: string;
     runtimeSeq?: number;
     fallbackEntryIds?: boolean;
+    /** Absolute logical entry ordinal used for page-local fallback identities. */
+    fallbackEntryOffset?: number;
   } = {},
 ): TranscriptProjection {
   let projection = createTranscriptProjection(sessionId);
   const items = copyItems(projection);
+  const fallbackEntryId = (index: number) =>
+    `entry-${(options.fallbackEntryOffset ?? 0) + index}`;
   const order = [...projection.order];
   const markedSteeringMarkers = steeringMarkers(entries);
   entries.forEach((raw, index) => {
     if (!isRecord(raw)) {
-      const id = `entry-${index}`;
+      const id = fallbackEntryId(index);
       items[id] = { kind: 'other', id, raw };
       order.push(id);
       return;
@@ -723,9 +727,9 @@ export function hydrateTranscript(
     if (message && (raw.type === 'message' || raw.type === undefined)) {
       const messageId =
         persistedMessageId(raw, message) ??
-        (options.fallbackEntryIds ? `entry-${index}` : undefined);
+        (options.fallbackEntryIds ? fallbackEntryId(index) : undefined);
       if (!messageId) {
-        const id = `entry-${index}`;
+        const id = fallbackEntryId(index);
         items[id] = { kind: 'other', id, raw };
         order.push(id);
         return;
@@ -877,7 +881,7 @@ export function hydrateTranscript(
         return;
       }
     }
-    const id = persistedEntryId(raw) ?? `entry-${index}`;
+    const id = persistedEntryId(raw) ?? fallbackEntryId(index);
     items[id] = { kind: 'other', id, raw };
     if (!order.includes(id)) order.push(id);
   });

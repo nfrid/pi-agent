@@ -106,6 +106,61 @@ describe('session index', () => {
     );
   });
 
+  it('loads immediately preceding pages and rejects malformed or stale cursors', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-pages-'));
+    const firstFile = path.join(root, 'paged.jsonl');
+    const secondFile = path.join(root, 'other.jsonl');
+    const entries = [
+      { type: 'session', id: 'paged-id', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'first-user',
+        message: { role: 'user', content: 'first request' },
+      },
+      ...Array.from({ length: 10 }, (_, index) => ({
+        type: 'message',
+        id: `large-${index}`,
+        message: { role: 'assistant', content: 'x'.repeat(1024 * 1024) },
+      })),
+    ];
+    await writeFile(
+      firstFile,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    await writeFile(
+      secondFile,
+      `${JSON.stringify({ type: 'session', id: 'other-id', cwd: '/tmp' })}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+
+    const recent = await index.readEntries('paged-id');
+    expect(recent.history.hasOlder).toBe(true);
+    expect(recent.history.nextBefore).toBeTruthy();
+    expect(recent.entries).not.toContainEqual(
+      expect.objectContaining({ id: 'first-user' }),
+    );
+    const older = await index.readEntries(
+      'paged-id',
+      recent.history.nextBefore,
+    );
+    expect(older.history.end).toBe(recent.history.start);
+    expect(older.entries).toContainEqual(
+      expect.objectContaining({ id: 'first-user' }),
+    );
+    expect(
+      older.entries.some(
+        (entry) => (entry as { id?: string }).id === 'large-9',
+      ),
+    ).toBe(false);
+    await expect(index.readEntries('paged-id', 'not-a-cursor')).rejects.toThrow(
+      'Invalid history cursor',
+    );
+    await expect(
+      index.readEntries('other-id', recent.history.nextBefore),
+    ).rejects.toThrow('Stale history cursor');
+  });
+
   it('accepts compaction entries with a materialized retainedTail', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-retained-tail-'),

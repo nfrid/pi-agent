@@ -515,6 +515,64 @@ describe('DashboardLiveStore', () => {
     });
   });
 
+  it('prepends older history, enriches a boundary tool, and keeps live events', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.acceptStreamRecord({
+      cursor: 2,
+      emittedAt: 2,
+      sessionId: 'session-1',
+      event: {
+        type: 'tool.finished',
+        sessionId: 'session-1',
+        tool: {
+          toolCallId: 'live-call',
+          name: 'live-tool',
+          result: 'live result',
+          status: 'completed',
+        },
+      },
+    } as never);
+    store.hydrateSession({
+      ...sessionResponse(2),
+      entries: [
+        {
+          type: 'message',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'boundary-call',
+            content: 'new result',
+          },
+        },
+      ],
+    });
+    const projection = store.prependSessionHistory({
+      ...sessionResponse(2),
+      history: { version: 1, start: 10, end: 11, hasOlder: false },
+      entries: [
+        {
+          type: 'tool',
+          tool: {
+            toolCallId: 'boundary-call',
+            name: 'older-tool',
+            arguments: { path: '/tmp/file' },
+          },
+        },
+      ],
+    });
+    expect(projection?.items['boundary-call']).toMatchObject({
+      name: 'older-tool',
+      arguments: { path: '/tmp/file' },
+      result: 'new result',
+      status: 'finished',
+    });
+    expect(projection?.items['live-call']).toMatchObject({
+      result: 'live result',
+      status: 'finished',
+    });
+    expect(projection?.order).toEqual(['boundary-call', 'live-call']);
+  });
+
   it('does not let stale HTTP hydration resurrect a complete tree replacement', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 4));

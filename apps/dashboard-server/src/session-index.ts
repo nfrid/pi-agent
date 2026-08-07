@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, promises as fs } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -16,6 +16,65 @@ import type { MetadataStore } from './metadata.js';
 interface IndexedFile extends SessionIndexEntry {
   header: Record<string, unknown>;
   lastEntryId?: string;
+}
+
+export interface SessionHistoryPage {
+  version: 1;
+  start: number;
+  end: number;
+  hasOlder: boolean;
+  nextBefore?: string;
+}
+
+interface HistoryCursor {
+  version: 1;
+  sessionId: string;
+  file: string;
+  dev: number;
+  ino: number;
+  size: number;
+  prefixHash: string;
+  before: number;
+}
+
+const HISTORY_PAGE_BYTES = 8 * 1024 * 1024;
+
+function encodeHistoryCursor(cursor: HistoryCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+
+function decodeHistoryCursor(value: string): HistoryCursor {
+  if (
+    typeof value !== 'string' ||
+    !/^[A-Za-z0-9_-]+$/.test(value) ||
+    value.length > 4096
+  )
+    throw new Error('Invalid history cursor.');
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(value, 'base64url').toString('utf8'),
+    ) as Partial<HistoryCursor>;
+    if (
+      decoded.version !== 1 ||
+      typeof decoded.sessionId !== 'string' ||
+      typeof decoded.file !== 'string' ||
+      typeof decoded.dev !== 'number' ||
+      !Number.isSafeInteger(decoded.dev) ||
+      typeof decoded.ino !== 'number' ||
+      !Number.isSafeInteger(decoded.ino) ||
+      typeof decoded.size !== 'number' ||
+      !Number.isSafeInteger(decoded.size) ||
+      typeof decoded.prefixHash !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(decoded.prefixHash) ||
+      typeof decoded.before !== 'number' ||
+      !Number.isSafeInteger(decoded.before) ||
+      decoded.before <= 0
+    )
+      throw new Error();
+    return decoded as HistoryCursor;
+  } catch {
+    throw new Error('Invalid history cursor.');
+  }
 }
 
 function within(root: string, file: string): boolean {
@@ -86,19 +145,37 @@ export class SessionIndex {
     return publicEntry;
   }
 
-  async readEntries(id: string): Promise<{
+  async readEntries(
+    id: string,
+    before?: string,
+  ): Promise<{
     metadata: SessionIndexEntry;
     entries: unknown[];
     entriesComplete: boolean;
+    history: SessionHistoryPage;
   }> {
     const indexed = this.files.get(id);
     if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
       throw new Error('Unknown session.');
+    const stat = await fs.stat(indexed.file).catch(() => undefined);
+    if (!stat) throw new Error('Unknown session.');
+    const cursor =
+      before === undefined ? undefined : decodeHistoryCursor(before);
+    if (
+      cursor &&
+      (cursor.sessionId !== id ||
+        cursor.file !== indexed.file ||
+        cursor.dev !== stat.dev ||
+        cursor.ino !== stat.ino ||
+        stat.size < cursor.size)
+    )
+      throw new Error('Stale history cursor.');
+    const upperBound = cursor?.before;
     const { header: _header, lastEntryId: _lastEntryId, ...metadata } = indexed;
-    const entries: unknown[] = [];
-    const entryBytes: number[] = [];
-    let responseBytes = 0;
-    let entriesComplete = true;
+    const allEntries: { ordinal: number; entry: unknown; bytes: number }[] = [];
+    let ordinal = 0;
+    const prefixHasher = createHash('sha256');
+    let prefixHash: string | undefined;
     const input = createReadStream(indexed.file, { encoding: 'utf8' });
     const lines = readline.createInterface({
       input,
@@ -111,15 +188,13 @@ export class SessionIndex {
           throw new Error('A session entry is too large to open remotely.');
         try {
           const entry = redactImageData(JSON.parse(line) as unknown);
-          const serializedBytes = Buffer.byteLength(JSON.stringify(entry));
-          entries.push(entry);
-          entryBytes.push(serializedBytes);
-          responseBytes += serializedBytes;
-          while (responseBytes > 8 * 1024 * 1024 && entries.length > 0) {
-            entriesComplete = false;
-            entries.shift();
-            responseBytes -= entryBytes.shift() ?? 0;
-          }
+          const serialized = JSON.stringify(entry);
+          const bytes = Buffer.byteLength(serialized);
+          if (upperBound !== undefined && ordinal === upperBound)
+            prefixHash = prefixHasher.copy().digest('hex');
+          prefixHasher.update(serialized);
+          allEntries.push({ ordinal, entry, bytes });
+          ordinal += 1;
         } catch (error) {
           if (error instanceof SyntaxError) continue;
           throw error;
@@ -129,7 +204,59 @@ export class SessionIndex {
       lines.close();
       input.destroy();
     }
-    return { metadata, entries, entriesComplete };
+    if (upperBound !== undefined && upperBound === ordinal)
+      prefixHash = prefixHasher.copy().digest('hex');
+    if (
+      upperBound !== undefined &&
+      (upperBound > ordinal || prefixHash !== cursor?.prefixHash)
+    )
+      throw new Error('Stale history cursor.');
+    const end = upperBound ?? ordinal;
+    const page: { ordinal: number; entry: unknown; bytes: number }[] = [];
+    let responseBytes = 0;
+    let entriesComplete = true;
+    for (const item of allEntries) {
+      if (item.ordinal >= end) break;
+      page.push(item);
+      responseBytes += item.bytes;
+      while (responseBytes > HISTORY_PAGE_BYTES && page.length > 0) {
+        entriesComplete = false;
+        responseBytes -= page.shift()?.bytes ?? 0;
+      }
+    }
+    const start = page[0]?.ordinal ?? end;
+    const hasOlder = start > 0;
+    const nextBefore = hasOlder
+      ? encodeHistoryCursor({
+          version: 1,
+          sessionId: id,
+          file: indexed.file,
+          dev: stat.dev,
+          ino: stat.ino,
+          size: stat.size,
+          prefixHash: createHash('sha256')
+            .update(
+              allEntries
+                .filter((item) => item.ordinal < start)
+                .map((item) => JSON.stringify(item.entry))
+                .join(''),
+            )
+            .digest('hex'),
+          before: start,
+        })
+      : undefined;
+    return {
+      metadata,
+      entries: page.map((item) => item.entry),
+      entriesComplete,
+      history: {
+        version: 1,
+        start,
+        end,
+        hasOlder,
+        ...(nextBefore === undefined ? {} : { nextBefore }),
+      },
+    };
   }
 
   /** Rename a known dormant session by appending a normal Pi session_info entry. */

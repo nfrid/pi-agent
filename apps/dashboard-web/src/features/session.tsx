@@ -112,6 +112,9 @@ export function SessionView({
   const [agentNavOpen, setAgentNavOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [incompleteRetryNonce, setIncompleteRetryNonce] = useState(0);
+  const [history, setHistory] = useState<SessionApiResponse['history']>();
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string>();
   const closeInspector = useCallback(() => setInspectorOpen(false), []);
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const stickToBottomRef = useRef(true);
@@ -121,6 +124,7 @@ export function SessionView({
   const controlLayerRef = useRef<HTMLDivElement>(null);
   const incompleteRetryCountRef = useRef(0);
   const hydrationRetryCountRef = useRef(0);
+  const historySessionRef = useRef<string | undefined>(undefined);
   const sessionRefetchRef = useRef<
     ReturnType<typeof query.refetch> | undefined
   >(undefined);
@@ -146,7 +150,16 @@ export function SessionView({
     setError(undefined);
     hydrationRetryCountRef.current = 0;
     incompleteRetryCountRef.current = 0;
+    historySessionRef.current = undefined;
+    setHistory(undefined);
+    setHistoryError(undefined);
   }, [id]);
+  useEffect(() => {
+    if (query.data?.metadata.id === id && historySessionRef.current !== id) {
+      historySessionRef.current = id;
+      setHistory(query.data.history);
+    }
+  }, [id, query.data]);
   useEffect(() => {
     // A refetch can reuse structurally equal data; its timestamp still marks a
     // new hydration attempt that must be evaluated.
@@ -357,6 +370,36 @@ export function SessionView({
         window.innerHeight,
       );
   }, [data, id, replaceSession, replacementSessionId, sessionChange]);
+  const loadEarlierHistory = useCallback(async () => {
+    const currentHistory = history;
+    if (
+      historyLoading ||
+      !currentHistory?.hasOlder ||
+      !currentHistory.nextBefore
+    )
+      return;
+    setHistoryLoading(true);
+    setHistoryError(undefined);
+    try {
+      const page = await dashboardHttpClient.sessionBefore(
+        id,
+        currentHistory.nextBefore,
+      );
+      if (page.metadata.id !== id || !page.history)
+        throw new Error('Dashboard returned invalid older history.');
+      if (!store.prependSessionHistory(page))
+        throw new Error('Session changed while loading older history.');
+      setHistory(page.history);
+    } catch (loadError) {
+      setHistoryError(
+        loadError instanceof Error
+          ? loadError.message
+          : 'Could not load older history.',
+      );
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [history, historyLoading, id, store]);
   const status = runtime
     ? runtime.online === false
       ? 'offline'
@@ -540,6 +583,27 @@ export function SessionView({
           runtimeError={runtimeError}
           store={store}
         />
+        {history?.hasOlder && (
+          <div className="session-history-control" aria-live="polite">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={() => void loadEarlierHistory()}
+              disabled={historyLoading}
+            >
+              {historyLoading
+                ? 'Loading earlier history…'
+                : historyError
+                  ? 'Retry earlier history'
+                  : 'Load earlier history'}
+            </button>
+            {historyError && (
+              <span role="alert" className="session-history-error">
+                {historyError}
+              </span>
+            )}
+          </div>
+        )}
         <Transcript
           projection={projection}
           runtime={runtime}
