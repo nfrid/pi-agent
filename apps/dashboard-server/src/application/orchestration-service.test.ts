@@ -394,8 +394,8 @@ describe('OrchestrationService', () => {
       repository.transitionRun(fixture.runId, 'starting');
       repository.setRunRuntime(fixture.runId, 'runtime-ordered');
       let releasePrompt!: () => void;
-      const prompt = new Promise<undefined>((resolve) => {
-        releasePrompt = () => resolve(undefined);
+      const prompt = new Promise<{ accepted: boolean }>((resolve) => {
+        releasePrompt = () => resolve({ accepted: true });
       });
       fixture.registry.sendCommand.mockImplementationOnce(async () => prompt);
       const handle = (
@@ -579,7 +579,7 @@ describe('OrchestrationService', () => {
         kind: 'event',
         runtimeId,
         event: { type: 'runtime.goodbye', reason: 'quit' },
-        snapshot: { ...runtimeHello(runtimeId), online: false },
+        snapshot: { ...runtimeHello(runtimeId), online: false } as never,
       });
       releaseFinish();
       await fixture.service.stop();
