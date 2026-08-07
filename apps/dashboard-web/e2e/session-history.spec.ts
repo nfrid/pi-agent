@@ -40,6 +40,7 @@ test('loads earlier session history on demand', async ({ page }) => {
         metadata,
         entries: older
           ? [
+              { type: 'session', id: 'session-1', cwd: '/tmp' },
               {
                 type: 'message',
                 id: 'first-user',

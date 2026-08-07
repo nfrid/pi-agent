@@ -176,6 +176,7 @@ export class SessionIndex {
       ordinal: number;
       entry: unknown;
       serialized: string;
+      hashSerialized: string;
       bytes: number;
     };
     const page: PageEntry[] = [];
@@ -202,15 +203,37 @@ export class SessionIndex {
           throw new Error('A session entry is too large to open remotely.');
         try {
           const entry = redactImageData(JSON.parse(line) as unknown);
-          const serialized = JSON.stringify(entry);
+          const hashSerialized = JSON.stringify(entry);
+          const originalBytes = Buffer.byteLength(hashSerialized);
+          const outputEntry =
+            originalBytes > HISTORY_PAGE_BYTES
+              ? {
+                  type: 'history_omission',
+                  ...(isRecord(entry) && typeof entry.id === 'string'
+                    ? { id: entry.id }
+                    : {}),
+                  ...(isRecord(entry) && typeof entry.type === 'string'
+                    ? { originalType: entry.type }
+                    : {}),
+                  reason: 'entry-exceeds-page-budget',
+                  originalBytes,
+                }
+              : entry;
+          const serialized = JSON.stringify(outputEntry);
           const bytes = Buffer.byteLength(serialized);
-          seenHasher.update(serialized);
-          page.push({ ordinal, entry, serialized, bytes });
+          seenHasher.update(hashSerialized);
+          page.push({
+            ordinal,
+            entry: outputEntry,
+            serialized,
+            hashSerialized,
+            bytes,
+          });
           pageBytes += bytes;
           while (pageBytes > HISTORY_PAGE_BYTES && page.length > 0) {
             const shifted = page.shift();
             if (!shifted) break;
-            shiftedHasher.update(shifted.serialized);
+            shiftedHasher.update(shifted.hashSerialized);
             pageBytes -= shifted.bytes;
           }
           ordinal += 1;

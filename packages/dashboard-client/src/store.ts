@@ -676,6 +676,7 @@ export class DashboardLiveStore {
   prependSessionHistory(
     response: SessionApiResponse,
   ): TranscriptProjection | undefined {
+    if (!response.history) return undefined;
     if (
       response.serverId !== undefined &&
       this.state.serverId !== undefined &&
@@ -687,7 +688,7 @@ export class DashboardLiveStore {
     if (!current) return undefined;
     const older = hydrateTranscript(response.entries, sessionId, {
       fallbackEntryIds: true,
-      fallbackEntryOffset: response.history?.start ?? 0,
+      fallbackEntryOffset: response.history.start,
     });
     const projection = mergePrependedTranscript(current, older);
     const currentMetadata = this.state.sessionsById[sessionId];

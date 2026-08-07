@@ -573,6 +573,15 @@ describe('DashboardLiveStore', () => {
     expect(projection?.order).toEqual(['boundary-call', 'live-call']);
   });
 
+  it('rejects prepending a page without history metadata', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.hydrateSession({ ...sessionResponse(1), entries: [] });
+    expect(
+      store.prependSessionHistory({ ...sessionResponse(1), entries: [] }),
+    ).toBeUndefined();
+  });
+
   it('does not let stale HTTP hydration resurrect a complete tree replacement', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 4));

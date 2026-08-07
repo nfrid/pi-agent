@@ -179,6 +179,57 @@ describe('session index', () => {
     ).rejects.toThrow('Stale history cursor');
   });
 
+  it('pages through an oversized individual entry and terminates', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-oversized-entry-'),
+    );
+    const file = path.join(root, 'oversized.jsonl');
+    const entries = [
+      { type: 'session', id: 'oversized-id', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'oversized-user',
+        message: { role: 'user', content: 'x'.repeat(9 * 1024 * 1024) },
+      },
+      ...Array.from({ length: 16 }, (_, index) => ({
+        type: 'message',
+        id: `later-${index}`,
+        message: { role: 'assistant', content: 'y'.repeat(1024 * 1024) },
+      })),
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+
+    let page = await index.readEntries('oversized-id');
+    const starts = [page.history.start];
+    let sawOmission = page.entries.some(
+      (entry) =>
+        (entry as { type?: string }).type === 'history_omission' &&
+        (entry as { id?: string }).id === 'oversized-user',
+    );
+    while (page.history.hasOlder) {
+      const before = page.history.nextBefore;
+      expect(before).toBeTruthy();
+      page = await index.readEntries('oversized-id', before);
+      expect(page.history.end).toBe(starts.at(-1));
+      expect(page.history.start).toBeLessThan(page.history.end);
+      starts.push(page.history.start);
+      sawOmission ||= page.entries.some(
+        (entry) =>
+          (entry as { type?: string }).type === 'history_omission' &&
+          (entry as { id?: string }).id === 'oversized-user',
+      );
+    }
+    expect(sawOmission).toBe(true);
+    expect(starts.length).toBeGreaterThan(1);
+    expect(starts).toEqual([...starts].sort((a, b) => b - a));
+    expect(page.history.nextBefore).toBeUndefined();
+  });
+
   it('accepts compaction entries with a materialized retainedTail', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-retained-tail-'),
