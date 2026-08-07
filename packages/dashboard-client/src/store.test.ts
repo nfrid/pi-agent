@@ -3,7 +3,11 @@ import type {
   SessionApiResponse,
 } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
-import { DashboardLiveStore, sessionCursorRangeCovered } from './store.js';
+import {
+  DashboardLiveStore,
+  selectSnapshot,
+  sessionCursorRangeCovered,
+} from './store.js';
 
 const snapshot = (serverId: string, cursor: number): BrowserSnapshot =>
   ({
@@ -38,7 +42,43 @@ const sessionResponse = (
   }) as SessionApiResponse;
 
 describe('DashboardLiveStore', () => {
-  it('applies patch-only runtime state to the live snapshot', () => {
+  it('hydrates normalized entities and retains notification/usage behavior', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      usage: { remaining: 3 },
+      workspaces: [
+        { id: 'workspace-1', name: 'Workspace', canonicalPath: '/tmp' },
+      ],
+      sessions: [{ id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 }],
+      unread: [
+        {
+          id: 'notification-1',
+          title: 'Question',
+          body: 'Choose',
+          createdAt: 1,
+        },
+      ],
+    } as unknown as BrowserSnapshot);
+
+    const hydrated = store.getSnapshot();
+    expect(hydrated).not.toHaveProperty('snapshot');
+    expect(hydrated.serverId).toBe('daemon-1');
+    expect(selectSnapshot(hydrated)).toMatchObject({
+      cursor: 1,
+      usage: { remaining: 3 },
+      workspaces: [{ id: 'workspace-1' }],
+      sessions: [{ id: 'session-1' }],
+      unread: [{ id: 'notification-1' }],
+    });
+
+    store.updateUsage({ remaining: 2 });
+    store.markNotificationRead('notification-1');
+    expect(store.getSnapshot().usage).toEqual({ remaining: 2 });
+    expect(selectSnapshot(store.getSnapshot())?.unread).toEqual([]);
+  });
+
+  it('applies patch-only runtime state to normalized entities', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot({
       ...snapshot('daemon-1', 1),
@@ -82,7 +122,7 @@ describe('DashboardLiveStore', () => {
       },
     } as unknown as StreamRecord);
 
-    expect(store.getSnapshot().snapshot?.runtimes[0]).toMatchObject({
+    expect(selectSnapshot(store.getSnapshot())?.runtimes[0]).toMatchObject({
       liveState: 'waiting',
       pendingInteractions: [{ id: 'question-1' }],
       extensionSurfaces: [{ id: 'delegate.status' }],
@@ -197,7 +237,7 @@ describe('DashboardLiveStore', () => {
     );
   });
 
-  it('keeps entity indexes and embedded snapshot projections aligned across ingress paths', () => {
+  it('materializes current entity indexes across ingress paths', () => {
     const store = new DashboardLiveStore();
     const runtime = {
       runtimeId: 'runtime-1',
@@ -229,7 +269,8 @@ describe('DashboardLiveStore', () => {
       },
     } as unknown as StreamRecord);
     const afterEvent = store.getSnapshot();
-    expect(afterEvent.snapshot?.runtimes).toContainEqual(
+    expect(afterEvent).not.toHaveProperty('snapshot');
+    expect(selectSnapshot(afterEvent)?.runtimes).toContainEqual(
       afterEvent.runtimesById['runtime-1'],
     );
 
@@ -240,10 +281,10 @@ describe('DashboardLiveStore', () => {
       entries: [],
     });
     const afterMutation = store.getSnapshot();
-    expect(afterMutation.snapshot?.sessions).toContainEqual(
+    expect(selectSnapshot(afterMutation)?.sessions).toContainEqual(
       afterMutation.sessionsById['session-1'],
     );
-    expect(afterMutation.snapshot?.sessions).toHaveLength(1);
+    expect(selectSnapshot(afterMutation)?.sessions).toHaveLength(1);
   });
 
   it('keeps bounded cursor/event history and rejects replay gaps', () => {
@@ -313,7 +354,7 @@ describe('DashboardLiveStore', () => {
       } as StreamRecord),
     ).toBe(true);
     expect(store.getSnapshot().cursor).toBe(1);
-    expect(store.getSnapshot().snapshot?.cursor).toBe(5);
+    expect(selectSnapshot(store.getSnapshot())?.cursor).toBe(5);
   });
 
   it('rebases the stream cursor after a replay gap snapshot', () => {

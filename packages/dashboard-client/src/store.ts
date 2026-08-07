@@ -25,9 +25,11 @@ export const LIVE_BUFFER_LIMIT = 256;
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting';
 
 export interface DashboardLiveState {
-  snapshot?: BrowserSnapshot;
+  /** Transport metadata is retained separately from hydrated entities. */
   serverId?: string;
   revision: number;
+  snapshotCursor: number;
+  usage?: unknown;
   cursor: number;
   connection: {
     status: ConnectionStatus;
@@ -91,32 +93,10 @@ function runtimeIndex(
   return Object.fromEntries(items.map((item) => [item.runtimeId, item]));
 }
 
-function upsertEntity<T>(
-  items: readonly T[],
-  next: T,
-  getId: (item: T) => string,
-): readonly T[] {
-  const id = getId(next);
-  let replaced = false;
-  const result = items.map((item) => {
-    if (getId(item) !== id) return item;
-    replaced = true;
-    return next;
-  });
-  return replaced ? result : [...result, next];
-}
-
-function removeEntity<T>(
-  items: readonly T[],
-  id: string,
-  getId: (item: T) => string,
-): readonly T[] {
-  return items.filter((item) => getId(item) !== id);
-}
-
 function emptyState(): DashboardLiveState {
   return {
     revision: 0,
+    snapshotCursor: 0,
     cursor: 0,
     connection: { status: 'connecting', lastCursor: 0 },
     workspacesById: {},
@@ -174,16 +154,17 @@ export class DashboardLiveStore {
     for (const listener of this.listeners) listener();
   }
 
-  /** Install every entity index represented by an authoritative browser snapshot. */
+  /** Hydrate normalized entity maps and transport metadata from a wire snapshot. */
   private installSnapshotProjection(
     state: DashboardLiveState,
     snapshot: BrowserSnapshot,
   ): DashboardLiveState {
     return {
       ...state,
-      snapshot,
       serverId: snapshot.serverId,
       revision: snapshot.revision,
+      snapshotCursor: snapshot.cursor,
+      usage: snapshot.usage,
       workspacesById: indexed(snapshot.workspaces),
       workspaceOrder: snapshot.workspaces.map((item) => item.id),
       runtimesById: runtimeIndex(snapshot.runtimes),
@@ -192,7 +173,6 @@ export class DashboardLiveStore {
     };
   }
 
-  /** Keep the runtime index and embedded browser snapshot projection in lockstep. */
   private installRuntimeProjection(
     state: DashboardLiveState,
     runtime: RuntimeSnapshot,
@@ -200,20 +180,9 @@ export class DashboardLiveStore {
     return {
       ...state,
       runtimesById: { ...state.runtimesById, [runtime.runtimeId]: runtime },
-      snapshot: state.snapshot
-        ? {
-            ...state.snapshot,
-            runtimes: upsertEntity(
-              state.snapshot.runtimes,
-              runtime,
-              (item) => item.runtimeId,
-            ),
-          }
-        : undefined,
     };
   }
 
-  /** Keep session metadata in both the index and embedded browser snapshot. */
   private installSessionProjection(
     state: DashboardLiveState,
     metadata: SessionIndexEntry,
@@ -221,16 +190,6 @@ export class DashboardLiveStore {
     return {
       ...state,
       sessionsById: { ...state.sessionsById, [metadata.id]: metadata },
-      snapshot: state.snapshot
-        ? {
-            ...state.snapshot,
-            sessions: upsertEntity(
-              state.snapshot.sessions,
-              metadata,
-              (item) => item.id,
-            ),
-          }
-        : undefined,
     };
   }
 
@@ -254,16 +213,7 @@ export class DashboardLiveStore {
   ): DashboardLiveState {
     const notificationsById = { ...state.notificationsById };
     delete notificationsById[id];
-    return {
-      ...state,
-      notificationsById,
-      snapshot: state.snapshot
-        ? {
-            ...state.snapshot,
-            unread: removeEntity(state.snapshot.unread, id, (item) => item.id),
-          }
-        : undefined,
-    };
+    return { ...state, notificationsById };
   }
 
   setConnection(status: ConnectionStatus, error?: string): void {
@@ -309,7 +259,7 @@ export class DashboardLiveStore {
   ): boolean {
     const decision = snapshotAcceptance(
       this.state.serverId,
-      Math.max(this.state.cursor, this.state.snapshot?.cursor ?? 0),
+      Math.max(this.state.cursor, this.state.snapshotCursor),
       next,
       {
         ...provenance,
@@ -341,8 +291,7 @@ export class DashboardLiveStore {
       });
       return true;
     }
-    const current = this.state.snapshot;
-    if (current && current.cursor > next.cursor) return false;
+    if (this.state.snapshotCursor > next.cursor) return false;
     // Ordinary HTTP reads update the authoritative projection but must not
     // jump over SSE records that were requested earlier and are still being
     // replayed. Only SSE delivery (or an explicit replay-gap rebase) advances
@@ -371,7 +320,7 @@ export class DashboardLiveStore {
         return false;
       const projectionIsOlder =
         record.snapshot.serverId === this.state.serverId &&
-        record.snapshot.cursor < (this.state.snapshot?.cursor ?? 0);
+        record.snapshot.cursor < this.state.snapshotCursor;
       if (!projectionIsOlder) {
         const accepted = this.installSnapshot(record.snapshot, {
           source: 'sse',
@@ -410,7 +359,7 @@ export class DashboardLiveStore {
     if (
       envelope.snapshot &&
       envelope.snapshot.serverId === this.state.serverId &&
-      envelope.snapshot.cursor >= (this.state.snapshot?.cursor ?? 0)
+      envelope.snapshot.cursor >= this.state.snapshotCursor
     )
       this.installSnapshot(envelope.snapshot, { source: 'sse' });
     let nextState = this.state;
@@ -686,9 +635,8 @@ export class DashboardLiveStore {
   }
 
   updateUsage(usage: unknown): void {
-    const snapshot = this.state.snapshot;
-    if (!snapshot) return;
-    this.publish({ ...this.state, snapshot: { ...snapshot, usage } });
+    if (!this.state.serverId) return;
+    this.publish({ ...this.state, usage });
   }
 
   updateSessionMetadata(
@@ -777,7 +725,79 @@ export function useDashboardStore<T>(
   );
 }
 
-export const selectSnapshot = (state: DashboardLiveState) => state.snapshot;
+let lastMaterializedParts:
+  | Pick<
+      DashboardLiveState,
+      | 'serverId'
+      | 'revision'
+      | 'snapshotCursor'
+      | 'usage'
+      | 'workspacesById'
+      | 'workspaceOrder'
+      | 'runtimesById'
+      | 'sessionsById'
+      | 'notificationsById'
+    >
+  | undefined;
+let lastMaterializedSnapshot: BrowserSnapshot | undefined;
+
+/** Materialize the legacy wire shape only for shell/route consumers. */
+export function materializeSnapshot(
+  state: DashboardLiveState,
+): BrowserSnapshot | undefined {
+  if (!state.serverId) return undefined;
+  const parts = {
+    serverId: state.serverId,
+    revision: state.revision,
+    snapshotCursor: state.snapshotCursor,
+    usage: state.usage,
+    workspacesById: state.workspacesById,
+    workspaceOrder: state.workspaceOrder,
+    runtimesById: state.runtimesById,
+    sessionsById: state.sessionsById,
+    notificationsById: state.notificationsById,
+  };
+  const previousParts = lastMaterializedParts;
+  if (
+    previousParts &&
+    Object.keys(parts).every(
+      (key) =>
+        parts[key as keyof typeof parts] ===
+        previousParts[key as keyof typeof previousParts],
+    )
+  )
+    return lastMaterializedSnapshot;
+  const snapshot: BrowserSnapshot = {
+    serverId: state.serverId,
+    revision: state.revision,
+    cursor: state.snapshotCursor,
+    runtimes: Object.values(state.runtimesById),
+    workspaces: state.workspaceOrder.flatMap((id) => {
+      const workspace = state.workspacesById[id];
+      return workspace ? [workspace] : [];
+    }),
+    sessions: Object.values(state.sessionsById),
+    ...(state.usage === undefined ? {} : { usage: state.usage }),
+    unread: Object.values(state.notificationsById),
+  };
+  lastMaterializedParts = parts;
+  lastMaterializedSnapshot = snapshot;
+  return snapshot;
+}
+
+export const selectSnapshot = materializeSnapshot;
+const EMPTY_WORKSPACES: readonly WorkspaceTarget[] = [];
+const EMPTY_RUNTIMES: readonly RuntimeSnapshot[] = [];
+const EMPTY_SESSIONS: readonly SessionIndexEntry[] = [];
+const EMPTY_NOTIFICATIONS: readonly BrowserSnapshot['unread'][number][] = [];
+export const selectWorkspaces = (state: DashboardLiveState) =>
+  materializeSnapshot(state)?.workspaces ?? EMPTY_WORKSPACES;
+export const selectRuntimes = (state: DashboardLiveState) =>
+  materializeSnapshot(state)?.runtimes ?? EMPTY_RUNTIMES;
+export const selectSessions = (state: DashboardLiveState) =>
+  materializeSnapshot(state)?.sessions ?? EMPTY_SESSIONS;
+export const selectNotifications = (state: DashboardLiveState) =>
+  materializeSnapshot(state)?.unread ?? EMPTY_NOTIFICATIONS;
 export const selectTranscript =
   (sessionId: string) => (state: DashboardLiveState) =>
     state.transcriptsBySessionId[sessionId];
@@ -793,3 +813,8 @@ export const selectSessionReplacement =
 export const selectRuntime =
   (runtimeId: string) => (state: DashboardLiveState) =>
     state.runtimesById[runtimeId];
+export const selectRuntimeForSession =
+  (sessionId: string) => (state: DashboardLiveState) =>
+    Object.values(state.runtimesById).find(
+      (runtime) => runtime.session.id === sessionId,
+    );

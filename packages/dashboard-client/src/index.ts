@@ -7,10 +7,14 @@ export * from './store.js';
 import { useEffect, useRef } from 'react';
 import type { DashboardHttpClient } from './http-client.js';
 import { dashboardHttpClient } from './http-client.js';
-import { DashboardLiveStore, useDashboardStore } from './store.js';
+import {
+  DashboardLiveStore,
+  selectSnapshot,
+  useDashboardStore,
+} from './store.js';
 
 export interface DashboardState {
-  snapshot: ReturnType<DashboardLiveStore['getSnapshot']>['snapshot'];
+  snapshot: ReturnType<typeof selectSnapshot>;
   error?: string;
   usageError?: string;
   events: ReturnType<DashboardLiveStore['getSnapshot']>['recentEvents'];
@@ -64,8 +68,9 @@ export function useDashboard(
 ): DashboardState {
   const store = useConnectedDashboardStore(client);
   const state = useDashboardStore(store, (current) => current);
+  const snapshot = useDashboardStore(store, selectSnapshot);
   return {
-    snapshot: state.snapshot,
+    snapshot,
     error: state.connection.error,
     usageError: state.usageError,
     events: state.recentEvents,
@@ -85,7 +90,7 @@ export function useDashboardShell(
   client: DashboardHttpClient = dashboardHttpClient,
 ): DashboardShellState {
   const store = useConnectedDashboardStore(client);
-  const snapshot = useDashboardStore(store, (state) => state.snapshot);
+  const snapshot = useDashboardStore(store, selectSnapshot);
   const error = useDashboardStore(store, (state) => state.connection.error);
   const usageError = useDashboardStore(store, (state) => state.usageError);
   const connectionState = useDashboardStore(

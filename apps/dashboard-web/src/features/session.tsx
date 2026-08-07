@@ -1,6 +1,7 @@
 import {
   type DashboardLiveStore,
   dashboardHttpClient,
+  selectRuntimeForSession,
   selectSessionChange,
   selectSessionReplacement,
   sessionQueryOptions,
@@ -79,7 +80,7 @@ export function SessionView({
   );
   const resyncNonce = useDashboardStore(store, (state) => state.resyncNonce);
   const sessionChange = useDashboardStore(store, selectSessionChange(id));
-  const runtime = snapshot.runtimes.find((item) => item.session.id === id);
+  const runtime = useDashboardStore(store, selectRuntimeForSession(id));
   const replacementSessionId = useDashboardStore(
     store,
     selectSessionReplacement(id),
@@ -353,8 +354,7 @@ export function SessionView({
     data?.entriesComplete === false &&
     (!projection || projection.order.length === 0);
   if (!data || !projection || waitingForInitialHistory) {
-    const loadingMetadata =
-      storedMetadata ?? snapshot.sessions.find((session) => session.id === id);
+    const loadingMetadata = storedMetadata;
     return (
       <div className="session-layout">
         <AgentThreadNav
