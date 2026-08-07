@@ -662,6 +662,16 @@ export class OrchestrationService {
           change.snapshot,
         );
       } else if (change.kind === 'event') {
+        const current = this.repository.getRun(run.id);
+        const promptPending =
+          current &&
+          (current.status === 'preparing' || current.status === 'starting') &&
+          !this.repository.getCommandReceipt(this.promptReceiptId(run.id));
+        // The per-run queue lets events following a successful hello observe
+        // its receipt. If the handoff failed, ignore prompt-driven lifecycle
+        // events until a later hello retries successfully; otherwise a stale
+        // settled event could complete work whose prompt was never durable.
+        if (promptPending && change.event.type !== 'runtime.goodbye') return;
         if (change.event.type === 'agent.settled') await this.settle(run.id);
         else if (change.event.type === 'interaction.requested') {
           this.transitionIfPossible(run.id, 'waiting');

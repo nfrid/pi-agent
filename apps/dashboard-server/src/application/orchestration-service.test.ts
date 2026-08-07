@@ -608,15 +608,22 @@ describe('OrchestrationService', () => {
       };
       const handle = (
         fixture.service as unknown as {
-          handleRegistryChange: (value: typeof change) => Promise<void>;
+          handleRegistryChange: (value: never) => Promise<void>;
         }
       ).handleRegistryChange.bind(fixture.service);
-      await handle(change);
+      const failedHello = handle(change as never);
+      const prematureSettled = handle({
+        kind: 'event',
+        runtimeId: 'runtime-retry',
+        event: { type: 'agent.settled', sessionId: 'runtime-retry-session' },
+        snapshot: runtimeHello('runtime-retry'),
+      } as never);
+      await Promise.all([failedHello, prematureSettled]);
       expect(
         repository.getCommandReceipt(`run-prompt:${fixture.runId}`),
       ).toBeUndefined();
       expect(repository.getRun(fixture.runId)?.status).toBe('starting');
-      await handle(change);
+      await handle(change as never);
       expect(fixture.registry.sendCommand).toHaveBeenCalledTimes(2);
       expect(
         repository.getCommandReceipt(`run-prompt:${fixture.runId}`),
