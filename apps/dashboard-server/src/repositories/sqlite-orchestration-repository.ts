@@ -25,6 +25,7 @@ import type {
   BindRuntimeInput,
   CheckoutPatch,
   CreateCheckoutInput,
+  CreateIsolatedThreadWithRunInput,
   CreateProjectInput,
   CreateRunInput,
   CreateThreadInput,
@@ -561,6 +562,11 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       const checkout = this.getCheckout(previous.checkoutId);
       if (!checkout)
         throw new Error(`Checkout ${previous.checkoutId} does not exist.`);
+      if (checkout.status === 'retired')
+        throw Object.assign(
+          new Error('A retired checkout cannot be retried.'),
+          { code: 'orchestration-conflict' },
+        );
       const run = this.insertRun({
         id: randomUUID(),
         threadId: thread.id,
@@ -744,6 +750,19 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     });
   }
 
+  claimCheckoutForMerge(id: string, now = Date.now()): Checkout | undefined {
+    return this.withTransaction(() => {
+      const result = this.db
+        .prepare(
+          `UPDATE checkout SET status='merging',updated_at=?
+           WHERE id=? AND status IN ('ready','dirty')`,
+        )
+        .run(now, id);
+      if (Number(result.changes) !== 1) return undefined;
+      return this.getCheckout(id);
+    });
+  }
+
   createThreadWithRun(
     idempotencyKey: string,
     input: CreateThreadWithRunInput,
@@ -763,6 +782,48 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       const run = this.insertRun({
         ...input.run,
         threadId: thread.id,
+      });
+      const receipt: CommandReceipt = {
+        idempotencyKey,
+        commandType: 'thread.create',
+        resourceType: 'thread',
+        resourceId: thread.id,
+        result: { thread, run },
+        createdAt: Date.now(),
+      };
+      this.insertReceipt(receipt);
+      return { thread, run, receipt };
+    });
+  }
+
+  createIsolatedThreadWithRun(
+    idempotencyKey: string,
+    input: CreateIsolatedThreadWithRunInput,
+  ): { thread: Thread; run: Run; receipt: CommandReceipt } {
+    return this.withTransaction(() => {
+      // Check the receipt before allocating the checkout. This is the
+      // durable idempotency boundary across connections and processes.
+      const existing = this.getCommandReceipt(idempotencyKey);
+      if (existing) {
+        if (existing.commandType !== 'thread.create')
+          throw idempotencyConflict(idempotencyKey, existing.commandType);
+        const result = existing.result as { thread: Thread; run: Run };
+        return { ...result, receipt: existing };
+      }
+      const checkout = this.createCheckout({
+        ...input.checkout,
+        projectId: input.thread.projectId,
+        status: input.checkout.status ?? 'preparing',
+      });
+      const thread = this.insertThread({
+        ...input.thread,
+        checkoutId: checkout.id,
+        status: input.thread.status ?? 'queued',
+      });
+      const run = this.insertRun({
+        ...input.run,
+        threadId: thread.id,
+        checkoutId: checkout.id,
       });
       const receipt: CommandReceipt = {
         idempotencyKey,

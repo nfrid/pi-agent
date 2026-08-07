@@ -122,6 +122,15 @@ export interface CreateThreadWithRunInput {
   run: Omit<CreateRunInput, 'threadId'> & { threadId?: string };
 }
 
+export interface CreateIsolatedThreadWithRunInput {
+  checkout: Omit<CreateCheckoutInput, 'projectId'>;
+  thread: Omit<CreateThreadInput, 'checkoutId'>;
+  run: Omit<CreateRunInput, 'threadId' | 'checkoutId'> & {
+    threadId?: string;
+    checkoutId?: string;
+  };
+}
+
 export interface RetryRunInput {
   threadId: string;
   initialPrompt: string;
@@ -204,9 +213,15 @@ export interface OrchestrationRepository {
     status: Checkout['status'],
     now?: number,
   ): Checkout;
+  /** Atomically claims a ready or dirty checkout for one merge owner. */
+  claimCheckoutForMerge(id: string, now?: number): Checkout | undefined;
   createThreadWithRun(
     idempotencyKey: string,
     input: CreateThreadWithRunInput,
+  ): { thread: Thread; run: Run; receipt: CommandReceipt };
+  createIsolatedThreadWithRun(
+    idempotencyKey: string,
+    input: CreateIsolatedThreadWithRunInput,
   ): { thread: Thread; run: Run; receipt: CommandReceipt };
   getCommandReceipt(idempotencyKey: string): CommandReceipt | undefined;
   recordCommandReceipt(receipt: CommandReceipt): void;

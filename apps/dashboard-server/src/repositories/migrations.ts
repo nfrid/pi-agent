@@ -3,6 +3,8 @@ import type { DatabaseSync } from 'node:sqlite';
 export interface DashboardMigration {
   readonly version: number;
   readonly name: string;
+  /** This migration rebuilds a table referenced by foreign keys. */
+  readonly foreignKeysOff?: boolean;
   readonly up: (db: DatabaseSync) => void;
 }
 
@@ -216,6 +218,39 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    name: 'project-scoped-checkout-branches',
+    foreignKeysOff: true,
+    up(db) {
+      // checkout is referenced by thread, orchestration_run, and
+      // worktree_record. Rebuild it without changing those old migration
+      // definitions: the runner temporarily disables FK enforcement around
+      // this narrowly-scoped operation.
+      db.exec(`
+        CREATE TABLE checkout_v5 (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES project(id),
+          kind TEXT NOT NULL CHECK (kind IN ('main','worktree','external')),
+          path TEXT NOT NULL UNIQUE,
+          branch TEXT,
+          base_sha TEXT,
+          status TEXT NOT NULL CHECK (status IN ('preparing','ready','dirty','merging','retired','failed')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        INSERT INTO checkout_v5
+          (id,project_id,kind,path,branch,base_sha,status,created_at,updated_at)
+          SELECT id,project_id,kind,path,branch,base_sha,status,created_at,updated_at
+          FROM checkout;
+        DROP INDEX IF EXISTS checkout_branch_unique;
+        DROP TABLE checkout;
+        ALTER TABLE checkout_v5 RENAME TO checkout;
+        CREATE UNIQUE INDEX checkout_project_branch_unique
+          ON checkout(project_id,branch) WHERE branch IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */
@@ -240,16 +275,37 @@ export function runMigrations(
     (left, right) => left.version - right.version,
   )) {
     if (applied.has(migration.version)) continue;
-    db.exec('BEGIN');
+    const foreignKeysEnabled = Boolean(
+      (db.prepare('PRAGMA foreign_keys').get() as Record<string, unknown>)
+        .foreign_keys,
+    );
+    if (migration.foreignKeysOff && foreignKeysEnabled)
+      db.exec('PRAGMA foreign_keys=OFF');
+    let transactionStarted = false;
     try {
+      db.exec('BEGIN');
+      transactionStarted = true;
       migration.up(db);
+      if (migration.foreignKeysOff) {
+        const violations = db.prepare('PRAGMA foreign_key_check').all();
+        if (violations.length > 0)
+          throw new Error('Foreign-key check failed after migration.');
+      }
       db.prepare(
         'INSERT INTO schema_migrations (version,name,applied_at) VALUES (?,?,?)',
       ).run(migration.version, migration.name, Date.now());
       db.exec('COMMIT');
     } catch (error) {
-      db.exec('ROLLBACK');
+      if (transactionStarted)
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          /* preserve the original migration error */
+        }
       throw error;
+    } finally {
+      if (migration.foreignKeysOff && foreignKeysEnabled)
+        db.exec('PRAGMA foreign_keys=ON');
     }
   }
 }

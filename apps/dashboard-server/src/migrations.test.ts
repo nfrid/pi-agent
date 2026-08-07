@@ -42,7 +42,7 @@ it('applies numbered dashboard migrations idempotently', async () => {
 describe('migration metadata', () => {
   it('uses stable ascending migration numbers', () => {
     expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4,
+      1, 2, 3, 4, 5,
     ]);
   });
 
@@ -106,6 +106,59 @@ describe('migration metadata', () => {
         `INSERT INTO project (id,title,root_path,repository_identity,default_isolation,max_parallel_runs,status,created_at,updated_at)
          VALUES ('identity-null','Null','/null',NULL,'worktree',1,'active',1,1)`,
       ).run();
+    } finally {
+      db.close();
+    }
+  });
+
+  it('rebuilds checkout from v4 without losing FK-referenced history', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-v5-'));
+    const db = new DatabaseSync(path.join(root, 'dashboard.sqlite'));
+    try {
+      db.exec('PRAGMA foreign_keys=ON');
+      runMigrations(db, DASHBOARD_MIGRATIONS.slice(0, 4));
+      db.exec(`
+        INSERT INTO project (id,title,root_path,default_isolation,max_parallel_runs,status,created_at,updated_at)
+        VALUES ('v5-project-1','One','/one','worktree',1,'active',1,1),
+               ('v5-project-2','Two','/two','worktree',1,'active',1,1);
+        INSERT INTO checkout (id,project_id,kind,path,branch,base_sha,status,created_at,updated_at)
+        VALUES ('v5-checkout-1','v5-project-1','worktree','/one/.worktrees/one','main','sha-one','ready',2,2),
+               ('v5-checkout-2','v5-project-2','worktree','/two/.worktrees/two','other','sha-two','dirty',3,3);
+        INSERT INTO thread (id,project_id,title,checkout_id,status,created_at,updated_at)
+        VALUES ('v5-thread','v5-project-1','History','v5-checkout-1','settled',4,4);
+        INSERT INTO orchestration_run
+          (id,thread_id,checkout_id,attempt,mode,runtime_provider,initial_prompt,status,created_at)
+        VALUES ('v5-run','v5-thread','v5-checkout-1',1,'write','extension-bridge','prompt','settled',5);
+        INSERT INTO orchestration_runtime
+          (runtime_id,pi_session_id,run_id,status,created_at,updated_at)
+        VALUES ('v5-runtime','v5-session','v5-run','stopped',6,6);
+        INSERT INTO worktree_record (id,checkout_id,record_json,updated_at)
+        VALUES ('v5-record','v5-checkout-1','{}',7);
+      `);
+      runMigrations(db);
+      expect(db.prepare('PRAGMA foreign_keys').get()).toMatchObject({
+        foreign_keys: 1,
+      });
+      expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(
+        db.prepare('SELECT id,branch FROM checkout ORDER BY id').all(),
+      ).toEqual([
+        { id: 'v5-checkout-1', branch: 'main' },
+        { id: 'v5-checkout-2', branch: 'other' },
+      ]);
+      expect(db.prepare('SELECT * FROM worktree_record').all()).toHaveLength(1);
+      db.prepare(
+        `INSERT INTO checkout (id,project_id,kind,path,branch,status,created_at,updated_at)
+         VALUES ('v5-checkout-3','v5-project-2','worktree','/two/.worktrees/main','main','ready',8,8)`,
+      ).run();
+      expect(() =>
+        db
+          .prepare(
+            `INSERT INTO checkout (id,project_id,kind,path,branch,status,created_at,updated_at)
+             VALUES ('v5-checkout-4','v5-project-1','worktree','/one/.worktrees/main','main','ready',9,9)`,
+          )
+          .run(),
+      ).toThrow();
     } finally {
       db.close();
     }

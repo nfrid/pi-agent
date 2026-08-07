@@ -117,6 +117,11 @@ export class OrchestrationService {
     string,
     { runId: string; task: Promise<unknown> }
   >();
+  /** One checkout has one merge owner; callers with that command share it. */
+  private readonly mergeTasks = new Map<
+    string,
+    { commandId: string; task: Promise<unknown> }
+  >();
   private readonly tools = new Map<
     string,
     {
@@ -266,34 +271,51 @@ export class OrchestrationService {
     const project = this.requireProject(projectId);
     if (project.status !== 'active') throw new Error('Project is archived.');
     const runId = `run-${randomUUID()}`;
-    const checkout = command.checkoutId
-      ? this.requireCheckout(command.checkoutId)
-      : this.checkoutForNewRun(project, command.isolation, runId);
-    if (checkout.projectId !== project.id)
-      throw new Error('Checkout does not belong to this project.');
-    const input: CreateThreadWithRunInput = {
-      thread: {
-        id: `thread-${randomUUID()}`,
-        projectId,
-        title: command.title,
-        checkoutId: checkout.id,
-      },
-      run: {
-        id: runId,
-        initialPrompt: command.prompt,
-        mode: command.mode ?? 'write',
-        runtimeProvider: command.runtimeProvider ?? 'extension-bridge',
-        model: command.model,
-        status: 'queued',
-      },
+    const thread = {
+      id: `thread-${randomUUID()}`,
+      projectId,
+      title: command.title,
+    };
+    const run = {
+      id: runId,
+      initialPrompt: command.prompt,
+      mode: command.mode ?? ('write' as const),
+      runtimeProvider: command.runtimeProvider ?? ('extension-bridge' as const),
+      model: command.model,
+      status: 'queued' as const,
     };
     let result: { thread: Thread; run: Run; receipt: CommandReceipt };
-    try {
+    const chosenIsolation = command.isolation ?? project.defaultIsolation;
+    if (command.checkoutId || chosenIsolation === 'main') {
+      const checkout = command.checkoutId
+        ? this.requireCheckout(command.checkoutId)
+        : this.mainCheckout(project.id);
+      if (!checkout) throw new Error('Project has no persisted main checkout.');
+      if (checkout.projectId !== project.id)
+        throw new Error('Checkout does not belong to this project.');
+      if (checkout.status === 'retired')
+        throw Object.assign(
+          new Error('A retired checkout cannot receive a new thread.'),
+          { code: 'orchestration-conflict' },
+        );
+      const input: CreateThreadWithRunInput = {
+        thread: { ...thread, checkoutId: checkout.id },
+        run,
+      };
       result = this.repository.createThreadWithRun(command.commandId, input);
-    } catch (error) {
-      if (!command.checkoutId && checkout.kind === 'worktree')
-        this.repository.deleteCheckout(checkout.id);
-      throw error;
+    } else {
+      // The repository allocates this preparing checkout only after it has
+      // checked the durable receipt, inside the same transaction as all rows.
+      result = this.repository.createIsolatedThreadWithRun(command.commandId, {
+        checkout: {
+          id: `checkout-${randomUUID()}`,
+          kind: 'worktree',
+          path: path.join(project.rootPath, '.worktrees', `.pending-${runId}`),
+          status: 'preparing',
+        },
+        thread,
+        run,
+      });
     }
     this.changed();
     this.kick();
@@ -423,11 +445,50 @@ export class OrchestrationService {
   async mergeCheckout(checkoutId: string, commandId: string): Promise<unknown> {
     const prior = this.receipt(commandId, 'checkout.merge');
     if (prior) return prior.result;
+    const active = this.mergeTasks.get(checkoutId);
+    if (active) {
+      if (active.commandId !== commandId)
+        throw Object.assign(
+          new Error('A different merge command already owns this checkout.'),
+          { code: 'orchestration-conflict' },
+        );
+      return active.task;
+    }
+    const task = this.performMergeCheckout(checkoutId, commandId);
+    this.mergeTasks.set(checkoutId, { commandId, task });
+    void task.then(
+      () => {
+        if (this.mergeTasks.get(checkoutId)?.task === task)
+          this.mergeTasks.delete(checkoutId);
+      },
+      () => {
+        if (this.mergeTasks.get(checkoutId)?.task === task)
+          this.mergeTasks.delete(checkoutId);
+      },
+    );
+    return task;
+  }
+
+  private async performMergeCheckout(
+    checkoutId: string,
+    commandId: string,
+  ): Promise<unknown> {
     const checkout = this.requireCheckout(checkoutId);
     this.assertCheckoutQuiescent(checkoutId);
     const record = this.worktreeRecord(checkout);
     if (!record) throw new Error('Checkout has no prepared worktree record.');
-    this.repository.transitionCheckout(checkoutId, 'merging');
+    const claimed = this.repository.claimCheckoutForMerge(checkoutId);
+    if (!claimed) {
+      const current = this.repository.getCheckout(checkoutId);
+      throw Object.assign(
+        new Error(
+          current?.status === 'merging'
+            ? 'Checkout merge is already owned by another command.'
+            : `Checkout cannot be merged from ${current?.status ?? 'missing'} state.`,
+        ),
+        { code: 'orchestration-conflict' },
+      );
+    }
     try {
       // Stop any retained managed runtime before Git integration can mutate
       // main. A cleanup failure must leave both sides untouched and reviewable.
@@ -734,6 +795,15 @@ export class OrchestrationService {
 
   private async execute(run: Run): Promise<void> {
     const checkout = this.requireCheckout(run.checkoutId);
+    if (checkout.status === 'retired') {
+      this.failRun(
+        run.id,
+        'failed',
+        'Cannot execute a run on a retired checkout.',
+      );
+      this.changed();
+      return;
+    }
     const project = this.requireProject(
       this.requireThread(run.threadId).projectId,
     );
@@ -952,26 +1022,6 @@ export class OrchestrationService {
     return this.repository
       .listCheckouts(projectId)
       .find((checkout) => checkout.kind === 'main');
-  }
-
-  private checkoutForNewRun(
-    project: Project,
-    isolation: 'worktree' | 'main' | undefined,
-    runId: string,
-  ) {
-    const chosen = isolation ?? project.defaultIsolation;
-    if (chosen === 'main') {
-      const main = this.mainCheckout(project.id);
-      if (!main) throw new Error('Project has no persisted main checkout.');
-      return main;
-    }
-    return this.repository.createCheckout({
-      id: `checkout-${randomUUID()}`,
-      projectId: project.id,
-      kind: 'worktree',
-      path: path.join(project.rootPath, '.worktrees', `.pending-${runId}`),
-      status: 'preparing',
-    });
   }
 
   private promptReceiptId(runId: string): string {

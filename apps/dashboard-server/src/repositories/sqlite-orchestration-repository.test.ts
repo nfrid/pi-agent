@@ -149,6 +149,50 @@ describe('SqliteOrchestrationRepository', () => {
     ).toThrow('belongs to run.create');
   });
 
+  it('atomically allocates one isolated checkout for a replayed command', async () => {
+    const value = await fixture();
+    const result = value.repository.createIsolatedThreadWithRun(
+      'isolated-once',
+      {
+        checkout: {
+          id: 'isolated-checkout',
+          kind: 'worktree',
+          path: '/repo/.worktrees/isolated',
+          status: 'preparing',
+        },
+        thread: {
+          id: 'isolated-thread',
+          projectId: value.project.id,
+          title: 'Isolated',
+        },
+        run: { id: 'isolated-run', initialPrompt: 'Do it.' },
+      },
+    );
+    const replay = value.repository.createIsolatedThreadWithRun(
+      'isolated-once',
+      {
+        checkout: {
+          id: 'orphan-checkout',
+          kind: 'worktree',
+          path: '/repo/.worktrees/orphan',
+        },
+        thread: {
+          id: 'orphan-thread',
+          projectId: value.project.id,
+          title: 'Must not exist',
+        },
+        run: { id: 'orphan-run', initialPrompt: 'Must not exist.' },
+      },
+    );
+    expect(replay).toEqual(result);
+    expect(value.repository.listCheckouts(value.project.id)).toHaveLength(2);
+    expect(value.repository.listThreads(value.project.id)).toHaveLength(1);
+    expect(value.repository.listRuns()).toHaveLength(1);
+    expect(
+      value.repository.listCheckouts(value.project.id).map((item) => item.id),
+    ).toContain('isolated-checkout');
+  });
+
   it('keeps a second isolated run queued until the project parallel slot settles', async () => {
     const value = await fixture();
     value.repository.updateProject(value.project.id, { maxParallelRuns: 1 });
@@ -340,6 +384,28 @@ describe('SqliteOrchestrationRepository', () => {
     ).toThrow();
   });
 
+  it('claims checkout merge ownership with a cross-connection CAS', async () => {
+    const value = await fixture();
+    const secondDb = new DatabaseSync(value.file);
+    secondDb.exec('PRAGMA foreign_keys=ON');
+    const second = new SqliteOrchestrationRepository(secondDb);
+    try {
+      expect(
+        value.repository.claimCheckoutForMerge(value.checkout.id)?.status,
+      ).toBe('merging');
+      expect(second.claimCheckoutForMerge(value.checkout.id)).toBeUndefined();
+      expect(value.repository.getCheckout(value.checkout.id)?.status).toBe(
+        'merging',
+      );
+      value.repository.transitionCheckout(value.checkout.id, 'dirty');
+      expect(second.claimCheckoutForMerge(value.checkout.id)?.status).toBe(
+        'merging',
+      );
+    } finally {
+      secondDb.close();
+    }
+  });
+
   it('queues a retry atomically and preserves that projection across replay and reopen', async () => {
     const value = await fixture();
     const thread = value.repository.createThread({
@@ -418,6 +484,18 @@ describe('SqliteOrchestrationRepository', () => {
         initialPrompt: 'Wrong command type.',
       }),
     ).toThrow('belongs to run.retry');
+    value.repository.transitionRun(result.run.id, 'preparing');
+    value.repository.transitionRun(result.run.id, 'starting');
+    value.repository.transitionRun(result.run.id, 'running');
+    value.repository.transitionRun(result.run.id, 'settled');
+    value.repository.transitionCheckout(value.checkout.id, 'retired');
+    expect(() =>
+      value.repository.retryRunIdempotent('retired-retry', {
+        threadId: thread.id,
+        initialPrompt: 'Must not run.',
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'orchestration-conflict' }));
+    expect(value.repository.listRuns(thread.id)).toHaveLength(2);
     value.db.close();
 
     const reopened = new DatabaseSync(value.file);

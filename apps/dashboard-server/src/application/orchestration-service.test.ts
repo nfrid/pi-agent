@@ -198,6 +198,69 @@ async function isolatedServiceFixture(options: { failingHook?: boolean } = {}) {
 }
 
 describe('OrchestrationService', () => {
+  it('replays isolated create without allocating an orphan checkout', async () => {
+    const fixture = await isolatedServiceFixture();
+    try {
+      const command = {
+        commandId: 'isolated-replay',
+        title: 'Once',
+        prompt: 'Do it once.',
+      };
+      const first = await fixture.service.createThread(
+        fixture.projectId,
+        command,
+      );
+      const replay = await fixture.service.createThread(fixture.projectId, {
+        ...command,
+        title: 'Must not replace',
+        prompt: 'Must not replace.',
+      });
+      expect(replay).toEqual(first);
+      expect(
+        fixture.metadata.orchestration.listCheckouts(fixture.projectId),
+      ).toHaveLength(2);
+      expect(
+        fixture.metadata.orchestration.listThreads(fixture.projectId),
+      ).toHaveLength(1);
+      expect(fixture.metadata.orchestration.listRuns()).toHaveLength(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('rejects new work and execution on a retired checkout without launching', async () => {
+    const fixture = await orchestrationFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      const current = repository.getCheckout(
+        repository.getRun(fixture.runId)?.checkoutId ?? '',
+      );
+      if (!current) throw new Error('Missing fixture checkout.');
+      repository.transitionCheckout(current.id, 'retired');
+      await expect(
+        fixture.service.createThread(
+          repository.getProject(current.projectId)?.id ?? '',
+          {
+            commandId: 'retired-new-thread',
+            title: 'Rejected',
+            prompt: 'Must not create.',
+            checkoutId: current.id,
+            isolation: 'main',
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'orchestration-conflict' });
+      await fixture.service.start();
+      await waitFor(
+        () => repository.getRun(fixture.runId)?.status === 'failed',
+      );
+      expect(fixture.manager.launch).not.toHaveBeenCalled();
+      expect(repository.listThreads()).toHaveLength(1);
+      expect(repository.listRuns()).toHaveLength(1);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('requeues preparing runs and leaves them claimable during reconciliation', async () => {
     const fixture = await orchestrationFixture();
     try {
