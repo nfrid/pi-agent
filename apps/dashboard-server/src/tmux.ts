@@ -214,7 +214,11 @@ export class TmuxRuntimeProvider implements AgentRuntimeProvider {
 
   async start(input: RuntimeStartInput): Promise<RuntimeBinding> {
     const session = input.workspace.sessionId;
-    if (!session || !input.workspace.active)
+    if (
+      !session ||
+      !input.workspace.active ||
+      !(await this.tmux.hasSession(session))
+    )
       throw new Error(
         'This workspace has no active tmux session yet. Open it through Sesh on the Mac first.',
       );

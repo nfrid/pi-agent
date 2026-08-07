@@ -1,5 +1,5 @@
 import type { WorkspaceTarget } from '@pi-dashboard/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   parseNewWindowOutput,
   sanitizeTmuxName,
@@ -94,6 +94,35 @@ describe('tmux adapter', () => {
     });
     await provider.stop(binding);
     expect(runner.calls.at(-1)).toEqual(['kill-window', '-t', 'project:@4']);
+  });
+
+  it('rejects a stale active Sesh flag before creating a managed window', async () => {
+    const hasSession = vi.fn().mockResolvedValue(false);
+    const newManagedWindow = vi.fn();
+    const provider = new TmuxRuntimeProvider({
+      hasSession,
+      newManagedWindow,
+    } as unknown as TmuxAdapter);
+
+    await expect(
+      provider.start({
+        runtimeId: 'runtime-stale-session',
+        cwd: '/tmp',
+        socketPath: '/tmp/socket',
+        launchToken: 'launch',
+        identityToken: 'identity',
+        workspace: {
+          id: 'w',
+          name: 'project',
+          sessionId: 'project',
+          active: true,
+        },
+      }),
+    ).rejects.toThrow(
+      'This workspace has no active tmux session yet. Open it through Sesh on the Mac first.',
+    );
+    expect(hasSession).toHaveBeenCalledWith('project');
+    expect(newManagedWindow).not.toHaveBeenCalled();
   });
 
   it('parses the literal-delimited placement format', () => {
