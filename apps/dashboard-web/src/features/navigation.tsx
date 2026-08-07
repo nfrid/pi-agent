@@ -45,11 +45,19 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
   const managedActive = (snapshot.runs ?? []).filter(
     (run) =>
       run.status !== 'queued' &&
-      ['preparing', 'starting', 'running', 'waiting'].includes(run.status),
+      ['preparing', 'starting', 'running'].includes(run.status),
   ).length;
-  const managedAttention = (snapshot.threads ?? []).filter(
-    (thread) => thread.status === 'needs-input' || thread.status === 'failed',
-  ).length;
+  const managedAttention = (snapshot.threads ?? []).filter((thread) => {
+    const latest = (snapshot.runs ?? [])
+      .filter((run) => run.threadId === thread.id)
+      .sort((a, b) => b.attempt - a.attempt || b.createdAt - a.createdAt)[0];
+    return (
+      thread.status === 'needs-input' ||
+      thread.status === 'failed' ||
+      latest?.status === 'waiting' ||
+      latest?.status === 'failed'
+    );
+  }).length;
   const paletteDisabled = Boolean(
     activeSessionId &&
       snapshot.runtimes.some(

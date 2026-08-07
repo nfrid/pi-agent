@@ -103,8 +103,11 @@ export {
   isTerminalRun,
   latestRunForThread,
   managementStatusCounts,
+  pathWithin,
   runTiming,
   sessionRouteTarget,
+  threadActionAvailability,
+  threadNeedsAttention,
   unassignedSessions,
 } from './routes/management';
 export { newChatPath } from './routes/navigation';
@@ -314,9 +317,7 @@ function HomeRoute() {
   const dashboard = useDashboardContext();
   if (!dashboard.snapshot) return null;
   if ((dashboard.snapshot.projects?.length ?? 0) > 0)
-    return (
-      <ManagementHome snapshot={dashboard.snapshot} store={dashboard.store} />
-    );
+    return <ManagementHome snapshot={dashboard.snapshot} />;
   return (
     <Dashboard
       snapshot={dashboard.snapshot}

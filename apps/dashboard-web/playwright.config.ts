@@ -20,12 +20,13 @@ export default defineConfig({
     {
       name: 'mobile',
       use: { ...devices['Pixel 5'] },
-      testIgnore: '**/management.spec.ts',
+      grepInvert: /@desktop/,
     },
     {
       name: 'desktop-management',
       use: { ...devices['Desktop Chrome'] },
       testMatch: '**/management.spec.ts',
+      grep: /@desktop/,
     },
   ],
 });

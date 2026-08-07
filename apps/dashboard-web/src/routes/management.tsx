@@ -42,6 +42,17 @@ const activeRunStatuses = new Set([
   'waiting',
 ]);
 const settledRunStatuses = new Set(['settled', 'cancelled', 'interrupted']);
+const attentionRunStatuses = new Set(['waiting', 'failed']);
+const reviewableCheckoutStatuses = new Set(['ready', 'dirty', 'failed']);
+const mergeableCheckoutStatuses = new Set(['ready', 'dirty']);
+const interruptibleRunStatuses = new Set([
+  'queued',
+  'preparing',
+  'starting',
+  'running',
+  'waiting',
+]);
+const runningRunStatuses = new Set(['preparing', 'starting', 'running']);
 
 /** Pure, stable management projection. A thread appears in exactly one shelf. */
 export function groupThreads(
@@ -71,15 +82,18 @@ export function groupThreads(
   for (const thread of sorted) {
     const run = latest.get(thread.id);
     const status = run?.status ?? thread.status;
+    const needsAttention =
+      thread.status === 'needs-input' ||
+      thread.status === 'failed' ||
+      attentionRunStatuses.has(status);
     const shelf: ThreadShelf =
       thread.status === 'archived'
         ? 'archived'
         : thread.pinnedAt !== undefined
           ? 'pinned'
-          : status === 'needs-input' || status === 'failed'
+          : needsAttention
             ? 'attention'
             : status === 'running' ||
-                status === 'waiting' ||
                 status === 'preparing' ||
                 status === 'starting'
               ? 'running'
@@ -118,6 +132,68 @@ function errorText(run: RunSummary | undefined): string | undefined {
   return run?.error;
 }
 
+export function threadNeedsAttention(
+  thread: ThreadSummary,
+  runs: readonly RunSummary[],
+): boolean {
+  const latest = runFor(thread, runs);
+  return (
+    thread.status === 'needs-input' ||
+    thread.status === 'failed' ||
+    attentionRunStatuses.has(latest?.status ?? '')
+  );
+}
+
+export interface ThreadActionAvailability {
+  canInterrupt: boolean;
+  canRetry: boolean;
+  canReview: boolean;
+  canMerge: boolean;
+  canRetire: boolean;
+  canArchive: boolean;
+}
+
+export function threadActionAvailability(
+  run: RunSummary | undefined,
+  checkout: CheckoutSummary | undefined,
+): ThreadActionAvailability {
+  const active = Boolean(run && activeRunStatuses.has(run.status));
+  const reviewable = Boolean(
+    checkout &&
+      checkout.kind === 'worktree' &&
+      checkout.changedFileCount !== undefined,
+  );
+  return {
+    canInterrupt: Boolean(run && interruptibleRunStatuses.has(run.status)),
+    canRetry: Boolean(
+      run &&
+        !active &&
+        checkout &&
+        checkout.status !== 'retired' &&
+        checkout.status !== 'merging',
+    ),
+    canReview: Boolean(
+      !active &&
+        reviewable &&
+        checkout &&
+        reviewableCheckoutStatuses.has(checkout.status),
+    ),
+    canMerge: Boolean(
+      !active &&
+        reviewable &&
+        checkout &&
+        mergeableCheckoutStatuses.has(checkout.status),
+    ),
+    canRetire: Boolean(
+      !active &&
+        reviewable &&
+        checkout &&
+        reviewableCheckoutStatuses.has(checkout.status),
+    ),
+    canArchive: !active,
+  };
+}
+
 export function managementStatusCounts(
   snapshot: Pick<BrowserSnapshot, 'threads' | 'runs'>,
 ): {
@@ -128,13 +204,20 @@ export function managementStatusCounts(
   interrupted: number;
 } {
   const runs = snapshot.runs ?? [];
+  const latest = new Map<string, RunSummary>();
+  for (const run of [...runs].sort(
+    (a, b) => b.attempt - a.attempt || b.createdAt - a.createdAt,
+  )) {
+    if (!latest.has(run.threadId)) latest.set(run.threadId, run);
+  }
   return {
-    active: runs.filter(
-      (run) => activeRunStatuses.has(run.status) && run.status !== 'queued',
-    ).length,
+    active: runs.filter((run) => runningRunStatuses.has(run.status)).length,
     queued: runs.filter((run) => run.status === 'queued').length,
     attention: (snapshot.threads ?? []).filter(
-      (thread) => thread.status === 'needs-input' || thread.status === 'failed',
+      (thread) =>
+        thread.status === 'needs-input' ||
+        thread.status === 'failed' ||
+        attentionRunStatuses.has(latest.get(thread.id)?.status ?? ''),
     ).length,
     failed: runs.filter((run) => run.status === 'failed').length,
     interrupted: runs.filter((run) => run.status === 'interrupted').length,
@@ -169,11 +252,11 @@ function Rail({
   const go = useDashboardNavigate();
   const [open, setOpen] = useState(false);
   const projects = snapshot.projects ?? [];
-  const active = (snapshot.runs ?? []).filter(
-    (run) => activeRunStatuses.has(run.status) && run.status !== 'queued',
+  const active = (snapshot.runs ?? []).filter((run) =>
+    runningRunStatuses.has(run.status),
   ).length;
-  const attention = (snapshot.threads ?? []).filter(
-    (thread) => thread.status === 'needs-input' || thread.status === 'failed',
+  const attention = (snapshot.threads ?? []).filter((thread) =>
+    threadNeedsAttention(thread, snapshot.runs ?? []),
   ).length;
   return (
     <>
@@ -202,7 +285,17 @@ function Rail({
         <button
           type="button"
           className="rail-attention"
-          onClick={() => go('/')}
+          onClick={() => {
+            const scroll = () =>
+              document
+                .getElementById('global-needs-attention')
+                ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (window.location.pathname === '/') scroll();
+            else {
+              go('/');
+              window.setTimeout(scroll, 0);
+            }
+          }}
         >
           <span>Needs attention</span>
           <b>{attention}</b>
@@ -230,8 +323,7 @@ function Rail({
               {
                 (snapshot.runs ?? []).filter(
                   (run) =>
-                    run.status !== 'queued' &&
-                    activeRunStatuses.has(run.status) &&
+                    runningRunStatuses.has(run.status) &&
                     snapshot.threads?.find(
                       (thread) => thread.id === run.threadId,
                     )?.projectId === project.id,
@@ -268,10 +360,12 @@ function ThreadCard({
   thread,
   runs,
   checkouts,
+  projectTitle,
 }: {
   thread: ThreadSummary;
   runs: readonly RunSummary[];
   checkouts: readonly CheckoutSummary[];
+  projectTitle?: string;
 }) {
   const go = useDashboardNavigate();
   const run = runFor(thread, runs);
@@ -283,6 +377,7 @@ function ThreadCard({
         className="thread-card-link"
         onClick={() => go(`/threads/${encodeURIComponent(thread.id)}`)}
       >
+        {projectTitle && <p className="thread-card-project">{projectTitle}</p>}
         <h3>{thread.title}</h3>
         <p className="thread-card-meta">
           {checkout?.branch ?? checkout?.kind ?? 'No checkout'} ·{' '}
@@ -343,6 +438,7 @@ export function ProjectShelves({
                   thread={thread}
                   runs={runs}
                   checkouts={checkouts}
+                  projectTitle={project.title}
                 />
               ))}
             </div>
@@ -509,8 +605,7 @@ export function ProjectRoute({
           {
             (snapshot.runs ?? []).filter(
               (run) =>
-                run.status !== 'queued' &&
-                activeRunStatuses.has(run.status) &&
+                runningRunStatuses.has(run.status) &&
                 snapshot.threads?.find((thread) => thread.id === run.threadId)
                   ?.projectId === project.id,
             ).length
@@ -556,23 +651,7 @@ function LegacySessions({
       go(`/threads/${encodeURIComponent(result.thread.id)}`);
     },
   });
-  const checkouts = (snapshot.checkouts ?? []).filter(
-    (checkout) =>
-      checkout.projectId === project.id &&
-      (checkout.status === 'ready' || checkout.status === 'dirty'),
-  );
-  const owned = new Set(
-    (snapshot.runs ?? []).map((run) => run.piSessionId).filter(Boolean),
-  );
-  const sessions = snapshot.sessions.filter(
-    (session) =>
-      !owned.has(session.id) &&
-      checkouts.some(
-        (checkout) =>
-          session.cwd === checkout.path ||
-          session.cwd.startsWith(`${checkout.path}/`),
-      ),
-  );
+  const sessions = unassignedSessions(snapshot, project);
   if (!sessions.length) return null;
   return (
     <section className="legacy-sessions">
@@ -595,6 +674,11 @@ function LegacySessions({
           </button>
         </div>
       ))}
+      {mutation.error && (
+        <p className="error" role="alert">
+          Unable to adopt session: {String(mutation.error)}
+        </p>
+      )}
     </section>
   );
 }
@@ -618,9 +702,7 @@ export function NewThreadRoute({
   });
   const [title, setTitle] = useState('');
   const [prompt, setPrompt] = useState('');
-  const [isolation, setIsolation] = useState<'worktree' | 'main'>(
-    project?.rootPath ? 'worktree' : 'worktree',
-  );
+  const [isolation, setIsolation] = useState<'worktree' | 'main'>('worktree');
   const [mode, setMode] = useState<'read' | 'write'>('write');
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
@@ -782,7 +864,7 @@ export function ThreadRoute({
   const cancel = useMutation({
     ...cancelRunMutationOptions(dashboardHttpClient),
     onSuccess: async () => {
-      setFeedback('Cancellation requested.');
+      setFeedback('Interrupt requested.');
       await refresh();
     },
   });
@@ -827,7 +909,7 @@ export function ThreadRoute({
         </button>
       </section>
     );
-  const active = Boolean(selected && activeRunStatuses.has(selected.status));
+  const availability = threadActionAvailability(selected, checkout);
   const busy =
     cancel.isPending ||
     retry.isPending ||
@@ -881,21 +963,21 @@ export function ThreadRoute({
           <div className="action-row">
             <button
               type="button"
-              disabled={!selected || !active || busy}
+              disabled={!availability.canInterrupt || busy}
               onClick={() => selected && cancel.mutate({ runId: selected.id })}
             >
-              Cancel run
+              Interrupt run
             </button>
             <button
               type="button"
-              disabled={!selected || active || busy}
+              disabled={!availability.canRetry || busy}
               onClick={() => retry.mutate({ threadId })}
             >
               Retry
             </button>
             <button
               type="button"
-              disabled={active || busy}
+              disabled={!availability.canArchive || busy}
               onClick={() =>
                 confirmAction('Archive this thread?', () =>
                   archive.mutate({ threadId }),
@@ -954,14 +1036,14 @@ export function ThreadRoute({
               <div className="action-row">
                 <button
                   type="button"
-                  disabled={reviewMutation.isPending}
+                  disabled={!availability.canReview || reviewMutation.isPending}
                   onClick={() => reviewMutation.mutate(checkout.id)}
                 >
                   Review checkout
                 </button>
                 <button
                   type="button"
-                  disabled={active || busy}
+                  disabled={!availability.canMerge || busy}
                   onClick={() =>
                     confirmAction('Merge this checkout?', () =>
                       merge.mutate({ checkoutId: checkout.id }),
@@ -972,7 +1054,7 @@ export function ThreadRoute({
                 </button>
                 <button
                   type="button"
-                  disabled={active || busy}
+                  disabled={!availability.canRetire || busy}
                   onClick={() =>
                     confirmAction('Retire this checkout?', () =>
                       retire.mutate({ checkoutId: checkout.id }),
@@ -1019,6 +1101,7 @@ export function ThreadRoute({
               snapshot={snapshot}
               store={store}
               Composer={Composer}
+              embedded
             />
           </section>
         )}
@@ -1027,12 +1110,107 @@ export function ThreadRoute({
   );
 }
 
-export function ManagementHome({
-  snapshot,
-}: {
-  snapshot: BrowserSnapshot;
-  store?: DashboardLiveStore;
-}) {
+function GlobalOverview({ snapshot }: { snapshot: BrowserSnapshot }) {
+  const go = useDashboardNavigate();
+  const threads = snapshot.threads ?? [];
+  const runs = snapshot.runs ?? [];
+  const checkouts = snapshot.checkouts ?? [];
+  const projects = new Map(
+    (snapshot.projects ?? []).map((project) => [project.id, project.title]),
+  );
+  const latest = (thread: ThreadSummary) => runFor(thread, runs);
+  const running = threads.filter((thread) => {
+    const status = latest(thread)?.status ?? thread.status;
+    return (
+      !threadNeedsAttention(thread, runs) &&
+      ['active', 'preparing', 'starting', 'running'].includes(status)
+    );
+  });
+  const queued = threads.filter(
+    (thread) =>
+      !threadNeedsAttention(thread, runs) &&
+      (latest(thread)?.status ?? thread.status) === 'queued',
+  );
+  const attention = threads.filter((thread) =>
+    threadNeedsAttention(thread, runs),
+  );
+  const failedOrInterrupted = threads.filter((thread) => {
+    const status = latest(thread)?.status ?? thread.status;
+    return (
+      thread.status === 'failed' ||
+      status === 'failed' ||
+      status === 'interrupted'
+    );
+  });
+  const settled = threads.filter((thread) => {
+    const status = latest(thread)?.status ?? thread.status;
+    return (
+      ['settled', 'cancelled', 'stopped'].includes(status) &&
+      !threadNeedsAttention(thread, runs) &&
+      !failedOrInterrupted.includes(thread)
+    );
+  });
+  const shelf = (
+    id: string,
+    title: string,
+    items: readonly ThreadSummary[],
+  ) => (
+    <section className="management-shelf global-shelf" id={id} key={id}>
+      <h2>
+        {title} <span className="shelf-count">{items.length}</span>
+      </h2>
+      {items.length ? (
+        <div className="thread-card-grid">
+          {items.map((thread) => (
+            <ThreadCard
+              key={thread.id}
+              thread={thread}
+              runs={runs}
+              checkouts={checkouts}
+              projectTitle={projects.get(thread.projectId) ?? 'Unknown project'}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="empty-shelf">Nothing here.</p>
+      )}
+    </section>
+  );
+  return (
+    <>
+      <Rail snapshot={snapshot} />
+      <section className="management-page global-overview">
+        <div className="page-heading">
+          <div>
+            <p className="eyebrow">Management overview</p>
+            <h1>All projects</h1>
+            <p className="path-label">
+              {projects.size} projects · global orchestration state
+            </p>
+            <p className="management-summary">
+              {running.length} active · {queued.length} queued ·{' '}
+              {attention.length} needs attention
+            </p>
+          </div>
+          <button type="button" onClick={() => go('/projects')}>
+            + Adopt project
+          </button>
+        </div>
+        {shelf('global-needs-attention', 'Needs attention', attention)}
+        {shelf('global-running', 'Running', running)}
+        {shelf('global-queued', 'Queued', queued)}
+        {shelf(
+          'global-failed-interrupted',
+          'Failed & interrupted',
+          failedOrInterrupted,
+        )}
+        {shelf('global-recent', 'Recently settled', settled)}
+      </section>
+    </>
+  );
+}
+
+export function ManagementHome({ snapshot }: { snapshot: BrowserSnapshot }) {
   const projects = snapshot.projects ?? [];
   if (!projects.length)
     return (
@@ -1044,29 +1222,44 @@ export function ManagementHome({
         </p>
       </section>
     );
-  const project = projects[0];
-  return <ProjectRoute projectId={project.id} snapshot={snapshot} />;
+  return <GlobalOverview snapshot={snapshot} />;
 }
 
 export function managementProjectCount(snapshot: BrowserSnapshot): number {
   return snapshot.projects?.length ?? 0;
 }
+function normalizedPath(value: string): string {
+  const trimmed = value.trim().replaceAll('\\', '/').replace(/\/+$/u, '');
+  return trimmed || '/';
+}
+
+export function pathWithin(child: string, parent: string): boolean {
+  const normalizedChild = normalizedPath(child);
+  const normalizedParent = normalizedPath(parent);
+  return (
+    normalizedChild === normalizedParent ||
+    normalizedChild.startsWith(
+      `${normalizedParent === '/' ? '' : normalizedParent}/`,
+    )
+  );
+}
+
 export function unassignedSessions(
   snapshot: BrowserSnapshot,
   project: ProjectSummary,
 ): readonly SessionIndexEntry[] {
   const checkouts = (snapshot.checkouts ?? []).filter(
-    (c) =>
-      c.projectId === project.id &&
-      (c.status === 'ready' || c.status === 'dirty'),
+    (checkout) =>
+      checkout.projectId === project.id &&
+      (checkout.status === 'ready' || checkout.status === 'dirty'),
   );
   const owned = new Set(
     (snapshot.runs ?? []).map((run) => run.piSessionId).filter(Boolean),
   );
   return snapshot.sessions.filter(
-    (s) =>
-      !owned.has(s.id) &&
-      checkouts.some((c) => s.cwd === c.path || s.cwd.startsWith(`${c.path}/`)),
+    (session) =>
+      !owned.has(session.id) &&
+      checkouts.some((checkout) => pathWithin(session.cwd, checkout.path)),
   );
 }
 export function latestRunForThread(

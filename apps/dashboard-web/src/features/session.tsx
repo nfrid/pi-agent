@@ -62,11 +62,14 @@ export function SessionView({
   snapshot,
   store,
   Composer,
+  embedded = false,
 }: {
   id: string;
   snapshot: BrowserSnapshot;
   store: DashboardLiveStore;
   Composer: ComponentType<ComposerProps>;
+  /** Render transcript controls without the full-page agent navigation shell. */
+  embedded?: boolean;
 }) {
   const navigate = useNavigate();
   const query = useQuery(sessionQueryOptions(dashboardHttpClient, id));
@@ -356,14 +359,18 @@ export function SessionView({
   if (!data || !projection || waitingForInitialHistory) {
     const loadingMetadata = storedMetadata;
     return (
-      <div className="session-layout">
-        <AgentThreadNav
-          snapshot={snapshot}
-          mode="session"
-          currentSessionId={id}
-          open={agentNavOpen}
-          onOpenChange={setAgentNavOpen}
-        />
+      <div
+        className={`session-layout${embedded ? ' embedded-session-layout' : ''}`}
+      >
+        {!embedded && (
+          <AgentThreadNav
+            snapshot={snapshot}
+            mode="session"
+            currentSessionId={id}
+            open={agentNavOpen}
+            onOpenChange={setAgentNavOpen}
+          />
+        )}
         <section className="session-page session-page-loading">
           <header className="session-context session-heading">
             <div className="session-context-main">
@@ -437,14 +444,18 @@ export function SessionView({
     setAwayFromLatest(false);
   };
   return (
-    <div className="session-layout">
-      <AgentThreadNav
-        snapshot={snapshot}
-        mode="session"
-        currentSessionId={id}
-        open={agentNavOpen}
-        onOpenChange={setAgentNavOpen}
-      />
+    <div
+      className={`session-layout${embedded ? ' embedded-session-layout' : ''}`}
+    >
+      {!embedded && (
+        <AgentThreadNav
+          snapshot={snapshot}
+          mode="session"
+          currentSessionId={id}
+          open={agentNavOpen}
+          onOpenChange={setAgentNavOpen}
+        />
+      )}
       <section
         ref={sessionPageRef}
         className={`session-page ${inspectorOpen ? 'inspector-open' : ''} ${hasPendingInteraction ? 'has-pending-interaction' : ''} ${inspectorOpen || outlineOpen || agentNavOpen || hasPendingInteraction ? 'modal-open' : ''}`}

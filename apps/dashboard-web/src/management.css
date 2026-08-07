@@ -171,6 +171,11 @@
 .thread-card-link:hover {
   border-color: var(--purple);
 }
+.thread-card-project {
+  color: var(--purple);
+  font-size: 11px;
+  margin: 0 0 5px;
+}
 .thread-card-link h3 {
   margin: 0 0 8px;
   overflow-wrap: anywhere;
@@ -311,6 +316,10 @@
 .transcript-embed {
   min-width: 0;
   overflow: hidden;
+}
+.transcript-embed .embedded-session-layout {
+  display: block;
+  min-width: 0;
 }
 .transcript-embed .session-page {
   padding-bottom: 0;
