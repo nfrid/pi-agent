@@ -4,6 +4,13 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { truncateToWidth } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
+import {
+  getScopedServices,
+  getSessionScopeId,
+  releaseScopedServices,
+  type ScopedServices,
+  type SessionScopeId,
+} from '../shared/runtime/scoped-services';
 import { createManagedWidget } from '../shared/ui/widget';
 import { registerBackgroundCommands } from './commands';
 import { exitDescription, formatCompletion, formatDuration } from './format';
@@ -17,6 +24,8 @@ export default defineExtension(
   (pi: ExtensionAPI): void => {
     let manager: BackgroundManager | undefined;
     let ui: ExtensionUIContext | undefined;
+    let scopeId: SessionScopeId | undefined;
+    let scopedServices: ScopedServices | undefined;
 
     const widget = createManagedWidget({
       key: WIDGET_KEY,
@@ -67,11 +76,16 @@ export default defineExtension(
       }
     };
 
-    const createManager = () =>
-      new BackgroundManager({
+    const createManager = (scope?: SessionScopeId) => {
+      const services = getScopedServices(scope);
+      scopedServices = services;
+      return new BackgroundManager({
+        scopeId: services.scopeId,
+        pendingProcesses: services.pendingProcesses,
         onSettled: deliverCompletion,
         onChange: () => widget.sync(),
       });
+    };
 
     const getManager = () => {
       manager ??= createManager();
@@ -79,8 +93,15 @@ export default defineExtension(
     };
 
     pi.on('session_start', (_event, ctx) => {
+      const nextScope = getSessionScopeId(ctx);
+      if (manager && scopeId && scopeId !== nextScope) {
+        const closing = manager;
+        manager = undefined;
+        void closing.dispose();
+      }
+      scopeId = nextScope;
       ui = ctx.hasUI ? ctx.ui : undefined;
-      manager ??= createManager();
+      manager ??= createManager(scopeId);
       widget.attach(ui);
     });
 
@@ -89,12 +110,19 @@ export default defineExtension(
     pi.on('agent_start', () => widget.reassert());
     pi.on('agent_settled', () => widget.reassert());
 
-    pi.on('session_shutdown', async () => {
+    pi.on('session_shutdown', async (_event, ctx) => {
       const closing = manager;
-      manager = undefined;
+      const closingScope = getSessionScopeId(ctx);
+      const closingServices = scopedServices;
+      if (scopeId === closingScope) {
+        manager = undefined;
+        scopeId = undefined;
+        scopedServices = undefined;
+      }
       widget.detach();
       ui = undefined;
       await closing?.dispose();
+      if (closingScope) releaseScopedServices(closingScope, closingServices);
     });
 
     registerBackgroundTool(pi, getManager);

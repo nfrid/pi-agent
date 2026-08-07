@@ -1,104 +1,52 @@
 import {
-  type ExtensionSurface,
-  MAX_EXTENSION_SURFACES,
-  parseExtensionSurfaceList,
-} from '@pi-dashboard/extension-contributions';
+  findScopedServices,
+  getScopedServices,
+  type SessionScopeId,
+} from './scoped-services';
 
-/** The bridge keeps the aggregate surface catalogue bounded. */
-export const MAX_LIVE_EXTENSION_SURFACES = MAX_EXTENSION_SURFACES;
-export const MAX_LIVE_EXTENSION_SURFACES_PER_EXTENSION = 32;
+export {
+  LiveSurfaceHub,
+  type LiveSurfaceListener,
+  type LiveSurfacePublisher,
+  MAX_LIVE_EXTENSION_SURFACES,
+  MAX_LIVE_EXTENSION_SURFACES_PER_EXTENSION,
+} from './live-surfaces-core';
 
-export type LiveSurfaceListener = (
-  surfaces: readonly ExtensionSurface[],
-) => void;
+type Hub = import('./live-surfaces-core').LiveSurfaceHub;
 
-export interface LiveSurfacePublisher {
-  publish(extensionId: string, surfaces: readonly ExtensionSurface[]): void;
-  clear(extensionId: string): void;
-  snapshot(): readonly ExtensionSurface[];
-  subscribe(listener: LiveSurfaceListener): () => void;
-}
-
-function sameSurfaceList(
-  left: readonly ExtensionSurface[],
-  right: readonly ExtensionSurface[],
-): boolean {
-  return (
-    left.length === right.length &&
-    left.every((surface, index) => surface === right[index])
-  );
-}
-
-/**
- * Small in-process handoff between extensions and the dashboard bridge.
- * Extensions own the surface values; the publisher only owns source slots and
- * lifecycle, so neither side needs to import the other's implementation.
- */
-export class LiveSurfaceHub implements LiveSurfacePublisher {
-  private readonly sources = new Map<string, readonly ExtensionSurface[]>();
-  private readonly listeners = new Set<LiveSurfaceListener>();
-
-  publish(extensionId: string, surfaces: readonly ExtensionSurface[]): void {
-    if (!extensionId) throw new Error('Live surface extension ID is required.');
-    const bounded = surfaces.slice(
-      0,
-      MAX_LIVE_EXTENSION_SURFACES_PER_EXTENSION,
+// The no-argument facade follows the one active session for compatibility
+// with older extension callers. Explicit scope lookups are always isolated.
+let activeDefaultScope: SessionScopeId = 'default';
+const defaultHubFacade = {
+  publish(extensionId: string, surfaces: Parameters<Hub['publish']>[1]): void {
+    getScopedServices(activeDefaultScope).liveSurfaceHub.publish(
+      extensionId,
+      surfaces,
     );
-    const previous = this.sources.get(extensionId) ?? [];
-    if (sameSurfaceList(previous, bounded)) return;
-    const prospective = [...this.sources.entries()].flatMap(
-      ([source, values]) => (source === extensionId ? [] : values),
-    );
-    prospective.push(...bounded);
-    parseExtensionSurfaceList(
-      prospective.slice(0, MAX_LIVE_EXTENSION_SURFACES),
-    );
-    if (bounded.length > 0) this.sources.set(extensionId, bounded);
-    else this.sources.delete(extensionId);
-    this.notify();
-  }
-
+  },
   clear(extensionId: string): void {
-    if (!this.sources.delete(extensionId)) return;
-    this.notify();
-  }
+    getScopedServices(activeDefaultScope).liveSurfaceHub.clear(extensionId);
+  },
+  clearAll(): void {
+    getScopedServices(activeDefaultScope).liveSurfaceHub.clearAll();
+  },
+  snapshot(): ReturnType<Hub['snapshot']> {
+    return getScopedServices(activeDefaultScope).liveSurfaceHub.snapshot();
+  },
+  subscribe(
+    listener: Parameters<Hub['subscribe']>[0],
+  ): ReturnType<Hub['subscribe']> {
+    return getScopedServices(activeDefaultScope).liveSurfaceHub.subscribe(
+      listener,
+    );
+  },
+} as Hub;
 
-  snapshot(): readonly ExtensionSurface[] {
-    return [...this.sources.values()]
-      .flat()
-      .slice(0, MAX_LIVE_EXTENSION_SURFACES);
-  }
-
-  subscribe(listener: LiveSurfaceListener): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
-  }
-
-  private notify(): void {
-    const surfaces = this.snapshot();
-    for (const listener of this.listeners) listener(surfaces);
-  }
-}
-
-/**
- * The one process-local publisher shared by independently loaded extensions.
- *
- * Pi evaluates extension entry points in isolated module graphs, so a plain
- * module singleton gives tasks, delegate, and remote-control different hubs.
- * A global symbol is stable across those graphs and across extension reloads,
- * matching the interaction broker's proven handoff pattern.
- */
-const liveSurfaceHubKey = Symbol.for('pi.dashboard.live-extension-surfaces');
-const liveSurfaceGlobal = globalThis as typeof globalThis & {
-  [liveSurfaceHubKey]?: LiveSurfaceHub;
-};
-
-export function getLiveExtensionSurfaceHub(): LiveSurfaceHub {
-  const existing = liveSurfaceGlobal[liveSurfaceHubKey];
-  if (existing) return existing;
-  const hub = new LiveSurfaceHub();
-  liveSurfaceGlobal[liveSurfaceHubKey] = hub;
-  return hub;
+/** Get a scope-specific hub, or the compatibility facade for one-session code. */
+export function getLiveExtensionSurfaceHub(scopeId?: SessionScopeId): Hub {
+  return scopeId === undefined
+    ? defaultHubFacade
+    : getScopedServices(scopeId).liveSurfaceHub;
 }
 
 export const liveExtensionSurfaceHub = getLiveExtensionSurfaceHub();
@@ -107,11 +55,23 @@ export const liveSurfaceHub = liveExtensionSurfaceHub;
 
 export function publishLiveExtensionSurfaces(
   extensionId: string,
-  surfaces: readonly ExtensionSurface[],
+  surfaces: readonly import('@pi-dashboard/extension-contributions').ExtensionSurface[],
+  scopeId: SessionScopeId = 'default',
 ): void {
-  liveExtensionSurfaceHub.publish(extensionId, surfaces);
+  activeDefaultScope = scopeId;
+  getScopedServices(scopeId).liveSurfaceHub.publish(extensionId, surfaces);
 }
 
-export function clearLiveExtensionSurfaces(extensionId: string): void {
-  liveExtensionSurfaceHub.clear(extensionId);
+export function clearLiveExtensionSurfaces(
+  extensionId: string,
+  scopeId: SessionScopeId = 'default',
+): void {
+  activeDefaultScope = scopeId;
+  findScopedServices(scopeId)?.liveSurfaceHub.clear(extensionId);
 }
+
+// Keep the pre-registry symbol visible to old isolated extension graphs.
+const legacyLiveSurfaceKey = Symbol.for('pi.dashboard.live-extension-surfaces');
+(globalThis as typeof globalThis & { [legacyLiveSurfaceKey]?: Hub })[
+  legacyLiveSurfaceKey
+] = liveExtensionSurfaceHub;

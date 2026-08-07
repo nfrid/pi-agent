@@ -1,5 +1,10 @@
 import { waitFor, withAbort } from './async';
 import { setPendingProcessCount } from './pending-processes';
+import {
+  getScopedServices,
+  type PendingProcessAccounting,
+  type SessionScopeId,
+} from './scoped-services';
 
 /**
  * The bookkeeping every long-running job in this repo needs: an id, a state,
@@ -33,6 +38,10 @@ export interface AsyncJobRegistryOptions<
   disposedError: string;
   /** Stop one active record and resolve once it has settled. */
   teardown: (record: TRecord) => Promise<unknown>;
+  /** Scope used by the default process-accounting facade. */
+  scopeId?: SessionScopeId;
+  /** Capture the scope generation so late settlement cannot recreate it. */
+  pendingProcesses?: PendingProcessAccounting;
   onSettled?: (snapshot: TSnapshot) => void;
   onChange?: () => void;
 }
@@ -52,11 +61,17 @@ export class AsyncJobRegistry<
 > {
   private readonly records = new Map<string, TRecord>();
   private readonly options: AsyncJobRegistryOptions<TState, TRecord, TSnapshot>;
+  private readonly pendingProcesses: PendingProcessAccounting | undefined;
   private counter = 0;
   private shuttingDown = false;
 
   constructor(options: AsyncJobRegistryOptions<TState, TRecord, TSnapshot>) {
     this.options = options;
+    this.pendingProcesses =
+      options.pendingProcesses ??
+      (options.scopeId
+        ? getScopedServices(options.scopeId).pendingProcesses
+        : undefined);
   }
 
   get disposed(): boolean {
@@ -186,7 +201,12 @@ export class AsyncJobRegistry<
   }
 
   private syncPendingProcesses(): void {
-    setPendingProcessCount(this, this.activeCount);
+    setPendingProcessCount(
+      this,
+      this.activeCount,
+      this.options.scopeId,
+      this.pendingProcesses,
+    );
   }
 
   /** Keep only the most recently settled records; active ones always stay. */

@@ -10,9 +10,17 @@ import type {
   RuntimeLiveState,
   RuntimeSnapshot,
 } from '../../packages/dashboard-protocol/src/pi-runtime-protocol';
-import { getInteractionBroker } from '../ask-user/broker';
+import {
+  getInteractionBroker,
+  type InteractionBroker,
+} from '../ask-user/broker';
 import { isGenuineAgentSettlement } from '../shared/runtime/agent-lifecycle';
-import { liveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
+import {
+  getScopedServices,
+  releaseScopedServices,
+  type ScopedServices,
+  type SessionScopeId,
+} from '../shared/runtime/scoped-services';
 import { BridgeClient } from './bridge-client';
 import { dispatchDashboardCommand } from './command-dispatcher';
 import { LiveEventNormalizer } from './live-event-normalizer';
@@ -36,6 +44,7 @@ export interface RemoteControlRuntime {
   clearContext(ctx: ExtensionContext): void;
   isCurrent(ctx: ExtensionContext): boolean;
   setLiveState(state: RuntimeLiveState): void;
+  getInteractionBroker?(): InteractionBroker;
   snapshot(): RuntimeSnapshot;
 }
 
@@ -52,11 +61,13 @@ export function createRemoteControlRuntime(
   const ownership = process.env.PI_DASHBOARD_RUNTIME_ID
     ? 'managed'
     : 'external';
-  const broker = getInteractionBroker();
+  let scopedServices: ScopedServices = getScopedServices();
+  let broker = scopedServices.interactionBroker;
+  let liveSurfaceHub = scopedServices.liveSurfaceHub;
   const eventNormalizer = new LiveEventNormalizer();
   let context: ExtensionContext | undefined;
   let currentSessionId: string | undefined;
-  let contextScope: string | undefined;
+  let contextScope: SessionScopeId | undefined;
   let lastError: string | undefined;
   const queueDrafts = new QueueDraftStore();
   const unavailableSnapshot = (): RuntimeSnapshot => ({
@@ -69,7 +80,7 @@ export function createRemoteControlRuntime(
     pendingInteractions: broker.list().map(interactionSnapshot),
     queueDrafts: queueDrafts.list(),
     capabilities: RUNTIME_CAPABILITIES,
-    extensionSurfaces: liveExtensionSurfaceHub.snapshot(),
+    extensionSurfaces: liveSurfaceHub.snapshot(),
     lastError,
   });
   let cachedSnapshot = unavailableSnapshot();
@@ -95,7 +106,7 @@ export function createRemoteControlRuntime(
       pendingInteractions: broker.list().map(interactionSnapshot),
       queueDrafts: queueDrafts.list(),
       capabilities: RUNTIME_CAPABILITIES,
-      extensionSurfaces: liveExtensionSurfaceHub.snapshot(),
+      extensionSurfaces: liveSurfaceHub.snapshot(),
       lastError,
     };
   };
@@ -108,7 +119,7 @@ export function createRemoteControlRuntime(
     broker,
     capabilities: RUNTIME_CAPABILITIES,
     commandScope: () => contextScope,
-    liveSurfaces: liveExtensionSurfaceHub,
+    liveSurfaces: liveSurfaceHub,
     onLiveSurfacesChanged: (surfaces) => {
       cachedSnapshot = { ...cachedSnapshot, extensionSurfaces: surfaces };
     },
@@ -151,10 +162,20 @@ export function createRemoteControlRuntime(
     try {
       lastError = undefined;
       const nextScope = ctx.sessionManager.getSessionId();
-      if (contextScope && contextScope !== nextScope) {
-        broker.cancelScope(contextScope);
-        eventNormalizer.reset();
-      }
+      const nextServices = getScopedServices(nextScope);
+      const previousServices = scopedServices;
+      const previousScope = contextScope;
+      const replacingScope =
+        previousScope !== undefined && previousScope !== nextScope;
+      if (replacingScope) eventNormalizer.reset();
+      scopedServices = nextServices;
+      broker = nextServices.interactionBroker;
+      liveSurfaceHub = nextServices.liveSurfaceHub;
+      // Detach old observers before releasing the old hub/broker, so a late
+      // cleanup cannot publish an old session patch into the replacement.
+      client.bindServices(broker, liveSurfaceHub);
+      if (replacingScope && previousScope)
+        releaseScopedServices(previousScope, previousServices);
       queueDrafts.setSession(nextScope);
       const next = snapshotFrom(ctx);
       context = ctx;
@@ -163,7 +184,7 @@ export function createRemoteControlRuntime(
       cachedSnapshot = next;
     } catch (error) {
       queueDrafts.clear();
-      if (contextScope) broker.cancelScope(contextScope);
+      if (contextScope) releaseScopedServices(contextScope, scopedServices);
       context = undefined;
       contextScope = undefined;
       currentSessionId = undefined;
@@ -186,17 +207,18 @@ export function createRemoteControlRuntime(
   };
   const clearContext = (ctx: ExtensionContext) => {
     if (!isCurrent(ctx) && context !== ctx) return;
-    try {
-      broker.cancelScope(ctx.sessionManager.getSessionId());
-    } catch {
-      /* stale session contexts may no longer expose their manager */
-    }
-    if (contextScope) broker.cancelScope(contextScope);
+    const closingServices = scopedServices;
+    const closingScope = contextScope;
     queueDrafts.setSession(undefined);
     queueDrafts.clear();
     context = undefined;
     contextScope = undefined;
     currentSessionId = undefined;
+    scopedServices = getScopedServices();
+    broker = scopedServices.interactionBroker;
+    liveSurfaceHub = scopedServices.liveSurfaceHub;
+    client.bindServices(broker, liveSurfaceHub);
+    if (closingScope) releaseScopedServices(closingScope, closingServices);
     eventNormalizer.reset();
     cachedSnapshot = unavailableSnapshot();
   };
@@ -209,6 +231,7 @@ export function createRemoteControlRuntime(
     clearContext,
     isCurrent,
     setLiveState,
+    getInteractionBroker: () => broker,
     snapshot,
   };
 }
@@ -244,7 +267,11 @@ export function flushQueueDrafts(
     if (runtime.isCurrent(ctx))
       runtime.client.sendEvent({
         type: 'runtime.stateChanged',
-        state: liveState(ctx, getInteractionBroker()),
+        state: liveState(
+          ctx,
+          runtime.getInteractionBroker?.() ??
+            getInteractionBroker(ctx.sessionManager.getSessionId()),
+        ),
         snapshot: runtime.snapshot(),
       });
   }
@@ -259,7 +286,13 @@ export function emitState(
   if (!runtime.isCurrent(ctx)) return;
   runtime.setContext(ctx);
   if (!runtime.isCurrent(ctx)) return;
-  const state = forcedState ?? liveState(ctx, getInteractionBroker());
+  const state =
+    forcedState ??
+    liveState(
+      ctx,
+      runtime.getInteractionBroker?.() ??
+        getInteractionBroker(ctx.sessionManager.getSessionId()),
+    );
   if (forcedState) runtime.setLiveState(forcedState);
   runtime.client.sendEvent({
     type: 'runtime.stateChanged',
@@ -272,7 +305,12 @@ export function emitAgentSettlement(
   runtime: RemoteControlRuntime,
   ctx: ExtensionContext,
 ): void {
-  if (!isGenuineAgentSettlement()) {
+  const hasIdleApi = typeof ctx.isIdle === 'function';
+  if (
+    !(hasIdleApi
+      ? isGenuineAgentSettlement(false, ctx.sessionManager.getSessionId())
+      : isGenuineAgentSettlement())
+  ) {
     emitState(runtime, ctx, 'working');
     return;
   }

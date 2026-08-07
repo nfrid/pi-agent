@@ -7,6 +7,7 @@ import {
   clearLiveExtensionSurfaces,
   publishLiveExtensionSurfaces,
 } from '../shared/runtime/live-surfaces';
+import type { SessionScopeId } from '../shared/runtime/scoped-services';
 import {
   TASKS_RENDERER_ID,
   TASKS_SURFACE_ID,
@@ -46,10 +47,17 @@ export function taskSurface(store: TaskStore): ExtensionSurface {
   });
 }
 
-export function publishTaskSurface(store: TaskStore): void {
-  publishLiveExtensionSurfaces(TASKS_EXTENSION_ID, [taskSurface(store)]);
+export function publishTaskSurface(
+  store: TaskStore,
+  scopeId?: SessionScopeId,
+): void {
+  publishLiveExtensionSurfaces(
+    TASKS_EXTENSION_ID,
+    [taskSurface(store)],
+    scopeId,
+  );
 }
 
-export function clearTaskSurface(): void {
-  clearLiveExtensionSurfaces(TASKS_EXTENSION_ID);
+export function clearTaskSurface(scopeId?: SessionScopeId): void {
+  clearLiveExtensionSurfaces(TASKS_EXTENSION_ID, scopeId);
 }

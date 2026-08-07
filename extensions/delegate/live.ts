@@ -7,6 +7,7 @@ import {
   clearLiveExtensionSurfaces,
   publishLiveExtensionSurfaces,
 } from '../shared/runtime/live-surfaces';
+import type { SessionScopeId } from '../shared/runtime/scoped-services';
 import {
   DELEGATE_RENDERER_ID,
   DELEGATE_SURFACE_ID,
@@ -154,10 +155,17 @@ export function delegateSurface(store: DelegateStatusStore): ExtensionSurface {
   });
 }
 
-export function publishDelegateSurface(store: DelegateStatusStore): void {
-  publishLiveExtensionSurfaces(DELEGATE_EXTENSION_ID, [delegateSurface(store)]);
+export function publishDelegateSurface(
+  store: DelegateStatusStore,
+  scopeId?: SessionScopeId,
+): void {
+  publishLiveExtensionSurfaces(
+    DELEGATE_EXTENSION_ID,
+    [delegateSurface(store)],
+    scopeId,
+  );
 }
 
-export function clearDelegateSurface(): void {
-  clearLiveExtensionSurfaces(DELEGATE_EXTENSION_ID);
+export function clearDelegateSurface(scopeId?: SessionScopeId): void {
+  clearLiveExtensionSurfaces(DELEGATE_EXTENSION_ID, scopeId);
 }

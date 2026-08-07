@@ -2,6 +2,10 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { waitFor } from '../shared/runtime/async';
 import { AsyncJobRegistry, type JobRecord } from '../shared/runtime/registry';
+import type {
+  PendingProcessAccounting,
+  SessionScopeId,
+} from '../shared/runtime/scoped-services';
 import { type OutputSnapshot, OutputTail } from './output';
 
 export const MAX_RUNNING = 8;
@@ -50,6 +54,8 @@ interface ProcessRecord extends JobRecord<BackgroundStatus> {
 }
 
 export interface BackgroundManagerOptions {
+  readonly scopeId?: SessionScopeId;
+  readonly pendingProcesses?: PendingProcessAccounting;
   readonly onSettled?: (snapshot: BackgroundSnapshot) => void;
   readonly onChange?: () => void;
 }
@@ -120,6 +126,8 @@ export class BackgroundManager {
       capacityError: `At most ${MAX_RUNNING} background processes may run at once.`,
       disposedError: 'Background manager is shutting down.',
       teardown: (record) => this.terminate(record),
+      scopeId: options.scopeId,
+      pendingProcesses: options.pendingProcesses,
       onSettled: options.onSettled,
       onChange: options.onChange,
     });

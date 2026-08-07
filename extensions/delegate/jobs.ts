@@ -1,5 +1,9 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { AsyncJobRegistry, type JobRecord } from '../shared/runtime/registry';
+import type {
+  PendingProcessAccounting,
+  SessionScopeId,
+} from '../shared/runtime/scoped-services';
 import { copyDelegateLifecycle } from './lifecycle';
 import { buildParentHandoff } from './output';
 import {
@@ -71,6 +75,8 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
 }
 
 export interface DelegateJobManagerOptions {
+  scopeId?: SessionScopeId;
+  pendingProcesses?: PendingProcessAccounting;
   onSettled?: (snapshot: DelegateJobSnapshot) => void;
   onChange?: () => void;
 }
@@ -124,6 +130,8 @@ export class DelegateJobManager {
         );
         await record.settled;
       },
+      scopeId: options.scopeId,
+      pendingProcesses: options.pendingProcesses,
       onSettled: options.onSettled,
       onChange: options.onChange,
     });

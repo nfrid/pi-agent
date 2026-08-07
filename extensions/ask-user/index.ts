@@ -40,7 +40,8 @@ function registerAskUserTool(pi: ExtensionAPI): void {
 
       const choices = normalizeChoices(params);
       let cancelLocal: (() => void) | undefined;
-      const result = await getInteractionBroker().request(
+      const sessionScopeId = ctx.sessionManager?.getSessionId() ?? 'default';
+      const result = await getInteractionBroker(sessionScopeId).request(
         {
           type: 'ask_user',
           question: params.question,
@@ -63,7 +64,7 @@ function registerAskUserTool(pi: ExtensionAPI): void {
               })
             : askThroughDialogs(params, choices, ctx.ui),
         mode === 'tui' ? () => cancelLocal?.() : undefined,
-        ctx.sessionManager?.getSessionId(),
+        sessionScopeId,
       );
 
       const details: Answer = result

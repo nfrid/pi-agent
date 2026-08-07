@@ -78,10 +78,26 @@ export class BridgeClient {
   private writeBlocked = false;
   private unsubscribeBroker: (() => void) | undefined;
   private unsubscribeLiveSurfaces: (() => void) | undefined;
+  private broker: InteractionBroker | undefined;
+  private liveSurfaces: BridgeClientOptions['liveSurfaces'];
 
   constructor(private readonly options: BridgeClientOptions) {
     this.effectiveCapabilities = options.capabilities ?? RUNTIME_CAPABILITIES;
-    this.unsubscribeBroker = options.broker?.subscribe((event) => {
+    this.bindServices(options.broker, options.liveSurfaces);
+  }
+
+  /** Rebind transport observers when Pi replaces the active session scope. */
+  bindServices(
+    broker: InteractionBroker | undefined,
+    liveSurfaces: BridgeClientOptions['liveSurfaces'],
+  ): void {
+    this.unsubscribeBroker?.();
+    this.unsubscribeLiveSurfaces?.();
+    this.unsubscribeBroker = undefined;
+    this.unsubscribeLiveSurfaces = undefined;
+    this.broker = broker;
+    this.liveSurfaces = liveSurfaces;
+    this.unsubscribeBroker = broker?.subscribe((event) => {
       if (event.kind === 'requested') {
         this.sendEvent({
           type: 'interaction.requested',
@@ -95,26 +111,25 @@ export class BridgeClient {
         });
       }
     });
-    this.unsubscribeLiveSurfaces = options.liveSurfaces?.subscribe(
-      (surfaces) => {
-        try {
-          options.onLiveSurfacesChanged?.(surfaces);
-          const current = options.snapshot();
-          this.sendEvent({
-            type: 'runtime.stateChanged',
-            state: current.liveState,
-            snapshot: { extensionSurfaces: surfaces },
-          });
-        } catch {
-          // A surface publisher must not make a Pi mutation fail because the
-          // bridge is offline or a stale cached snapshot is unavailable.
-        }
-      },
-    );
+    this.unsubscribeLiveSurfaces = liveSurfaces?.subscribe((surfaces) => {
+      try {
+        this.options.onLiveSurfacesChanged?.(surfaces);
+        const current = this.options.snapshot();
+        this.sendEvent({
+          type: 'runtime.stateChanged',
+          state: current.liveState,
+          snapshot: { extensionSurfaces: surfaces },
+        });
+      } catch {
+        // A surface publisher must not make a Pi mutation fail because the
+        // bridge is offline or a stale cached snapshot is unavailable.
+      }
+    });
   }
 
   start(): void {
     this.stopped = false;
+    this.bindServices(this.broker, this.liveSurfaces);
     this.connect();
   }
 
@@ -182,16 +197,13 @@ export class BridgeClient {
       }
       // The broker is authoritative at reconnect time. A cached snapshot can
       // still contain a question resolved while this bridge was offline.
-      const interactions =
-        this.options.broker?.list().map(interactionSnapshot) ?? [];
+      const interactions = this.broker?.list().map(interactionSnapshot) ?? [];
       snapshot = {
         ...snapshot,
         // One effective capability snapshot drives hello, runtime snapshot,
         // duplicate protection, and semantic dispatch.
         capabilities: this.effectiveCapabilities,
-        ...(this.options.broker
-          ? { pendingInteractions: interactions }
-          : undefined),
+        ...(this.broker ? { pendingInteractions: interactions } : undefined),
       };
       const helloSent = this.sendEvent({
         type: 'runtime.hello',
@@ -326,15 +338,12 @@ export class BridgeClient {
     // Commands received on a replaced generation are abandoned rather than
     // replayed. Replaying could duplicate a prompt after a daemon retry.
     if (item.socket !== this.socket || item.socket.destroyed) return;
-    if (
-      isQueueDraftCommand(item.command) &&
-      item.scope !== this.options.commandScope?.()
-    ) {
+    if (item.scope !== this.options.commandScope?.()) {
       this.sendAck(
         item.socket,
         item.command.id,
         false,
-        'Queue draft command belongs to a replaced session.',
+        'Command belongs to a replaced session.',
         'stale-session',
       );
       return;

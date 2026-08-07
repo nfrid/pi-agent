@@ -9,6 +9,11 @@ import {
 } from '../shared/runtime/agent-lifecycle';
 import { defineExtension } from '../shared/runtime/extension';
 import {
+  getScopedServices,
+  getSessionScopeId,
+  type SessionScopeId,
+} from '../shared/runtime/scoped-services';
+import {
   type BackgroundCompletionCard,
   renderBackgroundCompletion,
 } from '../shared/ui/background-completion';
@@ -174,6 +179,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   let jobs: DelegateJobManager | undefined;
   let statuses: DelegateStatusStore | undefined;
   let ui: ExtensionUIContext | undefined;
+  let scopeId: SessionScopeId = 'default';
   let deliveryEpoch = 0;
   let runtimeActive = false;
   let pendingCompletions: DelegateJobSnapshot[] = [];
@@ -338,7 +344,18 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   };
 
   pi.on('session_start', (event, ctx) => {
-    clearDelegateSurface();
+    const sessionScopeId = getSessionScopeId(ctx);
+    if (jobs && scopeId !== 'default' && scopeId !== sessionScopeId) {
+      const closingJobs = jobs;
+      const closingStatuses = statuses;
+      jobs = undefined;
+      statuses = undefined;
+      void closingJobs.dispose().then(() => closingStatuses?.clear());
+    }
+    if (scopeId !== 'default' && scopeId !== sessionScopeId)
+      clearDelegateSurface(scopeId);
+    scopeId = sessionScopeId;
+    clearDelegateSurface(sessionScopeId);
     const promptConfig = loadDelegateConfig(ctx.cwd);
     promptSnapshot = {
       fingerprint: fingerprintDelegateConfig(promptConfig),
@@ -362,11 +379,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     let nextStatuses: DelegateStatusStore | undefined;
     nextStatuses = new DelegateStatusStore(() => {
       syncWidget();
-      if (nextStatuses) publishDelegateSurface(nextStatuses);
+      if (nextStatuses) publishDelegateSurface(nextStatuses, sessionScopeId);
     });
     statuses = nextStatuses;
-    publishDelegateSurface(nextStatuses);
+    publishDelegateSurface(nextStatuses, sessionScopeId);
+    const scopedServices = getScopedServices(sessionScopeId);
     jobs = new DelegateJobManager({
+      scopeId: sessionScopeId,
+      pendingProcesses: scopedServices.pendingProcesses,
       onSettled: queueCompletion,
     });
     registerDelegateTool(
@@ -415,13 +435,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   // the existing component in place.
   pi.on('agent_start', syncWidget);
   pi.on('input', (event) => {
-    if (!beginsFreshUserTurn(event)) return;
+    if (!beginsFreshUserTurn(event, scopeId)) return;
     statuses?.parentUserMessage();
     syncWidget();
   });
   pi.on('agent_settled', () => {
     const genuinelySettled = isGenuineAgentSettlement(
       pendingCompletions.length > 0 || hasQueuedAutomaticDeliveries(),
+      scopeId,
     );
     // A successfully queued steer prevents settlement until it enters context.
     // If the parent settles first, dispatch failed asynchronously and explicit
@@ -430,7 +451,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     if (genuinelySettled) statuses?.parentSettled();
     syncWidget();
   });
-  pi.on('session_shutdown', async () => {
+  pi.on('session_shutdown', async (_event, ctx) => {
     runtimeActive = false;
     if (completionTimer) clearTimeout(completionTimer);
     completionTimer = undefined;
@@ -444,8 +465,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     statuses = undefined;
     await closing?.dispose();
     closingStatuses?.clear();
-    clearDelegateSurface();
+    const closingScopeId = getSessionScopeId(ctx);
+    clearDelegateSurface(closingScopeId);
     ui = undefined;
+    if (scopeId === closingScopeId) scopeId = 'default';
   });
 
   pi.registerMessageRenderer(

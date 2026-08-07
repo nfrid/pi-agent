@@ -3,6 +3,10 @@ import { existsSync } from 'node:fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { isGenuineAgentSettlement } from '../shared/runtime/agent-lifecycle';
 import { defineExtension } from '../shared/runtime/extension';
+import {
+  getSessionScopeId,
+  type SessionScopeId,
+} from '../shared/runtime/scoped-services';
 
 const ENABLE_FOCUS_REPORTING = '\x1b[?1004h';
 const DISABLE_FOCUS_REPORTING = '\x1b[?1004l';
@@ -32,8 +36,8 @@ function isActiveTmuxPane(): boolean {
   }
 }
 
-export function shouldNotifyAgentSettled(): boolean {
-  return isGenuineAgentSettlement();
+export function shouldNotifyAgentSettled(scopeId?: SessionScopeId): boolean {
+  return isGenuineAgentSettlement(false, scopeId);
 }
 
 function playSound(): void {
@@ -93,8 +97,8 @@ export default defineExtension('notify-sound', (pi: ExtensionAPI) => {
     if (event.toolName === 'ask_user_question') playIfOutOfFocus();
   });
 
-  pi.on('agent_settled', () => {
-    if (shouldNotifyAgentSettled()) playIfOutOfFocus();
+  pi.on('agent_settled', (_event, ctx) => {
+    if (shouldNotifyAgentSettled(getSessionScopeId(ctx))) playIfOutOfFocus();
   });
 
   pi.on('session_shutdown', () => {
