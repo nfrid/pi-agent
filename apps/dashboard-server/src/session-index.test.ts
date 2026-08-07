@@ -184,13 +184,18 @@ describe('session index', () => {
       path.join(os.tmpdir(), 'pi-dashboard-oversized-entry-'),
     );
     const file = path.join(root, 'oversized.jsonl');
+    const oversizedIds = [
+      'oversized-user-0',
+      'oversized-user-1',
+      'oversized-user-2',
+    ];
     const entries = [
       { type: 'session', id: 'oversized-id', cwd: '/tmp' },
-      {
+      ...oversizedIds.map((id) => ({
         type: 'message',
-        id: 'oversized-user',
+        id,
         message: { role: 'user', content: 'x'.repeat(9 * 1024 * 1024) },
-      },
+      })),
       ...Array.from({ length: 16 }, (_, index) => ({
         type: 'message',
         id: `later-${index}`,
@@ -206,10 +211,13 @@ describe('session index', () => {
 
     let page = await index.readEntries('oversized-id');
     const starts = [page.history.start];
-    let sawOmission = page.entries.some(
-      (entry) =>
-        (entry as { type?: string }).type === 'history_omission' &&
-        (entry as { id?: string }).id === 'oversized-user',
+    const seenOmissions = new Set(
+      page.entries
+        .filter(
+          (entry) => (entry as { type?: string }).type === 'history_omission',
+        )
+        .map((entry) => (entry as { id?: string }).id)
+        .filter((id): id is string => id !== undefined),
     );
     while (page.history.hasOlder) {
       const before = page.history.nextBefore;
@@ -218,13 +226,13 @@ describe('session index', () => {
       expect(page.history.end).toBe(starts.at(-1));
       expect(page.history.start).toBeLessThan(page.history.end);
       starts.push(page.history.start);
-      sawOmission ||= page.entries.some(
-        (entry) =>
-          (entry as { type?: string }).type === 'history_omission' &&
-          (entry as { id?: string }).id === 'oversized-user',
-      );
+      for (const entry of page.entries) {
+        if ((entry as { type?: string }).type !== 'history_omission') continue;
+        const id = (entry as { id?: string }).id;
+        if (id) seenOmissions.add(id);
+      }
     }
-    expect(sawOmission).toBe(true);
+    expect(seenOmissions).toEqual(new Set(oversizedIds));
     expect(starts.length).toBeGreaterThan(1);
     expect(starts).toEqual([...starts].sort((a, b) => b - a));
     expect(page.history.nextBefore).toBeUndefined();

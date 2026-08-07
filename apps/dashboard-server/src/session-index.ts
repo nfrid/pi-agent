@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, type Hash, randomUUID } from 'node:crypto';
 import { createReadStream, promises as fs } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
@@ -38,6 +38,12 @@ interface HistoryCursor {
 }
 
 const HISTORY_PAGE_BYTES = 8 * 1024 * 1024;
+
+function updateHistoryHash(hash: Hash, serialized: string): void {
+  const bytes = Buffer.byteLength(serialized);
+  hash.update(`${bytes}:`, 'utf8');
+  hash.update(serialized, 'utf8');
+}
 
 function encodeHistoryCursor(cursor: HistoryCursor): string {
   return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
@@ -145,6 +151,8 @@ export class SessionIndex {
     return publicEntry;
   }
 
+  // TODO: switch older pages to reverse-file reads if page counts grow; the
+  // bounded streaming scan keeps current history sizes simple and safe.
   async readEntries(
     id: string,
     before?: string,
@@ -175,16 +183,15 @@ export class SessionIndex {
     type PageEntry = {
       ordinal: number;
       entry: unknown;
-      serialized: string;
-      hashSerialized: string;
+      prefixHash: string;
       bytes: number;
     };
     const page: PageEntry[] = [];
     let pageBytes = 0;
     let ordinal = 0;
-    // The shifted hash is the prefix represented by nextBefore. The seen hash
-    // validates a cursor before its page has necessarily filled the budget.
-    const shiftedHasher = createHash('sha256');
+    // The seen hash validates a cursor before its page has necessarily filled
+    // the budget. Each retained entry snapshots the hash before its ordinal,
+    // so nextBefore needs no retained original serialization.
     const seenHasher = createHash('sha256');
     let reachedUpperBound = false;
     const input = createReadStream(indexed.file, { encoding: 'utf8' });
@@ -203,8 +210,8 @@ export class SessionIndex {
           throw new Error('A session entry is too large to open remotely.');
         try {
           const entry = redactImageData(JSON.parse(line) as unknown);
-          const hashSerialized = JSON.stringify(entry);
-          const originalBytes = Buffer.byteLength(hashSerialized);
+          const serialized = JSON.stringify(entry);
+          const originalBytes = Buffer.byteLength(serialized);
           const outputEntry =
             originalBytes > HISTORY_PAGE_BYTES
               ? {
@@ -219,21 +226,19 @@ export class SessionIndex {
                   originalBytes,
                 }
               : entry;
-          const serialized = JSON.stringify(outputEntry);
-          const bytes = Buffer.byteLength(serialized);
-          seenHasher.update(hashSerialized);
+          const prefixHash = seenHasher.copy().digest('hex');
+          updateHistoryHash(seenHasher, serialized);
+          const outputBytes = Buffer.byteLength(JSON.stringify(outputEntry));
           page.push({
             ordinal,
             entry: outputEntry,
-            serialized,
-            hashSerialized,
-            bytes,
+            prefixHash,
+            bytes: outputBytes,
           });
-          pageBytes += bytes;
+          pageBytes += outputBytes;
           while (pageBytes > HISTORY_PAGE_BYTES && page.length > 0) {
             const shifted = page.shift();
             if (!shifted) break;
-            shiftedHasher.update(shifted.hashSerialized);
             pageBytes -= shifted.bytes;
           }
           ordinal += 1;
@@ -265,7 +270,7 @@ export class SessionIndex {
           dev: stat.dev,
           ino: stat.ino,
           size: stat.size,
-          prefixHash: shiftedHasher.copy().digest('hex'),
+          prefixHash: page[0]?.prefixHash ?? seenHasher.copy().digest('hex'),
           before: start,
         })
       : undefined;

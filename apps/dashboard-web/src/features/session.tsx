@@ -125,6 +125,15 @@ export function SessionView({
   const incompleteRetryCountRef = useRef(0);
   const hydrationRetryCountRef = useRef(0);
   const historySessionRef = useRef<string | undefined>(undefined);
+  const historyGenerationRef = useRef(0);
+  const historyRequestRef = useRef<
+    | {
+        id: string;
+        generation: number;
+        controller: AbortController;
+      }
+    | undefined
+  >(undefined);
   const sessionRefetchRef = useRef<
     ReturnType<typeof query.refetch> | undefined
   >(undefined);
@@ -150,12 +159,20 @@ export function SessionView({
     setError(undefined);
     hydrationRetryCountRef.current = 0;
     incompleteRetryCountRef.current = 0;
+    historyGenerationRef.current += 1;
+    historyRequestRef.current?.controller.abort();
+    historyRequestRef.current = undefined;
     historySessionRef.current = undefined;
     setHistory(undefined);
+    setHistoryLoading(false);
     setHistoryError(undefined);
   }, [id]);
   useEffect(() => {
-    if (query.data?.metadata.id === id && historySessionRef.current !== id) {
+    if (
+      query.data?.metadata.id === id &&
+      query.data.history &&
+      historySessionRef.current !== id
+    ) {
       historySessionRef.current = id;
       setHistory(query.data.history);
     }
@@ -378,13 +395,26 @@ export function SessionView({
       !currentHistory.nextBefore
     )
       return;
+    const request = {
+      id,
+      generation: historyGenerationRef.current,
+      controller: new AbortController(),
+    };
+    historyRequestRef.current = request;
     setHistoryLoading(true);
     setHistoryError(undefined);
+    const isCurrentRequest = () =>
+      historyRequestRef.current === request &&
+      historyGenerationRef.current === request.generation &&
+      request.id === id &&
+      !request.controller.signal.aborted;
     try {
       const page = await dashboardHttpClient.sessionBefore(
         id,
         currentHistory.nextBefore,
+        request.controller.signal,
       );
+      if (!isCurrentRequest()) return;
       if (
         page.metadata.id !== id ||
         !page.history ||
@@ -400,13 +430,18 @@ export function SessionView({
         throw new Error('Session changed while loading older history.');
       setHistory(page.history);
     } catch (loadError) {
+      if (!isCurrentRequest()) return;
+      if (loadError instanceof Error && loadError.name === 'AbortError') return;
       setHistoryError(
         loadError instanceof Error
           ? loadError.message
           : 'Could not load older history.',
       );
     } finally {
-      setHistoryLoading(false);
+      if (isCurrentRequest()) {
+        historyRequestRef.current = undefined;
+        setHistoryLoading(false);
+      }
     }
   }, [history, historyLoading, id, store]);
   const status = runtime

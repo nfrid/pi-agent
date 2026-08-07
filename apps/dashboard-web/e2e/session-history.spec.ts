@@ -30,10 +30,13 @@ test('loads earlier session history on demand', async ({ page }) => {
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
   let beforeRequest: string | undefined;
+  let initialReads = 0;
   await page.route('**/api/sessions/session-1*', async (route) => {
     const url = new URL(route.request().url());
     beforeRequest = url.searchParams.get('before') ?? undefined;
     const older = beforeRequest !== undefined;
+    if (!older) initialReads += 1;
+    const hasHistory = older || initialReads > 1;
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -57,15 +60,19 @@ test('loads earlier session history on demand', async ({ page }) => {
         entriesComplete: false,
         serverId: 'history-test',
         cursor: 1,
-        history: older
-          ? { version: 1, start: 0, end: 2, hasOlder: false }
-          : {
-              version: 1,
-              start: 2,
-              end: 3,
-              hasOlder: true,
-              nextBefore: 'token-1',
-            },
+        ...(hasHistory
+          ? {
+              history: older
+                ? { version: 1, start: 0, end: 2, hasOlder: false }
+                : {
+                    version: 1,
+                    start: 2,
+                    end: 3,
+                    hasOlder: true,
+                    nextBefore: 'token-1',
+                  },
+            }
+          : {}),
       }),
     });
   });
@@ -74,6 +81,7 @@ test('loads earlier session history on demand', async ({ page }) => {
   await expect(
     page.getByRole('button', { name: 'Load earlier history' }),
   ).toBeVisible();
+  await expect.poll(() => initialReads).toBeGreaterThan(1);
   await page.getByRole('button', { name: 'Load earlier history' }).click();
   await expect(page.getByText('first request')).toBeVisible();
   await expect.poll(() => beforeRequest).toBe('token-1');
