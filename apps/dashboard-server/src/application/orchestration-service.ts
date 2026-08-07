@@ -429,6 +429,9 @@ export class OrchestrationService {
     if (!record) throw new Error('Checkout has no prepared worktree record.');
     this.repository.transitionCheckout(checkoutId, 'merging');
     try {
+      // Stop any retained managed runtime before Git integration can mutate
+      // main. A cleanup failure must leave both sides untouched and reviewable.
+      await this.quiesceCheckoutRuntimes(checkoutId);
       const outcome = await createWorktreeIntegrator().mergeBranch(record);
       if (!outcome.merged) {
         this.repository.transitionCheckout(checkoutId, 'dirty');
@@ -440,7 +443,6 @@ export class OrchestrationService {
           },
         );
       }
-      await this.quiesceCheckoutRuntimes(checkoutId);
       await createWorktreeFinisher(this.storeFor(checkout)).removeWorktree(
         record.id,
       );

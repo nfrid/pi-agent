@@ -522,6 +522,69 @@ describe('OrchestrationService', () => {
     }
   });
 
+  it('fails closed before merge when retained runtime cleanup rejects', async () => {
+    const fixture = await isolatedServiceFixture();
+    try {
+      const repository = fixture.metadata.orchestration;
+      await fixture.service.start();
+      const created = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'cleanup-failure-thread',
+        title: 'Cleanup failure',
+        prompt: 'Prepare for cleanup failure.',
+      })) as { run: { id: string; checkoutId: string } };
+      await waitFor(() => fixture.launches.length === 1);
+      const run = repository.getRun(created.run.id) as { runtimeId: string };
+      const checkoutPath = String(fixture.launches[0]?.checkoutCwd);
+      fixture.service.onRegistryChange({
+        kind: 'registered',
+        snapshot: {
+          ...runtimeHello(run.runtimeId),
+          cwd: checkoutPath,
+          session: { id: 'cleanup-failure-session', entries: [] },
+        } as never,
+      });
+      await waitFor(
+        () => repository.getRun(created.run.id)?.status === 'running',
+      );
+      await writeFile(path.join(checkoutPath, 'cleanup.txt'), 'branch\n');
+      fixture.service.onRegistryChange({
+        kind: 'event',
+        runtimeId: run.runtimeId,
+        event: {
+          type: 'agent.settled',
+          sessionId: 'cleanup-failure-session',
+        },
+        snapshot: {} as never,
+      });
+      await waitFor(
+        () => repository.getRun(created.run.id)?.status === 'settled',
+      );
+      const mainHead = await gitOutput(fixture.root, 'rev-parse', 'HEAD');
+      fixture.manager.stopRecovered.mockRejectedValueOnce(
+        new Error('runtime cleanup failed'),
+      );
+
+      await expect(
+        fixture.service.mergeCheckout(created.run.checkoutId, 'cleanup-merge'),
+      ).rejects.toThrow('runtime cleanup failed');
+      expect(await gitOutput(fixture.root, 'rev-parse', 'HEAD')).toBe(mainHead);
+      expect(await gitOutput(fixture.root, 'show', 'HEAD:tracked.txt')).toBe(
+        'base\n',
+      );
+      expect(repository.getCheckout(created.run.checkoutId)?.status).toBe(
+        'dirty',
+      );
+      expect(
+        repository.loadWorktreeRecord(created.run.checkoutId),
+      ).toBeDefined();
+      await expect(access(checkoutPath)).resolves.toBeUndefined();
+      expect(repository.getCommandReceipt('cleanup-merge')).toBeUndefined();
+      expect(fixture.manager.stopRecovered).toHaveBeenCalledOnce();
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('reviews, merges, archives, retires, and preserves isolated lifecycle history', async () => {
     const fixture = await isolatedServiceFixture();
     try {
