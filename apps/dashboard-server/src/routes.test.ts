@@ -169,6 +169,248 @@ describe('Fastify dashboard route plugin', () => {
     expect(routeContext.reviewCheckout).toHaveBeenCalledTimes(2);
   });
 
+  it('covers orchestration HTTP statuses, bounded schemas, auth, and coded conflicts', async () => {
+    const app = Fastify({
+      ajv: { customOptions: { removeAdditional: false } },
+    });
+    apps.push(app);
+    const routeContext = context();
+    const adopted = {
+      project: { id: 'project-1' },
+      checkout: { id: 'checkout-1' },
+    };
+    const created = { thread: { id: 'thread-1' }, run: { id: 'run-1' } };
+    routeContext.adoptProject = vi.fn(async () => adopted);
+    routeContext.createThread = vi.fn(async () => created);
+    routeContext.retryRun = vi.fn(async () => created);
+    routeContext.cancelRun = vi.fn(async () => ({
+      id: 'run-1',
+      status: 'cancelled',
+    }));
+    routeContext.reviewCheckout = vi.fn(async () => ({ state: 'unmerged' }));
+    routeContext.mergeCheckout = vi.fn(async () => ({
+      checkout: { status: 'retired' },
+    }));
+    routeContext.retireCheckout = vi.fn(async () => ({
+      id: 'checkout-1',
+      status: 'retired',
+    }));
+    routeContext.archiveThread = vi.fn(async () => ({
+      id: 'thread-1',
+      status: 'archived',
+    }));
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/snapshot' })).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/api/snapshot',
+          headers: {
+            origin: 'http://evil.test',
+            'x-dashboard-token': 'route-token',
+          },
+        })
+      ).statusCode,
+    ).toBe(403);
+
+    const invalidProject = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers,
+      payload: {
+        commandId: 'project-1',
+        rootPath: '/tmp/repo',
+        maxParallelRuns: 0,
+        extra: true,
+      },
+    });
+    expect(invalidProject.statusCode).toBe(400);
+    const extraProject = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers,
+      payload: {
+        commandId: 'project-extra',
+        rootPath: '/tmp/repo',
+        extra: true,
+      },
+    });
+    expect(extraProject.statusCode).toBe(400);
+    expect(routeContext.adoptProject).not.toHaveBeenCalled();
+    const missingCommand = await app.inject({
+      method: 'POST',
+      url: '/api/projects/project-1/threads',
+      headers,
+      payload: { title: 'Missing command', prompt: 'x' },
+    });
+    expect(missingCommand.statusCode).toBe(400);
+    expect(routeContext.createThread).not.toHaveBeenCalled();
+
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/projects',
+          headers,
+          payload: { commandId: 'project-1', rootPath: '/tmp/repo' },
+        })
+      ).statusCode,
+    ).toBe(201);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/projects/adopt',
+          headers,
+          payload: { commandId: 'adopt-1', workspaceId: 'workspace-1' },
+        })
+      ).statusCode,
+    ).toBe(201);
+    const threadRequest = {
+      commandId: 'thread-1',
+      title: 'Thread',
+      prompt: 'Prompt',
+    };
+    const firstThread = await app.inject({
+      method: 'POST',
+      url: '/api/projects/project-1/threads',
+      headers,
+      payload: threadRequest,
+    });
+    const replayThread = await app.inject({
+      method: 'POST',
+      url: '/api/projects/project-1/threads',
+      headers,
+      payload: { ...threadRequest, title: 'Replacement' },
+    });
+    expect(firstThread.statusCode).toBe(202);
+    expect(replayThread.statusCode).toBe(202);
+    expect(replayThread.json()).toEqual(firstThread.json());
+    expect(routeContext.createThread).toHaveBeenCalledTimes(2);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/threads/thread-1/retry',
+          headers,
+          payload: { commandId: 'retry-1' },
+        })
+      ).statusCode,
+    ).toBe(202);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/runs/run-1/cancel',
+          headers,
+          payload: { commandId: 'cancel-1' },
+        })
+      ).statusCode,
+    ).toBe(202);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/api/checkouts/checkout-1/review',
+          headers,
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/checkouts/checkout-1/merge',
+          headers,
+          payload: { commandId: 'merge-1' },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/checkouts/checkout-1/retire',
+          headers,
+          payload: { commandId: 'retire-1' },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/threads/thread-1/archive',
+          headers,
+          payload: { commandId: 'archive-1' },
+        })
+      ).statusCode,
+    ).toBe(200);
+
+    routeContext.retryRun = vi.fn(async () => {
+      throw new Error('Run missing.');
+    });
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/threads/missing/retry',
+          headers,
+          payload: { commandId: 'retry-missing' },
+        })
+      ).statusCode,
+    ).toBe(400);
+    routeContext.mergeCheckout = vi.fn(async () => {
+      throw Object.assign(new Error('UNIQUE constraint failed: secret'), {
+        code: 'active-writer',
+      });
+    });
+    const conflict = await app.inject({
+      method: 'POST',
+      url: '/api/checkouts/checkout-1/merge',
+      headers,
+      payload: { commandId: 'merge-conflict' },
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().error).not.toContain('UNIQUE');
+    expect(conflict.json().code).toBe('active-writer');
+    routeContext.mergeCheckout = vi.fn(async () => {
+      throw Object.assign(new Error('branch conflict'), {
+        code: 'merge-conflict',
+      });
+    });
+    const mergeConflict = await app.inject({
+      method: 'POST',
+      url: '/api/checkouts/checkout-1/merge',
+      headers,
+      payload: { commandId: 'merge-conflict-2' },
+    });
+    expect(mergeConflict.statusCode).toBe(409);
+    expect(mergeConflict.json().code).toBe('merge-conflict');
+    routeContext.retireCheckout = vi.fn(async () => {
+      throw Object.assign(new Error('owned by another command'), {
+        code: 'idempotency-conflict',
+      });
+    });
+    const ownershipConflict = await app.inject({
+      method: 'POST',
+      url: '/api/checkouts/checkout-1/retire',
+      headers,
+      payload: { commandId: 'retire-conflict' },
+    });
+    expect(ownershipConflict.statusCode).toBe(409);
+    expect(ownershipConflict.json().code).toBe('idempotency-conflict');
+  });
+
   it('accepts empty stop/cancel bodies but rejects malformed JSON bodies', async () => {
     const app = Fastify();
     apps.push(app);

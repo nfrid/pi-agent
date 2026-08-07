@@ -121,6 +121,9 @@ class DashboardServerImpl implements DashboardServer {
     });
     this.app = Fastify({
       logger: false,
+      // Reject, rather than silently strip, bounded orchestration command
+      // properties at the HTTP boundary.
+      ajv: { customOptions: { removeAdditional: false } },
     });
     this.app.register(dashboardRoutes, { context: this.routeContext() });
     this.http = this.app.server;

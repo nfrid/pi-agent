@@ -51,6 +51,23 @@ describe('DashboardHttpClient command requests', () => {
     });
   });
 
+  it('uses GET for checkout review', async () => {
+    const fetch = vi.fn(async () => new Response('{}', { status: 200 }));
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: {
+        get: () => 'test-token',
+        set: () => undefined,
+        clear: () => undefined,
+      },
+    });
+    await client.reviewCheckout('checkout-1');
+    const call = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
+    expect(call[0]?.[0]).toBe('/api/checkouts/checkout-1/review');
+    expect(call[0]?.[1]?.method).toBe('GET');
+    expect(call[0]?.[1]?.body).toBeUndefined();
+  });
+
   it('posts a project-scoped first-message runtime request', async () => {
     const fetch = vi.fn(
       async () =>
