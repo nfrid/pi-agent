@@ -122,6 +122,12 @@ export interface CreateThreadWithRunInput {
   run: Omit<CreateRunInput, 'threadId'> & { threadId?: string };
 }
 
+export interface RetryRunInput {
+  threadId: string;
+  initialPrompt: string;
+  model?: ModelSelection;
+}
+
 export type ProjectPatch = Partial<
   Pick<
     Project,
@@ -152,7 +158,12 @@ export interface BindRuntimeInput {
 
 export interface OrchestrationRepository {
   createProject(input: CreateProjectInput): Project;
+  createProjectWithCheckout(
+    input: CreateProjectInput,
+    checkout: Omit<CreateCheckoutInput, 'projectId'>,
+  ): { project: Project; checkout: Checkout };
   getProject(id: string): Project | undefined;
+  getProjectByRepositoryIdentity(identity: string): Project | undefined;
   listProjects(): Project[];
   updateProject(id: string, patch: ProjectPatch, now?: number): Project;
   deleteProject(id: string): void;
@@ -176,6 +187,10 @@ export interface OrchestrationRepository {
   threadSummaries(): ThreadSummary[];
   createRun(input: CreateRunInput): Run;
   createRunIdempotent(idempotencyKey: string, input: CreateRunInput): Run;
+  retryRunIdempotent(
+    idempotencyKey: string,
+    input: RetryRunInput,
+  ): { run: Run; thread: Thread; receipt: CommandReceipt };
   getRun(id: string): Run | undefined;
   listRuns(threadId?: string): Run[];
   deleteRun(id: string): void;

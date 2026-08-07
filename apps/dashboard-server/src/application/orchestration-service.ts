@@ -6,7 +6,6 @@ import {
   TERMINAL_RUN_STATUSES,
 } from '@pi-dashboard/domain';
 import type {
-  Checkout,
   CommandReceipt,
   Project,
   Run,
@@ -163,21 +162,22 @@ export class OrchestrationService {
       ? mainLine.slice('worktree '.length).trim()
       : discoveredRoot;
     const identity = await repositoryIdentity(candidate);
-    const existing = this.repository
-      .listProjects()
-      .find((project) => project.repositoryIdentity === identity);
+    const existing = this.repository.getProjectByRepositoryIdentity(identity);
     if (existing) {
-      const result = {
-        project: existing,
-        checkout: this.mainCheckout(existing.id),
-      };
-      this.saveReceipt(command.commandId, 'project.adopt', result);
-      return result;
+      const checkout = this.mainCheckout(existing.id);
+      if (!checkout) throw new Error('Adopted project has no main checkout.');
+      const result = { project: existing, checkout };
+      const persisted = this.saveReceipt(
+        command.commandId,
+        'project.adopt',
+        result,
+      );
+      return persisted as typeof result;
     }
     const branch = await gitText(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
     const baseSha = await gitText(root, ['rev-parse', 'HEAD']);
     const now = Date.now();
-    const project = this.repository.createProject({
+    const projectInput = {
       title: command.title ?? path.basename(root),
       rootPath: root,
       repositoryIdentity: identity,
@@ -188,12 +188,10 @@ export class OrchestrationService {
       maxParallelRuns: command.maxParallelRuns ?? 1,
       createdAt: now,
       updatedAt: now,
-    });
-    let checkout: Checkout;
+    };
     try {
-      checkout = this.repository.createCheckout({
+      const result = this.repository.createProjectWithCheckout(projectInput, {
         id: `checkout-${randomUUID()}`,
-        projectId: project.id,
         kind: 'main',
         path: root,
         ...(branch === 'HEAD' ? {} : { branch }),
@@ -202,14 +200,29 @@ export class OrchestrationService {
         createdAt: now,
         updatedAt: now,
       });
+      const persisted = this.saveReceipt(
+        command.commandId,
+        'project.adopt',
+        result,
+      );
+      this.changed();
+      return persisted as typeof result;
     } catch (error) {
-      this.repository.deleteProject(project.id);
-      throw error;
+      // The repository identity index serializes concurrent adopters. Read the
+      // committed winner (including its main checkout) instead of leaving a
+      // duplicate project or treating a harmless race as a failed command.
+      const winner = this.repository.getProjectByRepositoryIdentity(identity);
+      const checkout = winner && this.mainCheckout(winner.id);
+      if (!winner || !checkout) throw error;
+      const result = { project: winner, checkout };
+      const persisted = this.saveReceipt(
+        command.commandId,
+        'project.adopt',
+        result,
+      );
+      this.changed();
+      return persisted as typeof result;
     }
-    const result = { project, checkout };
-    this.saveReceipt(command.commandId, 'project.adopt', result);
-    this.changed();
-    return result;
   }
 
   async createThread(
@@ -269,54 +282,18 @@ export class OrchestrationService {
     threadId: string,
     command: { commandId: string; prompt?: string; model?: Run['model'] },
   ): Promise<unknown> {
-    const prior = this.receipt(command.commandId, 'run.retry');
-    if (prior) return prior.result;
-    const thread = this.requireThread(threadId);
-    const runs = this.repository.listRuns(threadId);
-    const previous = runs[runs.length - 1];
-    if (!previous || !TERMINAL_RUN_STATUSES.includes(previous.status))
-      throw new Error('Only a terminal run can be retried.');
-    const project = this.requireProject(thread.projectId);
-    const oldCheckout = this.requireCheckout(previous.checkoutId);
-    const checkout =
-      oldCheckout.kind === 'main'
-        ? oldCheckout
-        : this.repository.createCheckout({
-            id: `checkout-${randomUUID()}`,
-            projectId: project.id,
-            kind: 'worktree',
-            path: path.join(
-              project.rootPath,
-              '.worktrees',
-              `.pending-${randomUUID()}`,
-            ),
-            status: 'preparing',
-          });
-    try {
-      const run = this.repository.createRun({
-        id: `run-${randomUUID()}`,
+    this.requireThread(threadId);
+    const { receipt: _receipt, ...result } = this.repository.retryRunIdempotent(
+      command.commandId,
+      {
         threadId,
-        checkoutId: checkout.id,
-        parentRunId: previous.id,
-        initialPrompt: command.prompt ?? previous.initialPrompt,
-        model: command.model ?? previous.model,
-        mode: previous.mode,
-        runtimeProvider: previous.runtimeProvider,
-        status: 'queued',
-      });
-      const nextThread = this.repository.updateThread(threadId, {
-        checkoutId: checkout.id,
-      });
-      const result = { run, thread: nextThread };
-      this.saveReceipt(command.commandId, 'run.retry', result);
-      this.changed();
-      this.kick();
-      return result;
-    } catch (error) {
-      if (checkout.id !== oldCheckout.id)
-        this.repository.deleteCheckout(checkout.id);
-      throw error;
-    }
+        initialPrompt: command.prompt ?? this.latestRun(threadId).initialPrompt,
+        model: command.model,
+      },
+    );
+    this.changed();
+    this.kick();
+    return result;
   }
 
   async cancel(runId: string, commandId: string): Promise<unknown> {
@@ -558,24 +535,15 @@ export class OrchestrationService {
     for (const run of this.repository.listRuns()) {
       if (TERMINAL_RUN_STATUSES.includes(run.status)) continue;
       if (run.status === 'preparing') {
-        // Worktree preparation is restart-safe only before the record is
-        // written. Remove a half-prepared checkout before requeueing it; a
-        // requested worktree is never replaced by main.
+        // A durable record is the handoff point: it may describe an earlier
+        // attempt whose branch contains useful edits. Keep it and let execute
+        // rehydrate the same checkout rather than discarding the branch.
         const checkout = this.repository.getCheckout(run.checkoutId);
-        if (checkout?.kind === 'worktree') {
-          const record = this.worktreeRecord(checkout);
-          if (record) {
-            await createWorktreeFinisher(
-              this.storeFor(checkout),
-            ).discardFreshWorktree(record.id);
-            try {
-              if (checkout.status !== 'preparing')
-                this.repository.transitionCheckout(checkout.id, 'failed');
-              if (this.repository.getCheckout(checkout.id)?.status === 'failed')
-                this.repository.transitionCheckout(checkout.id, 'preparing');
-            } catch {
-              /* the next worker will fail closed if state is inconsistent */
-            }
+        if (checkout?.kind === 'worktree' && checkout.status === 'failed') {
+          try {
+            this.repository.transitionCheckout(checkout.id, 'preparing');
+          } catch {
+            /* the next worker will fail closed if state is inconsistent */
           }
         }
         this.transitionIfPossible(run.id, 'queued');
@@ -631,34 +599,53 @@ export class OrchestrationService {
     const project = this.requireProject(
       this.requireThread(run.threadId).projectId,
     );
+    const existingRecord =
+      checkout.kind === 'worktree' ? this.worktreeRecord(checkout) : undefined;
     try {
       let cwd = checkout.path;
       if (checkout.kind === 'worktree') {
         const creator = this.creatorFor(checkout);
-        const prepared = await this.serializedPreparation(() =>
-          creator.prepareWorktree({
-            cwd: project.rootPath,
-            name: this.requireThread(run.threadId).title,
-            base: 'wip',
-          }),
-        );
-        if (!prepared.worktree) {
-          this.failRun(
-            run.id,
-            'failed',
-            prepared.fallbackReason ?? 'Requested worktree preparation failed.',
+        const record = existingRecord;
+        let prepared: WorktreeRecord;
+        if (record) {
+          // A retry owns the same durable branch. Rehydrate a removed checkout
+          // or use its extant path; never prepare a new WIP branch over it.
+          prepared = (
+            await this.serializedPreparation(() =>
+              creator.rehydrateWorktree(record),
+            )
+          ).record;
+        } else {
+          const fresh = await this.serializedPreparation(() =>
+            creator.prepareWorktree({
+              cwd: project.rootPath,
+              name: this.requireThread(run.threadId).title,
+              base: 'wip',
+            }),
           );
-          this.repository.transitionCheckout(checkout.id, 'failed');
-          this.changed();
-          return;
+          if (!fresh.worktree) {
+            this.failRun(
+              run.id,
+              'failed',
+              fresh.fallbackReason ?? 'Requested worktree preparation failed.',
+            );
+            this.repository.transitionCheckout(checkout.id, 'failed');
+            this.changed();
+            return;
+          }
+          prepared = fresh.worktree.record;
         }
-        cwd = prepared.worktree.record.worktreePath;
+        cwd = prepared.worktreePath;
         this.repository.updateCheckout(checkout.id, {
           path: cwd,
-          branch: prepared.worktree.record.branch,
-          baseSha: prepared.worktree.record.baseHead,
+          branch: prepared.branch,
+          baseSha: prepared.baseHead,
         });
-        this.repository.transitionCheckout(checkout.id, 'ready');
+        const current = this.repository.getCheckout(checkout.id);
+        if (current?.status === 'failed')
+          this.repository.transitionCheckout(checkout.id, 'preparing');
+        if (this.repository.getCheckout(checkout.id)?.status !== 'ready')
+          this.repository.transitionCheckout(checkout.id, 'ready');
       }
       const anchor = this.workspaces().find((item) => {
         try {
@@ -697,7 +684,7 @@ export class OrchestrationService {
       });
     } catch (error) {
       this.failRun(run.id, 'failed', errorText(error));
-      if (checkout.kind === 'worktree') {
+      if (checkout.kind === 'worktree' && !existingRecord) {
         const record = this.worktreeRecord(
           this.repository.getCheckout(checkout.id) ?? checkout,
         );
@@ -824,8 +811,19 @@ export class OrchestrationService {
     return value;
   }
 
-  private saveReceipt(id: string, type: string, result: unknown): void {
-    this.repository.recordCommandReceipt(commandReceipt(id, type, result));
+  private saveReceipt(id: string, type: string, result: unknown): unknown {
+    try {
+      this.repository.recordCommandReceipt(commandReceipt(id, type, result));
+      return result;
+    } catch (error) {
+      const existing = this.repository.getCommandReceipt(id);
+      if (!existing) throw error;
+      if (existing.commandType !== type)
+        throw new Error(
+          `Idempotency key ${id} belongs to ${existing.commandType}.`,
+        );
+      return existing.result;
+    }
   }
 
   private requireProject(id: string): Project {
@@ -843,6 +841,12 @@ export class OrchestrationService {
   private requireRun(id: string): Run {
     const run = this.repository.getRun(id);
     if (!run) throw new Error(`Run ${id} does not exist.`);
+    return run;
+  }
+
+  private latestRun(threadId: string): Run {
+    const run = this.repository.listRuns(threadId).at(-1);
+    if (!run) throw new Error(`Thread ${threadId} has no run to retry.`);
     return run;
   }
 

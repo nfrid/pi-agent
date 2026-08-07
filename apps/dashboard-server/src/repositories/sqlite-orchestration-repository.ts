@@ -31,6 +31,7 @@ import type {
   CreateThreadWithRunInput,
   OrchestrationRepository,
   ProjectPatch,
+  RetryRunInput,
   ThreadPatch,
 } from './types.js';
 
@@ -110,10 +111,31 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     return project;
   }
 
+  createProjectWithCheckout(
+    input: CreateProjectInput,
+    checkoutInput: Omit<CreateCheckoutInput, 'projectId'>,
+  ): { project: Project; checkout: Checkout } {
+    return this.withTransaction(() => {
+      const project = this.createProject(input);
+      const checkout = this.createCheckout({
+        ...checkoutInput,
+        projectId: project.id,
+      });
+      return { project, checkout };
+    });
+  }
+
   getProject(id: string): Project | undefined {
     const row = this.db.prepare('SELECT * FROM project WHERE id=?').get(id) as
       | Record<string, unknown>
       | undefined;
+    return row === undefined ? undefined : projectFromRow(row);
+  }
+
+  getProjectByRepositoryIdentity(identity: string): Project | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM project WHERE repository_identity=?')
+      .get(identity) as Record<string, unknown> | undefined;
     return row === undefined ? undefined : projectFromRow(row);
   }
 
@@ -487,6 +509,63 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         createdAt: Date.now(),
       });
       return run;
+    });
+  }
+
+  retryRunIdempotent(
+    idempotencyKey: string,
+    input: RetryRunInput,
+  ): { run: Run; thread: Thread; receipt: CommandReceipt } {
+    return this.withTransaction(() => {
+      const existing = this.getCommandReceipt(idempotencyKey);
+      if (existing) {
+        if (existing.commandType !== 'run.retry')
+          throw new Error(
+            `Idempotency key ${idempotencyKey} belongs to ${existing.commandType}.`,
+          );
+        const result = existing.result as { run: Run; thread: Thread };
+        return { ...result, receipt: existing };
+      }
+      const thread = this.getThread(input.threadId);
+      if (!thread) throw new Error(`Thread ${input.threadId} does not exist.`);
+      if (thread.status === 'archived')
+        throw new Error('An archived thread cannot be retried.');
+      const previous = this.listRuns(thread.id).at(-1);
+      if (!previous || !TERMINAL_RUN_STATUSES.includes(previous.status))
+        throw new Error('Only a terminal run can be retried.');
+      const checkout = this.getCheckout(previous.checkoutId);
+      if (!checkout)
+        throw new Error(`Checkout ${previous.checkoutId} does not exist.`);
+      const run = this.insertRun({
+        id: randomUUID(),
+        threadId: thread.id,
+        checkoutId: previous.checkoutId,
+        parentRunId: previous.id,
+        initialPrompt: input.initialPrompt,
+        model: input.model ?? previous.model,
+        mode: previous.mode,
+        runtimeProvider: previous.runtimeProvider,
+        status: 'queued',
+      });
+      const now = Date.now();
+      this.db
+        .prepare(
+          "UPDATE thread SET checkout_id=?,status='queued',updated_at=? WHERE id=?",
+        )
+        .run(checkout.id, now, thread.id);
+      const nextThread = this.getThread(thread.id);
+      if (!nextThread) throw new Error(`Thread ${thread.id} disappeared.`);
+      const result = { run, thread: nextThread };
+      const receipt: CommandReceipt = {
+        idempotencyKey,
+        commandType: 'run.retry',
+        resourceType: 'run',
+        resourceId: run.id,
+        result,
+        createdAt: now,
+      };
+      this.insertReceipt(receipt);
+      return { ...result, receipt };
     });
   }
 

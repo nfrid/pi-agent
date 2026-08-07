@@ -332,6 +332,83 @@ describe('SqliteOrchestrationRepository', () => {
     }
   });
 
+  it('atomically retries one terminal run on its existing checkout', async () => {
+    const value = await fixture();
+    const thread = value.repository.createThread({
+      id: 'thread-atomic-retry',
+      projectId: value.project.id,
+      title: 'Atomic retry',
+      checkoutId: value.checkout.id,
+    });
+    const first = value.repository.createRun({
+      id: 'run-atomic-retry-1',
+      threadId: thread.id,
+      initialPrompt: 'Original prompt',
+    });
+    value.repository.transitionRun(first.id, 'preparing');
+    value.repository.transitionRun(first.id, 'starting');
+    value.repository.transitionRun(first.id, 'running');
+    value.repository.transitionRun(first.id, 'settled');
+
+    const result = value.repository.retryRunIdempotent('atomic-retry', {
+      threadId: thread.id,
+      initialPrompt: 'Continue the work.',
+    });
+    expect(result.run.checkoutId).toBe(first.checkoutId);
+    expect(result.run.parentRunId).toBe(first.id);
+    expect(result.run.attempt).toBe(2);
+    expect(result.thread.checkoutId).toBe(first.checkoutId);
+    expect(result.thread.status).toBe('queued');
+    expect(value.repository.listCheckouts(value.project.id)).toHaveLength(1);
+
+    const replay = value.repository.retryRunIdempotent('atomic-retry', {
+      threadId: thread.id,
+      initialPrompt: 'A different prompt must not be used.',
+    });
+    expect(replay).toEqual(result);
+    expect(value.repository.listRuns(thread.id)).toHaveLength(2);
+    expect(() =>
+      value.repository.createRunIdempotent('atomic-retry', {
+        threadId: thread.id,
+        initialPrompt: 'Wrong command type.',
+      }),
+    ).toThrow('belongs to run.retry');
+    value.db.close();
+
+    const reopened = new DatabaseSync(value.file);
+    try {
+      runMigrations(reopened);
+      const reopenedRepository = new SqliteOrchestrationRepository(reopened);
+      expect(
+        reopenedRepository.getCommandReceipt('atomic-retry')?.result,
+      ).toEqual({ run: result.run, thread: result.thread });
+      expect(reopenedRepository.getRun(result.run.id)?.checkoutId).toBe(
+        first.checkoutId,
+      );
+    } finally {
+      reopened.close();
+    }
+  });
+
+  it('rejects retry while the latest run is not terminal', async () => {
+    const value = await fixture();
+    const thread = value.repository.createThread({
+      projectId: value.project.id,
+      title: 'Active retry',
+      checkoutId: value.checkout.id,
+    });
+    value.repository.createRun({
+      threadId: thread.id,
+      initialPrompt: 'Still running.',
+    });
+    expect(() =>
+      value.repository.retryRunIdempotent('active-retry', {
+        threadId: thread.id,
+        initialPrompt: 'No.',
+      }),
+    ).toThrow('Only a terminal run can be retried.');
+  });
+
   it('records retry attempt lineage after the first run settles', async () => {
     const value = await fixture();
     const thread = value.repository.createThread({
