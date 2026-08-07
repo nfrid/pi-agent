@@ -785,6 +785,120 @@ describe('OrchestrationService', () => {
     }
   });
 
+  it('preserves edits when cancelling an ordinary running worktree', async () => {
+    const fixture = await isolatedServiceFixture();
+    try {
+      await fixture.service.start();
+      const created = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'cancel-running-thread',
+        title: 'Cancel running',
+        prompt: 'Cancel after edits.',
+      })) as { run: { id: string; checkoutId: string } };
+      await waitFor(() => fixture.launches.length === 1);
+      const runtimeId = fixture.launches[0]?.runtimeId as string;
+      const checkoutPath = String(fixture.launches[0]?.checkoutCwd);
+      fixture.service.onRegistryChange({
+        kind: 'registered',
+        snapshot: {
+          ...runtimeHello(runtimeId),
+          cwd: checkoutPath,
+        } as never,
+      });
+      await waitFor(
+        () =>
+          fixture.metadata.orchestration.getRun(created.run.id)?.status ===
+          'running',
+      );
+      await writeFile(path.join(checkoutPath, 'cancelled-edits.txt'), 'keep\n');
+      await expect(
+        fixture.service.cancelRun(created.run.id, 'cancel-running'),
+      ).resolves.toMatchObject({ status: 'cancelled' });
+      await expect(
+        readFile(path.join(checkoutPath, 'cancelled-edits.txt'), 'utf8'),
+      ).resolves.toBe('keep\n');
+      const record = fixture.metadata.orchestration.loadWorktreeRecord(
+        created.run.checkoutId,
+      );
+      expect(record?.status).toBe('finished');
+      expect(
+        await gitOutput(fixture.root, 'branch', '--list', record?.branch ?? ''),
+      ).toContain(record?.branch ?? '');
+      expect(
+        fixture.metadata.orchestration.getCheckout(created.run.checkoutId)
+          ?.status,
+      ).toBe('dirty');
+      expect(
+        fixture.metadata.orchestration.getCheckout(created.run.checkoutId)
+          ?.status,
+      ).not.toBe('retired');
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it('retries a rejected stop for an ordinary running cancellation', async () => {
+    const fixture = await isolatedServiceFixture();
+    try {
+      fixture.manager.stop
+        .mockRejectedValueOnce(new Error('running stop failed'))
+        .mockResolvedValue(undefined);
+      await fixture.service.start();
+      const created = (await fixture.service.createThread(fixture.projectId, {
+        commandId: 'cancel-running-retry-thread',
+        title: 'Cancel running retry',
+        prompt: 'Retry stop.',
+      })) as { run: { id: string; checkoutId: string } };
+      await waitFor(() => fixture.launches.length === 1);
+      const runtimeId = fixture.launches[0]?.runtimeId as string;
+      const checkoutPath = String(fixture.launches[0]?.checkoutCwd);
+      fixture.service.onRegistryChange({
+        kind: 'registered',
+        snapshot: { ...runtimeHello(runtimeId), cwd: checkoutPath } as never,
+      });
+      await waitFor(
+        () =>
+          fixture.metadata.orchestration.getRun(created.run.id)?.status ===
+          'running',
+      );
+      await expect(
+        fixture.service.cancelRun(created.run.id, 'cancel-running-retry'),
+      ).rejects.toThrow('running stop failed');
+      expect(
+        fixture.metadata.orchestration.getCommandReceipt(
+          'cancel-running-retry',
+        ),
+      ).toBeUndefined();
+      expect(
+        fixture.metadata.orchestration.getRun(created.run.id)?.error,
+      ).toContain('running stop failed');
+      const retained = fixture.metadata.orchestration.loadWorktreeRecord(
+        created.run.checkoutId,
+      );
+      expect(retained?.status).toBe('active');
+      await expect(access(checkoutPath)).resolves.toBeUndefined();
+
+      const retry = await fixture.service.cancelRun(
+        created.run.id,
+        'cancel-running-retry',
+      );
+      expect(retry).toMatchObject({ status: 'cancelled' });
+      expect((retry as { error?: string }).error).toBeUndefined();
+      const receiptResult = fixture.metadata.orchestration.getCommandReceipt(
+        'cancel-running-retry',
+      )?.result as { status?: string; error?: string };
+      expect(receiptResult.status).toBe('cancelled');
+      expect(receiptResult.error).toBeUndefined();
+      expect(fixture.manager.stop).toHaveBeenCalledTimes(2);
+      expect(
+        fixture.metadata.orchestration.loadWorktreeRecord(
+          created.run.checkoutId,
+        )?.status,
+      ).toBe('finished');
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('retains cancellation evidence after stop failure and retries cleanup', async () => {
     const fixture = await isolatedServiceFixture();
     try {

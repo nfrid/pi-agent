@@ -416,9 +416,18 @@ export class OrchestrationService {
       }
     }
     if (execution) await execution;
-    else if (run.runtimeId) await this.manager.stop(run.runtimeId, true);
+    else if (run.runtimeId) {
+      try {
+        await this.manager.stop(run.runtimeId, true);
+      } catch (error) {
+        this.repository.setRunError(runId, boundedErrorText(error));
+        this.changed();
+        this.kick();
+        throw error;
+      }
+    }
 
-    const result = this.repository.getRun(runId) as Run;
+    let result = this.repository.getRun(runId) as Run;
     const checkout = this.repository.getCheckout(result.checkoutId);
     // An execution task owns fresh-worktree cleanup. In particular, do not
     // finish a fresh checkout after its provider stop failed: retaining the
@@ -461,6 +470,7 @@ export class OrchestrationService {
       }
     }
     this.repository.clearRunError(runId);
+    result = this.repository.getRun(runId) as Run;
     this.saveReceipt(commandId, 'run.cancel', result);
     this.changed();
     this.kick();
@@ -1046,6 +1056,10 @@ export class OrchestrationService {
             }
           }
         }
+      } else if (freshPrepared) {
+        // Once launch has succeeded and no terminal stop is required, later
+        // cancellation must preserve model edits via finishWorktree().
+        this.freshWorktreeRuns.delete(run.id);
       }
     } catch (error) {
       const current = this.repository.getRun(run.id);
