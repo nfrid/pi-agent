@@ -18,6 +18,10 @@
       "types": "./src/orchestration-contracts.ts",
       "default": "./dist/orchestration-contracts.js"
     },
+    "./orchestration-parsers": {
+      "types": "./src/orchestration-parsers.ts",
+      "default": "./dist/orchestration-parsers.js"
+    },
     "./dashboard-api": {
       "types": "./src/dashboard-api.ts",
       "default": "./dist/dashboard-api.js"

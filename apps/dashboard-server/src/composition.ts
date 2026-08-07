@@ -4,6 +4,7 @@ import type { DashboardApplication } from './application/dashboard-application.j
 import type { DashboardEventStream } from './event-stream.js';
 import type { MetadataStore } from './metadata.js';
 import type { PushSender } from './push.js';
+import type { SqliteOrchestrationRepository } from './repositories/sqlite-orchestration-repository.js';
 import type { RuntimeManager } from './runtime-manager.js';
 import type { RuntimeRegistry } from './runtime-registry.js';
 import type { SeshAdapter } from './sesh.js';
@@ -49,6 +50,7 @@ export interface DashboardConfiguration {
 export interface DashboardDependencies {
   readonly configuration: DashboardConfiguration;
   readonly metadata: MetadataStore;
+  readonly orchestration: SqliteOrchestrationRepository;
   readonly sessions: SessionIndex;
   readonly sesh: SeshAdapter;
   readonly tmux: TmuxAdapter;

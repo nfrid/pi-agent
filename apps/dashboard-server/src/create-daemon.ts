@@ -151,6 +151,7 @@ function dependencies(
     dependencies: {
       configuration: config,
       metadata,
+      orchestration: metadata.orchestration,
       sessions,
       sesh,
       tmux,

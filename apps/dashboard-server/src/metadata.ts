@@ -11,6 +11,10 @@ import { credentialHash } from './metadata-credentials.js';
 import { runMigrations } from './repositories/migrations.js';
 import { SqliteMetadataRepository } from './repositories/sqlite-metadata-repository.js';
 import { SqliteNotificationRepository } from './repositories/sqlite-notification-repository.js';
+import { SqliteOrchestrationRepository } from './repositories/sqlite-orchestration-repository.js';
+
+export { SqliteOrchestrationRepository } from './repositories/sqlite-orchestration-repository.js';
+
 import type {
   ManagedLaunchRecord,
   PushSubscriptionRecord,
@@ -33,6 +37,8 @@ export class MetadataStore {
   readonly db: DatabaseSync;
   readonly metadata: SqliteMetadataRepository;
   readonly notifications: SqliteNotificationRepository;
+  /** Durable project/thread/run state; runtime and transcript storage stay separate. */
+  readonly orchestration: SqliteOrchestrationRepository;
 
   constructor(file: string) {
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -51,6 +57,7 @@ export class MetadataStore {
     runMigrations(this.db);
     this.metadata = new SqliteMetadataRepository(this.db);
     this.notifications = new SqliteNotificationRepository(this.db);
+    this.orchestration = new SqliteOrchestrationRepository(this.db);
   }
 
   saveWorkspace(workspace: WorkspaceTarget): void {

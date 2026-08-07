@@ -9,11 +9,15 @@ import {
 } from '@pi-dashboard/domain';
 import type {
   BrowserSnapshot,
+  CheckoutSummary,
   DashboardEventEnvelope,
   DashboardStreamMessage,
+  ProjectSummary,
+  RunSummary,
   RuntimeSnapshot,
   SessionApiResponse,
   SessionIndexEntry,
+  ThreadSummary,
   WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { useSyncExternalStore } from 'react';
@@ -30,6 +34,10 @@ export interface DashboardLiveState {
   revision: number;
   snapshotCursor: number;
   usage?: unknown;
+  projects?: readonly ProjectSummary[];
+  checkouts?: readonly CheckoutSummary[];
+  threads?: readonly ThreadSummary[];
+  runs?: readonly RunSummary[];
   cursor: number;
   connection: {
     status: ConnectionStatus;
@@ -165,6 +173,10 @@ export class DashboardLiveStore {
       revision: snapshot.revision,
       snapshotCursor: snapshot.cursor,
       usage: snapshot.usage,
+      projects: snapshot.projects,
+      checkouts: snapshot.checkouts,
+      threads: snapshot.threads,
+      runs: snapshot.runs,
       workspacesById: indexed(snapshot.workspaces),
       workspaceOrder: snapshot.workspaces.map((item) => item.id),
       runtimesById: runtimeIndex(snapshot.runtimes),
@@ -732,6 +744,10 @@ let lastMaterializedParts:
       | 'revision'
       | 'snapshotCursor'
       | 'usage'
+      | 'projects'
+      | 'checkouts'
+      | 'threads'
+      | 'runs'
       | 'workspacesById'
       | 'workspaceOrder'
       | 'runtimesById'
@@ -751,6 +767,10 @@ export function materializeSnapshot(
     revision: state.revision,
     snapshotCursor: state.snapshotCursor,
     usage: state.usage,
+    projects: state.projects,
+    checkouts: state.checkouts,
+    threads: state.threads,
+    runs: state.runs,
     workspacesById: state.workspacesById,
     workspaceOrder: state.workspaceOrder,
     runtimesById: state.runtimesById,
@@ -778,6 +798,10 @@ export function materializeSnapshot(
     }),
     sessions: Object.values(state.sessionsById),
     ...(state.usage === undefined ? {} : { usage: state.usage }),
+    ...(state.projects === undefined ? {} : { projects: state.projects }),
+    ...(state.checkouts === undefined ? {} : { checkouts: state.checkouts }),
+    ...(state.threads === undefined ? {} : { threads: state.threads }),
+    ...(state.runs === undefined ? {} : { runs: state.runs }),
     unread: Object.values(state.notificationsById),
   };
   lastMaterializedParts = parts;
@@ -786,10 +810,22 @@ export function materializeSnapshot(
 }
 
 export const selectSnapshot = materializeSnapshot;
+const EMPTY_PROJECTS: readonly ProjectSummary[] = [];
+const EMPTY_CHECKOUTS: readonly CheckoutSummary[] = [];
+const EMPTY_THREADS: readonly ThreadSummary[] = [];
+const EMPTY_RUNS: readonly RunSummary[] = [];
 const EMPTY_WORKSPACES: readonly WorkspaceTarget[] = [];
 const EMPTY_RUNTIMES: readonly RuntimeSnapshot[] = [];
 const EMPTY_SESSIONS: readonly SessionIndexEntry[] = [];
 const EMPTY_NOTIFICATIONS: readonly BrowserSnapshot['unread'][number][] = [];
+export const selectProjects = (state: DashboardLiveState) =>
+  state.projects ?? EMPTY_PROJECTS;
+export const selectCheckouts = (state: DashboardLiveState) =>
+  state.checkouts ?? EMPTY_CHECKOUTS;
+export const selectThreads = (state: DashboardLiveState) =>
+  state.threads ?? EMPTY_THREADS;
+export const selectRuns = (state: DashboardLiveState) =>
+  state.runs ?? EMPTY_RUNS;
 export const selectWorkspaces = (state: DashboardLiveState) =>
   materializeSnapshot(state)?.workspaces ?? EMPTY_WORKSPACES;
 export const selectRuntimes = (state: DashboardLiveState) =>

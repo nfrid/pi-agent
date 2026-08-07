@@ -1,18 +1,260 @@
-/**
- * Provider-neutral runtime lifecycle contracts.
- *
- * The orchestration layer deals in IDs, paths, and opaque commands only. A
- * provider may use Pi, tmux, a server process, or another runtime without
- * exposing those native types here.
- */
+import { type Static, Type } from 'typebox';
+import { MAX_ID, MAX_PATH, MAX_TEXT } from './limits.js';
+
+/** Bounded provider/model identity used by durable runs and project defaults. */
+export const ModelSelectionSchema = Type.Object(
+  {
+    provider: Type.String({ minLength: 1, maxLength: 200 }),
+    model: Type.String({ minLength: 1, maxLength: 300 }),
+    thinking: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  },
+  { additionalProperties: false },
+);
+export type ModelSelection = Static<typeof ModelSelectionSchema>;
+
+export const ProjectStatusSchema = Type.Union([
+  Type.Literal('active'),
+  Type.Literal('archived'),
+]);
+export type ProjectStatus = Static<typeof ProjectStatusSchema>;
+
+export const CheckoutKindSchema = Type.Union([
+  Type.Literal('main'),
+  Type.Literal('worktree'),
+  Type.Literal('external'),
+]);
+export type CheckoutKind = Static<typeof CheckoutKindSchema>;
+export const CheckoutStatusSchema = Type.Union([
+  Type.Literal('preparing'),
+  Type.Literal('ready'),
+  Type.Literal('dirty'),
+  Type.Literal('merging'),
+  Type.Literal('retired'),
+  Type.Literal('failed'),
+]);
+export type CheckoutStatus = Static<typeof CheckoutStatusSchema>;
+
+export const ThreadStatusSchema = Type.Union([
+  Type.Literal('draft'),
+  Type.Literal('queued'),
+  Type.Literal('active'),
+  Type.Literal('needs-input'),
+  Type.Literal('settled'),
+  Type.Literal('failed'),
+  Type.Literal('stopped'),
+  Type.Literal('archived'),
+]);
+export type ThreadStatus = Static<typeof ThreadStatusSchema>;
+
+export const RunStatusSchema = Type.Union([
+  Type.Literal('queued'),
+  Type.Literal('preparing'),
+  Type.Literal('starting'),
+  Type.Literal('running'),
+  Type.Literal('waiting'),
+  Type.Literal('settled'),
+  Type.Literal('failed'),
+  Type.Literal('cancelled'),
+  Type.Literal('interrupted'),
+]);
+export type RunStatus = Static<typeof RunStatusSchema>;
+
+/** Read runs may share a checkout; write runs exclusively own it while active. */
+export const RunModeSchema = Type.Union([
+  Type.Literal('read'),
+  Type.Literal('write'),
+]);
+export type RunMode = Static<typeof RunModeSchema>;
+
+const IdentifierSchema = Type.String({
+  minLength: 1,
+  maxLength: MAX_ID,
+  pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+});
+const PathSchema = Type.String({ minLength: 1, maxLength: MAX_PATH });
+const TimestampSchema = Type.Number();
+
+export const ProjectSchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    title: Type.String({ minLength: 1, maxLength: 512 }),
+    /** Canonical local repository root used to identify this project. */
+    rootPath: PathSchema,
+    /** Stable VCS identity, normally derived from the repository common dir. */
+    repositoryIdentity: Type.Optional(
+      Type.String({ minLength: 1, maxLength: MAX_PATH }),
+    ),
+    defaultBaseBranch: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 512 }),
+    ),
+    defaultModel: Type.Optional(ModelSelectionSchema),
+    defaultIsolation: Type.Union([
+      Type.Literal('worktree'),
+      Type.Literal('main'),
+    ]),
+    maxParallelRuns: Type.Integer({ minimum: 1, maximum: 1024 }),
+    status: ProjectStatusSchema,
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  },
+  { additionalProperties: false },
+);
+export type Project = Static<typeof ProjectSchema>;
+export const ProjectSummarySchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    title: Type.String({ minLength: 1, maxLength: 512 }),
+    rootPath: PathSchema,
+    status: ProjectStatusSchema,
+    maxParallelRuns: Type.Integer({ minimum: 1, maximum: 1024 }),
+    activeRunCount: Type.Integer({ minimum: 0 }),
+    updatedAt: TimestampSchema,
+  },
+  { additionalProperties: false },
+);
+export type ProjectSummary = Static<typeof ProjectSummarySchema>;
+
+export const CheckoutSchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    projectId: IdentifierSchema,
+    kind: CheckoutKindSchema,
+    path: PathSchema,
+    branch: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    baseSha: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    status: CheckoutStatusSchema,
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  },
+  { additionalProperties: false },
+);
+export type Checkout = Static<typeof CheckoutSchema>;
+export const CheckoutSummarySchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    projectId: IdentifierSchema,
+    kind: CheckoutKindSchema,
+    path: PathSchema,
+    branch: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    status: CheckoutStatusSchema,
+    activeRunId: Type.Optional(IdentifierSchema),
+    updatedAt: TimestampSchema,
+  },
+  { additionalProperties: false },
+);
+export type CheckoutSummary = Static<typeof CheckoutSummarySchema>;
+
+export const ThreadSchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    projectId: IdentifierSchema,
+    title: Type.String({ minLength: 1, maxLength: 512 }),
+    checkoutId: Type.Optional(IdentifierSchema),
+    status: ThreadStatusSchema,
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  },
+  { additionalProperties: false },
+);
+export type Thread = Static<typeof ThreadSchema>;
+export const ThreadSummarySchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    projectId: IdentifierSchema,
+    title: Type.String({ minLength: 1, maxLength: 512 }),
+    checkoutId: Type.Optional(IdentifierSchema),
+    status: ThreadStatusSchema,
+    activeRunId: Type.Optional(IdentifierSchema),
+    updatedAt: TimestampSchema,
+  },
+  { additionalProperties: false },
+);
+export type ThreadSummary = Static<typeof ThreadSummarySchema>;
+
+export const RunSchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    threadId: IdentifierSchema,
+    checkoutId: IdentifierSchema,
+    attempt: Type.Integer({ minimum: 1 }),
+    /** Previous attempt in the same thread, if this run is a retry/resume. */
+    parentRunId: Type.Optional(IdentifierSchema),
+    mode: RunModeSchema,
+    runtimeProvider: Type.String({ minLength: 1, maxLength: 128 }),
+    runtimeId: Type.Optional(IdentifierSchema),
+    piSessionId: Type.Optional(IdentifierSchema),
+    /** Complete user intent; never replace this with a rendered transcript. */
+    initialPrompt: Type.String({ minLength: 1, maxLength: MAX_TEXT }),
+    model: Type.Optional(ModelSelectionSchema),
+    status: RunStatusSchema,
+    createdAt: TimestampSchema,
+    startedAt: Type.Optional(TimestampSchema),
+    finishedAt: Type.Optional(TimestampSchema),
+    error: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_TEXT })),
+  },
+  { additionalProperties: false },
+);
+export type Run = Static<typeof RunSchema>;
+export const RunSummarySchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    threadId: IdentifierSchema,
+    checkoutId: IdentifierSchema,
+    attempt: Type.Integer({ minimum: 1 }),
+    parentRunId: Type.Optional(IdentifierSchema),
+    mode: RunModeSchema,
+    runtimeProvider: Type.String({ minLength: 1, maxLength: 128 }),
+    runtimeId: Type.Optional(IdentifierSchema),
+    piSessionId: Type.Optional(IdentifierSchema),
+    model: Type.Optional(ModelSelectionSchema),
+    status: RunStatusSchema,
+    createdAt: TimestampSchema,
+    startedAt: Type.Optional(TimestampSchema),
+    finishedAt: Type.Optional(TimestampSchema),
+    error: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_TEXT })),
+  },
+  { additionalProperties: false },
+);
+export type RunSummary = Static<typeof RunSummarySchema>;
+
+export const CommandReceiptSchema = Type.Object(
+  {
+    idempotencyKey: IdentifierSchema,
+    commandType: Type.String({ minLength: 1, maxLength: 128 }),
+    resourceType: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    resourceId: Type.Optional(IdentifierSchema),
+    result: Type.Unknown(),
+    createdAt: TimestampSchema,
+  },
+  { additionalProperties: false },
+);
+export type CommandReceipt = Static<typeof CommandReceiptSchema>;
+
+/** A runtime binding is a shell concern, not a transcript or browser entity. */
+export const OrchestrationRuntimeSchema = Type.Object(
+  {
+    runtimeId: IdentifierSchema,
+    piSessionId: IdentifierSchema,
+    runId: Type.Optional(IdentifierSchema),
+    status: Type.Union([
+      Type.Literal('starting'),
+      Type.Literal('running'),
+      Type.Literal('stopped'),
+      Type.Literal('failed'),
+    ]),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  },
+  { additionalProperties: false },
+);
+export type OrchestrationRuntime = Static<typeof OrchestrationRuntimeSchema>;
+
+/** Provider-neutral runtime lifecycle contracts retained for existing adapters. */
 export interface RuntimeLocation {
-  /** Provider-owned stable location identifier. */
   readonly id: string;
-  /** Provider-neutral location components for durable attachment metadata. */
   readonly sessionId?: string;
   readonly windowId?: string;
   readonly paneId?: string;
-  /** Human-readable attach/display target, when one exists. */
   readonly displayTarget?: string;
 }
 
@@ -35,7 +277,6 @@ export interface RuntimeStartInput {
     readonly model: string;
     readonly thinking?: string;
   };
-  /** Provider-neutral workspace/session hint; native provider values stay local. */
   readonly workspace: {
     readonly id: string;
     readonly name: string;

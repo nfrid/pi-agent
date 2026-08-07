@@ -1,5 +1,51 @@
 /** Contracts exposed by the dashboard daemon to HTTP, SSE, and browsers. */
 
+export type {
+  Checkout,
+  CheckoutKind,
+  CheckoutStatus,
+  CheckoutSummary,
+  CommandReceipt,
+  ModelSelection,
+  Project,
+  ProjectStatus,
+  ProjectSummary,
+  Run,
+  RunMode,
+  RunStatus,
+  RunSummary,
+  Thread,
+  ThreadStatus,
+  ThreadSummary,
+} from './orchestration-contracts.js';
+export {
+  CheckoutKindSchema,
+  CheckoutSchema,
+  CheckoutStatusSchema,
+  CheckoutSummarySchema,
+  CommandReceiptSchema,
+  ModelSelectionSchema,
+  ProjectSchema,
+  ProjectStatusSchema,
+  ProjectSummarySchema,
+  RunModeSchema,
+  RunSchema,
+  RunStatusSchema,
+  RunSummarySchema,
+  ThreadSchema,
+  ThreadStatusSchema,
+  ThreadSummarySchema,
+} from './orchestration-contracts.js';
+export {
+  parseCheckout,
+  parseProject,
+  parseRun,
+  parseThread,
+  tryParseCheckout,
+  tryParseProject,
+  tryParseRun,
+  tryParseThread,
+} from './orchestration-parsers.js';
 export {
   parseBrowserSnapshot,
   parseDashboardEventEnvelope,

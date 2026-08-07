@@ -20,6 +20,41 @@ import {
 } from '@pi-dashboard/extension-contributions';
 import { type Static, Type } from 'typebox';
 import { MAX_ID, MAX_PATH, MAX_TEXT } from './limits.js';
+import {
+  type CheckoutSummary,
+  CheckoutSummarySchema,
+  type ProjectSummary,
+  ProjectSummarySchema,
+  type RunSummary,
+  RunSummarySchema,
+  type ThreadSummary,
+  ThreadSummarySchema,
+} from './orchestration-contracts.js';
+
+export type {
+  Checkout,
+  CheckoutSummary,
+  CommandReceipt,
+  ModelSelection,
+  Project,
+  ProjectSummary,
+  Run,
+  RunSummary,
+  Thread,
+  ThreadSummary,
+} from './orchestration-contracts.js';
+export {
+  CheckoutSchema,
+  CheckoutSummarySchema,
+  CommandReceiptSchema,
+  ModelSelectionSchema,
+  ProjectSchema,
+  ProjectSummarySchema,
+  RunSchema,
+  RunSummarySchema,
+  ThreadSchema,
+  ThreadSummarySchema,
+} from './orchestration-contracts.js';
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME_BYTES = 512 * 1024;
@@ -830,6 +865,15 @@ export const BrowserSnapshotSchema = Type.Object(
     runtimes: Type.Array(RuntimeSnapshotSchema),
     workspaces: Type.Array(WorkspaceTargetSchema),
     sessions: Type.Array(SessionIndexEntrySchema),
+    /** Durable orchestration shell summaries; transcript entries never cross this boundary. */
+    projects: Type.Optional(
+      Type.Array(ProjectSummarySchema, { maxItems: 4096 }),
+    ),
+    checkouts: Type.Optional(
+      Type.Array(CheckoutSummarySchema, { maxItems: 4096 }),
+    ),
+    threads: Type.Optional(Type.Array(ThreadSummarySchema, { maxItems: 4096 })),
+    runs: Type.Optional(Type.Array(RunSummarySchema, { maxItems: 4096 })),
     usage: Type.Optional(UnknownSchema),
     unread: Type.Array(NotificationEventSchema),
   },
@@ -838,11 +882,22 @@ export const BrowserSnapshotSchema = Type.Object(
 type BrowserSnapshotStatic = Static<typeof BrowserSnapshotSchema>;
 export type BrowserSnapshot = Omit<
   BrowserSnapshotStatic,
-  'runtimes' | 'workspaces' | 'sessions' | 'unread'
+  | 'runtimes'
+  | 'workspaces'
+  | 'sessions'
+  | 'unread'
+  | 'projects'
+  | 'checkouts'
+  | 'threads'
+  | 'runs'
 > & {
   readonly runtimes: readonly RuntimeSnapshot[];
   readonly workspaces: readonly WorkspaceTarget[];
   readonly sessions: readonly SessionIndexEntry[];
+  readonly projects?: readonly ProjectSummary[];
+  readonly checkouts?: readonly CheckoutSummary[];
+  readonly threads?: readonly ThreadSummary[];
+  readonly runs?: readonly RunSummary[];
   readonly unread: readonly NotificationEvent[];
 };
 

@@ -8,6 +8,7 @@ import type {
 import { DashboardEventStream } from '../event-stream.js';
 import type { MetadataStore } from '../metadata.js';
 import type { PushSender } from '../push.js';
+import type { SqliteOrchestrationRepository } from '../repositories/sqlite-orchestration-repository.js';
 import type { RuntimeManager } from '../runtime-manager.js';
 import type { RegistryChange, RuntimeRegistry } from '../runtime-registry.js';
 import type { SeshAdapter } from '../sesh.js';
@@ -54,12 +55,14 @@ export class DashboardApplication {
   private readonly registry: RuntimeRegistry;
   private readonly manager: RuntimeManager;
   private readonly metadata: MetadataStore;
+  readonly orchestration: SqliteOrchestrationRepository;
   private readonly sessionIndex: SessionIndex;
 
   constructor(options: DashboardApplicationOptions) {
     this.registry = options.registry;
     this.manager = options.manager;
     this.metadata = options.metadata;
+    this.orchestration = options.metadata.orchestration;
     this.sessionIndex = options.sessions;
     this.eventStream = options.eventStream ?? new DashboardEventStream(256);
     this.runtime = new RuntimeService(
@@ -117,6 +120,10 @@ export class DashboardApplication {
         session: { ...runtime.session, entries: [] },
       })),
       workspaces: this.workspaces.list(),
+      projects: this.orchestration.projectSummaries(),
+      checkouts: this.orchestration.checkoutSummaries(),
+      threads: this.orchestration.threadSummaries(),
+      runs: this.orchestration.runSummaries(),
       sessions: this.sessions.list().map((session) => {
         const runtime = liveRuntimes.find(
           (item) => item.session.id === session.id && item.online !== false,

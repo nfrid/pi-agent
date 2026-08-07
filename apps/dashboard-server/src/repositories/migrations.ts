@@ -106,6 +106,96 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
         );
     },
   },
+  {
+    version: 3,
+    name: 'durable-orchestration-foundation',
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS project (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          root_path TEXT NOT NULL,
+          repository_identity TEXT,
+          default_base_branch TEXT,
+          default_model_json TEXT,
+          default_isolation TEXT NOT NULL CHECK (default_isolation IN ('worktree','main')),
+          max_parallel_runs INTEGER NOT NULL CHECK (max_parallel_runs BETWEEN 1 AND 1024),
+          status TEXT NOT NULL CHECK (status IN ('active','archived')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS checkout (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES project(id),
+          kind TEXT NOT NULL CHECK (kind IN ('main','worktree','external')),
+          path TEXT NOT NULL UNIQUE,
+          branch TEXT UNIQUE,
+          base_sha TEXT,
+          status TEXT NOT NULL CHECK (status IN ('preparing','ready','dirty','merging','retired','failed')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS thread (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL REFERENCES project(id),
+          title TEXT NOT NULL,
+          checkout_id TEXT REFERENCES checkout(id),
+          status TEXT NOT NULL CHECK (status IN ('draft','queued','active','needs-input','settled','failed','stopped','archived')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS orchestration_run (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL REFERENCES thread(id),
+          checkout_id TEXT NOT NULL REFERENCES checkout(id),
+          attempt INTEGER NOT NULL CHECK (attempt >= 1),
+          parent_run_id TEXT REFERENCES orchestration_run(id),
+          mode TEXT NOT NULL CHECK (mode IN ('read','write')),
+          runtime_provider TEXT NOT NULL,
+          runtime_id TEXT,
+          pi_session_id TEXT,
+          initial_prompt TEXT NOT NULL CHECK (length(initial_prompt) BETWEEN 1 AND 100000),
+          model_json TEXT,
+          status TEXT NOT NULL CHECK (status IN ('queued','preparing','starting','running','waiting','settled','failed','cancelled','interrupted')),
+          created_at INTEGER NOT NULL,
+          started_at INTEGER,
+          finished_at INTEGER,
+          error TEXT
+        );
+        CREATE TABLE IF NOT EXISTS orchestration_runtime (
+          runtime_id TEXT PRIMARY KEY,
+          pi_session_id TEXT NOT NULL,
+          run_id TEXT REFERENCES orchestration_run(id),
+          status TEXT NOT NULL CHECK (status IN ('starting','running','stopped','failed')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS command_receipt (
+          idempotency_key TEXT PRIMARY KEY,
+          command_type TEXT NOT NULL,
+          resource_type TEXT,
+          resource_id TEXT,
+          result_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS checkout_branch_unique
+          ON checkout(branch) WHERE branch IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS active_run_per_thread
+          ON orchestration_run(thread_id)
+          WHERE status IN ('queued','preparing','starting','running','waiting');
+        CREATE UNIQUE INDEX IF NOT EXISTS active_writer_per_checkout
+          ON orchestration_run(checkout_id)
+          WHERE mode = 'write' AND status IN ('queued','preparing','starting','running','waiting');
+        CREATE UNIQUE INDEX IF NOT EXISTS active_runtime_per_pi_session
+          ON orchestration_runtime(pi_session_id)
+          WHERE status IN ('starting','running');
+        CREATE INDEX IF NOT EXISTS run_thread_attempt
+          ON orchestration_run(thread_id, attempt);
+        CREATE INDEX IF NOT EXISTS run_checkout_status
+          ON orchestration_run(checkout_id, status);
+      `);
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */
