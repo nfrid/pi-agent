@@ -86,15 +86,19 @@ export class SessionIndex {
     return publicEntry;
   }
 
-  async readEntries(
-    id: string,
-  ): Promise<{ metadata: SessionIndexEntry; entries: unknown[] }> {
+  async readEntries(id: string): Promise<{
+    metadata: SessionIndexEntry;
+    entries: unknown[];
+    entriesComplete: boolean;
+  }> {
     const indexed = this.files.get(id);
     if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
       throw new Error('Unknown session.');
     const { header: _header, lastEntryId: _lastEntryId, ...metadata } = indexed;
     const entries: unknown[] = [];
+    const entryBytes: number[] = [];
     let responseBytes = 0;
+    let entriesComplete = true;
     const input = createReadStream(indexed.file, { encoding: 'utf8' });
     const lines = readline.createInterface({
       input,
@@ -107,10 +111,15 @@ export class SessionIndex {
           throw new Error('A session entry is too large to open remotely.');
         try {
           const entry = redactImageData(JSON.parse(line) as unknown);
-          responseBytes += Buffer.byteLength(JSON.stringify(entry));
-          if (responseBytes > 8 * 1024 * 1024)
-            throw new Error('Session is too large to open remotely.');
+          const serializedBytes = Buffer.byteLength(JSON.stringify(entry));
           entries.push(entry);
+          entryBytes.push(serializedBytes);
+          responseBytes += serializedBytes;
+          while (responseBytes > 8 * 1024 * 1024 && entries.length > 0) {
+            entriesComplete = false;
+            entries.shift();
+            responseBytes -= entryBytes.shift() ?? 0;
+          }
         } catch (error) {
           if (error instanceof SyntaxError) continue;
           throw error;
@@ -120,7 +129,7 @@ export class SessionIndex {
       lines.close();
       input.destroy();
     }
-    return { metadata, entries };
+    return { metadata, entries, entriesComplete };
   }
 
   /** Rename a known dormant session by appending a normal Pi session_info entry. */

@@ -565,7 +565,6 @@ class DashboardServerImpl implements DashboardServer {
       if (!runtime)
         return {
           ...result,
-          entriesComplete: true,
           serverId: this.serverId,
           cursor,
         };

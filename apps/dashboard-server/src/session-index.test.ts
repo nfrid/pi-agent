@@ -76,6 +76,36 @@ describe('session index', () => {
     expect(JSON.stringify(session.entries)).not.toContain('base64-bytes');
   });
 
+  it('returns a bounded recent tail for sessions larger than the response budget', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-large-'));
+    const file = path.join(root, 'large.jsonl');
+    const entries = [
+      { type: 'session', id: 'large-id', cwd: '/tmp' },
+      ...Array.from({ length: 10 }, (_, index) => ({
+        type: 'message',
+        id: `message-${index}`,
+        message: { role: 'assistant', content: 'x'.repeat(1024 * 1024) },
+      })),
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+
+    const session = await index.readEntries('large-id');
+    expect(session.entriesComplete).toBe(false);
+    expect(session.entries.length).toBeGreaterThan(0);
+    expect(JSON.stringify(session.entries).length).toBeLessThanOrEqual(
+      8 * 1024 * 1024,
+    );
+    expect(session.entries.at(-1)).toMatchObject({ id: 'message-9' });
+    expect(session.entries).not.toContainEqual(
+      expect.objectContaining({ id: 'message-0' }),
+    );
+  });
+
   it('accepts compaction entries with a materialized retainedTail', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-retained-tail-'),
