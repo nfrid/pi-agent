@@ -5,8 +5,10 @@ import {
   groupThreads,
   managementStatusCounts,
   pathWithin,
+  projectDefaultIsolation,
   runTiming,
   sessionRouteTarget,
+  shouldSyncProjectIsolation,
   threadActionAvailability,
   threadNeedsAttention,
 } from './management';
@@ -109,6 +111,25 @@ describe('management projections', () => {
     ).toBe(true);
     expect(pathWithin('/repo/worktree/file', '/repo/worktree')).toBe(true);
     expect(pathWithin('/repo/worktree-copy', '/repo/worktree')).toBe(false);
+  });
+
+  it('uses project defaults with a worktree fallback and preserves edits on refresh', () => {
+    expect(projectDefaultIsolation({ defaultIsolation: 'main' })).toBe('main');
+    expect(projectDefaultIsolation(undefined)).toBe('worktree');
+    expect(
+      shouldSyncProjectIsolation(
+        { projectId: 'p1', isolation: 'main' },
+        'p1',
+        'main',
+      ),
+    ).toBe(false);
+    expect(
+      shouldSyncProjectIsolation(
+        { projectId: 'p1', isolation: 'main' },
+        'p2',
+        'worktree',
+      ),
+    ).toBe(true);
   });
 
   it('keeps failed threads out of the attention shelf without losing counts', () => {

@@ -21,7 +21,13 @@ import type {
   ThreadSummary,
 } from '@pi-dashboard/protocol';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { type FormEvent, useCallback, useState } from 'react';
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Composer } from '../features/composer';
 import { SessionView } from '../features/session';
 import { useDashboardNavigate } from './navigation';
@@ -685,6 +691,24 @@ function LegacySessions({
   );
 }
 
+type CheckoutIsolation = 'worktree' | 'main';
+
+export function projectDefaultIsolation(
+  project: Pick<ProjectSummary, 'defaultIsolation'> | undefined,
+): CheckoutIsolation {
+  return project?.defaultIsolation ?? 'worktree';
+}
+
+export function shouldSyncProjectIsolation(
+  source: { projectId: string; isolation: CheckoutIsolation },
+  projectId: string,
+  projectIsolation: CheckoutIsolation,
+): boolean {
+  return (
+    source.projectId !== projectId || source.isolation !== projectIsolation
+  );
+}
+
 export function NewThreadRoute({
   projectId,
   snapshot,
@@ -704,9 +728,16 @@ export function NewThreadRoute({
   });
   const [title, setTitle] = useState('');
   const [prompt, setPrompt] = useState('');
-  const [isolation, setIsolation] = useState<'worktree' | 'main'>(
-    project?.defaultIsolation ?? 'worktree',
-  );
+  const projectIsolation = projectDefaultIsolation(project);
+  const [isolation, setIsolation] =
+    useState<CheckoutIsolation>(projectIsolation);
+  const isolationSourceRef = useRef({ projectId, isolation: projectIsolation });
+  useEffect(() => {
+    const source = isolationSourceRef.current;
+    if (shouldSyncProjectIsolation(source, projectId, projectIsolation))
+      setIsolation(projectIsolation);
+    isolationSourceRef.current = { projectId, isolation: projectIsolation };
+  }, [projectId, projectIsolation]);
   const [mode, setMode] = useState<'read' | 'write'>('write');
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
@@ -854,7 +885,6 @@ export function ThreadRoute({
 }) {
   const thread = snapshot.threads?.find((item) => item.id === threadId);
   const go = useDashboardNavigate();
-  const keepThreadRoute = useCallback(() => undefined, []);
   const queryClient = useQueryClient();
   const runs = (snapshot.runs ?? [])
     .filter((run) => run.threadId === threadId)
@@ -863,6 +893,19 @@ export function ThreadRoute({
   const checkout = selected
     ? snapshot.checkouts?.find((item) => item.id === selected.checkoutId)
     : undefined;
+  const selectedRunId = selected?.id;
+  const selectedSessionId = selected?.piSessionId;
+  const [replacementSessionId, setReplacementSessionId] = useState<string>();
+  const effectiveSessionId = replacementSessionId ?? selectedSessionId;
+  const handleSessionReplacement = useCallback(
+    (sessionId: string) => setReplacementSessionId(sessionId),
+    [],
+  );
+  useEffect(() => {
+    void selectedRunId;
+    void selectedSessionId;
+    setReplacementSessionId(undefined);
+  }, [selectedRunId, selectedSessionId]);
   const [feedback, setFeedback] = useState<string>();
   const [review, setReview] = useState<unknown>();
   const refresh = async () => invalidateDashboardQueries(queryClient);
@@ -931,7 +974,7 @@ export function ThreadRoute({
   const confirmAction = (message: string, action: () => void) => {
     if (globalThis.confirm(message)) action();
   };
-  const sessionId = selected?.piSessionId;
+  const sessionId = effectiveSessionId;
   const reviewRecord =
     review && typeof review === 'object' && !Array.isArray(review)
       ? (review as {
@@ -1107,7 +1150,7 @@ export function ThreadRoute({
               store={store}
               Composer={Composer}
               embedded
-              onSessionReplacement={keepThreadRoute}
+              onSessionReplacement={handleSessionReplacement}
             />
           </section>
         )}

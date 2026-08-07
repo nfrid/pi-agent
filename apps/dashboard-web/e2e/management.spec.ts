@@ -396,15 +396,104 @@ test('global new thread uses the managed thread project', async ({ page }) => {
       thread.id === 't-running' ? { ...thread, projectId: 'p2' } : thread,
     ),
   };
+  await page.route('**/api/usage', (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
   await page.route('**/api/snapshot', (route) =>
     route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify(multiProject),
     }),
   );
+  await page.goto('/projects/p1/new');
+  await expect(page.getByRole('radio', { name: 'Main' })).toBeChecked();
+  await page.getByRole('radio', { name: 'Worktree' }).click();
+  await page.getByRole('button', { name: 'Second project' }).click();
+  await page.getByRole('button', { name: '+ New thread' }).click();
+  await expect(page.getByRole('radio', { name: 'Worktree' })).toBeChecked();
+
   await page.goto('/threads/t-running');
   await page.getByRole('button', { name: 'New thread' }).click();
   await expect(page).toHaveURL(/\/projects\/p2\/new$/u);
+});
+
+test('managed thread retains its URL while selecting a replacement session', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  const managed = {
+    ...snapshot,
+    runtimes: [
+      {
+        runtimeId: 'runtime-1',
+        ownership: 'managed',
+        pid: 1,
+        cwd: '/workspace/demo/.worktree/task',
+        liveState: 'waiting',
+        online: true,
+        session: { id: 'pi-1', entries: [] },
+        pendingInteractions: [],
+      },
+    ],
+    runs: snapshot.runs.map((run) =>
+      run.id === 'r-running'
+        ? { ...run, piSessionId: 'pi-1', status: 'waiting' }
+        : run,
+    ),
+  };
+  await page.route('**/api/usage', (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/snapshot', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(managed),
+    }),
+  );
+  await page.route('**/api/sessions/pi-1', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        metadata: {
+          id: 'pi-2',
+          file: '/workspace/demo/pi-2.jsonl',
+          cwd: '/workspace/demo/.worktree/task',
+          updatedAt: 10,
+        },
+        entries: [],
+        entriesComplete: true,
+      }),
+    }),
+  );
+  await page.route('**/api/sessions/pi-2', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        metadata: {
+          id: 'pi-2',
+          file: '/workspace/demo/pi-2.jsonl',
+          cwd: '/workspace/demo/.worktree/task',
+          updatedAt: 10,
+        },
+        entries: [
+          {
+            type: 'message',
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'text', text: 'Replacement session transcript' },
+              ],
+            },
+          },
+        ],
+        entriesComplete: true,
+      }),
+    }),
+  );
+  await page.goto('/threads/t-running');
+  await expect(page).toHaveURL(/\/threads\/t-running$/u);
+  await expect(page.getByText('Replacement session transcript')).toBeVisible();
+  await expect(page.getByText('Pi session pi-2')).toBeVisible();
 });
 
 test('@desktop management desktop has persistent rail and queues a complete prompt', async ({
