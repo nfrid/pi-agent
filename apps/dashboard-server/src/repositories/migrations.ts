@@ -129,7 +129,7 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
           project_id TEXT NOT NULL REFERENCES project(id),
           kind TEXT NOT NULL CHECK (kind IN ('main','worktree','external')),
           path TEXT NOT NULL UNIQUE,
-          branch TEXT UNIQUE,
+          branch TEXT,
           base_sha TEXT,
           status TEXT NOT NULL CHECK (status IN ('preparing','ready','dirty','merging','retired','failed')),
           created_at INTEGER NOT NULL,
@@ -195,33 +195,8 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
           WHERE run_id IS NOT NULL AND status IN ('starting','running');
         CREATE UNIQUE INDEX IF NOT EXISTS orchestration_run_thread_attempt_unique
           ON orchestration_run(thread_id, attempt);
-        CREATE INDEX IF NOT EXISTS run_thread_attempt
-          ON orchestration_run(thread_id, attempt);
         CREATE INDEX IF NOT EXISTS run_checkout_status
           ON orchestration_run(checkout_id, status);
-      `);
-    },
-  },
-  {
-    version: 4,
-    name: 'orchestration-correctness-constraints',
-    up(db) {
-      if (!columns(db, 'thread').has('pinned_at'))
-        db.exec('ALTER TABLE thread ADD COLUMN pinned_at INTEGER');
-      db.exec(`
-        CREATE UNIQUE INDEX IF NOT EXISTS active_runtime_per_run
-          ON orchestration_runtime(run_id)
-          WHERE run_id IS NOT NULL AND status IN ('starting','running');
-        CREATE UNIQUE INDEX IF NOT EXISTS orchestration_run_thread_attempt_unique
-          ON orchestration_run(thread_id, attempt);
-        CREATE TRIGGER IF NOT EXISTS orchestration_run_runtime_provider_insert
-          BEFORE INSERT ON orchestration_run
-          WHEN NEW.runtime_provider NOT IN ('extension-bridge','pi-server')
-          BEGIN SELECT RAISE(ABORT, 'invalid runtime provider'); END;
-        CREATE TRIGGER IF NOT EXISTS orchestration_run_runtime_provider_update
-          BEFORE UPDATE OF runtime_provider ON orchestration_run
-          WHEN NEW.runtime_provider NOT IN ('extension-bridge','pi-server')
-          BEGIN SELECT RAISE(ABORT, 'invalid runtime provider'); END;
       `);
     },
   },

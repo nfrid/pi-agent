@@ -859,6 +859,20 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         null,
         null,
       );
+    if (
+      requestedStatus === 'queued' &&
+      (thread.status === 'settled' ||
+        thread.status === 'failed' ||
+        thread.status === 'stopped')
+    ) {
+      const result = this.db
+        .prepare(
+          'UPDATE thread SET status=?,updated_at=? WHERE id=? AND status=?',
+        )
+        .run('queued', now, thread.id, thread.status);
+      if (Number(result.changes) !== 1)
+        throw new Error(`Thread ${thread.id} changed concurrently.`);
+    }
     return run;
   }
 

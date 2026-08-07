@@ -42,7 +42,7 @@ it('applies numbered dashboard migrations idempotently', async () => {
 describe('migration metadata', () => {
   it('uses stable ascending migration numbers', () => {
     expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4,
+      1, 2, 3,
     ]);
   });
 

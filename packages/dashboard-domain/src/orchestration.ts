@@ -43,7 +43,7 @@ const threadTransitions: Readonly<
   queued: ['active', 'needs-input', 'failed', 'stopped', 'archived'],
   active: ['needs-input', 'settled', 'failed', 'stopped', 'archived'],
   'needs-input': ['active', 'settled', 'failed', 'stopped', 'archived'],
-  settled: ['active', 'archived'],
+  settled: ['queued', 'active', 'archived'],
   failed: ['queued', 'active', 'archived'],
   stopped: ['queued', 'archived'],
   archived: [],

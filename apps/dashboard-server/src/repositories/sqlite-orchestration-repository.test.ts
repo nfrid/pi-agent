@@ -295,6 +295,43 @@ describe('SqliteOrchestrationRepository', () => {
     ).toThrow();
   });
 
+  it('queues a retry atomically and preserves that projection across replay and reopen', async () => {
+    const value = await fixture();
+    const thread = value.repository.createThread({
+      id: 'thread-queued-retry',
+      projectId: value.project.id,
+      title: 'Queued retry',
+      checkoutId: value.checkout.id,
+      status: 'settled',
+    });
+    const first = value.repository.createRunIdempotent('retry-command', {
+      threadId: thread.id,
+      initialPrompt: 'Retry me.',
+    });
+    const queued = value.repository.getThread(thread.id);
+    expect(first.status).toBe('queued');
+    expect(queued?.status).toBe('queued');
+    const updatedAt = queued?.updatedAt;
+    const replay = value.repository.createRunIdempotent('retry-command', {
+      threadId: thread.id,
+      initialPrompt: 'Must not create a second retry.',
+    });
+    expect(replay).toEqual(first);
+    expect(value.repository.getThread(thread.id)?.updatedAt).toBe(updatedAt);
+    value.db.close();
+
+    const reopened = new DatabaseSync(value.file);
+    try {
+      runMigrations(reopened);
+      expect(
+        new SqliteOrchestrationRepository(reopened).getThread(thread.id)
+          ?.status,
+      ).toBe('queued');
+    } finally {
+      reopened.close();
+    }
+  });
+
   it('records retry attempt lineage after the first run settles', async () => {
     const value = await fixture();
     const thread = value.repository.createThread({
