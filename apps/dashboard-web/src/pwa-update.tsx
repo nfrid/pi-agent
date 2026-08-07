@@ -1,9 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 declare const __DASHBOARD_BUILD_ID__: string;
 
 const VERSION_URL = '/version.json';
-const UPDATE_POLL_INTERVAL_MS = 60_000;
+export const UPDATE_POLL_INTERVAL_MS = 60_000;
+
+export function shouldCheckDashboardVersion(
+  lastCheckedAt: number,
+  now: number,
+): boolean {
+  return lastCheckedAt === 0 || now - lastCheckedAt >= UPDATE_POLL_INTERVAL_MS;
+}
 
 export function dashboardVersion(value: unknown): string | undefined {
   if (!value || typeof value !== 'object') return undefined;
@@ -54,11 +61,15 @@ async function reloadDashboard(): Promise<void> {
 export function UpdateAvailablePrompt() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [reloading, setReloading] = useState(false);
+  const lastCheckedAtRef = useRef(0);
 
   useEffect(() => {
     let active = true;
     const check = async () => {
       if (document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (!shouldCheckDashboardVersion(lastCheckedAtRef.current, now)) return;
+      lastCheckedAtRef.current = now;
       const latestVersion = await fetchDashboardVersion();
       if (
         active &&

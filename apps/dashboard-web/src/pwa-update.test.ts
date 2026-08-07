@@ -3,6 +3,8 @@ import {
   dashboardUpdateAvailable,
   dashboardVersion,
   fetchDashboardVersion,
+  shouldCheckDashboardVersion,
+  UPDATE_POLL_INTERVAL_MS,
 } from './pwa-update';
 
 describe('dashboard PWA updates', () => {
@@ -17,6 +19,16 @@ describe('dashboard PWA updates', () => {
     expect(dashboardUpdateAvailable('release-1', 'release-2')).toBe(true);
     expect(dashboardUpdateAvailable('release-1', 'release-1')).toBe(false);
     expect(dashboardUpdateAvailable('release-1', undefined)).toBe(false);
+  });
+
+  it('does not repeat focus checks inside the polling interval', () => {
+    expect(shouldCheckDashboardVersion(0, 10)).toBe(true);
+    expect(
+      shouldCheckDashboardVersion(10, 10 + UPDATE_POLL_INTERVAL_MS - 1),
+    ).toBe(false);
+    expect(shouldCheckDashboardVersion(10, 10 + UPDATE_POLL_INTERVAL_MS)).toBe(
+      true,
+    );
   });
 
   it('checks the uncached version endpoint and tolerates failures', async () => {

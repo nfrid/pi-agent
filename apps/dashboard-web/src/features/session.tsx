@@ -118,6 +118,8 @@ export function SessionView({
   const closeInspector = useCallback(() => setInspectorOpen(false), []);
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const autoScrollFrameRef = useRef<number | undefined>(undefined);
+  const runtimeReconcileTimerRef = useRef<number | undefined>(undefined);
+  const runtimeWasOnlineRef = useRef(false);
   const stickToBottomRef = useRef(true);
   const outlineTriggerRef = useRef<HTMLButtonElement>(null);
   const outlineWasOpenRef = useRef(false);
@@ -226,9 +228,23 @@ export function SessionView({
     // reconcile it with Pi's canonical persisted branch so custom entries,
     // compaction records, and provider-specific tool payloads render exactly
     // as they do after a full reload.
-    const retry = window.setTimeout(() => void requestSessionRefetch(), 250);
+    const retry = window.setTimeout(() => void requestSessionRefetch(), 750);
     return () => window.clearTimeout(retry);
   }, [requestSessionRefetch, sessionChange]);
+  useEffect(() => {
+    const online = Boolean(runtime && runtime.online !== false);
+    const wasOnline = runtimeWasOnlineRef.current;
+    runtimeWasOnlineRef.current = online;
+    if (!wasOnline || online) return;
+    // A short-lived print/runtime can exit immediately after its terminal
+    // event. Re-read once after shutdown, when Pi's JSONL branch is durable.
+    if (runtimeReconcileTimerRef.current !== undefined)
+      window.clearTimeout(runtimeReconcileTimerRef.current);
+    runtimeReconcileTimerRef.current = window.setTimeout(() => {
+      runtimeReconcileTimerRef.current = undefined;
+      void requestSessionRefetch();
+    }, 500);
+  }, [requestSessionRefetch, runtime]);
   useEffect(() => {
     const reconcileWhenVisible = () => {
       if (document.visibilityState !== 'visible') return;
@@ -341,6 +357,10 @@ export function SessionView({
       if (autoScrollFrameRef.current !== undefined) {
         window.cancelAnimationFrame(autoScrollFrameRef.current);
         autoScrollFrameRef.current = undefined;
+      }
+      if (runtimeReconcileTimerRef.current !== undefined) {
+        window.clearTimeout(runtimeReconcileTimerRef.current);
+        runtimeReconcileTimerRef.current = undefined;
       }
     },
     [],
