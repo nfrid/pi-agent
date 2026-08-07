@@ -819,10 +819,24 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         if (existing.commandType !== 'session.adopt')
           throw idempotencyConflict(idempotencyKey, existing.commandType);
         const result = existing.result as { thread: Thread; run: Run };
-        if (result.run.piSessionId !== input.run.piSessionId)
+        if (
+          result.run.piSessionId !== input.run.piSessionId ||
+          result.thread.projectId !== input.thread.projectId
+        )
           throw idempotencyConflict(idempotencyKey, 'another-session');
         return { ...result, receipt: existing };
       }
+      const checkoutId = input.thread.checkoutId;
+      const checkout = checkoutId ? this.getCheckout(checkoutId) : undefined;
+      if (
+        !checkout ||
+        checkout.projectId !== input.thread.projectId ||
+        !['ready', 'dirty'].includes(checkout.status)
+      )
+        throw Object.assign(
+          new Error('Session adoption requires a ready or dirty checkout.'),
+          { code: 'orchestration-conflict' },
+        );
       const piSessionId = input.run.piSessionId;
       if (!piSessionId) throw new Error('Adoption requires a Pi session ID.');
       if (this.getRunByPiSessionId(piSessionId))
@@ -834,6 +848,14 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         status: input.thread.status ?? 'stopped',
       });
       const run = this.insertRun({ ...input.run, threadId: thread.id });
+      this.insertReceipt({
+        idempotencyKey: `run-prompt:${run.id}`,
+        commandType: 'run.prompt',
+        resourceType: 'run',
+        resourceId: run.id,
+        result: { runId: run.id },
+        createdAt: run.createdAt,
+      });
       if (input.runtime) {
         const now = Date.now();
         const existingRuntime = this.db
@@ -1209,6 +1231,10 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(input.model === undefined ? {} : { model: input.model }),
       status: requestedStatus,
       createdAt: now,
+      ...(input.startedAt === undefined ? {} : { startedAt: input.startedAt }),
+      ...(input.finishedAt === undefined
+        ? {}
+        : { finishedAt: input.finishedAt }),
     };
     this.db
       .prepare(
@@ -1230,8 +1256,8 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
         run.model === undefined ? null : JSON.stringify(run.model),
         run.status,
         run.createdAt,
-        null,
-        null,
+        run.startedAt ?? null,
+        run.finishedAt ?? null,
         null,
       );
     if (

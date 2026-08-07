@@ -14,6 +14,7 @@ import {
   type Run,
   type RuntimeSnapshot,
   type SessionAdoptCommand,
+  type SessionIndexEntry,
   type Thread,
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
@@ -50,9 +51,10 @@ export interface OrchestrationServiceOptions {
   beforeWorktreeFinish?: () => Promise<void>;
   /** Legacy transcript access used by session adoption. */
   readSession?: (id: string) => Promise<{
-    metadata: import('@pi-dashboard/protocol').SessionIndexEntry;
+    metadata: SessionIndexEntry;
     entries: unknown[];
   }>;
+  getSession?: (id: string) => SessionIndexEntry | undefined;
 }
 
 export interface CreateProjectCommand {
@@ -125,6 +127,7 @@ export class OrchestrationService {
   private readonly beforeWorktreePreparation?: () => Promise<void>;
   private readonly beforeWorktreeFinish?: () => Promise<void>;
   private readonly readSession?: OrchestrationServiceOptions['readSession'];
+  private readonly getSession?: OrchestrationServiceOptions['getSession'];
   private readonly inFlight = new Set<string>();
   /** Execution remains observable while preparation or manager.launch is pending. */
   private readonly executionTasks = new Map<string, Promise<void>>();
@@ -169,6 +172,7 @@ export class OrchestrationService {
     this.beforeWorktreePreparation = options.beforeWorktreePreparation;
     this.beforeWorktreeFinish = options.beforeWorktreeFinish;
     this.readSession = options.readSession;
+    this.getSession = options.getSession;
   }
 
   async start(): Promise<void> {
@@ -296,19 +300,28 @@ export class OrchestrationService {
     const prior = this.receipt(command.commandId, 'session.adopt');
     if (prior) {
       const result = prior.result as { thread: Thread; run: Run };
-      if (result.run.piSessionId !== sessionId)
+      if (
+        result.run.piSessionId !== sessionId ||
+        result.thread.projectId !== projectId
+      )
         throw idempotencyConflict(command.commandId, 'another-session');
       return { ...result, receipt: prior };
     }
-    if (!this.readSession) throw new Error('Session adoption is unavailable.');
+    if (!this.readSession && !this.getSession)
+      throw new Error('Session adoption is unavailable.');
     const project = this.requireProject(projectId);
     if (project.status !== 'active') throw new Error('Project is archived.');
-    const { metadata, entries } = await this.readSession(sessionId);
-    const initialPrompt = firstUserMessageText(entries);
-    if (!initialPrompt)
-      throw new Error('Session has no non-empty user message.');
-    if (initialPrompt.length > MAX_TEXT)
-      throw new Error('The initial user message is too long.');
+    const indexed = this.getSession?.(sessionId);
+    if (this.getSession && !indexed) throw new Error('Unknown session.');
+    let metadata: SessionIndexEntry;
+    let entries: unknown[] | undefined;
+    if (indexed) metadata = indexed;
+    else {
+      const loaded = await this.readSession?.(sessionId);
+      if (!loaded) throw new Error('Unknown session.');
+      metadata = loaded.metadata;
+      entries = loaded.entries;
+    }
     const assigned = this.repository.getRunByPiSessionId(sessionId);
     if (assigned)
       throw Object.assign(new Error('The session is already assigned.'), {
@@ -330,13 +343,23 @@ export class OrchestrationService {
       throw new Error('Session cwd is outside a known project checkout.');
     if (checkout.projectId !== projectId)
       throw new Error('Checkout does not belong to this project.');
-    if (checkout.status === 'retired')
+    if (!['ready', 'dirty'].includes(checkout.status))
       throw Object.assign(
-        new Error('A retired checkout cannot receive a session.'),
+        new Error('Session adoption requires a ready or dirty checkout.'),
         { code: 'orchestration-conflict' },
       );
     if (!this.containsPath(checkout.path, cwd))
       throw new Error('Session cwd is outside the selected checkout.');
+    if (!entries) {
+      const loaded = await this.readSession?.(sessionId);
+      if (!loaded) throw new Error('Unknown session.');
+      entries = loaded.entries;
+    }
+    const initialPrompt = firstUserMessageText(entries);
+    if (!initialPrompt)
+      throw new Error('Session has no non-empty user message.');
+    if (initialPrompt.length > MAX_TEXT)
+      throw new Error('The initial user message is too long.');
     const runtime = this.registry
       .snapshots()
       .find((item) => item.session.id === sessionId && item.online !== false);
@@ -345,6 +368,9 @@ export class OrchestrationService {
       (runtime.liveState === 'waiting' ||
         (runtime.pendingInteractions?.length ?? 0) > 0);
     const status = waiting ? 'waiting' : runtime ? 'running' : 'interrupted';
+    const observedAt = Number.isFinite(metadata.updatedAt)
+      ? metadata.updatedAt
+      : Date.now();
     const threadStatus =
       status === 'waiting'
         ? 'needs-input'
@@ -376,6 +402,8 @@ export class OrchestrationService {
           ...(runtime ? { runtimeId: runtime.runtimeId } : {}),
           piSessionId: sessionId,
           status,
+          createdAt: observedAt,
+          ...(runtime ? { startedAt: observedAt } : { finishedAt: observedAt }),
         },
         ...(runtime
           ? {

@@ -59,6 +59,7 @@ async function orchestrationFixture() {
     snapshots: () => (live ? [live as never] : []),
     sendCommand: vi.fn(async () => ({ accepted: true })),
   };
+  const onChange = vi.fn();
   const manager = {
     launch: vi.fn(async (input: { runtimeId?: string }) => ({
       runtimeId: input.runtimeId,
@@ -90,6 +91,7 @@ async function orchestrationFixture() {
       ],
     }),
     reconnectGraceMs: 25,
+    onChange,
   });
   const adopted = (await service.adoptProject({
     commandId: 'matrix-adopt',
@@ -108,6 +110,7 @@ async function orchestrationFixture() {
     service,
     manager,
     registry,
+    onChange,
     runId: created.run.id,
     projectId: adopted.project.id,
     setLive(value: Record<string, unknown> | undefined) {
@@ -126,6 +129,7 @@ it('adopts an inactive legacy session without launching or duplicating rows', as
   const fixture = await orchestrationFixture();
   try {
     await fixture.service.cancelRun(fixture.runId, 'cancel-before-adopt');
+    const changesBeforeAdoption = fixture.onChange.mock.calls.length;
     const checkout = fixture.metadata.orchestration
       .listCheckouts(fixture.projectId)
       .find((item) => item.kind === 'main');
@@ -145,6 +149,9 @@ it('adopts an inactive legacy session without launching or duplicating rows', as
       'A complete legacy prompt with all its details.',
     );
     expect(first.run.status).toBe('interrupted');
+    expect(fixture.onChange.mock.calls.length).toBeGreaterThan(
+      changesBeforeAdoption,
+    );
     expect(
       fixture.metadata.orchestration.listThreads(fixture.projectId),
     ).toHaveLength(2);
@@ -175,8 +182,31 @@ it('maps a live legacy runtime with pending interaction to waiting and binds it'
       'active-legacy-session',
       { commandId: 'adopt-live', checkoutId: checkout.id },
     );
+    fixture.service.onRegistryChange({
+      kind: 'registered',
+      snapshot: {
+        runtimeId: 'legacy-runtime',
+        session: { id: 'active-legacy-session' },
+        liveState: 'working',
+        pendingInteractions: [{}],
+        online: true,
+      } as never,
+    } as never);
+    await new Promise((resolve) => setTimeout(resolve, 10));
     expect(adopted.run.status).toBe('waiting');
     expect(adopted.run.runtimeId).toBe('legacy-runtime');
+    expect(fixture.registry.sendCommand).not.toHaveBeenCalled();
+    expect(
+      fixture.metadata.orchestration.getCommandReceipt('adopt-live'),
+    ).toMatchObject({ commandType: 'session.adopt' });
+    expect(
+      fixture.metadata.orchestration.getCommandReceipt(
+        `run-prompt:${adopted.run.id}`,
+      ),
+    ).toMatchObject({
+      commandType: 'run.prompt',
+      result: { runId: adopted.run.id },
+    });
     expect(
       fixture.metadata.orchestration.getRuntime('legacy-runtime'),
     ).toMatchObject({

@@ -141,6 +141,7 @@ function dependencies(
     manager,
     registry,
     workspaces: () => manager.activeWorkspaces(),
+    getSession: (id) => sessions.get(id),
     readSession: (id) => sessions.readEntries(id),
     onChange: () => applicationChanges.publish(undefined),
   });

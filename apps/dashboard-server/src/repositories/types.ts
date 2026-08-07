@@ -115,6 +115,8 @@ export interface CreateRunInput {
   model?: ModelSelection;
   status?: RunStatus;
   createdAt?: number;
+  startedAt?: number;
+  finishedAt?: number;
 }
 
 export interface CreateThreadWithRunInput {

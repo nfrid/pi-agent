@@ -149,6 +149,152 @@ describe('SqliteOrchestrationRepository', () => {
     ).toThrow('belongs to run.create');
   });
 
+  it('adopts sessions transactionally with prompt receipts and exact replay', async () => {
+    const value = await fixture();
+    const input = (
+      overrides: {
+        command?: string;
+        projectId?: string;
+        checkoutId?: string;
+        threadId?: string;
+        runId?: string;
+        sessionId?: string;
+      } = {},
+    ) => ({
+      thread: {
+        id: overrides.threadId ?? 'adopt-thread',
+        projectId: overrides.projectId ?? value.project.id,
+        title: 'Adopted',
+        checkoutId: overrides.checkoutId ?? value.checkout.id,
+        status: 'stopped' as const,
+      },
+      run: {
+        id: overrides.runId ?? 'adopt-run',
+        initialPrompt: 'Complete imported prompt',
+        piSessionId: overrides.sessionId ?? 'legacy-session',
+        status: 'interrupted' as const,
+        finishedAt: 123,
+      },
+    });
+    const result = value.repository.adoptSessionWithThreadAndRun(
+      'adopt-command',
+      input(),
+    );
+    const replay = value.repository.adoptSessionWithThreadAndRun(
+      'adopt-command',
+      input({ threadId: 'ignored-thread', runId: 'ignored-run' }),
+    );
+    expect(replay).toEqual(result);
+    expect(value.repository.listThreads()).toHaveLength(1);
+    expect(value.repository.listRuns()).toHaveLength(1);
+    expect(value.repository.getCommandReceipt('adopt-command')).toMatchObject({
+      commandType: 'session.adopt',
+    });
+    expect(
+      value.repository.getCommandReceipt(`run-prompt:${result.run.id}`),
+    ).toMatchObject({
+      commandType: 'run.prompt',
+      result: { runId: result.run.id },
+    });
+    expect(() =>
+      value.repository.adoptSessionWithThreadAndRun(
+        'adopt-other-session',
+        input({
+          threadId: 'other-thread',
+          runId: 'other-run',
+          sessionId: 'legacy-session',
+        }),
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'session-assigned' }));
+
+    const otherProject = value.repository.createProject({
+      id: 'project-other',
+      title: 'Other',
+      rootPath: '/other',
+    });
+    const otherCheckout = value.repository.createCheckout({
+      id: 'checkout-other',
+      projectId: otherProject.id,
+      kind: 'worktree',
+      path: '/other/worktree',
+      status: 'ready',
+    });
+    expect(() =>
+      value.repository.adoptSessionWithThreadAndRun(
+        'adopt-command',
+        input({
+          projectId: otherProject.id,
+          checkoutId: otherCheckout.id,
+          threadId: 'cross-project-thread',
+          runId: 'cross-project-run',
+          sessionId: 'legacy-session',
+        }),
+      ),
+    ).toThrowError(expect.objectContaining({ code: 'idempotency-conflict' }));
+  });
+
+  it('rejects adoption for an ineligible checkout without inserting rows', async () => {
+    const value = await fixture();
+    const preparing = value.repository.createCheckout({
+      id: 'checkout-preparing',
+      projectId: value.project.id,
+      kind: 'worktree',
+      path: '/repo/.worktrees/preparing',
+      branch: 'pi/preparing',
+      status: 'preparing',
+    });
+    expect(() =>
+      value.repository.adoptSessionWithThreadAndRun('adopt-preparing', {
+        thread: {
+          id: 'preparing-thread',
+          projectId: value.project.id,
+          title: 'Rejected',
+          checkoutId: preparing.id,
+        },
+        run: {
+          id: 'preparing-run',
+          initialPrompt: 'Should not persist',
+          piSessionId: 'preparing-session',
+        },
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'orchestration-conflict' }));
+    expect(value.repository.listThreads()).toHaveLength(0);
+    expect(value.repository.listRuns()).toHaveLength(0);
+    expect(
+      value.repository.getCommandReceipt('adopt-preparing'),
+    ).toBeUndefined();
+  });
+
+  it('rolls back adoption when its stable prompt receipt collides', async () => {
+    const value = await fixture();
+    value.repository.recordCommandReceipt({
+      idempotencyKey: 'run-prompt:collision-run',
+      commandType: 'run.prompt',
+      result: { runId: 'other-run' },
+      createdAt: 1,
+    });
+    expect(() =>
+      value.repository.adoptSessionWithThreadAndRun('adopt-collision', {
+        thread: {
+          id: 'collision-thread',
+          projectId: value.project.id,
+          title: 'Collision',
+          checkoutId: value.checkout.id,
+        },
+        run: {
+          id: 'collision-run',
+          initialPrompt: 'Should roll back',
+          piSessionId: 'collision-session',
+        },
+      }),
+    ).toThrow();
+    expect(value.repository.listThreads()).toHaveLength(0);
+    expect(value.repository.listRuns()).toHaveLength(0);
+    expect(
+      value.repository.getCommandReceipt('adopt-collision'),
+    ).toBeUndefined();
+  });
+
   it('atomically allocates one isolated checkout for a replayed command', async () => {
     const value = await fixture();
     const result = value.repository.createIsolatedThreadWithRun(
