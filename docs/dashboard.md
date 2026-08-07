@@ -73,6 +73,7 @@ For production build and restart instructions, see
 | `PI_SESSION_DIR` | Optional Pi session-root override. |
 | `PI_DASHBOARD_VAPID_PUBLIC_KEY`, `PI_DASHBOARD_VAPID_PRIVATE_KEY`, `PI_DASHBOARD_VAPID_SUBJECT` | Optional Web Push configuration. |
 | `PI_DASHBOARD_NOTIFY_SETTLED=1` | Opt in to settled-run notifications. |
+| `PI_DASHBOARD_EXPERIMENTAL_PI_SERVER=1` + `PI_DASHBOARD_PI_SERVER_SOCKET` | Explicitly enable the bounded external Pi server experiment; see [pi-server-experiment.md](pi-server-experiment.md). |
 
 ## Architecture
 

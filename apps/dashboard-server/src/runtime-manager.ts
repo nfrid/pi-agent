@@ -3,6 +3,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import type {
   AgentRuntimeProvider,
   RuntimeBinding,
+  RuntimeProvider,
   WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { validateStartRuntimeRequest } from '@pi-dashboard/protocol';
@@ -29,6 +30,8 @@ interface LaunchRecord {
   placement?: ManagedPlacement;
   /** Preserve the launch capability when restarting within this daemon. */
   mode: 'read' | 'write';
+  /** Preserve requested provider routing when restarting within this daemon. */
+  runtimeProvider: RuntimeProvider;
   metadataRecorded: boolean;
   createdAt: number;
 }
@@ -107,8 +110,10 @@ export class RuntimeManager {
       },
       binding: bindingFromPlacement(record.runtimeId, record.placement),
       placement: record.placement,
-      // Older persisted launches have no mode provenance and remain writable.
+      // Older persisted launches have no mode/provider provenance and remain
+      // writable on the legacy extension-bridge path.
       mode: record.mode ?? 'write',
+      runtimeProvider: 'extension-bridge',
       metadataRecorded: true,
       createdAt: record.launchedAt,
     };
@@ -180,7 +185,21 @@ export class RuntimeManager {
   async launch(
     input: unknown,
   ): Promise<{ runtimeId: string; placement?: ManagedPlacement }> {
-    const request = validateStartRuntimeRequest(input);
+    const raw =
+      input && typeof input === 'object'
+        ? (input as Record<string, unknown>)
+        : undefined;
+    const runtimeProvider =
+      raw?.runtimeProvider === 'pi-server' ||
+      raw?.runtimeProvider === 'extension-bridge'
+        ? (raw.runtimeProvider as RuntimeProvider)
+        : undefined;
+    const requestInput =
+      raw && 'runtimeProvider' in raw
+        ? (({ runtimeProvider: _ignored, ...withoutProvider }) =>
+            withoutProvider)(raw)
+        : input;
+    const request = validateStartRuntimeRequest(requestInput);
     const workspace = this.workspaces.get(request.workspaceId);
     if (!workspace)
       throw new Error('Workspace is not in the current Sesh catalogue.');
@@ -268,6 +287,8 @@ export class RuntimeManager {
           request.sessionId ? 'resume-agent' : 'pi-agent',
         ),
         runtimeId,
+        runtimeProvider: runtimeProvider ?? 'extension-bridge',
+        sessionId: request.sessionId,
         socketPath: this.socketPath,
         launchToken,
         identityToken,
@@ -284,6 +305,7 @@ export class RuntimeManager {
         binding,
         ...(placement ? { placement } : {}),
         mode: request.mode ?? 'write',
+        runtimeProvider: runtimeProvider ?? 'extension-bridge',
         metadataRecorded: false,
         createdAt: Date.now(),
       };
@@ -391,6 +413,7 @@ export class RuntimeManager {
           }
         : {}),
       mode: launch.mode,
+      runtimeProvider: launch.runtimeProvider,
     };
     await this.stop(runtimeId);
     return this.launch(request);
@@ -427,6 +450,7 @@ export class RuntimeManager {
     }
     if (
       snapshot &&
+      launch?.placement &&
       this.registry.isOnline(runtimeId) &&
       this.safePid(snapshot.pid)
     )
@@ -440,6 +464,7 @@ export class RuntimeManager {
       await new Promise((resolve) => setTimeout(resolve, 100));
     if (
       snapshot &&
+      launch?.placement &&
       this.registry.isOnline(runtimeId) &&
       this.safePid(snapshot.pid)
     )

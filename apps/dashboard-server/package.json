@@ -15,9 +15,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@earendil-works/pi-client": "0.84.1",
     "@pi-dashboard/codex-usage": "workspace:*",
-    "@pi-dashboard/extension-contributions": "workspace:*",
     "@pi-dashboard/domain": "workspace:*",
+    "@pi-dashboard/extension-contributions": "workspace:*",
     "@pi-dashboard/protocol": "workspace:*",
     "@pi-dashboard/worktree-manager": "workspace:*",
     "fastify": "5.11.2",

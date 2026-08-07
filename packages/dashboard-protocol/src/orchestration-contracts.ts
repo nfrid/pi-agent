@@ -280,6 +280,10 @@ export interface RuntimeBinding {
 
 export interface RuntimeStartInput {
   readonly runtimeId: string;
+  /** Provider selection is dashboard-neutral; native Pi types stay in adapters. */
+  readonly runtimeProvider?: RuntimeProvider;
+  /** Existing Pi session identity for native provider attachment. */
+  readonly sessionId?: string;
   /** Managed orchestration runs may restrict the Pi tool set. */
   readonly mode?: RunMode;
   readonly cwd: string;

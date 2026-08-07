@@ -54,6 +54,9 @@ importers:
 
   apps/dashboard-server:
     dependencies:
+      '@earendil-works/pi-client':
+        specifier: 0.84.1
+        version: 0.84.1
       '@pi-dashboard/codex-usage':
         specifier: workspace:*
         version: link:../../packages/codex-usage

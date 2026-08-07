@@ -69,6 +69,7 @@ class DashboardServerImpl implements DashboardServer {
   private readonly sseHeartbeatMs: number;
   private readonly sseBufferBytes: number;
   private readonly application: DashboardDependencies['application'];
+  private readonly runtimeProvider: DashboardDependencies['runtimeProvider'];
   private readonly wss = new WebSocketServer({
     noServer: true,
     maxPayload: 2048,
@@ -104,6 +105,7 @@ class DashboardServerImpl implements DashboardServer {
     this.sseHeartbeatMs = config.sseHeartbeatMs;
     this.sseBufferBytes = config.sseBufferBytes;
     this.application = dependencies.application;
+    this.runtimeProvider = dependencies.runtimeProvider;
     this.origins = config.origins;
 
     this.bridge = net.createServer((socket) => {
@@ -449,6 +451,11 @@ class DashboardServerImpl implements DashboardServer {
   private async stopInternal(): Promise<void> {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     await this.application.orchestrationService?.stop();
+    await (
+      this.runtimeProvider as DashboardDependencies['runtimeProvider'] & {
+        close?: () => Promise<void>;
+      }
+    ).close?.();
     this.heartbeatTimer = undefined;
     this.sessions.close();
     this.eventStream.close();
@@ -479,6 +486,11 @@ class DashboardServerImpl implements DashboardServer {
   private async cleanupFailedStart(): Promise<void> {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     await this.application.orchestrationService?.stop();
+    await (
+      this.runtimeProvider as DashboardDependencies['runtimeProvider'] & {
+        close?: () => Promise<void>;
+      }
+    ).close?.();
     this.heartbeatTimer = undefined;
     this.sessions.close();
     this.eventStream.close();

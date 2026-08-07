@@ -25,6 +25,10 @@ export interface DashboardServerOptions {
   /** Legacy tmux runner seam retained for callers that customize launch. */
   tmux?: TmuxAdapter;
   runtimeProvider?: AgentRuntimeProvider;
+  /** Explicit opt-in for the externally supervised Pi server experiment. */
+  experimentalPiServer?: boolean;
+  /** Unix socket supplied by the external @earendil-works/pi-server host. */
+  piServerSocketPath?: string;
   metadata?: MetadataStore;
   sessions?: SessionIndex;
   registry?: RuntimeRegistry;
@@ -42,6 +46,8 @@ export interface DashboardConfiguration {
   readonly stateDir: string;
   readonly token: string;
   readonly socketPath: string;
+  readonly experimentalPiServer: boolean;
+  readonly piServerSocketPath?: string;
   readonly origins: string[];
   readonly sseHeartbeatMs: number;
   readonly sseBufferBytes: number;

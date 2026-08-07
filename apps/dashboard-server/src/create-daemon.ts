@@ -13,6 +13,10 @@ import {
 import { DashboardEventStream } from './event-stream.js';
 import { type DashboardServer, DashboardServerImpl } from './http.js';
 import { MetadataStore } from './metadata.js';
+import {
+  PiClientRuntimeProvider,
+  RuntimeProviderRouter,
+} from './pi-server-runtime.js';
 import type { PushSender } from './push.js';
 import { RuntimeManager } from './runtime-manager.js';
 import { type RegistryChange, RuntimeRegistry } from './runtime-registry.js';
@@ -64,6 +68,13 @@ function configuration(
       ? path.join(stateDir, 'bridge.sock')
       : (process.env.PI_DASHBOARD_SOCKET ??
         path.join(stateDir, 'bridge.sock')));
+  const piServerSocketPath =
+    options.piServerSocketPath ??
+    (process.env.PI_DASHBOARD_PI_SERVER_SOCKET?.trim() || undefined);
+  const experimentalPiServer =
+    (options.experimentalPiServer ??
+      process.env.PI_DASHBOARD_EXPERIMENTAL_PI_SERVER === '1') &&
+    Boolean(piServerSocketPath);
   const origins = [
     ...(options.origins ?? [
       `http://${host}:${port}`,
@@ -79,6 +90,8 @@ function configuration(
     stateDir,
     token,
     socketPath,
+    experimentalPiServer,
+    ...(piServerSocketPath ? { piServerSocketPath } : {}),
     origins,
     sseHeartbeatMs: options.sseHeartbeatMs ?? SSE_HEARTBEAT_MS,
     sseBufferBytes: options.sseBufferBytes ?? SSE_BUFFER_BYTES,
@@ -113,13 +126,7 @@ function dependencies(
     );
   const sesh = options.sesh ?? new CliSeshAdapter();
   const tmux = options.tmux ?? new TmuxAdapter();
-  const runtimeProvider =
-    options.runtimeProvider ?? new TmuxRuntimeProvider(tmux);
-  const usage = options.usage ?? new CodexUsageProvider();
-  const eventStream = new DashboardEventStream(options.eventBufferSize ?? 256);
-  const pushConfigured = Boolean(options.push);
-  const push = options.push ?? noopPush();
-
+  const tmuxProvider = new TmuxRuntimeProvider(tmux);
   let manager!: RuntimeManager;
   const registry =
     options.registry ??
@@ -129,6 +136,24 @@ function dependencies(
         manager.expectedToken(runtimeId, launchToken, identityToken),
       onChange: (change) => registryChanges.publish(change),
     });
+  const piProvider =
+    config.experimentalPiServer && config.piServerSocketPath
+      ? new PiClientRuntimeProvider(registry)
+      : undefined;
+  const runtimeProvider =
+    options.runtimeProvider ??
+    (piProvider
+      ? new RuntimeProviderRouter(
+          tmuxProvider,
+          piProvider,
+          config.piServerSocketPath,
+        )
+      : tmuxProvider);
+  const usage = options.usage ?? new CodexUsageProvider();
+  const eventStream = new DashboardEventStream(options.eventBufferSize ?? 256);
+  const pushConfigured = Boolean(options.push);
+  const push = options.push ?? noopPush();
+
   manager = new RuntimeManager(
     registry,
     runtimeProvider,
@@ -143,6 +168,9 @@ function dependencies(
     workspaces: () => manager.activeWorkspaces(),
     getSession: (id) => sessions.get(id),
     readSession: (id) => sessions.readEntries(id),
+    defaultRuntimeProvider: config.experimentalPiServer
+      ? 'pi-server'
+      : 'extension-bridge',
     onChange: () => applicationChanges.publish(undefined),
   });
   const application = new DashboardApplication({

@@ -49,6 +49,8 @@ export interface OrchestrationServiceOptions {
   beforeWorktreePreparation?: () => Promise<void>;
   /** Test seam for deterministically racing goodbye with worktree settlement. */
   beforeWorktreeFinish?: () => Promise<void>;
+  /** Experimental default applies only to durable managed orchestration runs. */
+  defaultRuntimeProvider?: Run['runtimeProvider'];
   /** Legacy transcript access used by session adoption. */
   readSession?: (id: string) => Promise<{
     metadata: SessionIndexEntry;
@@ -126,6 +128,7 @@ export class OrchestrationService {
   private readonly reconnectGraceMs: number;
   private readonly beforeWorktreePreparation?: () => Promise<void>;
   private readonly beforeWorktreeFinish?: () => Promise<void>;
+  private readonly defaultRuntimeProvider: Run['runtimeProvider'];
   private readonly readSession?: OrchestrationServiceOptions['readSession'];
   private readonly getSession?: OrchestrationServiceOptions['getSession'];
   private readonly inFlight = new Set<string>();
@@ -171,6 +174,8 @@ export class OrchestrationService {
       : 5_000;
     this.beforeWorktreePreparation = options.beforeWorktreePreparation;
     this.beforeWorktreeFinish = options.beforeWorktreeFinish;
+    this.defaultRuntimeProvider =
+      options.defaultRuntimeProvider ?? 'extension-bridge';
     this.readSession = options.readSession;
     this.getSession = options.getSession;
   }
@@ -442,7 +447,7 @@ export class OrchestrationService {
       id: runId,
       initialPrompt: command.prompt,
       mode: command.mode ?? ('write' as const),
-      runtimeProvider: command.runtimeProvider ?? ('extension-bridge' as const),
+      runtimeProvider: command.runtimeProvider ?? this.defaultRuntimeProvider,
       model: command.model,
       status: 'queued' as const,
     };
@@ -1186,6 +1191,7 @@ export class OrchestrationService {
         name: this.requireThread(run.threadId).title,
         mode: run.mode,
         model: run.model,
+        runtimeProvider: run.runtimeProvider,
       });
 
       // Cancellation can race the provider start itself. The manager now
