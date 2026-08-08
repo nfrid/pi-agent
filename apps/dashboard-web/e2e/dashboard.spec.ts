@@ -57,10 +57,20 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
             liveState: 'idle',
             online: false,
             lastSeenAt: 20,
-            model: { provider: 'test', model: 'careful', thinking: 'high' },
+            model: {
+              provider: 'test',
+              model: 'careful',
+              thinking: 'high',
+              supportsImages: true,
+            },
             modelCatalog: [
               { provider: 'test', model: 'fast', name: 'Fast' },
-              { provider: 'test', model: 'careful', name: 'Careful' },
+              {
+                provider: 'test',
+                model: 'careful',
+                name: 'Careful',
+                supportsImages: true,
+              },
             ],
             thinkingLevels: ['off', 'medium', 'high'],
             session: {
@@ -179,10 +189,17 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     .evaluate((element) => element.getBoundingClientRect().width);
   const viewportWidth = await page.evaluate(() => window.innerWidth);
   expect(composerWidth / viewportWidth).toBeGreaterThan(0.8);
-  await expect(page.getByLabel('Model')).toHaveValue('test/careful');
+  await expect(page.getByLabel('Model', { exact: true })).toHaveValue(
+    'test/careful',
+  );
   await expect(page.getByLabel('Thinking level')).toHaveValue('high');
-  await page.getByLabel('Model').selectOption('test/fast');
-  await expect(page.getByLabel('Model')).toHaveValue('test/fast');
+  await expect(
+    page.getByRole('button', { name: 'Attach images' }),
+  ).toBeVisible();
+  await page.getByLabel('Model', { exact: true }).selectOption('test/fast');
+  await expect(page.getByLabel('Model', { exact: true })).toHaveValue(
+    'test/fast',
+  );
   await expect(
     page.getByRole('button', { name: 'Send first message' }),
   ).toBeVisible();

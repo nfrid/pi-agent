@@ -22,7 +22,7 @@ import {
 import { Button as AriaButton } from 'react-aria-components';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav } from './agent-thread-nav';
-import { MarkdownComposerEditor } from './composer';
+import { addImageAttachments, MarkdownComposerEditor } from './composer';
 import {
   configuredModelOptions,
   modelOptionValue,
@@ -48,6 +48,31 @@ function isSharedWorkingDirectoryWarning(message: string, code?: string) {
 }
 
 type NewChatModel = NonNullable<StartRuntimeRequest['model']>;
+type ImageAttachment = { file: File; previewUrl: string };
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+
+export async function waitForStartedRuntime(
+  store: DashboardLiveStore,
+  runtimeId: string,
+  timeoutMs = 30_000,
+): Promise<RuntimeSnapshot> {
+  const current = () => store.getSnapshot().runtimesById[runtimeId];
+  const ready = current();
+  if (ready) return ready;
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      unsubscribe();
+      reject(new Error('The new runtime did not connect in time.'));
+    }, timeoutMs);
+    const unsubscribe = store.subscribe(() => {
+      const runtime = current();
+      if (!runtime) return;
+      clearTimeout(timeout);
+      unsubscribe();
+      resolve(runtime);
+    });
+  });
+}
 
 export function preferredNewChatRuntime(
   workspacePath: string,
@@ -82,13 +107,13 @@ export function newChatThinkingLevels(
 
 export function newChatRequest(
   workspaceId: string,
-  initialPrompt: string,
+  initialPrompt: string | undefined,
   acknowledgeSharedWorkingDirectory = false,
   model?: NewChatModel,
 ): StartRuntimeRequest {
   return {
     workspaceId,
-    initialPrompt,
+    ...(initialPrompt ? { initialPrompt } : {}),
     ...(model ? { model } : {}),
     ...(acknowledgeSharedWorkingDirectory
       ? { acknowledgeSharedWorkingDirectory: true }
@@ -147,6 +172,12 @@ export function NewChatView({
     : '';
   const [text, setText] = useState('');
   const editorRef = useRef<MDXEditorMethods>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentsRef = useRef<ImageAttachment[]>([]);
+  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [startedRuntimeId, setStartedRuntimeId] = useState<string>();
   const [modelValue, setModelValue] = useState(() =>
     modelOptions.some(
       (model) =>
@@ -174,6 +205,29 @@ export function NewChatView({
     startRuntimeMutationOptions(dashboardHttpClient),
   );
   const sessionPath = sessionPathForRuntime(runtime);
+  const selectedModel = modelOptions.find(
+    (model) => modelOptionValue(model.provider, model.model) === modelValue,
+  );
+  const attachmentsEnabled = selectedModel?.supportsImages === true;
+
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+  useEffect(
+    () => () => {
+      for (const attachment of attachmentsRef.current)
+        URL.revokeObjectURL(attachment.previewUrl);
+    },
+    [],
+  );
+  useEffect(() => {
+    if (attachmentsEnabled) return;
+    setAttachments((current) => {
+      for (const attachment of current)
+        URL.revokeObjectURL(attachment.previewUrl);
+      return [];
+    });
+  }, [attachmentsEnabled]);
 
   useEffect(() => {
     if (
@@ -217,35 +271,83 @@ export function NewChatView({
     );
   }
 
+  const selectImages = (files: readonly File[]) => {
+    if (!attachmentsEnabled || busy) return;
+    const result = addImageAttachments(
+      attachments.map((attachment) => attachment.file),
+      files,
+    );
+    if (result.accepted.length)
+      setAttachments((current) => [
+        ...current,
+        ...result.accepted.map((file) => ({
+          file,
+          previewUrl: URL.createObjectURL(file),
+        })),
+      ]);
+    setError(result.error);
+  };
+  const removeImage = (previewUrl: string) => {
+    const attachment = attachments.find(
+      (candidate) => candidate.previewUrl === previewUrl,
+    );
+    if (!attachment) return;
+    URL.revokeObjectURL(attachment.previewUrl);
+    setAttachments((current) =>
+      current.filter((candidate) => candidate.previewUrl !== previewUrl),
+    );
+  };
   const submit = async (event: FormEvent, acknowledge = false) => {
     event.preventDefault();
     const initialPrompt = text.trim();
-    if (!initialPrompt || mutation.isPending) return;
+    if ((!initialPrompt && !attachments.length) || busy) return;
+    if (attachments.length > 0 && !attachmentsEnabled) {
+      setError('The selected model does not support image input.');
+      return;
+    }
+    setBusy(true);
     setError(undefined);
     setSharedWarning(false);
     try {
-      const selectedModel = modelOptions.find(
-        (model) => modelOptionValue(model.provider, model.model) === modelValue,
-      );
-      const result = await mutation.mutateAsync(
-        newChatRequest(
-          workspaceId,
-          initialPrompt,
-          acknowledge,
-          selectedModel && {
-            provider: selectedModel.provider,
-            model: selectedModel.model,
-            ...(thinking ? { thinking } : {}),
-          },
-        ),
-      );
-      go(pendingChatPath(workspaceId, result.runtimeId));
+      let runtimeId = startedRuntimeId;
+      if (!runtimeId) {
+        const result = await mutation.mutateAsync(
+          newChatRequest(
+            workspaceId,
+            attachments.length ? undefined : initialPrompt,
+            acknowledge,
+            selectedModel && {
+              provider: selectedModel.provider,
+              model: selectedModel.model,
+              ...(thinking ? { thinking } : {}),
+            },
+          ),
+        );
+        runtimeId = result.runtimeId;
+        if (attachments.length) setStartedRuntimeId(runtimeId);
+      }
+      if (attachments.length) {
+        const started = await waitForStartedRuntime(store, runtimeId);
+        if (started.model?.supportsImages !== true)
+          throw new Error('The new runtime does not support image input.');
+        await dashboardHttpClient.sendCommandWithImages(
+          runtimeId,
+          { type: 'prompt', text: initialPrompt },
+          attachments.map((attachment) => attachment.file),
+        );
+      }
+      for (const attachment of attachments)
+        URL.revokeObjectURL(attachment.previewUrl);
+      setAttachments([]);
+      go(pendingChatPath(workspaceId, runtimeId));
     } catch (cause) {
       const details = errorDetails(cause);
       setError(details.message);
       setSharedWarning(
         isSharedWorkingDirectoryWarning(details.message, details.code),
       );
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -299,12 +401,78 @@ export function NewChatView({
             <p className="muted">What would you like to work on?</p>
           </div>
           <form
-            className="composer new-chat-composer"
+            className={`composer new-chat-composer ${dragging ? 'dragging' : ''}`}
             aria-label="Start a new chat"
             onSubmit={(event) => void submit(event)}
+            onDragEnter={(event) => {
+              if (!attachmentsEnabled || busy) return;
+              event.preventDefault();
+              setDragging(true);
+            }}
+            onDragOver={(event) => {
+              if (!attachmentsEnabled || busy) return;
+              event.preventDefault();
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(event) => {
+              if (!attachmentsEnabled || busy) return;
+              event.preventDefault();
+              setDragging(false);
+              selectImages(Array.from(event.dataTransfer.files));
+            }}
           >
+            {attachmentsEnabled && (
+              <input
+                ref={fileInputRef}
+                className="sr-only"
+                type="file"
+                accept={IMAGE_TYPES.join(',')}
+                multiple
+                aria-label="Choose images"
+                disabled={busy}
+                onChange={(event) => {
+                  selectImages(Array.from(event.target.files ?? []));
+                  event.target.value = '';
+                }}
+              />
+            )}
+            {attachments.length > 0 && (
+              <fieldset className="composer-previews">
+                <legend className="sr-only">Image attachments</legend>
+                {attachments.map((attachment) => (
+                  <div className="composer-preview" key={attachment.previewUrl}>
+                    <img
+                      src={attachment.previewUrl}
+                      alt={attachment.file.name}
+                    />
+                    <button
+                      type="button"
+                      aria-label={`Remove ${attachment.file.name}`}
+                      disabled={busy}
+                      onClick={() => removeImage(attachment.previewUrl)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </fieldset>
+            )}
             <div
               className="composer-primary composer-rich-surface"
+              onPasteCapture={(event) => {
+                if (!attachmentsEnabled || busy) return;
+                const files = Array.from(event.clipboardData.files);
+                const itemFiles = Array.from(event.clipboardData.items).flatMap(
+                  (item) => {
+                    const file = item.kind === 'file' ? item.getAsFile() : null;
+                    return file ? [file] : [];
+                  },
+                );
+                const images = files.length ? files : itemFiles;
+                if (!images.length) return;
+                event.preventDefault();
+                selectImages(images);
+              }}
               onKeyDownCapture={(event) => {
                 if (
                   event.key === 'Enter' &&
@@ -327,14 +495,30 @@ export function NewChatView({
                   ref={editorRef}
                   onChange={setText}
                   placeholder="Message Pi…"
-                  readOnly={mutation.isPending}
+                  readOnly={busy}
                 />
               </Suspense>
               <div className="composer-actions">
                 <AriaButton
+                  type="button"
+                  className="composer-attach"
+                  isDisabled={!attachmentsEnabled || busy}
+                  onPress={() => fileInputRef.current?.click()}
+                  aria-label={
+                    attachmentsEnabled
+                      ? 'Attach images'
+                      : 'Attach images (unsupported by selected model)'
+                  }
+                >
+                  <span aria-hidden="true">＋</span>
+                  <span className="composer-attach-label">Image</span>
+                </AriaButton>
+                <AriaButton
                   type="submit"
                   className="composer-send"
-                  isDisabled={mutation.isPending || !text.trim()}
+                  isDisabled={
+                    busy || (!text.trim() && attachments.length === 0)
+                  }
                   aria-label="Send first message"
                 >
                   <span aria-hidden="true">↑</span>
@@ -354,7 +538,7 @@ export function NewChatView({
                       <select
                         aria-label="Model"
                         value={modelValue}
-                        disabled={mutation.isPending}
+                        disabled={busy || Boolean(startedRuntimeId)}
                         onChange={(event) => setModelValue(event.target.value)}
                       >
                         {modelOptions.map((model) => {
@@ -380,7 +564,7 @@ export function NewChatView({
                       <select
                         aria-label="Thinking level"
                         value={thinking}
-                        disabled={mutation.isPending}
+                        disabled={busy || Boolean(startedRuntimeId)}
                         onChange={(event) => setThinking(event.target.value)}
                       >
                         {thinkingLevels.map((level) => (
@@ -400,7 +584,7 @@ export function NewChatView({
                     <button
                       type="button"
                       className="secondary-button"
-                      disabled={mutation.isPending}
+                      disabled={busy}
                       onClick={(event) => void submit(event, true)}
                     >
                       Continue
