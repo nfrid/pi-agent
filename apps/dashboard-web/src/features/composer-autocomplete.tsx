@@ -14,20 +14,62 @@ export function composerCommandQuery(markdown: string): string | undefined {
   return match?.[1];
 }
 
+function subsequenceScore(target: string, query: string): number | undefined {
+  if (!query) return 0;
+  if (target === query) return -1_000;
+  if (target.startsWith(query)) return -800 + target.length - query.length;
+
+  let queryIndex = 0;
+  let firstMatch = -1;
+  let previousMatch = -1;
+  let gaps = 0;
+  for (const [targetIndex, character] of [...target].entries()) {
+    if (character !== query[queryIndex]) continue;
+    if (firstMatch < 0) firstMatch = targetIndex;
+    if (previousMatch >= 0) gaps += targetIndex - previousMatch - 1;
+    previousMatch = targetIndex;
+    queryIndex += 1;
+    if (queryIndex === query.length)
+      return firstMatch * 4 + gaps * 2 + (target.length - query.length) / 100;
+  }
+  return undefined;
+}
+
+export function fuzzyCommandScore(
+  commandName: string,
+  query: string,
+): number | undefined {
+  const name = commandName.toLocaleLowerCase();
+  const normalizedQuery = query.toLocaleLowerCase();
+  const unqualifiedName = name.includes(':') ? name.split(':').at(-1) : name;
+  const fullScore = subsequenceScore(name, normalizedQuery);
+  const unqualifiedScore = unqualifiedName
+    ? subsequenceScore(unqualifiedName, normalizedQuery)
+    : undefined;
+  if (fullScore === undefined) return unqualifiedScore;
+  if (unqualifiedScore === undefined) return fullScore;
+  return Math.min(fullScore, unqualifiedScore);
+}
+
 export function composerCommandSuggestions(
   commands: readonly ComposerCommandOption[],
   markdown: string,
 ): ComposerCommandOption[] {
-  const query = composerCommandQuery(markdown)?.toLocaleLowerCase();
+  const query = composerCommandQuery(markdown);
   if (query === undefined) return [];
   return commands
-    .filter((command) => command.name.toLocaleLowerCase().startsWith(query))
+    .flatMap((command) => {
+      const score = fuzzyCommandScore(command.name, query);
+      return score === undefined ? [] : [{ command, score }];
+    })
     .sort(
       (left, right) =>
-        left.name.localeCompare(right.name) ||
-        left.source.localeCompare(right.source),
+        left.score - right.score ||
+        left.command.name.localeCompare(right.command.name) ||
+        left.command.source.localeCompare(right.command.source),
     )
-    .slice(0, MAX_VISIBLE_COMMANDS);
+    .slice(0, MAX_VISIBLE_COMMANDS)
+    .map(({ command }) => command);
 }
 
 export function commandSourceLabel(

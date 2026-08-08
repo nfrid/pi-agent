@@ -59,6 +59,12 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
             description: 'Automate a browser',
             source: 'skill',
           },
+          {
+            name: 'skill:harness-feedback',
+            description:
+              'Capture actionable feedback about the Pi harness and its developer experience.',
+            source: 'skill',
+          },
         ],
       }),
     }),
@@ -223,10 +229,20 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(
     page.getByRole('listbox', { name: 'Available commands' }),
   ).toHaveCount(0);
+  await newChatComposer.fill('/fee');
+  const fuzzyMenu = page.getByRole('listbox', { name: 'Available commands' });
+  await expect(
+    page.getByRole('option', { name: /\/skill:harness-feedback/ }),
+  ).toBeVisible();
+  const fuzzyMenuWidth = await fuzzyMenu.evaluate(
+    (element) => element.getBoundingClientRect().width,
+  );
+  const viewportWidth = await page.evaluate(() => window.innerWidth);
+  expect(fuzzyMenuWidth / viewportWidth).toBeGreaterThan(0.9);
+  await newChatComposer.fill('');
   const composerWidth = await page
     .locator('.new-chat-composer')
     .evaluate((element) => element.getBoundingClientRect().width);
-  const viewportWidth = await page.evaluate(() => window.innerWidth);
   expect(composerWidth / viewportWidth).toBeGreaterThan(0.8);
   await expect(page.getByLabel('Model', { exact: true })).toHaveValue(
     'test/careful',

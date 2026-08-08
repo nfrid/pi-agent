@@ -4,6 +4,7 @@ import {
   commandSourceLabel,
   composerCommandQuery,
   composerCommandSuggestions,
+  fuzzyCommandScore,
 } from './composer-autocomplete';
 
 const commands: ComposerCommandOption[] = [
@@ -23,6 +24,11 @@ const commands: ComposerCommandOption[] = [
     description: 'Reload resources',
     source: 'builtin',
   },
+  {
+    name: 'skill:harness-feedback',
+    description: 'Capture harness feedback',
+    source: 'skill',
+  },
 ];
 
 describe('composer slash autocomplete', () => {
@@ -34,14 +40,18 @@ describe('composer slash autocomplete', () => {
     expect(composerCommandQuery('//nested')).toBeUndefined();
   });
 
-  it('filters commands by case-insensitive prefix and keeps results bounded', () => {
+  it('ranks prefix and fuzzy matches while keeping results bounded', () => {
     expect(composerCommandSuggestions(commands, '/RE')).toEqual([
       commands[2],
       commands[1],
+      commands[3],
     ]);
-    expect(composerCommandSuggestions(commands, '/skill:')).toEqual([
+    expect(composerCommandSuggestions(commands, '/skill:p')).toEqual([
       commands[0],
     ]);
+    expect(composerCommandSuggestions(commands, '/fee')).toEqual([commands[3]]);
+    expect(fuzzyCommandScore('skill:harness-feedback', 'fee')).toBeDefined();
+    expect(fuzzyCommandScore('skill:harness-feedback', 'xyz')).toBeUndefined();
     expect(composerCommandSuggestions(commands, 'review')).toEqual([]);
     expect(
       composerCommandSuggestions(
