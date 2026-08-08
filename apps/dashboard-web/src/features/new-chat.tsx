@@ -483,6 +483,7 @@ export function NewChatView({
                 if (
                   event.key === 'Enter' &&
                   (event.metaKey || event.ctrlKey) &&
+                  !event.currentTarget.querySelector('[role="listbox"]') &&
                   !event.shiftKey
                 ) {
                   event.preventDefault();

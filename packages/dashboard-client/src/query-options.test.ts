@@ -29,6 +29,7 @@ describe('dashboard query and mutation factories', () => {
       'composer-commands',
       'workspace-1',
     ]);
+    expect(options.staleTime).toBe(30_000);
     if (!options.queryFn) throw new Error('Query function is missing.');
     await expect(
       options.queryFn({ signal: undefined } as never),

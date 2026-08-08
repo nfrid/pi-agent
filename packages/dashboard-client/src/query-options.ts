@@ -118,7 +118,8 @@ export function composerCommandsQueryOptions(
   return queryOptions({
     queryKey: dashboardQueryKeys.composerCommands(workspaceId),
     queryFn: ({ signal }) => client.composerCommands(workspaceId, signal),
-    staleTime: Number.POSITIVE_INFINITY,
+    // Resource files can change independently of the dashboard snapshot.
+    staleTime: 30_000,
     retry: networkRetry,
     enabled: Boolean(workspaceId),
   });

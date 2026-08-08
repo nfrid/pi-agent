@@ -211,6 +211,9 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
     page.getByRole('listbox', { name: 'Available commands' }),
   ).toBeVisible();
   await expect(page.getByRole('option', { name: /\/review/ })).toBeVisible();
+  await newChatComposer.press('Control+Enter');
+  await expect(page.getByRole('option', { name: /\/review/ })).toBeVisible();
+  await expect(newChatComposer).toContainText('/rev');
   await newChatComposer.press('Enter');
   await expect(newChatComposer).toContainText('/review');
   await expect(
@@ -2255,6 +2258,12 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(deliveryMode).toHaveCount(1);
   await expect(deliveryMode).toHaveText('Steer');
   await expect(deliveryMode).toHaveAttribute('aria-pressed', 'true');
+  const workingComposerInput = page.getByLabel('Message Pi');
+  await workingComposerInput.fill('/compact');
+  await expect(
+    page.getByRole('listbox', { name: 'Available commands' }),
+  ).toHaveCount(0);
+  await workingComposerInput.fill('');
   await deliveryMode.click();
   await expect(deliveryMode).toHaveText('Later');
   await expect(deliveryMode).toHaveAttribute('aria-pressed', 'false');

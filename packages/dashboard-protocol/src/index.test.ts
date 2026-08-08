@@ -542,6 +542,16 @@ describe('dashboard protocol', () => {
         commands: [{ name: 'extension', source: 'extension' }],
       }),
     ).toThrow();
+    expect(() =>
+      parseComposerCommandCatalogue({
+        commands: [{ name: 'bad name', source: 'prompt' }],
+      }),
+    ).toThrow();
+    expect(() =>
+      parseComposerCommandCatalogue({
+        commands: [{ name: 'bad/name', source: 'prompt' }],
+      }),
+    ).toThrow();
   });
 
   it('accepts bounded model and thinking catalogues in runtime snapshots', () => {

@@ -1,6 +1,8 @@
 import {
   DefaultResourceLoader,
   getAgentDir,
+  hasTrustRequiringProjectResources,
+  ProjectTrustStore,
   type PromptTemplate,
   SettingsManager,
   type Skill,
@@ -37,12 +39,14 @@ function commandEntry(value: {
   argumentHint?: unknown;
   source: ComposerCommandEntry['source'];
 }): ComposerCommandEntry | undefined {
+  if (typeof value.name !== 'string' || !/^[^\s/]+$/u.test(value.name))
+    return undefined;
   let name = boundedText(value.name, MAX_COMPOSER_COMMAND_NAME);
   if (!name) return undefined;
   if (value.source === 'skill' && !name.startsWith('skill:'))
     name = `skill:${name}`;
   name = name.slice(0, MAX_COMPOSER_COMMAND_NAME);
-  if (!name) return undefined;
+  if (!name || !/^[^\s/]+$/u.test(name)) return undefined;
   const description = boundedText(
     value.description,
     MAX_COMPOSER_COMMAND_DESCRIPTION,
@@ -113,8 +117,17 @@ export class ComposerCommandService {
     const cwd = workspace.canonicalPath;
     if (!cwd) throw unknownWorkspace(workspaceId);
 
+    const bootstrapSettings = SettingsManager.create(cwd, this.agentDir, {
+      projectTrusted: false,
+    });
+    const savedTrust = new ProjectTrustStore(this.agentDir).get(cwd);
+    const projectTrusted =
+      !hasTrustRequiringProjectResources(cwd) ||
+      savedTrust === true ||
+      (savedTrust === null &&
+        bootstrapSettings.getDefaultProjectTrust() === 'always');
     const settingsManager = SettingsManager.create(cwd, this.agentDir, {
-      projectTrusted: true,
+      projectTrusted,
     });
     const resourceLoader = new DefaultResourceLoader({
       cwd,

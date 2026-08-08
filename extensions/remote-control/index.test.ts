@@ -470,6 +470,9 @@ describe('Pi 0.84 runtime catalogues', () => {
           description: 'Use the demo skill',
           source: 'skill',
         },
+        { name: 'bad name', source: 'prompt' },
+        { name: 'bad/name', source: 'prompt' },
+        { name: ' padded ', source: 'prompt' },
         { name: 'secret', source: 'extension' },
       ],
     } as unknown as ExtensionAPI);
@@ -492,6 +495,15 @@ describe('Pi 0.84 runtime catalogues', () => {
     ]);
     expect(commands).not.toContainEqual(
       expect.objectContaining({ name: 'secret' }),
+    );
+    expect(commands).not.toContainEqual(
+      expect.objectContaining({ name: 'bad name' }),
+    );
+    expect(commands).not.toContainEqual(
+      expect.objectContaining({ name: 'bad/name' }),
+    );
+    expect(commands).not.toContainEqual(
+      expect.objectContaining({ name: 'padded' }),
     );
   });
 
@@ -733,6 +745,64 @@ describe('dashboard-owned queue drafts', () => {
     expect(runtime.snapshot().session.id).toBe('session-queue-2');
     runtime.clearContext(second);
     expect(runtime.queueDrafts.list()).toEqual([]);
+  });
+
+  it('expands queued prompt templates before Pi delivery', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-queue-template-'));
+    const file = path.join(root, 'review.md');
+    await writeFile(file, 'Review $1 carefully.');
+    try {
+      const sendUserMessage = vi.fn();
+      const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+      if (!runtime) throw new Error('runtime was not created');
+      const context = {
+        cwd: root,
+        model: undefined,
+        thinkingLevel: 'off',
+        sessionManager: {
+          getBranch: () => [],
+          getSessionId: () => 'session-template-queue',
+          getSessionFile: () => undefined,
+          getSessionName: () => undefined,
+          getCwd: () => root,
+          getLeafId: () => undefined,
+        },
+        getContextUsage: () => undefined,
+        isIdle: () => false,
+      } as unknown as ExtensionContext;
+      runtime.setContext(context);
+      runtime.queueDrafts.add({
+        clientId: 'queued-template',
+        mode: 'followUp',
+        text: '/review src',
+      });
+      flushQueueDrafts(
+        runtime,
+        {
+          getCommands: () => [
+            {
+              name: 'review',
+              description: 'Review code',
+              source: 'prompt',
+              sourceInfo: {
+                path: file,
+                source: 'test',
+                scope: 'temporary',
+                origin: 'top-level',
+              },
+            },
+          ],
+          sendUserMessage,
+        } as unknown as ExtensionAPI,
+        context,
+        'followUp',
+      );
+      expect(sendUserMessage).toHaveBeenCalledWith('Review src carefully.', {
+        deliverAs: 'followUp',
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('dispatches queue commands into the current session store', async () => {

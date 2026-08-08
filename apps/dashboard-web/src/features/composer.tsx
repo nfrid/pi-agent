@@ -763,6 +763,7 @@ export function Composer({
             if (
               event.key === 'Enter' &&
               (event.metaKey || event.ctrlKey) &&
+              !event.currentTarget.querySelector('[role="listbox"]') &&
               !event.shiftKey
             ) {
               event.preventDefault();
@@ -779,7 +780,13 @@ export function Composer({
           >
             <MarkdownComposerEditor
               ref={editorRef}
-              commands={runtime.composerCommands}
+              commands={
+                runtime.liveState === 'working'
+                  ? runtime.composerCommands?.filter(
+                      (command) => command.source !== 'builtin',
+                    )
+                  : runtime.composerCommands
+              }
               onChange={setText}
               placeholder={
                 disabled ? 'Agent is waiting for input' : 'Message Pi…'

@@ -162,7 +162,13 @@ const MarkdownComposerEditor = forwardRef<
           );
           return;
         }
-        if (event.key === 'Enter' || event.key === 'Tab') {
+        if (
+          (event.key === 'Enter' || event.key === 'Tab') &&
+          !event.altKey &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.shiftKey
+        ) {
           event.preventDefault();
           event.stopPropagation();
           selectCommand(suggestions[boundedIndex]);

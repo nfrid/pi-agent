@@ -22,6 +22,7 @@ import {
   type SessionScopeId,
 } from '../shared/runtime/scoped-services';
 import { BridgeClient } from './bridge-client';
+import { expandDashboardInput } from './command-adapter';
 import { dispatchDashboardCommand } from './command-dispatcher';
 import { LiveEventNormalizer } from './live-event-normalizer';
 import { isQueueDraftCommand, QueueDraftStore } from './queue-draft-store';
@@ -250,10 +251,14 @@ export function flushQueueDrafts(
   if (!runtime.isCurrent(ctx)) return false;
   const drafts = runtime.queueDrafts.take(mode);
   if (drafts.length === 0) return false;
+  const getCommands = (
+    pi as ExtensionAPI & { getCommands?: ExtensionAPI['getCommands'] }
+  ).getCommands;
+  const commands = getCommands?.call(pi) ?? [];
   let failedAt = drafts.length;
   for (const [index, draft] of drafts.entries()) {
     try {
-      pi.sendUserMessage(draft.text, {
+      pi.sendUserMessage(expandDashboardInput(draft.text, commands), {
         deliverAs: draft.mode,
       });
     } catch {

@@ -156,7 +156,7 @@ export const ComposerCommandEntrySchema = Type.Object(
     name: Type.String({
       minLength: 1,
       maxLength: MAX_COMPOSER_COMMAND_NAME,
-      pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+      pattern: '^[^\\s/]+$',
     }),
     description: Type.Optional(
       Type.String({

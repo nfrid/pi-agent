@@ -170,11 +170,13 @@ function cleanComposerCommand(
   if (!value || typeof value !== 'object' || Array.isArray(value))
     return undefined;
   const candidate = value as Record<string, unknown>;
+  if (typeof candidate.name !== 'string' || !/^[^\s/]+$/u.test(candidate.name))
+    return undefined;
   let name = cleanCatalogueText(candidate.name, MAX_COMPOSER_COMMAND_NAME);
   if (!name) return undefined;
   if (source === 'skill' && !name.startsWith('skill:')) name = `skill:${name}`;
   name = name.slice(0, MAX_COMPOSER_COMMAND_NAME);
-  if (!name) return undefined;
+  if (!name || !/^[^\s/]+$/u.test(name)) return undefined;
   const description = cleanCatalogueText(
     candidate.description,
     MAX_COMPOSER_COMMAND_DESCRIPTION,
