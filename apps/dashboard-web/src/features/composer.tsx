@@ -1,6 +1,7 @@
 import type { MDXEditorMethods } from '@mdxeditor/editor';
 import {
   commandMutationOptions,
+  composerCommandsQueryOptions,
   dashboardHttpClient,
   startRuntimeMutationOptions,
 } from '@pi-dashboard/client';
@@ -8,7 +9,7 @@ import type {
   RuntimeSnapshot,
   StartRuntimeRequest,
 } from '@pi-dashboard/protocol';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   type FormEvent,
   lazy,
@@ -486,6 +487,11 @@ export function Composer({
   const resumeMutation = useMutation(
     startRuntimeMutationOptions(dashboardHttpClient),
   );
+  const commandCatalogue = useQuery(
+    composerCommandsQueryOptions(dashboardHttpClient, workspaceId ?? ''),
+  );
+  const composerCommands =
+    runtime?.composerCommands ?? commandCatalogue.data?.commands;
   const serverQueue = queuedMessagesForRuntime(runtime);
   const serverQueueKey = JSON.stringify(serverQueue);
   const serverQueueKeyRef = useRef(serverQueueKey);
@@ -782,10 +788,10 @@ export function Composer({
               ref={editorRef}
               commands={
                 runtime.liveState === 'working'
-                  ? runtime.composerCommands?.filter(
+                  ? composerCommands?.filter(
                       (command) => command.source !== 'builtin',
                     )
-                  : runtime.composerCommands
+                  : composerCommands
               }
               onChange={setText}
               placeholder={

@@ -1734,18 +1734,6 @@ function phase6Snapshot(
           },
         ],
         thinkingLevels: ['off', 'low', 'medium', 'high'],
-        composerCommands: [
-          {
-            name: 'compact',
-            description: 'Compact the current session',
-            source: 'builtin',
-          },
-          {
-            name: 'skill:browser',
-            description: 'Automate a browser',
-            source: 'skill',
-          },
-        ],
         pendingInteractions: overrides.pendingInteractions ?? [
           phase6Interaction('ask-1', 'Use the first answer?'),
           phase6Interaction('ask-2', 'Use the second answer?'),
@@ -1884,9 +1872,19 @@ async function installPhase6Mocks(page: Page) {
       body: JSON.stringify({
         commands: [
           {
+            name: 'compact',
+            description: 'Compact the current session',
+            source: 'builtin',
+          },
+          {
             name: 'review',
             description: 'Review changes',
             source: 'prompt',
+          },
+          {
+            name: 'skill:browser',
+            description: 'Automate a browser',
+            source: 'skill',
           },
         ],
       }),
