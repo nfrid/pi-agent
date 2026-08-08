@@ -250,6 +250,12 @@ function persistedMessageIdForLive(
   return matchedId;
 }
 
+function hasUserTranscriptMessage(projection: TranscriptProjection): boolean {
+  return Object.values(projection.items).some(
+    (item) => item.kind === 'message' && item.role === 'user',
+  );
+}
+
 function withoutTranscriptMessage(
   projection: TranscriptProjection,
   messageId: string,
@@ -778,17 +784,28 @@ export class DashboardLiveStore {
     };
     if (response.entriesComplete === false && currentProjection) {
       // A brand-new active session can beat both branch serialization and the
-      // JSONL watcher. Its fallback response is useful metadata, not an
-      // authoritative replacement for live transcript state.
-      projection = {
-        ...currentProjection,
-        lastCursor: Math.max(currentProjection.lastCursor, coveredCursor),
-        lastRuntimeSeq: Math.max(
-          currentProjection.lastRuntimeSeq,
-          response.runtimeSeq ?? -1,
-        ),
-        retiredEpochs: [...retiredEpochs],
-      };
+      // JSONL watcher. Keep an established user-visible branch authoritative.
+      // If the optimistic baseline has no user message yet, however, merge the
+      // later disk response behind its live tail; otherwise a refresh during
+      // the first turn can permanently lose the initiating prompt.
+      if (hasUserTranscriptMessage(currentProjection)) {
+        projection = {
+          ...currentProjection,
+          lastCursor: Math.max(currentProjection.lastCursor, coveredCursor),
+          lastRuntimeSeq: Math.max(
+            currentProjection.lastRuntimeSeq,
+            response.runtimeSeq ?? -1,
+          ),
+          retiredEpochs: [...retiredEpochs],
+        };
+      } else {
+        const merged = mergePrependedTranscript(currentProjection, projection);
+        projection = {
+          ...projection,
+          order: merged.order,
+          items: merged.items,
+        };
+      }
     }
     const currentMetadata = this.state.sessionsById[response.metadata.id];
     const metadata = currentMetadata

@@ -700,6 +700,56 @@ describe('DashboardLiveStore', () => {
     expect(projection?.order).toEqual(['first', 'second', 'epoch-a:3']);
   });
 
+  it('restores disk history behind a live-only incomplete refresh baseline', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.hydrateSession({
+      ...sessionResponse(1),
+      entriesComplete: false,
+      entries: [],
+    });
+    store.acceptStreamRecord({
+      cursor: 2,
+      emittedAt: 2,
+      sessionId: 'session-1',
+      event: {
+        type: 'message.finished',
+        sessionId: 'session-1',
+        message: {
+          messageId: 'live-answer',
+          role: 'assistant',
+          content: 'Live answer',
+          phase: 'finished',
+        },
+      },
+    } as never);
+
+    const projection = store.hydrateSession({
+      ...sessionResponse(2),
+      entriesComplete: false,
+      entries: [
+        {
+          type: 'message',
+          message: {
+            id: 'first-prompt',
+            role: 'user',
+            content: 'Original prompt',
+          },
+        },
+      ],
+    });
+
+    expect(projection?.order).toEqual(['first-prompt', 'live-answer']);
+    expect(projection?.items['first-prompt']).toMatchObject({
+      role: 'user',
+      content: 'Original prompt',
+    });
+    expect(projection?.items['live-answer']).toMatchObject({
+      role: 'assistant',
+      content: 'Live answer',
+    });
+  });
+
   it('uses an incomplete initial baseline without replacing the later live projection', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

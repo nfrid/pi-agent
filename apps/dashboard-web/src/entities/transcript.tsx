@@ -417,7 +417,6 @@ export function Transcript({
     );
   return (
     <div className="transcript">
-      <h2>Conversation &amp; activity</h2>
       <TranscriptOutline
         landmarks={landmarks}
         open={outlineOpen}
@@ -1163,7 +1162,6 @@ function VirtualizedTranscript({
 
   return (
     <div className="transcript transcript-virtualized">
-      <h2>Conversation &amp; activity</h2>
       <TranscriptOutline
         landmarks={landmarks}
         open={outlineOpen}
