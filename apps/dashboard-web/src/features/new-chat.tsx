@@ -1,3 +1,4 @@
+import type { MDXEditorMethods } from '@mdxeditor/editor';
 import {
   type DashboardLiveStore,
   dashboardHttpClient,
@@ -10,9 +11,18 @@ import type {
   StartRuntimeRequest,
 } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
-import { type FormEvent, useEffect, useMemo, useState } from 'react';
+import {
+  type FormEvent,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { Button as AriaButton } from 'react-aria-components';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav } from './agent-thread-nav';
+import { MarkdownComposerEditor } from './composer';
 import {
   configuredModelOptions,
   modelOptionValue,
@@ -39,10 +49,35 @@ function isSharedWorkingDirectoryWarning(message: string, code?: string) {
 
 type NewChatModel = NonNullable<StartRuntimeRequest['model']>;
 
+export function preferredNewChatRuntime(
+  workspacePath: string,
+  runtimes: readonly RuntimeSnapshot[],
+): RuntimeSnapshot | undefined {
+  return [...runtimes]
+    .filter((runtime) => runtime.cwd === workspacePath)
+    .sort(
+      (left, right) =>
+        Number(right.online !== false) - Number(left.online !== false) ||
+        (right.lastSeenAt ?? 0) - (left.lastSeenAt ?? 0),
+    )[0];
+}
+
 export function newChatModelOptions(
   runtimes: readonly RuntimeSnapshot[],
+  preferred?: RuntimeSnapshot,
 ): readonly RuntimeModelOption[] {
-  return configuredModelOptions(runtimes);
+  return configuredModelOptions(runtimes, preferred);
+}
+
+export function newChatThinkingLevels(
+  runtimes: readonly RuntimeSnapshot[],
+  preferred?: RuntimeSnapshot,
+): readonly string[] {
+  const levels = new Set<string>();
+  for (const level of preferred?.thinkingLevels ?? []) levels.add(level);
+  for (const runtime of runtimes)
+    for (const level of runtime.thinkingLevels ?? []) levels.add(level);
+  return [...levels];
 }
 
 export function newChatRequest(
@@ -89,15 +124,45 @@ export function NewChatView({
   const go = useDashboardNavigate();
   const workspace = snapshot.workspaces.find((item) => item.id === workspaceId);
   const [agentNavOpen, setAgentNavOpen] = useState(false);
-  const modelOptions = useMemo(
-    () => newChatModelOptions(snapshot.runtimes),
-    [snapshot.runtimes],
+  const preferredRuntime = useMemo(
+    () =>
+      workspace
+        ? preferredNewChatRuntime(workspace.canonicalPath, snapshot.runtimes)
+        : undefined,
+    [snapshot.runtimes, workspace],
   );
+  const modelOptions = useMemo(
+    () => newChatModelOptions(snapshot.runtimes, preferredRuntime),
+    [preferredRuntime, snapshot.runtimes],
+  );
+  const thinkingLevels = useMemo(
+    () => newChatThinkingLevels(snapshot.runtimes, preferredRuntime),
+    [preferredRuntime, snapshot.runtimes],
+  );
+  const preferredModelValue = preferredRuntime?.model
+    ? modelOptionValue(
+        preferredRuntime.model.provider,
+        preferredRuntime.model.model,
+      )
+    : '';
   const [text, setText] = useState('');
-  const [modelValue, setModelValue] = useState(() => {
-    const model = modelOptions[0];
-    return model ? modelOptionValue(model.provider, model.model) : '';
-  });
+  const editorRef = useRef<MDXEditorMethods>(null);
+  const [modelValue, setModelValue] = useState(() =>
+    modelOptions.some(
+      (model) =>
+        modelOptionValue(model.provider, model.model) === preferredModelValue,
+    )
+      ? preferredModelValue
+      : modelOptions[0]
+        ? modelOptionValue(modelOptions[0].provider, modelOptions[0].model)
+        : '',
+  );
+  const [thinking, setThinking] = useState(() =>
+    preferredRuntime?.model?.thinking &&
+    thinkingLevels.includes(preferredRuntime.model.thinking)
+      ? preferredRuntime.model.thinking
+      : (thinkingLevels[0] ?? ''),
+  );
   const [error, setError] = useState<string>();
   const [sharedWarning, setSharedWarning] = useState(false);
   const runtime = useDashboardStore(
@@ -117,9 +182,22 @@ export function NewChatView({
       )
     )
       return;
-    const model = modelOptions[0];
+    const preferred = modelOptions.find(
+      (model) =>
+        modelOptionValue(model.provider, model.model) === preferredModelValue,
+    );
+    const model = preferred ?? modelOptions[0];
     setModelValue(model ? modelOptionValue(model.provider, model.model) : '');
-  }, [modelOptions, modelValue]);
+  }, [modelOptions, modelValue, preferredModelValue]);
+  useEffect(() => {
+    if (thinkingLevels.includes(thinking)) return;
+    const preferredThinking = preferredRuntime?.model?.thinking;
+    setThinking(
+      preferredThinking && thinkingLevels.includes(preferredThinking)
+        ? preferredThinking
+        : (thinkingLevels[0] ?? ''),
+    );
+  }, [preferredRuntime, thinking, thinkingLevels]);
   useEffect(() => {
     if (!pendingRuntimeId || !sessionPath) return;
     go(sessionPath);
@@ -157,6 +235,7 @@ export function NewChatView({
           selectedModel && {
             provider: selectedModel.provider,
             model: selectedModel.model,
+            ...(thinking ? { thinking } : {}),
           },
         ),
       );
@@ -224,62 +303,112 @@ export function NewChatView({
             aria-label="Start a new chat"
             onSubmit={(event) => void submit(event)}
           >
-            <textarea
-              aria-label="Message"
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              placeholder="Message Pi…"
-              rows={3}
-              disabled={mutation.isPending}
-            />
-            <div className="new-chat-composer-actions">
-              {modelOptions.length > 0 && (
-                <label>
-                  <span>Model</span>
-                  <select
-                    aria-label="Model"
-                    value={modelValue}
-                    disabled={mutation.isPending}
-                    onChange={(event) => setModelValue(event.target.value)}
-                  >
-                    {modelOptions.map((model) => {
-                      const value = modelOptionValue(
-                        model.provider,
-                        model.model,
-                      );
-                      return (
-                        <option key={value} value={value}>
-                          {model.name ?? value}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </label>
-              )}
-              <button
-                type="submit"
-                className="composer-send"
-                disabled={mutation.isPending || !text.trim()}
-                aria-label="Send first message"
+            <div
+              className="composer-primary composer-rich-surface"
+              onKeyDownCapture={(event) => {
+                if (
+                  event.key === 'Enter' &&
+                  (event.metaKey || event.ctrlKey) &&
+                  !event.shiftKey
+                ) {
+                  event.preventDefault();
+                  event.currentTarget.closest('form')?.requestSubmit();
+                }
+              }}
+            >
+              <Suspense
+                fallback={
+                  <div className="composer-editor-loading" role="status">
+                    Loading editor…
+                  </div>
+                }
               >
-                <span aria-hidden="true">↑</span>
-              </button>
+                <MarkdownComposerEditor
+                  ref={editorRef}
+                  onChange={setText}
+                  placeholder="Message Pi…"
+                  readOnly={mutation.isPending}
+                />
+              </Suspense>
+              <div className="composer-actions">
+                <AriaButton
+                  type="submit"
+                  className="composer-send"
+                  isDisabled={mutation.isPending || !text.trim()}
+                  aria-label="Send first message"
+                >
+                  <span aria-hidden="true">↑</span>
+                </AriaButton>
+              </div>
             </div>
-            {error && (
-              <div className="new-chat-error" role="alert">
-                <p className="error">{error}</p>
-                {sharedWarning && (
-                  <button
-                    type="button"
-                    className="secondary-button"
-                    disabled={mutation.isPending}
-                    onClick={(event) => void submit(event, true)}
-                  >
-                    Continue
-                  </button>
+            <div className="composer-secondary">
+              <div className="composer-mode">
+                <span>Prompt</span>
+              </div>
+              <div className="composer-control-row">
+                {modelOptions.length > 0 && (
+                  <fieldset className="model-control">
+                    <legend className="sr-only">Model control</legend>
+                    <label>
+                      <span>Model</span>
+                      <select
+                        aria-label="Model"
+                        value={modelValue}
+                        disabled={mutation.isPending}
+                        onChange={(event) => setModelValue(event.target.value)}
+                      >
+                        {modelOptions.map((model) => {
+                          const value = modelOptionValue(
+                            model.provider,
+                            model.model,
+                          );
+                          return (
+                            <option key={value} value={value}>
+                              {model.name ?? value}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+                  </fieldset>
+                )}
+                {thinkingLevels.length > 0 && (
+                  <fieldset className="thinking-control">
+                    <legend className="sr-only">Thinking control</legend>
+                    <label>
+                      <span>Thinking</span>
+                      <select
+                        aria-label="Thinking level"
+                        value={thinking}
+                        disabled={mutation.isPending}
+                        onChange={(event) => setThinking(event.target.value)}
+                      >
+                        {thinkingLevels.map((level) => (
+                          <option value={level} key={level}>
+                            {level}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </fieldset>
                 )}
               </div>
-            )}
+              {error && (
+                <div className="new-chat-error" role="alert">
+                  <p className="error">{error}</p>
+                  {sharedWarning && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={mutation.isPending}
+                      onClick={(event) => void submit(event, true)}
+                    >
+                      Continue
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </form>
         </div>
       </section>

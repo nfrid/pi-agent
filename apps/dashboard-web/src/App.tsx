@@ -96,7 +96,9 @@ export {
 export {
   newChatModelOptions,
   newChatRequest,
+  newChatThinkingLevels,
   pendingChatPath,
+  preferredNewChatRuntime,
   sessionPathForRuntime,
 } from './features/new-chat';
 export {

@@ -56,11 +56,13 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
             cwd: '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
             liveState: 'idle',
             online: false,
-            model: { provider: 'test', model: 'fast' },
+            lastSeenAt: 20,
+            model: { provider: 'test', model: 'careful', thinking: 'high' },
             modelCatalog: [
               { provider: 'test', model: 'fast', name: 'Fast' },
               { provider: 'test', model: 'careful', name: 'Careful' },
             ],
+            thinkingLevels: ['off', 'medium', 'high'],
             session: {
               id: 'ghost-session',
               title: 'A deliberately long session title that must wrap safely',
@@ -170,16 +172,17 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await expect(page).toHaveURL(/\/workspaces\/w\/new$/u);
   await expect(page.getByRole('heading', { name: 'New chat' })).toBeVisible();
   await expect(
-    page.getByRole('textbox', { name: 'Message', exact: true }),
+    page.getByRole('textbox', { name: 'Message Pi', exact: true }),
   ).toBeVisible();
   const composerWidth = await page
     .locator('.new-chat-composer')
     .evaluate((element) => element.getBoundingClientRect().width);
   const viewportWidth = await page.evaluate(() => window.innerWidth);
   expect(composerWidth / viewportWidth).toBeGreaterThan(0.8);
-  await expect(page.getByLabel('Model')).toHaveValue('test/fast');
-  await page.getByLabel('Model').selectOption('test/careful');
   await expect(page.getByLabel('Model')).toHaveValue('test/careful');
+  await expect(page.getByLabel('Thinking level')).toHaveValue('high');
+  await page.getByLabel('Model').selectOption('test/fast');
+  await expect(page.getByLabel('Model')).toHaveValue('test/fast');
   await expect(
     page.getByRole('button', { name: 'Send first message' }),
   ).toBeVisible();

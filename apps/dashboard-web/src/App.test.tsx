@@ -15,7 +15,9 @@ import {
   newChatModelOptions,
   newChatPath,
   newChatRequest,
+  newChatThinkingLevels,
   pendingChatPath,
+  preferredNewChatRuntime,
   queueCommand,
   queuedMessagesForRuntime,
   queueRemoveCommand,
@@ -176,12 +178,68 @@ describe('project-scoped new chat', () => {
       newChatRequest('workspace-1', 'use luna', false, {
         provider: 'openai-codex',
         model: 'gpt-5.6-luna',
+        thinking: 'high',
       }),
     ).toEqual({
       workspaceId: 'workspace-1',
       initialPrompt: 'use luna',
-      model: { provider: 'openai-codex', model: 'gpt-5.6-luna' },
+      model: {
+        provider: 'openai-codex',
+        model: 'gpt-5.6-luna',
+        thinking: 'high',
+      },
     });
+  });
+
+  it('prefers the most recently used active workspace model and effort', () => {
+    const older = {
+      cwd: '/workspace',
+      online: true,
+      lastSeenAt: 10,
+      model: {
+        provider: 'openai-codex',
+        model: 'gpt-5.6-luna',
+        thinking: 'medium',
+      },
+      modelCatalog: [
+        { provider: 'anthropic', model: 'claude-opus-4-6' },
+        { provider: 'openai-codex', model: 'gpt-5.6-luna' },
+      ],
+      thinkingLevels: ['off', 'medium', 'high'],
+    } as RuntimeSnapshot;
+    const latest = {
+      ...older,
+      lastSeenAt: 20,
+      model: {
+        provider: 'anthropic',
+        model: 'claude-opus-4-6',
+        thinking: 'high',
+      },
+    } as RuntimeSnapshot;
+    const foreign = {
+      ...latest,
+      cwd: '/other',
+      lastSeenAt: 30,
+    } as RuntimeSnapshot;
+
+    expect(
+      preferredNewChatRuntime('/workspace', [older, foreign, latest]),
+    ).toBe(latest);
+    expect(
+      newChatModelOptions([older, latest], latest).map(
+        (model) => `${model.provider}/${model.model}`,
+      ),
+    ).toEqual(['anthropic/claude-opus-4-6', 'openai-codex/gpt-5.6-luna']);
+    expect(latest.model).toMatchObject({
+      provider: 'anthropic',
+      model: 'claude-opus-4-6',
+      thinking: 'high',
+    });
+    expect(newChatThinkingLevels([older, latest], latest)).toEqual([
+      'off',
+      'medium',
+      'high',
+    ]);
   });
 
   it('deduplicates model options exposed by connected runtimes', () => {

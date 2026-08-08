@@ -26,7 +26,9 @@ import {
 } from './model-option';
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
-const MarkdownComposerEditor = lazy(() => import('./markdown-composer-editor'));
+export const MarkdownComposerEditor = lazy(
+  () => import('./markdown-composer-editor'),
+);
 export const MAX_IMAGE_ATTACHMENTS = 4;
 export const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 export const MAX_IMAGE_TOTAL_SIZE = 12 * 1024 * 1024;
