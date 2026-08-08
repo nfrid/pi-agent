@@ -14,6 +14,7 @@ import type { RegistryChange, RuntimeRegistry } from '../runtime-registry.js';
 import type { SeshAdapter } from '../sesh.js';
 import type { SessionIndex } from '../session-index.js';
 import type { UsageProvider } from '../usage.js';
+import { ComposerCommandService } from './composer-command-service.js';
 import { NotificationService } from './notification-service.js';
 import type { OrchestrationService } from './orchestration-service.js';
 import { RuntimeService } from './runtime-service.js';
@@ -51,6 +52,7 @@ export class DashboardApplication {
   readonly sessions: SessionService;
   readonly workspaces: WorkspaceService;
   readonly notifications: NotificationService;
+  readonly composerCommands: ComposerCommandService;
   readonly usage: UsageService;
   readonly uploads: UploadService;
   readonly eventStream: DashboardEventStream;
@@ -86,6 +88,7 @@ export class DashboardApplication {
       options.metadata,
       options.push,
     );
+    this.composerCommands = new ComposerCommandService();
     this.usage = new UsageService(options.usage, options.onChange);
     this.uploads = new UploadService(options.stateDir);
   }

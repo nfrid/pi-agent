@@ -1,6 +1,12 @@
 /** Contracts exposed by the dashboard daemon to HTTP, SSE, and browsers. */
 
-export { MAX_TEXT } from './limits.js';
+export {
+  MAX_COMPOSER_COMMAND_ARGUMENT_HINT,
+  MAX_COMPOSER_COMMAND_DESCRIPTION,
+  MAX_COMPOSER_COMMAND_NAME,
+  MAX_COMPOSER_COMMANDS,
+  MAX_TEXT,
+} from './limits.js';
 
 export type {
   ArchiveThreadCommand,
@@ -94,6 +100,7 @@ export {
 } from './orchestration-parsers.js';
 export {
   parseBrowserSnapshot,
+  parseComposerCommandCatalogue,
   parseDashboardEventEnvelope,
   parseDashboardMessage,
   parseDashboardStreamMessage,
@@ -101,6 +108,7 @@ export {
   parseSessionRenameRequest,
   parseStartRuntimeRequest,
   tryParseBrowserSnapshot,
+  tryParseComposerCommandCatalogue,
   tryParseDashboardEventEnvelope,
   tryParseDashboardMessage,
   tryParseDashboardStreamMessage,
@@ -115,6 +123,10 @@ export type {
   BridgeEventEnvelope,
   BrowserMessage,
   BrowserSnapshot,
+  ComposerCommandCatalogue,
+  ComposerCommandEntry,
+  ComposerCommandSource,
+  ComposerCommandsResponse,
   DashboardEventEnvelope,
   DashboardMessage,
   DashboardSnapshotResponse,
@@ -136,6 +148,12 @@ export {
   BridgeEventEnvelopeSchema,
   BrowserMessageSchema,
   BrowserSnapshotSchema,
+  ComposerCommandCatalogueSchema,
+  ComposerCommandEntrySchema,
+  ComposerCommandSourceSchema,
+  ComposerCommandsResponseSchema,
+  DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
+  DASHBOARD_SUPPORTED_BUILTINS,
   DashboardEventEnvelopeSchema,
   DashboardMessageSchema,
   DashboardSnapshotResponseSchema,

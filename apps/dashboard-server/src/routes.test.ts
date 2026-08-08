@@ -23,6 +23,7 @@ function context(): DashboardRouteContext {
     }),
     workspaces: () => [],
     refreshWorkspaces: async () => [],
+    composerCommands: async () => ({ commands: [] }),
     usage: async () => ({ usage: null }),
     readSession: async () => ({ entries: [], metadata: { id: 's' } }),
     renameSession: async () => ({ metadata: { id: 's' } }),
@@ -87,6 +88,47 @@ describe('Fastify dashboard route plugin', () => {
     });
     expect(restarted.statusCode).toBe(200);
     expect(restart).toHaveBeenCalledWith('runtime-1', 'restart-1');
+  });
+
+  it('serves authenticated workspace composer commands and rejects unknown ids', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.composerCommands = vi.fn(async (workspaceId) => {
+      if (workspaceId === 'missing')
+        throw Object.assign(new Error('Unknown workspace.'), {
+          code: 'unknown-workspace',
+        });
+      return { commands: [{ name: 'compact', source: 'builtin' as const }] };
+    });
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const headers = {
+      origin: 'http://dashboard.test',
+      'x-dashboard-token': 'route-token',
+    };
+    const commands = await app.inject({
+      method: 'GET',
+      url: '/api/workspaces/workspace-1/composer-commands',
+      headers,
+    });
+    expect(commands.statusCode).toBe(200);
+    expect(commands.json()).toEqual({
+      commands: [{ name: 'compact', source: 'builtin' }],
+    });
+    await expect(
+      app.inject({
+        method: 'GET',
+        url: '/api/workspaces/missing/composer-commands',
+        headers,
+      }),
+    ).resolves.toMatchObject({ statusCode: 404 });
+    await expect(
+      app.inject({
+        method: 'GET',
+        url: '/api/workspaces/workspace-1/composer-commands',
+      }),
+    ).resolves.toMatchObject({ statusCode: 401 });
   });
 
   it('supports inject without starting an HTTP listener', async () => {

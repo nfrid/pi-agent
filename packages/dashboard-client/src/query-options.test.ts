@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DashboardHttpClient } from './http-client.js';
 import {
   commandMutationOptions,
+  composerCommandsQueryOptions,
   createThreadMutationOptions,
   renameSessionMutationOptions,
   snapshotQueryOptions,
@@ -17,6 +18,26 @@ const client = {
 } as unknown as DashboardHttpClient;
 
 describe('dashboard query and mutation factories', () => {
+  it('creates workspace-scoped composer command queries', async () => {
+    const composerCommands = vi.fn(async () => ({ commands: [] }));
+    const options = composerCommandsQueryOptions(
+      { composerCommands } as unknown as DashboardHttpClient,
+      'workspace-1',
+    );
+    expect(options.queryKey).toEqual([
+      'dashboard',
+      'composer-commands',
+      'workspace-1',
+    ]);
+    if (!options.queryFn) throw new Error('Query function is missing.');
+    await expect(
+      options.queryFn({ signal: undefined } as never),
+    ).resolves.toEqual({
+      commands: [],
+    });
+    expect(composerCommands).toHaveBeenCalledWith('workspace-1', undefined);
+  });
+
   it('keeps the live baseline authoritative and does not expire snapshots', () => {
     expect(snapshotQueryOptions(client).staleTime).toBe(
       Number.POSITIVE_INFINITY,

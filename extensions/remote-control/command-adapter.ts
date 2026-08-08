@@ -4,6 +4,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
+import { DASHBOARD_SUPPORTED_BUILTIN_COMMANDS } from '../../packages/dashboard-protocol/src/dashboard-api';
 import type { BridgeImageAttachment } from '../../packages/dashboard-protocol/src/pi-runtime-protocol';
 
 type CommandInfo = ReturnType<ExtensionAPI['getCommands']>[number];
@@ -35,6 +36,9 @@ const PI_BUILTIN_COMMANDS = new Set([
   'reload',
   'quit',
 ]);
+const DASHBOARD_BUILTIN_COMMANDS = new Set<string>(
+  DASHBOARD_SUPPORTED_BUILTIN_COMMANDS.map((command) => command.name),
+);
 
 function stripFrontmatter(content: string): string {
   return content.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
@@ -122,7 +126,7 @@ export async function dispatchDashboardInput(
 ): Promise<{ accepted: true; command?: string }> {
   const invocation = commandParts(text);
   if (invocation && !deliverAs) {
-    if (images.length > 0 && PI_BUILTIN_COMMANDS.has(invocation.name))
+    if (images.length > 0 && DASHBOARD_BUILTIN_COMMANDS.has(invocation.name))
       throw new Error('Images cannot be attached to dashboard commands.');
     if (invocation.name === 'compact') {
       await ctx.compact({

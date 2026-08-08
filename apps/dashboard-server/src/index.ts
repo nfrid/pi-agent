@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDaemon } from './create-daemon.js';
 
+export * from './application/composer-command-service.js';
 export * from './application/dashboard-application.js';
 export * from './application/orchestration-service.js';
 export type {

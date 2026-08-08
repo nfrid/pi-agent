@@ -23,6 +23,7 @@ import { LiveSurfaceHub } from '../shared/runtime/live-surfaces';
 import { setPendingProcessCount } from '../shared/runtime/pending-processes';
 import {
   BridgeClient,
+  composerCommandsSnapshot,
   createRemoteControlRuntime,
   dispatchDashboardCommand,
   dispatchDashboardInput,
@@ -455,6 +456,78 @@ describe('remote event normalization', () => {
 });
 
 describe('Pi 0.84 runtime catalogues', () => {
+  it('advertises supported builtins and prompt/skill commands but not extensions', () => {
+    const commands = composerCommandsSnapshot({
+      getCommands: () => [
+        {
+          name: 'review',
+          description: 'Review code\nwith context',
+          argumentHint: '<path>',
+          source: 'prompt',
+        },
+        {
+          name: 'demo',
+          description: 'Use the demo skill',
+          source: 'skill',
+        },
+        { name: 'secret', source: 'extension' },
+      ],
+    } as unknown as ExtensionAPI);
+    expect(commands).toEqual([
+      expect.objectContaining({ name: 'compact', source: 'builtin' }),
+      expect.objectContaining({ name: 'name', source: 'builtin' }),
+      expect.objectContaining({ name: 'model', source: 'builtin' }),
+      expect.objectContaining({ name: 'quit', source: 'builtin' }),
+      {
+        name: 'review',
+        description: 'Review codewith context',
+        argumentHint: '<path>',
+        source: 'prompt',
+      },
+      {
+        name: 'skill:demo',
+        description: 'Use the demo skill',
+        source: 'skill',
+      },
+    ]);
+    expect(commands).not.toContainEqual(
+      expect.objectContaining({ name: 'secret' }),
+    );
+  });
+
+  it('bounds runtime composer commands', () => {
+    const commands = composerCommandsSnapshot({
+      getCommands: () =>
+        Array.from({ length: 400 }, (_, index) => ({
+          name: `prompt-${index}`,
+          description: 'd'.repeat(2_000),
+          argumentHint: 'h'.repeat(500),
+          source: 'prompt',
+        })),
+    } as unknown as ExtensionAPI);
+    expect(commands).toHaveLength(256);
+    expect(commands.at(-1)?.description).toHaveLength(1_024);
+    expect(commands.at(-1)?.argumentHint).toHaveLength(256);
+  });
+
+  it('includes the command catalogue in runtime snapshots', () => {
+    const runtime = createRemoteControlRuntime({
+      getCommands: () => [
+        { name: 'review', source: 'prompt', description: 'Review code' },
+        { name: 'ignored', source: 'extension' },
+      ],
+    } as unknown as ExtensionAPI);
+    expect(runtime?.snapshot().composerCommands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'compact', source: 'builtin' }),
+        expect.objectContaining({ name: 'review', source: 'prompt' }),
+      ]),
+    );
+    expect(runtime?.snapshot().composerCommands).not.toContainEqual(
+      expect.objectContaining({ name: 'ignored' }),
+    );
+  });
+
   it('publishes scoped models instead of the full available catalogue', () => {
     const scoped = {
       provider: 'scoped-provider',

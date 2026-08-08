@@ -19,7 +19,15 @@ import {
   tryParseExtensionSurfaceList,
 } from '@pi-dashboard/extension-contributions';
 import { type Static, Type } from 'typebox';
-import { MAX_ID, MAX_PATH, MAX_TEXT } from './limits.js';
+import {
+  MAX_COMPOSER_COMMAND_ARGUMENT_HINT,
+  MAX_COMPOSER_COMMAND_DESCRIPTION,
+  MAX_COMPOSER_COMMAND_NAME,
+  MAX_COMPOSER_COMMANDS,
+  MAX_ID,
+  MAX_PATH,
+  MAX_TEXT,
+} from './limits.js';
 import {
   type CheckoutSummary,
   CheckoutSummarySchema,
@@ -135,6 +143,85 @@ export const RuntimeModelOptionSchema = Type.Object(
   { additionalProperties: false },
 );
 export type RuntimeModelOption = Static<typeof RuntimeModelOptionSchema>;
+
+export const ComposerCommandSourceSchema = Type.Union([
+  Type.Literal('builtin'),
+  Type.Literal('prompt'),
+  Type.Literal('skill'),
+]);
+export type ComposerCommandSource = Static<typeof ComposerCommandSourceSchema>;
+
+export const ComposerCommandEntrySchema = Type.Object(
+  {
+    name: Type.String({
+      minLength: 1,
+      maxLength: MAX_COMPOSER_COMMAND_NAME,
+      pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+    }),
+    description: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: MAX_COMPOSER_COMMAND_DESCRIPTION,
+      }),
+    ),
+    argumentHint: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: MAX_COMPOSER_COMMAND_ARGUMENT_HINT,
+      }),
+    ),
+    source: ComposerCommandSourceSchema,
+  },
+  { additionalProperties: false },
+);
+export type ComposerCommandEntry = Static<typeof ComposerCommandEntrySchema>;
+
+/** Builtins whose dashboard submission adapter is intentionally supported. */
+export const DASHBOARD_SUPPORTED_BUILTIN_COMMANDS = [
+  {
+    name: 'compact',
+    description: 'Compact the current session while preserving recent context.',
+    argumentHint: '[instructions]',
+    source: 'builtin',
+  },
+  {
+    name: 'name',
+    description: 'Set the current session name.',
+    argumentHint: '<name>',
+    source: 'builtin',
+  },
+  {
+    name: 'model',
+    description: 'Switch to an available provider/model.',
+    argumentHint: '<provider/model>',
+    source: 'builtin',
+  },
+  {
+    name: 'quit',
+    description: 'Exit the current Pi session.',
+    source: 'builtin',
+  },
+] as const satisfies readonly ComposerCommandEntry[];
+/** Compatibility shorthand for consumers that call these builtins. */
+export const DASHBOARD_SUPPORTED_BUILTINS =
+  DASHBOARD_SUPPORTED_BUILTIN_COMMANDS;
+
+export const ComposerCommandCatalogueSchema = Type.Object(
+  {
+    commands: Type.Readonly(
+      Type.Array(ComposerCommandEntrySchema, {
+        maxItems: MAX_COMPOSER_COMMANDS,
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type ComposerCommandCatalogue = Static<
+  typeof ComposerCommandCatalogueSchema
+>;
+/** Response spelling used by the authenticated workspace discovery endpoint. */
+export const ComposerCommandsResponseSchema = ComposerCommandCatalogueSchema;
+export type ComposerCommandsResponse = ComposerCommandCatalogue;
 
 /** Compatibility aliases for the original dashboard protocol surface names. */
 export const RuntimeExtensionSurfaceSchema = ExtensionSurfaceSchema;
@@ -289,6 +376,14 @@ const RuntimeSnapshotProperties = {
   modelCatalog: Type.Optional(
     Type.Readonly(Type.Array(RuntimeModelOptionSchema, { maxItems: 256 })),
   ),
+  /** Commands accepted by the dashboard composer, excluding extension commands. */
+  composerCommands: Type.Optional(
+    Type.Readonly(
+      Type.Array(ComposerCommandEntrySchema, {
+        maxItems: MAX_COMPOSER_COMMANDS,
+      }),
+    ),
+  ),
   /** Values accepted by the installed runtime's setThinkingLevel API. */
   thinkingLevels: Type.Optional(
     Type.Readonly(
@@ -333,12 +428,17 @@ export const RuntimeSnapshotSchema = Type.Object(RuntimeSnapshotProperties, {
 type RuntimeSnapshotStatic = Static<typeof RuntimeSnapshotSchema>;
 export type RuntimeSnapshot = Omit<
   RuntimeSnapshotStatic,
-  'session' | 'pendingInteractions' | 'queueDrafts' | 'extensionSurfaces'
+  | 'session'
+  | 'pendingInteractions'
+  | 'queueDrafts'
+  | 'extensionSurfaces'
+  | 'composerCommands'
 > & {
   session: SessionSnapshot;
   readonly pendingInteractions: readonly InteractionSnapshot[];
   readonly queueDrafts?: readonly QueueDraft[];
   readonly extensionSurfaces?: readonly RuntimeExtensionSurface[];
+  readonly composerCommands?: readonly ComposerCommandEntry[];
 };
 
 // Type.Partial needs its options argument to preserve strict unknown-field
@@ -349,12 +449,17 @@ export const RuntimeSnapshotPatchSchema = Type.Partial(RuntimeSnapshotSchema, {
 type RuntimeSnapshotPatchStatic = Static<typeof RuntimeSnapshotPatchSchema>;
 export type RuntimeSnapshotPatch = Omit<
   RuntimeSnapshotPatchStatic,
-  'session' | 'pendingInteractions' | 'queueDrafts' | 'extensionSurfaces'
+  | 'session'
+  | 'pendingInteractions'
+  | 'queueDrafts'
+  | 'extensionSurfaces'
+  | 'composerCommands'
 > & {
   session?: SessionSnapshot;
   pendingInteractions?: readonly InteractionSnapshot[];
   queueDrafts?: readonly QueueDraft[];
   extensionSurfaces?: readonly RuntimeExtensionSurface[];
+  composerCommands?: readonly ComposerCommandEntry[];
 };
 /** Compatibility spelling used by some consumers. */
 export const RuntimeSnapshotFullSchema = RuntimeSnapshotSchema;
