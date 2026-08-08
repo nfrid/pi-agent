@@ -4360,8 +4360,82 @@ body:has(.session-page) .global-tools > .palette-trigger {
   overflow-y: auto;
 }
 .composer-editor-mount {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
+}
+.composer-autocomplete {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  left: 0;
+  z-index: 30;
+  display: grid;
+  max-height: min(320px, 45vh);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-alt) 96%, transparent);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 38%);
+  padding: 4px;
+}
+.composer-autocomplete button {
+  display: grid;
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 7px 9px;
+  color: var(--fg);
+  text-align: left;
+}
+.composer-autocomplete button:hover,
+.composer-autocomplete button.selected {
+  background: color-mix(in srgb, var(--cyan) 13%, var(--bg-alt));
+}
+.composer-autocomplete-command,
+.composer-autocomplete-detail {
+  min-width: 0;
+}
+.composer-autocomplete-command {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.composer-autocomplete-command strong,
+.composer-autocomplete-command code,
+.composer-autocomplete-detail span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-autocomplete-command strong {
+  color: var(--cyan);
+  font-size: 12px;
+}
+.composer-autocomplete-command code {
+  color: var(--muted);
+  font-size: 10px;
+}
+.composer-autocomplete-detail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.composer-autocomplete-detail small {
+  flex: 0 0 auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 1px 5px;
+  color: var(--dim);
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .composer-editor-loading {
   min-height: 48px;

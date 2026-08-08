@@ -11,7 +11,21 @@ import {
   thematicBreakPlugin,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
-import { forwardRef, useEffect, useRef } from 'react';
+import {
+  type ForwardedRef,
+  forwardRef,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  ComposerAutocomplete,
+  type ComposerCommandOption,
+  composerCommandSuggestions,
+} from './composer-autocomplete';
 
 const COMPOSER_MARKDOWN_PLUGINS = [
   headingsPlugin(),
@@ -25,16 +39,73 @@ const COMPOSER_MARKDOWN_PLUGINS = [
 ];
 
 type MarkdownComposerEditorProps = {
+  commands?: readonly ComposerCommandOption[];
   onChange: (markdown: string) => void;
   placeholder: string;
   readOnly: boolean;
 };
 
+function assignEditorRef(
+  ref: ForwardedRef<MDXEditorMethods>,
+  value: MDXEditorMethods | null,
+): void {
+  if (typeof ref === 'function') ref(value);
+  else if (ref) ref.current = value;
+}
+
 const MarkdownComposerEditor = forwardRef<
   MDXEditorMethods,
   MarkdownComposerEditorProps
->(function MarkdownComposerEditor({ onChange, placeholder, readOnly }, ref) {
+>(function MarkdownComposerEditor(
+  { commands = [], onChange, placeholder, readOnly },
+  forwardedRef,
+) {
   const hostRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<MDXEditorMethods | null>(null);
+  const listId = useId();
+  const [markdown, setMarkdown] = useState('');
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [dismissedMarkdown, setDismissedMarkdown] = useState<string>();
+  const suggestions = useMemo(
+    () =>
+      dismissedMarkdown === markdown
+        ? []
+        : composerCommandSuggestions(commands, markdown),
+    [commands, dismissedMarkdown, markdown],
+  );
+  const boundedIndex = suggestions.length
+    ? Math.min(selectedIndex, suggestions.length - 1)
+    : 0;
+  const setEditorRef = useCallback(
+    (value: MDXEditorMethods | null) => {
+      editorRef.current = value;
+      assignEditorRef(forwardedRef, value);
+    },
+    [forwardedRef],
+  );
+  const updateMarkdown = useCallback(
+    (next: string) => {
+      setMarkdown(next);
+      setSelectedIndex(0);
+      setDismissedMarkdown(undefined);
+      onChange(next);
+    },
+    [onChange],
+  );
+  const selectCommand = useCallback(
+    (command: ComposerCommandOption) => {
+      const next = `/${command.name} `;
+      editorRef.current?.setMarkdown(next);
+      updateMarkdown(next);
+      requestAnimationFrame(() => {
+        hostRef.current
+          ?.querySelector<HTMLElement>('[contenteditable="true"]')
+          ?.focus();
+      });
+    },
+    [updateMarkdown],
+  );
+
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -46,6 +117,18 @@ const MarkdownComposerEditor = forwardRef<
       editable.setAttribute('aria-label', 'Message Pi');
       editable.setAttribute('role', 'textbox');
       editable.setAttribute('aria-multiline', 'true');
+      editable.setAttribute('aria-autocomplete', 'list');
+      editable.setAttribute('aria-expanded', String(suggestions.length > 0));
+      if (suggestions.length > 0) {
+        editable.setAttribute('aria-controls', listId);
+        editable.setAttribute(
+          'aria-activedescendant',
+          `${listId}-option-${boundedIndex}`,
+        );
+      } else {
+        editable.removeAttribute('aria-controls');
+        editable.removeAttribute('aria-activedescendant');
+      }
     };
     labelEditor();
     const observer = new MutationObserver(labelEditor);
@@ -56,20 +139,61 @@ const MarkdownComposerEditor = forwardRef<
       subtree: true,
     });
     return () => observer.disconnect();
-  }, []);
+  }, [boundedIndex, listId, suggestions.length]);
+
   return (
-    <div className="composer-editor-mount" ref={hostRef}>
+    <div
+      className="composer-editor-mount"
+      ref={hostRef}
+      onKeyDownCapture={(event) => {
+        if (!suggestions.length) return;
+        if (event.key === 'ArrowDown') {
+          event.preventDefault();
+          event.stopPropagation();
+          setSelectedIndex((current) => (current + 1) % suggestions.length);
+          return;
+        }
+        if (event.key === 'ArrowUp') {
+          event.preventDefault();
+          event.stopPropagation();
+          setSelectedIndex(
+            (current) =>
+              (current - 1 + suggestions.length) % suggestions.length,
+          );
+          return;
+        }
+        if (event.key === 'Enter' || event.key === 'Tab') {
+          event.preventDefault();
+          event.stopPropagation();
+          selectCommand(suggestions[boundedIndex]);
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          setDismissedMarkdown(markdown);
+        }
+      }}
+    >
       <MDXEditor
-        ref={ref}
+        ref={setEditorRef}
         className="composer-rich-editor-root dark-theme"
         contentEditableClassName="composer-rich-editor"
         markdown=""
-        onChange={(markdown, initialMarkdownNormalize) => {
-          if (!initialMarkdownNormalize) onChange(markdown);
+        onChange={(next, initialMarkdownNormalize) => {
+          if (!initialMarkdownNormalize) updateMarkdown(next);
         }}
         placeholder={placeholder}
         readOnly={readOnly}
         plugins={COMPOSER_MARKDOWN_PLUGINS}
+      />
+      <ComposerAutocomplete
+        id={listId}
+        commands={dismissedMarkdown === markdown ? [] : commands}
+        markdown={markdown}
+        selectedIndex={boundedIndex}
+        onSelectedIndexChange={setSelectedIndex}
+        onSelect={selectCommand}
       />
     </div>
   );

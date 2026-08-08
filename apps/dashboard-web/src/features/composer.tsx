@@ -779,6 +779,7 @@ export function Composer({
           >
             <MarkdownComposerEditor
               ref={editorRef}
+              commands={runtime.composerCommands}
               onChange={setText}
               placeholder={
                 disabled ? 'Agent is waiting for input' : 'Message Pi…'

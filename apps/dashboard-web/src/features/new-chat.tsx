@@ -1,5 +1,6 @@
 import type { MDXEditorMethods } from '@mdxeditor/editor';
 import {
+  composerCommandsQueryOptions,
   type DashboardLiveStore,
   dashboardHttpClient,
   startRuntimeMutationOptions,
@@ -10,7 +11,7 @@ import type {
   RuntimeSnapshot,
   StartRuntimeRequest,
 } from '@pi-dashboard/protocol';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   type FormEvent,
   Suspense,
@@ -204,6 +205,11 @@ export function NewChatView({
   const mutation = useMutation(
     startRuntimeMutationOptions(dashboardHttpClient),
   );
+  const commandCatalogue = useQuery(
+    composerCommandsQueryOptions(dashboardHttpClient, workspaceId),
+  );
+  const composerCommands =
+    commandCatalogue.data?.commands ?? preferredRuntime?.composerCommands ?? [];
   const sessionPath = sessionPathForRuntime(runtime);
   const selectedModel = modelOptions.find(
     (model) => modelOptionValue(model.provider, model.model) === modelValue,
@@ -493,6 +499,7 @@ export function NewChatView({
               >
                 <MarkdownComposerEditor
                   ref={editorRef}
+                  commands={composerCommands}
                   onChange={setText}
                   placeholder="Message Pi…"
                   readOnly={busy}

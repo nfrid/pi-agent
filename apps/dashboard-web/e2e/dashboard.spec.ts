@@ -43,6 +43,26 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
+  await page.route('**/api/workspaces/w/composer-commands', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        commands: [
+          {
+            name: 'review',
+            description: 'Review changes',
+            argumentHint: '[scope]',
+            source: 'prompt',
+          },
+          {
+            name: 'skill:browser',
+            description: 'Automate a browser',
+            source: 'skill',
+          },
+        ],
+      }),
+    }),
+  );
   await page.route('**/api/snapshot', async (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -181,9 +201,25 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   ).toBe(true);
   await expect(page).toHaveURL(/\/workspaces\/w\/new$/u);
   await expect(page.getByRole('heading', { name: 'New chat' })).toBeVisible();
+  const newChatComposer = page.getByRole('textbox', {
+    name: 'Message Pi',
+    exact: true,
+  });
+  await expect(newChatComposer).toBeVisible();
+  await newChatComposer.fill('/rev');
   await expect(
-    page.getByRole('textbox', { name: 'Message Pi', exact: true }),
+    page.getByRole('listbox', { name: 'Available commands' }),
   ).toBeVisible();
+  await expect(page.getByRole('option', { name: /\/review/ })).toBeVisible();
+  await newChatComposer.press('Enter');
+  await expect(newChatComposer).toContainText('/review');
+  await expect(
+    page.getByRole('listbox', { name: 'Available commands' }),
+  ).toHaveCount(0);
+  await newChatComposer.fill('');
+  await expect(
+    page.getByRole('listbox', { name: 'Available commands' }),
+  ).toHaveCount(0);
   const composerWidth = await page
     .locator('.new-chat-composer')
     .evaluate((element) => element.getBoundingClientRect().width);
@@ -1695,6 +1731,18 @@ function phase6Snapshot(
           },
         ],
         thinkingLevels: ['off', 'low', 'medium', 'high'],
+        composerCommands: [
+          {
+            name: 'compact',
+            description: 'Compact the current session',
+            source: 'builtin',
+          },
+          {
+            name: 'skill:browser',
+            description: 'Automate a browser',
+            source: 'skill',
+          },
+        ],
         pendingInteractions: overrides.pendingInteractions ?? [
           phase6Interaction('ask-1', 'Use the first answer?'),
           phase6Interaction('ask-2', 'Use the second answer?'),
@@ -1825,6 +1873,20 @@ async function installPhase6Mocks(page: Page) {
     route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify(phase6Snapshot()),
+    }),
+  );
+  await page.route('**/api/workspaces/*/composer-commands', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        commands: [
+          {
+            name: 'review',
+            description: 'Review changes',
+            source: 'prompt',
+          },
+        ],
+      }),
     }),
   );
   await page.route('**/api/sessions/s1', (route) =>
@@ -2202,6 +2264,16 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   });
   const composerInput = page.getByLabel('Message Pi');
   await expect(composerInput).toBeEnabled();
+  await composerInput.fill('/skill:');
+  await expect(
+    page.getByRole('option', { name: /\/skill:browser/ }),
+  ).toBeVisible();
+  await composerInput.press('Tab');
+  await expect(composerInput).toContainText('/skill:browser');
+  await expect(
+    page.getByRole('listbox', { name: 'Available commands' }),
+  ).toHaveCount(0);
+  await composerInput.fill('');
   const initialComposerHeight = await composerInput.evaluate(
     (element) => element.getBoundingClientRect().height,
   );
@@ -2379,7 +2451,7 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   await expect(page).toHaveURL(/\/workspaces\/w1\/new$/);
   await page.getByLabel('Model').selectOption('test/text');
   await page
-    .getByRole('textbox', { name: 'Message', exact: true })
+    .getByRole('textbox', { name: 'Message Pi', exact: true })
     .fill('Inspect the project setup');
   await page.getByRole('button', { name: 'Send first message' }).click();
   await expect(page.getByText('Starting agent…')).toBeVisible();
@@ -2387,7 +2459,7 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   expect(mocks.starts[0]).toEqual({
     workspaceId: 'w1',
     initialPrompt: 'Inspect the project setup',
-    model: { provider: 'test', model: 'text' },
+    model: { provider: 'test', model: 'text', thinking: 'medium' },
   });
   await page.reload();
   await expect(page.getByText('Starting agent…')).toBeVisible();
