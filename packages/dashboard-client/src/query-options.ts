@@ -21,6 +21,8 @@ export const dashboardQueryKeys = {
   usage: () => ['dashboard', 'usage'] as const,
   session: (id: string) => ['dashboard', 'session', id] as const,
   workspace: (id: string) => ['dashboard', 'workspace', id] as const,
+  composerCommands: (workspaceId: string) =>
+    ['dashboard', 'composer-commands', workspaceId] as const,
   runtime: (id: string) => ['dashboard', 'runtime', id] as const,
   notifications: () => ['dashboard', 'notifications'] as const,
   settings: () => ['dashboard', 'settings'] as const,
@@ -106,6 +108,19 @@ export function usageQueryOptions(client: DashboardHttpClient) {
     queryFn: () => client.usage(),
     staleTime: 30_000,
     retry: networkRetry,
+  });
+}
+
+export function composerCommandsQueryOptions(
+  client: DashboardHttpClient,
+  workspaceId: string,
+) {
+  return queryOptions({
+    queryKey: dashboardQueryKeys.composerCommands(workspaceId),
+    queryFn: ({ signal }) => client.composerCommands(workspaceId, signal),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: networkRetry,
+    enabled: Boolean(workspaceId),
   });
 }
 

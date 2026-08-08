@@ -3,6 +3,7 @@ import {
   type CancelCommand,
   type Checkout,
   type CommandReceipt,
+  type ComposerCommandCatalogue,
   type DashboardStreamMessage,
   type Project,
   type ProjectAdoptCommand,
@@ -15,6 +16,7 @@ import {
   type Thread,
   type ThreadCreateCommand,
   tryParseBrowserSnapshot,
+  tryParseComposerCommandCatalogue,
   tryParseDashboardStreamMessage,
   tryParseSessionApiResponse,
 } from '@pi-dashboard/protocol';
@@ -179,6 +181,20 @@ export class DashboardHttpClient {
 
   async usage(): Promise<{ usage?: unknown; error?: string }> {
     return this.request('/api/usage');
+  }
+
+  async composerCommands(
+    workspaceId: string,
+    signal?: AbortSignal,
+  ): Promise<ComposerCommandCatalogue> {
+    const value = await this.request<unknown>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/composer-commands`,
+      signal ? { signal } : {},
+    );
+    const catalogue = tryParseComposerCommandCatalogue(value);
+    if (!catalogue)
+      throw new Error('Dashboard returned invalid composer command data.');
+    return catalogue;
   }
 
   async createProject(command: ProjectCreateCommand): Promise<{

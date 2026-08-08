@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ComposerCommandCatalogueSchema,
+  DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
   deriveSessionTitle,
   ExtensionSurfaceSchema,
   firstUserMessageText,
@@ -10,6 +12,7 @@ import {
   MAX_QUEUE_DRAFTS,
   MAX_RUNTIME_EXTENSION_SURFACES,
   parseBridgeCommand,
+  parseComposerCommandCatalogue,
   parseDashboardEventEnvelope,
   parseDashboardStreamMessage,
   parseFrame,
@@ -500,6 +503,43 @@ describe('dashboard protocol', () => {
             id: `surface-${index}`,
           }),
         ),
+      }),
+    ).toThrow();
+  });
+
+  it('validates bounded composer command catalogues and optional runtime entries', () => {
+    const commands = [
+      ...DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
+      {
+        name: 'review',
+        description: 'Review a file',
+        argumentHint: '<path>',
+        source: 'prompt' as const,
+      },
+      { name: 'skill:demo', source: 'skill' as const },
+    ];
+    expect(parseComposerCommandCatalogue({ commands })).toEqual({ commands });
+    expect(ComposerCommandCatalogueSchema).toBeDefined();
+    expect(
+      parseRuntimeSnapshot({
+        runtimeId: 'runtime-1',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 'session-1', entries: [] },
+        pendingInteractions: [],
+        composerCommands: commands,
+      }).composerCommands,
+    ).toEqual(commands);
+    expect(() =>
+      parseComposerCommandCatalogue({
+        commands: Array.from({ length: 257 }, () => commands[0]),
+      }),
+    ).toThrow();
+    expect(() =>
+      parseComposerCommandCatalogue({
+        commands: [{ name: 'extension', source: 'extension' }],
       }),
     ).toThrow();
   });

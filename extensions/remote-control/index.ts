@@ -43,6 +43,7 @@ export {
   flushQueueDrafts,
 } from './runtime';
 export {
+  composerCommandsSnapshot,
   modelCatalogSnapshot,
   thinkingLevelsSnapshot,
 } from './runtime-snapshot-adapter';

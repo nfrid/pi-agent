@@ -194,6 +194,11 @@ class DashboardServerImpl implements DashboardServer {
         ),
       workspaces: () => this.application.workspaces.list(),
       refreshWorkspaces: () => this.refreshWorkspaces(),
+      composerCommands: (workspaceId) =>
+        this.application.composerCommands.forWorkspace(
+          workspaceId,
+          this.application.workspaces.list(),
+        ),
       usage: () => this.application.usage.get(),
       readSession: (id, before) => this.sessionResult(id, before),
       renameSession: async (id, name) => {

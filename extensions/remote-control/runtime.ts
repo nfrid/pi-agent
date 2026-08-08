@@ -26,6 +26,7 @@ import { dispatchDashboardCommand } from './command-dispatcher';
 import { LiveEventNormalizer } from './live-event-normalizer';
 import { isQueueDraftCommand, QueueDraftStore } from './queue-draft-store';
 import {
+  composerCommandsSnapshot,
   interactionSnapshot,
   liveState,
   modelCatalogSnapshot,
@@ -79,6 +80,7 @@ export function createRemoteControlRuntime(
     session: { id: 'unknown', entries: [] },
     pendingInteractions: broker.list().map(interactionSnapshot),
     queueDrafts: queueDrafts.list(),
+    composerCommands: composerCommandsSnapshot(pi),
     capabilities: RUNTIME_CAPABILITIES,
     extensionSurfaces: liveSurfaceHub.snapshot(),
     lastError,
@@ -105,6 +107,7 @@ export function createRemoteControlRuntime(
         : undefined,
       pendingInteractions: broker.list().map(interactionSnapshot),
       queueDrafts: queueDrafts.list(),
+      composerCommands: composerCommandsSnapshot(pi),
       capabilities: RUNTIME_CAPABILITIES,
       extensionSurfaces: liveSurfaceHub.snapshot(),
       lastError,

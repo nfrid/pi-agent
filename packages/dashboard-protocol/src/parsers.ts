@@ -17,6 +17,8 @@ import {
   BridgeImageAttachmentSchema,
   type BrowserSnapshot,
   BrowserSnapshotSchema,
+  type ComposerCommandCatalogue,
+  ComposerCommandCatalogueSchema,
   type DashboardEventEnvelope,
   DashboardEventEnvelopeSchema,
   type DashboardMessage,
@@ -576,6 +578,21 @@ export function tryParseDashboardMessage(
     return undefined;
   }
 }
+export function parseComposerCommandCatalogue(
+  value: unknown,
+): ComposerCommandCatalogue {
+  return parseSchema(
+    ComposerCommandCatalogueSchema,
+    value,
+    'composer command catalogue',
+  );
+}
+export function tryParseComposerCommandCatalogue(
+  value: unknown,
+): ComposerCommandCatalogue | undefined {
+  return tryParseSchema(ComposerCommandCatalogueSchema, value);
+}
+
 export function parseSessionApiResponse(value: unknown): SessionApiResponse {
   return parseSchema(SessionApiResponseSchema, value, 'session API response');
 }

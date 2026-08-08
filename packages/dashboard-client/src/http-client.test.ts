@@ -2,6 +2,84 @@ import { describe, expect, it, vi } from 'vitest';
 import { DashboardHttpClient } from './http-client.js';
 
 describe('DashboardHttpClient command requests', () => {
+  it('fetches and validates workspace composer commands', async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            commands: [
+              {
+                name: 'review',
+                description: 'Review code',
+                argumentHint: '<path>',
+                source: 'prompt',
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: {
+        get: () => 'test-token',
+        set: () => undefined,
+        clear: () => undefined,
+      },
+    });
+    await expect(client.composerCommands('workspace/1')).resolves.toEqual({
+      commands: [
+        {
+          name: 'review',
+          description: 'Review code',
+          argumentHint: '<path>',
+          source: 'prompt',
+        },
+      ],
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/workspaces/workspace%2F1/composer-commands',
+      expect.objectContaining({ headers: expect.anything() }),
+    );
+  });
+
+  it('rejects malformed workspace composer command responses', async () => {
+    const client = new DashboardHttpClient({
+      fetch: vi.fn(
+        async () =>
+          new Response(JSON.stringify({ commands: [] }), { status: 200 }),
+      ),
+      tokenStore: {
+        get: () => undefined,
+        set: () => undefined,
+        clear: () => undefined,
+      },
+    });
+    await expect(client.composerCommands('workspace')).resolves.toEqual({
+      commands: [],
+    });
+
+    const invalid = new DashboardHttpClient({
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              commands: [{ name: 'bad', source: 'extension' }],
+            }),
+            { status: 200 },
+          ),
+      ),
+      tokenStore: {
+        get: () => undefined,
+        set: () => undefined,
+        clear: () => undefined,
+      },
+    });
+    await expect(invalid.composerCommands('workspace')).rejects.toThrow(
+      'invalid composer command',
+    );
+  });
+
   it('requests an older session page with an encoded opaque cursor', async () => {
     const fetch = vi.fn(
       async () =>

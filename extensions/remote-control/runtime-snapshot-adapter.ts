@@ -1,7 +1,18 @@
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent';
 import { createRuntimeCapabilitySnapshot } from '@pi-dashboard/extension-contributions';
-import { deriveSessionTitle } from '../../packages/dashboard-protocol/src/dashboard-api';
 import {
+  DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
+  deriveSessionTitle,
+  MAX_COMPOSER_COMMAND_ARGUMENT_HINT,
+  MAX_COMPOSER_COMMAND_DESCRIPTION,
+  MAX_COMPOSER_COMMAND_NAME,
+  MAX_COMPOSER_COMMANDS,
+} from '../../packages/dashboard-protocol/src/dashboard-api';
+import {
+  type ComposerCommandEntry,
   type InteractionSnapshot,
   type RuntimeLiveState,
   type RuntimeSnapshot,
@@ -137,6 +148,77 @@ export function thinkingLevelsSnapshot(): string[] {
   // Keep this bounded wire data in sync with the installed Pi ThinkingLevel
   // union. `off` remains a dashboard control for disabling reasoning.
   return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
+}
+
+function cleanCatalogueText(value: unknown, max: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const text = Array.from(value, (character) =>
+    character.charCodeAt(0) <= 31 || character.charCodeAt(0) === 127
+      ? ''
+      : character,
+  )
+    .join('')
+    .trim()
+    .slice(0, max);
+  return text || undefined;
+}
+
+function cleanComposerCommand(
+  value: unknown,
+  source: ComposerCommandEntry['source'],
+): ComposerCommandEntry | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined;
+  const candidate = value as Record<string, unknown>;
+  let name = cleanCatalogueText(candidate.name, MAX_COMPOSER_COMMAND_NAME);
+  if (!name) return undefined;
+  if (source === 'skill' && !name.startsWith('skill:')) name = `skill:${name}`;
+  name = name.slice(0, MAX_COMPOSER_COMMAND_NAME);
+  if (!name) return undefined;
+  const description = cleanCatalogueText(
+    candidate.description,
+    MAX_COMPOSER_COMMAND_DESCRIPTION,
+  );
+  const argumentHint = cleanCatalogueText(
+    candidate.argumentHint,
+    MAX_COMPOSER_COMMAND_ARGUMENT_HINT,
+  );
+  return {
+    name,
+    ...(description ? { description } : {}),
+    ...(argumentHint ? { argumentHint } : {}),
+    source,
+  };
+}
+
+/** Project only dashboard-safe Pi resources; extension commands are executable-only. */
+export function composerCommandsSnapshot(
+  pi: ExtensionAPI,
+): readonly ComposerCommandEntry[] {
+  const commands: ComposerCommandEntry[] = [];
+  const seen = new Set<string>();
+  const add = (value: unknown, source: ComposerCommandEntry['source']) => {
+    const command = cleanComposerCommand(value, source);
+    if (!command || seen.has(command.name)) return;
+    seen.add(command.name);
+    commands.push(command);
+  };
+  for (const command of DASHBOARD_SUPPORTED_BUILTIN_COMMANDS)
+    add(command, 'builtin');
+  try {
+    const getCommands = (
+      pi as unknown as { getCommands?: () => readonly unknown[] }
+    ).getCommands;
+    for (const command of getCommands?.() ?? []) {
+      if (!command || typeof command !== 'object') continue;
+      const source = (command as { source?: unknown }).source;
+      if (source === 'prompt' || source === 'skill') add(command, source);
+      if (commands.length >= MAX_COMPOSER_COMMANDS) break;
+    }
+  } catch {
+    // Command discovery is optional; builtins remain available when Pi is still starting.
+  }
+  return commands;
 }
 
 export function liveState(

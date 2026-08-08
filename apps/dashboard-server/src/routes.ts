@@ -6,6 +6,7 @@ import {
   CancelCommandSchema,
   CheckoutActionCommandSchema,
   CheckoutReviewCommandSchema,
+  type ComposerCommandCatalogue,
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
   RetryCommandSchema,
@@ -84,6 +85,7 @@ export interface DashboardRouteContext {
   snapshot(): BrowserSnapshot;
   workspaces(): WorkspaceTarget[];
   refreshWorkspaces(): Promise<WorkspaceTarget[]>;
+  composerCommands(workspaceId: string): Promise<ComposerCommandCatalogue>;
   usage(): Promise<{ usage: unknown; error?: string }>;
   readSession(id: string, before?: string): Promise<unknown>;
   renameSession(id: string, name: string): Promise<unknown>;
@@ -149,7 +151,9 @@ function errorStatus(error: unknown): number {
     code === 'orchestration-conflict' ||
     code === 'session-assigned'
     ? 409
-    : 400;
+    : code === 'unknown-workspace'
+      ? 404
+      : 400;
 }
 
 function sendError(reply: FastifyReply, error: unknown): FastifyReply {
@@ -297,6 +301,16 @@ export const dashboardRoutes: FastifyPluginAsync<{
       return sendError(reply, error);
     }
   });
+  app.get<{ Params: { workspaceId: string } }>(
+    '/api/workspaces/:workspaceId/composer-commands',
+    async (request, reply) => {
+      try {
+        return await context.composerCommands(request.params.workspaceId);
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
   app.get('/api/usage', async (_request, reply) => {
     try {
       return await context.usage();
