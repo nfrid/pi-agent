@@ -141,6 +141,8 @@ function contentText(value: unknown): string {
 }
 
 function messageText(content: unknown): string {
+  if (Array.isArray(content))
+    return content.map(contentText).filter(Boolean).join('\n\n').trim();
   return contentText(content).trim();
 }
 

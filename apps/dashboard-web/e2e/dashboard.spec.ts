@@ -923,6 +923,10 @@ test('dense mobile session keeps conversation and activity readable', async ({
                   type: 'text',
                   text: 'Result: **ready** with `inline code`.',
                 },
+                {
+                  type: 'text',
+                  text: 'Deployment resumes automatically.',
+                },
               ],
             },
           },
@@ -963,6 +967,21 @@ test('dense mobile session keeps conversation and activity readable', async ({
   expect(compactHeader.text).not.toContain('/tmp');
   expect(compactHeader.text).not.toContain('test/');
   await expect(page.getByText('inline code', { exact: true })).toBeVisible();
+  const finalAssistantParagraphs = page
+    .locator('.message-assistant')
+    .filter({ hasText: 'Deployment resumes automatically.' })
+    .locator('.markdown > p');
+  await expect(finalAssistantParagraphs).toHaveCount(2);
+  const paragraphBoxes = await finalAssistantParagraphs.evaluateAll(
+    (paragraphs) =>
+      paragraphs.map((paragraph) => {
+        const bounds = paragraph.getBoundingClientRect();
+        return { top: bounds.top, bottom: bounds.bottom };
+      }),
+  );
+  expect(paragraphBoxes[1]?.top).toBeGreaterThan(
+    paragraphBoxes[0]?.bottom ?? 0,
+  );
   await expect(
     page.getByText('Context compacted', { exact: true }),
   ).toBeVisible();

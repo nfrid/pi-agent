@@ -13,6 +13,8 @@ interface ThemeLike {
 
 interface RegisteredTool {
   name: string;
+  description: string;
+  promptGuidelines: string[];
   execute: (
     id: string,
     params: {
@@ -65,6 +67,12 @@ describe('background terminals extension', () => {
 
     backgroundTerminals(pi);
     expect(tool?.name).toBe('background');
+    expect(tool?.description).toContain(
+      'write exactly one brief final-channel message saying you are waiting for the background process',
+    );
+    expect(tool?.promptGuidelines.join('\n')).toContain(
+      'without a commentary preamble or second summary',
+    );
 
     handlers.get('session_start')?.(
       {},

@@ -11,8 +11,10 @@ import {
   processDetails,
 } from './schema';
 
-const DESCRIPTION =
-  'Manage long-running, non-interactive Bash commands. Use start for servers, watchers, and long builds; use regular bash for quick commands. Commands run with /bin/bash -c (bash.exe on Windows), receive no stdin, and are stopped when the session ends. peek optionally waits for settlement, then returns bounded recent stdout/stderr so you can verify progress instead of guessing. Completion is delivered automatically: it steers the next turn when busy and wakes the agent when idle. Actions: start, peek, list, stop.';
+const WAIT_GUIDANCE =
+  'If no independent work remains, write exactly one brief final-channel message saying you are waiting for the background process and will resume automatically, then end the turn without a commentary preamble or second summary.';
+
+const DESCRIPTION = `Manage long-running, non-interactive Bash commands. Use start for servers, watchers, and long builds; use regular bash for quick commands. Commands run with /bin/bash -c (bash.exe on Windows), receive no stdin, and are stopped when the session ends. peek optionally waits for settlement, then returns bounded recent stdout/stderr so you can verify progress instead of guessing. Completion is delivered automatically: it steers the next turn when busy and wakes the agent when idle. ${WAIT_GUIDANCE} Actions: start, peek, list, stop.`;
 
 function requireText(value: string | undefined, name: string): string {
   const text = value?.trim();
@@ -38,6 +40,7 @@ export function registerBackgroundTool(
     description: DESCRIPTION,
     promptSnippet:
       'Start, inspect, and stop long-running non-interactive Bash commands',
+    promptGuidelines: [WAIT_GUIDANCE],
     parameters: Parameters,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const active = getManager();

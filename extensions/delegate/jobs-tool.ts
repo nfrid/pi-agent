@@ -79,10 +79,10 @@ export function registerDelegateJobsTool(
     name: 'delegate_jobs',
     label: 'Delegate Jobs',
     description:
-      'Inspect and cancel asynchronous delegate jobs. Completions are delivered automatically. Do not use peek merely to wait: if no independent work remains, briefly tell the user you are waiting for the background delegate and will resume automatically, then end the turn. Use peek only for deliberate inspection or once when a bounded timeout changes the next action. Actions: list, peek, cancel.',
+      'Inspect and cancel asynchronous delegate jobs. Completions are delivered automatically. Do not use peek merely to wait: if no independent work remains, write exactly one brief final-channel message saying you are waiting for the background delegate and will resume automatically, then end the turn without a commentary preamble or second summary. Use peek only for deliberate inspection or once when a bounded timeout changes the next action. Actions: list, peek, cancel.',
     promptSnippet: 'Inspect or cancel asynchronous delegate jobs',
     promptGuidelines: [
-      'If no independent work remains, briefly tell the user you are waiting for the background delegate and will resume automatically, then end the turn. Do not call delegate_jobs peek merely to wait or keep the turn open. Use peek only for deliberate inspection or once when a bounded timeout will change your next action, and never repeat it to poll.',
+      'If no independent work remains, write exactly one brief final-channel message saying you are waiting for the background delegate and will resume automatically, then end the turn without a commentary preamble or second summary. Do not call delegate_jobs peek merely to wait or keep the turn open. Use peek only for deliberate inspection or once when a bounded timeout will change the next action, and never repeat it to poll.',
     ],
     parameters: Parameters,
     async execute(

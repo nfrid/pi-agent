@@ -503,7 +503,7 @@ describe('async delegate extension', () => {
       'Started 1 background delegate job: dj-1',
     );
     expect(launch?.content[0]?.text).toContain(
-      'if none remains, briefly tell the user you are waiting for the background delegate and will resume automatically, then end the turn.',
+      'if none remains, write exactly one brief final-channel message saying you are waiting for the background delegate and will resume automatically, then end the turn without a commentary preamble or second summary.',
     );
     expect(launch?.content[0]?.text).not.toContain(
       'if none remains, end the turn.',

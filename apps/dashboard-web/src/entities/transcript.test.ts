@@ -69,6 +69,26 @@ describe('activity row views and virtual transcript construction', () => {
     expect(landmarkOrdinary?.label).toBe('Continue normally.');
   });
 
+  it('preserves boundaries between assistant text blocks', () => {
+    const [item] = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'assistant-waiting',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Waiting for the final review.' },
+            { type: 'text', text: 'Deployment will resume automatically.' },
+          ],
+        },
+      },
+    ]);
+
+    expect(item?.text).toBe(
+      'Waiting for the final review.\n\nDeployment will resume automatically.',
+    );
+  });
+
   it('keeps rich outline preview text and message timestamps', () => {
     const text =
       `Outline detail ${'with more useful context '.repeat(8)}`.trim();
