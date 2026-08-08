@@ -45,6 +45,7 @@ export {
 
 type ComposerProps = {
   runtime: RuntimeSnapshot | undefined;
+  runtimes?: readonly RuntimeSnapshot[];
   sessionId: string;
   workspaceId?: string;
 };
@@ -709,6 +710,7 @@ export function SessionView({
           <ExtensionSurfaceStack runtime={runtime} placement="composer" />
           <Composer
             runtime={runtime}
+            runtimes={snapshot.runtimes}
             sessionId={id}
             workspaceId={workspaceId}
           />

@@ -111,6 +111,12 @@ function mergeRuntimeEvent(
         liveState: event.state,
         ...(update?.session === undefined ? {} : { session: update.session }),
         ...(update?.model === undefined ? {} : { model: update.model }),
+        ...(update?.modelCatalog === undefined
+          ? {}
+          : { modelCatalog: update.modelCatalog }),
+        ...(update?.thinkingLevels === undefined
+          ? {}
+          : { thinkingLevels: update.thinkingLevels }),
         ...(update?.contextUsage === undefined
           ? {}
           : { contextUsage: update.contextUsage }),

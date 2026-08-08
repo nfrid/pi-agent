@@ -19,7 +19,11 @@ import {
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { useDashboardNavigate } from '../routes/navigation';
-import { modelOptionValue, parseModelOptionValue } from './model-option';
+import {
+  configuredModelOptions,
+  modelOptionValue,
+  parseModelOptionValue,
+} from './model-option';
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 const MarkdownComposerEditor = lazy(() => import('./markdown-composer-editor'));
@@ -324,7 +328,13 @@ function QueuePanel({
   );
 }
 
-function ModelControl({ runtime }: { runtime: RuntimeSnapshot }) {
+function ModelControl({
+  runtime,
+  runtimes,
+}: {
+  runtime: RuntimeSnapshot;
+  runtimes: readonly RuntimeSnapshot[];
+}) {
   const command = useMutation(commandMutationOptions(dashboardHttpClient));
   const [modelValue, setModelValue] = useState(
     runtime.model
@@ -341,16 +351,7 @@ function ModelControl({ runtime }: { runtime: RuntimeSnapshot }) {
       ),
     [runtime.model],
   );
-  const models =
-    runtime.modelCatalog ??
-    (runtime.model
-      ? [
-          {
-            provider: runtime.model.provider,
-            model: runtime.model.model,
-          },
-        ]
-      : []);
+  const models = configuredModelOptions(runtimes, runtime);
   if (!models.length && !error) return null;
   const unavailable =
     runtime.online === false || runtime.liveState === 'stopping';
@@ -453,10 +454,12 @@ function ThinkingControl({ runtime }: { runtime: RuntimeSnapshot }) {
 
 export function Composer({
   runtime,
+  runtimes = runtime ? [runtime] : [],
   sessionId,
   workspaceId,
 }: {
   runtime: RuntimeSnapshot | undefined;
+  runtimes?: readonly RuntimeSnapshot[];
   sessionId: string;
   workspaceId?: string;
 }) {
@@ -842,7 +845,7 @@ export function Composer({
             <ContextIndicator usage={runtime.contextUsage} />
           </div>
           <div className="composer-control-row">
-            <ModelControl runtime={runtime} />
+            <ModelControl runtime={runtime} runtimes={runtimes} />
             <ThinkingControl runtime={runtime} />
           </div>
           {error && (

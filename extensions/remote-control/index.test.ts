@@ -469,7 +469,11 @@ describe('Pi 0.84 runtime catalogues', () => {
     };
     const ctx = {
       scopedModels: [{ model: scoped }],
-      modelRegistry: { getAvailable: () => [scoped, available] },
+      modelRegistry: {
+        getAvailable: () => [scoped, available],
+        hasConfiguredAuth: (model: { provider: string }) =>
+          model.provider === 'scoped-provider',
+      },
     } as unknown as ExtensionContext;
 
     expect(modelCatalogSnapshot(ctx)).toEqual([
@@ -482,17 +486,25 @@ describe('Pi 0.84 runtime catalogues', () => {
     ]);
   });
 
-  it('falls back to the available catalogue when scope is empty', () => {
+  it('falls back to models from configured providers when scope is empty', () => {
+    const configured = {
+      provider: 'configured',
+      id: 'model',
+      input: ['image'],
+    };
     const ctx = {
       scopedModels: [],
       modelRegistry: {
         getAvailable: () => [
-          { provider: 'available', id: 'model', input: ['image'] },
+          configured,
+          { provider: 'unconfigured', id: 'other', input: ['text'] },
         ],
+        hasConfiguredAuth: (model: { provider: string }) =>
+          model.provider === 'configured',
       },
     } as unknown as ExtensionContext;
     expect(modelCatalogSnapshot(ctx)).toMatchObject([
-      { provider: 'available', model: 'model', supportsImages: true },
+      { provider: 'configured', model: 'model', supportsImages: true },
     ]);
   });
 

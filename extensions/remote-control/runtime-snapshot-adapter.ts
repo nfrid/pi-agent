@@ -98,7 +98,10 @@ export function modelCatalogSnapshot(
 ): RuntimeSnapshot['modelCatalog'] {
   const registry = (
     ctx as unknown as {
-      modelRegistry?: { getAvailable?: () => readonly unknown[] };
+      modelRegistry?: {
+        getAvailable?: () => readonly unknown[];
+        hasConfiguredAuth?: (model: unknown) => boolean;
+      };
       scopedModels?: readonly { model: unknown }[];
     }
   ).modelRegistry;
@@ -107,10 +110,11 @@ export function modelCatalogSnapshot(
       scopedModels?: readonly { model: unknown }[];
     }
   ).scopedModels;
-  const models =
+  const models = (
     scopedModels && scopedModels.length > 0
       ? scopedModels.map(({ model }) => model)
-      : (registry?.getAvailable?.() ?? []);
+      : (registry?.getAvailable?.() ?? [])
+  ).filter((model) => registry?.hasConfiguredAuth?.(model) !== false);
   return models.slice(0, 256).flatMap((candidate) => {
     if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate))
       return [];

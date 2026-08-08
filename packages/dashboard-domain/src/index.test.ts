@@ -709,6 +709,8 @@ describe('dashboard domain reducers', () => {
   it('merges live queue and extension surface patches without dropping either', () => {
     const state = createRuntimeReducerState({
       ...snapshot(),
+      modelCatalog: [{ provider: 'old', model: 'old' }],
+      thinkingLevels: ['off'],
       queueDrafts: [{ clientId: 'old', mode: 'steer', text: 'replace me' }],
       extensionSurfaces: [],
     });
@@ -717,6 +719,8 @@ describe('dashboard domain reducers', () => {
         type: 'runtime.stateChanged',
         state: 'working',
         snapshot: {
+          modelCatalog: [{ provider: 'configured', model: 'current' }],
+          thinkingLevels: ['off', 'medium'],
           queueDrafts: [
             { clientId: 'draft-1', mode: 'followUp', text: 'run later' },
           ],
@@ -732,6 +736,10 @@ describe('dashboard domain reducers', () => {
       runtimeSeq: 1,
     });
     expect(result.accepted).toBe(true);
+    expect(result.state.snapshot.modelCatalog).toEqual([
+      { provider: 'configured', model: 'current' },
+    ]);
+    expect(result.state.snapshot.thinkingLevels).toEqual(['off', 'medium']);
     expect(result.state.snapshot.queueDrafts).toEqual([
       { clientId: 'draft-1', mode: 'followUp', text: 'run later' },
     ]);

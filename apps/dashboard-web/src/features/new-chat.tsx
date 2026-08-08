@@ -13,7 +13,11 @@ import { useMutation } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav } from './agent-thread-nav';
-import { modelOptionValue } from './model-option';
+import {
+  configuredModelOptions,
+  modelOptionValue,
+  type RuntimeModelOption,
+} from './model-option';
 
 function errorDetails(cause: unknown): { message: string; code?: string } {
   if (cause instanceof Error) {
@@ -34,30 +38,11 @@ function isSharedWorkingDirectoryWarning(message: string, code?: string) {
 }
 
 type NewChatModel = NonNullable<StartRuntimeRequest['model']>;
-type RuntimeModelOption = NonNullable<RuntimeSnapshot['modelCatalog']>[number];
 
 export function newChatModelOptions(
   runtimes: readonly RuntimeSnapshot[],
 ): readonly RuntimeModelOption[] {
-  const options = new Map<string, RuntimeModelOption>();
-  for (const runtime of runtimes) {
-    if (runtime.model) {
-      const value = modelOptionValue(
-        runtime.model.provider,
-        runtime.model.model,
-      );
-      options.set(value, {
-        provider: runtime.model.provider,
-        model: runtime.model.model,
-        supportsImages: runtime.model.supportsImages,
-      });
-    }
-    for (const model of runtime.modelCatalog ?? []) {
-      const value = modelOptionValue(model.provider, model.model);
-      options.set(value, model);
-    }
-  }
-  return [...options.values()];
+  return configuredModelOptions(runtimes);
 }
 
 export function newChatRequest(
