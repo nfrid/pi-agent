@@ -4471,7 +4471,6 @@ body:has(.session-page) .global-tools > .palette-trigger {
   line-height: 1;
 }
 .session-more-glyph {
-  padding-bottom: 5px;
   font-size: 10px;
   letter-spacing: 1px;
 }
