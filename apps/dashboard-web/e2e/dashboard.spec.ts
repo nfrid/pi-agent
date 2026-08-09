@@ -2848,11 +2848,28 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   await expect(delegateStats).toContainText('18 active');
   await expect(delegateStats).toContainText('0 finished');
   expect(
-    await delegateStats.evaluate((element) => ({
-      display: getComputedStyle(element).display,
-      rows: getComputedStyle(element).gridTemplateRows.split(' ').length,
-    })),
-  ).toMatchObject({ display: 'grid', rows: 2 });
+    await delegateStats.evaluate((element) => {
+      const [activeSection, finishedSection] = Array.from(
+        element.children,
+      ) as HTMLElement[];
+      if (!activeSection || !finishedSection)
+        throw new Error('Split delegate stats not found');
+      return {
+        display: getComputedStyle(element).display,
+        height: element.getBoundingClientRect().height,
+        topDelta: Math.abs(
+          activeSection.getBoundingClientRect().top -
+            finishedSection.getBoundingClientRect().top,
+        ),
+        divider: getComputedStyle(finishedSection).borderLeftStyle,
+      };
+    }),
+  ).toMatchObject({ display: 'inline-flex', topDelta: 0, divider: 'solid' });
+  expect(
+    await delegateStats.evaluate(
+      (element) => element.getBoundingClientRect().height,
+    ),
+  ).toBeLessThan(30);
   expect(
     await delegateStats.evaluate((element) =>
       element.parentElement?.classList.contains(
