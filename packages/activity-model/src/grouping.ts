@@ -235,10 +235,17 @@ export function groupTranscript(
 ): ActivityGroup[] {
   const groups: ActivityGroup[] = [];
   let open: ActivityGroup | undefined;
+  let openHasTool = false;
+  let openIsStreaming = false;
 
   const flush = (): void => {
-    if (open) groups.push(open);
+    // A settled preamble without a call is only a transcript lead, not an
+    // activity card. A streaming lead remains eligible so the UI can show its
+    // preparing state before the first tool component arrives.
+    if (open && (openHasTool || openIsStreaming)) groups.push(open);
     open = undefined;
+    openHasTool = false;
+    openIsStreaming = false;
   };
 
   for (const [index, entry] of entries.entries()) {
@@ -250,16 +257,23 @@ export function groupTranscript(
       // A later preamble is the only ordinary way to start the next group.
       flush();
       open = { start: index, end: index };
+      openIsStreaming = entry.streaming === true;
     } else if (entry.kind === 'tool') {
       // Unannounced tool runs remain outside the activity model. Once a
       // preamble has opened a group, all tools belong to it regardless of
       // classification or count.
-      if (open) open.end = index;
+      if (open) {
+        open.end = index;
+        openHasTool = true;
+      }
     } else if (entry.kind === 'assistant') {
       if (entry.speaks) flush();
       // Thinking-only assistant entries neither open nor split groups. Keep
       // them in an already-open range so a preparing turn remains groupable.
-      else if (open) open.end = index;
+      else if (open) {
+        open.end = index;
+        openIsStreaming ||= entry.streaming === true;
+      }
     } else {
       flush();
     }

@@ -97,20 +97,31 @@ describe('shared activity model', () => {
     );
   });
 
-  it('does not keep a finished assistant-only tail live', () => {
+  it('does not emit a settled preamble without a tool', () => {
     expect(
-      projectActivityGroups(
-        [
-          {
-            kind: 'assistant',
-            speaks: false,
-            title: 'Preparing the response',
-            titleKind: 'preamble',
-          },
-        ],
-        { liveTail: true },
-      )[0]?.status,
-    ).toBe('complete');
+      groupTranscript([
+        {
+          kind: 'assistant',
+          speaks: false,
+          title: 'Preparing the response',
+          titleKind: 'preamble',
+        },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('emits a streaming preamble before its first tool arrives', () => {
+    expect(
+      groupTranscript([
+        {
+          kind: 'assistant',
+          speaks: false,
+          streaming: true,
+          title: 'Preparing the response',
+          titleKind: 'preamble',
+        },
+      ]),
+    ).toEqual([{ start: 0, end: 0 }]);
   });
 
   it('keeps unresolved failures live until the active group finishes', () => {
