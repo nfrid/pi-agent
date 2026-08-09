@@ -194,7 +194,6 @@ function ContextIndicator({
       className={`context-indicator context-${indicator.level}`}
       role="img"
       aria-label={`Context window ${indicator.text}`}
-      title="Current context window usage"
     >
       <span className="context-label">ctx</span>
       <span className="context-meter" aria-hidden="true">

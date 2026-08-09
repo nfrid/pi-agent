@@ -1133,7 +1133,12 @@ test('dense mobile session keeps conversation and activity readable', async ({
             type: 'message',
             message: {
               role: 'assistant',
+              timestamp: '2026-08-09T12:34:00.000Z',
               content: [
+                {
+                  type: 'thinking',
+                  thinking: 'Checking the available mobile width.',
+                },
                 { type: 'text', text: 'Checking the mobile transcript.' },
                 {
                   type: 'toolCall',
@@ -1206,6 +1211,28 @@ test('dense mobile session keeps conversation and activity readable', async ({
   expect(compactHeader.text).not.toContain('/tmp');
   expect(compactHeader.text).not.toContain('test/');
   await expect(page.getByText('inline code', { exact: true })).toBeVisible();
+  await expect(page.locator('.message-assistant .message-role')).toHaveText(
+    'agent',
+  );
+  await expect(page.locator('.activity-step-time')).toBeVisible();
+  const fullWidthGeometry = await page.evaluate(() => {
+    const transcript = document.querySelector('.transcript');
+    const message = document.querySelector('.message-bubble');
+    const composer = document.querySelector('.composer');
+    if (!transcript || !message || !composer)
+      throw new Error('Transcript surfaces missing');
+    return {
+      transcript: transcript.getBoundingClientRect().width,
+      message: message.getBoundingClientRect().width,
+      composer: composer.getBoundingClientRect().width,
+    };
+  });
+  expect(
+    Math.abs(fullWidthGeometry.message - fullWidthGeometry.transcript),
+  ).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs(fullWidthGeometry.composer - fullWidthGeometry.transcript),
+  ).toBeLessThanOrEqual(1);
   const finalAssistantParagraphs = page
     .locator('.message-assistant')
     .filter({ hasText: 'Deployment resumes automatically.' })
@@ -1260,10 +1287,18 @@ test('dense mobile session keeps conversation and activity readable', async ({
     touch('touchend', 86);
   });
   await expect(page.locator('.agent-nav-drawer.open')).toBeVisible();
-  await page
+  const threadRow = page
     .locator('.agent-nav-drawer.open .agent-thread-row')
-    .first()
-    .click();
+    .first();
+  const threadCopyRightGap = await threadRow.evaluate((row) => {
+    const copy = row.querySelector('.agent-thread-copy');
+    if (!copy) throw new Error('Agent thread copy missing');
+    return (
+      row.getBoundingClientRect().right - copy.getBoundingClientRect().right
+    );
+  });
+  expect(threadCopyRightGap).toBeLessThanOrEqual(8);
+  await threadRow.click();
   await expect(page.locator('.agent-nav-drawer.open')).toHaveCount(0);
   await page.getByRole('button', { name: 'Open transcript outline' }).click();
   const outline = page.getByRole('dialog', { name: 'Transcript outline' });
@@ -1277,8 +1312,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
     name: 'Transcript outline',
   });
   const steeringOutlineItem = reopenedOutline.getByRole('button', {
-    name: 'Steering · Focus on mobile readability.',
-    exact: true,
+    name: /^Steering · Focus on mobile readability\./u,
   });
   await expect(steeringOutlineItem).toHaveClass(/outline-steering/u);
   await reopenedOutline
@@ -1314,6 +1348,15 @@ test('dense mobile session keeps conversation and activity readable', async ({
   expect(jumpGeometry.bottom).toBeLessThan(jumpGeometry.composerTop ?? 0);
   await jumpLatest.click();
   await expect(jumpLatest).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollHeight -
+          (window.scrollY + window.innerHeight),
+      ),
+    )
+    .toBeLessThanOrEqual(1);
   const activity = page.getByRole('button', {
     name: /Checking the mobile transcript.*1 tool/,
   });
@@ -1566,7 +1609,12 @@ test('dense mobile session keeps conversation and activity readable', async ({
   );
   await expect(activity).toBeVisible();
   await activity.click();
-  await expect(page.locator('.tool-chip').getByText('Reading')).toBeVisible();
+  const expandedAction = page.locator('.tool-detail > summary.activity-step');
+  await expect(
+    expandedAction.locator('.activity-tool-name').getByText('Reading'),
+  ).toBeVisible();
+  await expect(expandedAction.locator('.activity-step-dot')).toBeVisible();
+  await expect(page.locator('.thinking-meta time')).toBeVisible();
   await expect(page.getByText('src/App.tsx', { exact: true })).toBeVisible();
   await activity.click();
   const emitAssistant = async (content: unknown[]) =>
@@ -1675,7 +1723,10 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(
     page.locator('.message-bubble').getByText('Delta during settled turn'),
   ).toBeVisible();
-  await page.evaluate(() => window.scrollBy(0, -400));
+  await page.evaluate(() => {
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -400 }));
+    window.scrollBy(0, -400);
+  });
   await emitMessage('message.started', 456, 'Message while reading history');
   await expect(
     page.locator('.message-bubble').getByText('Message while reading history'),

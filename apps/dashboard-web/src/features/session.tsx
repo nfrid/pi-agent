@@ -2,7 +2,6 @@ import {
   type DashboardLiveStore,
   dashboardHttpClient,
   selectRuntimeForSession,
-  selectSessionChange,
   selectSessionReplacement,
   sessionQueryOptions,
   useDashboardStore,
@@ -98,7 +97,6 @@ export function SessionView({
     (state) => state.sessionsById[id],
   );
   const resyncNonce = useDashboardStore(store, (state) => state.resyncNonce);
-  const sessionChange = useDashboardStore(store, selectSessionChange(id));
   const runtime = useDashboardStore(store, selectRuntimeForSession(id));
   const replacementSessionId = useDashboardStore(
     store,
@@ -339,6 +337,20 @@ export function SessionView({
       )
         cancelPendingTailScroll();
     };
+    let touchY: number | undefined;
+    let previousScrollY = window.scrollY;
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) cancelPendingTailScroll();
+    };
+    const onTouchStart = (event: TouchEvent) => {
+      touchY = event.touches[0]?.clientY;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const nextY = event.touches[0]?.clientY;
+      if (touchY !== undefined && nextY !== undefined && nextY > touchY)
+        cancelPendingTailScroll();
+      touchY = nextY;
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
       if (
@@ -348,45 +360,33 @@ export function SessionView({
         )
       )
         return;
-      if (
-        [
-          'ArrowUp',
-          'ArrowDown',
-          'PageUp',
-          'PageDown',
-          'Home',
-          'End',
-          'Space',
-        ].includes(event.code)
-      )
+      if (['ArrowUp', 'PageUp', 'Home'].includes(event.code))
         cancelPendingTailScroll();
     };
     const update = () => {
+      const scrolledUp = window.scrollY < previousScrollY - 1;
+      previousScrollY = window.scrollY;
+      if (scrolledUp) cancelPendingTailScroll();
       const nearLatest = isNearPageBottom(
         document.documentElement.scrollHeight,
         window.scrollY,
         window.innerHeight,
       );
-      if (
-        initialTailSessionRef.current === id &&
-        !userScrollIntentRef.current
-      ) {
-        stickToBottomRef.current = true;
+      if (stickToBottomRef.current && !userScrollIntentRef.current) {
         setAwayFromLatest(false);
         if (!nearLatest && layoutScrollFrameRef.current === undefined) {
           layoutScrollFrameRef.current = window.requestAnimationFrame(() => {
             layoutScrollFrameRef.current = undefined;
-            if (
-              initialTailSessionRef.current === id &&
-              !userScrollIntentRef.current
-            )
+            if (stickToBottomRef.current && !userScrollIntentRef.current)
               window.scrollTo(0, document.documentElement.scrollHeight);
           });
         }
         return;
       }
-      stickToBottomRef.current = nearLatest;
-      if (nearLatest) userScrollIntentRef.current = false;
+      if (nearLatest) {
+        userScrollIntentRef.current = false;
+        stickToBottomRef.current = true;
+      }
       setAwayFromLatest(
         shouldShowJumpToLatest(
           document.documentElement.scrollHeight,
@@ -396,19 +396,17 @@ export function SessionView({
       );
     };
     window.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('wheel', cancelPendingTailScroll, {
-      passive: true,
-    });
-    window.addEventListener('touchmove', cancelPendingTailScroll, {
-      passive: true,
-    });
+    window.addEventListener('wheel', onWheel, { passive: true });
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('pointerdown', onPointerDown);
     update();
     return () => {
       window.removeEventListener('scroll', update);
-      window.removeEventListener('wheel', cancelPendingTailScroll);
-      window.removeEventListener('touchmove', cancelPendingTailScroll);
+      window.removeEventListener('wheel', onWheel);
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('pointerdown', onPointerDown);
     };
@@ -557,17 +555,9 @@ export function SessionView({
     };
   }, [id, sessionMounted]);
   useEffect(() => {
-    if (replacementSessionId && replacementSessionId !== id) {
+    if (replacementSessionId && replacementSessionId !== id)
       replaceSession(replacementSessionId);
-      return;
-    }
-    if (data && sessionChange > 0)
-      stickToBottomRef.current = isNearPageBottom(
-        document.documentElement.scrollHeight,
-        window.scrollY,
-        window.innerHeight,
-      );
-  }, [data, id, replaceSession, replacementSessionId, sessionChange]);
+  }, [id, replaceSession, replacementSessionId]);
   const loadEarlierHistory = useCallback(async () => {
     const currentHistory = history;
     if (
@@ -716,12 +706,13 @@ export function SessionView({
       ?.id;
   const jumpToLatest = () => {
     userScrollIntentRef.current = false;
-    window.scrollTo({
-      top: document.documentElement.scrollHeight,
-      behavior: 'smooth',
-    });
     stickToBottomRef.current = true;
     setAwayFromLatest(false);
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    window.requestAnimationFrame(() => {
+      if (stickToBottomRef.current && !userScrollIntentRef.current)
+        window.scrollTo(0, document.documentElement.scrollHeight);
+    });
   };
   return (
     <div
@@ -845,7 +836,6 @@ export function SessionView({
               className="session-icon-button jump-latest"
               onClick={jumpToLatest}
               aria-label="Jump to latest transcript activity"
-              title="Jump to latest"
             >
               ↓
             </button>

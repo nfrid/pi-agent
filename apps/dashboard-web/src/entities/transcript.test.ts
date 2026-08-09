@@ -14,6 +14,7 @@ import {
   activityGroupPresentation,
   activityGroupSummary,
   activityStepParts,
+  activityStepTimestamps,
   buildTranscriptGroupCoverage,
   buildTranscriptLandmarks,
   buildVirtualTranscriptRows,
@@ -22,6 +23,7 @@ import {
   restoreVirtualBottom,
   type TranscriptGroup,
   transcriptItemTimestamp,
+  transcriptRoleLabel,
 } from './transcript';
 
 describe('activity row views and virtual transcript construction', () => {
@@ -116,6 +118,31 @@ describe('activity row views and virtual transcript construction', () => {
     );
   });
 
+  it('uses agent labels and associates tool steps with their turn timestamp', () => {
+    expect(transcriptRoleLabel('assistant')).toBe('agent');
+    expect(transcriptRoleLabel('user')).toBe('user');
+    expect(transcriptRoleLabel('assistant', 'steer')).toBe('steer');
+
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          timestamp: '2026-08-09T12:34:00.000Z',
+          content: [
+            { type: 'thinking', thinking: 'Checking the timestamp.' },
+            { type: 'toolCall', id: 'call-1', name: 'read' },
+            { type: 'toolCall', id: 'call-2', name: 'bash' },
+          ],
+        },
+      },
+    ]);
+    expect(activityStepTimestamps(items)).toEqual([
+      '2026-08-09T12:34:00.000Z',
+      '2026-08-09T12:34:00.000Z',
+    ]);
+  });
+
   it('separates tool names from their high-signal arguments', () => {
     expect(
       activityStepParts({
@@ -144,6 +171,10 @@ describe('activity row views and virtual transcript construction', () => {
       role: 'other',
       state: 'complete',
     });
+    const longPath = `src/${'wide-segment/'.repeat(10)}dashboard.tsx`;
+    expect(
+      activityStepParts({ name: 'read', args: { path: longPath } }).argument,
+    ).toBe(longPath);
   });
 
   it('keeps workspace paths relative and outside paths absolute', () => {
@@ -535,6 +566,24 @@ describe('activity row views and virtual transcript construction', () => {
         status: 'complete',
       },
     ]);
+  });
+
+  it('uses the latest plain thinking blob instead of a generic group title', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Tracing the remaining layout gap.' },
+            { type: 'toolCall', id: 'call-layout', name: 'read' },
+          ],
+        },
+      },
+    ]);
+    expect(
+      projectActivityGroups(items.map(({ entry }) => entry))[0]?.title,
+    ).toBe('Tracing the remaining layout gap');
   });
 
   it('uses semantic toolCallIds after compatibility filtering for preamble titles', () => {

@@ -128,13 +128,41 @@ export function transcriptItemTimestamp(
     : undefined;
 }
 
+function activityGroupItemTimestamps(
+  items: readonly TranscriptModelItem[],
+): Array<number | string | undefined> {
+  let associatedTimestamp: number | string | undefined;
+  return items.map((item) => {
+    const timestamp = transcriptItemTimestamp(item);
+    if (timestamp !== undefined) associatedTimestamp = timestamp;
+    return timestamp ?? associatedTimestamp;
+  });
+}
+
+export function activityStepTimestamps(
+  items: readonly TranscriptModelItem[],
+): Array<number | string | undefined> {
+  const timestamps = activityGroupItemTimestamps(items);
+  return items.flatMap((item, index) =>
+    item.entry.kind === 'tool' ? [timestamps[index]] : [],
+  );
+}
+
+export function transcriptRoleLabel(
+  role: 'user' | 'assistant',
+  deliveryMode?: TranscriptModelItem['deliveryMode'],
+): string {
+  if (deliveryMode === 'steer') return 'steer';
+  return role === 'assistant' ? 'agent' : role;
+}
+
 function landmarkType(
   kind: TranscriptLandmark['kind'],
   deliveryMode?: TranscriptLandmark['deliveryMode'],
 ): string {
   if (kind === 'user')
     return deliveryMode === 'steer' ? 'Steering message' : 'User message';
-  if (kind === 'assistant') return 'Assistant update';
+  if (kind === 'assistant') return 'Agent update';
   return 'Agent activity';
 }
 
@@ -198,7 +226,7 @@ export function buildTranscriptLandmarks(
     )
       result.push({
         key: item.key,
-        label: landmarkLabel(item, 'Assistant activity'),
+        label: landmarkLabel(item, 'Agent activity'),
         kind: 'assistant',
         itemIndex: index,
         ...(transcriptItemTimestamp(item) === undefined
@@ -488,21 +516,28 @@ export function Transcript({
                 />
               </AriaButton>
               {!expanded && (
-                <CollapsedActivitySummary group={group} cwd={runtime?.cwd} />
+                <CollapsedActivitySummary
+                  group={group}
+                  items={groupItems}
+                  cwd={runtime?.cwd}
+                />
               )}
               {visibleLead && (
                 <div className="activity-lead">
-                  <span className="message-role">assistant</span>
+                  <span className="message-role">agent</span>
                   <Markdown>{visibleLead}</Markdown>
                 </div>
               )}
               {expanded && (
                 <div className="activity-detail" id={detailId}>
-                  {groupItems.map((child) => (
+                  {groupItems.map((child, childIndex) => (
                     <TranscriptEntry
                       key={child.key}
                       item={child}
                       cwd={runtime?.cwd}
+                      timestampOverride={
+                        activityGroupItemTimestamps(groupItems)[childIndex]
+                      }
                     />
                   ))}
                 </div>
@@ -567,7 +602,7 @@ export function displayActivityPath(value: string, cwd = ''): string {
     : normalized;
 }
 
-function shortActivityArgument(value: string, maximum = 96): string {
+function shortActivityArgument(value: string, maximum = 320): string {
   const compact = value.replace(/\s+/gu, ' ').trim();
   return compact.length > maximum
     ? `${compact.slice(0, maximum - 1).trimEnd()}…`
@@ -817,17 +852,54 @@ export function activityGroupMetadata(
   return parts.join(' · ');
 }
 
+function ActivityStepContent({
+  action,
+  timestamp,
+}: {
+  action: ActivityStepParts;
+  timestamp?: number | string;
+}) {
+  return (
+    <>
+      <span className="activity-step-dot" aria-hidden="true">
+        {action.state === 'failed'
+          ? '!'
+          : action.state === 'pending'
+            ? '…'
+            : null}
+      </span>
+      <span className="activity-tool-name">{action.action}</span>
+      {action.argument && (
+        <span className="activity-tool-argument">{action.argument}</span>
+      )}
+      <DashboardTime
+        className="transcript-time activity-step-time"
+        timestamp={timestamp}
+      />
+    </>
+  );
+}
+
 function CollapsedActivitySummary({
   group,
+  items,
   cwd,
 }: {
   group: TranscriptGroup;
+  items: readonly TranscriptModelItem[];
   cwd?: string;
 }) {
   const summary = activityGroupSummary(group);
+  const allTimestamps = activityStepTimestamps(items);
   const recentActions = group.tools
     .slice(-summary.recentTools.length)
-    .map((tool) => activityStepParts(tool, cwd));
+    .map((tool, index) => ({
+      action: activityStepParts(tool, cwd),
+      timestamp:
+        allTimestamps[
+          allTimestamps.length - summary.recentTools.length + index
+        ],
+    }));
   const stepKeyCounts = new Map<string, number>();
   return (
     <div className="activity-summary">
@@ -839,28 +911,15 @@ function CollapsedActivitySummary({
       )}
       {recentActions.length > 0 && (
         <ol className="activity-steps">
-          {recentActions.map((action) => {
+          {recentActions.map(({ action, timestamp }) => {
             const occurrence = (stepKeyCounts.get(action.label) ?? 0) + 1;
             stepKeyCounts.set(action.label, occurrence);
             return (
               <li
                 className={`activity-step role-${action.role} step-${action.state}`}
                 key={`${action.label}-${occurrence}`}
-                title={action.label}
               >
-                <span className="activity-step-dot" aria-hidden="true">
-                  {action.state === 'failed'
-                    ? '!'
-                    : action.state === 'pending'
-                      ? '…'
-                      : null}
-                </span>
-                <span className="activity-tool-name">{action.action}</span>
-                {action.argument && (
-                  <span className="activity-tool-argument">
-                    {action.argument}
-                  </span>
-                )}
+                <ActivityStepContent action={action} timestamp={timestamp} />
               </li>
             );
           })}
@@ -1204,21 +1263,28 @@ function VirtualizedTranscript({
           />
         </AriaButton>
         {!expanded && (
-          <CollapsedActivitySummary group={group} cwd={runtime?.cwd} />
+          <CollapsedActivitySummary
+            group={group}
+            items={groupItems}
+            cwd={runtime?.cwd}
+          />
         )}
         {visibleLead && (
           <div className="activity-lead">
-            <span className="message-role">assistant</span>
+            <span className="message-role">agent</span>
             <Markdown>{visibleLead}</Markdown>
           </div>
         )}
         {expanded && (
           <div className="activity-detail" id={detailId}>
-            {groupItems.map((child) => (
+            {groupItems.map((child, childIndex) => (
               <TranscriptEntry
                 key={child.key}
                 item={child}
                 cwd={runtime?.cwd}
+                timestampOverride={
+                  activityGroupItemTimestamps(groupItems)[childIndex]
+                }
               />
             ))}
           </div>
@@ -1351,7 +1417,13 @@ function ToolInspector({ tool }: { tool: Record<string, unknown> }) {
   );
 }
 
-function ThinkingBlobs({ thinking }: { thinking: readonly string[] }) {
+function ThinkingBlobs({
+  thinking,
+  timestamp,
+}: {
+  thinking: readonly string[];
+  timestamp?: number | string;
+}) {
   const occurrences = new Map<string, number>();
   return (
     <aside className="transcript-thinking-blobs" aria-label="Thinking">
@@ -1363,6 +1435,13 @@ function ThinkingBlobs({ thinking }: { thinking: readonly string[] }) {
             className="transcript-thinking-blob"
             key={`${content}-${occurrence}`}
           >
+            <header className="thinking-meta">
+              <span>thinking</span>
+              <DashboardTime
+                className="transcript-time"
+                timestamp={timestamp}
+              />
+            </header>
             <Markdown>{content}</Markdown>
           </div>
         );
@@ -1468,11 +1547,13 @@ function TranscriptEventEntry({
 function TranscriptEntry({
   item,
   cwd,
+  timestampOverride,
 }: {
   item: import('../transcript').TranscriptModelItem;
   cwd?: string;
+  timestampOverride?: number | string;
 }) {
-  const timestamp = transcriptItemTimestamp(item);
+  const timestamp = transcriptItemTimestamp(item) ?? timestampOverride;
   if (item.event)
     return <TranscriptEventEntry event={item.event} timestamp={timestamp} />;
   if (item.preparing)
@@ -1490,7 +1571,7 @@ function TranscriptEntry({
     return (
       <div className="transcript-message-entry">
         {item.role === 'assistant' && item.thinking?.length ? (
-          <ThinkingBlobs thinking={item.thinking} />
+          <ThinkingBlobs thinking={item.thinking} timestamp={timestamp} />
         ) : null}
         {item.text || item.imageCount ? (
           <article
@@ -1498,7 +1579,7 @@ function TranscriptEntry({
           >
             <header className="message-meta">
               <span className="message-role">
-                {item.deliveryMode === 'steer' ? 'steer' : item.role}
+                {transcriptRoleLabel(item.role, item.deliveryMode)}
               </span>
               <DashboardTime
                 className="transcript-time"
@@ -1527,11 +1608,11 @@ function TranscriptEntry({
       cwd,
     );
     return (
-      <details className={`transcript-entry tool-detail role-${action.role}`}>
-        <summary title={action.label}>
-          <span className="tool-chip">{action.action}</span>
-          {action.argument && <span>{action.argument}</span>}
-          <DashboardTime className="transcript-time" timestamp={timestamp} />
+      <details
+        className={`transcript-entry tool-detail role-${action.role} step-${action.state}`}
+      >
+        <summary className="activity-step">
+          <ActivityStepContent action={action} timestamp={timestamp} />
         </summary>
         <ToolInspector tool={record} />
       </details>

@@ -3228,6 +3228,8 @@ h2 {
 }
 .agent-thread-copy {
   display: grid;
+  flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
   gap: 2px;
 }
@@ -3476,7 +3478,7 @@ h2 {
   left: calc(50% + 137px);
   display: flex;
   flex-direction: column;
-  width: min(720px, calc(100vw - 410px));
+  width: min(820px, calc(100vw - 410px));
   transform: translateX(-50%);
 }
 .extension-surfaces {
@@ -4803,8 +4805,8 @@ details.session-event {
 }
 .activity-summary .activity-steps li {
   min-height: 20px;
-  grid-template-columns: 14px max-content minmax(0, 1fr);
-  gap: 4px;
+  grid-template-columns: 14px max-content minmax(0, 1fr) auto;
+  gap: 6px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -4826,11 +4828,31 @@ details.session-event {
   background: currentColor;
   content: "";
 }
+.activity-step.role-edit,
+.tool-detail.role-edit {
+  --activity-role-color: var(--orange);
+}
+.activity-step.role-command,
+.tool-detail.role-command {
+  --activity-role-color: var(--purple);
+}
+.activity-step.role-search,
+.tool-detail.role-search {
+  --activity-role-color: var(--pink);
+}
+.activity-step.role-read,
+.tool-detail.role-read {
+  --activity-role-color: var(--cyan);
+}
+.activity-step.role-other,
+.tool-detail.role-other {
+  --activity-role-color: var(--green);
+}
 .activity-tool-name {
   border: 0;
   background: transparent;
   padding: 0;
-  color: var(--muted);
+  color: var(--activity-role-color, var(--muted));
   font-size: 10px;
   font-weight: 650;
   letter-spacing: 0;
@@ -4839,22 +4861,17 @@ details.session-event {
 .activity-tool-argument {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 10px;
+  color: color-mix(
+    in srgb,
+    var(--activity-role-color, var(--fg)) 72%,
+    var(--fg)
+  );
 }
-.activity-step.role-edit .activity-step-dot,
-.tool-detail.role-edit .tool-chip {
-  color: var(--orange);
+.activity-step .activity-step-dot {
+  color: var(--activity-role-color, var(--dim));
 }
-.activity-step.role-command .activity-step-dot,
-.tool-detail.role-command .tool-chip {
-  color: var(--purple);
-}
-.activity-step.role-search .activity-step-dot,
-.tool-detail.role-search .tool-chip {
-  color: var(--muted);
-}
-.activity-step.role-read .activity-step-dot,
-.tool-detail.role-read .tool-chip {
-  color: var(--cyan);
+.activity-step-time {
+  font-variant-numeric: tabular-nums;
 }
 .activity-step.step-failed .activity-step-dot {
   background: color-mix(in srgb, var(--red) 16%, transparent);
@@ -4869,16 +4886,16 @@ details.session-event {
 .activity-metadata {
   padding-left: 2px;
 }
-.tool-detail summary {
-  display: flex;
-  align-items: baseline;
+.tool-detail > summary.activity-step {
+  display: grid;
+  grid-template-columns: 14px max-content minmax(0, 1fr) auto;
+  align-items: center;
   min-width: 0;
-  gap: 8px;
+  gap: 6px;
 }
-.tool-detail summary > span:nth-of-type(2) {
+.tool-detail > summary.activity-step .activity-tool-argument {
   min-width: 0;
   overflow: hidden;
-  color: var(--fg);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4893,11 +4910,23 @@ details.session-event {
   margin: 6px 0;
 }
 .transcript-thinking-blob {
+  border-left: 2px solid color-mix(in srgb, var(--purple) 68%, transparent);
   border-radius: 5px;
   background: color-mix(in srgb, var(--purple) 7%, var(--bg));
   padding: 7px 9px;
   color: var(--muted);
   font-size: 10px;
+}
+.thinking-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 3px;
+  color: var(--purple);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 .transcript-thinking-blob .markdown {
   min-width: 0;
@@ -4914,6 +4943,16 @@ details.session-event {
     + .transcript-message-entry .transcript-thinking-blobs
   ) {
   border-bottom: 0;
+}
+.transcript-message-entry,
+.message-bubble {
+  width: 100%;
+  max-width: none;
+}
+.message-user,
+.message-assistant {
+  margin-right: 0;
+  margin-left: 0;
 }
 
 @media (max-width: 820px) {

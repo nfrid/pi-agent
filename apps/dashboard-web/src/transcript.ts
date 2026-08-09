@@ -521,9 +521,9 @@ export function toTranscriptEntries(
       visibleText && hasAssociatedTools
         ? preambleTitle(visibleText)
         : undefined;
-    const narratedTitle = (
-      textHeaders.length > 0 ? textHeaders : thinkingHeaders
-    ).at(-1);
+    const narratedTitle =
+      (textHeaders.length > 0 ? textHeaders : thinkingHeaders).at(-1) ??
+      (thinking.at(-1) ? preambleTitle(thinking.at(-1) ?? '') : undefined);
     result.push({
       key: item.key,
       entry: {
