@@ -1632,22 +1632,18 @@ test('dense mobile session keeps conversation and activity readable', async ({
     return {
       topDifference: Math.abs(timeRect.top - paragraphRect.top),
       paragraphTopInset: paragraphRect.top - blobRect.top,
-      leftInset: timeRect.left - blobRect.left,
-      rightInset: blobRect.right - timeRect.right,
       backgroundImage: getComputedStyle(time).backgroundImage,
     };
   });
   expect(thinkingLayout.topDifference).toBeLessThanOrEqual(2);
   expect(thinkingLayout.paragraphTopInset).toBeLessThanOrEqual(8);
-  expect(thinkingLayout.leftInset).toBeGreaterThanOrEqual(0);
-  expect(thinkingLayout.rightInset).toBeGreaterThanOrEqual(8);
-  expect(thinkingLayout.backgroundImage).toContain('linear-gradient');
+  expect(thinkingLayout.backgroundImage).toBe('none');
   const timestampRights = await page
-    .locator('.activity-group .transcript-time:not(.thinking-time):visible')
+    .locator('.activity-group .transcript-time:visible')
     .evaluateAll((timestamps) =>
       timestamps.map((timestamp) => timestamp.getBoundingClientRect().right),
     );
-  expect(timestampRights.length).toBeGreaterThanOrEqual(3);
+  expect(timestampRights.length).toBeGreaterThanOrEqual(4);
   expect(
     Math.max(...timestampRights) - Math.min(...timestampRights),
   ).toBeLessThanOrEqual(1);
