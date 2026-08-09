@@ -168,6 +168,7 @@ function WorkSurface({
       <DashboardDialog
         title={title}
         eyebrow={label}
+        hideTitle
         headerSummary={summary}
         className={dialogClassName}
         headerContent={headerStats}

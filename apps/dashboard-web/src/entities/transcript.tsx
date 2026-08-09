@@ -352,7 +352,8 @@ export function TranscriptOutline({
       <DashboardDialog
         isOpen={open}
         title="Transcript outline"
-        eyebrow="This session"
+        eyebrow="Transcript outline"
+        hideTitle
         headerSummary="Navigate transcript landmarks"
         headerContent={
           <SurfaceStats

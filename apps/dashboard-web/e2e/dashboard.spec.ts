@@ -500,6 +500,8 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await page.getByRole('button', { name: 'Open transcript outline' }).click();
   const outline = page.getByRole('dialog', { name: 'Transcript outline' });
   await expect(outline).toHaveClass(/work-surface-dialog/);
+  await expect(outline.locator('h2')).toHaveCount(0);
+  await expect(outline.locator('.eyebrow')).toHaveText('Transcript outline');
   await expect(outline.locator('.surface-dialog-summary')).toContainText(
     'Navigate transcript landmarks',
   );
@@ -2791,6 +2793,8 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   const tasksPanel = page.getByRole('dialog', { name: 'Tasks' });
   await expect(tasksPanel).toBeVisible();
   await expect(tasksPanel).toHaveClass(/work-surface-dialog/);
+  await expect(tasksPanel.locator('h2')).toHaveCount(0);
+  await expect(tasksPanel.locator('.eyebrow')).toHaveText('Tasks');
   await expect(tasksPanel.locator('.surface-dialog-summary')).toContainText(
     'Inspect the new drawer',
   );
@@ -2829,6 +2833,8 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   await delegatesLauncher.click();
   const delegatesPanel = page.getByRole('dialog', { name: 'Delegates' });
   await expect(delegatesPanel).toBeVisible();
+  await expect(delegatesPanel.locator('h2')).toHaveCount(0);
+  await expect(delegatesPanel.locator('.eyebrow')).toHaveText('Delegates');
   const delegateBody = delegatesPanel.locator('.surface-dialog-body');
   expect(
     await delegateBody.evaluate((element) => ({

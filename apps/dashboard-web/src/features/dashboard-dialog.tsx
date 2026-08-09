@@ -43,6 +43,7 @@ export function DashboardDialog({
   headerContent,
   headerSummary,
   eyebrow = 'Live work',
+  hideTitle = false,
   className = 'surface-dialog',
   layerClassName = 'surface-dialog-layer',
   isOpen = true,
@@ -53,6 +54,7 @@ export function DashboardDialog({
   headerContent?: ReactNode;
   headerSummary?: ReactNode;
   eyebrow?: string;
+  hideTitle?: boolean;
   className?: string;
   layerClassName?: string;
   isOpen?: boolean;
@@ -114,8 +116,10 @@ export function DashboardDialog({
         >
           <header className="surface-dialog-header">
             <div className="surface-dialog-heading">
-              <p className="eyebrow">{eyebrow}</p>
-              <h2 id={titleId}>{title}</h2>
+              <p className="eyebrow" id={hideTitle ? titleId : undefined}>
+                {eyebrow}
+              </p>
+              {!hideTitle && <h2 id={titleId}>{title}</h2>}
               {headerSummary && (
                 <div className="surface-dialog-summary">{headerSummary}</div>
               )}
