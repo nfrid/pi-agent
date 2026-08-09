@@ -105,34 +105,6 @@ function runtimeIndex(
   return Object.fromEntries(items.map((item) => [item.runtimeId, item]));
 }
 
-const NON_RENDERED_SESSION_ENTRY_TYPES = new Set([
-  'session',
-  'session_info',
-  'model_change',
-  'thinking_level_change',
-  'compaction',
-  'branch_summary',
-  'label',
-]);
-
-function isSparseSessionResponse(response: SessionApiResponse): boolean {
-  return (
-    response.entries.length === 0 ||
-    response.entries.every((entry) => {
-      if (
-        !entry ||
-        typeof entry !== 'object' ||
-        Array.isArray(entry) ||
-        typeof (entry as { type?: unknown }).type !== 'string'
-      )
-        return false;
-      return NON_RENDERED_SESSION_ENTRY_TYPES.has(
-        (entry as { type: string }).type,
-      );
-    })
-  );
-}
-
 function mergePrependedTranscript(
   current: TranscriptProjection,
   older: TranscriptProjection,
@@ -810,16 +782,7 @@ export class DashboardLiveStore {
       ),
       retiredEpochs: [...retiredEpochs],
     };
-    const responseRuntimeMatches =
-      response.runtimeEpoch === undefined ||
-      currentProjection?.runtimeEpoch === undefined ||
-      response.runtimeEpoch === currentProjection.runtimeEpoch;
-    if (
-      currentProjection &&
-      currentProjection.order.length > 0 &&
-      responseRuntimeMatches &&
-      (response.entriesComplete === false || isSparseSessionResponse(response))
-    ) {
+    if (response.entriesComplete === false && currentProjection) {
       // A brand-new active session can beat both branch serialization and the
       // JSONL watcher. Keep an established user-visible branch authoritative.
       // If the optimistic baseline has no user message yet, however, merge the

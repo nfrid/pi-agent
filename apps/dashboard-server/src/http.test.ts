@@ -720,6 +720,7 @@ describe('dashboard HTTP boundary', () => {
           session: {
             id: 'not-indexed-yet',
             name: 'Pending session',
+            leafId: 'stale-disk-entry',
             entriesComplete: false,
             entries: [],
           },
@@ -739,6 +740,32 @@ describe('dashboard HTTP boundary', () => {
       ],
       entriesComplete: false,
       metadata: { id: 'not-indexed-yet', name: 'Pending session' },
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 3,
+        event: {
+          type: 'session.changed',
+          session: {
+            id: 'not-indexed-yet',
+            leafId: 'missing-leaf',
+            entriesComplete: false,
+            entries: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const ambiguous = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/not-indexed-yet`,
+      { headers },
+    );
+    expect(ambiguous.status).toBe(200);
+    expect(await ambiguous.json()).toMatchObject({
+      entries: [],
+      entriesComplete: false,
+      metadata: { id: 'not-indexed-yet', activeRuntimeId: 'external-runtime' },
     });
     const missing = await fetch(
       `http://127.0.0.1:${server.port}/api/sessions/missing`,
@@ -761,12 +788,36 @@ describe('dashboard HTTP boundary', () => {
       path.join(sessionDir, 'sparse-session.jsonl'),
       `${[
         { type: 'session', id: 'sparse-session', cwd: '/tmp/project' },
-        { type: 'model_change', provider: 'openai', modelId: 'gpt-5' },
-        { type: 'thinking_level_change', thinkingLevel: 'medium' },
         {
           type: 'message',
           id: 'persisted-prompt',
+          parentId: null,
           message: { role: 'user', content: 'Persisted prompt' },
+        },
+        {
+          type: 'message',
+          id: 'persisted-answer',
+          parentId: 'persisted-prompt',
+          message: { role: 'assistant', content: 'Persisted answer' },
+        },
+        {
+          type: 'message',
+          id: 'stale-branch-prompt',
+          parentId: null,
+          message: { role: 'user', content: 'Wrong branch prompt' },
+        },
+        {
+          type: 'message',
+          id: 'stale-branch-answer',
+          parentId: 'stale-branch-prompt',
+          message: { role: 'assistant', content: 'Wrong branch' },
+        },
+        {
+          type: 'model_change',
+          id: 'settings-leaf',
+          parentId: null,
+          provider: 'openai',
+          modelId: 'gpt-5',
         },
       ]
         .map((entry) => JSON.stringify(entry))
@@ -801,6 +852,7 @@ describe('dashboard HTTP boundary', () => {
             liveState: 'working',
             session: {
               id: 'sparse-session',
+              leafId: 'persisted-answer',
               entriesComplete: true,
               entries: [
                 { type: 'model_change', provider: 'openai', modelId: 'gpt-5' },
@@ -822,9 +874,41 @@ describe('dashboard HTTP boundary', () => {
     expect(await response.json()).toMatchObject({
       entries: [
         { type: 'session', id: 'sparse-session' },
-        { type: 'model_change' },
-        { type: 'thinking_level_change' },
         { type: 'message', id: 'persisted-prompt' },
+        { type: 'message', id: 'persisted-answer' },
+      ],
+      entriesComplete: true,
+      metadata: { id: 'sparse-session', activeRuntimeId: 'sparse-runtime' },
+    });
+
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 2,
+        event: {
+          type: 'session.snapshot',
+          session: {
+            id: 'sparse-session',
+            leafId: 'settings-leaf',
+            entriesComplete: true,
+            entries: [
+              { type: 'model_change', provider: 'openai', modelId: 'gpt-5' },
+              { type: 'thinking_level_change', thinkingLevel: 'medium' },
+            ],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const switched = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/sparse-session`,
+      { headers: { 'x-dashboard-token': 'test-token' } },
+    );
+    expect(switched.status).toBe(200);
+    expect(await switched.json()).toMatchObject({
+      entries: [
+        { type: 'session', id: 'sparse-session' },
+        { type: 'model_change', id: 'settings-leaf' },
       ],
       entriesComplete: true,
       metadata: { id: 'sparse-session', activeRuntimeId: 'sparse-runtime' },

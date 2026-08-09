@@ -78,6 +78,55 @@ describe('session index', () => {
     expect(JSON.stringify(session.entries)).not.toContain('base64-bytes');
   });
 
+  it('filters active history to a valid leaf ancestry and rejects ambiguous leaves', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-branch-'));
+    const file = path.join(root, 'branched.jsonl');
+    await writeFile(
+      file,
+      `${[
+        { type: 'session', id: 'branched-id', cwd: '/tmp' },
+        {
+          type: 'message',
+          id: 'old-prompt',
+          parentId: null,
+          message: { role: 'user', content: 'Old prompt' },
+        },
+        {
+          type: 'message',
+          id: 'old-answer',
+          parentId: 'old-prompt',
+          message: { role: 'assistant', content: 'Old answer' },
+        },
+        {
+          type: 'model_change',
+          id: 'settings-leaf',
+          parentId: null,
+          provider: 'openai',
+          modelId: 'gpt-5',
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+
+    const branch = await index.readEntries(
+      'branched-id',
+      undefined,
+      'settings-leaf',
+    );
+    expect(
+      branch.entries.map((entry) => (entry as { id?: string }).id),
+    ).toEqual(['branched-id', 'settings-leaf']);
+    expect(branch.entries).not.toContainEqual(
+      expect.objectContaining({ id: 'old-prompt' }),
+    );
+    await expect(
+      index.readEntries('branched-id', undefined, 'missing-leaf'),
+    ).rejects.toThrow('Invalid session branch');
+  });
+
   it('returns a bounded recent tail for sessions larger than the response budget', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-large-'));
     const file = path.join(root, 'large.jsonl');

@@ -700,7 +700,7 @@ describe('DashboardLiveStore', () => {
     expect(projection?.order).toEqual(['first', 'second', 'epoch-a:3']);
   });
 
-  it('does not erase an established transcript on a sparse complete refresh', () => {
+  it('protects incomplete refreshes but clears an authoritative sparse branch', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
     store.hydrateSession({
@@ -713,7 +713,14 @@ describe('DashboardLiveStore', () => {
       ],
     });
 
-    const projection = store.hydrateSession({
+    const incomplete = store.hydrateSession({
+      ...sessionResponse(1),
+      entriesComplete: false,
+      entries: [],
+    });
+    expect(incomplete?.order).toEqual(['persisted-prompt']);
+
+    const completeSparse = store.hydrateSession({
       ...sessionResponse(1),
       entriesComplete: true,
       entries: [
@@ -721,18 +728,11 @@ describe('DashboardLiveStore', () => {
         { type: 'thinking_level_change', thinkingLevel: 'medium' },
       ],
     });
-
-    expect(projection?.order).toEqual(['persisted-prompt']);
-    expect(projection?.items['persisted-prompt']).toMatchObject({
-      role: 'user',
-      content: 'Prompt',
+    expect(completeSparse?.items['persisted-prompt']).toBeUndefined();
+    expect(completeSparse?.items['entry-0']).toMatchObject({
+      kind: 'other',
+      raw: { type: 'model_change' },
     });
-    const emptyRefresh = store.hydrateSession({
-      ...sessionResponse(1),
-      entriesComplete: false,
-      entries: [],
-    });
-    expect(emptyRefresh?.order).toEqual(['persisted-prompt']);
   });
 
   it('restores disk history behind a live-only incomplete refresh baseline', () => {

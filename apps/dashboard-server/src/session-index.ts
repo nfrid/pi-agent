@@ -35,6 +35,8 @@ interface HistoryCursor {
   size: number;
   prefixHash: string;
   before: number;
+  /** Active branch leaf when the page was branch-filtered. */
+  leafId?: string;
 }
 
 const HISTORY_PAGE_BYTES = 8 * 1024 * 1024;
@@ -74,7 +76,9 @@ function decodeHistoryCursor(value: string): HistoryCursor {
       !/^[a-f0-9]{64}$/.test(decoded.prefixHash) ||
       typeof decoded.before !== 'number' ||
       !Number.isSafeInteger(decoded.before) ||
-      decoded.before <= 0
+      decoded.before <= 0 ||
+      (decoded.leafId !== undefined &&
+        (typeof decoded.leafId !== 'string' || decoded.leafId.length === 0))
     )
       throw new Error();
     return decoded as HistoryCursor;
@@ -156,6 +160,7 @@ export class SessionIndex {
   async readEntries(
     id: string,
     before?: string,
+    leafId?: string,
   ): Promise<{
     metadata: SessionIndexEntry;
     entries: unknown[];
@@ -169,17 +174,28 @@ export class SessionIndex {
     if (!stat) throw new Error('Unknown session.');
     const cursor =
       before === undefined ? undefined : decodeHistoryCursor(before);
+    const requestedLeafId = leafId ?? cursor?.leafId;
     if (
       cursor &&
       (cursor.sessionId !== id ||
         cursor.file !== indexed.file ||
         cursor.dev !== stat.dev ||
         cursor.ino !== stat.ino ||
-        stat.size < cursor.size)
+        stat.size < cursor.size ||
+        cursor.leafId !== requestedLeafId)
     )
       throw new Error('Stale history cursor.');
     const upperBound = cursor?.before;
     const { header: _header, lastEntryId: _lastEntryId, ...metadata } = indexed;
+    if (requestedLeafId !== undefined)
+      return this.readBranchEntries(
+        id,
+        indexed.file,
+        stat,
+        metadata,
+        requestedLeafId,
+        cursor,
+      );
     type PageEntry = {
       ordinal: number;
       entry: unknown;
@@ -279,6 +295,212 @@ export class SessionIndex {
       metadata,
       entries: page.map((item) => item.entry),
       entriesComplete,
+      history: {
+        version: 1,
+        start,
+        end,
+        hasOlder,
+        ...(nextBefore === undefined ? {} : { nextBefore }),
+      },
+    };
+  }
+
+  /**
+   * Read only the ancestry rooted at an active runtime leaf. A normal session
+   * read intentionally retains append-only history semantics; branch reads are
+   * selected explicitly because the file can contain multiple trees.
+   */
+  private async readBranchEntries(
+    id: string,
+    file: string,
+    stat: { dev: number; ino: number; size: number },
+    metadata: SessionIndexEntry,
+    leafId: string,
+    cursor: HistoryCursor | undefined,
+  ): Promise<{
+    metadata: SessionIndexEntry;
+    entries: unknown[];
+    entriesComplete: boolean;
+    history: SessionHistoryPage;
+  }> {
+    const parents = new Map<string, unknown>();
+    const ordinals = new Map<string, number>();
+    let headerSeen = false;
+    let sourceOrdinal = 0;
+    const firstPassInput = createReadStream(file, { encoding: 'utf8' });
+    const firstPassLines = readline.createInterface({
+      input: firstPassInput,
+      crlfDelay: Number.POSITIVE_INFINITY,
+    });
+    try {
+      for await (const line of firstPassLines) {
+        if (!line.trim()) continue;
+        if (Buffer.byteLength(line) > 24 * 1024 * 1024)
+          throw new Error('A session entry is too large to open remotely.');
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(line) as unknown;
+        } catch (error) {
+          if (error instanceof SyntaxError) continue;
+          throw error;
+        }
+        if (!headerSeen) {
+          if (!isRecord(parsed) || parsed.type !== 'session')
+            throw new Error('Invalid session branch.');
+          headerSeen = true;
+        } else if (isRecord(parsed) && typeof parsed.id === 'string') {
+          if (parents.has(parsed.id))
+            throw new Error('Invalid session branch.');
+          parents.set(parsed.id, parsed.parentId);
+          ordinals.set(parsed.id, sourceOrdinal);
+        }
+        sourceOrdinal += 1;
+      }
+    } finally {
+      firstPassLines.close();
+      firstPassInput.destroy();
+    }
+    if (!headerSeen || !parents.has(leafId))
+      throw new Error('Invalid session branch.');
+
+    const branchIds = new Set<string>();
+    let currentId = leafId;
+    while (true) {
+      if (branchIds.has(currentId)) throw new Error('Invalid session branch.');
+      branchIds.add(currentId);
+      const parentId = parents.get(currentId);
+      if (parentId === undefined || parentId === null) break;
+      if (typeof parentId !== 'string' || !parents.has(parentId))
+        throw new Error('Invalid session branch.');
+      const currentOrdinal = ordinals.get(currentId);
+      const parentOrdinal = ordinals.get(parentId);
+      if (
+        currentOrdinal === undefined ||
+        parentOrdinal === undefined ||
+        parentOrdinal >= currentOrdinal
+      )
+        throw new Error('Invalid session branch.');
+      currentId = parentId;
+    }
+
+    type PageEntry = {
+      ordinal: number;
+      entry: unknown;
+      prefixHash: string;
+      bytes: number;
+    };
+    const page: PageEntry[] = [];
+    let pageBytes = 0;
+    let branchOrdinal = 0;
+    let selectedCount = 0;
+    let headerInSecondPass = false;
+    let reachedUpperBound = false;
+    const seenHasher = createHash('sha256');
+    const upperBound = cursor?.before;
+    const secondPassInput = createReadStream(file, { encoding: 'utf8' });
+    const secondPassLines = readline.createInterface({
+      input: secondPassInput,
+      crlfDelay: Number.POSITIVE_INFINITY,
+    });
+    try {
+      for await (const line of secondPassLines) {
+        if (!line.trim()) continue;
+        if (Buffer.byteLength(line) > 24 * 1024 * 1024)
+          throw new Error('A session entry is too large to open remotely.');
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(line) as unknown;
+        } catch (error) {
+          if (error instanceof SyntaxError) continue;
+          throw error;
+        }
+        const isHeader = !headerInSecondPass;
+        if (isHeader) {
+          headerInSecondPass = true;
+          if (!isRecord(parsed) || parsed.type !== 'session')
+            throw new Error('Invalid session branch.');
+        }
+        const entryId = isRecord(parsed) ? parsed.id : undefined;
+        const selected =
+          isHeader || (typeof entryId === 'string' && branchIds.has(entryId));
+        if (
+          selected &&
+          upperBound !== undefined &&
+          branchOrdinal === upperBound
+        ) {
+          reachedUpperBound = true;
+          break;
+        }
+        const entry = redactImageData(parsed);
+        const serialized = JSON.stringify(entry);
+        const prefixHash = seenHasher.copy().digest('hex');
+        updateHistoryHash(seenHasher, serialized);
+        if (!selected) continue;
+        const originalBytes = Buffer.byteLength(serialized);
+        const outputEntry =
+          originalBytes > HISTORY_PAGE_BYTES
+            ? {
+                type: 'history_omission',
+                ...(isRecord(entry) && typeof entry.id === 'string'
+                  ? { id: entry.id }
+                  : {}),
+                ...(isRecord(entry) && typeof entry.type === 'string'
+                  ? { originalType: entry.type }
+                  : {}),
+                reason: 'entry-exceeds-page-budget',
+                originalBytes,
+              }
+            : entry;
+        const outputBytes = Buffer.byteLength(JSON.stringify(outputEntry));
+        page.push({
+          ordinal: branchOrdinal,
+          entry: outputEntry,
+          prefixHash,
+          bytes: outputBytes,
+        });
+        pageBytes += outputBytes;
+        while (pageBytes > HISTORY_PAGE_BYTES && page.length > 0) {
+          const shifted = page.shift();
+          if (!shifted) break;
+          pageBytes -= shifted.bytes;
+        }
+        branchOrdinal += 1;
+        selectedCount += 1;
+      }
+    } finally {
+      secondPassLines.close();
+      secondPassInput.destroy();
+    }
+    if (upperBound !== undefined && branchOrdinal === upperBound)
+      reachedUpperBound = true;
+    if (
+      upperBound !== undefined &&
+      (!reachedUpperBound ||
+        seenHasher.copy().digest('hex') !== cursor?.prefixHash)
+    )
+      throw new Error('Stale history cursor.');
+    if (upperBound === undefined && selectedCount !== branchIds.size + 1)
+      throw new Error('Invalid session branch.');
+    const end = upperBound ?? branchOrdinal;
+    const start = page[0]?.ordinal ?? end;
+    const hasOlder = start > 0;
+    const nextBefore = hasOlder
+      ? encodeHistoryCursor({
+          version: 1,
+          sessionId: id,
+          file,
+          dev: stat.dev,
+          ino: stat.ino,
+          size: stat.size,
+          prefixHash: page[0]?.prefixHash ?? seenHasher.copy().digest('hex'),
+          before: start,
+          leafId,
+        })
+      : undefined;
+    return {
+      metadata,
+      entries: page.map((item) => item.entry),
+      entriesComplete: cursor === undefined && start === 0,
       history: {
         version: 1,
         start,

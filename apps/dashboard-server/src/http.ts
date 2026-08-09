@@ -559,6 +559,21 @@ class DashboardServerImpl implements DashboardServer {
       const provenance = this.registry.transportProvenance(runtime.runtimeId);
       return provenance && provenance.runtimeSeq >= 0 ? provenance : {};
     };
+    const runtimeLeafId = (runtime: RuntimeSnapshot): string | undefined => {
+      const leafId = (runtime.session as { leafId?: unknown }).leafId;
+      const hasControlCharacter =
+        typeof leafId === 'string' &&
+        [...leafId].some((character) => {
+          const code = character.charCodeAt(0);
+          return code <= 0x1f || code === 0x7f;
+        });
+      return typeof leafId === 'string' &&
+        leafId.length > 0 &&
+        leafId.length <= 512 &&
+        !hasControlCharacter
+        ? leafId
+        : undefined;
+    };
     const runtimeResult = (runtime: RuntimeSnapshot) => {
       const entriesComplete =
         (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
@@ -582,6 +597,19 @@ class DashboardServerImpl implements DashboardServer {
       };
     };
     let runtime = before === undefined ? activeRuntime() : undefined;
+    const initialRuntimeLeafId = runtime ? runtimeLeafId(runtime) : undefined;
+    const runtimeNeedsBranch =
+      runtime !== undefined &&
+      ((runtime.session as { entriesComplete?: boolean }).entriesComplete !==
+        true ||
+        isSparseRuntimeSession(runtime));
+    if (
+      before === undefined &&
+      runtime &&
+      runtimeNeedsBranch &&
+      !initialRuntimeLeafId
+    )
+      return runtimeResult(runtime);
     if (
       before === undefined &&
       runtime &&
@@ -591,7 +619,11 @@ class DashboardServerImpl implements DashboardServer {
     )
       return runtimeResult(runtime);
     try {
-      const result = await this.sessions.readEntries(id, before);
+      const result = await this.sessions.readEntries(
+        id,
+        before,
+        initialRuntimeLeafId,
+      );
       // Runtime attachment can change while the file is being read. Recheck it
       // before declaring disk history authoritative for the active branch.
       runtime = before === undefined ? activeRuntime() : undefined;
@@ -601,9 +633,17 @@ class DashboardServerImpl implements DashboardServer {
           serverId: this.serverId,
           cursor,
         };
+      const currentRuntimeLeafId = runtimeLeafId(runtime);
       const runtimeEntriesComplete =
         (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
         true;
+      const currentRuntimeNeedsBranch =
+        !runtimeEntriesComplete || isSparseRuntimeSession(runtime);
+      if (
+        currentRuntimeNeedsBranch &&
+        (!currentRuntimeLeafId || currentRuntimeLeafId !== initialRuntimeLeafId)
+      )
+        return runtimeResult(runtime);
       if (runtimeEntriesComplete && !isSparseRuntimeSession(runtime))
         return runtimeResult(runtime);
       if (runtimeEntriesComplete) {
