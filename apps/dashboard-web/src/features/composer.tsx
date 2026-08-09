@@ -89,14 +89,31 @@ export function queuedMessagesForRuntime(
 ): readonly QueuedMessage[] {
   const queue = runtime?.queueDrafts;
   if (!Array.isArray(queue)) return [];
-  return queue.flatMap((item) =>
-    item &&
-    typeof item.clientId === 'string' &&
-    item.clientId.length > 0 &&
-    (item.mode === 'steer' || item.mode === 'followUp') &&
-    typeof item.text === 'string'
-      ? [{ id: item.clientId, mode: item.mode, text: item.text }]
-      : [],
+  const seen = new Set<string>();
+  return queue.flatMap((item) => {
+    if (
+      !item ||
+      typeof item.clientId !== 'string' ||
+      item.clientId.length === 0 ||
+      (item.mode !== 'steer' && item.mode !== 'followUp') ||
+      typeof item.text !== 'string' ||
+      seen.has(item.clientId)
+    )
+      return [];
+    seen.add(item.clientId);
+    return [{ id: item.clientId, mode: item.mode, text: item.text }];
+  });
+}
+
+/** Add or replace a queue item without creating duplicate client IDs. */
+export function upsertQueuedMessage(
+  items: readonly QueuedMessage[],
+  item: QueuedMessage,
+): QueuedMessage[] {
+  const index = items.findIndex((candidate) => candidate.id === item.id);
+  if (index < 0) return [...items, item];
+  return items.map((candidate, candidateIndex) =>
+    candidateIndex === index ? item : candidate,
   );
 }
 
@@ -700,14 +717,13 @@ export function Composer({
             trimmedText,
           ),
         });
-        setQueue((current) => [
-          ...current,
-          {
+        setQueue((current) =>
+          upsertQueuedMessage(current, {
             id: queueId,
             mode: mode === 'prompt' ? 'followUp' : mode,
             text: trimmedText,
-          },
-        ]);
+          }),
+        );
       } else if (attachments.length)
         await dashboardHttpClient.sendCommandWithImages(
           runtime.runtimeId,

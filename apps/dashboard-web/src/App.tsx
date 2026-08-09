@@ -89,6 +89,7 @@ export {
   resumeRuntimeRequest,
   runtimeSupportsImages,
   shouldShowQueuePanel,
+  upsertQueuedMessage,
   writeComposerDraft,
 } from './features/composer';
 export {

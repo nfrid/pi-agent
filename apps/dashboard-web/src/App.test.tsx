@@ -34,6 +34,7 @@ import {
   shouldShowJumpToLatest,
   shouldShowQueuePanel,
   toTranscriptEntries,
+  upsertQueuedMessage,
   writeComposerDraft,
 } from './App';
 import type { DashboardEvent } from './dashboard-transport';
@@ -68,6 +69,7 @@ describe('queued message commands', () => {
     const runtime = {
       queueDrafts: [
         { clientId: 'q1', mode: 'steer', text: 'inspect this' },
+        { clientId: 'q1', mode: 'steer', text: 'duplicate snapshot item' },
         { clientId: 'q2', mode: 'followUp', text: 'then test it' },
         { clientId: '', mode: 'steer', text: 'ignore' },
       ],
@@ -92,6 +94,29 @@ describe('queued message commands', () => {
     expect(shouldShowQueuePanel('idle', 1)).toBe(true);
     expect(shouldShowQueuePanel('waiting', 1)).toBe(true);
     expect(shouldShowQueuePanel('idle', 0)).toBe(false);
+  });
+
+  it('upserts an optimistic item when the server snapshot arrived first', () => {
+    const serverItems = [
+      { id: 'q1', mode: 'steer' as const, text: 'inspect this' },
+    ];
+    expect(
+      upsertQueuedMessage(serverItems, {
+        id: 'q1',
+        mode: 'steer',
+        text: 'inspect this',
+      }),
+    ).toEqual(serverItems);
+    expect(
+      upsertQueuedMessage(serverItems, {
+        id: 'q2',
+        mode: 'followUp',
+        text: 'then test it',
+      }),
+    ).toEqual([
+      ...serverItems,
+      { id: 'q2', mode: 'followUp', text: 'then test it' },
+    ]);
   });
 });
 
