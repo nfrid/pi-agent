@@ -4821,7 +4821,8 @@ details.session-event {
   color: var(--dim);
   font-size: 8px;
 }
-.activity-step.step-complete .activity-step-dot::before {
+.activity-step.step-complete .activity-step-dot::before,
+.tool-detail.step-complete .activity-step-dot::before {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -4873,12 +4874,14 @@ details.session-event {
 .activity-step-time {
   font-variant-numeric: tabular-nums;
 }
-.activity-step.step-failed .activity-step-dot {
+.activity-step.step-failed .activity-step-dot,
+.tool-detail.step-failed .activity-step-dot {
   background: color-mix(in srgb, var(--red) 16%, transparent);
   color: var(--red);
   font-weight: 800;
 }
-.activity-step.step-pending .activity-step-dot {
+.activity-step.step-pending .activity-step-dot,
+.tool-detail.step-pending .activity-step-dot {
   color: var(--cyan);
   animation: tui-pulse 1.2s steps(2, end) infinite;
 }
@@ -4917,16 +4920,17 @@ details.session-event {
   color: var(--muted);
   font-size: 10px;
 }
-.thinking-meta {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 3px;
-  color: var(--purple);
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.thinking-time {
+  display: block;
+  width: max-content;
+  margin: 0 0 3px auto;
+  font-variant-numeric: tabular-nums;
+}
+.activity-detail .thinking-time {
+  margin-right: -9px;
+}
+.activity-detail .message-meta .transcript-time {
+  margin-right: -14px;
 }
 .transcript-thinking-blob .markdown {
   min-width: 0;
@@ -4966,6 +4970,7 @@ details.session-event {
     display: none;
   }
   .activity-group > button::after {
+    order: 2;
     content: "›";
     flex: 0 0 auto;
     color: var(--dim);
@@ -4975,6 +4980,9 @@ details.session-event {
   }
   .activity-group > button[aria-expanded="true"]::after {
     transform: rotate(90deg);
+  }
+  .activity-group > button .activity-time {
+    order: 3;
   }
   .preparing-toolcall strong {
     min-width: 0;

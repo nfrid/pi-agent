@@ -1613,8 +1613,22 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(
     expandedAction.locator('.activity-tool-name').getByText('Reading'),
   ).toBeVisible();
-  await expect(expandedAction.locator('.activity-step-dot')).toBeVisible();
-  await expect(page.locator('.thinking-meta time')).toBeVisible();
+  const expandedStepDot = expandedAction.locator('.activity-step-dot');
+  await expect(expandedStepDot).toBeVisible();
+  expect(
+    await expandedStepDot.evaluate(
+      (dot) => getComputedStyle(dot, '::before').backgroundColor,
+    ),
+  ).not.toBe('rgba(0, 0, 0, 0)');
+  await expect(page.locator('.thinking-time')).toBeVisible();
+  const timestampRights = await page
+    .locator('.activity-group .transcript-time:visible')
+    .evaluateAll((timestamps) =>
+      timestamps.map((timestamp) => timestamp.getBoundingClientRect().right),
+    );
+  expect(
+    Math.max(...timestampRights) - Math.min(...timestampRights),
+  ).toBeLessThanOrEqual(1);
   await expect(page.getByText('src/App.tsx', { exact: true })).toBeVisible();
   await activity.click();
   const emitAssistant = async (content: unknown[]) =>

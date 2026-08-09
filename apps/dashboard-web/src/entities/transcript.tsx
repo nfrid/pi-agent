@@ -1435,13 +1435,10 @@ function ThinkingBlobs({
             className="transcript-thinking-blob"
             key={`${content}-${occurrence}`}
           >
-            <header className="thinking-meta">
-              <span>thinking</span>
-              <DashboardTime
-                className="transcript-time"
-                timestamp={timestamp}
-              />
-            </header>
+            <DashboardTime
+              className="transcript-time thinking-time"
+              timestamp={timestamp}
+            />
             <Markdown>{content}</Markdown>
           </div>
         );

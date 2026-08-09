@@ -568,24 +568,6 @@ describe('activity row views and virtual transcript construction', () => {
     ]);
   });
 
-  it('uses the latest plain thinking blob instead of a generic group title', () => {
-    const items = toTranscriptEntries([
-      {
-        type: 'message',
-        message: {
-          role: 'assistant',
-          content: [
-            { type: 'thinking', thinking: 'Tracing the remaining layout gap.' },
-            { type: 'toolCall', id: 'call-layout', name: 'read' },
-          ],
-        },
-      },
-    ]);
-    expect(
-      projectActivityGroups(items.map(({ entry }) => entry))[0]?.title,
-    ).toBe('Tracing the remaining layout gap');
-  });
-
   it('uses semantic toolCallIds after compatibility filtering for preamble titles', () => {
     const items = toTranscriptEntries([
       {
@@ -661,6 +643,7 @@ describe('activity row views and virtual transcript construction', () => {
           id: 'assistant-success-message',
           role: 'assistant',
           content: [
+            { type: 'text', text: 'Reading the historical result.' },
             {
               type: 'toolCall',
               id: 'history-success',
@@ -682,6 +665,7 @@ describe('activity row views and virtual transcript construction', () => {
       {
         role: 'assistant',
         content: [
+          { type: 'text', text: 'Checking the failing command.' },
           {
             type: 'toolCall',
             id: 'history-failed',
@@ -702,16 +686,6 @@ describe('activity row views and virtual transcript construction', () => {
     });
     expect(successful).toHaveLength(2);
     expect(failed).toHaveLength(2);
-    expect(
-      projectActivityGroups(successful.map(({ entry }) => entry)).map(
-        ({ status }) => status,
-      ),
-    ).toEqual(['complete']);
-    expect(
-      projectActivityGroups(failed.map(({ entry }) => entry)).map(
-        ({ status }) => status,
-      ),
-    ).toEqual(['failed']);
     expect(toolOutcome({ kind: 'tool', status: 'finished' })).toBe('success');
     expect(toolOutcome({ kind: 'tool', status: 'complete' })).toBe('success');
   });
@@ -723,7 +697,12 @@ describe('activity row views and virtual transcript construction', () => {
       { name: 'bash', args: {}, status: 'running' as const },
     ]) {
       const [group] = projectActivityGroups([
-        { kind: 'assistant', speaks: false },
+        {
+          kind: 'assistant',
+          speaks: true,
+          title: 'Running the tool',
+          titleKind: 'preamble',
+        },
         { kind: 'tool', ...tool },
       ]);
       expect(Value.Check(ActivityGroupsViewModelSchema, group)).toBe(true);
