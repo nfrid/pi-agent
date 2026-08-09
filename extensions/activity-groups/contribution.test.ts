@@ -6,7 +6,13 @@ import { ActivityGroupsViewModelSchema } from './contribution';
 describe('activity groups contribution schema', () => {
   it('accepts a preparing shared projection as renderer input', () => {
     const [group] = projectActivityGroups([
-      { kind: 'assistant', speaks: false, streaming: true },
+      {
+        kind: 'assistant',
+        speaks: false,
+        streaming: true,
+        title: 'Preparing the work',
+        titleKind: 'preamble',
+      },
       { kind: 'tool', name: 'read', args: {} },
     ]);
     expect(group?.status).toBe('preparing');
@@ -16,7 +22,12 @@ describe('activity groups contribution schema', () => {
 
   it('bounds opaque tool arguments while retaining the complete view model', () => {
     const [group] = projectActivityGroups([
-      { kind: 'assistant', speaks: false },
+      {
+        kind: 'assistant',
+        speaks: false,
+        title: 'Read the file',
+        titleKind: 'preamble',
+      },
       {
         kind: 'tool',
         name: 'read',

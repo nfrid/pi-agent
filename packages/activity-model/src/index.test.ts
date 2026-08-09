@@ -41,7 +41,12 @@ describe('tool action summaries', () => {
 describe('shared activity model', () => {
   it('groups the same pure transcript deterministically', () => {
     const entries = [
-      { kind: 'assistant' as const, speaks: false },
+      {
+        kind: 'assistant' as const,
+        speaks: false,
+        title: 'Inspect the project',
+        titleKind: 'preamble' as const,
+      },
       { kind: 'tool' as const, name: 'read', args: { path: 'a.ts' } },
       { kind: 'tool' as const, name: 'grep', args: { pattern: 'x' } },
     ];
@@ -72,7 +77,12 @@ describe('shared activity model', () => {
 
   it('finishes the prior group when a later assistant message closes the work', () => {
     const entries = [
-      { kind: 'assistant' as const, speaks: false },
+      {
+        kind: 'assistant' as const,
+        speaks: false,
+        title: 'Read the project',
+        titleKind: 'preamble' as const,
+      },
       {
         kind: 'tool' as const,
         name: 'read',
@@ -89,9 +99,17 @@ describe('shared activity model', () => {
 
   it('does not keep a finished assistant-only tail live', () => {
     expect(
-      projectActivityGroups([{ kind: 'assistant', speaks: false }], {
-        liveTail: true,
-      })[0]?.status,
+      projectActivityGroups(
+        [
+          {
+            kind: 'assistant',
+            speaks: false,
+            title: 'Preparing the response',
+            titleKind: 'preamble',
+          },
+        ],
+        { liveTail: true },
+      )[0]?.status,
     ).toBe('complete');
   });
 
@@ -104,7 +122,12 @@ describe('shared activity model', () => {
       isError: true,
     };
     const terminalEntries = [
-      { kind: 'assistant' as const, speaks: false },
+      {
+        kind: 'assistant' as const,
+        speaks: false,
+        title: 'Run the command',
+        titleKind: 'preamble' as const,
+      },
       failed,
     ];
     const mixedEntries = [
@@ -126,7 +149,12 @@ describe('shared activity model', () => {
 
   it('uses retry-aware outcomes for shared dashboard projections', () => {
     const corrected = projectActivityGroups([
-      { kind: 'assistant' as const, speaks: false },
+      {
+        kind: 'assistant' as const,
+        speaks: false,
+        title: 'Correct the check',
+        titleKind: 'preamble' as const,
+      },
       {
         kind: 'tool' as const,
         name: 'bash',
@@ -142,7 +170,12 @@ describe('shared activity model', () => {
       },
     ]);
     const unresolved = projectActivityGroups([
-      { kind: 'assistant' as const, speaks: false },
+      {
+        kind: 'assistant' as const,
+        speaks: false,
+        title: 'Investigate the failure',
+        titleKind: 'preamble' as const,
+      },
       {
         kind: 'tool' as const,
         name: 'bash',
@@ -163,7 +196,12 @@ describe('shared activity model', () => {
 
   it('projects failed and streaming groups distinctly for every renderer', () => {
     const failed = projectActivityGroups([
-      { kind: 'assistant' as const, speaks: false },
+      {
+        kind: 'assistant' as const,
+        speaks: false,
+        title: 'Run the failing command',
+        titleKind: 'preamble' as const,
+      },
       {
         kind: 'tool' as const,
         name: 'bash',
@@ -172,12 +210,39 @@ describe('shared activity model', () => {
       },
     ]);
     const streaming = projectActivityGroups([
-      { kind: 'assistant' as const, speaks: false, streaming: true },
+      {
+        kind: 'assistant' as const,
+        speaks: false,
+        streaming: true,
+        title: 'Prepare the command',
+        titleKind: 'preamble' as const,
+      },
       { kind: 'tool' as const, name: 'bash', args: {} },
     ]);
     expect(failed[0]?.status).toBe('failed');
     expect(streaming[0]?.status).toBe('preparing');
     expect(failed[0]?.status).not.toBe(streaming[0]?.status);
+  });
+
+  it('titles a group from its preamble, never from thinking narration', () => {
+    const groups = projectActivityGroups([
+      {
+        kind: 'assistant',
+        speaks: false,
+        title: 'The announced task',
+        titleKind: 'preamble',
+      },
+      { kind: 'tool', name: 'read', args: {} },
+      {
+        kind: 'assistant',
+        speaks: false,
+        title: 'A private thought',
+        titleKind: 'narration',
+      },
+      { kind: 'tool', name: 'edit', args: {} },
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.title).toBe('The announced task');
   });
 
   it('extracts model headers without rendering them', () => {
@@ -251,9 +316,19 @@ describe('shared activity model', () => {
 
   it('marks an explicitly pending tail live without reopening completed groups', () => {
     const groups = projectActivityGroups([
-      { kind: 'assistant', speaks: false },
+      {
+        kind: 'assistant',
+        speaks: false,
+        title: 'Read the file',
+        titleKind: 'preamble',
+      },
       { kind: 'tool', name: 'read', args: {}, status: 'success' },
-      { kind: 'assistant', speaks: false },
+      {
+        kind: 'assistant',
+        speaks: false,
+        title: 'Edit the file',
+        titleKind: 'preamble',
+      },
       { kind: 'tool', name: 'edit', args: {}, status: 'running' },
     ]);
     expect(groups.map(({ status }) => status)).toEqual(['complete', 'live']);

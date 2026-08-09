@@ -46,13 +46,13 @@ function titleFor(
       entry.titleKind === 'preamble' &&
       entry.title,
   );
-  if (preamble?.kind === 'assistant' && preamble.title) return preamble.title;
-  const supplied = withinGroup
-    .flatMap((entry) =>
-      entry.kind === 'assistant' && entry.title ? [entry.title] : [],
-    )
-    .at(-1);
-  return supplied ?? describeTools(tools, undefined, completed);
+  if (preamble?.kind === 'assistant' && preamble.title?.trim()) {
+    return preamble.title.trim();
+  }
+  // Groups normally always have a preamble. Keep a defensive fallback for
+  // callers that provide an otherwise malformed group projection, but never
+  // use thinking narration (or any other assistant title) as its label.
+  return describeTools(tools, undefined, completed);
 }
 
 /**
