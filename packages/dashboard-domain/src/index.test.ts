@@ -469,6 +469,32 @@ describe('dashboard domain reducers', () => {
     ]);
   });
 
+  it('hides live context-only custom messages without persisted metadata', () => {
+    let state = hydrateTranscript([], 's');
+    for (const [messageId, content, data] of [
+      [
+        'todo-snapshot',
+        'Todo state at the start of this user turn (1 active, 0 ready, 0 blocked, 0 done).',
+        undefined,
+      ],
+      ['hidden-context', 'Provider-only context', { display: false }],
+    ] as const) {
+      state = reduceTranscriptEvent(state, {
+        type: 'message.finished',
+        sessionId: 's',
+        message: {
+          messageId,
+          role: 'custom',
+          content,
+          phase: 'finished',
+          ...(data ? { data } : {}),
+        },
+      } as never);
+    }
+
+    expect(projectTranscriptForRender(state).items).toEqual([]);
+  });
+
   it('preserves direct tool associations and skips only Pi metadata', () => {
     const state = hydrateTranscript([
       { type: 'session_info', id: 'meta' },

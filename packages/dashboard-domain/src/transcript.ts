@@ -992,6 +992,16 @@ export function projectTranscriptForRender(
         item.role === 'custom' && messageData
           ? directString(messageData, 'customType')
           : undefined;
+      if (
+        item.role === 'custom' &&
+        !customType &&
+        (messageData?.display === false ||
+          (typeof item.content === 'string' &&
+            item.content.startsWith(
+              'Todo state at the start of this user turn (',
+            )))
+      )
+        continue;
       if (customType) {
         items.push({
           kind: 'other',
