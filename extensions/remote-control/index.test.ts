@@ -19,6 +19,7 @@ import {
 } from '../../packages/dashboard-protocol/src/index';
 import { InteractionBroker } from '../ask-user/broker';
 import { askUserCapabilitySnapshot } from '../ask-user/contribution';
+import { beginsFreshUserTurn } from '../shared/runtime/agent-lifecycle';
 import { LiveSurfaceHub } from '../shared/runtime/live-surfaces';
 import { setPendingProcessCount } from '../shared/runtime/pending-processes';
 import {
@@ -156,6 +157,13 @@ describe('dashboard input dispatch', () => {
       dispatchDashboardInput(pi, context, '/reload'),
     ).rejects.toThrow('not available through the dashboard yet');
     expect(sendUserMessage).not.toHaveBeenCalled();
+
+    await dispatchDashboardInput(pi, context, 'fresh dashboard prompt');
+    expect(sendUserMessage).toHaveBeenCalledWith(
+      'fresh dashboard prompt',
+      undefined,
+    );
+    expect(beginsFreshUserTurn({ source: 'extension' })).toBe(true);
 
     await dispatchDashboardInput(pi, context, 'later', 'followUp');
     expect(sendUserMessage).toHaveBeenCalledWith('later', {

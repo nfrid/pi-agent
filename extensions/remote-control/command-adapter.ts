@@ -6,6 +6,8 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { DASHBOARD_SUPPORTED_BUILTIN_COMMANDS } from '../../packages/dashboard-protocol/src/dashboard-api';
 import type { BridgeImageAttachment } from '../../packages/dashboard-protocol/src/pi-runtime-protocol';
+import { markDashboardFreshUserTurn } from '../shared/runtime/agent-lifecycle';
+import { getSessionScopeId } from '../shared/runtime/scoped-services';
 
 type CommandInfo = ReturnType<ExtensionAPI['getCommands']>[number];
 
@@ -189,9 +191,17 @@ export async function dispatchDashboardInput(
           }),
         ]
       : expanded;
-  pi.sendUserMessage(
-    content as Parameters<ExtensionAPI['sendUserMessage']>[0],
-    deliverAs ? { deliverAs } : undefined,
-  );
+  const cancelFreshTurn = deliverAs
+    ? undefined
+    : markDashboardFreshUserTurn(getSessionScopeId(ctx));
+  try {
+    pi.sendUserMessage(
+      content as Parameters<ExtensionAPI['sendUserMessage']>[0],
+      deliverAs ? { deliverAs } : undefined,
+    );
+  } catch (error) {
+    cancelFreshTurn?.();
+    throw error;
+  }
   return { accepted: true };
 }

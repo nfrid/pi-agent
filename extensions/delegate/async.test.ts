@@ -12,6 +12,7 @@ import {
   resolveArtifact,
   restoreArtifacts,
 } from '../shared/artifacts';
+import { markDashboardFreshUserTurn } from '../shared/runtime/agent-lifecycle';
 import { getLiveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
 import type { DelegateConfig } from './config';
 import * as configModule from './config';
@@ -563,7 +564,8 @@ describe('async delegate extension', () => {
     handlers.get('input')?.({ source: 'extension' }, ctx);
     expect(widget?.render(100).join('\n')).toContain('done');
 
-    handlers.get('input')?.({ source: 'interactive' }, ctx);
+    markDashboardFreshUserTurn('parent');
+    handlers.get('input')?.({ source: 'extension' }, ctx);
     expect(widget?.render(100)).toEqual([]);
     expect(
       (
