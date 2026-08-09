@@ -273,6 +273,48 @@ describe('remote event normalization', () => {
     );
   });
 
+  it('preserves safe custom-message metadata for live transcript formatting', () => {
+    const normalizer = new LiveEventNormalizer('runtime-custom');
+    const message = normalizer.normalizeMessage('finished', {
+      message: {
+        role: 'custom',
+        customType: 'delegate-job-result',
+        content: '# Background delegate job dj-1 (Review) success',
+        display: true,
+        details: { jobs: [{ name: 'Review', state: 'success' }] },
+      },
+    });
+
+    expect(message).toMatchObject({
+      role: 'custom',
+      data: {
+        customType: 'delegate-job-result',
+        display: true,
+        details: { jobs: [{ name: 'Review', state: 'success' }] },
+      },
+    });
+    const combinedMetadata = {
+      customType: 'delegate-job-result',
+      display: true,
+      details: { jobs: [{ name: 'Review', state: 'success' }] },
+      deliveryMode: 'steer' as const,
+    };
+    expect(
+      withoutOpaqueData({
+        type: 'message.finished',
+        sessionId: 'session-test',
+        message: { ...message, data: combinedMetadata },
+      }),
+    ).toMatchObject({ message: { data: combinedMetadata } });
+    expect(
+      withoutOpaqueData({
+        type: 'message.updated',
+        sessionId: 'session-test',
+        message: { ...message, phase: 'updated', data: { display: false } },
+      }),
+    ).toMatchObject({ message: { data: { display: false } } });
+  });
+
   it('correlates id-less message phases and keeps the live ID when responseId arrives late', () => {
     const normalizer = new LiveEventNormalizer('runtime-epoch');
     const started = normalizer.normalizeMessage('started', {

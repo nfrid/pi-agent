@@ -385,6 +385,31 @@ describe('activity row views and virtual transcript construction', () => {
     });
   });
 
+  it('formats live custom messages without waiting for session hydration', () => {
+    let projection = hydrateTranscript([], 's1');
+    projection = reduceTranscriptEvent(projection, {
+      type: 'message.finished',
+      sessionId: 's1',
+      message: {
+        messageId: 'delegate-result-live',
+        role: 'custom',
+        content: '# Background delegate job dj-1 (UX audit) success',
+        phase: 'finished',
+        data: {
+          customType: 'delegate-job-result',
+          display: true,
+          details: { jobs: [{ name: 'UX audit', state: 'success' }] },
+        },
+      },
+    } as never);
+
+    expect(toTranscriptEntries(projection)[0]?.event).toMatchObject({
+      kind: 'delegate-result',
+      label: 'Delegate finished · UX audit',
+      status: 'success',
+    });
+  });
+
   it('projects uncompleted assistant tool calls as pending activity', () => {
     const [item] = toTranscriptEntries([
       {

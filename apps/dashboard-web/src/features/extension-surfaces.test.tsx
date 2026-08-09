@@ -92,6 +92,8 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain('<strong>Compact delegate</strong>');
     expect(markup).toContain('<strong>Compact task</strong>');
+    expect(markup).toContain('1 active · 0 finished');
+    expect(markup).toContain('0/1');
     expect(markup).not.toContain('luna-high');
     expect(markup).not.toContain('task-progress');
   });
@@ -143,6 +145,30 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('12 remaining');
     expect(markup).not.toContain('0 of 12 complete');
     expect(markup).not.toContain('more tasks');
+  });
+
+  it('uses aggregate task stats when dashboard rows are bounded', () => {
+    const tasks = renderLiveExtensionSurface({
+      id: 'tasks-bounded',
+      rendererId: 'tasks.current',
+      viewModel: {
+        version: 1,
+        tasks: Array.from({ length: 128 }, (_, index) => ({
+          id: `T${index + 1}`,
+          text: `Visible task ${index + 1}`,
+          status: 'todo',
+          dependsOn: [],
+          createdAt: 1,
+          updatedAt: 1,
+        })),
+        stats: { total: 150, active: 128, done: 22, blocked: 0, ready: 128 },
+      },
+    });
+    const markup = renderToStaticMarkup(tasks);
+
+    expect(markup).toContain('22/150');
+    expect(markup).toContain('128 remaining');
+    expect(markup).not.toContain('0/128');
   });
 
   it('omits task and delegate widgets when their row sets are empty', () => {
@@ -214,8 +240,10 @@ describe('live extension surface fixtures', () => {
       </>,
     );
 
-    expect(markup).toContain('All tasks complete');
+    expect(markup).toContain('No active tasks');
+    expect(markup).toContain('0/1');
     expect(markup).toContain('1 stopped');
+    expect(markup).toContain('0 active · 1 finished');
   });
 
   it('renders ordered delegate transcript entries with bounded-history notice', () => {

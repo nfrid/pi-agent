@@ -412,6 +412,63 @@ describe('dashboard domain reducers', () => {
     ]);
   });
 
+  it('projects phased live custom messages as their persisted entry shape', () => {
+    let state = hydrateTranscript([], 's');
+    state = reduceTranscriptEvent(state, {
+      type: 'message.started',
+      sessionId: 's',
+      message: {
+        messageId: 'custom-1',
+        role: 'custom',
+        content: '# Background delegate job',
+        phase: 'started',
+        data: {
+          customType: 'delegate-job-result',
+          display: true,
+          details: { jobs: [{ name: 'Review', state: 'success' }] },
+        },
+      },
+    } as never);
+    state = reduceTranscriptEvent(state, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        messageId: 'custom-1',
+        role: 'custom',
+        content: '# Background delegate job dj-1',
+        phase: 'updated',
+        data: { display: false },
+      },
+    } as never);
+    state = reduceTranscriptEvent(state, {
+      type: 'message.finished',
+      sessionId: 's',
+      message: {
+        messageId: 'custom-1',
+        role: 'custom',
+        content: '# Background delegate job dj-1 (Review) success',
+        phase: 'finished',
+      },
+    } as never);
+
+    expect(
+      projectTranscriptForRender(state, { includeSessionEvents: true }).items,
+    ).toEqual([
+      {
+        kind: 'other',
+        key: 'custom-1',
+        id: 'custom-1',
+        raw: {
+          type: 'custom_message',
+          customType: 'delegate-job-result',
+          content: '# Background delegate job dj-1 (Review) success',
+          display: false,
+          details: { jobs: [{ name: 'Review', state: 'success' }] },
+        },
+      },
+    ]);
+  });
+
   it('preserves direct tool associations and skips only Pi metadata', () => {
     const state = hydrateTranscript([
       { type: 'session_info', id: 'meta' },

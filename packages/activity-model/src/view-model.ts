@@ -82,13 +82,16 @@ export function projectActivityGroups(
       tools.some(
         (tool) => tool.status === 'pending' || tool.status === 'running',
       ) ||
-      (options.liveTail === true && index === groups.length - 1);
-    const status: ActivityGroupStatus = failed
-      ? 'failed'
-      : streaming
-        ? 'preparing'
-        : live
-          ? 'live'
+      (options.liveTail === true &&
+        tools.length > 0 &&
+        index === groups.length - 1 &&
+        group.end === entries.length - 1);
+    const status: ActivityGroupStatus = streaming
+      ? 'preparing'
+      : live
+        ? 'live'
+        : failed
+          ? 'failed'
           : 'complete';
     return {
       id,

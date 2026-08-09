@@ -2249,6 +2249,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   );
   await expect(dockMarker).toHaveCount(1);
   await expect(dockMarker).toHaveAttribute('aria-label', 'Earlier history 1');
+  await expect(dockMarker).not.toHaveAttribute('title', 'Earlier history 1');
   const supportsOutlineHover = await page.evaluate(
     () => window.matchMedia('(pointer: fine) and (min-width: 821px)').matches,
   );
@@ -2627,6 +2628,7 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   await page.getByRole('button', { name: 'Resume session' }).click();
   await expect(page.getByText('Starting agent…')).toBeVisible();
   expect(mocks.starts[1]).toEqual({ workspaceId: 'w1', sessionId: 's1' });
+  const delegateStartedAt = Date.now();
   await mocks.emit({
     type: 'snapshot',
     snapshot: phase6Snapshot({
@@ -2663,10 +2665,11 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
               name: `Dashboard delegate ${index + 1}`,
               kind: 'background',
               state: index === 0 ? 'running' : 'queued',
-              createdAt: 1,
+              createdAt: delegateStartedAt,
               allowWrites: false,
               ...(index === 0
                 ? {
+                    startedAt: delegateStartedAt,
                     transcript: Array.from({ length: 14 }, (_, entryIndex) => ({
                       id: `d1:tool:${entryIndex + 1}`,
                       type: 'tool',
@@ -2683,10 +2686,15 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
       ],
     }),
   });
-  await expect(
-    page.getByRole('button', { name: /Inspect the new drawer/ }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: /Inspect the new drawer/ }).click();
+  const tasksLauncher = page.getByRole('button', {
+    name: /Inspect the new drawer/,
+  });
+  const delegatesLauncher = page.getByRole('button', {
+    name: /Dashboard delegate 1/,
+  });
+  await expect(tasksLauncher).toContainText('0/18');
+  await expect(delegatesLauncher).toContainText('18 active · 0 finished');
+  await tasksLauncher.click();
   const tasksPanel = page.getByRole('dialog', { name: 'Tasks' });
   await expect(tasksPanel).toBeVisible();
   await expect(tasksPanel).toContainText('0 of 18 complete');
@@ -2712,9 +2720,17 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   ).toBeGreaterThan(0);
   await tasksPanel.getByRole('button', { name: 'Close Tasks' }).click();
   await expect(tasksPanel).toHaveCount(0);
-  await page.getByRole('button', { name: /Dashboard delegate 1/ }).click();
+  await delegatesLauncher.click();
   const delegatesPanel = page.getByRole('dialog', { name: 'Delegates' });
   await expect(delegatesPanel).toBeVisible();
+  const runningElapsed = delegatesPanel
+    .locator('.delegate-row-meta')
+    .filter({ hasText: 'running' })
+    .first();
+  const initialElapsed = await runningElapsed.textContent();
+  await expect
+    .poll(() => runningElapsed.textContent())
+    .not.toBe(initialElapsed);
   const delegateScroll = await delegatesPanel
     .locator('.surface-scroll-region')
     .evaluate((element) => ({

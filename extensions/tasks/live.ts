@@ -31,10 +31,19 @@ function boundedTask(task: TaskStore['state']['tasks'][number]) {
   };
 }
 
+function surfaceTasks(store: TaskStore) {
+  const tasks = store.state.tasks;
+  if (tasks.length <= 128) return tasks;
+  return [
+    ...tasks.filter((task) => task.status === 'doing'),
+    ...tasks.filter((task) => task.status !== 'doing'),
+  ].slice(0, 128);
+}
+
 export function taskSurface(store: TaskStore): ExtensionSurface {
   const viewModel = {
     version: 1 as const,
-    tasks: store.state.tasks.slice(0, 128).map(boundedTask),
+    tasks: surfaceTasks(store).map(boundedTask),
     stats: stats(store),
   };
   if (!Value.Check(TaskStateViewModelSchema, viewModel))

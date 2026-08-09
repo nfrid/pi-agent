@@ -31,13 +31,34 @@ export function withoutOpaqueData(event: BridgeEvent): BridgeEvent {
     const message = event.message;
     if (message && typeof message === 'object' && !Array.isArray(message)) {
       const { data, ...canonical } = message as Record<string, unknown>;
-      const deliveryMode = directString(eventRecord(data), 'deliveryMode');
+      const metadata = eventRecord(data);
+      const deliveryMode = directString(metadata, 'deliveryMode');
+      const customType = directString(metadata, 'customType');
+      const customData =
+        canonical.role === 'custom' &&
+        (customType ||
+          typeof metadata.display === 'boolean' ||
+          metadata.details !== undefined)
+          ? {
+              ...(customType ? { customType } : {}),
+              ...(typeof metadata.display === 'boolean'
+                ? { display: metadata.display }
+                : {}),
+              ...(metadata.details === undefined
+                ? {}
+                : { details: metadata.details }),
+            }
+          : undefined;
+      const allowlistedData = {
+        ...(deliveryMode === 'steer' ? { deliveryMode: 'steer' as const } : {}),
+        ...(customData ?? {}),
+      };
       return {
         ...event,
         message: {
           ...canonical,
-          ...(deliveryMode === 'steer'
-            ? { data: { deliveryMode: 'steer' } }
+          ...(deliveryMode === 'steer' || customData
+            ? { data: allowlistedData }
             : {}),
         },
       };
@@ -265,9 +286,22 @@ export class LiveEventNormalizer {
     if (this.activeMessage) this.activeMessage.content = safeContent;
     const turnId =
       directIdentifier(event, 'turnId') ?? directIdentifier(message, 'turnId');
-    const rawData = Object.hasOwn(message, 'data')
-      ? directValue(message, 'data')
-      : directValue(event, 'data');
+    const rawData =
+      role === 'custom'
+        ? {
+            customType:
+              directString(message, 'customType') ??
+              directString(event, 'customType'),
+            display:
+              typeof directValue(message, 'display') === 'boolean'
+                ? directValue(message, 'display')
+                : directValue(event, 'display'),
+            details:
+              directValue(message, 'details') ?? directValue(event, 'details'),
+          }
+        : Object.hasOwn(message, 'data')
+          ? directValue(message, 'data')
+          : directValue(event, 'data');
     const safeData =
       rawData === undefined ? undefined : jsonSafe(rawData, MAX_FRAME_BYTES);
     const payload: NormalizedMessagePayload = {

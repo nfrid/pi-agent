@@ -312,7 +312,6 @@ export function TranscriptOutline({
               onJump(landmark);
               onOpenChange?.(false);
             }}
-            title={landmark.label}
           >
             <i aria-hidden="true" />
             <span>{landmark.label}</span>
@@ -337,7 +336,6 @@ export function TranscriptOutline({
             className={`transcript-minimap-marker outline-${landmark.kind}${landmark.deliveryMode === 'steer' ? ' outline-steering' : ''}${activeKey === landmark.key ? ' active' : ''}`}
             key={landmark.key}
             aria-label={landmark.label}
-            title={landmark.label}
             data-preview={landmark.label}
             onClick={() => onJump(landmark)}
           >

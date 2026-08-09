@@ -33,4 +33,25 @@ describe('tasks live surface', () => {
       },
     });
   });
+
+  it('keeps the active task in bounded dashboard rows', () => {
+    const store = createTaskStore();
+    applySnapshot(store, initialState());
+    for (let index = 1; index <= 129; index += 1)
+      mutate(store, 'add', {
+        action: 'add',
+        id: `T${index}`,
+        text: `Task ${index}`,
+      });
+    mutate(store, 'start', { action: 'start', id: 'T129' });
+
+    const surface = taskSurface(store);
+    const viewModel = surface.viewModel as {
+      tasks: readonly { id: string; status: string }[];
+      stats: { total: number };
+    };
+    expect(viewModel.tasks).toHaveLength(128);
+    expect(viewModel.tasks[0]).toMatchObject({ id: 'T129', status: 'doing' });
+    expect(viewModel.stats.total).toBe(129);
+  });
 });

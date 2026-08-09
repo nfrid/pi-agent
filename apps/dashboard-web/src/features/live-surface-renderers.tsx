@@ -60,9 +60,13 @@ function stateClass(state: string): string {
   return 'surface-queued';
 }
 
-function elapsed(start: unknown, finish: unknown): string | undefined {
+function elapsed(
+  start: unknown,
+  finish: unknown,
+  now = Date.now(),
+): string | undefined {
   if (typeof start !== 'number') return undefined;
-  const end = typeof finish === 'number' ? finish : Date.now();
+  const end = typeof finish === 'number' ? finish : now;
   const seconds = Math.max(0, Math.floor((end - start) / 1000));
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -108,19 +112,21 @@ function WorkSurface({
   label,
   summary,
   count,
+  visibleCount,
   children,
 }: {
   title: string;
   label: string;
   summary: string;
-  count: number;
+  count: ReactNode;
+  visibleCount: number;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [visible, setVisible] = useState(count > 0);
+  const [visible, setVisible] = useState(visibleCount > 0);
   const launcherRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (count > 0) {
+    if (visibleCount > 0) {
       setVisible(true);
       return;
     }
@@ -130,7 +136,7 @@ function WorkSurface({
       setVisible(false);
     }, 180);
     return () => window.clearTimeout(timeout);
-  }, [count, open]);
+  }, [visibleCount, open]);
   if (!visible) return null;
   return (
     <>
@@ -244,6 +250,14 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
   const rows = delegateRows(model);
   const stats = delegateStats(rows);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const hasLiveElapsed = stats.running + stats.queued > 0;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!hasLiveElapsed) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [hasLiveElapsed]);
   const title = 'Delegates';
   const toggle = (id: string) =>
     setExpanded((current) => {
@@ -251,7 +265,9 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
-  const active = rows.find((row) => stateLabel(row.state) === 'running');
+  const active = rows.find((row) =>
+    ['running', 'queued'].includes(stateLabel(row.state)),
+  );
   const summary = active
     ? short(text(active.name, 'Subagent'), 42)
     : stats.failed
@@ -259,12 +275,15 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
       : stats.aborted
         ? `${stats.aborted} stopped`
         : 'All delegates complete';
+  const activeCount = stats.running + stats.queued;
+  const finishedCount = rows.length - activeCount;
   return (
     <WorkSurface
       title={title}
       label="Delegates"
       summary={summary}
-      count={rows.length}
+      count={`${activeCount} active · ${finishedCount} finished`}
+      visibleCount={rows.length}
     >
       <div className="delegate-scroll surface-scroll-region">
         <SurfaceStats
@@ -293,6 +312,7 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
             const elapsedText = elapsed(
               row.startedAt ?? row.createdAt,
               row.finishedAt,
+              now,
             );
             const isExpanded = expanded.has(id);
             const jobId = row.jobId ?? '';
@@ -399,8 +419,8 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
                               <span>Run {runIndex + 1}</span>
                               <small>
                                 {runState}
-                                {elapsed(run.startedAt, run.finishedAt)
-                                  ? ` · ${elapsed(run.startedAt, run.finishedAt)}`
+                                {elapsed(run.startedAt, run.finishedAt, now)
+                                  ? ` · ${elapsed(run.startedAt, run.finishedAt, now)}`
                                   : ''}
                               </small>
                             </li>
@@ -437,16 +457,11 @@ function taskDependencies(row: TaskSurfaceTask): readonly string[] {
   return row.dependsOn.slice(0, 6);
 }
 
-function taskIsComplete(row: TaskSurfaceTask): boolean {
-  const state = stateLabel(row.status);
-  return state === 'done' || state === 'dropped';
-}
-
 function TasksSurface({ surface }: { surface: ExtensionSurface }) {
   const model = surface.viewModel as TaskStateViewModel;
   const rows = taskRows(model);
-  const completed = rows.filter(taskIsComplete).length;
-  const total = rows.length;
+  const completed = model.stats.done;
+  const total = model.stats.total;
   const progress = total ? Math.round((completed / total) * 100) : 0;
   const title = 'Tasks';
   const current = rows.find((row) => stateLabel(row.status) === 'running');
@@ -454,9 +469,17 @@ function TasksSurface({ surface }: { surface: ExtensionSurface }) {
     ? short(text(current.text, 'Task in progress'), 42)
     : completed === total
       ? 'All tasks complete'
-      : `${total - completed} remaining`;
+      : model.stats.active === 0
+        ? 'No active tasks'
+        : `${model.stats.active} remaining`;
   return (
-    <WorkSurface title={title} label="Tasks" summary={summary} count={total}>
+    <WorkSurface
+      title={title}
+      label="Tasks"
+      summary={summary}
+      count={`${completed}/${total}`}
+      visibleCount={total}
+    >
       <div
         className="task-progress"
         role="progressbar"

@@ -70,6 +70,60 @@ describe('shared activity model', () => {
     expect(live[0]?.status).toBe('live');
   });
 
+  it('finishes the prior group when a later assistant message closes the work', () => {
+    const entries = [
+      { kind: 'assistant' as const, speaks: false },
+      {
+        kind: 'tool' as const,
+        name: 'read',
+        args: {},
+        status: 'success' as const,
+      },
+      { kind: 'assistant' as const, speaks: true },
+    ];
+
+    expect(projectActivityGroups(entries, { liveTail: true })[0]?.status).toBe(
+      'complete',
+    );
+  });
+
+  it('does not keep a finished assistant-only tail live', () => {
+    expect(
+      projectActivityGroups([{ kind: 'assistant', speaks: false }], {
+        liveTail: true,
+      })[0]?.status,
+    ).toBe('complete');
+  });
+
+  it('keeps unresolved failures live until the active group finishes', () => {
+    const failed = {
+      kind: 'tool' as const,
+      name: 'bash',
+      args: { command: 'false' },
+      status: 'error' as const,
+      isError: true,
+    };
+    const terminalEntries = [
+      { kind: 'assistant' as const, speaks: false },
+      failed,
+    ];
+    const mixedEntries = [
+      ...terminalEntries,
+      {
+        kind: 'tool' as const,
+        name: 'read',
+        args: {},
+        status: 'running' as const,
+      },
+    ];
+
+    expect(
+      projectActivityGroups(terminalEntries, { liveTail: true })[0]?.status,
+    ).toBe('live');
+    expect(projectActivityGroups(mixedEntries)[0]?.status).toBe('live');
+    expect(projectActivityGroups(terminalEntries)[0]?.status).toBe('failed');
+  });
+
   it('uses retry-aware outcomes for shared dashboard projections', () => {
     const corrected = projectActivityGroups([
       { kind: 'assistant' as const, speaks: false },

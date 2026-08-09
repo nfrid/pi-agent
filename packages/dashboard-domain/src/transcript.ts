@@ -417,6 +417,17 @@ function mergeMessage(
   const deliveryMode =
     normalizedDeliveryMode(payload.data) ??
     (previous?.kind === 'message' ? previous.deliveryMode : undefined);
+  const previousData =
+    previous?.kind === 'message' && isRecord(previous.data)
+      ? previous.data
+      : undefined;
+  const payloadData = isRecord(payload.data) ? payload.data : undefined;
+  const data =
+    payload.role === 'custom' && previousData && payloadData
+      ? { ...previousData, ...payloadData }
+      : payload.data === undefined && previous?.kind === 'message'
+        ? previous.data
+        : payload.data;
   const item: TranscriptMessageItem = {
     kind: 'message',
     messageId: payload.messageId,
@@ -434,7 +445,7 @@ function mergeMessage(
         : previous?.kind === 'message'
           ? previous.status
           : 'streaming',
-    ...(payload.data === undefined ? {} : { data: payload.data }),
+    ...(data === undefined ? {} : { data }),
   };
   items[payload.messageId] = item;
   return {
@@ -976,6 +987,30 @@ export function projectTranscriptForRender(
       continue;
     }
     if (item.kind === 'message') {
+      const messageData = isRecord(item.data) ? item.data : undefined;
+      const customType =
+        item.role === 'custom' && messageData
+          ? directString(messageData, 'customType')
+          : undefined;
+      if (customType) {
+        items.push({
+          kind: 'other',
+          key: item.messageId,
+          id: item.messageId,
+          raw: {
+            type: 'custom_message',
+            customType,
+            content: item.content,
+            ...(typeof messageData?.display === 'boolean'
+              ? { display: messageData.display }
+              : {}),
+            ...(messageData?.details === undefined
+              ? {}
+              : { details: messageData.details }),
+          },
+        });
+        continue;
+      }
       const embeddedToolCalls = directToolCallParts(item.content);
       const embeddedToolCallIds = embeddedToolCalls
         .map(
