@@ -12,7 +12,7 @@ import type {
 } from '../../../../extensions/tasks/contribution';
 import { Markdown } from '../Markdown';
 import type { DashboardRendererContext } from '../renderer-registry';
-import { DashboardDialog } from './dashboard-dialog';
+import { DashboardDialog, SurfaceStats } from './dashboard-dialog';
 import { DashboardTime } from './timestamp';
 
 function text(value: string | undefined, fallback = ''): string {
@@ -114,7 +114,7 @@ function WorkSurface({
   count,
   visibleCount,
   dialogClassName = 'surface-dialog work-surface-dialog',
-  dialogHeader,
+  headerStats,
   children,
 }: {
   title: string;
@@ -123,7 +123,7 @@ function WorkSurface({
   count: ReactNode;
   visibleCount: number;
   dialogClassName?: string;
-  dialogHeader?: ReactNode;
+  headerStats?: ReactNode;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -167,32 +167,16 @@ function WorkSurface({
       </article>
       <DashboardDialog
         title={title}
+        eyebrow={label}
+        headerSummary={summary}
         className={dialogClassName}
-        headerContent={dialogHeader}
+        headerContent={headerStats}
         isOpen={open}
         onClose={() => setOpen(false)}
       >
         <div className="work-surface-content">{children}</div>
       </DashboardDialog>
     </>
-  );
-}
-
-function SurfaceStats({
-  stats,
-}: {
-  stats: readonly { label: string; value: number; tone?: string }[];
-}) {
-  return (
-    <div className="surface-stats" role="status" aria-label="Status summary">
-      {stats
-        .filter((stat) => stat.value > 0)
-        .map((stat) => (
-          <span className={stat.tone} key={stat.label}>
-            <strong>{stat.value}</strong> {stat.label}
-          </span>
-        ))}
-    </div>
   );
 }
 
@@ -289,12 +273,11 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
   const finishedCount = rows.length - activeCount;
   const statsView = (
     <SurfaceStats
+      className="work-header-stats"
+      showZero
       stats={[
-        { label: 'running', value: stats.running, tone: 'surface-running' },
-        { label: 'queued', value: stats.queued },
-        { label: 'failed', value: stats.failed, tone: 'surface-failed' },
-        { label: 'stopped', value: stats.aborted, tone: 'surface-aborted' },
-        { label: 'done', value: stats.done, tone: 'surface-done' },
+        { label: 'active', value: activeCount, tone: 'surface-running' },
+        { label: 'finished', value: finishedCount },
       ]}
     />
   );
@@ -306,7 +289,7 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
       count={`${activeCount} active · ${finishedCount} finished`}
       visibleCount={rows.length}
       dialogClassName="surface-dialog work-surface-dialog delegate-surface-dialog"
-      dialogHeader={statsView}
+      headerStats={statsView}
     >
       <div className="delegate-scroll surface-scroll-region">
         <div className="delegate-rows">
@@ -464,6 +447,20 @@ function TasksSurface({ surface }: { surface: ExtensionSurface }) {
       summary={summary}
       count={`${completed}/${total}`}
       visibleCount={total}
+      headerStats={
+        <SurfaceStats
+          className="work-header-stats"
+          showZero
+          stats={[
+            {
+              label: 'active',
+              value: model.stats.active,
+              tone: 'surface-running',
+            },
+            { label: 'finished', value: completed },
+          ]}
+        />
+      }
     >
       <div
         className="task-progress"

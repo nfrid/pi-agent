@@ -95,7 +95,22 @@ export function shouldForwardLiveMessage(value: unknown): boolean {
   const event = eventRecord(value);
   const message = eventRecord(directValue(event, 'message'));
   const role = directString(message, 'role') ?? directString(event, 'role');
-  return role !== 'toolResult';
+  if (role === 'toolResult') return false;
+  if (role !== 'custom') return true;
+  const messageData = eventRecord(directValue(message, 'data'));
+  const eventData = eventRecord(directValue(event, 'data'));
+  const display =
+    directValue(message, 'display') ??
+    directValue(event, 'display') ??
+    directValue(messageData, 'display') ??
+    directValue(eventData, 'display');
+  if (display === false) return false;
+  const content =
+    directValue(message, 'content') ?? directValue(event, 'content');
+  return !(
+    typeof content === 'string' &&
+    content.startsWith('Todo state at the start of this user turn (')
+  );
 }
 
 function directIdentifier(
@@ -286,18 +301,29 @@ export class LiveEventNormalizer {
     if (this.activeMessage) this.activeMessage.content = safeContent;
     const turnId =
       directIdentifier(event, 'turnId') ?? directIdentifier(message, 'turnId');
+    const messageData = eventRecord(directValue(message, 'data'));
+    const eventData = eventRecord(directValue(event, 'data'));
     const rawData =
       role === 'custom'
         ? {
             customType:
               directString(message, 'customType') ??
-              directString(event, 'customType'),
+              directString(event, 'customType') ??
+              directString(messageData, 'customType') ??
+              directString(eventData, 'customType'),
             display:
               typeof directValue(message, 'display') === 'boolean'
                 ? directValue(message, 'display')
-                : directValue(event, 'display'),
+                : typeof directValue(event, 'display') === 'boolean'
+                  ? directValue(event, 'display')
+                  : typeof directValue(messageData, 'display') === 'boolean'
+                    ? directValue(messageData, 'display')
+                    : directValue(eventData, 'display'),
             details:
-              directValue(message, 'details') ?? directValue(event, 'details'),
+              directValue(message, 'details') ??
+              directValue(event, 'details') ??
+              directValue(messageData, 'details') ??
+              directValue(eventData, 'details'),
           }
         : Object.hasOwn(message, 'data')
           ? directValue(message, 'data')

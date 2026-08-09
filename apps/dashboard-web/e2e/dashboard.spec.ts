@@ -399,7 +399,26 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
           title: 'Dormant thread',
           updatedAt: Date.parse('2026-08-04T12:00:00.000Z'),
         },
-        entries: [],
+        entries: [
+          ...Array.from({ length: 80 }, (_, index) => ({
+            type: 'message',
+            message: {
+              id: `dormant-history-${index}`,
+              role: 'user',
+              content: `Dormant history ${index}`,
+              timestamp: Date.parse('2026-08-04T10:00:00.000Z') + index,
+            },
+          })),
+          {
+            type: 'message',
+            message: {
+              id: 'dormant-history-latest',
+              role: 'user',
+              content: 'Dormant latest',
+              timestamp: Date.parse('2026-08-04T11:00:00.000Z'),
+            },
+          },
+        ],
       }),
     }),
   );
@@ -480,6 +499,16 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   ).toHaveAttribute('datetime', '2026-08-05T18:42:00.000Z');
   await page.getByRole('button', { name: 'Open transcript outline' }).click();
   const outline = page.getByRole('dialog', { name: 'Transcript outline' });
+  await expect(outline).toHaveClass(/work-surface-dialog/);
+  await expect(outline.locator('.surface-dialog-summary')).toContainText(
+    'Navigate transcript landmarks',
+  );
+  await expect(outline.locator('.surface-stats')).toContainText('landmarks');
+  expect(
+    await outline
+      .locator('.surface-dialog-body')
+      .evaluate((element) => getComputedStyle(element).padding),
+  ).toBe('0px');
   await expect(
     outline.locator('.transcript-outline-time').first(),
   ).toBeVisible();
@@ -534,6 +563,11 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   const composer = page.getByLabel('Message Pi');
   await expect(composer).toBeVisible();
   await composer.fill('Draft survives navigation and refresh');
+  await page.evaluate(() => {
+    window.dispatchEvent(new WheelEvent('wheel'));
+    window.scrollTo(0, 0);
+  });
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   await page.getByRole('button', { name: 'Open agent list' }).click();
   await page
     .getByRole('complementary', { name: 'Agents and threads' })
@@ -541,6 +575,19 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     .click();
   await expect(page).toHaveURL(/\/sessions\/session-dormant$/u);
   await expect(page.getByText('This session is dormant.')).toBeVisible();
+  await expect(page.getByText('Dormant latest')).toBeVisible();
+  await expect(page.locator('.session-page')).not.toHaveAttribute(
+    'data-tail-pending',
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollHeight -
+          (window.scrollY + window.innerHeight),
+      ),
+    )
+    .toBeLessThanOrEqual(1);
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -2743,6 +2790,19 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   await tasksLauncher.click();
   const tasksPanel = page.getByRole('dialog', { name: 'Tasks' });
   await expect(tasksPanel).toBeVisible();
+  await expect(tasksPanel).toHaveClass(/work-surface-dialog/);
+  await expect(tasksPanel.locator('.surface-dialog-summary')).toContainText(
+    'Inspect the new drawer',
+  );
+  await expect(tasksPanel.locator('.surface-stats')).toContainText('1 active');
+  await expect(tasksPanel.locator('.surface-stats')).toContainText(
+    '0 finished',
+  );
+  expect(
+    await tasksPanel
+      .locator('.surface-dialog-body')
+      .evaluate((element) => getComputedStyle(element).padding),
+  ).toBe('0px');
   await expect(tasksPanel).toContainText('0 of 18 complete');
   const taskScroll = await tasksPanel
     .locator('.surface-scroll-region')
@@ -2779,6 +2839,14 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
     })),
   ).toEqual({ top: '0px', right: '0px', bottom: '0px', left: '0px' });
   const delegateStats = delegatesPanel.locator('.surface-stats');
+  await expect(delegateStats).toContainText('18 active');
+  await expect(delegateStats).toContainText('0 finished');
+  expect(
+    await delegateStats.evaluate((element) => ({
+      display: getComputedStyle(element).display,
+      rows: getComputedStyle(element).gridTemplateRows.split(' ').length,
+    })),
+  ).toMatchObject({ display: 'grid', rows: 2 });
   expect(
     await delegateStats.evaluate((element) =>
       element.parentElement?.classList.contains(

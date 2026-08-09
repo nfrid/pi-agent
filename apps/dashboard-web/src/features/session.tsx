@@ -120,6 +120,11 @@ export function SessionView({
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const autoScrollFrameRef = useRef<number | undefined>(undefined);
   const layoutScrollFrameRef = useRef<number | undefined>(undefined);
+  const initialTailSessionRef = useRef<string | undefined>(undefined);
+  const initialTailSettleTimerRef = useRef<number | undefined>(undefined);
+  const [tailReadySessionId, setTailReadySessionId] = useState<
+    string | undefined
+  >(undefined);
   const userScrollIntentRef = useRef(false);
   const runtimeReconcileTimerRef = useRef<number | undefined>(undefined);
   const runtimeWasOnlineRef = useRef(false);
@@ -311,6 +316,12 @@ export function SessionView({
     const cancelPendingTailScroll = () => {
       userScrollIntentRef.current = true;
       stickToBottomRef.current = false;
+      initialTailSessionRef.current = undefined;
+      setTailReadySessionId(id);
+      if (initialTailSettleTimerRef.current !== undefined) {
+        window.clearTimeout(initialTailSettleTimerRef.current);
+        initialTailSettleTimerRef.current = undefined;
+      }
       if (autoScrollFrameRef.current !== undefined) {
         window.cancelAnimationFrame(autoScrollFrameRef.current);
         autoScrollFrameRef.current = undefined;
@@ -319,6 +330,14 @@ export function SessionView({
         window.cancelAnimationFrame(layoutScrollFrameRef.current);
         layoutScrollFrameRef.current = undefined;
       }
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const root = document.documentElement;
+      if (
+        event.clientX >= root.clientWidth ||
+        event.clientY >= root.clientHeight
+      )
+        cancelPendingTailScroll();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
@@ -348,6 +367,24 @@ export function SessionView({
         window.scrollY,
         window.innerHeight,
       );
+      if (
+        initialTailSessionRef.current === id &&
+        !userScrollIntentRef.current
+      ) {
+        stickToBottomRef.current = true;
+        setAwayFromLatest(false);
+        if (!nearLatest && layoutScrollFrameRef.current === undefined) {
+          layoutScrollFrameRef.current = window.requestAnimationFrame(() => {
+            layoutScrollFrameRef.current = undefined;
+            if (
+              initialTailSessionRef.current === id &&
+              !userScrollIntentRef.current
+            )
+              window.scrollTo(0, document.documentElement.scrollHeight);
+          });
+        }
+        return;
+      }
       stickToBottomRef.current = nearLatest;
       if (nearLatest) userScrollIntentRef.current = false;
       setAwayFromLatest(
@@ -366,17 +403,29 @@ export function SessionView({
       passive: true,
     });
     window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('pointerdown', onPointerDown);
     update();
     return () => {
       window.removeEventListener('scroll', update);
       window.removeEventListener('wheel', cancelPendingTailScroll);
       window.removeEventListener('touchmove', cancelPendingTailScroll);
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pointerdown', onPointerDown);
     };
   }, [id]);
   useLayoutEffect(() => {
     if (!data || !projection) return;
     const enteringSession = scrolledSessionRef.current !== id;
+    if (enteringSession) {
+      userScrollIntentRef.current = false;
+      stickToBottomRef.current = true;
+      initialTailSessionRef.current = id;
+      if (initialTailSettleTimerRef.current !== undefined) {
+        window.clearTimeout(initialTailSettleTimerRef.current);
+        initialTailSettleTimerRef.current = undefined;
+      }
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    }
     if (enteringSession && autoScrollFrameRef.current !== undefined) {
       window.cancelAnimationFrame(autoScrollFrameRef.current);
       autoScrollFrameRef.current = undefined;
@@ -393,10 +442,20 @@ export function SessionView({
       if (
         userScrollIntentRef.current ||
         (!enteringSession && !stickToBottomRef.current)
-      )
+      ) {
+        setTailReadySessionId(id);
         return;
+      }
       window.scrollTo(0, document.documentElement.scrollHeight);
       stickToBottomRef.current = true;
+      setTailReadySessionId(id);
+      if (initialTailSettleTimerRef.current !== undefined)
+        window.clearTimeout(initialTailSettleTimerRef.current);
+      initialTailSettleTimerRef.current = window.setTimeout(() => {
+        initialTailSettleTimerRef.current = undefined;
+        if (initialTailSessionRef.current === id)
+          initialTailSessionRef.current = undefined;
+      }, 400);
     });
     autoScrollFrameRef.current = frame;
     return () => {
@@ -414,6 +473,10 @@ export function SessionView({
       if (layoutScrollFrameRef.current !== undefined) {
         window.cancelAnimationFrame(layoutScrollFrameRef.current);
         layoutScrollFrameRef.current = undefined;
+      }
+      if (initialTailSettleTimerRef.current !== undefined) {
+        window.clearTimeout(initialTailSettleTimerRef.current);
+        initialTailSettleTimerRef.current = undefined;
       }
       if (runtimeReconcileTimerRef.current !== undefined) {
         window.clearTimeout(runtimeReconcileTimerRef.current);
@@ -447,9 +510,11 @@ export function SessionView({
         `${Math.ceil(keyboardInset)}px`,
       );
       page.toggleAttribute('data-keyboard-open', keyboardInset > 0);
+      const initialTailPending =
+        initialTailSessionRef.current === id && !userScrollIntentRef.current;
       if (
         !preserveLatest ||
-        !stickToBottomRef.current ||
+        (!stickToBottomRef.current && !initialTailPending) ||
         userScrollIntentRef.current
       )
         return;
@@ -457,7 +522,11 @@ export function SessionView({
         window.cancelAnimationFrame(layoutScrollFrameRef.current);
       layoutScrollFrameRef.current = window.requestAnimationFrame(() => {
         layoutScrollFrameRef.current = undefined;
-        if (!stickToBottomRef.current || userScrollIntentRef.current) return;
+        if (
+          (!stickToBottomRef.current && initialTailSessionRef.current !== id) ||
+          userScrollIntentRef.current
+        )
+          return;
         window.scrollTo(0, document.documentElement.scrollHeight);
       });
     };
@@ -669,6 +738,7 @@ export function SessionView({
       )}
       <section
         ref={sessionPageRef}
+        data-tail-pending={tailReadySessionId === id ? undefined : ''}
         className={`session-page ${inspectorOpen ? 'inspector-open' : ''} ${hasPendingInteraction ? 'has-pending-interaction' : ''} ${inspectorOpen || outlineOpen || agentNavOpen || hasPendingInteraction ? 'modal-open' : ''}`}
       >
         <header className="session-context session-heading">
@@ -762,6 +832,7 @@ export function SessionView({
           </div>
         )}
         <Transcript
+          key={id}
           projection={projection}
           runtime={runtime}
           outlineOpen={outlineOpen}

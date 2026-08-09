@@ -23,7 +23,7 @@ import {
   useState,
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
-import { DashboardDialog } from '../features/dashboard-dialog';
+import { DashboardDialog, SurfaceStats } from '../features/dashboard-dialog';
 import { DashboardTime } from '../features/timestamp';
 import { Markdown } from '../Markdown';
 import {
@@ -301,12 +301,12 @@ export function TranscriptOutline({
     };
   }, [landmarkRevision]);
   const list = (
-    <div className="transcript-outline-list">
+    <div className="transcript-outline-list surface-scroll-region">
       {outlineLandmarks.length ? (
         outlineLandmarks.map((landmark) => (
           <button
             type="button"
-            className={`transcript-outline-item outline-${landmark.kind}${landmark.deliveryMode === 'steer' ? ' outline-steering' : ''}`}
+            className={`surface-row transcript-outline-item outline-${landmark.kind}${landmark.deliveryMode === 'steer' ? ' outline-steering' : ''}`}
             key={landmark.key}
             onClick={() => {
               onJump(landmark);
@@ -353,11 +353,18 @@ export function TranscriptOutline({
         isOpen={open}
         title="Transcript outline"
         eyebrow="This session"
-        className="outline-sheet"
-        layerClassName="outline-sheet-layer"
+        headerSummary="Navigate transcript landmarks"
+        headerContent={
+          <SurfaceStats
+            className="work-header-stats"
+            showZero
+            stats={[{ label: 'landmarks', value: outlineLandmarks.length }]}
+          />
+        }
+        className="surface-dialog work-surface-dialog outline-sheet"
         onClose={() => onOpenChange?.(false)}
       >
-        {list}
+        <div className="work-surface-content">{list}</div>
       </DashboardDialog>
     </>
   );

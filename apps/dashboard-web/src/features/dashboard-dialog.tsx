@@ -10,11 +10,38 @@ import { useOverlayPresence } from './overlay-presence';
 import { useSwipeToDismiss } from './swipe-to-dismiss';
 
 /** Shared overlay primitive for dashboard sheets and panels. */
+export function SurfaceStats({
+  stats,
+  className,
+  showZero = false,
+}: {
+  stats: readonly { label: string; value: number; tone?: string }[];
+  className?: string;
+  showZero?: boolean;
+}) {
+  return (
+    <div
+      className={`surface-stats${className ? ` ${className}` : ''}`}
+      role="status"
+      aria-label="Status summary"
+    >
+      {stats
+        .filter((stat) => showZero || stat.value > 0)
+        .map((stat) => (
+          <span className={stat.tone} key={stat.label}>
+            <strong>{stat.value}</strong> {stat.label}
+          </span>
+        ))}
+    </div>
+  );
+}
+
 export function DashboardDialog({
   title,
   onClose,
   children,
   headerContent,
+  headerSummary,
   eyebrow = 'Live work',
   className = 'surface-dialog',
   layerClassName = 'surface-dialog-layer',
@@ -24,6 +51,7 @@ export function DashboardDialog({
   onClose: () => void;
   children: ReactNode;
   headerContent?: ReactNode;
+  headerSummary?: ReactNode;
   eyebrow?: string;
   className?: string;
   layerClassName?: string;
@@ -88,6 +116,9 @@ export function DashboardDialog({
             <div className="surface-dialog-heading">
               <p className="eyebrow">{eyebrow}</p>
               <h2 id={titleId}>{title}</h2>
+              {headerSummary && (
+                <div className="surface-dialog-summary">{headerSummary}</div>
+              )}
             </div>
             {headerContent && (
               <div className="surface-dialog-header-content">

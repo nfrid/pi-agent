@@ -271,6 +271,33 @@ describe('remote event normalization', () => {
     expect(shouldForwardLiveMessage({ role: 'user', content: 'Prompt' })).toBe(
       true,
     );
+    expect(
+      shouldForwardLiveMessage({
+        message: {
+          role: 'custom',
+          content: 'hidden direct context',
+          display: false,
+        },
+      }),
+    ).toBe(false);
+    expect(
+      shouldForwardLiveMessage({
+        message: {
+          role: 'custom',
+          content: 'hidden nested context',
+          data: { display: false },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      shouldForwardLiveMessage({
+        message: {
+          role: 'custom',
+          content:
+            'Todo state at the start of this user turn (0 active, 0 ready, 0 blocked, 0 done).',
+        },
+      }),
+    ).toBe(false);
   });
 
   it('preserves safe custom-message metadata for live transcript formatting', () => {
@@ -291,6 +318,26 @@ describe('remote event normalization', () => {
         customType: 'delegate-job-result',
         display: true,
         details: { jobs: [{ name: 'Review', state: 'success' }] },
+      },
+    });
+    expect(
+      normalizer.normalizeMessage('finished', {
+        message: {
+          role: 'custom',
+          content: 'nested metadata',
+          data: {
+            customType: 'nested-note',
+            display: false,
+            details: { source: 'context' },
+          },
+        },
+      }),
+    ).toMatchObject({
+      role: 'custom',
+      data: {
+        customType: 'nested-note',
+        display: false,
+        details: { source: 'context' },
       },
     });
     const combinedMetadata = {
