@@ -1632,12 +1632,14 @@ test('dense mobile session keeps conversation and activity readable', async ({
     return {
       topDifference: Math.abs(timeRect.top - paragraphRect.top),
       paragraphTopInset: paragraphRect.top - blobRect.top,
-      backgroundImage: getComputedStyle(time).backgroundImage,
+      blobBackgroundImage: getComputedStyle(blob).backgroundImage,
+      timestampBackgroundImage: getComputedStyle(time).backgroundImage,
     };
   });
   expect(thinkingLayout.topDifference).toBeLessThanOrEqual(2);
   expect(thinkingLayout.paragraphTopInset).toBeLessThanOrEqual(8);
-  expect(thinkingLayout.backgroundImage).toBe('none');
+  expect(thinkingLayout.blobBackgroundImage).toContain('linear-gradient');
+  expect(thinkingLayout.timestampBackgroundImage).toBe('none');
   const timestampRights = await page
     .locator('.activity-group .transcript-time:visible')
     .evaluateAll((timestamps) =>

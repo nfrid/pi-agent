@@ -4916,7 +4916,12 @@ details.session-event {
   position: relative;
   border-left: 2px solid color-mix(in srgb, var(--purple) 68%, transparent);
   border-radius: 5px;
-  background: color-mix(in srgb, var(--purple) 7%, var(--bg));
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--purple) 7%, var(--bg)) 0,
+    color-mix(in srgb, var(--purple) 7%, var(--bg)) calc(100% - 84px),
+    transparent 100%
+  );
   padding: 7px 9px;
   color: var(--muted);
   font-size: 10px;
