@@ -865,6 +865,112 @@ describe('dashboard HTTP boundary', () => {
     bridge.destroy();
   });
 
+  it('falls back to the latest runtime snapshot after authority keeps changing', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-authority-exhaustion-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'authority.jsonl'),
+      `${[
+        { type: 'session', id: 'authority-session', cwd: '/tmp/project' },
+        {
+          type: 'message',
+          id: 'disk-leaf',
+          parentId: null,
+          message: { role: 'user', content: 'Persisted transcript' },
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}\n`,
+    );
+    const sessions = new SessionIndex(sessionDir);
+    const originalReadEntries = sessions.readEntries.bind(sessions);
+    let readCalls = 0;
+    let bridge!: net.Socket;
+    sessions.readEntries = async (id, before, leafId, options) => {
+      const result = await originalReadEntries(id, before, leafId, options);
+      if (readCalls < 3) {
+        readCalls += 1;
+        bridge.write(
+          serializeFrame({
+            kind: 'event',
+            seq: readCalls + 1,
+            event: {
+              type: 'session.changed',
+              session: {
+                id: 'authority-session',
+                leafId: `runtime-leaf-${readCalls}`,
+                entriesComplete: true,
+                entries: [
+                  {
+                    type: 'message',
+                    id: `runtime-entry-${readCalls}`,
+                    message: { role: 'user', content: 'Current runtime' },
+                  },
+                ],
+              },
+            },
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return result;
+    };
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      socketPath: path.join(root, 'bridge.sock'),
+      sessionDir,
+      sessions,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            runtimeId: 'authority-runtime',
+            ownership: 'external',
+            pid: 123,
+            cwd: '/tmp/project',
+            liveState: 'working',
+            session: {
+              id: 'authority-session',
+              entriesComplete: true,
+              entries: [{ type: 'model_change', id: 'setup' }],
+            },
+            pendingInteractions: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/authority-session`,
+      { headers: { 'x-dashboard-token': 'test-token' } },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      entries: [{ type: 'message', id: 'runtime-entry-3' }],
+      metadata: { activeRuntimeId: 'authority-runtime' },
+    });
+    expect(readCalls).toBe(3);
+    bridge.destroy();
+  });
+
   it('refreshes an existing working session past its stale runtime turn', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-working-stale-turn-'),

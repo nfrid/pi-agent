@@ -658,8 +658,18 @@ class DashboardServerImpl implements DashboardServer {
         result = await readForRuntime(runtime);
         if (before !== undefined) break;
         const currentRuntime = activeRuntime();
-        if (sameReadAuthority(runtime, currentRuntime) || attempt >= 2) {
+        if (sameReadAuthority(runtime, currentRuntime)) {
           runtime = currentRuntime;
+          break;
+        }
+        if (attempt >= 2) {
+          // Do not attach disk entries selected under an authority that has
+          // changed again. The live snapshot is the only result tied to the
+          // current authority; with no live runtime, start a fresh unbranched
+          // read instead of returning the mismatched branch page.
+          if (currentRuntime) return runtimeResult(currentRuntime);
+          result = await readForRuntime(undefined);
+          runtime = undefined;
           break;
         }
         runtime = currentRuntime;

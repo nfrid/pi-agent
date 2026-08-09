@@ -1,7 +1,15 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { promises as fs } from 'node:fs';
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SessionIndex } from './session-index.js';
 
 describe('session index', () => {
@@ -170,6 +178,65 @@ describe('session index', () => {
       'old-answer',
       'new-prompt',
     ]);
+  });
+
+  it('retries latest-leaf reads when the file is appended between passes', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-latest-leaf-race-'),
+    );
+    const file = path.join(root, 'latest.jsonl');
+    const entries = [
+      { type: 'session', id: 'race-id', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'old-prompt',
+        parentId: null,
+        message: { role: 'user', content: 'Old prompt' },
+      },
+      {
+        type: 'message',
+        id: 'old-answer',
+        parentId: 'old-prompt',
+        message: { role: 'assistant', content: 'Old answer' },
+      },
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+
+    const originalStat = fs.stat.bind(fs);
+    let statCalls = 0;
+    const statSpy = vi.spyOn(fs, 'stat').mockImplementation(async (...args) => {
+      const result = await originalStat(...args);
+      statCalls += 1;
+      // The second stat is the first-pass stability check. Append before it
+      // returns so the next pass cannot accidentally use the old leaf.
+      if (statCalls === 2)
+        await appendFile(
+          file,
+          `${JSON.stringify({
+            type: 'message',
+            id: 'new-prompt',
+            parentId: 'old-answer',
+            message: { role: 'user', content: 'New prompt' },
+          })}\n`,
+        );
+      return result;
+    });
+    try {
+      const page = await index.readEntries('race-id', undefined, undefined, {
+        resolveLatestLeaf: true,
+      });
+      expect(
+        page.entries.map((entry) => (entry as { id?: string }).id),
+      ).toEqual(['race-id', 'old-prompt', 'old-answer', 'new-prompt']);
+    } finally {
+      statSpy.mockRestore();
+    }
+    expect(statCalls).toBeGreaterThanOrEqual(5);
   });
 
   it('returns a bounded recent tail for sessions larger than the response budget', async () => {

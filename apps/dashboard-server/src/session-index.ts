@@ -45,6 +45,37 @@ interface HistoryCursor {
 }
 
 const HISTORY_PAGE_BYTES = 8 * 1024 * 1024;
+const LATEST_LEAF_READ_ATTEMPTS = 3;
+
+type SessionFileVersion = {
+  dev: number;
+  ino: number;
+  size: number;
+};
+
+class SessionFileChangedError extends Error {
+  constructor() {
+    super('Session file changed while resolving its latest branch.');
+  }
+}
+
+function sameSessionFileVersion(
+  left: SessionFileVersion,
+  right: SessionFileVersion,
+): boolean {
+  return (
+    left.dev === right.dev && left.ino === right.ino && left.size === right.size
+  );
+}
+
+async function verifySessionFileVersion(
+  file: string,
+  expected: SessionFileVersion,
+): Promise<void> {
+  const current = await fs.stat(file).catch(() => undefined);
+  if (!current || !sameSessionFileVersion(expected, current))
+    throw new SessionFileChangedError();
+}
 
 function updateHistoryHash(hash: Hash, serialized: string): void {
   const bytes = Buffer.byteLength(serialized);
@@ -193,16 +224,44 @@ export class SessionIndex {
       throw new Error('Stale history cursor.');
     const upperBound = cursor?.before;
     const { header: _header, lastEntryId: _lastEntryId, ...metadata } = indexed;
-    if (requestedLeafId !== undefined || options.resolveLatestLeaf)
-      return this.readBranchEntries(
-        id,
-        indexed.file,
-        stat,
-        metadata,
-        requestedLeafId,
-        cursor,
-        options.resolveLatestLeaf === true && requestedLeafId === undefined,
-      );
+    if (requestedLeafId !== undefined || options.resolveLatestLeaf) {
+      const resolveLatestLeaf =
+        options.resolveLatestLeaf === true && requestedLeafId === undefined;
+      if (!resolveLatestLeaf)
+        return this.readBranchEntries(
+          id,
+          indexed.file,
+          stat,
+          metadata,
+          requestedLeafId,
+          cursor,
+          false,
+        );
+      let latestStat = stat;
+      for (let attempt = 0; attempt < LATEST_LEAF_READ_ATTEMPTS; attempt += 1) {
+        try {
+          return await this.readBranchEntries(
+            id,
+            indexed.file,
+            latestStat,
+            metadata,
+            undefined,
+            cursor,
+            true,
+          );
+        } catch (error) {
+          if (
+            !(error instanceof SessionFileChangedError) ||
+            attempt === LATEST_LEAF_READ_ATTEMPTS - 1
+          )
+            throw error;
+          const refreshed = await fs.stat(indexed.file).catch(() => undefined);
+          if (!refreshed) throw new Error('Unknown session.');
+          latestStat = refreshed;
+        }
+      }
+      throw new Error('Unable to resolve the latest session branch.');
+    }
     type PageEntry = {
       ordinal: number;
       entry: unknown;
@@ -370,6 +429,10 @@ export class SessionIndex {
       firstPassLines.close();
       firstPassInput.destroy();
     }
+    // The first pass chooses the leaf and the second pass materializes its
+    // ancestry. A concurrent append between them must force a fresh leaf
+    // resolution rather than returning a page for the old file version.
+    if (resolveLatestLeaf) await verifySessionFileVersion(file, stat);
     const resolvedLeafId = resolveLatestLeaf ? latestEntryId : leafId;
     if (!headerSeen || !resolvedLeafId || !parents.has(resolvedLeafId))
       throw new Error('Invalid session branch.');
@@ -482,6 +545,7 @@ export class SessionIndex {
       secondPassLines.close();
       secondPassInput.destroy();
     }
+    if (resolveLatestLeaf) await verifySessionFileVersion(file, stat);
     if (upperBound !== undefined && branchOrdinal === upperBound)
       reachedUpperBound = true;
     if (
