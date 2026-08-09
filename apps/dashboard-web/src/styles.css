@@ -4913,6 +4913,7 @@ details.session-event {
   margin: 6px 0;
 }
 .transcript-thinking-blob {
+  position: relative;
   border-left: 2px solid color-mix(in srgb, var(--purple) 68%, transparent);
   border-radius: 5px;
   background: color-mix(in srgb, var(--purple) 7%, var(--bg));
@@ -4921,13 +4922,19 @@ details.session-event {
   font-size: 10px;
 }
 .thinking-time {
+  position: absolute;
+  top: 7px;
+  right: 11px;
+  z-index: 1;
   display: block;
-  width: max-content;
-  margin: 0 0 3px auto;
+  margin: 0;
+  background: linear-gradient(
+    to right,
+    transparent,
+    color-mix(in srgb, var(--purple) 7%, var(--bg)) 30px
+  );
+  padding-left: 30px;
   font-variant-numeric: tabular-nums;
-}
-.activity-detail .thinking-time {
-  margin-right: -9px;
 }
 .activity-detail .message-meta .transcript-time {
   margin-right: -14px;

@@ -1620,12 +1620,34 @@ test('dense mobile session keeps conversation and activity readable', async ({
       (dot) => getComputedStyle(dot, '::before').backgroundColor,
     ),
   ).not.toBe('rgba(0, 0, 0, 0)');
-  await expect(page.locator('.thinking-time')).toBeVisible();
+  const thinkingTime = page.locator('.thinking-time');
+  await expect(thinkingTime).toBeVisible();
+  const thinkingLayout = await thinkingTime.evaluate((time) => {
+    const blob = time.closest('.transcript-thinking-blob');
+    const firstParagraph = blob?.querySelector('.markdown > p');
+    if (!blob || !firstParagraph) throw new Error('Thinking layout missing');
+    const timeRect = time.getBoundingClientRect();
+    const blobRect = blob.getBoundingClientRect();
+    const paragraphRect = firstParagraph.getBoundingClientRect();
+    return {
+      topDifference: Math.abs(timeRect.top - paragraphRect.top),
+      paragraphTopInset: paragraphRect.top - blobRect.top,
+      leftInset: timeRect.left - blobRect.left,
+      rightInset: blobRect.right - timeRect.right,
+      backgroundImage: getComputedStyle(time).backgroundImage,
+    };
+  });
+  expect(thinkingLayout.topDifference).toBeLessThanOrEqual(2);
+  expect(thinkingLayout.paragraphTopInset).toBeLessThanOrEqual(8);
+  expect(thinkingLayout.leftInset).toBeGreaterThanOrEqual(0);
+  expect(thinkingLayout.rightInset).toBeGreaterThanOrEqual(8);
+  expect(thinkingLayout.backgroundImage).toContain('linear-gradient');
   const timestampRights = await page
-    .locator('.activity-group .transcript-time:visible')
+    .locator('.activity-group .transcript-time:not(.thinking-time):visible')
     .evaluateAll((timestamps) =>
       timestamps.map((timestamp) => timestamp.getBoundingClientRect().right),
     );
+  expect(timestampRights.length).toBeGreaterThanOrEqual(3);
   expect(
     Math.max(...timestampRights) - Math.min(...timestampRights),
   ).toBeLessThanOrEqual(1);
