@@ -224,15 +224,6 @@ export function SessionView({
     if (resyncNonce > 0) void requestSessionRefetch();
   }, [requestSessionRefetch, resyncNonce]);
   useEffect(() => {
-    if (sessionChange <= 0) return;
-    // Live records provide an immediate optimistic tail. Once activity pauses,
-    // reconcile it with Pi's canonical persisted branch so custom entries,
-    // compaction records, and provider-specific tool payloads render exactly
-    // as they do after a full reload.
-    const retry = window.setTimeout(() => void requestSessionRefetch(), 750);
-    return () => window.clearTimeout(retry);
-  }, [requestSessionRefetch, sessionChange]);
-  useEffect(() => {
     const online = Boolean(runtime && runtime.online !== false);
     const wasOnline = runtimeWasOnlineRef.current;
     runtimeWasOnlineRef.current = online;

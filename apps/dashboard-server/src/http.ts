@@ -6,6 +6,7 @@ import { URL } from 'node:url';
 import {
   type BridgeEvent,
   type BrowserSnapshot,
+  isRecord,
   type RuntimeSnapshot,
   redactImageData,
   validateBridgeCommand,
@@ -28,6 +29,26 @@ const MAX_WS_BUFFER = 1024 * 1024;
 const MAX_SSE_FRAME_BYTES = 2 * 1024 * 1024;
 const WS_HEARTBEAT_MS = 30_000;
 const WS_PATH = '/ws';
+const NON_RENDERED_SESSION_ENTRY_TYPES = new Set([
+  'session',
+  'session_info',
+  'model_change',
+  'thinking_level_change',
+  'compaction',
+  'branch_summary',
+  'label',
+]);
+
+function hasTranscriptEntries(entries: readonly unknown[]): boolean {
+  return entries.some((entry) => {
+    if (!isRecord(entry) || typeof entry.type !== 'string') return true;
+    return !NON_RENDERED_SESSION_ENTRY_TYPES.has(entry.type);
+  });
+}
+
+function isSparseRuntimeSession(runtime: RuntimeSnapshot): boolean {
+  return !hasTranscriptEntries(runtime.session.entries);
+}
 
 function isTranscriptEvent(change: RegistryChange): boolean {
   return (
@@ -565,7 +586,8 @@ class DashboardServerImpl implements DashboardServer {
       before === undefined &&
       runtime &&
       (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
-        true
+        true &&
+      !isSparseRuntimeSession(runtime)
     )
       return runtimeResult(runtime);
     try {
@@ -579,11 +601,33 @@ class DashboardServerImpl implements DashboardServer {
           serverId: this.serverId,
           cursor,
         };
-      if (
+      const runtimeEntriesComplete =
         (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
-        true
-      )
+        true;
+      if (runtimeEntriesComplete && !isSparseRuntimeSession(runtime))
         return runtimeResult(runtime);
+      if (runtimeEntriesComplete) {
+        // A branch can be serialized successfully yet contain only session
+        // settings while the indexed JSONL still has the conversation. The
+        // persisted branch is the useful baseline in that case; retain active
+        // runtime metadata without allowing the sparse snapshot to win.
+        return {
+          ...result,
+          serverId: this.serverId,
+          cursor,
+          ...runtimeTransport(runtime),
+          metadata: {
+            ...result.metadata,
+            ...(runtime.session.name !== undefined
+              ? { name: runtime.session.name }
+              : {}),
+            ...(runtime.session.title !== undefined
+              ? { title: runtime.session.title }
+              : {}),
+            activeRuntimeId: runtime.runtimeId,
+          },
+        };
+      }
       return {
         ...result,
         // The JSONL may lag or represent a different active branch while the

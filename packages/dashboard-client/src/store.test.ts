@@ -700,6 +700,41 @@ describe('DashboardLiveStore', () => {
     expect(projection?.order).toEqual(['first', 'second', 'epoch-a:3']);
   });
 
+  it('does not erase an established transcript on a sparse complete refresh', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.hydrateSession({
+      ...sessionResponse(1),
+      entries: [
+        {
+          type: 'message',
+          message: { id: 'persisted-prompt', role: 'user', content: 'Prompt' },
+        },
+      ],
+    });
+
+    const projection = store.hydrateSession({
+      ...sessionResponse(1),
+      entriesComplete: true,
+      entries: [
+        { type: 'model_change', provider: 'openai', modelId: 'gpt-5' },
+        { type: 'thinking_level_change', thinkingLevel: 'medium' },
+      ],
+    });
+
+    expect(projection?.order).toEqual(['persisted-prompt']);
+    expect(projection?.items['persisted-prompt']).toMatchObject({
+      role: 'user',
+      content: 'Prompt',
+    });
+    const emptyRefresh = store.hydrateSession({
+      ...sessionResponse(1),
+      entriesComplete: false,
+      entries: [],
+    });
+    expect(emptyRefresh?.order).toEqual(['persisted-prompt']);
+  });
+
   it('restores disk history behind a live-only incomplete refresh baseline', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

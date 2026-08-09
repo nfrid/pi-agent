@@ -751,6 +751,87 @@ describe('dashboard HTTP boundary', () => {
     bridge.destroy();
   });
 
+  it('uses indexed history when an active runtime snapshot is complete but sparse', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-sparse-session-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'sparse-session.jsonl'),
+      `${[
+        { type: 'session', id: 'sparse-session', cwd: '/tmp/project' },
+        { type: 'model_change', provider: 'openai', modelId: 'gpt-5' },
+        { type: 'thinking_level_change', thinkingLevel: 'medium' },
+        {
+          type: 'message',
+          id: 'persisted-prompt',
+          message: { role: 'user', content: 'Persisted prompt' },
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}\n`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      socketPath: path.join(root, 'bridge.sock'),
+      sessionDir,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            runtimeId: 'sparse-runtime',
+            ownership: 'external',
+            pid: 123,
+            cwd: '/tmp/project',
+            liveState: 'working',
+            session: {
+              id: 'sparse-session',
+              entriesComplete: true,
+              entries: [
+                { type: 'model_change', provider: 'openai', modelId: 'gpt-5' },
+                { type: 'thinking_level_change', thinkingLevel: 'medium' },
+              ],
+            },
+            pendingInteractions: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/sparse-session`,
+      { headers: { 'x-dashboard-token': 'test-token' } },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      entries: [
+        { type: 'session', id: 'sparse-session' },
+        { type: 'model_change' },
+        { type: 'thinking_level_change' },
+        { type: 'message', id: 'persisted-prompt' },
+      ],
+      entriesComplete: true,
+      metadata: { id: 'sparse-session', activeRuntimeId: 'sparse-runtime' },
+    });
+    bridge.destroy();
+  });
+
   it('captures the session cursor before a slow read, even after the replay window advances', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-session-cursor-race-'),
