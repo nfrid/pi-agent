@@ -352,7 +352,7 @@ export function toTranscriptEntries(
         if (event)
           result.push({
             key: item.key,
-            entry: { kind: 'other' },
+            entry: { kind: 'other', continuesGroup: true },
             raw: item.raw,
             event,
           });
@@ -365,7 +365,7 @@ export function toTranscriptEntries(
         const isBranch = raw.type === 'branch_summary';
         result.push({
           key: item.key,
-          entry: { kind: 'other' },
+          entry: { kind: 'other', continuesGroup: true },
           raw: item.raw,
           event: {
             kind: isBranch ? 'branch-summary' : 'compaction',
@@ -413,7 +413,7 @@ export function toTranscriptEntries(
         else
           result.push({
             key: item.key,
-            entry: { kind: 'other' },
+            entry: { kind: 'other', continuesGroup: true },
             raw: item.raw,
             event,
           });
@@ -424,7 +424,7 @@ export function toTranscriptEntries(
         if (asyncEvent) {
           result.push({
             key: item.key,
-            entry: { kind: 'other' },
+            entry: { kind: 'other', continuesGroup: true },
             raw: item.raw,
             event: asyncEvent,
           });
@@ -435,7 +435,7 @@ export function toTranscriptEntries(
         const content = contentText(raw.content).trim();
         result.push({
           key: item.key,
-          entry: { kind: 'other' },
+          entry: { kind: 'other', continuesGroup: true },
           raw: item.raw,
           event: {
             kind: 'custom-message',

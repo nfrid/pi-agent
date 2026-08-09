@@ -54,6 +54,32 @@ describe('shared activity model', () => {
     expect(groupTranscript(entries)).toEqual(groupTranscript(entries));
   });
 
+  it('keeps opted-in semantic events inside an active group', () => {
+    const entries = [
+      {
+        kind: 'assistant' as const,
+        speaks: true,
+        title: 'Track the work',
+        titleKind: 'preamble' as const,
+      },
+      { kind: 'other' as const, continuesGroup: true },
+      { kind: 'tool' as const, name: 'read', args: {} },
+      { kind: 'other' as const, continuesGroup: true },
+      { kind: 'tool' as const, name: 'edit', args: {} },
+      { kind: 'other' as const, continuesGroup: true },
+    ];
+    expect(groupTranscript(entries)).toEqual([{ start: 0, end: 5 }]);
+    expect(
+      groupTranscript([
+        { kind: 'other', continuesGroup: true },
+        { kind: 'tool', name: 'read', args: {} },
+      ]),
+    ).toEqual([]);
+    expect(
+      groupTranscript([entries[0], entries[2], { kind: 'other' }, entries[4]]),
+    ).toEqual([{ start: 0, end: 1 }]);
+  });
+
   it('keeps historical and live projections on the same boundaries and title', () => {
     const entries = [
       {

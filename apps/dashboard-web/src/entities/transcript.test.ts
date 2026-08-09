@@ -399,6 +399,14 @@ describe('activity row views and virtual transcript construction', () => {
       'custom-message',
     ]);
     expect(
+      items
+        .filter((item) => item.event)
+        .every(
+          (item) =>
+            item.entry.kind === 'other' && item.entry.continuesGroup === true,
+        ),
+    ).toBe(true);
+    expect(
       items.find((item) => item.event?.kind === 'todo')?.event,
     ).toMatchObject({
       label: 'Tasks · T1 added · 1 waiting',
@@ -414,6 +422,94 @@ describe('activity row views and virtual transcript construction', () => {
       label: 'Delegate finished · UX audit',
       status: 'success',
     });
+  });
+
+  it('keeps todo events inside activity ranges while user messages remain boundaries', () => {
+    const todoSnapshot = (status: string) => ({
+      type: 'custom',
+      customType: 'lean-todo',
+      data: {
+        state: {
+          tasks: [{ id: 'T1', text: 'Verify dashboard', status }],
+        },
+      },
+    });
+    const activityItems = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'assistant-activity',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Inspecting the workspace.' },
+            { type: 'toolCall', id: 'call-1', name: 'read' },
+          ],
+        },
+      },
+      {
+        type: 'tool',
+        tool: { toolCallId: 'call-1', name: 'read', status: 'complete' },
+      },
+      todoSnapshot('todo'),
+      {
+        type: 'tool',
+        tool: { toolCallId: 'call-2', name: 'edit', status: 'complete' },
+      },
+    ]);
+    const activityGroups = projectActivityGroups(
+      activityItems.map(({ entry }) => entry),
+    );
+    expect(activityGroups.map(({ start, end }) => ({ start, end }))).toEqual([
+      { start: 0, end: 3 },
+    ]);
+    expect(activityItems[2]?.entry).toMatchObject({
+      kind: 'other',
+      continuesGroup: true,
+    });
+    expect(activityItems[2]?.event?.kind).toBe('todo');
+    const expandedItems = activityItems.slice(
+      activityGroups[0]?.start,
+      (activityGroups[0]?.end ?? -1) + 1,
+    );
+    expect(expandedItems.some((item) => item.event?.kind === 'todo')).toBe(
+      true,
+    );
+
+    const boundaryItems = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'assistant-boundary',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Inspecting the workspace.' },
+            { type: 'toolCall', id: 'call-boundary', name: 'read' },
+          ],
+        },
+      },
+      {
+        type: 'tool',
+        tool: {
+          toolCallId: 'call-boundary',
+          name: 'read',
+          status: 'complete',
+        },
+      },
+      {
+        type: 'message',
+        id: 'user-boundary',
+        message: { role: 'user', content: 'Please continue.' },
+      },
+    ]);
+    const boundaryGroups = projectActivityGroups(
+      boundaryItems.map(({ entry }) => entry),
+    );
+    expect(boundaryItems.find(({ role }) => role === 'user')?.entry).toEqual({
+      kind: 'other',
+    });
+    expect(boundaryGroups.map(({ start, end }) => ({ start, end }))).toEqual([
+      { start: 0, end: 1 },
+    ]);
   });
 
   it('formats live custom messages without waiting for session hydration', () => {
