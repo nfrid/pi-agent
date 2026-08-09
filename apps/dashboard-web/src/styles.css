@@ -1626,9 +1626,22 @@ h2 {
   font-size: 10px;
 }
 .delegate-row-meta {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
   color: var(--muted);
   font-size: 10px;
+  text-align: right;
   white-space: nowrap;
+}
+.delegate-row-properties {
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--dim);
+  text-overflow: ellipsis;
+}
+.delegate-row-mobile-elapsed {
+  display: none;
 }
 .delegate-row-chevron {
   color: var(--purple);
@@ -2145,7 +2158,24 @@ h2 {
     grid-template-columns: 18px minmax(0, 1fr) 14px;
   }
   .delegate-row-meta {
+    display: block;
+    grid-column: 2;
+    min-width: 0;
+    text-align: left;
+  }
+  .delegate-row-status {
     display: none;
+  }
+  .delegate-row-properties {
+    display: block;
+    max-width: none;
+  }
+  .delegate-row-mobile-elapsed {
+    display: inline;
+  }
+  .delegate-row-chevron {
+    grid-column: 3;
+    grid-row: 1;
   }
   .task-row-meta small {
     max-width: 100px;
@@ -3166,6 +3196,27 @@ h2 {
 .agent-thread-row.status-working .agent-thread-glyph {
   color: var(--green);
 }
+.agent-thread-row:is(.status-working, .status-idle, .status-dormant)
+  .agent-thread-glyph {
+  font-size: 0;
+  line-height: 1;
+}
+.agent-thread-row:is(.status-working, .status-idle, .status-dormant)
+  .agent-thread-glyph::before {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  content: "";
+}
+.agent-thread-row:is(.status-working, .status-idle)
+  .agent-thread-glyph::before {
+  background: currentColor;
+}
+.agent-thread-row.status-dormant .agent-thread-glyph::before {
+  border: 1px dotted currentColor;
+}
 .agent-thread-row.status-waiting .agent-thread-glyph {
   color: var(--orange);
 }
@@ -3207,6 +3258,7 @@ h2 {
   color: var(--dim);
   font-variant-numeric: tabular-nums;
 }
+.agent-thread-row.status-idle .agent-thread-glyph,
 .agent-thread-row.status-dormant .agent-thread-glyph {
   color: var(--dim);
 }
@@ -3554,6 +3606,16 @@ h2 {
   margin: 0 0 3px;
   color: var(--purple);
 }
+.surface-dialog-heading,
+.surface-dialog-header-content {
+  min-width: 0;
+}
+.surface-dialog-header-content {
+  margin-left: auto;
+}
+.surface-dialog-header > .session-icon-button {
+  flex: none;
+}
 .surface-dialog-body {
   min-height: 0;
   overflow: auto;
@@ -3576,6 +3638,9 @@ h2 {
   flex: 1;
   overflow: hidden;
   padding-bottom: 0;
+}
+.delegate-surface-dialog .surface-dialog-body {
+  padding: 0;
 }
 .work-surface-content {
   display: flex;
@@ -3601,23 +3666,13 @@ h2 {
   color: currentColor;
   font-variant-numeric: tabular-nums;
 }
-.delegate-scroll {
-  --delegate-sticky-header-offset: 46px;
-}
-.delegate-scroll .surface-stats {
-  position: sticky;
-  z-index: 2;
-  top: 0;
-  min-height: var(--delegate-sticky-header-offset);
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--line-soft);
-  background: var(--bg-alt);
+.surface-dialog-header-content .surface-stats {
+  padding: 0;
 }
 .delegate-row:has(> .delegate-row-detail) > .delegate-row-toggle {
   position: sticky;
   z-index: 1;
-  top: var(--delegate-sticky-header-offset);
+  top: 0;
   background: var(--bg-alt);
   box-shadow: 0 1px 0 var(--line-soft);
 }
@@ -4243,6 +4298,18 @@ h2 {
   }
   .extension-surfaces {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .delegate-surface-dialog .surface-dialog-header {
+    flex-wrap: wrap;
+  }
+  .delegate-surface-dialog .surface-dialog-header-content {
+    order: 3;
+    flex-basis: 100%;
+    margin-left: 0;
+    overflow-x: auto;
+  }
+  .delegate-surface-dialog .surface-stats {
+    flex-wrap: nowrap;
   }
   .session-inspector {
     top: 0;

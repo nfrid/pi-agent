@@ -1048,6 +1048,43 @@ function VirtualizedTranscript({
   };
   const anchorRef = useRef<{ key: string; top: number } | undefined>(undefined);
   const bottomStuckRef = useRef(false);
+  const scrollIntentRevisionRef = useRef(0);
+  const restoreRevisionRef = useRef(0);
+  useEffect(() => {
+    const noteScrollIntent = () => {
+      scrollIntentRevisionRef.current += 1;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest(
+          'input, textarea, [contenteditable="true"], [role="textbox"]',
+        )
+      )
+        return;
+      if (
+        [
+          'ArrowUp',
+          'ArrowDown',
+          'PageUp',
+          'PageDown',
+          'Home',
+          'End',
+          'Space',
+        ].includes(event.code)
+      )
+        noteScrollIntent();
+    };
+    window.addEventListener('wheel', noteScrollIntent, { passive: true });
+    window.addEventListener('touchmove', noteScrollIntent, { passive: true });
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('wheel', noteScrollIntent);
+      window.removeEventListener('touchmove', noteScrollIntent);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
   const captureScrollAnchor = (key: string) => {
     const bottomStuck = isNearPageBottom(
       document.documentElement.scrollHeight,
@@ -1055,6 +1092,7 @@ function VirtualizedTranscript({
       window.innerHeight,
     );
     bottomStuckRef.current = bottomStuck;
+    restoreRevisionRef.current = scrollIntentRevisionRef.current;
     if (bottomStuck) {
       anchorRef.current = undefined;
       return;
@@ -1068,10 +1106,16 @@ function VirtualizedTranscript({
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
     const bottomStuck = bottomStuckRef.current;
+    const restoreRevision = restoreRevisionRef.current;
     if (!anchor && !bottomStuck) return;
     let measuredFrame: number | undefined;
     const frame = window.requestAnimationFrame(() => {
       measuredFrame = window.requestAnimationFrame(() => {
+        if (scrollIntentRevisionRef.current !== restoreRevision) {
+          anchorRef.current = undefined;
+          bottomStuckRef.current = false;
+          return;
+        }
         if (bottomStuck) {
           const top = restoreVirtualBottom(
             document.documentElement.scrollHeight,

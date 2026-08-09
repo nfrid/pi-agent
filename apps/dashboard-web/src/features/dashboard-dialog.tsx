@@ -14,6 +14,7 @@ export function DashboardDialog({
   title,
   onClose,
   children,
+  headerContent,
   eyebrow = 'Live work',
   className = 'surface-dialog',
   layerClassName = 'surface-dialog-layer',
@@ -22,6 +23,7 @@ export function DashboardDialog({
   title: string;
   onClose: () => void;
   children: ReactNode;
+  headerContent?: ReactNode;
   eyebrow?: string;
   className?: string;
   layerClassName?: string;
@@ -83,10 +85,15 @@ export function DashboardDialog({
           data-swipe-dismiss="right"
         >
           <header className="surface-dialog-header">
-            <div>
+            <div className="surface-dialog-heading">
               <p className="eyebrow">{eyebrow}</p>
               <h2 id={titleId}>{title}</h2>
             </div>
+            {headerContent && (
+              <div className="surface-dialog-header-content">
+                {headerContent}
+              </div>
+            )}
             <button
               type="button"
               className="session-icon-button"

@@ -113,6 +113,8 @@ function WorkSurface({
   summary,
   count,
   visibleCount,
+  dialogClassName = 'surface-dialog work-surface-dialog',
+  dialogHeader,
   children,
 }: {
   title: string;
@@ -120,6 +122,8 @@ function WorkSurface({
   summary: string;
   count: ReactNode;
   visibleCount: number;
+  dialogClassName?: string;
+  dialogHeader?: ReactNode;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -163,7 +167,8 @@ function WorkSurface({
       </article>
       <DashboardDialog
         title={title}
-        className="surface-dialog work-surface-dialog"
+        className={dialogClassName}
+        headerContent={dialogHeader}
         isOpen={open}
         onClose={() => setOpen(false)}
       >
@@ -245,6 +250,11 @@ export function DelegateTranscript({
   );
 }
 
+function delegateContext(row: DelegateStatus): string | undefined {
+  if ((row.runCount ?? 1) > 1) return `run ${row.runCount}`;
+  return row.context;
+}
+
 function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
   const model = surface.viewModel as DelegateStatusViewModel;
   const rows = delegateRows(model);
@@ -277,6 +287,17 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
         : 'All delegates complete';
   const activeCount = stats.running + stats.queued;
   const finishedCount = rows.length - activeCount;
+  const statsView = (
+    <SurfaceStats
+      stats={[
+        { label: 'running', value: stats.running, tone: 'surface-running' },
+        { label: 'queued', value: stats.queued },
+        { label: 'failed', value: stats.failed, tone: 'surface-failed' },
+        { label: 'stopped', value: stats.aborted, tone: 'surface-aborted' },
+        { label: 'done', value: stats.done, tone: 'surface-done' },
+      ]}
+    />
+  );
   return (
     <WorkSurface
       title={title}
@@ -284,17 +305,10 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
       summary={summary}
       count={`${activeCount} active · ${finishedCount} finished`}
       visibleCount={rows.length}
+      dialogClassName="surface-dialog work-surface-dialog delegate-surface-dialog"
+      dialogHeader={statsView}
     >
       <div className="delegate-scroll surface-scroll-region">
-        <SurfaceStats
-          stats={[
-            { label: 'running', value: stats.running, tone: 'surface-running' },
-            { label: 'queued', value: stats.queued },
-            { label: 'failed', value: stats.failed, tone: 'surface-failed' },
-            { label: 'stopped', value: stats.aborted, tone: 'surface-aborted' },
-            { label: 'done', value: stats.done, tone: 'surface-done' },
-          ]}
-        />
         <div className="delegate-rows">
           {rows.map((row) => {
             const id = row.id;
@@ -308,7 +322,9 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
             );
             const name = short(row.name, 70);
             const route = row.route ?? '';
-            const context = row.context ?? '';
+            const context = delegateContext(row) ?? '';
+            const access =
+              row.allowWrites === true ? 'read/write' : 'read-only';
             const elapsedText = elapsed(
               row.startedAt ?? row.createdAt,
               row.finishedAt,
@@ -316,9 +332,6 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
             );
             const isExpanded = expanded.has(id);
             const jobId = row.jobId ?? '';
-            const activityType = activity?.type ?? '';
-            const activityStatus = activity?.status ?? '';
-            const latestText = short(activity?.latestText ?? '', 600);
             const runs = row.runs?.slice(-6) ?? [];
             const transcript = row.transcript ?? [];
             return (
@@ -340,8 +353,19 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
                     <small>{activityLabel}</small>
                   </span>
                   <span className="delegate-row-meta">
-                    {state}
-                    {elapsedText ? ` · ${elapsedText}` : ''}
+                    <span className="delegate-row-status">
+                      {state}
+                      {elapsedText ? ` · ${elapsedText}` : ''}
+                    </span>
+                    <span className="delegate-row-properties">
+                      {[context, access, route].filter(Boolean).join(' · ')}
+                      {elapsedText && (
+                        <span className="delegate-row-mobile-elapsed">
+                          {' · '}
+                          {elapsedText}
+                        </span>
+                      )}
+                    </span>
                   </span>
                   <span className="delegate-row-chevron" aria-hidden="true">
                     {isExpanded ? '⌄' : '›'}
@@ -349,51 +373,19 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
                 </AriaButton>
                 {isExpanded && (
                   <div className="delegate-row-detail">
-                    <dl>
-                      {route && (
-                        <div>
-                          <dt>Route</dt>
-                          <dd>{route}</dd>
-                        </div>
-                      )}
-                      {context && (
-                        <div>
-                          <dt>Context</dt>
-                          <dd>{context}</dd>
-                        </div>
-                      )}
-                      <div>
-                        <dt>Access</dt>
-                        <dd>
-                          {row.allowWrites === true
-                            ? 'read/write'
-                            : 'read-only'}
-                        </dd>
-                      </div>
-                      {jobId && (
+                    {jobId && (
+                      <dl>
                         <div>
                           <dt>Job</dt>
                           <dd>{jobId}</dd>
                         </div>
-                      )}
-                      {(activityType || activityStatus) && (
-                        <div>
-                          <dt>Activity</dt>
-                          <dd>
-                            {[activityType, activityStatus]
-                              .filter(Boolean)
-                              .join(' · ')}
-                          </dd>
-                        </div>
-                      )}
-                    </dl>
-                    {transcript.length > 0 ? (
+                      </dl>
+                    )}
+                    {transcript.length > 0 && (
                       <DelegateTranscript
                         entries={transcript}
                         truncated={row.transcriptTruncated === true}
                       />
-                    ) : (
-                      latestText && <p>{latestText}</p>
                     )}
                     {runs.length > 0 && (
                       <ol
@@ -428,16 +420,9 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
                         })}
                       </ol>
                     )}
-                    {!route &&
-                      !context &&
-                      !jobId &&
-                      !activityType &&
-                      !activityStatus &&
-                      !latestText &&
-                      transcript.length === 0 &&
-                      runs.length === 0 && (
-                        <span>Waiting for the delegate to report details.</span>
-                      )}
+                    {!jobId && transcript.length === 0 && runs.length === 0 && (
+                      <span>Waiting for the delegate to report details.</span>
+                    )}
                   </div>
                 )}
               </div>

@@ -463,6 +463,15 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(page.locator('.transcript-virtualized')).toContainText(
     'Prior history',
   );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollHeight -
+          (window.scrollY + window.innerHeight),
+      ),
+    )
+    .toBeLessThanOrEqual(1);
   await expect(
     page
       .getByRole('article')
@@ -486,6 +495,39 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(
     agentNav.getByRole('button', { name: 'Dormant thread dormant' }),
   ).toBeVisible();
+  await expect(
+    agentNav.locator('.agent-thread-row.status-idle .agent-thread-glyph'),
+  ).toHaveText('●');
+  await expect(
+    agentNav.locator('.agent-thread-row.status-dormant .agent-thread-glyph'),
+  ).toHaveText('◌');
+  const idleMarker = await agentNav
+    .locator('.agent-thread-row.status-idle .agent-thread-glyph')
+    .evaluate((element) => {
+      const marker = getComputedStyle(element, '::before');
+      return {
+        width: marker.width,
+        height: marker.height,
+        background: marker.backgroundColor,
+      };
+    });
+  const dormantMarker = await agentNav
+    .locator('.agent-thread-row.status-dormant .agent-thread-glyph')
+    .evaluate((element) => {
+      const marker = getComputedStyle(element, '::before');
+      return {
+        width: marker.width,
+        height: marker.height,
+        borderStyle: marker.borderStyle,
+      };
+    });
+  expect(idleMarker).toMatchObject({ width: '8px', height: '8px' });
+  expect(idleMarker.background).not.toBe('rgba(0, 0, 0, 0)');
+  expect(dormantMarker).toEqual({
+    width: '8px',
+    height: '8px',
+    borderStyle: 'dotted',
+  });
   await expect(agentNav.locator('.agent-thread-time')).toHaveCount(2);
   await page.locator('.agent-nav-backdrop').click();
 
@@ -2666,10 +2708,14 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
               kind: 'background',
               state: index === 0 ? 'running' : 'queued',
               createdAt: delegateStartedAt,
-              allowWrites: false,
+              allowWrites: index === 0,
               ...(index === 0
                 ? {
                     startedAt: delegateStartedAt,
+                    jobId: 'dj-dashboard',
+                    route: 'luna-high',
+                    context: 'fresh',
+                    runCount: 2,
                     transcript: Array.from({ length: 14 }, (_, entryIndex) => ({
                       id: `d1:tool:${entryIndex + 1}`,
                       type: 'tool',
@@ -2723,10 +2769,34 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   await delegatesLauncher.click();
   const delegatesPanel = page.getByRole('dialog', { name: 'Delegates' });
   await expect(delegatesPanel).toBeVisible();
-  const runningElapsed = delegatesPanel
-    .locator('.delegate-row-meta')
-    .filter({ hasText: 'running' })
-    .first();
+  const delegateBody = delegatesPanel.locator('.surface-dialog-body');
+  expect(
+    await delegateBody.evaluate((element) => ({
+      top: getComputedStyle(element).paddingTop,
+      right: getComputedStyle(element).paddingRight,
+      bottom: getComputedStyle(element).paddingBottom,
+      left: getComputedStyle(element).paddingLeft,
+    })),
+  ).toEqual({ top: '0px', right: '0px', bottom: '0px', left: '0px' });
+  const delegateStats = delegatesPanel.locator('.surface-stats');
+  expect(
+    await delegateStats.evaluate((element) =>
+      element.parentElement?.classList.contains(
+        'surface-dialog-header-content',
+      ),
+    ),
+  ).toBe(true);
+  const runningMeta = delegatesPanel.locator('.delegate-row-meta').first();
+  await expect(runningMeta.locator('.delegate-row-status')).toContainText(
+    'running',
+  );
+  await expect(runningMeta.locator('.delegate-row-properties')).toContainText(
+    'run 2 · read/write · luna-high',
+  );
+  await expect(
+    runningMeta.locator('.delegate-row-mobile-elapsed'),
+  ).toBeHidden();
+  const runningElapsed = runningMeta.locator('.delegate-row-status');
   const initialElapsed = await runningElapsed.textContent();
   await expect
     .poll(() => runningElapsed.textContent())
@@ -2747,7 +2817,18 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
       rows.map((row) => row.getBoundingClientRect().height),
     );
   expect(Math.max(...delegateRowHeights)).toBeLessThan(80);
-  const delegateStats = delegatesPanel.locator('.surface-stats');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(runningMeta.locator('.delegate-row-status')).toBeHidden();
+  await expect(
+    runningMeta.locator('.delegate-row-mobile-elapsed'),
+  ).toBeVisible();
+  expect(
+    await runningMeta.evaluate((element) => ({
+      gridColumn: getComputedStyle(element).gridColumnStart,
+      textAlign: getComputedStyle(element).textAlign,
+    })),
+  ).toEqual({ gridColumn: '2', textAlign: 'left' });
+  await page.setViewportSize({ width: 1440, height: 900 });
   const delegateScrollRegion = delegatesPanel.locator('.surface-scroll-region');
   const statsTop = await delegateStats.evaluate(
     (element) => element.getBoundingClientRect().top,
@@ -2757,6 +2838,11 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   await delegateScrollRegion.evaluate((element) => {
     element.scrollTop = 0;
   });
+  const expandedDetail = delegatesPanel.locator('.delegate-row-detail').first();
+  await expect(expandedDetail.locator('dt')).toHaveText(['Job']);
+  await expect(expandedDetail).not.toContainText('luna-high');
+  await expect(expandedDetail).not.toContainText('read/write');
+  await expect(expandedDetail).not.toContainText('fresh');
   const expandedHeaderTop = await expandedHeader.evaluate(
     (element) => element.getBoundingClientRect().top,
   );

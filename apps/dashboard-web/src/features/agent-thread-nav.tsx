@@ -85,7 +85,7 @@ function statusGlyph(status: AgentThreadRow['status']): string {
   if (status === 'failed') return '!';
   if (status === 'offline') return '○';
   if (status === 'dormant') return '◌';
-  return '·';
+  return '●';
 }
 
 function statusLabel(status: AgentThreadRow['status']): string {
