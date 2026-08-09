@@ -9,10 +9,7 @@ import {
   toolRole,
 } from '../../packages/activity-model/src/grouping';
 import {
-  describeTools,
-  headersOf,
   isNarration,
-  type NarrationChannel,
   stripEmphasis,
 } from '../../packages/activity-model/src/title';
 import { hasUnresolvedToolFailure } from './outcome';
@@ -169,6 +166,34 @@ function count(value: number, singular: string): string {
   return `${value} ${value === 1 ? singular : `${singular}s`}`;
 }
 
+/**
+ * The only title that can make a native sequence an activity group: visible,
+ * non-narration text from an assistant message that also contains a tool call,
+ * before the sequence's first tool execution item.
+ */
+function explicitPreamble(sequence: SequenceSnapshot): string | undefined {
+  for (const item of sequence.items) {
+    if (item.type === 'tool') return undefined;
+    if (item.type !== 'assistant') continue;
+    if (!item.message.content.some((content) => content.type === 'toolCall'))
+      continue;
+    const spoken = item.message.content
+      .flatMap((content) =>
+        content.type === 'text' &&
+        content.text.trim() !== '' &&
+        !isNarration(content.text)
+          ? [content.text.trim()]
+          : [],
+      )
+      .at(0);
+    if (!spoken) continue;
+    const [first = ''] = spoken.split('\n');
+    const title = first.trim().replace(/[.…:]+$/, '');
+    if (title) return title;
+  }
+  return undefined;
+}
+
 export class ActivityGroupComponent implements Component {
   private sequence: SequenceSnapshot;
   private options: SequenceOptions;
@@ -215,81 +240,11 @@ export class ActivityGroupComponent implements Component {
     this.timer.unref?.();
   }
 
-  /**
-   * Groups use the model's latest narration header, both live and settled, so
-   * the label stays in the model's original words. A preamble outranks headers:
-   * when the model announced this phase to the reader — "Checking how sessions
-   * expire" — that line *is* the group, and it is printed here rather than
-   * above, so the reader sees it once and the collapsed group reads as the
-   * model's own account.
-   */
-  private title(tools: readonly ToolItem[], completed: boolean): string {
+  /** The model's explicit preamble is the group's only title. */
+  private title(): string {
     // One styled terminal line, so whatever markdown the model wrote inside
-    // its narration is unwrapped rather than printed as punctuation.
-    return stripEmphasis(
-      this.narratedTitle() ?? this.toolTitle(tools, completed),
-    );
-  }
-
-  /**
-   * The model's own words for this phase, if it gave any, taking what it said
-   * to the reader over what it only thought.
-   *
-   * A turn commonly carries both: the model thinks "**Creating a workspace**"
-   * on its way in and then announces "**Exercising planning, file work and
-   * cleanup**". Composing the two led with the passing thought — "Created a
-   * workspace" for a group that went on to do far more — so a channel the
-   * reader was addressed on wins outright, and thinking is what titles a group
-   * that never spoke.
-   */
-  private narratedTitle(): string | undefined {
-    const preamble = this.preamble();
-    // Keep the model's original wording after the group settles. A label may
-    // be a participle, a sentence, or another language; inventing a completed
-    // form would risk changing what the phase actually says.
-    if (preamble) return preamble;
-    const spoken = this.headers('text');
-    const headers = spoken.length > 0 ? spoken : this.headers('thinking');
-    return headers.at(-1);
-  }
-
-  private headers(channel: NarrationChannel): string[] {
-    return this.sequence.items.flatMap((item) =>
-      item.type === 'assistant' ? headersOf(item.message, channel) : [],
-    );
-  }
-
-  /** The fallback for a group that narrated nothing: what its tools did. */
-  private toolTitle(tools: readonly ToolItem[], completed: boolean): string {
-    const files = this.files(tools);
-    return describeTools(tools, commonDirectory(files) ?? files[0], completed);
-  }
-
-  /**
-   * What the model said on its way into this phase, if it led with anything.
-   *
-   * Only what came before the group's first call can be one: a message that
-   * speaks after the work has started is a remark about work already done, not
-   * a name for it. Everything ahead of that call is the model announcing what
-   * it is off to do, whether it announced it in the message that opened the
-   * group or in a bare line before it. Only the first sentence is a title,
-   * since the rest is available by expanding.
-   */
-  private preamble(): string | undefined {
-    for (const item of this.sequence.items) {
-      if (item.type === 'tool') break;
-      if (item.type !== 'assistant') continue;
-      const spoken = item.message.content
-        .filter((content) => content.type === 'text')
-        .map((content) => content.text.trim())
-        .find((text) => text && !isNarration(text));
-      if (!spoken) continue;
-      const [first = ''] = spoken.split('\n');
-      // A title is a label, not a sentence, so it does not end in a stop.
-      const title = first.trim().replace(/[.…:]+$/, '');
-      if (title) return title;
-    }
-    return undefined;
+    // its preamble is unwrapped rather than printed as punctuation.
+    return stripEmphasis(explicitPreamble(this.sequence) ?? '');
   }
 
   /** A step is a bullet, unless it is the one currently turning. */
@@ -332,7 +287,7 @@ export class ActivityGroupComponent implements Component {
     // established groups so the transient state is visually unambiguous.
     const titleColor = !completed && tools.length === 0 ? 'muted' : 'text';
     const titleLines = wrapTextWithAnsi(
-      this.theme.fg(titleColor, this.title(tools, completed)),
+      this.theme.fg(titleColor, this.title()),
       Math.max(1, width - indent.length),
     );
     return titleLines.map((line, index) =>
@@ -427,6 +382,7 @@ export class ActivityGroupComponent implements Component {
  */
 export function createActivityGroupRenderer(): SequenceRenderer {
   return (sequence, options, theme, context) => {
+    if (!explicitPreamble(sequence)) return undefined;
     const existing = context.lastComponent;
     if (existing instanceof ActivityGroupComponent) {
       existing.update(sequence, options);

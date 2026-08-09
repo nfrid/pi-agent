@@ -51,6 +51,19 @@ function toolItem(
   return { type: 'tool', id, name, args, status: 'complete', isError };
 }
 
+function preambleItem(
+  text = 'Working on the requested change',
+  id = 'preamble-call',
+): SequenceSnapshot['items'][number] {
+  return {
+    type: 'assistant',
+    message: message([
+      { type: 'text', text },
+      { type: 'toolCall', id, name: 'read', arguments: {} },
+    ]),
+  };
+}
+
 function renderOutcome(items: SequenceSnapshot['items']): string {
   const component = createActivityGroupRenderer()(
     {
@@ -60,7 +73,7 @@ function renderOutcome(items: SequenceSnapshot['items']): string {
       completedAt: 2000,
       // Deliberately stale: aggregate outcome must come from the items.
       failed: true,
-      items,
+      items: [preambleItem('Retrying the failed work'), ...items],
     },
     { streaming: false, expanded: false, defaultView: new Text('', 0, 0) },
     theme,
@@ -90,6 +103,8 @@ describe('activity groups renderer', () => {
               type: 'thinking',
               thinking: '**Inspecting authentication code**',
             },
+            { type: 'text', text: 'Inspecting authentication code' },
+            { type: 'toolCall', id: 'read-1', name: 'read', arguments: {} },
           ]),
         },
         {
@@ -132,59 +147,69 @@ describe('activity groups renderer', () => {
     (component as unknown as { dispose(): void }).dispose();
   });
 
-  it('mutes a changing thought until the group has its first tool', () => {
+  it('opts out of thinking-only and unpaired visible headers', () => {
     const renderer = createActivityGroupRenderer();
-    const ctx = context();
-    const thought: SequenceSnapshot = {
+    const tool = toolItem(
+      'read-1',
+      'read',
+      { path: 'extensions/activity-groups/renderer.ts' },
+      false,
+    );
+    const sequence = (assistant: AssistantMessage): SequenceSnapshot => ({
       id: 'forming-group',
       cwd: process.cwd(),
       startedAt: 1000,
       failed: false,
-      items: [
-        {
-          type: 'assistant',
-          message: message([
+      items: [{ type: 'assistant', message: assistant }, tool],
+    });
+
+    expect(
+      renderer(
+        sequence(
+          message([
             { type: 'thinking', thinking: '**Inspecting the renderer**' },
           ]),
+        ),
+        { streaming: true, expanded: false, defaultView: new Text('', 0, 0) },
+        paintedTheme,
+        context(),
+      ),
+    ).toBeUndefined();
+    expect(
+      renderer(
+        sequence(message([{ type: 'text', text: 'Inspecting the renderer' }])),
+        { streaming: true, expanded: false, defaultView: new Text('', 0, 0) },
+        paintedTheme,
+        context(),
+      ),
+    ).toBeUndefined();
+    expect(
+      renderer(
+        sequence(
+          message([
+            { type: 'text', text: '**Inspecting the renderer**' },
+            { type: 'toolCall', id: 'read-1', name: 'read', arguments: {} },
+          ]),
+        ),
+        { streaming: true, expanded: false, defaultView: new Text('', 0, 0) },
+        paintedTheme,
+        context(),
+      ),
+    ).toBeUndefined();
+    expect(
+      renderer(
+        {
+          id: 'bare-tools',
+          cwd: process.cwd(),
+          startedAt: 1000,
+          failed: false,
+          items: [tool],
         },
-      ],
-    };
-
-    const component = renderer(
-      thought,
-      { streaming: true, expanded: false, defaultView: new Text('', 0, 0) },
-      paintedTheme,
-      ctx,
-    );
-    if (!component) throw new Error('renderer returned no component');
-    ctx.lastComponent = component;
-    expect(component.render(200).join('\n')).toContain(
-      '<muted>Inspecting the renderer</muted>',
-    );
-
-    renderer(
-      {
-        ...thought,
-        items: [
-          ...thought.items,
-          {
-            type: 'tool',
-            id: 'read-1',
-            name: 'read',
-            args: { path: 'extensions/activity-groups/renderer.ts' },
-            status: 'running',
-            isError: false,
-          },
-        ],
-      },
-      { streaming: true, expanded: false, defaultView: new Text('', 0, 0) },
-      paintedTheme,
-      ctx,
-    );
-    const established = component.render(200).join('\n');
-    expect(established).toContain('<text>Inspecting the renderer</text>');
-    expect(established).not.toContain('<muted>Inspecting the renderer</muted>');
-    (component as unknown as { dispose(): void }).dispose();
+        { streaming: true, expanded: false, defaultView: new Text('', 0, 0) },
+        paintedTheme,
+        context(),
+      ),
+    ).toBeUndefined();
   });
 
   it('wraps long titles instead of discarding their detail', () => {
@@ -203,6 +228,7 @@ describe('activity groups renderer', () => {
                 type: 'text',
                 text: 'Checking how sessions expire across refreshes and reconnects',
               },
+              { type: 'toolCall', id: 'read-1', name: 'read', arguments: {} },
             ]),
           },
           toolItem('read-1', 'read', { path: 'src/session.ts' }, false),
@@ -244,6 +270,7 @@ describe('activity groups renderer', () => {
         completedAt: 2000,
         failed: false,
         items: [
+          preambleItem('Reviewing the session files'),
           toolItem(
             'read-1',
             'read',
@@ -281,6 +308,7 @@ describe('activity groups renderer', () => {
         completedAt: 2000,
         failed: false,
         items: [
+          preambleItem('Organizing the extension work'),
           toolItem('delegate-1', 'delegate', { name: 'Queue reviewer' }, false),
           toolItem('todo-1', 'todo', { action: 'start', id: 'T2' }, false),
           toolItem(
@@ -325,6 +353,7 @@ describe('activity groups renderer', () => {
       completedAt: 5000,
       failed: false,
       items: [
+        preambleItem('Reviewing and updating command workflows'),
         tool('e1', 'edit', { path: 'src/commands/workflows.ts' }),
         tool('e2', 'write', { path: 'src/commands/brief.ts' }),
         tool('r1', 'read', { path: 'src/commands/index.ts' }),
@@ -387,6 +416,7 @@ describe('activity groups renderer', () => {
               message: message([
                 { type: 'thinking', thinking: '**Inspecting the store**' },
                 { type: 'text', text },
+                { type: 'toolCall', id: 'r1', name: 'read', arguments: {} },
               ]),
             },
             {
@@ -458,7 +488,7 @@ describe('activity groups renderer', () => {
     const titleOf = (
       items: SequenceSnapshot['items'],
       streaming = false,
-    ): string => {
+    ): string | undefined => {
       const component = createActivityGroupRenderer()(
         {
           id: 'sequence-7',
@@ -472,13 +502,13 @@ describe('activity groups renderer', () => {
         theme,
         context(),
       );
-      if (!component) throw new Error('renderer returned no component');
+      if (!component) return undefined;
       const [, title = ''] = component.render(100);
       (component as unknown as { dispose(): void }).dispose();
       return title;
     };
 
-    it('takes the header it announced over the one it only thought', () => {
+    it('uses the paired visible preamble over thinking', () => {
       // Some models write their narration as text rather than in thinking, so
       // both channels carry a header and the thought comes first. Composing
       // the two led with the passing thought and buried the announcement.
@@ -487,7 +517,8 @@ describe('activity groups renderer', () => {
           type: 'assistant',
           message: message([
             { type: 'thinking', thinking: '**Creating a workspace**' },
-            { type: 'text', text: '**Exercising planning and cleanup**' },
+            { type: 'text', text: 'Exercising **planning and cleanup**' },
+            { type: 'toolCall', id: 'r1', name: 'read', arguments: {} },
           ]),
         },
         read,
@@ -497,7 +528,7 @@ describe('activity groups renderer', () => {
       expect(titleOf(items)).not.toContain('workspace');
     });
 
-    it('still titles a silent group from its thinking', () => {
+    it('opts out of a thinking-derived title', () => {
       expect(
         titleOf([
           {
@@ -508,12 +539,10 @@ describe('activity groups renderer', () => {
           },
           read,
         ]),
-      ).toContain('✓ Creating a workspace');
+      ).toBeUndefined();
     });
 
-    it('takes a preamble spoken after the thought that preceded it', () => {
-      // The model thought first and spoke second, in two messages, and both
-      // ended up in this group. What it said is still the name of the work.
+    it('opts out of a visible title without an associated tool call', () => {
       expect(
         titleOf([
           {
@@ -530,12 +559,10 @@ describe('activity groups renderer', () => {
           },
           read,
         ]),
-      ).toContain('✓ Rewriting how sessions expire');
+      ).toBeUndefined();
     });
 
-    it('does not name a group after a remark made once it was under way', () => {
-      // Talking after the calls have started is commentary on work already
-      // done, not an announcement of what this group is.
+    it('opts out when a remark follows an unpaired thinking header', () => {
       expect(
         titleOf([
           {
@@ -552,7 +579,7 @@ describe('activity groups renderer', () => {
             ]),
           },
         ]),
-      ).toContain('✓ Reading the session store');
+      ).toBeUndefined();
     });
   });
 
@@ -566,6 +593,7 @@ describe('activity groups renderer', () => {
         startedAt: 1000,
         failed: false,
         items: [
+          preambleItem('Replaying the authentication check'),
           {
             type: 'tool',
             id: 'read-1',
@@ -651,6 +679,7 @@ describe('activity groups renderer', () => {
         completedAt: 1200,
         failed: true,
         items: [
+          preambleItem('Exploring missing.ts'),
           {
             type: 'tool',
             id: 'read-1',
@@ -667,7 +696,7 @@ describe('activity groups renderer', () => {
     );
     if (!component) throw new Error('renderer returned no component');
     const output = component.render(100).join('\n');
-    expect(output).toContain('✗ Explored missing.ts');
+    expect(output).toContain('✗ Exploring missing.ts');
     expect(output).toContain('1 failed');
     (component as unknown as { dispose(): void }).dispose();
   });
@@ -688,6 +717,8 @@ describe('activity groups renderer', () => {
               type: 'thinking',
               thinking: '**Planning the delegate shutdown fix**',
             },
+            { type: 'text', text: 'Planning the delegate shutdown fix' },
+            { type: 'toolCall', id: 'read-1', name: 'read', arguments: {} },
           ]),
         },
         {
@@ -727,9 +758,9 @@ describe('activity groups renderer', () => {
     );
     if (!component) throw new Error('renderer returned no component');
     ctx.lastComponent = component;
-    // Live: the newest header, so the line says what is happening right now.
+    // Live and settled titles stay on the explicit preamble, not later thought.
     expect(component.render(100).join('\n')).toContain(
-      'Implementing the shutdown guard',
+      'Planning the delegate shutdown fix',
     );
 
     renderer(
@@ -739,9 +770,8 @@ describe('activity groups renderer', () => {
       ctx,
     );
     const settled = component.render(100).join('\n');
-    // Settled groups keep the latest model-authored header rather than
-    // synthesizing a summary from earlier narration.
-    expect(settled).toContain('Implementing the shutdown guard');
+    // Settled groups keep the explicit preamble rather than later narration.
+    expect(settled).toContain('Planning the delegate shutdown fix');
     // Few enough calls to show them all, so nothing is counted away.
     expect(settled).toContain('Reading extensions/delegate/jobs.ts');
     expect(settled).not.toContain('earlier step');
