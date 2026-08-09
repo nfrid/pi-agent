@@ -778,6 +778,189 @@ describe('dashboard HTTP boundary', () => {
     bridge.destroy();
   });
 
+  it('uses the current JSONL leaf for working runtime snapshots', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-working-freshness-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'working.jsonl'),
+      `${[
+        { type: 'session', id: 'working-session', cwd: '/tmp/project' },
+        { type: 'model_change', id: 'setup', parentId: null },
+        {
+          type: 'message',
+          id: 'first-user',
+          parentId: 'setup',
+          message: { role: 'user', content: 'First request' },
+        },
+        {
+          type: 'message',
+          id: 'latest-user',
+          parentId: 'first-user',
+          message: { role: 'user', content: 'Latest request' },
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}
+`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      socketPath: path.join(root, 'bridge.sock'),
+      sessionDir,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            runtimeId: 'working-runtime',
+            ownership: 'external',
+            pid: 123,
+            cwd: '/tmp/project',
+            liveState: 'working',
+            session: {
+              id: 'working-session',
+              entriesComplete: true,
+              entries: [
+                { type: 'model_change', id: 'setup' },
+                { type: 'thinking_level_change', thinkingLevel: 'medium' },
+              ],
+            },
+            pendingInteractions: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/working-session`,
+      { headers: { 'x-dashboard-token': 'test-token' } },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      entries: [
+        { type: 'session', id: 'working-session' },
+        { type: 'model_change', id: 'setup' },
+        { type: 'message', id: 'first-user' },
+        { type: 'message', id: 'latest-user' },
+      ],
+      entriesComplete: true,
+      metadata: { activeRuntimeId: 'working-runtime' },
+    });
+    bridge.destroy();
+  });
+
+  it('refreshes an existing working session past its stale runtime turn', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-working-stale-turn-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'stale.jsonl'),
+      `${[
+        { type: 'session', id: 'stale-session', cwd: '/tmp/project' },
+        {
+          type: 'message',
+          id: 'old-user',
+          parentId: null,
+          message: { role: 'user', content: 'Old request' },
+        },
+        {
+          type: 'message',
+          id: 'old-answer',
+          parentId: 'old-user',
+          message: { role: 'assistant', content: 'Old answer' },
+        },
+        {
+          type: 'message',
+          id: 'latest-user',
+          parentId: 'old-answer',
+          message: { role: 'user', content: 'Latest request' },
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}\n`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      socketPath: path.join(root, 'bridge.sock'),
+      sessionDir,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            runtimeId: 'stale-runtime',
+            ownership: 'external',
+            pid: 123,
+            cwd: '/tmp/project',
+            liveState: 'working',
+            session: {
+              id: 'stale-session',
+              leafId: 'old-answer',
+              entriesComplete: true,
+              entries: [
+                { type: 'message', id: 'old-user', message: { role: 'user' } },
+                {
+                  type: 'message',
+                  id: 'old-answer',
+                  message: { role: 'assistant' },
+                },
+              ],
+            },
+            pendingInteractions: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/stale-session`,
+      { headers: { 'x-dashboard-token': 'test-token' } },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      entries: [
+        { type: 'session', id: 'stale-session' },
+        { type: 'message', id: 'old-user' },
+        { type: 'message', id: 'old-answer' },
+        { type: 'message', id: 'latest-user' },
+      ],
+      entriesComplete: true,
+      metadata: { activeRuntimeId: 'stale-runtime' },
+    });
+    bridge.destroy();
+  });
+
   it('uses indexed history when an active runtime snapshot is complete but sparse', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-sparse-session-'),
@@ -849,7 +1032,7 @@ describe('dashboard HTTP boundary', () => {
             ownership: 'external',
             pid: 123,
             cwd: '/tmp/project',
-            liveState: 'working',
+            liveState: 'idle',
             session: {
               id: 'sparse-session',
               leafId: 'persisted-answer',

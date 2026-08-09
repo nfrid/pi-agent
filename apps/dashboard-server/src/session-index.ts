@@ -26,6 +26,11 @@ export interface SessionHistoryPage {
   nextBefore?: string;
 }
 
+export interface SessionReadOptions {
+  /** Resolve the active leaf from the latest valid entry in the file. */
+  resolveLatestLeaf?: boolean;
+}
+
 interface HistoryCursor {
   version: 1;
   sessionId: string;
@@ -161,6 +166,7 @@ export class SessionIndex {
     id: string,
     before?: string,
     leafId?: string,
+    options: SessionReadOptions = {},
   ): Promise<{
     metadata: SessionIndexEntry;
     entries: unknown[];
@@ -187,7 +193,7 @@ export class SessionIndex {
       throw new Error('Stale history cursor.');
     const upperBound = cursor?.before;
     const { header: _header, lastEntryId: _lastEntryId, ...metadata } = indexed;
-    if (requestedLeafId !== undefined)
+    if (requestedLeafId !== undefined || options.resolveLatestLeaf)
       return this.readBranchEntries(
         id,
         indexed.file,
@@ -195,6 +201,7 @@ export class SessionIndex {
         metadata,
         requestedLeafId,
         cursor,
+        options.resolveLatestLeaf === true && requestedLeafId === undefined,
       );
     type PageEntry = {
       ordinal: number;
@@ -315,8 +322,9 @@ export class SessionIndex {
     file: string,
     stat: { dev: number; ino: number; size: number },
     metadata: SessionIndexEntry,
-    leafId: string,
+    leafId: string | undefined,
     cursor: HistoryCursor | undefined,
+    resolveLatestLeaf: boolean,
   ): Promise<{
     metadata: SessionIndexEntry;
     entries: unknown[];
@@ -326,6 +334,7 @@ export class SessionIndex {
     const parents = new Map<string, unknown>();
     const ordinals = new Map<string, number>();
     let headerSeen = false;
+    let latestEntryId: string | undefined;
     let sourceOrdinal = 0;
     const firstPassInput = createReadStream(file, { encoding: 'utf8' });
     const firstPassLines = readline.createInterface({
@@ -353,6 +362,7 @@ export class SessionIndex {
             throw new Error('Invalid session branch.');
           parents.set(parsed.id, parsed.parentId);
           ordinals.set(parsed.id, sourceOrdinal);
+          latestEntryId = parsed.id;
         }
         sourceOrdinal += 1;
       }
@@ -360,11 +370,12 @@ export class SessionIndex {
       firstPassLines.close();
       firstPassInput.destroy();
     }
-    if (!headerSeen || !parents.has(leafId))
+    const resolvedLeafId = resolveLatestLeaf ? latestEntryId : leafId;
+    if (!headerSeen || !resolvedLeafId || !parents.has(resolvedLeafId))
       throw new Error('Invalid session branch.');
 
     const branchIds = new Set<string>();
-    let currentId = leafId;
+    let currentId = resolvedLeafId;
     while (true) {
       if (branchIds.has(currentId)) throw new Error('Invalid session branch.');
       branchIds.add(currentId);
@@ -494,7 +505,7 @@ export class SessionIndex {
           size: stat.size,
           prefixHash: page[0]?.prefixHash ?? seenHasher.copy().digest('hex'),
           before: start,
-          leafId,
+          leafId: resolvedLeafId,
         })
       : undefined;
     return {

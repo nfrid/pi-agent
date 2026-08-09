@@ -559,8 +559,12 @@ class DashboardServerImpl implements DashboardServer {
       const provenance = this.registry.transportProvenance(runtime.runtimeId);
       return provenance && provenance.runtimeSeq >= 0 ? provenance : {};
     };
-    const runtimeLeafId = (runtime: RuntimeSnapshot): string | undefined => {
-      const leafId = (runtime.session as { leafId?: unknown }).leafId;
+    const runtimeLeafId = (
+      runtime: RuntimeSnapshot | undefined,
+    ): string | undefined => {
+      const leafId = runtime
+        ? (runtime.session as { leafId?: unknown }).leafId
+        : undefined;
       const hasControlCharacter =
         typeof leafId === 'string' &&
         [...leafId].some((character) => {
@@ -596,84 +600,90 @@ class DashboardServerImpl implements DashboardServer {
         entriesComplete,
       };
     };
-    let runtime = before === undefined ? activeRuntime() : undefined;
-    const initialRuntimeLeafId = runtime ? runtimeLeafId(runtime) : undefined;
-    const runtimeNeedsBranch =
-      runtime !== undefined &&
-      ((runtime.session as { entriesComplete?: boolean }).entriesComplete !==
-        true ||
-        isSparseRuntimeSession(runtime));
-    if (
-      before === undefined &&
-      runtime &&
-      runtimeNeedsBranch &&
-      !initialRuntimeLeafId
-    )
-      return runtimeResult(runtime);
-    if (
-      before === undefined &&
-      runtime &&
-      (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
-        true &&
-      !isSparseRuntimeSession(runtime)
-    )
-      return runtimeResult(runtime);
-    try {
-      const result = await this.sessions.readEntries(
+    const runtimeIsWorking = (runtime: RuntimeSnapshot): boolean =>
+      runtime.liveState === 'working';
+    const sameReadAuthority = (
+      left: RuntimeSnapshot | undefined,
+      right: RuntimeSnapshot | undefined,
+    ): boolean =>
+      left?.runtimeId === right?.runtimeId &&
+      left?.liveState === right?.liveState &&
+      runtimeLeafId(left) === runtimeLeafId(right);
+    const readForRuntime = (runtime: RuntimeSnapshot | undefined) =>
+      this.sessions.readEntries(
         id,
         before,
-        initialRuntimeLeafId,
+        runtime && !runtimeIsWorking(runtime)
+          ? runtimeLeafId(runtime)
+          : undefined,
+        {
+          // A working runtime's snapshot is deliberately not authoritative:
+          // emitState is only refreshed at turn boundaries. Resolve the leaf
+          // from the JSONL scan that performs the read, not the file watcher.
+          resolveLatestLeaf:
+            before === undefined &&
+            runtime !== undefined &&
+            runtimeIsWorking(runtime),
+        },
       );
-      // Runtime attachment can change while the file is being read. Recheck it
-      // before declaring disk history authoritative for the active branch.
-      runtime = before === undefined ? activeRuntime() : undefined;
+    let runtime = before === undefined ? activeRuntime() : undefined;
+    let result: Awaited<ReturnType<typeof this.sessions.readEntries>>;
+    try {
+      // Runtime state can change between the initial snapshot and the disk
+      // read. Retry a small, bounded number of times so a working/idle switch
+      // cannot select the wrong authority or branch.
+      for (let attempt = 0; ; attempt += 1) {
+        const runtimeNeedsBranch =
+          runtime !== undefined &&
+          ((runtime.session as { entriesComplete?: boolean })
+            .entriesComplete !== true ||
+            isSparseRuntimeSession(runtime));
+        if (
+          before === undefined &&
+          runtime &&
+          !runtimeIsWorking(runtime) &&
+          runtimeNeedsBranch &&
+          !runtimeLeafId(runtime)
+        )
+          return runtimeResult(runtime);
+        if (
+          before === undefined &&
+          runtime &&
+          !runtimeIsWorking(runtime) &&
+          (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
+            true &&
+          !isSparseRuntimeSession(runtime)
+        )
+          return runtimeResult(runtime);
+        result = await readForRuntime(runtime);
+        if (before !== undefined) break;
+        const currentRuntime = activeRuntime();
+        if (sameReadAuthority(runtime, currentRuntime) || attempt >= 2) {
+          runtime = currentRuntime;
+          break;
+        }
+        runtime = currentRuntime;
+      }
       if (!runtime)
         return {
           ...result,
           serverId: this.serverId,
           cursor,
         };
-      const currentRuntimeLeafId = runtimeLeafId(runtime);
       const runtimeEntriesComplete =
         (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
         true;
-      const currentRuntimeNeedsBranch =
-        !runtimeEntriesComplete || isSparseRuntimeSession(runtime);
-      if (
-        currentRuntimeNeedsBranch &&
-        (!currentRuntimeLeafId || currentRuntimeLeafId !== initialRuntimeLeafId)
-      )
-        return runtimeResult(runtime);
-      if (runtimeEntriesComplete && !isSparseRuntimeSession(runtime))
-        return runtimeResult(runtime);
-      if (runtimeEntriesComplete) {
-        // A branch can be serialized successfully yet contain only session
-        // settings while the indexed JSONL still has the conversation. The
-        // persisted branch is the useful baseline in that case; retain active
-        // runtime metadata without allowing the sparse snapshot to win.
-        return {
-          ...result,
-          serverId: this.serverId,
-          cursor,
-          ...runtimeTransport(runtime),
-          metadata: {
-            ...result.metadata,
-            ...(runtime.session.name !== undefined
-              ? { name: runtime.session.name }
-              : {}),
-            ...(runtime.session.title !== undefined
-              ? { title: runtime.session.title }
-              : {}),
-            activeRuntimeId: runtime.runtimeId,
-          },
-        };
-      }
-      return {
+      const withRuntimeMetadata = {
         ...result,
-        // The JSONL may lag or represent a different active branch while the
-        // runtime itself reports an incomplete snapshot. Keep polling and
-        // preserve the optimistic live projection until that branch is complete.
-        entriesComplete: false,
+        // A disk page containing transcript entries is authoritative even if
+        // the working snapshot has not settled. If disk only has setup data,
+        // retain the incomplete live-state signal while it catches up.
+        ...(runtimeIsWorking(runtime) &&
+        (runtime.session as { entriesComplete?: boolean }).entriesComplete !==
+          true &&
+        !hasTranscriptEntries(result.entries)
+          ? { entriesComplete: false }
+          : {}),
         serverId: this.serverId,
         cursor,
         ...runtimeTransport(runtime),
@@ -687,6 +697,24 @@ class DashboardServerImpl implements DashboardServer {
             : {}),
           activeRuntimeId: runtime.runtimeId,
         },
+      };
+      if (runtimeIsWorking(runtime))
+        // While working, disk is authoritative even when the cached runtime
+        // snapshot looks complete: it can be one or more turns behind.
+        return withRuntimeMetadata;
+      if (runtimeEntriesComplete && !isSparseRuntimeSession(runtime))
+        return runtimeResult(runtime);
+      if (runtimeEntriesComplete) {
+        // A branch can be serialized successfully yet contain only session
+        // settings while the indexed JSONL still has the conversation. The
+        // persisted branch is the useful baseline; retain live metadata.
+        return withRuntimeMetadata;
+      }
+      return {
+        ...withRuntimeMetadata,
+        // An incomplete idle snapshot still wins the optimistic projection;
+        // the browser will poll until the branch is complete.
+        entriesComplete: false,
       };
     } catch (error) {
       runtime = before === undefined ? activeRuntime() : undefined;

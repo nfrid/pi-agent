@@ -127,6 +127,51 @@ describe('session index', () => {
     ).rejects.toThrow('Invalid session branch');
   });
 
+  it('resolves a working branch leaf from the latest JSONL entry', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-latest-leaf-'),
+    );
+    const file = path.join(root, 'latest.jsonl');
+    await writeFile(
+      file,
+      `${[
+        { type: 'session', id: 'latest-id', cwd: '/tmp' },
+        {
+          type: 'message',
+          id: 'old-prompt',
+          parentId: null,
+          message: { role: 'user', content: 'Old prompt' },
+        },
+        {
+          type: 'message',
+          id: 'old-answer',
+          parentId: 'old-prompt',
+          message: { role: 'assistant', content: 'Old answer' },
+        },
+        {
+          type: 'message',
+          id: 'new-prompt',
+          parentId: 'old-answer',
+          message: { role: 'user', content: 'New prompt' },
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}
+`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    const page = await index.readEntries('latest-id', undefined, undefined, {
+      resolveLatestLeaf: true,
+    });
+    expect(page.entries.map((entry) => (entry as { id?: string }).id)).toEqual([
+      'latest-id',
+      'old-prompt',
+      'old-answer',
+      'new-prompt',
+    ]);
+  });
+
   it('returns a bounded recent tail for sessions larger than the response budget', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-large-'));
     const file = path.join(root, 'large.jsonl');
