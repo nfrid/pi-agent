@@ -17,12 +17,13 @@
  * Nothing is removed from the container, so expanding a group is just replaying
  * the members' original `render`.
  *
- * Anything the model says to the user ends the phase before it. What happens to
- * the line itself depends on what came next: work below it makes it that work's
- * preamble, so it leads the group and is printed once as its title; nothing
- * below it makes it an ordinary message, in no group, rendered by Pi untouched.
- * A message whose whole text is a narration header is not speech at all — see
- * `isNarration` — because some models write headers on the text channel.
+ * Only visible, non-narration text paired with a tool-call block is a preamble:
+ * it leads that call's group and is printed once as its title. Thinking-only
+ * turns and text-only narration headers remain ordinary Pi output. Text that
+ * arrives before its tool-call block is likewise ordinary until the block
+ * arrives. A message whose whole text is a narration header is not speech at
+ * all — see `isNarration` — because some models write headers on the text
+ * channel.
  *
  * This reaches into host internals that carry no compatibility promise. Every
  * assumption is verified at install time and re-checked per sequence: anything
@@ -232,13 +233,33 @@ export function installToolSequenceShim(
     ) ?? false;
 
   /**
-   * How the message narrated itself, if it did. A header the model wrote where
-   * the user can read it is worth more as a boundary than the same line in
-   * thinking — see `Narration` — so the channel is carried, not just the fact.
+   * How the message narrated itself, if it did. Keep this for renderer context;
+   * grouping boundaries come only from the explicit preamble below.
    */
   const narrationOf = (message: AssistantMessage): Narration | undefined => {
     if (headersOf(message, 'text').length > 0) return 'announced';
     return headersOf(message, 'thinking').length > 0 ? 'thought' : undefined;
+  };
+
+  /**
+   * An activity group needs an explicit announcement, not a title inferred from
+   * thinking or the tool name. The tool-call block matters here as well: while
+   * text is streaming in ahead of it, the assistant is still ordinary speech.
+   */
+  const preambleTitle = (message: AssistantMessage): string | undefined => {
+    if (!message.content.some((content) => content.type === 'toolCall'))
+      return undefined;
+    const spoken = message.content
+      .flatMap((content) => {
+        if (content.type !== 'text') return [];
+        const text = content.text.trim();
+        return text && !isNarration(text) ? [text] : [];
+      })
+      .at(0);
+    if (!spoken) return undefined;
+    const [first = ''] = spoken.split('\n');
+    const title = first.trim().replace(/[.…:]+$/, '');
+    return title || undefined;
   };
 
   function requestRender(): void {
@@ -277,17 +298,24 @@ export function installToolSequenceShim(
   function transcriptOf(container: ContainerLike): TranscriptEntry[] {
     return container.children.map((child) => {
       const closesGroup = runEnds.has(child) || undefined;
-      if (isAssistant(child))
+      if (isAssistant(child)) {
+        const title = child.lastMessage
+          ? preambleTitle(child.lastMessage)
+          : undefined;
         return {
           kind: 'assistant' as const,
           speaks: speaks(child),
-          // The model's own account of what it is starting, which is where a
-          // group of work that nothing else distinguishes is cut.
+          // Only visible text paired with a tool-call block is an explicit
+          // preamble. Thinking-only turns and text-only narration headers do
+          // not open a group.
+          title,
+          titleKind: title ? ('preamble' as const) : undefined,
           narration: child.lastMessage
             ? narrationOf(child.lastMessage)
             : undefined,
           closesGroup,
         };
+      }
       if (isTool(child))
         return {
           kind: 'tool' as const,

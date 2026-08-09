@@ -47,7 +47,9 @@ const REQUIRED = Boolean(process.env.PI_CANARY_REQUIRED);
 
 function message(
   content: AssistantMessage['content'] = [
-    { type: 'thinking', thinking: '**Inspecting authentication code**' },
+    // The shim groups only an explicit visible preamble paired with a call;
+    // thinking-only narration is intentionally not an activity group.
+    { type: 'text', text: 'Inspecting authentication code' },
     { type: 'toolCall', id: 'call-1', name: 'read', arguments: {} },
   ],
 ): AssistantMessage {

@@ -3,7 +3,6 @@ import type { Theme } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installToolSequenceShim, type ShimHost } from './shim';
-import { headersOf } from './title';
 import type { SequenceRenderer, SequenceSnapshot } from './types';
 
 /**
@@ -103,10 +102,9 @@ function assistantMessage(
 
 function toolCallMessage(id: string, name: string): AssistantMessage {
   return assistantMessage([
-    // Narration lives in thinking: as of July 2026, 2616 of this repo's 2861
-    // tool-carrying messages narrate that way and only 10 also speak to the
-    // user, which is why thinking is what a group may hide.
-    { type: 'thinking', thinking: 'Reading the auth code' },
+    // Grouping is explicit: visible, non-narration text paired with a call is
+    // the model's preamble. Thinking-only turns are covered separately below.
+    { type: 'text', text: 'Reading the auth code' },
     { type: 'toolCall', id, name, arguments: {} },
   ]);
 }
@@ -187,14 +185,18 @@ function turn(
   const assistant = new FakeAssistant();
   h.chat.addChild(assistant);
   assistant.updateContent(
-    assistantMessage(
-      tools.map((tool, index) => ({
+    assistantMessage([
+      {
+        type: 'text',
+        text: `Working on ${tools.map((tool) => tool.name).join(' and ')}`,
+      },
+      ...tools.map((tool, index) => ({
         type: 'toolCall' as const,
         id: `${prefix}-${index}`,
         name: tool.name,
         arguments: {},
       })),
-    ),
+    ]),
   );
   return tools.map((tool, index) => {
     const component = new FakeTool(
@@ -227,6 +229,14 @@ describe('tool sequence shim', () => {
 
     expect(h.render()).toEqual(['group:group-1:2:live']);
     const [snapshot] = snapshots;
+    expect(snapshot?.items[0]).toMatchObject({
+      type: 'assistant',
+      message: expect.objectContaining({
+        content: expect.arrayContaining([
+          { type: 'text', text: 'Reading the auth code' },
+        ]),
+      }),
+    });
     expect(snapshot?.items).toEqual([
       expect.objectContaining({ type: 'assistant' }),
       expect.objectContaining({
@@ -291,16 +301,37 @@ describe('tool sequence shim', () => {
     );
     h.chat.addChild(new FakeTool('read', 'call-2', {}));
 
-    // One group, and no line of its own for either header.
-    expect(h.render()).toEqual(['group:group-1:4:live']);
-    // Both headers stayed inside it; the renderer uses the latest useful one.
-    expect(
-      snapshots
-        .at(-1)
-        ?.items.flatMap((item) =>
-          item.type === 'assistant' ? headersOf(item.message) : [],
-        ),
-    ).toEqual(['Reading the auth code', 'Reading the session store']);
+    // A text-only narration header is not visible speech and is not an
+    // explicit preamble, so neither assistant/tool pair is grouped.
+    expect(h.render()).toEqual([
+      'assistant:**Reading the auth code**',
+      'tool:read',
+      'assistant:**Reading the session store**',
+      'tool:read',
+    ]);
+    expect(snapshots).toEqual([]);
+  });
+
+  it('leaves thinking-only tool turns ungrouped', () => {
+    const { renderer, snapshots } = recordingRenderer();
+    const h = harness();
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    const assistant = new FakeAssistant();
+    h.chat.addChild(assistant);
+    assistant.updateContent(
+      assistantMessage([
+        { type: 'thinking', thinking: '**Inspecting the workspace**' },
+        { type: 'toolCall', id: 'call-1', name: 'read', arguments: {} },
+      ]),
+    );
+    h.chat.addChild(new FakeTool('read', 'call-1', {}));
+
+    expect(h.render()).toEqual([
+      'assistant:**Inspecting the workspace**',
+      'tool:read',
+    ]);
+    expect(snapshots).toEqual([]);
   });
 
   /**
@@ -366,11 +397,13 @@ describe('tool sequence shim', () => {
         { type: 'thinking', thinking: 'Second private step.' },
       ]),
     );
-    expect(h.render()).toEqual(['group:group-1:1:live']);
+    // Thinking-only turns remain ordinary transcript entries.
+    expect(h.render()).toEqual([
+      'assistant:First private step.Second private step.',
+    ]);
 
     // Text streams before the toolCall content block. It is temporarily plain
-    // speech, but the thinking already represented by the live group must not
-    // burst back into the transcript during that gap.
+    // speech and is not grouped until the call arrives.
     assistant.updateContent(
       assistantMessage([
         { type: 'thinking', thinking: 'First private step.' },
@@ -378,7 +411,9 @@ describe('tool sequence shim', () => {
         { type: 'text', text: 'Editing the shutdown path.' },
       ]),
     );
-    expect(h.render()).toEqual(['assistant:Editing the shutdown path.']);
+    expect(h.render()).toEqual([
+      'assistant:First private step.Second private step.Editing the shutdown path.',
+    ]);
 
     assistant.updateContent(
       assistantMessage([
@@ -533,7 +568,7 @@ describe('tool sequence shim', () => {
 
     turn(h, [{ name: 'read' }], 'a');
     // The broken group shows Pi's own rendering; grouping stays installed.
-    expect(h.render()).toEqual(['assistant:', 'tool:read']);
+    expect(h.render()).toEqual(['assistant:Working on read', 'tool:read']);
     expect(onWarn).toHaveBeenCalledOnce();
     expect(onError).not.toHaveBeenCalled();
     expect(FakeTool.prototype.render.name).toBe('patchedToolRender');
@@ -545,7 +580,7 @@ describe('tool sequence shim', () => {
     turn(h, [{ name: 'read' }], 'b');
     h.render();
     h.render();
-    expect(onWarn).toHaveBeenCalledOnce();
+    expect(onWarn).toHaveBeenCalledTimes(2);
     expect(onError).not.toHaveBeenCalled();
   });
 
