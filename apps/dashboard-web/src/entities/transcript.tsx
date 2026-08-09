@@ -602,11 +602,8 @@ export function displayActivityPath(value: string, cwd = ''): string {
     : normalized;
 }
 
-function shortActivityArgument(value: string, maximum = 320): string {
-  const compact = value.replace(/\s+/gu, ' ').trim();
-  return compact.length > maximum
-    ? `${compact.slice(0, maximum - 1).trimEnd()}…`
-    : compact;
+function compactActivityArgument(value: string): string {
+  return value.replace(/\s+/gu, ' ').trim();
 }
 
 function activityArgs(args: unknown): Record<string, unknown> | undefined {
@@ -629,10 +626,6 @@ function arrayArg(args: unknown, key: string): readonly unknown[] {
 
 function countLabel(count: number, singular: string): string {
   return `${count} ${count === 1 ? singular : `${singular}s`}`;
-}
-
-function shortActivityId(value: string): string {
-  return value.length > 22 ? `${value.slice(0, 8)}…${value.slice(-5)}` : value;
 }
 
 function readPathArgument(path: string, args: unknown, cwd: string): string {
@@ -668,14 +661,11 @@ export function activityStepParts(
       stringArg(tool.args, 'command') ??
       stringArg(tool.args, 'cmd') ??
       stringArg(tool.args, 'script');
-    if (command)
-      argument = shortActivityArgument(
-        command.split(/&&|\|\||[;|]/u)[0] ?? command,
-      );
+    if (command) argument = compactActivityArgument(command);
   } else if (name === 'inspect_shell') {
     action = 'Checking';
     const command = stringArg(tool.args, 'command');
-    if (command) argument = shortActivityArgument(command);
+    if (command) argument = compactActivityArgument(command);
   } else if (name === 'delegate' || name === 'delegates') {
     role = 'command';
     const operation =
@@ -710,7 +700,7 @@ export function activityStepParts(
             ? 'Dropping delegate branch'
             : 'Listing delegate branches';
     const id = stringArg(tool.args, 'id');
-    if (id) argument = shortActivityId(id);
+    if (id) argument = id;
   } else if (name === 'background') {
     role = 'command';
     const operation = stringArg(tool.args, 'action') ?? 'list';
@@ -798,13 +788,13 @@ export function activityStepParts(
     const detail = fallback.slice(name.length).trim().replace(/^:\s*/u, '');
     if (detail) argument = detail;
   }
-  const boundedArgument = argument
-    ? shortActivityArgument(argument)
+  const displayedArgument = argument
+    ? compactActivityArgument(argument)
     : undefined;
   return {
-    label: boundedArgument ? `${action} ${boundedArgument}` : action,
+    label: displayedArgument ? `${action} ${displayedArgument}` : action,
     action,
-    ...(boundedArgument ? { argument: boundedArgument } : {}),
+    ...(displayedArgument ? { argument: displayedArgument } : {}),
     role,
     state,
   };

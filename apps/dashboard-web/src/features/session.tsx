@@ -366,7 +366,8 @@ export function SessionView({
     const update = () => {
       const scrolledUp = window.scrollY < previousScrollY - 1;
       previousScrollY = window.scrollY;
-      if (scrolledUp) cancelPendingTailScroll();
+      if (scrolledUp && initialTailSessionRef.current !== id)
+        cancelPendingTailScroll();
       const nearLatest = isNearPageBottom(
         document.documentElement.scrollHeight,
         window.scrollY,

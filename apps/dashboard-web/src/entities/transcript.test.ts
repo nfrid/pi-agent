@@ -156,6 +156,14 @@ describe('activity row views and virtual transcript construction', () => {
       role: 'command',
       state: 'complete',
     });
+    const compoundCommand =
+      'rg -n "todo|otherstuff"\napps && rg -n "kind: other" packages; printf done';
+    expect(
+      activityStepParts({ name: 'bash', args: { command: compoundCommand } }),
+    ).toMatchObject({
+      argument:
+        'rg -n "todo|otherstuff" apps && rg -n "kind: other" packages; printf done',
+    });
     expect(
       activityStepParts({ name: 'read', args: { path: 'src/App.tsx' } }),
     ).toEqual({
@@ -171,7 +179,7 @@ describe('activity row views and virtual transcript construction', () => {
       role: 'other',
       state: 'complete',
     });
-    const longPath = `src/${'wide-segment/'.repeat(10)}dashboard.tsx`;
+    const longPath = `src/${'wide-segment/'.repeat(40)}dashboard.tsx`;
     expect(
       activityStepParts({ name: 'read', args: { path: longPath } }).argument,
     ).toBe(longPath);
@@ -236,7 +244,7 @@ describe('activity row views and virtual transcript construction', () => {
       }),
     ).toMatchObject({
       action: 'Dropping delegate branch',
-      argument: '136d280a…cd03b',
+      argument: '136d280a-7c10-4427-9d2d-1f7e62acd03b',
       role: 'command',
     });
     expect(

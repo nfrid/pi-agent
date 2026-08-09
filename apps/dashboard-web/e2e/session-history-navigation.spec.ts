@@ -126,3 +126,66 @@ test('aborts older history when navigating away from a session', async ({
     }),
   ).toHaveCount(0);
 });
+
+test('switching chats establishes the new transcript tail', async ({
+  page,
+}) => {
+  const sessions = [
+    { ...snapshot.sessions[0], title: 'First chat' },
+    { ...snapshot.sessions[1], title: 'Second chat' },
+  ];
+  const sessionEntries = (id: string) =>
+    Array.from({ length: 120 }, (_, index) => ({
+      type: 'message',
+      id: `${id}-${index}`,
+      message: {
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        content: `${id} message ${index} ${'transcript detail '.repeat(8)}`,
+      },
+    }));
+  await page.route('**/api/snapshot', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ...snapshot, sessions }),
+    }),
+  );
+  await page.route('**/api/usage', (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/sessions/*', (route) => {
+    const id = new URL(route.request().url()).pathname.split('/').at(-1) ?? '';
+    const sessionIndex = id === 'session-2' ? 1 : 0;
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        metadata: sessions[sessionIndex],
+        entries: sessionEntries(id),
+        entriesComplete: true,
+        serverId: snapshot.serverId,
+        cursor: 1,
+      }),
+    });
+  });
+
+  const atBottom = () =>
+    page.evaluate(
+      () =>
+        document.documentElement.scrollHeight -
+        (window.scrollY + window.innerHeight),
+    );
+  await page.goto('/sessions/session-1');
+  await expect.poll(atBottom).toBeLessThanOrEqual(2);
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  await page
+    .locator('.agent-nav-drawer.open .agent-thread-row')
+    .filter({ hasText: 'Second chat' })
+    .click();
+  await expect(page).toHaveURL(/\/sessions\/session-2$/u);
+  await expect(page.getByText(/session-2 message 119/u)).toBeVisible();
+  await expect.poll(atBottom).toBeLessThanOrEqual(2);
+  await page.evaluate(() => {
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -240 }));
+    window.scrollBy(0, -240);
+  });
+  await expect.poll(atBottom).toBeGreaterThan(120);
+});
