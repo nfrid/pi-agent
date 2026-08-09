@@ -21,6 +21,10 @@ const thinking: TranscriptEntry = {
 };
 const speech: TranscriptEntry = { kind: 'assistant', speaks: true };
 const other: TranscriptEntry = { kind: 'other' };
+const transparentEvent: TranscriptEntry = {
+  kind: 'other',
+  continuesGroup: true,
+};
 const call = (name: string): TranscriptEntry => ({
   kind: 'tool',
   name,
@@ -80,7 +84,22 @@ describe('preamble-led activity grouping', () => {
     ).toEqual(['[0..2]', '[3..4]']);
   });
 
-  it('leaves plain speech and other entries outside groups and ends the active group', () => {
+  it('keeps transparent semantic events before, between, and after tools', () => {
+    expect(
+      shape(
+        groupTranscript([
+          preamble('Track the work'),
+          transparentEvent,
+          call('read'),
+          transparentEvent,
+          call('edit'),
+          transparentEvent,
+        ]),
+      ),
+    ).toEqual(['[0..5]']);
+  });
+
+  it('leaves plain speech and ordinary other entries outside groups and ends the active group', () => {
     expect(
       shape(
         groupTranscript([
@@ -95,6 +114,10 @@ describe('preamble-led activity grouping', () => {
         ]),
       ),
     ).toEqual(['[0..1]', '[6..7]']);
+  });
+
+  it('does not let a transparent event open a group by itself', () => {
+    expect(groupTranscript([transparentEvent, call('read')])).toEqual([]);
   });
 
   it('honours closesGroup without allowing a following tool to rejoin', () => {

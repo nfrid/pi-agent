@@ -177,7 +177,7 @@ export function activityKind(tools: readonly ToolDescriptor[]): ActivityKind {
  * This is deliberately the small common shape of a live component and a
  * persisted session message: an assistant message either speaks to the user or
  * only thinks, a tool call has a name and arguments, and anything else is an
- * opaque thing no group may span.
+ * opaque thing no group may span unless it explicitly opts into transparency.
  */
 export type TranscriptEntry = {
   /**
@@ -207,7 +207,14 @@ export type TranscriptEntry = {
         status?: 'pending' | 'running' | 'complete' | 'success' | 'error';
         isError?: boolean;
       })
-  | { kind: 'other' }
+  | {
+      kind: 'other';
+      /**
+       * This semantic event is rendered as part of the active activity rather
+       * than as an opaque transcript boundary. It never opens a group alone.
+       */
+      continuesGroup?: boolean;
+    }
 );
 
 /** A run of entries that belong together, as indices into the transcript. */
@@ -274,6 +281,11 @@ export function groupTranscript(
         open.end = index;
         openIsStreaming ||= entry.streaming === true;
       }
+    } else if (entry.continuesGroup && open) {
+      // Semantic events such as todo snapshots are transcript-visible but do
+      // not represent a new activity boundary. An event without an active
+      // group is intentionally ignored here rather than opening one.
+      open.end = index;
     } else {
       flush();
     }
