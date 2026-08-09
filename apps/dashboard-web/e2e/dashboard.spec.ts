@@ -1953,7 +1953,7 @@ function phase6Entries() {
         role: 'assistant',
         content: [
           { type: 'thinking', thinking: '**Considering the workspace**' },
-          { type: 'text', text: '**Inspecting history**' },
+          { type: 'text', text: 'Inspecting history' },
           {
             type: 'toolCall',
             id: 'history-read',
