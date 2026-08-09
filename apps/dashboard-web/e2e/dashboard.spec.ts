@@ -2492,9 +2492,12 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
       .locator('.transcript-thinking-blob')
       .getByText('Considering the workspace'),
   ).toBeVisible();
-  await expect(page.locator('.tool-chip').getByText('Reading')).toBeVisible();
+  const expandedToolDetail = page
+    .locator('.tool-detail .activity-step')
+    .getByText('Reading', { exact: true });
+  await expect(expandedToolDetail).toBeVisible();
   await activity.click();
-  await expect(page.locator('.tool-chip').getByText('Reading')).toHaveCount(0);
+  await expect(expandedToolDetail).toHaveCount(0);
   await expect
     .poll(
       () =>
