@@ -228,6 +228,7 @@ describe('live extension surface fixtures', () => {
             label: 'Task',
             text: 'Inspect the queue',
             status: 'completed',
+            at: Date.parse('2026-08-05T18:42:00.000Z'),
             run: 1,
           },
           {
@@ -252,6 +253,7 @@ describe('live extension surface fixtures', () => {
     );
 
     expect(markup).toContain('aria-label="Delegate transcript"');
+    expect(markup).toContain('dateTime="2026-08-05T18:42:00.000Z"');
     expect(markup).toContain('Inspect the queue');
     expect(markup).toContain('<pre>npm test</pre>');
     expect(markup).toContain('<strong>Done</strong>');

@@ -4,11 +4,12 @@ import {
   selectLegacyTranscriptEntries,
 } from '@pi-dashboard/domain';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   addImageAttachments,
   asBrowserSnapshot,
   asSessionResponse,
+  composerDraftStorageKey,
   contextIndicatorData,
   formatContextTokens,
   isNearPageBottom,
@@ -21,6 +22,7 @@ import {
   queueCommand,
   queuedMessagesForRuntime,
   queueRemoveCommand,
+  readComposerDraft,
   resumeRuntimeRequest,
   runtimeSupportsImages,
   sessionCursorRangeCovered,
@@ -32,6 +34,7 @@ import {
   shouldShowJumpToLatest,
   shouldShowQueuePanel,
   toTranscriptEntries,
+  writeComposerDraft,
 } from './App';
 import type { DashboardEvent } from './dashboard-transport';
 import {
@@ -89,6 +92,53 @@ describe('queued message commands', () => {
     expect(shouldShowQueuePanel('idle', 1)).toBe(true);
     expect(shouldShowQueuePanel('waiting', 1)).toBe(true);
     expect(shouldShowQueuePanel('idle', 0)).toBe(false);
+  });
+});
+
+describe('composer drafts', () => {
+  it('persists drafts independently by session and removes empty values', () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    });
+    try {
+      const firstKey = composerDraftStorageKey('session/one');
+      const secondKey = composerDraftStorageKey('session-two');
+      writeComposerDraft('session/one', 'Keep this message');
+      writeComposerDraft('session-two', 'Keep the other message');
+      expect(readComposerDraft('session/one')).toBe('Keep this message');
+      expect(readComposerDraft('session-two')).toBe('Keep the other message');
+      expect(firstKey).not.toBe(secondKey);
+
+      writeComposerDraft('session/one', '');
+      expect(readComposerDraft('session/one')).toBe('');
+      expect(values.has(firstKey)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('degrades safely when local storage is unavailable', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: () => {
+        throw new Error('unavailable');
+      },
+      setItem: () => {
+        throw new Error('quota exceeded');
+      },
+      removeItem: () => {
+        throw new Error('unavailable');
+      },
+    });
+    try {
+      expect(readComposerDraft('session')).toBe('');
+      expect(() => writeComposerDraft('session', 'draft')).not.toThrow();
+      expect(() => writeComposerDraft('session', '')).not.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -739,19 +789,22 @@ describe('workspace-first agent navigation', () => {
         { id: 'idle-session', cwd: '/workspace/app', updatedAt: 1 },
         { id: 'failed-session', cwd: '/workspace/app', updatedAt: 2 },
         { id: 'working-session', cwd: '/workspace/app', updatedAt: 3 },
+        { id: 'dormant-session', cwd: '/workspace/app', updatedAt: 4 },
       ],
     } as never;
     const rows = agentThreadRows(snapshot);
-    expect(rows.map((row) => row.id)).toEqual([
-      'working-session',
-      'failed-session',
-      'idle-session',
+    expect(rows.map((row) => [row.id, row.status])).toEqual([
+      ['working-session', 'working'],
+      ['failed-session', 'failed'],
+      ['idle-session', 'idle'],
+      ['dormant-session', 'dormant'],
     ]);
     const idle = rows[2];
     if (!idle) throw new Error('idle row missing');
     const history = Array.from({ length: 100 }, (_, index) => ({
       ...idle,
       id: `history-${index}`,
+      status: index % 2 === 0 ? ('idle' as const) : ('dormant' as const),
       updatedAt: index,
     }));
     expect(

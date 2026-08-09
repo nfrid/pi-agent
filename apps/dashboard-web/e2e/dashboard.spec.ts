@@ -326,7 +326,7 @@ test('command palette identifies the runtime before invoking repeated actions', 
   await expect.poll(() => invokedRuntime).toBe('runtime-beta');
 });
 
-test('session loading preserves the shell and shows live status as a toast', async ({
+test('session shell exposes timestamps, dormant state, and persistent drafts', async ({
   page,
 }) => {
   await page.addInitScript(() =>
@@ -372,10 +372,34 @@ test('session loading preserves the shell and shows live status as a toast', asy
             file: '',
             cwd: '/tmp',
             title: 'Loaded shell',
-            updatedAt: 1,
+            updatedAt: Date.parse('2026-08-05T18:42:00.000Z'),
+          },
+          {
+            id: 'session-dormant',
+            file: '',
+            cwd: '/tmp/archive',
+            title: 'Dormant thread',
+            updatedAt: Date.parse('2026-08-04T12:00:00.000Z'),
           },
         ],
         unread: [],
+      }),
+    }),
+  );
+  await page.route('**/api/sessions/session-dormant', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        serverId: 'server-loading',
+        cursor: 0,
+        metadata: {
+          id: 'session-dormant',
+          file: '',
+          cwd: '/tmp/archive',
+          title: 'Dormant thread',
+          updatedAt: Date.parse('2026-08-04T12:00:00.000Z'),
+        },
+        entries: [],
       }),
     }),
   );
@@ -394,12 +418,22 @@ test('session loading preserves the shell and shows live status as a toast', asy
           updatedAt: 1,
         },
         entries: [
+          ...Array.from({ length: 80 }, (_, index) => ({
+            type: 'message',
+            message: {
+              id: `history-${index}`,
+              role: 'user',
+              content: `Earlier history ${index}`,
+              timestamp: Date.parse('2026-08-05T17:00:00.000Z') + index,
+            },
+          })),
           {
             type: 'message',
             message: {
-              id: 'history-1',
+              id: 'history-latest',
               role: 'user',
               content: 'Prior history',
+              timestamp: '2026-08-05T18:42:00.000Z',
             },
           },
         ],
@@ -426,7 +460,66 @@ test('session loading preserves the shell and shows live status as a toast', asy
       insideMain: Boolean(element.closest('main')),
     })),
   ).toEqual({ position: 'fixed', insideMain: false });
-  await expect(page.locator('.transcript')).toContainText('Prior history');
+  await expect(page.locator('.transcript-virtualized')).toContainText(
+    'Prior history',
+  );
+  await expect(
+    page
+      .getByRole('article')
+      .filter({ hasText: 'Prior history' })
+      .getByRole('time'),
+  ).toHaveAttribute('datetime', '2026-08-05T18:42:00.000Z');
+  await page.getByRole('button', { name: 'Open transcript outline' }).click();
+  const outline = page.getByRole('dialog', { name: 'Transcript outline' });
+  await expect(
+    outline.locator('.transcript-outline-time').first(),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Close Transcript outline' }).click();
+
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  const agentNav = page.getByRole('complementary', {
+    name: 'Agents and threads',
+  });
+  await expect(
+    agentNav.getByRole('button', { name: 'Loaded shell idle' }),
+  ).toBeVisible();
+  await expect(
+    agentNav.getByRole('button', { name: 'Dormant thread dormant' }),
+  ).toBeVisible();
+  await expect(agentNav.locator('.agent-thread-time')).toHaveCount(2);
+  await page.locator('.agent-nav-backdrop').click();
+
+  const composer = page.getByLabel('Message Pi');
+  await expect(composer).toBeVisible();
+  await composer.fill('Draft survives navigation and refresh');
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  await page
+    .getByRole('complementary', { name: 'Agents and threads' })
+    .getByRole('button', { name: 'Dormant thread dormant' })
+    .click();
+  await expect(page).toHaveURL(/\/sessions\/session-dormant$/u);
+  await expect(page.getByText('This session is dormant.')).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        localStorage.getItem('pi-dashboard-composer-draft:session-loading'),
+      ),
+    )
+    .toBe('Draft survives navigation and refresh');
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  await page
+    .getByRole('complementary', { name: 'Agents and threads' })
+    .getByRole('button', { name: 'Loaded shell idle' })
+    .click();
+  await expect(page).toHaveURL(/\/sessions\/session-loading$/u);
+  await expect(page.getByLabel('Message Pi')).toContainText(
+    'Draft survives navigation and refresh',
+  );
+
+  await page.reload();
+  await expect(page.getByLabel('Message Pi')).toContainText(
+    'Draft survives navigation and refresh',
+  );
 });
 
 test('live transport contains malformed data and reconnects without HTTP polling', async ({

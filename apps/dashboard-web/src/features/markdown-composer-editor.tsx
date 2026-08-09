@@ -40,6 +40,7 @@ const COMPOSER_MARKDOWN_PLUGINS = [
 
 type MarkdownComposerEditorProps = {
   commands?: readonly ComposerCommandOption[];
+  initialMarkdown?: string;
   onChange: (markdown: string) => void;
   placeholder: string;
   readOnly: boolean;
@@ -57,13 +58,13 @@ const MarkdownComposerEditor = forwardRef<
   MDXEditorMethods,
   MarkdownComposerEditorProps
 >(function MarkdownComposerEditor(
-  { commands = [], onChange, placeholder, readOnly },
+  { commands = [], initialMarkdown = '', onChange, placeholder, readOnly },
   forwardedRef,
 ) {
   const hostRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<MDXEditorMethods | null>(null);
   const listId = useId();
-  const [markdown, setMarkdown] = useState('');
+  const [markdown, setMarkdown] = useState(initialMarkdown);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [dismissedMarkdown, setDismissedMarkdown] = useState<string>();
   const suggestions = useMemo(
@@ -185,7 +186,7 @@ const MarkdownComposerEditor = forwardRef<
         ref={setEditorRef}
         className="composer-rich-editor-root dark-theme"
         contentEditableClassName="composer-rich-editor"
-        markdown=""
+        markdown={initialMarkdown}
         onChange={(next, initialMarkdownNormalize) => {
           if (!initialMarkdownNormalize) updateMarkdown(next);
         }}

@@ -14,6 +14,7 @@ import {
   type FormEvent,
   lazy,
   Suspense,
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -33,6 +34,32 @@ export const MarkdownComposerEditor = lazy(
 export const MAX_IMAGE_ATTACHMENTS = 4;
 export const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 export const MAX_IMAGE_TOTAL_SIZE = 12 * 1024 * 1024;
+export const COMPOSER_DRAFT_STORAGE_PREFIX = 'pi-dashboard-composer-draft:';
+const COMPOSER_DRAFT_WRITE_DELAY = 350;
+
+export function composerDraftStorageKey(sessionId: string): string {
+  return `${COMPOSER_DRAFT_STORAGE_PREFIX}${encodeURIComponent(sessionId)}`;
+}
+
+export function readComposerDraft(sessionId: string): string {
+  try {
+    return (
+      globalThis.localStorage?.getItem(composerDraftStorageKey(sessionId)) ?? ''
+    );
+  } catch {
+    return '';
+  }
+}
+
+export function writeComposerDraft(sessionId: string, text: string): void {
+  try {
+    const key = composerDraftStorageKey(sessionId);
+    if (text) globalThis.localStorage?.setItem(key, text);
+    else globalThis.localStorage?.removeItem(key);
+  } catch {
+    // Draft persistence is best-effort when storage is unavailable or full.
+  }
+}
 
 type ImageAttachment = { file: File; previewUrl: string };
 
@@ -467,7 +494,13 @@ export function Composer({
   workspaceId?: string;
 }) {
   const go = useDashboardNavigate();
-  const [text, setText] = useState('');
+  const [initialDraft] = useState(() => readComposerDraft(sessionId));
+  const [text, setText] = useState(initialDraft);
+  const draftTextRef = useRef(initialDraft);
+  const updateText = useCallback((next: string) => {
+    draftTextRef.current = next;
+    setText(next);
+  }, []);
   const editorRef = useRef<MDXEditorMethods>(null);
   const [mode, setMode] = useState<'prompt' | 'steer' | 'followUp'>(() =>
     runtime?.liveState === 'working' ? 'steer' : 'prompt',
@@ -510,6 +543,17 @@ export function Composer({
   useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
+  useEffect(() => {
+    const timeout = window.setTimeout(
+      () => writeComposerDraft(sessionId, text),
+      COMPOSER_DRAFT_WRITE_DELAY,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [sessionId, text]);
+  useEffect(
+    () => () => writeComposerDraft(sessionId, draftTextRef.current),
+    [sessionId],
+  );
   useEffect(
     () => () => {
       for (const attachment of attachmentsRef.current)
@@ -678,6 +722,8 @@ export function Composer({
       for (const attachment of attachments)
         URL.revokeObjectURL(attachment.previewUrl);
       setAttachments([]);
+      draftTextRef.current = '';
+      writeComposerDraft(sessionId, '');
       setText('');
       editorRef.current?.setMarkdown('');
     } catch (cause) {
@@ -786,6 +832,7 @@ export function Composer({
           >
             <MarkdownComposerEditor
               ref={editorRef}
+              initialMarkdown={initialDraft}
               commands={
                 runtime.liveState === 'working'
                   ? composerCommands?.filter(
@@ -793,7 +840,7 @@ export function Composer({
                     )
                   : composerCommands
               }
-              onChange={setText}
+              onChange={updateText}
               placeholder={
                 disabled ? 'Agent is waiting for input' : 'Message Pi…'
               }

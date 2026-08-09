@@ -10,6 +10,7 @@ import { sessionDisplayTitle } from '../app-helpers';
 import { useDashboardNavigate } from '../routes/navigation';
 import { useDashboardUtility } from './dashboard-utility-context';
 import { useOverlayPresence } from './overlay-presence';
+import { DashboardTime } from './timestamp';
 
 export type AgentThreadRow = {
   id: string;
@@ -17,7 +18,7 @@ export type AgentThreadRow = {
   workspaceId?: string;
   workspaceName: string;
   cwd: string;
-  status: RuntimeSnapshot['liveState'] | 'offline' | 'idle';
+  status: RuntimeSnapshot['liveState'] | 'offline' | 'dormant';
   runtime?: RuntimeSnapshot;
   session?: SessionIndexEntry;
   updatedAt: number;
@@ -28,7 +29,8 @@ function statusRank(status: AgentThreadRow['status']): number {
   if (status === 'waiting') return 1;
   if (status === 'failed') return 2;
   if (status === 'idle') return 3;
-  return 4;
+  if (status === 'dormant') return 4;
+  return 5;
 }
 
 export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
@@ -64,7 +66,7 @@ export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
       workspaceId: session.workspaceId,
       workspaceName: workspace?.name ?? 'Other workspace',
       cwd: session.cwd,
-      status: 'idle',
+      status: 'dormant',
       session,
       updatedAt: session.updatedAt,
     });
@@ -82,6 +84,7 @@ function statusGlyph(status: AgentThreadRow['status']): string {
   if (status === 'waiting') return '◆';
   if (status === 'failed') return '!';
   if (status === 'offline') return '○';
+  if (status === 'dormant') return '◌';
   return '·';
 }
 
@@ -92,12 +95,16 @@ function statusLabel(status: AgentThreadRow['status']): string {
 const MAX_VISIBLE_ACTIVE_THREADS = 40;
 const MAX_VISIBLE_HISTORY_THREADS = 24;
 
+function isHistoricalThread(row: AgentThreadRow): boolean {
+  return row.status === 'idle' || row.status === 'dormant';
+}
+
 export function boundedAgentThreadRows(
   rows: readonly AgentThreadRow[],
   historyLimit = MAX_VISIBLE_HISTORY_THREADS,
 ): AgentThreadRow[] {
-  const active = rows.filter((row) => row.status !== 'idle');
-  const history = rows.filter((row) => row.status === 'idle');
+  const active = rows.filter((row) => !isHistoricalThread(row));
+  const history = rows.filter(isHistoricalThread);
   return [
     ...active.slice(0, MAX_VISIBLE_ACTIVE_THREADS),
     ...history.slice(0, Math.max(0, historyLimit)),
@@ -165,8 +172,8 @@ export function AgentThreadNav({
   );
   const hiddenRowCount = Math.max(
     0,
-    filtered.filter((row) => row.status === 'idle').length -
-      visibleRows.filter((row) => row.status === 'idle').length,
+    filtered.filter(isHistoricalThread).length -
+      visibleRows.filter(isHistoricalThread).length,
   );
   const groups = useMemo(() => {
     const result = new Map<
@@ -382,9 +389,16 @@ export function AgentThreadNav({
                   <span className="agent-thread-copy">
                     <strong>{row.title}</strong>
                     <small>
-                      <span>{statusLabel(row.status)}</span>
-                      <span aria-hidden="true"> · </span>
-                      <span>{shortPath(row.cwd)}</span>
+                      <span className="agent-thread-context">
+                        <span>{statusLabel(row.status)}</span>
+                        <span aria-hidden="true"> · </span>
+                        <span>{shortPath(row.cwd)}</span>
+                      </span>
+                      <DashboardTime
+                        className="agent-thread-time"
+                        timestamp={row.updatedAt}
+                        context="sidebar"
+                      />
                     </small>
                   </span>
                 </button>

@@ -724,13 +724,27 @@ h2 {
 .message-assistant {
   border-color: var(--purple);
 }
+.message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 5px;
+}
 .message-role {
   display: block;
   color: var(--pink);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  margin-bottom: 5px;
+}
+.transcript-time {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
 }
 .message-assistant .message-role {
   color: var(--purple);
@@ -886,6 +900,9 @@ h2 {
   white-space: nowrap;
   text-align: right;
 }
+.activity-group > button .activity-time {
+  margin-left: 0;
+}
 .activity-icon {
   color: var(--cyan);
   font-weight: 700;
@@ -986,6 +1003,9 @@ h2 {
 .preparing-toolcall small {
   margin-left: auto;
   color: var(--muted);
+}
+.preparing-toolcall .transcript-time {
+  margin-left: 0;
 }
 .transcript-entry:last-child {
   border-bottom: 0;
@@ -1689,6 +1709,16 @@ h2 {
 }
 .delegate-transcript-entry header strong {
   color: var(--fg);
+}
+.delegate-transcript-entry header small {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.delegate-transcript-time {
+  color: var(--dim);
 }
 .delegate-transcript-entry pre {
   max-height: 180px;
@@ -3160,8 +3190,25 @@ h2 {
   font-weight: 600;
 }
 .agent-thread-copy small {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   color: var(--dim);
   font-size: 9px;
+}
+.agent-thread-context {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-thread-time {
+  flex: none;
+  margin-left: auto;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.agent-thread-row.status-dormant .agent-thread-glyph {
+  color: var(--dim);
 }
 .agent-thread-row.status-working .agent-thread-copy small,
 .agent-thread-row.status-waiting .agent-thread-copy small,
@@ -3942,8 +3989,16 @@ h2 {
   background: var(--cyan);
 }
 .transcript-outline-item span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.transcript-outline-item .transcript-outline-time {
+  flex: none;
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 9px;
   white-space: nowrap;
 }
 @keyframes overlay-in {
@@ -4568,6 +4623,9 @@ details.session-event {
   margin-left: auto;
   white-space: nowrap;
 }
+.session-event small + .transcript-time {
+  margin-left: 0;
+}
 .session-event-disclosure {
   color: var(--dim);
   font-size: 13px;
@@ -4750,12 +4808,17 @@ details.session-event {
   min-width: 0;
   gap: 8px;
 }
-.tool-detail summary > span:last-child {
+.tool-detail summary > span:nth-of-type(2) {
   min-width: 0;
   overflow: hidden;
   color: var(--fg);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.transcript-entry > summary {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
 }
 .transcript-thinking-blobs {
   display: grid;

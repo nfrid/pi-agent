@@ -79,14 +79,17 @@ export {
 } from './features/agent-thread-nav';
 export {
   addImageAttachments,
+  composerDraftStorageKey,
   contextIndicatorData,
   formatContextTokens,
   queueCommand,
   queuedMessagesForRuntime,
   queueRemoveCommand,
+  readComposerDraft,
   resumeRuntimeRequest,
   runtimeSupportsImages,
   shouldShowQueuePanel,
+  writeComposerDraft,
 } from './features/composer';
 export {
   ExtensionSurfaceStack,

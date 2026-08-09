@@ -13,6 +13,7 @@ import type {
 import { Markdown } from '../Markdown';
 import type { DashboardRendererContext } from '../renderer-registry';
 import { DashboardDialog } from './dashboard-dialog';
+import { DashboardTime } from './timestamp';
 
 function text(value: string | undefined, fallback = ''): string {
   return value?.trim() || fallback;
@@ -208,9 +209,15 @@ export function DelegateTranscript({
             <header>
               <strong>{text(entry.label, entryType)}</strong>
               <small>
-                {[transcriptRun ? `run ${transcriptRun}` : '', entryStatus]
-                  .filter(Boolean)
-                  .join(' · ')}
+                <span>
+                  {[transcriptRun ? `run ${transcriptRun}` : '', entryStatus]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+                <DashboardTime
+                  className="delegate-transcript-time"
+                  timestamp={entry.at}
+                />
               </small>
             </header>
             {entryText &&

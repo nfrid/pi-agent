@@ -700,6 +700,7 @@ export function SessionView({
           )}
           <ExtensionSurfaceStack runtime={runtime} placement="composer" />
           <Composer
+            key={id}
             runtime={runtime}
             runtimes={snapshot.runtimes}
             sessionId={id}

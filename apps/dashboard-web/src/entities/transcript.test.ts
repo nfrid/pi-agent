@@ -21,6 +21,7 @@ import {
   preserveVirtualScrollOffset,
   restoreVirtualBottom,
   type TranscriptGroup,
+  transcriptItemTimestamp,
 } from './transcript';
 
 describe('activity row views and virtual transcript construction', () => {
@@ -110,6 +111,9 @@ describe('activity row views and virtual transcript construction', () => {
       timestamp: '2026-08-05T18:42:00.000Z',
     });
     expect(landmark?.label.length).toBeGreaterThan(72);
+    expect(item && transcriptItemTimestamp(item)).toBe(
+      '2026-08-05T18:42:00.000Z',
+    );
   });
 
   it('separates tool names from their high-signal arguments', () => {

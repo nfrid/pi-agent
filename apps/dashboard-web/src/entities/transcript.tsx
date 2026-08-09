@@ -24,6 +24,7 @@ import {
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { DashboardDialog } from '../features/dashboard-dialog';
+import { DashboardTime } from '../features/timestamp';
 import { Markdown } from '../Markdown';
 import {
   isNarration,
@@ -106,7 +107,7 @@ function landmarkLabel(item: TranscriptModelItem, fallback: string): string {
   return item.deliveryMode === 'steer' ? `Steering · ${label}` : label;
 }
 
-function landmarkTimestamp(
+export function transcriptItemTimestamp(
   item: TranscriptModelItem,
 ): number | string | undefined {
   const raw =
@@ -117,7 +118,11 @@ function landmarkTimestamp(
     raw?.message && typeof raw.message === 'object'
       ? (raw.message as Record<string, unknown>)
       : undefined;
-  const timestamp = message?.timestamp ?? raw?.timestamp;
+  const data =
+    raw?.data && typeof raw.data === 'object'
+      ? (raw.data as Record<string, unknown>)
+      : undefined;
+  const timestamp = message?.timestamp ?? raw?.timestamp ?? data?.timestamp;
   return typeof timestamp === 'number' || typeof timestamp === 'string'
     ? timestamp
     : undefined;
@@ -167,9 +172,9 @@ export function buildTranscriptLandmarks(
         label: group.title,
         kind: 'activity',
         itemIndex: index,
-        ...(landmarkTimestamp(item) === undefined
+        ...(transcriptItemTimestamp(item) === undefined
           ? {}
-          : { timestamp: landmarkTimestamp(item) }),
+          : { timestamp: transcriptItemTimestamp(item) }),
       });
       continue;
     }
@@ -182,9 +187,9 @@ export function buildTranscriptLandmarks(
         ...(item.deliveryMode === undefined
           ? {}
           : { deliveryMode: item.deliveryMode }),
-        ...(landmarkTimestamp(item) === undefined
+        ...(transcriptItemTimestamp(item) === undefined
           ? {}
-          : { timestamp: landmarkTimestamp(item) }),
+          : { timestamp: transcriptItemTimestamp(item) }),
       });
     else if (
       item.role === 'assistant' &&
@@ -196,9 +201,9 @@ export function buildTranscriptLandmarks(
         label: landmarkLabel(item, 'Assistant activity'),
         kind: 'assistant',
         itemIndex: index,
-        ...(landmarkTimestamp(item) === undefined
+        ...(transcriptItemTimestamp(item) === undefined
           ? {}
-          : { timestamp: landmarkTimestamp(item) }),
+          : { timestamp: transcriptItemTimestamp(item) }),
       });
   }
   return result;
@@ -311,6 +316,10 @@ export function TranscriptOutline({
           >
             <i aria-hidden="true" />
             <span>{landmark.label}</span>
+            <DashboardTime
+              className="transcript-outline-time"
+              timestamp={landmark.timestamp}
+            />
           </button>
         ))
       ) : (
@@ -467,6 +476,10 @@ export function Transcript({
                   {presentation.label}
                 </span>
                 <small aria-hidden="true">{presentation.label}</small>
+                <DashboardTime
+                  className="transcript-time activity-time"
+                  timestamp={transcriptItemTimestamp(lead)}
+                />
               </AriaButton>
               {!expanded && (
                 <CollapsedActivitySummary group={group} cwd={runtime?.cwd} />
@@ -1135,6 +1148,10 @@ function VirtualizedTranscript({
             {presentation.label}
           </span>
           <small aria-hidden="true">{presentation.label}</small>
+          <DashboardTime
+            className="transcript-time activity-time"
+            timestamp={transcriptItemTimestamp(lead)}
+          />
         </AriaButton>
         {!expanded && (
           <CollapsedActivitySummary group={group} cwd={runtime?.cwd} />
@@ -1313,8 +1330,10 @@ function compactTokenCount(tokens: number): string {
 
 function TranscriptEventEntry({
   event,
+  timestamp,
 }: {
   event: NonNullable<import('../transcript').TranscriptModelItem['event']>;
+  timestamp?: number | string;
 }) {
   const [expanded, setExpanded] = useState(false);
   const failed =
@@ -1375,6 +1394,7 @@ function TranscriptEventEntry({
       </span>
       <strong>{event.label}</strong>
       {metric ? <small>{metric}</small> : null}
+      <DashboardTime className="transcript-time" timestamp={timestamp} />
     </>
   );
   return hasDetails ? (
@@ -1402,7 +1422,9 @@ function TranscriptEntry({
   item: import('../transcript').TranscriptModelItem;
   cwd?: string;
 }) {
-  if (item.event) return <TranscriptEventEntry event={item.event} />;
+  const timestamp = transcriptItemTimestamp(item);
+  if (item.event)
+    return <TranscriptEventEntry event={item.event} timestamp={timestamp} />;
   if (item.preparing)
     return (
       <div className="transcript-entry preparing-toolcall" role="status">
@@ -1411,6 +1433,7 @@ function TranscriptEntry({
           {item.text ? activityTitleLine(item.text) : 'Preparing tool call'}
         </strong>
         <small>preparing tool call</small>
+        <DashboardTime className="transcript-time" timestamp={timestamp} />
       </div>
     );
   if (item.role && (item.text || item.imageCount || item.thinking?.length))
@@ -1423,9 +1446,15 @@ function TranscriptEntry({
           <article
             className={`message-bubble message-${item.role}${item.deliveryMode === 'steer' ? ' message-steering' : ''}`}
           >
-            <span className="message-role">
-              {item.deliveryMode === 'steer' ? 'steer' : item.role}
-            </span>
+            <header className="message-meta">
+              <span className="message-role">
+                {item.deliveryMode === 'steer' ? 'steer' : item.role}
+              </span>
+              <DashboardTime
+                className="transcript-time"
+                timestamp={timestamp}
+              />
+            </header>
             {item.imageCount ? (
               <span className="message-attachment">
                 {item.imageCount} image{item.imageCount === 1 ? '' : 's'}{' '}
@@ -1452,6 +1481,7 @@ function TranscriptEntry({
         <summary title={action.label}>
           <span className="tool-chip">{action.action}</span>
           {action.argument && <span>{action.argument}</span>}
+          <DashboardTime className="transcript-time" timestamp={timestamp} />
         </summary>
         <ToolInspector tool={record} />
       </details>
@@ -1465,6 +1495,7 @@ function TranscriptEntry({
         {typeof raw === 'object' && raw && 'type' in raw
           ? String((raw as { type?: unknown }).type)
           : 'entry'}
+        <DashboardTime className="transcript-time" timestamp={timestamp} />
       </summary>
       <pre>{text}</pre>
     </details>
