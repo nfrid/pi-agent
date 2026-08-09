@@ -782,7 +782,14 @@ export class DashboardLiveStore {
       ),
       retiredEpochs: [...retiredEpochs],
     };
-    if (response.entriesComplete === false && currentProjection) {
+    const responseRuntimeMatches =
+      response.runtimeEpoch === undefined ||
+      response.runtimeEpoch === currentProjection?.runtimeEpoch;
+    if (
+      response.entriesComplete === false &&
+      currentProjection &&
+      responseRuntimeMatches
+    ) {
       // A brand-new active session can beat both branch serialization and the
       // JSONL watcher. Keep an established user-visible branch authoritative.
       // If the optimistic baseline has no user message yet, however, merge the

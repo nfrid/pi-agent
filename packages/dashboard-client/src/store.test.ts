@@ -735,6 +735,32 @@ describe('DashboardLiveStore', () => {
     });
   });
 
+  it('does not preserve incomplete history across runtime generations', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.hydrateSession({
+      ...sessionResponse(1),
+      runtimeEpoch: 'epoch-a',
+      entries: [
+        {
+          type: 'message',
+          message: { id: 'old-prompt', role: 'user', content: 'Old prompt' },
+        },
+      ],
+    });
+
+    const replacement = store.hydrateSession({
+      ...sessionResponse(1),
+      runtimeEpoch: 'epoch-b',
+      entriesComplete: false,
+      entries: [],
+    });
+
+    expect(replacement?.runtimeEpoch).toBe('epoch-b');
+    expect(replacement?.items['old-prompt']).toBeUndefined();
+    expect(replacement?.retiredEpochs).toContain('epoch-a');
+  });
+
   it('restores disk history behind a live-only incomplete refresh baseline', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
