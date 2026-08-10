@@ -83,7 +83,10 @@ function shimIsSupported(container: typeof Container | undefined): boolean {
 }
 
 export default defineExtension('activity-groups', (pi) => {
-  const renderer = createActivityGroupRenderer();
+  const activityRenderer = createActivityGroupRenderer();
+  let enabled = true;
+  const renderer: SequenceRenderer = (...args) =>
+    enabled ? activityRenderer(...args) : undefined;
 
   const nativeHook = hasNativeHook(pi);
   if (nativeHook) pi.registerToolSequenceRenderer(renderer);
@@ -140,7 +143,7 @@ export default defineExtension('activity-groups', (pi) => {
     error instanceof Error ? error.message : String(error);
 
   const install = () => {
-    if (nativeHook || uninstall || !context) return;
+    if (!enabled || nativeHook || uninstall || !context) return;
     const container = containerClassOf(AssistantMessageComponent);
     if (!shimIsSupported(container)) {
       notify(
@@ -185,6 +188,15 @@ export default defineExtension('activity-groups', (pi) => {
     });
   };
 
+  const setEnabled = (next: boolean) => {
+    enabled = next;
+    if (enabled) install();
+    else {
+      uninstall?.();
+      uninstall = undefined;
+    }
+  };
+
   pi.on('session_start', (_event, ctx) => {
     uninstallActionHandler?.();
     context = ctx;
@@ -192,15 +204,15 @@ export default defineExtension('activity-groups', (pi) => {
     // Pi build has no native renderer hook. Rendering itself remains bounded
     // by the verified shim below.
     uninstallActionHandler = installActivityGroupsActionHandler((input) => {
-      if (input.enabled === false && !nativeHook) {
-        uninstall?.();
-        uninstall = undefined;
-      } else if (input.enabled === true) install();
+      if (input.enabled !== undefined) setEnabled(input.enabled);
       if (input.expanded !== undefined) {
         opened = input.expanded;
         if (nativeHook) ctx.ui.setToolsExpanded(opened);
       }
-      return { enabled: nativeHook || Boolean(uninstall), expanded: opened };
+      return {
+        enabled: enabled && (nativeHook || Boolean(uninstall)),
+        expanded: opened,
+      };
     });
     // Only the interactive TUI renders these components at all.
     if (!nativeHook && ctx.mode === 'tui') install();
@@ -215,59 +227,29 @@ export default defineExtension('activity-groups', (pi) => {
   });
 
   /**
-   * One command, because `/groups` and `/activity-groups` did two different
-   * things under two names nothing distinguished. Bare is the daily action —
-   * open the groups to see their steps — and `on`/`off` is the rare one.
-   *
-   * Notifying is also what redraws the transcript, which is where any of this
-   * actually shows up.
+   * Notifying also redraws the transcript, so disabling the renderer restores
+   * Pi's stock assistant and tool rows immediately.
    */
   pi.registerCommand('activity-groups', {
     description:
-      'Open or collapse the steps inside activity groups; "on"/"off" turns grouping itself on and off',
+      "Toggle activity groups on or off, restoring Pi's default transcript when off",
     handler: async (args, ctx) => {
       // A command can run before any session_start this extension saw.
       context = ctx;
       const action = args.trim().toLowerCase();
-
-      if (action === 'off') {
-        if (nativeHook) {
-          ctx.ui.notify(
-            'Activity groups are managed by the native renderer',
-            'info',
-          );
-        } else {
-          uninstall?.();
-          uninstall = undefined;
-          ctx.ui.notify('Activity groups off', 'info');
-        }
-        return;
-      }
-      if (action === 'on') {
-        install();
-        ctx.ui.notify(
-          nativeHook || uninstall
-            ? 'Activity groups on'
-            : 'Activity groups unavailable',
-          nativeHook || uninstall ? 'info' : 'warning',
-        );
-        return;
-      }
-      if (action) {
+      if (action && action !== 'on' && action !== 'off') {
         ctx.ui.notify(`Usage: /activity-groups [on|off]`, 'warning');
         return;
       }
 
-      if (!nativeHook && !uninstall) {
-        ctx.ui.notify(
-          'Activity groups are off — /activity-groups on to enable',
-          'warning',
-        );
-        return;
-      }
-      opened = !opened;
-      if (nativeHook) ctx.ui.setToolsExpanded(opened);
-      ctx.ui.notify(opened ? 'Groups opened' : 'Groups collapsed', 'info');
+      setEnabled(action ? action === 'on' : !enabled);
+      const available = nativeHook || Boolean(uninstall);
+      ctx.ui.notify(
+        enabled && !available
+          ? 'Activity groups unavailable'
+          : `Activity groups ${enabled ? 'on' : 'off'}`,
+        enabled && !available ? 'warning' : 'info',
+      );
     },
   });
 });
