@@ -34,6 +34,7 @@ answering or implementing:
 - Custom providers: `docs/custom-provider.md`
 - Adding models: `docs/models.md`
 - Pi packages: `docs/packages.md`
+- Environment variables: `docs/environment-variables.md`
 
 ## Required workflow
 
