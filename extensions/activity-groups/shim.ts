@@ -86,6 +86,8 @@ export interface ShimHost {
   getTheme(): Theme;
   /** True while the agent is producing a turn. */
   isBusy(): boolean;
+  /** Whether grouping is active; disabled mode renders every member verbatim. */
+  isEnabled?(): boolean;
   /** Pi's global tool-output expansion state. */
   isExpanded(): boolean;
   /** Overrides the TUI handle captured from tool components. */
@@ -502,7 +504,8 @@ export function installToolSequenceShim(
   }
 
   function renderMember(component: Component, width: number): string[] {
-    if (!installed) return originalRenderOf(component, width);
+    if (!installed || host.isEnabled?.() === false)
+      return originalRenderOf(component, width);
     let sequence: Sequence | undefined;
     try {
       ensureFresh();

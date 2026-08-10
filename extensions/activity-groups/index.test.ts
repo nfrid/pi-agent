@@ -5,6 +5,7 @@ import activityGroups from './index';
 import type { SequenceRenderer } from './types';
 
 const rendererComponent = { invalidate: vi.fn(), render: vi.fn(() => []) };
+const stockComponent = { invalidate: vi.fn(), render: vi.fn(() => []) };
 const activityRenderer = vi.fn(() => rendererComponent);
 
 vi.mock('./renderer', () => ({
@@ -44,7 +45,12 @@ function harness() {
     handlers,
     notify,
     render: () =>
-      renderer?.({} as never, {} as never, {} as never, {} as never),
+      renderer?.(
+        {} as never,
+        { defaultView: stockComponent } as never,
+        {} as never,
+        {} as never,
+      ),
   };
 }
 
@@ -60,7 +66,7 @@ describe('/activity-groups', () => {
     expect(activityRenderer).toHaveBeenCalledOnce();
 
     await h.command();
-    expect(h.render()).toBeUndefined();
+    expect(h.render()).toBe(stockComponent);
     expect(activityRenderer).toHaveBeenCalledOnce();
     expect(h.notify).toHaveBeenLastCalledWith('Activity groups off', 'info');
 
@@ -79,7 +85,7 @@ describe('/activity-groups', () => {
       enabled: false,
       expanded: false,
     });
-    expect(h.render()).toBeUndefined();
+    expect(h.render()).toBe(stockComponent);
 
     await h.command('on');
     expect(h.render()).toBe(rendererComponent);

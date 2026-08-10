@@ -85,8 +85,10 @@ function shimIsSupported(container: typeof Container | undefined): boolean {
 export default defineExtension('activity-groups', (pi) => {
   const activityRenderer = createActivityGroupRenderer();
   let enabled = true;
-  const renderer: SequenceRenderer = (...args) =>
-    enabled ? activityRenderer(...args) : undefined;
+  const renderer: SequenceRenderer = (sequence, options, theme, context) =>
+    enabled
+      ? activityRenderer(sequence, options, theme, context)
+      : options.defaultView;
 
   const nativeHook = hasNativeHook(pi);
   if (nativeHook) pi.registerToolSequenceRenderer(renderer);
@@ -164,6 +166,10 @@ export default defineExtension('activity-groups', (pi) => {
         if (!theme) throw new Error('no extension context');
         return theme;
       },
+      // Staying installed while disabled lets the shim observe transcript
+      // changes and rebuild every group when it is enabled again. Its disabled
+      // render path is still Pi's exact assistant/tool rendering.
+      isEnabled: () => enabled,
       // Idle means the agent is not streaming, so nothing can still be running.
       isBusy: () => active((ctx) => ctx.isIdle()) === false,
       isExpanded: () =>
@@ -191,10 +197,6 @@ export default defineExtension('activity-groups', (pi) => {
   const setEnabled = (next: boolean) => {
     enabled = next;
     if (enabled) install();
-    else {
-      uninstall?.();
-      uninstall = undefined;
-    }
   };
 
   pi.on('session_start', (_event, ctx) => {

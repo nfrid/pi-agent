@@ -611,6 +611,33 @@ describe('tool sequence shim', () => {
     expect(FakeTool.prototype.render.name).toBe('render');
   });
 
+  it('rebuilds every group after stock activity was rendered while disabled', () => {
+    const { renderer, snapshots } = recordingRenderer();
+    let enabled = true;
+    const h = harness({ isEnabled: () => enabled });
+    uninstall = installToolSequenceShim(renderer, h.host);
+
+    turn(h, [{ name: 'read' }], 'before');
+    expect(h.render()).toEqual(['group:group-1:2:live']);
+
+    enabled = false;
+    turn(h, [{ name: 'edit' }], 'disabled');
+    expect(h.render()).toEqual([
+      'assistant:Working on read',
+      'tool:read',
+      'assistant:Working on edit',
+      'tool:edit',
+    ]);
+
+    snapshots.length = 0;
+    enabled = true;
+    expect(h.render()).toEqual([
+      'group:group-1:2:done',
+      'group:group-2:2:live',
+    ]);
+    expect(snapshots.map((snapshot) => snapshot.items.length)).toEqual([2, 2]);
+  });
+
   it('restores every patched method on uninstall', () => {
     const { renderer } = recordingRenderer();
     const h = harness();
