@@ -2,6 +2,9 @@ import { type Component, sliceByColumn } from '@earendil-works/pi-tui';
 
 export const USER_MESSAGE_BORDER = '▏';
 const ANSI_STYLE_RESET = '\x1b[0m';
+// A harmless, deliberately distinctive SGR reset marks lines already rewritten
+// by this shim. It survives ANSI-aware slicing without changing visible width.
+const RAIL_MARKER = '\x1b[0;0;0m';
 
 type ComponentClass<T> = abstract new (...args: never[]) => T;
 
@@ -69,10 +72,27 @@ export function installSteeringMessageShim(
 
     const lines = originalUserRender.call(this, width);
     if (width < 1) return lines;
-    return lines.map(
-      (line) =>
-        `${host.renderBorderCell(USER_MESSAGE_BORDER, state.steering)}${ANSI_STYLE_RESET}${sliceByColumn(line, 1, width - 1)}`,
-    );
+    return lines.map((line) => {
+      const marker = line.indexOf(RAIL_MARKER);
+      let body: string;
+      if (marker >= 0) body = line.slice(marker + RAIL_MARKER.length);
+      else {
+        // The first reload after upgrading can still call the previous,
+        // unmarked wrapper. Strip its known rail instead of slicing it: ANSI
+        // slicing would replay that rail's foreground immediately before the
+        // message body and color the whole line pink/orange.
+        const previousPrefix = [false, true]
+          .map(
+            (steering) =>
+              `${host.renderBorderCell(USER_MESSAGE_BORDER, steering)}${ANSI_STYLE_RESET}`,
+          )
+          .find((prefix) => line.startsWith(prefix));
+        body = previousPrefix
+          ? line.slice(previousPrefix.length)
+          : sliceByColumn(line, 1, width - 1);
+      }
+      return `${host.renderBorderCell(USER_MESSAGE_BORDER, state.steering)}${ANSI_STYLE_RESET}${RAIL_MARKER}${body}`;
+    });
   };
 
   return () => {

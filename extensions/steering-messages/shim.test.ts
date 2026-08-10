@@ -15,6 +15,7 @@ class FakeUser implements Component {
 }
 
 const STYLE_RESET = '\x1b[0m';
+const RAIL_MARKER = '\x1b[0;0;0m';
 const STEERING_BORDER = `\x1b[43m\x1b[33m${USER_MESSAGE_BORDER}\x1b[39m\x1b[49m`;
 const ORDINARY_BORDER = `\x1b[43m\x1b[35m${USER_MESSAGE_BORDER}\x1b[39m\x1b[49m`;
 
@@ -54,6 +55,20 @@ describe('steering message TUI shim', () => {
     expect(visibleWidth(steering.render(3)[0] ?? '')).toBe(3);
     stop?.();
     expect(steering.render(12)[0]?.trim()).toBe('user:same');
+  });
+
+  it('replaces a retained rail instead of replaying its foreground over text', () => {
+    const firstStop = installSteeringMessageShim(host(new Set()));
+    const secondStop = installSteeringMessageShim(host(new Set()));
+    const line = new FakeUser('same').render(20)[0] ?? '';
+
+    expect(line).toContain(
+      `${ORDINARY_BORDER}${STYLE_RESET}${RAIL_MARKER}user:same`,
+    );
+    expect(line.split(USER_MESSAGE_BORDER)).toHaveLength(2);
+
+    secondStop?.();
+    firstStop?.();
   });
 
   it('keeps duplicate occurrence counts across microtasks and rerenders', async () => {
