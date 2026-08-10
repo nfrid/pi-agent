@@ -48,6 +48,34 @@ export {
   thinkingLevelsSnapshot,
 } from './runtime-snapshot-adapter';
 
+export function shutdownRemoteControlRuntime(
+  runtime: import('./runtime').RemoteControlRuntime,
+  event: { reason: string },
+  ctx: ExtensionContext,
+  stopSteeringUpdates: () => void,
+): void {
+  stopSteeringUpdates();
+  const announcesTermination =
+    event.reason === 'quit' || event.reason === 'reload';
+  const wasCurrent = runtime.isCurrent(ctx);
+  if (announcesTermination && wasCurrent)
+    runtime.client.sendEvent({
+      type: 'runtime.goodbye',
+      reason: event.reason,
+    });
+  runtime.clearContext(ctx);
+  if (wasCurrent && !announcesTermination)
+    runtime.client.sendEvent({
+      type: 'runtime.stateChanged',
+      state: 'idle',
+      snapshot: runtime.snapshot(),
+    });
+  // Pi tears down the entire extension runtime for every session replacement,
+  // not only quit/reload. Leaving this bridge alive captures the old `pi` and
+  // command context, which become stale as soon as the replacement is bound.
+  runtime.client.stop();
+}
+
 type GenericEventAPI = {
   on(
     event: string,
@@ -199,22 +227,6 @@ export default defineExtension('remote-control', (pi) => {
     emitState(runtime, ctx),
   );
   pi.on('session_shutdown', (event, ctx) => {
-    stopSteeringUpdates();
-    const tearsDownExtension =
-      event.reason === 'quit' || event.reason === 'reload';
-    const wasCurrent = runtime.isCurrent(ctx);
-    if (tearsDownExtension && wasCurrent)
-      runtime.client.sendEvent({
-        type: 'runtime.goodbye',
-        reason: event.reason,
-      });
-    runtime.clearContext(ctx);
-    if (wasCurrent && !tearsDownExtension)
-      runtime.client.sendEvent({
-        type: 'runtime.stateChanged',
-        state: 'idle',
-        snapshot: runtime.snapshot(),
-      });
-    if (tearsDownExtension) runtime.client.stop();
+    shutdownRemoteControlRuntime(runtime, event, ctx, stopSteeringUpdates);
   });
 });

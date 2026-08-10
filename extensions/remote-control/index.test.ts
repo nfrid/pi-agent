@@ -35,6 +35,7 @@ import {
   modelCatalogSnapshot,
   QueueDraftStore,
   shouldForwardLiveMessage,
+  shutdownRemoteControlRuntime,
   thinkingLevelsSnapshot,
   withoutOpaqueData,
 } from './index';
@@ -61,6 +62,59 @@ function waitFor(predicate: () => boolean): Promise<void> {
     tick();
   });
 }
+
+describe('remote-control session lifecycle', () => {
+  it.each([
+    'new',
+    'resume',
+    'fork',
+  ])('stops the old bridge when a %s replacement tears down its extension runtime', (reason) => {
+    const sendEvent = vi.fn(() => true);
+    const stop = vi.fn();
+    const clearContext = vi.fn();
+    const stopSteeringUpdates = vi.fn();
+    const runtime = {
+      client: { sendEvent, stop },
+      isCurrent: () => true,
+      clearContext,
+      snapshot: () => snapshot,
+    } as unknown as Parameters<typeof shutdownRemoteControlRuntime>[0];
+    const ctx = {} as ExtensionContext;
+
+    shutdownRemoteControlRuntime(runtime, { reason }, ctx, stopSteeringUpdates);
+
+    expect(stopSteeringUpdates).toHaveBeenCalledOnce();
+    expect(clearContext).toHaveBeenCalledWith(ctx);
+    expect(stop).toHaveBeenCalledOnce();
+    expect(sendEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'runtime.goodbye' }),
+    );
+  });
+
+  it.each(['quit', 'reload'])('announces %s and stops the bridge', (reason) => {
+    const sendEvent = vi.fn(() => true);
+    const stop = vi.fn();
+    const runtime = {
+      client: { sendEvent, stop },
+      isCurrent: () => true,
+      clearContext: vi.fn(),
+      snapshot: () => snapshot,
+    } as unknown as Parameters<typeof shutdownRemoteControlRuntime>[0];
+
+    shutdownRemoteControlRuntime(
+      runtime,
+      { reason },
+      {} as ExtensionContext,
+      vi.fn(),
+    );
+
+    expect(sendEvent).toHaveBeenCalledWith({
+      type: 'runtime.goodbye',
+      reason,
+    });
+    expect(stop).toHaveBeenCalledOnce();
+  });
+});
 
 describe('dashboard input dispatch', () => {
   it('expands prompt templates with native positional argument semantics', async () => {
