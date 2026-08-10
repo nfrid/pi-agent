@@ -135,18 +135,22 @@ function takeSteeringInput(
   return true;
 }
 
-function tuiShimHost(
+export function createTuiShimHost(
   isSteering: SteeringShimHost['isSteering'],
   context: ExtensionContext,
 ): SteeringShimHost {
+  // Layered prototype shims can retain this renderer for one final TUI pass
+  // after session shutdown. Capture the plain theme while the context is live;
+  // render callbacks must never dereference the guarded session context.
+  const theme = context.ui.theme;
   return {
     userComponent:
       UserMessageComponent as unknown as SteeringShimHost['userComponent'],
     isSteering,
     renderBorderCell: (text, steering) =>
-      context.ui.theme.bg(
+      theme.bg(
         'userMessageBg',
-        context.ui.theme.fg(steering ? 'warning' : 'borderAccent', text),
+        theme.fg(steering ? 'warning' : 'borderAccent', text),
       ),
   };
 }
@@ -156,7 +160,7 @@ export function registerSteeringMessageTracking(
   getTuiShimHost: (
     isSteering: SteeringShimHost['isSteering'],
     context: ExtensionContext,
-  ) => SteeringShimHost | undefined = tuiShimHost,
+  ) => SteeringShimHost | undefined = createTuiShimHost,
 ): void {
   let context: ExtensionContext | undefined;
   let marks = createMarks();

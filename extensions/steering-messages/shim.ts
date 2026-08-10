@@ -1,6 +1,7 @@
 import { type Component, sliceByColumn } from '@earendil-works/pi-tui';
 
 export const USER_MESSAGE_BORDER = '▏';
+const ANSI_STYLE_RESET = '\x1b[0m';
 
 type ComponentClass<T> = abstract new (...args: never[]) => T;
 
@@ -70,7 +71,7 @@ export function installSteeringMessageShim(
     if (width < 1) return lines;
     return lines.map(
       (line) =>
-        `${host.renderBorderCell(USER_MESSAGE_BORDER, state.steering)}${sliceByColumn(line, 1, width - 1)}`,
+        `${host.renderBorderCell(USER_MESSAGE_BORDER, state.steering)}${ANSI_STYLE_RESET}${sliceByColumn(line, 1, width - 1)}`,
     );
   };
 

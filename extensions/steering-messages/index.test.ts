@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createTuiShimHost,
   loadHistoryMarks,
   registerSteeringMessageTracking,
   STEERING_MESSAGE_MARKER_TYPE,
@@ -30,6 +31,27 @@ function harness() {
 }
 
 describe('steering message tracking', () => {
+  it('renders a retained rail after its session context becomes stale', () => {
+    let stale = false;
+    const theme = {
+      fg: (color: string, text: string) => `fg:${color}:${text}`,
+      bg: (color: string, text: string) => `bg:${color}:${text}`,
+    };
+    const context = {
+      get ui() {
+        if (stale) throw new Error('stale session context');
+        return { theme };
+      },
+    } as never;
+    const host = createTuiShimHost(() => true, context);
+
+    stale = true;
+
+    expect(host.renderBorderCell('▏', true)).toBe(
+      'bg:userMessageBg:fg:warning:▏',
+    );
+  });
+
   it('records and publishes an explicitly steered user message', () => {
     const { appendEntry, emit, handlers } = harness();
     handlers.get('input')?.({

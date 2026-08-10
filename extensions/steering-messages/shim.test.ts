@@ -14,6 +14,7 @@ class FakeUser implements Component {
   }
 }
 
+const STYLE_RESET = '\x1b[0m';
 const STEERING_BORDER = `\x1b[43m\x1b[33m${USER_MESSAGE_BORDER}\x1b[39m\x1b[49m`;
 const ORDINARY_BORDER = `\x1b[43m\x1b[35m${USER_MESSAGE_BORDER}\x1b[39m\x1b[49m`;
 
@@ -39,10 +40,14 @@ describe('steering message TUI shim', () => {
     const stop = installSteeringMessageShim(host(new Set([1])));
     expect(stop).toBeDefined();
     const ordinaryLine = ordinary.render(12)[0] ?? '';
-    expect(ordinaryLine.startsWith(ORDINARY_BORDER)).toBe(true);
+    expect(ordinaryLine.startsWith(`${ORDINARY_BORDER}${STYLE_RESET}`)).toBe(
+      true,
+    );
     expect(ordinaryLine).toContain('user:same');
     const steeringLine = steering.render(12)[0] ?? '';
-    expect(steeringLine.startsWith(STEERING_BORDER)).toBe(true);
+    expect(steeringLine.startsWith(`${STEERING_BORDER}${STYLE_RESET}`)).toBe(
+      true,
+    );
     expect(steeringLine).toContain('user:same');
     expect(visibleWidth(ordinaryLine)).toBe(12);
     expect(visibleWidth(steeringLine)).toBe(12);
