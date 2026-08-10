@@ -22,9 +22,11 @@ const ORDINARY_BORDER = `\x1b[43m\x1b[35m${USER_MESSAGE_BORDER}\x1b[39m\x1b[49m`
 function host(
   marked: ReadonlySet<number>,
   onResolve?: (text: string, occurrence: number) => void,
+  userComponent: typeof FakeUser = FakeUser,
 ): SteeringShimHost {
   return {
-    userComponent: FakeUser as unknown as SteeringShimHost['userComponent'],
+    userComponent:
+      userComponent as unknown as SteeringShimHost['userComponent'],
     isSteering: (text, occurrence) => {
       onResolve?.(text, occurrence);
       return marked.has(occurrence);
@@ -69,6 +71,27 @@ describe('steering message TUI shim', () => {
 
     secondStop?.();
     firstStop?.();
+  });
+
+  it('upgrades a retained unmarked rail on the first reload', () => {
+    class UnmarkedRailUser extends FakeUser {
+      override render(width: number): string[] {
+        return super
+          .render(width)
+          .map((line) => `${ORDINARY_BORDER}${STYLE_RESET}${line.slice(1)}`);
+      }
+    }
+    const stop = installSteeringMessageShim(
+      host(new Set(), undefined, UnmarkedRailUser),
+    );
+    const line = new UnmarkedRailUser('same').render(20)[0] ?? '';
+
+    expect(line).toContain(
+      `${ORDINARY_BORDER}${STYLE_RESET}${RAIL_MARKER}user:same`,
+    );
+    expect(line.split(USER_MESSAGE_BORDER)).toHaveLength(2);
+
+    stop?.();
   });
 
   it('keeps duplicate occurrence counts across microtasks and rerenders', async () => {
