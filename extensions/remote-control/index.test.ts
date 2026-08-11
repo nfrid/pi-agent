@@ -1206,6 +1206,15 @@ describe('remote-control bridge', () => {
       entriesComplete: false,
       leafId: 'current-leaf',
     });
+    manager.getLeafId = () => 'x'.repeat(256);
+    expect(
+      runtime?.snapshotPatch?.(context, 'idle').session?.leafId,
+    ).toHaveLength(256);
+    manager.getLeafId = () => 'x'.repeat(257);
+    expect(
+      runtime?.snapshotPatch?.(context, 'idle').session,
+    ).not.toHaveProperty('leafId');
+    expect(routineBranchReads).toBe(0);
     const equivalentContext = {
       ...context,
       sessionManager: manager,

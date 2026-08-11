@@ -5,11 +5,12 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import type {
-  QueueDraftMode,
-  RuntimeLiveState,
-  RuntimeSnapshot,
-  RuntimeSnapshotPatch,
+import {
+  MAX_ID,
+  type QueueDraftMode,
+  type RuntimeLiveState,
+  type RuntimeSnapshot,
+  type RuntimeSnapshotPatch,
 } from '@pi-dashboard/protocol/pi-runtime-protocol';
 import {
   getInteractionBroker,
@@ -107,7 +108,7 @@ export function createRemoteControlRuntime(
     const leafId =
       typeof currentLeafId === 'string' &&
       currentLeafId.length > 0 &&
-      currentLeafId.length <= 512 &&
+      currentLeafId.length <= MAX_ID &&
       !Array.from(currentLeafId).some((character) => {
         const code = character.charCodeAt(0);
         return code <= 0x1f || code === 0x7f;

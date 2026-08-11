@@ -6,6 +6,7 @@ import {
   type BridgeEvent,
   type BrowserSnapshot,
   isRecord,
+  MAX_ID,
   type RuntimeSnapshot,
   redactImageData,
   validateBridgeCommand,
@@ -515,7 +516,7 @@ export class DashboardServerImpl implements DashboardServer {
         });
       return typeof leafId === 'string' &&
         leafId.length > 0 &&
-        leafId.length <= 512 &&
+        leafId.length <= MAX_ID &&
         !hasControlCharacter
         ? leafId
         : undefined;
