@@ -503,11 +503,13 @@ export function Composer({
   runtimes = runtime ? [runtime] : [],
   sessionId,
   workspaceId,
+  onPromptSubmitted,
 }: {
   runtime: RuntimeSnapshot | undefined;
   runtimes?: readonly RuntimeSnapshot[];
   sessionId: string;
   workspaceId?: string;
+  onPromptSubmitted?: (text: string) => void;
 }) {
   const go = useDashboardNavigate();
   const [initialDraft] = useState(() => readComposerDraft(sessionId));
@@ -702,6 +704,7 @@ export function Composer({
       type: runtime.liveState === 'idle' ? 'prompt' : mode,
       text: trimmedText,
     };
+    if (command.type === 'prompt') onPromptSubmitted?.(trimmedText);
     const queueTextOnly =
       runtime.liveState === 'working' && attachments.length === 0;
     try {

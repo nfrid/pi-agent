@@ -42,6 +42,99 @@ const sessionResponse = (
   }) as SessionApiResponse;
 
 describe('DashboardLiveStore', () => {
+  it('optimistically titles the first prompt through settlement and reconciles authority', () => {
+    const store = new DashboardLiveStore();
+    const metadata = {
+      id: 'session-1',
+      file: '',
+      cwd: '/tmp',
+      updatedAt: 1,
+    };
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      sessions: [metadata],
+    } as unknown as BrowserSnapshot);
+
+    expect(
+      store.optimisticallyTitleSession('session-1', '  first request  '),
+    ).toBe(true);
+    expect(store.getSnapshot().sessionsById['session-1']?.title).toBe(
+      'first request',
+    );
+    expect(store.getSnapshot().optimisticSessionTitlesById['session-1']).toBe(
+      'first request',
+    );
+    store.hydrateSession(sessionResponse(1));
+    expect(store.getSnapshot().sessionsById['session-1']?.title).toBe(
+      'first request',
+    );
+
+    // Neither a live user message nor settlement may make the optimistic
+    // title disappear while the session branch is still being persisted.
+    store.acceptStreamRecord({
+      cursor: 2,
+      emittedAt: 2,
+      sessionId: 'session-1',
+      event: {
+        type: 'message.finished',
+        sessionId: 'session-1',
+        message: {
+          messageId: 'user-1',
+          role: 'user',
+          content: 'first request',
+        },
+      },
+    } as StreamRecord);
+    store.acceptStreamRecord({
+      cursor: 3,
+      emittedAt: 3,
+      sessionId: 'session-1',
+      event: { type: 'agent.settled', sessionId: 'session-1' },
+    } as StreamRecord);
+    expect(store.getSnapshot().sessionsById['session-1']?.title).toBe(
+      'first request',
+    );
+
+    store.acceptStreamRecord({
+      cursor: 4,
+      emittedAt: 4,
+      sessionId: 'session-1',
+      event: {
+        type: 'session.changed',
+        session: { id: 'session-1', entries: [], title: 'Authoritative title' },
+      },
+    } as StreamRecord);
+    expect(store.getSnapshot().sessionsById['session-1']?.title).toBe(
+      'Authoritative title',
+    );
+    expect(
+      store.getSnapshot().optimisticSessionTitlesById['session-1'],
+    ).toBeUndefined();
+  });
+
+  it('does not replace an explicit session name with an optimistic prompt title', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      sessions: [
+        {
+          id: 'session-1',
+          file: '',
+          cwd: '/tmp',
+          updatedAt: 1,
+          name: 'Custom session',
+        },
+      ],
+    } as unknown as BrowserSnapshot);
+
+    expect(store.optimisticallyTitleSession('session-1', 'first request')).toBe(
+      false,
+    );
+    expect(store.getSnapshot().sessionsById['session-1']?.name).toBe(
+      'Custom session',
+    );
+  });
+
   it('hydrates normalized entities and retains notification/usage behavior', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot({

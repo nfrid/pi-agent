@@ -47,6 +47,7 @@ type ComposerProps = {
   runtimes?: readonly RuntimeSnapshot[];
   sessionId: string;
   workspaceId?: string;
+  onPromptSubmitted?: (text: string) => void;
 };
 
 export function visualViewportKeyboardInset(
@@ -848,6 +849,9 @@ export function SessionView({
             runtimes={snapshot.runtimes}
             sessionId={id}
             workspaceId={workspaceId}
+            onPromptSubmitted={(text) => {
+              store.optimisticallyTitleSession(id, text);
+            }}
           />
         </div>
         <PendingInteractions runtime={runtime} />
