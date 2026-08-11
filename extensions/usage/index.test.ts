@@ -110,7 +110,7 @@ describe('usage lifecycle wiring', () => {
     handlers.get('session_shutdown')?.({}, selected);
   });
 
-  it('replaces the periodic context across sessions', async () => {
+  it('reuses fresh process usage across sessions and refreshes it periodically', async () => {
     vi.useFakeTimers();
     const { handlers, pending, query } = harness();
     const first = context('first-session');
@@ -125,8 +125,8 @@ describe('usage lifecycle wiring', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS);
-    expect(query).toHaveBeenCalledTimes(3);
-    expect(query.mock.calls[2]?.[0]).toBe(second);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[1]?.[0]).toBe(second);
     handlers.get('session_shutdown')?.({}, second);
   });
 });

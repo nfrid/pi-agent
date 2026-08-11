@@ -14,6 +14,7 @@ import { hydrateDelegateLifecycle } from './lifecycle';
 import {
   continuationRecoveryNote,
   type DelegateDetails,
+  type DelegatedActivity,
   type DelegatedRun,
   type DelegateRunState,
   getRunState,
@@ -25,6 +26,10 @@ export const TASK_PREVIEW_CHARS = 220;
 export const ACTIVITY_PREVIEW_CHARS = 280;
 export const RESULT_PREVIEW_CHARS = 420;
 export const FINAL_PREVIEW_CHARS = 700;
+export const EXPANDED_TASK_MAX_CHARS = 4_096;
+export const EXPANDED_RESULT_MAX_CHARS = 12_000;
+export const EXPANDED_TRANSCRIPT_MAX_ENTRIES = 24;
+export const EXPANDED_TRANSCRIPT_MAX_CHARS = 6_000;
 export const FINAL_PREVIEW_LINES = 10;
 
 export type ThemeLike = {
@@ -64,6 +69,14 @@ export type RenderContextLike = {
 export function truncate(text: string, max: number): string {
   const compact = text.replace(/\s+/g, ' ').trim();
   return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
+}
+
+/** Preserve useful newlines while making a long expanded field's loss explicit. */
+export function explicitTruncate(text: string, max: number): string {
+  const value = text.trim();
+  if (value.length <= max) return value;
+  const marker = `… [truncated; ${value.length - max + 1} chars omitted]`;
+  return `${value.slice(0, Math.max(1, max - marker.length)).trimEnd()}\n${marker}`;
 }
 
 class WrappedTask implements Component {
@@ -113,7 +126,8 @@ export function taskBlock(
   expanded: boolean,
   fg: (color: ThemeColor, text: string) => string,
 ): Component {
-  const text = String(value || '...').trim() || '...';
+  const raw = String(value || '...').trim() || '...';
+  const text = expanded ? explicitTruncate(raw, EXPANDED_TASK_MAX_CHARS) : raw;
   const prefix = fg('accent', `${label.padEnd(7)} `);
   return new WrappedTask(prefix, text, (part) => fg('text', part), expanded);
 }
@@ -151,6 +165,65 @@ function count(n: number): string {
   if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
   if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
   return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+export interface TranscriptPreviewEntry {
+  label: string;
+  text?: string;
+  status?: DelegatedActivity['status'];
+}
+
+/** The child-visible activity/response sequence available in public details. */
+export function transcriptEntries(run: DelegatedRun): TranscriptPreviewEntry[] {
+  return [
+    { label: 'Task', text: run.task, status: 'completed' },
+    ...run.activities.map((activity) => ({
+      label: activity.label,
+      text: activity.transcriptText ?? activity.latestText,
+      status: activity.status,
+    })),
+    ...run.messages.flatMap((message) => {
+      if (message.role !== 'assistant') return [];
+      const text = message.content
+        .filter((part) => part.type === 'text')
+        .map((part) => (part.type === 'text' ? part.text : ''))
+        .join('\n')
+        .trim();
+      return text ? [{ label: 'Response', text, status: 'completed' as const }] : [];
+    }),
+    ...(run.errorMessage?.trim()
+      ? [{ label: 'Error', text: run.errorMessage.trim(), status: 'error' as const }]
+      : []),
+  ];
+}
+
+export function transcriptPreview(run: DelegatedRun): {
+  text: string;
+  truncated: boolean;
+} {
+  const entries = transcriptEntries(run);
+  const selected =
+    entries.length <= EXPANDED_TRANSCRIPT_MAX_ENTRIES
+      ? entries
+      : [
+          entries[0],
+          ...entries.slice(-EXPANDED_TRANSCRIPT_MAX_ENTRIES + 1),
+        ];
+  const lines = selected
+    .filter((entry): entry is TranscriptPreviewEntry => Boolean(entry))
+    .map((entry) => {
+      const text = entry.text
+        ?.trim()
+        .replace(/^#{1,6}\s+result\b/im, 'response heading');
+      return text ? `${entry.label}: ${text}` : entry.label;
+    });
+  let text = lines.join('\n');
+  const entryTruncated = selected.length < entries.length;
+  const charTruncated = text.length > EXPANDED_TRANSCRIPT_MAX_CHARS;
+  if (charTruncated) text = explicitTruncate(text, EXPANDED_TRANSCRIPT_MAX_CHARS);
+  if (entryTruncated && !text.includes('[truncated;'))
+    text += `\n… [truncated; ${entries.length - selected.length} transcript entries omitted]`;
+  return { text: text || '(no transcript captured)', truncated: entryTruncated || charTruncated };
 }
 
 export function usage(run: DelegatedRun): string {

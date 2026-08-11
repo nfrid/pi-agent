@@ -38,6 +38,7 @@ import {
 } from './structured-result';
 import { registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
+import { registerDelegateTranscriptCommand } from './transcript';
 import {
   DELEGATE_WIDGET_MAX_WIDTH,
   DELEGATE_WIDGET_MIN_WIDTH,
@@ -376,4 +377,5 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   });
 
   registerDelegateWorktreesCommand(pi);
+  registerDelegateTranscriptCommand(pi);
 });

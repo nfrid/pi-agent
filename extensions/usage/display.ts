@@ -73,16 +73,31 @@ function formatDurationLeft(resetsAt: number, now = Date.now()): string {
   return `${minutes}m`;
 }
 
-const DISABLE_LABELS = true;
+function windowLabel(
+  window: NonNullable<UsageSnapshot['primary']>,
+  fallback: string,
+): string {
+  const minutes = window.windowMinutes;
+  if (!minutes || !Number.isFinite(minutes) || minutes <= 0) return fallback;
+  if (minutes === 300) return '5h';
+  if (minutes === 10_080) return 'wk';
+  if (minutes % 10_080 === 0) return `${minutes / 10_080}w`;
+  if (minutes % 1_440 === 0) return `${minutes / 1_440}d`;
+  if (minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${minutes}m`;
+}
 
 function formatUsagePart(
   label: string,
+  window: NonNullable<UsageSnapshot['primary']>,
   percent: number,
-  resetsAt: number | undefined,
   theme: ExtensionContext['ui']['theme'],
 ): string {
-  const reset = resetsAt ? ` ^${formatDurationLeft(resetsAt)}` : '';
-  return `${DISABLE_LABELS ? '' : `${theme.fg('dim', label)} `}${theme.fg(
+  const reset =
+    window.resetsAt !== undefined
+      ? ` · reset ${formatDurationLeft(window.resetsAt)}`
+      : '';
+  return `${theme.fg('dim', label)} ${theme.fg(
     usageToColor(percent),
     `${percent}%`,
   )}${theme.italic(theme.fg('muted', reset))}`;
@@ -103,13 +118,23 @@ export function formatUsage(
   if (snapshot.primary) {
     const percent = Math.round(clampPercent(snapshot.primary.usedPercent));
     parts.push(
-      formatUsagePart('5h', percent, snapshot.primary.resetsAt, theme),
+      formatUsagePart(
+        windowLabel(snapshot.primary, '5h'),
+        snapshot.primary,
+        percent,
+        theme,
+      ),
     );
   }
   if (snapshot.secondary) {
     const percent = Math.round(clampPercent(snapshot.secondary.usedPercent));
     parts.push(
-      formatUsagePart('wk', percent, snapshot.secondary.resetsAt, theme),
+      formatUsagePart(
+        windowLabel(snapshot.secondary, 'wk'),
+        snapshot.secondary,
+        percent,
+        theme,
+      ),
     );
   }
   return parts.join(theme.fg('dim', ' ⋅ '));

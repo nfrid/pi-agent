@@ -1,9 +1,17 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { UsageReport } from './types';
 
+export interface UsageQueryOptions {
+  force?: boolean;
+}
+
 export interface UsageRefreshHooks {
   debounceMs: number;
-  query: (ctx: ExtensionContext, signal: AbortSignal) => Promise<UsageReport>;
+  query: (
+    ctx: ExtensionContext,
+    signal: AbortSignal,
+    options?: UsageQueryOptions,
+  ) => Promise<UsageReport>;
   canRefresh: (ctx: ExtensionContext) => boolean;
   isFresh: (report: UsageReport) => boolean;
   onLoading: (ctx: ExtensionContext) => void;
@@ -15,6 +23,7 @@ export interface UsageRefreshHooks {
 interface RefreshBatch {
   ctx: ExtensionContext;
   generation: number;
+  force: boolean;
   waiters: Array<() => void>;
 }
 
@@ -67,7 +76,7 @@ export function createUsageRefresh(hooks: UsageRefreshHooks): UsageRefresh {
     if (isCurrent(batch)) hooks.onLoading(batch.ctx);
 
     void hooks
-      .query(batch.ctx, controller.signal)
+      .query(batch.ctx, controller.signal, { force: batch.force })
       .then((report) => {
         if (!isCurrent(batch) || !hooks.canRefresh(batch.ctx)) return;
         cache = report;
@@ -115,15 +124,16 @@ export function createUsageRefresh(hooks: UsageRefreshHooks): UsageRefresh {
         return promise;
       }
       if (!trailing || trailing.generation !== generation) {
-        trailing = { ctx, generation, waiters: [] };
+        trailing = { ctx, generation, force, waiters: [] };
       } else {
         trailing.ctx = ctx;
+        trailing.force ||= force;
       }
       trailing.waiters.push(waiter);
       return promise;
     }
 
-    start({ ctx, generation, waiters: [waiter] });
+    start({ ctx, generation, force, waiters: [waiter] });
     return promise;
   };
 
@@ -131,7 +141,7 @@ export function createUsageRefresh(hooks: UsageRefreshHooks): UsageRefresh {
     sessionStart(ctx) {
       active = true;
       advanceGeneration();
-      return request(ctx, true, true);
+      return request(ctx, false, true);
     },
     modelChanged(ctx) {
       advanceGeneration();

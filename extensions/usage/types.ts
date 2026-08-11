@@ -15,7 +15,12 @@ export type UsageSnapshot = {
   secondary?: UsageWindow;
 };
 
-export type UsageReport = { capturedAt: number; snapshots: UsageSnapshot[] };
+export type UsageReport = {
+  capturedAt: number;
+  /** Provider identity is process-cache metadata, not a window selector. */
+  provider?: string;
+  snapshots: UsageSnapshot[];
+};
 
 export type BackendPayload = {
   rate_limit?: unknown;
