@@ -221,6 +221,35 @@ A continuation reuses its original worktree, working directory, route, and scope
 
 `scope` is advisory in both directions now. It tells the child where the work is expected to land; nothing enforces it.
 
+## Caller-provided worktrees
+
+A fresh delegate may provide `worktreePath` with an absolute path to an existing
+Git linked worktree. This is an explicit opt-in; isolation defaults remain
+unchanged when it is omitted. The harness validates that the path is a
+registered worktree (not merely a directory containing `.git`), belongs to the
+same repository identity as `cwd`, is not the requested checkout, is attached
+to a branch, has no in-progress merge/cherry-pick/rebase, and is clean of
+tracked and non-ignored untracked changes. It also refuses a path already held
+by another delegate record. The existing branch tip is the source snapshot;
+`from`/`base` cannot be combined with `worktreePath`.
+
+The resulting record is explicitly caller-owned. The harness does not create a
+nested checkout or branch, carry WIP, remove/prune the checkout, delete its
+branch, or merge it into the parent. Writable runs may commit their work (and
+lifecycle cleanup may commit leftover writable edits); read-only cleanup never
+commits and reports a run that modified the caller path without changing those
+files. `delegate_branches review` remains available as bounded evidence from
+the recorded starting tip, while `merge` is refused with instructions to
+manage the branch in its own checkout. `drop`/`/delegate-worktrees ... drop`
+only releases the harness record and retains both checkout and branch.
+
+A continuation reuses the recorded caller path, branch, repository, and last
+known tip. It cannot replace `worktreePath`, refresh it, or silently fall back
+to a nested checkout; the path must still be registered, clean, on the same
+branch and tip, and owned by the same repository. If the caller changes or
+removes it, setup fails with a continuation rather than touching another
+checkout.
+
 ## Background supervision and waiting
 
 Background jobs are first-class supervision targets. Use `delegate_jobs list` or a deliberate `peek` to inspect, and `delegate_jobs feedback` for concrete corrective steering; feedback is bounded to 4 KiB and queued in a private per-child control inbox. A pre-timeout request reserves a bounded final window (up to 30 seconds, scaled down for short limits) and asks the child to stop starting work, preserve a coherent partial state, and report what remains. The hard timeout is unchanged: an unresponsive child is still terminated, and timeout handoff explicitly distinguishes an acknowledged checkpoint from an unacknowledged retained partial state. Retained writable work remains reviewable and is never auto-validated or presented as complete.
@@ -240,7 +269,7 @@ delegate_branches merge <id>              # integrate into your checkout
 delegate_branches drop <id>               # delete the checkout and the branch
 ```
 
-`list` defaults to records created or touched by the current parent Pi session; `scope: all` is the explicit recovery view and includes legacy records. `review` measures from the child's own starting point, so carried parent work never appears as the child's. `summaryOnly` returns provenance, commits, stat, and bounded path evidence without patch bodies. `paths` accepts exact safe repository-relative paths, while `patchBudget` caps patch characters; every bounded view reports active selectors, total/matched/omitted paths, and patch omission. `merge` integrates only the child's commits after `workBase`, not the carry snapshot. For `from: 'wip'`, it therefore preserves non-overlapping dirty parent state while refusing to proceed when a child-edited path is also dirty in the parent. It either lands or leaves the checkout exactly as it was: a conflict is aborted rather than parked, because an agent working on from a half-merged tree makes a worse mess than one told to resolve deliberately. `drop` refuses unmerged work without `force`.
+`list` defaults to records created or touched by the current parent Pi session; `scope: all` is the explicit recovery view and includes legacy records. `review` measures from the child's own starting point, so carried parent work never appears as the child's. `summaryOnly` returns provenance, commits, stat, and bounded path evidence without patch bodies. `paths` accepts exact safe repository-relative paths, while `patchBudget` caps patch characters; every bounded view reports active selectors, total/matched/omitted paths, and patch omission. `merge` integrates only the child's commits after `workBase`, not the carry snapshot. For `from: 'wip'`, it therefore preserves non-overlapping dirty parent state while refusing to proceed when a child-edited path is also dirty in the parent. It either lands or leaves the checkout exactly as it was: a conflict is aborted rather than parked, because an agent working on from a half-merged tree makes a worse mess than one told to resolve deliberately. Caller-owned records are review-only: merge is refused and drop releases only the harness record, never the checkout or branch. Harness-managed `drop` refuses unmerged work without `force`.
 
 `/delegate-worktrees` inspects and cleans up from the parent session:
 

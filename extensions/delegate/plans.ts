@@ -43,6 +43,7 @@ interface TaskInput {
   isolation?: DelegateTaskPlan['isolation'];
   from?: DelegateTaskPlan['base'];
   refresh?: DelegateTaskPlan['refresh'];
+  worktreePath?: string;
   handoffFrom?: DelegateHandoffInput;
   result?: unknown;
 }
@@ -61,6 +62,7 @@ interface SharedDefaults {
   isolation?: DelegateTaskPlan['isolation'];
   from?: DelegateTaskPlan['base'];
   refresh?: DelegateTaskPlan['refresh'];
+  worktreePath?: string;
   handoffFrom?: DelegateHandoffInput;
   result?: unknown;
 }
@@ -77,6 +79,7 @@ interface DerivedTask {
   writeRequested: boolean;
   isolationExplicit: boolean;
   isolation: DelegateTaskPlan['isolation'];
+  worktreePath?: string;
   resultSpec?: NormalizedDelegateResultSpec;
   warnings: string[];
 }
@@ -113,6 +116,7 @@ function assertContinuationFields(
     context?: unknown;
     scope?: unknown;
     from?: unknown;
+    worktreePath?: unknown;
   },
   message: string,
 ): void {
@@ -121,7 +125,8 @@ function assertContinuationFields(
     (fields.cwd !== undefined ||
       fields.context !== undefined ||
       fields.scope !== undefined ||
-      fields.from !== undefined)
+      fields.from !== undefined ||
+      fields.worktreePath !== undefined)
   )
     invalidParams(message);
 }
@@ -143,6 +148,7 @@ function normalizeInputs(params: DelegateParams): {
       isolation: params.isolation,
       from: params.from,
       refresh: params.refresh,
+      worktreePath: params.worktreePath,
       handoffFrom: params.handoffFrom,
       result: params.result,
     };
@@ -176,6 +182,7 @@ function normalizeInputs(params: DelegateParams): {
         isolation: params.isolation,
         from: params.from,
         refresh: params.refresh,
+        worktreePath: params.worktreePath,
         handoffFrom: params.handoffFrom,
         result: params.result,
       },
@@ -260,7 +267,8 @@ export function buildDelegatePlans(
       shared.context !== undefined ||
       shared.scope !== undefined ||
       shared.from !== undefined ||
-      shared.refresh !== undefined)
+      shared.refresh !== undefined ||
+      shared.worktreePath !== undefined)
   )
     invalidParams(
       'Parallel continuations reuse their original cwd, history, scope, and base; do not provide top-level replacements.',
@@ -292,6 +300,7 @@ export function buildDelegatePlans(
       : (task.input.context ?? shared.context ?? 'fresh'),
     requestedCwd: task.resumed?.cwd ?? task.input.cwd ?? shared.cwd ?? ctx.cwd,
     scope: task.input.scope ?? shared.scope,
+    worktreePath: task.input.worktreePath ?? shared.worktreePath,
   }));
 
   namedTasks = namedTasks.map((task) => {
@@ -325,17 +334,19 @@ export function buildDelegatePlans(
       Boolean(task.resumed?.worktreeId);
     const isolationExplicit =
       task.input.isolation !== undefined || shared.isolation !== undefined;
+    const worktreePath = task.worktreePath;
     const isolation =
       task.input.isolation ??
       shared.isolation ??
       (task.resumed ? task.resumed.isolation : undefined) ??
-      (writeRequested ? 'worktree' : 'shared');
+      (writeRequested || worktreePath ? 'worktree' : 'shared');
     return {
       ...task,
       writeRequestExplicit,
       writeRequested,
       isolationExplicit,
       isolation,
+      worktreePath,
     };
   });
 
@@ -371,6 +382,18 @@ export function buildDelegatePlans(
       invalidParams(
         'from requires worktree isolation; it cannot be used with a shared delegate.',
       );
+    if (
+      !task.resumed &&
+      task.worktreePath &&
+      (task.input.from !== undefined || shared.from !== undefined)
+    )
+      invalidParams(
+        'worktreePath selects the existing branch state and cannot be combined with from.',
+      );
+    if (!task.resumed && task.worktreePath && task.isolation === 'shared')
+      invalidParams(
+        'worktreePath requires worktree isolation; shared delegates cannot select a checkout.',
+      );
   }
 
   if (parallel) writeWarnings(namedTasks);
@@ -404,6 +427,7 @@ export function buildDelegatePlans(
       scope: task.scope,
       base: task.input.from ?? shared.from,
       refresh: task.input.refresh ?? shared.refresh,
+      worktreePath: task.worktreePath,
       handoffFrom: normalizeHandoffFrom(
         task.input.handoffFrom ?? shared.handoffFrom,
       ),

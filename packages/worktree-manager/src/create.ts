@@ -6,9 +6,17 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  statSync,
 } from 'node:fs';
 import * as path from 'node:path';
-import { canonical, git, gitText, repositoryRoot, splitZ } from './git.js';
+import {
+  canonical,
+  git,
+  gitText,
+  repositoryIdentity,
+  repositoryRoot,
+  splitZ,
+} from './git.js';
 import type {
   PreparedWorktree,
   WorktreeBase,
@@ -145,6 +153,151 @@ async function carryWorkInProgress(
   return await gitText(worktreePath, ['rev-parse', 'HEAD']);
 }
 
+interface RegisteredWorktree {
+  path: string;
+  branch?: string;
+}
+
+async function registeredWorktrees(
+  repositoryRootPath: string,
+): Promise<RegisteredWorktree[]> {
+  const lines = String(
+    await git(repositoryRootPath, ['worktree', 'list', '--porcelain']),
+  ).split(/\r?\n/);
+  const entries: RegisteredWorktree[] = [];
+  let current: RegisteredWorktree | undefined;
+  for (const line of lines) {
+    if (line.startsWith('worktree ')) {
+      current = { path: line.slice('worktree '.length) };
+      entries.push(current);
+    } else if (current && line.startsWith('branch refs/heads/')) {
+      current.branch = line.slice('branch refs/heads/'.length);
+    }
+  }
+  return entries;
+}
+
+export interface ExistingWorktreeValidation {
+  worktreePath: string;
+  repositoryRoot: string;
+  branch: string;
+  headCommit: string;
+}
+
+/**
+ * Validate a caller-selected checkout without changing it. Git's common
+ * directory proves repository identity across linked worktrees; the porcelain
+ * inventory proves that the path is an actual registered worktree rather than
+ * an arbitrary directory containing a .git file.
+ */
+export async function validateExistingWorktree(options: {
+  cwd: string;
+  worktreePath: string;
+  expectedRepositoryRoot?: string;
+  expectedBranch?: string;
+  expectedHead?: string;
+  /** Continuations may validate the already-selected checkout as cwd. */
+  allowRequestedCheckout?: boolean;
+}): Promise<ExistingWorktreeValidation> {
+  if (!path.isAbsolute(options.worktreePath))
+    throw new Error('the caller worktree path must be absolute');
+  if (!existsSync(options.worktreePath))
+    throw new Error('the caller worktree path does not exist');
+  if (!statSync(options.worktreePath).isDirectory())
+    throw new Error('the caller worktree path is not a directory');
+
+  const requestedRoot = await repositoryRoot(options.cwd);
+  const targetPath = canonical(options.worktreePath);
+  const targetRoot = await repositoryRoot(targetPath);
+  if (targetRoot !== targetPath)
+    throw new Error('the caller path must be the worktree root');
+  if (targetPath === requestedRoot && !options.allowRequestedCheckout)
+    throw new Error('the caller worktree must not be the requested checkout');
+  if (
+    (await repositoryIdentity(options.cwd)) !==
+    (await repositoryIdentity(targetPath))
+  )
+    throw new Error('the caller worktree belongs to a different repository');
+  if (
+    options.expectedRepositoryRoot &&
+    (await repositoryIdentity(options.expectedRepositoryRoot)) !==
+      (await repositoryIdentity(targetPath))
+  )
+    throw new Error('the recorded worktree repository no longer matches');
+
+  const registered = await registeredWorktrees(requestedRoot);
+  const entry = registered.find((candidate) => {
+    try {
+      return canonical(candidate.path) === targetPath;
+    } catch {
+      return false;
+    }
+  });
+  if (!entry) throw new Error('the path is not a registered Git worktree');
+
+  let branch: string;
+  try {
+    branch = await gitText(targetPath, [
+      'symbolic-ref',
+      '--quiet',
+      '--short',
+      'HEAD',
+    ]);
+  } catch {
+    throw new Error('the caller worktree must be checked out on a branch');
+  }
+  if (!entry.branch || entry.branch !== branch)
+    throw new Error('the Git worktree branch metadata is inconsistent');
+  if (options.expectedBranch && options.expectedBranch !== branch)
+    throw new Error('the caller worktree branch changed since delegate setup');
+
+  const status = String(
+    await git(targetPath, [
+      'status',
+      '--porcelain=v1',
+      '--untracked-files=all',
+    ]),
+  );
+  if (status.trim())
+    throw new Error('the caller worktree must be clean before delegation');
+  for (const marker of ['MERGE_HEAD', 'CHERRY_PICK_HEAD'] as const) {
+    if (
+      await (async () => {
+        try {
+          await git(targetPath, ['rev-parse', '--verify', '--quiet', marker]);
+          return true;
+        } catch {
+          return false;
+        }
+      })()
+    )
+      throw new Error(
+        `the caller worktree has an in-progress ${marker} operation`,
+      );
+  }
+  const gitDir = await gitText(targetPath, ['rev-parse', '--git-dir']);
+  const resolvedGitDir = path.isAbsolute(gitDir)
+    ? gitDir
+    : path.resolve(targetPath, gitDir);
+  if (
+    existsSync(path.join(resolvedGitDir, 'rebase-merge')) ||
+    existsSync(path.join(resolvedGitDir, 'rebase-apply'))
+  )
+    throw new Error('the caller worktree has an in-progress rebase');
+
+  const headCommit = await gitText(targetPath, ['rev-parse', 'HEAD']);
+  if (options.expectedHead && headCommit !== options.expectedHead)
+    throw new Error(
+      'the caller worktree changed since the previous delegate run',
+    );
+  return {
+    worktreePath: targetPath,
+    repositoryRoot: requestedRoot,
+    branch,
+    headCommit,
+  };
+}
+
 export interface WorktreeCreatorOptions {
   /** Environment variable used to identify the prepared checkout. */
   environmentVariable?: string;
@@ -161,6 +314,8 @@ export interface WorktreeCreator<
     base?: WorktreeBase;
     /** Safe branch/ref to resolve instead of the parent's current HEAD. */
     baseRef?: string;
+    /** Existing, validated caller-owned worktree to use without creating one. */
+    worktreePath?: string;
   }): Promise<WorktreePreparation<Record>>;
   /** Recreate a retired checkout from its retained branch ref. */
   rehydrateWorktree(record: Record): Promise<PreparedWorktree<Record>>;
@@ -196,6 +351,7 @@ export function createWorktreeCreator<
     name: string;
     base?: WorktreeBase;
     baseRef?: string;
+    worktreePath?: string;
   }): Promise<WorktreePreparation<Record>> {
     let root: string;
     try {
@@ -208,6 +364,47 @@ export function createWorktreeCreator<
 
     const id = randomUUID();
     const baseRef = options.baseRef;
+    if (options.worktreePath) {
+      if (options.base !== undefined || options.baseRef !== undefined)
+        return {
+          fallbackReason:
+            'Caller worktree selection cannot be combined with a base/ref; the existing branch is the source snapshot.',
+        };
+      try {
+        const existing = await validateExistingWorktree({
+          cwd: options.cwd,
+          worktreePath: options.worktreePath,
+        });
+        const canonicalCwd = canonical(options.cwd);
+        const workingDirectory = path.relative(root, canonicalCwd);
+        const now = new Date().toISOString();
+        const record = {
+          version: 1 as const,
+          id,
+          repositoryRoot: existing.repositoryRoot,
+          worktreePath: existing.worktreePath,
+          workingDirectory,
+          branch: existing.branch,
+          ownership: 'caller' as const,
+          baseHead: existing.headCommit,
+          base: 'head' as const,
+          carriedWip: false,
+          status: 'active' as const,
+          createdAt: now,
+          updatedAt: now,
+          // The selected checkout is already at this tip. Keeping the initial
+          // tip lets read-only runs detect a shell-side commit without ever
+          // committing or deleting caller-owned work.
+          headCommit: existing.headCommit,
+        } as Record;
+        store.writeWorktreeRecord(record);
+        return { worktree: { record, env: environment(id) } };
+      } catch (error) {
+        return {
+          fallbackReason: `Caller worktree unavailable: ${error instanceof Error ? error.message : String(error)}.`,
+        };
+      }
+    }
     if (
       baseRef !== undefined &&
       (baseRef.length === 0 ||
@@ -294,6 +491,10 @@ export function createWorktreeCreator<
   async function rehydrateWorktree(
     record: Record,
   ): Promise<PreparedWorktree<Record>> {
+    if (record.ownership === 'caller' && !existsSync(record.worktreePath))
+      throw new Error(
+        'This caller-owned worktree is unavailable and will not be recreated by the harness.',
+      );
     if (existsSync(record.worktreePath)) {
       // A retry may reuse a settled checkout without recreating its directory.
       // Persist the active ownership and a fresh lifecycle timestamp before the

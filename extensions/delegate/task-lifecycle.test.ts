@@ -12,7 +12,7 @@ import {
   prepareDelegateTask,
   rollbackPreparedDelegateTasks,
 } from './task-lifecycle';
-import { repository } from './test/worktree-fixture';
+import { git, repository } from './test/worktree-fixture';
 import type { DelegateRouteState } from './types';
 import { createRun } from './types';
 import * as worktree from './worktree';
@@ -47,6 +47,62 @@ function plan(overrides: Partial<DelegateTaskPlan> = {}): DelegateTaskPlan {
 }
 
 describe('delegate task lifecycle', () => {
+  test('preserves a caller-owned worktree across read-only continuation', async () => {
+    const selected = path.join(path.dirname(repository), 'caller-continuation');
+    git(repository, [
+      'worktree',
+      'add',
+      '-q',
+      '-b',
+      'caller/continuation',
+      selected,
+      'HEAD',
+    ]);
+    let initial: Awaited<ReturnType<typeof prepareDelegateTask>> | undefined;
+    let continued: Awaited<ReturnType<typeof prepareDelegateTask>> | undefined;
+    try {
+      initial = await prepareDelegateTask(
+        plan({
+          isolation: 'worktree',
+          worktreePath: selected,
+        }),
+      );
+      if (!initial.worktree) throw new Error('missing caller worktree');
+      const run = createRun('caller review', undefined, {
+        allowWrites: false,
+      });
+      run.state = 'success';
+      run.exitCode = 0;
+      await finalizeWorktreeRun(run, initial.worktree, 'caller review');
+      expect(loadWorktree(initial.worktree.record.id)).toMatchObject({
+        ownership: 'caller',
+        worktreePath: selected,
+      });
+      expect(
+        loadWorktree(initial.worktree.record.id)?.snapshot,
+      ).toBeUndefined();
+      expect(existsSync(selected)).toBe(true);
+
+      continued = await prepareDelegateTask(
+        plan({
+          context: 'continuation',
+          isolation: 'worktree',
+          resumed: initial.session,
+        }),
+      );
+      expect(continued.worktree?.record.id).toBe(initial.worktree.record.id);
+      expect(continued.cwd).toBe(selected);
+    } finally {
+      if (continued) removeDelegateSession(continued.session);
+      if (initial) {
+        removeDelegateSession(initial.session);
+        await removeWorktree(initial.worktree?.record.id ?? '');
+      }
+      git(repository, ['worktree', 'remove', '--force', selected]);
+      git(repository, ['branch', '-D', 'caller/continuation']);
+    }
+  });
+
   test('rolls back fresh sessions and resumed route overrides', async () => {
     const resumed = createDelegateSession({
       cwd: repository,

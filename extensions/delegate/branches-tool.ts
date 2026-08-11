@@ -20,7 +20,7 @@ import {
 const Parameters = Type.Object({
   action: StringEnum(['list', 'review', 'merge', 'drop'] as const, {
     description:
-      'List writable delegate branches and retired read-only snapshots. review and merge apply only to writable branches; snapshots can be continued or dropped. drop deletes the checkout and retained ref.',
+      'List writable delegate branches, caller-owned worktrees, and retired read-only snapshots. review applies to branches; merge applies only to harness-managed writable branches. Caller-owned checkouts are never merged or deleted by the harness; drop only releases the delegate record and retains the caller checkout and branch. Snapshots can be continued or dropped.',
   }),
   scope: Type.Optional(
     StringEnum(['session', 'all'] as const, {
@@ -97,7 +97,7 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
     name: 'delegate_branches',
     label: 'Delegate Branches',
     description:
-      "Review and integrate the branches writable delegate tasks leave behind. list defaults to this parent session; set scope: all for repository history. review gives you the task's commits and diff measured from its own starting point by default; set incremental: true to show only task patches not represented in current parent HEAD. Use summaryOnly, exact repository-relative paths, or patchBudget for bounded review. merge either lands cleanly or leaves your checkout untouched. Actions: list, review, merge, drop.",
+      "Review and integrate harness-managed delegate branches, or inspect caller-owned worktrees without taking ownership. list defaults to this parent session; set scope: all for repository history. review gives you the task's commits and diff measured from its own starting point by default; set incremental: true to show only task patches not represented in current parent HEAD. Use summaryOnly, exact repository-relative paths, or patchBudget for bounded review. merge either lands cleanly or leaves your checkout untouched, and refuses caller-owned branches. drop never deletes a caller-owned checkout or branch. Actions: list, review, merge, drop.",
     promptSnippet:
       'Review or merge writable delegate branches; continue or drop retired read-only snapshots',
     promptGuidelines: [
@@ -225,13 +225,22 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
         }
         case 'drop': {
           const state = await branchState(record);
-          if (state === 'unmerged' && !params.force && !record.snapshot)
+          if (
+            state === 'unmerged' &&
+            !params.force &&
+            !record.snapshot &&
+            record.ownership !== 'caller'
+          )
             throw new Error(
               `${record.branch} is not merged; its commits would be lost. Review or merge it first, or pass force true.`,
             );
           await removeWorktree(record.id, { deleteBranch: true });
           return {
-            ...text(`Dropped ${record.branch} and its checkout.`),
+            ...text(
+              record.ownership === 'caller'
+                ? `Released delegate record for caller-owned ${record.branch}; its checkout and branch were retained.`
+                : `Dropped ${record.branch} and its checkout.`,
+            ),
             details: { action: 'drop' as const },
           };
         }

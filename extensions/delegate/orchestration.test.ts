@@ -133,6 +133,80 @@ describe('buildDelegatePlans', () => {
     });
   });
 
+  test('selects caller worktree paths and rejects unsafe mode combinations', () => {
+    expect(
+      buildDelegatePlans(
+        {
+          name: 'Caller audit',
+          task: 'inspect',
+          route: 'quick',
+          worktreePath: '/tmp/caller-worktree',
+        },
+        ctx,
+        config,
+        () => null,
+      ).tasks[0]?.plan,
+    ).toMatchObject({
+      isolation: 'worktree',
+      worktreePath: '/tmp/caller-worktree',
+    });
+    expect(() =>
+      buildDelegatePlans(
+        {
+          name: 'Caller audit',
+          task: 'inspect',
+          route: 'quick',
+          isolation: 'shared',
+          worktreePath: '/tmp/caller-worktree',
+        },
+        ctx,
+        config,
+        () => null,
+      ),
+    ).toThrow(/worktreePath requires worktree isolation/);
+    expect(() =>
+      buildDelegatePlans(
+        {
+          name: 'Caller audit',
+          task: 'inspect',
+          route: 'quick',
+          from: 'head',
+          worktreePath: '/tmp/caller-worktree',
+        },
+        ctx,
+        config,
+        () => null,
+      ),
+    ).toThrow(/cannot be combined with from/);
+  });
+
+  test('rejects replacing a continuation caller worktree path', () => {
+    const session = createDelegateSession({
+      cwd: '/tmp/project/caller-worktree',
+      allowWrites: false,
+      isolation: 'worktree',
+      worktreeId: '11111111-1111-1111-1111-111111111111',
+    });
+    try {
+      expect(() =>
+        buildDelegatePlans(
+          {
+            name: 'Caller audit',
+            task: 'continue',
+            route: 'quick',
+            continuation: session.token,
+            worktreePath: '/tmp/other-worktree',
+          },
+          ctx,
+          config,
+          () => null,
+        ),
+      ).toThrow(/continuation reuses its original cwd/);
+    } finally {
+      removeDelegateSession(session);
+    }
+  });
+
   test('rejects writable shared delegates and base selection on shared delegates', () => {
     for (const params of [
       { allowWrites: true, isolation: 'shared' as const },

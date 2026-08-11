@@ -1,7 +1,9 @@
 import { existsSync } from 'node:fs';
 import {
+  canonical,
   createWorktreeCreator,
   isInside,
+  validateExistingWorktree,
   WORKTREE_DIR,
 } from '@pi-dashboard/worktree-manager';
 import type {
@@ -10,7 +12,11 @@ import type {
   WorktreePreparation,
   WorktreeRecord,
 } from './model';
-import { delegateWorktreeStore, writeWorktreeRecord } from './records';
+import {
+  delegateWorktreeStore,
+  listWorktrees,
+  writeWorktreeRecord,
+} from './records';
 
 const creator = createWorktreeCreator<WorktreeRecord>(delegateWorktreeStore, {
   environmentVariable: 'PI_DELEGATE_WORKTREE',
@@ -23,8 +29,35 @@ export async function prepareWorktree(options: {
   cwd: string;
   name: string;
   base?: WorktreeBase;
+  /** Existing caller-owned Git worktree; no checkout or branch is created. */
+  worktreePath?: string;
   parentSessionId?: string;
 }): Promise<WorktreePreparation> {
+  if (options.worktreePath) {
+    try {
+      const validated = await validateExistingWorktree({
+        cwd: options.cwd,
+        worktreePath: options.worktreePath,
+      });
+      const occupied = listWorktrees().find((record) => {
+        if (record.branch === validated.branch) return true;
+        try {
+          return canonical(record.worktreePath) === validated.worktreePath;
+        } catch {
+          return false;
+        }
+      });
+      if (occupied)
+        return {
+          fallbackReason:
+            'Caller worktree unavailable: this path is already attached to a delegate session or retained worktree record.',
+        };
+    } catch (error) {
+      return {
+        fallbackReason: `Caller worktree unavailable: ${error instanceof Error ? error.message : String(error)}.`,
+      };
+    }
+  }
   const preparation = await creator.prepareWorktree(options);
   if (!preparation.worktree || !options.parentSessionId) return preparation;
   const record = {
@@ -66,6 +99,10 @@ export async function rehydrateWorktreeSession(
 ): Promise<PreparedWorktree> {
   if (existsSync(record.worktreePath))
     return restoreWorktreeSession(record, token);
+  if (record.ownership === 'caller')
+    throw new Error(
+      'The caller-owned worktree for this continuation is unavailable; it will not be recreated.',
+    );
   if (record.sessionToken && record.sessionToken !== token)
     throw new Error('This worktree belongs to another delegate session.');
   if (record.status === 'removed')
@@ -73,4 +110,4 @@ export async function rehydrateWorktreeSession(
   return creator.rehydrateWorktree(record);
 }
 
-export { isInside, WORKTREE_DIR };
+export { isInside, validateExistingWorktree, WORKTREE_DIR };

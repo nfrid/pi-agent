@@ -25,6 +25,7 @@ import {
   removeWorktree,
   restoreWorktreeSession,
   touchWorktreeParentSession,
+  validateExistingWorktree,
   type WorktreeBase,
   type WorktreeRecord,
 } from './worktree';
@@ -37,6 +38,8 @@ export interface DelegateTaskPlan {
   contextNote?: string;
   scope?: string[];
   base?: WorktreeBase;
+  /** Existing caller-owned checkout selected for a fresh task. */
+  worktreePath?: string;
   /** Explicit source for a read-only continuation replacement snapshot. */
   refresh?: WorktreeBase;
   /** Parent-owned artifact reference resolved before child setup. */
@@ -126,6 +129,10 @@ export function preflightDelegateContinuation(
       if (!record)
         throw new Error('The worktree for this continuation is unavailable.');
       if (plan.refresh) {
+        if (record.ownership === 'caller')
+          throw new Error(
+            'refresh cannot replace a caller-owned worktree; continue the selected path or start a fresh delegate.',
+          );
         if (
           !record.snapshot ||
           record.status !== 'finished' ||
@@ -164,6 +171,7 @@ export async function prepareDelegateTask(
         cwd: plan.requestedCwd,
         name: plan.name,
         base: plan.base,
+        worktreePath: plan.worktreePath,
         parentSessionId,
       });
       if (!prepared.worktree)
@@ -175,6 +183,18 @@ export async function prepareDelegateTask(
         prepared.worktree.record.worktreePath,
         prepared.worktree.record.workingDirectory,
       );
+    }
+
+    if (plan.resumed && state.worktree?.record.ownership === 'caller') {
+      await validateExistingWorktree({
+        cwd: state.worktree.record.worktreePath,
+        worktreePath: state.worktree.record.worktreePath,
+        expectedRepositoryRoot: state.worktree.record.repositoryRoot,
+        expectedBranch: state.worktree.record.branch,
+        expectedHead:
+          state.worktree.record.headCommit ?? state.worktree.record.baseHead,
+        allowRequestedCheckout: true,
+      });
     }
 
     // Apply a route override before a snapshot switch so every operation

@@ -14,8 +14,9 @@ const USAGE =
   'Usage: /delegate-worktrees [list] | <continuation-token|worktree-id> [show|remove|drop]';
 
 /**
- * Inspect and clean up delegate worktrees. Writable branches are deliverable;
- * retired read-only snapshots are resumed or dropped rather than integrated.
+ * Inspect and clean up delegate worktrees. Harness-managed writable branches
+ * are deliverable; caller-owned paths are only recorded and are never removed.
+ * Retired read-only snapshots are resumed or dropped rather than integrated.
  */
 export function registerDelegateWorktreesCommand(pi: ExtensionAPI): void {
   pi.registerCommand('delegate-worktrees', {
@@ -60,9 +61,11 @@ export function registerDelegateWorktreesCommand(pi: ExtensionAPI): void {
         try {
           await removeWorktree(id, { deleteBranch });
           ctx.ui.notify(
-            deleteBranch
-              ? 'Worktree and branch removed.'
-              : 'Worktree removed; its branch is still there.',
+            record.ownership === 'caller'
+              ? 'Delegate record released; caller-owned worktree and branch retained.'
+              : deleteBranch
+                ? 'Worktree and branch removed.'
+                : 'Worktree removed; its branch is still there.',
             'info',
           );
         } catch (error) {

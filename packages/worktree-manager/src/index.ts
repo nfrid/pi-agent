@@ -7,6 +7,8 @@
  */
 export {
   createWorktreeCreator,
+  type ExistingWorktreeValidation,
+  validateExistingWorktree,
   WORKTREE_DIR,
   type WorktreeCreator,
   type WorktreeCreatorOptions,
@@ -45,6 +47,7 @@ export {
 export type {
   PreparedWorktree,
   WorktreeBase,
+  WorktreeOwnership,
   WorktreePreparation,
   WorktreeRecord,
   WorktreeRunOutcome,

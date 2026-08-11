@@ -112,6 +112,9 @@ function validRecord(value: unknown, id: string): value is WorktreeRecord {
     path.isAbsolute(record.worktreePath) &&
     typeof record.branch === 'string' &&
     record.branch.length > 0 &&
+    (record.ownership === undefined ||
+      record.ownership === 'harness' ||
+      record.ownership === 'caller') &&
     typeof record.baseHead === 'string' &&
     /^[a-f0-9]{7,64}$/.test(record.baseHead) &&
     (record.headCommit === undefined ||

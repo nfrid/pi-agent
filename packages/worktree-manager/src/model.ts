@@ -14,6 +14,8 @@ export type WorktreeBase =
 
 export type WorktreeStatus = 'active' | 'finished' | 'removed';
 export type WorktreeRunOutcome = 'timed-out' | 'aborted' | 'error';
+/** Whether the harness owns the checkout lifecycle or only records it. */
+export type WorktreeOwnership = 'harness' | 'caller';
 
 export interface WorktreeRecord {
   version: 1;
@@ -25,6 +27,8 @@ export interface WorktreeRecord {
   workingDirectory: string;
   /** The branch the worktree is checked out on; this is what carries the work. */
   branch: string;
+  /** Caller-owned records are never removed, pruned, or merged by the harness. */
+  ownership?: WorktreeOwnership;
   /** Commit the branch was created from. */
   baseHead: string;
   base: WorktreeBase;
@@ -38,9 +42,9 @@ export interface WorktreeRecord {
   /** Commit holding the parent's carried uncommitted work, when there was any. */
   carryCommit?: string;
   /**
-   * Latest branch tip recorded by lifecycle finalization. Integration checks
-   * that this persisted provenance remains an ancestor before reviewing or
-   * merging, while continuations may append commits after it.
+   * Latest branch tip recorded by lifecycle finalization. Caller-owned records
+   * also use their initial clean tip as a baseline so read-only runs can detect
+   * shell-side commits; continuations may append commits after it.
    */
   headCommit?: string;
   /** Files the agent changed relative to workBase. */
@@ -94,6 +98,8 @@ export interface WorktreeSummary {
   runOutcome?: WorktreeRunOutcome;
   /** True when this is a retired, resumable read-only snapshot rather than integration work. */
   snapshot?: boolean;
+  /** Ownership is surfaced so caller-provided checkouts are not mistaken for managed branches. */
+  ownership?: WorktreeOwnership;
   /** Bounded source selector, safe to include in aggregate lifecycle metrics. */
   snapshotBase?: WorktreeBase;
 }
@@ -115,6 +121,7 @@ export function worktreeSummary(record: WorktreeRecord): WorktreeSummary {
     error: record.error,
     runOutcome: record.runOutcome,
     snapshot: record.snapshot,
+    ownership: record.ownership ?? 'harness',
     snapshotBase: record.base,
   };
 }
