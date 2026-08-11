@@ -1145,6 +1145,10 @@ describe('remote-control bridge', () => {
     const routinePatch = runtime?.snapshotPatch?.(context, 'working');
     expect(routineBranchReads).toBe(0);
     expect(routinePatch).not.toHaveProperty('session');
+    expect(routinePatch).toMatchObject({
+      online: true,
+      lastSeenAt: expect.any(Number),
+    });
     expect(JSON.stringify(routinePatch)).not.toContain('inspect   title');
     expect(runtime?.snapshot().session.title).toBe('inspect title');
     const patchClient = new BridgeClient({

@@ -714,9 +714,11 @@ export class BridgeClient {
         return;
       }
       try {
+        const current = this.options.snapshot();
         this.sendEvent({
           type: 'runtime.heartbeat',
-          state: this.options.snapshot().liveState,
+          state: current.liveState,
+          snapshot: { online: true, lastSeenAt: Date.now() },
         });
       } catch {
         // The next heartbeat or a normal event will retry; no context is

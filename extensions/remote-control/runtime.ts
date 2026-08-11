@@ -105,6 +105,8 @@ export function createRemoteControlRuntime(
     return {
       cwd: ctx.cwd,
       liveState: state,
+      online: true,
+      lastSeenAt: Date.now(),
       model: modelSnapshot(ctx),
       modelCatalog: modelCatalogSnapshot(ctx),
       thinkingLevels: thinkingLevelsSnapshot(),
