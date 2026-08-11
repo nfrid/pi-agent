@@ -4,10 +4,10 @@ import { blockedQuestion } from './output';
 import {
   ACTIVITY_PREVIEW_CHARS,
   activityLabel,
-  activityLines,
   capitalize,
   controls,
   currentActivityLines,
+  EXPANDED_RESULT_MAX_CHARS,
   explicitTruncate,
   fallbackText,
   fieldLine,
@@ -19,16 +19,15 @@ import {
   markdownPreview,
   modeDescription,
   RESULT_PREVIEW_CHARS,
-  EXPANDED_RESULT_MAX_CHARS,
   runtimeLabel,
   sectionTitle,
   stateColor,
   stateLabel,
   TASK_PREVIEW_CHARS,
-  transcriptPreview,
   type ThemeLike,
   type ToolResultLike,
   taskBlock,
+  transcriptPreview,
   truncate,
   usage,
   worktreeLines,
@@ -67,8 +66,14 @@ function boundedRuns(runs: readonly DelegatedRun[]): {
   const successes = runs
     .map((run, index) => ({ run, index }))
     .filter(({ run }) => getRunState(run) === 'success');
+  const newestSuccesses = [...successes]
+    .sort(
+      (a, b) => (a.run.finishedAt ?? a.index) - (b.run.finishedAt ?? b.index),
+    )
+    .slice(-MAX_RESULT_SUCCESS_RUNS)
+    .sort((a, b) => a.index - b.index);
   return {
-    entries: [...important, ...successes.slice(0, MAX_RESULT_SUCCESS_RUNS)],
+    entries: [...important, ...newestSuccesses],
     hiddenSuccesses: Math.max(0, successes.length - MAX_RESULT_SUCCESS_RUNS),
   };
 }
@@ -283,6 +288,8 @@ export function renderDelegateResult(
 ) {
   const details = getDetails(toolResult);
   if (!details?.runs?.length) return new Text(fallbackText(toolResult), 0, 0);
+  const firstRun = details.runs[0];
+  if (!firstRun) return new Text(fallbackText(toolResult), 0, 0);
 
   const fg = theme.fg.bind(theme);
   const states = details.runs.map(getRunState);
@@ -301,10 +308,7 @@ export function renderDelegateResult(
     const display =
       details.mode === 'parallel'
         ? boundedRuns(details.runs)
-        : {
-            entries: [{ run: details.runs[0]!, index: 0 }],
-            hiddenSuccesses: 0,
-          };
+        : { entries: [{ run: firstRun, index: 0 }], hiddenSuccesses: 0 };
     if (display.hiddenSuccesses > 0)
       container.addChild(
         new Text(

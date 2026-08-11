@@ -446,10 +446,39 @@ describe('delegate widget', () => {
 
     expect(lines.join('\n')).toContain('Still running');
     expect(lines.join('\n')).toContain('Needs attention');
-    expect(lines.join('\n')).toContain('Completed 0');
-    expect(lines.join('\n')).toContain('Completed 7');
-    expect(lines.join('\n')).not.toContain('Completed 8');
+    expect(lines.join('\n')).not.toContain('Completed 0');
+    expect(lines.join('\n')).toContain('Completed 2');
+    expect(lines.join('\n')).toContain('Completed 9');
+    expect(lines.join('\n')).not.toContain('Completed 1');
     expect(lines.join('\n')).toContain('2 completed delegates hidden');
+  });
+
+  test('retains the newest successful rows by completion time', () => {
+    const lines = renderDelegateWidget(
+      [
+        status({
+          id: 'old',
+          name: 'Old success',
+          state: 'success',
+          finishedAt: 900,
+        }),
+        status({
+          id: 'new',
+          name: 'New success',
+          state: 'success',
+          finishedAt: 9_000,
+        }),
+        status({ id: 'active', name: 'Active', state: 'running' }),
+        status({ id: 'failed', name: 'Failed', state: 'error' }),
+      ],
+      true,
+      100,
+      theme as never,
+      10_000,
+    );
+    expect(lines.join('\\n')).toContain('New success');
+    expect(lines.join('\\n')).toContain('Active');
+    expect(lines.join('\\n')).toContain('Failed');
   });
 
   test('breaks the compact line down by state', () => {
