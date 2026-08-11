@@ -7,18 +7,19 @@ import {
   reduceTranscriptEvent,
   type TranscriptProjection,
 } from '@pi-dashboard/domain';
-import type {
-  BrowserSnapshot,
-  CheckoutSummary,
-  DashboardEventEnvelope,
-  DashboardStreamMessage,
-  ProjectSummary,
-  RunSummary,
-  RuntimeSnapshot,
-  SessionApiResponse,
-  SessionIndexEntry,
-  ThreadSummary,
-  WorkspaceTarget,
+import {
+  type BrowserSnapshot,
+  type CheckoutSummary,
+  type DashboardEventEnvelope,
+  type DashboardStreamMessage,
+  deriveSessionTitle,
+  type ProjectSummary,
+  type RunSummary,
+  type RuntimeSnapshot,
+  type SessionApiResponse,
+  type SessionIndexEntry,
+  type ThreadSummary,
+  type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { useSyncExternalStore } from 'react';
 import { DashboardEventStream } from './event-stream.js';
@@ -52,6 +53,8 @@ export interface DashboardLiveState {
   workspaceOrder: readonly string[];
   runtimesById: Readonly<Record<string, RuntimeSnapshot>>;
   sessionsById: Readonly<Record<string, SessionIndexEntry>>;
+  /** First-turn titles are rendered before Pi persists or publishes session metadata. */
+  optimisticSessionTitlesById: Readonly<Record<string, string>>;
   /** Monotonic semantic updates used by transcript views; pages do not consume raw envelopes. */
   sessionChangeById: Readonly<Record<string, number>>;
   sessionReplacementByRuntimeId: Readonly<Record<string, string>>;
@@ -161,6 +164,7 @@ function emptyState(): DashboardLiveState {
     workspaceOrder: [],
     runtimesById: {},
     sessionsById: {},
+    optimisticSessionTitlesById: {},
     sessionChangeById: {},
     sessionReplacementByRuntimeId: {},
     sessionReplacementBySessionId: {},
@@ -345,7 +349,31 @@ export class DashboardLiveStore {
       workspacesById: indexed(snapshot.workspaces),
       workspaceOrder: snapshot.workspaces.map((item) => item.id),
       runtimesById: runtimeIndex(snapshot.runtimes),
-      sessionsById: indexed(snapshot.sessions),
+      sessionsById: (() => {
+        const sessions = indexed(snapshot.sessions);
+        const optimistic = { ...state.optimisticSessionTitlesById };
+        for (const session of snapshot.sessions) {
+          if (
+            session.name === undefined &&
+            session.title === undefined &&
+            optimistic[session.id] !== undefined
+          ) {
+            sessions[session.id] = {
+              ...session,
+              title: optimistic[session.id],
+            };
+          } else delete optimistic[session.id];
+        }
+        return sessions;
+      })(),
+      optimisticSessionTitlesById: (() => {
+        const optimistic = { ...state.optimisticSessionTitlesById };
+        for (const session of snapshot.sessions) {
+          if (session.name !== undefined || session.title !== undefined)
+            delete optimistic[session.id];
+        }
+        return optimistic;
+      })(),
       notificationsById: indexed(snapshot.unread),
     };
   }
@@ -618,6 +646,8 @@ export class DashboardLiveStore {
       'session' in event
     ) {
       const current = nextState.sessionsById[sessionId];
+      const hasAuthoritativeTitle =
+        event.session.name !== undefined || event.session.title !== undefined;
       if (current) {
         const metadata = {
           ...current,
@@ -629,6 +659,14 @@ export class DashboardLiveStore {
             : { title: event.session.title }),
         };
         nextState = this.installSessionProjection(nextState, metadata);
+      }
+      if (hasAuthoritativeTitle) {
+        const optimistic = { ...nextState.optimisticSessionTitlesById };
+        delete optimistic[sessionId];
+        nextState = {
+          ...nextState,
+          optimisticSessionTitlesById: optimistic,
+        };
       }
       if (envelope.runtimeId)
         sessionReplacementByRuntimeId = {
@@ -815,10 +853,33 @@ export class DashboardLiveStore {
       }
     }
     const currentMetadata = this.state.sessionsById[response.metadata.id];
-    const metadata = currentMetadata
-      ? { ...response.metadata, ...currentMetadata }
-      : response.metadata;
+    const optimisticTitle =
+      this.state.optimisticSessionTitlesById[response.metadata.id];
+    const metadata = {
+      ...response.metadata,
+      ...(response.metadata.name === undefined && currentMetadata?.name
+        ? { name: currentMetadata.name }
+        : {}),
+      ...(response.metadata.title === undefined
+        ? optimisticTitle !== undefined
+          ? { title: optimisticTitle }
+          : currentMetadata?.title !== undefined
+            ? { title: currentMetadata.title }
+            : {}
+        : {}),
+    };
     let nextState = this.installSessionProjection(this.state, metadata);
+    if (
+      response.metadata.name !== undefined ||
+      response.metadata.title !== undefined
+    ) {
+      const optimistic = { ...nextState.optimisticSessionTitlesById };
+      delete optimistic[response.metadata.id];
+      nextState = {
+        ...nextState,
+        optimisticSessionTitlesById: optimistic,
+      };
+    }
     nextState = this.installTranscriptProjection(
       nextState,
       response.metadata.id,
@@ -848,10 +909,32 @@ export class DashboardLiveStore {
     });
     const projection = mergePrependedTranscript(current, older);
     const currentMetadata = this.state.sessionsById[sessionId];
-    const metadata = currentMetadata
-      ? { ...response.metadata, ...currentMetadata }
-      : response.metadata;
+    const optimisticTitle = this.state.optimisticSessionTitlesById[sessionId];
+    const metadata = {
+      ...response.metadata,
+      ...(response.metadata.name === undefined && currentMetadata?.name
+        ? { name: currentMetadata.name }
+        : {}),
+      ...(response.metadata.title === undefined
+        ? optimisticTitle !== undefined
+          ? { title: optimisticTitle }
+          : currentMetadata?.title !== undefined
+            ? { title: currentMetadata.title }
+            : {}
+        : {}),
+    };
     let nextState = this.installSessionProjection(this.state, metadata);
+    if (
+      response.metadata.name !== undefined ||
+      response.metadata.title !== undefined
+    ) {
+      const optimistic = { ...nextState.optimisticSessionTitlesById };
+      delete optimistic[sessionId];
+      nextState = {
+        ...nextState,
+        optimisticSessionTitlesById: optimistic,
+      };
+    }
     nextState = this.installTranscriptProjection(
       nextState,
       sessionId,
@@ -894,7 +977,44 @@ export class DashboardLiveStore {
     const current = this.state.sessionsById[id];
     if (!current) return;
     const metadata = { ...current, ...patch };
-    this.publish(this.installSessionProjection(this.state, metadata));
+    let nextState = this.installSessionProjection(this.state, metadata);
+    if (patch.name !== undefined || patch.title !== undefined) {
+      const optimistic = { ...nextState.optimisticSessionTitlesById };
+      delete optimistic[id];
+      nextState = { ...nextState, optimisticSessionTitlesById: optimistic };
+    }
+    this.publish(nextState);
+  }
+
+  /** Render the first prompt title before the runtime reaches settlement. */
+  optimisticallyTitleSession(id: string, prompt: string): boolean {
+    const current = this.state.sessionsById[id];
+    if (!current || current.name !== undefined || current.title !== undefined)
+      return false;
+    const projection = this.state.transcriptsBySessionId[id];
+    if (
+      projection &&
+      Object.values(projection.items).some(
+        (item) => item.kind === 'message' && item.role === 'user',
+      )
+    )
+      return false;
+    const title = deriveSessionTitle([
+      { type: 'message', message: { role: 'user', content: prompt } },
+    ]);
+    if (!title) return false;
+    this.publish({
+      ...this.state,
+      sessionsById: {
+        ...this.state.sessionsById,
+        [id]: { ...current, title },
+      },
+      optimisticSessionTitlesById: {
+        ...this.state.optimisticSessionTitlesById,
+        [id]: title,
+      },
+    });
+    return true;
   }
 
   markNotificationRead(id: string): void {
