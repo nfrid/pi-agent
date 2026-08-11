@@ -322,13 +322,20 @@ function forDisplay(statuses: readonly DelegateStatusSnapshot[]): DisplayRows {
   );
   const active = ordered.filter(isActive);
   const terminal = statuses.filter((status) => !isActive(status));
-  const successes = terminal.filter((status) => status.state === 'success');
-  let keptSuccesses = 0;
+  const successes = terminal
+    .map((status, index) => ({ status, index }))
+    .filter(({ status }) => status.state === 'success');
+  const newestSuccesses = [...successes]
+    .sort(
+      (a, b) =>
+        (a.status.finishedAt ?? a.status.createdAt ?? a.index) -
+        (b.status.finishedAt ?? b.status.createdAt ?? b.index),
+    )
+    .slice(-DELEGATE_WIDGET_MAX_SUCCESS_ROWS)
+    .map(({ status }) => status);
+  const visibleSuccesses = new Set(newestSuccesses);
   const visibleTerminal = terminal.filter(
-    (status) =>
-      isFailure(status) ||
-      (status.state === 'success' &&
-        keptSuccesses++ < DELEGATE_WIDGET_MAX_SUCCESS_ROWS),
+    (status) => isFailure(status) || visibleSuccesses.has(status),
   );
   return {
     rows: [...active, ...visibleTerminal],

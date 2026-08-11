@@ -3,10 +3,10 @@ import type {
   Theme,
 } from '@earendil-works/pi-coding-agent';
 import {
+  type Component,
   matchesKey,
   type TUI,
   truncateToWidth,
-  type Component,
   visibleWidth,
   wrapTextWithAnsi,
 } from '@earendil-works/pi-tui';
@@ -19,6 +19,8 @@ import type { DelegateDetails, DelegatedRun } from './types';
 
 const MAX_MODAL_CHARS = 64 * 1024;
 const MAX_ENTRY_CHARS = 8_000;
+const OVERLAY_MAX_HEIGHT_PERCENT = 80;
+const FRAME_ROWS = 4;
 
 function toolResultDetails(entry: unknown): DelegateDetails | undefined {
   if (!entry || typeof entry !== 'object') return undefined;
@@ -35,6 +37,40 @@ function toolResultDetails(entry: unknown): DelegateDetails | undefined {
   return getDetails({ details: value.details as never });
 }
 
+function backgroundResultDetails(entry: unknown): DelegateDetails | undefined {
+  if (!entry || typeof entry !== 'object') return undefined;
+  const value = entry as {
+    message?: unknown;
+    customType?: unknown;
+    details?: unknown;
+  };
+  const message =
+    value.message && typeof value.message === 'object'
+      ? (value.message as { customType?: unknown; details?: unknown })
+      : value;
+  if (message.customType !== 'delegate-job-result') return undefined;
+  const details = message.details;
+  if (!details || typeof details !== 'object') return undefined;
+  const jobs = (details as { jobs?: unknown }).jobs;
+  if (!Array.isArray(jobs)) return undefined;
+  const runs = jobs.flatMap((job) => {
+    if (!job || typeof job !== 'object') return [];
+    const candidate = (job as { runs?: unknown }).runs;
+    return Array.isArray(candidate) ? candidate : [];
+  });
+  if (runs.length === 0) return undefined;
+  const mode =
+    jobs.length === 1 &&
+    (jobs[0] as { mode?: unknown } | undefined)?.mode === 'single'
+      ? 'single'
+      : 'parallel';
+  return getDetails({ details: { mode, runs } as never });
+}
+
+function delegateDetails(entry: unknown): DelegateDetails | undefined {
+  return toolResultDetails(entry) ?? backgroundResultDetails(entry);
+}
+
 /** Find the most recent delegate result in the active session branch. */
 export function latestDelegateDetails(
   branch: readonly unknown[],
@@ -42,7 +78,7 @@ export function latestDelegateDetails(
 ): DelegateDetails | undefined {
   const wanted = selector.trim().toLowerCase();
   for (let index = branch.length - 1; index >= 0; index--) {
-    const details = toolResultDetails(branch[index]);
+    const details = delegateDetails(branch[index]);
     if (!details) continue;
     if (!wanted) return details;
     if (
@@ -80,6 +116,14 @@ export function transcriptText(runs: readonly DelegatedRun[]): string {
 function padLine(text: string, width: number): string {
   const bounded = truncateToWidth(text, width, '');
   return `${bounded}${' '.repeat(Math.max(0, width - visibleWidth(bounded)))}`;
+}
+
+/** Rows available for content inside the max-height overlay and its frame. */
+export function transcriptVisibleRows(terminalRows: number): number {
+  const overlayRows = Math.floor(
+    (Math.max(1, terminalRows) * OVERLAY_MAX_HEIGHT_PERCENT) / 100,
+  );
+  return Math.max(1, Math.min(24, overlayRows - FRAME_ROWS));
 }
 
 class TranscriptViewer implements Component {
@@ -147,7 +191,7 @@ class TranscriptViewer implements Component {
   }
 
   private visibleRows(): number {
-    return Math.max(3, Math.min(24, this.tui.terminal.rows - 6));
+    return transcriptVisibleRows(this.tui.terminal.rows);
   }
 
   private maxOffset(): number {
@@ -186,7 +230,7 @@ export async function showDelegateTranscript(
       overlayOptions: {
         width: '90%',
         minWidth: 40,
-        maxHeight: '80%',
+        maxHeight: `${OVERLAY_MAX_HEIGHT_PERCENT}%`,
         margin: 2,
       },
     },

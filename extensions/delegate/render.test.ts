@@ -2,7 +2,7 @@ import { initTheme, type ThemeColor } from '@earendil-works/pi-coding-agent';
 import { describe, expect, test } from 'vitest';
 import { renderDelegateCall, renderDelegateResult } from './render';
 import { worktreeLines } from './render-utils';
-import { createRun } from './types';
+import { createRun, type DelegatedRun } from './types';
 
 initTheme('dark', false);
 
@@ -18,6 +18,40 @@ const assistantMessage = {
 };
 
 describe('render', () => {
+  test('retains newest successful parallel results while preserving failures', () => {
+    const runs: DelegatedRun[] = Array.from({ length: 10 }, (_, index) => ({
+      ...createRun(`task ${index}`, undefined, { name: `agent ${index}` }),
+      state: 'success' as const,
+      finishedAt: index + 1,
+    }));
+    runs[0].finishedAt = 100;
+    runs[9].finishedAt = 1;
+    runs.push(
+      {
+        ...createRun('still running', undefined, { name: 'active agent' }),
+        state: 'running' as const,
+      },
+      {
+        ...createRun('failed task', undefined, { name: 'failed agent' }),
+        state: 'error' as const,
+      },
+    );
+    const output = renderDelegateResult(
+      { details: { mode: 'parallel', runs } },
+      { expanded: false },
+      theme,
+    )
+      .render(200)
+      .join('\\n');
+
+    expect(output).toContain('task 0');
+    expect(output).toContain('task 8');
+    expect(output).not.toContain('task 1');
+    expect(output).not.toContain('task 9');
+    expect(output).toContain('still running');
+    expect(output).toContain('failed task');
+  });
+
   test('normalizes legacy result state before rendering', () => {
     const run = createRun('legacy result');
     const legacyRun = { ...run, state: undefined, exitCode: 124 };

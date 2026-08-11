@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { latestDelegateDetails, transcriptText } from './transcript';
+import {
+  latestDelegateDetails,
+  transcriptText,
+  transcriptVisibleRows,
+} from './transcript';
 import { createRun } from './types';
 
 describe('delegate transcript viewer data', () => {
@@ -31,6 +35,46 @@ describe('delegate transcript viewer data', () => {
       'Cache review',
     );
     expect(latestDelegateDetails(branch)?.runs[0]?.task).toBe('inspect cache');
+  });
+
+  it('finds completed background delegate results in custom messages', () => {
+    const run = {
+      ...createRun('background audit', undefined, {
+        name: 'Background reviewer',
+      }),
+      state: 'success' as const,
+      finishedAt: Date.now(),
+    };
+    const branch = [
+      {
+        type: 'message',
+        message: {
+          role: 'custom',
+          customType: 'delegate-job-result',
+          details: {
+            jobs: [
+              {
+                id: 'job-1',
+                name: 'Background reviewer',
+                mode: 'single',
+                runs: [run],
+              },
+            ],
+          },
+        },
+      },
+    ];
+
+    expect(latestDelegateDetails(branch, 'background')?.runs[0]?.task).toBe(
+      'background audit',
+    );
+  });
+
+  it('budgets modal content inside the 80% overlay height', () => {
+    expect(transcriptVisibleRows(24)).toBe(15);
+    expect(transcriptVisibleRows(24) + 4).toBeLessThanOrEqual(
+      Math.floor(24 * 0.8),
+    );
   });
 
   it('retains activity/response text and marks modal truncation explicitly', () => {

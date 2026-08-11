@@ -42,9 +42,53 @@ describe('process usage cache', () => {
     expect(otherReport.snapshots[0]?.limitId).toBe('provider-b');
   });
 
+  it('expires based on cache insertion, not a stale report timestamp', async () => {
+    let calls = 0;
+    const shared = createSharedUsageQuery(
+      async (): Promise<UsageReport> => {
+        calls++;
+        return { capturedAt: 0, snapshots: [{ limitId: `report-${calls}` }] };
+      },
+      { freshMs: 60_000, stable: true },
+    );
+    const first = await shared(
+      context('provider-a', 'model-a'),
+      new AbortController().signal,
+    );
+    const second = await shared(
+      context('provider-a', 'model-a'),
+      new AbortController().signal,
+    );
+
+    expect(calls).toBe(1);
+    expect(second).toBe(first);
+  });
+
+  it('bypasses a fresh cache entry when forced', async () => {
+    let calls = 0;
+    const shared = createSharedUsageQuery(
+      async (): Promise<UsageReport> => {
+        calls++;
+        return report(`report-${calls}`);
+      },
+      { freshMs: 60_000, stable: true },
+    );
+    const ctx = context('provider-a', 'model-a');
+    await shared(ctx, new AbortController().signal);
+    const refreshed = await shared(ctx, new AbortController().signal, {
+      force: true,
+    });
+
+    expect(calls).toBe(2);
+    expect(refreshed.snapshots[0]?.limitId).toBe('report-2');
+  });
+
   it('does not let one session cancellation cancel shared physical work', async () => {
     let resolve!: (value: UsageReport) => void;
-    const query = () => new Promise<UsageReport>((done) => (resolve = done));
+    const query = () =>
+      new Promise<UsageReport>((done) => {
+        resolve = done;
+      });
     const shared = createSharedUsageQuery(query, {
       freshMs: 60_000,
       stable: true,

@@ -13,8 +13,13 @@ type UsageQuery = (
   signal: AbortSignal,
 ) => Promise<UsageReport>;
 
+interface CachedUsageReport {
+  report: UsageReport;
+  cachedAt: number;
+}
+
 interface SharedUsageState {
-  reports: Map<string, UsageReport>;
+  reports: Map<string, CachedUsageReport>;
   inFlight: Map<string, Promise<UsageReport>>;
   queryIds: WeakMap<UsageQuery, number>;
   nextQueryId: number;
@@ -96,9 +101,9 @@ export function createSharedUsageQuery(
     if (
       !queryOptions.force &&
       cached &&
-      Date.now() - cached.capturedAt < options.freshMs
+      Date.now() - cached.cachedAt < options.freshMs
     )
-      return cached;
+      return cached.report;
 
     let pending = state.inFlight.get(key);
     if (!pending) {
@@ -108,7 +113,10 @@ export function createSharedUsageQuery(
           const withProvider = report.provider
             ? report
             : { ...report, provider };
-          state.reports.set(key, withProvider);
+          state.reports.set(key, {
+            report: withProvider,
+            cachedAt: Date.now(),
+          });
           return withProvider;
         })
         .finally(() => {
