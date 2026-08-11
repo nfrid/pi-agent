@@ -189,6 +189,8 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
   const rows = delegateRows(model);
   const stats = delegateStats(rows);
   const [selectedId, setSelectedId] = useState<string>();
+  const [lastInspectorRow, setLastInspectorRow] = useState<DelegateStatus>();
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const hasLiveElapsed = stats.running + stats.queued > 0;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -198,6 +200,7 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
     return () => window.clearInterval(timer);
   }, [hasLiveElapsed]);
   const selected = rows.find((row) => row.id === selectedId);
+  const inspectorRow = selected ?? lastInspectorRow;
   const title = 'Delegates';
   const active = rows.find((row) =>
     ['running', 'queued'].includes(stateLabel(row.state)),
@@ -262,7 +265,11 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
                     type="button"
                     className="delegate-row-toggle"
                     aria-haspopup="dialog"
-                    onPress={() => setSelectedId(row.id)}
+                    onPress={() => {
+                      setSelectedId(row.id);
+                      setLastInspectorRow(row);
+                      setInspectorOpen(true);
+                    }}
                   >
                     <span className="surface-state" aria-hidden="true">
                       {stateGlyph(state)}
@@ -296,11 +303,12 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
           </div>
         </div>
       </WorkSurface>
-      {selected && (
+      {inspectorRow && (
         <DelegateTranscriptInspector
-          row={selected}
+          row={inspectorRow}
           now={now}
-          onClose={() => setSelectedId(undefined)}
+          isOpen={inspectorOpen}
+          onClose={() => setInspectorOpen(false)}
         />
       )}
     </>

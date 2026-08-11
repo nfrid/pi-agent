@@ -39,6 +39,7 @@ describe('transcript payload inspection', () => {
           status: 'success',
           arguments: { path: 'src/App.tsx' },
           result: { lines: 42 },
+          data: { argumentsTruncated: true, resultTruncated: true },
         }}
       />,
     );
@@ -48,5 +49,11 @@ describe('transcript payload inspection', () => {
     );
     expect(markup).toContain('src/App.tsx');
     expect(markup).toContain('&quot;lines&quot;: 42');
+    expect(markup).toContain(
+      'Source truncated this arguments before it reached the dashboard.',
+    );
+    expect(markup).toContain(
+      'Source truncated this result before it reached the dashboard.',
+    );
   });
 });

@@ -1,7 +1,10 @@
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { DelegateInspectorMetadata } from './delegate-transcript-inspector';
+import {
+  DelegateInspectorMetadata,
+  delegateTranscriptItems,
+} from './delegate-transcript-inspector';
 import {
   DelegateTranscript,
   dashboardSurfacePlacement,
@@ -263,8 +266,10 @@ describe('live extension surface fixtures', () => {
           {
             id: '1:tool',
             type: 'tool',
-            label: 'bash',
-            text: 'npm test',
+            label: 'run checks',
+            name: 'bash',
+            arguments: { command: 'npm test' },
+            result: { exitCode: 0 },
             status: 'running',
             run: 1,
           },
@@ -274,6 +279,14 @@ describe('live extension surface fixtures', () => {
             label: 'Response',
             text: '**Done**',
             status: 'completed',
+            run: 1,
+          },
+          {
+            id: '1:error',
+            type: 'error',
+            label: 'Error',
+            text: 'Command failed.',
+            status: 'error',
             run: 1,
           },
         ]}
@@ -286,12 +299,36 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('message-bubble message-user');
     expect(markup).toContain('Inspect the queue');
     expect(markup).toContain('tool-detail');
+    expect(markup).toContain('Arguments');
     expect(markup).toContain('Result');
     expect(markup).toContain('npm test');
+    expect(markup).toContain('&quot;exitCode&quot;: 0');
     expect(markup).toContain('<strong>Done</strong>');
+    expect(markup).toContain('event-delegate-result event-failed');
     expect(markup).toContain(
       'Earlier transcript entries were omitted from this live view.',
     );
+  });
+
+  it('keeps stable transcript keys when a bounded window rotates', () => {
+    const retained = {
+      id: '2:tool-7',
+      type: 'tool' as const,
+      label: 'read source',
+      name: 'read',
+      status: 'completed' as const,
+      run: 2,
+    };
+    const before = delegateTranscriptItems([
+      { id: '1:task', type: 'task', label: 'Task', run: 1 },
+      retained,
+    ]);
+    const after = delegateTranscriptItems([
+      retained,
+      { id: '2:response', type: 'assistant', label: 'Response', run: 2 },
+    ]);
+
+    expect(before[1]?.key).toBe(after[0]?.key);
   });
 
   it('keeps delegate lifecycle and result facts in the inspector header', () => {

@@ -3,7 +3,7 @@ import {
   type ExtensionManifest,
   type RendererDescriptor,
 } from '@pi-dashboard/extension-contributions';
-import { type Static, Type } from 'typebox';
+import { type Static, type TSchema, Type } from 'typebox';
 
 export const DELEGATE_CAPABILITY_ID = 'delegate.live-status';
 export const DELEGATE_RENDERER_ID = 'delegate.status';
@@ -74,6 +74,30 @@ const DelegateResultSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+const DelegateTranscriptPayloadScalarSchema = Type.Union([
+  Type.Null(),
+  Type.Boolean(),
+  Type.Number(),
+  Type.String({ maxLength: 1_024 }),
+]);
+
+/** Mirror the four-level, sixteen-item source payload cap in the wire schema. */
+function delegateTranscriptPayloadSchema(value: TSchema) {
+  return Type.Union([
+    DelegateTranscriptPayloadScalarSchema,
+    Type.Array(value, { maxItems: 16 }),
+    Type.Record(Type.String({ maxLength: 128 }), value, { maxProperties: 16 }),
+  ]);
+}
+
+const DelegateTranscriptPayloadSchema = delegateTranscriptPayloadSchema(
+  delegateTranscriptPayloadSchema(
+    delegateTranscriptPayloadSchema(
+      delegateTranscriptPayloadSchema(DelegateTranscriptPayloadScalarSchema),
+    ),
+  ),
+);
+
 const DelegateTranscriptEntrySchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 512 }),
@@ -85,6 +109,14 @@ const DelegateTranscriptEntrySchema = Type.Object(
       Type.Literal('error'),
     ]),
     label: Type.String({ minLength: 1, maxLength: 2_000 }),
+    /** Canonical tool name when this is a tool entry. */
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    /** Bounded tool input captured at tool start, never inferred from labels. */
+    arguments: Type.Optional(DelegateTranscriptPayloadSchema),
+    /** Bounded final tool output captured at tool end. */
+    result: Type.Optional(DelegateTranscriptPayloadSchema),
+    argumentsTruncated: Type.Optional(Type.Boolean()),
+    resultTruncated: Type.Optional(Type.Boolean()),
     text: Type.Optional(Type.String({ maxLength: 8_000 })),
     status: Type.Optional(
       Type.Union([

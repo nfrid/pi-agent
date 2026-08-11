@@ -11,9 +11,18 @@ import type { DelegateStatusSnapshot, DelegateStatusStore } from './status';
 export const DELEGATE_EXTENSION_ID = 'delegate';
 const MAX_SURFACE_STATUSES = 24;
 const MAX_TRANSCRIPT_SURFACE_CHARS = 96_000;
+const MAX_LIFECYCLE_DIAGNOSTIC_CHARS = 4_000;
 
 function text(value: string, max: number): string {
   return value.slice(0, max);
+}
+
+function payloadLength(value: unknown): number {
+  try {
+    return JSON.stringify(value)?.length ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 function transcriptSnapshot(
@@ -34,8 +43,15 @@ function transcriptSnapshot(
       Math.min(8_000, budget.remaining - label.length - 64),
     );
     const value = entry.text ? text(entry.text, textBudget) : undefined;
+    const argumentsValue = entry.arguments;
+    const resultValue = entry.result;
     if (entry.text && value?.length !== entry.text.length) truncated = true;
-    const cost = label.length + (value?.length ?? 0) + 64;
+    const cost =
+      label.length +
+      (value?.length ?? 0) +
+      payloadLength(argumentsValue) +
+      payloadLength(resultValue) +
+      96;
     if (cost > budget.remaining) {
       truncated = true;
       break;
@@ -45,6 +61,11 @@ function transcriptSnapshot(
       id: text(entry.id, 512) || `${entry.type}-${projected.length}`,
       type: entry.type,
       label,
+      ...(entry.name ? { name: text(entry.name, 256) } : {}),
+      ...(argumentsValue === undefined ? {} : { arguments: argumentsValue }),
+      ...(resultValue === undefined ? {} : { result: resultValue }),
+      ...(entry.argumentsTruncated ? { argumentsTruncated: true } : {}),
+      ...(entry.resultTruncated ? { resultTruncated: true } : {}),
       ...(value ? { text: value } : {}),
       ...(entry.status ? { status: entry.status } : {}),
       ...(entry.at === undefined ? {} : { at: entry.at }),
@@ -117,12 +138,20 @@ function statusSnapshot(
           lifecycle: {
             reason: status.lifecycle.reason,
             ...(status.lifecycle.diagnostic !== undefined
-              ? { diagnostic: status.lifecycle.diagnostic }
+              ? {
+                  diagnostic: text(
+                    status.lifecycle.diagnostic,
+                    MAX_LIFECYCLE_DIAGNOSTIC_CHARS,
+                  ),
+                }
               : {}),
-            ...(status.lifecycle.diagnosticArtifact
+            ...(typeof status.lifecycle.diagnosticArtifact?.handle === 'string'
               ? {
                   diagnosticArtifact: {
-                    ...status.lifecycle.diagnosticArtifact,
+                    handle: text(
+                      status.lifecycle.diagnosticArtifact.handle,
+                      256,
+                    ),
                   },
                 }
               : {}),

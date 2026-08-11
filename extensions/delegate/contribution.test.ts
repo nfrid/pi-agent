@@ -31,9 +31,43 @@ describe('delegate live contribution', () => {
               label: 'Checking files',
               status: 'running',
             },
+            transcript: [
+              {
+                id: 'tool-1',
+                type: 'tool',
+                label: 'run checks',
+                name: 'bash',
+                arguments: { command: 'pnpm test' },
+                result: { exitCode: 0 },
+                status: 'completed',
+              },
+            ],
           },
         ],
       }),
     ).toBe(true);
+    expect(
+      Value.Check(DelegateStatusViewModelSchema, {
+        version: 1,
+        statuses: [
+          {
+            id: 'ds-2',
+            name: 'Oversized',
+            kind: 'foreground',
+            state: 'running',
+            createdAt: 1,
+            allowWrites: false,
+            transcript: [
+              {
+                id: 'tool-1',
+                type: 'tool',
+                label: 'run checks',
+                arguments: { command: 'x'.repeat(1_025) },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toBe(false);
   });
 });

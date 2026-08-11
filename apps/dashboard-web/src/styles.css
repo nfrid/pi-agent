@@ -1777,6 +1777,69 @@ h2 {
   min-height: 0;
   padding: 14px 18px 28px;
 }
+.delegate-inspector-details {
+  margin: 0 0 12px;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 0 0 10px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.delegate-inspector-details > summary {
+  color: var(--purple);
+  cursor: pointer;
+  font-weight: 650;
+}
+.delegate-inspector-details > dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 7px 12px;
+  margin: 9px 0;
+}
+.delegate-inspector-details dt {
+  color: var(--dim);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.delegate-inspector-details dd {
+  margin: 1px 0 0;
+  overflow-wrap: anywhere;
+}
+.delegate-inspector-runs {
+  display: grid;
+  gap: 3px;
+  margin: 9px 0;
+  padding: 0;
+  list-style: none;
+}
+ol.delegate-inspector-runs > li {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+ol.delegate-inspector-runs > li small {
+  color: var(--dim);
+}
+.delegate-inspector-recovery {
+  border-left: 2px solid var(--orange);
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--bg) 46%, transparent);
+}
+.delegate-inspector-recovery > strong {
+  color: var(--orange);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.delegate-inspector-recovery pre {
+  max-height: 12em;
+  margin: 5px 0;
+  overflow: auto;
+  color: var(--fg);
+  font: inherit;
+  white-space: pre-wrap;
+}
+.delegate-inspector-recovery p {
+  margin: 4px 0 0;
+}
 .delegate-transcript {
   display: grid;
   gap: 6px;

@@ -45,6 +45,12 @@ export interface DelegatedActivity {
   latestText?: string;
   /** Bounded complete thinking block; kept non-enumerable on run details. */
   transcriptText?: string;
+  /** Tool fields are private on the run and projected only to the live surface. */
+  toolName?: string;
+  toolArguments?: unknown;
+  toolResult?: unknown;
+  toolArgumentsTruncated?: boolean;
+  toolResultTruncated?: boolean;
   startedAt?: number;
 }
 

@@ -94,12 +94,38 @@ export function BoundedPayloadPreview({
   );
 }
 
-function PayloadSection({ title, value }: { title: string; value: unknown }) {
+function PayloadSection({
+  title,
+  value,
+  sourceTruncated = false,
+}: {
+  title: string;
+  value: unknown;
+  sourceTruncated?: boolean;
+}) {
   return (
     <section className="payload-section" aria-label={title}>
       <h4>{title}</h4>
       <BoundedPayloadPreview value={value} label={title.toLowerCase()} />
+      {sourceTruncated && (
+        <small className="payload-truncation-label">
+          Source truncated this {title.toLowerCase()} before it reached the
+          dashboard.
+        </small>
+      )}
     </section>
+  );
+}
+
+function sourceTruncated(
+  tool: Record<string, unknown>,
+  field: string,
+): boolean {
+  const data = tool.data;
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    (data as Record<string, unknown>)[`${field}Truncated`] === true
   );
 }
 
@@ -115,10 +141,18 @@ function ToolInspector({ tool }: { tool: Record<string, unknown> }) {
         </div>
       </dl>
       {argumentsValue !== undefined && (
-        <PayloadSection title="Arguments" value={argumentsValue} />
+        <PayloadSection
+          title="Arguments"
+          value={argumentsValue}
+          sourceTruncated={sourceTruncated(tool, 'arguments')}
+        />
       )}
       {tool.result !== undefined && (
-        <PayloadSection title="Result" value={tool.result} />
+        <PayloadSection
+          title="Result"
+          value={tool.result}
+          sourceTruncated={sourceTruncated(tool, 'result')}
+        />
       )}
       <details className="tool-inspector-raw">
         <summary>Raw tool record</summary>

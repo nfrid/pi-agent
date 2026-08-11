@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { processJsonLine } from './events';
 import { delegateSurface } from './live';
 import { DelegateStatusStore } from './status';
 import { createRun } from './types';
@@ -36,6 +37,45 @@ describe('delegate live surface', () => {
         ],
       },
     });
+  });
+
+  it('projects distinct bounded tool input and output to the dashboard', () => {
+    const store = new DelegateStatusStore();
+    const run = createRun('inspect');
+    const [id] = store.start([run], 'background');
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'read-1',
+        toolName: 'read',
+        args: { path: 'src/live.ts' },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'read-1',
+        toolName: 'read',
+        result: { lines: 42 },
+      }),
+      run,
+    );
+    store.update(id, run);
+
+    const viewModel = delegateSurface(store).viewModel as {
+      statuses: Array<{ transcript?: unknown[] }>;
+    };
+    expect(viewModel.statuses[0]?.transcript).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'tool',
+          name: 'read',
+          arguments: { path: 'src/live.ts' },
+          result: { lines: 42 },
+        }),
+      ]),
+    );
   });
 
   it('prioritizes active work and bounds historical dashboard payloads', () => {
