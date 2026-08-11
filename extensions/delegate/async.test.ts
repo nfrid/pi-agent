@@ -504,10 +504,10 @@ describe('async delegate extension', () => {
       'Started 1 background delegate job: dj-1',
     );
     expect(launch?.content[0]?.text).toContain(
-      'if none remains, write exactly one brief final-channel message saying you are waiting for the background delegate and will resume automatically, then end the turn without a commentary preamble or second summary.',
+      'if none remains, use /wait to yield without injecting a fabricated waiting message.',
     );
-    expect(launch?.content[0]?.text).not.toContain(
-      'if none remains, end the turn.',
+    expect(launch?.content[0]?.text).toContain(
+      'Use delegate_jobs feedback for bounded corrective steering',
     );
     expect(launch?.content[0]?.text).not.toContain('peek to wait');
     expect(launch?.content[0]?.text).toContain('continuation-token');
@@ -1049,7 +1049,7 @@ describe('async delegate extension', () => {
     } as never;
     finishes.get('first')?.(first);
     await new Promise((resolve) => setTimeout(resolve, 75));
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledOnce();
 
     const listed = await tools
       .get('delegate_jobs')
@@ -1063,15 +1063,9 @@ describe('async delegate extension', () => {
       content: [{ type: 'text', text: 'Second finding.' }],
     } as never;
     finishes.get('second')?.(second);
-    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
-    expect(sendMessage.mock.calls[0]?.[0].content).not.toContain(
-      'First finding.',
-    );
-    expect(sendMessage.mock.calls[0]?.[0].content).not.toContain(
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
+    expect(sendMessage.mock.calls[1]?.[0].content).not.toContain(
       'Second finding.',
-    );
-    expect(sendMessage.mock.calls[0]?.[0].content).not.toContain(
-      'Third finding.',
     );
 
     const third = successfulRun();
@@ -1081,8 +1075,8 @@ describe('async delegate extension', () => {
       content: [{ type: 'text', text: 'Third finding.' }],
     } as never;
     finishes.get('third')?.(third);
-    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(2));
-    expect(sendMessage.mock.calls[1]?.[0].content).not.toContain(
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(3));
+    expect(sendMessage.mock.calls[2]?.[0].content).not.toContain(
       'Third finding.',
     );
     await handlers.get('session_shutdown')?.({}, ctx);
@@ -1166,6 +1160,7 @@ describe('async delegate extension', () => {
       cwd: '/tmp/project',
       hasUI: true,
       mode: 'tui',
+      isIdle: () => true,
       ui: { notify, setWidget },
       sessionManager: {
         getSessionId: () => sessionId,
@@ -1280,6 +1275,16 @@ describe('async delegate extension', () => {
       undefined,
       ctx,
     );
+    await commands.get('wait')?.handler('', ctx);
+    expect(sendMessage).toHaveBeenCalledWith(
+      {
+        customType: 'delegate-wait',
+        content: [],
+        display: false,
+      },
+      { triggerTurn: false },
+    );
+    sendMessage.mockClear();
     const widgetFactory = [...setWidget.mock.calls]
       .reverse()
       .find((call) => typeof call[1] === 'function')?.[1] as

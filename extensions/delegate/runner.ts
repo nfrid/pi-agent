@@ -1,6 +1,12 @@
 import * as path from 'node:path';
 import { acquireSession, acquireSlot } from './concurrency';
 import {
+  checkpointRequestMessage,
+  createDelegateControlChannel,
+  type DelegateControlChannel,
+} from './control';
+import {
+  checkpointLeadMs,
   PROGRESS_UPDATE_INTERVAL_MS,
   spawnDelegateChild,
 } from './delegate-child';
@@ -108,6 +114,8 @@ export interface RunDelegateOptions {
   maxConcurrency: number;
   killGraceMs?: number;
   signal?: AbortSignal;
+  /** Parent-side inbox used for bounded feedback and checkpoint requests. */
+  control?: DelegateControlChannel;
   onUpdate?: OnUpdate;
   mode: DelegateDetails['mode'];
 }
@@ -190,6 +198,8 @@ export async function runDelegate(
     continuation: options.continuation,
   });
   setDelegateResultSpec(run, options.resultSpec);
+  const control =
+    options.control ?? createDelegateControlChannel(options.sessionPath);
   let releaseSlot: (() => void) | undefined;
   let releaseSession: (() => void) | undefined;
 
@@ -223,6 +233,7 @@ export async function runDelegate(
       cwd: options.cwd,
       env: {
         ...(options.worktree?.env ?? {}),
+        PI_DELEGATE_CONTROL_FILE: control.filePath,
         ...(options.resultSpec
           ? {
               PI_DELEGATE_RESULT_SCHEMA: JSON.stringify(
@@ -240,8 +251,21 @@ export async function runDelegate(
         cwd: spawnTarget.cwd,
         env: spawnTarget.env,
         timeoutMs: options.timeoutMs,
+        checkpointLeadMs: checkpointLeadMs(options.timeoutMs),
         killGraceMs: options.killGraceMs,
         signal: options.signal,
+        onCheckpoint: () => {
+          const requestedAt = Date.now();
+          const queued = control.enqueue(
+            'checkpoint',
+            checkpointRequestMessage(),
+          );
+          run.checkpoint = {
+            requestedAt,
+            state: queued.accepted ? 'requested' : 'unavailable',
+          };
+          emitUpdate();
+        },
         onLine: emitUpdate,
       });
 
@@ -259,7 +283,18 @@ export async function runDelegate(
       run.state = 'aborted';
     } else if (!spawnError && timedOut) {
       run.stopReason = 'error';
-      run.errorMessage = `Delegated task timed out after ${Math.round(options.timeoutMs / 1000)} seconds.`;
+      const checkpoint = run.checkpoint;
+      if (checkpoint?.state === 'requested')
+        run.checkpoint = { ...checkpoint, state: 'hard-timeout' };
+      const checkpointStatus =
+        checkpoint?.state === 'acknowledged'
+          ? ' The child acknowledged a pre-timeout checkpoint; retained output/worktree is partial and requires review.'
+          : checkpoint?.state === 'requested'
+            ? ' A pre-timeout checkpoint was requested but not acknowledged; retained output/worktree is partial and requires review.'
+            : checkpoint?.state === 'unavailable'
+              ? ' The pre-timeout checkpoint request could not be queued; retained output/worktree is partial and requires review.'
+              : '';
+      run.errorMessage = `Delegated task timed out after ${Math.round(options.timeoutMs / 1000)} seconds.${checkpointStatus}`;
       setDelegateLifecycle(run, 'timeout', run.errorMessage);
       run.state = 'timed-out';
     } else if (!spawnError && exitCode !== 0) {
@@ -328,6 +363,7 @@ export async function runDelegate(
     emitUpdate();
     releaseSlot?.();
     releaseSession?.();
+    control.close();
   }
   return run;
 }

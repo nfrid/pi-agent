@@ -349,6 +349,7 @@ export async function runPreparedDelegateTask(
     RunDelegateOptions,
     'timeoutMs' | 'maxConcurrency' | 'signal' | 'onUpdate' | 'mode'
   > & {
+    control?: RunDelegateOptions['control'];
     onWorktreeRunning?: (worktree: PreparedWorktree) => void;
   },
 ): Promise<DelegatedRun> {
@@ -381,6 +382,7 @@ export async function runPreparedDelegateTask(
     timeoutMs: options.timeoutMs,
     maxConcurrency: options.maxConcurrency,
     signal: options.signal,
+    control: options.control,
     onUpdate: options.onUpdate,
     mode: options.mode,
   });

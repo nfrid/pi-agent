@@ -186,6 +186,32 @@ describe('DelegateJobManager', () => {
     await manager.dispose();
   });
 
+  test('queues bounded feedback only while a job is active', async () => {
+    const feedback = vi.fn(() => ({ accepted: true, id: 'feedback-1' }));
+    let reject!: (error: unknown) => void;
+    const manager = new DelegateJobManager();
+    const started = manager.start({
+      mode: 'single',
+      tasks: ['steer me'],
+      feedback,
+      execute: () =>
+        new Promise<DelegateJobResult>((_resolve, rejectPromise) => {
+          reject = rejectPromise;
+        }),
+    });
+
+    expect(
+      manager.sendFeedback(started.id, 'Fix the omitted interface.'),
+    ).toEqual(expect.objectContaining({ delivery: 'queued' }));
+    expect(feedback).toHaveBeenCalledWith('Fix the omitted interface.');
+    reject(new Error('stop test job'));
+    await vi.waitFor(() => expect(manager.runningCount).toBe(0));
+    expect(manager.sendFeedback(started.id, 'too late').delivery).toBe(
+      'settled',
+    );
+    await manager.dispose();
+  });
+
   test('cancels with a manager-owned abort signal', async () => {
     const onSettled = vi.fn();
     const manager = new DelegateJobManager({ onSettled });
