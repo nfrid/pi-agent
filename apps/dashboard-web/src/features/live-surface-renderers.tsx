@@ -132,13 +132,16 @@ function WorkSurface({
       setVisible(true);
       return;
     }
-    if (open) return;
+    // A delta can remove every row while the surface is open. Close the
+    // controlled dialog first so its exit/focus handling does not retain a
+    // launcher or transcript row that no longer exists.
+    setOpen(false);
     const timeout = window.setTimeout(() => {
       focusAfterSurfaceHides(launcherRef.current);
       setVisible(false);
     }, 180);
     return () => window.clearTimeout(timeout);
-  }, [visibleCount, open]);
+  }, [visibleCount]);
   if (!visible) return null;
   return (
     <>
@@ -193,6 +196,12 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const hasLiveElapsed = stats.running + stats.queued > 0;
   const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (rows.length > 0) return;
+    setSelectedId(undefined);
+    setLastInspectorRow(undefined);
+    setInspectorOpen(false);
+  }, [rows.length]);
   useEffect(() => {
     if (!hasLiveElapsed) return;
     setNow(Date.now());

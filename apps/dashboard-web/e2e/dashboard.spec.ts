@@ -3088,6 +3088,10 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   await expect(transcriptInspector).toHaveCount(0);
   await expect(exitingDelegateInspector).toHaveCount(0);
   await expect(delegatesPanel).toBeVisible();
+  await delegatesPanel.locator('.delegate-row-toggle').first().click();
+  await expect(transcriptInspector).toBeVisible();
+  // A delta removing the selected row must close the inspector and the open
+  // delegate surface rather than leaving stale transcript details behind.
   await mocks.emit({
     type: 'snapshot',
     snapshot: phase6Snapshot({
@@ -3112,9 +3116,7 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
       ],
     }),
   });
-  await expect(delegatesPanel).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(delegatesPanel).toHaveCount(0);
+  await expect(transcriptInspector).toHaveCount(0);
   await expect(page.locator('.extension-surface')).toHaveCount(0);
   const detailsButton = page.getByRole('button', {
     name: 'Details',
