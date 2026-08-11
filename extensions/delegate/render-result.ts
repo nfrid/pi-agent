@@ -143,7 +143,9 @@ function addExpandedRun(
   const worktree = boundedLines(worktreeLines(run), 24);
   if (worktree.length) container.addChild(new Text(worktree.join('\n'), 0, 0));
   else if (!run.continuation)
-    container.addChild(new Text(fg('dim', 'No continuation or worktree metadata.'), 0, 0));
+    container.addChild(
+      new Text(fg('dim', 'No continuation or worktree metadata.'), 0, 0),
+    );
 
   const lifecycle = ensureDelegateLifecycle(run);
   const recoveryNote = continuationRecoveryNote(run);
@@ -184,16 +186,23 @@ function addExpandedRun(
         ),
       );
     }
-    if (recoveryNote) container.addChild(new Text(fg('muted', recoveryNote), 0, 0));
-    if (blocked) container.addChild(new Text(fg('warning', `Blocked on: ${blocked}`), 0, 0));
+    if (recoveryNote)
+      container.addChild(new Text(fg('muted', recoveryNote), 0, 0));
+    if (blocked)
+      container.addChild(
+        new Text(fg('warning', `Blocked on: ${blocked}`), 0, 0),
+      );
     for (const warning of warnings)
-      container.addChild(new Text(fg('warning', explicitTruncate(warning, 2_048)), 0, 0));
+      container.addChild(
+        new Text(fg('warning', explicitTruncate(warning, 2_048)), 0, 0),
+      );
   }
 
   const structured = getDelegateResultSpec(run);
   const final = structured ? '' : getFinalAssistantText(run.messages).trim();
   const backgroundLaunch = isBackgroundLaunch(run);
-  if (!hasResultHeading(final)) container.addChild(sectionTitle('Result', theme));
+  if (!hasResultHeading(final))
+    container.addChild(sectionTitle('Result', theme));
   if (structured) {
     const settlement = getSettledDelegateResult(run);
     container.addChild(
@@ -210,17 +219,29 @@ function addExpandedRun(
     );
   } else if (final)
     container.addChild(
-      new Markdown(explicitTruncate(final, EXPANDED_RESULT_MAX_CHARS), 0, 0, mdTheme),
+      new Markdown(
+        explicitTruncate(final, EXPANDED_RESULT_MAX_CHARS),
+        0,
+        0,
+        mdTheme,
+      ),
     );
   else if (backgroundLaunch)
-    container.addChild(new Text(fg('muted', 'Running independently in the background.'), 0, 0));
+    container.addChild(
+      new Text(fg('muted', 'Running independently in the background.'), 0, 0),
+    );
   else if (['queued', 'running'].includes(state))
-    container.addChild(new Text(fg('muted', 'Waiting for the subagent…'), 0, 0));
+    container.addChild(
+      new Text(fg('muted', 'Waiting for the subagent…'), 0, 0),
+    );
   else {
     const error = run.errorMessage || run.stderr.trim() || 'No final response';
     container.addChild(
       new Text(
-        fg(state === 'error' ? 'error' : 'warning', explicitTruncate(error, 2_048)),
+        fg(
+          state === 'error' ? 'error' : 'warning',
+          explicitTruncate(error, 2_048),
+        ),
         0,
         0,
       ),
@@ -239,7 +260,9 @@ function addExpandedRun(
     ),
   );
   if (run.backgroundJobId)
-    container.addChild(new Text(fg('accent', `Background job: ${run.backgroundJobId}`), 0, 0));
+    container.addChild(
+      new Text(fg('accent', `Background job: ${run.backgroundJobId}`), 0, 0),
+    );
 
   container.addChild(new Spacer(1));
   container.addChild(sectionTitle('Usage', theme));
@@ -278,7 +301,10 @@ export function renderDelegateResult(
     const display =
       details.mode === 'parallel'
         ? boundedRuns(details.runs)
-        : { entries: [{ run: details.runs[0]!, index: 0 }], hiddenSuccesses: 0 };
+        : {
+            entries: [{ run: details.runs[0]!, index: 0 }],
+            hiddenSuccesses: 0,
+          };
     if (display.hiddenSuccesses > 0)
       container.addChild(
         new Text(

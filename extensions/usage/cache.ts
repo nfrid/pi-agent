@@ -56,13 +56,14 @@ function waitWithAbort<T>(
   promise: Promise<T>,
   signal: AbortSignal,
 ): Promise<T> {
-  if (signal.aborted) return Promise.reject(signal.reason ?? new Error('Aborted'));
+  if (signal.aborted)
+    return Promise.reject(signal.reason ?? new Error('Aborted'));
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(signal.reason ?? new Error('Aborted'));
     signal.addEventListener('abort', abort, { once: true });
-    promise.then(resolve, reject).finally(() =>
-      signal.removeEventListener('abort', abort),
-    );
+    promise
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', abort));
   });
 }
 

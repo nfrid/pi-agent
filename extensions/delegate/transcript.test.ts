@@ -5,13 +5,31 @@ import { createRun } from './types';
 describe('delegate transcript viewer data', () => {
   it('selects the latest matching delegate result from the active branch', () => {
     const first = createRun('old task', undefined, { name: 'Old' });
-    const latest = createRun('inspect cache', undefined, { name: 'Cache review' });
+    const latest = createRun('inspect cache', undefined, {
+      name: 'Cache review',
+    });
     const branch = [
-      { type: 'message', message: { role: 'toolResult', toolName: 'delegate', details: { mode: 'single', runs: [first] } } },
-      { type: 'message', message: { role: 'toolResult', toolName: 'delegate', details: { mode: 'single', runs: [latest] } } },
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: { mode: 'single', runs: [first] },
+        },
+      },
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: { mode: 'single', runs: [latest] },
+        },
+      },
     ];
 
-    expect(latestDelegateDetails(branch, 'cache')?.runs[0]?.name).toBe('Cache review');
+    expect(latestDelegateDetails(branch, 'cache')?.runs[0]?.name).toBe(
+      'Cache review',
+    );
     expect(latestDelegateDetails(branch)?.runs[0]?.task).toBe('inspect cache');
   });
 

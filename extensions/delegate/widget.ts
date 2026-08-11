@@ -316,9 +316,7 @@ interface DisplayRows {
  * Keep active/error work visible, while completed success history is bounded.
  * The store remains authoritative; this only limits the persistent rail.
  */
-function forDisplay(
-  statuses: readonly DelegateStatusSnapshot[],
-): DisplayRows {
+function forDisplay(statuses: readonly DelegateStatusSnapshot[]): DisplayRows {
   const ordered = [...statuses].sort(
     (a, b) => STATE_RANK[a.state] - STATE_RANK[b.state],
   );
@@ -347,7 +345,9 @@ function compactSummary(statuses: readonly DelegateStatusSnapshot[]): string {
   const running = count('running');
   const queued = count('queued');
   const failed = statuses.filter((status) => isFailure(status)).length;
-  const completed = statuses.filter((status) => status.state === 'success').length;
+  const completed = statuses.filter(
+    (status) => status.state === 'success',
+  ).length;
   const parts = [
     running > 0 ? `${running} running` : '',
     queued > 0 ? `${queued} queued` : '',

@@ -1,9 +1,6 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  createSharedUsageQuery,
-  resetSharedUsageState,
-} from './cache';
+import { createSharedUsageQuery, resetSharedUsageState } from './cache';
 import type { UsageReport } from './types';
 
 function context(provider: string, id: string): ExtensionContext {
@@ -28,7 +25,10 @@ describe('process usage cache', () => {
       calls.push(ctx.model?.provider ?? 'unknown');
       return report(ctx.model?.provider ?? 'unknown');
     };
-    const shared = createSharedUsageQuery(query, { freshMs: 60_000, stable: true });
+    const shared = createSharedUsageQuery(query, {
+      freshMs: 60_000,
+      stable: true,
+    });
     const first = context('provider-a', 'model-a');
     const second = context('provider-a', 'model-b');
     const other = context('provider-b', 'model-a');
@@ -45,7 +45,10 @@ describe('process usage cache', () => {
   it('does not let one session cancellation cancel shared physical work', async () => {
     let resolve!: (value: UsageReport) => void;
     const query = () => new Promise<UsageReport>((done) => (resolve = done));
-    const shared = createSharedUsageQuery(query, { freshMs: 60_000, stable: true });
+    const shared = createSharedUsageQuery(query, {
+      freshMs: 60_000,
+      stable: true,
+    });
     const firstController = new AbortController();
     const first = shared(
       context('provider-a', 'model-a'),
@@ -59,6 +62,8 @@ describe('process usage cache', () => {
     firstController.abort(new Error('session closed'));
     await expect(first).rejects.toThrow('session closed');
     resolve(report('provider-a'));
-    await expect(second).resolves.toMatchObject({ snapshots: [{ limitId: 'provider-a' }] });
+    await expect(second).resolves.toMatchObject({
+      snapshots: [{ limitId: 'provider-a' }],
+    });
   });
 });

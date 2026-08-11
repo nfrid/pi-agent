@@ -189,10 +189,18 @@ export function transcriptEntries(run: DelegatedRun): TranscriptPreviewEntry[] {
         .map((part) => (part.type === 'text' ? part.text : ''))
         .join('\n')
         .trim();
-      return text ? [{ label: 'Response', text, status: 'completed' as const }] : [];
+      return text
+        ? [{ label: 'Response', text, status: 'completed' as const }]
+        : [];
     }),
     ...(run.errorMessage?.trim()
-      ? [{ label: 'Error', text: run.errorMessage.trim(), status: 'error' as const }]
+      ? [
+          {
+            label: 'Error',
+            text: run.errorMessage.trim(),
+            status: 'error' as const,
+          },
+        ]
       : []),
   ];
 }
@@ -205,10 +213,7 @@ export function transcriptPreview(run: DelegatedRun): {
   const selected =
     entries.length <= EXPANDED_TRANSCRIPT_MAX_ENTRIES
       ? entries
-      : [
-          entries[0],
-          ...entries.slice(-EXPANDED_TRANSCRIPT_MAX_ENTRIES + 1),
-        ];
+      : [entries[0], ...entries.slice(-EXPANDED_TRANSCRIPT_MAX_ENTRIES + 1)];
   const lines = selected
     .filter((entry): entry is TranscriptPreviewEntry => Boolean(entry))
     .map((entry) => {
@@ -220,10 +225,14 @@ export function transcriptPreview(run: DelegatedRun): {
   let text = lines.join('\n');
   const entryTruncated = selected.length < entries.length;
   const charTruncated = text.length > EXPANDED_TRANSCRIPT_MAX_CHARS;
-  if (charTruncated) text = explicitTruncate(text, EXPANDED_TRANSCRIPT_MAX_CHARS);
+  if (charTruncated)
+    text = explicitTruncate(text, EXPANDED_TRANSCRIPT_MAX_CHARS);
   if (entryTruncated && !text.includes('[truncated;'))
     text += `\n… [truncated; ${entries.length - selected.length} transcript entries omitted]`;
-  return { text: text || '(no transcript captured)', truncated: entryTruncated || charTruncated };
+  return {
+    text: text || '(no transcript captured)',
+    truncated: entryTruncated || charTruncated,
+  };
 }
 
 export function usage(run: DelegatedRun): string {

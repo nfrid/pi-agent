@@ -10,7 +10,11 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from '@earendil-works/pi-tui';
-import { explicitTruncate, getDetails, transcriptEntries } from './render-utils';
+import {
+  explicitTruncate,
+  getDetails,
+  transcriptEntries,
+} from './render-utils';
 import type { DelegateDetails, DelegatedRun } from './types';
 
 const MAX_MODAL_CHARS = 64 * 1024;
@@ -25,7 +29,8 @@ function toolResultDetails(entry: unknown): DelegateDetails | undefined {
     toolName?: unknown;
     details?: unknown;
   };
-  if (value.role !== 'toolResult' || value.toolName !== 'delegate') return undefined;
+  if (value.role !== 'toolResult' || value.toolName !== 'delegate')
+    return undefined;
   if (!value.details || typeof value.details !== 'object') return undefined;
   return getDetails({ details: value.details as never });
 }
@@ -173,17 +178,19 @@ export async function showDelegateTranscript(
     ctx.ui.notify(`${title}\n\n${content}`, 'info');
     return;
   }
-  await ctx.ui.custom<void>((tui, theme, _keybindings, done) =>
-    new TranscriptViewer(tui, theme, title, content, () => done()),
-  {
-    overlay: true,
-    overlayOptions: {
-      width: '90%',
-      minWidth: 40,
-      maxHeight: '80%',
-      margin: 2,
+  await ctx.ui.custom<void>(
+    (tui, theme, _keybindings, done) =>
+      new TranscriptViewer(tui, theme, title, content, () => done()),
+    {
+      overlay: true,
+      overlayOptions: {
+        width: '90%',
+        minWidth: 40,
+        maxHeight: '80%',
+        margin: 2,
+      },
     },
-  });
+  );
 }
 
 export function registerDelegateTranscriptCommand(
