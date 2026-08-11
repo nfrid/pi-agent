@@ -36,6 +36,7 @@ vi.mock('../extract', () => ({
 }));
 
 import web from '../index';
+import { MAX_INLINE_CHARS } from '../result-support';
 import type { StoredSearchData } from '../storage';
 
 type ToolResult = {
@@ -91,7 +92,7 @@ async function reconstructInitialView(
   const nextOffset = Number(match?.[2]);
   expect(responseId).toBe(String(initial.details.responseId));
   expect(nextOffset).toBe(initial.details.nextOffset);
-  expect(rendered.length).toBeLessThanOrEqual(30_000);
+  expect(rendered.length).toBeLessThanOrEqual(MAX_INLINE_CHARS);
   const continued = await getContent.execute(
     'continue',
     { responseId, view: 'summary', offset: nextOffset, maxChars: 100_000 },

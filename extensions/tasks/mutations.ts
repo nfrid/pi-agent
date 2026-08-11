@@ -12,7 +12,12 @@ import {
   validateDeps,
 } from './domain';
 import { dashboard } from './format';
-import type { Action, Params, Task } from './model';
+import {
+  type Action,
+  MAX_TODO_RESULT_CHARS,
+  type Params,
+  type Task,
+} from './model';
 import {
   bumpNextIdFromTasks,
   captureMutationSnapshot,
@@ -137,7 +142,12 @@ function mutateUnsafe(
   if (action === 'list')
     return {
       changed: false,
-      message: dashboard(store, Boolean(params.include_done), 80),
+      message: dashboard(
+        store,
+        Boolean(params.include_done),
+        80,
+        MAX_TODO_RESULT_CHARS,
+      ),
     };
   if (action === 'batch')
     return {

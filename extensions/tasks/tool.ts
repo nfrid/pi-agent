@@ -2,9 +2,27 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { normalizeId, stats } from './domain';
 import { dashboard } from './format';
-import { ACTION_GLYPH, paramsSchema, TOOL, type ToolDetails } from './model';
+import {
+  ACTION_GLYPH,
+  MAX_TODO_RESULT_CHARS,
+  paramsSchema,
+  TOOL,
+  type ToolDetails,
+} from './model';
 import { applyMutation } from './mutations';
 import type { TaskStore } from './store';
+
+const TODO_RESULT_TRUNCATION_MARKER =
+  '\n… todo output truncated; use todo action:list after narrowing the active set.';
+
+function boundedResultText(text: string): string {
+  if (text.length <= MAX_TODO_RESULT_CHARS) return text;
+  const budget = Math.max(
+    0,
+    MAX_TODO_RESULT_CHARS - TODO_RESULT_TRUNCATION_MARKER.length,
+  );
+  return `${text.slice(0, budget)}${TODO_RESULT_TRUNCATION_MARKER}`;
+}
 
 export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
   pi.registerTool<typeof paramsSchema, ToolDetails>({
@@ -27,19 +45,22 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
       const result = applyMutation(store, pi, ctx, params.action, params, {
         updateOnError: false,
       });
-      if (result.error) throw new Error(result.message);
+      const message = boundedResultText(result.message);
+      if (result.error) throw new Error(message);
 
       const details: ToolDetails = {
         action: params.action,
         changed: result.changed,
-        message: result.message,
+        message,
         stats: stats(store),
       };
       // The list message already is the dashboard; do not render it twice.
       const text =
         params.action === 'list'
-          ? result.message
-          : `${result.message}\n${dashboard(store, Boolean(params.include_done), 24)}`;
+          ? message
+          : boundedResultText(
+              `${message}\n${dashboard(store, Boolean(params.include_done), 24, MAX_TODO_RESULT_CHARS)}`,
+            );
       return {
         content: [{ type: 'text', text }],
         details,

@@ -144,6 +144,11 @@ export const TOOL = 'todo';
 export const LEGACY_TODO_SNAPSHOT_TYPE = 'lean-todo-replay-v2';
 export const LEGACY_TODO_REPLAY_TYPE = 'lean-todo-replay';
 export const MAX_TODO_CONTEXT_CHARS = 12_000;
+/** Maximum routine todo tool text; state remains available through later list calls. */
+export const MAX_TODO_RESULT_CHARS = 8_000;
+/** Keep one task row actionable without allowing a note to dominate context. */
+export const MAX_TODO_FIELD_CHARS = 512;
+export const MAX_TODO_DEPENDENCIES = 16;
 export const MAX_WIDGET_LINES = 12;
 
 export const STATUS_GLYPH: Record<Status, string> = {

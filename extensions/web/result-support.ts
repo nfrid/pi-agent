@@ -14,7 +14,8 @@ import {
   type WebResultStore,
 } from './storage';
 
-const MAX_INLINE_CHARS = 30_000;
+/** Keep routine web results small; exact content remains in the artifact/retrieval view. */
+export const MAX_INLINE_CHARS = 12_000;
 const ARTIFACT_WARNING =
   'Exact artifact unavailable; continuation is limited to this session.';
 const CAPTURE_LIMIT_WARNING =
