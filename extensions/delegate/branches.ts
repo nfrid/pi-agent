@@ -71,7 +71,7 @@ export async function listBranchEntries(
 const MAX_DETAIL_FIELD_CHARS = 512;
 const MAX_DETAIL_ERROR_CHARS = 2_000;
 const MAX_DETAIL_PATH_CHARS = 256;
-const MAX_DETAIL_PATHS = 24;
+const MAX_DETAIL_PATHS = 40;
 
 function bounded(value: string, maxChars: number): string {
   return value.length <= maxChars
@@ -168,20 +168,12 @@ function reviewSelectionSummary(review: BranchReview): string {
     : 'none';
   const budget = review.patchBudget
     ? `${review.patchBudget} chars`
-    : review.summaryOnly
-      ? 'not requested'
-      : 'default (60,000 chars)';
+    : 'default (60,000 chars)';
   const summary = review.pathSummary;
   if (!summary)
     return [
       `Selectors: mode=${review.mode}; summaryOnly=${review.summaryOnly ? 'yes' : 'no'}; paths=${selectors}; patchBudget=${budget}`,
       `Patch: ${review.summaryOnly ? 'body omitted (summaryOnly)' : `budget=${budget}; truncated=${review.patchTruncated ? 'yes' : 'no'}; omitted=${review.omittedPatchChars ?? 0} chars`}`,
-    ].join('\n');
-  if (!review.pathSelectors?.length)
-    return [
-      `Selectors: mode=${review.mode}; summaryOnly=${review.summaryOnly ? 'yes' : 'no'}; paths=${selectors}; patchBudget=${budget}`,
-      `Patch: ${review.summaryOnly ? 'body omitted (summaryOnly)' : `budget=${budget}; truncated=${review.patchTruncated ? 'yes' : 'no'}; omitted=${review.omittedPatchChars ?? 0} chars`}`,
-      `Changed paths: total=${summary.total}; matched=${summary.matched}; omitted=${summary.omitted}`,
     ].join('\n');
   const matched = summary.matchedPaths
     .slice(0, MAX_DETAIL_PATHS)
@@ -235,7 +227,7 @@ export function formatReview(
       : `\n[review truncated — log/stat/diff output is bounded${review.patchBudget ? `; patch budget=${review.patchBudget} chars` : ''}; inspect the complete review with: git -C ${repository} log --oneline ${workBase(record)}..${branch} and git -C ${repository} diff ${workBase(record)}..${branch}]`
     : '';
   const patch = review.summaryOnly
-    ? '[patch body omitted — summaryOnly is active; set summaryOnly: false or use patchBudget for bounded patch evidence]'
+    ? '[patch body omitted — summaryOnly is active]'
     : review.diff;
   return [
     `${branch} (${bounded(review.state, MAX_DETAIL_FIELD_CHARS)}), ${range}`,

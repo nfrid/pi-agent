@@ -53,7 +53,7 @@ const Parameters = Type.Object({
       minimum: 1,
       maximum: 60_000,
       description:
-        'For review only, maximum patch-body characters when summaryOnly is false. The default review omits patch bodies; set summaryOnly: false or provide this selector to inspect bounded patch evidence. summaryOnly cannot be combined with this selector.',
+        'For review only, maximum patch-body characters. The default is 60,000; summaryOnly cannot be combined with this selector.',
     }),
   ),
   id: Type.Optional(
@@ -97,12 +97,12 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
     name: 'delegate_branches',
     label: 'Delegate Branches',
     description:
-      'Review and integrate harness-managed delegate branches, or inspect caller-owned worktrees without taking ownership. list defaults to this parent session; set scope: all for repository history, including legacy records. review is summary-only by default so routine inspection does not inject a raw patch; set summaryOnly: false or patchBudget for bounded patch evidence. set incremental: true to show only task patches not represented in current parent HEAD. Use exact repository-relative paths for a narrower review. merge either lands cleanly or leaves your checkout untouched, and refuses caller-owned branches. drop never deletes a caller-owned checkout or branch. Actions: list, review, merge, drop.',
+      "Review and integrate harness-managed delegate branches, or inspect caller-owned worktrees without taking ownership. list defaults to this parent session; set scope: all for repository history. review gives you the task's commits and diff measured from its own starting point by default; set incremental: true to show only task patches not represented in current parent HEAD. Use summaryOnly, exact repository-relative paths, or patchBudget for bounded review. merge either lands cleanly or leaves your checkout untouched, and refuses caller-owned branches. drop never deletes a caller-owned checkout or branch. Actions: list, review, merge, drop.",
     promptSnippet:
       'Review or merge writable delegate branches; continue or drop retired read-only snapshots',
     promptGuidelines: [
       'After a writable run, review its branch before merging, and run the check the task was given yourself. A branch that merges cleanly can still be wrong.',
-      'For a continued branch after integration, use review with incremental: true to inspect only task patches not represented in current HEAD; omit it for the full recorded-range audit. Review omits patch bodies by default; set summaryOnly: false or patchBudget for bounded patch evidence, and use exact paths before requesting a larger view. Omitted paths are evidence that the view is partial.',
+      'For a continued branch after integration, use review with incremental: true to inspect only task patches not represented in current HEAD; omit it for the full recorded-range audit. Use summaryOnly or exact paths before requesting a bounded patchBudget; omitted paths are evidence that the view is partial.',
       'Merge sibling branches one at a time, reviewing between them: parallel tasks never collide in their worktrees, but their merges can.',
       'Drop a branch once its work is merged, so list stays a picture of what is still outstanding. A retired read-only snapshot is not mergeable: continue it for the same source or targeted refresh, or drop it when no longer needed.',
     ],
@@ -173,11 +173,9 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
               details: { action: 'review' as const },
             };
           }
-          const summaryOnly =
-            params.summaryOnly ?? params.patchBudget === undefined;
           const review = await reviewBranch(record, {
             mode: params.incremental ? 'incremental' : 'full',
-            summaryOnly,
+            summaryOnly: params.summaryOnly,
             paths: params.paths,
             patchBudget: params.patchBudget,
           });

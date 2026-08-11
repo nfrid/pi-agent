@@ -162,11 +162,9 @@ describe('delegate_branches', () => {
       await tool.execute('c1', { action: 'review', id: record.id }),
     );
     expect(response).toContain('Changed:   120 paths');
-    expect(response).toContain('… and 96 more paths (path list bounded)');
-    expect(response).toContain('[patch body omitted');
-    expect(response).toContain('set summaryOnly: false or use patchBudget');
+    expect(response).toContain('… and 80 more paths (path list bounded)');
     expect(response).toContain('evidence-path-');
-    expect(response.length).toBeLessThan(16_000);
+    expect(response.length).toBeLessThan(100_000);
   });
 
   test('supports summary, safe path filtering, and a selected patch budget', async () => {
@@ -263,11 +261,7 @@ describe('delegate_branches', () => {
     });
 
     const full = body(
-      await tool.execute('c2', {
-        action: 'review',
-        id: record.id,
-        summaryOnly: false,
-      }),
+      await tool.execute('c2', { action: 'review', id: record.id }),
     );
     const incremental = await tool.execute('c3', {
       action: 'review',
