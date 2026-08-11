@@ -22,6 +22,20 @@ const creator = createWorktreeCreator<WorktreeRecord>(delegateWorktreeStore, {
   environmentVariable: 'PI_DELEGATE_WORKTREE',
   carryCommitMessage:
     'Carried uncommitted parent work\n\nApplied by pi delegate so the task starts where the parent actually is.',
+  claimCallerWorktree: (validated) => {
+    const occupied = listWorktrees().find((record) => {
+      if (record.branch === validated.branch) return true;
+      try {
+        return canonical(record.worktreePath) === validated.worktreePath;
+      } catch {
+        return false;
+      }
+    });
+    if (occupied)
+      throw new Error(
+        'Caller worktree unavailable: this path is already attached to a delegate session or retained worktree record.',
+      );
+  },
 });
 
 /** Generic Git/create mechanics are implemented by the shared manager. */
@@ -33,31 +47,6 @@ export async function prepareWorktree(options: {
   worktreePath?: string;
   parentSessionId?: string;
 }): Promise<WorktreePreparation> {
-  if (options.worktreePath) {
-    try {
-      const validated = await validateExistingWorktree({
-        cwd: options.cwd,
-        worktreePath: options.worktreePath,
-      });
-      const occupied = listWorktrees().find((record) => {
-        if (record.branch === validated.branch) return true;
-        try {
-          return canonical(record.worktreePath) === validated.worktreePath;
-        } catch {
-          return false;
-        }
-      });
-      if (occupied)
-        return {
-          fallbackReason:
-            'Caller worktree unavailable: this path is already attached to a delegate session or retained worktree record.',
-        };
-    } catch (error) {
-      return {
-        fallbackReason: `Caller worktree unavailable: ${error instanceof Error ? error.message : String(error)}.`,
-      };
-    }
-  }
   const preparation = await creator.prepareWorktree(options);
   if (!preparation.worktree || !options.parentSessionId) return preparation;
   const record = {

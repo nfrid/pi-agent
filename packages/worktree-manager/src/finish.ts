@@ -1,4 +1,5 @@
 import { existsSync, rmSync } from 'node:fs';
+import { validateExistingWorktree, withWorktreePathLock } from './create.js';
 import { git, gitText, splitZ } from './git.js';
 import { type WorktreeRecord, workBase } from './model.js';
 import type { WorktreeStore } from './store.js';
@@ -62,7 +63,7 @@ export interface WorktreeFinisher<
   retireWorktreeSnapshot(id: string): Promise<Record>;
   removeWorktree(
     id: string,
-    options?: { deleteBranch?: boolean },
+    options?: { deleteBranch?: boolean; preLaunch?: boolean },
   ): Promise<void>;
   discardFreshWorktree(id: string): Promise<{ warning?: string }>;
 }
@@ -102,6 +103,16 @@ export function createWorktreeFinisher<
     }
 
     try {
+      if (record.ownership === 'caller')
+        await validateExistingWorktree({
+          cwd: record.repositoryRoot,
+          worktreePath: record.worktreePath,
+          expectedRepositoryRoot: record.repositoryRoot,
+          expectedBranch: record.branch,
+          requireClean: false,
+          allowRequestedCheckout: record.repositoryRoot === record.worktreePath,
+        });
+
       // A continuation is allowed to append commits, but it must not replace
       // the previously recorded branch history. Check before committing pending
       // edits so a reset followed by unrelated work cannot overwrite the
@@ -127,6 +138,16 @@ export function createWorktreeFinisher<
       const callerReadOnly =
         record.ownership === 'caller' && options.commitPending === false;
       if (callerReadOnly) {
+        if (record.ownership === 'caller')
+          await validateExistingWorktree({
+            cwd: record.repositoryRoot,
+            worktreePath: record.worktreePath,
+            expectedRepositoryRoot: record.repositoryRoot,
+            expectedBranch: record.branch,
+            requireClean: true,
+            allowRequestedCheckout:
+              record.repositoryRoot === record.worktreePath,
+          });
         const status = String(
           await git(record.worktreePath, [
             'status',
@@ -152,23 +173,40 @@ export function createWorktreeFinisher<
         record.changedPaths = [];
       } else {
         // Even a failed or aborted run may have produced useful partial work,
-        // so the branch is settled regardless of outcome.
-        await commitPendingWork(record, options.taskName, commitAttribution);
-        record.headCommit = await gitText(record.worktreePath, [
-          'rev-parse',
-          'HEAD',
-        ]);
-        record.changedPaths = splitZ(
-          String(
-            await git(record.worktreePath, [
-              'diff',
-              '--name-only',
-              '-z',
-              workBase(record),
-              record.headCommit,
-            ]),
-          ),
-        );
+        // so the branch is settled regardless of outcome. Caller-owned paths
+        // are revalidated while an atomic path lock covers validation and the
+        // first Git write, preventing another delegate claim in this process.
+        const write = async () => {
+          if (record.ownership === 'caller')
+            await validateExistingWorktree({
+              cwd: record.repositoryRoot,
+              worktreePath: record.worktreePath,
+              expectedRepositoryRoot: record.repositoryRoot,
+              expectedBranch: record.branch,
+              requireClean: false,
+              allowRequestedCheckout:
+                record.repositoryRoot === record.worktreePath,
+            });
+          await commitPendingWork(record, options.taskName, commitAttribution);
+          record.headCommit = await gitText(record.worktreePath, [
+            'rev-parse',
+            'HEAD',
+          ]);
+          record.changedPaths = splitZ(
+            String(
+              await git(record.worktreePath, [
+                'diff',
+                '--name-only',
+                '-z',
+                workBase(record),
+                record.headCommit,
+              ]),
+            ),
+          );
+        };
+        if (record.ownership === 'caller')
+          await withWorktreePathLock(record.worktreePath, write);
+        else await write();
       }
       record.status = 'finished';
       if (options.outcome !== 'success') {
@@ -239,12 +277,16 @@ export function createWorktreeFinisher<
    */
   async function removeWorktree(
     id: string,
-    options: { deleteBranch?: boolean } = {},
+    options: { deleteBranch?: boolean; preLaunch?: boolean } = {},
   ): Promise<void> {
     const record = store.loadWorktree(id);
     if (!record) return;
 
     if (record.ownership === 'caller') {
+      if (record.status === 'active' && !options.preLaunch)
+        throw new Error(
+          'Cannot release an active caller-owned worktree; wait for the delegate to settle or use pre-launch cleanup.',
+        );
       // Releasing our record is the only cleanup permitted for a caller-owned
       // checkout. Never invoke worktree remove, prune, or branch -D here.
       store.deleteWorktreeRecord(id);
@@ -286,7 +328,7 @@ export function createWorktreeFinisher<
     id: string,
   ): Promise<{ warning?: string }> {
     try {
-      await removeWorktree(id, { deleteBranch: true });
+      await removeWorktree(id, { deleteBranch: true, preLaunch: true });
       return {};
     } catch (error) {
       return {

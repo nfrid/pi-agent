@@ -12,6 +12,7 @@ export {
   WORKTREE_DIR,
   type WorktreeCreator,
   type WorktreeCreatorOptions,
+  withWorktreePathLock,
 } from './create.js';
 export {
   createWorktreeFinisher,

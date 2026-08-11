@@ -3,6 +3,7 @@ import {
   lstatSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
@@ -100,6 +101,91 @@ describe('caller-owned worktree selection', () => {
     }
   });
 
+  test('rejects branch switching and path replacement before finish writes', async () => {
+    const selected = createCallerWorktree();
+    let record: Awaited<ReturnType<typeof prepared>>['record'] | undefined;
+    try {
+      const preparation = await prepareWorktree({
+        cwd: repository,
+        name: 'Branch switch',
+        worktreePath: selected,
+      });
+      if (!preparation.worktree)
+        throw new Error(preparation.fallbackReason ?? 'preparation failed');
+      record = preparation.worktree.record;
+      git(selected, ['switch', '--detach', 'HEAD']);
+      const switched = await finishWorktree(record.id, {
+        taskName: 'Branch switch',
+        outcome: 'success',
+        commitPending: true,
+      });
+      expect(switched.error).toMatch(
+        /caller worktree must be checked out on a branch/,
+      );
+
+      git(repository, ['worktree', 'remove', '--force', selected]);
+      symlinkSync(repository, selected);
+      const replaced = await finishWorktree(record.id, {
+        taskName: 'Path replacement',
+        outcome: 'success',
+        commitPending: true,
+      });
+      expect(replaced.error).toMatch(/must not be a symbolic link/);
+    } finally {
+      if (record) await removeWorktree(record.id);
+      rmSync(selected, { recursive: true, force: true });
+      git(repository, ['worktree', 'prune']);
+      git(repository, ['branch', '-D', 'caller/owned']);
+    }
+  });
+
+  test('refuses release of an active caller-owned record', async () => {
+    const selected = createCallerWorktree();
+    try {
+      const preparation = await prepareWorktree({
+        cwd: repository,
+        name: 'Active release',
+        worktreePath: selected,
+      });
+      if (!preparation.worktree)
+        throw new Error(preparation.fallbackReason ?? 'preparation failed');
+      const id = preparation.worktree.record.id;
+      await expect(removeWorktree(id)).rejects.toThrow(/active caller-owned/);
+      expect(loadWorktree(id)).toBeDefined();
+      await discardFreshWorktree(id);
+      expect(loadWorktree(id)).toBeUndefined();
+      expect(existsSync(selected)).toBe(true);
+    } finally {
+      git(repository, ['worktree', 'remove', '--force', selected]);
+      git(repository, ['branch', '-D', 'caller/owned']);
+    }
+  });
+
+  test('atomically rejects concurrent duplicate caller claims', async () => {
+    const selected = createCallerWorktree();
+    try {
+      const results = await Promise.all([
+        prepareWorktree({
+          cwd: repository,
+          name: 'Concurrent one',
+          worktreePath: selected,
+        }),
+        prepareWorktree({
+          cwd: repository,
+          name: 'Concurrent two',
+          worktreePath: selected,
+        }),
+      ]);
+      expect(results.filter((result) => result.worktree)).toHaveLength(1);
+      expect(results.filter((result) => result.fallbackReason)).toHaveLength(1);
+      const winner = results.find((result) => result.worktree)?.worktree;
+      if (winner) await discardFreshWorktree(winner.record.id);
+    } finally {
+      git(repository, ['worktree', 'remove', '--force', selected]);
+      git(repository, ['branch', '-D', 'caller/owned']);
+    }
+  });
+
   test('rejects the main checkout, dirty paths, and duplicate ownership', async () => {
     const selected = createCallerWorktree();
     try {
@@ -134,7 +220,7 @@ describe('caller-owned worktree selection', () => {
       });
       expect(duplicate.worktree).toBeUndefined();
       expect(duplicate.fallbackReason).toMatch(/already attached/);
-      if (first.worktree) await removeWorktree(first.worktree.record.id);
+      if (first.worktree) await discardFreshWorktree(first.worktree.record.id);
     } finally {
       git(repository, ['worktree', 'remove', '--force', selected]);
       git(repository, ['branch', '-D', 'caller/owned']);

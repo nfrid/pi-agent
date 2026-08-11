@@ -229,9 +229,12 @@ unchanged when it is omitted. The harness validates that the path is a
 registered worktree (not merely a directory containing `.git`), belongs to the
 same repository identity as `cwd`, is not the requested checkout, is attached
 to a branch, has no in-progress merge/cherry-pick/rebase, and is clean of
-tracked and non-ignored untracked changes. It also refuses a path already held
-by another delegate record. The existing branch tip is the source snapshot;
-`from`/`base` cannot be combined with `worktreePath`.
+tracked and non-ignored untracked changes. It also refuses a path or branch already held by another delegate record;
+validation and first record publication are serialized by an atomic claim. The
+existing branch tip is the source snapshot; `from`/`base` cannot be combined
+with `worktreePath`. Before writable finish-time Git writes, the harness repeats
+repository, registration, canonical non-symlink path, and symbolic-branch
+validation under the same path lock.
 
 The resulting record is explicitly caller-owned. The harness does not create a
 nested checkout or branch, carry WIP, remove/prune the checkout, delete its
@@ -241,7 +244,9 @@ commits and reports a run that modified the caller path without changing those
 files. `delegate_branches review` remains available as bounded evidence from
 the recorded starting tip, while `merge` is refused with instructions to
 manage the branch in its own checkout. `drop`/`/delegate-worktrees ... drop`
-only releases the harness record and retains both checkout and branch.
+only releases the harness record and retains both checkout and branch. Active
+caller-owned records cannot be released; only pre-launch rollback may release
+one after setup never launched a child.
 
 A continuation reuses the recorded caller path, branch, repository, and last
 known tip. It cannot replace `worktreePath`, refresh it, or silently fall back

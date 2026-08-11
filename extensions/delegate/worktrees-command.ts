@@ -47,12 +47,12 @@ export function registerDelegateWorktreesCommand(pi: ExtensionAPI): void {
       if (action === 'show') {
         const state = await branchState(record);
         const detail = formatBranchDetail({ record, state });
-        ctx.ui.notify(
-          record.snapshot
-            ? `${detail}\nDrop:     /delegate-worktrees ${id} drop`
-            : `${detail}\n\nReview:    delegate_branches review ${id}\nIntegrate: delegate_branches merge ${id}\nDiscard:   /delegate-worktrees ${id} drop`,
-          'info',
-        );
+        const guidance = record.snapshot
+          ? `Drop:     /delegate-worktrees ${id} drop`
+          : record.ownership === 'caller'
+            ? `Review:    delegate_branches review ${id}\nManage:    merge or otherwise manage this caller-owned branch in its checkout\nRelease:   /delegate-worktrees ${id} drop`
+            : `Review:    delegate_branches review ${id}\nIntegrate: delegate_branches merge ${id}\nDiscard:   /delegate-worktrees ${id} drop`;
+        ctx.ui.notify(`${detail}\n\n${guidance}`, 'info');
         return;
       }
 

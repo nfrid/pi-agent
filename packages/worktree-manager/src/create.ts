@@ -1,13 +1,16 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFileSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import {
   canonical,
@@ -34,6 +37,10 @@ const DEFAULT_CARRY_COMMIT_MESSAGE =
   'Carried uncommitted parent work\n\nApplied by pi worktree manager so the task starts from the parent working state.';
 const MAX_BASE_REF_CHARS = 512;
 const SAFE_BASE_REF = /^[A-Za-z0-9][A-Za-z0-9._/@+-]*$/;
+const WORKTREE_LOCK_TIMEOUT_MS = 30_000;
+const WORKTREE_LOCK_RETRY_MS = 20;
+const WORKTREE_LOCK_STALE_MS = 120_000;
+const WORKTREE_LOCK_OWNER = randomUUID();
 
 function slugify(name: string): string {
   const slug = name
@@ -153,6 +160,80 @@ async function carryWorkInProgress(
   return await gitText(worktreePath, ['rev-parse', 'HEAD']);
 }
 
+function processIsAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Serialize caller-worktree validation and publication across delegate
+ * processes. The lock is outside the checkout and uses mkdir as an atomic
+ * claim; stale locks from a crashed process are recoverable by PID/age.
+ */
+export async function withWorktreePathLock<T>(
+  worktreePath: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  const targetPath = canonical(worktreePath);
+  const identity = await repositoryIdentity(targetPath);
+  const lockRoot = path.join(tmpdir(), 'pi-worktree-manager-locks');
+  mkdirSync(lockRoot, { recursive: true });
+  const key = createHash('sha256')
+    .update(`${identity}\\u0000${targetPath}`)
+    .digest('hex');
+  const lockPath = path.join(lockRoot, `${key}.lock`);
+  const ownerPath = path.join(lockPath, 'owner.json');
+  const startedAt = Date.now();
+
+  while (true) {
+    try {
+      mkdirSync(lockPath);
+      writeFileSync(
+        ownerPath,
+        JSON.stringify({ pid: process.pid, owner: WORKTREE_LOCK_OWNER }),
+        'utf8',
+      );
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      let stale = false;
+      try {
+        const owner = JSON.parse(readFileSync(ownerPath, 'utf8')) as {
+          pid?: unknown;
+        };
+        stale = typeof owner.pid === 'number' && !processIsAlive(owner.pid);
+      } catch {
+        try {
+          stale =
+            Date.now() - statSync(lockPath).mtimeMs > WORKTREE_LOCK_STALE_MS;
+        } catch {
+          stale = false;
+        }
+      }
+      if (stale) {
+        rmSync(lockPath, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() - startedAt >= WORKTREE_LOCK_TIMEOUT_MS)
+        throw new Error('timed out waiting for the caller worktree claim');
+      await new Promise((resolve) =>
+        setTimeout(resolve, WORKTREE_LOCK_RETRY_MS),
+      );
+    }
+  }
+
+  try {
+    return await action();
+  } finally {
+    rmSync(lockPath, { recursive: true, force: true });
+  }
+}
+
 interface RegisteredWorktree {
   path: string;
   branch?: string;
@@ -198,11 +279,15 @@ export async function validateExistingWorktree(options: {
   expectedHead?: string;
   /** Continuations may validate the already-selected checkout as cwd. */
   allowRequestedCheckout?: boolean;
+  /** Finish-time validation may inspect a writable dirty checkout. */
+  requireClean?: boolean;
 }): Promise<ExistingWorktreeValidation> {
   if (!path.isAbsolute(options.worktreePath))
     throw new Error('the caller worktree path must be absolute');
   if (!existsSync(options.worktreePath))
     throw new Error('the caller worktree path does not exist');
+  if (lstatSync(options.worktreePath).isSymbolicLink())
+    throw new Error('the caller worktree path must not be a symbolic link');
   if (!statSync(options.worktreePath).isDirectory())
     throw new Error('the caller worktree path is not a directory');
 
@@ -258,7 +343,7 @@ export async function validateExistingWorktree(options: {
       '--untracked-files=all',
     ]),
   );
-  if (status.trim())
+  if ((options.requireClean ?? true) && status.trim())
     throw new Error('the caller worktree must be clean before delegation');
   for (const marker of ['MERGE_HEAD', 'CHERRY_PICK_HEAD'] as const) {
     if (
@@ -303,6 +388,8 @@ export interface WorktreeCreatorOptions {
   environmentVariable?: string;
   /** Commit message used for the synthetic parent-WIP carry commit. */
   carryCommitMessage?: string;
+  /** Atomically reject an already-claimed caller path before publication. */
+  claimCallerWorktree?: (worktree: ExistingWorktreeValidation) => void;
 }
 
 export interface WorktreeCreator<
@@ -331,6 +418,7 @@ export function createWorktreeCreator<
     options.environmentVariable ?? DEFAULT_WORKTREE_ENVIRONMENT_VARIABLE;
   const carryCommitMessage =
     options.carryCommitMessage ?? DEFAULT_CARRY_COMMIT_MESSAGE;
+  const claimCallerWorktree = options.claimCallerWorktree;
   const environment = (id: string): NodeJS.ProcessEnv => ({
     [environmentVariable]: id,
   });
@@ -371,34 +459,37 @@ export function createWorktreeCreator<
             'Caller worktree selection cannot be combined with a base/ref; the existing branch is the source snapshot.',
         };
       try {
-        const existing = await validateExistingWorktree({
-          cwd: options.cwd,
-          worktreePath: options.worktreePath,
+        return await withWorktreePathLock(options.worktreePath, async () => {
+          const existing = await validateExistingWorktree({
+            cwd: options.cwd,
+            worktreePath: options.worktreePath as string,
+          });
+          claimCallerWorktree?.(existing);
+          const canonicalCwd = canonical(options.cwd);
+          const workingDirectory = path.relative(root, canonicalCwd);
+          const now = new Date().toISOString();
+          const record = {
+            version: 1 as const,
+            id,
+            repositoryRoot: existing.repositoryRoot,
+            worktreePath: existing.worktreePath,
+            workingDirectory,
+            branch: existing.branch,
+            ownership: 'caller' as const,
+            baseHead: existing.headCommit,
+            base: 'head' as const,
+            carriedWip: false,
+            status: 'active' as const,
+            createdAt: now,
+            updatedAt: now,
+            // The selected checkout is already at this tip. Keeping the initial
+            // tip lets read-only runs detect a shell-side commit without ever
+            // committing or deleting caller-owned work.
+            headCommit: existing.headCommit,
+          } as Record;
+          store.writeWorktreeRecord(record);
+          return { worktree: { record, env: environment(id) } };
         });
-        const canonicalCwd = canonical(options.cwd);
-        const workingDirectory = path.relative(root, canonicalCwd);
-        const now = new Date().toISOString();
-        const record = {
-          version: 1 as const,
-          id,
-          repositoryRoot: existing.repositoryRoot,
-          worktreePath: existing.worktreePath,
-          workingDirectory,
-          branch: existing.branch,
-          ownership: 'caller' as const,
-          baseHead: existing.headCommit,
-          base: 'head' as const,
-          carriedWip: false,
-          status: 'active' as const,
-          createdAt: now,
-          updatedAt: now,
-          // The selected checkout is already at this tip. Keeping the initial
-          // tip lets read-only runs detect a shell-side commit without ever
-          // committing or deleting caller-owned work.
-          headCommit: existing.headCommit,
-        } as Record;
-        store.writeWorktreeRecord(record);
-        return { worktree: { record, env: environment(id) } };
       } catch (error) {
         return {
           fallbackReason: `Caller worktree unavailable: ${error instanceof Error ? error.message : String(error)}.`,
