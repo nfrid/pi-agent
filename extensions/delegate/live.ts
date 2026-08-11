@@ -104,6 +104,14 @@ function statusSnapshot(
           })),
         }
       : {}),
+    ...(status.result
+      ? {
+          result: {
+            kind: status.result.kind,
+            status: status.result.status,
+          },
+        }
+      : {}),
     ...(status.lifecycle
       ? {
           lifecycle: {

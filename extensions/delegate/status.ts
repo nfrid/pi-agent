@@ -1,5 +1,10 @@
+import type { DelegateResult } from './contribution';
 import { cloneDelegateLifecycle } from './lifecycle';
-import { serializeDelegateRunForPublic } from './structured-result';
+import {
+  getDelegateResultSpec,
+  getSettledDelegateResult,
+  serializeDelegateRunForPublic,
+} from './structured-result';
 import type {
   DelegateContext,
   DelegatedActivity,
@@ -47,6 +52,7 @@ export interface DelegateStatusSnapshot {
   /** Ordered, bounded activity and response history across the lineage. */
   transcript?: DelegateTranscriptEntry[];
   transcriptTruncated?: boolean;
+  result?: DelegateResult;
   /** Harness-authored terminal projection retained in status snapshots. */
   lifecycle?: DelegateLifecycleProjection;
 }
@@ -131,6 +137,16 @@ function isSettled(state: DelegateRunState): boolean {
   return state !== 'queued' && state !== 'running';
 }
 
+function resultProjection(run: DelegatedRun): DelegateResult | undefined {
+  if (!getDelegateResultSpec(run)) return undefined;
+  if (!isSettled(getRunState(run)))
+    return { kind: 'structured', status: 'pending' };
+  return {
+    kind: 'structured',
+    status: getSettledDelegateResult(run)?.valid ? 'valid' : 'invalid',
+  };
+}
+
 function hasContent(activity: DelegatedActivity): boolean {
   return activity.type === 'thinking'
     ? Boolean(activity.latestText?.trim())
@@ -178,6 +194,7 @@ export class DelegateStatusStore {
         allowWrites: run.allowWrites === true,
         activity: displayActivity(run, undefined),
         transcript: transcript(run),
+        result: resultProjection(inputRun),
         lifecycle: cloneDelegateLifecycle(run.lifecycle),
         resultEntered: false,
         clearOnNextUserMessage: false,
@@ -201,6 +218,7 @@ export class DelegateStatusStore {
     record.allowWrites = run.allowWrites === true;
     record.activity = displayActivity(run, record.activity);
     record.transcript = transcript(run);
+    record.result = resultProjection(inputRun);
     record.lifecycle = cloneDelegateLifecycle(run.lifecycle);
     this.onChange();
   }
@@ -221,6 +239,7 @@ export class DelegateStatusStore {
       record.allowWrites = run.allowWrites === true;
       record.activity = displayActivity(run, record.activity);
       record.transcript = transcript(run);
+      record.result = resultProjection(inputRun);
       record.lifecycle = cloneDelegateLifecycle(run.lifecycle);
       changed = true;
     }
@@ -342,6 +361,7 @@ export class DelegateStatusStore {
         runs: _runs,
         transcript: _transcript,
         transcriptTruncated: _transcriptTruncated,
+        result: _result,
         ...snapshot
       } = current;
       const fullTranscript = ordered.flatMap((record, runIndex) =>
@@ -369,6 +389,7 @@ export class DelegateStatusStore {
           finishedAt: record.finishedAt,
         })),
         transcript: boundedTranscript,
+        ...(current.result ? { result: current.result } : {}),
         ...(boundedTranscript.length < fullTranscript.length
           ? { transcriptTruncated: true }
           : {}),

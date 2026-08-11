@@ -63,6 +63,17 @@ const DelegateTimingSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+const DelegateResultSchema = Type.Object(
+  {
+    kind: Type.Literal('structured'),
+    status: Type.Union([
+      Type.Literal('pending'),
+      Type.Literal('valid'),
+      Type.Literal('invalid'),
+    ]),
+  },
+  { additionalProperties: false },
+);
 const DelegateTranscriptEntrySchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 512 }),
@@ -117,6 +128,7 @@ export const DelegateStatusSchema = Type.Object(
       ),
     ),
     transcriptTruncated: Type.Optional(Type.Boolean()),
+    result: Type.Optional(DelegateResultSchema),
     lifecycle: Type.Optional(DelegateLifecycleSchema),
   },
   { additionalProperties: false },
@@ -133,6 +145,7 @@ export type DelegateActivity = Static<typeof DelegateActivitySchema>;
 export type DelegateTranscriptEntry = Static<
   typeof DelegateTranscriptEntrySchema
 >;
+export type DelegateResult = Static<typeof DelegateResultSchema>;
 export type DelegateStatus = Static<typeof DelegateStatusSchema>;
 export type DelegateStatusViewModel = Static<
   typeof DelegateStatusViewModelSchema

@@ -5,7 +5,11 @@ import type { TranscriptModelItem } from '../../transcript';
 import { activityStepParts } from './activity';
 import { activityTitleLine } from './activity-lead';
 import { ActivityStepContent } from './activity-summary';
-import { ToolInspector, toolInspectorRecord } from './inspector';
+import {
+  BoundedPayloadPreview,
+  ToolInspector,
+  toolInspectorRecord,
+} from './inspector';
 import { transcriptItemTimestamp, transcriptRoleLabel } from './landmarks';
 
 function ThinkingBlobs({
@@ -132,6 +136,65 @@ function TranscriptEventEntry({
   );
 }
 
+export interface SkillInvocation {
+  name: string;
+  location?: string;
+  instructions: string;
+  request?: string;
+}
+
+/** Recognize the model-facing skill envelope without exposing protocol noise. */
+export function parseSkillInvocation(
+  text: string,
+): SkillInvocation | undefined {
+  const match = text.match(
+    /^<skill\b([^>]*)>\s*([\s\S]*?)\s*<\/skill>(?:\s*\n\n([\s\S]*))?$/u,
+  );
+  if (!match) return undefined;
+  const name = match[1]?.match(/\bname="([^"]*)"/u)?.[1];
+  if (!name) return undefined;
+  const location = match[1]?.match(/\blocation="([^"]*)"/u)?.[1];
+  const instructions = match[2]?.trim() ?? '';
+  const request = match[3]?.trim() || undefined;
+  return {
+    name,
+    ...(location ? { location } : {}),
+    instructions,
+    ...(request ? { request } : {}),
+  };
+}
+
+function SkillInvocationView({ invocation }: { invocation: SkillInvocation }) {
+  return (
+    <details className="skill-invocation">
+      <summary>
+        <span className="activity-icon" aria-hidden="true">
+          ✦
+        </span>
+        <strong>Skill · {invocation.name}</strong>
+        <small>invoked</small>
+        <span className="session-event-disclosure" aria-hidden="true">
+          ›
+        </span>
+      </summary>
+      <div className="skill-invocation-details">
+        {invocation.location ? (
+          <small>Instructions from {invocation.location}</small>
+        ) : null}
+        {invocation.instructions ? (
+          <Markdown>{invocation.instructions}</Markdown>
+        ) : null}
+        {invocation.request ? (
+          <div className="skill-invocation-request">
+            <strong>Request</strong>
+            <Markdown>{invocation.request}</Markdown>
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 function TranscriptEntry({
   item,
   cwd,
@@ -146,16 +209,27 @@ function TranscriptEntry({
     return <TranscriptEventEntry event={item.event} timestamp={timestamp} />;
   if (item.preparing)
     return (
-      <div className="transcript-entry preparing-toolcall" role="status">
+      <output className="transcript-entry preparing-toolcall">
         <span className="activity-icon">…</span>
         <strong>
           {item.text ? activityTitleLine(item.text) : 'Preparing tool call'}
         </strong>
         <small>preparing tool call</small>
         <DashboardTime className="transcript-time" timestamp={timestamp} />
-      </div>
+      </output>
     );
-  if (item.role && (item.text || item.imageCount || item.thinking?.length))
+  if (item.role && (item.text || item.imageCount || item.thinking?.length)) {
+    const skill =
+      item.role === 'user' && item.text
+        ? parseSkillInvocation(item.text)
+        : undefined;
+    if (skill)
+      return (
+        <div className="transcript-message-entry">
+          <SkillInvocationView invocation={skill} />
+          <DashboardTime className="transcript-time" timestamp={timestamp} />
+        </div>
+      );
     return (
       <div className="transcript-message-entry">
         {item.role === 'assistant' && item.thinking?.length ? (
@@ -185,6 +259,7 @@ function TranscriptEntry({
         ) : null}
       </div>
     );
+  }
   if (item.tool) {
     const tool = item.tool;
     const record = toolInspectorRecord(tool);
@@ -207,7 +282,6 @@ function TranscriptEntry({
     );
   }
   const raw = item.raw;
-  const text = JSON.stringify(raw, null, 2);
   return (
     <details className="transcript-entry">
       <summary>
@@ -216,7 +290,7 @@ function TranscriptEntry({
           : 'entry'}
         <DashboardTime className="transcript-time" timestamp={timestamp} />
       </summary>
-      <pre>{text}</pre>
+      <BoundedPayloadPreview value={raw} label="raw payload" />
     </details>
   );
 }

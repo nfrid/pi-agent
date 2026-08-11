@@ -7,6 +7,7 @@ import {
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import { DashboardTime, timestampDate } from './timestamp';
 
 export function PushButton() {
   const [status, setStatus] = useState<'off' | 'on' | 'unavailable'>('off');
@@ -63,6 +64,56 @@ function decodeVapidKey(value: string): ArrayBuffer {
   const binary = atob(padded);
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   return bytes.buffer as ArrayBuffer;
+}
+
+const NOTIFICATION_PREVIEW_LIMIT = 8;
+
+function usageNumber(
+  value: Record<string, unknown> | undefined,
+  keys: readonly string[],
+): number | undefined {
+  for (const key of keys)
+    if (typeof value?.[key] === 'number' && Number.isFinite(value[key]))
+      return value[key];
+  return undefined;
+}
+
+function resetTimestamp(
+  value: Record<string, unknown>,
+): number | string | undefined {
+  const raw =
+    value.resetAt ?? value.reset_at ?? value.resetTime ?? value.reset_time;
+  if (typeof raw === 'number' && Number.isFinite(raw))
+    return raw < 100_000_000_000 ? raw * 1_000 : raw;
+  if (typeof raw === 'string' && timestampDate(raw)) return raw;
+  return undefined;
+}
+
+function ResetTiming({ window }: { window?: Record<string, unknown> }) {
+  if (!window) return null;
+  const reset = resetTimestamp(window);
+  if (reset !== undefined)
+    return (
+      <span className="usage-reset">
+        resets <DashboardTime timestamp={reset} />
+      </span>
+    );
+  const seconds = usageNumber(window, [
+    'resetAfterSeconds',
+    'reset_after_seconds',
+    'resetInSeconds',
+    'reset_in_seconds',
+  ]);
+  if (seconds === undefined) return null;
+  const minutes = Math.max(0, Math.ceil(seconds / 60));
+  return (
+    <span className="usage-reset">
+      resets in{' '}
+      {minutes < 60
+        ? `${minutes}m`
+        : `${Math.floor(minutes / 60)}h ${minutes % 60}m`}
+    </span>
+  );
 }
 
 export function NotificationList({
@@ -145,20 +196,36 @@ export function NotificationList({
         </p>
       )}
       {notifications.length ? (
-        notifications.slice(0, 8).map((notification) => (
-          <article className="notification" key={notification.id}>
-            <div>
-              <strong>{notification.title}</strong>
-              <p>{notification.body}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void markRead(notification.id)}
-            >
-              Mark read
-            </button>
-          </article>
-        ))
+        <>
+          {notifications.length > NOTIFICATION_PREVIEW_LIMIT && (
+            <output className="notification-truncation">
+              Showing the {NOTIFICATION_PREVIEW_LIMIT} newest of{' '}
+              {notifications.length} unread notifications; older items are
+              omitted from this view.
+            </output>
+          )}
+          {notifications
+            .slice(0, NOTIFICATION_PREVIEW_LIMIT)
+            .map((notification) => (
+              <article className="notification" key={notification.id}>
+                <div>
+                  <strong>{notification.title}</strong>
+                  <p>{notification.body}</p>
+                  <DashboardTime
+                    className="notification-time"
+                    timestamp={notification.createdAt}
+                    context="sidebar"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void markRead(notification.id)}
+                >
+                  Mark read
+                </button>
+              </article>
+            ))}
+        </>
       ) : (
         <p className="empty inbox-empty">You’re all caught up.</p>
       )}
@@ -200,16 +267,28 @@ export function UsagePanel({
             record.primary && typeof record.primary === 'object'
               ? (record.primary as Record<string, unknown>)
               : undefined;
+          const usedPercent = usageNumber(primary, [
+            'usedPercent',
+            'used_percent',
+          ]);
           const used =
-            typeof primary?.usedPercent === 'number'
-              ? `${Math.round(primary.usedPercent)}% used`
-              : 'window reported';
+            usedPercent === undefined
+              ? 'window reported'
+              : `${Math.round(usedPercent)}% used`;
+          const resetWindow =
+            primary ??
+            (record.secondary && typeof record.secondary === 'object'
+              ? (record.secondary as Record<string, unknown>)
+              : undefined);
           return (
             <div className="usage-row" key={String(record.limitId ?? index)}>
               <strong>
                 {String(record.limitName ?? record.limitId ?? 'limit')}
               </strong>
-              <span>{used}</span>
+              <span>
+                {used}
+                <ResetTiming window={resetWindow} />
+              </span>
             </div>
           );
         })
