@@ -7,13 +7,15 @@ import {
 } from './inspector';
 
 describe('transcript payload inspection', () => {
-  it('marks bounded previews and offers the complete value', () => {
+  it('marks bounded previews without making copy the primary interaction', () => {
     const value = { output: 'x'.repeat(14_000) };
     const markup = renderToStaticMarkup(
       <BoundedPayloadPreview value={value} label="raw payload" />,
     );
-    expect(markup).toContain('Preview truncated after 12,000 characters.');
-    expect(markup).toContain('Copy full raw payload');
+    expect(markup).toContain(
+      'raw payload is truncated after 12,000 characters.',
+    );
+    expect(markup).not.toContain('Copy full raw payload');
     expect(markup).not.toContain('x'.repeat(14_000));
   });
 
@@ -22,10 +24,29 @@ describe('transcript payload inspection', () => {
       boundedInspectorText({ nested: { value: { deep: 'hidden' } } }),
     ).toBe('{ nested: { value: { deep: … } } }');
     const markup = renderToStaticMarkup(
-      <ToolInspector tool={{ arguments: 'x'.repeat(1_300) }} />,
+      <ToolInspector tool={{ arguments: 'x'.repeat(14_000) }} />,
     );
-    expect(markup).toContain('Preview truncated');
-    expect(markup).toContain('Copy full arguments');
-    expect(markup).toContain('Raw payload');
+    expect(markup).toContain('arguments is truncated after 12,000 characters.');
+    expect(markup).toContain('Arguments');
+    expect(markup).toContain('Raw tool record');
+    expect(markup).not.toContain('Copy full arguments');
+  });
+
+  it('separates arguments and result before the expandable raw fallback', () => {
+    const markup = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          status: 'success',
+          arguments: { path: 'src/App.tsx' },
+          result: { lines: 42 },
+        }}
+      />,
+    );
+    expect(markup.indexOf('Arguments')).toBeLessThan(markup.indexOf('Result'));
+    expect(markup.indexOf('Result')).toBeLessThan(
+      markup.indexOf('Raw tool record'),
+    );
+    expect(markup).toContain('src/App.tsx');
+    expect(markup).toContain('&quot;lines&quot;: 42');
   });
 });

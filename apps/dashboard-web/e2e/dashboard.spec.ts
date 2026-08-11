@@ -2853,6 +2853,7 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
                     route: 'luna-high',
                     context: 'fresh',
                     runCount: 2,
+                    result: { kind: 'structured', status: 'valid' },
                     transcript: Array.from({ length: 14 }, (_, entryIndex) => ({
                       id: `d1:tool:${entryIndex + 1}`,
                       type: 'tool',
@@ -3008,56 +3009,30 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
     })),
   ).toEqual({ gridColumn: '2', textAlign: 'left' });
   await page.setViewportSize({ width: 1440, height: 900 });
-  const delegateScrollRegion = delegatesPanel.locator('.surface-scroll-region');
-  const statsTop = await delegateStats.evaluate(
-    (element) => element.getBoundingClientRect().top,
-  );
-  const expandedHeader = delegatesPanel.locator('.delegate-row-toggle').first();
-  await expandedHeader.click();
-  await delegateScrollRegion.evaluate((element) => {
-    element.scrollTop = 0;
+  await delegatesPanel.locator('.delegate-row-toggle').first().click();
+  const transcriptInspector = page.getByRole('dialog', {
+    name: 'Delegate transcript',
   });
-  const expandedDetail = delegatesPanel.locator('.delegate-row-detail').first();
-  await expect(expandedDetail.locator('dt')).toHaveText(['Job']);
-  await expect(expandedDetail).not.toContainText('luna-high');
-  await expect(expandedDetail).not.toContainText('read/write');
-  await expect(expandedDetail).not.toContainText('fresh');
-  const expandedHeaderTop = await expandedHeader.evaluate(
-    (element) => element.getBoundingClientRect().top,
+  await expect(transcriptInspector).toBeVisible();
+  await expect(
+    transcriptInspector.locator('.surface-dialog-summary'),
+  ).toContainText('Dashboard delegate 1');
+  await expect(
+    transcriptInspector.locator('.delegate-inspector-metadata'),
+  ).toContainText('result valid');
+  await expect(
+    transcriptInspector.getByRole('region', { name: 'Delegate transcript' }),
+  ).toBeVisible();
+  const delegateTool = transcriptInspector.locator('.tool-detail').first();
+  await delegateTool.click();
+  await expect(delegateTool.getByLabel('Result')).toContainText(
+    'Command output line 1',
   );
-  await delegateScrollRegion.evaluate((element) => {
-    element.scrollTop = 240;
-  });
-  const scrolledHeaderTop = await expandedHeader.evaluate(
-    (element) => element.getBoundingClientRect().top,
-  );
-  expect(Math.abs(scrolledHeaderTop - expandedHeaderTop)).toBeLessThanOrEqual(
-    1,
-  );
-  const scrolledStatsTop = await delegateStats.evaluate(
-    (element) => element.getBoundingClientRect().top,
-  );
-  expect(Math.abs(scrolledStatsTop - statsTop)).toBeLessThanOrEqual(1);
-  await delegateScrollRegion.evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  await delegatesPanel.locator('.delegate-row-toggle').nth(4).hover();
-  await page.mouse.wheel(0, 320);
-  await expect
-    .poll(() => delegateScrollRegion.evaluate((element) => element.scrollTop))
-    .toBeGreaterThan(0);
-  expect(
-    await delegateScrollRegion.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      return element.scrollTop;
-    }),
-  ).toBeGreaterThan(0);
-  await expect(delegateStats).toBeVisible();
-  expect(
-    await delegateStats.evaluate(
-      (element) => element.getBoundingClientRect().top,
-    ),
-  ).toBeCloseTo(statsTop, 0);
+  await transcriptInspector
+    .getByRole('button', { name: 'Close Delegate transcript' })
+    .click();
+  await expect(transcriptInspector).toHaveCount(0);
+  await expect(delegatesPanel).toBeVisible();
   await mocks.emit({
     type: 'snapshot',
     snapshot: phase6Snapshot({

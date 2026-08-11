@@ -1,6 +1,7 @@
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { DelegateInspectorMetadata } from './delegate-transcript-inspector';
 import {
   DelegateTranscript,
   dashboardSurfacePlacement,
@@ -246,7 +247,7 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('0 active · 1 finished');
   });
 
-  it('renders ordered delegate transcript entries with bounded-history notice', () => {
+  it('adapts delegate history through the main transcript entry components', () => {
     const markup = renderToStaticMarkup(
       <DelegateTranscript
         entries={[
@@ -282,10 +283,53 @@ describe('live extension surface fixtures', () => {
 
     expect(markup).toContain('aria-label="Delegate transcript"');
     expect(markup).toContain('dateTime="2026-08-05T18:42:00.000Z"');
+    expect(markup).toContain('message-bubble message-user');
     expect(markup).toContain('Inspect the queue');
-    expect(markup).toContain('<pre>npm test</pre>');
+    expect(markup).toContain('tool-detail');
+    expect(markup).toContain('Result');
+    expect(markup).toContain('npm test');
     expect(markup).toContain('<strong>Done</strong>');
-    expect(markup).toContain('Earlier transcript entries were omitted');
+    expect(markup).toContain(
+      'Earlier transcript entries were omitted from this live view.',
+    );
+  });
+
+  it('keeps delegate lifecycle and result facts in the inspector header', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateInspectorMetadata
+        now={2_000}
+        row={{
+          id: 'd1',
+          name: 'Recover build',
+          kind: 'background',
+          state: 'timed-out',
+          createdAt: 1,
+          startedAt: 1,
+          finishedAt: 2_000,
+          allowWrites: true,
+          runCount: 2,
+          result: { kind: 'structured', status: 'invalid' },
+          lifecycle: {
+            reason: 'timeout',
+            diagnostic: 'Runner disconnected after retry.',
+            diagnosticArtifact: { handle: 'artifact-1' },
+            continuationUsable: true,
+            writableBranchRetained: false,
+            readOnlySnapshotRetained: true,
+          },
+        }}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Delegate details"');
+    expect(markup).toContain('2 attempts');
+    expect(markup).toContain('result invalid');
+    expect(markup).toContain('recovery timeout');
+    expect(markup).toContain('continuation ready');
+    expect(markup).toContain('read-only snapshot retained');
+    expect(markup).toContain('diagnostic available');
+    expect(markup).toContain('diagnostic artifact available');
+    expect(markup).not.toContain('Observed failure');
   });
 
   it('routes exact renderer IDs through schema validation and rejects suffix aliases', () => {

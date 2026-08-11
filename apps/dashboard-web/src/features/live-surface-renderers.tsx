@@ -4,16 +4,14 @@ import { Button as AriaButton } from 'react-aria-components';
 import type {
   DelegateStatus,
   DelegateStatusViewModel,
-  DelegateTranscriptEntry,
 } from '../../../../extensions/delegate/contribution';
 import type {
   TaskStateViewModel,
   TaskSurfaceTask,
 } from '../../../../extensions/tasks/contribution';
-import { Markdown } from '../Markdown';
 import type { DashboardRendererContext } from '../renderer-registry';
 import { DashboardDialog, SurfaceStats } from './dashboard-dialog';
-import { DashboardTime } from './timestamp';
+import { DelegateTranscriptInspector } from './delegate-transcript-inspector';
 
 function text(value: string | undefined, fallback = ''): string {
   return value?.trim() || fallback;
@@ -181,60 +179,6 @@ function WorkSurface({
   );
 }
 
-export function DelegateTranscript({
-  entries,
-  truncated = false,
-}: {
-  entries: readonly DelegateTranscriptEntry[];
-  truncated?: boolean;
-}) {
-  return (
-    <ol className="delegate-transcript" aria-label="Delegate transcript">
-      {entries.map((entry) => {
-        const entryId = text(entry.id);
-        const entryType = text(entry.type, 'activity');
-        const entryText = text(entry.text);
-        const entryStatus = text(entry.status);
-        const transcriptRun =
-          typeof entry.run === 'number' ? entry.run : undefined;
-        return (
-          <li
-            className={`delegate-transcript-entry transcript-${entryType}`}
-            key={entryId}
-          >
-            <header>
-              <strong>{text(entry.label, entryType)}</strong>
-              <small>
-                <span>
-                  {[transcriptRun ? `run ${transcriptRun}` : '', entryStatus]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </span>
-                <DashboardTime
-                  className="delegate-transcript-time"
-                  timestamp={entry.at}
-                />
-              </small>
-            </header>
-            {entryText &&
-              (entryType === 'tool' ? (
-                <pre>{entryText}</pre>
-              ) : (
-                <Markdown>{entryText}</Markdown>
-              ))}
-          </li>
-        );
-      })}
-      {truncated && (
-        <li className="delegate-transcript-truncated">
-          Earlier transcript entries were omitted to keep the live surface
-          bounded.
-        </li>
-      )}
-    </ol>
-  );
-}
-
 function delegateContext(row: DelegateStatus): string | undefined {
   if ((row.runCount ?? 1) > 1) return `run ${row.runCount}`;
   return row.context;
@@ -244,7 +188,7 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
   const model = surface.viewModel as DelegateStatusViewModel;
   const rows = delegateRows(model);
   const stats = delegateStats(rows);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [selectedId, setSelectedId] = useState<string>();
   const hasLiveElapsed = stats.running + stats.queued > 0;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -253,13 +197,8 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [hasLiveElapsed]);
+  const selected = rows.find((row) => row.id === selectedId);
   const title = 'Delegates';
-  const toggle = (id: string) =>
-    setExpanded((current) => {
-      const next = new Set(current);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
   const active = rows.find((row) =>
     ['running', 'queued'].includes(stateLabel(row.state)),
   );
@@ -283,229 +222,88 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
     />
   );
   return (
-    <WorkSurface
-      title={title}
-      label="Delegates"
-      summary={summary}
-      count={`${activeCount} active · ${finishedCount} finished`}
-      visibleCount={rows.length}
-      dialogClassName="surface-dialog work-surface-dialog delegate-surface-dialog"
-      headerStats={statsView}
-    >
-      <div className="delegate-scroll surface-scroll-region">
-        <div className="delegate-rows">
-          {rows.map((row) => {
-            const id = row.id;
-            const state = stateLabel(row.state);
-            const activity = row.activity;
-            const activityLabel = short(
-              activity?.latestText ||
-                activity?.label ||
-                (state === 'queued' ? 'waiting for a slot' : 'starting'),
-              140,
-            );
-            const name = short(row.name, 70);
-            const route = row.route ?? '';
-            const context = delegateContext(row) ?? '';
-            const access =
-              row.allowWrites === true ? 'read/write' : 'read-only';
-            const elapsedText = elapsed(
-              row.startedAt ?? row.createdAt,
-              row.finishedAt,
-              now,
-            );
-            const isExpanded = expanded.has(id);
-            const jobId = row.jobId ?? '';
-            const allRuns = row.runs ?? [];
-            const runs = allRuns.slice(-6);
-            const runOffset = allRuns.length - runs.length;
-            const transcript = row.transcript ?? [];
-            const result = [...transcript]
-              .reverse()
-              .find((entry) => entry.type === 'assistant');
-            const activityTranscript = transcript.filter(
-              (entry) => entry.type !== 'assistant',
-            );
-            const lifecycle = row.lifecycle;
-            const artifactHandle =
-              lifecycle?.diagnosticArtifact &&
-              typeof lifecycle.diagnosticArtifact.handle === 'string'
-                ? lifecycle.diagnosticArtifact.handle
-                : undefined;
-            return (
-              <div
-                className={`delegate-row ${stateClass(state)}`}
-                key={`${surface.id}-${id}`}
-              >
-                <AriaButton
-                  type="button"
-                  className="delegate-row-toggle"
-                  aria-expanded={isExpanded}
-                  onPress={() => toggle(id)}
+    <>
+      <WorkSurface
+        title={title}
+        label="Delegates"
+        summary={summary}
+        count={`${activeCount} active · ${finishedCount} finished`}
+        visibleCount={rows.length}
+        dialogClassName="surface-dialog work-surface-dialog delegate-surface-dialog"
+        headerStats={statsView}
+      >
+        <div className="delegate-scroll surface-scroll-region">
+          <div className="delegate-rows">
+            {rows.map((row) => {
+              const state = stateLabel(row.state);
+              const activity = row.activity;
+              const activityLabel = short(
+                activity?.latestText ||
+                  activity?.label ||
+                  (state === 'queued' ? 'waiting for a slot' : 'starting'),
+                140,
+              );
+              const name = short(row.name, 70);
+              const route = row.route ?? '';
+              const context = delegateContext(row) ?? '';
+              const access =
+                row.allowWrites === true ? 'read/write' : 'read-only';
+              const elapsedText = elapsed(
+                row.startedAt ?? row.createdAt,
+                row.finishedAt,
+                now,
+              );
+              return (
+                <div
+                  className={`delegate-row ${stateClass(state)}`}
+                  key={`${surface.id}-${row.id}`}
                 >
-                  <span className="surface-state" aria-hidden="true">
-                    {stateGlyph(state)}
-                  </span>
-                  <span className="delegate-row-main">
-                    <strong>{name}</strong>
-                    <small>{activityLabel}</small>
-                  </span>
-                  <span className="delegate-row-meta">
-                    <span className="delegate-row-status">
-                      {state}
-                      {elapsedText ? ` · ${elapsedText}` : ''}
+                  <AriaButton
+                    type="button"
+                    className="delegate-row-toggle"
+                    aria-haspopup="dialog"
+                    onPress={() => setSelectedId(row.id)}
+                  >
+                    <span className="surface-state" aria-hidden="true">
+                      {stateGlyph(state)}
                     </span>
-                    <span className="delegate-row-properties">
-                      {[context, access, route].filter(Boolean).join(' · ')}
-                      {elapsedText && (
-                        <span className="delegate-row-mobile-elapsed">
-                          {' · '}
-                          {elapsedText}
-                        </span>
-                      )}
+                    <span className="delegate-row-main">
+                      <strong>{name}</strong>
+                      <small>{activityLabel}</small>
                     </span>
-                  </span>
-                  <span className="delegate-row-chevron" aria-hidden="true">
-                    {isExpanded ? '⌄' : '›'}
-                  </span>
-                </AriaButton>
-                {isExpanded && (
-                  <div className="delegate-row-detail">
-                    {jobId && (
-                      <dl>
-                        <div>
-                          <dt>Job</dt>
-                          <dd>{jobId}</dd>
-                        </div>
-                      </dl>
-                    )}
-                    {(row.context === 'continuation' || allRuns.length > 1) && (
-                      <div className="delegate-detail-facts">
-                        {row.context === 'continuation' && (
-                          <span>
-                            <b>Context</b> continuation
+                    <span className="delegate-row-meta">
+                      <span className="delegate-row-status">
+                        {state}
+                        {elapsedText ? ` · ${elapsedText}` : ''}
+                      </span>
+                      <span className="delegate-row-properties">
+                        {[context, access, route].filter(Boolean).join(' · ')}
+                        {elapsedText && (
+                          <span className="delegate-row-mobile-elapsed">
+                            {' · '}
+                            {elapsedText}
                           </span>
                         )}
-                        {allRuns.length > 1 && (
-                          <span>
-                            <b>Attempts</b> {allRuns.length}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    {lifecycle && (
-                      <section
-                        className="delegate-recovery"
-                        aria-label="Recovery details"
-                      >
-                        <strong>Recovery</strong>
-                        <p>
-                          Observed failure: {lifecycle.reason}
-                          {lifecycle.diagnostic
-                            ? ` · ${short(lifecycle.diagnostic, 320)}`
-                            : ''}
-                        </p>
-                        <ul>
-                          <li>
-                            Continuation:{' '}
-                            {lifecycle.continuationUsable
-                              ? 'usable'
-                              : 'unavailable'}
-                          </li>
-                          <li>
-                            Writable branch:{' '}
-                            {lifecycle.writableBranchRetained
-                              ? 'retained'
-                              : 'not retained'}
-                          </li>
-                          <li>
-                            Read-only snapshot:{' '}
-                            {lifecycle.readOnlySnapshotRetained
-                              ? 'retained'
-                              : 'not retained'}
-                          </li>
-                        </ul>
-                        {artifactHandle && (
-                          <small>Diagnostic artifact: {artifactHandle}</small>
-                        )}
-                      </section>
-                    )}
-                    {row.result && (
-                      <section
-                        className="delegate-result-summary"
-                        aria-label="Delegate result"
-                      >
-                        <strong>Result</strong>
-                        <p>
-                          Structured result:{' '}
-                          {row.result.status === 'valid'
-                            ? 'valid'
-                            : row.result.status === 'pending'
-                              ? 'pending'
-                              : 'invalid'}
-                        </p>
-                      </section>
-                    )}
-                    {result?.text && (
-                      <section
-                        className="delegate-result-summary"
-                        aria-label="Delegate response"
-                      >
-                        <strong>Response</strong>
-                        <Markdown>{result.text}</Markdown>
-                      </section>
-                    )}
-                    {(activityTranscript.length > 0 ||
-                      row.transcriptTruncated === true) && (
-                      <DelegateTranscript
-                        entries={activityTranscript}
-                        truncated={row.transcriptTruncated === true}
-                      />
-                    )}
-                    {runs.length > 0 && (
-                      <ol
-                        className="delegate-run-history"
-                        aria-label="Run history"
-                      >
-                        {runs.map((run, runIndex) => {
-                          const runState = stateLabel(run.state);
-                          const runKey = [
-                            id,
-                            runState,
-                            String(run.startedAt),
-                            String(run.finishedAt),
-                          ].join('-');
-                          return (
-                            <li className="delegate-run-item" key={runKey}>
-                              <span
-                                className={`surface-state ${stateClass(runState)}`}
-                                aria-hidden="true"
-                              >
-                                {stateGlyph(runState)}
-                              </span>
-                              <span>Run {runOffset + runIndex + 1}</span>
-                              <small>
-                                {runState}
-                                {elapsed(run.startedAt, run.finishedAt, now)
-                                  ? ` · ${elapsed(run.startedAt, run.finishedAt, now)}`
-                                  : ''}
-                              </small>
-                            </li>
-                          );
-                        })}
-                      </ol>
-                    )}
-                    {!jobId && transcript.length === 0 && runs.length === 0 && (
-                      <span>Waiting for the delegate to report details.</span>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                      </span>
+                    </span>
+                    <span className="delegate-row-chevron" aria-hidden="true">
+                      ›
+                    </span>
+                  </AriaButton>
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
-    </WorkSurface>
+      </WorkSurface>
+      {selected && (
+        <DelegateTranscriptInspector
+          row={selected}
+          now={now}
+          onClose={() => setSelectedId(undefined)}
+        />
+      )}
+    </>
   );
 }
 
