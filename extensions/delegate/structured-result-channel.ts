@@ -1,17 +1,23 @@
 import { ensureDelegateLifecycle, setDelegateLifecycle } from './lifecycle';
 import { validateStructuredResult } from './structured-result-project';
-import type {
-  NormalizedDelegateResultSpec,
-  StructuredArtifacts,
-  StructuredValidationResult,
+import {
+  type NormalizedDelegateResultSpec,
+  STRUCTURED_RESULT_CAPS,
+  type StructuredArtifacts,
+  type StructuredValidationResult,
 } from './structured-result-schema';
 import type { DelegatedRun } from './types';
 
-interface StructuredChannel {
-  calls: number;
+interface StructuredAttempt {
   detailsPresent: boolean;
   details?: unknown;
   toolError: boolean;
+}
+
+interface StructuredChannel {
+  calls: number;
+  /** Only the bounded prefix is retained; later calls cannot extend retries. */
+  attempts: StructuredAttempt[];
 }
 
 const resultSpecs = new WeakMap<DelegatedRun, NormalizedDelegateResultSpec>();
@@ -42,21 +48,26 @@ export function captureDelegateResultEvent(
   const previous = channels.get(run);
   const channel: StructuredChannel = previous ?? {
     calls: 0,
-    detailsPresent: false,
-    toolError: false,
+    attempts: [],
   };
   channel.calls++;
-  channel.toolError ||= isError;
   structuredChannelRuns.add(run);
-  if (
-    result &&
-    typeof result === 'object' &&
-    !Array.isArray(result) &&
-    Object.hasOwn(result, 'details')
-  ) {
-    channel.detailsPresent = true;
-    channel.details = (result as { details?: unknown }).details;
+  if (channel.attempts.length < STRUCTURED_RESULT_CAPS.maxAttempts) {
+    const detailsPresent =
+      result !== null &&
+      typeof result === 'object' &&
+      !Array.isArray(result) &&
+      Object.hasOwn(result, 'details');
+    channel.attempts.push({
+      detailsPresent,
+      details: detailsPresent
+        ? (result as { details?: unknown }).details
+        : undefined,
+      toolError: isError,
+    });
   }
+  // A later attempt may supersede a previously cached failed settlement.
+  settlements.delete(run);
   redactDelegateResultTerminalProse(run);
   channels.set(run, channel);
 }
@@ -77,21 +88,35 @@ export function redactDelegateResultTerminalProse(run: DelegatedRun): void {
   }
 }
 
-function channelError(channel: StructuredChannel | undefined): string[] {
-  if (!channel) return ['/: delegate_result channel is missing'];
+function attemptValidation(
+  spec: NormalizedDelegateResultSpec,
+  attempt: StructuredAttempt,
+): StructuredValidationResult {
   const errors: string[] = [];
-  if (channel.calls !== 1)
-    errors.push(
-      `/: delegate_result channel must be called exactly once (got ${channel.calls})`,
-    );
-  if (channel.toolError)
+  if (attempt.toolError)
     errors.push('/: delegate_result tool execution failed');
-  if (!channel.detailsPresent)
+  if (!attempt.detailsPresent)
     errors.push('/: delegate_result result details are missing or malformed');
-  return errors;
+  if (errors.length) return { valid: false, errors };
+  return validateStructuredResult(spec, attempt.details);
 }
 
-/** Settlement is deliberately idempotent: a parent validates once, then reuses the result. */
+function channelError(
+  spec: NormalizedDelegateResultSpec,
+  channel: StructuredChannel | undefined,
+): string[] {
+  if (!channel) return ['/: delegate_result channel is missing'];
+  if (channel.calls > STRUCTURED_RESULT_CAPS.maxAttempts)
+    return [
+      `/: delegate_result channel exceeded the ${STRUCTURED_RESULT_CAPS.maxAttempts}-attempt limit without a valid result`,
+    ];
+  const lastAttempt = channel.attempts.at(-1);
+  if (!lastAttempt)
+    return ['/: delegate_result channel did not produce an attempt'];
+  return attemptValidation(spec, lastAttempt).errors;
+}
+
+/** Settlement is idempotent once the channel stops; a new attempt invalidates a cached result. */
 export function settleDelegateResult(
   run: DelegatedRun,
   spec = getDelegateResultSpec(run),
@@ -100,10 +125,22 @@ export function settleDelegateResult(
   const existing = settlements.get(run);
   if (existing) return existing;
   const channel = channels.get(run);
-  const channelErrors = channelError(channel);
-  const validation = channelErrors.length
-    ? { valid: false, errors: channelErrors }
-    : validateStructuredResult(spec, channel?.details);
+  let validation: StructuredValidationResult;
+  let lastFailure: StructuredValidationResult | undefined;
+  let lastValid: StructuredValidationResult | undefined;
+  for (const attempt of channel?.attempts ?? []) {
+    const attemptResult = attemptValidation(spec, attempt);
+    if (attemptResult.valid) lastValid = attemptResult;
+    else lastFailure = attemptResult;
+  }
+  if (lastValid) validation = lastValid;
+  else {
+    const errors = channelError(spec, channel);
+    validation = {
+      valid: false,
+      errors: errors.length ? errors : (lastFailure?.errors ?? []),
+    };
+  }
   settlements.set(run, validation);
   if (!validation.valid) {
     const lifecycle = ensureDelegateLifecycle(run);

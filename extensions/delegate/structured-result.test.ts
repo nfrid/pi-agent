@@ -221,23 +221,60 @@ describe('schema-driven delegate results', () => {
     );
   });
 
-  test.each([
-    ['missing', [] as const],
-    ['multiple', [1, 2] as const],
-  ])('rejects a %s delegate_result channel', (_label, calls) => {
+  test('allows an invalid attempt to be corrected by a later valid attempt', () => {
+    const spec = normalizeDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: { ok: { type: 'boolean' } },
+        required: ['ok'],
+      },
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    const run = createRun('invalid then valid');
+    setDelegateResultSpec(run, spec);
+    captureDelegateResultEvent(run, { details: { ok: 'wrong' } }, false);
+    captureDelegateResultEvent(run, { details: { ok: true } }, false);
+
+    expect(settleDelegateResult(run)).toEqual({
+      valid: true,
+      value: { ok: true },
+      errors: [],
+    });
+  });
+
+  test('uses the last valid attempt when delegate_result succeeds repeatedly', () => {
+    const spec = normalizeDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: { value: { type: 'string' } },
+        required: ['value'],
+      },
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    const run = createRun('valid then valid');
+    setDelegateResultSpec(run, spec);
+    captureDelegateResultEvent(run, { details: { value: 'first' } }, false);
+    captureDelegateResultEvent(run, { details: { value: 'last' } }, false);
+
+    expect(settleDelegateResult(run)?.value).toEqual({ value: 'last' });
+  });
+
+  test('rejects a channel with no valid result', () => {
     const spec = normalizeDelegateResultSpec({
       schema: { type: 'object', properties: { ok: { type: 'boolean' } } },
     });
     if (!spec) throw new Error('expected normalized result spec');
-    const run = createRun('channel');
+    const run = createRun('no valid result');
     setDelegateResultSpec(run, spec);
-    for (let index = 0; index < calls.length; index++)
-      captureDelegateResultEvent(run, { details: { ok: true } }, false);
+    captureDelegateResultEvent(run, { details: { ok: 'wrong' } }, false);
+    captureDelegateResultEvent(run, {}, true);
     const settled = settleDelegateResult(run);
+
     expect(settled?.valid).toBe(false);
     expect(settled?.errors.join('; ')).toMatch(
-      calls.length === 0 ? /missing/ : /exactly once.*2/,
+      /tool execution failed.*missing or malformed/,
     );
+    expect(run.state).toBe('error');
   });
 
   test('uses the child TypeBox contract for decimal multipleOf settlement', () => {
