@@ -1095,14 +1095,22 @@ describe('remote-control bridge', () => {
         );
       return value;
     };
+    const largeBranch = [
+      {
+        type: 'message',
+        message: { role: 'user', content: '  inspect   title  ' },
+      },
+      ...Array.from({ length: 512 }, (_, index) => ({
+        type: 'message',
+        id: `large-entry-${index}`,
+        message: {
+          role: 'assistant',
+          content: 'large branch entry '.repeat(32),
+        },
+      })),
+    ];
     const manager = {
-      getBranch: () =>
-        active([
-          {
-            type: 'message',
-            message: { role: 'user', content: '  inspect   title  ' },
-          },
-        ]),
+      getBranch: () => active(largeBranch),
       getSessionId: () => active('session-current'),
       getSessionFile: () => active('/tmp/session.jsonl'),
       getSessionName: () => active('Current session'),
@@ -1128,6 +1136,41 @@ describe('remote-control bridge', () => {
     expect(runtime).toBeDefined();
     runtime?.setContext(context);
     expect(runtime?.snapshot().session.title).toBe('inspect title');
+    const branchReadsBeforePatch = manager.getBranch;
+    let routineBranchReads = 0;
+    manager.getBranch = () => {
+      routineBranchReads += 1;
+      return branchReadsBeforePatch();
+    };
+    const routinePatch = runtime?.snapshotPatch?.(context, 'working');
+    expect(routineBranchReads).toBe(0);
+    expect(routinePatch).not.toHaveProperty('session');
+    expect(JSON.stringify(routinePatch)).not.toContain('inspect   title');
+    expect(runtime?.snapshot().session.title).toBe('inspect title');
+    const patchClient = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => runtime?.snapshot() ?? snapshot,
+      handleCommand: async () => ({ accepted: true }),
+    });
+    const patchSocket = new net.Socket();
+    const patchWrite = vi.spyOn(patchSocket, 'write').mockReturnValue(true);
+    Reflect.set(patchClient, 'socket', patchSocket);
+    expect(
+      patchClient.sendEvent({
+        type: 'runtime.stateChanged',
+        state: 'working',
+        snapshot: routinePatch,
+      }),
+    ).toBe(true);
+    const routineFrame = JSON.parse(String(patchWrite.mock.calls[0]?.[0])) as {
+      event: { snapshot?: Record<string, unknown> };
+    };
+    expect(routineFrame.event.snapshot).not.toHaveProperty('session');
+    expect(String(patchWrite.mock.calls[0]?.[0]).length).toBeLessThan(
+      JSON.stringify(runtime?.snapshot() ?? snapshot).length,
+    );
+    patchClient.stop();
     const equivalentContext = {
       ...context,
       sessionManager: manager,

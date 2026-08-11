@@ -181,7 +181,10 @@ describe('DashboardLiveStore', () => {
           liveState: 'working',
           pendingInteractions: [],
           extensionSurfaces: [],
-          session: { id: 'session-1', entries: [] },
+          session: {
+            id: 'session-1',
+            entries: [{ type: 'message', id: 'large-existing-branch' }],
+          },
         },
       ],
     } as unknown as BrowserSnapshot);
@@ -223,6 +226,9 @@ describe('DashboardLiveStore', () => {
     expect(store.getSnapshot().runtimesById['runtime-1']).toMatchObject({
       pendingInteractions: [{ id: 'question-1' }],
       extensionSurfaces: [{ id: 'delegate.status' }],
+      session: {
+        entries: [{ id: 'large-existing-branch' }],
+      },
     });
   });
 

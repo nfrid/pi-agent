@@ -603,6 +603,17 @@ describe('dashboard HTTP boundary', () => {
       initialSnapshot.revision,
     );
     expect(server.snapshot().runtimes[0]?.session.entries).toEqual([]);
+    const implementation = server as unknown as {
+      snapshot(
+        cursor?: number,
+      ): import('@pi-dashboard/protocol').BrowserSnapshot;
+    };
+    const originalSnapshot = implementation.snapshot.bind(server);
+    let routineSnapshotConstructions = 0;
+    implementation.snapshot = (cursor) => {
+      routineSnapshotConstructions += 1;
+      return originalSnapshot(cursor);
+    };
     bridge.write(
       serializeFrame({
         kind: 'event',
@@ -612,9 +623,8 @@ describe('dashboard HTTP boundary', () => {
     );
     const update = await waitForMessage();
     expect(update.type).toBe('event');
-    expect(update.revision).toBe(
-      (update.snapshot as { revision: number }).revision,
-    );
+    expect(update.snapshot).toBeUndefined();
+    expect(routineSnapshotConstructions).toBe(0);
     expect(update.revision).toBeGreaterThan(registrationSnapshot.revision);
     bridge.write(
       serializeFrame({

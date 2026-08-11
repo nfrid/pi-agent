@@ -68,7 +68,12 @@ export function shutdownRemoteControlRuntime(
     runtime.client.sendEvent({
       type: 'runtime.stateChanged',
       state: 'idle',
-      snapshot: runtime.snapshot(),
+      snapshot: {
+        liveState: 'idle',
+        pendingInteractions: [],
+        queueDrafts: [],
+        extensionSurfaces: [],
+      },
     });
   // Pi tears down the entire extension runtime for every session replacement,
   // not only quit/reload. Leaving this bridge alive captures the old `pi` and
@@ -118,7 +123,7 @@ export default defineExtension('remote-control', (pi) => {
   ) =>
     onTransportEvent(pi, event, (value, ctx) => {
       if (!runtime.isCurrent(ctx)) return;
-      runtime.setContext(ctx);
+      runtime.setContext(ctx, false);
       if (runtime.isCurrent(ctx)) handler(value, ctx);
     });
 
@@ -152,14 +157,8 @@ export default defineExtension('remote-control', (pi) => {
   });
   pi.on('before_agent_start', (_event, ctx) => {
     if (!runtime.isCurrent(ctx)) return;
-    runtime.setContext(ctx);
     if (!runtime.isCurrent(ctx)) return;
-    runtime.setLiveState('working');
-    runtime.client.sendEvent({
-      type: 'runtime.stateChanged',
-      state: 'working',
-      snapshot: runtime.snapshot(),
-    });
+    emitState(runtime, ctx, 'working');
   });
   pi.on('agent_start', (_event, ctx) => emitState(runtime, ctx));
   pi.on('turn_end', (_event, ctx) => {

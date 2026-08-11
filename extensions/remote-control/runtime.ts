@@ -9,6 +9,7 @@ import type {
   QueueDraftMode,
   RuntimeLiveState,
   RuntimeSnapshot,
+  RuntimeSnapshotPatch,
 } from '@pi-dashboard/protocol/pi-runtime-protocol';
 import {
   getInteractionBroker,
@@ -43,11 +44,16 @@ export interface RemoteControlRuntime {
   readonly client: BridgeClient;
   readonly eventNormalizer: LiveEventNormalizer;
   readonly queueDrafts: QueueDraftStore;
-  setContext(ctx: ExtensionContext): void;
+  setContext(ctx: ExtensionContext, refreshSnapshot?: boolean): void;
   clearContext(ctx: ExtensionContext): void;
   isCurrent(ctx: ExtensionContext): boolean;
   setLiveState(state: RuntimeLiveState): void;
   getInteractionBroker?(): InteractionBroker;
+  /** Build a bounded runtime-only update without reading the session branch. */
+  snapshotPatch?(
+    ctx: ExtensionContext,
+    state?: RuntimeLiveState,
+  ): RuntimeSnapshotPatch;
   snapshot(): RuntimeSnapshot;
 }
 
@@ -91,15 +97,14 @@ export function createRemoteControlRuntime(
     lastError,
   });
   let cachedSnapshot = unavailableSnapshot();
-  const snapshotFrom = (ctx: ExtensionContext): RuntimeSnapshot => {
+  const runtimePatchFrom = (
+    ctx: ExtensionContext,
+    state = liveState(ctx, broker),
+  ): RuntimeSnapshotPatch => {
     const usage = ctx.getContextUsage();
     return {
-      runtimeId,
-      ownership,
-      pid: process.pid,
       cwd: ctx.cwd,
-      liveState: liveState(ctx, broker),
-      session: sessionSnapshot(ctx),
+      liveState: state,
       model: modelSnapshot(ctx),
       modelCatalog: modelCatalogSnapshot(ctx),
       thinkingLevels: thinkingLevelsSnapshot(),
@@ -116,6 +121,19 @@ export function createRemoteControlRuntime(
       capabilities: capabilitiesFor(),
       extensionSurfaces: liveSurfaceHub.snapshot(),
       lastError,
+    };
+  };
+  const snapshotFrom = (ctx: ExtensionContext): RuntimeSnapshot => {
+    const patch = runtimePatchFrom(ctx);
+    return {
+      runtimeId,
+      ownership,
+      pid: process.pid,
+      ...patch,
+      cwd: ctx.cwd,
+      liveState: liveState(ctx, broker),
+      pendingInteractions: patch.pendingInteractions ?? [],
+      session: sessionSnapshot(ctx),
     };
   };
   const client = new BridgeClient({
@@ -154,18 +172,19 @@ export function createRemoteControlRuntime(
         context === commandContext &&
         currentSessionId === commandSessionId
       ) {
-        setContext(commandContext);
+        setContext(commandContext, false);
+        const state = liveState(commandContext, broker);
         client.sendEvent({
           type: 'runtime.stateChanged',
-          state: liveState(commandContext, broker),
-          snapshot: cachedSnapshot,
+          state,
+          snapshot: snapshotPatch(commandContext, state),
         });
       }
       return result;
     },
   });
 
-  const setContext = (ctx: ExtensionContext) => {
+  const setContext = (ctx: ExtensionContext, refreshSnapshot = true) => {
     try {
       lastError = undefined;
       const nextScope = ctx.sessionManager.getSessionId();
@@ -184,11 +203,16 @@ export function createRemoteControlRuntime(
       if (replacingScope && previousScope)
         releaseScopedServices(previousScope, previousServices);
       queueDrafts.setSession(nextScope);
-      const next = snapshotFrom(ctx);
+      // Same-session transport events only need a bounded patch. A full
+      // snapshot is reserved for the initial/replacement binding and explicit
+      // session metadata/tree events.
+      const shouldRefresh =
+        refreshSnapshot || previousScope === undefined || replacingScope;
+      const next = shouldRefresh ? snapshotFrom(ctx) : undefined;
       context = ctx;
       contextScope = nextScope;
-      currentSessionId = next.session.id;
-      cachedSnapshot = next;
+      currentSessionId = nextScope;
+      if (next) cachedSnapshot = next;
     } catch (error) {
       queueDrafts.clear();
       if (contextScope) releaseScopedServices(contextScope, scopedServices);
@@ -199,6 +223,16 @@ export function createRemoteControlRuntime(
       lastError = error instanceof Error ? error.message : String(error);
       cachedSnapshot = unavailableSnapshot();
     }
+  };
+  const snapshotPatch = (
+    ctx: ExtensionContext,
+    state?: RuntimeLiveState,
+  ): RuntimeSnapshotPatch => {
+    const patch = runtimePatchFrom(ctx, state);
+    // Keep reconnect/hello authoritative without retaining the session branch
+    // in any routine event payload.
+    cachedSnapshot = { ...cachedSnapshot, ...patch };
+    return patch;
   };
   const snapshot = () => cachedSnapshot;
   const setLiveState = (state: RuntimeLiveState) => {
@@ -239,6 +273,7 @@ export function createRemoteControlRuntime(
     isCurrent,
     setLiveState,
     getInteractionBroker: () => broker,
+    snapshotPatch,
     snapshot,
   };
 }
@@ -250,7 +285,7 @@ export function flushQueueDrafts(
   mode: QueueDraftMode,
 ): boolean {
   if (!runtime.isCurrent(ctx)) return false;
-  runtime.setContext(ctx);
+  runtime.setContext(ctx, false);
   if (!runtime.isCurrent(ctx)) return false;
   const drafts = runtime.queueDrafts.take(mode);
   if (drafts.length === 0) return false;
@@ -274,17 +309,19 @@ export function flushQueueDrafts(
   if (failedAt < drafts.length && runtime.isCurrent(ctx))
     runtime.queueDrafts.restore(drafts.slice(failedAt));
   if (runtime.isCurrent(ctx)) {
-    runtime.setContext(ctx);
-    if (runtime.isCurrent(ctx))
+    runtime.setContext(ctx, false);
+    if (runtime.isCurrent(ctx)) {
+      const state = liveState(
+        ctx,
+        runtime.getInteractionBroker?.() ??
+          getInteractionBroker(ctx.sessionManager.getSessionId()),
+      );
       runtime.client.sendEvent({
         type: 'runtime.stateChanged',
-        state: liveState(
-          ctx,
-          runtime.getInteractionBroker?.() ??
-            getInteractionBroker(ctx.sessionManager.getSessionId()),
-        ),
-        snapshot: runtime.snapshot(),
+        state,
+        snapshot: runtime.snapshotPatch?.(ctx, state) ?? { liveState: state },
       });
+    }
   }
   return true;
 }
@@ -295,7 +332,7 @@ export function emitState(
   forcedState?: RuntimeLiveState,
 ): void {
   if (!runtime.isCurrent(ctx)) return;
-  runtime.setContext(ctx);
+  runtime.setContext(ctx, false);
   if (!runtime.isCurrent(ctx)) return;
   const state =
     forcedState ??
@@ -308,7 +345,7 @@ export function emitState(
   runtime.client.sendEvent({
     type: 'runtime.stateChanged',
     state,
-    snapshot: runtime.snapshot(),
+    snapshot: runtime.snapshotPatch?.(ctx, state) ?? { liveState: state },
   });
 }
 

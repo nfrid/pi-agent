@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import type http from 'node:http';
-import { URL } from 'node:url';
+import type { URL } from 'node:url';
 import {
   type BridgeEvent,
   type BrowserSnapshot,
@@ -46,12 +46,38 @@ function isSparseRuntimeSession(runtime: RuntimeSnapshot): boolean {
   return !hasTranscriptEntries(runtime.session.entries);
 }
 
-function isTranscriptEvent(change: RegistryChange): boolean {
-  return (
-    change.kind === 'event' &&
-    (change.event.type.startsWith('message.') ||
-      change.event.type.startsWith('tool.'))
-  );
+/**
+ * Browser reducers already own runtime/transcript projections for these
+ * events. Session-index metadata, notifications, and runtime
+ * registration/offline transitions remain snapshot-backed because they are not
+ * fully represented by an event reducer.
+ */
+function requiresBrowserSnapshot(change: RegistryChange): boolean {
+  if (change.kind !== 'event') return true;
+  switch (change.event.type) {
+    case 'runtime.stateChanged':
+    case 'runtime.heartbeat':
+    case 'message.started':
+    case 'message.updated':
+    case 'message.finished':
+    case 'tool.started':
+    case 'tool.updated':
+    case 'tool.finished':
+      return false;
+    case 'agent.settled':
+      return process.env.PI_DASHBOARD_NOTIFY_SETTLED === '1';
+    case 'session.changed':
+    case 'session.snapshot':
+    case 'interaction.requested':
+    case 'interaction.resolved':
+    case 'runtime.goodbye':
+      // Session events also refresh the sessions index metadata; notification
+      // unread/waiting state and runtime removal are not reduced from the event
+      // envelope alone.
+      return true;
+    default:
+      return true;
+  }
 }
 
 export interface DashboardServer {
@@ -682,7 +708,9 @@ export class DashboardServerImpl implements DashboardServer {
       applicationChange.type === 'event'
         ? {
             ...applicationChange,
-            ...(isTranscriptEvent(change) ? {} : { snapshot: change.snapshot }),
+            ...(requiresBrowserSnapshot(change)
+              ? { snapshot: change.snapshot }
+              : {}),
           }
         : { type: 'snapshot', snapshot: this.snapshot() },
     );
