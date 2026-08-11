@@ -227,6 +227,42 @@ Background jobs are first-class supervision targets. Use `delegate_jobs list` or
 
 When no independent parent work remains, `/wait` records only a hidden session marker and yields without injecting fabricated waiting prose. A background completion steers the next turn automatically; `/continue` is the manual resume path. This is a UI/session interaction, not a replacement for deliberate `peek` or continuation recovery.
 
+## TUI inspection bounds
+
+The delegate rail keeps all queued/running and failed, timed-out, or aborted
+rows visible. Successful history is capped at eight rows and the rail adds an
+explicit hidden-count line rather than letting old completions push active work
+off screen. Expanded parallel calls/results use the same policy for successful
+runs; the full run count and diagnostics remain in the result metadata.
+
+Expanded results separate `Result`, `Lifecycle / recovery`,
+`Continuation / worktree`, `Runtime`, `Usage`, and `Transcript` sections.
+Long task, result, diagnostic, activity, and worktree fields carry an explicit
+truncation marker. Use the normal configured `app.tools.expand` binding for the
+bounded details view, then use:
+
+```text
+/delegate-transcript                 # latest delegate result
+/delegate-transcript <name-or-token> # latest matching result
+```
+
+In TUI mode this opens a supported Pi `ctx.ui.custom({ overlay: true })`
+scrollable modal (`↑↓`, `PgUp/PgDn`, `Home/End`, `Esc`). It shows the bounded
+transcript Pi retained for the run; structured result payloads and private child
+thinking are intentionally not copied into public details. In RPC/headless
+modes the command falls back to a bounded notification because Pi does not
+provide a terminal modal there.
+
+## Usage state
+
+Usage refreshes are process-level and keyed by provider plus query identity, so
+fresh state is reused when Pi switches/reloads sessions and concurrent session
+refreshes coalesce. Window identities (`limitId`/`limitName`) remain separate;
+they are selected for the current model only at display time. The footer labels
+each window (`5h`, `wk`, or its reported duration) and shows its reset time
+when available. A five-minute periodic refresh remains the freshness bound;
+manual/model-change/settled refreshes can force an update.
+
 ## Integrating the result
 
 A finished writable run reports its branch, its base commit, and the paths it changed. Nothing bespoke carries the work back: it is a git branch, and the orchestrating agent is expected to integrate it itself. The `delegate_branches` tool is the fan-in counterpart to parallel worktrees — it accepts a worktree id or a continuation token:

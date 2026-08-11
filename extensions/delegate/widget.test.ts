@@ -424,6 +424,34 @@ describe('delegate widget', () => {
     expect(lines).toHaveLength(10);
   });
 
+  test('bounds completed history without hiding active or failed rows', () => {
+    const successes = Array.from({ length: 10 }, (_, index) =>
+      status({
+        id: `success-${index}`,
+        name: `Completed ${index}`,
+        state: 'success',
+      }),
+    );
+    const lines = renderDelegateWidget(
+      [
+        ...successes,
+        status({ id: 'running', name: 'Still running', state: 'running' }),
+        status({ id: 'failed', name: 'Needs attention', state: 'error' }),
+      ],
+      true,
+      100,
+      theme as never,
+      5_000,
+    );
+
+    expect(lines.join('\n')).toContain('Still running');
+    expect(lines.join('\n')).toContain('Needs attention');
+    expect(lines.join('\n')).toContain('Completed 0');
+    expect(lines.join('\n')).toContain('Completed 7');
+    expect(lines.join('\n')).not.toContain('Completed 8');
+    expect(lines.join('\n')).toContain('2 completed delegates hidden');
+  });
+
   test('breaks the compact line down by state', () => {
     const [line] = renderDelegateWidget(
       [

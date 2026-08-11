@@ -4,6 +4,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { defineExtension } from '../shared/runtime/extension';
 import { queryUsage } from './backends';
+import { createSharedUsageQuery } from './cache';
 import {
   REFRESH_INTERVAL_MS,
   SETTLED_REFRESH_DEBOUNCE_MS,
@@ -25,6 +26,13 @@ export function registerUsage(
 ) {
   let timer: NodeJS.Timeout | undefined;
   let currentContext: ExtensionContext | undefined;
+  const sharedQuery = createSharedUsageQuery(query, {
+    freshMs: REFRESH_INTERVAL_MS,
+    // The built-in backend is stable across extension reloads. A supplied
+    // query remains isolated by function identity, which keeps test/custom
+    // backends from accidentally sharing another provider's account state.
+    stable: query === queryUsage,
+  });
 
   const clear = (ctx: ExtensionContext) => {
     if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, undefined);
@@ -32,7 +40,7 @@ export function registerUsage(
 
   const coordinator = createUsageRefresh({
     debounceMs: SETTLED_REFRESH_DEBOUNCE_MS,
-    query,
+    query: sharedQuery,
     canRefresh: (ctx) => ctx.hasUI && isCodexModel(ctx.model),
     isFresh: (report) => Date.now() - report.capturedAt < REFRESH_INTERVAL_MS,
     onLoading: (ctx) =>

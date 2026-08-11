@@ -8,6 +8,7 @@ import {
   capitalize,
   controls,
   currentActivityLines,
+  explicitTruncate,
   fallbackText,
   fieldLine,
   getDetails,
@@ -18,11 +19,13 @@ import {
   markdownPreview,
   modeDescription,
   RESULT_PREVIEW_CHARS,
+  EXPANDED_RESULT_MAX_CHARS,
   runtimeLabel,
   sectionTitle,
   stateColor,
   stateLabel,
   TASK_PREVIEW_CHARS,
+  transcriptPreview,
   type ThemeLike,
   type ToolResultLike,
   taskBlock,
@@ -52,6 +55,32 @@ function backgroundLaunchLabel(run: DelegatedRun): string {
   return `${capitalize(getRunState(run))} · ${run.backgroundJobId ?? '?'} · Background`;
 }
 
+const MAX_RESULT_SUCCESS_RUNS = 8;
+
+function boundedRuns(runs: readonly DelegatedRun[]): {
+  entries: Array<{ run: DelegatedRun; index: number }>;
+  hiddenSuccesses: number;
+} {
+  const important = runs
+    .map((run, index) => ({ run, index }))
+    .filter(({ run }) => getRunState(run) !== 'success');
+  const successes = runs
+    .map((run, index) => ({ run, index }))
+    .filter(({ run }) => getRunState(run) === 'success');
+  return {
+    entries: [...important, ...successes.slice(0, MAX_RESULT_SUCCESS_RUNS)],
+    hiddenSuccesses: Math.max(0, successes.length - MAX_RESULT_SUCCESS_RUNS),
+  };
+}
+
+function boundedLines(lines: string[], max: number): string[] {
+  if (lines.length <= max) return lines;
+  return [
+    ...lines.slice(0, Math.max(1, max - 1)),
+    `… [truncated; ${lines.length - max + 1} lines omitted]`,
+  ];
+}
+
 function addExpandedRun(
   container: Container,
   run: DelegatedRun,
@@ -68,7 +97,9 @@ function addExpandedRun(
 
   container.addChild(new Spacer(1));
   container.addChild(sectionTitle('Task', theme));
-  container.addChild(new Text(run.task.trim() || '(no task)', 0, 0));
+  container.addChild(
+    new Text(explicitTruncate(run.task.trim() || '(no task)', 4_096), 0, 0),
+  );
 
   container.addChild(new Spacer(1));
   container.addChild(sectionTitle('Mode', theme));
@@ -90,86 +121,80 @@ function addExpandedRun(
       0,
     ),
   );
+
+  container.addChild(new Spacer(1));
+  container.addChild(sectionTitle('Continuation / worktree', theme));
+  if (run.continuation)
+    container.addChild(
+      new Text(fg('accent', `Continuation: ${run.continuation}`), 0, 0),
+    );
   if (run.scope?.length)
     container.addChild(
-      new Text(
-        fg(
-          'muted',
-          // Scope is guidance for the child in both directions now; nothing
-          // enforces it, so the label no longer claims otherwise.
-          `Expected scope: ${run.scope.join(', ')}`,
-        ),
-        0,
-        0,
-      ),
+      new Text(fg('muted', `Expected scope: ${run.scope.join(', ')}`), 0, 0),
     );
   if (run.contextNote?.trim())
     container.addChild(
-      new Text(fg('muted', `Parent note: ${run.contextNote.trim()}`), 0, 0),
+      new Text(
+        fg('muted', `Parent note: ${explicitTruncate(run.contextNote, 2_000)}`),
+        0,
+        0,
+      ),
     );
-  for (const warning of [run.routing?.warning, ...(run.warnings ?? [])].filter(
-    (value): value is string => Boolean(value),
-  ))
-    container.addChild(new Text(fg('warning', warning), 0, 0));
+  const worktree = boundedLines(worktreeLines(run), 24);
+  if (worktree.length) container.addChild(new Text(worktree.join('\n'), 0, 0));
+  else if (!run.continuation)
+    container.addChild(new Text(fg('dim', 'No continuation or worktree metadata.'), 0, 0));
 
-  const worktree = worktreeLines(run);
-  if (worktree.length) {
-    container.addChild(new Spacer(1));
-    container.addChild(sectionTitle('Branch', theme));
-    container.addChild(new Text(worktree.join('\n'), 0, 0));
-  }
+  const lifecycle = ensureDelegateLifecycle(run);
   const recoveryNote = continuationRecoveryNote(run);
-  if (recoveryNote)
-    container.addChild(new Text(fg('muted', recoveryNote), 0, 0));
+  const blocked = blockedQuestion(run);
+  const warnings = [run.routing?.warning, ...(run.warnings ?? [])].filter(
+    (value): value is string => Boolean(value),
+  );
+  if (lifecycle || recoveryNote || blocked || warnings.length > 0) {
+    container.addChild(new Spacer(1));
+    container.addChild(sectionTitle('Lifecycle / recovery', theme));
+    if (lifecycle) {
+      container.addChild(
+        new Text(
+          fg(
+            state === 'error' ? 'error' : 'warning',
+            `Observed failure: ${lifecycle.reason}`,
+          ),
+          0,
+          0,
+        ),
+      );
+      const diagnostic = lifecycle.diagnostic
+        ? `Diagnostic: ${lifecycle.diagnostic}`
+        : lifecycle.diagnosticArtifact
+          ? `Diagnostic artifact: ${lifecycle.diagnosticArtifact.handle}`
+          : 'Diagnostic artifact unavailable.';
+      container.addChild(
+        new Text(fg('warning', explicitTruncate(diagnostic, 2_048)), 0, 0),
+      );
+      container.addChild(
+        new Text(
+          fg(
+            'dim',
+            `Continuation usable: ${lifecycle.continuationUsable ? 'yes' : 'no'} · Writable branch retained: ${lifecycle.writableBranchRetained ? 'yes' : 'no'} · Read-only snapshot retained: ${lifecycle.readOnlySnapshotRetained ? 'yes' : 'no'}`,
+          ),
+          0,
+          0,
+        ),
+      );
+    }
+    if (recoveryNote) container.addChild(new Text(fg('muted', recoveryNote), 0, 0));
+    if (blocked) container.addChild(new Text(fg('warning', `Blocked on: ${blocked}`), 0, 0));
+    for (const warning of warnings)
+      container.addChild(new Text(fg('warning', explicitTruncate(warning, 2_048)), 0, 0));
+  }
 
   const structured = getDelegateResultSpec(run);
-  const lifecycle = ensureDelegateLifecycle(run);
   const final = structured ? '' : getFinalAssistantText(run.messages).trim();
   const backgroundLaunch = isBackgroundLaunch(run);
-  const blocked = blockedQuestion(run);
-  if (blocked) {
-    container.addChild(new Spacer(1));
-    container.addChild(sectionTitle('Blocked on', theme));
-    container.addChild(new Text(fg('warning', blocked), 0, 0));
-  }
-  if (!hasResultHeading(final))
-    container.addChild(sectionTitle('Result', theme));
-  if (lifecycle) {
-    container.addChild(
-      new Text(
-        fg(
-          state === 'error' ? 'error' : 'warning',
-          `Observed failure: ${lifecycle.reason}`,
-        ),
-        0,
-        0,
-      ),
-    );
-    container.addChild(
-      new Text(
-        fg(
-          'warning',
-          lifecycle.diagnostic
-            ? `Diagnostic: ${lifecycle.diagnostic}`
-            : lifecycle.diagnosticArtifact
-              ? `Diagnostic artifact: ${lifecycle.diagnosticArtifact.handle}`
-              : 'Diagnostic artifact unavailable.',
-        ),
-        0,
-        0,
-      ),
-    );
-    container.addChild(
-      new Text(
-        fg(
-          'dim',
-          `Continuation usable: ${lifecycle.continuationUsable ? 'yes' : 'no'} · Writable branch retained: ${lifecycle.writableBranchRetained ? 'yes' : 'no'} · Read-only snapshot retained: ${lifecycle.readOnlySnapshotRetained ? 'yes' : 'no'}`,
-        ),
-        0,
-        0,
-      ),
-    );
-  } else if (structured) {
+  if (!hasResultHeading(final)) container.addChild(sectionTitle('Result', theme));
+  if (structured) {
     const settlement = getSettledDelegateResult(run);
     container.addChild(
       new Text(
@@ -183,32 +208,27 @@ function addExpandedRun(
         0,
       ),
     );
-  } else if (final) container.addChild(new Markdown(final, 0, 0, mdTheme));
+  } else if (final)
+    container.addChild(
+      new Markdown(explicitTruncate(final, EXPANDED_RESULT_MAX_CHARS), 0, 0, mdTheme),
+    );
   else if (backgroundLaunch)
-    container.addChild(
-      new Text(fg('muted', 'Running independently in the background.'), 0, 0),
-    );
+    container.addChild(new Text(fg('muted', 'Running independently in the background.'), 0, 0));
   else if (['queued', 'running'].includes(state))
-    container.addChild(
-      new Text(fg('muted', 'Waiting for the subagent…'), 0, 0),
-    );
-  else
+    container.addChild(new Text(fg('muted', 'Waiting for the subagent…'), 0, 0));
+  else {
+    const error = run.errorMessage || run.stderr.trim() || 'No final response';
     container.addChild(
       new Text(
-        fg(
-          state === 'error' ? 'error' : 'warning',
-          run.errorMessage || run.stderr.trim() || 'No final response',
-        ),
+        fg(state === 'error' ? 'error' : 'warning', explicitTruncate(error, 2_048)),
         0,
         0,
       ),
     );
+  }
 
-  const activities = backgroundLaunch ? '' : activityLines(run, fg);
-  const stats = usage(run);
   container.addChild(new Spacer(1));
   container.addChild(sectionTitle('Runtime', theme));
-  if (activities) container.addChild(new Text(activities, 0, 0));
   container.addChild(
     new Text(
       backgroundLaunch
@@ -218,15 +238,19 @@ function addExpandedRun(
       0,
     ),
   );
-  if (stats) container.addChild(new Text(fg('dim', stats), 0, 0));
   if (run.backgroundJobId)
-    container.addChild(
-      new Text(fg('accent', `Background job: ${run.backgroundJobId}`), 0, 0),
-    );
-  if (run.continuation)
-    container.addChild(
-      new Text(fg('dim', `Continuation: ${run.continuation}`), 0, 0),
-    );
+    container.addChild(new Text(fg('accent', `Background job: ${run.backgroundJobId}`), 0, 0));
+
+  container.addChild(new Spacer(1));
+  container.addChild(sectionTitle('Usage', theme));
+  container.addChild(
+    new Text(fg('dim', usage(run) || 'No token usage recorded.'), 0, 0),
+  );
+
+  const transcript = transcriptPreview(run);
+  container.addChild(new Spacer(1));
+  container.addChild(sectionTitle('Transcript', theme));
+  container.addChild(new Text(transcript.text, 0, 0));
 }
 
 export function renderDelegateResult(
@@ -251,13 +275,28 @@ export function renderDelegateResult(
         ? `Delegate · ${details.runs.length} subagents`
         : 'Delegate';
     container.addChild(new Text(fg('toolTitle', theme.bold(title)), 0, 0));
-    for (const [index, run] of details.runs.entries()) {
-      if (index > 0) container.addChild(new Spacer(1));
+    const display =
+      details.mode === 'parallel'
+        ? boundedRuns(details.runs)
+        : { entries: [{ run: details.runs[0]!, index: 0 }], hiddenSuccesses: 0 };
+    if (display.hiddenSuccesses > 0)
+      container.addChild(
+        new Text(
+          fg(
+            'dim',
+            `… ${display.hiddenSuccesses} successful delegates omitted; use /delegate-transcript for the full history`,
+          ),
+          0,
+          0,
+        ),
+      );
+    for (const [position, entry] of display.entries.entries()) {
+      if (position > 0) container.addChild(new Spacer(1));
       addExpandedRun(
         container,
-        run,
+        entry.run,
         theme,
-        details.mode === 'parallel' ? `Subagent ${index + 1}` : undefined,
+        details.mode === 'parallel' ? `Subagent ${entry.index + 1}` : undefined,
       );
     }
     return container;
@@ -458,7 +497,21 @@ export function renderDelegateResult(
       ),
     );
 
-  for (const [index, run] of details.runs.entries()) {
+  const display = boundedRuns(details.runs);
+  if (display.hiddenSuccesses > 0)
+    container.addChild(
+      new Text(
+        fg(
+          'dim',
+          `… ${display.hiddenSuccesses} successful delegates omitted; use /delegate-transcript for the full history`,
+        ),
+        0,
+        0,
+      ),
+    );
+
+  for (const entry of display.entries) {
+    const { run, index } = entry;
     container.addChild(
       indexedTaskBlock(
         `${fg('muted', `${index + 1}`.padStart(2))} ${icon(run, fg)} `,
@@ -488,7 +541,8 @@ export function renderDelegateResult(
 
   // Frequently changing runtime data stays at the bottom so updates do not
   // repaint or shift the task summaries above it.
-  for (const [index, run] of details.runs.entries()) {
+  for (const entry of display.entries) {
+    const { run, index } = entry;
     const state = getRunState(run);
     const latest = run.activities.at(-1);
     const status = fg(

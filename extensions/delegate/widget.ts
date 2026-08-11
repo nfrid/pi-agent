@@ -11,6 +11,8 @@ import {
 import type { DelegateStatusSnapshot } from './status';
 
 export const DELEGATE_WIDGET_MAX_WIDTH = 68;
+/** Successful rows are history; active and failed rows are always retained. */
+export const DELEGATE_WIDGET_MAX_SUCCESS_ROWS = 8;
 /** Narrower than this a subagent row is name and elapsed time and nothing else. */
 export const DELEGATE_WIDGET_MIN_WIDTH = 30;
 const MODE_ROUTE_MAX_WIDTH = 16;
@@ -283,23 +285,60 @@ function placeBlock(lines: string[], width: number): string[] {
   );
 }
 
-/** Rank for display: what is happening now, then what is about to. */
+/** Rank for display: active work, failures, then successful history. */
 const STATE_RANK: Record<DelegateStatusSnapshot['state'], number> = {
   running: 0,
-  success: 1,
-  error: 1,
-  'timed-out': 1,
-  aborted: 1,
-  queued: 2,
+  queued: 1,
+  error: 2,
+  'timed-out': 2,
+  aborted: 2,
+  success: 3,
 };
 
-/** Keep active work first while retaining every tracked subagent. */
+function isActive(status: DelegateStatusSnapshot): boolean {
+  return status.state === 'queued' || status.state === 'running';
+}
+
+function isFailure(status: DelegateStatusSnapshot): boolean {
+  return (
+    status.state === 'error' ||
+    status.state === 'timed-out' ||
+    status.state === 'aborted'
+  );
+}
+
+interface DisplayRows {
+  rows: DelegateStatusSnapshot[];
+  hiddenSuccesses: number;
+}
+
+/**
+ * Keep active/error work visible, while completed success history is bounded.
+ * The store remains authoritative; this only limits the persistent rail.
+ */
 function forDisplay(
   statuses: readonly DelegateStatusSnapshot[],
-): DelegateStatusSnapshot[] {
-  return [...statuses].sort(
+): DisplayRows {
+  const ordered = [...statuses].sort(
     (a, b) => STATE_RANK[a.state] - STATE_RANK[b.state],
   );
+  const active = ordered.filter(isActive);
+  const terminal = statuses.filter((status) => !isActive(status));
+  const successes = terminal.filter((status) => status.state === 'success');
+  let keptSuccesses = 0;
+  const visibleTerminal = terminal.filter(
+    (status) =>
+      isFailure(status) ||
+      (status.state === 'success' &&
+        keptSuccesses++ < DELEGATE_WIDGET_MAX_SUCCESS_ROWS),
+  );
+  return {
+    rows: [...active, ...visibleTerminal],
+    hiddenSuccesses: Math.max(
+      0,
+      successes.length - DELEGATE_WIDGET_MAX_SUCCESS_ROWS,
+    ),
+  };
 }
 
 function compactSummary(statuses: readonly DelegateStatusSnapshot[]): string {
@@ -307,9 +346,15 @@ function compactSummary(statuses: readonly DelegateStatusSnapshot[]): string {
     statuses.filter((status) => status.state === state).length;
   const running = count('running');
   const queued = count('queued');
+  const failed = statuses.filter((status) => isFailure(status)).length;
+  const completed = statuses.filter((status) => status.state === 'success').length;
   const parts = [
     running > 0 ? `${running} running` : '',
     queued > 0 ? `${queued} queued` : '',
+    failed > 0 ? `${failed} failed` : '',
+    running === 0 && queued === 0 && completed > 0
+      ? `${completed} completed`
+      : '',
   ].filter(Boolean);
   return parts.length > 0 ? parts.join(', ') : 'finishing';
 }
@@ -338,11 +383,19 @@ export function renderDelegateWidget(
     return placeBlock([line], width);
   }
 
-  const lines = forDisplay(statuses).flatMap((status) => {
+  const display = forDisplay(statuses);
+  const lines = display.rows.flatMap((status) => {
     const main = mainLine(status, blockWidth, theme, now);
-    return status.state === 'queued' || status.state === 'running'
+    return isActive(status)
       ? [main, actionLine(status, blockWidth, theme, markdownTheme)]
       : [main];
   });
+  if (display.hiddenSuccesses > 0)
+    lines.push(
+      theme.fg(
+        'dim',
+        `… ${display.hiddenSuccesses} completed delegate${display.hiddenSuccesses === 1 ? '' : 's'} hidden`,
+      ),
+    );
   return placeBlock(lines, width);
 }
