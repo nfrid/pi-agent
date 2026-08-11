@@ -14,6 +14,7 @@ export {
   activityTitleLine,
   shouldShowActivityLead,
 } from './activity-lead';
+export { parseSkillInvocation } from './entries';
 export { boundedInspectorText, toolInspectorRows } from './inspector';
 export type { TranscriptLandmark } from './landmarks';
 export {

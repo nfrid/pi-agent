@@ -292,6 +292,24 @@ h2 {
   margin: 3px 0 0;
   font-size: 11px;
 }
+.notification-truncation {
+  display: block;
+  margin: 8px 5px;
+  color: var(--orange);
+  font-size: 11px;
+}
+.notification-time {
+  display: block;
+  margin-top: 4px;
+  color: var(--dim);
+  font-size: 10px;
+}
+.usage-reset {
+  display: block;
+  margin-top: 3px;
+  color: var(--dim);
+  font-size: 10px;
+}
 .notification button {
   border: 1px solid var(--line);
   color: var(--muted);
@@ -1444,14 +1462,81 @@ h2 {
   text-transform: uppercase;
 }
 .tool-inspector dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 5px;
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--muted);
   white-space: pre-wrap;
 }
-.tool-inspector pre {
+.tool-inspector pre,
+.payload-preview pre {
   max-height: 240px;
   overflow: auto;
+}
+.payload-truncation,
+.payload-truncation-label {
+  color: var(--orange);
+  font-size: 10px;
+}
+.payload-truncation {
+  margin: 5px 0;
+}
+.payload-copy {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+}
+.payload-copy:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.skill-invocation {
+  border-left: 2px solid var(--purple);
+  padding-left: 8px;
+}
+.skill-invocation > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  cursor: pointer;
+  list-style: none;
+}
+.skill-invocation > summary::-webkit-details-marker {
+  display: none;
+}
+.skill-invocation > summary strong {
+  color: var(--fg);
+}
+.skill-invocation > summary small {
+  color: var(--dim);
+}
+.skill-invocation-details {
+  max-height: min(52vh, 440px);
+  overflow: auto;
+  border-top: 1px solid var(--line-soft);
+  padding: 8px 0 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.skill-invocation-details > small {
+  color: var(--dim);
+}
+.skill-invocation-request {
+  border-top: 1px solid var(--line-soft);
+  margin-top: 8px;
+  padding-top: 7px;
+}
+.skill-invocation-request > strong {
+  color: var(--purple);
+  font-size: 10px;
+  text-transform: uppercase;
 }
 
 /* Live extension cards retain the compact status density of the TUI. */
@@ -1665,6 +1750,47 @@ h2 {
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 5px 12px;
   margin: 0;
+}
+.delegate-detail-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--muted);
+}
+.delegate-detail-facts b,
+.delegate-recovery > strong,
+.delegate-result-summary > strong {
+  color: var(--purple);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.delegate-recovery,
+.delegate-result-summary {
+  border-left: 2px solid var(--line);
+  padding: 5px 8px;
+  background: color-mix(in srgb, var(--bg) 48%, transparent);
+}
+.delegate-recovery {
+  border-left-color: var(--orange);
+}
+.delegate-recovery p {
+  margin: 3px 0;
+}
+.delegate-recovery ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 14px;
+  margin: 4px 0;
+  padding-left: 14px;
+}
+.delegate-result-summary {
+  border-left-color: var(--green);
+}
+.delegate-result-summary > .markdown {
+  max-height: 14em;
+  margin-top: 4px;
+  overflow: auto;
+  color: var(--fg);
 }
 .delegate-row-detail dl > div {
   display: grid;

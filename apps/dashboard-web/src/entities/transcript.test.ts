@@ -19,6 +19,7 @@ import {
   buildTranscriptLandmarks,
   buildVirtualTranscriptRows,
   displayActivityPath,
+  parseSkillInvocation,
   preserveVirtualScrollOffset,
   restoreVirtualBottom,
   type TranscriptGroup,
@@ -27,6 +28,20 @@ import {
 } from './transcript';
 
 describe('activity row views and virtual transcript construction', () => {
+  it('projects skill protocol envelopes as compact invocation data', () => {
+    expect(
+      parseSkillInvocation(
+        '<skill name="browser" location="/skills/browser/SKILL.md">\nReferences are relative to /skills/browser.\n\nUse the browser.\n</skill>\n\nInspect the page',
+      ),
+    ).toEqual({
+      name: 'browser',
+      location: '/skills/browser/SKILL.md',
+      instructions:
+        'References are relative to /skills/browser.\n\nUse the browser.',
+      request: 'Inspect the page',
+    });
+    expect(parseSkillInvocation('ordinary user message')).toBeUndefined();
+  });
   it('labels steering messages in the transcript and outline without adding a row', () => {
     const items = toTranscriptEntries([
       {

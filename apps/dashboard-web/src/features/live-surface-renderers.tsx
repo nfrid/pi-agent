@@ -316,8 +316,22 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
             );
             const isExpanded = expanded.has(id);
             const jobId = row.jobId ?? '';
-            const runs = row.runs?.slice(-6) ?? [];
+            const allRuns = row.runs ?? [];
+            const runs = allRuns.slice(-6);
+            const runOffset = allRuns.length - runs.length;
             const transcript = row.transcript ?? [];
+            const result = [...transcript]
+              .reverse()
+              .find((entry) => entry.type === 'assistant');
+            const activityTranscript = transcript.filter(
+              (entry) => entry.type !== 'assistant',
+            );
+            const lifecycle = row.lifecycle;
+            const artifactHandle =
+              lifecycle?.diagnosticArtifact &&
+              typeof lifecycle.diagnosticArtifact.handle === 'string'
+                ? lifecycle.diagnosticArtifact.handle
+                : undefined;
             return (
               <div
                 className={`delegate-row ${stateClass(state)}`}
@@ -365,9 +379,86 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
                         </div>
                       </dl>
                     )}
-                    {transcript.length > 0 && (
+                    {(row.context === 'continuation' || allRuns.length > 1) && (
+                      <div className="delegate-detail-facts">
+                        {row.context === 'continuation' && (
+                          <span>
+                            <b>Context</b> continuation
+                          </span>
+                        )}
+                        {allRuns.length > 1 && (
+                          <span>
+                            <b>Attempts</b> {allRuns.length}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {lifecycle && (
+                      <section
+                        className="delegate-recovery"
+                        aria-label="Recovery details"
+                      >
+                        <strong>Recovery</strong>
+                        <p>
+                          Observed failure: {lifecycle.reason}
+                          {lifecycle.diagnostic
+                            ? ` · ${short(lifecycle.diagnostic, 320)}`
+                            : ''}
+                        </p>
+                        <ul>
+                          <li>
+                            Continuation:{' '}
+                            {lifecycle.continuationUsable
+                              ? 'usable'
+                              : 'unavailable'}
+                          </li>
+                          <li>
+                            Writable branch:{' '}
+                            {lifecycle.writableBranchRetained
+                              ? 'retained'
+                              : 'not retained'}
+                          </li>
+                          <li>
+                            Read-only snapshot:{' '}
+                            {lifecycle.readOnlySnapshotRetained
+                              ? 'retained'
+                              : 'not retained'}
+                          </li>
+                        </ul>
+                        {artifactHandle && (
+                          <small>Diagnostic artifact: {artifactHandle}</small>
+                        )}
+                      </section>
+                    )}
+                    {row.result && (
+                      <section
+                        className="delegate-result-summary"
+                        aria-label="Delegate result"
+                      >
+                        <strong>Result</strong>
+                        <p>
+                          Structured result:{' '}
+                          {row.result.status === 'valid'
+                            ? 'valid'
+                            : row.result.status === 'pending'
+                              ? 'pending'
+                              : 'invalid'}
+                        </p>
+                      </section>
+                    )}
+                    {result?.text && (
+                      <section
+                        className="delegate-result-summary"
+                        aria-label="Delegate response"
+                      >
+                        <strong>Response</strong>
+                        <Markdown>{result.text}</Markdown>
+                      </section>
+                    )}
+                    {(activityTranscript.length > 0 ||
+                      row.transcriptTruncated === true) && (
                       <DelegateTranscript
-                        entries={transcript}
+                        entries={activityTranscript}
                         truncated={row.transcriptTruncated === true}
                       />
                     )}
@@ -392,7 +483,7 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
                               >
                                 {stateGlyph(runState)}
                               </span>
-                              <span>Run {runIndex + 1}</span>
+                              <span>Run {runOffset + runIndex + 1}</span>
                               <small>
                                 {runState}
                                 {elapsed(run.startedAt, run.finishedAt, now)
