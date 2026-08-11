@@ -2853,14 +2853,48 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
                     route: 'luna-high',
                     context: 'fresh',
                     runCount: 2,
-                    transcript: Array.from({ length: 14 }, (_, entryIndex) => ({
-                      id: `d1:tool:${entryIndex + 1}`,
-                      type: 'tool',
-                      label: `Validation command ${entryIndex + 1}`,
-                      text: `Command output line ${entryIndex + 1}\nAdditional diagnostic context for sticky-header scrolling.`,
-                      status: 'completed',
-                      run: 1,
-                    })),
+                    runs: [
+                      {
+                        state: 'success',
+                        startedAt: delegateStartedAt - 30_000,
+                        finishedAt: delegateStartedAt - 10_000,
+                      },
+                      { state: 'running', startedAt: delegateStartedAt },
+                    ],
+                    result: { kind: 'structured', status: 'valid' },
+                    lifecycle: {
+                      reason: 'timeout',
+                      diagnostic:
+                        'The child runner timed out after the final check.',
+                      diagnosticArtifact: { handle: 'artifact-dashboard' },
+                      continuationUsable: true,
+                      writableBranchRetained: false,
+                      readOnlySnapshotRetained: true,
+                    },
+                    transcript: [
+                      ...Array.from({ length: 14 }, (_, entryIndex) => ({
+                        id: `d1:tool:${entryIndex + 1}`,
+                        type: 'tool',
+                        label: `Validation command ${entryIndex + 1}`,
+                        name: 'bash',
+                        arguments: {
+                          command: `pnpm test --filter validation-${entryIndex + 1}`,
+                        },
+                        result: {
+                          output: `Command output line ${entryIndex + 1}`,
+                        },
+                        status: 'completed',
+                        run: 1,
+                      })),
+                      {
+                        id: 'd1:error',
+                        type: 'error',
+                        label: 'Error',
+                        text: 'A child command failed.',
+                        status: 'error',
+                        run: 1,
+                      },
+                    ],
                   }
                 : {}),
             })),
@@ -3008,56 +3042,52 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
     })),
   ).toEqual({ gridColumn: '2', textAlign: 'left' });
   await page.setViewportSize({ width: 1440, height: 900 });
-  const delegateScrollRegion = delegatesPanel.locator('.surface-scroll-region');
-  const statsTop = await delegateStats.evaluate(
-    (element) => element.getBoundingClientRect().top,
-  );
-  const expandedHeader = delegatesPanel.locator('.delegate-row-toggle').first();
-  await expandedHeader.click();
-  await delegateScrollRegion.evaluate((element) => {
-    element.scrollTop = 0;
+  await delegatesPanel.locator('.delegate-row-toggle').first().click();
+  const transcriptInspector = page.getByRole('dialog', {
+    name: 'Delegate transcript',
   });
-  const expandedDetail = delegatesPanel.locator('.delegate-row-detail').first();
-  await expect(expandedDetail.locator('dt')).toHaveText(['Job']);
-  await expect(expandedDetail).not.toContainText('luna-high');
-  await expect(expandedDetail).not.toContainText('read/write');
-  await expect(expandedDetail).not.toContainText('fresh');
-  const expandedHeaderTop = await expandedHeader.evaluate(
-    (element) => element.getBoundingClientRect().top,
+  await expect(transcriptInspector).toBeVisible();
+  await expect(
+    transcriptInspector.locator('.surface-dialog-summary'),
+  ).toContainText('Dashboard delegate 1');
+  await expect(
+    transcriptInspector.locator('.delegate-inspector-metadata'),
+  ).toContainText('result valid');
+  await expect(
+    transcriptInspector.getByRole('region', { name: 'Delegate transcript' }),
+  ).toBeVisible();
+  const delegateTool = transcriptInspector.locator('.tool-detail').first();
+  await delegateTool.click();
+  await expect(delegateTool.getByLabel('Arguments')).toContainText(
+    'pnpm test --filter validation-1',
   );
-  await delegateScrollRegion.evaluate((element) => {
-    element.scrollTop = 240;
-  });
-  const scrolledHeaderTop = await expandedHeader.evaluate(
-    (element) => element.getBoundingClientRect().top,
+  await expect(delegateTool.getByLabel('Result')).toContainText(
+    'Command output line 1',
   );
-  expect(Math.abs(scrolledHeaderTop - expandedHeaderTop)).toBeLessThanOrEqual(
-    1,
+  const delegateError = transcriptInspector.locator(
+    '.event-delegate-result.event-failed',
   );
-  const scrolledStatsTop = await delegateStats.evaluate(
-    (element) => element.getBoundingClientRect().top,
+  await delegateError.click();
+  await expect(delegateError).toContainText('A child command failed.');
+  await transcriptInspector.getByText('Run and recovery details').click();
+  const delegateDetails = transcriptInspector.locator(
+    '.delegate-inspector-details',
   );
-  expect(Math.abs(scrolledStatsTop - statsTop)).toBeLessThanOrEqual(1);
-  await delegateScrollRegion.evaluate((element) => {
-    element.scrollTop = 0;
-  });
-  await delegatesPanel.locator('.delegate-row-toggle').nth(4).hover();
-  await page.mouse.wheel(0, 320);
-  await expect
-    .poll(() => delegateScrollRegion.evaluate((element) => element.scrollTop))
-    .toBeGreaterThan(0);
-  expect(
-    await delegateScrollRegion.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      return element.scrollTop;
-    }),
-  ).toBeGreaterThan(0);
-  await expect(delegateStats).toBeVisible();
-  expect(
-    await delegateStats.evaluate(
-      (element) => element.getBoundingClientRect().top,
-    ),
-  ).toBeCloseTo(statsTop, 0);
+  await expect(delegateDetails).toContainText('dj-dashboard');
+  await expect(delegateDetails).toContainText('Run 1');
+  await expect(delegateDetails).toContainText(
+    'The child runner timed out after the final check.',
+  );
+  await expect(delegateDetails).toContainText('artifact-dashboard');
+  await transcriptInspector
+    .getByRole('button', { name: 'Close Delegate transcript' })
+    .click();
+  // The controlled drawer stays mounted for its exit animation and focus return.
+  const exitingDelegateInspector = page.locator('.delegate-transcript-dialog');
+  await expect(exitingDelegateInspector).toHaveCount(1);
+  await expect(transcriptInspector).toHaveCount(0);
+  await expect(exitingDelegateInspector).toHaveCount(0);
+  await expect(delegatesPanel).toBeVisible();
   await mocks.emit({
     type: 'snapshot',
     snapshot: phase6Snapshot({

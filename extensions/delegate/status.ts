@@ -26,6 +26,12 @@ export interface DelegateTranscriptEntry {
   id: string;
   type: 'task' | 'thinking' | 'tool' | 'assistant' | 'error';
   label: string;
+  /** Canonical tool name; label remains a compact activity description. */
+  name?: string;
+  arguments?: unknown;
+  result?: unknown;
+  argumentsTruncated?: boolean;
+  resultTruncated?: boolean;
   text?: string;
   status?: 'running' | 'completed' | 'error';
   at?: number;
@@ -91,7 +97,10 @@ function assistantText(run: DelegatedRun): DelegateTranscriptEntry[] {
   });
 }
 
-function transcript(run: DelegatedRun): DelegateTranscriptEntry[] {
+function transcript(
+  run: DelegatedRun,
+  activities: readonly DelegatedActivity[] = run.activities,
+): DelegateTranscriptEntry[] {
   const entries: DelegateTranscriptEntry[] = [
     {
       id: 'task',
@@ -101,10 +110,25 @@ function transcript(run: DelegatedRun): DelegateTranscriptEntry[] {
       status: 'completed',
       at: run.queuedAt,
     },
-    ...run.activities.map((activity, index) => ({
+    ...activities.map((activity, index) => ({
       id: activity.id ?? `activity-${index}`,
       type: activity.type,
       label: activity.label,
+      ...(activity.type === 'tool' && activity.toolName
+        ? { name: activity.toolName }
+        : {}),
+      ...(activity.type === 'tool' && activity.toolArguments !== undefined
+        ? { arguments: activity.toolArguments }
+        : {}),
+      ...(activity.type === 'tool' && activity.toolResult !== undefined
+        ? { result: activity.toolResult }
+        : {}),
+      ...(activity.type === 'tool' && activity.toolArgumentsTruncated
+        ? { argumentsTruncated: true }
+        : {}),
+      ...(activity.type === 'tool' && activity.toolResultTruncated
+        ? { resultTruncated: true }
+        : {}),
       ...(activity.transcriptText || activity.latestText
         ? { text: activity.transcriptText ?? activity.latestText }
         : {}),
@@ -193,7 +217,7 @@ export class DelegateStatusStore {
         context: run.context,
         allowWrites: run.allowWrites === true,
         activity: displayActivity(run, undefined),
-        transcript: transcript(run),
+        transcript: transcript(run, inputRun.activities),
         result: resultProjection(inputRun),
         lifecycle: cloneDelegateLifecycle(run.lifecycle),
         resultEntered: false,
@@ -217,7 +241,7 @@ export class DelegateStatusStore {
     record.context = run.context;
     record.allowWrites = run.allowWrites === true;
     record.activity = displayActivity(run, record.activity);
-    record.transcript = transcript(run);
+    record.transcript = transcript(run, inputRun.activities);
     record.result = resultProjection(inputRun);
     record.lifecycle = cloneDelegateLifecycle(run.lifecycle);
     this.onChange();
@@ -238,7 +262,7 @@ export class DelegateStatusStore {
       record.context = run.context;
       record.allowWrites = run.allowWrites === true;
       record.activity = displayActivity(run, record.activity);
-      record.transcript = transcript(run);
+      record.transcript = transcript(run, inputRun.activities);
       record.result = resultProjection(inputRun);
       record.lifecycle = cloneDelegateLifecycle(run.lifecycle);
       changed = true;

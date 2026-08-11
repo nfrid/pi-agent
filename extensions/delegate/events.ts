@@ -9,6 +9,58 @@ const MAX_ACTIVITY_COUNT = 96;
 const MAX_MESSAGE_COUNT = 100;
 const MAX_MESSAGE_BYTES = 5 * 1024 * 1024;
 const MAX_THINKING_TRANSCRIPT_CHARS = 8_000;
+const MAX_TOOL_PAYLOAD_CHARS = 6_000;
+const MAX_TOOL_PAYLOAD_DEPTH = 4;
+const MAX_TOOL_PAYLOAD_NODES = 64;
+const MAX_TOOL_PAYLOAD_ITEMS = 16;
+const MAX_TOOL_PAYLOAD_KEY_CHARS = 128;
+
+type BoundedToolPayload = { value: unknown; truncated: boolean };
+
+/** Keep final tool input/output structured but small enough for live patches. */
+function boundedToolPayload(value: unknown): BoundedToolPayload {
+  let remainingChars = MAX_TOOL_PAYLOAD_CHARS;
+  let remainingNodes = MAX_TOOL_PAYLOAD_NODES;
+  let truncated = false;
+  const visit = (current: unknown, depth: number): unknown => {
+    if (depth >= MAX_TOOL_PAYLOAD_DEPTH || remainingNodes-- <= 0) {
+      truncated = true;
+      return '[truncated]';
+    }
+    if (typeof current === 'string') {
+      const limit = Math.max(0, Math.min(1_024, remainingChars));
+      const next = current.slice(0, limit);
+      remainingChars -= next.length;
+      if (next.length !== current.length) truncated = true;
+      return next;
+    }
+    if (
+      current === null ||
+      typeof current === 'boolean' ||
+      (typeof current === 'number' && Number.isFinite(current))
+    )
+      return current;
+    if (Array.isArray(current)) {
+      const values = current.slice(0, MAX_TOOL_PAYLOAD_ITEMS);
+      if (values.length !== current.length) truncated = true;
+      return values.map((item) => visit(item, depth + 1));
+    }
+    if (current && typeof current === 'object') {
+      const output: Record<string, unknown> = Object.create(null);
+      const entries = Object.entries(current).slice(0, MAX_TOOL_PAYLOAD_ITEMS);
+      if (entries.length !== Object.keys(current).length) truncated = true;
+      for (const [key, item] of entries) {
+        const boundedKey = key.slice(0, MAX_TOOL_PAYLOAD_KEY_CHARS);
+        if (boundedKey !== key) truncated = true;
+        output[boundedKey] = visit(item, depth + 1);
+      }
+      return output;
+    }
+    truncated = true;
+    return String(current).slice(0, 256);
+  };
+  return { value: visit(value, 0), truncated };
+}
 
 type ThinkingGroup = {
   id: string;
@@ -97,6 +149,11 @@ function upsertActivity(
     status: 'running' | 'completed' | 'error';
     latestText?: string;
     transcriptText?: string;
+    toolName?: string;
+    toolArguments?: unknown;
+    toolResult?: unknown;
+    toolArgumentsTruncated?: boolean;
+    toolResultTruncated?: boolean;
     startedAt?: number;
   },
 ) {
@@ -108,6 +165,11 @@ function upsertActivity(
   const {
     latestText = existing?.latestText,
     transcriptText = existing?.transcriptText,
+    toolName = existing?.toolName,
+    toolArguments = existing?.toolArguments,
+    toolResult = existing?.toolResult,
+    toolArgumentsTruncated = existing?.toolArgumentsTruncated,
+    toolResultTruncated = existing?.toolResultTruncated,
     startedAt = existing?.startedAt ?? Date.now(),
     ...safeActivity
   } = activity;
@@ -124,6 +186,36 @@ function upsertActivity(
   if (transcriptText)
     Object.defineProperty(stored, 'transcriptText', {
       value: transcriptText,
+      enumerable: false,
+      configurable: true,
+    });
+  if (toolName)
+    Object.defineProperty(stored, 'toolName', {
+      value: toolName,
+      enumerable: false,
+      configurable: true,
+    });
+  if (toolArguments !== undefined)
+    Object.defineProperty(stored, 'toolArguments', {
+      value: toolArguments,
+      enumerable: false,
+      configurable: true,
+    });
+  if (toolResult !== undefined)
+    Object.defineProperty(stored, 'toolResult', {
+      value: toolResult,
+      enumerable: false,
+      configurable: true,
+    });
+  if (toolArgumentsTruncated)
+    Object.defineProperty(stored, 'toolArgumentsTruncated', {
+      value: true,
+      enumerable: false,
+      configurable: true,
+    });
+  if (toolResultTruncated)
+    Object.defineProperty(stored, 'toolResultTruncated', {
+      value: true,
       enumerable: false,
       configurable: true,
     });
@@ -332,11 +424,18 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
     }
     case 'tool_execution_start': {
       const name = String(event.toolName || 'tool');
+      const input =
+        name === 'delegate_result' || event.args === undefined
+          ? undefined
+          : boundedToolPayload(event.args);
       upsertActivity(run, {
         id: eventId(event, 'tool'),
         type: 'tool',
         label: toolLabel(name, event.args),
         status: 'running',
+        toolName: name,
+        ...(input === undefined ? {} : { toolArguments: input.value }),
+        ...(input?.truncated ? { toolArgumentsTruncated: true } : {}),
         latestText: toolInputPreview(name, event.args),
       });
       return true;
@@ -349,16 +448,31 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
         status: 'running',
       });
       return true;
-    case 'tool_execution_end':
-      if (event.toolName === 'delegate_result')
+    case 'tool_execution_end': {
+      const name = String(event.toolName || 'tool');
+      if (name === 'delegate_result')
         captureDelegateResultEvent(run, event.result, event.isError === true);
+      const output =
+        name === 'delegate_result' || event.result === undefined
+          ? undefined
+          : boundedToolPayload(event.result);
+      const input =
+        name === 'delegate_result' || event.args === undefined
+          ? undefined
+          : boundedToolPayload(event.args);
       upsertActivity(run, {
         id: eventId(event, 'tool'),
         type: 'tool',
         label: existingToolLabel(run, event),
         status: event.isError ? 'error' : 'completed',
+        toolName: name,
+        ...(input === undefined ? {} : { toolArguments: input.value }),
+        ...(input?.truncated ? { toolArgumentsTruncated: true } : {}),
+        ...(output === undefined ? {} : { toolResult: output.value }),
+        ...(output?.truncated ? { toolResultTruncated: true } : {}),
       });
       return true;
+    }
     case 'delegate_control_ack': {
       if (event.controlKind !== 'checkpoint') return false;
       const requested = run.checkpoint;

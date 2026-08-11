@@ -1,5 +1,4 @@
 import type { TranscriptRenderToolItem } from '@pi-dashboard/domain';
-import { useState } from 'react';
 
 const INSPECTOR_MAX_TEXT = 1_200;
 const INSPECTOR_MAX_DEPTH = 3;
@@ -71,48 +70,6 @@ function stringifyValue(value: unknown): string | undefined {
   }
 }
 
-async function copyText(value: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
-  }
-  const area = document.createElement('textarea');
-  area.value = value;
-  area.setAttribute('readonly', '');
-  area.style.position = 'fixed';
-  area.style.opacity = '0';
-  document.body.append(area);
-  area.select();
-  try {
-    if (!document.execCommand('copy')) throw new Error('Copy is unavailable.');
-  } finally {
-    area.remove();
-  }
-}
-
-function CopyValueButton({ value, label }: { value: unknown; label: string }) {
-  const [status, setStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const serialized = stringifyValue(value);
-  if (serialized === undefined) return null;
-  return (
-    <button
-      type="button"
-      className="payload-copy"
-      onClick={() =>
-        void copyText(serialized)
-          .then(() => setStatus('copied'))
-          .catch(() => setStatus('failed'))
-      }
-    >
-      {status === 'copied'
-        ? 'Copied'
-        : status === 'failed'
-          ? 'Copy unavailable'
-          : label}
-    </button>
-  );
-}
-
 export function BoundedPayloadPreview({
   value,
   label = 'payload',
@@ -129,40 +86,77 @@ export function BoundedPayloadPreview({
       <pre>{preview ?? '[unavailable payload]'}</pre>
       {truncated && (
         <p className="payload-truncation">
-          Preview truncated after {INSPECTOR_MAX_RAW_TEXT.toLocaleString()}{' '}
-          characters. Use Copy full {label} to retrieve the complete value.
+          {label} is truncated after {INSPECTOR_MAX_RAW_TEXT.toLocaleString()}{' '}
+          characters. Remaining characters are not displayed.
         </p>
       )}
-      <CopyValueButton value={value} label={`Copy full ${label}`} />
     </div>
   );
 }
 
+function PayloadSection({
+  title,
+  value,
+  sourceTruncated = false,
+}: {
+  title: string;
+  value: unknown;
+  sourceTruncated?: boolean;
+}) {
+  return (
+    <section className="payload-section" aria-label={title}>
+      <h4>{title}</h4>
+      <BoundedPayloadPreview value={value} label={title.toLowerCase()} />
+      {sourceTruncated && (
+        <small className="payload-truncation-label">
+          Source truncated this {title.toLowerCase()} before it reached the
+          dashboard.
+        </small>
+      )}
+    </section>
+  );
+}
+
+function sourceTruncated(
+  tool: Record<string, unknown>,
+  field: string,
+): boolean {
+  const data = tool.data;
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    (data as Record<string, unknown>)[`${field}Truncated`] === true
+  );
+}
+
 function ToolInspector({ tool }: { tool: Record<string, unknown> }) {
+  const status = tool.status ?? (tool.isError ? 'error' : 'pending');
+  const argumentsValue = tool.arguments ?? tool.args;
   return (
     <div className="tool-inspector">
-      <dl>
-        {toolInspectorRows(tool).map(([label, value]) => {
-          const bounded = boundedValue(value, 0);
-          return (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd>
-                <span>{bounded.text}</span>
-                {bounded.truncated && (
-                  <small className="payload-truncation-label">
-                    Preview truncated
-                  </small>
-                )}
-                <CopyValueButton value={value} label={`Copy full ${label}`} />
-              </dd>
-            </div>
-          );
-        })}
+      <dl className="tool-inspector-status">
+        <div>
+          <dt>Status</dt>
+          <dd>{String(status)}</dd>
+        </div>
       </dl>
-      <details>
-        <summary>Raw payload</summary>
-        <BoundedPayloadPreview value={tool} />
+      {argumentsValue !== undefined && (
+        <PayloadSection
+          title="Arguments"
+          value={argumentsValue}
+          sourceTruncated={sourceTruncated(tool, 'arguments')}
+        />
+      )}
+      {tool.result !== undefined && (
+        <PayloadSection
+          title="Result"
+          value={tool.result}
+          sourceTruncated={sourceTruncated(tool, 'result')}
+        />
+      )}
+      <details className="tool-inspector-raw">
+        <summary>Raw tool record</summary>
+        <BoundedPayloadPreview value={tool} label="raw tool record" />
       </details>
     </div>
   );

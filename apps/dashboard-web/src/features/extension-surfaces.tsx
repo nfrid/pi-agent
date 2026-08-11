@@ -14,7 +14,7 @@ import {
 
 /** Compatibility export for callers that used the old dashboard-local name. */
 export type { ExtensionSurface as LiveExtensionSurface } from '@pi-dashboard/extension-contributions';
-export { DelegateTranscript } from './live-surface-renderers';
+export { DelegateTranscript } from './delegate-transcript-inspector';
 
 type SurfacePlacement = 'main' | 'composer';
 

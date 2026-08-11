@@ -132,6 +132,55 @@ describe('events', () => {
     expect(JSON.stringify(run)).not.toContain('contents');
   });
 
+  test('retains bounded distinct tool input and final output for the live surface', () => {
+    const run = createRun('inspect');
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'bash-1',
+        toolName: 'bash',
+        args: { command: 'pnpm test', labels: ['unit', 'dashboard'] },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'bash-1',
+        toolName: 'bash',
+        result: { exitCode: 0, output: 'all tests passed' },
+      }),
+      run,
+    );
+
+    expect(run.activities[0]).toMatchObject({
+      toolName: 'bash',
+      toolArguments: { command: 'pnpm test', labels: ['unit', 'dashboard'] },
+      toolResult: { exitCode: 0, output: 'all tests passed' },
+      status: 'completed',
+    });
+    expect(JSON.stringify(run)).not.toContain('all tests passed');
+    expect(JSON.stringify(run)).not.toContain('pnpm test');
+  });
+
+  test('bounds oversized tool payloads before they reach the live projection', () => {
+    const run = createRun('inspect');
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'read-1',
+        toolName: 'read',
+        args: { payload: 'x'.repeat(12_000) },
+      }),
+      run,
+    );
+    const activity = run.activities[0];
+    expect(activity?.toolArgumentsTruncated).toBe(true);
+    expect(JSON.stringify(activity?.toolArguments).length).toBeLessThanOrEqual(
+      6_100,
+    );
+  });
+
   test('does not stream tool output, thinking, or tool arguments to the parent', () => {
     const run = createRun('inspect');
     processJsonLine(
