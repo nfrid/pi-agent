@@ -60,3 +60,25 @@ These shims cover host APIs still missing as of Pi 0.84.1.
 
 These removal conditions are intentionally exact: changing a private Pi class
 shape must make a shim fail closed, never expand its reach.
+
+## Skill envelopes in the local TUI
+
+Pi 0.84.1's interactive mode has a native renderer for the canonical skill
+message envelope (`<skill name="..." location="...">...</skill>`). It renders a
+collapsed `[skill] name` event and the following user request separately; its
+expand action renders the skill instructions. The original user message is
+still retained for the model and session history. Do not replace this with a
+`registerMessageRenderer` call: that API is only for custom messages, not
+ordinary user messages.
+
+`extensions/skill-message-rendering` uses the supported
+`registerMarkdownTransformer` hook only as a fallback for messages containing
+multiple envelopes or surrounding text, which the native parser does not
+recognize as one canonical invocation. The transformer is display-only and
+leaves canonical single envelopes untouched so native expansion is preserved.
+The hook has no `expanded` argument and cannot add the envelope's exact
+`location` attribute to Pi's native expanded component. That is a host API
+limitation: do not monkey-patch `UserMessageComponent` or
+`SkillInvocationMessageComponent` to work around it. The raw location and
+instructions remain in the unmodified session message; a future public skill
+renderer hook can replace this fallback and expose both fields directly.
