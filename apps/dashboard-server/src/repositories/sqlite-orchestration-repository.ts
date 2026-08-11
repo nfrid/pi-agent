@@ -4,7 +4,6 @@ import {
   assertRunTransition,
   canTransitionCheckout,
   canTransitionProject,
-  canTransitionThread,
 } from '@pi-dashboard/domain';
 import type {
   Checkout,
@@ -21,6 +20,11 @@ import type {
   ThreadSummary,
 } from '@pi-dashboard/protocol';
 import type { WorktreeRecord } from '@pi-dashboard/worktree-manager';
+import {
+  assertRuntimeTransition,
+  canApplyThreadStatus,
+  threadStatusForRun,
+} from '../application/orchestration/transitions.js';
 import type {
   AdoptSessionWithThreadAndRunInput,
   BindRuntimeInput,
@@ -734,7 +738,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     return this.withTransaction(() => {
       const current = this.getThread(id);
       if (!current) throw new Error(`Thread ${id} does not exist.`);
-      if (!canTransitionThread(current.status, status))
+      if (!canApplyThreadStatus(current.status, status))
         throw new Error(
           `Illegal thread transition: ${current.status} -> ${status}.`,
         );
@@ -1106,16 +1110,7 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     return this.withTransaction(() => {
       const current = this.getRuntime(runtimeId);
       if (!current) throw new Error(`Runtime ${runtimeId} does not exist.`);
-      const legal =
-        current.status === status ||
-        (current.status === 'starting' &&
-          ['running', 'stopped', 'failed'].includes(status)) ||
-        (current.status === 'running' &&
-          ['stopped', 'failed'].includes(status));
-      if (!legal)
-        throw new Error(
-          `Illegal runtime transition: ${current.status} -> ${status}.`,
-        );
+      assertRuntimeTransition(current.status, status);
       if (current.status === status) return current;
       const result = this.db
         .prepare(
@@ -1310,21 +1305,10 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     runStatus: RunStatus,
     now: number,
   ): void {
-    const desired =
-      runStatus === 'waiting'
-        ? 'needs-input'
-        : runStatus === 'settled'
-          ? 'settled'
-          : runStatus === 'failed'
-            ? 'failed'
-            : runStatus === 'cancelled' || runStatus === 'interrupted'
-              ? 'stopped'
-              : runStatus === 'queued'
-                ? 'queued'
-                : 'active';
+    const desired = threadStatusForRun(runStatus);
     const current = this.getThread(threadId);
     if (!current || current.status === desired) return;
-    if (canTransitionThread(current.status, desired))
+    if (canApplyThreadStatus(current.status, desired))
       this.db
         .prepare('UPDATE thread SET status=?,updated_at=? WHERE id=?')
         .run(desired, now, threadId);

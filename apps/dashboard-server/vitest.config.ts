@@ -16,6 +16,10 @@ export default defineConfig({
         __dirname,
         '../../packages/codex-usage/src/index.ts',
       ),
+      '@pi-dashboard/worktree-manager': path.resolve(
+        __dirname,
+        '../../packages/worktree-manager/src/index.ts',
+      ),
     },
   },
   test: {
