@@ -58,6 +58,8 @@ export const STRUCTURED_RESULT_CAPS = {
   resultBytes: 64 * 1024,
   maxValidationErrors: 16,
   maxValidationErrorBytes: 240,
+  /** Maximum delegate_result calls retained/evaluated for one run. */
+  maxAttempts: 3,
 } as const;
 
 /** Alias retained as a discoverable name for callers that prefer "limits". */
