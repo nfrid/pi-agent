@@ -194,12 +194,12 @@ from runtime control and in-app notifications.
 ## Intentional limits
 
 The dashboard has no terminal emulator, arbitrary command route, cold-start Sesh
-path, worktree automation, multi-user authentication, public exposure,
+path, multi-user authentication, public exposure,
 delegate-child control, offline command queue, or transcript database. Pi's
 native extensions and TUI remain the source of truth for local terminal
 behavior.
 
-Pi 0.82.1 exposes some lifecycle operations only through command context, so the
+Pi 0.84.1 exposes some lifecycle operations only through command context, so the
 remote adapter advertises only headless operations that are safe from its socket
 callback. Managed launch and restart are the supported browser lifecycle paths. See
 [extension-contributions.md](extension-contributions.md) for the exact removal

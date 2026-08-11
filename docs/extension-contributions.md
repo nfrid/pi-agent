@@ -35,16 +35,18 @@ not an error: selectors return no advertised actions and the dashboard uses
 legacy protocol-v1 behavior only where that existing API requires it. Unknown
 capability/action/renderer IDs never execute or load code.
 
-## Installed Pi 0.82.1 shims
+## Installed Pi host-API shims
+
+These shims cover host APIs still missing as of Pi 0.84.1.
 
 * `extensions/ask-user/dialogs.ts` is the bounded RPC `select`/`input`
-  fallback. It loses previews because Pi 0.82.1 RPC has no `custom()` payload;
+  fallback. It loses previews because Pi RPC has no `custom()` payload;
   remove it when Pi RPC exposes rich/custom dialog payloads. The separate
   headless omission is removed only when Pi exposes a headless interaction API.
   Broker answer and cancel do not require a shim and retain session scope,
   timeout, and single-winner resolution.
 * `extensions/activity-groups/shim.ts` is used only after its exact installed
-  component-method canary passes because Pi 0.82.1 has no public
+  component-method canary passes because Pi has no public
   `registerToolSequenceRenderer`. Remove the prototype patch and its canary
   when that public hook and the sequence renderer contract ship; keep the
   semantic `activity-groups.set` adapter.
