@@ -10,7 +10,7 @@ import {
   transformTodoContext,
 } from './context';
 import { turnSnapshotText } from './format';
-import { operationSchema, paramsSchema } from './model';
+import { MAX_TODO_RESULT_CHARS, operationSchema, paramsSchema } from './model';
 import { applyMutation, mutate, mutateBatch } from './mutations';
 import {
   applySnapshot,
@@ -673,6 +673,52 @@ describe('todo widget lifecycle', () => {
     expect(widget?.render(100)).toEqual(widget?.render(100));
     expect([...store.completedPendingHide]).toEqual(pending);
     expect([...store.hiddenCompleted]).toEqual(hidden);
+  });
+});
+
+describe('bounded todo tool results', () => {
+  it('caps large task rows and marks omitted state', async () => {
+    const localStore = createTaskStore();
+    for (let index = 0; index < 100; index += 1) {
+      mutate(localStore, 'add', {
+        action: 'add',
+        text: `task-${index} ${'detail '.repeat(200)}`,
+        notes: 'note '.repeat(200),
+      });
+    }
+
+    let tool:
+      | {
+          execute: (
+            id: string,
+            params: { action: 'list' },
+            signal: AbortSignal | undefined,
+            onUpdate: undefined,
+            ctx: unknown,
+          ) => Promise<{ content: Array<{ text: string }> }>;
+        }
+      | undefined;
+    registerTodoTool(
+      {
+        registerTool(value: typeof tool) {
+          tool = value;
+        },
+        appendEntry() {},
+      } as never,
+      localStore,
+    );
+
+    const response = await tool?.execute(
+      'call-list',
+      { action: 'list' },
+      undefined,
+      undefined,
+      { hasUI: false } as never,
+    );
+    const text = response?.content[0]?.text ?? '';
+    expect(text.length).toBeLessThanOrEqual(MAX_TODO_RESULT_CHARS);
+    expect(text).toContain('todo output capped');
+    expect(text).toContain('more tasks omitted');
   });
 });
 
