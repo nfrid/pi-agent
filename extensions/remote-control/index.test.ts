@@ -1115,7 +1115,7 @@ describe('remote-control bridge', () => {
       getSessionFile: () => active('/tmp/session.jsonl'),
       getSessionName: () => active('Current session'),
       getCwd: () => active('/tmp/project'),
-      getLeafId: () => active(undefined),
+      getLeafId: () => active(undefined as string | undefined),
     };
     const context = {
       get cwd() {
@@ -1198,6 +1198,14 @@ describe('remote-control bridge', () => {
       fullSnapshotBytes,
     );
     patchClient.stop();
+    manager.getLeafId = () => 'current-leaf';
+    const patchWithCurrentLeaf = runtime?.snapshotPatch?.(context, 'idle');
+    expect(routineBranchReads).toBe(0);
+    expect(patchWithCurrentLeaf?.session).toMatchObject({
+      entries: [],
+      entriesComplete: false,
+      leafId: 'current-leaf',
+    });
     const equivalentContext = {
       ...context,
       sessionManager: manager,

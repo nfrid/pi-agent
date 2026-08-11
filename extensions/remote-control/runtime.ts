@@ -103,10 +103,21 @@ export function createRemoteControlRuntime(
   ): RuntimeSnapshotPatch => {
     const usage = ctx.getContextUsage();
     const sessionId = ctx.sessionManager.getSessionId();
+    const currentLeafId = ctx.sessionManager.getLeafId();
+    const leafId =
+      typeof currentLeafId === 'string' &&
+      currentLeafId.length > 0 &&
+      currentLeafId.length <= 512 &&
+      !Array.from(currentLeafId).some((character) => {
+        const code = character.charCodeAt(0);
+        return code <= 0x1f || code === 0x7f;
+      })
+        ? currentLeafId
+        : undefined;
     const cachedSession = cachedSnapshot.session;
     // A routine update must invalidate the cached branch for both reconnect
     // hello and the daemon's runtime-backed session read. Metadata is retained,
-    // but leafId is deliberately omitted because it may select stale history.
+    // while only the current context leaf may select the persisted branch.
     const session = {
       id: sessionId,
       ...(cachedSession.id === sessionId && cachedSession.file !== undefined
@@ -122,6 +133,7 @@ export function createRemoteControlRuntime(
         cachedSession.id === sessionId
           ? (cachedSession.cwd ?? ctx.cwd)
           : ctx.cwd,
+      ...(leafId === undefined ? {} : { leafId }),
       entries: [],
       entriesComplete: false,
     };

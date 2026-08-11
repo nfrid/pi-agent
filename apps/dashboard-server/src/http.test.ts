@@ -875,6 +875,119 @@ describe('dashboard HTTP boundary', () => {
     bridge.destroy();
   });
 
+  it('reads the persisted idle branch after a bounded runtime invalidation', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-idle-invalidation-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'idle.jsonl'),
+      `${[
+        { type: 'session', id: 'idle-session', cwd: '/tmp/project' },
+        { type: 'model_change', id: 'setup', parentId: null },
+        {
+          type: 'message',
+          id: 'persisted-user',
+          parentId: 'setup',
+          message: { role: 'user', content: 'Persisted request' },
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join('\n')}\n`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      socketPath: path.join(root, 'bridge.sock'),
+      sessionDir,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    const helloSession = {
+      id: 'idle-session',
+      file: path.join(sessionDir, 'idle.jsonl'),
+      cwd: '/tmp/project',
+      entriesComplete: true,
+      entries: [
+        {
+          type: 'message',
+          id: 'stale-runtime-entry',
+          message: { role: 'user', content: 'Stale runtime branch' },
+        },
+      ],
+    };
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            runtimeId: 'idle-invalidation-runtime',
+            ownership: 'external',
+            pid: 123,
+            cwd: '/tmp/project',
+            liveState: 'idle',
+            session: helloSession,
+            pendingInteractions: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const headers = { 'x-dashboard-token': 'test-token' };
+    const before = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/idle-session`,
+      { headers },
+    );
+    expect(await before.json()).toMatchObject({
+      entries: [{ id: 'stale-runtime-entry' }],
+      entriesComplete: true,
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 2,
+        event: {
+          type: 'runtime.stateChanged',
+          state: 'idle',
+          snapshot: {
+            session: {
+              id: 'idle-session',
+              file: path.join(sessionDir, 'idle.jsonl'),
+              cwd: '/tmp/project',
+              entries: [],
+              entriesComplete: false,
+              leafId: 'persisted-user',
+            },
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const after = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/idle-session`,
+      { headers },
+    );
+    expect(await after.json()).toMatchObject({
+      entries: [
+        { type: 'session', id: 'idle-session' },
+        { type: 'model_change', id: 'setup' },
+        { type: 'message', id: 'persisted-user' },
+      ],
+      entriesComplete: false,
+    });
+    bridge.destroy();
+  });
+
   it('falls back to the latest runtime snapshot after authority keeps changing', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-authority-exhaustion-'),
