@@ -3,6 +3,7 @@ import {
   lstatSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import * as path from 'node:path';
@@ -17,6 +18,7 @@ import {
   finishWorktree,
   listWorktrees,
   loadWorktree,
+  mergeBranch,
   prepareWorktree,
   rehydrateWorktreeSession,
   removeWorktree,
@@ -41,6 +43,190 @@ async function prepared(
     throw new Error(preparation.fallbackReason ?? 'preparation failed');
   return worktree;
 }
+
+describe('caller-owned worktree selection', () => {
+  function callerPath(): string {
+    return path.join(path.dirname(repository), 'caller-owned');
+  }
+
+  function createCallerWorktree(): string {
+    const selected = callerPath();
+    git(repository, [
+      'worktree',
+      'add',
+      '-q',
+      '-b',
+      'caller/owned',
+      selected,
+      'HEAD',
+    ]);
+    return selected;
+  }
+
+  test('uses a clean existing linked worktree without nesting or owning cleanup', async () => {
+    const selected = createCallerWorktree();
+    try {
+      const preparation = await prepareWorktree({
+        cwd: repository,
+        name: 'Caller checkout',
+        worktreePath: selected,
+      });
+      if (!preparation.worktree)
+        throw new Error(preparation.fallbackReason ?? 'preparation failed');
+      const record = preparation.worktree.record;
+      expect(record.ownership).toBe('caller');
+      expect(record.worktreePath).toBe(selected);
+      expect(record.branch).toBe('caller/owned');
+      expect(existsSync(path.join(repository, '.worktrees'))).toBe(false);
+
+      writeFileSync(path.join(selected, 'caller-change.txt'), 'delegated\\n');
+      const finished = await finishWorktree(record.id, {
+        taskName: 'Caller checkout',
+        outcome: 'success',
+        commitPending: true,
+      });
+      expect(finished.ownership).toBe('caller');
+      expect(finished.changedPaths).toContain('caller-change.txt');
+      expect((await mergeBranch(finished)).reason).toMatch(/caller-owned/);
+
+      await removeWorktree(record.id, { deleteBranch: true });
+      expect(existsSync(selected)).toBe(true);
+      expect(git(repository, ['branch', '--list', 'caller/owned'])).toContain(
+        'caller/owned',
+      );
+      expect(loadWorktree(record.id)).toBeUndefined();
+    } finally {
+      git(repository, ['worktree', 'remove', '--force', selected]);
+      git(repository, ['branch', '-D', 'caller/owned']);
+    }
+  });
+
+  test('rejects branch switching and path replacement before finish writes', async () => {
+    const selected = createCallerWorktree();
+    let record: Awaited<ReturnType<typeof prepared>>['record'] | undefined;
+    try {
+      const preparation = await prepareWorktree({
+        cwd: repository,
+        name: 'Branch switch',
+        worktreePath: selected,
+      });
+      if (!preparation.worktree)
+        throw new Error(preparation.fallbackReason ?? 'preparation failed');
+      record = preparation.worktree.record;
+      git(selected, ['switch', '--detach', 'HEAD']);
+      const switched = await finishWorktree(record.id, {
+        taskName: 'Branch switch',
+        outcome: 'success',
+        commitPending: true,
+      });
+      expect(switched.error).toMatch(
+        /caller worktree must be checked out on a branch/,
+      );
+
+      git(repository, ['worktree', 'remove', '--force', selected]);
+      symlinkSync(repository, selected);
+      const replaced = await finishWorktree(record.id, {
+        taskName: 'Path replacement',
+        outcome: 'success',
+        commitPending: true,
+      });
+      expect(replaced.error).toMatch(/must not be a symbolic link/);
+    } finally {
+      if (record) await removeWorktree(record.id);
+      rmSync(selected, { recursive: true, force: true });
+      git(repository, ['worktree', 'prune']);
+      git(repository, ['branch', '-D', 'caller/owned']);
+    }
+  });
+
+  test('refuses release of an active caller-owned record', async () => {
+    const selected = createCallerWorktree();
+    try {
+      const preparation = await prepareWorktree({
+        cwd: repository,
+        name: 'Active release',
+        worktreePath: selected,
+      });
+      if (!preparation.worktree)
+        throw new Error(preparation.fallbackReason ?? 'preparation failed');
+      const id = preparation.worktree.record.id;
+      await expect(removeWorktree(id)).rejects.toThrow(/active caller-owned/);
+      expect(loadWorktree(id)).toBeDefined();
+      await discardFreshWorktree(id);
+      expect(loadWorktree(id)).toBeUndefined();
+      expect(existsSync(selected)).toBe(true);
+    } finally {
+      git(repository, ['worktree', 'remove', '--force', selected]);
+      git(repository, ['branch', '-D', 'caller/owned']);
+    }
+  });
+
+  test('atomically rejects concurrent duplicate caller claims', async () => {
+    const selected = createCallerWorktree();
+    try {
+      const results = await Promise.all([
+        prepareWorktree({
+          cwd: repository,
+          name: 'Concurrent one',
+          worktreePath: selected,
+        }),
+        prepareWorktree({
+          cwd: repository,
+          name: 'Concurrent two',
+          worktreePath: selected,
+        }),
+      ]);
+      expect(results.filter((result) => result.worktree)).toHaveLength(1);
+      expect(results.filter((result) => result.fallbackReason)).toHaveLength(1);
+      const winner = results.find((result) => result.worktree)?.worktree;
+      if (winner) await discardFreshWorktree(winner.record.id);
+    } finally {
+      git(repository, ['worktree', 'remove', '--force', selected]);
+      git(repository, ['branch', '-D', 'caller/owned']);
+    }
+  });
+
+  test('rejects the main checkout, dirty paths, and duplicate ownership', async () => {
+    const selected = createCallerWorktree();
+    try {
+      const main = await prepareWorktree({
+        cwd: repository,
+        name: 'Main checkout',
+        worktreePath: repository,
+      });
+      expect(main.worktree).toBeUndefined();
+      expect(main.fallbackReason).toMatch(/must not be the requested checkout/);
+
+      writeFileSync(path.join(selected, 'dirty.txt'), 'dirty\\n');
+      const dirty = await prepareWorktree({
+        cwd: repository,
+        name: 'Dirty checkout',
+        worktreePath: selected,
+      });
+      expect(dirty.worktree).toBeUndefined();
+      expect(dirty.fallbackReason).toMatch(/must be clean/);
+      rmSync(path.join(selected, 'dirty.txt'));
+
+      const first = await prepareWorktree({
+        cwd: repository,
+        name: 'First checkout',
+        worktreePath: selected,
+      });
+      expect(first.worktree).toBeDefined();
+      const duplicate = await prepareWorktree({
+        cwd: repository,
+        name: 'Duplicate checkout',
+        worktreePath: selected,
+      });
+      expect(duplicate.worktree).toBeUndefined();
+      expect(duplicate.fallbackReason).toMatch(/already attached/);
+      if (first.worktree) await discardFreshWorktree(first.worktree.record.id);
+    } finally {
+      git(repository, ['worktree', 'remove', '--force', selected]);
+      git(repository, ['branch', '-D', 'caller/owned']);
+    }
+  });
+});
 
 describe('worktree preparation', () => {
   test('persists bounded parent-session touch identity across continuation rehydration', async () => {

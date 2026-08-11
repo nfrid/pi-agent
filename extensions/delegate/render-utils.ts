@@ -46,6 +46,7 @@ export type DelegateCallTask = {
   context?: unknown;
   allowWrites?: unknown;
   isolation?: unknown;
+  worktreePath?: unknown;
   continuation?: unknown;
 };
 
@@ -193,6 +194,7 @@ export function modeDescription(
     continuation?: unknown;
     allowWrites?: unknown;
     isolation?: unknown;
+    worktreePath?: unknown;
     cwd?: unknown;
     route?: unknown;
     requestedMode?: boolean;
@@ -210,11 +212,13 @@ export function modeDescription(
           : 'Can edit'
         : 'Read-only',
     ),
-    ...(values.isolation === 'worktree'
-      ? [fg('dim', 'Isolated worktree')]
-      : values.isolation === 'shared'
-        ? [fg('dim', 'Shared checkout')]
-        : []),
+    ...(values.worktreePath
+      ? [fg('dim', 'Caller worktree')]
+      : values.isolation === 'worktree'
+        ? [fg('dim', 'Isolated worktree')]
+        : values.isolation === 'shared'
+          ? [fg('dim', 'Shared checkout')]
+          : []),
     fg('dim', compactPath(values.cwd)),
   ];
   if (typeof values.route === 'string' && values.route)
@@ -233,6 +237,9 @@ export function worktreeLines(run: DelegatedRun): string[] {
       'A refreshed continuation is not independent review; use a fresh delegate for that.',
     ];
   const lines = [
+    ...(worktree.ownership === 'caller'
+      ? ['Ownership: caller-provided (checkout and branch stay caller-managed)']
+      : []),
     `Branch: ${worktree.branch}`,
     `Worktree: ${compactPath(worktree.worktreePath)}`,
     `Base: ${worktree.baseHead.slice(0, 8)}`,
@@ -249,7 +256,9 @@ export function worktreeLines(run: DelegatedRun): string[] {
     lines.push(`Note: ${worktree.error}`);
   lines.push(
     `Review:    delegate_branches review ${worktree.id}`,
-    `Integrate: delegate_branches merge ${worktree.id}`,
+    worktree.ownership === 'caller'
+      ? 'Integrate: manage the caller-owned branch in that checkout'
+      : `Integrate: delegate_branches merge ${worktree.id}`,
   );
   return lines;
 }

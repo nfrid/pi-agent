@@ -108,8 +108,10 @@ export function formatBranchLine({ record, state }: BranchEntry): string {
     record.id,
     state.padEnd(8),
     record.status.padEnd(8),
-    record.branch,
-    changedCount(record),
+    record.ownership === 'caller' ? 'caller-owned' : record.branch,
+    record.ownership === 'caller'
+      ? `${record.branch} (${changedCount(record)})`
+      : changedCount(record),
   ].join('  ');
 }
 
@@ -126,6 +128,9 @@ export function snapshotGuidance(record: WorktreeRecord): string {
 export function formatBranchDetail({ record, state }: BranchEntry): string {
   if (record.snapshot) return snapshotGuidance(record);
   return [
+    record.ownership === 'caller'
+      ? 'Ownership: caller-provided (checkout and branch remain caller-managed)'
+      : undefined,
     `Branch:    ${bounded(record.branch, MAX_DETAIL_FIELD_CHARS)} (${bounded(state, MAX_DETAIL_FIELD_CHARS)})`,
     `Worktree:  ${bounded(record.worktreePath, MAX_DETAIL_FIELD_CHARS)}`,
     `Repo:      ${bounded(record.repositoryRoot, MAX_DETAIL_FIELD_CHARS)}`,
@@ -135,6 +140,9 @@ export function formatBranchDetail({ record, state }: BranchEntry): string {
       : undefined,
     `Status:    ${bounded(record.status, MAX_DETAIL_FIELD_CHARS)}`,
     changedDetail(record),
+    record.ownership === 'caller'
+      ? 'Integration: delegate_branches merge is disabled; merge or manage this branch in the caller checkout.'
+      : undefined,
     record.error
       ? `Note:      ${bounded(record.error, MAX_DETAIL_ERROR_CHARS)}`
       : undefined,

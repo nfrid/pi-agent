@@ -1,6 +1,7 @@
 import {
   type PreparedWorktree as GenericPreparedWorktree,
   type WorktreeBase as GenericWorktreeBase,
+  type WorktreeOwnership as GenericWorktreeOwnership,
   type WorktreePreparation as GenericWorktreePreparation,
   type WorktreeRecord as GenericWorktreeRecord,
   type WorktreeRunOutcome as GenericWorktreeRunOutcome,
@@ -17,6 +18,7 @@ import {
 export type WorktreeBase = GenericWorktreeBase;
 export type WorktreeStatus = GenericWorktreeStatus;
 export type WorktreeRunOutcome = GenericWorktreeRunOutcome;
+export type WorktreeOwnership = GenericWorktreeOwnership;
 
 export interface WorktreeRecord extends GenericWorktreeRecord {
   sessionToken?: string;

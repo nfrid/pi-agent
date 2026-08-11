@@ -784,6 +784,11 @@ export function createWorktreeIntegrator(
    * merge.
    */
   async function mergeBranch(record: WorktreeRecord): Promise<MergeOutcome> {
+    if (record.ownership === 'caller')
+      return {
+        merged: false,
+        reason: `${record.branch} is caller-owned. Review it here, then merge or otherwise manage the branch in the caller's checkout; the delegate harness will not integrate it.`,
+      };
     const root = record.repositoryRoot;
     const state = await branchState(record);
     if (state === 'gone')

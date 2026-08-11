@@ -12,6 +12,7 @@ export {
   prepareWorktree,
   rehydrateWorktreeSession,
   restoreWorktreeSession,
+  validateExistingWorktree,
   WORKTREE_DIR,
 } from './create';
 export {
@@ -20,7 +21,7 @@ export {
   removeWorktree,
   retireWorktreeSnapshot,
 } from './finish';
-export { git, gitText, repositoryRoot } from './git';
+export { canonical, git, gitText, repositoryRoot } from './git';
 export type {
   BranchReview,
   BranchReviewMode,
@@ -33,6 +34,7 @@ export { branchState, mergeBranch, reviewBranch } from './integrate';
 export type {
   PreparedWorktree,
   WorktreeBase,
+  WorktreeOwnership,
   WorktreePreparation,
   WorktreeRecord,
   WorktreeRunOutcome,

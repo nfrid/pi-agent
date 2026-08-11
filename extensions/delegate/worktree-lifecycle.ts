@@ -106,6 +106,13 @@ export async function finalizeWorktreeRun(
     const record = await finishWorktree(worktree.record.id, {
       taskName,
       outcome,
+      // Harness-created read-only worktrees retain the historical behavior,
+      // while caller-owned read-only checkouts must never be committed to by
+      // lifecycle cleanup.
+      commitPending:
+        worktree.record.ownership === 'caller'
+          ? run.allowWrites === true
+          : true,
     });
     const cleanReadOnlySnapshot =
       state === 'success' &&

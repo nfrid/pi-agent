@@ -1,4 +1,5 @@
 import { existsSync, rmSync } from 'node:fs';
+import { validateExistingWorktree, withWorktreePathLock } from './create.js';
 import { git, gitText, splitZ } from './git.js';
 import { type WorktreeRecord, workBase } from './model.js';
 import type { WorktreeStore } from './store.js';
@@ -55,6 +56,8 @@ export interface WorktreeFinisher<
     options: {
       taskName: string;
       outcome: 'success' | 'error' | 'aborted' | 'timed-out';
+      /** Caller-owned read-only runs must not commit shell-side changes. */
+      commitPending?: boolean;
     },
   ): Promise<Record>;
   retireWorktreeSnapshot(id: string): Promise<Record>;
@@ -83,12 +86,15 @@ export function createWorktreeFinisher<
     options: {
       taskName: string;
       outcome: 'success' | 'error' | 'aborted' | 'timed-out';
+      commitPending?: boolean;
     },
   ): Promise<Record> {
     const record = store.loadWorktree(id);
     if (!record) throw new Error(`Unknown worktree ${id}`);
     if (!existsSync(record.worktreePath)) {
-      record.status = 'removed';
+      // A caller-owned checkout is never removed or reclassified as a
+      // harness-managed resource merely because its path disappeared.
+      record.status = record.ownership === 'caller' ? 'finished' : 'removed';
       record.runOutcome = undefined;
       record.error =
         'The worktree directory disappeared before it was finished.';
@@ -97,6 +103,16 @@ export function createWorktreeFinisher<
     }
 
     try {
+      if (record.ownership === 'caller')
+        await validateExistingWorktree({
+          cwd: record.repositoryRoot,
+          worktreePath: record.worktreePath,
+          expectedRepositoryRoot: record.repositoryRoot,
+          expectedBranch: record.branch,
+          requireClean: false,
+          allowRequestedCheckout: record.repositoryRoot === record.worktreePath,
+        });
+
       // A continuation is allowed to append commits, but it must not replace
       // the previously recorded branch history. Check before committing pending
       // edits so a reset followed by unrelated work cannot overwrite the
@@ -119,24 +135,79 @@ export function createWorktreeFinisher<
         }
       }
 
-      // Even a failed or aborted run may have produced useful partial work, so
-      // the branch is settled regardless of outcome.
-      await commitPendingWork(record, options.taskName, commitAttribution);
-      record.headCommit = await gitText(record.worktreePath, [
-        'rev-parse',
-        'HEAD',
-      ]);
-      record.changedPaths = splitZ(
-        String(
+      const callerReadOnly =
+        record.ownership === 'caller' && options.commitPending === false;
+      if (callerReadOnly) {
+        if (record.ownership === 'caller')
+          await validateExistingWorktree({
+            cwd: record.repositoryRoot,
+            worktreePath: record.worktreePath,
+            expectedRepositoryRoot: record.repositoryRoot,
+            expectedBranch: record.branch,
+            requireClean: true,
+            allowRequestedCheckout:
+              record.repositoryRoot === record.worktreePath,
+          });
+        const status = String(
           await git(record.worktreePath, [
-            'diff',
-            '--name-only',
-            '-z',
-            workBase(record),
-            record.headCommit,
+            'status',
+            '--porcelain=v1',
+            '--untracked-files=all',
           ]),
-        ),
-      );
+        );
+        const currentHead = await gitText(record.worktreePath, [
+          'rev-parse',
+          'HEAD',
+        ]);
+        const expectedHead = record.headCommit ?? record.baseHead;
+        if (status.trim() || currentHead !== expectedHead) {
+          record.status = 'finished';
+          record.error =
+            'The caller-owned read-only worktree was modified; no caller files or commits were changed by the harness.';
+          if (options.outcome !== 'success')
+            record.runOutcome = options.outcome;
+          store.writeWorktreeRecord(record);
+          return record;
+        }
+        record.headCommit = currentHead;
+        record.changedPaths = [];
+      } else {
+        // Even a failed or aborted run may have produced useful partial work,
+        // so the branch is settled regardless of outcome. Caller-owned paths
+        // are revalidated while an atomic path lock covers validation and the
+        // first Git write, preventing another delegate claim in this process.
+        const write = async () => {
+          if (record.ownership === 'caller')
+            await validateExistingWorktree({
+              cwd: record.repositoryRoot,
+              worktreePath: record.worktreePath,
+              expectedRepositoryRoot: record.repositoryRoot,
+              expectedBranch: record.branch,
+              requireClean: false,
+              allowRequestedCheckout:
+                record.repositoryRoot === record.worktreePath,
+            });
+          await commitPendingWork(record, options.taskName, commitAttribution);
+          record.headCommit = await gitText(record.worktreePath, [
+            'rev-parse',
+            'HEAD',
+          ]);
+          record.changedPaths = splitZ(
+            String(
+              await git(record.worktreePath, [
+                'diff',
+                '--name-only',
+                '-z',
+                workBase(record),
+                record.headCommit,
+              ]),
+            ),
+          );
+        };
+        if (record.ownership === 'caller')
+          await withWorktreePathLock(record.worktreePath, write);
+        else await write();
+      }
       record.status = 'finished';
       if (options.outcome !== 'success') {
         // A continuation may have left an earlier harness-generated error on
@@ -161,6 +232,14 @@ export function createWorktreeFinisher<
   async function retireWorktreeSnapshot(id: string): Promise<Record> {
     const record = store.loadWorktree(id);
     if (!record) throw new Error(`Unknown worktree ${id}`);
+    if (record.ownership === 'caller') {
+      // Caller-owned checkouts remain available for the caller and for
+      // continuations; only the harness lifecycle record is settled.
+      record.status = 'finished';
+      delete record.snapshot;
+      store.writeWorktreeRecord(record);
+      return record;
+    }
     if (existsSync(record.worktreePath)) {
       await git(record.repositoryRoot, [
         'worktree',
@@ -203,6 +282,17 @@ export function createWorktreeFinisher<
     const record = store.loadWorktree(id);
     if (!record) return;
 
+    if (record.ownership === 'caller') {
+      if (record.status === 'active')
+        throw new Error(
+          'Cannot release an active caller-owned worktree; wait for the delegate to settle or use pre-launch cleanup.',
+        );
+      // Releasing our record is the only cleanup permitted for a caller-owned
+      // checkout. Never invoke worktree remove, prune, or branch -D here.
+      store.deleteWorktreeRecord(id);
+      return;
+    }
+
     if (existsSync(record.worktreePath)) {
       try {
         await git(record.repositoryRoot, [
@@ -238,6 +328,13 @@ export function createWorktreeFinisher<
     id: string,
   ): Promise<{ warning?: string }> {
     try {
+      const record = store.loadWorktree(id);
+      if (record?.ownership === 'caller' && record.status === 'active') {
+        // This is the sole pre-launch exception: setup created only the
+        // harness record, so discard it without touching the caller checkout.
+        store.deleteWorktreeRecord(id);
+        return {};
+      }
       await removeWorktree(id, { deleteBranch: true });
       return {};
     } catch (error) {
