@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import type http from 'node:http';
-import net from 'node:net';
 import { URL } from 'node:url';
 import {
   type BridgeEvent,
@@ -14,21 +13,18 @@ import {
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { type WebSocket, WebSocketServer } from 'ws';
 import type {
   DashboardDependencies,
   DashboardServerOptions,
 } from './composition.js';
 import type { DashboardEventStreamRecord } from './event-stream.js';
+import { BridgeListener } from './http/bridge-listener.js';
+import { SseWriter } from './http/sse-writer.js';
+import { WsCompatChannel } from './http/ws-channel.js';
 import { createPushSender } from './push.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 import type { RegistryChange } from './runtime-registry.js';
-import { allowedOrigin, safeTokenEqual } from './security.js';
 
-const MAX_WS_BUFFER = 1024 * 1024;
-const MAX_SSE_FRAME_BYTES = 2 * 1024 * 1024;
-const WS_HEARTBEAT_MS = 30_000;
-const WS_PATH = '/ws';
 const NON_RENDERED_SESSION_ENTRY_TYPES = new Set([
   'session',
   'session_info',
@@ -58,10 +54,6 @@ function isTranscriptEvent(change: RegistryChange): boolean {
   );
 }
 
-function serializeSseRecord(record: DashboardEventStreamRecord): string {
-  return `id: ${record.cursor}\nevent: dashboard\ndata: ${JSON.stringify(record)}\n\n`;
-}
-
 export interface DashboardServer {
   readonly token: string;
   readonly socketPath: string;
@@ -75,7 +67,11 @@ export interface DashboardServer {
   publishChange(message?: unknown): void;
 }
 
-class DashboardServerImpl implements DashboardServer {
+/**
+ * Thin Fastify lifecycle owner. Transport concerns live in http/bridge-listener,
+ * http/sse-writer, and http/ws-channel.
+ */
+export class DashboardServerImpl implements DashboardServer {
   readonly token: string;
   readonly socketPath: string;
   readonly registry: DashboardDependencies['registry'];
@@ -90,21 +86,12 @@ class DashboardServerImpl implements DashboardServer {
   private push: DashboardDependencies['push'];
   private readonly app: FastifyInstance;
   private readonly http: http.Server;
-  private readonly bridge: net.Server;
+  private readonly bridge: BridgeListener;
   private readonly eventStream: DashboardDependencies['eventStream'];
-  private readonly sseHeartbeatMs: number;
-  private readonly sseBufferBytes: number;
   private readonly application: DashboardDependencies['application'];
   private readonly runtimeProvider: DashboardDependencies['runtimeProvider'];
-  private readonly wss = new WebSocketServer({
-    noServer: true,
-    maxPayload: 2048,
-  });
-  private readonly clients = new Set<WebSocket>();
-  private readonly awaitingPong = new WeakSet<WebSocket>();
-  private readonly bridgeSockets = new Set<net.Socket>();
-  private readonly sseResponses = new Set<http.ServerResponse>();
-  private heartbeatTimer: NodeJS.Timeout | undefined;
+  private readonly sse: SseWriter;
+  private readonly ws: WsCompatChannel;
   private workspaces: WorkspaceTarget[] = [];
   private readonly serverId = randomBytes(12).toString('base64url');
   private revision = 0;
@@ -128,25 +115,30 @@ class DashboardServerImpl implements DashboardServer {
     this.registry = dependencies.registry;
     this.manager = dependencies.manager;
     this.eventStream = dependencies.eventStream;
-    this.sseHeartbeatMs = config.sseHeartbeatMs;
-    this.sseBufferBytes = config.sseBufferBytes;
     this.application = dependencies.application;
     this.runtimeProvider = dependencies.runtimeProvider;
     this.origins = config.origins;
 
-    this.bridge = net.createServer((socket) => {
-      // Track the transport before RuntimeRegistry sees it. A client can be
-      // connected without having sent runtime.hello yet, and registry.close()
-      // only knows about authenticated runtime records.
-      this.bridgeSockets.add(socket);
-      socket.once('close', () => this.bridgeSockets.delete(socket));
-      try {
-        socket.setTimeout(0);
-      } catch {
-        /* fake sockets in tests */
-      }
-      this.registry.accept(socket);
+    this.bridge = new BridgeListener((socket) => this.registry.accept(socket));
+    this.sse = new SseWriter({
+      eventStream: this.eventStream,
+      serverId: () => this.serverId,
+      sseHeartbeatMs: config.sseHeartbeatMs,
+      sseBufferBytes: config.sseBufferBytes,
     });
+    this.ws = new WsCompatChannel({
+      token: this.token,
+      origins: () => this.origins,
+      host: () => this.host,
+      port: () => this.port,
+      onAuthenticated: (client) => {
+        this.ws.send(client, {
+          type: 'snapshot',
+          snapshot: this.snapshot(),
+        });
+      },
+    });
+
     this.app = Fastify({
       logger: false,
       // Reject, rather than silently strip, bounded orchestration command
@@ -155,52 +147,7 @@ class DashboardServerImpl implements DashboardServer {
     });
     this.app.register(dashboardRoutes, { context: this.routeContext() });
     this.http = this.app.server;
-    this.http.on('upgrade', (request, socket, head) => {
-      this.handleUpgrade(request, socket, head);
-    });
-    this.wss.on('connection', (client) => {
-      // Authentication is a bounded first message, never a URL query value.
-      // Browsers cannot set Authorization during a WebSocket upgrade.
-      const timer = setTimeout(
-        () => client.close(1008, 'Authentication required.'),
-        5_000,
-      );
-      const authenticate = (raw: import('ws').RawData) => {
-        clearTimeout(timer);
-        client.off('message', authenticate);
-        let token: string;
-        try {
-          const message = JSON.parse(String(raw)) as {
-            type?: unknown;
-            token?: unknown;
-          };
-          if (
-            message.type !== 'auth' ||
-            typeof message.token !== 'string' ||
-            message.token.length > 512
-          )
-            throw new Error('invalid');
-          token = message.token;
-        } catch {
-          client.close(1008, 'Authentication required.');
-          return;
-        }
-        if (!safeTokenEqual(token, this.token)) {
-          client.close(1008, 'Authentication required.');
-          return;
-        }
-        this.clients.add(client);
-        client.on('pong', () => this.awaitingPong.delete(client));
-        client.once('close', () => this.clients.delete(client));
-        this.sendClient(
-          client,
-          JSON.stringify({ type: 'snapshot', snapshot: this.snapshot() }),
-        );
-      };
-      client.once('close', () => clearTimeout(timer));
-      client.once('error', () => client.terminate());
-      client.on('message', authenticate);
-    });
+    this.ws.attachUpgrade(this.http);
   }
 
   private routeContext(): DashboardRouteContext {
@@ -392,19 +339,7 @@ class DashboardServerImpl implements DashboardServer {
     try {
       await fs.mkdir(this.stateDir, { recursive: true, mode: 0o700 });
       await this.application.uploads.start();
-      await fs.rm(this.socketPath, { force: true }).catch(() => undefined);
-      await new Promise<void>((resolve, reject) => {
-        const onError = (error: Error) => {
-          this.bridge.off('error', onError);
-          reject(error);
-        };
-        this.bridge.once('error', onError);
-        this.bridge.listen(this.socketPath, () => {
-          this.bridge.off('error', onError);
-          resolve();
-        });
-      });
-      await fs.chmod(this.socketPath, 0o600).catch(() => undefined);
+      await this.bridge.listen(this.socketPath);
       if (this.httpHasStarted) await this.listenHttp();
       else {
         await this.app.listen({ port: this.port, host: this.host });
@@ -424,11 +359,7 @@ class DashboardServerImpl implements DashboardServer {
       if (!this.pushConfigured)
         this.push = await createPushSender(this.metadata);
       this.application.setPush(this.push);
-      this.heartbeatTimer = setInterval(
-        () => this.heartbeatClients(),
-        WS_HEARTBEAT_MS,
-      );
-      this.heartbeatTimer.unref?.();
+      this.ws.startHeartbeat();
       this.lifecycle = 'started';
       // Startup callbacks are suppressed while the workspace and session
       // state is being assembled. Publish one authoritative initial snapshot.
@@ -480,60 +411,45 @@ class DashboardServerImpl implements DashboardServer {
   }
 
   private async stopInternal(): Promise<void> {
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.ws.stopHeartbeat();
     await this.application.orchestrationService?.stop();
     await (
       this.runtimeProvider as DashboardDependencies['runtimeProvider'] & {
         close?: () => Promise<void>;
       }
     ).close?.();
-    this.heartbeatTimer = undefined;
     this.sessions.close();
     this.eventStream.close();
     this.registry.close();
-    for (const response of this.sseResponses) this.destroySseResponse(response);
-    this.sseResponses.clear();
-    for (const client of this.wss.clients) {
-      try {
-        client.close();
-      } catch {
-        client.terminate();
-      }
-    }
-    this.clients.clear();
+    this.sse.destroyAll();
+    this.ws.closeAll();
     // Destroy raw transports before waiting for their listening servers to
     // close. Otherwise a silent pre-hello bridge or open SSE can keep shutdown
     // pending indefinitely.
-    for (const socket of this.bridgeSockets) socket.destroy();
+    this.bridge.destroyClients();
     await this.app.close();
-    if (this.bridge.listening)
-      await new Promise<void>((resolve) => this.bridge.close(() => resolve()));
-    await fs.rm(this.socketPath, { force: true }).catch(() => undefined);
+    await this.bridge.close(this.socketPath);
     await this.application.uploads.close();
     this.push.close?.();
     this.metadata.close();
   }
 
   private async cleanupFailedStart(): Promise<void> {
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    this.ws.stopHeartbeat();
     await this.application.orchestrationService?.stop();
     await (
       this.runtimeProvider as DashboardDependencies['runtimeProvider'] & {
         close?: () => Promise<void>;
       }
     ).close?.();
-    this.heartbeatTimer = undefined;
     this.sessions.close();
     this.eventStream.close();
     this.registry.close();
-    for (const response of this.sseResponses) this.destroySseResponse(response);
-    this.sseResponses.clear();
-    for (const socket of this.bridgeSockets) socket.destroy();
+    this.sse.destroyAll();
+    this.bridge.destroyClients();
     if (this.http.listening)
       await new Promise<void>((resolve) => this.http.close(() => resolve()));
-    if (this.bridge.listening)
-      await new Promise<void>((resolve) => this.bridge.close(() => resolve()));
-    await fs.rm(this.socketPath, { force: true }).catch(() => undefined);
+    await this.bridge.close(this.socketPath);
     await this.application.uploads.close().catch(() => undefined);
   }
 
@@ -733,6 +649,15 @@ class DashboardServerImpl implements DashboardServer {
     }
   }
 
+  /** Test and route seam for the SSE transport module. */
+  private handleSse(
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+    url: URL,
+  ): void {
+    this.sse.handle(request, response, url);
+  }
+
   private savePushSubscription(body: unknown): void {
     if (
       !body ||
@@ -748,284 +673,6 @@ class DashboardServerImpl implements DashboardServer {
       createdAt: now,
       updatedAt: now,
     });
-  }
-
-  private handleSse(
-    request: http.IncomingMessage,
-    response: http.ServerResponse,
-    url: URL,
-  ): void {
-    const rawCursor =
-      url.searchParams.get('cursor') ??
-      (typeof request.headers['last-event-id'] === 'string'
-        ? request.headers['last-event-id']
-        : undefined);
-    const requestedCursor =
-      rawCursor === undefined || rawCursor === ''
-        ? this.eventStream.cursor
-        : /^\d+$/u.test(rawCursor) && Number.isSafeInteger(Number(rawCursor))
-          ? Number(rawCursor)
-          : undefined;
-    if (requestedCursor === undefined) {
-      this.json(response, 400, {
-        error: 'Invalid event cursor.',
-        code: 'invalid-cursor',
-      });
-      return;
-    }
-    const requestedServerId = url.searchParams.get('serverId');
-    if (requestedServerId && requestedServerId !== this.serverId) {
-      this.json(response, 409, {
-        error: 'The requested event generation is no longer available.',
-        code: 'replay-gap',
-        reason: 'server-generation-mismatch',
-        serverId: this.serverId,
-        cursor: this.eventStream.cursor,
-        oldestCursor: this.eventStream.oldestCursor,
-      });
-      return;
-    }
-    const replay = this.eventStream.replayAfter(requestedCursor);
-    if (replay.gap) {
-      this.json(response, 409, {
-        error: 'The requested event cursor is no longer available.',
-        code: 'replay-gap',
-        cursor: replay.currentCursor,
-        oldestCursor: replay.oldestCursor,
-      });
-      return;
-    }
-    const replayFrames = replay.events.map(serializeSseRecord);
-    const replayFrameBytes = replayFrames.map((frame) =>
-      Buffer.byteLength(frame),
-    );
-    const replayBytes = replayFrameBytes.reduce(
-      (total, bytes) => total + bytes,
-      0,
-    );
-    if (
-      replayFrameBytes.some((bytes) => bytes > MAX_SSE_FRAME_BYTES) ||
-      replayBytes > this.sseBufferBytes
-    ) {
-      this.json(response, 409, {
-        error: 'The requested event replay is too large for this stream.',
-        code: 'replay-gap',
-        reason: 'replay-too-large',
-        cursor: replay.currentCursor,
-        oldestCursor: replay.oldestCursor,
-      });
-      return;
-    }
-
-    let closed = false;
-    let replaying = true;
-    const queued: DashboardEventStreamRecord[] = [];
-    let queuedBytes = 0;
-    const pendingWrites: string[] = [];
-    let pendingBytes = 0;
-    let backpressured = false;
-    let drainAttached = false;
-    let unsubscribe: () => void = () => undefined;
-    let heartbeat: NodeJS.Timeout | undefined;
-    const cleanup = () => {
-      if (closed) return;
-      closed = true;
-      this.sseResponses.delete(response);
-      unsubscribe();
-      if (heartbeat) clearInterval(heartbeat);
-      if (drainAttached) response.off('drain', flushWrites);
-      pendingWrites.length = 0;
-      pendingBytes = 0;
-    };
-    const closeSlowClient = () => {
-      cleanup();
-      if (!response.writableEnded) response.destroy();
-    };
-    const flushWrites = () => {
-      if (closed || response.writableEnded) return;
-      backpressured = false;
-      drainAttached = false;
-      while (pendingWrites.length > 0) {
-        const value = pendingWrites[0];
-        const bytes = Buffer.byteLength(value);
-        if (response.writableLength + bytes > this.sseBufferBytes) {
-          backpressured = true;
-          if (!drainAttached) {
-            drainAttached = true;
-            response.once('drain', flushWrites);
-          }
-          return;
-        }
-        try {
-          pendingWrites.shift();
-          pendingBytes -= bytes;
-          if (!response.write(value)) {
-            backpressured = true;
-            if (!drainAttached) {
-              drainAttached = true;
-              response.once('drain', flushWrites);
-            }
-            return;
-          }
-        } catch {
-          closeSlowClient();
-          return;
-        }
-      }
-    };
-    const writeRaw = (value: string): boolean => {
-      if (closed || response.writableEnded) return false;
-      const bytes = Buffer.byteLength(value);
-      if (bytes > MAX_SSE_FRAME_BYTES || bytes > this.sseBufferBytes) {
-        closeSlowClient();
-        return false;
-      }
-      if (backpressured || pendingWrites.length > 0) {
-        if (
-          response.writableLength + pendingBytes + bytes >
-          this.sseBufferBytes
-        ) {
-          closeSlowClient();
-          return false;
-        }
-        pendingWrites.push(value);
-        pendingBytes += bytes;
-        return true;
-      }
-      if (response.writableLength + bytes > this.sseBufferBytes) {
-        closeSlowClient();
-        return false;
-      }
-      try {
-        if (!response.write(value)) {
-          backpressured = true;
-          if (!drainAttached) {
-            drainAttached = true;
-            response.once('drain', flushWrites);
-          }
-        }
-        return true;
-      } catch {
-        closeSlowClient();
-        return false;
-      }
-    };
-    const writeRecord = (record: DashboardEventStreamRecord): boolean =>
-      writeRaw(serializeSseRecord(record));
-    const writeHeartbeat = () => writeRaw(': heartbeat\n\n');
-    const queueRecord = (record: DashboardEventStreamRecord): boolean => {
-      const bytes = Buffer.byteLength(serializeSseRecord(record));
-      if (
-        bytes > MAX_SSE_FRAME_BYTES ||
-        queuedBytes + bytes > this.sseBufferBytes
-      )
-        return false;
-      queued.push(record);
-      queuedBytes += bytes;
-      return true;
-    };
-    const onRecord = (record: DashboardEventStreamRecord) => {
-      if (replaying) {
-        if (!queueRecord(record)) closeSlowClient();
-        return;
-      }
-      writeRecord(record);
-    };
-    unsubscribe = this.eventStream.subscribe(onRecord);
-    // Close the small replayAfter/subscribe race before committing 200 headers.
-    // Records published in that interval are replayed after the original
-    // window; subsequent records are already captured by the subscription.
-    const catchup = this.eventStream.replayAfter(replay.currentCursor);
-    const catchupFits =
-      !catchup.gap && catchup.events.every((record) => queueRecord(record));
-    if (
-      !catchupFits ||
-      replayBytes + queuedBytes + Buffer.byteLength(': heartbeat\n\n') >
-        this.sseBufferBytes
-    ) {
-      unsubscribe();
-      this.json(response, 409, {
-        error: 'The requested event replay changed before streaming began.',
-        code: 'replay-gap',
-        reason: 'replay-too-large',
-        cursor: this.eventStream.cursor,
-        oldestCursor: this.eventStream.oldestCursor,
-      });
-      return;
-    }
-    response.writeHead(200, {
-      'content-type': 'text/event-stream; charset=utf-8',
-      'cache-control': 'no-cache, no-store',
-      connection: 'keep-alive',
-      'x-accel-buffering': 'no',
-    });
-    response.flushHeaders?.();
-    this.sseResponses.add(response);
-    response.once('close', cleanup);
-    request.once('aborted', cleanup);
-    if (!writeHeartbeat()) return;
-    for (const frame of replayFrames) {
-      if (!writeRaw(frame)) return;
-    }
-    replaying = false;
-    for (const record of queued) {
-      if (!writeRecord(record)) return;
-    }
-    heartbeat = setInterval(
-      writeHeartbeat,
-      Math.max(1_000, this.sseHeartbeatMs),
-    );
-    heartbeat.unref?.();
-  }
-
-  private json(
-    response: http.ServerResponse,
-    status: number,
-    value: unknown,
-  ): void {
-    const text = JSON.stringify(value);
-    response.writeHead(status, {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store',
-    });
-    response.end(text);
-  }
-
-  private destroySseResponse(response: http.ServerResponse): void {
-    if (response.writableEnded) return;
-    try {
-      response.destroy();
-    } catch {
-      try {
-        response.end();
-      } catch {
-        /* best effort during shutdown */
-      }
-    }
-  }
-
-  private handleUpgrade(
-    request: http.IncomingMessage,
-    socket: import('node:stream').Duplex,
-    head: Buffer,
-  ): void {
-    const url = new URL(
-      request.url ?? '/',
-      `http://${request.headers.host ?? `${this.host}:${this.port}`}`,
-    );
-    if (
-      url.pathname !== WS_PATH ||
-      !allowedOrigin(request.headers.origin, this.origins)
-    ) {
-      socket.destroy();
-      return;
-    }
-    // Upgrade authentication is completed by the first WebSocket message.
-    // Do not accept query-string or upgrade-header tokens: URLs are routinely
-    // logged by browsers, proxies, analytics and reverse proxies.
-    this.wss.handleUpgrade(request, socket, head, (client) =>
-      this.wss.emit('connection', client, request),
-    );
   }
 
   public handleRegistryChange(change: RegistryChange): void {
@@ -1083,7 +730,7 @@ class DashboardServerImpl implements DashboardServer {
         // callback and take down the daemon.
         return;
       }
-      this.publishLegacy({
+      this.ws.publish({
         ...record,
         serverId: this.serverId,
         revision: this.revision,
@@ -1099,68 +746,10 @@ class DashboardServerImpl implements DashboardServer {
       emittedAt,
       snapshot: this.snapshot(cursor),
     }));
-    this.publishLegacy({
+    this.ws.publish({
       type: 'snapshot',
       snapshot: streamRecord.snapshot,
     });
-  }
-
-  private publishLegacy(message: unknown): void {
-    let text: string;
-    try {
-      text = JSON.stringify(message);
-    } catch {
-      // A bad optional provider payload must not escape an event callback and
-      // take down the daemon. The next valid change remains publishable.
-      return;
-    }
-    for (const client of this.clients) this.sendClient(client, text);
-  }
-
-  private heartbeatClients(): void {
-    for (const client of this.clients) {
-      if (client.readyState !== client.OPEN) {
-        this.clients.delete(client);
-        continue;
-      }
-      if (this.awaitingPong.has(client)) {
-        this.clients.delete(client);
-        client.terminate();
-        continue;
-      }
-      this.awaitingPong.add(client);
-      try {
-        client.ping();
-      } catch {
-        this.clients.delete(client);
-        client.terminate();
-      }
-    }
-  }
-
-  private sendClient(client: WebSocket, text: string): boolean {
-    if (client.readyState !== client.OPEN) return false;
-    const bytes = Buffer.byteLength(text);
-    if (
-      bytes > MAX_WS_BUFFER ||
-      client.bufferedAmount + bytes > MAX_WS_BUFFER
-    ) {
-      this.clients.delete(client);
-      client.terminate();
-      return false;
-    }
-    try {
-      client.send(text, (error) => {
-        if (!error) return;
-        this.clients.delete(client);
-        client.terminate();
-      });
-      return true;
-    } catch {
-      this.clients.delete(client);
-      client.terminate();
-      return false;
-    }
   }
 }
 
@@ -1172,4 +761,3 @@ export async function createDashboardServer(
 }
 
 export type { DashboardServerOptions } from './composition.js';
-export { DashboardServerImpl };
