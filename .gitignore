@@ -7,7 +7,9 @@ packages/extension-contributions/src/*.d.ts
 test-results/
 playwright-report/
 /dashboard/
+/dashboard-v2/
 .env.dashboard
+pi-accept-*
 auth.json
 trust.json
 models-store.json
