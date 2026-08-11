@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { createWorktreeCreator } from './create';
-import type { WorktreeRecord } from './model';
+import { createWorktreeCreator } from './create.js';
+import type { WorktreeRecord } from './model.js';
 
 const exec = promisify(execFile);
 

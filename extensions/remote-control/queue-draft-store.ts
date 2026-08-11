@@ -8,7 +8,7 @@ import {
   type QueueDraftMode,
   type QueueDraftRemoveCommand,
   type QueueDraftUpdateCommand,
-} from '../../packages/dashboard-protocol/src/pi-runtime-protocol';
+} from '@pi-dashboard/protocol/pi-runtime-protocol';
 
 export function queueDraftError(
   code: string,

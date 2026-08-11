@@ -4,4 +4,4 @@
 export {
   hasUnresolvedToolFailure,
   validationKindsOf,
-} from '../../packages/activity-model/src/outcome.mjs';
+} from '@pi-dashboard/activity-model';

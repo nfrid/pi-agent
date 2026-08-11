@@ -8,6 +8,7 @@ import { registerTodoCommands } from './commands';
 import { registerTodoContext } from './context';
 import { clearTaskSurface, publishTaskSurface } from './live';
 import { EXT } from './model';
+import { registerTasksCapability } from './register-capability';
 import {
   createTaskStore,
   flushCompletedPendingHide,
@@ -18,6 +19,7 @@ import { registerTodoTool } from './tool';
 import { teardownUi, updateUi } from './widget';
 
 export default defineExtension('tasks', (pi: ExtensionAPI) => {
+  registerTasksCapability();
   const store = createTaskStore();
   let scopeId: SessionScopeId = 'default';
   store.onChange = () => publishTaskSurface(store, scopeId);

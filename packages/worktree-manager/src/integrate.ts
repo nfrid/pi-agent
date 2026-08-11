@@ -8,8 +8,8 @@
  * are the delegate's work. Integration preserves that boundary rather than
  * merging the carry snapshot back into the still-dirty parent checkout.
  */
-import { git as defaultGit, gitText as defaultGitText, splitZ } from './git';
-import { type WorktreeRecord, workBase } from './model';
+import { git as defaultGit, gitText as defaultGitText, splitZ } from './git.js';
+import { type WorktreeRecord, workBase } from './model.js';
 
 const MAX_REVIEW_DIFF_CHARS = 60_000;
 // Keep the complete review bounded even when a branch has a large commit

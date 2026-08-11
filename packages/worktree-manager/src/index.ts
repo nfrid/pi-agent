@@ -10,12 +10,12 @@ export {
   WORKTREE_DIR,
   type WorktreeCreator,
   type WorktreeCreatorOptions,
-} from './create';
+} from './create.js';
 export {
   createWorktreeFinisher,
   type WorktreeFinisher,
   type WorktreeFinisherOptions,
-} from './finish';
+} from './finish.js';
 export {
   canonical,
   git,
@@ -24,7 +24,7 @@ export {
   repositoryIdentity,
   repositoryRoot,
   splitZ,
-} from './git';
+} from './git.js';
 export type {
   BranchReview,
   BranchReviewMode,
@@ -34,14 +34,14 @@ export type {
   MergeOutcome,
   WorktreeGit,
   WorktreeIntegrator,
-} from './integrate';
+} from './integrate.js';
 export {
   branchState,
   createWorktreeIntegrator,
   MAX_REVIEW_PATCH_BUDGET,
   mergeBranch,
   reviewBranch,
-} from './integrate';
+} from './integrate.js';
 export type {
   PreparedWorktree,
   WorktreeBase,
@@ -50,6 +50,6 @@ export type {
   WorktreeRunOutcome,
   WorktreeStatus,
   WorktreeSummary,
-} from './model';
-export { workBase, worktreeSummary } from './model';
-export type { WorktreeStore } from './store';
+} from './model.js';
+export { workBase, worktreeSummary } from './model.js';
+export type { WorktreeStore } from './store.js';

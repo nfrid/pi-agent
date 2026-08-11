@@ -7,6 +7,18 @@ export default defineConfig({
       '@pi-dashboard/client': path.resolve(
         'packages/dashboard-client/src/index.ts',
       ),
+      '@pi-dashboard/protocol/pi-runtime-protocol': path.resolve(
+        'packages/dashboard-protocol/src/pi-runtime-protocol.ts',
+      ),
+      '@pi-dashboard/protocol/dashboard-api': path.resolve(
+        'packages/dashboard-protocol/src/dashboard-api.ts',
+      ),
+      '@pi-dashboard/protocol/orchestration-contracts': path.resolve(
+        'packages/dashboard-protocol/src/orchestration-contracts.ts',
+      ),
+      '@pi-dashboard/protocol/orchestration-parsers': path.resolve(
+        'packages/dashboard-protocol/src/orchestration-parsers.ts',
+      ),
       '@pi-dashboard/protocol': path.resolve(
         'packages/dashboard-protocol/src/index.ts',
       ),

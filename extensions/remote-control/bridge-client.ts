@@ -10,16 +10,14 @@ import {
   type RuntimeExtensionSurface,
   type RuntimeSnapshot,
   serializeFrame,
-} from '../../packages/dashboard-protocol/src/pi-runtime-protocol';
+} from '@pi-dashboard/protocol/pi-runtime-protocol';
 import type { InteractionBroker } from '../ask-user/broker';
+import { aggregateRuntimeCapabilities } from '../shared/runtime/capability-registry';
 import type { CommandHandler } from './command-dispatcher';
+import { jsonSafe } from './json-safe';
 import { withoutOpaqueData } from './live-event-normalizer';
 import { isQueueDraftCommand } from './queue-draft-store';
-import {
-  interactionSnapshot,
-  jsonSafe,
-  RUNTIME_CAPABILITIES,
-} from './runtime-snapshot-adapter';
+import { interactionSnapshot } from './runtime-snapshot-adapter';
 
 const RECONNECT_MIN_MS = 250;
 const RECONNECT_MAX_MS = 10_000;
@@ -101,7 +99,6 @@ export class BridgeClient {
     string,
     SemanticCommandRecord
   >();
-  private readonly effectiveCapabilities: RuntimeCapabilitySnapshot;
   private outboundQueue: Array<{
     socket: net.Socket;
     data: string;
@@ -115,8 +112,14 @@ export class BridgeClient {
   private liveSurfaces: BridgeClientOptions['liveSurfaces'];
 
   constructor(private readonly options: BridgeClientOptions) {
-    this.effectiveCapabilities = options.capabilities ?? RUNTIME_CAPABILITIES;
     this.bindServices(options.broker, options.liveSurfaces);
+  }
+
+  private resolveCapabilities(): RuntimeCapabilitySnapshot {
+    return (
+      this.options.capabilities ??
+      aggregateRuntimeCapabilities(this.options.commandScope?.() ?? 'default')
+    );
   }
 
   /** Rebind transport observers when Pi replaces the active session scope. */
@@ -238,7 +241,7 @@ export class BridgeClient {
         ...snapshot,
         // One effective capability snapshot drives hello, runtime snapshot,
         // duplicate protection, and semantic dispatch.
-        capabilities: this.effectiveCapabilities,
+        capabilities: this.resolveCapabilities(),
         ...(this.broker ? { pendingInteractions: interactions } : undefined),
       };
       const helloSent = this.sendEvent({
@@ -248,7 +251,7 @@ export class BridgeClient {
         identityToken: this.options.identityToken,
         capabilities: {
           heartbeat: true,
-          extensions: this.effectiveCapabilities,
+          extensions: this.resolveCapabilities(),
         },
         snapshot,
       });
@@ -342,8 +345,8 @@ export class BridgeClient {
       return;
     }
     if (command.type === 'action.invoke') {
-      const action = this.effectiveCapabilities.manifests
-        .flatMap((manifest) => manifest.actions)
+      const action = this.resolveCapabilities()
+        .manifests.flatMap((manifest) => manifest.actions)
         .find((item) => item.id === command.actionId);
       if (action && !action.idempotent) {
         const reservation = this.actionCommandIds.reserve(command.id);
@@ -540,7 +543,7 @@ export class BridgeClient {
     try {
       const result = await this.options.handleCommand(
         item.command,
-        this.effectiveCapabilities,
+        this.resolveCapabilities(),
       );
       const outcome: CommandExecution = { status: 'success', result };
       this.sendAck(item.socket, item.command.id, true, result);

@@ -1,6 +1,6 @@
+import { projectActivityGroups } from '@pi-dashboard/activity-model';
 import { Value } from 'typebox/value';
 import { describe, expect, it } from 'vitest';
-import { projectActivityGroups } from '../../packages/activity-model/src/index.js';
 import { ActivityGroupsViewModelSchema } from './contribution';
 
 describe('activity groups contribution schema', () => {

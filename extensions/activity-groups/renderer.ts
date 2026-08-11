@@ -3,15 +3,13 @@ import type { Theme, ThemeColor } from '@earendil-works/pi-coding-agent';
 import type { Component } from '@earendil-works/pi-tui';
 import { truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui';
 import {
+  isNarration,
   stringArg,
+  stripEmphasis,
   toolBaseName,
   toolPath,
   toolRole,
-} from '../../packages/activity-model/src/grouping';
-import {
-  isNarration,
-  stripEmphasis,
-} from '../../packages/activity-model/src/title';
+} from '@pi-dashboard/activity-model';
 import { hasUnresolvedToolFailure } from './outcome';
 import type {
   SequenceItem,

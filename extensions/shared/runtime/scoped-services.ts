@@ -1,3 +1,7 @@
+import {
+  CapabilityRegistry,
+  seedCapabilityRegistry,
+} from './capability-registry-core';
 import { InteractionBroker } from './interaction-broker';
 import { LiveSurfaceHub } from './live-surfaces-core';
 
@@ -43,6 +47,7 @@ export interface ScopedServices {
   readonly interactionBroker: InteractionBroker;
   readonly liveSurfaceHub: LiveSurfaceHub;
   readonly pendingProcesses: PendingProcessAccounting;
+  readonly capabilities: CapabilityRegistry;
 }
 
 const scopedServicesKey = Symbol.for('pi.dashboard.scoped-runtime-services');
@@ -85,6 +90,7 @@ export function getScopedServices(
     interactionBroker: new InteractionBroker(),
     liveSurfaceHub: new LiveSurfaceHub(),
     pendingProcesses: new PendingProcessAccounting(),
+    capabilities: seedCapabilityRegistry(new CapabilityRegistry()),
   };
   registry().set(id, created);
   return created;

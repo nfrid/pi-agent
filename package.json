@@ -33,7 +33,11 @@
     "pi:sdk-sync": "VERSION=$(pi --version) && TYPEBOX_VERSION=1.3.7 && pnpm add -E @earendil-works/pi-ai@$VERSION @earendil-works/pi-coding-agent@$VERSION @earendil-works/pi-tui@$VERSION typebox@$TYPEBOX_VERSION && pnpm --filter @pi-dashboard/activity-model add -E @earendil-works/pi-ai@$VERSION && pnpm --filter @pi-dashboard/server --filter @pi-dashboard/web --filter @pi-dashboard/extension-contributions add -E typebox@$TYPEBOX_VERSION"
   },
   "dependencies": {
+    "@pi-dashboard/activity-model": "workspace:*",
+    "@pi-dashboard/codex-usage": "workspace:*",
     "@pi-dashboard/extension-contributions": "workspace:*",
+    "@pi-dashboard/protocol": "workspace:*",
+    "@pi-dashboard/worktree-manager": "workspace:*",
     "@earendil-works/pi-ai": "0.84.1",
     "@earendil-works/pi-coding-agent": "0.84.1",
     "@earendil-works/pi-tui": "0.84.1",

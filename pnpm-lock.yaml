@@ -20,9 +20,21 @@ importers:
       '@mozilla/readability':
         specifier: ^0.6.0
         version: 0.6.0
+      '@pi-dashboard/activity-model':
+        specifier: workspace:*
+        version: link:packages/activity-model
+      '@pi-dashboard/codex-usage':
+        specifier: workspace:*
+        version: link:packages/codex-usage
       '@pi-dashboard/extension-contributions':
         specifier: workspace:*
         version: link:packages/extension-contributions
+      '@pi-dashboard/protocol':
+        specifier: workspace:*
+        version: link:packages/dashboard-protocol
+      '@pi-dashboard/worktree-manager':
+        specifier: workspace:*
+        version: link:packages/worktree-manager
       linkedom:
         specifier: ^0.16.11
         version: 0.16.11

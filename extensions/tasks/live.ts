@@ -1,12 +1,5 @@
-import {
-  type ExtensionSurface,
-  parseExtensionSurface,
-} from '@pi-dashboard/extension-contributions';
-import { Value } from 'typebox/value';
-import {
-  clearLiveExtensionSurfaces,
-  publishLiveExtensionSurfaces,
-} from '../shared/runtime/live-surfaces';
+import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
+import { createLiveSurfacePublisher } from '../shared/runtime/live-surface-publisher';
 import type { SessionScopeId } from '../shared/runtime/scoped-services';
 import {
   TASKS_RENDERER_ID,
@@ -40,33 +33,31 @@ function surfaceTasks(store: TaskStore) {
   ].slice(0, 128);
 }
 
-export function taskSurface(store: TaskStore): ExtensionSurface {
-  const viewModel = {
+const publisher = createLiveSurfacePublisher<TaskStore>({
+  extensionId: TASKS_EXTENSION_ID,
+  surfaceId: TASKS_SURFACE_ID,
+  rendererId: TASKS_RENDERER_ID,
+  placement: 'left-rail',
+  viewModelSchema: TaskStateViewModelSchema,
+  invalidMessage: 'Task state surface is invalid.',
+  buildViewModel: (store) => ({
     version: 1 as const,
     tasks: surfaceTasks(store).map(boundedTask),
     stats: stats(store),
-  };
-  if (!Value.Check(TaskStateViewModelSchema, viewModel))
-    throw new Error('Task state surface is invalid.');
-  return parseExtensionSurface({
-    id: TASKS_SURFACE_ID,
-    rendererId: TASKS_RENDERER_ID,
-    placement: 'left-rail',
-    viewModel,
-  });
+  }),
+});
+
+export function taskSurface(store: TaskStore): ExtensionSurface {
+  return publisher.surface(store);
 }
 
 export function publishTaskSurface(
   store: TaskStore,
   scopeId?: SessionScopeId,
 ): void {
-  publishLiveExtensionSurfaces(
-    TASKS_EXTENSION_ID,
-    [taskSurface(store)],
-    scopeId,
-  );
+  publisher.publish(store, scopeId);
 }
 
 export function clearTaskSurface(scopeId?: SessionScopeId): void {
-  clearLiveExtensionSurfaces(TASKS_EXTENSION_ID, scopeId);
+  publisher.clear(scopeId);
 }

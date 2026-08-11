@@ -1,4 +1,4 @@
-import type { WorktreeRecord } from './model';
+import type { WorktreeRecord } from './model.js';
 
 /**
  * Caller-owned persistence for worktree lifecycle records.

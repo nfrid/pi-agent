@@ -1,4 +1,4 @@
-import { queryViaCodexAppServer as queryShared } from '../../packages/codex-usage/src/index';
+import { queryViaCodexAppServer as queryShared } from '@pi-dashboard/codex-usage';
 import type { UsageReport } from './types';
 
 // The daemon and the Pi extension share one Node-only app-server transport.

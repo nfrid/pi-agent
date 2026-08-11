@@ -19,6 +19,7 @@ import {
 import type { Container } from '@earendil-works/pi-tui';
 import { defineExtension } from '../shared/runtime/extension';
 import { installActivityGroupsActionHandler } from './actions';
+import { registerActivityGroupsCapability } from './register-capability';
 import { createActivityGroupRenderer } from './renderer';
 import { installToolSequenceShim, type ShimHost } from './shim';
 import type { SequenceRenderer } from './types';
@@ -83,6 +84,7 @@ function shimIsSupported(container: typeof Container | undefined): boolean {
 }
 
 export default defineExtension('activity-groups', (pi) => {
+  registerActivityGroupsCapability();
   const activityRenderer = createActivityGroupRenderer();
   let enabled = true;
   const renderer: SequenceRenderer = (sequence, options, theme, context) =>

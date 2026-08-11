@@ -5,6 +5,7 @@ import { getInteractionBroker } from './broker';
 import { TOOL_NAME } from './constants';
 import { askThroughDialogs } from './dialogs';
 import { normalizeChoices, resultText } from './format';
+import { registerAskUserCapability } from './register-capability';
 import { ParamsSchema } from './schema';
 import type { Answer, UiResult } from './types';
 import { createQuestionDialog } from './ui';
@@ -13,6 +14,7 @@ import { createQuestionDialog } from './ui';
 // outside an interactive mode it can only throw, and an unusable tool still
 // costs its description and guidelines in every prompt.
 export default defineExtension('ask-user', (pi: ExtensionAPI) => {
+  registerAskUserCapability();
   pi.on('session_start', (_event, ctx) => {
     if (ctx.hasUI) registerAskUserTool(pi);
   });

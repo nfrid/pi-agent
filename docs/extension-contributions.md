@@ -16,8 +16,11 @@ host adapter; it is not a React component or a slash command.
    `availability.requires` to capability IDs and set `idempotent: true` only
    when replaying the same command is harmless.
 3. Export the manifest and build a runtime summary with
-   `createRuntimeCapabilitySnapshot`. The remote adapter advertises summaries
-   in `runtime.hello` and in the runtime snapshot; old runtimes may omit them.
+   `createRuntimeCapabilitySnapshot`. Register the contribution through
+   `registerExtensionCapability` (session-scoped via
+   `extensions/shared/runtime/capability-registry.ts`) so remote-control can
+   aggregate manifests, capability summaries, and action handlers without
+   hard-importing peer extensions. Old runtimes may omit capability summaries.
 4. Add a semantic adapter handler in the extension/remote adapter. Invoke the
    action envelope (`{ id, type: "action.invoke", actionId, input }`), never a
    browser slash-command string. Validate input again at the Pi boundary.

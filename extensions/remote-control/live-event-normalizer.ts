@@ -5,8 +5,8 @@ import {
   MAX_FRAME_BYTES,
   type NormalizedMessagePayload,
   type NormalizedToolPayload,
-  redactImageData,
-} from '../../packages/dashboard-protocol/src/pi-runtime-protocol';
+} from '@pi-dashboard/protocol/pi-runtime-protocol';
+import { jsonSafe } from './json-safe';
 
 type EventRecord = Record<string, unknown>;
 
@@ -14,16 +14,6 @@ export function eventRecord(value: unknown): EventRecord {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as EventRecord)
     : {};
-}
-
-function jsonSafe(value: unknown, max = MAX_FRAME_BYTES): unknown {
-  try {
-    const text = JSON.stringify(redactImageData(value));
-    if (!text || Buffer.byteLength(text) > max) return null;
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
 }
 
 export function withoutOpaqueData(event: BridgeEvent): BridgeEvent {

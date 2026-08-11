@@ -2,7 +2,6 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { createRuntimeCapabilitySnapshot } from '@pi-dashboard/extension-contributions';
 import {
   DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
   deriveSessionTitle,
@@ -10,70 +9,36 @@ import {
   MAX_COMPOSER_COMMAND_DESCRIPTION,
   MAX_COMPOSER_COMMAND_NAME,
   MAX_COMPOSER_COMMANDS,
-} from '../../packages/dashboard-protocol/src/dashboard-api';
-import {
-  type ComposerCommandEntry,
-  type InteractionSnapshot,
-  type RuntimeLiveState,
-  type RuntimeSnapshot,
-  redactImageData,
-  type SessionSnapshot,
-} from '../../packages/dashboard-protocol/src/pi-runtime-protocol';
-import {
-  activityGroupsCapabilitySnapshot,
-  activityGroupsManifest,
-} from '../activity-groups/contribution';
+} from '@pi-dashboard/protocol/dashboard-api';
+import type {
+  ComposerCommandEntry,
+  InteractionSnapshot,
+  RuntimeLiveState,
+  RuntimeSnapshot,
+  SessionSnapshot,
+} from '@pi-dashboard/protocol/pi-runtime-protocol';
 import type { InteractionBroker } from '../ask-user/broker';
 import {
   ASK_USER_ANSWER_ACTION_ID,
   ASK_USER_CANCEL_ACTION_ID,
-  askUserCapabilitySnapshot,
-  askUserManifest,
 } from '../ask-user/contribution';
 import {
-  delegateCapabilitySnapshot,
-  delegateManifest,
-} from '../delegate/contribution';
-import { tasksCapabilitySnapshot, tasksManifest } from '../tasks/contribution';
-import {
-  remoteControlCapabilitySnapshot,
-  remoteControlManifest,
-} from './contribution';
+  aggregateRuntimeCapabilities,
+  contributionManifests,
+} from '../shared/runtime/capability-registry';
+import type { SessionScopeId } from '../shared/runtime/scoped-services';
+import { jsonSafe } from './json-safe';
 
-const MAX_JSON_PAYLOAD_BYTES = 460_000;
+export { jsonSafe } from './json-safe';
 
-export const CONTRIBUTION_MANIFESTS = [
-  askUserManifest,
-  activityGroupsManifest,
-  remoteControlManifest,
-  delegateManifest,
-  tasksManifest,
-] as const;
-export const RUNTIME_CAPABILITIES = createRuntimeCapabilitySnapshot(
-  CONTRIBUTION_MANIFESTS,
-  [
-    ...askUserCapabilitySnapshot.capabilities,
-    ...activityGroupsCapabilitySnapshot.capabilities,
-    ...remoteControlCapabilitySnapshot.capabilities,
-    ...delegateCapabilitySnapshot.capabilities,
-    ...tasksCapabilitySnapshot.capabilities,
-  ],
-);
+/** Aggregate contribution manifests from the session capability registry. */
+export function getContributionManifests(scopeId?: SessionScopeId) {
+  return contributionManifests(scopeId);
+}
 
-export function jsonSafe(
-  value: unknown,
-  max = MAX_JSON_PAYLOAD_BYTES,
-): unknown {
-  try {
-    const text = JSON.stringify(redactImageData(value));
-    if (!text || Buffer.byteLength(text) > max) return null;
-    return JSON.parse(text) as unknown;
-  } catch {
-    // Event schemas require the payload key to be present. Null is a valid,
-    // bounded representation for an optional provider object that cannot be
-    // cloned (for example, a cyclic or oversized value).
-    return null;
-  }
+/** Aggregate runtime capabilities from the session capability registry. */
+export function getRuntimeCapabilities(scopeId?: SessionScopeId) {
+  return aggregateRuntimeCapabilities(scopeId);
 }
 
 export function sessionSnapshot(ctx: ExtensionContext): SessionSnapshot {

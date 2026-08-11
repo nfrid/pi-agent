@@ -4,35 +4,25 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import {
   type ActionInvocation,
-  findActionDescriptor,
   isActionAvailable,
   parseActionInput,
   parseActionInvocation,
   type RuntimeCapabilitySnapshot,
 } from '@pi-dashboard/extension-contributions';
-import type { BridgeCommand } from '../../packages/dashboard-protocol/src/pi-runtime-protocol';
-import { executeActivityGroupsAction } from '../activity-groups/actions';
-import { ACTIVITY_GROUPS_ACTION_ID } from '../activity-groups/contribution';
+import type { BridgeCommand } from '@pi-dashboard/protocol/pi-runtime-protocol';
 import type { InteractionBroker } from '../ask-user/broker';
+import type { CapabilityActionHost } from '../shared/runtime/capability-action-host';
 import {
-  ASK_USER_ANSWER_ACTION_ID,
-  ASK_USER_CANCEL_ACTION_ID,
-} from '../ask-user/contribution';
+  aggregateRuntimeCapabilities,
+  getCapabilityRegistry,
+} from '../shared/runtime/capability-registry';
+import { getSessionScopeId } from '../shared/runtime/scoped-services';
 import { dispatchDashboardInput } from './command-adapter';
-import {
-  RUNTIME_ABORT_ACTION_ID,
-  RUNTIME_SHUTDOWN_ACTION_ID,
-  SESSION_COMPACT_ACTION_ID,
-} from './contribution';
 import {
   isQueueDraftCommand,
   type QueueDraftStore,
   queueDraftError,
 } from './queue-draft-store';
-import {
-  CONTRIBUTION_MANIFESTS,
-  RUNTIME_CAPABILITIES,
-} from './runtime-snapshot-adapter';
 
 export type CommandHandler = (
   command: BridgeCommand,
@@ -40,16 +30,16 @@ export type CommandHandler = (
 ) => Promise<unknown>;
 
 async function dispatchSemanticAction(
+  pi: ExtensionAPI,
   ctx: ExtensionContext,
   broker: InteractionBroker,
   command: Extract<BridgeCommand, { type: 'action.invoke' }>,
   capabilities: RuntimeCapabilitySnapshot,
 ): Promise<unknown> {
   const invocation: ActionInvocation = parseActionInvocation(command);
-  const action = findActionDescriptor(
-    CONTRIBUTION_MANIFESTS,
-    invocation.actionId,
-  );
+  const registry = getCapabilityRegistry(getSessionScopeId(ctx));
+  const action = registry.findAction(invocation.actionId);
+  const handler = registry.findHandler(invocation.actionId);
   const advertisedAction = capabilities.manifests
     .flatMap((manifest) => manifest.actions)
     .find((candidate) => candidate.id === invocation.actionId);
@@ -58,7 +48,7 @@ async function dispatchSemanticAction(
       new Error(`Unknown dashboard action: ${invocation.actionId}`),
       { code: 'unknown-action' },
     );
-  if (!action)
+  if (!action || !handler)
     throw Object.assign(
       new Error(`No adapter for dashboard action: ${invocation.actionId}`),
       { code: 'unknown-action' },
@@ -75,48 +65,13 @@ async function dispatchSemanticAction(
       { code: 'unavailable-action' },
     );
   parseActionInput(advertisedAction, invocation.input);
-  if (invocation.actionId === ASK_USER_ANSWER_ACTION_ID) {
-    const input = invocation.input as { interactionId: string; answer: string };
-    if (!broker.answer(input.interactionId, input.answer))
-      throw Object.assign(
-        new Error('Interaction is already resolved or the answer is invalid.'),
-        {
-          code: 'unavailable-action',
-        },
-      );
-    return { accepted: true, actionId: invocation.actionId };
-  }
-  if (invocation.actionId === ASK_USER_CANCEL_ACTION_ID) {
-    const input = invocation.input as { interactionId: string };
-    if (!broker.cancel(input.interactionId))
-      throw Object.assign(new Error('Interaction is already resolved.'), {
-        code: 'unavailable-action',
-      });
-    return { accepted: true, actionId: invocation.actionId };
-  }
-  if (invocation.actionId === ACTIVITY_GROUPS_ACTION_ID)
-    return executeActivityGroupsAction(invocation.input);
-  if (invocation.actionId === SESSION_COMPACT_ACTION_ID) {
-    const input = invocation.input as { customInstructions?: string };
-    await ctx.compact({
-      customInstructions: input.customInstructions || undefined,
-    });
-    return { accepted: true, actionId: invocation.actionId };
-  }
-  if (invocation.actionId === RUNTIME_ABORT_ACTION_ID) {
-    ctx.abort();
-    return { accepted: true, actionId: invocation.actionId };
-  }
-  if (invocation.actionId === RUNTIME_SHUTDOWN_ACTION_ID) {
-    ctx.shutdown();
-    return { accepted: true, actionId: invocation.actionId };
-  }
-  throw Object.assign(
-    new Error(`No adapter for dashboard action: ${invocation.actionId}`),
-    {
-      code: 'unknown-action',
-    },
-  );
+  const host: CapabilityActionHost = {
+    scopeId: getSessionScopeId(ctx),
+    broker,
+    ctx,
+    pi,
+  };
+  return handler(invocation, host);
 }
 
 export async function dispatchDashboardCommand(
@@ -124,11 +79,11 @@ export async function dispatchDashboardCommand(
   ctx: ExtensionContext,
   broker: InteractionBroker,
   command: BridgeCommand,
-  capabilities = RUNTIME_CAPABILITIES,
+  capabilities = aggregateRuntimeCapabilities(getSessionScopeId(ctx)),
   queueDrafts?: QueueDraftStore,
 ): Promise<unknown> {
   if (command.type === 'action.invoke')
-    return dispatchSemanticAction(ctx, broker, command, capabilities);
+    return dispatchSemanticAction(pi, ctx, broker, command, capabilities);
   if (isQueueDraftCommand(command)) {
     if (!queueDrafts)
       throw queueDraftError(

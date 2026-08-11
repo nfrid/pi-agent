@@ -1,12 +1,5 @@
-import {
-  type ExtensionSurface,
-  parseExtensionSurface,
-} from '@pi-dashboard/extension-contributions';
-import { Value } from 'typebox/value';
-import {
-  clearLiveExtensionSurfaces,
-  publishLiveExtensionSurfaces,
-} from '../shared/runtime/live-surfaces';
+import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
+import { createLiveSurfacePublisher } from '../shared/runtime/live-surface-publisher';
 import type { SessionScopeId } from '../shared/runtime/scoped-services';
 import {
   DELEGATE_RENDERER_ID,
@@ -135,46 +128,45 @@ function statusSnapshot(
   };
 }
 
+const publisher = createLiveSurfacePublisher<DelegateStatusStore>({
+  extensionId: DELEGATE_EXTENSION_ID,
+  surfaceId: DELEGATE_SURFACE_ID,
+  rendererId: DELEGATE_RENDERER_ID,
+  placement: 'right-rail',
+  viewModelSchema: DelegateStatusViewModelSchema,
+  invalidMessage: 'Delegate status surface is invalid.',
+  buildViewModel: (store) => {
+    const transcriptBudget = { remaining: MAX_TRANSCRIPT_SURFACE_CHARS };
+    const statuses = store
+      .list()
+      .sort((left, right) => {
+        const leftActive = left.state === 'queued' || left.state === 'running';
+        const rightActive =
+          right.state === 'queued' || right.state === 'running';
+        if (leftActive !== rightActive) return leftActive ? -1 : 1;
+        return right.createdAt - left.createdAt;
+      })
+      .slice(0, MAX_SURFACE_STATUSES);
+    return {
+      version: 1 as const,
+      statuses: statuses.map((status) =>
+        statusSnapshot(status, transcriptBudget),
+      ),
+    };
+  },
+});
+
 export function delegateSurface(store: DelegateStatusStore): ExtensionSurface {
-  const transcriptBudget = { remaining: MAX_TRANSCRIPT_SURFACE_CHARS };
-  const statuses = store
-    .list()
-    .sort((left, right) => {
-      const leftActive = left.state === 'queued' || left.state === 'running';
-      const rightActive = right.state === 'queued' || right.state === 'running';
-      if (leftActive !== rightActive) return leftActive ? -1 : 1;
-      return right.createdAt - left.createdAt;
-    })
-    .slice(0, MAX_SURFACE_STATUSES);
-  const viewModel = {
-    version: 1 as const,
-    statuses: statuses.map((status) =>
-      statusSnapshot(status, transcriptBudget),
-    ),
-  };
-  // Keep this check next to the adapter so a future status field cannot leak
-  // into the bridge without a corresponding renderer contract change.
-  if (!Value.Check(DelegateStatusViewModelSchema, viewModel))
-    throw new Error('Delegate status surface is invalid.');
-  return parseExtensionSurface({
-    id: DELEGATE_SURFACE_ID,
-    rendererId: DELEGATE_RENDERER_ID,
-    placement: 'right-rail',
-    viewModel,
-  });
+  return publisher.surface(store);
 }
 
 export function publishDelegateSurface(
   store: DelegateStatusStore,
   scopeId?: SessionScopeId,
 ): void {
-  publishLiveExtensionSurfaces(
-    DELEGATE_EXTENSION_ID,
-    [delegateSurface(store)],
-    scopeId,
-  );
+  publisher.publish(store, scopeId);
 }
 
 export function clearDelegateSurface(scopeId?: SessionScopeId): void {
-  clearLiveExtensionSurfaces(DELEGATE_EXTENSION_ID, scopeId);
+  publisher.clear(scopeId);
 }

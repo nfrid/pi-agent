@@ -8,6 +8,9 @@ import {
   SESSION_COMPACT_ACTION_ID,
 } from './contribution';
 import { dispatchDashboardCommand } from './index';
+import { registerRemoteControlCapability } from './register-capability';
+
+registerRemoteControlCapability();
 
 describe('remote-control semantic lifecycle contribution', () => {
   it('advertises only context-backed lifecycle actions', () => {

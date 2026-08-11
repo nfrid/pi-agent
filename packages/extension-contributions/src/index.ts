@@ -808,6 +808,33 @@ export type ContributionActionHandler = (
   invocation: ActionInvocation,
 ) => Promise<unknown> | unknown;
 
+/**
+ * Host-bound action handler. The second argument is an opaque host bag (broker,
+ * ExtensionContext, etc.); framework-free code never inspects it.
+ */
+export type ExtensionCapabilityActionHandler = (
+  invocation: ActionInvocation,
+  hostContext?: unknown,
+) => Promise<unknown> | unknown;
+
+/** Optional dynamic capability summaries for one extension contribution. */
+export type CapabilitySnapshotProvider = () => readonly CapabilitySummary[];
+
+/**
+ * Contract an extension publishes into a host capability registry.
+ *
+ * The registry (not this package) owns session scoping, dispatch, and aggregation.
+ */
+export interface ExtensionCapabilityContract {
+  readonly id: string;
+  readonly manifest: ExtensionManifest;
+  readonly capabilities?: readonly CapabilitySummary[];
+  readonly snapshotProvider?: CapabilitySnapshotProvider;
+  readonly actionHandlers?: Readonly<
+    Record<string, ExtensionCapabilityActionHandler>
+  >;
+}
+
 export function actionSummary(action: ActionDescriptor): ActionSummary {
   const { outputSchema: _output, ...summary } = action;
   return summary;

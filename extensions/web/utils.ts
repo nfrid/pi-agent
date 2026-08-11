@@ -1,16 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { resolvePiConfigHome } from '../shared/runtime/agent-dir';
 import { abortableDelay, throwIfAborted } from '../shared/runtime/async';
 
 export { abortableDelay, throwIfAborted };
 
 export function getWebSearchConfigDir(): string {
-  if (process.env.PI_CODING_AGENT_DIR) return process.env.PI_CODING_AGENT_DIR;
-  if (process.env.XDG_CONFIG_HOME) {
-    return join(process.env.XDG_CONFIG_HOME, 'pi');
-  }
-  return join(homedir(), '.pi');
+  return resolvePiConfigHome();
 }
 
 export function getWebSearchConfigPath(): string {

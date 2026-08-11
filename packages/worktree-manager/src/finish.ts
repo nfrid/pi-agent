@@ -1,7 +1,7 @@
 import { existsSync, rmSync } from 'node:fs';
-import { git, gitText, splitZ } from './git';
-import { type WorktreeRecord, workBase } from './model';
-import type { WorktreeStore } from './store';
+import { git, gitText, splitZ } from './git.js';
+import { type WorktreeRecord, workBase } from './model.js';
+import type { WorktreeStore } from './store.js';
 
 const COMMIT_SUBJECT_MAX = 72;
 

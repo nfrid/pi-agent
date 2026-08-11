@@ -8,14 +8,14 @@ import {
   rmSync,
 } from 'node:fs';
 import * as path from 'node:path';
-import { canonical, git, gitText, repositoryRoot, splitZ } from './git';
+import { canonical, git, gitText, repositoryRoot, splitZ } from './git.js';
 import type {
   PreparedWorktree,
   WorktreeBase,
   WorktreePreparation,
   WorktreeRecord,
-} from './model';
-import type { WorktreeStore } from './store';
+} from './model.js';
+import type { WorktreeStore } from './store.js';
 
 /** Worktrees live beside the repository so `git worktree list` reads naturally. */
 export const WORKTREE_DIR = '.worktrees';
@@ -363,4 +363,4 @@ async function cleanupFailedPreparation(
   }
 }
 
-export { canonical, isInside, repositoryRoot, splitZ } from './git';
+export { canonical, isInside, repositoryRoot, splitZ } from './git.js';

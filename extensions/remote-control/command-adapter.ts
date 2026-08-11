@@ -4,8 +4,8 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
-import { DASHBOARD_SUPPORTED_BUILTIN_COMMANDS } from '../../packages/dashboard-protocol/src/dashboard-api';
-import type { BridgeImageAttachment } from '../../packages/dashboard-protocol/src/pi-runtime-protocol';
+import { DASHBOARD_SUPPORTED_BUILTIN_COMMANDS } from '@pi-dashboard/protocol/dashboard-api';
+import type { BridgeImageAttachment } from '@pi-dashboard/protocol/pi-runtime-protocol';
 import { markDashboardFreshUserTurn } from '../shared/runtime/agent-lifecycle';
 import { getSessionScopeId } from '../shared/runtime/scoped-services';
 

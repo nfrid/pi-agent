@@ -10,18 +10,22 @@ import {
   MAX_NON_IDEMPOTENT_ACTION_IDS,
   type NonIdempotentActionIdGuard,
 } from '@pi-dashboard/extension-contributions';
-import { describe, expect, it, vi } from 'vitest';
 import {
   type BridgeCommand,
   parseFrame,
   type RuntimeSnapshot,
   serializeFrame,
-} from '../../packages/dashboard-protocol/src/index';
+} from '@pi-dashboard/protocol';
+import { describe, expect, it, vi } from 'vitest';
+import { registerActivityGroupsCapability } from '../activity-groups/register-capability';
 import { InteractionBroker } from '../ask-user/broker';
 import { askUserCapabilitySnapshot } from '../ask-user/contribution';
+import { registerAskUserCapability } from '../ask-user/register-capability';
+import { registerDelegateCapability } from '../delegate/register-capability';
 import { beginsFreshUserTurn } from '../shared/runtime/agent-lifecycle';
 import { LiveSurfaceHub } from '../shared/runtime/live-surfaces';
 import { setPendingProcessCount } from '../shared/runtime/pending-processes';
+import { registerTasksCapability } from '../tasks/register-capability';
 import {
   BridgeClient,
   composerCommandsSnapshot,
@@ -39,6 +43,11 @@ import {
   thinkingLevelsSnapshot,
   withoutOpaqueData,
 } from './index';
+
+registerAskUserCapability();
+registerActivityGroupsCapability();
+registerDelegateCapability();
+registerTasksCapability();
 
 const snapshot: RuntimeSnapshot = {
   runtimeId: 'runtime-test',

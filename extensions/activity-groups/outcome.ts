@@ -1,7 +1,7 @@
 import {
   hasUnresolvedToolFailure as sharedHasUnresolvedToolFailure,
   validationKindsOf,
-} from '../../packages/activity-model/src/outcome.mjs';
+} from '@pi-dashboard/activity-model';
 import type { SequenceItem } from './types';
 
 export { validationKindsOf };

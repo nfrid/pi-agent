@@ -9,7 +9,7 @@ import type {
   QueueDraftMode,
   RuntimeLiveState,
   RuntimeSnapshot,
-} from '../../packages/dashboard-protocol/src/pi-runtime-protocol';
+} from '@pi-dashboard/protocol/pi-runtime-protocol';
 import {
   getInteractionBroker,
   type InteractionBroker,
@@ -26,13 +26,14 @@ import { expandDashboardInput } from './command-adapter';
 import { dispatchDashboardCommand } from './command-dispatcher';
 import { LiveEventNormalizer } from './live-event-normalizer';
 import { isQueueDraftCommand, QueueDraftStore } from './queue-draft-store';
+import { registerRemoteControlCapability } from './register-capability';
 import {
   composerCommandsSnapshot,
+  getRuntimeCapabilities,
   interactionSnapshot,
   liveState,
   modelCatalogSnapshot,
   modelSnapshot,
-  RUNTIME_CAPABILITIES,
   sessionSnapshot,
   thinkingLevelsSnapshot,
 } from './runtime-snapshot-adapter';
@@ -53,6 +54,7 @@ export interface RemoteControlRuntime {
 export function createRemoteControlRuntime(
   pi: ExtensionAPI,
 ): RemoteControlRuntime | undefined {
+  registerRemoteControlCapability();
   // This extension is globally loaded. A missing daemon is a normal offline
   // condition, not a reason to make Pi startup fail.
   const socketPath =
@@ -72,6 +74,8 @@ export function createRemoteControlRuntime(
   let contextScope: SessionScopeId | undefined;
   let lastError: string | undefined;
   const queueDrafts = new QueueDraftStore();
+  const capabilitiesFor = () =>
+    getRuntimeCapabilities(contextScope ?? scopedServices.scopeId);
   const unavailableSnapshot = (): RuntimeSnapshot => ({
     runtimeId,
     ownership,
@@ -82,7 +86,7 @@ export function createRemoteControlRuntime(
     pendingInteractions: broker.list().map(interactionSnapshot),
     queueDrafts: queueDrafts.list(),
     composerCommands: composerCommandsSnapshot(pi),
-    capabilities: RUNTIME_CAPABILITIES,
+    capabilities: capabilitiesFor(),
     extensionSurfaces: liveSurfaceHub.snapshot(),
     lastError,
   });
@@ -109,7 +113,7 @@ export function createRemoteControlRuntime(
       pendingInteractions: broker.list().map(interactionSnapshot),
       queueDrafts: queueDrafts.list(),
       composerCommands: composerCommandsSnapshot(pi),
-      capabilities: RUNTIME_CAPABILITIES,
+      capabilities: capabilitiesFor(),
       extensionSurfaces: liveSurfaceHub.snapshot(),
       lastError,
     };
@@ -121,7 +125,6 @@ export function createRemoteControlRuntime(
     identityToken: process.env.PI_DASHBOARD_IDENTITY_TOKEN,
     runtimeId,
     broker,
-    capabilities: RUNTIME_CAPABILITIES,
     commandScope: () => contextScope,
     liveSurfaces: liveSurfaceHub,
     onLiveSurfacesChanged: (surfaces) => {
