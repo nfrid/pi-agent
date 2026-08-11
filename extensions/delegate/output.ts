@@ -184,6 +184,15 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
         ]),
   ];
   if (run.continuation) lines.push(`Continuation: ${run.continuation}`);
+  if (run.checkpoint) {
+    const acknowledged = run.checkpoint.acknowledgedAt
+      ? ` at ${new Date(run.checkpoint.acknowledgedAt).toISOString()}`
+      : '';
+    const review = isRunError(run)
+      ? ' Retained partial state still requires review.'
+      : '';
+    lines.push(`Checkpoint: ${run.checkpoint.state}${acknowledged}.${review}`);
+  }
   const blocked = extractReportField(originalBody, 'Blocked', 240);
   if (blocked)
     lines.push(

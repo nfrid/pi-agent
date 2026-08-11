@@ -2,6 +2,7 @@ import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { type Static, Type } from 'typebox';
 import { type DelegateConfig, loadDelegateConfig } from './config';
+import { createDelegateControlChannel } from './control';
 import type { DelegateJobManager } from './jobs';
 import {
   pendingRuns,
@@ -315,42 +316,61 @@ export function registerDelegateTool(
             handoff,
           };
         };
+        const controls = execution.tasks.map((item) =>
+          createDelegateControlChannel(item.session.filePath),
+        );
         let jobs: ReturnType<DelegateJobManager['startMany']>;
         try {
           jobs = backgroundRuntime.manager.startMany(
-            execution.tasks.map((item, index) => ({
-              name: item.plan.name,
-              ownerSessionId: launchSessionId,
-              mode: 'single' as const,
-              tasks: [item.plan.task],
-              deliveryEpoch: backgroundRuntime.getDeliveryEpoch(),
-              route: item.plan.routing?.route,
-              allowWrites: item.allowWrites,
-              execute: async (jobSignal) => {
-                const runs = await runPreparedDelegateExecution(
-                  { ...runCtx, signal: jobSignal },
-                  { mode: 'single', tasks: [item] },
-                  {
-                    onUpdate: (partial) => {
-                      const run = partial.details?.runs?.[0];
-                      if (run && statusIds?.[index])
-                        backgroundRuntime.statuses.update(
-                          statusIds[index],
-                          run,
-                        );
-                    },
-                  },
-                );
-                const run = runs[0];
-                if (run && statusIds?.[index])
-                  backgroundRuntime.statuses.update(statusIds[index], run);
-                return materializeHandoff(ctx, runs, statusIds?.[index]);
-              },
-              materialize: (materializeCtx, runs) =>
-                materializeHandoff(materializeCtx, runs, statusIds?.[index]),
-            })),
+            execution.tasks.map((item, index) => {
+              const control = controls[index];
+              if (!control)
+                throw new Error('Missing delegate control channel.');
+              return {
+                name: item.plan.name,
+                ownerSessionId: launchSessionId,
+                mode: 'single' as const,
+                tasks: [item.plan.task],
+                deliveryEpoch: backgroundRuntime.getDeliveryEpoch(),
+                route: item.plan.routing?.route,
+                allowWrites: item.allowWrites,
+                feedback: (message) => control.enqueue('feedback', message),
+                execute: async (jobSignal) => {
+                  try {
+                    const runs = await runPreparedDelegateExecution(
+                      { ...runCtx, signal: jobSignal },
+                      { mode: 'single', tasks: [item] },
+                      {
+                        control,
+                        onUpdate: (partial) => {
+                          const run = partial.details?.runs?.[0];
+                          if (run && statusIds?.[index])
+                            backgroundRuntime.statuses.update(
+                              statusIds[index],
+                              run,
+                            );
+                        },
+                      },
+                    );
+                    // The child is settled before owner-session artifact
+                    // materialization; reject feedback during that recovery
+                    // window rather than reporting it as delivered.
+                    control.close();
+                    const run = runs[0];
+                    if (run && statusIds?.[index])
+                      backgroundRuntime.statuses.update(statusIds[index], run);
+                    return materializeHandoff(ctx, runs, statusIds?.[index]);
+                  } finally {
+                    control.close();
+                  }
+                },
+                materialize: (materializeCtx, runs) =>
+                  materializeHandoff(materializeCtx, runs, statusIds?.[index]),
+              };
+            }),
           );
         } catch (error) {
+          for (const control of controls) control.close();
           if (statusIds) backgroundRuntime.statuses.finish(statusIds);
           const warnings = await rollbackPreparedDelegateTasks(execution.tasks);
           const message =
@@ -375,7 +395,7 @@ export function registerDelegateTool(
           content: [
             {
               type: 'text' as const,
-              text: `Started ${jobs.length} background delegate ${jobs.length === 1 ? 'job' : 'jobs'}: ${jobs.map((job) => job.id).join(', ')}. Each subagent completion will be delivered automatically. Continue independent work; if none remains, write exactly one brief final-channel message saying you are waiting for the background delegate and will resume automatically, then end the turn without a commentary preamble or second summary. Use delegate_jobs peek only for deliberate inspection or a decision-changing bounded timeout.\n${jobLines.join('\n')}`.trim(),
+              text: `Started ${jobs.length} background delegate ${jobs.length === 1 ? 'job' : 'jobs'}: ${jobs.map((job) => job.id).join(', ')}. Each subagent completion will be delivered automatically. Continue independent work; if none remains, use /wait to yield without injecting a fabricated waiting message. Use delegate_jobs feedback for bounded corrective steering, peek for deliberate inspection, and /continue to resume manually.\n${jobLines.join('\n')}`.trim(),
             },
           ],
           details: makeDetails(execution.mode, initialRuns),

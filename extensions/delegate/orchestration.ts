@@ -81,6 +81,7 @@ export function pendingRuns(
 
 type RunHooks = {
   onUpdate?: (partial: import('./types').DelegateProgressUpdate) => void;
+  control?: import('./runner').RunDelegateOptions['control'];
   onWorktreeRunning?: (worktree: PreparedWorktree) => void;
 };
 
@@ -155,6 +156,7 @@ async function runPreparedWithLifecycle(
       timeoutMs: config.timeoutMs,
       maxConcurrency: config.maxConcurrency,
       signal,
+      control: hooks.control,
       onUpdate: hooks.onUpdate,
       mode,
       onWorktreeRunning: (worktree) => {

@@ -57,7 +57,7 @@ For broad work, a child should stop early and return partial findings rather tha
 
 A child that cannot settle something itself — the task contradicts what it found, or the call is the parent's to make — stops and ends its report with a `Blocked:` line holding one question. The parent answers by continuing that child, whose session, worktree, route, and scope are all intact.
 
-There is no live channel, and this is why: while a foreground child runs, the parent is suspended inside its own tool call, so the parent's model cannot answer anything until that call returns. The only party who could answer mid-run is the user, which is a different feature and a less autonomous one. Ending the run *is* the question, and the continuation *is* the answer.
+Foreground delegation still has no live channel: while a foreground child runs, the parent is suspended inside its own tool call, so the parent's model cannot answer anything until that call returns. Background delegation is different: `delegate_jobs feedback` queues one bounded parent message for a queued or running job and presents it to the child at the next safe Pi checkpoint (before a model turn or after a tool completes). If the job settles first, the operation reports that state and a normal continuation remains the recovery path. Feedback does not interrupt an in-flight tool call, change the child's route or isolation, or bypass the existing worktree boundary.
 
 `Blocked:` is extracted into the handoff envelope rather than left in the body, so it sits next to the continuation token and survives truncation — a question that reaches the parent without its answer route is no use. Everything a default and a stated assumption can cover stays a default and a stated assumption.
 
@@ -220,6 +220,12 @@ The child is asked to commit as it goes and told explicitly not to merge, rebase
 A continuation reuses its original worktree, working directory, route, and scope, and must repeat `allowWrites: true`. If a worktree cannot be created — no repository, or git refuses — the task still runs writably in the parent checkout and says why.
 
 `scope` is advisory in both directions now. It tells the child where the work is expected to land; nothing enforces it.
+
+## Background supervision and waiting
+
+Background jobs are first-class supervision targets. Use `delegate_jobs list` or a deliberate `peek` to inspect, and `delegate_jobs feedback` for concrete corrective steering; feedback is bounded to 4 KiB and queued in a private per-child control inbox. A pre-timeout request reserves a bounded final window (up to 30 seconds, scaled down for short limits) and asks the child to stop starting work, preserve a coherent partial state, and report what remains. The hard timeout is unchanged: an unresponsive child is still terminated, and timeout handoff explicitly distinguishes an acknowledged checkpoint from an unacknowledged retained partial state. Retained writable work remains reviewable and is never auto-validated or presented as complete.
+
+When no independent parent work remains, `/wait` records only a hidden session marker and yields without injecting fabricated waiting prose. A background completion steers the next turn automatically; `/continue` is the manual resume path. This is a UI/session interaction, not a replacement for deliberate `peek` or continuation recovery.
 
 ## Integrating the result
 

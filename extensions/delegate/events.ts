@@ -359,6 +359,18 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
         status: event.isError ? 'error' : 'completed',
       });
       return true;
+    case 'delegate_control_ack': {
+      if (event.controlKind !== 'checkpoint') return false;
+      const requested = run.checkpoint;
+      if (!requested) return false;
+      run.checkpoint = {
+        ...requested,
+        state: 'acknowledged',
+        acknowledgedAt:
+          typeof event.timestamp === 'number' ? event.timestamp : Date.now(),
+      };
+      return true;
+    }
     case 'message_update': {
       const assistantMessageEvent = asRecord(event.assistantMessageEvent);
       if (assistantMessageEvent?.type === 'thinking_start') {

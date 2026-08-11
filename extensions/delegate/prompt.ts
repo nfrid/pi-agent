@@ -55,7 +55,7 @@ export function buildDelegatePrompt(
     options.timeoutMs !== undefined &&
     Number.isFinite(options.timeoutMs) &&
     options.timeoutMs > 0
-      ? `\n\nThis run has a maximum runtime of approximately ${formatRuntime(options.timeoutMs)}; reserve time to return partial findings.`
+      ? `\n\nThis run has a maximum runtime of approximately ${formatRuntime(options.timeoutMs)}; reserve time to return partial findings. The parent may send bounded corrective feedback at a safe checkpoint. If you receive a pre-timeout checkpoint request, stop starting new work, leave a coherent inspectable state, and return a partial status rather than claiming completion.`
       : '';
   return `You are a coding subagent reporting to a parent agent. Work only on the delegated task. If something is unclear, pick one reasonable default and say what you assumed.
 

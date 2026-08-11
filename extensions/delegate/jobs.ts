@@ -37,6 +37,13 @@ export type DelegateJobMaterializer = (
   runs: DelegatedRun[],
 ) => Promise<DelegateJobResult>;
 
+export type DelegateJobFeedbackDelivery = 'queued' | 'settled' | 'unavailable';
+
+export interface DelegateJobFeedbackResult {
+  job: DelegateJobSnapshot;
+  delivery: DelegateJobFeedbackDelivery;
+}
+
 export interface DelegateJobSnapshot {
   id: string;
   name: string;
@@ -68,6 +75,9 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  feedback?: (
+    message: string,
+  ) => import('./control').DelegateControlEnqueueResult;
   controller: AbortController;
   execute: (signal: AbortSignal) => Promise<DelegateJobResult>;
   materialize?: DelegateJobMaterializer;
@@ -92,6 +102,9 @@ export interface DelegateJobStartOptions {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  feedback?: (
+    message: string,
+  ) => import('./control').DelegateControlEnqueueResult;
 }
 
 function aggregateState(
@@ -154,6 +167,7 @@ export class DelegateJobManager {
         deliveryEpoch: item.deliveryEpoch,
         route: item.route,
         allowWrites: item.allowWrites,
+        feedback: item.feedback,
         controller: new AbortController(),
         execute: item.execute,
         materialize: item.materialize,
@@ -221,6 +235,29 @@ export class DelegateJobManager {
     return this.visibleSnapshot(snapshot(record), ctx);
   }
 
+  sendFeedback(
+    id: string,
+    message: string,
+    ctx?: ExtensionContext,
+  ): DelegateJobFeedbackResult {
+    const record = this.registry.require(id);
+    if (!this.registryActive(record))
+      return {
+        job: this.visibleSnapshot(snapshot(record), ctx),
+        delivery: 'settled',
+      };
+    if (!record.feedback)
+      return {
+        job: this.visibleSnapshot(snapshot(record), ctx),
+        delivery: 'unavailable',
+      };
+    const queued = record.feedback(message);
+    return {
+      job: this.visibleSnapshot(snapshot(record), ctx),
+      delivery: queued.accepted ? 'queued' : 'unavailable',
+    };
+  }
+
   async cancel(
     ids: readonly string[],
     signal?: AbortSignal,
@@ -247,6 +284,10 @@ export class DelegateJobManager {
 
   get runningCount(): number {
     return this.registry.activeCount;
+  }
+
+  private registryActive(record: DelegateJobRecord): boolean {
+    return record.state === 'queued' || record.state === 'running';
   }
 
   private visibleSnapshot(

@@ -8,10 +8,19 @@ import { Type } from 'typebox';
 import type { DelegateJobManager, DelegateJobSnapshot } from './jobs';
 
 const Parameters = Type.Object({
-  action: StringEnum(['list', 'peek', 'cancel'] as const, {
+  action: StringEnum(['list', 'peek', 'feedback', 'cancel'] as const, {
     description: 'Operation to perform',
   }),
-  id: Type.Optional(Type.String({ description: 'Job ID for peek' })),
+  id: Type.Optional(
+    Type.String({ description: 'Job ID for peek or feedback' }),
+  ),
+  message: Type.Optional(
+    Type.String({
+      maxLength: 4096,
+      description:
+        'Bounded feedback delivered at the child’s next safe checkpoint',
+    }),
+  ),
   ids: Type.Optional(
     Type.Array(Type.String(), { description: 'Job IDs for cancel' }),
   ),
@@ -71,18 +80,21 @@ export function registerDelegateJobsTool(
   pi.registerTool<
     typeof Parameters,
     {
-      action: 'list' | 'peek' | 'cancel';
+      action: 'list' | 'peek' | 'feedback' | 'cancel';
       job?: DelegateJobSnapshot;
       jobs?: DelegateJobSnapshot[];
+      delivery?: 'queued' | 'settled' | 'unavailable' | 'automatic-queued';
     }
   >({
     name: 'delegate_jobs',
     label: 'Delegate Jobs',
     description:
-      'Inspect and cancel asynchronous delegate jobs. Completions are delivered automatically. Do not use peek merely to wait: if no independent work remains, write exactly one brief final-channel message saying you are waiting for the background delegate and will resume automatically, then end the turn without a commentary preamble or second summary. Use peek only for deliberate inspection or once when a bounded timeout changes the next action. Actions: list, peek, cancel.',
-    promptSnippet: 'Inspect or cancel asynchronous delegate jobs',
+      'Inspect, steer, and cancel asynchronous delegate jobs. Completions are delivered automatically. Use feedback with one bounded message to steer a running child at its next safe checkpoint; a settled job reports that feedback was not delivered. Use peek for deliberate inspection, not polling. If no independent work remains, use /wait to yield without adding a fabricated waiting message; completion or /continue resumes the parent. Actions: list, peek, feedback, cancel.',
+    promptSnippet: 'Inspect, steer, or cancel asynchronous delegate jobs',
     promptGuidelines: [
-      'If no independent work remains, write exactly one brief final-channel message saying you are waiting for the background delegate and will resume automatically, then end the turn without a commentary preamble or second summary. Do not call delegate_jobs peek merely to wait or keep the turn open. Use peek only for deliberate inspection or once when a bounded timeout will change the next action, and never repeat it to poll.',
+      'Use delegate_jobs feedback only for concrete corrective guidance to a queued or running background child; it is bounded and delivered at a safe checkpoint, not an interruption of an in-flight tool call.',
+      'If no independent work remains, use /wait to yield without injecting a fabricated content message. Background completion resumes the parent automatically; /continue is the manual resume path.',
+      'Use peek only for deliberate inspection or once when a bounded timeout will change the next action, and never repeat it to poll.',
     ],
     parameters: Parameters,
     async execute(
@@ -139,6 +151,27 @@ export function registerDelegateJobsTool(
             },
           };
         }
+        case 'feedback': {
+          const feedback = manager.sendFeedback(
+            requireText(params.id, 'id'),
+            requireText(params.message, 'message'),
+            ctx,
+          );
+          const text =
+            feedback.delivery === 'queued'
+              ? `Feedback queued for ${feedback.job.id}; it will be presented at the child’s next safe checkpoint.`
+              : feedback.delivery === 'settled'
+                ? `Feedback was not delivered because ${feedback.job.id} is already settled; use a continuation if it still needs correction.`
+                : `Feedback could not be queued for ${feedback.job.id}; use a continuation if it still needs correction.`;
+          return {
+            content: [{ type: 'text', text }],
+            details: {
+              action: 'feedback',
+              job: feedback.job,
+              delivery: feedback.delivery,
+            },
+          };
+        }
         case 'cancel': {
           const ids = params.ids?.map((id) => id.trim()).filter(Boolean) ?? [];
           if (ids.length === 0) throw new Error('ids is required.');
@@ -191,6 +224,9 @@ export function registerDelegateJobsTool(
           0,
         );
       }
+      if (action === 'feedback') {
+        return new Text(`${title} ${theme.fg('accent', args.id ?? '?')}`, 0, 0);
+      }
       if (action === 'cancel') {
         const ids = args.ids ?? [];
         const visible = context?.expanded ? ids : ids.slice(0, 3);
@@ -227,6 +263,16 @@ export function registerDelegateJobsTool(
           theme.fg('muted', `• ${listed.length} tracked`) +
             theme.fg(running > 0 ? 'warning' : 'dim', ` · ${running} running`) +
             (failed > 0 ? theme.fg('error', ` · ${failed} failed`) : ''),
+          0,
+          0,
+        );
+      }
+
+      if (details.action === 'feedback' && details.job) {
+        const display = stateDisplay(details.job.state);
+        const delivery = details.delivery ?? 'unavailable';
+        return new Text(
+          `${theme.fg(display.color, `${display.icon} ${details.job.id} ${delivery}`)}`,
           0,
           0,
         );
