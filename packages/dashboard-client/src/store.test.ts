@@ -171,7 +171,7 @@ describe('DashboardLiveStore', () => {
     expect(selectSnapshot(store.getSnapshot())?.unread).toEqual([]);
   });
 
-  it('applies patch-only runtime state to normalized entities', () => {
+  it('applies patch-only runtime state and invalidates stale runtime branches', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot({
       ...snapshot('daemon-1', 1),
@@ -197,6 +197,11 @@ describe('DashboardLiveStore', () => {
         type: 'runtime.stateChanged',
         state: 'waiting',
         snapshot: {
+          session: {
+            id: 'session-1',
+            entries: [],
+            entriesComplete: false,
+          },
           pendingInteractions: [
             {
               id: 'question-1',
@@ -227,7 +232,9 @@ describe('DashboardLiveStore', () => {
       pendingInteractions: [{ id: 'question-1' }],
       extensionSurfaces: [{ id: 'delegate.status' }],
       session: {
-        entries: [{ id: 'large-existing-branch' }],
+        id: 'session-1',
+        entries: [],
+        entriesComplete: false,
       },
     });
   });

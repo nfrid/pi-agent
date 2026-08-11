@@ -789,6 +789,50 @@ describe('dashboard domain reducers', () => {
     expect(late.state.order).toEqual(['new-message']);
   });
 
+  it('invalidates a complete runtime branch with a bounded session patch', () => {
+    const state = createRuntimeReducerState({
+      ...snapshot(),
+      session: {
+        id: 's',
+        file: '/tmp/session.jsonl',
+        name: 'Session',
+        title: 'Session title',
+        cwd: '/tmp',
+        leafId: 'stale-leaf',
+        entriesComplete: true,
+        entries: [{ type: 'message', id: 'stale-entry' }],
+      },
+    });
+    const result = applyRuntimeEvent(state, {
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'idle',
+        snapshot: {
+          session: {
+            id: 's',
+            file: '/tmp/session.jsonl',
+            name: 'Session',
+            title: 'Session title',
+            cwd: '/tmp',
+            entries: [],
+            entriesComplete: false,
+          },
+        },
+      },
+      runtimeSeq: 1,
+    });
+    expect(result.accepted).toBe(true);
+    expect(result.state.snapshot.session).toEqual({
+      id: 's',
+      file: '/tmp/session.jsonl',
+      name: 'Session',
+      title: 'Session title',
+      cwd: '/tmp',
+      entries: [],
+      entriesComplete: false,
+    });
+  });
+
   it('merges live queue and extension surface patches without dropping either', () => {
     const state = createRuntimeReducerState({
       ...snapshot(),

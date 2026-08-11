@@ -49,7 +49,7 @@ export interface RemoteControlRuntime {
   isCurrent(ctx: ExtensionContext): boolean;
   setLiveState(state: RuntimeLiveState): void;
   getInteractionBroker?(): InteractionBroker;
-  /** Build a bounded runtime-only update without reading the session branch. */
+  /** Build a bounded runtime update without reading the session branch. */
   snapshotPatch?(
     ctx: ExtensionContext,
     state?: RuntimeLiveState,
@@ -102,6 +102,29 @@ export function createRemoteControlRuntime(
     state = liveState(ctx, broker),
   ): RuntimeSnapshotPatch => {
     const usage = ctx.getContextUsage();
+    const sessionId = ctx.sessionManager.getSessionId();
+    const cachedSession = cachedSnapshot.session;
+    // A routine update must invalidate the cached branch for both reconnect
+    // hello and the daemon's runtime-backed session read. Metadata is retained,
+    // but leafId is deliberately omitted because it may select stale history.
+    const session = {
+      id: sessionId,
+      ...(cachedSession.id === sessionId && cachedSession.file !== undefined
+        ? { file: cachedSession.file }
+        : {}),
+      ...(cachedSession.id === sessionId && cachedSession.name !== undefined
+        ? { name: cachedSession.name }
+        : {}),
+      ...(cachedSession.id === sessionId && cachedSession.title !== undefined
+        ? { title: cachedSession.title }
+        : {}),
+      cwd:
+        cachedSession.id === sessionId
+          ? (cachedSession.cwd ?? ctx.cwd)
+          : ctx.cwd,
+      entries: [],
+      entriesComplete: false,
+    };
     return {
       cwd: ctx.cwd,
       liveState: state,
@@ -123,6 +146,7 @@ export function createRemoteControlRuntime(
       capabilities: capabilitiesFor(),
       extensionSurfaces: liveSurfaceHub.snapshot(),
       lastError,
+      session,
     };
   };
   const snapshotFrom = (ctx: ExtensionContext): RuntimeSnapshot => {
@@ -231,8 +255,8 @@ export function createRemoteControlRuntime(
     state?: RuntimeLiveState,
   ): RuntimeSnapshotPatch => {
     const patch = runtimePatchFrom(ctx, state);
-    // Keep reconnect/hello authoritative without retaining the session branch
-    // in any routine event payload.
+    // Keep reconnect/hello authoritative while replacing any cached transcript
+    // branch with the bounded invalidation session metadata.
     cachedSnapshot = { ...cachedSnapshot, ...patch };
     return patch;
   };

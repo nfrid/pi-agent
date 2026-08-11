@@ -1136,6 +1136,9 @@ describe('remote-control bridge', () => {
     expect(runtime).toBeDefined();
     runtime?.setContext(context);
     expect(runtime?.snapshot().session.title).toBe('inspect title');
+    const fullSnapshotBytes = JSON.stringify(
+      runtime?.snapshot() ?? snapshot,
+    ).length;
     const branchReadsBeforePatch = manager.getBranch;
     let routineBranchReads = 0;
     manager.getBranch = () => {
@@ -1144,13 +1147,24 @@ describe('remote-control bridge', () => {
     };
     const routinePatch = runtime?.snapshotPatch?.(context, 'working');
     expect(routineBranchReads).toBe(0);
-    expect(routinePatch).not.toHaveProperty('session');
     expect(routinePatch).toMatchObject({
       online: true,
       lastSeenAt: expect.any(Number),
+      session: {
+        id: 'session-current',
+        file: '/tmp/session.jsonl',
+        name: 'Current session',
+        title: 'inspect title',
+        cwd: '/tmp/project',
+        entries: [],
+        entriesComplete: false,
+      },
     });
-    expect(JSON.stringify(routinePatch)).not.toContain('inspect   title');
-    expect(runtime?.snapshot().session.title).toBe('inspect title');
+    expect(routinePatch?.session).not.toHaveProperty('leafId');
+    expect(JSON.stringify(routinePatch)).not.toContain('large-entry-');
+    expect(JSON.stringify(routinePatch)).not.toContain('large branch entry');
+    expect(runtime?.snapshot().session.entries).toEqual([]);
+    expect(runtime?.snapshot().session.entriesComplete).toBe(false);
     const patchClient = new BridgeClient({
       socketPath: '/unused',
       runtimeId: 'runtime-test',
@@ -1170,9 +1184,18 @@ describe('remote-control bridge', () => {
     const routineFrame = JSON.parse(String(patchWrite.mock.calls[0]?.[0])) as {
       event: { snapshot?: Record<string, unknown> };
     };
-    expect(routineFrame.event.snapshot).not.toHaveProperty('session');
+    expect(routineFrame.event.snapshot?.session).toMatchObject({
+      id: 'session-current',
+      entries: [],
+      entriesComplete: false,
+    });
+    expect(routineFrame.event.snapshot?.session).not.toHaveProperty('leafId');
+    expect(String(patchWrite.mock.calls[0]?.[0])).not.toContain('large-entry-');
+    expect(String(patchWrite.mock.calls[0]?.[0])).not.toContain(
+      'large branch entry',
+    );
     expect(String(patchWrite.mock.calls[0]?.[0]).length).toBeLessThan(
-      JSON.stringify(runtime?.snapshot() ?? snapshot).length,
+      fullSnapshotBytes,
     );
     patchClient.stop();
     const equivalentContext = {
