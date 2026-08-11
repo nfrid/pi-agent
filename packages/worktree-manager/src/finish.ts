@@ -63,7 +63,7 @@ export interface WorktreeFinisher<
   retireWorktreeSnapshot(id: string): Promise<Record>;
   removeWorktree(
     id: string,
-    options?: { deleteBranch?: boolean; preLaunch?: boolean },
+    options?: { deleteBranch?: boolean },
   ): Promise<void>;
   discardFreshWorktree(id: string): Promise<{ warning?: string }>;
 }
@@ -277,13 +277,13 @@ export function createWorktreeFinisher<
    */
   async function removeWorktree(
     id: string,
-    options: { deleteBranch?: boolean; preLaunch?: boolean } = {},
+    options: { deleteBranch?: boolean } = {},
   ): Promise<void> {
     const record = store.loadWorktree(id);
     if (!record) return;
 
     if (record.ownership === 'caller') {
-      if (record.status === 'active' && !options.preLaunch)
+      if (record.status === 'active')
         throw new Error(
           'Cannot release an active caller-owned worktree; wait for the delegate to settle or use pre-launch cleanup.',
         );
@@ -328,7 +328,14 @@ export function createWorktreeFinisher<
     id: string,
   ): Promise<{ warning?: string }> {
     try {
-      await removeWorktree(id, { deleteBranch: true, preLaunch: true });
+      const record = store.loadWorktree(id);
+      if (record?.ownership === 'caller' && record.status === 'active') {
+        // This is the sole pre-launch exception: setup created only the
+        // harness record, so discard it without touching the caller checkout.
+        store.deleteWorktreeRecord(id);
+        return {};
+      }
+      await removeWorktree(id, { deleteBranch: true });
       return {};
     } catch (error) {
       return {
