@@ -1,7 +1,6 @@
 import type {
   ExtensionAPI,
   ExtensionUIContext,
-  ThemeColor,
 } from '@earendil-works/pi-coding-agent';
 import {
   beginsFreshUserTurn,
@@ -13,12 +12,13 @@ import {
   getSessionScopeId,
   type SessionScopeId,
 } from '../shared/runtime/scoped-services';
-import {
-  type BackgroundCompletionCard,
-  renderBackgroundCompletion,
-} from '../shared/ui/background-completion';
 import { createRailPanel } from '../shared/ui/rail';
 import { registerDelegateBranchesTool } from './branches-tool';
+import {
+  completionCard,
+  createCompletionDelivery,
+  renderBackgroundCompletion,
+} from './completion-delivery';
 import {
   delegateRouteCount,
   fingerprintDelegateConfig,
@@ -28,6 +28,7 @@ import {
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
 import { clearDelegateSurface, publishDelegateSurface } from './live';
+import { registerDelegateCapability } from './register-capability';
 import { pruneDelegateSessions } from './session';
 import { DelegateStatusStore } from './status';
 import {
@@ -36,11 +37,9 @@ import {
 } from './structured-result';
 import { registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
-import { type DelegateRunState, getRunState } from './types';
 import {
   DELEGATE_WIDGET_MAX_WIDTH,
   DELEGATE_WIDGET_MIN_WIDTH,
-  formatElapsed,
   renderDelegateWidget,
 } from './widget';
 import { loadWorktree } from './worktree';
@@ -49,119 +48,9 @@ import { registerDelegateWorktreesCommand } from './worktrees-command';
 export const DELEGATES_COMMAND_DESCRIPTION =
   'Toggle detailed subagent status or inspect delegate config';
 
-const COMPLETION_WAVE_GRACE_MS = 5_000;
-const COMPLETION_WAVE_BURST_MS = 50;
-const AUTOMATIC_DELIVERY_STATE_LIMIT = 256;
-
-type AutomaticDeliveryState = 'queued' | 'entered';
-
-type CompletionState = Extract<
-  DelegateRunState,
-  'success' | 'error' | 'timed-out' | 'aborted'
->;
-
-function completionState(job: DelegateJobSnapshot): CompletionState {
-  const run = job.runs?.[0];
-  const state = run ? getRunState(run) : job.state;
-  if (state === 'timed-out' || state === 'aborted' || state === 'error')
-    return state;
-  return 'success';
-}
-
-function completionStyle(state: CompletionState): {
-  icon: string;
-  color: ThemeColor;
-  label: string;
-} {
-  if (state === 'error') return { icon: '✗', color: 'error', label: 'failed' };
-  if (state === 'timed-out')
-    return { icon: '◷', color: 'warning', label: 'timed out' };
-  if (state === 'aborted')
-    return { icon: '■', color: 'warning', label: 'aborted' };
-  return { icon: '✓', color: 'success', label: 'finished' };
-}
-
-function jobDuration(job: DelegateJobSnapshot): string {
-  return job.settledAt
-    ? formatElapsed(job.startedAt ?? job.createdAt, job.settledAt)
-    : '';
-}
-
-function completionCard(
-  jobs: readonly DelegateJobSnapshot[],
-): BackgroundCompletionCard {
-  if (jobs.length === 0)
-    return {
-      icon: '✓',
-      color: 'success',
-      title: [{ text: 'Background subagent finished', color: 'muted' }],
-    };
-  const states = jobs.map(completionState);
-  const dominant = states.includes('error')
-    ? 'error'
-    : states.includes('timed-out')
-      ? 'timed-out'
-      : states.includes('aborted')
-        ? 'aborted'
-        : 'success';
-  const style = completionStyle(dominant);
-  const duration = formatElapsed(
-    Math.min(...jobs.map((job) => job.startedAt ?? job.createdAt)),
-    Math.max(...jobs.map((job) => job.settledAt ?? job.createdAt)),
-  );
-  const counts = (state: CompletionState) =>
-    states.filter((candidate) => candidate === state).length;
-  const outcome = [
-    counts('success') ? `${counts('success')} succeeded` : '',
-    counts('error') ? `${counts('error')} failed` : '',
-    counts('timed-out') ? `${counts('timed-out')} timed out` : '',
-    counts('aborted') ? `${counts('aborted')} aborted` : '',
-  ].filter(Boolean);
-  const title =
-    jobs.length === 1
-      ? [
-          { text: 'Background subagent ', color: 'muted' as const },
-          { text: jobs[0].name, color: 'text' as const },
-          {
-            text: ` · ${completionStyle(states[0]).label} · ${duration}`,
-            color: 'dim' as const,
-          },
-        ]
-      : [
-          {
-            text: `${jobs.length} background subagents finished`,
-            color: 'text' as const,
-          },
-          {
-            text: `${outcome.length > 1 || dominant !== 'success' ? ` · ${outcome.join(', ')}` : ''} · ${duration}`,
-            color: 'dim' as const,
-          },
-        ];
-  return {
-    icon: style.icon,
-    color: style.color,
-    title,
-    rows: jobs.map((job) => {
-      const state = completionState(job);
-      const row = completionStyle(state);
-      const metadata = [job.id, job.route, jobDuration(job)].filter(Boolean);
-      return {
-        icon: row.icon,
-        color: row.color,
-        segments: [
-          { text: job.name, color: 'text' },
-          {
-            text: ` · ${row.label}${metadata.length ? ` · ${metadata.join(' · ')}` : ''}`,
-            color: 'dim',
-          },
-        ],
-      };
-    }),
-  };
-}
-
 /** Stable registration facade; orchestration and broker commands have separate owners. */
 export default defineExtension('delegate', (pi: ExtensionAPI) => {
+  registerDelegateCapability();
   const isChild = process.env.PI_DELEGATE_CHILD === '1';
 
   if (isChild) {
@@ -182,12 +71,6 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   let scopeId: SessionScopeId = 'default';
   let deliveryEpoch = 0;
   let runtimeActive = false;
-  let pendingCompletions: DelegateJobSnapshot[] = [];
-  // sendMessage can queue a steer while the parent is still active. Keep this
-  // separate from pendingCompletions, whose wave is already flushed by then.
-  const automaticDeliveryStates = new Map<string, AutomaticDeliveryState>();
-  let completionTimer: NodeJS.Timeout | undefined;
-  let completionFlushAt: number | undefined;
   let widgetDetailed = true;
   let promptSnapshot:
     | {
@@ -200,62 +83,16 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       }
     | undefined;
 
+  const delivery = createCompletionDelivery({
+    pi,
+    getRuntimeActive: () => runtimeActive,
+    getDeliveryEpoch: () => deliveryEpoch,
+    getRunningCount: () => jobs?.runningCount ?? 0,
+    getStatuses: () => statuses,
+    getUi: () => ui,
+  });
+
   const activeStatuses = () => statuses?.list() ?? [];
-
-  const trimAutomaticDeliveryStates = () => {
-    while (automaticDeliveryStates.size > AUTOMATIC_DELIVERY_STATE_LIMIT) {
-      const entered = [...automaticDeliveryStates].find(
-        ([, state]) => state === 'entered',
-      );
-      const oldest = entered ?? automaticDeliveryStates.entries().next().value;
-      if (oldest) automaticDeliveryStates.delete(oldest[0]);
-    }
-  };
-
-  const queueAutomaticDelivery = (jobs: readonly DelegateJobSnapshot[]) => {
-    for (const job of jobs) automaticDeliveryStates.set(job.id, 'queued');
-    trimAutomaticDeliveryStates();
-  };
-
-  const rollbackAutomaticDelivery = (jobs: readonly DelegateJobSnapshot[]) => {
-    for (const job of jobs) {
-      if (automaticDeliveryStates.get(job.id) === 'queued')
-        automaticDeliveryStates.delete(job.id);
-    }
-  };
-
-  const automaticDeliveryQueued = (job: DelegateJobSnapshot) =>
-    automaticDeliveryStates.get(job.id) === 'queued';
-
-  const hasQueuedAutomaticDeliveries = () =>
-    [...automaticDeliveryStates.values()].some((state) => state === 'queued');
-
-  const clearUnenteredAutomaticDeliveries = () => {
-    for (const [id, state] of automaticDeliveryStates) {
-      if (state === 'queued') automaticDeliveryStates.delete(id);
-    }
-  };
-
-  const markAutomaticDeliveriesEntered = (messages: readonly unknown[]) => {
-    for (const message of messages) {
-      const candidate = message as {
-        customType?: unknown;
-        details?: { jobs?: unknown };
-      };
-      if (candidate.customType !== 'delegate-job-result') continue;
-      const jobs = candidate.details?.jobs;
-      if (!Array.isArray(jobs)) continue;
-      for (const job of jobs) {
-        const id =
-          job && typeof job === 'object' && typeof job.id === 'string'
-            ? job.id
-            : undefined;
-        if (id && automaticDeliveryStates.get(id) === 'queued')
-          automaticDeliveryStates.set(id, 'entered');
-      }
-    }
-    trimAutomaticDeliveryStates();
-  };
 
   // Refreshed on a timer because the rendered rows include elapsed time.
   const widget = createRailPanel({
@@ -272,76 +109,6 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   });
 
   const syncWidget = () => widget.sync();
-
-  const notifyStaleCompletions = (jobs: readonly DelegateJobSnapshot[]) => {
-    const ids = jobs.map((job) => job.id).join(', ');
-    ui?.notify(
-      `Delegate job${jobs.length === 1 ? '' : 's'} ${ids} finished on another conversation branch; use delegate_jobs peek to inspect ${jobs.length === 1 ? 'it' : 'them'}.`,
-      'info',
-    );
-  };
-
-  const flushCompletions = () => {
-    completionTimer = undefined;
-    completionFlushAt = undefined;
-    if (!runtimeActive || pendingCompletions.length === 0) return;
-    const queued = pendingCompletions;
-    pendingCompletions = [];
-    const completed = queued.filter(
-      (job) => job.deliveryEpoch === deliveryEpoch,
-    );
-    const stale = queued.filter((job) => job.deliveryEpoch !== deliveryEpoch);
-    if (stale.length > 0) notifyStaleCompletions(stale);
-    if (completed.length === 0) return;
-    const content = completed
-      .map((job) => {
-        const body =
-          job.handoff ??
-          job.error ??
-          '(background delegate produced no result)';
-        return `# Background delegate job ${job.id} (${job.name}) ${job.state}\n\n${body}`;
-      })
-      .join('\n\n---\n\n');
-    queueAutomaticDelivery(completed);
-    try {
-      pi.sendMessage(
-        {
-          customType: 'delegate-job-result',
-          content,
-          display: true,
-          details: { jobs: completed },
-        },
-        { deliverAs: 'steer', triggerTurn: true },
-      );
-      statuses?.jobResultEntered(completed.map((job) => job.id));
-    } catch (error) {
-      rollbackAutomaticDelivery(completed);
-      console.error('delegate: failed to deliver background completion', error);
-    }
-  };
-
-  const queueCompletion = (job: DelegateJobSnapshot) => {
-    if (!runtimeActive) return;
-    statuses?.settleJobs([job]);
-    if (job.deliveryEpoch !== deliveryEpoch) {
-      notifyStaleCompletions([job]);
-      return;
-    }
-    pendingCompletions.push(job);
-    // Give the first result a short grace period for siblings, then deliver
-    // whatever is ready. A second result (or the final active job) closes the
-    // wave promptly without waiting for the whole original batch.
-    const delay =
-      pendingCompletions.length >= 2 || jobs?.runningCount === 0
-        ? COMPLETION_WAVE_BURST_MS
-        : COMPLETION_WAVE_GRACE_MS;
-    const flushAt = Date.now() + delay;
-    if (completionFlushAt !== undefined && completionFlushAt <= flushAt) return;
-    if (completionTimer) clearTimeout(completionTimer);
-    completionFlushAt = flushAt;
-    completionTimer = setTimeout(flushCompletions, delay);
-    completionTimer.unref();
-  };
 
   pi.on('session_start', (event, ctx) => {
     const sessionScopeId = getSessionScopeId(ctx);
@@ -369,9 +136,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     ui = ctx.hasUI ? ctx.ui : undefined;
     deliveryEpoch = 0;
     widgetDetailed = true;
-    pendingCompletions = [];
-    automaticDeliveryStates.clear();
-    completionFlushAt = undefined;
+    delivery.clearPending();
+    delivery.resetAutomaticDelivery();
+    delivery.clearTimer();
     widget.attach(ui);
     pruneDelegateSessions({
       isWorktreeRetained: (id) => Boolean(loadWorktree(id)),
@@ -387,7 +154,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     jobs = new DelegateJobManager({
       scopeId: sessionScopeId,
       pendingProcesses: scopedServices.pendingProcesses,
-      onSettled: queueCompletion,
+      onSettled: delivery.queueCompletion,
     });
     registerDelegateTool(
       pi,
@@ -408,13 +175,13 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
             .filter((job) => job.deliveryEpoch === deliveryEpoch)
             .map((job) => job.id),
         );
-        pendingCompletions = pendingCompletions.filter(
+        delivery.filterPending(
           (job) => job.deliveryEpoch !== deliveryEpoch || !entered.has(job.id),
         );
         statuses?.settleJobs(completed);
         statuses?.jobResultEntered(completed.map((job) => job.id));
       },
-      automaticDeliveryQueued,
+      delivery.automaticDeliveryQueued,
     );
     registerDelegateBranchesTool(pi);
     syncWidget();
@@ -422,12 +189,12 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
 
   pi.on('session_tree', () => {
     deliveryEpoch++;
-    automaticDeliveryStates.clear();
+    delivery.resetAutomaticDelivery();
   });
   pi.on('context', (event) => {
     // A queued steer cannot be retracted. Once it is in context, later peeks
     // intentionally return the retained full result again.
-    markAutomaticDeliveriesEntered(event.messages);
+    delivery.markAutomaticDeliveriesEntered(event.messages);
   });
   // Unlike background-terminals, this widget is not force-remounted at agent
   // boundaries: a delegate run is live across them, and tearing the component
@@ -441,13 +208,13 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   });
   pi.on('agent_settled', () => {
     const genuinelySettled = isGenuineAgentSettlement(
-      pendingCompletions.length > 0 || hasQueuedAutomaticDeliveries(),
+      delivery.pendingCount() > 0 || delivery.hasQueuedAutomaticDeliveries(),
       scopeId,
     );
     // A successfully queued steer prevents settlement until it enters context.
     // If the parent settles first, dispatch failed asynchronously and explicit
     // inspection must remain able to return the retained handoff.
-    clearUnenteredAutomaticDeliveries();
+    delivery.clearUnenteredAutomaticDeliveries();
     if (genuinelySettled) statuses?.parentSettled();
     syncWidget();
   });
@@ -455,11 +222,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const closingScopeId = getSessionScopeId(ctx);
     if (scopeId !== closingScopeId) return;
     runtimeActive = false;
-    if (completionTimer) clearTimeout(completionTimer);
-    completionTimer = undefined;
-    completionFlushAt = undefined;
-    pendingCompletions = [];
-    automaticDeliveryStates.clear();
+    delivery.clearTimer();
+    delivery.clearPending();
+    delivery.resetAutomaticDelivery();
     widget.detach();
     const closing = jobs;
     const closingStatuses = statuses;
