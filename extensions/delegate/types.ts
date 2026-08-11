@@ -96,6 +96,18 @@ export type DelegateProgressUpdate = Parameters<
   >
 >[0];
 
+export type DelegateCheckpointState =
+  | 'requested'
+  | 'acknowledged'
+  | 'unavailable'
+  | 'hard-timeout';
+
+export interface DelegateCheckpoint {
+  requestedAt: number;
+  acknowledgedAt?: number;
+  state: DelegateCheckpointState;
+}
+
 export interface DelegateRunMetadata {
   name?: string;
   cwd?: string;
@@ -113,6 +125,8 @@ export interface DelegateRunMetadata {
   worktree?: WorktreeSummary;
   /** Exact final assistant output, stored only when the parent handoff omits it. */
   artifact?: ArtifactMetadata;
+  /** A bounded pre-timeout checkpoint request and its observed outcome. */
+  checkpoint?: DelegateCheckpoint;
   /** Public projection; authored by the harness and ignored from child input. */
   lifecycle?: DelegateLifecycleProjection;
 }

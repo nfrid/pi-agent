@@ -4,6 +4,9 @@ import { processJsonLine } from './events';
 import type { DelegatedRun } from './types';
 
 export const SIGKILL_TIMEOUT_MS = 5000;
+/** Reserve a bounded final window for a child to checkpoint before hard stop. */
+export const PRETIMEOUT_CHECKPOINT_LEAD_MS = 30_000;
+export const MIN_PRETIMEOUT_CHECKPOINT_LEAD_MS = 1_000;
 export const MAX_STDERR_BYTES = 64 * 1024;
 export const MAX_JSON_LINE_BYTES = 1024 * 1024;
 export const PROGRESS_UPDATE_INTERVAL_MS = 1000;
@@ -28,8 +31,11 @@ export interface SpawnChildOptions {
   cwd: string;
   env: NodeJS.ProcessEnv;
   timeoutMs: number;
+  /** How much of the hard deadline to reserve for a checkpoint request. */
+  checkpointLeadMs?: number;
   killGraceMs?: number;
   signal?: AbortSignal;
+  onCheckpoint?: () => void;
   onLine: () => void;
 }
 
@@ -59,6 +65,14 @@ export function effectiveDelegateHome(): string {
   if (!fallback.trim() || fallback === '/')
     throw new Error('Could not determine a usable delegate HOME directory.');
   return fallback;
+}
+
+export function checkpointLeadMs(timeoutMs: number): number {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return 0;
+  return Math.min(
+    PRETIMEOUT_CHECKPOINT_LEAD_MS,
+    Math.max(MIN_PRETIMEOUT_CHECKPOINT_LEAD_MS, Math.floor(timeoutMs / 5)),
+  );
 }
 
 export function buildDelegateChildEnvironment(
@@ -185,9 +199,32 @@ export async function spawnDelegateChild(
       finish(1);
     });
 
+    const checkpointLead = Math.min(
+      Math.max(0, options.checkpointLeadMs ?? 0),
+      Math.max(0, options.timeoutMs - 1),
+    );
+    const checkpoint =
+      checkpointLead > 0
+        ? setTimeout(
+            () => {
+              if (closed || terminating) return;
+              try {
+                options.onCheckpoint?.();
+              } catch {
+                // Checkpoint delivery is best effort; the hard timeout remains
+                // authoritative even if the control path fails.
+              }
+            },
+            Math.max(1, options.timeoutMs - checkpointLead),
+          )
+        : undefined;
+    checkpoint?.unref();
     const timeout = setTimeout(() => terminate('timeout'), options.timeoutMs);
     timeout.unref();
-    proc.once('close', () => clearTimeout(timeout));
+    proc.once('close', () => {
+      clearTimeout(timeout);
+      if (checkpoint) clearTimeout(checkpoint);
+    });
 
     abortHandler = () => terminate('abort');
     if (options.signal?.aborted) abortHandler();

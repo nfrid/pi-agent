@@ -18,7 +18,11 @@ interface RegisteredTool {
   promptGuidelines: string[];
   execute: (
     id: string,
-    params: { action: 'list' | 'peek' | 'cancel'; id?: string },
+    params: {
+      action: 'list' | 'peek' | 'feedback' | 'cancel';
+      id?: string;
+      message?: string;
+    },
   ) => Promise<{
     content: Array<{ type: string; text: string }>;
     details?: Record<string, unknown>;
@@ -44,7 +48,7 @@ const theme: ThemeLike = {
 };
 
 describe('delegate_jobs rendering', () => {
-  test('tells the agent to yield instead of peeking merely to wait', async () => {
+  test('offers silent waiting and bounded live steering', async () => {
     const manager = new DelegateJobManager();
     let tool: RegisteredTool | undefined;
     const pi = {
@@ -56,20 +60,16 @@ describe('delegate_jobs rendering', () => {
     registerDelegateJobsTool(pi, manager);
 
     expect(tool?.description).toContain(
-      'write exactly one brief final-channel message saying you are waiting for the background delegate and will resume automatically',
+      'use /wait to yield without adding a fabricated waiting message',
     );
-    expect(tool?.description).not.toContain(
-      'if no independent work remains, end the turn',
-    );
-    expect(tool?.description).toContain('once when a bounded timeout changes');
-    expect(tool?.promptGuidelines.join('\n')).toContain(
-      'write exactly one brief final-channel message saying you are waiting for the background delegate and will resume automatically',
+    expect(tool?.description).toContain(
+      'Use feedback with one bounded message to steer a running child',
     );
     expect(tool?.promptGuidelines.join('\n')).toContain(
-      'without a commentary preamble or second summary',
+      'use /wait to yield without injecting a fabricated content message',
     );
     expect(tool?.promptGuidelines.join('\n')).toContain(
-      'Do not call delegate_jobs peek merely to wait or keep the turn open.',
+      'Use delegate_jobs feedback only for concrete corrective guidance',
     );
     expect(tool?.promptGuidelines.join('\n')).toContain(
       'never repeat it to poll',

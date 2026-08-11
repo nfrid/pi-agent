@@ -122,6 +122,38 @@ describe('delegate lifecycle failure projection', () => {
     expect(getDelegateLifecycle(run)?.reason).toBe(reason);
   });
 
+  test('reports an acknowledged pre-timeout checkpoint with retained partial status', async () => {
+    vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
+      async (run, options) => {
+        options.onCheckpoint?.();
+        if (run.checkpoint)
+          run.checkpoint = {
+            ...run.checkpoint,
+            state: 'acknowledged',
+            acknowledgedAt: Date.now(),
+          };
+        return { exitCode: 124, wasAborted: false, timedOut: true };
+      },
+    );
+
+    const run = await runDelegate({
+      cwd: '/tmp',
+      task: 'checkpointed timeout',
+      context: 'fresh',
+      sessionPath: '/tmp/lifecycle-checkpoint-test.jsonl',
+      isolation: 'shared',
+      timeoutMs: 5_000,
+      maxConcurrency: 1,
+      mode: 'single',
+    });
+    expect(run.state).toBe('timed-out');
+    expect(run.checkpoint?.state).toBe('acknowledged');
+    expect(run.errorMessage).toContain('acknowledged a pre-timeout checkpoint');
+    expect(makeDetails('single', [run]).runs[0]?.checkpoint).toMatchObject({
+      state: 'acknowledged',
+    });
+  });
+
   test('classifies a nonzero exit even when a child error event populated the message', async () => {
     vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
       async (run) => {

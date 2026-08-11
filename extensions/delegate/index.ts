@@ -25,6 +25,7 @@ import {
   getDelegateSettingsPath,
   loadDelegateConfig,
 } from './config';
+import { registerDelegateControl } from './control';
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
 import { clearDelegateSurface, publishDelegateSurface } from './live';
@@ -47,6 +48,9 @@ import { registerDelegateWorktreesCommand } from './worktrees-command';
 
 export const DELEGATES_COMMAND_DESCRIPTION =
   'Toggle detailed subagent status or inspect delegate config';
+export const DELEGATE_WAIT_CUSTOM_TYPE = 'delegate-wait';
+export const DELEGATE_WAIT_COMMAND_DESCRIPTION =
+  'Yield while background delegates run without adding a waiting message';
 
 /** Stable registration facade; orchestration and broker commands have separate owners. */
 export default defineExtension('delegate', (pi: ExtensionAPI) => {
@@ -58,6 +62,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       process.env.PI_DELEGATE_RESULT_SCHEMA,
     );
     if (resultSpec) registerChildDelegateResultTool(pi, resultSpec);
+    registerDelegateControl(pi, process.env.PI_DELEGATE_CONTROL_FILE);
     pi.on('tool_call', (event, ctx) => {
       const reason = delegateToolBoundary(event.toolName, event.input, ctx.cwd);
       return reason ? { block: true, reason } : undefined;
@@ -250,6 +255,52 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       );
     },
   );
+
+  pi.registerCommand('wait', {
+    description: DELEGATE_WAIT_COMMAND_DESCRIPTION,
+    handler: async (_args, ctx) => {
+      if (!ctx.isIdle()) {
+        if (ctx.hasUI) ctx.ui.notify('Agent is already running.', 'warning');
+        return;
+      }
+      const active =
+        jobs
+          ?.list(ctx)
+          .filter((job) => job.state === 'queued' || job.state === 'running') ??
+        [];
+      if (active.length === 0) {
+        if (ctx.hasUI)
+          ctx.ui.notify('No background delegates are running.', 'info');
+        return;
+      }
+      const alreadyWaiting = ctx.sessionManager
+        .getBranch()
+        .some(
+          (entry) =>
+            entry.type === 'message' &&
+            entry.message.role === 'custom' &&
+            entry.message.customType === DELEGATE_WAIT_CUSTOM_TYPE,
+        );
+      if (alreadyWaiting) {
+        if (ctx.hasUI)
+          ctx.ui.notify(
+            'Already waiting for background delegates; completion or /continue will resume.',
+            'info',
+          );
+        return;
+      }
+      // This is a hidden session marker, not fabricated assistant/user prose.
+      // It does not trigger a turn; automatic completion steers one later.
+      pi.sendMessage(
+        {
+          customType: DELEGATE_WAIT_CUSTOM_TYPE,
+          content: [],
+          display: false,
+        },
+        { triggerTurn: false },
+      );
+    },
+  });
 
   pi.registerCommand('delegates', {
     description: DELEGATES_COMMAND_DESCRIPTION,

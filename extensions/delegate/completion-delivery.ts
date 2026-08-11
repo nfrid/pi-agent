@@ -8,8 +8,10 @@ import type { DelegateStatusStore } from './status';
 import { type DelegateRunState, getRunState } from './types';
 import { formatElapsed } from './widget';
 
-export const COMPLETION_WAVE_GRACE_MS = 5_000;
+/** Short coalescing window; never hold the first completion for seconds. */
 export const COMPLETION_WAVE_BURST_MS = 50;
+/** Retained export for consumers that named the former first-wave grace. */
+export const COMPLETION_WAVE_GRACE_MS = COMPLETION_WAVE_BURST_MS;
 export const AUTOMATIC_DELIVERY_STATE_LIMIT = 256;
 
 type AutomaticDeliveryState = 'queued' | 'entered';
@@ -222,24 +224,28 @@ export function createCompletionDelivery(options: {
 
   const queueCompletion = (job: DelegateJobSnapshot) => {
     if (!options.getRuntimeActive()) return;
+    // Settlement is normally idempotent, but delivery can also be retried
+    // around a branch/session boundary. Do not enqueue a second copy of the
+    // same stable job ID while the first copy is pending or already accepted.
+    if (
+      pendingCompletions.some((pending) => pending.id === job.id) ||
+      automaticDeliveryStates.has(job.id)
+    )
+      return;
     options.getStatuses()?.settleJobs([job]);
     if (job.deliveryEpoch !== options.getDeliveryEpoch()) {
       notifyStaleCompletions([job]);
       return;
     }
     pendingCompletions.push(job);
-    // Give the first result a short grace period for siblings, then deliver
-    // whatever is ready. A second result (or the final active job) closes the
-    // wave promptly without waiting for the whole original batch.
-    const delay =
-      pendingCompletions.length >= 2 || options.getRunningCount() === 0
-        ? COMPLETION_WAVE_BURST_MS
-        : COMPLETION_WAVE_GRACE_MS;
-    const flushAt = Date.now() + delay;
+    // Coalesce completions that land in the same event-loop burst, but never
+    // make the first result wait for a long sibling grace period. Later waves
+    // retain the same stable-ID deduplication above.
+    const flushAt = Date.now() + COMPLETION_WAVE_BURST_MS;
     if (completionFlushAt !== undefined && completionFlushAt <= flushAt) return;
     if (completionTimer) clearTimeout(completionTimer);
     completionFlushAt = flushAt;
-    completionTimer = setTimeout(flushCompletions, delay);
+    completionTimer = setTimeout(flushCompletions, COMPLETION_WAVE_BURST_MS);
     completionTimer.unref();
   };
 

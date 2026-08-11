@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
   buildDelegateChildEnvironment,
+  checkpointLeadMs,
   effectiveDelegateHome,
   spawnDelegateChild,
 } from './delegate-child';
@@ -25,6 +26,12 @@ afterEach(() => {
 });
 
 describe('delegate child environment', () => {
+  test('scales the checkpoint window without moving the hard deadline', () => {
+    expect(checkpointLeadMs(10_000)).toBe(2_000);
+    expect(checkpointLeadMs(10 * 60_000)).toBe(30_000);
+    expect(checkpointLeadMs(0)).toBe(0);
+  });
+
   test('forwards a set parent HOME and keeps the existing allowlist bounded', () => {
     vi.stubEnv('HOME', '/tmp/parent-home');
     vi.stubEnv('DELEGATE_SECRET', 'must-not-forward');
@@ -51,6 +58,25 @@ describe('delegate child environment', () => {
 
     expect(effectiveDelegateHome()).toBe(fallback);
     expect(buildDelegateChildEnvironment({}).HOME).toBe(fallback);
+  });
+
+  test('requests a checkpoint before hard timeout and still terminates an idle child', async () => {
+    const checkpoint = vi.fn();
+    const run = createRun('checkpoint');
+    const result = await spawnDelegateChild(run, {
+      command: process.execPath,
+      args: ['-e', 'setInterval(() => {}, 1_000)'],
+      cwd: process.cwd(),
+      env: {},
+      timeoutMs: 250,
+      checkpointLeadMs: 100,
+      killGraceMs: 100,
+      onCheckpoint: checkpoint,
+      onLine: vi.fn(),
+    });
+
+    expect(checkpoint).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ timedOut: true, exitCode: 124 });
   });
 
   test('resolves a bounded temp home in a child command without touching the real home', async () => {
