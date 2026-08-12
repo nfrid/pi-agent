@@ -32,11 +32,11 @@ export class NotificationService {
     return !isTranscriptEvent(change);
   }
 
-  handle(change: RegistryChange): NotificationEvent | undefined {
+  handle(change: RegistryChange): void {
     if (change.kind === 'offline') {
       const kind =
         change.snapshot.liveState === 'failed' ? 'failed' : 'runtime-exited';
-      return this.publish({
+      this.publish({
         id: `${kind}-${change.snapshot.runtimeId}-${change.snapshot.lastSeenAt ?? Date.now()}`,
         kind,
         runtimeId: change.snapshot.runtimeId,
@@ -52,7 +52,7 @@ export class NotificationService {
         createdAt: Date.now(),
       });
     }
-    if (change.kind !== 'event') return undefined;
+    if (change.kind !== 'event') return;
     const event = change.event;
     if (event.type === 'interaction.resolved') {
       this.metadata.clearWaitingNotifications(change.snapshot.runtimeId);
@@ -66,8 +66,8 @@ export class NotificationService {
         !isSessionReplacementGoodbye(change)) ||
       (event.type === 'agent.settled' &&
         process.env.PI_DASHBOARD_NOTIFY_SETTLED === '1');
-    if (!shouldNotify) return undefined;
-    return this.publish({
+    if (!shouldNotify) return;
+    this.publish({
       id: `${event.type}-${change.snapshot.runtimeId}-${event.type === 'interaction.requested' ? event.interaction.id : Date.now()}`,
       kind:
         event.type === 'interaction.requested'
@@ -95,9 +95,8 @@ export class NotificationService {
     this.push.close?.();
   }
 
-  private publish(notification: NotificationEvent): NotificationEvent {
+  private publish(notification: NotificationEvent): void {
     this.metadata.addNotification(notification);
     void this.push.notify(notification).catch(() => undefined);
-    return notification;
   }
 }

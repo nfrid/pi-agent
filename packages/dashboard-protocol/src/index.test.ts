@@ -467,6 +467,18 @@ describe('dashboard protocol', () => {
         runtimeEpoch: 'epoch-1',
         runtimeSeq: 1,
         sessionId: 'session-1',
+        event: {
+          type: 'message.updated',
+          sessionId: 'session-1',
+          message,
+        },
+      }).cursor,
+    ).toBe(1);
+    expect(() =>
+      parseDashboardEventEnvelope({
+        cursor: 1,
+        emittedAt: 100,
+        event: { type: 'agent.settled', sessionId: 'session-1' },
         notification: {
           id: 'notification-1',
           kind: 'runtime-exited',
@@ -474,13 +486,8 @@ describe('dashboard protocol', () => {
           body: 'Runtime went offline',
           createdAt: 100,
         },
-        event: {
-          type: 'message.updated',
-          sessionId: 'session-1',
-          message,
-        },
-      }).notification?.id,
-    ).toBe('notification-1');
+      }),
+    ).toThrow();
     expect(
       parseDashboardStreamMessage({
         cursor: 2,

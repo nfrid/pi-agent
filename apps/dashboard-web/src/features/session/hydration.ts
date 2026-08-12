@@ -2,6 +2,7 @@ import {
   type DashboardLiveStore,
   dashboardHttpClient,
   selectRuntimeForSession,
+  selectSessionChange,
   sessionQueryOptions,
   useDashboardStore,
 } from '@pi-dashboard/client';
@@ -28,6 +29,7 @@ export function useSessionHydration({
 }) {
   const query = useQuery(sessionQueryOptions(dashboardHttpClient, id));
   const runtime = useDashboardStore(store, selectRuntimeForSession(id));
+  const sessionChange = useDashboardStore(store, selectSessionChange(id));
   const resyncNonce = useDashboardStore(store, (state) => state.resyncNonce);
   const storedMetadata = useDashboardStore(
     store,
@@ -46,6 +48,7 @@ export function useSessionHydration({
   const [incompleteRetryNonce, setIncompleteRetryNonce] = useState(0);
   const hydrationRetryCountRef = useRef(0);
   const incompleteRetryCountRef = useRef(0);
+  const sessionChangeRef = useRef({ id, value: sessionChange });
   const runtimeReconcileTimerRef = useRef<number | undefined>(undefined);
   const runtimeWasOnlineRef = useRef(false);
   const sessionRefetchRef = useRef<
@@ -120,6 +123,13 @@ export function useSessionHydration({
     requestSessionRefetch,
     store,
   ]);
+
+  useEffect(() => {
+    const previous = sessionChangeRef.current;
+    sessionChangeRef.current = { id, value: sessionChange };
+    if (previous.id !== id || previous.value === sessionChange) return;
+    void requestSessionRefetch();
+  }, [id, requestSessionRefetch, sessionChange]);
 
   useEffect(() => {
     if (resyncNonce > 0) void requestSessionRefetch();

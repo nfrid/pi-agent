@@ -699,7 +699,7 @@ export class DashboardLiveStore {
         sessionId,
         liveMessage.content,
       );
-    if (sessionId) {
+    if (sessionId && envelope.event.type !== 'runtime.hello') {
       const currentProjection = nextState.transcriptsBySessionId[sessionId];
       const canSeedSnapshot =
         envelope.event.type === 'session.snapshot' &&
@@ -767,14 +767,6 @@ export class DashboardLiveStore {
         }
       }
     }
-    if (envelope.notification)
-      nextState = {
-        ...nextState,
-        notificationsById: {
-          ...nextState.notificationsById,
-          [envelope.notification.id]: envelope.notification,
-        },
-      };
     let sessionChangeById = nextState.sessionChangeById;
     let sessionReplacementByRuntimeId = nextState.sessionReplacementByRuntimeId;
     let sessionReplacementBySessionId = nextState.sessionReplacementBySessionId;
@@ -793,22 +785,39 @@ export class DashboardLiveStore {
         [sessionId]: (sessionChangeById[sessionId] ?? 0) + 1,
       };
     if (
+      envelope.runtimeId &&
       sessionId &&
-      (event.type === 'session.changed' || event.type === 'session.snapshot') &&
-      'session' in event
+      event.type === 'runtime.stateChanged' &&
+      event.snapshot?.online === false
     ) {
       const current = nextState.sessionsById[sessionId];
+      if (current?.activeRuntimeId === envelope.runtimeId) {
+        const sessionsById = { ...nextState.sessionsById };
+        const { activeRuntimeId: _activeRuntimeId, ...metadata } = current;
+        sessionsById[sessionId] = metadata;
+        nextState = { ...nextState, sessionsById };
+      }
+    }
+    if (
+      sessionId &&
+      (event.type === 'runtime.hello' ||
+        event.type === 'session.changed' ||
+        event.type === 'session.snapshot')
+    ) {
+      const sessionUpdate =
+        event.type === 'runtime.hello' ? event.snapshot.session : event.session;
+      const current = nextState.sessionsById[sessionId];
       const hasAuthoritativeTitle =
-        event.session.name !== undefined || event.session.title !== undefined;
+        sessionUpdate.name !== undefined || sessionUpdate.title !== undefined;
       if (current) {
         const metadata = {
           ...current,
-          ...(event.session.name === undefined
+          ...(sessionUpdate.name === undefined
             ? {}
-            : { name: event.session.name }),
-          ...(event.session.title === undefined
+            : { name: sessionUpdate.name }),
+          ...(sessionUpdate.title === undefined
             ? {}
-            : { title: event.session.title }),
+            : { title: sessionUpdate.title }),
         };
         nextState = this.installSessionProjection(nextState, metadata);
       }
@@ -819,6 +828,38 @@ export class DashboardLiveStore {
           ...nextState,
           optimisticSessionTitlesById: optimistic,
         };
+      }
+      if (event.type === 'runtime.hello' && envelope.runtimeId) {
+        const sessionsById = { ...nextState.sessionsById };
+        const runtime = nextState.runtimesById[envelope.runtimeId];
+        const existing = sessionsById[sessionId];
+        sessionsById[sessionId] = existing
+          ? { ...existing, activeRuntimeId: envelope.runtimeId }
+          : {
+              id: sessionId,
+              file: sessionUpdate.file ?? '',
+              cwd: sessionUpdate.cwd ?? runtime?.cwd ?? '',
+              updatedAt: runtime?.lastSeenAt ?? Date.now(),
+              ...(sessionUpdate.name === undefined
+                ? {}
+                : { name: sessionUpdate.name }),
+              ...(sessionUpdate.title === undefined
+                ? {}
+                : { title: sessionUpdate.title }),
+              activeRuntimeId: envelope.runtimeId,
+            };
+        if (
+          previousRuntimeSessionId &&
+          previousRuntimeSessionId !== sessionId
+        ) {
+          const previous = sessionsById[previousRuntimeSessionId];
+          if (previous?.activeRuntimeId === envelope.runtimeId) {
+            const { activeRuntimeId: _activeRuntimeId, ...previousMetadata } =
+              previous;
+            sessionsById[previousRuntimeSessionId] = previousMetadata;
+          }
+        }
+        nextState = { ...nextState, sessionsById };
       }
       if (envelope.runtimeId)
         sessionReplacementByRuntimeId = {

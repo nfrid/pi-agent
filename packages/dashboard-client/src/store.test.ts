@@ -417,8 +417,26 @@ describe('DashboardLiveStore', () => {
     store.installSnapshot({
       ...snapshot('daemon-1', 1),
       runtimes: [runtime],
-      sessions: [{ id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 }],
+      sessions: [
+        {
+          id: 'session-1',
+          file: '',
+          cwd: '/tmp',
+          updatedAt: 1,
+          activeRuntimeId: 'runtime-1',
+        },
+      ],
     } as unknown as BrowserSnapshot);
+    store.hydrateSession({
+      ...sessionResponse(1),
+      entries: [
+        {
+          id: 'persisted-message',
+          type: 'message',
+          message: { role: 'user', content: 'preserve me' },
+        },
+      ],
+    } as never);
 
     store.acceptStreamRecord({
       cursor: 2,
@@ -427,13 +445,6 @@ describe('DashboardLiveStore', () => {
       runtimeEpoch: 'epoch-a',
       runtimeSeq: 2,
       sessionId: 'session-1',
-      notification: {
-        id: 'offline-1',
-        kind: 'runtime-exited',
-        title: 'Disconnected',
-        body: 'Runtime went offline',
-        createdAt: 2,
-      },
       event: {
         type: 'runtime.stateChanged',
         state: 'idle',
@@ -445,8 +456,9 @@ describe('DashboardLiveStore', () => {
       online: false,
       session: { id: 'session-1', entries: [{ id: 'existing' }] },
     });
-    expect(store.getSnapshot().notificationsById['offline-1']).toBeDefined();
-
+    expect(
+      store.getSnapshot().sessionsById['session-1']?.activeRuntimeId,
+    ).toBeUndefined();
     store.acceptStreamRecord({
       cursor: 3,
       emittedAt: 3,
@@ -474,6 +486,68 @@ describe('DashboardLiveStore', () => {
       session: { id: 'session-1', entries: [], entriesComplete: false },
     });
     expect(store.getSnapshot().sessionChangeById['session-1']).toBe(1);
+    expect(store.getSnapshot().sessionsById['session-1']?.activeRuntimeId).toBe(
+      'runtime-1',
+    );
+    expect(
+      store.getSnapshot().sessionReplacementBySessionId['session-1'],
+    ).toBeUndefined();
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.items[
+        'persisted-message'
+      ],
+    ).toBeDefined();
+  });
+
+  it('maps a reconnect session replacement without navigating same-session reconnects', () => {
+    const store = new DashboardLiveStore();
+    const runtime = {
+      runtimeId: 'runtime-1',
+      ownership: 'external',
+      pid: 10,
+      cwd: '/tmp',
+      liveState: 'idle',
+      online: false,
+      pendingInteractions: [],
+      session: { id: 'session-1', entries: [] },
+    };
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      runtimes: [runtime],
+      sessions: [
+        { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
+        { id: 'session-2', file: '', cwd: '/tmp', updatedAt: 1 },
+      ],
+    } as unknown as BrowserSnapshot);
+    store.acceptStreamRecord({
+      cursor: 2,
+      emittedAt: 2,
+      runtimeId: 'runtime-1',
+      runtimeEpoch: 'epoch-new',
+      runtimeSeq: 1,
+      sessionId: 'session-2',
+      event: {
+        type: 'runtime.hello',
+        protocolVersion: 1,
+        snapshot: {
+          ...runtime,
+          online: true,
+          session: { id: 'session-2', entries: [], entriesComplete: false },
+        },
+      },
+    } as StreamRecord);
+    expect(store.getSnapshot().sessionReplacementByRuntimeId['runtime-1']).toBe(
+      'session-2',
+    );
+    expect(store.getSnapshot().sessionReplacementBySessionId['session-1']).toBe(
+      'session-2',
+    );
+    expect(store.getSnapshot().sessionsById['session-1']?.activeRuntimeId).toBe(
+      undefined,
+    );
+    expect(store.getSnapshot().sessionsById['session-2']?.activeRuntimeId).toBe(
+      'runtime-1',
+    );
   });
 
   it('retains runtime epoch ordering across no-snapshot browser events', () => {

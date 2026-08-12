@@ -10,7 +10,11 @@ import {
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { parseFrame, serializeFrame } from '@pi-dashboard/protocol';
+import {
+  parseDashboardMessage,
+  parseFrame,
+  serializeFrame,
+} from '@pi-dashboard/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { createDashboardServer } from './http.js';
@@ -281,7 +285,6 @@ describe('dashboard HTTP boundary', () => {
     expect(lifecycle).toHaveLength(2);
     expect(lifecycle[0]).toMatchObject({
       event: { type: 'runtime.stateChanged' },
-      notification: { kind: 'runtime-exited' },
     });
     expect(lifecycle[1]).toMatchObject({
       event: {
@@ -731,6 +734,14 @@ describe('dashboard HTTP boundary', () => {
     expect(update.type).toBe('event');
     expect(update.snapshot).toBeUndefined();
     expect(routineSnapshotConstructions).toBe(0);
+    expect(() => parseDashboardMessage(update)).not.toThrow();
+    expect(Object.keys(update).sort()).toEqual([
+      'event',
+      'revision',
+      'runtimeId',
+      'serverId',
+      'type',
+    ]);
     expect(update.revision).toBeGreaterThan(registrationSnapshot.revision);
     bridge.write(
       serializeFrame({

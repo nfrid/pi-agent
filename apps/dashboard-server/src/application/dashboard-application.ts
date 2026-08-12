@@ -30,8 +30,6 @@ export interface ApplicationChange {
   runtimeEpoch?: string;
   runtimeSeq?: number;
   sessionId?: string;
-  /** Narrow lifecycle upsert; full unread state remains bootstrap/replay-gap data. */
-  notification?: NotificationEvent;
   snapshot?: RuntimeSnapshot;
 }
 
@@ -159,7 +157,7 @@ export class DashboardApplication {
     if (this.notifications.shouldPersistRuntime(change))
       this.metadata.saveRuntime(change.snapshot);
     this.manager.onRegistryChange(change);
-    const notification = this.notifications.handle(change);
+    this.notifications.handle(change);
     const provenance = {
       ...(change.runtimeEpoch === undefined
         ? {}
@@ -201,7 +199,6 @@ export class DashboardApplication {
         runtimeId: change.snapshot.runtimeId,
         sessionId: change.snapshot.session.id,
         ...provenance,
-        ...(notification === undefined ? {} : { notification }),
       };
     if (change.kind === 'event')
       return {
@@ -209,7 +206,6 @@ export class DashboardApplication {
         event: change.event,
         runtimeId: change.runtimeId,
         ...provenance,
-        ...(notification === undefined ? {} : { notification }),
       };
     return { type: 'snapshot', snapshot: change.snapshot };
   }

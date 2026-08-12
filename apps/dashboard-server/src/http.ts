@@ -752,9 +752,6 @@ export class DashboardServerImpl implements DashboardServer {
             ...(record.sessionId === undefined
               ? {}
               : { sessionId: record.sessionId as string }),
-            ...(record.notification === undefined
-              ? {}
-              : { notification: record.notification }),
             ...(snapshot === undefined ? {} : { snapshot }),
           });
         });
@@ -764,9 +761,14 @@ export class DashboardServerImpl implements DashboardServer {
         return;
       }
       this.ws.publish({
-        ...record,
+        type: 'event',
         serverId: this.serverId,
         revision: this.revision,
+        runtimeId:
+          typeof record.runtimeId === 'string' && record.runtimeId.length > 0
+            ? record.runtimeId
+            : 'dashboard',
+        event: record.event,
         ...(includeSnapshot && streamRecord.snapshot !== undefined
           ? { snapshot: streamRecord.snapshot }
           : {}),

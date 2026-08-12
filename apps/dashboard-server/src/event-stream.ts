@@ -1,8 +1,4 @@
-import type {
-  BridgeEvent,
-  BrowserSnapshot,
-  NotificationEvent,
-} from '@pi-dashboard/protocol';
+import type { BridgeEvent, BrowserSnapshot } from '@pi-dashboard/protocol';
 
 export interface DashboardEventStreamEnvelope {
   readonly cursor: number;
@@ -11,7 +7,6 @@ export interface DashboardEventStreamEnvelope {
   readonly runtimeEpoch?: string;
   readonly runtimeSeq?: number;
   readonly sessionId?: string;
-  readonly notification?: NotificationEvent;
   readonly event: BridgeEvent;
   readonly snapshot?: BrowserSnapshot;
 }
