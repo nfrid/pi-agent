@@ -1,4 +1,3 @@
-export { MarkdownComposerEditor } from '../composer';
 export {
   ImageAttachmentInput,
   ImageAttachmentPreviews,
@@ -8,4 +7,5 @@ export {
   ComposerModelControl,
   ComposerThinkingControl,
 } from './controls';
+export { MarkdownComposerEditor } from './editor';
 export { ComposerRichSurface } from './shell';
