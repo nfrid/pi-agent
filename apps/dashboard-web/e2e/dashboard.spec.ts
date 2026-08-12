@@ -697,7 +697,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(composer).toBeVisible();
   await composer.fill('Draft survives navigation and refresh');
   await page.evaluate(() => {
-    window.dispatchEvent(new WheelEvent('wheel'));
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
     window.scrollTo(0, 0);
   });
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
@@ -742,6 +742,147 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(page.getByLabel('Message Pi')).toContainText(
     'Draft survives navigation and refresh',
   );
+});
+
+test('delayed command completion does not scroll a destination session', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.addInitScript(() =>
+    localStorage.setItem('pi-dashboard-token', 'test-token'),
+  );
+  await page.route('**/api/usage', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/events?*', async (route) =>
+    route.fulfill({
+      contentType: 'text/event-stream',
+      body: ': heartbeat\n\n',
+    }),
+  );
+  const metadata = (id: string, title: string) => ({
+    id,
+    file: '',
+    cwd: '/tmp',
+    title,
+    updatedAt: Date.now(),
+  });
+  const entries = (title: string) => [
+    ...Array.from({ length: 90 }, (_, index) => ({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: `${title} history ${index}` }],
+      },
+    })),
+    {
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: `${title} latest` }],
+      },
+    },
+  ];
+  await page.route('**/api/snapshot', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        revision: 1,
+        runtimes: [
+          {
+            runtimeId: 'runtime-source',
+            ownership: 'external',
+            pid: 1,
+            cwd: '/tmp',
+            liveState: 'idle',
+            online: true,
+            session: {
+              id: 'session-source',
+              title: 'Source session',
+              entries: [],
+            },
+            model: { provider: 'test', model: 'text', supportsImages: false },
+            pendingInteractions: [],
+          },
+        ],
+        workspaces: [],
+        sessions: [
+          metadata('session-source', 'Source session'),
+          metadata('session-destination', 'Destination session'),
+        ],
+        unread: [],
+      }),
+    }),
+  );
+  await page.route('**/api/sessions/*', async (route) => {
+    const sessionId = new URL(route.request().url()).pathname.split('/').pop();
+    const title =
+      sessionId === 'session-destination' ? 'Destination' : 'Source';
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        metadata: metadata(sessionId ?? 'session-source', `${title} session`),
+        entries: entries(title),
+        entriesComplete: true,
+      }),
+    });
+  });
+  let commandRequested = false;
+  let commandCompleted = false;
+  let releaseCommand!: () => void;
+  const commandReleased = new Promise<void>((resolve) => {
+    releaseCommand = resolve;
+  });
+  await page.route('**/api/runtimes/runtime-source/command', async (route) => {
+    commandRequested = true;
+    await commandReleased;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ accepted: true }),
+    });
+    commandCompleted = true;
+  });
+
+  await page.goto('/sessions/session-source');
+  const composer = page.getByLabel('Message Pi');
+  await expect(composer).toBeVisible();
+  await composer.fill('Delayed command');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect.poll(() => commandRequested).toBe(true);
+
+  await page.getByRole('button', { name: 'Open agent list' }).click();
+  const agentNav = page.getByRole('complementary', {
+    name: 'Agents and threads',
+  });
+  await agentNav
+    .getByRole('button', { name: /Destination session dormant/ })
+    .click();
+  await expect(page).toHaveURL(/\/sessions\/session-destination$/u);
+  await expect(page.getByText('Destination latest')).toBeVisible();
+  await expect(page.locator('.session-page')).not.toHaveAttribute(
+    'data-tail-pending',
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollHeight -
+          (window.scrollY + window.innerHeight),
+      ),
+    )
+    .toBeLessThanOrEqual(1);
+  await page.evaluate(() => {
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    window.scrollTo(0, 0);
+  });
+  const destinationScrollY = await page.evaluate(() => window.scrollY);
+  expect(destinationScrollY).toBe(0);
+
+  releaseCommand();
+  await expect.poll(() => commandCompleted).toBe(true);
+  await expect
+    .poll(() => page.evaluate(() => window.scrollY))
+    .toBe(destinationScrollY);
 });
 
 test('live transport contains malformed data and reconnects without HTTP polling', async ({

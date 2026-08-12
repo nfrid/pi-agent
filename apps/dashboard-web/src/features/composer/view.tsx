@@ -86,6 +86,7 @@ export function Composer({
   const { initialDraft, text, updateText, clearDraft } =
     useComposerDraft(sessionId);
   const editorRef = useRef<MDXEditorMethods>(null);
+  const mountedRef = useRef(false);
   const [mode, setMode] = useState<'prompt' | 'steer' | 'followUp'>(() =>
     runtime?.liveState === 'working' ? 'steer' : 'prompt',
   );
@@ -131,6 +132,12 @@ export function Composer({
     onError: setError,
   });
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
     setMode(runtime?.liveState === 'working' ? 'steer' : 'prompt');
   }, [runtime?.liveState]);
   const resume = async (acknowledge = false) => {
@@ -144,8 +151,10 @@ export function Composer({
     setResumeWarning(false);
     try {
       await resumeMutation.mutateAsync(request);
+      if (!mountedRef.current) return;
       setResumePending(true);
     } catch (cause) {
+      if (!mountedRef.current) return;
       const details =
         cause instanceof Error
           ? (cause as Error & { code?: unknown })
@@ -253,14 +262,16 @@ export function Composer({
           runtimeId: runtime.runtimeId,
           command,
         });
+      if (!mountedRef.current) return;
       clearAttachments();
       clearDraft();
       editorRef.current?.setMarkdown('');
       onMessageSubmitted?.();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (mountedRef.current)
+        setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   };
   return (

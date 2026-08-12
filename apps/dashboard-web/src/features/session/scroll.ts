@@ -31,12 +31,19 @@ export function useSessionScroll({
   const autoScrollFrameRef = useRef<number | undefined>(undefined);
   const tailReadyTimerRef = useRef<number | undefined>(undefined);
   const layoutScrollFrameRef = useRef<number | undefined>(undefined);
+  const explicitJumpFramesRef = useRef<number[]>([]);
+  const mountedSessionIdRef = useRef<string | undefined>(undefined);
   const initialTailSessionRef = useRef<string | undefined>(undefined);
   const initialTailSettleTimerRef = useRef<number | undefined>(undefined);
   const userScrollIntentRef = useRef(false);
   const stickToBottomRef = useRef(true);
   const sessionPageRef = useRef<HTMLElement>(null);
   const controlLayerRef = useRef<HTMLDivElement>(null);
+  const cancelExplicitJumpFrames = useCallback(() => {
+    for (const frame of explicitJumpFramesRef.current)
+      window.cancelAnimationFrame(frame);
+    explicitJumpFramesRef.current = [];
+  }, []);
 
   useLayoutEffect(() => {
     // SessionRoute is reused while only the route id changes. Arm the new
@@ -57,8 +64,19 @@ export function useSessionScroll({
     }
   }, [id]);
 
+  useLayoutEffect(() => {
+    cancelExplicitJumpFrames();
+    mountedSessionIdRef.current = sessionMounted ? id : undefined;
+    return () => {
+      cancelExplicitJumpFrames();
+      if (mountedSessionIdRef.current === id)
+        mountedSessionIdRef.current = undefined;
+    };
+  }, [cancelExplicitJumpFrames, id, sessionMounted]);
+
   useEffect(() => {
     const cancelPendingTailScroll = () => {
+      cancelExplicitJumpFrames();
       userScrollIntentRef.current = true;
       stickToBottomRef.current = false;
       initialTailSessionRef.current = undefined;
@@ -91,7 +109,7 @@ export function useSessionScroll({
     let touchY: number | undefined;
     let previousScrollY = window.scrollY;
     const onWheel = (event: WheelEvent) => {
-      if (event.deltaY <= 0) cancelPendingTailScroll();
+      if (event.deltaY < 0) cancelPendingTailScroll();
     };
     const onTouchStart = (event: TouchEvent) => {
       touchY = event.touches[0]?.clientY;
@@ -162,7 +180,7 @@ export function useSessionScroll({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('pointerdown', onPointerDown);
     };
-  }, [id]);
+  }, [cancelExplicitJumpFrames, id]);
 
   useLayoutEffect(() => {
     if (!data || !projection) return;
@@ -230,6 +248,7 @@ export function useSessionScroll({
 
   useEffect(
     () => () => {
+      cancelExplicitJumpFrames();
       if (autoScrollFrameRef.current !== undefined) {
         window.cancelAnimationFrame(autoScrollFrameRef.current);
         autoScrollFrameRef.current = undefined;
@@ -247,7 +266,7 @@ export function useSessionScroll({
         initialTailSettleTimerRef.current = undefined;
       }
     },
-    [],
+    [cancelExplicitJumpFrames],
   );
 
   useLayoutEffect(() => {
@@ -322,6 +341,8 @@ export function useSessionScroll({
   }, [id, sessionMounted]);
 
   const jumpToLatest = useCallback(() => {
+    if (mountedSessionIdRef.current !== id) return;
+    cancelExplicitJumpFrames();
     userScrollIntentRef.current = false;
     stickToBottomRef.current = true;
     initialTailSessionRef.current = id;
@@ -335,18 +356,37 @@ export function useSessionScroll({
     setAwayFromLatest(false);
     setTailScrollRequest((current) => current + 1);
     window.scrollTo(0, document.documentElement.scrollHeight);
-    window.requestAnimationFrame(() => {
-      if (!stickToBottomRef.current || userScrollIntentRef.current) return;
+    const scheduleExplicitJumpFrame = (callback: () => void) => {
+      let frame: number;
+      frame = window.requestAnimationFrame(() => {
+        explicitJumpFramesRef.current = explicitJumpFramesRef.current.filter(
+          (pending) => pending !== frame,
+        );
+        callback();
+      });
+      explicitJumpFramesRef.current.push(frame);
+    };
+    scheduleExplicitJumpFrame(() => {
+      if (
+        mountedSessionIdRef.current !== id ||
+        !stickToBottomRef.current ||
+        userScrollIntentRef.current
+      )
+        return;
       window.scrollTo(0, document.documentElement.scrollHeight);
       // Clearing the rich editor and remeasuring virtual rows can change the
       // document height one frame after submission. Honor the explicit jump
       // through that second layout pass unless the user scrolls away.
-      window.requestAnimationFrame(() => {
-        if (stickToBottomRef.current && !userScrollIntentRef.current)
+      scheduleExplicitJumpFrame(() => {
+        if (
+          mountedSessionIdRef.current === id &&
+          stickToBottomRef.current &&
+          !userScrollIntentRef.current
+        )
           window.scrollTo(0, document.documentElement.scrollHeight);
       });
     });
-  }, [id]);
+  }, [cancelExplicitJumpFrames, id]);
 
   return {
     awayFromLatest,
