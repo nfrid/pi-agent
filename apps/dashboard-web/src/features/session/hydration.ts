@@ -8,6 +8,15 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+type SessionResponseWithId = { metadata: { id: string } };
+
+export function isCurrentSessionResponse<T extends SessionResponseWithId>(
+  id: string,
+  response: T | undefined,
+): response is T {
+  return response?.metadata.id === id;
+}
+
 export function useSessionHydration({
   id,
   store,
@@ -31,6 +40,8 @@ export function useSessionHydration({
   const data = query.data
     ? { ...query.data, metadata: storedMetadata ?? query.data.metadata }
     : undefined;
+  const queryDataId = query.data?.metadata.id;
+  const queryEntriesComplete = query.data?.entriesComplete;
   const [error, setError] = useState<string>();
   const [incompleteRetryNonce, setIncompleteRetryNonce] = useState(0);
   const hydrationRetryCountRef = useRef(0);
@@ -38,28 +49,37 @@ export function useSessionHydration({
   const runtimeReconcileTimerRef = useRef<number | undefined>(undefined);
   const runtimeWasOnlineRef = useRef(false);
   const sessionRefetchRef = useRef<
-    ReturnType<typeof query.refetch> | undefined
+    | {
+        id: string;
+        promise: ReturnType<typeof query.refetch>;
+      }
+    | undefined
   >(undefined);
   const refetchSession = query.refetch;
   const requestSessionRefetch = useCallback(() => {
     if (document.visibilityState !== 'visible') return undefined;
-    if (sessionRefetchRef.current) return sessionRefetchRef.current;
+    const current = sessionRefetchRef.current;
+    if (current?.id === id) return current.promise;
+    if (current) sessionRefetchRef.current = undefined;
     const pending = refetchSession();
-    sessionRefetchRef.current = pending;
+    const request = { id, promise: pending };
+    sessionRefetchRef.current = request;
     void pending.then(
       () => {
-        if (sessionRefetchRef.current === pending)
+        if (sessionRefetchRef.current === request)
           sessionRefetchRef.current = undefined;
       },
       () => {
-        if (sessionRefetchRef.current === pending)
+        if (sessionRefetchRef.current === request)
           sessionRefetchRef.current = undefined;
       },
     );
     return pending;
-  }, [refetchSession]);
+  }, [id, refetchSession]);
 
   useEffect(() => {
+    if (sessionRefetchRef.current?.id !== id)
+      sessionRefetchRef.current = undefined;
     if (!id) return;
     setError(undefined);
     hydrationRetryCountRef.current = 0;
@@ -136,7 +156,7 @@ export function useSessionHydration({
   useEffect(() => {
     // Visibility increments this nonce to restart a previously suspended retry loop.
     void incompleteRetryNonce;
-    if (query.data?.entriesComplete !== false) {
+    if (queryDataId !== id || queryEntriesComplete !== false) {
       incompleteRetryCountRef.current = 0;
       return;
     }
@@ -154,7 +174,12 @@ export function useSessionHydration({
           if (canceled || document.visibilityState !== 'visible') return;
           incompleteRetryCountRef.current = attempt + 1;
           const result = await requestSessionRefetch();
-          if (!canceled && result?.data?.entriesComplete === false) retry();
+          if (
+            !canceled &&
+            isCurrentSessionResponse(id, result?.data) &&
+            result.data.entriesComplete === false
+          )
+            retry();
         },
         Math.min(8_000, 500 * 2 ** attempt),
       );
@@ -165,8 +190,10 @@ export function useSessionHydration({
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, [
+    id,
     incompleteRetryNonce,
-    query.data?.entriesComplete,
+    queryDataId,
+    queryEntriesComplete,
     requestSessionRefetch,
   ]);
 
