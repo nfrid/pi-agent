@@ -35,7 +35,9 @@ export {
   type StructuredValidationResult,
 } from './structured-result-schema';
 export {
+  boundPublicStructuredRuns,
   formatStructuredResult,
+  PUBLIC_STRUCTURED_RESULT_CAPS,
   serializeDelegateRunForPublic,
   serializeDelegateRunForStaleSession,
 } from './structured-result-serialize';

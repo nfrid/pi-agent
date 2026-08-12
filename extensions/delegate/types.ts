@@ -27,10 +27,13 @@ export interface DelegateLifecycleProjection {
   readOnlySnapshotRetained: boolean;
 }
 
-/** Bounded validated value retained for human-facing details/status surfaces. */
+/** Bounded projected value retained for human-facing details/status surfaces. */
 export interface DelegateStructuredResult {
   valid: boolean;
+  /** Only the contract's parent-visible projection; never the full result. */
   value?: unknown;
+  /** True when no bounded user-visible value could be retained. */
+  valueOmitted?: boolean;
   errors: string[];
 }
 

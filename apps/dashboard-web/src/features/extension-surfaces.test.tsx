@@ -503,12 +503,13 @@ describe('live extension surface fixtures', () => {
           result: {
             kind: 'structured',
             status: 'invalid',
-            errors: ['/outcome: expected string'],
+            errors: ['/outcome: expected string', '/outcome: expected string'],
           },
         }}
       />,
     );
     expect(markup).toContain('/outcome: expected string');
+    expect(markup.match(/\/outcome: expected string/g)).toHaveLength(2);
     expect(markup).not.toContain('malformed attempt value');
     expect(markup).not.toContain('payload-preview');
   });

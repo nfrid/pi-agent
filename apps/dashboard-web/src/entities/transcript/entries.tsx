@@ -67,6 +67,7 @@ export function StructuredDelegateResults({
       {results.map((result) => {
         const occurrence = (occurrences.get(result.label) ?? 0) + 1;
         occurrences.set(result.label, occurrence);
+        const errorOccurrences = new Map<string, number>();
         return (
           <section
             className="payload-section"
@@ -91,11 +92,18 @@ export function StructuredDelegateResults({
                 Structured result value unavailable in this bounded snapshot.
               </p>
             ) : null}
-            {result.errors?.map((error) => (
-              <p className="payload-truncation-label" key={error}>
-                {error}
-              </p>
-            ))}
+            {result.errors?.map((error) => {
+              const errorOccurrence = (errorOccurrences.get(error) ?? 0) + 1;
+              errorOccurrences.set(error, errorOccurrence);
+              return (
+                <p
+                  className="payload-truncation-label"
+                  key={`${result.label}:error:${error}:${errorOccurrence}`}
+                >
+                  {error}
+                </p>
+              );
+            })}
           </section>
         );
       })}

@@ -139,7 +139,7 @@ describe('delegate transcript viewer data', () => {
     );
   });
 
-  it('replays the complete validated structured value into the transcript modal', () => {
+  it('does not replay a full structured value omitted from public details', () => {
     const spec = normalizeDelegateResultSpec({
       schema: {
         type: 'object',
@@ -163,9 +163,11 @@ describe('delegate transcript viewer data', () => {
     const persisted = JSON.parse(JSON.stringify(makeDetails('single', [run])));
     const replayed = getDetails({ details: persisted });
     const text = transcriptText(replayed?.runs ?? []);
-    expect(text).toContain('Structured result:');
-    expect(text).toContain('Outcome: done');
-    expect(text).toContain('2. second');
+    expect(text).toContain(
+      'Structured result value unavailable in bounded public details.',
+    );
+    expect(text).not.toContain('Outcome: done');
+    expect(text).not.toContain('2. second');
   });
 
   it('retains activity/response text and marks modal truncation explicitly', () => {

@@ -1209,7 +1209,14 @@ test('dense mobile session keeps conversation and activity readable', async ({
             type: 'custom_message',
             customType: 'delegate-job-result',
             display: true,
-            content: '# Background delegate job dj-1 (UX audit) success',
+            content: `# Background delegate job dj-1 (UX audit) success
+
+Delegated results: 1 run(s)
+
+Status: success
+Structured result: valid
+Projection: {"outcome":"done"}
+Note: Recovery completed after the final check.`,
             details: {
               jobs: [
                 {
@@ -1432,6 +1439,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
     page.getByText('Model → openai/gpt-5.6-sol · thinking medium'),
   ).toBeVisible();
   const delegateResult = page.getByText('Delegate finished · UX audit');
+  const delegateEvent = page.locator('details.event-delegate-result');
   await expect(delegateResult).toBeVisible();
   await delegateResult.click();
   const structuredDelegateResults = page.getByRole('region', {
@@ -1442,6 +1450,13 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(structuredDelegateResults).toContainText('done');
   await expect(structuredDelegateResults).toContainText('src/App.tsx');
   await expect(structuredDelegateResults.getByText('Raw JSON')).toBeVisible();
+  await expect(delegateEvent).toContainText('Status: success');
+  await expect(delegateEvent).toContainText(
+    'Recovery completed after the final check.',
+  );
+  await expect(delegateEvent).not.toContainText(
+    'Projection: {"outcome":"done"}',
+  );
   await delegateResult.click();
   await expect(structuredDelegateResults).toHaveCount(0);
   await expect(

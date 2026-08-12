@@ -250,11 +250,30 @@ function todoEvent(
 
 const MAX_DELEGATE_STRUCTURED_JOBS = 16;
 const MAX_DELEGATE_STRUCTURED_RUNS = 64;
+const MAX_DELEGATE_STRUCTURED_RESULTS = 64;
 const MAX_DELEGATE_STRUCTURED_ERRORS = 16;
+const MAX_DELEGATE_STRUCTURED_VALUE_BYTES = 64 * 1024;
+
+interface StructuredResultBudget {
+  remainingBytes: number;
+  values: number;
+}
+
+function jsonByteLength(value: unknown): number | undefined {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined
+      ? undefined
+      : new TextEncoder().encode(serialized).byteLength;
+  } catch {
+    return undefined;
+  }
+}
 
 function structuredResultView(
   value: Record<string, unknown>,
   label: string,
+  budget: StructuredResultBudget,
 ): TranscriptStructuredResult {
   const rawStatus = stringField(value, 'status');
   const status: TranscriptStructuredResult['status'] =
@@ -270,11 +289,21 @@ function structuredResultView(
         .map((error) => error.slice(0, 240))
     : undefined;
   const hasValue = Object.hasOwn(value, 'value') && value.value !== undefined;
+  const valueBytes = hasValue ? jsonByteLength(value.value) : undefined;
+  const valueFitsBudget =
+    hasValue &&
+    valueBytes !== undefined &&
+    budget.values < MAX_DELEGATE_STRUCTURED_RESULTS &&
+    valueBytes <= budget.remainingBytes;
+  if (valueFitsBudget && valueBytes !== undefined) {
+    budget.values++;
+    budget.remainingBytes -= valueBytes;
+  }
   return {
     label,
     status,
-    ...(hasValue ? { value: value.value } : {}),
-    ...(value.valueOmitted === true || (status === 'valid' && !hasValue)
+    ...(valueFitsBudget ? { value: value.value } : {}),
+    ...(value.valueOmitted === true || (status === 'valid' && !valueFitsBudget)
       ? { valueOmitted: true }
       : {}),
     ...(errors?.length ? { errors } : {}),
@@ -296,6 +325,10 @@ function delegateStructuredResults(
     )
     .slice(0, MAX_DELEGATE_STRUCTURED_JOBS);
   const results: TranscriptStructuredResult[] = [];
+  const budget: StructuredResultBudget = {
+    remainingBytes: MAX_DELEGATE_STRUCTURED_VALUE_BYTES,
+    values: 0,
+  };
   for (const [jobIndex, job] of jobs.entries()) {
     const jobName =
       stringField(job, 'name') ??
@@ -317,10 +350,32 @@ function delegateStructuredResults(
         jobs.length > 1 || runs.length > 1
           ? `${jobName} · Run ${runIndex + 1}`
           : jobName;
-      results.push(structuredResultView(structured, label));
+      if (results.length >= MAX_DELEGATE_STRUCTURED_RESULTS) break;
+      results.push(structuredResultView(structured, label, budget));
     }
+    if (results.length >= MAX_DELEGATE_STRUCTURED_RESULTS) break;
   }
   return results.length ? results : undefined;
+}
+
+/** Remove the machine-only parent projection line when structured fields
+ * are available. Keep status, recovery, artifact, and other useful prose. */
+function withoutStructuredProjectionSummary(content: string): string {
+  return content
+    .split(/\r?\n/u)
+    .filter((line) => {
+      const match = line.trim().match(/^Projection:\s*(.+)$/u);
+      if (!match) return true;
+      try {
+        JSON.parse(match[1]);
+        return false;
+      } catch {
+        return true;
+      }
+    })
+    .join('\n')
+    .replace(/\n{3,}/gu, '\n\n')
+    .trim();
 }
 
 function asyncResultEvent(
@@ -350,11 +405,14 @@ function asyncResultEvent(
     const subject =
       jobs.length > 1 ? `${jobs.length} delegate jobs` : (name ?? 'Delegate');
     const structuredResults = delegateStructuredResults(details);
+    const visibleContent = structuredResults
+      ? withoutStructuredProjectionSummary(content)
+      : content;
     return {
       kind: 'delegate-result',
       label: `${status === 'error' ? 'Delegate failed' : 'Delegate finished'} · ${subject}`,
       status,
-      ...(content ? { content } : {}),
+      ...(visibleContent ? { content: visibleContent } : {}),
       ...(details ? { details } : {}),
       ...(structuredResults ? { structuredResults } : {}),
     };

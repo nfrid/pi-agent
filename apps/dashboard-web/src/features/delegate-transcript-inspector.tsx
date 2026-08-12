@@ -244,15 +244,23 @@ export function DelegateStructuredResultSection({
   row: DelegateStatus;
 }) {
   if (!row.result) return null;
+  const errorOccurrences = new Map<string, number>();
   return (
     <section className="payload-section" aria-label="Structured result">
       <h4>Structured result</h4>
       <p>Status: {row.result.status}</p>
-      {row.result.errors?.map((error) => (
-        <p key={error} className="payload-truncation-label">
-          {error}
-        </p>
-      ))}
+      {row.result.errors?.map((error) => {
+        const errorOccurrence = (errorOccurrences.get(error) ?? 0) + 1;
+        errorOccurrences.set(error, errorOccurrence);
+        return (
+          <p
+            key={`${row.id}:structured-error:${error}:${errorOccurrence}`}
+            className="payload-truncation-label"
+          >
+            {error}
+          </p>
+        );
+      })}
       {row.result.status === 'valid' && row.result.value !== undefined && (
         <>
           <StructuredPayloadView value={row.result.value} />

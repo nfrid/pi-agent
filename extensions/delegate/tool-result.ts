@@ -14,6 +14,7 @@ import {
 import { buildParentHandoffResult } from './output';
 import { throwIfAllRunsFailed } from './param-errors';
 import {
+  boundPublicStructuredRuns,
   getDelegateResultSpec,
   getSettledDelegateResult,
   getStructuredArtifacts,
@@ -37,7 +38,9 @@ export function makeDetails(
 ): DelegateDetails {
   return {
     mode,
-    runs: runs.map((run) => serializeDelegateRunForPublic(run)),
+    runs: boundPublicStructuredRuns(
+      runs.map((run) => serializeDelegateRunForPublic(run)),
+    ),
   };
 }
 
