@@ -36,7 +36,7 @@ export interface SpawnChildOptions {
   killGraceMs?: number;
   signal?: AbortSignal;
   onCheckpoint?: () => void;
-  onControlAck?: (kind: string, generation?: number) => void;
+  onControlAck?: (id: string, kind: string, generation?: number) => void;
   onLine: () => void;
 }
 
@@ -156,14 +156,17 @@ export async function spawnDelegateChild(
       try {
         const event = JSON.parse(line) as {
           type?: unknown;
+          controlId?: unknown;
           controlKind?: unknown;
           controlGeneration?: unknown;
         };
         if (
           event.type === 'delegate_control_ack' &&
+          typeof event.controlId === 'string' &&
           typeof event.controlKind === 'string'
         )
           options.onControlAck?.(
+            event.controlId,
             event.controlKind,
             typeof event.controlGeneration === 'number'
               ? event.controlGeneration

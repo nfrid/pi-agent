@@ -70,8 +70,9 @@ describe('delegate control inbox', () => {
       accepted: false,
       reason: 'queue-full',
     });
-    expect(channel.pause(3).accepted).toBe(true);
-    channel.acknowledge('pause', 3);
+    const pause = channel.pause(3);
+    expect(pause.accepted).toBe(true);
+    channel.acknowledge(pause.id ?? '', 'pause', 3);
     expect(channel.resume(3).accepted).toBe(true);
     expect(readFileSync(channel.filePath, 'utf8')).toContain('"kind":"resume"');
     channel.close();
@@ -83,13 +84,34 @@ describe('delegate control inbox', () => {
     const channel = createDelegateControlChannel(
       path.join(root, 'session.jsonl'),
     );
-    expect(channel.pause(4).accepted).toBe(true);
-    channel.acknowledge('pause', 4);
+    const pause = channel.pause(4);
+    expect(pause.accepted).toBe(true);
+    channel.acknowledge(pause.id ?? '', 'pause', 4);
     expect(channel.enqueue('feedback', 'while paused').accepted).toBe(true);
     expect(channel.resume(4).accepted).toBe(true);
     const inbox = readFileSync(channel.filePath, 'utf8');
     expect(inbox).toContain('while paused');
     expect(inbox).toContain('"kind":"resume"');
+    channel.close();
+  });
+
+  test('releases feedback quota as child acknowledgements arrive', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-quota-'));
+    roots.push(root);
+    const channel = createDelegateControlChannel(
+      path.join(root, 'session.jsonl'),
+    );
+    const ids: string[] = [];
+    for (let index = 0; index < 32; index++) {
+      const queued = channel.enqueue('feedback', `message ${index}`);
+      expect(queued.accepted).toBe(true);
+      ids.push(queued.id ?? '');
+    }
+    expect(channel.enqueue('feedback', 'overflow').accepted).toBe(false);
+    for (const id of ids) channel.acknowledge(id, 'feedback');
+    expect(channel.enqueue('feedback', 'after consumption').accepted).toBe(
+      true,
+    );
     channel.close();
   });
 

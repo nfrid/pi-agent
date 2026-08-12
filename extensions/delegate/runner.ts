@@ -142,6 +142,8 @@ export function buildChildArgs(
   const allowWrites = options.allowWrites === true;
   if (allowWrites && !options.worktree)
     throw new Error('Writable delegates require a prepared worktree.');
+  const baseTools = allowWrites ? WRITE_TOOLS : READ_ONLY_TOOLS;
+  const tools = options.resultSpec ? `${baseTools},delegate_result` : baseTools;
   const args = [
     '--mode',
     'json',
@@ -159,7 +161,7 @@ export function buildChildArgs(
     '--no-prompt-templates',
     '--no-themes',
     '--tools',
-    allowWrites ? WRITE_TOOLS : READ_ONLY_TOOLS,
+    tools,
   ];
   args.push('--session', sessionPath);
   if (options.routing) {
@@ -272,8 +274,9 @@ export async function runDelegate(
           };
           emitUpdate();
         },
-        onControlAck: (kind, generation) =>
+        onControlAck: (id, kind, generation) =>
           control.acknowledge(
+            id,
             kind as import('./control').DelegateControlKind,
             generation,
           ),

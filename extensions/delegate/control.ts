@@ -5,6 +5,7 @@ import {
   readFileSync,
   statSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
@@ -55,7 +56,11 @@ export interface DelegateControlChannel {
   ) => DelegateControlEnqueueResult;
   pause: (generation: number) => DelegateControlEnqueueResult;
   resume: (generation: number) => DelegateControlEnqueueResult;
-  acknowledge: (kind: DelegateControlKind, generation?: number) => void;
+  acknowledge: (
+    id: string,
+    kind: DelegateControlKind,
+    generation?: number,
+  ) => void;
   close: () => void;
 }
 
@@ -97,7 +102,8 @@ export function createDelegateControlChannel(
   const participantId = filePath;
   let closed = false;
   let sequence = 0;
-  let requestCount = 0;
+  const outstanding = new Map<string, boolean>();
+  let boundedOutstandingCount = 0;
 
   const request = (
     input: Omit<DelegateControlRequest, 'id' | 'createdAt'>,
@@ -112,7 +118,10 @@ export function createDelegateControlChannel(
     options: { bypassLimits?: boolean } = {},
   ): DelegateControlEnqueueResult => {
     if (closed) return { accepted: false, reason: 'channel-closed' };
-    if (!options.bypassLimits && requestCount >= MAX_DELEGATE_CONTROL_REQUESTS)
+    if (
+      !options.bypassLimits &&
+      boundedOutstandingCount >= MAX_DELEGATE_CONTROL_REQUESTS
+    )
       return { accepted: false, reason: 'queue-full' };
     const line = `${JSON.stringify(value)}\n`;
     try {
@@ -128,7 +137,9 @@ export function createDelegateControlChannel(
       } catch {
         // The append succeeded; avoid a duplicate retry after a chmod failure.
       }
-      if (!options.bypassLimits) requestCount++;
+      const bounded = !options.bypassLimits;
+      outstanding.set(value.id, bounded);
+      if (bounded) boundedOutstandingCount++;
       return { accepted: true, id: value.id };
     } catch (error) {
       return {
@@ -161,7 +172,19 @@ export function createDelegateControlChannel(
         bypassLimits: true,
       });
     },
-    acknowledge(kind, generation) {
+    acknowledge(id, kind, generation) {
+      const bounded = outstanding.get(id);
+      if (bounded !== undefined) {
+        outstanding.delete(id);
+        if (bounded) boundedOutstandingCount--;
+        if (outstanding.size === 0) {
+          try {
+            writeFileSync(filePath, '', { encoding: 'utf8', mode: 0o600 });
+          } catch {
+            // Compaction is opportunistic; queue accounting is authoritative.
+          }
+        }
+      }
       if (kind === 'pause' && typeof generation === 'number')
         emitLifecycle({ type: 'ack', participantId, kind, generation });
     },
@@ -279,6 +302,7 @@ export function registerDelegateControl(
   if (!filePath?.trim()) return;
   const state = { offset: 0, inode: undefined as number | undefined };
   let pausedGeneration: number | undefined;
+  let pendingPause: DelegateControlRequest | undefined;
   let acknowledgedGeneration: number | undefined;
 
   const consume = (): DelegateControlRequest[] => {
@@ -291,9 +315,13 @@ export function registerDelegateControl(
             request.generation >= pausedGeneration)
         )
           pausedGeneration = request.generation;
+        pendingPause = request;
       } else if (request.kind === 'resume') {
-        if (request.generation === pausedGeneration)
+        if (request.generation === pausedGeneration) {
           pausedGeneration = undefined;
+          pendingPause = undefined;
+        }
+        acknowledge(request);
       } else conversational.push(request);
     }
     return conversational;
@@ -317,13 +345,8 @@ export function registerDelegateControl(
     deliver();
     while (pausedGeneration !== undefined) {
       const generation = pausedGeneration;
-      if (acknowledgedGeneration !== generation) {
-        acknowledge({
-          id: `pause-${generation}`,
-          kind: 'pause',
-          generation,
-          createdAt: Date.now(),
-        });
+      if (acknowledgedGeneration !== generation && pendingPause) {
+        acknowledge(pendingPause);
         acknowledgedGeneration = generation;
       }
       await new Promise<void>((resolve) =>
