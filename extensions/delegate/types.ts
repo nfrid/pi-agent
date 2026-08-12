@@ -27,6 +27,13 @@ export interface DelegateLifecycleProjection {
   readOnlySnapshotRetained: boolean;
 }
 
+/** Bounded validated value retained for human-facing details/status surfaces. */
+export interface DelegateStructuredResult {
+  valid: boolean;
+  value?: unknown;
+  errors: string[];
+}
+
 export interface UsageStats {
   input: number;
   output: number;
@@ -151,6 +158,8 @@ export interface DelegatedRun extends DelegateRunMetadata {
   activities: DelegatedActivity[];
   /** Canonical lifecycle state for every current/internal run. */
   state: DelegateRunState;
+  /** Public validated result capture; never used for parent handoff content. */
+  structuredResult?: DelegateStructuredResult;
   queuedAt?: number;
   startedAt?: number;
   finishedAt?: number;

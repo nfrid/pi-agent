@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { processJsonLine } from './events';
 import { getDetails } from './render-utils';
+import {
+  captureDelegateResultEvent,
+  normalizeDelegateResultSpec,
+  setDelegateResultSpec,
+  settleDelegateResult,
+} from './structured-result';
 import { makeDetails } from './tool-result';
 import {
   latestDelegateDetails,
@@ -131,6 +137,35 @@ describe('delegate transcript viewer data', () => {
     expect(transcriptText(replayed?.runs ?? [])).toContain(
       'bounded child thinking',
     );
+  });
+
+  it('replays the complete validated structured value into the transcript modal', () => {
+    const spec = normalizeDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: {
+          outcome: { type: 'string' },
+          details: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['outcome', 'details'],
+      },
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    const run = createRun('structured replay');
+    run.state = 'success';
+    setDelegateResultSpec(run, spec);
+    captureDelegateResultEvent(
+      run,
+      { details: { outcome: 'done', details: ['first', 'second'] } },
+      false,
+    );
+    settleDelegateResult(run);
+    const persisted = JSON.parse(JSON.stringify(makeDetails('single', [run])));
+    const replayed = getDetails({ details: persisted });
+    const text = transcriptText(replayed?.runs ?? []);
+    expect(text).toContain('Structured result:');
+    expect(text).toContain('"outcome": "done"');
+    expect(text).toContain('"second"');
   });
 
   it('retains activity/response text and marks modal truncation explicitly', () => {

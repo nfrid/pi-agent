@@ -288,8 +288,8 @@ export async function buildSessionBoundArtifactBackedHandoff(
       const spec = getDelegateResultSpec(runs[index]);
       if (spec) {
         // Weak-map state intentionally does not cross the enumerable clone.
-        // Reusing the spec keeps the stale branch artifact-only without
-        // copying the structured result into its details.
+        // Reusing the spec keeps the stale handoff projection-only while the
+        // already-persisted validated value remains available to local details.
         setDelegateResultSpec(run, spec);
       }
     }

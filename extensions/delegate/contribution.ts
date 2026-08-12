@@ -63,17 +63,6 @@ const DelegateTimingSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-const DelegateResultSchema = Type.Object(
-  {
-    kind: Type.Literal('structured'),
-    status: Type.Union([
-      Type.Literal('pending'),
-      Type.Literal('valid'),
-      Type.Literal('invalid'),
-    ]),
-  },
-  { additionalProperties: false },
-);
 const DelegateTranscriptPayloadScalarSchema = Type.Union([
   Type.Null(),
   Type.Boolean(),
@@ -96,6 +85,42 @@ const DelegateTranscriptPayloadSchema = delegateTranscriptPayloadSchema(
       delegateTranscriptPayloadSchema(DelegateTranscriptPayloadScalarSchema),
     ),
   ),
+);
+
+/** Generic wire bound for the already schema-validated structured value. */
+const DelegateStructuredResultScalarSchema = Type.Union([
+  Type.Null(),
+  Type.Boolean(),
+  Type.Number(),
+  Type.String({ maxLength: 4_096 }),
+]);
+function delegateStructuredResultValueSchema(depth: number): TSchema {
+  const child =
+    depth <= 1
+      ? DelegateStructuredResultScalarSchema
+      : delegateStructuredResultValueSchema(depth - 1);
+  return Type.Union([
+    DelegateStructuredResultScalarSchema,
+    Type.Array(child, { maxItems: 64 }),
+    Type.Record(Type.String({ maxLength: 256 }), child, { maxProperties: 32 }),
+  ]);
+}
+const DelegateStructuredResultValueSchema =
+  delegateStructuredResultValueSchema(8);
+const DelegateResultSchema = Type.Object(
+  {
+    kind: Type.Literal('structured'),
+    status: Type.Union([
+      Type.Literal('pending'),
+      Type.Literal('valid'),
+      Type.Literal('invalid'),
+    ]),
+    value: Type.Optional(DelegateStructuredResultValueSchema),
+    errors: Type.Optional(
+      Type.Array(Type.String({ maxLength: 240 }), { maxItems: 16 }),
+    ),
+  },
+  { additionalProperties: false },
 );
 
 const DelegateTranscriptEntrySchema = Type.Object(

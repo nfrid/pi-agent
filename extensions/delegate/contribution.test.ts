@@ -42,6 +42,11 @@ describe('delegate live contribution', () => {
                 status: 'completed',
               },
             ],
+            result: {
+              kind: 'structured',
+              status: 'valid',
+              value: { outcome: 'done', details: ['complete'] },
+            },
           },
         ],
       }),

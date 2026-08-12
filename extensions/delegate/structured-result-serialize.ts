@@ -7,14 +7,27 @@ import {
 import { getDelegateResultSpec } from './structured-result-channel';
 import type { DelegatedActivity, DelegatedRun } from './types';
 
+/** Readable JSON for human-facing surfaces; input is already bounded/validated. */
+export function formatStructuredResult(value: unknown): string {
+  try {
+    const formatted = JSON.stringify(value, null, 2);
+    return formatted === undefined
+      ? '[unavailable structured result]'
+      : formatted;
+  } catch {
+    return '[unavailable structured result]';
+  }
+}
+
 /**
  * Copy the bounded execution records captured on the private run into public
  * details. They are deliberately omitted from the live enumerable run so the
  * parent handoff cannot accidentally acquire child execution chatter, but the
  * human-facing details/status/job surfaces need them after persistence.
  *
- * The terminating structured channel is a separate artifact/projection
- * contract: keep its activity marker, but never copy its arguments or result.
+ * The terminating structured channel is a separate parent handoff contract:
+ * keep its activity marker, while the validated value is copied separately as
+ * a human-facing structuredResult field.
  */
 function serializeActivityForPublic(
   activity: DelegatedActivity,
@@ -50,9 +63,9 @@ function publicActivities(run: DelegatedRun): DelegatedActivity[] {
 }
 
 /**
- * Serialize a run for any public details/status/job surface. Structured result
- * evidence stays in the private run for settlement and artifact publication;
- * child messages, stderr, activity records for the terminating result, and
+ * Serialize a run for any public details/status/job surface. The validated
+ * structured result is retained in its bounded human-facing field; child
+ * messages, stderr, activity records for the terminating result, and
  * child-shaped lifecycle fields never cross this boundary; lifecycle
  * projections come only from harness state.
  */

@@ -95,7 +95,7 @@ describe('structured delegate output handoff', () => {
     );
     expect(handoff).toContain('Projection: {"title":"visible title"}');
     expect(handoff).not.toContain('artifact-only secret');
-    expect(JSON.stringify({ mode: 'single', runs: [run] })).not.toContain(
+    expect(JSON.stringify({ mode: 'single', runs: [run] })).toContain(
       'artifact-only secret',
     );
     expect(entries).toHaveLength(1);
@@ -257,16 +257,20 @@ describe('structured delegate output handoff', () => {
     expect(terminal).toBeDefined();
     expect(terminal).not.toHaveProperty('toolArguments');
     expect(terminal).not.toHaveProperty('toolResult');
+    expect(JSON.stringify(details)).toContain('structured-result-secret');
     expect(JSON.stringify(details)).not.toMatch(
-      /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
+      /earlier-child-secret|terminal-child-secret|stderr-child-secret/,
     );
     expect(JSON.stringify(details)).toContain('structured child thinking');
     expect(JSON.stringify(details)).toContain('structured output');
     const statuses = new DelegateStatusStore();
     statuses.start([run], 'foreground');
     statuses.update('ds-1', run);
+    expect(JSON.stringify(statuses.list())).toContain(
+      'structured-result-secret',
+    );
     expect(JSON.stringify(statuses.list())).not.toMatch(
-      /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
+      /earlier-child-secret|terminal-child-secret|stderr-child-secret/,
     );
     expect(JSON.stringify(statuses.list())).toContain('structured output');
 
@@ -278,8 +282,9 @@ describe('structured delegate output handoff', () => {
       execute: async () => ({ runs: [run], handoff: 'bounded' }),
     });
     const completed = await jobs.peek(started.id, 1_000);
+    expect(JSON.stringify(completed)).toContain('structured-result-secret');
     expect(JSON.stringify(completed)).not.toMatch(
-      /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
+      /earlier-child-secret|terminal-child-secret|stderr-child-secret/,
     );
     expect(JSON.stringify(completed)).toContain('structured child thinking');
     expect(JSON.stringify(completed)).toContain('structured output');
@@ -295,8 +300,11 @@ describe('structured delegate output handoff', () => {
       [run],
       'owner-session',
     );
+    expect(JSON.stringify(ownerResult.details)).toContain(
+      'structured-result-secret',
+    );
     expect(JSON.stringify(ownerResult.details)).not.toMatch(
-      /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
+      /earlier-child-secret|terminal-child-secret|stderr-child-secret/,
     );
     const foreignCtx = {
       sessionManager: { getSessionId: () => 'foreign-session' },
@@ -308,9 +316,13 @@ describe('structured delegate output handoff', () => {
       [run],
       'owner-session',
     );
-    expect(JSON.stringify(foreignResult.details)).not.toMatch(
-      /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
+    expect(JSON.stringify(foreignResult.details)).toContain(
+      'structured-result-secret',
     );
+    expect(JSON.stringify(foreignResult.details)).not.toMatch(
+      /earlier-child-secret|terminal-child-secret|stderr-child-secret/,
+    );
+    expect(foreignResult.details?.runs[0]?.artifact).toBeUndefined();
   });
 
   test('rejects background publication after the owner session switches', async () => {

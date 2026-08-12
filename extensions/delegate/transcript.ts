@@ -15,6 +15,10 @@ import {
   getDetails,
   transcriptEntries,
 } from './render-utils';
+import {
+  formatStructuredResult,
+  getUserVisibleStructuredResult,
+} from './structured-result';
 import type { DelegateDetails, DelegatedRun } from './types';
 
 const MAX_MODAL_CHARS = 64 * 1024;
@@ -105,7 +109,13 @@ export function transcriptText(runs: readonly DelegatedRun[]): string {
           : entry.label;
       })
       .join('\n');
-    return `Subagent ${index + 1} · ${run.name} · ${run.state}\n${body || '(no transcript captured)'}`;
+    const structured = getUserVisibleStructuredResult(run);
+    const structuredText = structured
+      ? structured.valid && structured.value !== undefined
+        ? `Structured result:\n${formatStructuredResult(structured.value)}`
+        : `Structured result invalid${structured.errors.length ? `:\n${structured.errors.join('\n')}` : '.'}`
+      : undefined;
+    return `Subagent ${index + 1} · ${run.name} · ${run.state}\n${[body, structuredText].filter(Boolean).join('\n\n') || '(no transcript captured)'}`;
   });
   return explicitTruncate(
     blocks.join('\n\n────────────────────────────────────────\n\n'),

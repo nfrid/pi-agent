@@ -11,6 +11,7 @@ export {
   getDelegateResultSpec,
   getSettledDelegateResult,
   getStructuredArtifacts,
+  getUserVisibleStructuredResult,
   redactDelegateResultTerminalProse,
   setDelegateResultSpec,
   setStructuredArtifacts,
@@ -34,6 +35,7 @@ export {
   type StructuredValidationResult,
 } from './structured-result-schema';
 export {
+  formatStructuredResult,
   serializeDelegateRunForPublic,
   serializeDelegateRunForStaleSession,
 } from './structured-result-serialize';

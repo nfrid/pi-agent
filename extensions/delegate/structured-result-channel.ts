@@ -6,7 +6,7 @@ import {
   type StructuredArtifacts,
   type StructuredValidationResult,
 } from './structured-result-schema';
-import type { DelegatedRun } from './types';
+import type { DelegatedRun, DelegateStructuredResult } from './types';
 
 interface StructuredAttempt {
   detailsPresent: boolean;
@@ -142,6 +142,13 @@ export function settleDelegateResult(
     };
   }
   settlements.set(run, validation);
+  // Copy only the validated settlement into the enumerable human-facing run.
+  // Invalid attempts intentionally have no value field.
+  run.structuredResult = {
+    valid: validation.valid,
+    ...(validation.valid ? { value: validation.value } : {}),
+    errors: [...validation.errors],
+  };
   if (!validation.valid) {
     const lifecycle = ensureDelegateLifecycle(run);
     if (!lifecycle || lifecycle.reason === 'unknown')
@@ -167,6 +174,13 @@ export function getSettledDelegateResult(
   run: DelegatedRun,
 ): StructuredValidationResult | undefined {
   return settlements.get(run);
+}
+
+/** Read the owner-facing capture, including values restored from persisted details. */
+export function getUserVisibleStructuredResult(
+  run: DelegatedRun,
+): DelegateStructuredResult | undefined {
+  return settlements.get(run) ?? run.structuredResult;
 }
 
 export function getDelegateChannelPresent(run: DelegatedRun): boolean {

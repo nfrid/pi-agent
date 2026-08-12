@@ -113,8 +113,9 @@ function runBody(run: DelegatedRun): {
 } {
   // A structured child has no prose body for the parent. In particular, a
   // malformed child must not fall back to prose that could contain an
-  // artifact-only value.
-  if (getDelegateResultSpec(run)) return { text: '' };
+  // artifact-only value. Persisted details retain only the human-facing
+  // structuredResult projection and are treated the same way.
+  if (getDelegateResultSpec(run) || run.structuredResult) return { text: '' };
   const originalReport = getExactFinalAssistantText(run.messages);
   if (originalReport) return { text: originalReport, originalReport };
   return {
@@ -130,7 +131,10 @@ function structuredEnvelope(run: DelegatedRun):
     }
   | undefined {
   const spec = getDelegateResultSpec(run);
-  if (!spec) return undefined;
+  if (!spec) {
+    const persisted = run.structuredResult;
+    return persisted ? { settlement: persisted, omittedPaths: [] } : undefined;
+  }
   const settlement = getSettledDelegateResult(run) ??
     settleDelegateResult(run, spec) ?? {
       valid: false,

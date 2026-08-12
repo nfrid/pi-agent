@@ -130,6 +130,12 @@ function statusSnapshot(
           result: {
             kind: status.result.kind,
             status: status.result.status,
+            ...(status.result.value === undefined
+              ? {}
+              : { value: status.result.value }),
+            ...(status.result.errors?.length
+              ? { errors: status.result.errors.slice(0, 16) }
+              : {}),
           },
         }
       : {}),

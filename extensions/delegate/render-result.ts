@@ -33,8 +33,9 @@ import {
   worktreeLines,
 } from './render-utils';
 import {
+  formatStructuredResult,
   getDelegateResultSpec,
-  getSettledDelegateResult,
+  getUserVisibleStructuredResult,
 } from './structured-result';
 import type { DelegatedRun, DelegateRunState } from './types';
 import {
@@ -203,25 +204,29 @@ function addExpandedRun(
       );
   }
 
-  const structured = getDelegateResultSpec(run);
+  const structured = getDelegateResultSpec(run) ?? run.structuredResult;
   const final = structured ? '' : getFinalAssistantText(run.messages).trim();
   const backgroundLaunch = isBackgroundLaunch(run);
   if (!hasResultHeading(final))
     container.addChild(sectionTitle('Result', theme));
   if (structured) {
-    const settlement = getSettledDelegateResult(run);
+    const settlement = getUserVisibleStructuredResult(run);
     container.addChild(
       new Text(
         fg(
           settlement?.valid ? 'success' : 'warning',
           settlement?.valid
             ? 'Structured result valid; selected projections are in the parent handoff.'
-            : `Structured result invalid${run.errorMessage ? `: ${run.errorMessage}` : '.'}`,
+            : `Structured result invalid${settlement?.errors.length ? `: ${settlement.errors.join('; ')}` : run.errorMessage ? `: ${run.errorMessage}` : '.'}`,
         ),
         0,
         0,
       ),
     );
+    if (settlement?.valid && settlement.value !== undefined)
+      container.addChild(
+        new Text(formatStructuredResult(settlement.value), 0, 0),
+      );
   } else if (final)
     container.addChild(
       new Markdown(
@@ -408,7 +413,7 @@ export function renderDelegateResult(
         ),
       );
 
-    const structured = getDelegateResultSpec(run);
+    const structured = getDelegateResultSpec(run) ?? run.structuredResult;
     const lifecycle = ensureDelegateLifecycle(run);
     const final = structured ? '' : getFinalAssistantText(run.messages).trim();
     if (lifecycle) {
@@ -431,14 +436,14 @@ export function renderDelegateResult(
         ),
       );
     } else if (structured) {
-      const settlement = getSettledDelegateResult(run);
+      const settlement = getUserVisibleStructuredResult(run);
       container.addChild(
         new Text(
           fieldLine(
             'Result',
             settlement?.valid
               ? 'structured result valid'
-              : 'structured result invalid',
+              : `structured result invalid${settlement?.errors.length ? `: ${settlement.errors.join('; ')}` : ''}`,
             fg,
             settlement?.valid ? 'success' : 'warning',
           ),

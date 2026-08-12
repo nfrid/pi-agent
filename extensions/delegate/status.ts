@@ -2,7 +2,7 @@ import type { DelegateResult } from './contribution';
 import { cloneDelegateLifecycle } from './lifecycle';
 import {
   getDelegateResultSpec,
-  getSettledDelegateResult,
+  getUserVisibleStructuredResult,
   serializeDelegateRunForPublic,
 } from './structured-result';
 import type {
@@ -162,12 +162,23 @@ function isSettled(state: DelegateRunState): boolean {
 }
 
 function resultProjection(run: DelegatedRun): DelegateResult | undefined {
-  if (!getDelegateResultSpec(run)) return undefined;
+  const captured = getUserVisibleStructuredResult(run);
+  if (!getDelegateResultSpec(run) && !captured) return undefined;
   if (!isSettled(getRunState(run)))
     return { kind: 'structured', status: 'pending' };
+  if (!captured)
+    return {
+      kind: 'structured',
+      status: 'invalid',
+      errors: ['/: structured result settlement is unavailable'],
+    };
   return {
     kind: 'structured',
-    status: getSettledDelegateResult(run)?.valid ? 'valid' : 'invalid',
+    status: captured.valid ? 'valid' : 'invalid',
+    ...(captured.valid && captured.value !== undefined
+      ? { value: captured.value }
+      : {}),
+    ...(captured.errors.length ? { errors: [...captured.errors] } : {}),
   };
 }
 

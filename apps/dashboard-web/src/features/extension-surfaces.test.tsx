@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
   DelegateInspectorMetadata,
+  DelegateStructuredResultSection,
   delegateTranscriptItems,
 } from './delegate-transcript-inspector';
 import {
@@ -414,6 +415,53 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('diagnostic available');
     expect(markup).toContain('diagnostic artifact available');
     expect(markup).not.toContain('Observed failure');
+  });
+
+  it('renders validated structured results in a dedicated inspector section', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateStructuredResultSection
+        row={{
+          id: 'd1',
+          name: 'Structured audit',
+          kind: 'background',
+          state: 'success',
+          createdAt: 1,
+          finishedAt: 2,
+          allowWrites: false,
+          result: {
+            kind: 'structured',
+            status: 'valid',
+            value: { outcome: 'done', findings: [{ path: 'src/index.ts' }] },
+          },
+        }}
+      />,
+    );
+    expect(markup).toContain('aria-label="Structured result"');
+    expect(markup).toContain('&quot;outcome&quot;: &quot;done&quot;');
+    expect(markup).toContain('&quot;path&quot;: &quot;src/index.ts&quot;');
+  });
+
+  it('shows structured validation errors without rendering invalid values', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateStructuredResultSection
+        row={{
+          id: 'd2',
+          name: 'Invalid audit',
+          kind: 'foreground',
+          state: 'error',
+          createdAt: 1,
+          allowWrites: false,
+          result: {
+            kind: 'structured',
+            status: 'invalid',
+            errors: ['/outcome: expected string'],
+          },
+        }}
+      />,
+    );
+    expect(markup).toContain('/outcome: expected string');
+    expect(markup).not.toContain('malformed attempt value');
+    expect(markup).not.toContain('payload-preview');
   });
 
   it('routes exact renderer IDs through schema validation and rejects suffix aliases', () => {

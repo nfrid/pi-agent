@@ -3,6 +3,7 @@ import type {
   DelegateTranscriptEntry,
 } from '../../../../extensions/delegate/contribution';
 import { TranscriptEntry } from '../entities/transcript/entries';
+import { BoundedPayloadPreview } from '../entities/transcript/inspector';
 import type { TranscriptModelItem } from '../transcript';
 import { DashboardDialog } from './dashboard-dialog';
 
@@ -230,6 +231,31 @@ function artifactHandle(row: DelegateStatus): string | undefined {
     : undefined;
 }
 
+export function DelegateStructuredResultSection({
+  row,
+}: {
+  row: DelegateStatus;
+}) {
+  if (!row.result) return null;
+  return (
+    <section className="payload-section" aria-label="Structured result">
+      <h4>Structured result</h4>
+      <p>Status: {row.result.status}</p>
+      {row.result.errors?.map((error) => (
+        <p key={error} className="payload-truncation-label">
+          {error}
+        </p>
+      ))}
+      {row.result.status === 'valid' && row.result.value !== undefined && (
+        <BoundedPayloadPreview
+          value={row.result.value}
+          label="structured result"
+        />
+      )}
+    </section>
+  );
+}
+
 function DelegateInspectorDetails({
   row,
   now,
@@ -331,6 +357,7 @@ export function DelegateTranscriptInspector({
       onClose={onClose}
     >
       <div className="delegate-transcript-inspector-body">
+        <DelegateStructuredResultSection row={row} />
         <DelegateInspectorDetails row={row} now={now} />
         {entries.length > 0 || row.transcriptTruncated ? (
           <DelegateTranscript
