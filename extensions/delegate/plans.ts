@@ -9,6 +9,7 @@ import { DELEGATE_HANDOFF_PROMPT_SUFFIX } from './prompt';
 import { mergeDelegateRouteRequest, writeWarnings } from './routing-warnings';
 import { type DelegateSession, resolveDelegateSession } from './session';
 import {
+  type DelegateResultSpecInput,
   type NormalizedDelegateResultSpec,
   normalizeDelegateResultSpec,
 } from './structured-result';
@@ -315,7 +316,7 @@ export function buildDelegatePlans(
         resultSpec:
           raw === undefined
             ? undefined
-            : normalizeDelegateResultSpec(raw as { schema: unknown }),
+            : normalizeDelegateResultSpec(raw as DelegateResultSpecInput),
       };
     } catch (error) {
       return invalidParams(

@@ -76,7 +76,39 @@ invocation only: a continuation does not inherit the prior call's contract.
 Omit `result` on a continuation to return to the legacy prose contract, or
 supply a new task-level/top-level contract explicitly. The contract is
 independent for every parallel task; a top-level `result` is the shared default
-and a task-level `result` replaces it. A contract has this small public shape:
+and a task-level `result` replaces it. A contract requires exactly one of a
+compact `shape` or the bounded `schema` escape hatch. Prefer `shape` for ordinary
+contracts:
+
+```json
+{
+  "result": {
+    "shape": {
+      "outcome": ["done", "partial", "blocked"],
+      "summary": {
+        "$optional": { "$type": "string", "maxLength": 500 }
+      },
+      "findings": [{
+        "title": "string",
+        "severity": ["low", "medium", "high"]
+      }]
+    },
+    "projection": ["/outcome", "/findings/*/title"]
+  }
+}
+```
+
+Primitive strings (`string`, `number`, `integer`, `boolean`, and `null`) name
+types. Object fields are required by default. A one-item array declares a
+homogeneous list, while an array of two or more same-typed JSON literals declares
+an enum. Nest those forms to declare a list of enum values. An exact
+`{"$optional": shape}` wrapper makes one object field optional. A `$type`
+descriptor adds supported constraints, such as
+`{"$type":"string","minLength":1,"maxLength":500}`. Dollar-prefixed object
+field names are reserved. The shorthand is expanded deterministically into the
+same closed bounded schema used everywhere else.
+
+Use `schema` when the explicit form is clearer or needs finer control:
 
 ```json
 {

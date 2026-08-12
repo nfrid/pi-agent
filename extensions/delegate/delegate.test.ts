@@ -39,6 +39,7 @@ import {
   resolveDelegateSession,
   updateDelegateSessionRouting,
 } from './session';
+import { normalizeDelegateResultSpec } from './structured-result-schema';
 import { delegatePromptGuidelines } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import {
@@ -536,7 +537,7 @@ describe('delegate', () => {
             {
               name: 'count',
               task: 'count contract',
-              result: { schema: { type: 'integer' } },
+              result: { shape: 'integer' },
             },
           ],
         } as never,
@@ -644,6 +645,22 @@ describe('delegate', () => {
     expect(tools).toBe('read,bash,grep,find,ls');
     expect(tools).not.toContain('write');
     expect(tools).not.toContain('edit');
+  });
+
+  test('enables the terminating result tool only for structured children', () => {
+    const resultSpec = normalizeDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: { ok: { type: 'boolean' } },
+        required: ['ok'],
+      },
+    });
+    const args = buildChildArgs(
+      { task: 'report', resultSpec },
+      '/tmp/structured-child.jsonl',
+    );
+    const tools = args[args.indexOf('--tools') + 1].split(',');
+    expect(tools).toContain('delegate_result');
   });
 
   test('keeps delegate framing out of the canonical system prompt', () => {

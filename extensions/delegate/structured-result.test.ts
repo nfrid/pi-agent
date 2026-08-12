@@ -71,6 +71,82 @@ describe('schema-driven delegate results', () => {
     expect(JSON.stringify(projection.value)).not.toContain('SECRET');
   });
 
+  test('expands compact shapes into the same closed bounded schema', () => {
+    const spec = normalizeDelegateResultSpec({
+      shape: {
+        outcome: ['done', 'partial', 'blocked'],
+        summary: {
+          $optional: { $type: 'string', minLength: 1, maxLength: 500 },
+        },
+        findings: [
+          {
+            title: 'string',
+            severity: ['low', 'medium', 'high'],
+            tags: [['string', 'security']],
+          },
+        ],
+      },
+      projection: ['/outcome', '/findings/*/title'],
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    expect(spec.schema).toMatchObject({
+      type: 'object',
+      required: ['findings', 'outcome'],
+      additionalProperties: false,
+      properties: {
+        outcome: {
+          type: 'string',
+          enum: ['done', 'partial', 'blocked'],
+        },
+        summary: { type: 'string', minLength: 1, maxLength: 500 },
+        findings: {
+          type: 'array',
+          maxItems: STRUCTURED_RESULT_CAPS.maxArrayItems,
+          items: {
+            type: 'object',
+            required: ['severity', 'tags', 'title'],
+            additionalProperties: false,
+            properties: {
+              title: { type: 'string' },
+              severity: { type: 'string', enum: ['low', 'medium', 'high'] },
+              tags: {
+                type: 'array',
+                items: { type: 'string', enum: ['string', 'security'] },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(
+      validateStructuredResult(spec, {
+        outcome: 'done',
+        findings: [{ title: 'fixed', severity: 'high', tags: ['security'] }],
+      }).valid,
+    ).toBe(true);
+  });
+
+  test('rejects ambiguous or invalid compact result shapes', () => {
+    expect(() => normalizeDelegateResultSpec({})).toThrow(/exactly one/);
+    expect(() =>
+      normalizeDelegateResultSpec({
+        schema: { type: 'string' },
+        shape: 'string',
+      }),
+    ).toThrow(/exactly one/);
+    expect(() =>
+      normalizeDelegateResultSpec({ shape: { value: ['yes', false] } }),
+    ).toThrow(/one JSON type/);
+    expect(() =>
+      normalizeDelegateResultSpec({
+        shape: { value: { $optional: { $optional: 'string' } } },
+      }),
+    ).toThrow(/cannot be nested/);
+    expect(() =>
+      normalizeDelegateResultSpec({ shape: { $private: 'string' } }),
+    ).toThrow(/reserved/);
+  });
+
   test('rejects unsupported keywords and bounded schemas before launch', () => {
     expect(() =>
       normalizeDelegateResultSpec({

@@ -98,33 +98,47 @@ const HandoffFromSchema = Type.Union([
   HandoffFromListSchema,
 ]);
 
-const ResultSpecSchema = Type.Object(
-  {
-    schema: Type.Any({
-      description:
-        'Bounded JSON-schema subset for the complete machine-readable result',
-    }),
-    projection: Type.Optional(
-      Type.Array(Type.String({ maxLength: 256 }), {
-        maxItems: 32,
-        description:
-          'Static schema paths selected for the compact parent envelope',
-      }),
-    ),
-    views: Type.Optional(
-      Type.Record(
-        Type.String({
-          minLength: 1,
-          maxLength: 64,
-          pattern: '^[A-Za-z][A-Za-z0-9_-]*$',
-        }),
-        Type.String({ maxLength: 256 }),
-        { maxProperties: 16 },
-      ),
-    ),
-  },
-  { additionalProperties: false },
+const ResultProjectionSchema = Type.Optional(
+  Type.Array(Type.String({ maxLength: 256 }), {
+    maxItems: 32,
+    description: 'Static schema paths selected for the compact parent envelope',
+  }),
 );
+const ResultViewsSchema = Type.Optional(
+  Type.Record(
+    Type.String({
+      minLength: 1,
+      maxLength: 64,
+      pattern: '^[A-Za-z][A-Za-z0-9_-]*$',
+    }),
+    Type.String({ maxLength: 256 }),
+    { maxProperties: 16 },
+  ),
+);
+const ResultSpecSchema = Type.Union([
+  Type.Object(
+    {
+      schema: Type.Any({
+        description:
+          'Bounded JSON-schema subset for the complete machine-readable result',
+      }),
+      projection: ResultProjectionSchema,
+      views: ResultViewsSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      shape: Type.Any({
+        description:
+          'Compact result shape: primitive type tokens; required-by-default object fields; one-item arrays for homogeneous lists; multi-literal arrays for enums; exact {$optional: shape} wrappers; and $type descriptors for constraints',
+      }),
+      projection: ResultProjectionSchema,
+      views: ResultViewsSchema,
+    },
+    { additionalProperties: false },
+  ),
+]);
 
 export type DelegateHandoffFrom = Static<typeof HandoffArtifactSchema>;
 export type DelegateHandoffInput = Static<typeof HandoffFromSchema>;
@@ -223,7 +237,7 @@ export function delegatePromptGuidelines(
     'A child that comes back with a "Blocked:" question is waiting on you, not failing. Answer it — from what you know, or by looking — and continue that child; re-briefing a fresh one throws away the context it already built. Decide it yourself unless it is genuinely the user\'s call.',
     "Parallelize only independent work: if one task depends on another's findings, inspect enough of the compact prerequisite envelope to confirm its outcome, relevant conclusion/evidence, assumptions, and risks; use handoffFrom only when exact upstream detail is needed. Worktree-isolated tasks each get their own checkout, so writable tasks can run in parallel even on overlapping files. Use background delegation when foreground work can continue meanwhile; use foreground delegation when the next parent action must await the result.",
     'A writable run leaves its work as commits on the branch it reports; integrate it yourself with delegate_branches rather than handing the merge to the user. A delegate-output artifact being available is not an instruction to retrieve it: use the compact envelope unless exact upstream wording would change a decision, and then use handoffFrom (or artifact retrieval) deliberately.',
-    'For machine-readable work, provide result with a bounded schema, projection paths, and named static views. Every projection entry and views value must be a canonical path starting with `/` (for example, `/summary`, never `summary`). The child must finish through delegate_result; the full validated JSON stays in an owner-session artifact, while only selected projections enter the parent envelope. Use handoffFrom with {handle, view} to forward a named view without retrieving the full artifact into your context. Omit result for the exact legacy prose contract.',
+    'For machine-readable work, provide result with exactly one of compact shape or bounded schema, plus optional projection paths and named static views. Prefer shape for ordinary required-by-default objects, lists, enums, and optional fields; use schema for precise advanced constraints. Every projection entry and views value must be a canonical path starting with `/` (for example, `/summary`, never `summary`). The child must finish through delegate_result; the full validated JSON stays in an owner-session artifact, while only selected projections enter the parent envelope. Use handoffFrom with {handle, view} to forward a named view without retrieving the full artifact into your context. Omit result for the exact legacy prose contract.',
     'Supervise proportionally: inspect and verify high-risk or consequential work, while letting routine bounded work return a compact report. Treat child results as claims to verify: trust reported checks and concrete evidence, and re-check or continue the child when an important claim has none. A subagent can report work it did not finish, and weakening a test is a common way a task comes back "passing".',
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd, config)}`,
   ];

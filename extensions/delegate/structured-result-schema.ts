@@ -9,7 +9,8 @@ import type { TSchema } from 'typebox';
  * `*` segment is only valid when it selects the items of an array schema.
  */
 export interface DelegateResultSpecInput {
-  schema: unknown;
+  schema?: unknown;
+  shape?: unknown;
   projection?: unknown;
   views?: unknown;
 }
@@ -228,6 +229,179 @@ function sameJson(left: unknown, right: unknown): boolean {
 interface SchemaCounters {
   depth: number;
   nodes: { value: number };
+}
+
+interface ExpandedShapeNode {
+  schema: JsonSchemaNode;
+  optional: boolean;
+}
+
+const SHAPE_PRIMITIVE_TYPES = new Set([
+  'string',
+  'number',
+  'integer',
+  'boolean',
+  'null',
+]);
+
+function shapeLiteralType(values: unknown[]): string {
+  if (
+    values.length === 0 ||
+    values.some((value) =>
+      value === null
+        ? false
+        : !['string', 'number', 'boolean'].includes(typeof value) ||
+          (typeof value === 'number' && !Number.isFinite(value)),
+    )
+  )
+    throw new Error(
+      'result shape enums must contain JSON string, number, boolean, or null literals',
+    );
+  const kinds = new Set(
+    values.map((value) =>
+      value === null
+        ? 'null'
+        : typeof value === 'number' && Number.isSafeInteger(value)
+          ? 'integer'
+          : typeof value,
+    ),
+  );
+  if (kinds.size === 1) return [...kinds][0];
+  if ([...kinds].every((kind) => kind === 'integer' || kind === 'number'))
+    return 'number';
+  throw new Error('result shape enum literals must have one JSON type');
+}
+
+function expandShapeProperties(
+  input: unknown,
+  counters: SchemaCounters,
+): { properties: Record<string, unknown>; required: string[] } {
+  if (!isPlainObject(input))
+    throw new Error('result shape object properties must be an object');
+  const properties: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
+  const required: string[] = [];
+  for (const [name, child] of Object.entries(input)) {
+    if (name.startsWith('$'))
+      throw new Error(`result shape property name is reserved: ${name}`);
+    const expanded = expandShapeNode(child, {
+      depth: counters.depth + 1,
+      nodes: counters.nodes,
+    });
+    properties[name] = expanded.schema;
+    if (!expanded.optional) required.push(name);
+  }
+  return { properties, required };
+}
+
+function expandShapeNode(
+  input: unknown,
+  counters: SchemaCounters,
+): ExpandedShapeNode {
+  counters.nodes.value++;
+  if (counters.nodes.value > STRUCTURED_RESULT_CAPS.schemaNodes)
+    throw new Error(
+      `result shape exceeds the ${STRUCTURED_RESULT_CAPS.schemaNodes}-node limit`,
+    );
+  if (counters.depth > STRUCTURED_RESULT_CAPS.schemaDepth)
+    throw new Error(
+      `result shape exceeds the ${STRUCTURED_RESULT_CAPS.schemaDepth}-level depth limit`,
+    );
+
+  if (typeof input === 'string' && SHAPE_PRIMITIVE_TYPES.has(input))
+    return { schema: { type: input }, optional: false };
+
+  if (Array.isArray(input)) {
+    if (input.length === 0)
+      throw new Error('result shape arrays must contain an item shape or enum');
+    if (input.length === 1) {
+      const item = expandShapeNode(input[0], {
+        depth: counters.depth + 1,
+        nodes: counters.nodes,
+      });
+      if (item.optional)
+        throw new Error('result shape array items cannot be optional');
+      return {
+        schema: { type: 'array', items: item.schema },
+        optional: false,
+      };
+    }
+    return {
+      schema: { type: shapeLiteralType(input), enum: input },
+      optional: false,
+    };
+  }
+
+  if (!isPlainObject(input))
+    throw new Error(
+      'result shape nodes must be primitive type tokens, objects, arrays, enums, or descriptors',
+    );
+
+  if (Object.keys(input).length === 1 && Object.hasOwn(input, '$optional')) {
+    const expanded = expandShapeNode(input.$optional, {
+      depth: counters.depth + 1,
+      nodes: counters.nodes,
+    });
+    if (expanded.optional)
+      throw new Error('result shape optional wrappers cannot be nested');
+    return { schema: expanded.schema, optional: true };
+  }
+
+  if (Object.hasOwn(input, '$type')) {
+    const { $type, ...constraints } = input;
+    if (typeof $type !== 'string' || !TYPES.has($type))
+      throw new Error('result shape $type must name one supported type');
+    if (Object.hasOwn(constraints, '$optional'))
+      throw new Error(
+        'use an exact {$optional: shape} wrapper for optional fields',
+      );
+    const schema: Record<string, unknown> = { type: $type };
+    for (const [key, value] of Object.entries(constraints)) {
+      if (key.startsWith('$'))
+        throw new Error(`Unsupported result shape descriptor field: ${key}`);
+      schema[key] = value;
+    }
+    if ($type === 'array' && Object.hasOwn(schema, 'items')) {
+      const item = expandShapeNode(schema.items, {
+        depth: counters.depth + 1,
+        nodes: counters.nodes,
+      });
+      if (item.optional)
+        throw new Error('result shape array items cannot be optional');
+      schema.items = item.schema;
+    }
+    if ($type === 'object' && Object.hasOwn(schema, 'properties')) {
+      if (Object.hasOwn(schema, 'required'))
+        throw new Error(
+          'result shape object descriptors derive required fields; use $optional wrappers instead',
+        );
+      const expanded = expandShapeProperties(schema.properties, counters);
+      schema.properties = expanded.properties;
+      schema.required = expanded.required;
+    }
+    return { schema, optional: false };
+  }
+
+  if (Object.keys(input).some((key) => key.startsWith('$')))
+    throw new Error('result shape $ fields are reserved for descriptors');
+  const expanded = expandShapeProperties(input, counters);
+  return {
+    schema: {
+      type: 'object',
+      properties: expanded.properties,
+      required: expanded.required,
+    },
+    optional: false,
+  };
+}
+
+function expandResultShape(input: unknown): JsonSchemaNode {
+  const expanded = expandShapeNode(input, { depth: 1, nodes: { value: 0 } });
+  if (expanded.optional)
+    throw new Error('the complete result shape cannot be optional');
+  return expanded.schema;
 }
 
 function normalizeSchemaNode(
@@ -612,11 +786,18 @@ export function normalizeDelegateResultSpec(
   if (!isPlainObject(input))
     throw new Error('delegate result specification must be an object');
   for (const key of Object.keys(input))
-    if (!new Set(['schema', 'projection', 'views']).has(key))
+    if (!new Set(['schema', 'shape', 'projection', 'views']).has(key))
       throw new Error(
         `Unsupported delegate result specification field: ${key}`,
       );
-  const schema = normalizeSchemaNode(input.schema, {
+  const hasSchema = Object.hasOwn(input, 'schema');
+  const hasShape = Object.hasOwn(input, 'shape');
+  if (hasSchema === hasShape)
+    throw new Error(
+      'delegate result specification requires exactly one of schema or shape',
+    );
+  const schemaInput = hasShape ? expandResultShape(input.shape) : input.schema;
+  const schema = normalizeSchemaNode(schemaInput, {
     depth: 1,
     nodes: { value: 0 },
   });
