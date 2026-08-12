@@ -244,6 +244,7 @@ export function Composer({
             trimmedText,
           ),
         });
+        if (!mountedRef.current) return;
         setQueue((current) =>
           upsertQueuedMessage(current, {
             id: queueId,
