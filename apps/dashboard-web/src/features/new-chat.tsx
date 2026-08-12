@@ -23,7 +23,17 @@ import {
 import { Button as AriaButton } from 'react-aria-components';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav } from './agent-thread-nav';
-import { addImageAttachments, MarkdownComposerEditor } from './composer';
+import { MarkdownComposerEditor } from './composer';
+import {
+  ImageAttachmentInput,
+  ImageAttachmentPreviews,
+  useImageAttachments,
+} from './composer/attachments';
+import {
+  ComposerModelControl,
+  ComposerThinkingControl,
+} from './composer/controls';
+import { ComposerRichSurface } from './composer/shell';
 import {
   configuredModelOptions,
   modelOptionValue,
@@ -49,8 +59,6 @@ function isSharedWorkingDirectoryWarning(message: string, code?: string) {
 }
 
 type NewChatModel = NonNullable<StartRuntimeRequest['model']>;
-type ImageAttachment = { file: File; previewUrl: string };
-const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 
 export async function waitForStartedRuntime(
   store: DashboardLiveStore,
@@ -173,10 +181,6 @@ export function NewChatView({
     : '';
   const [text, setText] = useState('');
   const editorRef = useRef<MDXEditorMethods>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const attachmentsRef = useRef<ImageAttachment[]>([]);
-  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
-  const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [startedRuntimeId, setStartedRuntimeId] = useState<string>();
   const [modelValue, setModelValue] = useState(() =>
@@ -215,25 +219,23 @@ export function NewChatView({
     (model) => modelOptionValue(model.provider, model.model) === modelValue,
   );
   const attachmentsEnabled = selectedModel?.supportsImages === true;
-
-  useEffect(() => {
-    attachmentsRef.current = attachments;
-  }, [attachments]);
-  useEffect(
-    () => () => {
-      for (const attachment of attachmentsRef.current)
-        URL.revokeObjectURL(attachment.previewUrl);
-    },
-    [],
-  );
-  useEffect(() => {
-    if (attachmentsEnabled) return;
-    setAttachments((current) => {
-      for (const attachment of current)
-        URL.revokeObjectURL(attachment.previewUrl);
-      return [];
-    });
-  }, [attachmentsEnabled]);
+  const {
+    attachments,
+    dragging,
+    fileInputRef,
+    selectImages,
+    removeImage,
+    clearAttachments,
+    onDragEnter,
+    onDragOver,
+    onDragLeave,
+    onDrop,
+    onPasteCapture,
+  } = useImageAttachments({
+    enabled: attachmentsEnabled,
+    busy,
+    onError: setError,
+  });
 
   useEffect(() => {
     if (
@@ -277,32 +279,6 @@ export function NewChatView({
     );
   }
 
-  const selectImages = (files: readonly File[]) => {
-    if (!attachmentsEnabled || busy) return;
-    const result = addImageAttachments(
-      attachments.map((attachment) => attachment.file),
-      files,
-    );
-    if (result.accepted.length)
-      setAttachments((current) => [
-        ...current,
-        ...result.accepted.map((file) => ({
-          file,
-          previewUrl: URL.createObjectURL(file),
-        })),
-      ]);
-    setError(result.error);
-  };
-  const removeImage = (previewUrl: string) => {
-    const attachment = attachments.find(
-      (candidate) => candidate.previewUrl === previewUrl,
-    );
-    if (!attachment) return;
-    URL.revokeObjectURL(attachment.previewUrl);
-    setAttachments((current) =>
-      current.filter((candidate) => candidate.previewUrl !== previewUrl),
-    );
-  };
   const submit = async (event: FormEvent, acknowledge = false) => {
     event.preventDefault();
     const initialPrompt = text.trim();
@@ -343,9 +319,7 @@ export function NewChatView({
           attachments.map((attachment) => attachment.file),
         );
       }
-      for (const attachment of attachments)
-        URL.revokeObjectURL(attachment.previewUrl);
-      setAttachments([]);
+      clearAttachments();
       go(pendingChatPath(workspaceId, runtimeId));
     } catch (cause) {
       const details = errorDetails(cause);
@@ -411,87 +385,23 @@ export function NewChatView({
             className={`composer new-chat-composer ${dragging ? 'dragging' : ''}`}
             aria-label="Start a new chat"
             onSubmit={(event) => void submit(event)}
-            onDragEnter={(event) => {
-              if (!attachmentsEnabled || busy) return;
-              event.preventDefault();
-              setDragging(true);
-            }}
-            onDragOver={(event) => {
-              if (!attachmentsEnabled || busy) return;
-              event.preventDefault();
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(event) => {
-              if (!attachmentsEnabled || busy) return;
-              event.preventDefault();
-              setDragging(false);
-              selectImages(Array.from(event.dataTransfer.files));
-            }}
+            onDragEnter={onDragEnter}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
           >
-            {attachmentsEnabled && (
-              <input
-                ref={fileInputRef}
-                className="sr-only"
-                type="file"
-                accept={IMAGE_TYPES.join(',')}
-                multiple
-                aria-label="Choose images"
-                disabled={busy}
-                onChange={(event) => {
-                  selectImages(Array.from(event.target.files ?? []));
-                  event.target.value = '';
-                }}
-              />
-            )}
-            {attachments.length > 0 && (
-              <fieldset className="composer-previews">
-                <legend className="sr-only">Image attachments</legend>
-                {attachments.map((attachment) => (
-                  <div className="composer-preview" key={attachment.previewUrl}>
-                    <img
-                      src={attachment.previewUrl}
-                      alt={attachment.file.name}
-                    />
-                    <button
-                      type="button"
-                      aria-label={`Remove ${attachment.file.name}`}
-                      disabled={busy}
-                      onClick={() => removeImage(attachment.previewUrl)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </fieldset>
-            )}
-            <div
-              className="composer-primary composer-rich-surface"
-              onPasteCapture={(event) => {
-                if (!attachmentsEnabled || busy) return;
-                const files = Array.from(event.clipboardData.files);
-                const itemFiles = Array.from(event.clipboardData.items).flatMap(
-                  (item) => {
-                    const file = item.kind === 'file' ? item.getAsFile() : null;
-                    return file ? [file] : [];
-                  },
-                );
-                const images = files.length ? files : itemFiles;
-                if (!images.length) return;
-                event.preventDefault();
-                selectImages(images);
-              }}
-              onKeyDownCapture={(event) => {
-                if (
-                  event.key === 'Enter' &&
-                  (event.metaKey || event.ctrlKey) &&
-                  !event.currentTarget.querySelector('[role="listbox"]') &&
-                  !event.shiftKey
-                ) {
-                  event.preventDefault();
-                  event.currentTarget.closest('form')?.requestSubmit();
-                }
-              }}
-            >
+            <ImageAttachmentInput
+              enabled={attachmentsEnabled}
+              busy={busy}
+              inputRef={fileInputRef}
+              onFiles={selectImages}
+            />
+            <ImageAttachmentPreviews
+              attachments={attachments}
+              busy={busy}
+              onRemove={removeImage}
+            />
+            <ComposerRichSurface onPasteCapture={onPasteCapture}>
               <Suspense
                 fallback={
                   <div className="composer-editor-loading" role="status">
@@ -533,58 +443,24 @@ export function NewChatView({
                   <span aria-hidden="true">↑</span>
                 </AriaButton>
               </div>
-            </div>
+            </ComposerRichSurface>
             <div className="composer-secondary">
               <div className="composer-mode">
                 <span>Prompt</span>
               </div>
               <div className="composer-control-row">
-                {modelOptions.length > 0 && (
-                  <fieldset className="model-control">
-                    <legend className="sr-only">Model control</legend>
-                    <label>
-                      <span>Model</span>
-                      <select
-                        aria-label="Model"
-                        value={modelValue}
-                        disabled={busy || Boolean(startedRuntimeId)}
-                        onChange={(event) => setModelValue(event.target.value)}
-                      >
-                        {modelOptions.map((model) => {
-                          const value = modelOptionValue(
-                            model.provider,
-                            model.model,
-                          );
-                          return (
-                            <option key={value} value={value}>
-                              {model.name ?? value}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </label>
-                  </fieldset>
-                )}
-                {thinkingLevels.length > 0 && (
-                  <fieldset className="thinking-control">
-                    <legend className="sr-only">Thinking control</legend>
-                    <label>
-                      <span>Thinking</span>
-                      <select
-                        aria-label="Thinking level"
-                        value={thinking}
-                        disabled={busy || Boolean(startedRuntimeId)}
-                        onChange={(event) => setThinking(event.target.value)}
-                      >
-                        {thinkingLevels.map((level) => (
-                          <option value={level} key={level}>
-                            {level}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </fieldset>
-                )}
+                <ComposerModelControl
+                  models={modelOptions}
+                  value={modelValue}
+                  disabled={busy || Boolean(startedRuntimeId)}
+                  onChange={setModelValue}
+                />
+                <ComposerThinkingControl
+                  levels={thinkingLevels}
+                  value={thinking}
+                  disabled={busy || Boolean(startedRuntimeId)}
+                  onChange={setThinking}
+                />
               </div>
               {error && (
                 <div className="new-chat-error" role="alert">
