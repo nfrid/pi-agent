@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import type {
@@ -6,6 +6,8 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { requestRuntimePause, resumeRuntimePause } from '../pause/operations';
+import { getPauseCoordinator } from '../pause/state';
 import {
   artifactProducer,
   putArtifact,
@@ -16,6 +18,7 @@ import { markDashboardFreshUserTurn } from '../shared/runtime/agent-lifecycle';
 import { getLiveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
 import type { DelegateConfig } from './config';
 import * as configModule from './config';
+import { createDelegateControlChannel } from './control';
 import delegate, { DELEGATES_COMMAND_DESCRIPTION } from './index';
 import { setDelegateLifecycle } from './lifecycle';
 import * as sessionModule from './session';
@@ -192,6 +195,7 @@ function createAsyncHarness(initialScope = 'parent') {
   const handlers = new Map<string, Handler>();
   const tools = new Map<string, RegisteredTool>();
   const sendMessage = vi.fn();
+  const eventListeners = new Map<string, Set<(value: unknown) => void>>();
   const entries: Array<{ type: string; customType?: string; data?: unknown }> =
     [];
   const pi = {
@@ -207,11 +211,23 @@ function createAsyncHarness(initialScope = 'parent') {
     appendEntry(customType: string, data: unknown) {
       entries.push({ type: 'custom', customType, data });
     },
+    events: {
+      on(event: string, listener: (value: unknown) => void) {
+        const listeners = eventListeners.get(event) ?? new Set();
+        listeners.add(listener);
+        eventListeners.set(event, listeners);
+        return () => listeners.delete(listener);
+      },
+      emit(event: string, value: unknown) {
+        for (const listener of eventListeners.get(event) ?? []) listener(value);
+      },
+    },
   } as unknown as ExtensionAPI;
   const ctx = {
     cwd: '/tmp/project',
     hasUI: false,
     mode: 'print',
+    isIdle: () => false,
     sessionManager: {
       getSessionId: () => initialScope,
       getEntries: () => entries,
@@ -235,6 +251,7 @@ function createAsyncHarness(initialScope = 'parent') {
   };
   return {
     ctx,
+    pi,
     finish,
     handlers,
     sendMessage,
@@ -243,6 +260,23 @@ function createAsyncHarness(initialScope = 'parent') {
 }
 
 describe('async delegate extension', () => {
+  test('enrolls a delegate control channel opened after pause was requested', async () => {
+    const { ctx, handlers, pi } = createAsyncHarness();
+    const requested = requestRuntimePause(pi, ctx);
+    const channel = createDelegateControlChannel(
+      path.join(artifactRoot, 'late-delegate.jsonl'),
+    );
+    const snapshot = getPauseCoordinator('parent').snapshot();
+    expect(snapshot?.generation).toBe(requested.generation);
+    expect(snapshot?.delegateIds).toContain(channel.participantId);
+    expect(readFileSync(channel.filePath, 'utf8')).toContain('"kind":"pause"');
+
+    resumeRuntimePause(pi, ctx);
+    expect(readFileSync(channel.filePath, 'utf8')).toContain('"kind":"resume"');
+    channel.close();
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
   test('ignores a late shutdown from a replaced session scope', async () => {
     const { ctx, finish, handlers, sendMessage, tools } =
       createAsyncHarness('scope-A');

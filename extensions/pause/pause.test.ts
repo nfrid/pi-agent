@@ -77,4 +77,55 @@ describe('pause extension', () => {
     expect(statuses.at(-1)).toBeUndefined();
     handlers.get('session_shutdown')?.({}, ctx);
   });
+
+  test('late shutdown from an old scope keeps the current pause UI bound', async () => {
+    const handlers = new Map<
+      string,
+      (event: unknown, ctx: ExtensionContext) => unknown
+    >();
+    const commands = new Map<
+      string,
+      { handler: (args: string, ctx: ExtensionContext) => Promise<void> }
+    >();
+    const pi = {
+      on(
+        event: string,
+        handler: (event: unknown, ctx: ExtensionContext) => unknown,
+      ) {
+        handlers.set(event, handler);
+      },
+      registerCommand(
+        name: string,
+        command: {
+          handler: (args: string, ctx: ExtensionContext) => Promise<void>;
+        },
+      ) {
+        commands.set(name, command);
+      },
+      events: { on: vi.fn(() => () => {}), emit: vi.fn() },
+    } as unknown as ExtensionAPI;
+    const makeContext = (id: string, statuses: Array<string | undefined>) =>
+      ({
+        hasUI: true,
+        isIdle: () => true,
+        ui: {
+          notify: vi.fn(),
+          setStatus: (_key: string, value: string | undefined) =>
+            statuses.push(value),
+        },
+        sessionManager: { getSessionId: () => id },
+      }) as unknown as ExtensionContext;
+    const firstStatuses: Array<string | undefined> = [];
+    const secondStatuses: Array<string | undefined> = [];
+    const first = makeContext('pause-old', firstStatuses);
+    const second = makeContext('pause-current', secondStatuses);
+
+    pauseExtension(pi);
+    handlers.get('session_start')?.({}, first);
+    handlers.get('session_start')?.({}, second);
+    handlers.get('session_shutdown')?.({}, first);
+    await commands.get('pause')?.handler('', second);
+    expect(secondStatuses.at(-1)).toBe('Paused');
+    handlers.get('session_shutdown')?.({}, second);
+  });
 });

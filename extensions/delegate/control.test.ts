@@ -56,6 +56,28 @@ describe('delegate control inbox', () => {
     expect(() => readFileSync(channel.filePath)).toThrow();
   });
 
+  test('always reserves pause and resume capacity after feedback bounds', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-full-'));
+    roots.push(root);
+    const channel = createDelegateControlChannel(
+      path.join(root, 'session.jsonl'),
+    );
+    for (let index = 0; index < 32; index++)
+      expect(channel.enqueue('feedback', `message ${index}`).accepted).toBe(
+        true,
+      );
+    expect(channel.enqueue('feedback', 'overflow')).toMatchObject({
+      accepted: false,
+      reason: 'queue-full',
+    });
+    expect(channel.pause(3).accepted).toBe(true);
+    channel.acknowledge('pause', 3);
+    expect(channel.resume(3).accepted).toBe(true);
+    expect(readFileSync(channel.filePath, 'utf8')).toContain('"kind":"resume"');
+    expect(channel.enqueue('feedback', 'after resume').accepted).toBe(true);
+    channel.close();
+  });
+
   test('presents a queued checkpoint at a child reasoning boundary and acknowledges it', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-child-'));
     roots.push(root);

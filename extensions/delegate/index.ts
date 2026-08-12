@@ -111,7 +111,12 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const coordinator = getPauseCoordinator(scopeId);
     const snapshot = coordinator.snapshot();
     if (!snapshot) return;
-    if (event.type === 'ack')
+    if (event.type === 'open') {
+      if (event.channel.pause(snapshot.generation).accepted)
+        coordinator.enrollDelegates(snapshot.generation, [
+          event.channel.participantId,
+        ]);
+    } else if (event.type === 'ack')
       coordinator.markDelegateReached(event.generation, event.participantId);
     else coordinator.removeDelegate(snapshot.generation, event.participantId);
   });

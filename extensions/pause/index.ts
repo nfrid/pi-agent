@@ -64,11 +64,12 @@ export default defineExtension('pause', (pi: ExtensionAPI) => {
   pi.on('session_shutdown', (_event, ctx) => {
     const closingScope = getSessionScopeId(ctx);
     resumeRuntimePause(pi, ctx);
+    clearPauseSurface(closingScope);
+    releasePauseCoordinator(closingScope);
+    if (scopeId !== closingScope) return;
     unsubscribe?.();
     unsubscribe = undefined;
     ctx.ui.setStatus('runtime-pause', undefined);
-    clearPauseSurface(closingScope);
-    releasePauseCoordinator(closingScope);
-    if (scopeId === closingScope) scopeId = undefined;
+    scopeId = undefined;
   });
 });

@@ -3,8 +3,10 @@ import {
   chmodSync,
   existsSync,
   readFileSync,
+  renameSync,
   statSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
@@ -36,6 +38,7 @@ export interface DelegateControlEnqueueResult {
 }
 
 export type DelegateControlLifecycleEvent =
+  | { type: 'open'; channel: DelegateControlChannel }
   | {
       type: 'ack';
       participantId: string;
@@ -95,22 +98,30 @@ export function createDelegateControlChannel(
   let closed = false;
   let sequence = 0;
   let requestCount = 0;
+  let acknowledgedPauseGeneration: number | undefined;
+
+  const request = (
+    input: Omit<DelegateControlRequest, 'id' | 'createdAt'>,
+  ): DelegateControlRequest => ({
+    id: `${process.pid}-${Date.now()}-${++sequence}`,
+    ...input,
+    createdAt: Date.now(),
+  });
 
   const append = (
-    request: Omit<DelegateControlRequest, 'id' | 'createdAt'>,
+    value: DelegateControlRequest,
+    options: { bypassLimits?: boolean } = {},
   ): DelegateControlEnqueueResult => {
     if (closed) return { accepted: false, reason: 'channel-closed' };
-    if (requestCount >= MAX_DELEGATE_CONTROL_REQUESTS)
+    if (!options.bypassLimits && requestCount >= MAX_DELEGATE_CONTROL_REQUESTS)
       return { accepted: false, reason: 'queue-full' };
-    const value: DelegateControlRequest = {
-      id: `${process.pid}-${Date.now()}-${++sequence}`,
-      ...request,
-      createdAt: Date.now(),
-    };
     const line = `${JSON.stringify(value)}\n`;
     try {
       const currentBytes = existsSync(filePath) ? statSync(filePath).size : 0;
-      if (currentBytes + bytes(line) > MAX_DELEGATE_CONTROL_FILE_BYTES)
+      if (
+        !options.bypassLimits &&
+        currentBytes + bytes(line) > MAX_DELEGATE_CONTROL_FILE_BYTES
+      )
         return { accepted: false, reason: 'queue-full' };
       appendFileSync(filePath, line, { encoding: 'utf8', mode: 0o600 });
       try {
@@ -118,9 +129,35 @@ export function createDelegateControlChannel(
       } catch {
         // The append succeeded; avoid a duplicate retry after a chmod failure.
       }
-      requestCount++;
+      if (!options.bypassLimits) requestCount++;
       return { accepted: true, id: value.id };
     } catch (error) {
+      return {
+        accepted: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
+  const replace = (
+    value: DelegateControlRequest,
+  ): DelegateControlEnqueueResult => {
+    if (closed) return { accepted: false, reason: 'channel-closed' };
+    const replacementPath = `${filePath}.resume-${value.id}`;
+    try {
+      writeFileSync(replacementPath, `${JSON.stringify(value)}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      renameSync(replacementPath, filePath);
+      requestCount = 0;
+      return { accepted: true, id: value.id };
+    } catch (error) {
+      try {
+        unlinkSync(replacementPath);
+      } catch {
+        // Nothing to clean up.
+      }
       return {
         accepted: false,
         reason: error instanceof Error ? error.message : String(error),
@@ -136,17 +173,28 @@ export function createDelegateControlChannel(
       if (!text) return { accepted: false, reason: 'empty-message' };
       if (bytes(text) > MAX_DELEGATE_CONTROL_MESSAGE_BYTES)
         return { accepted: false, reason: 'message-too-large' };
-      return append({ kind, message: text });
+      return append(request({ kind, message: text }));
     },
     pause(generation) {
-      return append({ kind: 'pause', generation });
+      // One small pause record may exceed feedback bounds; resume compacts it.
+      return append(request({ kind: 'pause', generation }), {
+        bypassLimits: true,
+      });
     },
     resume(generation) {
-      return append({ kind: 'resume', generation });
+      const value = request({ kind: 'resume', generation });
+      const result =
+        acknowledgedPauseGeneration === generation
+          ? replace(value)
+          : append(value, { bypassLimits: true });
+      if (result.accepted) acknowledgedPauseGeneration = undefined;
+      return result;
     },
     acknowledge(kind, generation) {
-      if (kind === 'pause' && typeof generation === 'number')
+      if (kind === 'pause' && typeof generation === 'number') {
+        acknowledgedPauseGeneration = generation;
         emitLifecycle({ type: 'ack', participantId, kind, generation });
+      }
     },
     close() {
       if (closed) return;
@@ -161,6 +209,7 @@ export function createDelegateControlChannel(
     },
   };
   activeChannels.set(participantId, channel);
+  emitLifecycle({ type: 'open', channel });
   return channel;
 }
 
@@ -214,8 +263,7 @@ function readRequests(
       } catch {
         return [];
       }
-    })
-    .slice(0, MAX_DELEGATE_CONTROL_REQUESTS);
+    });
 }
 
 function formatRequests(requests: readonly DelegateControlRequest[]): string {
