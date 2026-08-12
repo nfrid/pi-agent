@@ -3,7 +3,10 @@ import type {
   DelegateTranscriptEntry,
 } from '../../../../extensions/delegate/contribution';
 import { TranscriptEntry } from '../entities/transcript/entries';
-import { BoundedPayloadPreview } from '../entities/transcript/inspector';
+import {
+  BoundedPayloadPreview,
+  StructuredPayloadView,
+} from '../entities/transcript/inspector';
 import type { TranscriptModelItem } from '../transcript';
 import { DashboardDialog } from './dashboard-dialog';
 
@@ -247,10 +250,16 @@ export function DelegateStructuredResultSection({
         </p>
       ))}
       {row.result.status === 'valid' && row.result.value !== undefined && (
-        <BoundedPayloadPreview
-          value={row.result.value}
-          label="structured result"
-        />
+        <>
+          <StructuredPayloadView value={row.result.value} />
+          <details className="tool-inspector-raw">
+            <summary>Raw JSON</summary>
+            <BoundedPayloadPreview
+              value={row.result.value}
+              label="structured result JSON"
+            />
+          </details>
+        </>
       )}
     </section>
   );

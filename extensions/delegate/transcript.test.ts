@@ -164,8 +164,8 @@ describe('delegate transcript viewer data', () => {
     const replayed = getDetails({ details: persisted });
     const text = transcriptText(replayed?.runs ?? []);
     expect(text).toContain('Structured result:');
-    expect(text).toContain('"outcome": "done"');
-    expect(text).toContain('"second"');
+    expect(text).toContain('Outcome: done');
+    expect(text).toContain('2. second');
   });
 
   it('retains activity/response text and marks modal truncation explicitly', () => {

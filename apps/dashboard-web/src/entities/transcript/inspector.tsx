@@ -60,6 +60,102 @@ export function toolInspectorRows(
   return rows.filter(([, value]) => value !== undefined);
 }
 
+const STRUCTURED_VIEW_MAX_DEPTH = 4;
+const STRUCTURED_VIEW_MAX_ENTRIES = 24;
+const STRUCTURED_VIEW_MAX_TEXT = 1_200;
+
+function humanizeStructuredKey(key: string): string {
+  const words = key
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_.-]+/g, ' ')
+    .trim()
+    .toLowerCase();
+  return words ? words[0].toUpperCase() + words.slice(1) : '(unnamed)';
+}
+
+function structuredPrimitive(value: unknown): string {
+  if (typeof value === 'string') {
+    const text = value.slice(0, STRUCTURED_VIEW_MAX_TEXT);
+    return value.length > STRUCTURED_VIEW_MAX_TEXT ? `${text}…` : text;
+  }
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  return String(value);
+}
+
+function structuredContainer(value: unknown): boolean {
+  return value !== null && typeof value === 'object';
+}
+
+function structuredArrayKey(value: unknown, position: number): string {
+  return `${position}-${JSON.stringify(value) ?? String(value)}`;
+}
+
+function StructuredValue({ value, depth }: { value: unknown; depth: number }) {
+  if (depth >= STRUCTURED_VIEW_MAX_DEPTH) return <span>…</span>;
+  if (Array.isArray(value)) {
+    return (
+      <ol className="structured-result-list">
+        {value.slice(0, STRUCTURED_VIEW_MAX_ENTRIES).map((item, index) => (
+          <li key={structuredArrayKey(item, index)}>
+            {structuredContainer(item) ? (
+              <StructuredValue value={item} depth={depth + 1} />
+            ) : (
+              <span>{structuredPrimitive(item)}</span>
+            )}
+          </li>
+        ))}
+        {value.length > STRUCTURED_VIEW_MAX_ENTRIES && (
+          <li>… ({value.length - STRUCTURED_VIEW_MAX_ENTRIES} more items)</li>
+        )}
+      </ol>
+    );
+  }
+  if (structuredContainer(value)) {
+    const entries = Object.entries(value as Record<string, unknown>);
+    return (
+      <dl className="structured-result-fields">
+        {entries.slice(0, STRUCTURED_VIEW_MAX_ENTRIES).map(([key, item]) => {
+          const label = humanizeStructuredKey(key);
+          return (
+            <div key={key}>
+              <dt>{label}</dt>
+              <dd>
+                {structuredContainer(item) ? (
+                  <section
+                    aria-label={label}
+                    className="structured-result-group"
+                  >
+                    <StructuredValue value={item} depth={depth + 1} />
+                  </section>
+                ) : (
+                  <span>{structuredPrimitive(item)}</span>
+                )}
+              </dd>
+            </div>
+          );
+        })}
+        {entries.length > STRUCTURED_VIEW_MAX_ENTRIES && (
+          <div>
+            <dt>More fields</dt>
+            <dd>… ({entries.length - STRUCTURED_VIEW_MAX_ENTRIES} omitted)</dd>
+          </div>
+        )}
+      </dl>
+    );
+  }
+  return <span>{structuredPrimitive(value)}</span>;
+}
+
+export function StructuredPayloadView({ value }: { value: unknown }) {
+  return (
+    <div className="structured-result-value">
+      <StructuredValue value={value} depth={0} />
+    </div>
+  );
+}
+
 function stringifyValue(value: unknown): string | undefined {
   try {
     if (typeof value === 'string') return value;

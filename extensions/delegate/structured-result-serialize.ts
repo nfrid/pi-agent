@@ -7,16 +7,89 @@ import {
 import { getDelegateResultSpec } from './structured-result-channel';
 import type { DelegatedActivity, DelegatedRun } from './types';
 
-/** Readable JSON for human-facing surfaces; input is already bounded/validated. */
-export function formatStructuredResult(value: unknown): string {
-  try {
-    const formatted = JSON.stringify(value, null, 2);
-    return formatted === undefined
-      ? '[unavailable structured result]'
-      : formatted;
-  } catch {
+/**
+ * Format a bounded structured value as a small, schema-agnostic outline for
+ * human-facing TUI surfaces. The value has already been validated; this is
+ * presentation only and deliberately does not know any result contract.
+ */
+export function formatStructuredResult(
+  value: unknown,
+  maxChars = 12_000,
+): string {
+  const lines: string[] = [];
+  const maxDepth = 8;
+  const maxEntries = 32;
+  const maxStringChars = 1_200;
+
+  const primitive = (item: unknown): string => {
+    if (typeof item === 'string') {
+      const text = item.slice(0, maxStringChars);
+      return item.length > maxStringChars ? `${text}…` : text;
+    }
+    if (item === null) return 'null';
+    if (item === undefined) return 'undefined';
+    if (typeof item === 'number' || typeof item === 'boolean')
+      return String(item);
     return '[unavailable structured result]';
-  }
+  };
+
+  const humanize = (key: string): string => {
+    const words = key
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/[_.-]+/g, ' ')
+      .trim()
+      .toLowerCase();
+    return words ? words[0].toUpperCase() + words.slice(1) : '(unnamed)';
+  };
+
+  const render = (item: unknown, indent: string, depth: number): void => {
+    if (depth >= maxDepth) {
+      lines.push(`${indent}…`);
+      return;
+    }
+    if (Array.isArray(item)) {
+      if (item.length === 0) {
+        lines.push(`${indent}(empty)`);
+        return;
+      }
+      item.slice(0, maxEntries).forEach((entry, index) => {
+        const prefix = `${indent}${index + 1}.`;
+        if (entry !== null && typeof entry === 'object') {
+          lines.push(prefix);
+          render(entry, `${indent}  `, depth + 1);
+        } else lines.push(`${prefix} ${primitive(entry)}`);
+      });
+      if (item.length > maxEntries)
+        lines.push(`${indent}… (${item.length - maxEntries} more items)`);
+      return;
+    }
+    if (item !== null && typeof item === 'object') {
+      const entries = Object.entries(item as Record<string, unknown>);
+      if (entries.length === 0) {
+        lines.push(`${indent}(empty)`);
+        return;
+      }
+      entries.slice(0, maxEntries).forEach(([key, entry]) => {
+        const label = humanize(key);
+        if (entry !== null && typeof entry === 'object') {
+          lines.push(`${indent}${label}:`);
+          render(entry, `${indent}  `, depth + 1);
+        } else lines.push(`${indent}${label}: ${primitive(entry)}`);
+      });
+      if (entries.length > maxEntries)
+        lines.push(`${indent}… (${entries.length - maxEntries} more fields)`);
+      return;
+    }
+    lines.push(`${indent}${primitive(item)}`);
+  };
+
+  render(value, '', 0);
+  const output = lines.join('\n') || '[unavailable structured result]';
+  if (output.length <= maxChars) return output;
+  const marker = `\n… [truncated after ${maxChars.toLocaleString()} characters]`;
+  if (maxChars <= marker.length) return output.slice(0, Math.max(0, maxChars));
+  return `${output.slice(0, maxChars - marker.length)}${marker}`;
 }
 
 /**

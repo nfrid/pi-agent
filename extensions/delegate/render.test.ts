@@ -168,8 +168,9 @@ describe('render', () => {
       .render(120)
       .join('\\n');
     expect(output).toContain('Structured result valid');
-    expect(output).toContain('"findings": [');
-    expect(output).toContain('"path": "src/index.ts"');
+    expect(output).toContain('Findings:');
+    expect(output).toContain('1.');
+    expect(output).toContain('Path: src/index.ts');
   });
 
   test('keeps result task previews to one line and reveals the full task', () => {
