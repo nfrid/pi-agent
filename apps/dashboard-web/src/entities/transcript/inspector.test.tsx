@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BoundedPayloadPreview,
   boundedInspectorText,
+  StructuredPayloadView,
   ToolInspector,
 } from './inspector';
 
@@ -30,6 +31,26 @@ describe('transcript payload inspection', () => {
     expect(markup).toContain('Arguments');
     expect(markup).toContain('Raw tool record');
     expect(markup).not.toContain('Copy full arguments');
+  });
+
+  it('renders structured values as labeled fields and lists rather than JSON', () => {
+    const markup = renderToStaticMarkup(
+      <StructuredPayloadView
+        value={{
+          outcome: 'done',
+          findings: [{ filePath: 'src/App.tsx', lineCount: 42 }],
+          checkList: ['types', 'tests'],
+        }}
+      />,
+    );
+    expect(markup).toContain('<dt>Outcome</dt>');
+    expect(markup).toContain('<dt>Findings</dt>');
+    expect(markup).toContain('<dt>File path</dt>');
+    expect(markup).toContain('src/App.tsx');
+    expect(markup).toContain('<ol class="structured-result-list">');
+    expect(markup).toContain('types');
+    expect(markup).not.toContain('<pre>');
+    expect(markup).not.toContain('&quot;outcome&quot;');
   });
 
   it('separates arguments and result before the expandable raw fallback', () => {
