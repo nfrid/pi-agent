@@ -9,6 +9,7 @@ import { type TouchEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { sessionDisplayTitle } from '../app-helpers';
 import { useDashboardNavigate } from '../routes/navigation';
 import { useDashboardUtility } from './dashboard-utility-context';
+import { runtimePauseStatus } from './extension-surfaces';
 import { useOverlayPresence } from './overlay-presence';
 import { DashboardTime } from './timestamp';
 
@@ -18,7 +19,8 @@ export type AgentThreadRow = {
   workspaceId?: string;
   workspaceName: string;
   cwd: string;
-  status: RuntimeSnapshot['liveState'] | 'offline' | 'dormant';
+  status: RuntimeSnapshot['liveState'] | 'paused' | 'offline' | 'dormant';
+  statusLabel?: string;
   runtime?: RuntimeSnapshot;
   session?: SessionIndexEntry;
   startedAt: number;
@@ -38,7 +40,13 @@ export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
   for (const runtime of snapshot.runtimes) {
     const session = sessionsById.get(runtime.session.id);
     const workspace = workspaceForPath(runtime.cwd, workspaces);
-    const status = runtime.online === false ? 'offline' : runtime.liveState;
+    const pauseStatus = runtimePauseStatus(runtime);
+    const status =
+      runtime.online === false
+        ? 'offline'
+        : pauseStatus
+          ? 'paused'
+          : runtime.liveState;
     rows.set(runtime.session.id, {
       id: runtime.session.id,
       title: sessionDisplayTitle(runtime.session, runtime.session.entries),
@@ -46,6 +54,7 @@ export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
       workspaceName: workspace?.name ?? 'Other workspace',
       cwd: runtime.cwd,
       status,
+      statusLabel: pauseStatus?.label,
       runtime,
       session,
       startedAt: session?.startedAt ?? 0,
@@ -87,8 +96,8 @@ function statusGlyph(status: AgentThreadRow['status']): string {
   return '●';
 }
 
-function statusLabel(status: AgentThreadRow['status']): string {
-  return status;
+function statusLabel(row: AgentThreadRow): string {
+  return row.statusLabel ?? row.status;
 }
 
 const MAX_VISIBLE_ACTIVE_THREADS = 40;
@@ -378,7 +387,7 @@ export function AgentThreadNav({
                   type="button"
                   className={`agent-thread-row ${selected ? 'selected' : ''} status-${row.status}`}
                   aria-current={selected ? 'page' : undefined}
-                  aria-label={`${row.title} ${statusLabel(row.status)}`}
+                  aria-label={`${row.title} ${statusLabel(row)}`}
                   key={row.id}
                   onClick={() => select(row.id)}
                 >
@@ -389,7 +398,7 @@ export function AgentThreadNav({
                     <strong>{row.title}</strong>
                     <small>
                       <span className="agent-thread-context">
-                        <span>{statusLabel(row.status)}</span>
+                        <span>{statusLabel(row)}</span>
                         <span aria-hidden="true"> · </span>
                         <span>{shortPath(row.cwd)}</span>
                       </span>

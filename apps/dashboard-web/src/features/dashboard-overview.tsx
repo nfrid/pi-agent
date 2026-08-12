@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { sessionDisplayTitle } from '../app-helpers';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav, agentThreadRows } from './agent-thread-nav';
+import { runtimePauseStatus } from './extension-surfaces';
 import { SessionRow } from './workspace-session';
 
 function WorkspaceRefresh({
@@ -213,7 +214,14 @@ export function RuntimeCard({
   runtime: import('@pi-dashboard/protocol').RuntimeSnapshot;
 }) {
   const go = useDashboardNavigate();
-  const status = runtime.online === false ? 'offline' : runtime.liveState;
+  const pauseStatus = runtimePauseStatus(runtime);
+  const status =
+    runtime.online === false
+      ? 'offline'
+      : pauseStatus
+        ? 'paused'
+        : runtime.liveState;
+  const statusLabel = pauseStatus?.label ?? status;
   const title = sessionDisplayTitle(runtime.session, runtime.session.entries);
   const glyph =
     status === 'working'
@@ -243,7 +251,7 @@ export function RuntimeCard({
       <span className="runtime-main">
         <strong>{title}</strong>
         <span>
-          <b>{status}</b> · {model}
+          <b>{statusLabel}</b> · {model}
         </span>
         <small>
           {runtime.lastError ?? `${runtime.cwd} · ${runtime.ownership}`}

@@ -3088,6 +3088,10 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   await expect(
     page.getByRole('status').filter({ hasText: 'Paused (with 2 delegates)' }),
   ).toBeVisible();
+  await expect(page.locator('.session-status')).toContainText(
+    'Paused (with 2 delegates)',
+  );
+  await expect(page.locator('.pause-status')).toHaveCount(0);
   const tasksLauncher = page.getByRole('button', {
     name: /Inspect the new drawer/,
   });
@@ -3184,6 +3188,12 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
       ),
     ),
   ).toBe(true);
+  expect(
+    await delegatesPanel
+      .locator('.surface-running .surface-state')
+      .first()
+      .evaluate((element) => getComputedStyle(element).animationName),
+  ).toBe('none');
   const runningMeta = delegatesPanel.locator('.delegate-row-meta').first();
   await expect(runningMeta.locator('.delegate-row-status')).toContainText(
     'running',

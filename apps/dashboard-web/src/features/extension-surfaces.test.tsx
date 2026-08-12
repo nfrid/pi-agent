@@ -11,6 +11,7 @@ import {
   ExtensionSurfaceStack,
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
+  runtimePauseStatus,
 } from './extension-surfaces';
 
 const runtimeFixture = (extensionSurfaces: unknown): RuntimeSnapshot =>
@@ -47,6 +48,50 @@ describe('live extension surface fixtures', () => {
         placement: 'composer',
       },
     ]);
+  });
+
+  it('uses pause as runtime state without rendering a composer widget', () => {
+    const runtime = runtimeFixture([
+      {
+        id: 'pause-1',
+        rendererId: 'runtime.pause-status',
+        placement: 'composer',
+        viewModel: {
+          version: 1,
+          phase: 'paused',
+          delegateCount: 2,
+          label: 'Paused (with 2 delegates)',
+        },
+      },
+      {
+        id: 'delegate-1',
+        rendererId: 'delegate.status',
+        placement: 'composer',
+        viewModel: {
+          version: 1,
+          statuses: [
+            {
+              id: 'd1',
+              name: 'Still visible delegate',
+              kind: 'background',
+              state: 'running',
+              createdAt: 1,
+              allowWrites: false,
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(runtimePauseStatus(runtime)?.label).toBe(
+      'Paused (with 2 delegates)',
+    );
+    const markup = renderToStaticMarkup(
+      <ExtensionSurfaceStack runtime={runtime} placement="composer" />,
+    );
+    expect(markup).not.toContain('pause-status');
+    expect(markup).not.toContain('Paused (with 2 delegates)');
+    expect(markup).toContain('Still visible delegate');
   });
 
   it('keeps live surfaces collapsed to compact summaries by default', () => {

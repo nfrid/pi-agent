@@ -40,6 +40,8 @@ export interface SequenceSnapshot {
 
 export interface SequenceOptions {
   streaming: boolean;
+  /** Defaults to streaming; false keeps a live sequence visually still. */
+  animated?: boolean;
   expanded: boolean;
   /** Exact built-in assistant and tool rendering, for expanded details or fallback. */
   defaultView: Component;

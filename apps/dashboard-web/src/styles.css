@@ -446,7 +446,8 @@ h2 {
 .runtime-card.compacting::before {
   background: var(--purple);
 }
-.runtime-card.waiting::before {
+.runtime-card.waiting::before,
+.runtime-card.paused::before {
   background: var(--orange);
 }
 .runtime-card.failed::before {
@@ -473,7 +474,8 @@ h2 {
 .compacting-glyph {
   animation: tui-pulse 1.2s steps(2, end) infinite;
 }
-.waiting .runtime-rail {
+.waiting .runtime-rail,
+.paused .runtime-rail {
   color: var(--orange);
 }
 .failed .runtime-rail {
@@ -3302,6 +3304,9 @@ ol.delegate-inspector-runs > li small {
 .agent-thread-row.status-working .agent-thread-glyph {
   color: var(--green);
 }
+.agent-thread-row.status-paused .agent-thread-glyph {
+  color: var(--orange);
+}
 .agent-thread-row.status-compacting .agent-thread-glyph {
   color: var(--purple);
   animation: tui-pulse 1.2s steps(2, end) infinite;
@@ -3527,7 +3532,8 @@ ol.delegate-inspector-runs > li small {
   color: var(--purple);
   animation: tui-pulse 1.2s steps(2, end) infinite;
 }
-.session-status.status-waiting i {
+.session-status.status-waiting i,
+.session-status.status-paused i {
   color: var(--orange);
 }
 .session-status.status-failed i,
@@ -5046,6 +5052,23 @@ details.session-event {
 .tool-detail.step-pending .activity-step-dot {
   color: var(--cyan);
   animation: tui-pulse 1.2s steps(2, end) infinite;
+}
+.session-page[data-runtime-paused]
+  .activity-group.activity-pending
+  .activity-icon,
+.session-page[data-runtime-paused]
+  .activity-step.step-pending
+  .activity-step-dot,
+.session-page[data-runtime-paused] .tool-detail.step-pending .activity-step-dot,
+.session-page[data-runtime-paused] .surface-running .surface-state,
+.session-page[data-runtime-paused] .working-glyph,
+.session-page[data-runtime-paused] .compacting-glyph {
+  animation: none;
+}
+.runtime-pause-label {
+  color: var(--orange);
+  font-size: 11px;
+  font-weight: 650;
 }
 .activity-earlier,
 .activity-metadata {

@@ -1,5 +1,10 @@
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { describe, expect, it } from 'vitest';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent';
+import { describe, expect, it, vi } from 'vitest';
+import { requestRuntimePause } from '../pause/operations';
+import { getPauseCoordinator } from '../pause/state';
 import continueExtension, {
   type AgentMessage,
   CONTINUE_CUSTOM_TYPE,
@@ -97,6 +102,53 @@ describe('continue extension', () => {
     ).toBe(true);
     expect(canContinue([user('go'), assistant('stop')])).toBe(false);
     expect(canContinue([])).toBe(false);
+  });
+
+  it('resumes an active pause without injecting a continuation marker', async () => {
+    const commands = new Map<
+      string,
+      { handler: (args: string, ctx: unknown) => Promise<void> }
+    >();
+    const sent: unknown[] = [];
+    const listeners = new Map<string, Set<(value: unknown) => void>>();
+    const pi = {
+      registerCommand(name: string, options: { handler: () => Promise<void> }) {
+        commands.set(name, options);
+      },
+      on: vi.fn(),
+      sendMessage(message: unknown) {
+        sent.push(message);
+      },
+      events: {
+        on(event: string, listener: (value: unknown) => void) {
+          const registered = listeners.get(event) ?? new Set();
+          registered.add(listener);
+          listeners.set(event, registered);
+          return () => registered.delete(listener);
+        },
+        emit(event: string, value: unknown) {
+          for (const listener of listeners.get(event) ?? []) listener(value);
+        },
+      },
+    } as unknown as ExtensionAPI;
+    const ctx = {
+      isIdle: () => false,
+      hasUI: true,
+      ui: { notify: vi.fn() },
+      sessionManager: {
+        getSessionId: () => 'continue-paused',
+        getBranch: () => [],
+      },
+    };
+
+    continueExtension(pi);
+    requestRuntimePause(pi, ctx as unknown as ExtensionContext);
+    expect(getPauseCoordinator('continue-paused').isActive()).toBe(true);
+    await commands.get('continue')?.handler('', ctx);
+
+    expect(getPauseCoordinator('continue-paused').isActive()).toBe(false);
+    expect(sent).toEqual([]);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Resumed.', 'info');
   });
 
   it('registers /continue and filters context when a marker is present', async () => {

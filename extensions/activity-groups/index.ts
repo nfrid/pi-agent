@@ -17,7 +17,9 @@ import {
   ToolExecutionComponent,
 } from '@earendil-works/pi-coding-agent';
 import type { Container } from '@earendil-works/pi-tui';
+import { getPauseCoordinator } from '../pause/state';
 import { defineExtension } from '../shared/runtime/extension';
+import { getSessionScopeId } from '../shared/runtime/scoped-services';
 import { installActivityGroupsActionHandler } from './actions';
 import { registerActivityGroupsCapability } from './register-capability';
 import { createActivityGroupRenderer } from './renderer';
@@ -87,15 +89,33 @@ export default defineExtension('activity-groups', (pi) => {
   registerActivityGroupsCapability();
   const activityRenderer = createActivityGroupRenderer();
   let enabled = true;
-  const renderer: SequenceRenderer = (sequence, options, theme, context) =>
+  let context: ExtensionContext | undefined;
+  const paused = () => {
+    if (!context) return false;
+    try {
+      return getPauseCoordinator(getSessionScopeId(context)).isActive();
+    } catch {
+      return false;
+    }
+  };
+  const renderer: SequenceRenderer = (
+    sequence,
+    options,
+    theme,
+    renderContext,
+  ) =>
     enabled
-      ? activityRenderer(sequence, options, theme, context)
+      ? activityRenderer(
+          sequence,
+          { ...options, animated: options.streaming && !paused() },
+          theme,
+          renderContext,
+        )
       : options.defaultView;
 
   const nativeHook = hasNativeHook(pi);
   if (nativeHook) pi.registerToolSequenceRenderer(renderer);
 
-  let context: ExtensionContext | undefined;
   let uninstall: (() => void) | undefined;
   let uninstallActionHandler: (() => void) | undefined;
   /**

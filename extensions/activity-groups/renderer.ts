@@ -224,8 +224,12 @@ export class ActivityGroupComponent implements Component {
     this.timer = undefined;
   }
 
+  private animated(): boolean {
+    return this.options.animated ?? this.options.streaming;
+  }
+
   private updateSpinner(): void {
-    if (!this.options.streaming) {
+    if (!this.animated()) {
       if (this.timer) clearInterval(this.timer);
       this.timer = undefined;
       return;
@@ -247,7 +251,7 @@ export class ActivityGroupComponent implements Component {
 
   /** A step is a bullet, unless it is the one currently turning. */
   private stepMarker(tool: ToolItem): string {
-    if (tool.status === 'running' && this.options.streaming)
+    if (tool.status === 'running' && this.animated())
       return SPINNER_FRAMES[this.spinnerFrame] ?? STEP_MARKER;
     if (tool.isError) return '✗';
     return tool.status === 'pending' ? '·' : STEP_MARKER;
@@ -275,7 +279,9 @@ export class ActivityGroupComponent implements Component {
       ? failed
         ? '!'
         : '•'
-      : SPINNER_FRAMES[this.spinnerFrame];
+      : this.animated()
+        ? SPINNER_FRAMES[this.spinnerFrame]
+        : STEP_MARKER;
     const color = failed ? 'error' : completed ? 'muted' : 'accent';
     const showPrefix = width > 3;
     const prefix = showPrefix ? ` ${this.theme.fg(color, marker)} ` : '';

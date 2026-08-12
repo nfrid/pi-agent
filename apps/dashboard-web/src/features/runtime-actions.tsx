@@ -12,8 +12,8 @@ import { useState } from 'react';
 import {
   CONTINUE_ACTION_ID,
   PAUSE_ACTION_ID,
-  PAUSE_RENDERER_ID,
 } from '../../../../extensions/pause/contribution';
+import { runtimePauseStatus } from './extension-surfaces';
 
 export function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
   const navigate = useNavigate();
@@ -40,9 +40,8 @@ export function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
   const compactSupported = supportsAction('session.compact');
   const pauseSupported = supportsAction(PAUSE_ACTION_ID);
   const continueSupported = supportsAction(CONTINUE_ACTION_ID);
-  const paused = runtime.extensionSurfaces?.some(
-    (surface) => surface.rendererId === PAUSE_RENDERER_ID,
-  );
+  const pauseStatus = runtimePauseStatus(runtime);
+  const paused = Boolean(pauseStatus);
   const run = async (operation: () => Promise<unknown>) => {
     setError(undefined);
     try {
@@ -68,6 +67,11 @@ export function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
       >
         Abort
       </button>
+      {pauseStatus && (
+        <span className="runtime-pause-label" role="status">
+          {pauseStatus.label}
+        </span>
+      )}
       {pauseSupported && continueSupported && (
         <button
           type="button"

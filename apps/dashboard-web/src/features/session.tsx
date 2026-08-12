@@ -29,7 +29,10 @@ import {
 } from '../app-helpers';
 import { Transcript } from '../entities/transcript';
 import { AgentThreadNav, workspaceNameForSession } from './agent-thread-nav';
-import { ExtensionSurfaceStack } from './extension-surfaces';
+import {
+  ExtensionSurfaceStack,
+  runtimePauseStatus,
+} from './extension-surfaces';
 import { useOverlayPresence } from './overlay-presence';
 import { PendingInteractions } from './pending-interaction';
 import { RuntimeActions } from './runtime-actions';
@@ -619,13 +622,17 @@ export function SessionView({
       }
     }
   }, [history, historyLoading, id, store]);
+  const pauseStatus = runtimePauseStatus(runtime);
   const status = runtime
     ? runtime.online === false
       ? 'offline'
-      : runtime.liveState === 'idle'
-        ? 'ready'
-        : runtime.liveState
+      : pauseStatus
+        ? 'paused'
+        : runtime.liveState === 'idle'
+          ? 'ready'
+          : runtime.liveState
     : 'dormant';
+  const statusLabel = pauseStatus?.label ?? status;
   const waitingForInitialHistory =
     data?.entriesComplete === false &&
     (!projection || projection.order.length === 0);
@@ -663,7 +670,7 @@ export function SessionView({
                   </h1>
                 </div>
                 <span className={`session-status status-${status}`}>
-                  <i aria-hidden="true">●</i> {status}
+                  <i aria-hidden="true">●</i> {statusLabel}
                 </span>
               </div>
             </div>
@@ -735,6 +742,7 @@ export function SessionView({
       <section
         ref={sessionPageRef}
         data-tail-pending={tailReadySessionId === id ? undefined : ''}
+        data-runtime-paused={pauseStatus ? '' : undefined}
         className={`session-page ${inspectorOpen ? 'inspector-open' : ''} ${hasPendingInteraction ? 'has-pending-interaction' : ''} ${inspectorOpen || outlineOpen || agentNavOpen || hasPendingInteraction ? 'modal-open' : ''}`}
       >
         <header className="session-context session-heading">
@@ -753,7 +761,7 @@ export function SessionView({
                 </h1>
               </div>
               <span className={`session-status status-${status}`}>
-                <i aria-hidden="true">●</i> {status}
+                <i aria-hidden="true">●</i> {statusLabel}
               </span>
             </div>
           </div>

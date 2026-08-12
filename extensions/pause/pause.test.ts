@@ -18,6 +18,7 @@ describe('pause extension', () => {
     >();
     const eventHandlers = new Map<string, Set<(value: unknown) => void>>();
     const statuses: Array<string | undefined> = [];
+    const workingIndicators: unknown[] = [];
     const pi = {
       on(
         event: string,
@@ -52,6 +53,7 @@ describe('pause extension', () => {
         notify: vi.fn(),
         setStatus: (_key: string, value: string | undefined) =>
           statuses.push(value),
+        setWorkingIndicator: (value?: unknown) => workingIndicators.push(value),
       },
       sessionManager: { getSessionId: () => 'pause-test' },
     } as unknown as ExtensionContext;
@@ -70,11 +72,13 @@ describe('pause extension', () => {
     await Promise.resolve();
     expect(released).toBe(false);
     expect(statuses.at(-1)).toBe('Paused');
+    expect(workingIndicators.at(-1)).toEqual({ frames: ['•'] });
 
     expect(resumeRuntimePause(pi, ctx)).toBeDefined();
     await boundary;
     expect(released).toBe(true);
     expect(statuses.at(-1)).toBeUndefined();
+    expect(workingIndicators.at(-1)).toBeUndefined();
     handlers.get('session_shutdown')?.({}, ctx);
   });
 

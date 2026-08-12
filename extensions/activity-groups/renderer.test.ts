@@ -147,6 +147,45 @@ describe('activity groups renderer', () => {
     (component as unknown as { dispose(): void }).dispose();
   });
 
+  it('keeps a paused live group active but visually still', () => {
+    const component = createActivityGroupRenderer()(
+      {
+        id: 'paused-live',
+        cwd: process.cwd(),
+        startedAt: 1000,
+        failed: false,
+        items: [
+          preambleItem('Waiting at a safe boundary'),
+          {
+            type: 'tool',
+            id: 'read-paused',
+            name: 'read',
+            args: { path: 'src/session.ts' },
+            status: 'running',
+            isError: false,
+          },
+        ],
+      },
+      {
+        streaming: true,
+        animated: false,
+        expanded: false,
+        defaultView: new Text('', 0, 0),
+      },
+      theme,
+      context(),
+    );
+    if (!component) throw new Error('renderer returned no component');
+    const output = component.render(100).join('\n');
+    expect(output).toContain('Waiting at a safe boundary');
+    expect(output).toContain('⏺');
+    expect(output).not.toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/u);
+    expect(
+      (component as unknown as { timer?: NodeJS.Timeout }).timer,
+    ).toBeUndefined();
+    (component as unknown as { dispose(): void }).dispose();
+  });
+
   it('opts out of thinking-only and unpaired visible headers', () => {
     const renderer = createActivityGroupRenderer();
     const tool = toolItem(

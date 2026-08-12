@@ -5,7 +5,13 @@ import {
 } from '@pi-dashboard/extension-contributions';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMemo } from 'react';
+import { Value } from 'typebox/value';
 import { DELEGATE_RENDERER_ID } from '../../../../extensions/delegate/contribution';
+import {
+  PAUSE_RENDERER_ID,
+  type PauseStatusViewModel,
+  PauseStatusViewModelSchema,
+} from '../../../../extensions/pause/contribution';
 import { TASKS_RENDERER_ID } from '../../../../extensions/tasks/contribution';
 import {
   type DashboardRendererContext,
@@ -45,6 +51,17 @@ export function runtimeExtensionSurfaces(
   });
 }
 
+export function runtimePauseStatus(
+  runtime: RuntimeSnapshot | undefined,
+): PauseStatusViewModel | undefined {
+  const surface = runtimeExtensionSurfaces(runtime).find(
+    (candidate) => candidate.rendererId === PAUSE_RENDERER_ID,
+  );
+  return surface && Value.Check(PauseStatusViewModelSchema, surface.viewModel)
+    ? (surface.viewModel as PauseStatusViewModel)
+    : undefined;
+}
+
 /** Render only through the exact-ID, schema-validating static registry. */
 export function renderLiveExtensionSurface(surface: ExtensionSurface) {
   const context: DashboardRendererContext = {
@@ -75,6 +92,7 @@ export function ExtensionSurfaceStack({
   const surfaces = useMemo(
     () =>
       runtimeExtensionSurfaces(runtime)
+        .filter((surface) => surface.rendererId !== PAUSE_RENDERER_ID)
         .filter(
           (surface) =>
             dashboardSurfacePlacement(surface.placement) === placement ||

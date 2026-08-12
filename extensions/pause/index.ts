@@ -25,13 +25,19 @@ export default defineExtension('pause', (pi: ExtensionAPI) => {
     const coordinator = getPauseCoordinator(boundScope);
     unsubscribe = coordinator.subscribe((snapshot) => {
       if (!snapshot) {
-        if (ctx.hasUI) ctx.ui.setStatus('runtime-pause', undefined);
+        if (ctx.hasUI) {
+          ctx.ui.setStatus('runtime-pause', undefined);
+          ctx.ui.setWorkingIndicator?.();
+        }
         clearPauseSurface(boundScope);
         return;
       }
       const label =
         snapshot.phase === 'paused' ? pauseLabel(snapshot) : 'Pausing…';
-      if (ctx.hasUI) ctx.ui.setStatus('runtime-pause', label);
+      if (ctx.hasUI) {
+        ctx.ui.setStatus('runtime-pause', label);
+        ctx.ui.setWorkingIndicator?.({ frames: ['•'] });
+      }
       publishPauseSurface(snapshot, boundScope);
     });
   };
@@ -69,7 +75,10 @@ export default defineExtension('pause', (pi: ExtensionAPI) => {
     if (scopeId !== closingScope) return;
     unsubscribe?.();
     unsubscribe = undefined;
-    if (ctx.hasUI) ctx.ui.setStatus('runtime-pause', undefined);
+    if (ctx.hasUI) {
+      ctx.ui.setStatus('runtime-pause', undefined);
+      ctx.ui.setWorkingIndicator?.();
+    }
     scopeId = undefined;
   });
 });
