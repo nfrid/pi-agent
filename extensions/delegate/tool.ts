@@ -325,7 +325,7 @@ export function registerDelegateTool(
           };
         };
         const controls = execution.tasks.map((item) =>
-          createDelegateControlChannel(item.session.filePath),
+          createDelegateControlChannel(item.session.filePath, launchSessionId),
         );
         let jobs: ReturnType<DelegateJobManager['startMany']>;
         try {

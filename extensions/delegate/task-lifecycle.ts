@@ -370,6 +370,7 @@ export async function runPreparedDelegateTask(
     | 'timeoutMs'
     | 'maxConcurrency'
     | 'signal'
+    | 'ownerSessionId'
     | 'onUpdate'
     | 'onRunUpdate'
     | 'mode'
@@ -391,6 +392,7 @@ export async function runPreparedDelegateTask(
     task: prepared.plan.task,
     context: prepared.plan.context,
     sessionPath: prepared.session.filePath,
+    ownerSessionId: options.ownerSessionId,
     continuation: prepared.session.token,
     resuming: Boolean(prepared.plan.resumed),
     contextNote: [prepared.plan.contextNote, prepared.snapshotNotice]

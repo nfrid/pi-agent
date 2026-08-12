@@ -265,6 +265,7 @@ describe('async delegate extension', () => {
     const requested = requestRuntimePause(pi, ctx);
     const channel = createDelegateControlChannel(
       path.join(artifactRoot, 'late-delegate.jsonl'),
+      'parent',
     );
     const snapshot = getPauseCoordinator('parent').snapshot();
     expect(snapshot?.generation).toBe(requested.generation);
@@ -273,6 +274,23 @@ describe('async delegate extension', () => {
 
     resumeRuntimePause(pi, ctx);
     expect(readFileSync(channel.filePath, 'utf8')).toContain('"kind":"resume"');
+    channel.close();
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('does not enroll a late control channel owned by a replaced session', async () => {
+    const { ctx, handlers, pi } = createAsyncHarness('current');
+    requestRuntimePause(pi, ctx);
+    const channel = createDelegateControlChannel(
+      path.join(artifactRoot, 'stale-delegate.jsonl'),
+      'old',
+    );
+    expect(
+      getPauseCoordinator('current').snapshot()?.delegateIds,
+    ).not.toContain(channel.participantId);
+    expect(() => readFileSync(channel.filePath, 'utf8')).toThrow();
+
+    resumeRuntimePause(pi, ctx);
     channel.close();
     await handlers.get('session_shutdown')?.({}, ctx);
   });

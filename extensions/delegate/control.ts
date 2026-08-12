@@ -3,10 +3,8 @@ import {
   chmodSync,
   existsSync,
   readFileSync,
-  renameSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from 'node:fs';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
@@ -50,6 +48,7 @@ export type DelegateControlLifecycleEvent =
 export interface DelegateControlChannel {
   readonly participantId: string;
   readonly filePath: string;
+  readonly ownerSessionId?: string;
   enqueue: (
     kind: 'feedback' | 'checkpoint',
     message: string,
@@ -92,13 +91,13 @@ function controlPath(sessionPath: string): string {
 /** Parent side of a private child control inbox. */
 export function createDelegateControlChannel(
   sessionPath: string,
+  ownerSessionId?: string,
 ): DelegateControlChannel {
   const filePath = controlPath(sessionPath);
   const participantId = filePath;
   let closed = false;
   let sequence = 0;
   let requestCount = 0;
-  let acknowledgedPauseGeneration: number | undefined;
 
   const request = (
     input: Omit<DelegateControlRequest, 'id' | 'createdAt'>,
@@ -139,35 +138,10 @@ export function createDelegateControlChannel(
     }
   };
 
-  const replace = (
-    value: DelegateControlRequest,
-  ): DelegateControlEnqueueResult => {
-    if (closed) return { accepted: false, reason: 'channel-closed' };
-    const replacementPath = `${filePath}.resume-${value.id}`;
-    try {
-      writeFileSync(replacementPath, `${JSON.stringify(value)}\n`, {
-        encoding: 'utf8',
-        mode: 0o600,
-      });
-      renameSync(replacementPath, filePath);
-      requestCount = 0;
-      return { accepted: true, id: value.id };
-    } catch (error) {
-      try {
-        unlinkSync(replacementPath);
-      } catch {
-        // Nothing to clean up.
-      }
-      return {
-        accepted: false,
-        reason: error instanceof Error ? error.message : String(error),
-      };
-    }
-  };
-
   const channel: DelegateControlChannel = {
     participantId,
     filePath,
+    ownerSessionId,
     enqueue(kind, message) {
       const text = message.trim();
       if (!text) return { accepted: false, reason: 'empty-message' };
@@ -182,19 +156,14 @@ export function createDelegateControlChannel(
       });
     },
     resume(generation) {
-      const value = request({ kind: 'resume', generation });
-      const result =
-        acknowledgedPauseGeneration === generation
-          ? replace(value)
-          : append(value, { bypassLimits: true });
-      if (result.accepted) acknowledgedPauseGeneration = undefined;
-      return result;
+      // Resume is control-plane traffic and always has reserved capacity.
+      return append(request({ kind: 'resume', generation }), {
+        bypassLimits: true,
+      });
     },
     acknowledge(kind, generation) {
-      if (kind === 'pause' && typeof generation === 'number') {
-        acknowledgedPauseGeneration = generation;
+      if (kind === 'pause' && typeof generation === 'number')
         emitLifecycle({ type: 'ack', participantId, kind, generation });
-      }
     },
     close() {
       if (closed) return;

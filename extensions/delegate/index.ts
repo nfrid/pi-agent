@@ -112,10 +112,14 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const snapshot = coordinator.snapshot();
     if (!snapshot) return;
     if (event.type === 'open') {
-      if (event.channel.pause(snapshot.generation).accepted)
-        coordinator.enrollDelegates(snapshot.generation, [
-          event.channel.participantId,
-        ]);
+      if (
+        event.channel.ownerSessionId !== scopeId ||
+        !event.channel.pause(snapshot.generation).accepted
+      )
+        return;
+      coordinator.enrollDelegates(snapshot.generation, [
+        event.channel.participantId,
+      ]);
     } else if (event.type === 'ack')
       coordinator.markDelegateReached(event.generation, event.participantId);
     else coordinator.removeDelegate(snapshot.generation, event.participantId);
@@ -126,7 +130,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         if (!runtimeActive || event.scopeId !== scopeId) return;
         const coordinator = getPauseCoordinator(scopeId);
         const accepted = listActiveDelegateControlChannels().filter(
-          (channel) => channel.pause(event.generation).accepted,
+          (channel) =>
+            channel.ownerSessionId === event.scopeId &&
+            channel.pause(event.generation).accepted,
         );
         coordinator.enrollDelegates(
           event.generation,

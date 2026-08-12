@@ -74,7 +74,22 @@ describe('delegate control inbox', () => {
     channel.acknowledge('pause', 3);
     expect(channel.resume(3).accepted).toBe(true);
     expect(readFileSync(channel.filePath, 'utf8')).toContain('"kind":"resume"');
-    expect(channel.enqueue('feedback', 'after resume').accepted).toBe(true);
+    channel.close();
+  });
+
+  test('resume preserves feedback accepted after pause acknowledgement', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-resume-'));
+    roots.push(root);
+    const channel = createDelegateControlChannel(
+      path.join(root, 'session.jsonl'),
+    );
+    expect(channel.pause(4).accepted).toBe(true);
+    channel.acknowledge('pause', 4);
+    expect(channel.enqueue('feedback', 'while paused').accepted).toBe(true);
+    expect(channel.resume(4).accepted).toBe(true);
+    const inbox = readFileSync(channel.filePath, 'utf8');
+    expect(inbox).toContain('while paused');
+    expect(inbox).toContain('"kind":"resume"');
     channel.close();
   });
 

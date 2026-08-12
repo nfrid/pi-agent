@@ -157,6 +157,7 @@ async function runPreparedWithLifecycle(
       timeoutMs: config.timeoutMs,
       maxConcurrency: config.maxConcurrency,
       signal,
+      ownerSessionId: runCtx.launchSessionId,
       control: hooks.control,
       onUpdate: hooks.onUpdate,
       onRunUpdate: hooks.onRunUpdate,

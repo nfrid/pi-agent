@@ -97,6 +97,8 @@ export interface RunDelegateOptions {
   task: string;
   context: DelegateContext;
   sessionPath: string;
+  /** Parent session that owns this delegate control channel. */
+  ownerSessionId?: string;
   routing?: DelegateRouteState;
   allowWrites?: boolean;
   writeRequested?: boolean;
@@ -201,7 +203,8 @@ export async function runDelegate(
   });
   setDelegateResultSpec(run, options.resultSpec);
   const control =
-    options.control ?? createDelegateControlChannel(options.sessionPath);
+    options.control ??
+    createDelegateControlChannel(options.sessionPath, options.ownerSessionId);
   let releaseSlot: (() => void) | undefined;
   let releaseSession: (() => void) | undefined;
 
