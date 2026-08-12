@@ -44,6 +44,7 @@ export function Transcript({
   entries,
   projection,
   runtime,
+  tailScrollRequest,
   outlineOpen,
   onOutlineOpenChange,
 }: {
@@ -52,6 +53,7 @@ export function Transcript({
   /** Preferred canonical domain projection input. */
   projection?: TranscriptProjection;
   runtime?: RuntimeSnapshot;
+  tailScrollRequest?: number;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
 }) {
@@ -95,6 +97,7 @@ export function Transcript({
         open={open}
         setOpen={setOpen}
         runtime={runtime}
+        tailScrollRequest={tailScrollRequest}
         outlineOpen={outlineOpen}
         onOutlineOpenChange={onOutlineOpenChange}
       />
@@ -203,6 +206,7 @@ function VirtualizedTranscript({
   open,
   setOpen,
   runtime,
+  tailScrollRequest,
   outlineOpen,
   onOutlineOpenChange,
 }: {
@@ -211,6 +215,7 @@ function VirtualizedTranscript({
   open: ReadonlySet<string>;
   setOpen: Dispatch<SetStateAction<Set<string>>>;
   runtime?: RuntimeSnapshot;
+  tailScrollRequest?: number;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
 }) {
@@ -228,6 +233,14 @@ function VirtualizedTranscript({
     getItemKey: (index) => rows[index]?.key ?? `transcript-row-${index}`,
     measureElement: (element) => element.getBoundingClientRect().height,
   });
+  useLayoutEffect(() => {
+    if (!tailScrollRequest || rows.length === 0) return;
+    virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
+    const frame = window.requestAnimationFrame(() => {
+      virtualizer.scrollToIndex(rows.length - 1, { align: 'end' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [rows.length, tailScrollRequest, virtualizer]);
   useLayoutEffect(() => {
     void rows.length;
     const measure = () => {

@@ -2635,8 +2635,27 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(
     page.getByRole('button', { name: 'Preview', exact: true }),
   ).toHaveCount(0);
+  await page.mouse.wheel(0, -100_000);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollHeight -
+          (window.scrollY + window.innerHeight),
+      ),
+    )
+    .toBeGreaterThan(120);
   await composerInput.fill('stream this');
   await page.getByRole('button', { name: 'Send' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollHeight -
+          (window.scrollY + window.innerHeight),
+      ),
+    )
+    .toBeLessThanOrEqual(1);
   await expect
     .poll(() => mocks.commands.some((command) => command.type === 'prompt'))
     .toBe(true);

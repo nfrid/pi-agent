@@ -503,12 +503,14 @@ export function Composer({
   runtimes = runtime ? [runtime] : [],
   sessionId,
   workspaceId,
+  onMessageSubmitted,
   onPromptSubmitted,
 }: {
   runtime: RuntimeSnapshot | undefined;
   runtimes?: readonly RuntimeSnapshot[];
   sessionId: string;
   workspaceId?: string;
+  onMessageSubmitted?: () => void;
   onPromptSubmitted?: (text: string) => void;
 }) {
   const go = useDashboardNavigate();
@@ -744,6 +746,7 @@ export function Composer({
       writeComposerDraft(sessionId, '');
       setText('');
       editorRef.current?.setMarkdown('');
+      onMessageSubmitted?.();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {

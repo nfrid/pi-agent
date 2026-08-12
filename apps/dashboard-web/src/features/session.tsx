@@ -47,6 +47,7 @@ type ComposerProps = {
   runtimes?: readonly RuntimeSnapshot[];
   sessionId: string;
   workspaceId?: string;
+  onMessageSubmitted?: () => void;
   onPromptSubmitted?: (text: string) => void;
 };
 
@@ -115,6 +116,7 @@ export function SessionView({
   const [history, setHistory] = useState<SessionApiResponse['history']>();
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string>();
+  const [tailScrollRequest, setTailScrollRequest] = useState(0);
   const closeInspector = useCallback(() => setInspectorOpen(false), []);
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const autoScrollFrameRef = useRef<number | undefined>(undefined);
@@ -710,6 +712,7 @@ export function SessionView({
     userScrollIntentRef.current = false;
     stickToBottomRef.current = true;
     setAwayFromLatest(false);
+    setTailScrollRequest((current) => current + 1);
     window.scrollTo(0, document.documentElement.scrollHeight);
     window.requestAnimationFrame(() => {
       if (stickToBottomRef.current && !userScrollIntentRef.current)
@@ -828,6 +831,7 @@ export function SessionView({
           key={id}
           projection={projection}
           runtime={runtime}
+          tailScrollRequest={tailScrollRequest}
           outlineOpen={outlineOpen}
           onOutlineOpenChange={setOutlineOpen}
         />
@@ -849,6 +853,7 @@ export function SessionView({
             runtimes={snapshot.runtimes}
             sessionId={id}
             workspaceId={workspaceId}
+            onMessageSubmitted={jumpToLatest}
             onPromptSubmitted={(text) => {
               store.optimisticallyTitleSession(id, text);
             }}
