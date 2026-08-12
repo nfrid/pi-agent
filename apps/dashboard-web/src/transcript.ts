@@ -23,6 +23,15 @@ export interface TranscriptTodoTask {
   status: string;
 }
 
+/** Bounded canonical structured output captured from one delegate run. */
+export interface TranscriptStructuredResult {
+  label: string;
+  status: 'pending' | 'valid' | 'invalid';
+  value?: unknown;
+  valueOmitted?: boolean;
+  errors?: readonly string[];
+}
+
 export type TranscriptEvent =
   | {
       kind: 'compaction' | 'branch-summary';
@@ -42,6 +51,7 @@ export type TranscriptEvent =
       status: 'success' | 'error';
       content?: string;
       details?: unknown;
+      structuredResults?: readonly TranscriptStructuredResult[];
     }
   | {
       kind: 'settings';
@@ -238,6 +248,81 @@ function todoEvent(
   };
 }
 
+const MAX_DELEGATE_STRUCTURED_JOBS = 16;
+const MAX_DELEGATE_STRUCTURED_RUNS = 64;
+const MAX_DELEGATE_STRUCTURED_ERRORS = 16;
+
+function structuredResultView(
+  value: Record<string, unknown>,
+  label: string,
+): TranscriptStructuredResult {
+  const rawStatus = stringField(value, 'status');
+  const status: TranscriptStructuredResult['status'] =
+    rawStatus === 'pending' || rawStatus === 'valid' || rawStatus === 'invalid'
+      ? rawStatus
+      : value.valid === true
+        ? 'valid'
+        : 'invalid';
+  const errors = Array.isArray(value.errors)
+    ? value.errors
+        .filter((error): error is string => typeof error === 'string')
+        .slice(0, MAX_DELEGATE_STRUCTURED_ERRORS)
+        .map((error) => error.slice(0, 240))
+    : undefined;
+  const hasValue = Object.hasOwn(value, 'value') && value.value !== undefined;
+  return {
+    label,
+    status,
+    ...(hasValue ? { value: value.value } : {}),
+    ...(value.valueOmitted === true || (status === 'valid' && !hasValue)
+      ? { valueOmitted: true }
+      : {}),
+    ...(errors?.length ? { errors } : {}),
+  };
+}
+
+/**
+ * Pull only the bounded, harness-authored structured result projections out of
+ * delegate job details. Prose remains a separate handoff field; this data is
+ * rendered with structured controls instead of being serialized into Markdown.
+ */
+function delegateStructuredResults(
+  details: Record<string, unknown> | undefined,
+): TranscriptStructuredResult[] | undefined {
+  if (!details || !Array.isArray(details.jobs)) return undefined;
+  const jobs = details.jobs
+    .filter(
+      (value): value is Record<string, unknown> => record(value) !== undefined,
+    )
+    .slice(0, MAX_DELEGATE_STRUCTURED_JOBS);
+  const results: TranscriptStructuredResult[] = [];
+  for (const [jobIndex, job] of jobs.entries()) {
+    const jobName =
+      stringField(job, 'name') ??
+      (stringField(job, 'id')
+        ? `Delegate ${stringField(job, 'id')}`
+        : `Delegate ${jobIndex + 1}`);
+    const runs = Array.isArray(job.runs)
+      ? job.runs
+          .filter(
+            (value): value is Record<string, unknown> =>
+              record(value) !== undefined,
+          )
+          .slice(0, MAX_DELEGATE_STRUCTURED_RUNS)
+      : [];
+    for (const [runIndex, run] of runs.entries()) {
+      const structured = record(run.structuredResult);
+      if (!structured) continue;
+      const label =
+        jobs.length > 1 || runs.length > 1
+          ? `${jobName} · Run ${runIndex + 1}`
+          : jobName;
+      results.push(structuredResultView(structured, label));
+    }
+  }
+  return results.length ? results : undefined;
+}
+
 function asyncResultEvent(
   raw: Record<string, unknown>,
 ):
@@ -264,12 +349,14 @@ function asyncResultEvent(
         : 'success';
     const subject =
       jobs.length > 1 ? `${jobs.length} delegate jobs` : (name ?? 'Delegate');
+    const structuredResults = delegateStructuredResults(details);
     return {
       kind: 'delegate-result',
       label: `${status === 'error' ? 'Delegate failed' : 'Delegate finished'} · ${subject}`,
       status,
       ...(content ? { content } : {}),
       ...(details ? { details } : {}),
+      ...(structuredResults ? { structuredResults } : {}),
     };
   }
   if (customType === 'background-terminal-result') {

@@ -593,15 +593,112 @@ describe('activity row views and virtual transcript construction', () => {
         data: {
           customType: 'delegate-job-result',
           display: true,
-          details: { jobs: [{ name: 'UX audit', state: 'success' }] },
+          details: {
+            jobs: [
+              {
+                name: 'UX audit',
+                state: 'success',
+                runs: [
+                  {
+                    structuredResult: {
+                      valid: true,
+                      value: {
+                        outcome: 'done',
+                        findings: [{ filePath: 'src/App.tsx' }],
+                      },
+                      errors: [],
+                    },
+                  },
+                ],
+              },
+            ],
+          },
         },
       },
     } as never);
 
-    expect(toTranscriptEntries(projection)[0]?.event).toMatchObject({
+    const event = toTranscriptEntries(projection)[0]?.event;
+    expect(event).toMatchObject({
       kind: 'delegate-result',
       label: 'Delegate finished · UX audit',
       status: 'success',
+      structuredResults: [
+        {
+          label: 'UX audit',
+          status: 'valid',
+          value: {
+            outcome: 'done',
+            findings: [{ filePath: 'src/App.tsx' }],
+          },
+        },
+      ],
+    });
+  });
+
+  it('labels batch delegate structured results and preserves invalid or omitted states', () => {
+    const [item] = toTranscriptEntries([
+      {
+        type: 'custom_message',
+        customType: 'delegate-job-result',
+        display: true,
+        content: 'Batch delegates finished.',
+        details: {
+          jobs: [
+            {
+              name: 'First audit',
+              state: 'success',
+              runs: [
+                {
+                  structuredResult: {
+                    valid: true,
+                    value: { outcome: 'done' },
+                  },
+                },
+              ],
+            },
+            {
+              name: 'Second audit',
+              state: 'error',
+              runs: [
+                {
+                  structuredResult: {
+                    valid: false,
+                    errors: ['/: expected result'],
+                  },
+                },
+              ],
+            },
+            {
+              name: 'Third audit',
+              state: 'success',
+              runs: [
+                {
+                  structuredResult: {
+                    status: 'valid',
+                    valueOmitted: true,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+    expect(item?.event).toMatchObject({
+      kind: 'delegate-result',
+      structuredResults: [
+        { label: 'First audit · Run 1', status: 'valid' },
+        {
+          label: 'Second audit · Run 1',
+          status: 'invalid',
+          errors: ['/: expected result'],
+        },
+        {
+          label: 'Third audit · Run 1',
+          status: 'valid',
+          valueOmitted: true,
+        },
+      ],
     });
   });
 

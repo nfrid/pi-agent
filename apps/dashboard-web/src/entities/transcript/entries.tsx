@@ -1,12 +1,16 @@
 import { useState } from 'react';
 import { DashboardTime } from '../../features/timestamp';
 import { Markdown } from '../../Markdown';
-import type { TranscriptModelItem } from '../../transcript';
+import type {
+  TranscriptModelItem,
+  TranscriptStructuredResult,
+} from '../../transcript';
 import { activityStepParts } from './activity';
 import { activityTitleLine } from './activity-lead';
 import { ActivityStepContent } from './activity-summary';
 import {
   BoundedPayloadPreview,
+  StructuredPayloadView,
   ToolInspector,
   toolInspectorRecord,
 } from './inspector';
@@ -47,6 +51,56 @@ function compactTokenCount(tokens: number): string {
     notation: 'compact',
     maximumFractionDigits: 0,
   }).format(tokens);
+}
+
+export function StructuredDelegateResults({
+  results,
+}: {
+  results: readonly TranscriptStructuredResult[];
+}) {
+  const occurrences = new Map<string, number>();
+  return (
+    <section
+      className="session-event-structured-results"
+      aria-label="Structured delegate results"
+    >
+      {results.map((result) => {
+        const occurrence = (occurrences.get(result.label) ?? 0) + 1;
+        occurrences.set(result.label, occurrence);
+        return (
+          <section
+            className="payload-section"
+            aria-label={result.label}
+            key={`${result.label}-${occurrence}`}
+          >
+            <h4>{result.label}</h4>
+            <p>Status: {result.status}</p>
+            {result.status === 'valid' && result.value !== undefined ? (
+              <>
+                <StructuredPayloadView value={result.value} />
+                <details className="tool-inspector-raw">
+                  <summary>Raw JSON</summary>
+                  <BoundedPayloadPreview
+                    value={result.value}
+                    label={`${result.label} structured result JSON`}
+                  />
+                </details>
+              </>
+            ) : result.status === 'valid' && result.valueOmitted ? (
+              <p className="payload-truncation-label">
+                Structured result value unavailable in this bounded snapshot.
+              </p>
+            ) : null}
+            {result.errors?.map((error) => (
+              <p className="payload-truncation-label" key={error}>
+                {error}
+              </p>
+            ))}
+          </section>
+        );
+      })}
+    </section>
+  );
 }
 
 function TranscriptEventEntry({
@@ -92,11 +146,16 @@ function TranscriptEventEntry({
     ) : event.kind === 'delegate-result' ||
       event.kind === 'background-result' ||
       event.kind === 'custom-message' ? (
-      event.content ? (
-        <div className="session-event-details">
-          <Markdown>{event.content}</Markdown>
-        </div>
-      ) : null
+      <>
+        {event.content ? (
+          <div className="session-event-details">
+            <Markdown>{event.content}</Markdown>
+          </div>
+        ) : null}
+        {event.kind === 'delegate-result' && event.structuredResults ? (
+          <StructuredDelegateResults results={event.structuredResults} />
+        ) : null}
+      </>
     ) : null
   ) : null;
   const hasDetails =
@@ -106,7 +165,9 @@ function TranscriptEventEntry({
     ((event.kind === 'delegate-result' ||
       event.kind === 'background-result' ||
       event.kind === 'custom-message') &&
-      Boolean(event.content));
+      (Boolean(event.content) ||
+        (event.kind === 'delegate-result' &&
+          Boolean(event.structuredResults?.length))));
   const className = `session-event event-${event.kind}${failed ? ' event-failed' : ''}`;
   const heading = (
     <>

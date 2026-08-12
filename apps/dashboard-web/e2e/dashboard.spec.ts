@@ -1171,7 +1171,26 @@ test('dense mobile session keeps conversation and activity readable', async ({
             customType: 'delegate-job-result',
             display: true,
             content: '# Background delegate job dj-1 (UX audit) success',
-            details: { jobs: [{ name: 'UX audit', state: 'success' }] },
+            details: {
+              jobs: [
+                {
+                  name: 'UX audit',
+                  state: 'success',
+                  runs: [
+                    {
+                      structuredResult: {
+                        valid: true,
+                        value: {
+                          outcome: 'done',
+                          findings: [{ filePath: 'src/App.tsx' }],
+                        },
+                        errors: [],
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
           },
           {
             type: 'custom_message',
@@ -1373,7 +1392,19 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await expect(
     page.getByText('Model → openai/gpt-5.6-sol · thinking medium'),
   ).toBeVisible();
-  await expect(page.getByText('Delegate finished · UX audit')).toBeVisible();
+  const delegateResult = page.getByText('Delegate finished · UX audit');
+  await expect(delegateResult).toBeVisible();
+  await delegateResult.click();
+  const structuredDelegateResults = page.getByRole('region', {
+    name: 'Structured delegate results',
+  });
+  await expect(structuredDelegateResults).toBeVisible();
+  await expect(structuredDelegateResults).toContainText('Outcome');
+  await expect(structuredDelegateResults).toContainText('done');
+  await expect(structuredDelegateResults).toContainText('src/App.tsx');
+  await expect(structuredDelegateResults.getByText('Raw JSON')).toBeVisible();
+  await delegateResult.click();
+  await expect(structuredDelegateResults).toHaveCount(0);
   await expect(
     page.getByText(/Background command finished · Dashboard build · 2s/),
   ).toBeVisible();
@@ -1474,7 +1505,7 @@ test('dense mobile session keeps conversation and activity readable', async ({
     )
     .toBeLessThanOrEqual(1);
   const failedActivity = page.getByRole('button', {
-    name: /Checking the failed command.*1 tool.*failed/,
+    name: /Checking the failed command.*1 tool.*(?:failed|error)/,
   });
   await expect(failedActivity).toBeVisible();
   await failedActivity.click();
