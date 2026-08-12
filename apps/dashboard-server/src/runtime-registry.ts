@@ -59,7 +59,14 @@ type RuntimeRecord = {
 };
 
 export type RegistryChange =
-  | { kind: 'registered'; snapshot: RuntimeSnapshot }
+  | {
+      kind: 'registered';
+      snapshot: RuntimeSnapshot;
+      /** True when this runtime identity already had a registry record. */
+      reconnected?: boolean;
+      runtimeEpoch?: string;
+      runtimeSeq?: number;
+    }
   | {
       kind: 'event';
       runtimeId: string;
@@ -68,7 +75,13 @@ export type RegistryChange =
       runtimeEpoch?: string;
       runtimeSeq?: number;
     }
-  | { kind: 'offline'; snapshot: RuntimeSnapshot };
+  | {
+      kind: 'offline';
+      snapshot: RuntimeSnapshot;
+      runtimeEpoch?: string;
+      /** Synthetic lifecycle events use the next sequence after the last bridge frame. */
+      runtimeSeq?: number;
+    };
 
 function isQueueDraftCommand(command: BridgeCommand): boolean {
   return (
@@ -274,6 +287,9 @@ export class RuntimeRegistry {
           this.options.onChange?.({
             kind: 'registered',
             snapshot: record.snapshot,
+            reconnected: old !== undefined,
+            runtimeEpoch,
+            runtimeSeq: frame.seq,
           });
         } else if (record) {
           this.handleFrame(record, frame);
@@ -302,7 +318,12 @@ export class RuntimeRegistry {
           online: false,
           lastSeenAt: Date.now(),
         };
-        this.options.onChange?.({ kind: 'offline', snapshot: record.snapshot });
+        this.options.onChange?.({
+          kind: 'offline',
+          snapshot: record.snapshot,
+          runtimeEpoch: record.runtimeEpoch,
+          runtimeSeq: record.reducerState.lastRuntimeSeq + 1,
+        });
       }
     });
     socket.once('error', () => socket.destroy());

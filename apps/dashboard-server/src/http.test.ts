@@ -10,7 +10,11 @@ import {
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { parseFrame, serializeFrame } from '@pi-dashboard/protocol';
+import {
+  parseDashboardMessage,
+  parseFrame,
+  serializeFrame,
+} from '@pi-dashboard/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { createDashboardServer } from './http.js';
@@ -211,6 +215,111 @@ describe('dashboard HTTP boundary', () => {
     );
     expect(gap.status).toBe(409);
     await expect(gap.json()).resolves.toMatchObject({ code: 'replay-gap' });
+  });
+
+  it('keeps runtime lifecycle SSE records snapshotless across replay', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-lifecycle-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const implementation = server as unknown as {
+      eventStream: {
+        cursor: number;
+        replayAfter(cursor: number): {
+          events: readonly Record<string, unknown>[];
+        };
+      };
+    };
+    const initialCursor = implementation.eventStream.cursor;
+    const waitForCursor = async (cursor: number): Promise<void> => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        if (implementation.eventStream.cursor >= cursor) return;
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      }
+      throw new Error(`Timed out waiting for cursor ${cursor}.`);
+    };
+    const hello = (cwd: string) => ({
+      kind: 'event' as const,
+      seq: 1,
+      event: {
+        type: 'runtime.hello' as const,
+        protocolVersion: 1 as const,
+        snapshot: {
+          runtimeId: 'lifecycle-runtime',
+          ownership: 'external' as const,
+          pid: 1,
+          cwd,
+          liveState: 'idle' as const,
+          session: { id: 'lifecycle-session', entries: [] },
+          pendingInteractions: [],
+        },
+      },
+    });
+    const connect = async (cwd: string): Promise<net.Socket> => {
+      const bridge = net.createConnection(server?.socketPath as string);
+      await new Promise<void>((resolve, reject) => {
+        bridge.once('connect', resolve);
+        bridge.once('error', reject);
+      });
+      bridge.write(serializeFrame(hello(cwd)));
+      return bridge;
+    };
+
+    const first = await connect('/tmp/first');
+    await waitForCursor(initialCursor + 1);
+    first.destroy();
+    await waitForCursor(initialCursor + 2);
+    const replacement = await connect('/tmp/reconnected');
+    await waitForCursor(initialCursor + 3);
+
+    const replay = implementation.eventStream.replayAfter(initialCursor).events;
+    expect(replay[0]).toMatchObject({ type: 'snapshot' });
+    const lifecycle = replay.slice(1);
+    expect(lifecycle).toHaveLength(2);
+    expect(lifecycle[0]).toMatchObject({
+      event: { type: 'runtime.stateChanged' },
+    });
+    expect(lifecycle[1]).toMatchObject({
+      event: {
+        type: 'runtime.hello',
+        snapshot: {
+          session: { entries: [], entriesComplete: false },
+        },
+      },
+    });
+    for (const record of lifecycle)
+      expect(record).not.toHaveProperty('snapshot');
+
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/api/events?cursor=${initialCursor}`,
+      { headers: { 'x-dashboard-token': 'test-token' } },
+    );
+    expect(response.status).toBe(200);
+    const reader = response.body?.getReader();
+    expect(reader).toBeTruthy();
+    let text = '';
+    const frames: Record<string, unknown>[] = [];
+    while (frames.length < replay.length) {
+      const next = await reader?.read();
+      if (!next || next.done) break;
+      text += new TextDecoder().decode(next.value);
+      for (const line of text.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        frames.push(JSON.parse(line.slice(6)) as Record<string, unknown>);
+      }
+      text = text.slice(text.lastIndexOf('\n') + 1);
+    }
+    await reader?.cancel();
+    expect(frames).toHaveLength(replay.length);
+    expect(frames.slice(1).every((frame) => !('snapshot' in frame))).toBe(true);
+    replacement.destroy();
   });
 
   it('rejects an oversized replay before starting SSE', async () => {
@@ -625,6 +734,14 @@ describe('dashboard HTTP boundary', () => {
     expect(update.type).toBe('event');
     expect(update.snapshot).toBeUndefined();
     expect(routineSnapshotConstructions).toBe(0);
+    expect(() => parseDashboardMessage(update)).not.toThrow();
+    expect(Object.keys(update).sort()).toEqual([
+      'event',
+      'revision',
+      'runtimeId',
+      'serverId',
+      'type',
+    ]);
     expect(update.revision).toBeGreaterThan(registrationSnapshot.revision);
     bridge.write(
       serializeFrame({

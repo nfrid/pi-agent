@@ -474,6 +474,20 @@ describe('dashboard protocol', () => {
         },
       }).cursor,
     ).toBe(1);
+    expect(() =>
+      parseDashboardEventEnvelope({
+        cursor: 1,
+        emittedAt: 100,
+        event: { type: 'agent.settled', sessionId: 'session-1' },
+        notification: {
+          id: 'notification-1',
+          kind: 'runtime-exited',
+          title: 'Disconnected',
+          body: 'Runtime went offline',
+          createdAt: 100,
+        },
+      }),
+    ).toThrow();
     expect(
       parseDashboardStreamMessage({
         cursor: 2,

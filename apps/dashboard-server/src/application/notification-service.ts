@@ -51,7 +51,6 @@ export class NotificationService {
           change.snapshot.cwd,
         createdAt: Date.now(),
       });
-      return;
     }
     if (change.kind !== 'event') return;
     const event = change.event;

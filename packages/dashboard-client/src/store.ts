@@ -691,6 +691,7 @@ export class DashboardLiveStore {
     )
       this.installSnapshot(envelope.snapshot, { source: 'sse' });
     let nextState = this.state;
+    let runtimeOrderingAccepted = envelope.runtimeId === undefined;
     const sessionId = sessionIdForEvent(envelope);
     const liveMessage = liveMessageIdentity(envelope);
     if (sessionId && liveMessage?.role === 'user')
@@ -699,7 +700,7 @@ export class DashboardLiveStore {
         sessionId,
         liveMessage.content,
       );
-    if (sessionId) {
+    if (sessionId && envelope.event.type !== 'runtime.hello') {
       const currentProjection = nextState.transcriptsBySessionId[sessionId];
       const canSeedSnapshot =
         envelope.event.type === 'session.snapshot' &&
@@ -738,18 +739,38 @@ export class DashboardLiveStore {
           // The browser snapshot already includes this runtime event. Advance
           // transport metadata without reducing the event a second time.
           const ordering = applyTransportOrdering(runtimeState, envelope);
-          this.runtimeReducerStates.set(envelope.runtimeId, {
-            snapshot: currentRuntime,
-            ...ordering.state,
-          });
+          runtimeOrderingAccepted = ordering.accepted;
+          if (ordering.accepted)
+            this.runtimeReducerStates.set(envelope.runtimeId, {
+              snapshot: currentRuntime,
+              ...ordering.state,
+            });
         } else {
           const reduced = applyRuntimeEvent(runtimeState, envelope);
+          runtimeOrderingAccepted = reduced.accepted;
+          if (reduced.accepted) {
+            this.runtimeReducerStates.set(envelope.runtimeId, reduced.state);
+            if (reduced.state.snapshot !== currentRuntime)
+              nextState = this.installRuntimeProjection(
+                nextState,
+                reduced.state.snapshot,
+              );
+          }
+        }
+      } else if (envelope.event.type === 'runtime.hello') {
+        // A reconnect hello is authoritative even if a shell was evicted while
+        // the stream was offline; keep the event reducer as the single owner.
+        const reduced = applyRuntimeEvent(
+          createRuntimeReducerState(envelope.event.snapshot),
+          envelope,
+        );
+        runtimeOrderingAccepted = reduced.accepted;
+        if (reduced.accepted) {
           this.runtimeReducerStates.set(envelope.runtimeId, reduced.state);
-          if (reduced.state.snapshot !== currentRuntime)
-            nextState = this.installRuntimeProjection(
-              nextState,
-              reduced.state.snapshot,
-            );
+          nextState = this.installRuntimeProjection(
+            nextState,
+            reduced.state.snapshot,
+          );
         }
       }
     }
@@ -762,30 +783,53 @@ export class DashboardLiveStore {
       (event.type === 'message.finished' ||
         event.type === 'tool.finished' ||
         event.type === 'agent.settled' ||
+        event.type === 'runtime.hello' ||
         event.type === 'session.changed' ||
         event.type === 'session.snapshot');
-    if (sessionId && semanticSessionUpdate)
+    if (
+      sessionId &&
+      semanticSessionUpdate &&
+      (event.type !== 'runtime.hello' || runtimeOrderingAccepted)
+    )
       sessionChangeById = {
         ...sessionChangeById,
         [sessionId]: (sessionChangeById[sessionId] ?? 0) + 1,
       };
     if (
+      envelope.runtimeId &&
       sessionId &&
-      (event.type === 'session.changed' || event.type === 'session.snapshot') &&
-      'session' in event
+      runtimeOrderingAccepted &&
+      event.type === 'runtime.stateChanged' &&
+      event.snapshot?.online === false
     ) {
       const current = nextState.sessionsById[sessionId];
+      if (current?.activeRuntimeId === envelope.runtimeId) {
+        const sessionsById = { ...nextState.sessionsById };
+        const { activeRuntimeId: _activeRuntimeId, ...metadata } = current;
+        sessionsById[sessionId] = metadata;
+        nextState = { ...nextState, sessionsById };
+      }
+    }
+    if (
+      sessionId &&
+      (event.type === 'session.changed' ||
+        event.type === 'session.snapshot' ||
+        (event.type === 'runtime.hello' && runtimeOrderingAccepted))
+    ) {
+      const sessionUpdate =
+        event.type === 'runtime.hello' ? event.snapshot.session : event.session;
+      const current = nextState.sessionsById[sessionId];
       const hasAuthoritativeTitle =
-        event.session.name !== undefined || event.session.title !== undefined;
+        sessionUpdate.name !== undefined || sessionUpdate.title !== undefined;
       if (current) {
         const metadata = {
           ...current,
-          ...(event.session.name === undefined
+          ...(sessionUpdate.name === undefined
             ? {}
-            : { name: event.session.name }),
-          ...(event.session.title === undefined
+            : { name: sessionUpdate.name }),
+          ...(sessionUpdate.title === undefined
             ? {}
-            : { title: event.session.title }),
+            : { title: sessionUpdate.title }),
         };
         nextState = this.installSessionProjection(nextState, metadata);
       }
@@ -796,6 +840,38 @@ export class DashboardLiveStore {
           ...nextState,
           optimisticSessionTitlesById: optimistic,
         };
+      }
+      if (event.type === 'runtime.hello' && envelope.runtimeId) {
+        const sessionsById = { ...nextState.sessionsById };
+        const runtime = nextState.runtimesById[envelope.runtimeId];
+        const existing = sessionsById[sessionId];
+        sessionsById[sessionId] = existing
+          ? { ...existing, activeRuntimeId: envelope.runtimeId }
+          : {
+              id: sessionId,
+              file: sessionUpdate.file ?? '',
+              cwd: sessionUpdate.cwd ?? runtime?.cwd ?? '',
+              updatedAt: runtime?.lastSeenAt ?? Date.now(),
+              ...(sessionUpdate.name === undefined
+                ? {}
+                : { name: sessionUpdate.name }),
+              ...(sessionUpdate.title === undefined
+                ? {}
+                : { title: sessionUpdate.title }),
+              activeRuntimeId: envelope.runtimeId,
+            };
+        if (
+          previousRuntimeSessionId &&
+          previousRuntimeSessionId !== sessionId
+        ) {
+          const previous = sessionsById[previousRuntimeSessionId];
+          if (previous?.activeRuntimeId === envelope.runtimeId) {
+            const { activeRuntimeId: _activeRuntimeId, ...previousMetadata } =
+              previous;
+            sessionsById[previousRuntimeSessionId] = previousMetadata;
+          }
+        }
+        nextState = { ...nextState, sessionsById };
       }
       if (envelope.runtimeId)
         sessionReplacementByRuntimeId = {
@@ -1432,7 +1508,14 @@ export const selectRuntime =
   (runtimeId: string) => (state: DashboardLiveState) =>
     state.runtimesById[runtimeId];
 export const selectRuntimeForSession =
-  (sessionId: string) => (state: DashboardLiveState) =>
-    Object.values(state.runtimesById).find(
+  (sessionId: string) => (state: DashboardLiveState) => {
+    const activeRuntimeId = state.sessionsById[sessionId]?.activeRuntimeId;
+    const activeRuntime = activeRuntimeId
+      ? state.runtimesById[activeRuntimeId]
+      : undefined;
+    if (activeRuntime?.session.id === sessionId) return activeRuntime;
+    const matching = Object.values(state.runtimesById).filter(
       (runtime) => runtime.session.id === sessionId,
     );
+    return matching.find((runtime) => runtime.online !== false) ?? matching[0];
+  };

@@ -49,12 +49,12 @@ function isSparseRuntimeSession(runtime: RuntimeSnapshot): boolean {
 
 /**
  * Browser reducers already own runtime/transcript projections for these
- * events. Session-index metadata, notifications, and runtime
- * registration/offline transitions remain snapshot-backed because they are not
- * fully represented by an event reducer.
+ * events. Session-index metadata and most notifications remain snapshot-backed;
+ * lifecycle registration/offline deltas use their small synthetic events.
  */
 function requiresBrowserSnapshot(change: RegistryChange): boolean {
-  if (change.kind !== 'event') return true;
+  if (change.kind === 'offline') return false;
+  if (change.kind === 'registered') return !change.reconnected;
   switch (change.event.type) {
     case 'runtime.stateChanged':
     case 'runtime.heartbeat':
@@ -760,9 +760,14 @@ export class DashboardServerImpl implements DashboardServer {
         return;
       }
       this.ws.publish({
-        ...record,
+        type: 'event',
         serverId: this.serverId,
         revision: this.revision,
+        runtimeId:
+          typeof record.runtimeId === 'string' && record.runtimeId.length > 0
+            ? record.runtimeId
+            : 'dashboard',
+        event: record.event,
         ...(includeSnapshot && streamRecord.snapshot !== undefined
           ? { snapshot: streamRecord.snapshot }
           : {}),
