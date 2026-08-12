@@ -544,7 +544,7 @@ export class DashboardServerImpl implements DashboardServer {
       };
     };
     const runtimeIsWorking = (runtime: RuntimeSnapshot): boolean =>
-      runtime.liveState === 'working';
+      runtime.liveState === 'working' || runtime.liveState === 'compacting';
     const sameReadAuthority = (
       left: RuntimeSnapshot | undefined,
       right: RuntimeSnapshot | undefined,

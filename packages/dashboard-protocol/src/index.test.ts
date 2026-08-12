@@ -313,6 +313,20 @@ describe('dashboard protocol', () => {
     ).toHaveLength(96);
   });
 
+  it('accepts compacting as a runtime live state', () => {
+    expect(
+      parseRuntimeSnapshot({
+        runtimeId: 'compacting-runtime',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'compacting',
+        session: { id: 'compacting-session', entries: [] },
+        pendingInteractions: [],
+      }).liveState,
+    ).toBe('compacting');
+  });
+
   it('semantically validates capability snapshots on runtime events', () => {
     const duplicate = {
       version: 1,

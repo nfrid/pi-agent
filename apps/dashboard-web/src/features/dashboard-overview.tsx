@@ -218,13 +218,15 @@ export function RuntimeCard({
   const glyph =
     status === 'working'
       ? '●'
-      : status === 'waiting'
-        ? '◆'
-        : status === 'failed'
-          ? '×'
-          : status === 'offline'
-            ? '○'
-            : '·';
+      : status === 'compacting'
+        ? '◐'
+        : status === 'waiting'
+          ? '◆'
+          : status === 'failed'
+            ? '×'
+            : status === 'offline'
+              ? '○'
+              : '·';
   const model = runtime.model
     ? `${runtime.model.provider}/${runtime.model.model}`
     : 'model unavailable';

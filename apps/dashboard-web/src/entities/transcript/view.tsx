@@ -68,6 +68,7 @@ export function Transcript({
         liveTail:
           runtime?.online !== false &&
           (runtime?.liveState === 'working' ||
+            runtime?.liveState === 'compacting' ||
             runtime?.liveState === 'waiting' ||
             runtime?.liveState === 'aborting' ||
             runtime?.liveState === 'stopping'),

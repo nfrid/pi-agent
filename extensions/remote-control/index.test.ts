@@ -33,6 +33,8 @@ import {
   dispatchDashboardCommand,
   dispatchDashboardInput,
   emitAgentSettlement,
+  emitCompactionCompleted,
+  emitCompactionStarted,
   expandDashboardInput,
   flushQueueDrafts,
   LiveEventNormalizer,
@@ -73,6 +75,62 @@ function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe('remote-control session lifecycle', () => {
+  it('publishes compaction progress and refreshes the completed session', () => {
+    const events: unknown[] = [];
+    const broker = new InteractionBroker();
+    const runtime = {
+      isCurrent: () => true,
+      setContext: vi.fn(),
+      setLiveState: vi.fn(),
+      getInteractionBroker: () => broker,
+      snapshotPatch: (
+        _ctx: ExtensionContext,
+        state: RuntimeSnapshot['liveState'],
+      ) => ({
+        liveState: state,
+      }),
+      client: { sendEvent: (event: unknown) => events.push(event) },
+    } as unknown as Parameters<typeof emitCompactionStarted>[0];
+    const ctx = {
+      cwd: '/tmp/project',
+      isIdle: () => true,
+      getContextUsage: () => undefined,
+      sessionManager: {
+        getSessionId: () => 'session-compact',
+        getSessionFile: () => '/tmp/session-compact.jsonl',
+        getSessionName: () => 'Compacted session',
+        getCwd: () => '/tmp/project',
+        getLeafId: () => 'compact-leaf',
+        getBranch: () => [{ type: 'compaction', id: 'compact-leaf' }],
+      },
+    } as unknown as ExtensionContext;
+
+    emitCompactionStarted(runtime, ctx);
+    emitCompactionCompleted(runtime, ctx);
+
+    expect(events).toEqual([
+      {
+        type: 'runtime.stateChanged',
+        state: 'compacting',
+        snapshot: { liveState: 'compacting' },
+      },
+      expect.objectContaining({
+        type: 'session.snapshot',
+        session: expect.objectContaining({
+          id: 'session-compact',
+          leafId: 'compact-leaf',
+          entries: [{ type: 'compaction', id: 'compact-leaf' }],
+        }),
+      }),
+      {
+        type: 'runtime.stateChanged',
+        state: 'idle',
+        snapshot: { liveState: 'idle' },
+      },
+    ]);
+    expect(runtime.setContext).toHaveBeenCalled();
+  });
+
   it.each([
     'new',
     'resume',

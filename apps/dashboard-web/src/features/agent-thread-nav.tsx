@@ -25,7 +25,7 @@ export type AgentThreadRow = {
 };
 
 function statusRank(status: AgentThreadRow['status']): number {
-  if (status === 'working') return 0;
+  if (status === 'working' || status === 'compacting') return 0;
   if (status === 'waiting') return 1;
   if (status === 'failed') return 2;
   if (status === 'idle') return 3;
@@ -81,6 +81,7 @@ export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
 
 function statusGlyph(status: AgentThreadRow['status']): string {
   if (status === 'working') return '●';
+  if (status === 'compacting') return '◐';
   if (status === 'waiting') return '◆';
   if (status === 'failed') return '!';
   if (status === 'offline') return '○';

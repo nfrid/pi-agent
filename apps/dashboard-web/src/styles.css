@@ -125,6 +125,9 @@ select:focus-visible {
 .working-glyph {
   color: var(--green);
 }
+.compacting-glyph {
+  color: var(--purple);
+}
 .waiting-glyph {
   color: var(--orange);
 }
@@ -440,6 +443,9 @@ h2 {
 .runtime-card.working::before {
   background: var(--green);
 }
+.runtime-card.compacting::before {
+  background: var(--purple);
+}
 .runtime-card.waiting::before {
   background: var(--orange);
 }
@@ -458,8 +464,13 @@ h2 {
 .working .runtime-rail {
   color: var(--green);
 }
+.compacting .runtime-rail {
+  color: var(--purple);
+}
 .working .runtime-rail .status-glyph,
-.working-glyph {
+.compacting .runtime-rail .status-glyph,
+.working-glyph,
+.compacting-glyph {
   animation: tui-pulse 1.2s steps(2, end) infinite;
 }
 .waiting .runtime-rail {
@@ -475,7 +486,9 @@ h2 {
 }
 @media (prefers-reduced-motion: reduce) {
   .working .runtime-rail .status-glyph,
-  .working-glyph {
+  .compacting .runtime-rail .status-glyph,
+  .working-glyph,
+  .compacting-glyph {
     animation: none;
   }
 }
@@ -3289,6 +3302,10 @@ ol.delegate-inspector-runs > li small {
 .agent-thread-row.status-working .agent-thread-glyph {
   color: var(--green);
 }
+.agent-thread-row.status-compacting .agent-thread-glyph {
+  color: var(--purple);
+  animation: tui-pulse 1.2s steps(2, end) infinite;
+}
 .agent-thread-row:is(.status-working, .status-idle, .status-dormant)
   .agent-thread-glyph {
   font-size: 0;
@@ -3358,6 +3375,7 @@ ol.delegate-inspector-runs > li small {
   color: var(--dim);
 }
 .agent-thread-row.status-working .agent-thread-copy small,
+.agent-thread-row.status-compacting .agent-thread-copy small,
 .agent-thread-row.status-waiting .agent-thread-copy small,
 .agent-thread-row.status-failed .agent-thread-copy small {
   color: var(--muted);
@@ -3505,6 +3523,10 @@ ol.delegate-inspector-runs > li small {
 .session-status.status-working i {
   color: var(--green);
 }
+.session-status.status-compacting i {
+  color: var(--purple);
+  animation: tui-pulse 1.2s steps(2, end) infinite;
+}
 .session-status.status-waiting i {
   color: var(--orange);
 }
@@ -3512,6 +3534,12 @@ ol.delegate-inspector-runs > li small {
 .session-status.status-aborting i,
 .session-status.status-stopping i {
   color: var(--red);
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-thread-row.status-compacting .agent-thread-glyph,
+  .session-status.status-compacting i {
+    animation: none;
+  }
 }
 .session-heading-actions {
   display: flex;

@@ -48,6 +48,26 @@ export {
   thinkingLevelsSnapshot,
 } from './runtime-snapshot-adapter';
 
+export function emitCompactionStarted(
+  runtime: import('./runtime').RemoteControlRuntime,
+  ctx: ExtensionContext,
+): void {
+  emitState(runtime, ctx, 'compacting');
+}
+
+export function emitCompactionCompleted(
+  runtime: import('./runtime').RemoteControlRuntime,
+  ctx: ExtensionContext,
+): void {
+  runtime.setContext(ctx);
+  if (!runtime.isCurrent(ctx)) return;
+  runtime.client.sendEvent({
+    type: 'session.snapshot',
+    session: sessionSnapshot(ctx),
+  });
+  emitState(runtime, ctx);
+}
+
 export function shutdownRemoteControlRuntime(
   runtime: import('./runtime').RemoteControlRuntime,
   event: { reason: string },
@@ -154,6 +174,15 @@ export default defineExtension('remote-control', (pi) => {
       type: 'session.snapshot',
       session: sessionSnapshot(ctx),
     });
+  });
+  pi.on('session_before_compact', (event, ctx) => {
+    emitCompactionStarted(runtime, ctx);
+    event.signal.addEventListener('abort', () => emitState(runtime, ctx), {
+      once: true,
+    });
+  });
+  pi.on('session_compact', (_event, ctx) => {
+    emitCompactionCompleted(runtime, ctx);
   });
   pi.on('before_agent_start', (_event, ctx) => {
     if (!runtime.isCurrent(ctx)) return;

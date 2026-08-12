@@ -91,6 +91,7 @@ describe('queued message commands', () => {
       clientId: 'q2',
     });
     expect(shouldShowQueuePanel('working', 0)).toBe(true);
+    expect(shouldShowQueuePanel('compacting', 0)).toBe(true);
     expect(shouldShowQueuePanel('idle', 1)).toBe(true);
     expect(shouldShowQueuePanel('waiting', 1)).toBe(true);
     expect(shouldShowQueuePanel('idle', 0)).toBe(false);
@@ -808,23 +809,36 @@ describe('workspace-first agent navigation', () => {
             entries: [],
           },
         },
+        {
+          runtimeId: 'compacting',
+          liveState: 'compacting',
+          online: true,
+          cwd: '/workspace/app',
+          session: {
+            id: 'compacting-session',
+            title: 'Compacting thread',
+            entries: [],
+          },
+        },
       ],
       workspaces: [{ id: 'app', name: 'App', canonicalPath: '/workspace/app' }],
       sessions: [
         { id: 'idle-session', cwd: '/workspace/app', updatedAt: 1 },
         { id: 'failed-session', cwd: '/workspace/app', updatedAt: 2 },
         { id: 'working-session', cwd: '/workspace/app', updatedAt: 3 },
+        { id: 'compacting-session', cwd: '/workspace/app', updatedAt: 5 },
         { id: 'dormant-session', cwd: '/workspace/app', updatedAt: 4 },
       ],
     } as never;
     const rows = agentThreadRows(snapshot);
     expect(rows.map((row) => [row.id, row.status])).toEqual([
+      ['compacting-session', 'compacting'],
       ['working-session', 'working'],
       ['failed-session', 'failed'],
       ['idle-session', 'idle'],
       ['dormant-session', 'dormant'],
     ]);
-    const idle = rows[2];
+    const idle = rows[3];
     if (!idle) throw new Error('idle row missing');
     const history = Array.from({ length: 100 }, (_, index) => ({
       ...idle,
@@ -833,11 +847,11 @@ describe('workspace-first agent navigation', () => {
       updatedAt: index,
     }));
     expect(
-      boundedAgentThreadRows([...rows.slice(0, 2), ...history]),
-    ).toHaveLength(26);
+      boundedAgentThreadRows([...rows.slice(0, 3), ...history]),
+    ).toHaveLength(27);
     expect(
-      boundedAgentThreadRows([...rows.slice(0, 2), ...history], 48),
-    ).toHaveLength(50);
+      boundedAgentThreadRows([...rows.slice(0, 3), ...history], 48),
+    ).toHaveLength(51);
     const active = Array.from({ length: 60 }, (_, index) => ({
       ...rows[0],
       id: `active-${index}`,

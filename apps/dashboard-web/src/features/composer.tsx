@@ -147,7 +147,9 @@ export function shouldShowQueuePanel(
   liveState: RuntimeSnapshot['liveState'],
   queuedCount: number,
 ): boolean {
-  return liveState === 'working' || queuedCount > 0;
+  return (
+    liveState === 'working' || liveState === 'compacting' || queuedCount > 0
+  );
 }
 
 export function formatContextTokens(tokens: number): string {
@@ -558,6 +560,7 @@ export function Composer({
     !runtime ||
     runtime.online === false ||
     runtime.liveState === 'stopping' ||
+    runtime.liveState === 'compacting' ||
     runtime.liveState === 'waiting';
   const attachmentsEnabled = runtime ? runtimeSupportsImages(runtime) : false;
   useEffect(() => {
@@ -863,7 +866,11 @@ export function Composer({
               }
               onChange={updateText}
               placeholder={
-                disabled ? 'Agent is waiting for input' : 'Message Pi…'
+                runtime.liveState === 'compacting'
+                  ? 'Compacting context…'
+                  : disabled
+                    ? 'Agent is waiting for input'
+                    : 'Message Pi…'
               }
               readOnly={disabled || busy}
             />
@@ -925,6 +932,9 @@ export function Composer({
               </>
             )}
             {runtime.liveState === 'idle' && <span>Prompt</span>}
+            {runtime.liveState === 'compacting' && (
+              <span>Compacting context…</span>
+            )}
             {runtime.liveState === 'waiting' && <span>Answer above</span>}
             <ContextIndicator usage={runtime.contextUsage} />
           </div>

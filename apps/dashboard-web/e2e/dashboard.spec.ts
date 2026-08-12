@@ -326,6 +326,77 @@ test('command palette identifies the runtime before invoking repeated actions', 
   await expect.poll(() => invokedRuntime).toBe('runtime-beta');
 });
 
+test('session shell shows compaction progress', async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem('pi-dashboard-token', 'test-token'),
+  );
+  await page.route('**/api/usage', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/events?*', async (route) =>
+    route.fulfill({
+      contentType: 'text/event-stream',
+      body: ': heartbeat\n\n',
+    }),
+  );
+  const runtime = {
+    runtimeId: 'runtime-compacting',
+    ownership: 'external',
+    pid: 1,
+    cwd: '/tmp',
+    liveState: 'compacting',
+    online: true,
+    session: {
+      id: 'session-compacting',
+      title: 'Compacting session',
+      entries: [],
+      entriesComplete: true,
+    },
+    pendingInteractions: [],
+  };
+  const metadata = {
+    id: 'session-compacting',
+    file: '',
+    cwd: '/tmp',
+    title: 'Compacting session',
+    updatedAt: Date.now(),
+  };
+  await page.route('**/api/snapshot', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        serverId: 'server-compacting',
+        revision: 1,
+        cursor: 0,
+        runtimes: [runtime],
+        workspaces: [],
+        sessions: [metadata],
+        unread: [],
+      }),
+    }),
+  );
+  await page.route('**/api/sessions/session-compacting', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        serverId: 'server-compacting',
+        cursor: 0,
+        runtimeEpoch: 'epoch-compacting',
+        runtimeSeq: 1,
+        metadata,
+        entries: [],
+        entriesComplete: true,
+      }),
+    }),
+  );
+
+  await page.goto('/sessions/session-compacting');
+
+  await expect(page.locator('.session-status')).toHaveText(/compacting/i);
+  await expect(page.locator('.composer')).toContainText('Compacting context…');
+  await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
+});
+
 test('session shell exposes timestamps, dormant state, and persistent drafts', async ({
   page,
 }) => {

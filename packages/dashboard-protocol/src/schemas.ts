@@ -120,6 +120,7 @@ const UnknownSchema = Type.Unknown();
 export const RuntimeLiveStateSchema = Type.Union([
   Type.Literal('idle'),
   Type.Literal('working'),
+  Type.Literal('compacting'),
   Type.Literal('waiting'),
   Type.Literal('aborting'),
   Type.Literal('stopping'),

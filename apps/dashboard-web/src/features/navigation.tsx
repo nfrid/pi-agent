@@ -7,7 +7,9 @@ import { useDashboardUtility } from './dashboard-utility-context';
 export function runtimeStatusCounts(snapshot: BrowserSnapshot) {
   return {
     working: snapshot.runtimes.filter(
-      (runtime) => runtime.online !== false && runtime.liveState === 'working',
+      (runtime) =>
+        runtime.online !== false &&
+        (runtime.liveState === 'working' || runtime.liveState === 'compacting'),
     ).length,
     waiting: snapshot.runtimes.filter(
       (runtime) => runtime.online !== false && runtime.liveState === 'waiting',
