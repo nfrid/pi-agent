@@ -1,5 +1,3 @@
-// biome-ignore-all lint/a11y/useSemanticElements: Structured payload headings use explicit levels while remaining inline within summaries.
-
 import type { TranscriptRenderToolItem } from '@pi-dashboard/domain';
 import type { ReactNode } from 'react';
 
@@ -120,10 +118,6 @@ function structuredContainerDescriptor(value: unknown): string {
   return `${structuredType(value)} · ${count} ${noun}`;
 }
 
-function structuredHeadingLevel(depth: number): number {
-  return Math.min(6, Math.max(1, depth + 2));
-}
-
 /** Make paths stable without serializing payload values into React keys. */
 function structuredPathSegment(value: string): string {
   return value.replaceAll('~', '~0').replaceAll('/', '~1');
@@ -140,21 +134,13 @@ function structuredArrayPath(path: string, index: number): string {
 function StructuredNodeSummary({
   label,
   value,
-  depth,
 }: {
   label: string;
   value: unknown;
-  depth: number;
 }) {
   return (
     <summary className="structured-result-summary">
-      <span
-        aria-level={structuredHeadingLevel(depth)}
-        className="structured-result-heading"
-        role="heading"
-      >
-        {label}
-      </span>
+      <span className="structured-result-label">{label}</span>
       <span className="structured-result-summary-meta">
         {' · '}
         {structuredContainerDescriptor(value)}
@@ -170,23 +156,15 @@ function StructuredOmission({ children }: { children: ReactNode }) {
 function StructuredPrimitiveBlock({
   label,
   value,
-  depth,
 }: {
   label?: string;
   value: unknown;
-  depth: number;
 }) {
   const primitive = structuredPrimitive(value);
   return (
     <section className="structured-result-primitive-block">
       {label ? (
-        <span
-          aria-level={structuredHeadingLevel(depth)}
-          className="structured-result-heading"
-          role="heading"
-        >
-          {label}
-        </span>
+        <strong className="structured-result-field-label">{label}</strong>
       ) : null}
       <p className="structured-result-primitive">{primitive.text}</p>
       {primitive.truncated && (
@@ -224,7 +202,7 @@ function StructuredArrayItems({
                 value={item}
               />
             ) : (
-              <StructuredPrimitiveBlock depth={depth + 1} value={item} />
+              <StructuredPrimitiveBlock value={item} />
             )}
           </li>
         );
@@ -267,11 +245,7 @@ function StructuredObjectFields({
                 value={item}
               />
             ) : (
-              <StructuredPrimitiveBlock
-                depth={depth + 1}
-                label={label}
-                value={item}
-              />
+              <StructuredPrimitiveBlock label={label} value={item} />
             )}
           </li>
         );
@@ -302,10 +276,10 @@ function StructuredContainer({
   const atDepthLimit = depth >= STRUCTURED_VIEW_MAX_DEPTH;
   return (
     <details
-      className="structured-result-node"
+      className={`structured-result-node${depth === 0 ? ' structured-result-root' : ''}`}
       open={!atDepthLimit && depth < 3}
     >
-      <StructuredNodeSummary depth={depth} label={label} value={value} />
+      <StructuredNodeSummary label={label} value={value} />
       <div className="structured-result-node-content">
         {atDepthLimit ? (
           <StructuredOmission>
@@ -332,7 +306,7 @@ export function StructuredPayloadView({ value }: { value: unknown }) {
       {structuredContainer(value) ? (
         <StructuredContainer depth={0} label="Payload" path="$" value={value} />
       ) : (
-        <StructuredPrimitiveBlock depth={0} label="Payload" value={value} />
+        <StructuredPrimitiveBlock label="Payload" value={value} />
       )}
     </div>
   );

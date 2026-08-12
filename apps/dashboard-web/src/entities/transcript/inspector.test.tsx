@@ -44,14 +44,14 @@ describe('transcript payload inspection', () => {
       />,
     );
     expect(markup).toContain('class="structured-result-value"');
-    expect(markup).toContain('aria-level="2"');
-    expect(markup).toContain('role="heading"');
+    expect(markup).not.toContain('aria-level=');
+    expect(markup).not.toContain('role="heading"');
     expect(markup).toContain('>Payload</span>');
     expect(markup).toContain('object · 3 fields');
-    expect(markup).toContain('>Outcome</span>');
+    expect(markup).toContain('>Outcome</strong>');
     expect(markup).toContain('>Findings</span>');
     expect(markup).toContain('array · 1 item');
-    expect(markup).toContain('>File path</span>');
+    expect(markup).toContain('>File path</strong>');
     expect(markup).toContain('src/App.tsx');
     expect(markup).toContain('<ol class="structured-result-list">');
     expect(markup).toContain('types');
@@ -89,6 +89,21 @@ describe('transcript payload inspection', () => {
     expect(markup).toContain('Showing 24 of 25 fields; 1 field omitted.');
     expect(markup).toContain('class="structured-result-node"');
     expect(markup).not.toContain('not rendered');
+  });
+
+  it('renders cyclic object and array payloads with bounded raw fallback', () => {
+    const cycle: { items?: unknown[] } = {};
+    const items: unknown[] = [cycle];
+    cycle.items = items;
+    let markup = '';
+    expect(() => {
+      markup = renderToStaticMarkup(<StructuredPayloadView value={cycle} />);
+    }).not.toThrow();
+    expect(markup).toContain('Nested content omitted after depth 4.');
+    const rawMarkup = renderToStaticMarkup(
+      <BoundedPayloadPreview value={cycle} label="cyclic payload" />,
+    );
+    expect(rawMarkup).toContain('[unavailable payload]');
   });
 
   it('separates arguments and result before the expandable raw fallback', () => {

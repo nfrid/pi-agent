@@ -39,11 +39,11 @@ describe('expanded transcript tool rows', () => {
     );
 
     expect(markup).toContain('aria-label="Structured delegate results"');
-    expect(markup).toContain('aria-level="2"');
-    expect(markup).toContain('role="heading"');
+    expect(markup).not.toContain('aria-level=');
+    expect(markup).not.toContain('role="heading"');
     expect(markup).toContain('>Payload</span>');
     expect(markup).toContain('object · 2 fields');
-    expect(markup).toContain('>Outcome</span>');
+    expect(markup).toContain('>Outcome</strong>');
     expect(markup).toContain('>Findings</span>');
     expect(markup).toContain('array · 1 item');
     expect(markup).not.toContain('<dt>');
@@ -51,6 +51,19 @@ describe('expanded transcript tool rows', () => {
     expect(markup).toContain('Raw JSON');
     expect(markup).toContain('&quot;outcome&quot;: &quot;done&quot;');
     expect(markup).not.toContain('StructuredPayloadView');
+  });
+
+  it('renders cyclic delegate results without throwing and falls back to unavailable raw JSON', () => {
+    const cycle: { items?: unknown[] } = {};
+    const items: unknown[] = [cycle];
+    cycle.items = items;
+    const markup = renderToStaticMarkup(
+      <StructuredDelegateResults
+        results={[{ label: 'Cyclic audit', status: 'valid', value: cycle }]}
+      />,
+    );
+    expect(markup).toContain('Nested content omitted after depth 4.');
+    expect(markup).toContain('[unavailable payload]');
   });
 
   it('renders invalid and omitted delegate structured states explicitly', () => {

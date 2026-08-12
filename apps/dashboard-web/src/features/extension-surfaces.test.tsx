@@ -462,8 +462,8 @@ describe('live extension surface fixtures', () => {
       />,
     );
     expect(markup).toContain('aria-label="Structured result"');
-    expect(markup).toContain('aria-level="2"');
-    expect(markup).toContain('role="heading"');
+    expect(markup).not.toContain('aria-level=');
+    expect(markup).not.toContain('role="heading"');
     expect(markup).toContain('object · 2 fields');
     expect(markup).toContain('>Findings</span>');
     expect(markup).toContain('array · 1 item');
