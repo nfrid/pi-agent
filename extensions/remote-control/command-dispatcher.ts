@@ -18,6 +18,7 @@ import {
 } from '../shared/runtime/capability-registry';
 import { getSessionScopeId } from '../shared/runtime/scoped-services';
 import { dispatchDashboardInput } from './command-adapter';
+import { cancelActiveCompaction } from './compaction-control';
 import {
   isQueueDraftCommand,
   type QueueDraftStore,
@@ -126,6 +127,9 @@ export async function dispatchDashboardCommand(
       };
     case 'abort':
       ctx.abort();
+      return { accepted: true };
+    case 'compact.cancel':
+      cancelActiveCompaction();
       return { accepted: true };
     case 'shutdown':
       ctx.shutdown();

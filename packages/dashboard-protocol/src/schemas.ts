@@ -786,7 +786,11 @@ export type QueueDraftCommand = Static<typeof QueueDraftCommandSchema>;
 const SimpleCommandSchema = Type.Object(
   {
     ...BridgeCommandBaseProperties,
-    type: Type.Union([Type.Literal('abort'), Type.Literal('shutdown')]),
+    type: Type.Union([
+      Type.Literal('abort'),
+      Type.Literal('compact.cancel'),
+      Type.Literal('shutdown'),
+    ]),
   },
   { additionalProperties: false },
 );

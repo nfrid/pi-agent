@@ -339,6 +339,17 @@ test('session shell shows compaction progress', async ({ page }) => {
       body: ': heartbeat\n\n',
     }),
   );
+  let cancellationCommand: unknown;
+  await page.route(
+    '**/api/runtimes/runtime-compacting/command',
+    async (route) => {
+      cancellationCommand = route.request().postDataJSON();
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ accepted: true }),
+      });
+    },
+  );
   const runtime = {
     runtimeId: 'runtime-compacting',
     ownership: 'external',
@@ -393,14 +404,18 @@ test('session shell shows compaction progress', async ({ page }) => {
   await page.goto('/sessions/session-compacting');
 
   await expect(page.locator('.session-status')).toHaveText(/compacting/i);
-  await expect(page.locator('.compaction-progress-notice')).toContainText(
-    'Compacting context…',
-  );
-  await expect(page.locator('.compaction-progress-notice')).toContainText(
-    'The transcript will refresh when the new summary is ready.',
-  );
+  const compactionEvent = page.locator('.live-compaction-event');
+  await expect(compactionEvent).toContainText('Compacting context…');
+  await expect(compactionEvent).toContainText('in progress');
   await expect(page.locator('.composer')).toContainText('Compacting context…');
   await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Cancel context compaction' }).click();
+  await expect
+    .poll(() => cancellationCommand)
+    .toMatchObject({
+      type: 'compact.cancel',
+    });
 });
 
 test('session shell exposes timestamps, dormant state, and persistent drafts', async ({
