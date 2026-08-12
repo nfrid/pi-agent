@@ -263,6 +263,51 @@ function hasUserTranscriptMessage(projection: TranscriptProjection): boolean {
   );
 }
 
+function withOptimisticSessionTitle(
+  state: DashboardLiveState,
+  id: string,
+  content: unknown,
+): DashboardLiveState {
+  const current = state.sessionsById[id];
+  if (current?.name !== undefined || current?.title !== undefined) return state;
+  const title = deriveSessionTitle([
+    { type: 'message', message: { role: 'user', content } },
+  ]);
+  if (!title) return state;
+  const runtimesById = { ...state.runtimesById };
+  let matchedRuntime = false;
+  for (const [runtimeId, runtime] of Object.entries(runtimesById)) {
+    if (runtime.session.id !== id) continue;
+    matchedRuntime = true;
+    if (
+      runtime.session.name !== undefined ||
+      runtime.session.title !== undefined
+    )
+      return state;
+    runtimesById[runtimeId] = {
+      ...runtime,
+      session: { ...runtime.session, title },
+    };
+  }
+  if (!current && !matchedRuntime) return state;
+  return {
+    ...state,
+    runtimesById,
+    ...(current
+      ? {
+          sessionsById: {
+            ...state.sessionsById,
+            [id]: { ...current, title },
+          },
+        }
+      : {}),
+    optimisticSessionTitlesById: {
+      ...state.optimisticSessionTitlesById,
+      [id]: title,
+    },
+  };
+}
+
 function withoutTranscriptMessage(
   projection: TranscriptProjection,
   messageId: string,
@@ -341,24 +386,12 @@ export class DashboardLiveStore {
   ): DashboardLiveState {
     const optimisticSessions = { ...state.optimisticSessionTitlesById };
     const optimisticRuntimes = { ...state.optimisticRuntimeTitlesById };
-    const runtimes = snapshot.runtimes.map((runtime) => {
+    for (const runtime of snapshot.runtimes) {
       const pendingTitle = optimisticRuntimes[runtime.runtimeId];
-      const title = pendingTitle ?? optimisticSessions[runtime.session.id];
-      if (pendingTitle !== undefined) {
-        delete optimisticRuntimes[runtime.runtimeId];
-        optimisticSessions[runtime.session.id] = pendingTitle;
-      }
-      if (
-        runtime.session.name !== undefined ||
-        runtime.session.title !== undefined
-      ) {
-        delete optimisticSessions[runtime.session.id];
-        return runtime;
-      }
-      return title === undefined
-        ? runtime
-        : { ...runtime, session: { ...runtime.session, title } };
-    });
+      if (pendingTitle === undefined) continue;
+      delete optimisticRuntimes[runtime.runtimeId];
+      optimisticSessions[runtime.session.id] = pendingTitle;
+    }
     const sessions = indexed(snapshot.sessions);
     for (const session of snapshot.sessions) {
       const title = optimisticSessions[session.id];
@@ -370,6 +403,40 @@ export class DashboardLiveStore {
         sessions[session.id] = { ...session, title };
       else delete optimisticSessions[session.id];
     }
+    const runtimes = snapshot.runtimes.map((runtime) => {
+      const metadata = sessions[runtime.session.id];
+      const optimisticTitle = optimisticSessions[runtime.session.id];
+      const metadataTitleIsOptimistic =
+        metadata?.title !== undefined && metadata.title === optimisticTitle;
+      const pendingTitle = optimisticRuntimes[runtime.runtimeId];
+      const title = metadata?.title ?? pendingTitle ?? optimisticTitle;
+      if (pendingTitle !== undefined) {
+        delete optimisticRuntimes[runtime.runtimeId];
+        optimisticSessions[runtime.session.id] = pendingTitle;
+      }
+      if (metadata?.name !== undefined || runtime.session.name !== undefined) {
+        delete optimisticSessions[runtime.session.id];
+        return {
+          ...runtime,
+          session: {
+            ...runtime.session,
+            name: metadata?.name ?? runtime.session.name,
+            ...(title === undefined ? {} : { title }),
+          },
+        };
+      }
+      if (metadata?.title !== undefined && !metadataTitleIsOptimistic) {
+        delete optimisticSessions[runtime.session.id];
+        return { ...runtime, session: { ...runtime.session, title } };
+      }
+      if (runtime.session.title !== undefined) {
+        delete optimisticSessions[runtime.session.id];
+        return runtime;
+      }
+      return title === undefined
+        ? runtime
+        : { ...runtime, session: { ...runtime.session, title } };
+    });
     return {
       ...state,
       serverId: snapshot.serverId,
@@ -396,23 +463,30 @@ export class DashboardLiveStore {
   ): DashboardLiveState {
     const optimisticRuntimes = { ...state.optimisticRuntimeTitlesById };
     const optimisticSessions = { ...state.optimisticSessionTitlesById };
+    const metadata = state.sessionsById[runtime.session.id];
+    const optimisticTitle = optimisticSessions[runtime.session.id];
+    const metadataTitleIsOptimistic =
+      metadata?.title !== undefined && metadata.title === optimisticTitle;
     const pendingTitle = optimisticRuntimes[runtime.runtimeId];
-    const title = pendingTitle ?? optimisticSessions[runtime.session.id];
+    const title = metadata?.title ?? pendingTitle ?? optimisticTitle;
     if (pendingTitle !== undefined) {
       delete optimisticRuntimes[runtime.runtimeId];
       optimisticSessions[runtime.session.id] = pendingTitle;
     }
+    const authoritativeName = metadata?.name ?? runtime.session.name;
     const hasAuthoritativeTitle =
-      runtime.session.name !== undefined ||
+      authoritativeName !== undefined ||
+      (metadata?.title !== undefined && !metadataTitleIsOptimistic) ||
       (runtime.session.title !== undefined && runtime.session.title !== title);
     if (hasAuthoritativeTitle) delete optimisticSessions[runtime.session.id];
-    const projectedRuntime =
-      hasAuthoritativeTitle || title === undefined
-        ? runtime
-        : {
-            ...runtime,
-            session: { ...runtime.session, title },
-          };
+    const projectedRuntime = {
+      ...runtime,
+      session: {
+        ...runtime.session,
+        ...(authoritativeName === undefined ? {} : { name: authoritativeName }),
+        ...(title === undefined ? {} : { title }),
+      },
+    };
     return {
       ...state,
       runtimesById: {
@@ -428,8 +502,21 @@ export class DashboardLiveStore {
     state: DashboardLiveState,
     metadata: SessionIndexEntry,
   ): DashboardLiveState {
+    const runtimesById = { ...state.runtimesById };
+    for (const [runtimeId, runtime] of Object.entries(runtimesById)) {
+      if (runtime.session.id !== metadata.id) continue;
+      runtimesById[runtimeId] = {
+        ...runtime,
+        session: {
+          ...runtime.session,
+          ...(metadata.name === undefined ? {} : { name: metadata.name }),
+          ...(metadata.title === undefined ? {} : { title: metadata.title }),
+        },
+      };
+    }
     return {
       ...state,
+      runtimesById,
       sessionsById: { ...state.sessionsById, [metadata.id]: metadata },
     };
   }
@@ -605,6 +692,13 @@ export class DashboardLiveStore {
       this.installSnapshot(envelope.snapshot, { source: 'sse' });
     let nextState = this.state;
     const sessionId = sessionIdForEvent(envelope);
+    const liveMessage = liveMessageIdentity(envelope);
+    if (sessionId && liveMessage?.role === 'user')
+      nextState = withOptimisticSessionTitle(
+        nextState,
+        sessionId,
+        liveMessage.content,
+      );
     if (sessionId) {
       const currentProjection = nextState.transcriptsBySessionId[sessionId];
       const canSeedSnapshot =
@@ -615,7 +709,6 @@ export class DashboardLiveStore {
         currentProjection ??
         (canSeedSnapshot ? hydrateTranscript([], sessionId) : undefined);
       if (baseProjection) {
-        const liveMessage = liveMessageIdentity(envelope);
         const persistedMessageId =
           envelope.event.type === 'message.finished'
             ? persistedMessageIdForLive(baseProjection, liveMessage)
@@ -1035,41 +1128,9 @@ export class DashboardLiveStore {
       )
     )
       return false;
-    const title = deriveSessionTitle([
-      { type: 'message', message: { role: 'user', content: prompt } },
-    ]);
-    if (!title) return false;
-    const runtimesById = { ...this.state.runtimesById };
-    let matchedRuntime = false;
-    for (const [runtimeId, runtime] of Object.entries(runtimesById)) {
-      if (runtime.session.id !== id) continue;
-      matchedRuntime = true;
-      if (
-        runtime.session.name === undefined &&
-        runtime.session.title === undefined
-      )
-        runtimesById[runtimeId] = {
-          ...runtime,
-          session: { ...runtime.session, title },
-        };
-    }
-    if (!current && !matchedRuntime) return false;
-    this.publish({
-      ...this.state,
-      runtimesById,
-      ...(current
-        ? {
-            sessionsById: {
-              ...this.state.sessionsById,
-              [id]: { ...current, title },
-            },
-          }
-        : {}),
-      optimisticSessionTitlesById: {
-        ...this.state.optimisticSessionTitlesById,
-        [id]: title,
-      },
-    });
+    const nextState = withOptimisticSessionTitle(this.state, id, prompt);
+    if (nextState === this.state) return false;
+    this.publish(nextState);
     return true;
   }
 

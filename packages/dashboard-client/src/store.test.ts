@@ -198,6 +198,80 @@ describe('DashboardLiveStore', () => {
     );
   });
 
+  it('titles TUI sessions from live user messages and indexed metadata', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      runtimes: [
+        {
+          runtimeId: 'runtime-1',
+          liveState: 'idle',
+          pendingInteractions: [],
+          extensionSurfaces: [],
+          session: { id: 'session-1', entries: [] },
+        },
+      ],
+    } as unknown as BrowserSnapshot);
+
+    store.acceptStreamRecord({
+      cursor: 2,
+      emittedAt: 2,
+      runtimeId: 'runtime-1',
+      sessionId: 'session-1',
+      event: {
+        type: 'message.started',
+        sessionId: 'session-1',
+        message: {
+          messageId: 'user-1',
+          role: 'user',
+          content: '  Created from the TUI  ',
+        },
+      },
+    } as StreamRecord);
+    expect(store.getSnapshot().runtimesById['runtime-1']?.session.title).toBe(
+      'Created from the TUI',
+    );
+
+    store.installSnapshot({
+      ...snapshot('daemon-1', 3),
+      runtimes: [
+        {
+          runtimeId: 'runtime-1',
+          liveState: 'working',
+          pendingInteractions: [],
+          extensionSurfaces: [],
+          session: { id: 'session-1', entries: [] },
+        },
+      ],
+      sessions: [
+        {
+          id: 'session-1',
+          file: '/tmp/session.jsonl',
+          cwd: '/tmp',
+          updatedAt: 3,
+          title: 'Indexed TUI title',
+        },
+      ],
+    } as unknown as BrowserSnapshot);
+    expect(store.getSnapshot().runtimesById['runtime-1']?.session.title).toBe(
+      'Indexed TUI title',
+    );
+
+    store.acceptStreamRecord({
+      cursor: 4,
+      emittedAt: 4,
+      runtimeId: 'runtime-1',
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'idle',
+        snapshot: { pendingInteractions: [] },
+      },
+    } as unknown as StreamRecord);
+    expect(store.getSnapshot().runtimesById['runtime-1']?.session.title).toBe(
+      'Indexed TUI title',
+    );
+  });
+
   it('does not replace an explicit session name with an optimistic prompt title', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot({
