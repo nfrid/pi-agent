@@ -1,6 +1,6 @@
 # HF-20260809: Delegate result overflow discards the entire diagnosis
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-09
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Read-only diagnosis of a bounded dashboard chat-switch scrolling bug
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** `luna-xhigh`; initial run and a constrained continuation both ended without a usable result
 - **Observed cost / rework:** Two delegate attempts were lost and the parent had to diagnose the issue directly
 - **Recurrence / confidence:** Observed twice in one delegated task; high confidence in the transport failure
-- **Ticket:** —
+- **Ticket:** [HFM-20260812: Preserve oversized delegate events for recovery](../tickets/20260812-preserve-oversized-delegate-events.md)
 
 ## Behavior
 

@@ -1,6 +1,6 @@
 # HF-20260811: Read-only WIP delegation cannot snapshot a multi-repository workspace
 
-- **Status:** new
+- **Status:** duplicate
 - **Observed date:** 2026-08-11
 - **Source cwd/repo:** `/Users/nfrid/job` multi-repository workspace
 - **Task shape:** Independent read-only regression review of uncommitted changes in two product repositories
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** `luna-xhigh`, `isolation: worktree`, `from: wip`; setup failed before launch
 - **Observed cost / rework:** The independent review had to be retried in the shared checkout, losing isolation from concurrent parent edits
 - **Recurrence / confidence:** Observed once in this session; high confidence in the failure, unknown confidence in its underlying cause
-- **Ticket:** —
+- **Ticket:** [HFM-20260806: Report actionable delegate lifecycle failures](../tickets/20260806-report-actionable-delegate-lifecycle-failures.md)
 
 ## Behavior
 

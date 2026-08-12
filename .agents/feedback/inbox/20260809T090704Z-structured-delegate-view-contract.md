@@ -1,6 +1,6 @@
 # HF-20260809: Structured delegate view syntax is not discoverable from the tool contract
 
-- **Status:** new
+- **Status:** duplicate
 - **Observed date:** 2026-08-09
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Launch a bounded implementation delegate with a JSON result projection and a named review view.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Two `luna-xhigh` delegate setup attempts were rejected while constructing the structured result contract; the task proceeded only after dropping structured output and using legacy prose.
 - **Observed cost / rework:** Two validation retries and loss of bounded machine-readable output; the eventual prose result was truncated.
 - **Recurrence / confidence:** Observed in this session with high confidence; likely for first-time callers because the accepted `views` value syntax is absent from the exposed schema description.
-- **Ticket:** —
+- **Ticket:** [HFM-20260805: Add schema-driven delegate outputs](../tickets/20260805-add-schema-driven-delegate-outputs.md)
 
 ## Behavior
 

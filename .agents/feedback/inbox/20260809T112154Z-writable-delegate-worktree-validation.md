@@ -1,6 +1,6 @@
 # HF-20260809: Writable delegate worktrees cannot run requested workspace validation
 
-- **Status:** new
+- **Status:** duplicate
 - **Observed date:** 2026-08-09
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Several isolated dashboard implementation delegates with explicit test, typecheck, and build acceptance commands.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** `luna-high` and `luna-medium` writable worktree runs implemented and committed their changes, but repeatedly reported that requested tests/typecheck could not run because workspace dependencies or built workspace package entries were unavailable.
 - **Observed cost / rework:** The parent had to integrate each branch before running authoritative checks, reducing pre-merge confidence and requiring additional review/fix cycles.
 - **Recurrence / confidence:** Observed across three writable delegate runs in this task; high confidence.
-- **Ticket:** —
+- **Ticket:** [HFM-20260805: Use project-native delegate worktree setup](../tickets/20260805-isolate-delegate-dependency-links.md)
 
 ## Behavior
 

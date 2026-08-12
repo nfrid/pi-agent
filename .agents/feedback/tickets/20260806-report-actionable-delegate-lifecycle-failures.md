@@ -3,7 +3,7 @@
 - **Status:** evaluation-pending
 - **Approval:** approved 2026-08-06
 - **Created:** 2026-08-06
-- **Source reports:** [HF-20260806: Delegate lifecycle failures lack actionable diagnostics](../inbox/20260806T093756Z-opaque-delegate-lifecycle-failures.md)
+- **Source reports:** [HF-20260806: Delegate lifecycle failures lack actionable diagnostics](../inbox/20260806T093756Z-opaque-delegate-lifecycle-failures.md); [HF-20260811: Read-only WIP delegation cannot snapshot a multi-repository workspace](../inbox/20260811T091445Z-readonly-wip-worktree-setup.md)
 - **Implementation dependency:** Implement after [HFM-20260805: Add schema-driven delegate outputs](20260805-add-schema-driven-delegate-outputs.md) lands, reusing its validated structured-result and artifact primitives
 
 <!-- Proposal and implementation approval are separate decisions. A proposed ticket does not authorize implementation. -->

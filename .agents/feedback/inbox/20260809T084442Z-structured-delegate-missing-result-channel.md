@@ -1,6 +1,6 @@
 # HF-20260809: Structured delegate can finish without required result channel
 
-- **Status:** new
+- **Status:** duplicate
 - **Observed date:** 2026-08-09
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent` (Pi agent configuration repository)
 - **Task shape:** Read-only repository mapping delegated with a bounded structured-result schema
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** `luna-high`; child run ended with `child-result-invalid` because the `delegate_result` channel was missing
 - **Observed cost / rework:** The delegated repository analysis was unavailable, so the parent repeated the exploration directly.
 - **Recurrence / confidence:** Observed once in this session; high confidence in the failure mode, unknown recurrence rate
-- **Ticket:** —
+- **Ticket:** [HFM-20260805: Add schema-driven delegate outputs](../tickets/20260805-add-schema-driven-delegate-outputs.md)
 
 ## Behavior
 

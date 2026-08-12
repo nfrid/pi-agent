@@ -1,6 +1,6 @@
 # HF-20260809: Delegate handoff rejects a parent-visible delegate artifact
 
-- **Status:** new
+- **Status:** duplicate
 - **Observed date:** 2026-08-09
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Continue a writable implementation delegate with findings from an independent read-only review delegate.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** A `luna-xhigh` writable continuation used `handoffFrom` with the review delegate's artifact handle; setup failed before launch because the artifact "was not found in the current session." Retrying without `handoffFrom` succeeded.
 - **Observed cost / rework:** One failed delegate lifecycle attempt and manual restatement of the review findings in `contextNote`.
 - **Recurrence / confidence:** Observed once with high confidence; likely whenever sibling delegate evidence must be forwarded to another child and artifact ownership is narrower than the parent session.
-- **Ticket:** —
+- **Ticket:** [HFM-20260805: Add schema-driven delegate outputs](../tickets/20260805-add-schema-driven-delegate-outputs.md)
 
 ## Behavior
 

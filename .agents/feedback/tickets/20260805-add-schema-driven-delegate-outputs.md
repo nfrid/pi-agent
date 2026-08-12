@@ -3,7 +3,7 @@
 - **Status:** evaluation-pending
 - **Approval:** approved 2026-08-05
 - **Created:** 2026-08-05
-- **Source reports:** [HF-20260805: Delegate completion truncates actionable audit findings](../inbox/20260805T111944Z-delegate-audit-findings-truncated.md)
+- **Source reports:** [HF-20260805: Delegate completion truncates actionable audit findings](../inbox/20260805T111944Z-delegate-audit-findings-truncated.md); [HF-20260809: Structured delegate can finish without required result channel](../inbox/20260809T084442Z-structured-delegate-missing-result-channel.md); [HF-20260809: Delegate handoff rejects a parent-visible delegate artifact](../inbox/20260809T090704Z-delegate-handoff-artifact-scope.md); [HF-20260809: Structured delegate view syntax is not discoverable from the tool contract](../inbox/20260809T090704Z-structured-delegate-view-contract.md)
 
 ## Problem
 

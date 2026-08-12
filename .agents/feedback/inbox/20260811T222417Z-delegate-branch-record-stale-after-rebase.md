@@ -1,6 +1,6 @@
 # HF-20260812: Delegate branch record becomes unusable after owner rebase
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-12
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent` harness repository
 - **Task shape:** Isolated multi-file dashboard implementation, repeated review, rebase onto advancing main, then integration and cleanup
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** Writable Luna branch completed; after the owner rebased its retained branch, `delegate_branches review`, merge, and normal drop refused to operate on the current branch ref
 - **Observed cost / rework:** Required direct Git review/fast-forward integration, an independent ancestry check, and forced cleanup instead of the harness integration path
 - **Recurrence / confidence:** Observed once with deterministic repeated refusals after two rebases; high confidence for retained branches whose history is rewritten
-- **Ticket:** —
+- **Ticket:** [HFM-20260812: Refresh retained delegate records after an owner rebase](../tickets/20260812-refresh-rebased-delegate-branch-records.md)
 
 ## Behavior
 

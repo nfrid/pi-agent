@@ -1,6 +1,6 @@
 # HF-20260811: Running delegates cannot receive corrective steering
 
-- **Status:** new
+- **Status:** parked
 - **Observed date:** 2026-08-11
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Long-running dashboard refactor recovery with several isolated writable implementation and audit delegates
@@ -9,6 +9,12 @@
 - **Observed cost / rework:** Known defects continued through the remainder of active runs, requiring follow-up continuations and repeated validation; starting a sibling would risk overlapping edits
 - **Recurrence / confidence:** Observed repeatedly in this session; high confidence for long-running delegated implementation and review tasks
 - **Ticket:** —
+
+## Triage decision
+
+Parked without a ticket on 2026-08-12 because the observed capability gap is absent from the current source. `delegate_jobs` now exposes a bounded `feedback` action, queues one parent message to a running child for its next safe checkpoint, and reports when the job settled before delivery; focused coverage exists in `extensions/delegate/jobs-tool.test.ts`, `jobs.test.ts`, and `control.test.ts`. The implementation is present in `e4161e2` (`feat(delegate): add bounded runtime supervision`).
+
+Reconsider only if a live background delegate cannot receive queued feedback under the documented boundary. Foreground delegation remains intentionally unsteerable while the parent is suspended in its tool call, and feedback does not interrupt an in-flight child tool call.
 
 ## Behavior
 

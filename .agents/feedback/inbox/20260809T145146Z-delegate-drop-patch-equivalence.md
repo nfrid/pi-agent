@@ -1,6 +1,6 @@
 # HF-20260809: Delegate branch cleanup ignores patch-equivalent integration
 
-- **Status:** new
+- **Status:** triaged
 - **Observed date:** 2026-08-09
 - **Source cwd/repo:** `/Users/nfrid/.pi/agent`
 - **Task shape:** Concurrent dashboard fix implemented through isolated writable delegates, with one conflicted integration resolved by cherry-picking the delegate commits.
@@ -8,7 +8,7 @@
 - **Route / attempt / outcome:** A `luna-high` writable branch was integrated by cherry-picking its two commits after `delegate_branches merge` correctly aborted on a conflict. A later `drop` refused because the original commit hashes were not ancestors, although their patches were present under new hashes; cleanup required `force: true`.
 - **Observed cost / rework:** Required manual verification that no delegate work would be lost before forcing cleanup, despite patch-aware review already being available.
 - **Recurrence / confidence:** Likely whenever conflicted delegate commits are cherry-picked or otherwise recreated; high confidence from the deterministic branch state and tool response.
-- **Ticket:** —
+- **Ticket:** [HFM-20260812: Recognize patch-equivalent delegate integration during cleanup](../tickets/20260812-recognize-patch-equivalent-delegate-integration.md)
 
 ## Behavior
 

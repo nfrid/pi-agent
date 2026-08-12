@@ -3,7 +3,7 @@
 - **Status:** evaluation-pending
 - **Approval:** approved 2026-08-05
 - **Created:** 2026-08-05
-- **Source reports:** [HF-20260804: Dropping delegate worktrees breaks parent workspace dependencies](../inbox/20260804T095043Z-delegate-worktree-drop-breaks-parent-node-modules.md); [HF-20260804: Delegate worktree installs leak pnpm links into the parent checkout](../inbox/20260804T180339Z-delegate-worktree-pnpm-links-leak.md)
+- **Source reports:** [HF-20260804: Dropping delegate worktrees breaks parent workspace dependencies](../inbox/20260804T095043Z-delegate-worktree-drop-breaks-parent-node-modules.md); [HF-20260804: Delegate worktree installs leak pnpm links into the parent checkout](../inbox/20260804T180339Z-delegate-worktree-pnpm-links-leak.md); [HF-20260809: Writable delegate worktrees cannot run requested workspace validation](../inbox/20260809T112154Z-writable-delegate-worktree-validation.md)
 
 ## Problem
 
