@@ -11,11 +11,13 @@ These files remain global only for selectors that cross component boundaries:
 - runtime state vocabularies (`status-*`, `context-*`, `priority-*`, and queue
   mode classes) emitted from data;
 - extension contribution and dialog contracts shared by generic renderers;
-- responsive, safe-area, visualViewport, minimap, and virtual transcript
-  geometry contracts; and
+- session layout plus drawer swipe, backdrop, responsive, safe-area, visualViewport,
+  minimap, and virtual transcript geometry contracts; and
 - MDX editor theme overrides, which target third-party DOM.
 
-Feature-owned presentation is colocated as CSS Modules. Semantic kebab-case
-classes remain on those elements when they are runtime or browser-test
+Feature-owned presentation is colocated as CSS Modules. Agent-thread
+navigation content (header, search, groups, rows, and footer) follows that rule;
+session rail placement and drawer swipe/backdrop geometry remain global. Semantic
+kebab-case classes remain on those elements when they are runtime or browser-test
 locators; module classes provide the local ownership without renaming those
 contracts.
