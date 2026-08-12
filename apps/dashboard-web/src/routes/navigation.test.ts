@@ -13,7 +13,7 @@ describe('dashboard view transition navigation policy', () => {
   });
 
   it.each([
-    ['reduced motion', '/sessions/one', '/sessions/two', true],
+    ['reduced motion', '/workspaces/workspace-1', '/runtimes/runtime-1', true],
     ['same path', '/sessions/one', '/sessions/one', false],
     [
       'same pathname with a search string',

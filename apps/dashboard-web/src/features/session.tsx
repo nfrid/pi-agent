@@ -743,7 +743,7 @@ export function SessionView({
         ref={sessionPageRef}
         data-tail-pending={tailReadySessionId === id ? undefined : ''}
         data-runtime-paused={pauseStatus ? '' : undefined}
-        className={`session-page ${inspectorOpen ? 'inspector-open' : ''} ${hasPendingInteraction ? 'has-pending-interaction' : ''}`}
+        className={`session-page ${inspectorOpen ? 'inspector-open' : ''} ${hasPendingInteraction ? 'has-pending-interaction pending-interaction-open' : ''}`}
       >
         <header className="session-context session-heading">
           <div className="session-context-main">

@@ -3332,6 +3332,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
     name: 'Existing session request',
   });
   await expect(inspector).toBeVisible();
+  await expect(page.locator('.session-heading')).toBeVisible();
   await expect(inspector).toContainText('Runtime controls');
   await expect(inspector).not.toContainText('Live work');
   await expect(inspector).not.toContainText('test/vision');
