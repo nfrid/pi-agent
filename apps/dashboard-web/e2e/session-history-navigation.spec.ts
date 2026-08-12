@@ -152,9 +152,21 @@ test('switching chats establishes the new transcript tail', async ({
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await page.route('**/api/sessions/*', (route) => {
+  let releaseSecondSession!: () => void;
+  let secondSessionStarted!: () => void;
+  const secondSessionRequest = new Promise<void>((resolve) => {
+    secondSessionStarted = resolve;
+  });
+  const secondSessionResponse = new Promise<void>((resolve) => {
+    releaseSecondSession = resolve;
+  });
+  await page.route('**/api/sessions/*', async (route) => {
     const id = new URL(route.request().url()).pathname.split('/').at(-1) ?? '';
     const sessionIndex = id === 'session-2' ? 1 : 0;
+    if (id === 'session-2') {
+      secondSessionStarted();
+      await secondSessionResponse;
+    }
     return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -175,12 +187,21 @@ test('switching chats establishes the new transcript tail', async ({
     );
   await page.goto('/sessions/session-1');
   await expect.poll(atBottom).toBeLessThanOrEqual(2);
+  await page.evaluate(() => window.scrollTo(0, 300));
+  await expect
+    .poll(() => page.evaluate(() => window.scrollY))
+    .toBeGreaterThan(0);
   await page.getByRole('button', { name: 'Open agent list' }).click();
   await page
     .locator('.agent-nav-drawer.open .agent-thread-row')
     .filter({ hasText: 'Second chat' })
     .click();
   await expect(page).toHaveURL(/\/sessions\/session-2$/u);
+  await secondSessionRequest;
+  await expect(page.locator('.session-page-loading')).toBeVisible();
+  await expect(page.locator('.session-transcript-loading')).toBeVisible();
+  await expect(page.locator('[data-transcript-row]:visible')).toHaveCount(0);
+  releaseSecondSession();
   await expect(page.getByText(/session-2 message 119/u)).toBeVisible();
   await expect.poll(atBottom).toBeLessThanOrEqual(2);
   await page.evaluate(() => {

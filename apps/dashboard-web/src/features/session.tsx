@@ -160,6 +160,20 @@ export function SessionView({
     );
     return pending;
   }, [query.refetch]);
+  useLayoutEffect(() => {
+    // SessionRoute is reused while only the route id changes. Arm the new
+    // session before its existing projection can paint at the old scroll
+    // position.
+    initialTailSessionRef.current = id;
+    userScrollIntentRef.current = false;
+    stickToBottomRef.current = true;
+    setTailReadySessionId(undefined);
+    setAwayFromLatest(false);
+    if (initialTailSettleTimerRef.current !== undefined) {
+      window.clearTimeout(initialTailSettleTimerRef.current);
+      initialTailSettleTimerRef.current = undefined;
+    }
+  }, [id]);
   useEffect(() => {
     if (!id) return;
     setError(undefined);
@@ -304,10 +318,6 @@ export function SessionView({
     }
   }, [runtime?.pendingInteractions.length]);
   useEffect(() => {
-    void id;
-    stickToBottomRef.current = true;
-    userScrollIntentRef.current = false;
-    setAwayFromLatest(false);
     const cancelPendingTailScroll = () => {
       userScrollIntentRef.current = true;
       stickToBottomRef.current = false;
