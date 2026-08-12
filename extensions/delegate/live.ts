@@ -80,8 +80,32 @@ function transcriptSnapshot(
 
 function statusSnapshot(
   status: DelegateStatusSnapshot,
-  transcriptBudget: { remaining: number },
+  surfaceBudget: { remaining: number },
 ) {
+  const resultValue = status.result?.value;
+  const resultValueLength =
+    resultValue === undefined ? 0 : payloadLength(resultValue);
+  const result = status.result
+    ? {
+        kind: status.result.kind,
+        status: status.result.status,
+        ...(status.result.errors?.length
+          ? {
+              errors: status.result.errors
+                .slice(0, 16)
+                .map((error) => text(error, 240)),
+            }
+          : {}),
+        ...(resultValue === undefined
+          ? {}
+          : resultValueLength <= surfaceBudget.remaining
+            ? (() => {
+                surfaceBudget.remaining -= resultValueLength;
+                return { value: resultValue };
+              })()
+            : {}),
+      }
+    : undefined;
   return {
     id: text(status.id, 256),
     name: text(status.name, 2_000) || 'Subagent',
@@ -125,20 +149,7 @@ function statusSnapshot(
           })),
         }
       : {}),
-    ...(status.result
-      ? {
-          result: {
-            kind: status.result.kind,
-            status: status.result.status,
-            ...(status.result.value === undefined
-              ? {}
-              : { value: status.result.value }),
-            ...(status.result.errors?.length
-              ? { errors: status.result.errors.slice(0, 16) }
-              : {}),
-          },
-        }
-      : {}),
+    ...(result ? { result } : {}),
     ...(status.lifecycle
       ? {
           lifecycle: {
@@ -167,7 +178,7 @@ function statusSnapshot(
           },
         }
       : {}),
-    ...transcriptSnapshot(status, transcriptBudget),
+    ...transcriptSnapshot(status, surfaceBudget),
   };
 }
 

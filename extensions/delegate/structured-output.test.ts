@@ -13,6 +13,7 @@ import { runDelegate } from './runner';
 import { DelegateStatusStore } from './status';
 import {
   captureDelegateResultEvent,
+  getDelegateResultSpec,
   normalizeDelegateResultSpec,
   setDelegateResultSpec,
   settleDelegateResult,
@@ -100,6 +101,35 @@ describe('structured delegate output handoff', () => {
     );
     expect(entries).toHaveLength(1);
     expect(JSON.stringify(entries[0])).toContain('secret');
+  });
+
+  test('does not put a persisted structured value into parent handoff without its private spec', () => {
+    const spec = normalizeDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: { secret: { type: 'string' } },
+        required: ['secret'],
+      },
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    const run = createRun('persisted structured value');
+    run.state = 'success';
+    setDelegateResultSpec(run, spec);
+    captureDelegateResultEvent(
+      run,
+      { details: { secret: 'full value must stay out of parent handoff' } },
+      false,
+    );
+    settleDelegateResult(run);
+
+    const persistedRun = JSON.parse(
+      JSON.stringify(makeDetails('single', [run])),
+    ).runs[0];
+    expect(getDelegateResultSpec(persistedRun)).toBeUndefined();
+    const handoff = buildParentHandoff([persistedRun]);
+    expect(handoff).toContain('Structured result: valid');
+    expect(handoff).not.toContain('full value must stay out of parent handoff');
+    expect(handoff).not.toContain('Projection:');
   });
 
   test('suppresses structured child prose from foreground progress updates', async () => {

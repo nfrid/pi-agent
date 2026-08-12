@@ -115,6 +115,43 @@ describe('delegate live surface', () => {
     );
   });
 
+  it('bounds aggregate structured values and validation errors on the dashboard surface', () => {
+    const store = new DelegateStatusStore();
+    const value = Object.fromEntries(
+      Array.from({ length: 14 }, (_, index) => [
+        `field${index}`,
+        'x'.repeat(4_096),
+      ]),
+    );
+    for (const name of ['first', 'second']) {
+      const run = createRun(name);
+      run.state = 'success';
+      run.structuredResult = {
+        valid: true,
+        value,
+        errors: ['e'.repeat(500)],
+      };
+      const [id] = store.start([run], 'background');
+      store.update(id, run);
+    }
+
+    const statuses = (
+      delegateSurface(store).viewModel as {
+        statuses: Array<{
+          result?: { value?: unknown; errors?: string[] };
+        }>;
+      }
+    ).statuses;
+    expect(
+      statuses.filter((status) => status.result?.value !== undefined),
+    ).toHaveLength(1);
+    expect(
+      statuses.every((status) =>
+        (status.result?.errors ?? []).every((error) => error.length <= 240),
+      ),
+    ).toBe(true);
+  });
+
   it('prioritizes active work and bounds historical dashboard payloads', () => {
     const store = new DelegateStatusStore();
     const active = createRun('active task');
