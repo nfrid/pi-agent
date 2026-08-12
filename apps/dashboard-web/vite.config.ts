@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
 
+const workspaceRoot = path.resolve(__dirname, '../..');
 const dashboardTarget = `http://127.0.0.1:${process.env.PI_DASHBOARD_PORT ?? 4173}`;
 const proxy = {
   '/api': { target: dashboardTarget },
@@ -34,6 +35,7 @@ function dashboardVersionPlugin(): Plugin {
 }
 
 export default defineConfig({
+  envDir: workspaceRoot,
   define: {
     __DASHBOARD_BUILD_ID__: JSON.stringify(dashboardBuildId),
   },
