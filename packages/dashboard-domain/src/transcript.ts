@@ -704,6 +704,25 @@ function persistedToolStatus(
 }
 
 /**
+ * Pi stores tool results as message records, while live tool events carry the
+ * same result envelope directly. Preserve the details field when hydrating so
+ * a complete snapshot cannot erase structured delegate payloads.
+ */
+function persistedToolResult(
+  message: Record<string, unknown>,
+  previous?: unknown,
+): unknown {
+  if (message.details === undefined) {
+    // Duplicate history entries can omit details after the first copy. Keep
+    // the retained envelope while accepting the newest content payload.
+    if (isRecord(previous) && Object.hasOwn(previous, 'details'))
+      return { ...previous, content: message.content };
+    return message.content;
+  }
+  return { content: message.content, details: message.details };
+}
+
+/**
  * Hydrate Pi JSONL entries. Only explicit entry/message/tool IDs and direct
  * timestamps are used; arbitrary recursive provider fields are not identities.
  * `fallbackEntryIds` is a compatibility mode for the public web adapter: it
@@ -736,17 +755,21 @@ export function hydrateTranscript(
     }
     const message = persistedMessage(raw);
     if (message && (raw.type === 'message' || raw.type === undefined)) {
+      const role = typeof message.role === 'string' ? message.role : 'unknown';
+      const timestamp = persistedTimestamp(raw, message);
       const messageId =
         persistedMessageId(raw, message) ??
-        (options.fallbackEntryIds ? fallbackEntryId(index) : undefined);
+        (role === 'toolResult'
+          ? directString(message, 'toolCallId')
+          : options.fallbackEntryIds
+            ? fallbackEntryId(index)
+            : undefined);
       if (!messageId) {
         const id = fallbackEntryId(index);
         items[id] = { kind: 'other', id, raw };
         order.push(id);
         return;
       }
-      const role = typeof message.role === 'string' ? message.role : 'unknown';
-      const timestamp = persistedTimestamp(raw, message);
       if (role === 'toolResult') {
         const toolCallId = directString(message, 'toolCallId');
         if (toolCallId) {
@@ -754,7 +777,7 @@ export function hydrateTranscript(
           if (existing?.kind === 'tool') {
             items[toolCallId] = {
               ...existing,
-              result: message.content,
+              result: persistedToolResult(message, existing.result),
               ...(typeof message.isError === 'boolean'
                 ? { isError: message.isError }
                 : {}),
@@ -764,8 +787,8 @@ export function hydrateTranscript(
             items[toolCallId] = {
               kind: 'tool',
               toolCallId,
-              name: 'tool',
-              result: message.content,
+              name: directString(message, 'toolName') ?? 'tool',
+              result: persistedToolResult(message),
               ...(typeof message.isError === 'boolean'
                 ? { isError: message.isError }
                 : {}),

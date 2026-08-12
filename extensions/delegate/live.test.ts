@@ -141,13 +141,20 @@ describe('delegate live surface', () => {
     const statuses = (
       delegateSurface(store).viewModel as {
         statuses: Array<{
-          result?: { value?: unknown; errors?: string[] };
+          result?: {
+            value?: unknown;
+            valueOmitted?: boolean;
+            errors?: string[];
+          };
         }>;
       }
     ).statuses;
     expect(
       statuses.filter((status) => status.result?.value !== undefined),
     ).toHaveLength(1);
+    expect(
+      statuses.find((status) => status.result?.valueOmitted),
+    ).toMatchObject({ result: { status: 'valid', valueOmitted: true } });
     expect(
       statuses.every((status) =>
         (status.result?.errors ?? []).every((error) => error.length <= 240),

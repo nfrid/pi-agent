@@ -265,6 +265,14 @@ export function DelegateStructuredResultSection({
           </details>
         </>
       )}
+      {row.result.status === 'valid' && row.result.value === undefined && (
+        <p className="payload-truncation-label">
+          Structured result value{' '}
+          {row.result.valueOmitted === true
+            ? 'unavailable in this bounded live snapshot.'
+            : 'is unavailable in this snapshot.'}
+        </p>
+      )}
     </section>
   );
 }
