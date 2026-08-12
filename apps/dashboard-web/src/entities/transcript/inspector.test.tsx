@@ -66,18 +66,23 @@ describe('transcript payload inspection', () => {
     const markup = renderToStaticMarkup(
       <StructuredPayloadView
         value={{
-          notes: '# Notes\n\n- [dashboard](https://example.com)\n- use `code`',
+          notes:
+            '## Notes\n\n- [dashboard](https://example.com)\n- use `code`\n\n```ts\nconst ready = true;\n```',
           count: 2,
           enabled: true,
         }}
       />,
     );
     expect(markup).toContain('<div class="markdown">');
-    expect(markup).toContain('<h1>Notes</h1>');
+    expect(markup).toContain('<h2>Notes</h2>');
     expect(markup).toContain(
       '<a href="https://example.com" target="_blank" rel="noreferrer noopener">dashboard</a>',
     );
+    expect(markup).toContain('<li>');
     expect(markup).toContain('<code>code</code>');
+    expect(markup).toContain(
+      '<pre><code class="language-ts">const ready = true;\n</code></pre>',
+    );
     expect(markup).toContain('<p class="structured-result-primitive">2</p>');
     expect(markup).toContain('<p class="structured-result-primitive">true</p>');
   });

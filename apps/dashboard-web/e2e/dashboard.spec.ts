@@ -1232,7 +1232,7 @@ Note: Recovery completed after the final check.`,
                             {
                               filePath: 'src/App.tsx',
                               notes:
-                                '## Finding notes\n\n- [dashboard](https://example.com)\n- use `code`',
+                                '## Finding notes\n\n- [dashboard](https://example.com)\n- use `code`\n\n```ts\nconst ready = true;\n```',
                             },
                           ],
                         },
@@ -1464,8 +1464,13 @@ Note: Recovery completed after the final check.`,
       .getByRole('link', { name: 'dashboard' }),
   ).toBeVisible();
   await expect(
-    structuredDelegateResults.locator('.structured-result-markdown code'),
+    structuredDelegateResults
+      .locator('.structured-result-markdown code')
+      .first(),
   ).toHaveText('code');
+  await expect(
+    structuredDelegateResults.locator('.structured-result-markdown pre code'),
+  ).toHaveText(/const ready = true;/);
   await expect(structuredDelegateResults.getByText('Raw JSON')).toBeVisible();
   const structuredPayload = structuredDelegateResults.locator(
     '.structured-result-value',
@@ -1503,6 +1508,38 @@ Note: Recovery completed after the final check.`,
     const firstItemLabel = firstItem?.querySelector<HTMLElement>(
       '.structured-result-field-label, .structured-result-label',
     );
+    const markdown = element.querySelector<HTMLElement>(
+      '.structured-result-markdown .markdown',
+    );
+    const markdownHeading = markdown?.querySelector<HTMLElement>('h2');
+    const markdownItem = markdown?.querySelector<HTMLElement>('li');
+    const markdownPre = markdown?.querySelector<HTMLElement>('pre');
+    const markdownCode = markdown?.querySelector<HTMLElement>('pre code');
+    const structuralElements = Array.from(
+      element.querySelectorAll<HTMLElement>(
+        '.structured-result-node, .structured-result-fields, .structured-result-list, .structured-result-field, .structured-result-list-item, .structured-result-node-content, .structured-result-summary',
+      ),
+    );
+    const structuralStyles = structuralElements.map((structuralElement) => {
+      const style = getComputedStyle(structuralElement);
+      return {
+        border: [
+          style.borderTopWidth,
+          style.borderRightWidth,
+          style.borderBottomWidth,
+          style.borderLeftWidth,
+        ],
+        paddingLeft: style.paddingInlineStart,
+        paddingRight: style.paddingInlineEnd,
+        marginLeft: style.marginInlineStart,
+      };
+    });
+    const firstSummary = element.querySelector<HTMLElement>(
+      '.structured-result-node > summary',
+    );
+    const summaryMarker = firstSummary
+      ? getComputedStyle(firstSummary, '::after')
+      : undefined;
     return {
       lefts: flowElements.map((flowElement) =>
         Math.round(flowElement.getBoundingClientRect().left),
@@ -1510,17 +1547,61 @@ Note: Recovery completed after the final check.`,
       listLeft: list?.getBoundingClientRect().left,
       listPadding: list ? getComputedStyle(list).paddingInlineStart : undefined,
       listMargin: list ? getComputedStyle(list).marginInlineStart : undefined,
+      listStyle: list ? getComputedStyle(list).listStyleType : undefined,
+      itemStyle: firstItem
+        ? getComputedStyle(firstItem).listStyleType
+        : undefined,
       firstItemLeft: firstItem?.getBoundingClientRect().left,
       firstItemLabelLeft: firstItemLabel?.getBoundingClientRect().left,
+      markdownLeft: markdown?.getBoundingClientRect().left,
+      markdownHeadingLeft: markdownHeading?.getBoundingClientRect().left,
+      markdownItemLeft: markdownItem?.getBoundingClientRect().left,
+      markdownPreLeft: markdownPre?.getBoundingClientRect().left,
+      markdownCodeDisplay: markdownCode
+        ? getComputedStyle(markdownCode).display
+        : undefined,
+      structuralStyles,
+      summaryPaddingRight: firstSummary
+        ? getComputedStyle(firstSummary).paddingInlineEnd
+        : undefined,
+      summaryMarker: summaryMarker
+        ? { right: summaryMarker.right, content: summaryMarker.content }
+        : undefined,
     };
   });
   expect(new Set(structuredGeometry.lefts).size).toBe(1);
   expect(structuredGeometry.listPadding).toBe('0px');
   expect(structuredGeometry.listMargin).toBe('0px');
+  expect(structuredGeometry.listStyle).toBe('none');
+  expect(structuredGeometry.itemStyle).toBe('none');
   expect(structuredGeometry.firstItemLeft).toBe(structuredGeometry.listLeft);
   expect(structuredGeometry.firstItemLabelLeft).toBe(
     structuredGeometry.listLeft,
   );
+  expect(structuredGeometry.markdownHeadingLeft).toBe(
+    structuredGeometry.markdownLeft,
+  );
+  expect(structuredGeometry.markdownItemLeft).toBe(
+    structuredGeometry.markdownLeft,
+  );
+  expect(structuredGeometry.markdownPreLeft).toBe(
+    structuredGeometry.markdownLeft,
+  );
+  expect(structuredGeometry.markdownCodeDisplay).toBe('inline');
+  expect(
+    structuredGeometry.structuralStyles.every(
+      ({ border, paddingLeft, paddingRight, marginLeft }) =>
+        border.every((width) => width === '0px') &&
+        paddingLeft === '0px' &&
+        marginLeft === '0px' &&
+        (paddingRight === '0px' || paddingRight === '14px'),
+    ),
+  ).toBe(true);
+  expect(structuredGeometry.summaryPaddingRight).toBe('14px');
+  expect(structuredGeometry.summaryMarker).toEqual({
+    right: '0px',
+    content: '"▾"',
+  });
   expect(
     await page
       .locator('body')
