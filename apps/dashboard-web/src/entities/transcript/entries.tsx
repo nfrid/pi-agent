@@ -164,34 +164,40 @@ export function parseSkillInvocation(
   };
 }
 
-function SkillInvocationView({ invocation }: { invocation: SkillInvocation }) {
+export function SkillInvocationView({
+  invocation,
+}: {
+  invocation: SkillInvocation;
+}) {
   return (
-    <details className="skill-invocation">
-      <summary>
-        <span className="activity-icon" aria-hidden="true">
-          ✦
-        </span>
-        <strong>Skill · {invocation.name}</strong>
-        <small>invoked</small>
-        <span className="session-event-disclosure" aria-hidden="true">
-          ›
-        </span>
-      </summary>
-      <div className="skill-invocation-details">
-        {invocation.location ? (
-          <small>Instructions from {invocation.location}</small>
-        ) : null}
-        {invocation.instructions ? (
-          <Markdown>{invocation.instructions}</Markdown>
-        ) : null}
-        {invocation.request ? (
-          <div className="skill-invocation-request">
-            <strong>Request</strong>
-            <Markdown>{invocation.request}</Markdown>
-          </div>
-        ) : null}
-      </div>
-    </details>
+    <div className="skill-invocation">
+      <details>
+        <summary>
+          <span className="activity-icon" aria-hidden="true">
+            ✦
+          </span>
+          <strong>Skill · {invocation.name}</strong>
+          <small>invoked</small>
+          <span className="session-event-disclosure" aria-hidden="true">
+            ›
+          </span>
+        </summary>
+        <div className="skill-invocation-details">
+          {invocation.location ? (
+            <small>Instructions from {invocation.location}</small>
+          ) : null}
+          {invocation.instructions ? (
+            <Markdown>{invocation.instructions}</Markdown>
+          ) : null}
+        </div>
+      </details>
+      {invocation.request ? (
+        <div className="skill-invocation-request">
+          <strong>Request</strong>
+          <Markdown>{invocation.request}</Markdown>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

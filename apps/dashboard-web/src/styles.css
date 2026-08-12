@@ -1516,7 +1516,7 @@ h2 {
   border-left: 2px solid var(--purple);
   padding-left: 8px;
 }
-.skill-invocation > summary {
+.skill-invocation :where(details > summary) {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1524,13 +1524,13 @@ h2 {
   cursor: pointer;
   list-style: none;
 }
-.skill-invocation > summary::-webkit-details-marker {
+.skill-invocation :where(details > summary)::-webkit-details-marker {
   display: none;
 }
-.skill-invocation > summary strong {
+.skill-invocation :where(details > summary) strong {
   color: var(--fg);
 }
-.skill-invocation > summary small {
+.skill-invocation :where(details > summary) small {
   color: var(--dim);
 }
 .skill-invocation-details {
@@ -1546,8 +1546,10 @@ h2 {
 }
 .skill-invocation-request {
   border-top: 1px solid var(--line-soft);
-  margin-top: 8px;
+  margin-top: 4px;
   padding-top: 7px;
+  color: var(--fg);
+  font-size: 12px;
 }
 .skill-invocation-request > strong {
   color: var(--purple);

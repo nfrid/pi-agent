@@ -5,6 +5,8 @@ import {
   reduceTranscriptEvent,
   STEERING_MESSAGE_MARKER_TYPE,
 } from '@pi-dashboard/domain';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { Value } from 'typebox/value';
 import { describe, expect, it } from 'vitest';
 import { ActivityGroupsViewModelSchema } from '../../../../extensions/activity-groups/contribution';
@@ -26,6 +28,7 @@ import {
   transcriptItemTimestamp,
   transcriptRoleLabel,
 } from './transcript';
+import { SkillInvocationView } from './transcript/entries';
 
 describe('activity row views and virtual transcript construction', () => {
   it('projects skill protocol envelopes as compact invocation data', () => {
@@ -42,6 +45,23 @@ describe('activity row views and virtual transcript construction', () => {
     });
     expect(parseSkillInvocation('ordinary user message')).toBeUndefined();
   });
+
+  it('keeps the user request visible outside collapsed skill details', () => {
+    const html = renderToStaticMarkup(
+      createElement(SkillInvocationView, {
+        invocation: {
+          name: 'browser',
+          instructions: 'Use the browser.',
+          request: 'Inspect the page',
+        },
+      }),
+    );
+
+    expect(html).toMatch(
+      /<\/details><div class="skill-invocation-request"><strong>Request<\/strong>.*Inspect the page/u,
+    );
+  });
+
   it('labels steering messages in the transcript and outline without adding a row', () => {
     const items = toTranscriptEntries([
       {
