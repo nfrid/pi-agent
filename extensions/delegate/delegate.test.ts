@@ -676,6 +676,9 @@ describe('delegate', () => {
     expect(guidelines).toContain(
       'use handoffFrom only when exact upstream detail',
     );
+    expect(guidelines).toContain(
+      'canonical path starting with `/` (for example, `/summary`, never `summary`)',
+    );
     expect(guidelines).toContain('<delegate_routing>');
     expect(guidelines).toContain('luna-low: model=gpt-5.6-luna');
   });
