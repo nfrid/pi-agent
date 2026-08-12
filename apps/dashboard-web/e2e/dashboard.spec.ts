@@ -1450,6 +1450,34 @@ Note: Recovery completed after the final check.`,
   await expect(structuredDelegateResults).toContainText('done');
   await expect(structuredDelegateResults).toContainText('src/App.tsx');
   await expect(structuredDelegateResults.getByText('Raw JSON')).toBeVisible();
+  const structuredPayload = structuredDelegateResults.locator(
+    '.structured-result-value',
+  );
+  const payloadRoot = structuredPayload
+    .locator('details.structured-result-node')
+    .first();
+  await expect(payloadRoot).toHaveAttribute('open', '');
+  const findingsSummary = structuredPayload
+    .locator('summary')
+    .filter({ hasText: 'Findings' });
+  const findingsNode = findingsSummary.locator('..');
+  await expect(findingsNode).toHaveAttribute('open', '');
+  await findingsSummary.click();
+  await expect(findingsNode).not.toHaveAttribute('open', '');
+  await findingsSummary.click();
+  await expect(findingsNode).toHaveAttribute('open', '');
+  const payloadOverflow = await structuredPayload.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(payloadOverflow.scrollWidth).toBeLessThanOrEqual(
+    payloadOverflow.clientWidth,
+  );
+  expect(
+    await page
+      .locator('body')
+      .evaluate((element) => element.scrollWidth <= element.clientWidth),
+  ).toBe(true);
   await expect(delegateEvent).toContainText('Status: success');
   await expect(delegateEvent).toContainText(
     'Recovery completed after the final check.',

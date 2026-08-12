@@ -1,4 +1,5 @@
 import type { TranscriptRenderToolItem } from '@pi-dashboard/domain';
+import type { ReactNode } from 'react';
 
 const INSPECTOR_MAX_TEXT = 1_200;
 const INSPECTOR_MAX_DEPTH = 3;
@@ -64,6 +65,8 @@ const STRUCTURED_VIEW_MAX_DEPTH = 4;
 const STRUCTURED_VIEW_MAX_ENTRIES = 24;
 const STRUCTURED_VIEW_MAX_TEXT = 1_200;
 
+type StructuredPrimitive = { text: string; truncated: boolean };
+
 function humanizeStructuredKey(key: string): string {
   const words = key
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
@@ -74,84 +77,237 @@ function humanizeStructuredKey(key: string): string {
   return words ? words[0].toUpperCase() + words.slice(1) : '(unnamed)';
 }
 
-function structuredPrimitive(value: unknown): string {
+function structuredPrimitive(value: unknown): StructuredPrimitive {
   if (typeof value === 'string') {
-    const text = value.slice(0, STRUCTURED_VIEW_MAX_TEXT);
-    return value.length > STRUCTURED_VIEW_MAX_TEXT ? `${text}…` : text;
+    return {
+      text: value.slice(0, STRUCTURED_VIEW_MAX_TEXT),
+      truncated: value.length > STRUCTURED_VIEW_MAX_TEXT,
+    };
   }
-  if (value === null) return 'null';
-  if (value === undefined) return 'undefined';
-  return String(value);
+  if (value === null) return { text: 'null', truncated: false };
+  if (value === undefined) return { text: 'undefined', truncated: false };
+  return { text: String(value), truncated: false };
 }
 
-function structuredContainer(value: unknown): boolean {
+function structuredContainer(value: unknown): value is object {
   return value !== null && typeof value === 'object';
 }
 
-function structuredArrayKey(value: unknown, position: number): string {
-  return `${position}-${JSON.stringify(value) ?? String(value)}`;
+function structuredType(value: unknown): string {
+  if (Array.isArray(value)) return 'array';
+  if (value === null) return 'null';
+  if (typeof value === 'object') return 'object';
+  return typeof value;
 }
 
-function StructuredValue({ value, depth }: { value: unknown; depth: number }) {
-  if (depth >= STRUCTURED_VIEW_MAX_DEPTH) return <span>…</span>;
-  if (Array.isArray(value)) {
-    return (
-      <ol className="structured-result-list">
-        {value.slice(0, STRUCTURED_VIEW_MAX_ENTRIES).map((item, index) => (
-          <li key={structuredArrayKey(item, index)}>
+function structuredContainerCount(value: unknown): number {
+  return Array.isArray(value)
+    ? value.length
+    : Object.keys(value as Record<string, unknown>).length;
+}
+
+function structuredContainerDescriptor(value: unknown): string {
+  const count = structuredContainerCount(value);
+  const noun = Array.isArray(value)
+    ? count === 1
+      ? 'item'
+      : 'items'
+    : count === 1
+      ? 'field'
+      : 'fields';
+  return `${structuredType(value)} · ${count} ${noun}`;
+}
+
+/** Make paths stable without serializing payload values into React keys. */
+function structuredPathSegment(value: string): string {
+  return value.replaceAll('~', '~0').replaceAll('/', '~1');
+}
+
+function structuredObjectPath(path: string, key: string): string {
+  return `${path}/${structuredPathSegment(key)}`;
+}
+
+function structuredArrayPath(path: string, index: number): string {
+  return `${path}/${index}`;
+}
+
+function StructuredNodeSummary({
+  label,
+  value,
+}: {
+  label: string;
+  value: unknown;
+}) {
+  return (
+    <summary className="structured-result-summary">
+      <span className="structured-result-label">{label}</span>
+      <span className="structured-result-summary-meta">
+        {' · '}
+        {structuredContainerDescriptor(value)}
+      </span>
+    </summary>
+  );
+}
+
+function StructuredOmission({ children }: { children: ReactNode }) {
+  return <p className="structured-result-omission">{children}</p>;
+}
+
+function StructuredPrimitiveBlock({
+  label,
+  value,
+}: {
+  label?: string;
+  value: unknown;
+}) {
+  const primitive = structuredPrimitive(value);
+  return (
+    <section className="structured-result-primitive-block">
+      {label ? (
+        <strong className="structured-result-field-label">{label}</strong>
+      ) : null}
+      <p className="structured-result-primitive">{primitive.text}</p>
+      {primitive.truncated && (
+        <StructuredOmission>
+          String truncated after {STRUCTURED_VIEW_MAX_TEXT.toLocaleString()}{' '}
+          characters; remaining characters are not displayed.
+        </StructuredOmission>
+      )}
+    </section>
+  );
+}
+
+function StructuredArrayItems({
+  value,
+  depth,
+  path,
+}: {
+  value: readonly unknown[];
+  depth: number;
+  path: string;
+}) {
+  const shown = Math.min(value.length, STRUCTURED_VIEW_MAX_ENTRIES);
+  return (
+    <ol className="structured-result-list">
+      {Array.from({ length: shown }, (_, index) => {
+        const item = value[index];
+        const itemPath = structuredArrayPath(path, index);
+        return (
+          <li className="structured-result-list-item" key={itemPath}>
             {structuredContainer(item) ? (
-              <StructuredValue value={item} depth={depth + 1} />
+              <StructuredContainer
+                depth={depth + 1}
+                label={`Item ${index + 1}`}
+                path={itemPath}
+                value={item}
+              />
             ) : (
-              <span>{structuredPrimitive(item)}</span>
+              <StructuredPrimitiveBlock value={item} />
             )}
           </li>
-        ))}
-        {value.length > STRUCTURED_VIEW_MAX_ENTRIES && (
-          <li>… ({value.length - STRUCTURED_VIEW_MAX_ENTRIES} more items)</li>
+        );
+      })}
+      {value.length > shown && (
+        <li className="structured-result-list-item">
+          <StructuredOmission>
+            Showing {shown} of {value.length} items; {value.length - shown}{' '}
+            {value.length - shown === 1 ? 'item' : 'items'} omitted.
+          </StructuredOmission>
+        </li>
+      )}
+    </ol>
+  );
+}
+
+function StructuredObjectFields({
+  value,
+  depth,
+  path,
+}: {
+  value: Record<string, unknown>;
+  depth: number;
+  path: string;
+}) {
+  const entries = Object.entries(value);
+  const shown = Math.min(entries.length, STRUCTURED_VIEW_MAX_ENTRIES);
+  return (
+    <ul className="structured-result-fields">
+      {entries.slice(0, shown).map(([key, item]) => {
+        const itemPath = structuredObjectPath(path, key);
+        const label = humanizeStructuredKey(key);
+        return (
+          <li className="structured-result-field" key={itemPath}>
+            {structuredContainer(item) ? (
+              <StructuredContainer
+                depth={depth + 1}
+                label={label}
+                path={itemPath}
+                value={item}
+              />
+            ) : (
+              <StructuredPrimitiveBlock label={label} value={item} />
+            )}
+          </li>
+        );
+      })}
+      {entries.length > shown && (
+        <li className="structured-result-field">
+          <StructuredOmission>
+            Showing {shown} of {entries.length} fields; {entries.length - shown}{' '}
+            {entries.length - shown === 1 ? 'field' : 'fields'} omitted.
+          </StructuredOmission>
+        </li>
+      )}
+    </ul>
+  );
+}
+
+function StructuredContainer({
+  label,
+  value,
+  depth,
+  path,
+}: {
+  label: string;
+  value: object;
+  depth: number;
+  path: string;
+}) {
+  const atDepthLimit = depth >= STRUCTURED_VIEW_MAX_DEPTH;
+  return (
+    <details
+      className={`structured-result-node${depth === 0 ? ' structured-result-root' : ''}`}
+      open={!atDepthLimit && depth < 3}
+    >
+      <StructuredNodeSummary label={label} value={value} />
+      <div className="structured-result-node-content">
+        {atDepthLimit ? (
+          <StructuredOmission>
+            Nested content omitted after depth {STRUCTURED_VIEW_MAX_DEPTH}. Open
+            the raw JSON fallback for the complete bounded value.
+          </StructuredOmission>
+        ) : Array.isArray(value) ? (
+          <StructuredArrayItems depth={depth} path={path} value={value} />
+        ) : (
+          <StructuredObjectFields
+            depth={depth}
+            path={path}
+            value={value as Record<string, unknown>}
+          />
         )}
-      </ol>
-    );
-  }
-  if (structuredContainer(value)) {
-    const entries = Object.entries(value as Record<string, unknown>);
-    return (
-      <dl className="structured-result-fields">
-        {entries.slice(0, STRUCTURED_VIEW_MAX_ENTRIES).map(([key, item]) => {
-          const label = humanizeStructuredKey(key);
-          return (
-            <div key={key}>
-              <dt>{label}</dt>
-              <dd>
-                {structuredContainer(item) ? (
-                  <section
-                    aria-label={label}
-                    className="structured-result-group"
-                  >
-                    <StructuredValue value={item} depth={depth + 1} />
-                  </section>
-                ) : (
-                  <span>{structuredPrimitive(item)}</span>
-                )}
-              </dd>
-            </div>
-          );
-        })}
-        {entries.length > STRUCTURED_VIEW_MAX_ENTRIES && (
-          <div>
-            <dt>More fields</dt>
-            <dd>… ({entries.length - STRUCTURED_VIEW_MAX_ENTRIES} omitted)</dd>
-          </div>
-        )}
-      </dl>
-    );
-  }
-  return <span>{structuredPrimitive(value)}</span>;
+      </div>
+    </details>
+  );
 }
 
 export function StructuredPayloadView({ value }: { value: unknown }) {
   return (
     <div className="structured-result-value">
-      <StructuredValue value={value} depth={0} />
+      {structuredContainer(value) ? (
+        <StructuredContainer depth={0} label="Payload" path="$" value={value} />
+      ) : (
+        <StructuredPrimitiveBlock label="Payload" value={value} />
+      )}
     </div>
   );
 }

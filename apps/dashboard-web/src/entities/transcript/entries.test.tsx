@@ -7,7 +7,7 @@ import type {
 import { StructuredDelegateResults, TranscriptEntry } from './entries';
 
 describe('expanded transcript tool rows', () => {
-  it('renders delegate structured output as labeled fields with raw JSON secondary', () => {
+  it('renders delegate structured output as a semantic document with raw JSON secondary', () => {
     const structuredResults: TranscriptStructuredResult[] = [
       {
         label: 'Audit',
@@ -39,12 +39,31 @@ describe('expanded transcript tool rows', () => {
     );
 
     expect(markup).toContain('aria-label="Structured delegate results"');
-    expect(markup).toContain('<dt>Outcome</dt>');
-    expect(markup).toContain('<dt>Findings</dt>');
+    expect(markup).not.toContain('aria-level=');
+    expect(markup).not.toContain('role="heading"');
+    expect(markup).toContain('>Payload</span>');
+    expect(markup).toContain('object · 2 fields');
+    expect(markup).toContain('>Outcome</strong>');
+    expect(markup).toContain('>Findings</span>');
+    expect(markup).toContain('array · 1 item');
+    expect(markup).not.toContain('<dt>');
     expect(markup).toContain('src/App.tsx');
     expect(markup).toContain('Raw JSON');
     expect(markup).toContain('&quot;outcome&quot;: &quot;done&quot;');
     expect(markup).not.toContain('StructuredPayloadView');
+  });
+
+  it('renders cyclic delegate results without throwing and falls back to unavailable raw JSON', () => {
+    const cycle: { items?: unknown[] } = {};
+    const items: unknown[] = [cycle];
+    cycle.items = items;
+    const markup = renderToStaticMarkup(
+      <StructuredDelegateResults
+        results={[{ label: 'Cyclic audit', status: 'valid', value: cycle }]}
+      />,
+    );
+    expect(markup).toContain('Nested content omitted after depth 4.');
+    expect(markup).toContain('[unavailable payload]');
   });
 
   it('renders invalid and omitted delegate structured states explicitly', () => {
