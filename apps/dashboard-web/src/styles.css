@@ -1593,8 +1593,7 @@ h2 {
   min-width: 0;
   min-height: 32px;
   margin: 0;
-  padding: 7px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--line-soft) 72%, transparent);
+  padding: 7px 14px 7px 0;
   color: var(--fg);
   cursor: pointer;
   list-style: none;
@@ -1606,13 +1605,13 @@ h2 {
 .structured-result-node > summary::-webkit-details-marker {
   display: none;
 }
-.structured-result-node > summary::before {
+.structured-result-node > summary::after {
   position: absolute;
-  left: -13px;
+  inset-inline-end: 0;
   color: var(--cyan);
   content: "▸";
 }
-.structured-result-node[open] > summary::before {
+.structured-result-node[open] > summary::after {
   content: "▾";
 }
 .structured-result-node > summary:hover {
@@ -1648,10 +1647,6 @@ h2 {
 .structured-result-node-content {
   overflow-wrap: anywhere;
 }
-.structured-result-field + .structured-result-field,
-.structured-result-list-item + .structured-result-list-item {
-  border-top: 1px solid color-mix(in srgb, var(--line-soft) 58%, transparent);
-}
 .structured-result-primitive-block {
   min-width: 0;
   margin: 10px 0 11px;
@@ -1675,6 +1670,17 @@ h2 {
 }
 .structured-result-markdown .markdown {
   color: var(--muted);
+}
+.structured-result-markdown .markdown ul,
+.structured-result-markdown .markdown ol {
+  margin-inline: 0;
+  padding-inline: 0;
+  list-style: none;
+}
+.structured-result-markdown .markdown li {
+  margin-inline: 0;
+  padding-inline: 0;
+  list-style: none;
 }
 .structured-result-omission {
   margin: 10px 0 11px;
