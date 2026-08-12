@@ -2671,77 +2671,28 @@ ol.delegate-inspector-runs > li small {
   font-size: 10px;
   font-weight: 800;
 }
-.session-inspector-layer {
-  position: fixed;
-  z-index: 45;
-  inset: 0;
-  pointer-events: none;
-}
-.session-inspector-backdrop {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: #18192399;
-  cursor: default;
-  pointer-events: auto;
-}
-.session-inspector {
-  position: absolute;
-  animation: drawer-in 160ms ease-out both;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  flex-direction: column;
+.session-inspector.surface-dialog {
   width: min(390px, 100vw);
   border-left: 1px solid var(--line);
   background: var(--bg-alt);
   box-shadow: -18px 0 48px #0008;
   color: var(--fg);
   outline: 0;
-  pointer-events: auto;
 }
-.session-inspector-layer.is-exiting .session-inspector-backdrop {
-  animation: overlay-out 160ms ease-in both;
-  pointer-events: none;
-}
-.session-inspector.is-exiting,
-.session-inspector-layer.is-exiting .session-inspector {
-  animation: drawer-out 160ms ease-in both;
-  pointer-events: none;
-}
-.inspector-header {
-  display: flex;
+.session-inspector.surface-dialog .surface-dialog-header {
   align-items: flex-start;
-  justify-content: space-between;
   gap: 18px;
   flex: none;
-  border-bottom: 1px solid var(--line-soft);
   background: color-mix(in srgb, var(--bg-alt) 96%, var(--purple));
   padding: 20px 20px 16px;
 }
-.inspector-kicker {
-  margin: 0 0 5px;
-  color: var(--purple);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.inspector-header h2 {
+.session-inspector.surface-dialog .surface-dialog-header h2 {
   max-width: 310px;
-  margin: 0;
-  overflow: hidden;
-  color: var(--fg);
   font-size: 18px;
-  letter-spacing: -0.02em;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.inspector-close {
-  flex: none;
+.session-inspector.surface-dialog
+  .surface-dialog-header
+  > .session-icon-button {
   width: 31px;
   height: 31px;
   border: 1px solid var(--line);
@@ -2752,12 +2703,22 @@ ol.delegate-inspector-runs > li small {
   font-size: 21px;
   line-height: 1;
 }
-.inspector-close:hover {
+.session-inspector.surface-dialog
+  .surface-dialog-header
+  > .session-icon-button:hover {
   border-color: var(--pink);
   color: var(--pink);
 }
-.inspector-body {
+.session-inspector.surface-dialog .surface-dialog-body {
+  display: flex;
   min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  padding: 0;
+}
+.session-inspector.surface-dialog .inspector-body {
+  min-height: 0;
+  flex: 1;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 0 20px 32px;
@@ -2855,7 +2816,7 @@ ol.delegate-inspector-runs > li small {
   }
 }
 @media (max-width: 820px) {
-  .session-inspector {
+  .session-inspector.surface-dialog {
     top: 62px;
     right: 0;
     bottom: 68px;
@@ -2867,14 +2828,14 @@ ol.delegate-inspector-runs > li small {
     border-left: 0;
     box-shadow: 0 -12px 38px #0008;
   }
-  .inspector-header {
+  .session-inspector.surface-dialog .surface-dialog-header {
     padding: 15px 13px 13px;
   }
-  .inspector-header h2 {
+  .session-inspector.surface-dialog .surface-dialog-header h2 {
     max-width: calc(100vw - 85px);
     font-size: 17px;
   }
-  .inspector-body {
+  .session-inspector.surface-dialog .inspector-body {
     padding: 0 13px 24px;
   }
   .session-page.inspector-open .session-control-layer {
@@ -4584,8 +4545,6 @@ body:has(.session-page) .global-tools > .palette-trigger {
 @media (prefers-reduced-motion: reduce) {
   .palette-backdrop,
   .command-palette,
-  .session-inspector-layer,
-  .session-inspector-backdrop,
   .agent-nav-backdrop,
   .agent-nav-drawer,
   .surface-dialog-layer,
@@ -4613,16 +4572,6 @@ body:has(.session-page) .global-tools > .palette-trigger {
     opacity 170ms ease,
     transform 170ms ease,
     visibility 0s linear 0s;
-}
-.session-page.modal-open .session-context {
-  visibility: hidden;
-  opacity: 0;
-  transform: translateY(-10px);
-  pointer-events: none;
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease,
-    visibility 0s linear 140ms;
 }
 .session-context-main,
 .session-identity,
@@ -5371,7 +5320,6 @@ details.session-event {
 
 @media (prefers-reduced-motion: reduce) {
   .session-context,
-  .session-page.modal-open .session-context,
   .transcript-minimap-marker i,
   .transcript-minimap-preview {
     transition: none;

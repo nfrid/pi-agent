@@ -3339,6 +3339,14 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   await expect(inspector).toBeVisible();
   await swipe(inspector, { dx: 104, dy: 8 });
   await expect(inspector).toHaveCount(0);
+  await expect(detailsButton).toBeFocused();
+  await detailsButton.click();
+  await expect(inspector).toBeVisible();
+  await page
+    .locator('.surface-dialog-layer')
+    .click({ position: { x: 2, y: 2 } });
+  await expect(inspector).toHaveCount(0);
+  await expect(detailsButton).toBeFocused();
   await detailsButton.click();
   await expect(inspector).toBeVisible();
   const readDesktopGeometry = () =>
@@ -3374,7 +3382,29 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   await page.setViewportSize({ width: 1024, height: 900 });
   expect((await readDesktopGeometry())?.composerVisibility).toBe('hidden');
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.keyboard.press('Escape');
+  const exitState = await page.evaluate(() => {
+    document
+      .querySelector<HTMLButtonElement>(
+        '#session-inspector button[aria-label="Close session details"]',
+      )
+      ?.click();
+    return new Promise<{ exiting: boolean; headingVisibility: string }>(
+      (resolve) =>
+        window.setTimeout(() => {
+          const layer = document.querySelector('.surface-dialog-layer');
+          const heading = document.querySelector(
+            '.session-page > .session-heading h1',
+          );
+          resolve({
+            exiting: layer?.classList.contains('is-exiting') ?? false,
+            headingVisibility: heading
+              ? getComputedStyle(heading).visibility
+              : 'missing',
+          });
+        }, 16),
+    );
+  });
+  expect(exitState).toEqual({ exiting: true, headingVisibility: 'visible' });
   await expect(inspector).toHaveCount(0);
   await page.getByRole('button', { name: 'Details', exact: true }).click();
   const reopenedInspector = page.getByRole('dialog');

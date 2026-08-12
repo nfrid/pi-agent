@@ -46,6 +46,9 @@ export function DashboardDialog({
   hideTitle = false,
   className = 'surface-dialog',
   layerClassName = 'surface-dialog-layer',
+  dialogId,
+  titleId: providedTitleId,
+  closeLabel,
   isOpen = true,
   paused = false,
 }: {
@@ -58,10 +61,15 @@ export function DashboardDialog({
   hideTitle?: boolean;
   className?: string;
   layerClassName?: string;
+  dialogId?: string;
+  titleId?: string;
+  closeLabel?: string;
   isOpen?: boolean;
   paused?: boolean;
 }) {
-  const titleId = useId();
+  const generatedTitleId = useId();
+  const titleId = providedTitleId ?? generatedTitleId;
+  const resolvedCloseLabel = closeLabel ?? `Close ${title}`;
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
   const { present, exiting } = useOverlayPresence(isOpen);
@@ -111,6 +119,7 @@ export function DashboardDialog({
       >
         <AriaDialog
           ref={swipeHandlers.ref}
+          id={dialogId}
           className={className}
           aria-labelledby={titleId}
           aria-modal="true"
@@ -135,7 +144,7 @@ export function DashboardDialog({
             <button
               type="button"
               className="session-icon-button"
-              aria-label={`Close ${title}`}
+              aria-label={resolvedCloseLabel}
               onClick={onClose}
             >
               ×
