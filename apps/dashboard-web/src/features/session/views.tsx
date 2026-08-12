@@ -1,0 +1,241 @@
+import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type { ComponentType, RefObject } from 'react';
+import { sessionDisplayTitle } from '../../app-helpers';
+import { ExtensionSurfaceStack } from '../extension-surfaces';
+
+export type SessionComposerProps = {
+  runtime: RuntimeSnapshot | undefined;
+  runtimes?: readonly RuntimeSnapshot[];
+  sessionId: string;
+  workspaceId?: string;
+  onMessageSubmitted?: () => void;
+  onPromptSubmitted?: (text: string) => void;
+};
+
+export function SessionLoadingCurtain({
+  error,
+  queryError,
+  onRetry,
+}: {
+  error: string | undefined;
+  queryError: Error | null;
+  onRetry: () => void;
+}) {
+  return (
+    <output
+      className="session-loading-curtain session-transcript-loading"
+      aria-live="polite"
+    >
+      <span className="session-loading-indicator" aria-hidden="true" />
+      <p>
+        {error ??
+          (queryError instanceof Error
+            ? queryError.message
+            : 'Loading session…')}
+      </p>
+      {(error || queryError) && (
+        <button type="button" className="secondary-button" onClick={onRetry}>
+          Retry
+        </button>
+      )}
+    </output>
+  );
+}
+
+export function SessionHeader({
+  workspaceName,
+  data,
+  entries,
+  status,
+  statusLabel,
+  inspectorOpen,
+  hasPendingInteraction,
+  outlineTriggerRef,
+  onOpenOutline,
+  onOpenInspector,
+}: {
+  workspaceName: string;
+  data: Parameters<typeof sessionDisplayTitle>[0];
+  entries: readonly unknown[];
+  status: string;
+  statusLabel: string;
+  inspectorOpen: boolean;
+  hasPendingInteraction: boolean;
+  outlineTriggerRef: RefObject<HTMLButtonElement | null>;
+  onOpenOutline: () => void;
+  onOpenInspector: () => void;
+}) {
+  return (
+    <header className="session-context session-heading">
+      <div className="session-context-main">
+        <div className="session-identity">
+          <div className="session-breadcrumb">
+            <span className="session-workspace">{workspaceName}</span>
+            <span className="session-breadcrumb-separator" aria-hidden="true">
+              /
+            </span>
+            <h1 title={sessionDisplayTitle(data, entries)}>
+              {sessionDisplayTitle(data, entries)}
+            </h1>
+          </div>
+          <span className={`session-status status-${status}`}>
+            <i aria-hidden="true">●</i> {statusLabel}
+          </span>
+        </div>
+      </div>
+      <div className="session-heading-actions">
+        <button
+          type="button"
+          ref={outlineTriggerRef}
+          className="session-icon-button outline-trigger"
+          aria-label="Open transcript outline"
+          aria-haspopup="dialog"
+          onClick={onOpenOutline}
+        >
+          <span className="session-icon-glyph" aria-hidden="true">
+            ≡
+          </span>
+        </button>
+        <button
+          type="button"
+          className="session-icon-button session-details-trigger"
+          aria-label="Details"
+          aria-haspopup="dialog"
+          aria-expanded={inspectorOpen}
+          aria-controls="session-inspector"
+          disabled={hasPendingInteraction}
+          title={
+            hasPendingInteraction
+              ? 'Answer the pending question before opening session details'
+              : 'Session details'
+          }
+          onClick={onOpenInspector}
+        >
+          <span
+            className="session-icon-glyph session-more-glyph"
+            aria-hidden="true"
+          >
+            •••
+          </span>
+          <span className="sr-only">Details</span>
+        </button>
+      </div>
+    </header>
+  );
+}
+
+export function SessionHistoryControl({
+  loading,
+  error,
+  onLoad,
+}: {
+  loading: boolean;
+  error: string | undefined;
+  onLoad: () => void;
+}) {
+  return (
+    <div className="session-history-control" aria-live="polite">
+      <button
+        type="button"
+        className="secondary-button"
+        onClick={onLoad}
+        disabled={loading}
+      >
+        {loading
+          ? 'Loading earlier history…'
+          : error
+            ? 'Retry earlier history'
+            : 'Load earlier history'}
+      </button>
+      {error && (
+        <span role="alert" className="session-history-error">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+export function SessionControlLayer({
+  controlLayerRef,
+  awayFromLatest,
+  onJumpToLatest,
+  Composer,
+  runtime,
+  runtimes,
+  sessionId,
+  workspaceId,
+  onPromptSubmitted,
+}: {
+  controlLayerRef: RefObject<HTMLDivElement | null>;
+  awayFromLatest: boolean;
+  onJumpToLatest: () => void;
+  Composer: ComponentType<SessionComposerProps>;
+  runtime: RuntimeSnapshot | undefined;
+  runtimes: readonly RuntimeSnapshot[];
+  sessionId: string;
+  workspaceId: string | undefined;
+  onPromptSubmitted: (text: string) => void;
+}) {
+  return (
+    <div ref={controlLayerRef} className="session-control-layer">
+      {awayFromLatest && (
+        <button
+          type="button"
+          className="session-icon-button jump-latest"
+          onClick={onJumpToLatest}
+          aria-label="Jump to latest transcript activity"
+        >
+          ↓
+        </button>
+      )}
+      <ExtensionSurfaceStack runtime={runtime} placement="composer" />
+      <Composer
+        key={sessionId}
+        runtime={runtime}
+        runtimes={runtimes}
+        sessionId={sessionId}
+        workspaceId={workspaceId}
+        onMessageSubmitted={onJumpToLatest}
+        onPromptSubmitted={onPromptSubmitted}
+      />
+    </div>
+  );
+}
+
+export function SessionLoadingHeader({
+  id,
+  metadata,
+  runtime,
+  status,
+  statusLabel,
+}: {
+  id: string;
+  metadata: Parameters<typeof sessionDisplayTitle>[0] | undefined;
+  runtime: RuntimeSnapshot | undefined;
+  status: string;
+  statusLabel: string;
+}) {
+  return (
+    <header className="session-context session-heading">
+      <div className="session-context-main">
+        <div className="session-identity">
+          <div className="session-breadcrumb">
+            <span className="session-workspace">Session</span>
+            <span className="session-breadcrumb-separator" aria-hidden="true">
+              /
+            </span>
+            <h1>
+              {metadata
+                ? sessionDisplayTitle(metadata)
+                : runtime?.session.title || runtime?.session.name || id}
+            </h1>
+          </div>
+          <span className={`session-status status-${status}`}>
+            <i aria-hidden="true">●</i> {statusLabel}
+          </span>
+        </div>
+      </div>
+    </header>
+  );
+}
