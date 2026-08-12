@@ -27,8 +27,8 @@ export type AgentThreadRow = {
   updatedAt: number;
 };
 
-function dormantRank(status: AgentThreadRow['status']): number {
-  return status === 'dormant' ? 1 : 0;
+function inactiveRank(status: AgentThreadRow['status']): number {
+  return status === 'offline' || status === 'dormant' ? 1 : 0;
 }
 
 export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
@@ -80,7 +80,7 @@ export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
   }
   return [...rows.values()].sort(
     (left, right) =>
-      dormantRank(left.status) - dormantRank(right.status) ||
+      inactiveRank(left.status) - inactiveRank(right.status) ||
       right.startedAt - left.startedAt ||
       left.title.localeCompare(right.title),
   );

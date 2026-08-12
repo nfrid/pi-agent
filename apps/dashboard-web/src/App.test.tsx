@@ -777,7 +777,7 @@ describe('ask-user keyboard contract', () => {
 });
 
 describe('workspace-first agent navigation', () => {
-  it('prioritizes working, waiting, failed, then recent idle threads', () => {
+  it('keeps offline and dormant threads below everything else', () => {
     const snapshot = {
       runtimes: [
         {
@@ -786,6 +786,17 @@ describe('workspace-first agent navigation', () => {
           online: true,
           cwd: '/workspace/app',
           session: { id: 'idle-session', title: 'Old thread', entries: [] },
+        },
+        {
+          runtimeId: 'offline',
+          liveState: 'idle',
+          online: false,
+          cwd: '/workspace/app',
+          session: {
+            id: 'offline-session',
+            title: 'Offline thread',
+            entries: [],
+          },
         },
         {
           runtimeId: 'failed',
@@ -830,6 +841,12 @@ describe('workspace-first agent navigation', () => {
           updatedAt: 2,
         },
         {
+          id: 'offline-session',
+          cwd: '/workspace/app',
+          startedAt: 700,
+          updatedAt: 7,
+        },
+        {
           id: 'failed-session',
           cwd: '/workspace/app',
           startedAt: 300,
@@ -861,6 +878,7 @@ describe('workspace-first agent navigation', () => {
       ['working-session', 'working'],
       ['failed-session', 'failed'],
       ['idle-session', 'idle'],
+      ['offline-session', 'offline'],
       ['dormant-session', 'dormant'],
     ]);
     const idle = rows[3];
