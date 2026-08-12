@@ -2,6 +2,3 @@ packages:
   - apps/*
   - packages/*
   - extensions/*
-
-patchedDependencies:
-  '@earendil-works/pi-coding-agent@0.84.1': patches/@earendil-works__pi-coding-agent@0.84.1.patch

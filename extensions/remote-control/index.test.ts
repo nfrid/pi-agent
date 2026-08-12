@@ -1046,25 +1046,6 @@ describe('dashboard-owned queue drafts', () => {
     }
   });
 
-  it('cancels compaction through the direct Pi context hook', async () => {
-    const abortCompaction = vi.fn();
-    const commandContext = {
-      abortCompaction,
-      isIdle: () => true,
-    } as unknown as ExtensionContext;
-
-    await expect(
-      dispatchDashboardCommand(
-        {} as ExtensionAPI,
-        commandContext,
-        new InteractionBroker(),
-        { id: 'cancel-compaction-1', type: 'compact.cancel' },
-      ),
-    ).resolves.toEqual({ accepted: true });
-
-    expect(abortCompaction).toHaveBeenCalledOnce();
-  });
-
   it('dispatches queue commands into the current session store', async () => {
     const store = new QueueDraftStore();
     store.setSession('session-commands');
