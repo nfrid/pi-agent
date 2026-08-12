@@ -32,6 +32,7 @@ function inactiveRank(status: AgentThreadRow['status']): number {
 }
 
 export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
+  const now = Date.now();
   const workspaces = snapshot.workspaces;
   const sessionsById = new Map(
     snapshot.sessions.map((session) => [session.id, session]),
@@ -57,8 +58,8 @@ export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
       statusLabel: pauseStatus?.label,
       runtime,
       session,
-      startedAt: session?.startedAt ?? 0,
-      updatedAt: session?.updatedAt ?? 0,
+      startedAt: session?.startedAt ?? now,
+      updatedAt: session?.updatedAt ?? now,
     });
   }
   for (const session of snapshot.sessions) {
