@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { sessionDisplayTitle } from '../app-helpers';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav, agentThreadRows } from './agent-thread-nav';
+import styles from './dashboard-overview.module.css';
 import { runtimePauseStatus } from './extension-surfaces';
 import { SessionRow } from './workspace-session';
 
@@ -74,7 +75,9 @@ export function Dashboard({
     (runtime) => runtime.online !== false,
   ).length;
   return (
-    <div className="session-layout dashboard-workspace">
+    <div
+      className={`session-layout dashboard-workspace ${styles.dashboardWorkspace}`}
+    >
       <AgentThreadNav
         snapshot={snapshot}
         mode="session"
@@ -82,10 +85,10 @@ export function Dashboard({
         onOpenChange={setAgentNavOpen}
       />
       <section
-        className="dashboard-empty-workspace"
+        className={`dashboard-empty-workspace ${styles.dashboardEmptyWorkspace}`}
         aria-label="Agent workspace"
       >
-        <div className="home-heading">
+        <div className={`home-heading ${styles.homeHeading}`}>
           <div>
             <p className="eyebrow">Pi workspace</p>
             <h1>No thread selected</h1>
@@ -95,7 +98,7 @@ export function Dashboard({
             </p>
           </div>
         </div>
-        <div className="empty-workspace-state">
+        <div className={`empty-workspace-state ${styles.emptyWorkspaceState}`}>
           <span className="empty-mark" aria-hidden="true">
             ›_
           </span>
@@ -104,7 +107,9 @@ export function Dashboard({
             Start a new agent, or choose an existing thread from the workspace
             nav to open its transcript.
           </p>
-          <div className="empty-workspace-actions">
+          <div
+            className={`empty-workspace-actions ${styles.emptyWorkspaceActions}`}
+          >
             <button type="button" onClick={() => go(newChatPath(snapshot))}>
               New chat
             </button>

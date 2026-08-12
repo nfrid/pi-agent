@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { useDashboardContext } from '../app/dashboard-context';
 import { Composer } from '../features/composer';
 import { NewChatView } from '../features/new-chat';
+import newChatStyles from '../features/new-chat.module.css';
 import { SessionView } from '../features/session';
 import {
   Dashboard,
@@ -116,7 +117,10 @@ export function LegacyNewRoute() {
     : '/workspaces';
   useEffect(() => go(path), [go, path]);
   return (
-    <section className="new-chat-missing" role="status">
+    <section
+      className={`new-chat-missing ${newChatStyles.newChatMissing}`}
+      role="status"
+    >
       <p>Opening a new chat…</p>
     </section>
   );

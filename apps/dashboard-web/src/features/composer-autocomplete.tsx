@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import styles from './composer-autocomplete.module.css';
 
 export type ComposerCommandOption = {
   name: string;
@@ -112,7 +113,7 @@ export function ComposerAutocomplete({
 
   return (
     <div
-      className="composer-autocomplete"
+      className={`composer-autocomplete ${styles.autocomplete}`}
       id={id}
       role="listbox"
       aria-label="Available commands"
@@ -130,11 +131,11 @@ export function ComposerAutocomplete({
           onMouseEnter={() => onSelectedIndexChange(index)}
           onClick={() => onSelect(command)}
         >
-          <span className="composer-autocomplete-command">
+          <span className={`composer-autocomplete-command ${styles.command}`}>
             <strong>/{command.name}</strong>
             {command.argumentHint && <code>{command.argumentHint}</code>}
           </span>
-          <span className="composer-autocomplete-detail">
+          <span className={`composer-autocomplete-detail ${styles.detail}`}>
             <small>{commandSourceLabel(command.source)}</small>
             {command.description && <span>{command.description}</span>}
           </span>

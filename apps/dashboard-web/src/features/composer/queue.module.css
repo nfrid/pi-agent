@@ -1,0 +1,130 @@
+/* Queue presentation is owned by QueuePanel. queue-* names remain on elements
+   because queue mode is a runtime semantic vocabulary and a session-wide contract. */
+.panel {
+  order: 0;
+  margin: 0 0 5px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-alt) 65%, transparent);
+  overflow: hidden;
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.heading :global(.eyebrow) {
+  margin: 0;
+  color: var(--orange);
+}
+
+.list {
+  display: grid;
+  max-height: min(34vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.item:last-child {
+  border-bottom: 0;
+}
+
+.mode {
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  color: var(--cyan);
+  font-size: 9px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.text {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item input {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--purple);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 4px 6px;
+}
+
+.actions {
+  display: flex;
+  gap: 5px;
+  flex: none;
+}
+
+.actions button {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  padding: 3px 6px;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.actions button:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+.actions button:global(.queue-remove):hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.actions button:disabled {
+  cursor: wait;
+  opacity: 0.45;
+}
+
+.error {
+  margin: 0;
+  padding: 5px 9px;
+  font-size: 10px;
+}
+
+@media (max-width: 600px) {
+  .list {
+    max-height: min(28vh, 220px);
+  }
+
+  .item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .actions {
+    grid-column: 2;
+  }
+
+  .text {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

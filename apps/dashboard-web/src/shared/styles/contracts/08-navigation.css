@@ -1,0 +1,118 @@
+/* Global navigation contract: contextual shell, home, new-chat, and loading states. */
+/* Second-pass workspace-first shell. Navigation is contextual to the route. */
+.app {
+  display: block;
+  min-height: 100vh;
+}
+.navigation-shell {
+  position: relative;
+  z-index: 20;
+  display: block;
+  height: 0;
+  pointer-events: none;
+}
+.global-tools {
+  position: fixed;
+  z-index: 20;
+  top: 12px;
+  right: 18px;
+  bottom: auto;
+  left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+.global-tools .push-button,
+.global-new-agent,
+.global-notifications,
+.global-tools .palette-trigger {
+  height: 32px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
+  color: var(--muted);
+  padding: 6px 9px;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    color 150ms ease,
+    background 150ms ease;
+}
+.global-tools .push-button {
+  margin: 0;
+  border-left: 1px solid var(--line-soft);
+}
+.global-new-agent {
+  width: 32px;
+  color: var(--purple);
+  font-size: 17px;
+}
+.global-notifications {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  gap: 4px;
+}
+.global-notifications b,
+.agent-nav-utility b {
+  min-width: 16px;
+  border-radius: 999px;
+  background: var(--orange);
+  color: var(--bg);
+  padding: 0 4px;
+  font-size: 9px;
+  text-align: center;
+}
+.global-notifications:hover,
+.global-tools .push-button:hover,
+.global-tools .palette-trigger:hover {
+  border-color: var(--purple);
+  background: color-mix(in srgb, var(--purple) 10%, var(--bg-alt));
+  color: var(--fg);
+}
+.shell {
+  width: min(1240px, 100%);
+  max-width: none;
+  margin: 0 auto;
+  padding: 34px clamp(16px, 4vw, 56px) 96px;
+}
+.session-layout {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+  min-width: 0;
+}
+.session-transcript-loading {
+  min-height: min(46vh, 420px);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: var(--muted);
+}
+.session-transcript-loading p {
+  margin: 0;
+}
+.session-loading-indicator {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--line);
+  border-top-color: var(--purple);
+  border-radius: 50%;
+  animation: session-loading-spin 800ms linear infinite;
+}
+@keyframes session-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-loading-indicator {
+    animation: none;
+    border-top-color: var(--line);
+  }
+}

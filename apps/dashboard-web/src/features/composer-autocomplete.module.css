@@ -1,0 +1,101 @@
+/* Command completion is local UI; the kebab-case classes remain as optional
+   semantic hooks while these module selectors own the popup presentation. */
+.autocomplete {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  z-index: 30;
+  display: grid;
+  width: min(760px, calc(100vw - 20px));
+  max-height: min(360px, 48vh);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-alt) 96%, transparent);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 38%);
+  padding: 4px;
+  transform: translateX(-50%);
+}
+
+.autocomplete button {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.5fr);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 7px 9px;
+  color: var(--fg);
+  text-align: left;
+}
+
+.autocomplete button:hover,
+.autocomplete button:global(.selected) {
+  background: color-mix(in srgb, var(--cyan) 13%, var(--bg-alt));
+}
+
+.command,
+.detail {
+  min-width: 0;
+}
+
+.command {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.command strong,
+.command code,
+.detail span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command strong {
+  color: var(--cyan);
+  font-size: 12px;
+}
+
+.command code {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.detail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.detail small {
+  flex: 0 0 auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 1px 5px;
+  color: var(--dim);
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 600px) {
+  .autocomplete button {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3px;
+    padding: 8px 9px;
+  }
+
+  .detail span {
+    display: -webkit-box;
+    overflow: hidden;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+}

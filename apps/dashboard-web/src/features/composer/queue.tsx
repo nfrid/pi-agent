@@ -6,6 +6,7 @@ import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
+import styles from './queue.module.css';
 
 export type QueuedMessage = {
   id: string;
@@ -149,17 +150,20 @@ export function QueuePanel({
   };
   if (!items.length) return null;
   return (
-    <section className="queue-panel" aria-label="Queued messages">
-      <div className="queue-heading">
+    <section
+      className={`queue-panel ${styles.panel}`}
+      aria-label="Queued messages"
+    >
+      <div className={`queue-heading ${styles.heading}`}>
         <span className="eyebrow">Queue</span>
         <span>{items.length} waiting</span>
       </div>
-      <div className="queue-list">
+      <div className={`queue-list ${styles.list}`}>
         {items.map((item) => {
           const editing = editingId === item.id;
           return (
-            <div className="queue-item" key={item.id}>
-              <span className={`queue-mode queue-${item.mode}`}>
+            <div className={`queue-item ${styles.item}`} key={item.id}>
+              <span className={`queue-mode queue-${item.mode} ${styles.mode}`}>
                 {item.mode === 'steer' ? 'steer' : 'follow-up'}
               </span>
               {editing ? (
@@ -177,9 +181,9 @@ export function QueuePanel({
                   disabled={mutation.isPending}
                 />
               ) : (
-                <span className="queue-text">{item.text}</span>
+                <span className={`queue-text ${styles.text}`}>{item.text}</span>
               )}
-              <div className="queue-actions">
+              <div className={`queue-actions ${styles.actions}`}>
                 {editing ? (
                   <AriaButton
                     type="button"
@@ -211,7 +215,7 @@ export function QueuePanel({
         })}
       </div>
       {error && (
-        <p className="error queue-error" role="alert">
+        <p className={`error queue-error ${styles.error}`} role="alert">
           {error}
         </p>
       )}

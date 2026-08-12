@@ -37,6 +37,7 @@ import {
   modelOptionValue,
   type RuntimeModelOption,
 } from './model-option';
+import styles from './new-chat.module.css';
 
 function errorDetails(cause: unknown): { message: string; code?: string } {
   if (cause instanceof Error) {
@@ -265,7 +266,7 @@ export function NewChatView({
 
   if (!workspace) {
     return (
-      <section className="new-chat-missing">
+      <section className={`new-chat-missing ${styles.newChatMissing}`}>
         <h1>Workspace not found</h1>
         <p className="error" role="alert">
           This workspace is no longer available.
@@ -339,14 +340,20 @@ export function NewChatView({
           open={agentNavOpen}
           onOpenChange={setAgentNavOpen}
         />
-        <section className="new-chat-page new-chat-pending" aria-live="polite">
-          <header className="new-chat-heading">
+        <section
+          className={`new-chat-page new-chat-pending ${styles.newChatPage}`}
+          aria-live="polite"
+        >
+          <header className={`new-chat-heading ${styles.newChatHeading}`}>
             <div>
               <p className="eyebrow">{workspace.name}</p>
               <h1>New chat</h1>
             </div>
           </header>
-          <div className="new-chat-pending-state" role="status">
+          <div
+            className={`new-chat-pending-state ${styles.newChatPendingState}`}
+            role="status"
+          >
             <span className="session-loading-indicator" aria-hidden="true" />
             <strong>Starting agent…</strong>
             <p className="muted">Your chat will open as soon as it is ready.</p>
@@ -364,15 +371,18 @@ export function NewChatView({
         open={agentNavOpen}
         onOpenChange={setAgentNavOpen}
       />
-      <section className="new-chat-page" aria-label="New chat">
-        <header className="new-chat-heading">
+      <section
+        className={`new-chat-page ${styles.newChatPage}`}
+        aria-label="New chat"
+      >
+        <header className={`new-chat-heading ${styles.newChatHeading}`}>
           <div>
             <p className="eyebrow">{workspace.name}</p>
             <h1>New chat</h1>
           </div>
         </header>
-        <div className="new-chat-empty">
-          <div className="new-chat-intro">
+        <div className={`new-chat-empty ${styles.newChatEmpty}`}>
+          <div className={`new-chat-intro ${styles.newChatIntro}`}>
             <span className="empty-mark" aria-hidden="true">
               ›_
             </span>
@@ -380,7 +390,7 @@ export function NewChatView({
             <p className="muted">What would you like to work on?</p>
           </div>
           <form
-            className={`composer new-chat-composer ${dragging ? 'dragging' : ''}`}
+            className={`composer new-chat-composer ${styles.newChatComposer} ${dragging ? 'dragging' : ''}`}
             aria-label="Start a new chat"
             onSubmit={(event) => void submit(event)}
             onDragEnter={onDragEnter}
@@ -461,7 +471,10 @@ export function NewChatView({
                 />
               </div>
               {error && (
-                <div className="new-chat-error" role="alert">
+                <div
+                  className={`new-chat-error ${styles.newChatError}`}
+                  role="alert"
+                >
                   <p className="error">{error}</p>
                   {sharedWarning && (
                     <button

@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
 
@@ -39,8 +38,7 @@ export default defineConfig({
   define: {
     __DASHBOARD_BUILD_ID__: JSON.stringify(dashboardBuildId),
   },
-  // Tailwind v4 is utility-only here; styles.css intentionally does not import preflight.
-  plugins: [react(), tailwindcss(), dashboardVersionPlugin()],
+  plugins: [react(), dashboardVersionPlugin()],
   resolve: {
     alias: {
       '@pi-dashboard/client': path.resolve(

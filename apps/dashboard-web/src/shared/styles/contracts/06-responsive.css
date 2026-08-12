@@ -1,0 +1,202 @@
+/* Global responsive contract: legacy breakpoint overrides kept in cascade order. */
+@media (max-width: 600px) {
+  .interaction-choice-layout.has-preview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .push-button {
+    display: none;
+  }
+  .header-action {
+    padding: 7px 8px;
+    font-size: 11px;
+  }
+  .shell {
+    padding: 22px 13px 100px;
+  }
+  .session-shell {
+    padding-bottom: 8px;
+  }
+  .session-page {
+    padding-bottom: 150px;
+  }
+  .session-control-layer {
+    bottom: max(6px, env(safe-area-inset-bottom));
+    width: calc(100vw - 26px);
+  }
+  .extension-surfaces {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+  }
+  .section-heading,
+  .session-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .section-heading > button {
+    align-self: stretch;
+    margin-left: 0;
+  }
+  .runtime-owner {
+    display: none;
+  }
+  .activity-group > button {
+    flex-wrap: wrap;
+  }
+  .composer-secondary {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 5px;
+  }
+  .composer-mode {
+    overflow: hidden;
+  }
+  .composer-control-row {
+    min-width: 0;
+  }
+  .model-control label > span,
+  .thinking-control label > span {
+    display: none;
+  }
+  .model-control select {
+    min-width: 112px;
+    width: 112px;
+    max-width: 112px;
+  }
+  .thinking-control select {
+    min-width: 74px;
+    width: 74px;
+    max-width: 74px;
+  }
+  .activity-group > button small {
+    width: 100%;
+    margin-left: 28px;
+  }
+  .context-indicator {
+    margin-left: auto;
+  }
+  .context-meter {
+    display: none;
+  }
+  .context-indicator strong {
+    font-size: 9px;
+  }
+  .context-detail {
+    display: none;
+  }
+  .composer {
+    padding: 7px;
+  }
+  .composer-primary {
+    align-items: flex-end;
+    padding: 4px;
+  }
+  .composer-primary textarea {
+    min-height: 38px;
+  }
+  .composer-actions {
+    gap: 4px;
+  }
+  .composer-attach,
+  .composer-send {
+    width: 38px;
+    padding: 0;
+  }
+  .composer-attach-label {
+    display: none;
+  }
+  .composer-preview {
+    flex-basis: 54px;
+    width: 54px;
+    height: 54px;
+  }
+  .session-heading-actions {
+    width: 100%;
+    justify-items: stretch;
+  }
+  .session-rename {
+    flex-wrap: wrap;
+  }
+  .session-rename input {
+    flex: 1;
+    min-width: 120px;
+  }
+  .session-heading .actions {
+    align-self: stretch;
+  }
+  .session-heading .actions {
+    flex-wrap: wrap;
+  }
+  .session-heading .actions button {
+    flex: 1 1 auto;
+  }
+  .session-rename button {
+    flex: none;
+  }
+  .interaction-dock {
+    padding: 58px 13px 215px;
+  }
+  .interaction-dock .interaction {
+    max-height: min(62vh, 520px);
+  }
+  .interaction {
+    margin-left: -2px;
+    margin-right: -2px;
+  }
+  .interaction form {
+    flex-wrap: wrap;
+  }
+  .interaction form button {
+    width: 100%;
+  }
+  .auth-form {
+    flex-direction: column;
+  }
+  .delegate-row-toggle {
+    grid-template-columns: 18px minmax(0, 1fr) 14px;
+  }
+  .delegate-row-meta {
+    display: block;
+    grid-column: 2;
+    min-width: 0;
+    text-align: left;
+  }
+  .delegate-row-status {
+    display: none;
+  }
+  .delegate-row-properties {
+    display: block;
+    max-width: none;
+  }
+  .delegate-row-mobile-elapsed {
+    display: inline;
+  }
+  .delegate-row-chevron {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .task-row-meta small {
+    max-width: 100px;
+  }
+}
+@media (max-width: 360px) {
+  .header-action {
+    padding-inline: 6px;
+    font-size: 10px;
+  }
+  .shell {
+    padding-inline: 10px;
+  }
+  .session-heading h1,
+  .section-heading h1 {
+    overflow-wrap: anywhere;
+  }
+  .session-rename {
+    width: 100%;
+  }
+  .session-rename input {
+    width: 0;
+  }
+  .activity-group > button small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}

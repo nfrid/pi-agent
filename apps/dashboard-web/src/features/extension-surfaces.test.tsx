@@ -476,7 +476,7 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('object · 2 fields');
     expect(markup).toContain('>Findings</span>');
     expect(markup).toContain('array · 1 item');
-    expect(markup).toContain('<div class="markdown">');
+    expect(markup).toMatch(/class="markdown(?: |")/u);
     expect(markup).toContain('<h1>Finding</h1>');
     expect(markup).toContain('<code>code</code>');
     expect(markup).not.toContain('<ol class="structured-result-list">');
