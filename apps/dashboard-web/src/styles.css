@@ -1,6 +1,9 @@
 /* Tailwind v4 utilities without preflight: the legacy dashboard cascade remains authoritative. */
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
+@import "./shared/styles/tokens.css";
+@import "./shared/styles/global.css";
+@import "./shared/styles/motion.css";
 
 @theme {
   --color-dashboard-bg: var(--bg);
@@ -14,89 +17,6 @@
   --color-dashboard-success: var(--green);
   --color-dashboard-warning: var(--orange);
   --color-dashboard-danger: var(--red);
-}
-
-:root {
-  --bg: #282a36;
-  --bg-alt: #343746;
-  --line: #6272a4;
-  --line-soft: #44475a;
-  --fg: #f8f8f2;
-  --muted: #a5add2;
-  --dim: #7f89ae;
-  --purple: #bd93f9;
-  --pink: #ff79c6;
-  --cyan: #8be9fd;
-  --green: #50fa7b;
-  --orange: #ffb86c;
-  --red: #ff5555;
-  --yellow: #f1fa8c;
-  --tool-pending: #303241;
-  --tool-success: #263a33;
-  --tool-error: #3b2832;
-  font-family:
-    "SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace;
-  color: var(--fg);
-  background: var(--bg);
-  line-height: 1.45;
-  font-size: 14px;
-}
-* {
-  box-sizing: border-box;
-}
-body {
-  margin: 0;
-  background: var(--bg);
-  overflow-x: hidden;
-}
-
-/* Small, content-only experiment; overlays remain outside the transition. */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation: none;
-}
-.route-content {
-  view-transition-name: dashboard-content;
-}
-::view-transition-old(dashboard-content) {
-  animation: dashboard-content-out 150ms ease-out both;
-}
-::view-transition-new(dashboard-content) {
-  animation: dashboard-content-in 150ms ease-out both;
-}
-@keyframes dashboard-content-out {
-  to {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-}
-@keyframes dashboard-content-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(dashboard-content),
-  ::view-transition-new(dashboard-content) {
-    animation: none;
-  }
-}
-button,
-input,
-textarea,
-select {
-  font: inherit;
-}
-button {
-  color: inherit;
-}
-button:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--pink);
-  outline-offset: 2px;
 }
 .app {
   min-height: 100vh;
@@ -310,72 +230,6 @@ h2 {
 }
 .recent-sessions {
   margin-top: 38px;
-}
-.notifications,
-.usage-panel {
-  margin-top: 28px;
-}
-.notification,
-.usage-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  border-bottom: 1px solid var(--line-soft);
-  padding: 11px 5px;
-}
-.notification strong,
-.usage-row strong {
-  color: var(--fg);
-  font-size: 12px;
-}
-.notification p {
-  color: var(--muted);
-  margin: 3px 0 0;
-  font-size: 11px;
-}
-.notification-truncation {
-  display: block;
-  margin: 8px 5px;
-  color: var(--orange);
-  font-size: 11px;
-}
-.notification-time {
-  display: block;
-  margin-top: 4px;
-  color: var(--dim);
-  font-size: 10px;
-}
-.usage-reset {
-  display: block;
-  margin-top: 3px;
-  color: var(--dim);
-  font-size: 10px;
-}
-.notification button {
-  border: 1px solid var(--line);
-  color: var(--muted);
-  background: transparent;
-  padding: 5px 8px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.notification button:hover {
-  border-color: var(--cyan);
-  color: var(--cyan);
-}
-.notification-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.notification-actions button:disabled {
-  cursor: wait;
-  opacity: 0.6;
-}
-.usage-row span {
-  color: var(--muted);
-  font-size: 11px;
 }
 .sr-only {
   position: absolute;
@@ -2739,10 +2593,6 @@ ol.delegate-inspector-runs > li small {
   color: var(--purple);
   padding: 8px 11px;
 }
-.notifications,
-.usage-panel {
-  margin-top: 0;
-}
 .subsection-heading {
   display: flex;
   align-items: center;
@@ -2756,15 +2606,6 @@ ol.delegate-inspector-runs > li small {
   color: var(--dim);
   font-size: 11px;
   font-weight: 500;
-}
-.notification {
-  padding: 14px 3px;
-}
-.notification strong {
-  font-size: 13px;
-}
-.notification p {
-  font-size: 12px;
 }
 .secondary-panel {
   margin-top: 34px;
@@ -2780,9 +2621,6 @@ ol.delegate-inspector-runs > li small {
 .secondary-panel[open] > summary {
   margin-bottom: 18px;
   color: var(--fg);
-}
-.secondary-panel .usage-panel {
-  margin-top: 0;
 }
 /* Session inspector: the quiet header opens a deeper command-center view on demand. */
 .session-details-trigger {
@@ -5489,59 +5327,5 @@ details.session-event {
   .transcript-minimap-marker i,
   .transcript-minimap-preview {
     transition: none;
-  }
-}
-
-.app-update-prompt {
-  position: fixed;
-  top: calc(64px + env(safe-area-inset-top));
-  right: 16px;
-  z-index: 100;
-  display: flex;
-  width: min(390px, calc(100vw - 32px));
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  border: 1px solid var(--purple);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-alt) 96%, transparent);
-  box-shadow: 0 14px 38px #0009;
-  color: var(--fg);
-  padding: 12px 14px;
-}
-.app-update-prompt span {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-.app-update-prompt strong {
-  color: var(--purple);
-  font-size: 12px;
-}
-.app-update-prompt small {
-  color: var(--muted);
-  font-size: 10px;
-}
-.app-update-prompt button {
-  flex: none;
-  border: 1px solid var(--purple);
-  border-radius: 5px;
-  background: var(--purple);
-  color: var(--bg);
-  cursor: pointer;
-  font-size: 10px;
-  font-weight: 750;
-  padding: 8px 10px;
-}
-.app-update-prompt button:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
-
-@media (max-width: 430px) {
-  .app-update-prompt {
-    top: calc(58px + env(safe-area-inset-top));
-    right: 10px;
-    width: calc(100vw - 20px);
   }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import styles from './pwa-update.module.css';
 
 declare const __DASHBOARD_BUILD_ID__: string;
 
@@ -98,7 +99,7 @@ export function UpdateAvailablePrompt() {
 
   if (!updateAvailable) return null;
   return (
-    <aside className="app-update-prompt" role="status" aria-live="polite">
+    <aside className={styles.prompt} role="status" aria-live="polite">
       <span>
         <strong>Update available</strong>
         <small>A new dashboard version is ready.</small>

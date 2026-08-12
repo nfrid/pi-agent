@@ -7,6 +7,7 @@ import {
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
+import styles from './notifications.module.css';
 import { DashboardTime, timestampDate } from './timestamp';
 
 export function PushButton() {
@@ -94,7 +95,7 @@ function ResetTiming({ window }: { window?: Record<string, unknown> }) {
   const reset = resetTimestamp(window);
   if (reset !== undefined)
     return (
-      <span className="usage-reset">
+      <span className={styles.usageReset}>
         resets <DashboardTime timestamp={reset} />
       </span>
     );
@@ -107,7 +108,7 @@ function ResetTiming({ window }: { window?: Record<string, unknown> }) {
   if (seconds === undefined) return null;
   const minutes = Math.max(0, Math.ceil(seconds / 60));
   return (
-    <span className="usage-reset">
+    <span className={styles.usageReset}>
       resets in{' '}
       {minutes < 60
         ? `${minutes}m`
@@ -166,10 +167,13 @@ export function NotificationList({
     }
   };
   return (
-    <section className="notifications" aria-labelledby="notifications-heading">
+    <section
+      className={styles.notifications}
+      aria-labelledby="notifications-heading"
+    >
       <div className="subsection-heading">
         <span id="notifications-heading">Notifications</span>
-        <span className="notification-actions">
+        <span className={styles.notificationActions}>
           <button
             type="button"
             onClick={() => void markAllRead()}
@@ -198,7 +202,7 @@ export function NotificationList({
       {notifications.length ? (
         <>
           {notifications.length > NOTIFICATION_PREVIEW_LIMIT && (
-            <output className="notification-truncation">
+            <output className={styles.notificationTruncation}>
               Showing the {NOTIFICATION_PREVIEW_LIMIT} newest of{' '}
               {notifications.length} unread notifications; older items are
               omitted from this view.
@@ -207,12 +211,12 @@ export function NotificationList({
           {notifications
             .slice(0, NOTIFICATION_PREVIEW_LIMIT)
             .map((notification) => (
-              <article className="notification" key={notification.id}>
+              <article className={styles.notification} key={notification.id}>
                 <div>
                   <strong>{notification.title}</strong>
                   <p>{notification.body}</p>
                   <DashboardTime
-                    className="notification-time"
+                    className={styles.notificationTime}
                     timestamp={notification.createdAt}
                     context="sidebar"
                   />
@@ -247,7 +251,7 @@ export function UsagePanel({
       ? ((usage as Record<string, unknown>).snapshots as unknown[])
       : [];
   return (
-    <section className="usage-panel" aria-labelledby="usage-heading">
+    <section className={styles.usagePanel} aria-labelledby="usage-heading">
       <div className="subsection-heading">
         <span id="usage-heading">Usage</span>
         <span>{snapshots.length ? 'latest' : 'reported'}</span>
@@ -281,7 +285,10 @@ export function UsagePanel({
               ? (record.secondary as Record<string, unknown>)
               : undefined);
           return (
-            <div className="usage-row" key={String(record.limitId ?? index)}>
+            <div
+              className={styles.usageRow}
+              key={String(record.limitId ?? index)}
+            >
               <strong>
                 {String(record.limitName ?? record.limitId ?? 'limit')}
               </strong>
