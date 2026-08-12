@@ -528,7 +528,6 @@ body:has(.session-page) .global-tools > .palette-trigger {
   .surface-dialog,
   .outline-sheet,
   .session-inspector,
-  .agent-thread-row,
   .composer,
   .composer textarea,
   .surface-launcher,

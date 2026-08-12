@@ -1,0 +1,337 @@
+/* Local agent-thread navigation presentation. Semantic kebab-case classes stay on the
+   DOM for runtime status classes and browser-test locators. */
+.threadNav {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-alt) 72%, var(--bg));
+  color: var(--fg);
+}
+.drawer {
+  min-width: 0;
+}
+.drawer > .threadNav {
+  height: 100%;
+}
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 14px 9px;
+}
+.header :global(.eyebrow) {
+  margin-bottom: 2px;
+  color: var(--dim);
+  font-size: 9px;
+}
+.header strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+.utility {
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.utility:hover {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 10px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--dim);
+  padding: 5px 7px;
+}
+.search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: 11px;
+}
+.search input::placeholder {
+  color: var(--dim);
+}
+.search button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+.list {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 7px 8px;
+  scrollbar-gutter: stable;
+}
+.workspaceGroup + .workspaceGroup {
+  margin-top: 12px;
+}
+.workspaceHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 7px 5px;
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 700;
+}
+.workspaceHeadingActions {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 5px;
+}
+.workspaceHeading .workspaceNew {
+  display: inline-grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--purple);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.workspaceHeading .workspaceNew:hover {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+.workspaceHeading button {
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspaceHeading button:hover:not(:disabled) {
+  color: var(--fg);
+}
+.workspaceHeading button:disabled {
+  cursor: default;
+}
+.workspaceHeading small {
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 500;
+}
+.threadRow {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 7px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+.threadRow:hover,
+.threadRow:global(.selected) {
+  border-color: var(--line-soft);
+  background: color-mix(in srgb, var(--purple) 10%, var(--bg));
+  color: var(--fg);
+}
+.threadRow:global(.selected) {
+  box-shadow: inset 2px 0 var(--purple);
+}
+.threadGlyph {
+  width: 14px;
+  flex: none;
+  color: var(--dim);
+  font-size: 10px;
+  text-align: center;
+}
+/* Agent/session status-${status} classes are runtime and test contracts. */
+.threadRow:global(.status-working) .threadGlyph {
+  color: var(--green);
+}
+.threadRow:global(.status-paused) .threadGlyph {
+  color: var(--orange);
+}
+.threadRow:global(.status-compacting) .threadGlyph {
+  --agent-thread-pulse-name: tui-pulse;
+  color: var(--purple);
+  animation: var(--agent-thread-pulse-name) 1.2s steps(2, end) infinite;
+}
+.threadRow:is(
+    :global(.status-working),
+    :global(.status-idle),
+    :global(.status-dormant)
+  )
+  .threadGlyph {
+  font-size: 0;
+  line-height: 1;
+}
+.threadRow:is(
+    :global(.status-working),
+    :global(.status-idle),
+    :global(.status-dormant)
+  )
+  .threadGlyph::before {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  content: "";
+}
+.threadRow:is(:global(.status-working), :global(.status-idle))
+  .threadGlyph::before {
+  background: currentColor;
+}
+.threadRow:global(.status-dormant) .threadGlyph::before {
+  border: 1px dotted currentColor;
+}
+.threadRow:global(.status-waiting) .threadGlyph {
+  color: var(--orange);
+}
+.threadRow:global(.status-failed) .threadGlyph {
+  color: var(--red);
+}
+.threadCopy {
+  display: grid;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  gap: 2px;
+}
+.threadCopy strong,
+.threadCopy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.threadCopy strong {
+  color: inherit;
+  font-size: 11px;
+  font-weight: 600;
+}
+.threadCopy small {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 9px;
+}
+.threadContext {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.threadTime {
+  flex: none;
+  margin-left: auto;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.threadRow:is(:global(.status-idle), :global(.status-dormant)) .threadGlyph {
+  color: var(--dim);
+}
+.threadRow:is(
+    :global(.status-working),
+    :global(.status-compacting),
+    :global(.status-waiting),
+    :global(.status-failed)
+  )
+  .threadCopy
+  small {
+  color: var(--muted);
+}
+.empty {
+  color: var(--dim);
+  padding: 16px 8px;
+  font-size: 11px;
+}
+.more {
+  width: calc(100% - 20px);
+  margin: 0 10px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 10px;
+  text-align: left;
+}
+.more:hover {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+.footer {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+  border-top: 1px solid var(--line-soft);
+  padding: 8px;
+}
+.utility {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  padding: 5px 2px;
+  text-align: center;
+  font-size: 9px;
+  cursor: pointer;
+}
+.utility b {
+  position: absolute;
+  top: 0;
+  right: 3px;
+  min-width: 16px;
+  border-radius: 999px;
+  background: var(--orange);
+  color: var(--bg);
+  padding: 0 4px;
+  font-size: 9px;
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .threadRow {
+    transition: none;
+    animation: none;
+  }
+  .threadRow:global(.status-compacting) .threadGlyph {
+    animation: none;
+  }
+}

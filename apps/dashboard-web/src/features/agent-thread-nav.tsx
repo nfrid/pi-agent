@@ -16,6 +16,7 @@ import {
   type AgentThreadNavMode,
   useAgentThreadDrawer,
 } from './agent-thread-nav/use-agent-thread-drawer';
+import styles from './agent-thread-nav.module.css';
 import { useDashboardUtility } from './dashboard-utility-context';
 import { DashboardTime } from './timestamp';
 
@@ -81,18 +82,18 @@ export function AgentThreadNav({
   const nav = (
     <aside
       ref={mode === 'session' ? drawerRef : undefined}
-      className={`agent-thread-nav agent-thread-nav-${mode}`}
+      className={`agent-thread-nav agent-thread-nav-${mode} ${styles.threadNav}`}
       aria-label="Agents and threads"
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
-      <div className="agent-nav-header">
+      <div className={`agent-nav-header ${styles.header}`}>
         <div>
           <p className="eyebrow">Workspace threads</p>
           <strong>Agents</strong>
         </div>
       </div>
-      <label className="agent-nav-search">
+      <label className={`agent-nav-search ${styles.search}`}>
         <span className="sr-only">Search agents and threads</span>
         <span aria-hidden="true">⌕</span>
         <input
@@ -114,13 +115,20 @@ export function AgentThreadNav({
           </button>
         )}
       </label>
-      <div className="agent-nav-list">
+      <div className={`agent-nav-list ${styles.list}`}>
         {!groups.length && (
-          <p className="agent-nav-empty">No matching threads.</p>
+          <p className={`agent-nav-empty ${styles.empty}`}>
+            No matching threads.
+          </p>
         )}
         {groups.map(([key, group]) => (
-          <section className="agent-workspace-group" key={key}>
-            <div className="agent-workspace-heading">
+          <section
+            className={`agent-workspace-group ${styles.workspaceGroup}`}
+            key={key}
+          >
+            <div
+              className={`agent-workspace-heading ${styles.workspaceHeading}`}
+            >
               <button
                 type="button"
                 disabled={!group.workspaceId}
@@ -133,12 +141,14 @@ export function AgentThreadNav({
               >
                 {group.workspaceName}
               </button>
-              <span className="agent-workspace-heading-actions">
+              <span
+                className={`agent-workspace-heading-actions ${styles.workspaceHeadingActions}`}
+              >
                 <small>{group.rows.length}</small>
                 {group.workspaceId && (
                   <button
                     type="button"
-                    className="agent-workspace-new"
+                    className={`agent-workspace-new ${styles.workspaceNew}`}
                     aria-label={`New chat in ${group.workspaceName}`}
                     onClick={() => {
                       go(
@@ -157,25 +167,30 @@ export function AgentThreadNav({
               return (
                 <button
                   type="button"
-                  className={`agent-thread-row ${selected ? 'selected' : ''} status-${row.status}`}
+                  className={`agent-thread-row ${styles.threadRow} ${selected ? 'selected' : ''} status-${row.status}`}
                   aria-current={selected ? 'page' : undefined}
                   aria-label={`${row.title} ${statusLabel(row)}`}
                   key={row.id}
                   onClick={() => select(row.id)}
                 >
-                  <span className="agent-thread-glyph" aria-hidden="true">
+                  <span
+                    className={`agent-thread-glyph ${styles.threadGlyph}`}
+                    aria-hidden="true"
+                  >
                     {statusGlyph(row.status)}
                   </span>
-                  <span className="agent-thread-copy">
+                  <span className={`agent-thread-copy ${styles.threadCopy}`}>
                     <strong>{row.title}</strong>
                     <small>
-                      <span className="agent-thread-context">
+                      <span
+                        className={`agent-thread-context ${styles.threadContext}`}
+                      >
                         <span>{statusLabel(row)}</span>
                         <span aria-hidden="true"> · </span>
                         <span>{shortPath(row.cwd)}</span>
                       </span>
                       <DashboardTime
-                        className="agent-thread-time"
+                        className={`agent-thread-time ${styles.threadTime}`}
                         timestamp={row.updatedAt}
                         context="sidebar"
                       />
@@ -190,7 +205,7 @@ export function AgentThreadNav({
       {hiddenRowCount > 0 && (
         <button
           type="button"
-          className="agent-nav-more"
+          className={`agent-nav-more ${styles.more}`}
           onClick={() =>
             setHistoryLimit((current) => current + MAX_VISIBLE_HISTORY_THREADS)
           }
@@ -202,10 +217,10 @@ export function AgentThreadNav({
             : 's'}
         </button>
       )}
-      <footer className="agent-nav-footer">
+      <footer className={`agent-nav-footer ${styles.footer}`}>
         <button
           type="button"
-          className="agent-nav-utility"
+          className={`agent-nav-utility ${styles.utility}`}
           onClick={() => openUtility('workspaces', '/workspaces')}
         >
           <span aria-hidden="true">⌂</span>
@@ -213,7 +228,7 @@ export function AgentThreadNav({
         </button>
         <button
           type="button"
-          className="agent-nav-utility"
+          className={`agent-nav-utility ${styles.utility}`}
           onClick={() => openUtility('sessions', '/sessions')}
         >
           <span aria-hidden="true">▤</span>
@@ -221,7 +236,7 @@ export function AgentThreadNav({
         </button>
         <button
           type="button"
-          className="agent-nav-utility"
+          className={`agent-nav-utility ${styles.utility}`}
           onClick={() => openUtility('inbox', '/inbox')}
         >
           <span aria-hidden="true">✉</span>
@@ -259,7 +274,7 @@ export function AgentThreadNav({
       )}
       {(!isMobile || drawerPresent) && (
         <div
-          className={`agent-nav-drawer ${open ? 'open' : ''}${drawerExiting ? ' is-exiting' : ''}`}
+          className={`agent-nav-drawer ${styles.drawer} ${open ? 'open' : ''}${drawerExiting ? ' is-exiting' : ''}`}
           aria-hidden={isMobile && !open ? true : undefined}
         >
           {nav}

@@ -56,8 +56,7 @@
   min-width: 32px;
   gap: 4px;
 }
-.global-notifications b,
-.agent-nav-utility b {
+.global-notifications b {
   min-width: 16px;
   border-radius: 999px;
   background: var(--orange);
