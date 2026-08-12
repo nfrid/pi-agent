@@ -8,6 +8,10 @@ import { Value } from 'typebox/value';
 import { activityGroupsRenderer } from '../../../extensions/activity-groups/contribution';
 import { askUserRenderer } from '../../../extensions/ask-user/contribution';
 import { delegateStatusRenderer } from '../../../extensions/delegate/contribution';
+import {
+  type PauseStatusViewModel,
+  pauseStatusRenderer,
+} from '../../../extensions/pause/contribution';
 import { tasksRenderer } from '../../../extensions/tasks/contribution';
 import {
   renderDelegateSurface,
@@ -112,6 +116,17 @@ const explicitRenderers: readonly DashboardRenderer[] = [
   {
     descriptor: delegateStatusRenderer,
     render: renderDelegateSurface,
+  },
+  {
+    descriptor: pauseStatusRenderer,
+    render: (input) => {
+      const model = input as PauseStatusViewModel;
+      return (
+        <div className="pause-status" role="status">
+          {model.label}
+        </div>
+      );
+    },
   },
 ];
 

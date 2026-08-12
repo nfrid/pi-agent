@@ -3,6 +3,12 @@ import type {
   ExtensionUIContext,
 } from '@earendil-works/pi-coding-agent';
 import {
+  PAUSE_REQUESTED_EVENT,
+  PAUSE_RESUMED_EVENT,
+  type PauseControlEvent,
+} from '../pause/operations';
+import { getPauseCoordinator } from '../pause/state';
+import {
   beginsFreshUserTurn,
   isGenuineAgentSettlement,
 } from '../shared/runtime/agent-lifecycle';
@@ -25,7 +31,11 @@ import {
   getDelegateSettingsPath,
   loadDelegateConfig,
 } from './config';
-import { registerDelegateControl } from './control';
+import {
+  listActiveDelegateControlChannels,
+  registerDelegateControl,
+  subscribeDelegateControlLifecycle,
+} from './control';
 import { DelegateJobManager, type DelegateJobSnapshot } from './jobs';
 import { registerDelegateJobsTool } from './jobs-tool';
 import { clearDelegateSurface, publishDelegateSurface } from './live';
@@ -49,9 +59,6 @@ import { registerDelegateWorktreesCommand } from './worktrees-command';
 
 export const DELEGATES_COMMAND_DESCRIPTION =
   'Toggle detailed subagent status or inspect delegate config';
-export const DELEGATE_WAIT_CUSTOM_TYPE = 'delegate-wait';
-export const DELEGATE_WAIT_COMMAND_DESCRIPTION =
-  'Yield while background delegates run without adding a waiting message';
 
 /** Stable registration facade; orchestration and broker commands have separate owners. */
 export default defineExtension('delegate', (pi: ExtensionAPI) => {
@@ -96,7 +103,43 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     getRunningCount: () => jobs?.runningCount ?? 0,
     getStatuses: () => statuses,
     getUi: () => ui,
+    getPaused: () => getPauseCoordinator(scopeId).isActive(),
   });
+
+  const stopControlLifecycle = subscribeDelegateControlLifecycle((event) => {
+    if (!runtimeActive) return;
+    const coordinator = getPauseCoordinator(scopeId);
+    const snapshot = coordinator.snapshot();
+    if (!snapshot) return;
+    if (event.type === 'ack')
+      coordinator.markDelegateReached(event.generation, event.participantId);
+    else coordinator.removeDelegate(snapshot.generation, event.participantId);
+  });
+  const stopPauseRequested = pi.events
+    ? pi.events.on(PAUSE_REQUESTED_EVENT, (value) => {
+        const event = value as PauseControlEvent;
+        if (!runtimeActive || event.scopeId !== scopeId) return;
+        const coordinator = getPauseCoordinator(scopeId);
+        const accepted = listActiveDelegateControlChannels().filter(
+          (channel) => channel.pause(event.generation).accepted,
+        );
+        coordinator.enrollDelegates(
+          event.generation,
+          accepted.map((channel) => channel.participantId),
+        );
+      })
+    : () => {};
+  const stopPauseResumed = pi.events
+    ? pi.events.on(PAUSE_RESUMED_EVENT, (value) => {
+        const event = value as PauseControlEvent;
+        if (!runtimeActive || event.scopeId !== scopeId) return;
+        const targetIds = new Set(event.delegateIds);
+        for (const channel of listActiveDelegateControlChannels())
+          if (targetIds.has(channel.participantId))
+            channel.resume(event.generation);
+        delivery.flushCompletions();
+      })
+    : () => {};
 
   const activeStatuses = () => statuses?.list() ?? [];
 
@@ -207,6 +250,16 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   // down mid-run would discard the mounted render loop. A plain sync refreshes
   // the existing component in place.
   pi.on('agent_start', syncWidget);
+  pi.on('tool_call', (event) => {
+    if (
+      event.toolName === 'delegate' &&
+      getPauseCoordinator(scopeId).isActive()
+    )
+      return {
+        block: true,
+        reason: 'Cannot start a delegate while the runtime is paused.',
+      };
+  });
   pi.on('input', (event) => {
     if (!beginsFreshUserTurn(event, scopeId)) return;
     statuses?.parentUserMessage();
@@ -238,6 +291,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     statuses = undefined;
     await closing?.dispose();
     closingStatuses?.clear();
+    stopControlLifecycle();
+    stopPauseRequested();
+    stopPauseResumed();
     clearDelegateSurface(closingScopeId);
     ui = undefined;
     if (scopeId === closingScopeId) scopeId = 'default';
@@ -256,52 +312,6 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       );
     },
   );
-
-  pi.registerCommand('wait', {
-    description: DELEGATE_WAIT_COMMAND_DESCRIPTION,
-    handler: async (_args, ctx) => {
-      if (!ctx.isIdle()) {
-        if (ctx.hasUI) ctx.ui.notify('Agent is already running.', 'warning');
-        return;
-      }
-      const active =
-        jobs
-          ?.list(ctx)
-          .filter((job) => job.state === 'queued' || job.state === 'running') ??
-        [];
-      if (active.length === 0) {
-        if (ctx.hasUI)
-          ctx.ui.notify('No background delegates are running.', 'info');
-        return;
-      }
-      const alreadyWaiting = ctx.sessionManager
-        .getBranch()
-        .some(
-          (entry) =>
-            entry.type === 'message' &&
-            entry.message.role === 'custom' &&
-            entry.message.customType === DELEGATE_WAIT_CUSTOM_TYPE,
-        );
-      if (alreadyWaiting) {
-        if (ctx.hasUI)
-          ctx.ui.notify(
-            'Already waiting for background delegates; completion or /continue will resume.',
-            'info',
-          );
-        return;
-      }
-      // This is a hidden session marker, not fabricated assistant/user prose.
-      // It does not trigger a turn; automatic completion steers one later.
-      pi.sendMessage(
-        {
-          customType: DELEGATE_WAIT_CUSTOM_TYPE,
-          content: [],
-          display: false,
-        },
-        { triggerTurn: false },
-      );
-    },
-  });
 
   pi.registerCommand('delegates', {
     description: DELEGATES_COMMAND_DESCRIPTION,

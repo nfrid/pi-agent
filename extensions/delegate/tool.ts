@@ -402,7 +402,7 @@ export function registerDelegateTool(
           content: [
             {
               type: 'text' as const,
-              text: `Started ${jobs.length} background delegate ${jobs.length === 1 ? 'job' : 'jobs'}: ${jobs.map((job) => job.id).join(', ')}. Each subagent completion will be delivered automatically. Continue independent work; if none remains, use /wait to yield without injecting a fabricated waiting message. Use delegate_jobs feedback for bounded corrective steering, peek for deliberate inspection, and /continue to resume manually.\n${jobLines.join('\n')}`.trim(),
+              text: `Started ${jobs.length} background delegate ${jobs.length === 1 ? 'job' : 'jobs'}: ${jobs.map((job) => job.id).join(', ')}. Each subagent completion will be delivered automatically. Continue independent work when useful. Use delegate_jobs feedback for bounded corrective steering, peek for deliberate inspection, and /continue to resume manually after an interruption.\n${jobLines.join('\n')}`.trim(),
             },
           ],
           details: makeDetails(execution.mode, initialRuns),

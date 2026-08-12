@@ -144,6 +144,7 @@ export function createCompletionDelivery(options: {
   getRunningCount: () => number;
   getStatuses: () => DelegateStatusStore | undefined;
   getUi: () => { notify(message: string, level: 'info'): void } | undefined;
+  getPaused?: () => boolean;
 }): CompletionDeliveryController {
   let pendingCompletions: DelegateJobSnapshot[] = [];
   const automaticDeliveryStates = new Map<string, AutomaticDeliveryState>();
@@ -185,7 +186,12 @@ export function createCompletionDelivery(options: {
   const flushCompletions = () => {
     completionTimer = undefined;
     completionFlushAt = undefined;
-    if (!options.getRuntimeActive() || pendingCompletions.length === 0) return;
+    if (
+      !options.getRuntimeActive() ||
+      pendingCompletions.length === 0 ||
+      options.getPaused?.()
+    )
+      return;
     const queued = pendingCompletions;
     pendingCompletions = [];
     const deliveryEpoch = options.getDeliveryEpoch();

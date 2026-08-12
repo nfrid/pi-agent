@@ -9,6 +9,11 @@ import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
+import {
+  CONTINUE_ACTION_ID,
+  PAUSE_ACTION_ID,
+  PAUSE_RENDERER_ID,
+} from '../../../../extensions/pause/contribution';
 
 export function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
   const navigate = useNavigate();
@@ -26,10 +31,17 @@ export function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
     action.isPending ||
     stop.isPending ||
     restart.isPending;
-  const compactSupported = Boolean(
-    runtime.capabilities?.manifests.some((manifest) =>
-      manifest.actions.some((candidate) => candidate.id === 'session.compact'),
-    ),
+  const supportsAction = (actionId: string) =>
+    Boolean(
+      runtime.capabilities?.manifests.some((manifest) =>
+        manifest.actions.some((candidate) => candidate.id === actionId),
+      ),
+    );
+  const compactSupported = supportsAction('session.compact');
+  const pauseSupported = supportsAction(PAUSE_ACTION_ID);
+  const continueSupported = supportsAction(CONTINUE_ACTION_ID);
+  const paused = runtime.extensionSurfaces?.some(
+    (surface) => surface.rendererId === PAUSE_RENDERER_ID,
   );
   const run = async (operation: () => Promise<unknown>) => {
     setError(undefined);
@@ -56,6 +68,23 @@ export function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
       >
         Abort
       </button>
+      {pauseSupported && continueSupported && (
+        <button
+          type="button"
+          disabled={onlineOnly}
+          onClick={() =>
+            void run(() =>
+              action.mutateAsync({
+                runtimeId: runtime.runtimeId,
+                actionId: paused ? CONTINUE_ACTION_ID : PAUSE_ACTION_ID,
+                input: {},
+              }),
+            )
+          }
+        >
+          {paused ? 'Continue' : 'Pause'}
+        </button>
+      )}
       {compactSupported && (
         <button
           type="button"

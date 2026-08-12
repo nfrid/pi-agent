@@ -1831,6 +1831,7 @@ function phase6Capabilities() {
         available: true,
       },
       { id: 'activity-groups', version: '1', available: true },
+      { id: 'runtime.pause-control', version: '1', available: true },
       { id: 'interaction.ask_user', version: '1', available: true },
     ],
     manifests: [
@@ -1865,6 +1866,31 @@ function phase6Capabilities() {
             title: 'Unsafe unavailable action',
             inputSchema: phase6ActionSchema,
             availability: { requires: ['missing-capability'] },
+          },
+        ],
+        renderers: [],
+      },
+      {
+        id: 'pause',
+        version: '1',
+        actions: [
+          {
+            id: 'runtime.pause',
+            title: 'Pause runtime',
+            inputSchema: phase6ActionSchema,
+            availability: {
+              requires: ['runtime.pause-control'],
+              liveStates: ['idle', 'working', 'waiting'],
+            },
+          },
+          {
+            id: 'runtime.continue',
+            title: 'Continue runtime',
+            inputSchema: phase6ActionSchema,
+            availability: {
+              requires: ['runtime.pause-control'],
+              liveStates: ['idle', 'working', 'waiting'],
+            },
           },
         ],
         renderers: [],
@@ -2887,6 +2913,17 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
           },
         },
         {
+          id: 'pause-1',
+          rendererId: 'runtime.pause-status',
+          placement: 'composer',
+          viewModel: {
+            version: 1,
+            phase: 'paused',
+            delegateCount: 2,
+            label: 'Paused (with 2 delegates)',
+          },
+        },
+        {
           id: 'delegates-1',
           rendererId: 'delegate.status',
           placement: 'composer',
@@ -2956,6 +2993,9 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
       ],
     }),
   });
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Paused (with 2 delegates)' }),
+  ).toBeVisible();
   const tasksLauncher = page.getByRole('button', {
     name: /Inspect the new drawer/,
   });
@@ -3230,6 +3270,21 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   await expect(
     reopenedInspector.getByRole('button', { name: 'Stop', exact: true }),
   ).toBeVisible();
+  const pauseButton = reopenedInspector.getByRole('button', {
+    name: 'Pause',
+    exact: true,
+  });
+  await expect(pauseButton).toBeVisible();
+  await pauseButton.click();
+  await expect
+    .poll(() =>
+      mocks.commands.some(
+        (command) =>
+          command.type === 'action.invoke' &&
+          command.actionId === 'runtime.pause',
+      ),
+    )
+    .toBe(true);
   const stopButton = reopenedInspector.getByRole('button', {
     name: 'Stop',
     exact: true,

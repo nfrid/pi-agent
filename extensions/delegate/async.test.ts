@@ -504,7 +504,7 @@ describe('async delegate extension', () => {
       'Started 1 background delegate job: dj-1',
     );
     expect(launch?.content[0]?.text).toContain(
-      'if none remains, use /wait to yield without injecting a fabricated waiting message.',
+      'Continue independent work when useful.',
     );
     expect(launch?.content[0]?.text).toContain(
       'Use delegate_jobs feedback for bounded corrective steering',
@@ -1276,16 +1276,7 @@ describe('async delegate extension', () => {
       undefined,
       ctx,
     );
-    await commands.get('wait')?.handler('', ctx);
-    expect(sendMessage).toHaveBeenCalledWith(
-      {
-        customType: 'delegate-wait',
-        content: [],
-        display: false,
-      },
-      { triggerTurn: false },
-    );
-    sendMessage.mockClear();
+    expect(commands.has('wait')).toBe(false);
     const widgetFactory = [...setWidget.mock.calls]
       .reverse()
       .find((call) => typeof call[1] === 'function')?.[1] as

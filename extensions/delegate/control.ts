@@ -13,13 +13,19 @@ export const MAX_DELEGATE_CONTROL_MESSAGE_BYTES = 4 * 1024;
 export const MAX_DELEGATE_CONTROL_FILE_BYTES = 64 * 1024;
 export const MAX_DELEGATE_CONTROL_REQUESTS = 32;
 export const DELEGATE_CONTROL_MESSAGE_TYPE = 'delegate-control';
+export const DELEGATE_CONTROL_POLL_MS = 100;
 
-export type DelegateControlKind = 'feedback' | 'checkpoint';
+export type DelegateControlKind =
+  | 'feedback'
+  | 'checkpoint'
+  | 'pause'
+  | 'resume';
 
 export interface DelegateControlRequest {
   id: string;
   kind: DelegateControlKind;
-  message: string;
+  message?: string;
+  generation?: number;
   createdAt: number;
 }
 
@@ -29,85 +35,124 @@ export interface DelegateControlEnqueueResult {
   reason?: string;
 }
 
+export type DelegateControlLifecycleEvent =
+  | {
+      type: 'ack';
+      participantId: string;
+      kind: 'pause';
+      generation: number;
+    }
+  | { type: 'close'; participantId: string };
+
 export interface DelegateControlChannel {
+  readonly participantId: string;
   readonly filePath: string;
   enqueue: (
-    kind: DelegateControlKind,
+    kind: 'feedback' | 'checkpoint',
     message: string,
   ) => DelegateControlEnqueueResult;
+  pause: (generation: number) => DelegateControlEnqueueResult;
+  resume: (generation: number) => DelegateControlEnqueueResult;
+  acknowledge: (kind: DelegateControlKind, generation?: number) => void;
   close: () => void;
 }
 
 let channelCounter = 0;
+const activeChannels = new Map<string, DelegateControlChannel>();
+const lifecycleListeners = new Set<
+  (event: DelegateControlLifecycleEvent) => void
+>();
+
+export function listActiveDelegateControlChannels(): DelegateControlChannel[] {
+  return [...activeChannels.values()];
+}
+
+export function subscribeDelegateControlLifecycle(
+  listener: (event: DelegateControlLifecycleEvent) => void,
+): () => void {
+  lifecycleListeners.add(listener);
+  return () => lifecycleListeners.delete(listener);
+}
+
+function emitLifecycle(event: DelegateControlLifecycleEvent): void {
+  for (const listener of lifecycleListeners) listener(event);
+}
 
 function bytes(value: string): number {
   return Buffer.byteLength(value, 'utf8');
 }
 
 function controlPath(sessionPath: string): string {
-  // A continuation can overlap a still-settling background job. Keep each
-  // invocation's inbox separate rather than allowing one child to consume
-  // another child's feedback.
   return `${sessionPath}.${process.pid}.${++channelCounter}.control`;
 }
 
-/**
- * Create the parent side of a child control inbox. Appends are synchronous and
- * small: this makes concurrent tool calls linear without exposing a writable
- * socket or an unbounded queue to the child.
- */
+/** Parent side of a private child control inbox. */
 export function createDelegateControlChannel(
   sessionPath: string,
 ): DelegateControlChannel {
   const filePath = controlPath(sessionPath);
+  const participantId = filePath;
   let closed = false;
   let sequence = 0;
   let requestCount = 0;
 
-  return {
+  const append = (
+    request: Omit<DelegateControlRequest, 'id' | 'createdAt'>,
+  ): DelegateControlEnqueueResult => {
+    if (closed) return { accepted: false, reason: 'channel-closed' };
+    if (requestCount >= MAX_DELEGATE_CONTROL_REQUESTS)
+      return { accepted: false, reason: 'queue-full' };
+    const value: DelegateControlRequest = {
+      id: `${process.pid}-${Date.now()}-${++sequence}`,
+      ...request,
+      createdAt: Date.now(),
+    };
+    const line = `${JSON.stringify(value)}\n`;
+    try {
+      const currentBytes = existsSync(filePath) ? statSync(filePath).size : 0;
+      if (currentBytes + bytes(line) > MAX_DELEGATE_CONTROL_FILE_BYTES)
+        return { accepted: false, reason: 'queue-full' };
+      appendFileSync(filePath, line, { encoding: 'utf8', mode: 0o600 });
+      try {
+        chmodSync(filePath, 0o600);
+      } catch {
+        // The append succeeded; avoid a duplicate retry after a chmod failure.
+      }
+      requestCount++;
+      return { accepted: true, id: value.id };
+    } catch (error) {
+      return {
+        accepted: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
+  const channel: DelegateControlChannel = {
+    participantId,
     filePath,
     enqueue(kind, message) {
-      if (closed) return { accepted: false, reason: 'channel-closed' };
       const text = message.trim();
       if (!text) return { accepted: false, reason: 'empty-message' };
       if (bytes(text) > MAX_DELEGATE_CONTROL_MESSAGE_BYTES)
         return { accepted: false, reason: 'message-too-large' };
-      if (requestCount >= MAX_DELEGATE_CONTROL_REQUESTS)
-        return { accepted: false, reason: 'queue-full' };
-
-      const request: DelegateControlRequest = {
-        id: `${process.pid}-${Date.now()}-${++sequence}`,
-        kind,
-        message: text,
-        createdAt: Date.now(),
-      };
-      const line = `${JSON.stringify(request)}\n`;
-      let currentBytes = 0;
-      try {
-        currentBytes = existsSync(filePath) ? statSync(filePath).size : 0;
-        if (currentBytes + bytes(line) > MAX_DELEGATE_CONTROL_FILE_BYTES)
-          return { accepted: false, reason: 'queue-full' };
-        appendFileSync(filePath, line, { encoding: 'utf8', mode: 0o600 });
-        // appendFileSync's mode applies only on creation; make the privacy
-        // boundary explicit for pre-existing state directories/filesystems.
-        try {
-          chmodSync(filePath, 0o600);
-        } catch {
-          // The append succeeded; a chmod failure must not turn a queued
-          // message into a duplicate when the caller retries.
-        }
-        requestCount++;
-        return { accepted: true, id: request.id };
-      } catch (error) {
-        return {
-          accepted: false,
-          reason: error instanceof Error ? error.message : String(error),
-        };
-      }
+      return append({ kind, message: text });
+    },
+    pause(generation) {
+      return append({ kind: 'pause', generation });
+    },
+    resume(generation) {
+      return append({ kind: 'resume', generation });
+    },
+    acknowledge(kind, generation) {
+      if (kind === 'pause' && typeof generation === 'number')
+        emitLifecycle({ type: 'ack', participantId, kind, generation });
     },
     close() {
       if (closed) return;
       closed = true;
+      activeChannels.delete(participantId);
+      emitLifecycle({ type: 'close', participantId });
       try {
         unlinkSync(filePath);
       } catch {
@@ -115,17 +160,28 @@ export function createDelegateControlChannel(
       }
     },
   };
+  activeChannels.set(participantId, channel);
+  return channel;
 }
 
 function isControlRequest(value: unknown): value is DelegateControlRequest {
   if (!value || typeof value !== 'object') return false;
   const request = value as Partial<DelegateControlRequest>;
+  if (
+    typeof request.id !== 'string' ||
+    typeof request.createdAt !== 'number' ||
+    !['feedback', 'checkpoint', 'pause', 'resume'].includes(request.kind ?? '')
+  )
+    return false;
+  if (request.kind === 'pause' || request.kind === 'resume')
+    return (
+      typeof request.generation === 'number' &&
+      Number.isSafeInteger(request.generation) &&
+      request.generation > 0
+    );
   return (
-    typeof request.id === 'string' &&
-    (request.kind === 'feedback' || request.kind === 'checkpoint') &&
     typeof request.message === 'string' &&
-    bytes(request.message) <= MAX_DELEGATE_CONTROL_MESSAGE_BYTES &&
-    typeof request.createdAt === 'number'
+    bytes(request.message) <= MAX_DELEGATE_CONTROL_MESSAGE_BYTES
   );
 }
 
@@ -187,30 +243,47 @@ function acknowledge(request: DelegateControlRequest): void {
         type: 'delegate_control_ack',
         controlId: request.id,
         controlKind: request.kind,
+        ...(request.generation === undefined
+          ? {}
+          : { controlGeneration: request.generation }),
         timestamp: Date.now(),
       })}\n`,
     );
   } catch {
-    // The child may be closing its stdout while the control is being handled.
+    // The child may be closing stdout while the control is handled.
   }
 }
 
-/**
- * Install the child side of the control inbox. Controls are consumed only at
- * Pi boundaries: before a model turn starts, or after a tool has completed.
- * This avoids interrupting an in-flight edit/tool call while still allowing a
- * running child to receive bounded feedback without a fabricated user turn.
- */
+/** Child side: feedback is steered; pause/resume gates provider requests. */
 export function registerDelegateControl(
   pi: ExtensionAPI,
   filePath: string | undefined,
 ): void {
   if (!filePath?.trim()) return;
   const state = { offset: 0, inode: undefined as number | undefined };
+  let pausedGeneration: number | undefined;
+  let acknowledgedGeneration: number | undefined;
 
-  const take = () => readRequests(filePath, state);
+  const consume = (): DelegateControlRequest[] => {
+    const conversational: DelegateControlRequest[] = [];
+    for (const request of readRequests(filePath, state)) {
+      if (request.kind === 'pause') {
+        if (
+          request.generation !== undefined &&
+          (pausedGeneration === undefined ||
+            request.generation >= pausedGeneration)
+        )
+          pausedGeneration = request.generation;
+      } else if (request.kind === 'resume') {
+        if (request.generation === pausedGeneration)
+          pausedGeneration = undefined;
+      } else conversational.push(request);
+    }
+    return conversational;
+  };
+
   const deliver = () => {
-    const requests = take();
+    const requests = consume();
     if (requests.length === 0) return;
     try {
       pi.sendMessage(controlMessage(requests), {
@@ -219,19 +292,38 @@ export function registerDelegateControl(
       });
       for (const request of requests) acknowledge(request);
     } catch {
-      // Leave an unacknowledged request visible to the parent. The inbox offset
-      // is intentionally retained: a later checkpoint cannot safely replay a
-      // message after an unknown send outcome, so the parent can continue the
-      // child with the original feedback if required.
+      // An unknown send outcome must not replay feedback later.
     }
   };
 
-  pi.on('before_agent_start', () => {
-    const requests = take();
+  const waitForResume = async () => {
+    deliver();
+    while (pausedGeneration !== undefined) {
+      const generation = pausedGeneration;
+      if (acknowledgedGeneration !== generation) {
+        acknowledge({
+          id: `pause-${generation}`,
+          kind: 'pause',
+          generation,
+          createdAt: Date.now(),
+        });
+        acknowledgedGeneration = generation;
+      }
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, DELEGATE_CONTROL_POLL_MS),
+      );
+      deliver();
+    }
+  };
+
+  pi.on('before_agent_start', async () => {
+    const requests = consume();
+    if (pausedGeneration !== undefined) await waitForResume();
     if (requests.length === 0) return;
     for (const request of requests) acknowledge(request);
     return { message: controlMessage(requests) };
   });
+  pi.on('before_provider_request', waitForResume);
   pi.on('tool_execution_end', deliver);
   pi.on('turn_end', deliver);
   pi.on('turn_start', deliver);

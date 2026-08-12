@@ -1,4 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
@@ -13,6 +19,7 @@ const roots: string[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
   for (const root of roots.splice(0))
     rmSync(root, { recursive: true, force: true });
 });
@@ -49,7 +56,7 @@ describe('delegate control inbox', () => {
     expect(() => readFileSync(channel.filePath)).toThrow();
   });
 
-  test('presents a queued checkpoint at a child reasoning boundary and acknowledges it', () => {
+  test('presents a queued checkpoint at a child reasoning boundary and acknowledges it', async () => {
     const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-child-'));
     roots.push(root);
     const filePath = path.join(root, 'control.jsonl');
@@ -75,7 +82,7 @@ describe('delegate control inbox', () => {
       .mockImplementation(() => true);
 
     registerDelegateControl(pi, filePath);
-    const result = handlers.get('before_agent_start')?.() as {
+    const result = (await handlers.get('before_agent_start')?.()) as {
       message?: { customType: string; content: string; display: boolean };
     };
     expect(result.message).toMatchObject({
@@ -87,5 +94,62 @@ describe('delegate control inbox', () => {
       expect.stringContaining('checkpoint-1'),
     );
     expect(pi.sendMessage).not.toHaveBeenCalled();
+  });
+
+  test('acknowledges a pause at the provider boundary and waits for resume', async () => {
+    vi.useFakeTimers();
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-pause-child-'));
+    roots.push(root);
+    const filePath = path.join(root, 'control.jsonl');
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({
+        id: 'pause-1',
+        kind: 'pause',
+        generation: 7,
+        createdAt: Date.now(),
+      })}\n`,
+      'utf8',
+    );
+    const handlers = new Map<string, () => unknown>();
+    const pi = {
+      on(event: string, handler: () => unknown) {
+        handlers.set(event, handler);
+      },
+      sendMessage: vi.fn(),
+    } as unknown as ExtensionAPI;
+    const output = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    registerDelegateControl(pi, filePath);
+    let resumed = false;
+    const waiting = Promise.resolve(
+      handlers.get('before_provider_request')?.(),
+    ).then(() => {
+      resumed = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resumed).toBe(false);
+    expect(output).toHaveBeenCalledWith(
+      expect.stringContaining('"controlKind":"pause"'),
+    );
+    expect(output).toHaveBeenCalledWith(
+      expect.stringContaining('"controlGeneration":7'),
+    );
+
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        id: 'resume-1',
+        kind: 'resume',
+        generation: 7,
+        createdAt: Date.now(),
+      })}\n`,
+      'utf8',
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await waiting;
+    expect(resumed).toBe(true);
   });
 });

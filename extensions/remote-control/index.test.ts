@@ -234,6 +234,29 @@ describe('dashboard input dispatch', () => {
     });
   });
 
+  it('dispatches pause and continue immediately even in steering mode', async () => {
+    const listeners = new Map<string, Set<(value: unknown) => void>>();
+    const pi = {
+      events: {
+        on: vi.fn(),
+        emit(event: string, value: unknown) {
+          for (const listener of listeners.get(event) ?? []) listener(value);
+        },
+      },
+    } as unknown as ExtensionAPI;
+    const context = {
+      isIdle: () => false,
+      sessionManager: { getSessionId: () => 'dashboard-pause' },
+    } as unknown as ExtensionContext;
+
+    await expect(
+      dispatchDashboardInput(pi, context, '/pause', 'steer'),
+    ).resolves.toMatchObject({ command: 'pause' });
+    await expect(
+      dispatchDashboardInput(pi, context, '/continue', 'steer'),
+    ).resolves.toMatchObject({ command: 'continue' });
+  });
+
   it('dispatches temporary images as native Pi multimodal content', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-image-input-'));
     const file = path.join(directory, 'image.png');

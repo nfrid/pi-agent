@@ -31,12 +31,15 @@ describe('dashboard renderer registry', () => {
     ).toThrow('valid schema');
   });
 
-  it('registers task and delegate adapters by exact trusted IDs', () => {
+  it('registers task, delegate, and pause adapters by exact trusted IDs', () => {
     expect(resolveDashboardRenderer('tasks.current')).toBe(
       dashboardRendererRegistry.get('tasks.current'),
     );
     expect(resolveDashboardRenderer('delegate.status')).toBe(
       dashboardRendererRegistry.get('delegate.status'),
+    );
+    expect(resolveDashboardRenderer('runtime.pause-status')).toBe(
+      dashboardRendererRegistry.get('runtime.pause-status'),
     );
     expect(resolveDashboardRenderer('runtime.delegate.status')).toBeUndefined();
     expect(
@@ -52,6 +55,20 @@ describe('dashboard renderer registry', () => {
         statuses: [],
       }),
     ).toMatchObject({ type: expect.any(Function) });
+    expect(
+      renderDashboardContribution('runtime.pause-status', {
+        version: 1,
+        phase: 'paused',
+        delegateCount: 2,
+        label: 'Paused (with 2 delegates)',
+      }),
+    ).toMatchObject({
+      type: 'div',
+      props: {
+        role: 'status',
+        children: 'Paused (with 2 delegates)',
+      },
+    });
   });
 
   it('uses a generic fallback for unknown and invalid renderer payloads', () => {

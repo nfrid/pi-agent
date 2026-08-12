@@ -6,6 +6,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { DASHBOARD_SUPPORTED_BUILTIN_COMMANDS } from '@pi-dashboard/protocol/dashboard-api';
 import type { BridgeImageAttachment } from '@pi-dashboard/protocol/pi-runtime-protocol';
+import { requestRuntimePause, resumeRuntimePause } from '../pause/operations';
 import { markDashboardFreshUserTurn } from '../shared/runtime/agent-lifecycle';
 import { getSessionScopeId } from '../shared/runtime/scoped-services';
 
@@ -127,6 +128,19 @@ export async function dispatchDashboardInput(
   images: readonly BridgeImageAttachment[] = [],
 ): Promise<{ accepted: true; command?: string }> {
   const invocation = commandParts(text);
+  if (
+    invocation &&
+    (invocation.name === 'pause' || invocation.name === 'continue')
+  ) {
+    if (images.length > 0)
+      throw new Error('Images cannot be attached to dashboard commands.');
+    if (invocation.name === 'pause') {
+      requestRuntimePause(pi, ctx);
+      return { accepted: true, command: 'pause' };
+    }
+    if (!resumeRuntimePause(pi, ctx)) throw new Error('Runtime is not paused.');
+    return { accepted: true, command: 'continue' };
+  }
   if (invocation && !deliverAs) {
     if (images.length > 0 && DASHBOARD_BUILTIN_COMMANDS.has(invocation.name))
       throw new Error('Images cannot be attached to dashboard commands.');

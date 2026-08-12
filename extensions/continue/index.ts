@@ -4,6 +4,7 @@ import type {
   ExtensionCommandContext,
   SessionEntry,
 } from '@earendil-works/pi-coding-agent';
+import { resumeRuntimePause } from '../pause/operations';
 import { defineExtension } from '../shared/runtime/extension';
 
 /** Hidden session marker used only to kick an idle agent turn. */
@@ -114,6 +115,11 @@ export default defineExtension('continue', (pi: ExtensionAPI) => {
     description:
       'Continue after an interruption without sending a new user message',
     handler: async (_args, ctx) => {
+      if (resumeRuntimePause(pi, ctx)) {
+        notify(ctx, 'Resumed.', 'info');
+        return;
+      }
+
       if (!ctx.isIdle()) {
         notify(ctx, 'Agent is already running.', 'warning');
         return;

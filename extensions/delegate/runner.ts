@@ -269,6 +269,11 @@ export async function runDelegate(
           };
           emitUpdate();
         },
+        onControlAck: (kind, generation) =>
+          control.acknowledge(
+            kind as import('./control').DelegateControlKind,
+            generation,
+          ),
         onLine: emitUpdate,
       });
 

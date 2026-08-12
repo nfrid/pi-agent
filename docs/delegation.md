@@ -259,7 +259,9 @@ checkout.
 
 Background jobs are first-class supervision targets. Use `delegate_jobs list` or a deliberate `peek` to inspect, and `delegate_jobs feedback` for concrete corrective steering; feedback is bounded to 4 KiB and queued in a private per-child control inbox. A pre-timeout request reserves a bounded final window (up to 30 seconds, scaled down for short limits) and asks the child to stop starting work, preserve a coherent partial state, and report what remains. The hard timeout is unchanged: an unresponsive child is still terminated, and timeout handoff explicitly distinguishes an acknowledged checkpoint from an unacknowledged retained partial state. Retained writable work remains reviewable and is never auto-validated or presented as complete.
 
-When no independent parent work remains, `/wait` records only a hidden session marker and yields without injecting fabricated waiting prose. A background completion steers the next turn automatically; `/continue` is the manual resume path. This is a UI/session interaction, not a replacement for deliberate `peek` or continuation recovery.
+A background completion automatically steers the parent’s next turn. `/continue` manually resumes an interrupted parent turn. Neither behavior replaces deliberate `peek` or continuation recovery.
+
+`/pause` pauses the parent and every active delegate at provider-safe boundaries. In-flight provider responses and tool calls finish first; no new provider request starts after a participant reaches the pause gate. The footer and dashboard show `Paused` for the parent alone or `Paused (with N delegates)` after all enrolled delegates acknowledge the gate. While pausing or paused, delegate completions are retained rather than steering the parent. `/continue` releases the parent and delegates, then delivers retained completions. New delegate calls are rejected until the runtime resumes.
 
 ## TUI inspection bounds
 

@@ -36,6 +36,7 @@ export interface SpawnChildOptions {
   killGraceMs?: number;
   signal?: AbortSignal;
   onCheckpoint?: () => void;
+  onControlAck?: (kind: string, generation?: number) => void;
   onLine: () => void;
 }
 
@@ -151,7 +152,27 @@ export async function spawnDelegateChild(
     };
 
     const processLine = (line: string) => {
-      if (terminating || !processJsonLine(line, run)) return;
+      if (terminating) return;
+      try {
+        const event = JSON.parse(line) as {
+          type?: unknown;
+          controlKind?: unknown;
+          controlGeneration?: unknown;
+        };
+        if (
+          event.type === 'delegate_control_ack' &&
+          typeof event.controlKind === 'string'
+        )
+          options.onControlAck?.(
+            event.controlKind,
+            typeof event.controlGeneration === 'number'
+              ? event.controlGeneration
+              : undefined,
+          );
+      } catch {
+        // Normal Pi output is parsed by processJsonLine below.
+      }
+      if (!processJsonLine(line, run)) return;
       options.onLine();
     };
 

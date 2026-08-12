@@ -48,7 +48,7 @@ const theme: ThemeLike = {
 };
 
 describe('delegate_jobs rendering', () => {
-  test('offers silent waiting and bounded live steering', async () => {
+  test('offers automatic completion and bounded live steering', async () => {
     const manager = new DelegateJobManager();
     let tool: RegisteredTool | undefined;
     const pi = {
@@ -60,13 +60,13 @@ describe('delegate_jobs rendering', () => {
     registerDelegateJobsTool(pi, manager);
 
     expect(tool?.description).toContain(
-      'use /wait to yield without adding a fabricated waiting message',
+      'Completions are delivered automatically',
     );
     expect(tool?.description).toContain(
       'Use feedback with one bounded message to steer a running child',
     );
     expect(tool?.promptGuidelines.join('\n')).toContain(
-      'use /wait to yield without injecting a fabricated content message',
+      'Background completion resumes the parent automatically',
     );
     expect(tool?.promptGuidelines.join('\n')).toContain(
       'Use delegate_jobs feedback only for concrete corrective guidance',
