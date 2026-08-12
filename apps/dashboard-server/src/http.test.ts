@@ -413,6 +413,38 @@ describe('dashboard HTTP boundary', () => {
     });
   });
 
+  it('publishes session-index changes as one compact SSE replay record', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-sessions-stream-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const implementation = server as unknown as {
+      eventStream: {
+        cursor: number;
+        replayAfter(cursor: number): {
+          events: readonly Record<string, unknown>[];
+        };
+      };
+    };
+    const before = implementation.eventStream.cursor;
+    server.publishSessionIndexChange();
+    const record = implementation.eventStream.replayAfter(before).events[0];
+    expect(record).toMatchObject({
+      type: 'sessions',
+      cursor: before + 1,
+      sessions: [],
+    });
+    expect(record).not.toHaveProperty('snapshot');
+    expect(JSON.stringify(record).length).toBeLessThan(1_000);
+  });
+
   it('constructs one browser snapshot for each changed SSE/legacy update', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-snapshot-count-'),

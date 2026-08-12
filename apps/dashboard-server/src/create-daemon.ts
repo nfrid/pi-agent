@@ -115,16 +115,18 @@ function dependencies(
   dependencies: DashboardDependencies;
   registryChanges: ChangeRelay<RegistryChange>;
   applicationChanges: ChangeRelay<void>;
+  sessionIndexChanges: ChangeRelay<void>;
 } {
   const registryChanges = new ChangeRelay<RegistryChange>();
   const applicationChanges = new ChangeRelay<void>();
+  const sessionIndexChanges = new ChangeRelay<void>();
   const metadata =
     options.metadata ??
     new MetadataStore(path.join(config.stateDir, 'dashboard.sqlite'));
   const sessions =
     options.sessions ??
     new SessionIndex(sessionDirectory(options), metadata, () =>
-      applicationChanges.publish(undefined),
+      sessionIndexChanges.publish(undefined),
     );
   const sesh = options.sesh ?? new CliSeshAdapter();
   const tmux = options.tmux ?? new TmuxAdapter();
@@ -208,6 +210,7 @@ function dependencies(
     },
     registryChanges,
     applicationChanges,
+    sessionIndexChanges,
   };
 }
 
@@ -222,6 +225,9 @@ export async function createDaemon(
     server.handleRegistryChange(change),
   );
   composed.applicationChanges.connect(() => server.publishChange());
+  composed.sessionIndexChanges.connect(() =>
+    server.publishSessionIndexChange(),
+  );
   return server;
 }
 
