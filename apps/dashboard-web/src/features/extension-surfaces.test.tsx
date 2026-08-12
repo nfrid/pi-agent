@@ -1,6 +1,7 @@
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { StructuredDelegateResults } from '../entities/transcript/entries';
 import {
   DelegateInspectorMetadata,
   DelegateStructuredResultSection,
@@ -481,6 +482,42 @@ describe('live extension surface fixtures', () => {
     expect(markup).not.toContain('<ol class="structured-result-list">');
     expect(markup).toContain('&quot;outcome&quot;: &quot;done&quot;');
     expect(markup).toContain('&quot;path&quot;: &quot;src/index.ts&quot;');
+  });
+
+  it('keeps transcript and live result adapters equivalent for common bounded content', () => {
+    const value = { outcome: 'done', findings: [{ path: 'src/index.ts' }] };
+    const transcriptMarkup = renderToStaticMarkup(
+      <StructuredDelegateResults
+        results={[{ label: 'Audit', status: 'valid', value }]}
+      />,
+    );
+    const liveMarkup = renderToStaticMarkup(
+      <DelegateStructuredResultSection
+        row={{
+          id: 'd-equivalent',
+          name: 'Audit',
+          kind: 'background',
+          state: 'success',
+          createdAt: 1,
+          allowWrites: false,
+          result: { kind: 'structured', status: 'valid', value },
+        }}
+      />,
+    );
+
+    for (const fragment of [
+      'Status: valid',
+      'class="structured-result-value"',
+      'object · 2 fields',
+      'array · 1 item',
+      'Raw JSON',
+      '&quot;outcome&quot;: &quot;done&quot;',
+    ]) {
+      expect(transcriptMarkup).toContain(fragment);
+      expect(liveMarkup).toContain(fragment);
+    }
+    expect(transcriptMarkup.match(/class="payload-section"/gu)).toHaveLength(1);
+    expect(liveMarkup.match(/class="payload-section"/gu)).toHaveLength(1);
   });
 
   it('shows an explicit notice when a bounded live result omits its value', () => {

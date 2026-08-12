@@ -3,10 +3,7 @@ import type {
   DelegateTranscriptEntry,
 } from '../../../../extensions/delegate/contribution';
 import { TranscriptEntry } from '../entities/transcript/entries';
-import {
-  BoundedPayloadPreview,
-  StructuredPayloadView,
-} from '../entities/transcript/inspector';
+import { StructuredResultSection } from '../entities/transcript/inspector';
 import type { TranscriptModelItem } from '../transcript';
 import { DashboardDialog } from './dashboard-dialog';
 
@@ -244,44 +241,15 @@ export function DelegateStructuredResultSection({
   row: DelegateStatus;
 }) {
   if (!row.result) return null;
-  const errorOccurrences = new Map<string, number>();
   return (
-    <section className="payload-section" aria-label="Structured result">
-      <h4>Structured result</h4>
-      <p>Status: {row.result.status}</p>
-      {row.result.errors?.map((error) => {
-        const errorOccurrence = (errorOccurrences.get(error) ?? 0) + 1;
-        errorOccurrences.set(error, errorOccurrence);
-        return (
-          <p
-            key={`${row.id}:structured-error:${error}:${errorOccurrence}`}
-            className="payload-truncation-label"
-          >
-            {error}
-          </p>
-        );
-      })}
-      {row.result.status === 'valid' && row.result.value !== undefined && (
-        <>
-          <StructuredPayloadView value={row.result.value} />
-          <details className="tool-inspector-raw">
-            <summary>Raw JSON</summary>
-            <BoundedPayloadPreview
-              value={row.result.value}
-              label="structured result JSON"
-            />
-          </details>
-        </>
-      )}
-      {row.result.status === 'valid' && row.result.value === undefined && (
-        <p className="payload-truncation-label">
-          Structured result value{' '}
-          {row.result.valueOmitted === true
-            ? 'unavailable in this bounded live snapshot.'
-            : 'is unavailable in this snapshot.'}
-        </p>
-      )}
-    </section>
+    <StructuredResultSection
+      ariaLabel="Structured result"
+      rawJsonLabel="structured result JSON"
+      result={row.result}
+      title="Structured result"
+      valueOmittedMessage="Structured result value unavailable in this bounded live snapshot."
+      valueUnavailableMessage="Structured result value is unavailable in this snapshot."
+    />
   );
 }
 
