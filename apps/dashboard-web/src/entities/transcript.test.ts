@@ -353,16 +353,16 @@ describe('activity row views and virtual transcript construction', () => {
     );
   });
 
-  it('keeps failed shared status distinct in the dashboard row view', () => {
+  it('shows a factual warning when the group ended on an error', () => {
     const group = {
-      status: 'failed' as const,
+      status: 'ended-error' as const,
       toolCount: 1,
     } as TranscriptGroup;
     const view = activityGroupPresentation(group, false);
     expect(view.status).toBe(group.status);
-    expect(view.className).toBe('activity-failed');
+    expect(view.className).toBe('activity-ended-error');
     expect(view.icon).toBe('!');
-    expect(view.label).toContain('failed');
+    expect(view.label).toContain('ended after an error');
   });
 
   it('drops empty assistant messages after filtering empty thinking', () => {
@@ -702,7 +702,7 @@ describe('activity row views and virtual transcript construction', () => {
       {
         title: 'Inspecting the workspace',
         toolCount: 3,
-        status: 'complete',
+        status: 'settled',
       },
     ]);
   });
@@ -893,7 +893,7 @@ describe('activity row views and virtual transcript construction', () => {
         ({
           start: index * 2,
           end: index * 2,
-          status: 'complete',
+          status: 'settled',
           toolCount: 1,
           title: 'work',
         }) as TranscriptGroup,

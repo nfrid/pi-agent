@@ -5,10 +5,14 @@ import {
   type ToolDescriptor,
   type TranscriptEntry,
 } from './grouping.js';
-import { hasUnresolvedToolFailure } from './outcome.mjs';
+import { endedWithToolFailure } from './outcome.mjs';
 import { describeTools } from './title.js';
 
-export type ActivityGroupStatus = 'live' | 'preparing' | 'complete' | 'failed';
+export type ActivityGroupStatus =
+  | 'live'
+  | 'preparing'
+  | 'settled'
+  | 'ended-error';
 
 export interface ActivityGroupViewModel {
   readonly id: string;
@@ -27,7 +31,7 @@ export interface ActivityProjectionOptions {
   readonly liveTail?: boolean;
   readonly expandedIds?: ReadonlySet<string>;
   readonly groupId?: (group: ActivityGroup, index: number) => string;
-  readonly failed?: (
+  readonly endedWithError?: (
     group: ActivityGroup,
     tools: readonly ToolDescriptor[],
   ) => boolean;
@@ -73,8 +77,8 @@ export function projectActivityGroups(
       );
     const id =
       options.groupId?.(group, index) ?? `activity-group-${group.start}`;
-    const failed =
-      options.failed?.(group, tools) ?? hasUnresolvedToolFailure(tools);
+    const endedWithError =
+      options.endedWithError?.(group, tools) ?? endedWithToolFailure(tools);
     const streaming = entries
       .slice(group.start, group.end + 1)
       .some((entry) => entry.kind === 'assistant' && entry.streaming === true);
@@ -90,9 +94,9 @@ export function projectActivityGroups(
       ? 'preparing'
       : live
         ? 'live'
-        : failed
-          ? 'failed'
-          : 'complete';
+        : endedWithError
+          ? 'ended-error'
+          : 'settled';
     return {
       id,
       start: group.start,

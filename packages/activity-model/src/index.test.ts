@@ -97,7 +97,7 @@ describe('shared activity model', () => {
       end: historical[0]?.end,
       title: 'Checking the workspace',
     });
-    expect(historical[0]?.status).toBe('complete');
+    expect(historical[0]?.status).toBe('settled');
     expect(live[0]?.status).toBe('live');
   });
 
@@ -119,7 +119,7 @@ describe('shared activity model', () => {
     ];
 
     expect(projectActivityGroups(entries, { liveTail: true })[0]?.status).toBe(
-      'complete',
+      'settled',
     );
   });
 
@@ -150,7 +150,7 @@ describe('shared activity model', () => {
     ).toEqual([{ start: 0, end: 0 }]);
   });
 
-  it('keeps unresolved failures live until the active group finishes', () => {
+  it('keeps final tool errors live until the active group finishes', () => {
     const failed = {
       kind: 'tool' as const,
       name: 'bash',
@@ -181,10 +181,12 @@ describe('shared activity model', () => {
       projectActivityGroups(terminalEntries, { liveTail: true })[0]?.status,
     ).toBe('live');
     expect(projectActivityGroups(mixedEntries)[0]?.status).toBe('live');
-    expect(projectActivityGroups(terminalEntries)[0]?.status).toBe('failed');
+    expect(projectActivityGroups(terminalEntries)[0]?.status).toBe(
+      'ended-error',
+    );
   });
 
-  it('uses retry-aware outcomes for shared dashboard projections', () => {
+  it('settles after any successful final attempt without matching commands', () => {
     const corrected = projectActivityGroups([
       {
         kind: 'assistant' as const,
@@ -227,11 +229,11 @@ describe('shared activity model', () => {
         status: 'success' as const,
       },
     ]);
-    expect(corrected[0]?.status).toBe('complete');
-    expect(unresolved[0]?.status).toBe('failed');
+    expect(corrected[0]?.status).toBe('settled');
+    expect(unresolved[0]?.status).toBe('settled');
   });
 
-  it('projects failed and streaming groups distinctly for every renderer', () => {
+  it('projects final errors and streaming groups distinctly for every renderer', () => {
     const failed = projectActivityGroups([
       {
         kind: 'assistant' as const,
@@ -256,7 +258,7 @@ describe('shared activity model', () => {
       },
       { kind: 'tool' as const, name: 'bash', args: {} },
     ]);
-    expect(failed[0]?.status).toBe('failed');
+    expect(failed[0]?.status).toBe('ended-error');
     expect(streaming[0]?.status).toBe('preparing');
     expect(failed[0]?.status).not.toBe(streaming[0]?.status);
   });
@@ -335,8 +337,8 @@ describe('shared activity model', () => {
         toolCount,
       })),
     ).toEqual([
-      { status: 'complete', expanded: true, kind: 'inspect', toolCount: 2 },
-      { status: 'complete', expanded: false, kind: 'mutate', toolCount: 1 },
+      { status: 'settled', expanded: true, kind: 'inspect', toolCount: 2 },
+      { status: 'settled', expanded: false, kind: 'mutate', toolCount: 1 },
     ]);
     expect(
       live.map(({ status, expanded, kind, toolCount }) => ({
@@ -346,7 +348,7 @@ describe('shared activity model', () => {
         toolCount,
       })),
     ).toEqual([
-      { status: 'complete', expanded: true, kind: 'inspect', toolCount: 2 },
+      { status: 'settled', expanded: true, kind: 'inspect', toolCount: 2 },
       { status: 'live', expanded: false, kind: 'mutate', toolCount: 1 },
     ]);
   });
@@ -368,6 +370,6 @@ describe('shared activity model', () => {
       },
       { kind: 'tool', name: 'edit', args: {}, status: 'running' },
     ]);
-    expect(groups.map(({ status }) => status)).toEqual(['complete', 'live']);
+    expect(groups.map(({ status }) => status)).toEqual(['settled', 'live']);
   });
 });

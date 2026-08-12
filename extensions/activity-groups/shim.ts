@@ -42,7 +42,7 @@ import {
   type Narration,
   type TranscriptEntry,
 } from './grouping';
-import { hasUnresolvedToolFailure } from './outcome';
+import { endedWithToolFailure } from './outcome';
 import { headersOf, isNarration } from './title';
 import type {
   RendererContext,
@@ -451,7 +451,7 @@ export function installToolSequenceShim(
       cwd: sequence.tools[0]?.cwd ?? process.cwd(),
       startedAt: state.startedAt,
       completedAt: state.completedAt,
-      failed: hasUnresolvedToolFailure(items),
+      failed: endedWithToolFailure(items),
       items,
     };
   }

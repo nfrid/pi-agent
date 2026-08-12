@@ -883,13 +883,13 @@ h2 {
   border: 1px solid var(--line-soft);
   background: var(--tool-pending);
 }
-.activity-group.activity-complete {
-  background: var(--tool-success);
+.activity-group.activity-settled {
+  background: var(--tool-pending);
 }
 .activity-group.activity-pending {
   border-left: 2px solid var(--cyan);
 }
-.activity-group.activity-failed {
+.activity-group.activity-ended-error {
   border-left: 2px solid var(--red);
   background: var(--tool-error);
 }
@@ -928,10 +928,10 @@ h2 {
   color: var(--cyan);
   font-weight: 700;
 }
-.activity-complete .activity-icon {
-  color: var(--green);
+.activity-settled .activity-icon {
+  color: var(--muted);
 }
-.activity-failed .activity-icon {
+.activity-ended-error .activity-icon {
   color: var(--red);
 }
 .activity-group.activity-pending .activity-icon {
@@ -4850,15 +4850,18 @@ details.session-event {
   background: color-mix(in srgb, var(--bg-alt) 82%, var(--bg));
   box-shadow: none;
 }
-.activity-group.activity-complete {
-  --activity-status-color: var(--green);
-  background: color-mix(in srgb, var(--green) 4%, var(--bg-alt));
+.activity-group.activity-settled {
+  --activity-status-color: var(--muted);
 }
-.activity-group.activity-failed {
+.activity-group.activity-ended-error {
   --activity-status-color: var(--red);
   background: color-mix(in srgb, var(--red) 6%, var(--bg-alt));
 }
-.activity-group:is(.activity-complete, .activity-pending, .activity-failed) {
+.activity-group:is(
+  .activity-settled,
+  .activity-pending,
+  .activity-ended-error
+) {
   border-left: 1px solid
     color-mix(in srgb, var(--activity-status-color) 72%, transparent);
 }

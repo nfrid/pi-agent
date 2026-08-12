@@ -63,8 +63,8 @@ export const ActivityGroupsViewModelSchema = Type.Object(
     status: Type.Union([
       Type.Literal('live'),
       Type.Literal('preparing'),
-      Type.Literal('complete'),
-      Type.Literal('failed'),
+      Type.Literal('settled'),
+      Type.Literal('ended-error'),
     ]),
     expanded: Type.Boolean(),
     toolCount: Type.Integer({ minimum: 0 }),

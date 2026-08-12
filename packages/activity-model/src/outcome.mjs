@@ -180,7 +180,18 @@ function isComplete(item) {
   );
 }
 
-/** Retry-aware aggregate outcome shared by the activity model and TUI. */
+/** Whether an activity currently ends on an errored tool call. */
+export function endedWithToolFailure(items) {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (!item || (item.type !== undefined && item.type !== 'tool')) continue;
+    if (item.status === 'pending' || item.status === 'running') return false;
+    return item.isError === true || item.status === 'error';
+  }
+  return false;
+}
+
+/** Legacy retry-aware outcome retained for session metrics only. */
 export function hasUnresolvedToolFailure(items) {
   const failed = new Map();
   let unkeyedFailure = false;

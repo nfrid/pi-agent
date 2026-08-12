@@ -300,17 +300,17 @@ export function activityGroupPresentation(
   group: Pick<TranscriptGroup, 'status' | 'toolCount'>,
   expanded: boolean,
 ): {
-  className: 'activity-complete' | 'activity-pending' | 'activity-failed';
-  icon: '✓' | '…' | '!';
+  className: 'activity-settled' | 'activity-pending' | 'activity-ended-error';
+  icon: '•' | '…' | '!';
   label: string;
   status: TranscriptGroup['status'];
 } {
   const detail = expanded ? 'hide detail' : 'show detail';
-  if (group.status === 'failed')
+  if (group.status === 'ended-error')
     return {
-      className: 'activity-failed',
+      className: 'activity-ended-error',
       icon: '!',
-      label: `failed · ${detail}`,
+      label: `ended after an error · ${detail}`,
       status: group.status,
     };
   if (group.status === 'preparing')
@@ -328,8 +328,8 @@ export function activityGroupPresentation(
       status: group.status,
     };
   return {
-    className: 'activity-complete',
-    icon: '✓',
+    className: 'activity-settled',
+    icon: '•',
     label: detail,
     status: group.status,
   };

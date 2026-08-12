@@ -879,7 +879,7 @@ describe('transcript outline and metadata', () => {
       '1 tool call',
     );
     expect(
-      activityGroupPresentation({ status: 'complete', toolCount: 1 }, false)
+      activityGroupPresentation({ status: 'settled', toolCount: 1 }, false)
         .label,
     ).not.toContain('tool');
   });

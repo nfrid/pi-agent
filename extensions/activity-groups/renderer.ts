@@ -10,7 +10,7 @@ import {
   toolPath,
   toolRole,
 } from '@pi-dashboard/activity-model';
-import { hasUnresolvedToolFailure } from './outcome';
+import { endedWithToolFailure } from './outcome';
 import type {
   SequenceItem,
   SequenceOptions,
@@ -273,10 +273,10 @@ export class ActivityGroupComponent implements Component {
   ): string[] {
     const marker = completed
       ? failed
-        ? '✗'
-        : '✓'
+        ? '!'
+        : '•'
       : SPINNER_FRAMES[this.spinnerFrame];
-    const color = failed ? 'error' : completed ? 'success' : 'accent';
+    const color = failed ? 'error' : completed ? 'muted' : 'accent';
     const showPrefix = width > 3;
     const prefix = showPrefix ? ` ${this.theme.fg(color, marker)} ` : '';
     const indent = showPrefix ? '   ' : '';
@@ -357,7 +357,7 @@ export class ActivityGroupComponent implements Component {
       (item): item is ToolItem => item.type === 'tool',
     );
     const completed = !this.options.streaming;
-    const failed = hasUnresolvedToolFailure(tools);
+    const failed = endedWithToolFailure(tools);
     const metadata = this.metadataLines(tools, completed, failed, width);
 
     const lines = [

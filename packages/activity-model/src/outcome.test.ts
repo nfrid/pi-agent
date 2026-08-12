@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hasUnresolvedToolFailure, validationKindsOf } from './outcome.mjs';
+import { endedWithToolFailure, validationKindsOf } from './outcome.mjs';
 
 function tool(
   name: string,
@@ -15,22 +15,33 @@ function tool(
 }
 
 describe('shared activity outcomes', () => {
-  it('resolves a failed validation with a semantically equivalent retry', () => {
+  it('warns only when the final completed tool call failed', () => {
     expect(
-      hasUnresolvedToolFailure([
-        tool('bash', { command: 'cd app && npm run lint' }, 'error'),
-        tool('bash', { command: 'cd app && npm run lint -- --fix' }),
+      endedWithToolFailure([
+        tool('bash', { command: './mg/mg ticket BTB-2178' }, 'error'),
+        tool('bash', { command: 'mg ticket BTB-2178' }),
       ]),
     ).toBe(false);
-  });
-
-  it('keeps an unrelated successful validation from resolving a failure', () => {
     expect(
-      hasUnresolvedToolFailure([
-        tool('bash', { command: 'npm run lint' }, 'error'),
+      endedWithToolFailure([
         tool('bash', { command: 'npm test' }),
+        tool('delegate', { task: 'review' }, 'error'),
       ]),
     ).toBe(true);
+  });
+
+  it('does not warn while a retry is still in flight', () => {
+    expect(
+      endedWithToolFailure([
+        tool('bash', { command: 'false' }, 'error'),
+        {
+          name: 'read',
+          args: {},
+          status: 'running' as const,
+          isError: false,
+        },
+      ]),
+    ).toBe(false);
   });
 
   it('preserves validation command facets', () => {

@@ -451,26 +451,26 @@ describe('activity groups renderer', () => {
 
     it('keeps the original preamble wording after the phase settles', () => {
       expect(titleOf('Checking how sessions expire', false)).toContain(
-        '✓ Checking how sessions expire',
+        '• Checking how sessions expire',
       );
     });
 
     it('keeps non-English preambles unchanged', () => {
       const preamble = 'Реализую поддержку русского';
       expect(titleOf(preamble, true)).toContain(preamble);
-      expect(titleOf(preamble, false)).toContain(`✓ ${preamble}`);
+      expect(titleOf(preamble, false)).toContain(`• ${preamble}`);
     });
 
     it('keeps an action announced after the problem statement unchanged', () => {
       const preamble = "There's an issue here. Fixing it";
       expect(titleOf(preamble, true)).toContain(preamble);
-      expect(titleOf(preamble, false)).toContain(`✓ ${preamble}`);
+      expect(titleOf(preamble, false)).toContain(`• ${preamble}`);
     });
 
     it('keeps a non-participle line exactly as written', () => {
       // A title is a label, so the full stop goes; the words do not.
       expect(titleOf("Now I'll check how sessions expire.", false)).toContain(
-        "✓ Now I'll check how sessions expire",
+        "• Now I'll check how sessions expire",
       );
     });
   });
@@ -524,7 +524,7 @@ describe('activity groups renderer', () => {
         read,
       ];
       expect(titleOf(items, true)).toContain('Exercising planning and cleanup');
-      expect(titleOf(items)).toContain('✓ Exercising planning and cleanup');
+      expect(titleOf(items)).toContain('• Exercising planning and cleanup');
       expect(titleOf(items)).not.toContain('workspace');
     });
 
@@ -615,48 +615,23 @@ describe('activity groups renderer', () => {
     (component as unknown as { dispose(): void }).dispose();
   });
 
-  it('resolves failures by ordered tool-call signature', () => {
+  it('warns only when the final completed call failed', () => {
     const failed = toolItem(
-      'lint-1',
+      'ticket-1',
       'bash',
-      { command: 'npm run lint' },
+      { command: './mg/mg ticket BTB-2178' },
       true,
     );
-    const sameArgs = toolItem(
-      'lint-2',
+    const succeeded = toolItem(
+      'ticket-2',
       'bash',
-      { command: 'npm run lint' },
-      false,
-    );
-    const reorderedArgs = toolItem(
-      'lint-3',
-      'edit',
-      { path: 'src/index.ts', content: 'updated' },
-      true,
-    );
-    const reorderedSuccess = toolItem(
-      'lint-4',
-      'edit',
-      { content: 'updated', path: 'src/index.ts' },
+      { command: 'mg ticket BTB-2178' },
       false,
     );
 
-    // An unrelated success does not clear the failed signature.
-    expect(
-      renderOutcome([
-        failed,
-        toolItem('other', 'bash', { command: 'npm test' }, false),
-      ]),
-    ).toContain('✗');
-    // A retry clears it, while the historical tally remains visible.
-    expect(renderOutcome([failed, sameArgs])).toContain('✓');
-    expect(renderOutcome([failed, sameArgs])).toContain('1 failed');
-    // Repeated failures still represent one unresolved signature.
-    expect(renderOutcome([failed, failed, sameArgs])).toContain('✓');
-    expect(renderOutcome([failed, failed, sameArgs])).toContain('2 failed');
-    // A later failure reopens a signature, and object key order is irrelevant.
-    expect(renderOutcome([sameArgs, failed])).toContain('✗');
-    expect(renderOutcome([reorderedArgs, reorderedSuccess])).toContain('✓');
+    expect(renderOutcome([failed, succeeded])).toContain('•');
+    expect(renderOutcome([failed, succeeded])).toContain('1 failed');
+    expect(renderOutcome([succeeded, failed])).toContain('!');
   });
 
   it('keeps the historical lint failure after an edit retry resolves it', () => {
@@ -665,7 +640,7 @@ describe('activity groups renderer', () => {
       toolItem('edit-1', 'edit', { path: 'src/index.ts' }, false),
       toolItem('lint-2', 'bash', { command: 'npm run lint' }, false),
     ]);
-    expect(output).toContain('✓');
+    expect(output).toContain('•');
     expect(output).toContain('1 failed');
   });
 
@@ -696,7 +671,7 @@ describe('activity groups renderer', () => {
     );
     if (!component) throw new Error('renderer returned no component');
     const output = component.render(100).join('\n');
-    expect(output).toContain('✗ Exploring missing.ts');
+    expect(output).toContain('! Exploring missing.ts');
     expect(output).toContain('1 failed');
     (component as unknown as { dispose(): void }).dispose();
   });

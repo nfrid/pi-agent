@@ -5,6 +5,8 @@ export type OutcomeTool = {
   isError?: boolean;
 };
 
+export function endedWithToolFailure(items: readonly OutcomeTool[]): boolean;
+/** Legacy retry-aware outcome retained for session metrics only. */
 export function hasUnresolvedToolFailure(
   items: readonly OutcomeTool[],
 ): boolean;
