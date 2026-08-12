@@ -49,6 +49,39 @@ body {
   background: var(--bg);
   overflow-x: hidden;
 }
+
+/* Small, content-only experiment; overlays remain outside the transition. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+.route-content {
+  view-transition-name: dashboard-content;
+}
+::view-transition-old(dashboard-content) {
+  animation: dashboard-content-out 150ms ease-out both;
+}
+::view-transition-new(dashboard-content) {
+  animation: dashboard-content-in 150ms ease-out both;
+}
+@keyframes dashboard-content-out {
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes dashboard-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(dashboard-content),
+  ::view-transition-new(dashboard-content) {
+    animation: none;
+  }
+}
 button,
 input,
 textarea,

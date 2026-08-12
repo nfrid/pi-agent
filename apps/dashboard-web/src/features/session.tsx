@@ -13,7 +13,6 @@ import {
   workspaceForPath,
 } from '@pi-dashboard/protocol';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
 import {
   type ComponentType,
   useCallback,
@@ -28,6 +27,7 @@ import {
   shouldShowJumpToLatest,
 } from '../app-helpers';
 import { Transcript } from '../entities/transcript';
+import { useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav, workspaceNameForSession } from './agent-thread-nav';
 import {
   ExtensionSurfaceStack,
@@ -76,14 +76,12 @@ export function SessionView({
   /** Render transcript controls without the full-page agent navigation shell. */
   embedded?: boolean;
 }) {
-  const navigate = useNavigate();
+  const go = useDashboardNavigate();
   const replaceSession = useCallback(
     (sessionId: string) => {
-      void navigate({
-        to: `/sessions/${encodeURIComponent(sessionId)}`,
-      });
+      go(`/sessions/${encodeURIComponent(sessionId)}`);
     },
-    [navigate],
+    [go],
   );
   const query = useQuery(sessionQueryOptions(dashboardHttpClient, id));
   const projection = useDashboardStore(

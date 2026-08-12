@@ -1,11 +1,5 @@
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
-import { useNavigate } from '@tanstack/react-router';
-import { Back } from './dashboard';
-
-function useDashboardNavigate(): (path: string) => void {
-  const navigate = useNavigate();
-  return (path) => void navigate({ to: path });
-}
+import { Back, useDashboardNavigate } from './dashboard';
 
 export function RuntimeView({
   id,

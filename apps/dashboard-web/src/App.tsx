@@ -241,7 +241,7 @@ function RouteShell() {
           </div>
         )}
         <main
-          className={`shell ${routeState.isSession ? 'session-shell' : ''}`}
+          className={`shell route-content ${routeState.isSession ? 'session-shell' : ''}`}
         >
           <Outlet />
         </main>
