@@ -525,7 +525,8 @@ export function parseDashboardStreamMessage(
     'dashboard stream message',
   );
   if ('event' in message) validateDashboardEventEnvelopeCapabilities(message);
-  else validateBrowserSnapshotCapabilities(message.snapshot);
+  else if (message.type === 'snapshot')
+    validateBrowserSnapshotCapabilities(message.snapshot);
   return message;
 }
 export function tryParseDashboardStreamMessage(

@@ -3,6 +3,7 @@ import type {
   BrowserSnapshot,
   NotificationEvent,
   RuntimeSnapshot,
+  SessionIndexEntry,
   WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { DashboardEventStream } from '../event-stream.js';
@@ -108,17 +109,36 @@ export class DashboardApplication {
     this.notifications.setPush(push);
   }
 
+  /** Authoritative session metadata, including live runtime overlays. */
+  sessionMetadata(
+    liveRuntimes = this.registry.snapshots(),
+  ): SessionIndexEntry[] {
+    const activeRuntimes = new Map(
+      liveRuntimes
+        .filter((runtime) => runtime.online !== false)
+        .map((runtime) => [runtime.session.id, runtime]),
+    );
+    return this.sessions.list().map((session) => {
+      const runtime = activeRuntimes.get(session.id);
+      return {
+        ...session,
+        ...(runtime?.session.name !== undefined
+          ? { name: runtime.session.name }
+          : {}),
+        ...(runtime?.session.title !== undefined
+          ? { title: runtime.session.title }
+          : {}),
+        activeRuntimeId: runtime?.runtimeId,
+      };
+    });
+  }
+
   snapshot(
     serverId: string,
     revision: number,
     cursor = this.eventStream.cursor,
   ): BrowserSnapshot {
     const liveRuntimes = this.registry.snapshots();
-    const activeSessions = new Map(
-      liveRuntimes
-        .filter((runtime) => runtime.online !== false)
-        .map((runtime) => [runtime.session.id, runtime.runtimeId]),
-    );
     return {
       serverId,
       revision,
@@ -132,21 +152,7 @@ export class DashboardApplication {
       checkouts: this.orchestration.checkoutSummaries(),
       threads: this.orchestration.threadSummaries(),
       runs: this.orchestration.runSummaries(),
-      sessions: this.sessions.list().map((session) => {
-        const runtime = liveRuntimes.find(
-          (item) => item.session.id === session.id && item.online !== false,
-        );
-        return {
-          ...session,
-          ...(runtime?.session.name !== undefined
-            ? { name: runtime.session.name }
-            : {}),
-          ...(runtime?.session.title !== undefined
-            ? { title: runtime.session.title }
-            : {}),
-          activeRuntimeId: activeSessions.get(session.id),
-        };
-      }),
+      sessions: this.sessionMetadata(liveRuntimes),
       usage: this.usage.cached(),
       unread: this.metadata.unreadNotifications(),
     };

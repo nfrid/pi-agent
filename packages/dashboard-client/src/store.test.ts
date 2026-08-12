@@ -3,6 +3,7 @@ import type {
   SessionApiResponse,
 } from '@pi-dashboard/protocol';
 import { describe, expect, it, vi } from 'vitest';
+import { ReplayGapError } from './http-client.js';
 import {
   DashboardLiveStore,
   selectRuntimeForSession,
@@ -43,7 +44,68 @@ const sessionResponse = (
   }) as SessionApiResponse;
 
 describe('DashboardLiveStore', () => {
-  it('optimistically titles the first prompt through settlement and reconciles authority', () => {
+  it('authoritatively replaces sessions without clearing transcripts and handles replay ordering', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      sessions: [
+        { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
+        { id: 'removed', file: '', cwd: '/tmp', updatedAt: 1 },
+      ],
+    } as unknown as BrowserSnapshot);
+    store.hydrateSession(sessionResponse(1));
+    const beforeNonce = store.getSnapshot().resyncNonce;
+
+    expect(
+      store.acceptStreamRecord({
+        type: 'sessions',
+        cursor: 2,
+        emittedAt: 2,
+        sessions: [
+          {
+            id: 'session-1',
+            file: '/tmp/session.jsonl',
+            cwd: '/tmp',
+            updatedAt: 2,
+          },
+          { id: 'new-session', file: '', cwd: '/tmp', updatedAt: 2 },
+        ],
+      }),
+    ).toBe(true);
+    expect(store.getSnapshot().sessionsById).toEqual({
+      'session-1': {
+        id: 'session-1',
+        file: '/tmp/session.jsonl',
+        cwd: '/tmp',
+        updatedAt: 2,
+      },
+      'new-session': { id: 'new-session', file: '', cwd: '/tmp', updatedAt: 2 },
+    });
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1'],
+    ).toBeDefined();
+    expect(store.getSnapshot().cursor).toBe(2);
+    expect(store.getSnapshot().cursorHistory).toContain(2);
+    expect(store.getSnapshot().resyncNonce).toBe(beforeNonce + 1);
+    expect(
+      store.acceptStreamRecord({
+        type: 'sessions',
+        cursor: 2,
+        emittedAt: 3,
+        sessions: [],
+      }),
+    ).toBe(false);
+    expect(() =>
+      store.acceptStreamRecord({
+        type: 'sessions',
+        cursor: 4,
+        emittedAt: 4,
+        sessions: [],
+      }),
+    ).toThrow(ReplayGapError);
+  });
+
+  it('preserves optimistic titles across authoritative session-index records', () => {
     const store = new DashboardLiveStore();
     const metadata = {
       id: 'session-1',
@@ -97,8 +159,17 @@ describe('DashboardLiveStore', () => {
     );
 
     store.acceptStreamRecord({
+      type: 'sessions',
       cursor: 4,
       emittedAt: 4,
+      sessions: [metadata],
+    });
+    expect(store.getSnapshot().sessionsById['session-1']?.title).toBe(
+      'first request',
+    );
+    store.acceptStreamRecord({
+      cursor: 5,
+      emittedAt: 5,
       sessionId: 'session-1',
       event: {
         type: 'session.changed',

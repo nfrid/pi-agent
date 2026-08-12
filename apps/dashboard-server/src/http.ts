@@ -9,6 +9,7 @@ import {
   MAX_ID,
   type RuntimeSnapshot,
   redactImageData,
+  type SessionIndexEntry,
   validateBridgeCommand,
   validateSessionRenameRequest,
   type WorkspaceTarget,
@@ -92,6 +93,7 @@ export interface DashboardServer {
   snapshot(): BrowserSnapshot;
   refreshWorkspaces(): Promise<WorkspaceTarget[]>;
   publishChange(message?: unknown): void;
+  publishSessionIndexChange(): void;
 }
 
 /**
@@ -722,16 +724,36 @@ export class DashboardServerImpl implements DashboardServer {
     this.changed(message);
   }
 
+  public publishSessionIndexChange(): void {
+    if (this.lifecycle !== 'started') return;
+    this.changed({
+      type: 'sessions',
+      sessions: this.application.sessionMetadata(),
+    });
+  }
+
   private changed(message?: unknown): void {
     this.revision += 1;
     const record =
       message && typeof message === 'object' && !Array.isArray(message)
         ? (message as Record<string, unknown>)
         : undefined;
+    if (record?.type === 'sessions' && Array.isArray(record.sessions)) {
+      this.eventStream.publish((cursor, emittedAt) => ({
+        type: 'sessions' as const,
+        cursor,
+        emittedAt,
+        sessions: record.sessions as readonly SessionIndexEntry[],
+      }));
+      return;
+    }
     if (record?.type === 'event' && record.event) {
       const includeSnapshot =
         record.snapshot !== undefined && typeof record.snapshot === 'object';
-      let streamRecord: DashboardEventStreamRecord;
+      let streamRecord: Extract<
+        DashboardEventStreamRecord,
+        { event: BridgeEvent }
+      >;
       try {
         streamRecord = this.eventStream.publish((cursor, emittedAt) => {
           const snapshot = includeSnapshot ? this.snapshot(cursor) : undefined;
@@ -753,7 +775,7 @@ export class DashboardServerImpl implements DashboardServer {
               : { sessionId: record.sessionId as string }),
             ...(snapshot === undefined ? {} : { snapshot }),
           };
-        });
+        }) as Extract<DashboardEventStreamRecord, { event: BridgeEvent }>;
       } catch {
         // A malformed optional provider payload must not escape a runtime
         // callback and take down the daemon.
@@ -775,11 +797,11 @@ export class DashboardServerImpl implements DashboardServer {
       return;
     }
     const streamRecord = this.eventStream.publish((cursor, emittedAt) => ({
-      type: 'snapshot',
+      type: 'snapshot' as const,
       cursor,
       emittedAt,
       snapshot: this.snapshot(cursor),
-    }));
+    })) as Extract<DashboardEventStreamRecord, { type: 'snapshot' }>;
     this.ws.publish({
       type: 'snapshot',
       snapshot: streamRecord.snapshot,

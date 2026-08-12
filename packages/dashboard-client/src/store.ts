@@ -457,6 +457,61 @@ export class DashboardLiveStore {
     };
   }
 
+  /** Replace the session index without disturbing hydrated transcript pages. */
+  private installSessionIndexProjection(
+    state: DashboardLiveState,
+    sessions: readonly SessionIndexEntry[],
+  ): DashboardLiveState {
+    const optimisticSessions = { ...state.optimisticSessionTitlesById };
+    const optimisticRuntimes = { ...state.optimisticRuntimeTitlesById };
+    const sessionsById: Record<string, SessionIndexEntry> = {};
+    for (const session of sessions) {
+      const pendingTitle = session.activeRuntimeId
+        ? optimisticRuntimes[session.activeRuntimeId]
+        : undefined;
+      if (pendingTitle !== undefined) {
+        delete optimisticRuntimes[session.activeRuntimeId as string];
+        optimisticSessions[session.id] = pendingTitle;
+      }
+      const optimisticTitle = optimisticSessions[session.id];
+      if (
+        session.name === undefined &&
+        session.title === undefined &&
+        optimisticTitle !== undefined
+      )
+        sessionsById[session.id] = { ...session, title: optimisticTitle };
+      else {
+        sessionsById[session.id] = session;
+        if (session.name !== undefined || session.title !== undefined)
+          delete optimisticSessions[session.id];
+      }
+    }
+    const runtimesById = { ...state.runtimesById };
+    for (const [runtimeId, runtime] of Object.entries(runtimesById)) {
+      const metadata = sessionsById[runtime.session.id];
+      if (!metadata) continue;
+      const optimisticTitle = optimisticSessions[runtime.session.id];
+      const title = metadata.title ?? optimisticTitle;
+      runtimesById[runtimeId] = {
+        ...runtime,
+        session: {
+          ...runtime.session,
+          ...(metadata.name === undefined ? {} : { name: metadata.name }),
+          ...(metadata.title === undefined && title === undefined
+            ? {}
+            : { title }),
+        },
+      };
+    }
+    return {
+      ...state,
+      runtimesById,
+      sessionsById,
+      optimisticSessionTitlesById: optimisticSessions,
+      optimisticRuntimeTitlesById: optimisticRuntimes,
+    };
+  }
+
   private installRuntimeProjection(
     state: DashboardLiveState,
     runtime: RuntimeSnapshot,
@@ -640,6 +695,28 @@ export class DashboardLiveStore {
   }
 
   acceptStreamRecord(record: DashboardStreamMessage): boolean {
+    if ('type' in record && record.type === 'sessions') {
+      const priorCursor = this.state.cursor;
+      if (record.cursor <= priorCursor) return false;
+      if (record.cursor > priorCursor + 1 && this.state.serverId !== undefined)
+        throw new ReplayGapError();
+      const projected = this.installSessionIndexProjection(
+        this.state,
+        record.sessions,
+      );
+      this.publish({
+        ...projected,
+        cursor: record.cursor,
+        connection: { ...projected.connection, lastCursor: record.cursor },
+        cursorHistory: [...projected.cursorHistory, record.cursor].slice(
+          -LIVE_BUFFER_LIMIT,
+        ),
+        // A session-index update can invalidate the currently mounted branch;
+        // refetch it without replacing the transcript projection.
+        resyncNonce: this.state.resyncNonce + 1,
+      });
+      return true;
+    }
     if ('type' in record && record.type === 'snapshot') {
       if (
         record.snapshot.serverId === this.state.serverId &&

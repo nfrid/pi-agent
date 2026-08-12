@@ -496,6 +496,30 @@ describe('dashboard protocol', () => {
         event: { type: 'agent.settled', sessionId: 'session-1' },
       }).cursor,
     ).toBe(2);
+    expect(
+      parseDashboardStreamMessage({
+        type: 'sessions',
+        cursor: 3,
+        emittedAt: 102,
+        sessions: [
+          {
+            id: 'session-1',
+            file: '/tmp/session.jsonl',
+            cwd: '/tmp',
+            updatedAt: 1,
+          },
+        ],
+      }),
+    ).toMatchObject({ type: 'sessions', cursor: 3 });
+    expect(() =>
+      parseDashboardStreamMessage({
+        type: 'sessions',
+        cursor: 3,
+        emittedAt: 102,
+        sessions: [],
+        extra: true,
+      }),
+    ).toThrow();
   });
 
   it('retains explicit runtime/live surface aliases over the canonical contract', () => {

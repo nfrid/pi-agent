@@ -1,4 +1,8 @@
-import type { BridgeEvent, BrowserSnapshot } from '@pi-dashboard/protocol';
+import type {
+  BridgeEvent,
+  BrowserSnapshot,
+  SessionIndexEntry,
+} from '@pi-dashboard/protocol';
 
 export interface DashboardEventStreamEnvelope {
   readonly cursor: number;
@@ -18,9 +22,17 @@ export interface DashboardSnapshotStreamRecord {
   readonly snapshot: BrowserSnapshot;
 }
 
+export interface DashboardSessionIndexStreamRecord {
+  readonly type: 'sessions';
+  readonly cursor: number;
+  readonly emittedAt: number;
+  readonly sessions: readonly SessionIndexEntry[];
+}
+
 export type DashboardEventStreamRecord =
   | DashboardEventStreamEnvelope
-  | DashboardSnapshotStreamRecord;
+  | DashboardSnapshotStreamRecord
+  | DashboardSessionIndexStreamRecord;
 
 export interface ReplayWindow {
   readonly currentCursor: number;

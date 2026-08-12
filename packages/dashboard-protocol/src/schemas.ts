@@ -1155,9 +1155,25 @@ export const DashboardSnapshotStreamSchema = Type.Object(
 export type DashboardSnapshotStream = Static<
   typeof DashboardSnapshotStreamSchema
 >;
+export const DashboardSessionIndexStreamSchema = Type.Object(
+  {
+    type: Type.Literal('sessions'),
+    cursor: Type.Integer({ minimum: 0 }),
+    emittedAt: FiniteNumberSchema,
+    sessions: Type.Array(SessionIndexEntrySchema),
+  },
+  { additionalProperties: false },
+);
+export type DashboardSessionIndexStreamRecord = Static<
+  typeof DashboardSessionIndexStreamSchema
+>;
+/** Explicit record spelling retained alongside the stream naming convention. */
+export const DashboardSessionIndexStreamRecordSchema =
+  DashboardSessionIndexStreamSchema;
 export const DashboardStreamMessageSchema = Type.Union([
   DashboardEventEnvelopeSchema,
   DashboardSnapshotStreamSchema,
+  DashboardSessionIndexStreamSchema,
 ]);
 export type DashboardStreamMessage = Static<
   typeof DashboardStreamMessageSchema
