@@ -1,6 +1,6 @@
 # HFM-20260805: Add crop controls to image reads
 
-- **Status:** proposed
+- **Status:** evaluation-pending
 - **Approval:** approved 2026-08-05
 - **Created:** 2026-08-05
 - **Source reports:** [HF-20260805: Image reads need crop or region controls](../inbox/20260805T160611Z-image-read-needs-crop.md)
@@ -42,19 +42,19 @@ Add optional pixel crop parameters with explicit coordinate semantics and source
 
 ## Acceptance criteria
 
-- [ ] A valid crop returns exactly the requested pixel region and reports source and returned dimensions.
-- [ ] Omitting crop parameters preserves current whole-image behavior.
-- [ ] Invalid, empty, and out-of-bounds crops fail deterministically without excessive allocation.
-- [ ] Tall PNG, JPEG, GIF, WebP, and BMP inputs retain current support where applicable.
-- [ ] Crop limits prevent decompression or response-size abuse and are documented in the tool schema.
+- [x] A valid crop returns exactly the requested pixel region and reports source and returned dimensions.
+- [x] Omitting crop parameters preserves current whole-image behavior.
+- [x] Invalid, empty, and out-of-bounds crops fail deterministically without excessive allocation.
+- [x] Tall PNG, JPEG, GIF, WebP, and BMP inputs retain current support where applicable.
+- [x] Crop limits prevent decompression or response-size abuse and are documented in the tool schema.
 
 ## Validation
 
-Use a synthetic grid image with known corner colors and labels to verify exact coordinates, edges, partial/out-of-bounds policy, large dimensions, formats, and unchanged default rendering. Run the owning harness tool tests and repository validation applicable to the implementation.
+Validated exact synthetic-grid pixels, edge and out-of-bounds semantics, PNG/JPEG/GIF/WebP/BMP decoding, EXIF-oriented coordinates, malformed WebP rejection, source and encoded-response limits, abort and worker deadline behavior, file-URL paths, and unchanged text/whole-image delegation in `extensions/image-read/image-read.test.ts` (25 tests). `pnpm run check` passed after implementation and again after review fixes. Three independent read-only reviews found and drove fixes for base64 sizing, EXIF orientation, decode/abort bounds, malformed WebP hangs, and crop-path compatibility; the final fresh audit reported no actionable findings.
 
 ## Evaluation
 
-- **Window:** After an approved merge, the first 10 visual-QA tasks that inspect screenshots taller than four viewports, or 2026-09-30, whichever is later
+- **Window:** Started 2026-08-12; the first 10 visual-QA tasks that inspect screenshots taller than four viewports, or 2026-09-30, whichever is later
 - **Result:** pending (`keep` | `revise` | `revert` | `insufficient evidence`)
 
 Compare with the baseline of two required viewport recaptures. Keep only if at least 8 of 10 eligible tasks inspect the needed region from the original capture, crops remain within resource bounds, and whole-image reads do not regress.
@@ -62,5 +62,5 @@ Compare with the baseline of two required viewport recaptures. Keep only if at l
 ## Implementation and resolution
 
 - **Approved implementation:** Add validated pixel crop parameters and source/returned dimensions to raster image reads, preserve whole-image defaults and current format support, and enforce deterministic coordinate and resource bounds; approved by the user on 2026-08-05.
-- **Merged change:** —
+- **Merged change:** `240c4fb feat(read): add bounded image crops`, merged 2026-08-12
 - **Resolution:** pending evaluation
