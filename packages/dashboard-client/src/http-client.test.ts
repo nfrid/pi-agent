@@ -1,6 +1,28 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DashboardHttpClient } from './http-client.js';
 
+const validSnapshot = {
+  serverId: 'daemon-1',
+  revision: 1,
+  cursor: 7,
+  runtimes: [],
+  workspaces: [],
+  sessions: [],
+  unread: [],
+};
+
+function snapshotResponse(): Response {
+  return new Response(JSON.stringify(validSnapshot), { status: 200 });
+}
+
+function tokenStore() {
+  return {
+    get: () => 'test-token',
+    set: () => undefined,
+    clear: () => undefined,
+  };
+}
+
 describe('DashboardHttpClient command requests', () => {
   it('fetches and validates workspace composer commands', async () => {
     const fetch = vi.fn(
@@ -269,6 +291,151 @@ describe('DashboardHttpClient snapshot requests', () => {
   });
 });
 
+describe('DashboardHttpClient candidate endpoint selection', () => {
+  it('uses a LAN endpoint when its authenticated snapshot is valid', async () => {
+    const fetch = vi.fn(
+      async (input: RequestInfo | URL, _init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/lan/api/snapshot') return snapshotResponse();
+        return new Response(JSON.stringify({ usage: {} }), { status: 200 });
+      },
+    );
+    const client = new DashboardHttpClient({
+      baseUrl: '/base',
+      candidateBaseUrls: ['/lan'],
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    await client.usage();
+
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/lan/api/snapshot',
+      '/lan/api/usage',
+    ]);
+    expect(
+      new Headers((fetch.mock.calls[0]?.[1] as RequestInit).headers).get(
+        'x-dashboard-token',
+      ),
+    ).toBe('test-token');
+  });
+
+  it.each([
+    ['failed', 500],
+    ['unauthorized', 401],
+  ])('falls back after a LAN %s probe', async (_label, status) => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/lan/api/snapshot')
+        return new Response('{}', { status });
+      return snapshotResponse();
+    });
+    const client = new DashboardHttpClient({
+      baseUrl: '/base',
+      candidateBaseUrls: ['/lan'],
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    await expect(client.snapshot()).resolves.toMatchObject({
+      serverId: 'daemon-1',
+    });
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/lan/api/snapshot',
+      '/base/api/snapshot',
+    ]);
+  });
+
+  it('falls back after a LAN probe returns an invalid snapshot', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input) === '/lan/api/snapshot'
+        ? new Response(JSON.stringify({ invalid: true }), { status: 200 })
+        : snapshotResponse(),
+    );
+    const client = new DashboardHttpClient({
+      baseUrl: '/base',
+      candidateBaseUrls: ['/lan'],
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    await client.snapshot();
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/lan/api/snapshot',
+      '/base/api/snapshot',
+    ]);
+  });
+
+  it('shares one in-flight selection across concurrent requests', async () => {
+    let release!: () => void;
+    const probeReady = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/lan/api/snapshot') {
+        await probeReady;
+        return snapshotResponse();
+      }
+      return new Response(JSON.stringify({ usage: {} }), { status: 200 });
+    });
+    const client = new DashboardHttpClient({
+      baseUrl: '/base',
+      candidateBaseUrls: ['/lan'],
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    const first = client.usage();
+    const second = client.usage();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.all([first, second]);
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/lan/api/snapshot',
+      '/lan/api/usage',
+      '/lan/api/usage',
+    ]);
+  });
+
+  it('reuses the selection snapshot for the first public snapshot', async () => {
+    const fetch = vi.fn(async () => snapshotResponse());
+    const client = new DashboardHttpClient({
+      baseUrl: '/base',
+      candidateBaseUrls: ['/lan'],
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    await expect(client.snapshot()).resolves.toMatchObject({ cursor: 7 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await client.snapshot();
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('sends a mutation once, only after endpoint selection', async () => {
+    const fetch = vi.fn(
+      async (input: RequestInfo | URL, _init?: RequestInit) =>
+        String(input).endsWith('/api/snapshot')
+          ? snapshotResponse()
+          : new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const client = new DashboardHttpClient({
+      baseUrl: '/base',
+      candidateBaseUrls: ['/lan'],
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    await client.sendCommand('runtime-1', { id: 'command-1', type: 'abort' });
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/lan/api/snapshot',
+      '/lan/api/runtimes/runtime-1/command',
+    ]);
+    expect(fetch.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+});
+
 describe('DashboardHttpClient event requests', () => {
   it('sends the known daemon generation with the replay cursor', async () => {
     const fetch = vi.fn(async () => new Response(null, { status: 200 }));
@@ -290,5 +457,25 @@ describe('DashboardHttpClient event requests', () => {
         },
       }),
     );
+  });
+
+  it('uses the pinned endpoint for the event stream', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith('/api/snapshot')
+        ? snapshotResponse()
+        : new Response(null, { status: 200 }),
+    );
+    const client = new DashboardHttpClient({
+      baseUrl: '/base',
+      candidateBaseUrls: ['/lan'],
+      fetch,
+      tokenStore: tokenStore(),
+    });
+
+    await client.events(4, new AbortController().signal);
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/lan/api/snapshot',
+      '/lan/api/events?cursor=4',
+    ]);
   });
 });

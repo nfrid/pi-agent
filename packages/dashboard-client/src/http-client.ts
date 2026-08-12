@@ -83,8 +83,21 @@ async function responseBody(response: Response): Promise<unknown> {
 
 export interface DashboardHttpClientOptions {
   baseUrl?: string;
+  /** Additional endpoints to try before the configured base URL. */
+  candidateBaseUrls?: string[];
+  /** Maximum time to wait for each endpoint selection probe. */
+  selectionTimeoutMs?: number;
   fetch?: FetchLike;
   tokenStore?: DashboardTokenStore;
+}
+
+type EndpointSelection = {
+  baseUrl: string;
+  snapshot?: BrowserSnapshot;
+};
+
+function normalizeBaseUrl(value: string): string {
+  return value.replace(/\/$/u, '');
 }
 
 /** Typed, authenticated browser HTTP boundary for dashboard API calls. */
@@ -92,10 +105,27 @@ export class DashboardHttpClient {
   readonly baseUrl: string;
   readonly tokenStore: DashboardTokenStore;
   private readonly fetchImpl: FetchLike;
+  private readonly candidateBaseUrls: readonly string[];
+  private readonly selectionTimeoutMs: number;
+  private endpointSelection?: Promise<EndpointSelection>;
+  private selectedSnapshot?: BrowserSnapshot;
   private snapshotInFlight?: Promise<BrowserSnapshot>;
 
   constructor(options: DashboardHttpClientOptions = {}) {
-    this.baseUrl = (options.baseUrl ?? '').replace(/\/$/u, '');
+    this.baseUrl = normalizeBaseUrl(options.baseUrl ?? '');
+    const candidates = (options.candidateBaseUrls ?? []).map(normalizeBaseUrl);
+    // Keep the configured base URL as the final fallback, even when callers
+    // also include it in the candidate list.
+    this.candidateBaseUrls = [
+      ...new Set(candidates.filter((candidate) => candidate !== this.baseUrl)),
+      this.baseUrl,
+    ];
+    this.selectionTimeoutMs =
+      typeof options.selectionTimeoutMs === 'number' &&
+      Number.isFinite(options.selectionTimeoutMs) &&
+      options.selectionTimeoutMs >= 0
+        ? options.selectionTimeoutMs
+        : 1500;
     this.fetchImpl =
       options.fetch ??
       (typeof globalThis.fetch === 'function'
@@ -104,13 +134,81 @@ export class DashboardHttpClient {
     this.tokenStore = options.tokenStore ?? browserDashboardTokenStore;
   }
 
+  private ensureEndpoint(): Promise<EndpointSelection> {
+    if (this.candidateBaseUrls.length === 1)
+      return Promise.resolve({ baseUrl: this.baseUrl });
+    if (!this.endpointSelection) {
+      this.endpointSelection = this.selectEndpoint();
+    }
+    return this.endpointSelection;
+  }
+
+  private async selectEndpoint(): Promise<EndpointSelection> {
+    for (const baseUrl of this.candidateBaseUrls) {
+      const snapshot = await this.probeEndpoint(baseUrl);
+      if (snapshot) {
+        this.selectedSnapshot = snapshot;
+        return { baseUrl, snapshot };
+      }
+    }
+    // The configured base URL is always the last candidate. Keep it pinned
+    // even when every probe failed so normal requests are never retried.
+    return { baseUrl: this.baseUrl };
+  }
+
+  private async probeEndpoint(
+    baseUrl: string,
+  ): Promise<BrowserSnapshot | undefined> {
+    const controller = new AbortController();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const token = this.tokenStore.get();
+    const headers = new Headers({ accept: 'application/json' });
+    if (token) headers.set('x-dashboard-token', token);
+    let request: Promise<Response>;
+    try {
+      request = this.fetchImpl(`${baseUrl}/api/snapshot`, {
+        method: 'GET',
+        headers,
+        signal: controller.signal,
+      });
+    } catch {
+      return undefined;
+    }
+    const timedOut = new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        reject(new Error('Dashboard endpoint selection timed out.'));
+      }, this.selectionTimeoutMs);
+    });
+    try {
+      const response = await Promise.race([request, timedOut]);
+      if (!response.ok) return undefined;
+      return asBrowserSnapshot(await responseBody(response));
+    } catch {
+      return undefined;
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
+  }
+
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    if (this.candidateBaseUrls.length === 1)
+      return this.requestAt<T>(this.baseUrl, path, init);
+    const { baseUrl } = await this.ensureEndpoint();
+    return this.requestAt<T>(baseUrl, path, init);
+  }
+
+  private async requestAt<T>(
+    baseUrl: string,
+    path: string,
+    init: RequestInit,
+  ): Promise<T> {
     const token = this.tokenStore.get();
     const headers = new Headers(init.headers);
     if (!headers.has('content-type') && !(init.body instanceof FormData))
       headers.set('content-type', 'application/json');
     if (token) headers.set('x-dashboard-token', token);
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+    const response = await this.fetchImpl(`${baseUrl}${path}`, {
       ...init,
       headers,
     });
@@ -134,11 +232,18 @@ export class DashboardHttpClient {
 
   snapshot(): Promise<BrowserSnapshot> {
     if (this.snapshotInFlight) return this.snapshotInFlight;
-    const request = this.request<unknown>('/api/snapshot').then((value) => {
-      const snapshot = tryParseBrowserSnapshot(normalizeLegacySnapshot(value));
-      if (!snapshot) throw new Error('Dashboard returned an invalid snapshot.');
-      return snapshot;
-    });
+    const request =
+      this.candidateBaseUrls.length === 1
+        ? this.readSnapshot()
+        : this.ensureEndpoint().then(async () => {
+            // Endpoint selection already made an authenticated, validated
+            // snapshot request. Consume it for the first public snapshot read
+            // only.
+            const selectedSnapshot = this.selectedSnapshot;
+            this.selectedSnapshot = undefined;
+            if (selectedSnapshot) return selectedSnapshot;
+            return this.readSnapshot();
+          });
     this.snapshotInFlight = request;
     // Keep only the in-flight request. Failed and successful reads must both
     // be eligible for a later refresh while concurrent callers share one read.
@@ -153,6 +258,13 @@ export class DashboardHttpClient {
       },
     );
     return request;
+  }
+
+  private async readSnapshot(): Promise<BrowserSnapshot> {
+    const value = await this.request<unknown>('/api/snapshot');
+    const snapshot = asBrowserSnapshot(value);
+    if (!snapshot) throw new Error('Dashboard returned an invalid snapshot.');
+    return snapshot;
   }
 
   async session(
@@ -449,12 +561,13 @@ export class DashboardHttpClient {
     signal: AbortSignal,
     serverId?: string,
   ): Promise<Response> {
+    const { baseUrl } = await this.ensureEndpoint();
     const token = this.tokenStore.get();
     if (!token) throw new DashboardHttpError(401, 'Authentication required.');
     const params = new URLSearchParams({ cursor: String(cursor) });
     if (serverId) params.set('serverId', serverId);
     const response = await this.fetchImpl(
-      `${this.baseUrl}/api/events?${params.toString()}`,
+      `${baseUrl}/api/events?${params.toString()}`,
       {
         headers: {
           accept: 'text/event-stream',
@@ -500,11 +613,19 @@ const viteEnv = (import.meta as ImportMeta & { env?: Record<string, unknown> })
   .env;
 export const dashboardBaseUrl =
   typeof viteEnv?.VITE_DASHBOARD_URL === 'string'
-    ? viteEnv.VITE_DASHBOARD_URL.replace(/\/$/u, '')
+    ? normalizeBaseUrl(viteEnv.VITE_DASHBOARD_URL)
     : '';
+export const dashboardLanUrl =
+  typeof viteEnv?.VITE_DASHBOARD_LAN_URL === 'string'
+    ? normalizeBaseUrl(viteEnv.VITE_DASHBOARD_LAN_URL)
+    : '';
+export const dashboardCandidateBaseUrls = dashboardLanUrl
+  ? [dashboardLanUrl, dashboardBaseUrl]
+  : undefined;
 
 export const dashboardHttpClient = new DashboardHttpClient({
   baseUrl: dashboardBaseUrl,
+  candidateBaseUrls: dashboardCandidateBaseUrls,
 });
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
