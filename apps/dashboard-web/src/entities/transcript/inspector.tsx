@@ -354,6 +354,67 @@ export function BoundedPayloadPreview({
   );
 }
 
+export interface StructuredResultPresentation {
+  status: 'pending' | 'valid' | 'invalid';
+  value?: unknown;
+  valueOmitted?: boolean;
+  errors?: readonly string[];
+}
+
+const DEFAULT_STRUCTURED_RESULT_OMISSION =
+  'Structured result value unavailable in this bounded snapshot.';
+
+/** Present a bounded structured result consistently across its source surfaces. */
+export function StructuredResultSection({
+  result,
+  title,
+  ariaLabel = title,
+  rawJsonLabel = 'structured result JSON',
+  valueUnavailableMessage,
+  valueOmittedMessage = DEFAULT_STRUCTURED_RESULT_OMISSION,
+}: {
+  result: StructuredResultPresentation;
+  title: string;
+  ariaLabel?: string;
+  rawJsonLabel?: string;
+  valueUnavailableMessage?: ReactNode;
+  valueOmittedMessage?: ReactNode;
+}) {
+  const unavailableMessage = result.valueOmitted
+    ? valueOmittedMessage
+    : valueUnavailableMessage;
+  const errorOccurrences = new Map<string, number>();
+  return (
+    <section className="payload-section" aria-label={ariaLabel}>
+      <h4>{title}</h4>
+      <p>Status: {result.status}</p>
+      {result.status === 'valid' && result.value !== undefined ? (
+        <>
+          <StructuredPayloadView value={result.value} />
+          <details className="tool-inspector-raw">
+            <summary>Raw JSON</summary>
+            <BoundedPayloadPreview value={result.value} label={rawJsonLabel} />
+          </details>
+        </>
+      ) : result.status === 'valid' && unavailableMessage ? (
+        <p className="payload-truncation-label">{unavailableMessage}</p>
+      ) : null}
+      {result.errors?.map((error) => {
+        const errorOccurrence = (errorOccurrences.get(error) ?? 0) + 1;
+        errorOccurrences.set(error, errorOccurrence);
+        return (
+          <p
+            className="payload-truncation-label"
+            key={`${title}:structured-error:${error}:${errorOccurrence}`}
+          >
+            {error}
+          </p>
+        );
+      })}
+    </section>
+  );
+}
+
 function PayloadSection({
   title,
   value,
