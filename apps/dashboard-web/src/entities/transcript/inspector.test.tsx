@@ -33,7 +33,7 @@ describe('transcript payload inspection', () => {
     expect(markup).not.toContain('Copy full arguments');
   });
 
-  it('renders structured values as labeled fields and lists rather than JSON', () => {
+  it('renders structured values as a semantic collapsible document rather than a table', () => {
     const markup = renderToStaticMarkup(
       <StructuredPayloadView
         value={{
@@ -43,14 +43,52 @@ describe('transcript payload inspection', () => {
         }}
       />,
     );
-    expect(markup).toContain('<dt>Outcome</dt>');
-    expect(markup).toContain('<dt>Findings</dt>');
-    expect(markup).toContain('<dt>File path</dt>');
+    expect(markup).toContain('class="structured-result-value"');
+    expect(markup).toContain('aria-level="2"');
+    expect(markup).toContain('role="heading"');
+    expect(markup).toContain('>Payload</span>');
+    expect(markup).toContain('object · 3 fields');
+    expect(markup).toContain('>Outcome</span>');
+    expect(markup).toContain('>Findings</span>');
+    expect(markup).toContain('array · 1 item');
+    expect(markup).toContain('>File path</span>');
     expect(markup).toContain('src/App.tsx');
     expect(markup).toContain('<ol class="structured-result-list">');
     expect(markup).toContain('types');
+    expect(markup).not.toContain('<dl');
+    expect(markup).not.toContain('<dt');
     expect(markup).not.toContain('<pre>');
     expect(markup).not.toContain('&quot;outcome&quot;');
+  });
+
+  it('keeps depth, entry, and string bounds visible to readers', () => {
+    const deeplyNested = {
+      levelOne: {
+        levelTwo: {
+          levelThree: {
+            levelFour: {
+              hidden: { value: 'not rendered' },
+            },
+          },
+        },
+      },
+      longText: 'x'.repeat(1_201),
+      fields: Object.fromEntries(
+        Array.from({ length: 25 }, (_, index) => [`field${index}`, index]),
+      ),
+    };
+    const markup = renderToStaticMarkup(
+      <StructuredPayloadView value={deeplyNested} />,
+    );
+    expect(markup).toContain(
+      'Nested content omitted after depth 4. Open the raw JSON fallback for the complete bounded value.',
+    );
+    expect(markup).toContain(
+      'String truncated after 1,200 characters; remaining characters are not displayed.',
+    );
+    expect(markup).toContain('Showing 24 of 25 fields; 1 field omitted.');
+    expect(markup).toContain('class="structured-result-node"');
+    expect(markup).not.toContain('not rendered');
   });
 
   it('separates arguments and result before the expandable raw fallback', () => {
