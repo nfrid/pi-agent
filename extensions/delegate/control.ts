@@ -38,18 +38,27 @@ export interface DelegateControlEnqueueResult {
 
 export type DelegateControlLifecycleEvent =
   | { type: 'open'; channel: DelegateControlChannel }
+  | { type: 'bind'; participantId: string; statusId: string }
   | {
       type: 'ack';
       participantId: string;
       kind: 'pause';
       generation: number;
     }
-  | { type: 'close'; participantId: string };
+  | {
+      type: 'close';
+      participantId: string;
+      ownerSessionId?: string;
+      statusId?: string;
+    };
 
 export interface DelegateControlChannel {
   readonly participantId: string;
   readonly filePath: string;
   readonly ownerSessionId?: string;
+  readonly runKind?: 'foreground' | 'background';
+  bindStatusId: (statusId: string) => void;
+  statusId: () => string | undefined;
   enqueue: (
     kind: 'feedback' | 'checkpoint',
     message: string,
@@ -97,10 +106,12 @@ function controlPath(sessionPath: string): string {
 export function createDelegateControlChannel(
   sessionPath: string,
   ownerSessionId?: string,
+  runKind?: 'foreground' | 'background',
 ): DelegateControlChannel {
   const filePath = controlPath(sessionPath);
   const participantId = filePath;
   let closed = false;
+  let boundStatusId: string | undefined;
   let sequence = 0;
   const outstanding = new Map<string, boolean>();
   let boundedOutstandingCount = 0;
@@ -153,6 +164,14 @@ export function createDelegateControlChannel(
     participantId,
     filePath,
     ownerSessionId,
+    runKind,
+    bindStatusId(statusId) {
+      boundStatusId = statusId;
+      emitLifecycle({ type: 'bind', participantId, statusId });
+    },
+    statusId() {
+      return boundStatusId;
+    },
     enqueue(kind, message) {
       const text = message.trim();
       if (!text) return { accepted: false, reason: 'empty-message' };
@@ -192,7 +211,12 @@ export function createDelegateControlChannel(
       if (closed) return;
       closed = true;
       activeChannels.delete(participantId);
-      emitLifecycle({ type: 'close', participantId });
+      emitLifecycle({
+        type: 'close',
+        participantId,
+        ...(ownerSessionId ? { ownerSessionId } : {}),
+        ...(boundStatusId ? { statusId: boundStatusId } : {}),
+      });
       try {
         unlinkSync(filePath);
       } catch {
@@ -320,7 +344,11 @@ export function registerDelegateControl(
         pendingPause = request;
       } else if (request.kind === 'resume') {
         if (request.generation === pausedGeneration) {
-          if (pendingPause) acknowledge(pendingPause);
+          if (
+            pendingPause &&
+            acknowledgedGeneration !== pendingPause.generation
+          )
+            acknowledge(pendingPause);
           acknowledgedGeneration = pausedGeneration;
           pausedGeneration = undefined;
           pendingPause = undefined;
@@ -372,7 +400,13 @@ export function registerDelegateControl(
   });
   pi.on('before_provider_request', waitForResume);
   pi.on('tool_execution_end', deliver);
-  pi.on('turn_end', deliver);
+  // turn_end runs after the turn's tool results have been finalized and
+  // persisted, so a consumed pause can safely enter the barrier here instead
+  // of waiting for another provider request that may never be started.
+  pi.on('turn_end', async () => {
+    deliver();
+    if (pausedGeneration !== undefined) await waitForResume();
+  });
   pi.on('turn_start', deliver);
 }
 

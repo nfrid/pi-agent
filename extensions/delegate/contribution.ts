@@ -41,6 +41,8 @@ const DelegateLifecycleSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+export type DelegatePauseState = 'pausing' | 'paused';
+
 const DelegateActivitySchema = Type.Object(
   {
     id: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
@@ -174,6 +176,10 @@ export const DelegateStatusSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
+    pauseState: Type.Optional(
+      Type.Union([Type.Literal('pausing'), Type.Literal('paused')]),
+    ),
+    pausedAt: Type.Optional(Type.Number({ minimum: 0 })),
     activity: Type.Optional(DelegateActivitySchema),
     runCount: Type.Optional(Type.Integer({ minimum: 1 })),
     runs: Type.Optional(

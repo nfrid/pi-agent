@@ -120,6 +120,8 @@ function statusSnapshot(
     ...(status.route ? { route: text(status.route, 512) } : {}),
     ...(status.context ? { context: status.context } : {}),
     allowWrites: status.allowWrites,
+    ...(status.pauseState ? { pauseState: status.pauseState } : {}),
+    ...(status.pausedAt === undefined ? {} : { pausedAt: status.pausedAt }),
     ...(status.activity
       ? {
           activity: {

@@ -7,6 +7,8 @@ import { getPauseCoordinator, type PauseSnapshot } from './state';
 
 export const PAUSE_REQUESTED_EVENT = 'runtime-pause:requested';
 export const PAUSE_RESUMED_EVENT = 'runtime-pause:resumed';
+export const FOREGROUND_DELEGATES_PAUSED_EVENT =
+  'runtime-pause:foreground-delegates-paused';
 
 export interface PauseControlEvent {
   scopeId: string;

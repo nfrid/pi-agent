@@ -83,6 +83,9 @@ type RunHooks = {
   onUpdate?: (partial: import('./types').DelegateProgressUpdate) => void;
   onRunUpdate?: (run: DelegatedRun, index?: number) => void;
   control?: import('./runner').RunDelegateOptions['control'];
+  controls?: readonly NonNullable<
+    import('./runner').RunDelegateOptions['control']
+  >[];
   onWorktreeRunning?: (worktree: PreparedWorktree) => void;
 };
 
@@ -306,12 +309,10 @@ export async function runPreparedDelegateExecution(
 ): Promise<DelegatedRun[]> {
   const prepared = execution.tasks;
   if (execution.mode === 'single') {
-    const run = await runPreparedWithLifecycle(
-      runCtx,
-      prepared[0],
-      'single',
-      hooks,
-    );
+    const run = await runPreparedWithLifecycle(runCtx, prepared[0], 'single', {
+      ...hooks,
+      control: hooks.controls?.[0] ?? hooks.control,
+    });
     return [run];
   }
 
@@ -339,6 +340,7 @@ export async function runPreparedDelegateExecution(
       runCtx.config.maxConcurrency,
       async (item, index) => {
         const run = await runPreparedWithLifecycle(runCtx, item, 'parallel', {
+          control: hooks.controls?.[index],
           onRunUpdate: (current) => {
             liveRuns[index] = current;
             hooks.onRunUpdate?.(current, index);

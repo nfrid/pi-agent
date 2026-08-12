@@ -101,6 +101,29 @@ describe('delegate widget', () => {
     expect(long.join('\n')).not.toContain('HIDDEN-TAIL');
   });
 
+  test('labels each delegate pause phase and freezes reached elapsed time', () => {
+    const pausing = renderDelegateWidget(
+      [status({ pauseState: 'pausing' })],
+      true,
+      100,
+      theme as never,
+      66_000,
+    ).join('\n');
+    const paused = renderDelegateWidget(
+      [status({ pauseState: 'paused', pausedAt: 12_000 })],
+      true,
+      100,
+      theme as never,
+      99_000,
+    ).join('\n');
+
+    expect(pausing).toContain('pausing');
+    expect(pausing).toContain('Pausing at a safe boundary');
+    expect(paused).toContain('paused');
+    expect(paused).toContain('Paused at a safe boundary');
+    expect(paused).toMatch(/10s/);
+  });
+
   test('counts only active runtime and freezes it after completion', () => {
     const queued = renderDelegateWidget(
       [status({ state: 'queued', startedAt: undefined })],

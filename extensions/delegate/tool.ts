@@ -324,9 +324,16 @@ export function registerDelegateTool(
             handoff,
           };
         };
-        const controls = execution.tasks.map((item) =>
-          createDelegateControlChannel(item.session.filePath, launchSessionId),
-        );
+        const controls = execution.tasks.map((item, index) => {
+          const control = createDelegateControlChannel(
+            item.session.filePath,
+            launchSessionId,
+            'background',
+          );
+          const statusId = statusIds?.[index];
+          if (statusId) control.bindStatusId(statusId);
+          return control;
+        });
         let jobs: ReturnType<DelegateJobManager['startMany']>;
         try {
           jobs = backgroundRuntime.manager.startMany(
@@ -409,9 +416,20 @@ export function registerDelegateTool(
         };
       }
 
+      const controls = execution.tasks.map((item, index) => {
+        const control = createDelegateControlChannel(
+          item.session.filePath,
+          launchSessionId,
+          'foreground',
+        );
+        const statusId = statusIds?.[index];
+        if (statusId) control.bindStatusId(statusId);
+        return control;
+      });
       let runs: Awaited<ReturnType<typeof runPreparedDelegateExecution>>;
       try {
         runs = await runPreparedDelegateExecution(runCtx, execution, {
+          controls,
           onRunUpdate: (run, index = 0) => {
             const statusId = statusIds?.[index];
             if (statusId) backgroundRuntime?.statuses.update(statusId, run);
@@ -421,6 +439,8 @@ export function registerDelegateTool(
       } catch (error) {
         if (statusIds) backgroundRuntime?.statuses.finish(statusIds);
         throw error;
+      } finally {
+        for (const control of controls) control.close();
       }
       const result = await delegateToolResult(
         pi,

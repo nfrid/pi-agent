@@ -18,7 +18,10 @@ import { markDashboardFreshUserTurn } from '../shared/runtime/agent-lifecycle';
 import { getLiveExtensionSurfaceHub } from '../shared/runtime/live-surfaces';
 import type { DelegateConfig } from './config';
 import * as configModule from './config';
-import { createDelegateControlChannel } from './control';
+import {
+  createDelegateControlChannel,
+  listActiveDelegateControlChannels,
+} from './control';
 import delegate, { DELEGATES_COMMAND_DESCRIPTION } from './index';
 import { setDelegateLifecycle } from './lifecycle';
 import * as sessionModule from './session';
@@ -276,6 +279,225 @@ describe('async delegate extension', () => {
     expect(readFileSync(channel.filePath, 'utf8')).toContain('"kind":"resume"');
     channel.close();
     await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('advances two delegate rows from pausing to paused and clears them on resume', async () => {
+    const { ctx, finish, handlers, pi, tools } = createAsyncHarness();
+    await tools.get('delegate')?.execute(
+      'call-two-paused',
+      {
+        tasks: [
+          { name: 'Pause one', task: 'pause one', route: 'quick' },
+          { name: 'Pause two', task: 'pause two', route: 'quick' },
+        ],
+        background: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const requested = requestRuntimePause(pi, ctx);
+    const channels = listActiveDelegateControlChannels().filter(
+      (channel) => channel.ownerSessionId === 'parent',
+    );
+    expect(channels).toHaveLength(2);
+    const pausingStatuses = (
+      getLiveExtensionSurfaceHub('parent')
+        .snapshot()
+        .find((surface) => surface.rendererId === 'delegate.status')
+        ?.viewModel as {
+        statuses?: Array<{ pauseState?: string; pausedAt?: number }>;
+      }
+    ).statuses;
+    expect(pausingStatuses).toHaveLength(2);
+    expect(pausingStatuses).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pauseState: 'pausing',
+          pausedAt: expect.any(Number),
+        }),
+        expect.objectContaining({
+          pauseState: 'pausing',
+          pausedAt: expect.any(Number),
+        }),
+      ]),
+    );
+
+    for (const channel of channels) {
+      const pause = readFileSync(channel.filePath, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { id: string; kind: string })
+        .find((request) => request.kind === 'pause');
+      expect(pause).toBeDefined();
+      channel.acknowledge(pause?.id ?? '', 'pause', requested.generation);
+    }
+    getPauseCoordinator('parent').markMainReached(requested.generation);
+
+    expect(getPauseCoordinator('parent').snapshot()).toMatchObject({
+      phase: 'paused',
+      delegateIds: expect.arrayContaining(
+        channels.map((channel) => channel.participantId),
+      ),
+      reachedDelegateIds: expect.arrayContaining(
+        channels.map((channel) => channel.participantId),
+      ),
+    });
+    const pausedStatuses = (
+      getLiveExtensionSurfaceHub('parent')
+        .snapshot()
+        .find((surface) => surface.rendererId === 'delegate.status')
+        ?.viewModel as {
+        statuses?: Array<{ pauseState?: string; pausedAt?: number }>;
+      }
+    ).statuses;
+    expect(
+      pausedStatuses?.every((status) => status.pauseState === 'paused'),
+    ).toBe(true);
+    expect(
+      pausedStatuses?.every((status) => status.pausedAt !== undefined),
+    ).toBe(true);
+
+    resumeRuntimePause(pi, ctx);
+    const resumedStatuses = (
+      getLiveExtensionSurfaceHub('parent')
+        .snapshot()
+        .find((surface) => surface.rendererId === 'delegate.status')
+        ?.viewModel as {
+        statuses?: Array<{ pauseState?: string; pausedAt?: number }>;
+      }
+    ).statuses;
+    expect(
+      resumedStatuses?.every(
+        (status) =>
+          status.pauseState === undefined && status.pausedAt === undefined,
+      ),
+    ).toBe(true);
+
+    finish('pause one');
+    finish('pause two');
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('binds foreground delegate controls to live pause rows', async () => {
+    const { ctx, finish, handlers, pi, tools } = createAsyncHarness();
+    const execution = tools.get('delegate')?.execute(
+      'call-foreground-paused',
+      {
+        tasks: [
+          { name: 'Foreground one', task: 'foreground one', route: 'quick' },
+          { name: 'Foreground two', task: 'foreground two', route: 'quick' },
+        ],
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    await vi.waitFor(() =>
+      expect(
+        listActiveDelegateControlChannels().filter(
+          (channel) => channel.ownerSessionId === 'parent',
+        ),
+      ).toHaveLength(2),
+    );
+
+    requestRuntimePause(pi, ctx);
+    const statuses = (
+      getLiveExtensionSurfaceHub('parent')
+        .snapshot()
+        .find((surface) => surface.rendererId === 'delegate.status')
+        ?.viewModel as {
+        statuses?: Array<{ pauseState?: string; pausedAt?: number }>;
+      }
+    ).statuses;
+    expect(statuses).toHaveLength(2);
+    expect(
+      statuses?.every(
+        (status) =>
+          status.pauseState === 'pausing' && status.pausedAt !== undefined,
+      ),
+    ).toBe(true);
+
+    resumeRuntimePause(pi, ctx);
+    finish('foreground one');
+    finish('foreground two');
+    await execution;
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('keeps an active delegate enrolled when pause delivery fails', async () => {
+    const { ctx, handlers, pi } = createAsyncHarness();
+    const requested = requestRuntimePause(pi, ctx);
+    const channel = createDelegateControlChannel(
+      path.join(artifactRoot, 'missing', 'delegate.jsonl'),
+      'parent',
+      'background',
+    );
+
+    expect(channel.pause(requested.generation).accepted).toBe(false);
+    expect(getPauseCoordinator('parent').snapshot()?.delegateIds).toContain(
+      channel.participantId,
+    );
+    expect(getPauseCoordinator('parent').snapshot()?.phase).toBe('pausing');
+
+    resumeRuntimePause(pi, ctx);
+    channel.close();
+    await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('keeps pause wiring active after a complete session replacement', async () => {
+    const { ctx, handlers, pi } = createAsyncHarness('scope-A');
+    await handlers.get('session_shutdown')?.({}, ctx);
+    const replacement = {
+      ...ctx,
+      sessionManager: {
+        ...ctx.sessionManager,
+        getSessionId: () => 'scope-B',
+      },
+    };
+    handlers.get('session_start')?.({}, replacement);
+    const requested = requestRuntimePause(pi, replacement);
+    const channel = createDelegateControlChannel(
+      path.join(artifactRoot, 'replacement-delegate.jsonl'),
+      'scope-B',
+      'background',
+    );
+
+    expect(getPauseCoordinator('scope-B').snapshot()?.delegateIds).toContain(
+      channel.participantId,
+    );
+    expect(readFileSync(channel.filePath, 'utf8')).toContain(
+      `"generation":${requested.generation}`,
+    );
+
+    resumeRuntimePause(pi, replacement);
+    channel.close();
+    await handlers.get('session_shutdown')?.({}, replacement);
+  });
+
+  test('resumes old-scope channels after a replacement session starts', async () => {
+    const { ctx, handlers, pi } = createAsyncHarness('scope-A');
+    requestRuntimePause(pi, ctx);
+    const channel = createDelegateControlChannel(
+      path.join(artifactRoot, 'old-scope-delegate.jsonl'),
+      'scope-A',
+      'foreground',
+    );
+    const replacement = {
+      ...ctx,
+      sessionManager: {
+        ...ctx.sessionManager,
+        getSessionId: () => 'scope-B',
+      },
+    };
+    handlers.get('session_start')?.({}, replacement);
+
+    resumeRuntimePause(pi, ctx);
+    expect(readFileSync(channel.filePath, 'utf8')).toContain('"kind":"resume"');
+
+    channel.close();
+    await handlers.get('session_shutdown')?.({}, replacement);
   });
 
   test('does not enroll a late control channel owned by a replaced session', async () => {

@@ -40,21 +40,23 @@ export function formatElapsed(startedAt: number, now = Date.now()): string {
 }
 
 function elapsedTime(status: DelegateStatusSnapshot, now: number): string {
+  const effectiveNow = status.pausedAt ?? now;
   if (status.runs)
     return formatDuration(
       status.runs.reduce((total, run) => {
         if (run.startedAt === undefined) return total;
         const finished =
           run.state === 'queued' || run.state === 'running'
-            ? now
+            ? effectiveNow
             : (run.finishedAt ?? run.startedAt);
         return total + Math.max(0, finished - run.startedAt);
       }, 0),
     );
-  if (status.startedAt === undefined) return formatElapsed(now, now);
+  if (status.startedAt === undefined)
+    return formatElapsed(effectiveNow, effectiveNow);
   const finished =
     status.state === 'queued' || status.state === 'running'
-      ? now
+      ? effectiveNow
       : (status.finishedAt ?? status.startedAt);
   return formatElapsed(status.startedAt, finished);
 }
@@ -64,6 +66,10 @@ function stateStyle(status: DelegateStatusSnapshot): {
   detail?: string;
   color: ThemeColor;
 } {
+  if (status.pauseState === 'paused')
+    return { icon: '||', detail: 'paused', color: 'warning' };
+  if (status.pauseState === 'pausing')
+    return { icon: '..', detail: 'pausing', color: 'warning' };
   switch (status.state) {
     case 'queued':
       return { icon: '○', detail: 'queued', color: 'muted' };
@@ -166,6 +172,8 @@ function actionMarker(status: DelegateStatusSnapshot): {
   text: string;
   color: ThemeColor;
 } {
+  if (status.pauseState === 'paused') return { text: '||', color: 'warning' };
+  if (status.pauseState === 'pausing') return { text: '..', color: 'warning' };
   const activity = status.activity;
   if (!activity)
     return status.state === 'queued'
@@ -177,6 +185,8 @@ function actionMarker(status: DelegateStatusSnapshot): {
 }
 
 function actionContent(status: DelegateStatusSnapshot): string {
+  if (status.pauseState === 'paused') return 'Paused at a safe boundary';
+  if (status.pauseState === 'pausing') return 'Pausing at a safe boundary';
   const activity = status.activity;
   if (!activity)
     return status.state === 'queued' ? 'waiting for a slot' : 'starting';

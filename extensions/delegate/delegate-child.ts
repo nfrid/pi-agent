@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
+import { StringDecoder } from 'node:string_decoder';
 import { processJsonLine } from './events';
 import type { DelegatedRun } from './types';
 
@@ -109,6 +110,9 @@ export async function spawnDelegateChild(
     });
 
     let buffer = '';
+    let stderrBuffer = '';
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
     let discardingLongLine = false;
     let closed = false;
     let settled = false;
@@ -151,8 +155,9 @@ export async function spawnDelegateChild(
       }, options.killGraceMs ?? SIGKILL_TIMEOUT_MS).unref();
     };
 
-    const processLine = (line: string) => {
-      if (terminating) return;
+    const processControlAck = (
+      line: string,
+    ): false | 'control' | 'checkpoint' => {
       try {
         const event = JSON.parse(line) as {
           type?: unknown;
@@ -161,26 +166,42 @@ export async function spawnDelegateChild(
           controlGeneration?: unknown;
         };
         if (
-          event.type === 'delegate_control_ack' &&
-          typeof event.controlId === 'string' &&
-          typeof event.controlKind === 'string'
+          event.type !== 'delegate_control_ack' ||
+          typeof event.controlId !== 'string' ||
+          typeof event.controlKind !== 'string'
         )
-          options.onControlAck?.(
-            event.controlId,
-            event.controlKind,
-            typeof event.controlGeneration === 'number'
-              ? event.controlGeneration
-              : undefined,
-          );
+          return false;
+        // Recognize private records even during termination so they never leak
+        // into retained diagnostics, but do not deliver stale callbacks.
+        if (terminating) return 'control';
+        options.onControlAck?.(
+          event.controlId,
+          event.controlKind,
+          typeof event.controlGeneration === 'number'
+            ? event.controlGeneration
+            : undefined,
+        );
+        // Checkpoint acknowledgement also updates the run projection. Pause and
+        // resume records intentionally remain private control-plane events.
+        if (event.controlKind === 'checkpoint') {
+          processJsonLine(line, run);
+          return 'checkpoint';
+        }
+        return 'control';
       } catch {
-        // Normal Pi output is parsed by processJsonLine below.
+        return false;
       }
+    };
+
+    const processLine = (line: string) => {
+      if (terminating) return;
+      processControlAck(line);
       if (!processJsonLine(line, run)) return;
       options.onLine();
     };
 
     proc.stdout.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString();
+      buffer += stdoutDecoder.write(chunk);
       const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() || '';
       for (const line of lines) {
@@ -210,11 +231,34 @@ export async function spawnDelegateChild(
     });
 
     proc.stderr.on('data', (chunk: Buffer) => {
-      run.stderr = appendTail(run.stderr, chunk.toString(), MAX_STDERR_BYTES);
+      // Pi JSON mode redirects extension writes to stderr. Control ACKs are
+      // private protocol records, not diagnostics, so parse and remove them
+      // while retaining every other stderr line as bounded evidence.
+      stderrBuffer += stderrDecoder.write(chunk);
+      const lines = stderrBuffer.split(/\r?\n/);
+      stderrBuffer = lines.pop() || '';
+      for (const line of lines) {
+        const control = processControlAck(line);
+        if (control === 'checkpoint') options.onLine();
+        else if (!control)
+          run.stderr = appendTail(run.stderr, `${line}\n`, MAX_STDERR_BYTES);
+      }
+      if (Buffer.byteLength(stderrBuffer, 'utf8') > MAX_STDERR_BYTES) {
+        run.stderr = appendTail(run.stderr, stderrBuffer, MAX_STDERR_BYTES);
+        stderrBuffer = '';
+      }
     });
     proc.on('close', (code) => {
       closed = true;
+      buffer += stdoutDecoder.end();
       if (buffer.trim() && !discardingLongLine) processLine(buffer);
+      stderrBuffer += stderrDecoder.end();
+      if (stderrBuffer) {
+        const control = processControlAck(stderrBuffer);
+        if (control === 'checkpoint') options.onLine();
+        else if (!control)
+          run.stderr = appendTail(run.stderr, stderrBuffer, MAX_STDERR_BYTES);
+      }
       finish(code ?? 1);
     });
     proc.on('error', (error) => {

@@ -3,6 +3,7 @@ import type {
   ExtensionUIContext,
 } from '@earendil-works/pi-coding-agent';
 import {
+  FOREGROUND_DELEGATES_PAUSED_EVENT,
   PAUSE_REQUESTED_EVENT,
   PAUSE_RESUMED_EVENT,
   type PauseControlEvent,
@@ -106,51 +107,89 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     getPaused: () => getPauseCoordinator(scopeId).isActive(),
   });
 
-  const stopControlLifecycle = subscribeDelegateControlLifecycle((event) => {
+  subscribeDelegateControlLifecycle((event) => {
     if (!runtimeActive) return;
     const coordinator = getPauseCoordinator(scopeId);
     const snapshot = coordinator.snapshot();
     if (!snapshot) return;
     if (event.type === 'open') {
-      if (
-        event.channel.ownerSessionId !== scopeId ||
-        !event.channel.pause(snapshot.generation).accepted
-      )
-        return;
+      if (event.channel.ownerSessionId !== scopeId) return;
       coordinator.enrollDelegates(snapshot.generation, [
         event.channel.participantId,
       ]);
-    } else if (event.type === 'ack')
+      event.channel.pause(snapshot.generation);
+    } else if (event.type === 'bind') {
+      if (snapshot.delegateIds.includes(event.participantId))
+        statuses?.setPauseState(event.statusId, 'pausing', Date.now());
+    } else if (event.type === 'ack') {
+      if (
+        event.generation !== snapshot.generation ||
+        !snapshot.delegateIds.includes(event.participantId)
+      )
+        return;
       coordinator.markDelegateReached(event.generation, event.participantId);
-    else coordinator.removeDelegate(snapshot.generation, event.participantId);
+      const channel = listActiveDelegateControlChannels().find(
+        (candidate) => candidate.participantId === event.participantId,
+      );
+      const statusId = channel?.statusId();
+      if (statusId) statuses?.setPauseState(statusId, 'paused', Date.now());
+      const reached = coordinator.snapshot();
+      if (
+        reached &&
+        reached.reachedDelegateIds.length === reached.delegateIds.length &&
+        reached.delegateIds.some((participantId) =>
+          listActiveDelegateControlChannels().some(
+            (candidate) =>
+              candidate.participantId === participantId &&
+              candidate.runKind === 'foreground',
+          ),
+        )
+      )
+        pi.events.emit(FOREGROUND_DELEGATES_PAUSED_EVENT, {
+          scopeId,
+          generation: reached.generation,
+        });
+    } else {
+      if (event.ownerSessionId !== scopeId) return;
+      if (event.statusId) statuses?.setPauseState(event.statusId, undefined);
+      coordinator.removeDelegate(snapshot.generation, event.participantId);
+    }
   });
-  const stopPauseRequested = pi.events
-    ? pi.events.on(PAUSE_REQUESTED_EVENT, (value) => {
-        const event = value as PauseControlEvent;
-        if (!runtimeActive || event.scopeId !== scopeId) return;
-        const coordinator = getPauseCoordinator(scopeId);
-        const accepted = listActiveDelegateControlChannels().filter(
-          (channel) =>
-            channel.ownerSessionId === event.scopeId &&
-            channel.pause(event.generation).accepted,
-        );
-        coordinator.enrollDelegates(
-          event.generation,
-          accepted.map((channel) => channel.participantId),
-        );
-      })
-    : () => {};
-  const stopPauseResumed = pi.events
-    ? pi.events.on(PAUSE_RESUMED_EVENT, (value) => {
-        const event = value as PauseControlEvent;
-        if (!runtimeActive || event.scopeId !== scopeId) return;
-        const targetIds = new Set(event.delegateIds);
-        for (const channel of listActiveDelegateControlChannels())
-          if (targetIds.has(channel.participantId))
-            channel.resume(event.generation);
+  if (pi.events)
+    pi.events.on(PAUSE_REQUESTED_EVENT, (value) => {
+      const event = value as PauseControlEvent;
+      if (!runtimeActive || event.scopeId !== scopeId) return;
+      const coordinator = getPauseCoordinator(scopeId);
+      const participants = listActiveDelegateControlChannels().filter(
+        (channel) => channel.ownerSessionId === event.scopeId,
+      );
+      coordinator.enrollDelegates(
+        event.generation,
+        participants.map((channel) => channel.participantId),
+      );
+      for (const channel of participants) {
+        channel.pause(event.generation);
+        const statusId = channel.statusId();
+        if (statusId) statuses?.setPauseState(statusId, 'pausing', Date.now());
+      }
+    });
+  if (pi.events)
+    pi.events.on(PAUSE_RESUMED_EVENT, (value) => {
+      const event = value as PauseControlEvent;
+      const targetIds = new Set(event.delegateIds);
+      for (const channel of listActiveDelegateControlChannels()) {
+        if (
+          channel.ownerSessionId !== event.scopeId ||
+          !targetIds.has(channel.participantId)
+        )
+          continue;
+        channel.resume(event.generation);
+        const statusId = channel.statusId();
+        if (statusId) statuses?.setPauseState(statusId, undefined);
+      }
+      if (runtimeActive && event.scopeId === scopeId)
         delivery.flushCompletions();
-      })
-    : () => {};
+    });
 
   const activeStatuses = () => statuses?.list() ?? [];
 
@@ -310,9 +349,6 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     statuses = undefined;
     await closing?.dispose();
     closingStatuses?.clear();
-    stopControlLifecycle();
-    stopPauseRequested();
-    stopPauseResumed();
     clearDelegateSurface(closingScopeId);
     ui = undefined;
     if (scopeId === closingScopeId) scopeId = 'default';

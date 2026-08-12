@@ -17,6 +17,7 @@ describe('delegate live surface', () => {
       status: 'running',
     });
     store.update(id, run);
+    store.setPauseState(id, 'paused', 12_345);
 
     expect(delegateSurface(store)).toMatchObject({
       id: 'delegate.status',
@@ -29,6 +30,8 @@ describe('delegate live surface', () => {
             id,
             name: 'Subagent',
             state: 'running',
+            pauseState: 'paused',
+            pausedAt: 12_345,
             activity: { label: 'read source' },
             transcript: [
               { type: 'task', label: 'Task', text: 'inspect' },

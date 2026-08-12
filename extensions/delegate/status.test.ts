@@ -83,6 +83,28 @@ describe('delegate status store', () => {
     expect(onChange).toHaveBeenCalledTimes(3);
   });
 
+  test('tracks per-delegate pausing and reached pause timestamps', () => {
+    const store = new DelegateStatusStore();
+    const run = createRun('pause me');
+    const [id] = store.start([run], 'background');
+
+    store.setPauseState(id, 'pausing', 10_000);
+    expect(store.list()[0]).toMatchObject({
+      pauseState: 'pausing',
+      pausedAt: 10_000,
+    });
+
+    store.setPauseState(id, 'paused', 12_345);
+    expect(store.list()[0]).toMatchObject({
+      pauseState: 'paused',
+      pausedAt: 12_345,
+    });
+
+    store.setPauseState(id, undefined);
+    expect(store.list()[0]?.pauseState).toBeUndefined();
+    expect(store.list()[0]?.pausedAt).toBeUndefined();
+  });
+
   test('clears an entered result only on the first user message after settlement', () => {
     const store = new DelegateStatusStore();
     const run = createRun('audit');

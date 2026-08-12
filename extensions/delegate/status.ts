@@ -15,6 +15,7 @@ import type {
 import { getRunState } from './types';
 
 export type DelegateStatusKind = 'foreground' | 'background';
+export type DelegatePauseState = 'pausing' | 'paused';
 
 export interface DelegateStatusTiming {
   state: DelegateRunState;
@@ -61,6 +62,8 @@ export interface DelegateStatusSnapshot {
   result?: DelegateResult;
   /** Harness-authored terminal projection retained in status snapshots. */
   lifecycle?: DelegateLifecycleProjection;
+  pauseState?: DelegatePauseState;
+  pausedAt?: number;
 }
 
 interface DelegateStatusRecord extends DelegateStatusSnapshot {
@@ -285,6 +288,26 @@ export class DelegateStatusStore {
     const record = this.records.get(id);
     if (!record) return;
     record.jobId = jobId;
+    this.onChange();
+  }
+
+  setPauseState(
+    id: string,
+    pauseState: DelegatePauseState | undefined,
+    pausedAt?: number,
+  ): void {
+    const record = this.records.get(id);
+    if (!record) return;
+    const effectivePausedAt = pauseState
+      ? (pausedAt ?? record.pausedAt)
+      : undefined;
+    if (
+      record.pauseState === pauseState &&
+      record.pausedAt === effectivePausedAt
+    )
+      return;
+    record.pauseState = pauseState;
+    record.pausedAt = effectivePausedAt;
     this.onChange();
   }
 

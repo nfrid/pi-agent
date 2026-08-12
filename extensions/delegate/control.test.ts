@@ -13,6 +13,7 @@ import {
   createDelegateControlChannel,
   MAX_DELEGATE_CONTROL_MESSAGE_BYTES,
   registerDelegateControl,
+  subscribeDelegateControlLifecycle,
 } from './control';
 
 const roots: string[] = [];
@@ -54,6 +55,38 @@ describe('delegate control inbox', () => {
 
     channel.close();
     expect(() => readFileSync(channel.filePath)).toThrow();
+  });
+
+  test('reports a bound status id on lifecycle events and close', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-bind-'));
+    roots.push(root);
+    const events: unknown[] = [];
+    const unsubscribe = subscribeDelegateControlLifecycle((event) =>
+      events.push(event),
+    );
+    const channel = createDelegateControlChannel(
+      path.join(root, 'session.jsonl'),
+      'owner-session',
+    );
+    channel.bindStatusId('ds-1');
+    channel.close();
+    unsubscribe();
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'bind',
+          participantId: channel.participantId,
+          statusId: 'ds-1',
+        }),
+        expect.objectContaining({
+          type: 'close',
+          participantId: channel.participantId,
+          ownerSessionId: 'owner-session',
+          statusId: 'ds-1',
+        }),
+      ]),
+    );
   });
 
   test('always reserves pause and resume capacity after feedback bounds', () => {
@@ -241,6 +274,63 @@ describe('delegate control inbox', () => {
         id: 'resume-1',
         kind: 'resume',
         generation: 7,
+        createdAt: Date.now(),
+      })}\n`,
+      'utf8',
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await waiting;
+    expect(resumed).toBe(true);
+    const pauseAcks = output.mock.calls.filter(([value]) =>
+      String(value).includes('"controlId":"pause-1"'),
+    );
+    expect(pauseAcks).toHaveLength(1);
+  });
+
+  test('acknowledges and gates a pause after persisted tool results at turn end', async () => {
+    vi.useFakeTimers();
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-pause-turn-end-'));
+    roots.push(root);
+    const filePath = path.join(root, 'control.jsonl');
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({
+        id: 'pause-turn-end',
+        kind: 'pause',
+        generation: 11,
+        createdAt: Date.now(),
+      })}\n`,
+      'utf8',
+    );
+    const handlers = new Map<string, () => unknown>();
+    const pi = {
+      on(event: string, handler: () => unknown) {
+        handlers.set(event, handler);
+      },
+      sendMessage: vi.fn(),
+    } as unknown as ExtensionAPI;
+    const output = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    registerDelegateControl(pi, filePath);
+    handlers.get('tool_execution_end')?.();
+    let resumed = false;
+    const waiting = Promise.resolve(handlers.get('turn_end')?.()).then(() => {
+      resumed = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resumed).toBe(false);
+    expect(output).toHaveBeenCalledWith(
+      expect.stringContaining('"controlId":"pause-turn-end"'),
+    );
+
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        id: 'resume-turn-end',
+        kind: 'resume',
+        generation: 11,
         createdAt: Date.now(),
       })}\n`,
       'utf8',

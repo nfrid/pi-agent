@@ -37,7 +37,7 @@ export class PauseCoordinator {
   request(): PauseSnapshot {
     if (!this.active) {
       this.active = true;
-      this.generation++;
+      this.generation = nextPauseGeneration();
       this.mainReached = false;
       this.pausedAt = undefined;
       this.delegates.clear();
@@ -66,6 +66,12 @@ export class PauseCoordinator {
   markMainReached(generation = this.generation): void {
     if (!this.matches(generation) || this.mainReached) return;
     this.mainReached = true;
+    this.changed();
+  }
+
+  markMainUnreached(generation = this.generation): void {
+    if (!this.matches(generation) || !this.mainReached) return;
+    this.mainReached = false;
     this.changed();
   }
 
@@ -128,9 +134,17 @@ export class PauseCoordinator {
 }
 
 const pauseCoordinatorsKey = Symbol.for('pi.runtime-pause.coordinators');
+const pauseGenerationKey = Symbol.for('pi.runtime-pause.generation');
 const pauseCoordinatorGlobal = globalThis as typeof globalThis & {
   [pauseCoordinatorsKey]?: Map<string, PauseCoordinator>;
+  [pauseGenerationKey]?: number;
 };
+
+function nextPauseGeneration(): number {
+  const next = (pauseCoordinatorGlobal[pauseGenerationKey] ?? 0) + 1;
+  pauseCoordinatorGlobal[pauseGenerationKey] = next;
+  return next;
+}
 
 function coordinatorRegistry(): Map<string, PauseCoordinator> {
   const existing = pauseCoordinatorGlobal[pauseCoordinatorsKey];
