@@ -12,6 +12,7 @@ import type {
 import type { DashboardRendererContext } from '../renderer-registry';
 import { DashboardDialog, SurfaceStats } from './dashboard-dialog';
 import { DelegateTranscriptInspector } from './delegate-transcript-inspector';
+import { PauseIcon } from './pause-icon';
 
 function text(value: string | undefined, fallback = ''): string {
   return value?.trim() || fallback;
@@ -40,7 +41,10 @@ function stateLabel(value: string): string {
   return state;
 }
 
-function stateGlyph(state: string): string {
+function stateGlyph(state: string): ReactNode {
+  if (state === 'paused') return <PauseIcon className="pause-icon" />;
+  if (state === 'pausing')
+    return <span className="pausing-icon" aria-hidden="true" />;
   if (state === 'running') return '●';
   if (state === 'done') return '✓';
   if (state === 'failed' || state === 'blocked') return '!';
@@ -50,6 +54,8 @@ function stateGlyph(state: string): string {
 }
 
 function stateClass(state: string): string {
+  if (state === 'paused') return 'surface-paused';
+  if (state === 'pausing') return 'surface-pausing';
   if (state === 'running') return 'surface-running';
   if (state === 'done') return 'surface-done';
   if (state === 'failed' || state === 'blocked') return 'surface-failed';
@@ -261,12 +267,20 @@ function DelegateSurface({
         <div className="delegate-scroll surface-scroll-region">
           <div className="delegate-rows">
             {rows.map((row) => {
-              const state = stateLabel(row.state);
+              const runState = stateLabel(row.state);
+              const pauseState = row.pauseState;
+              const state = pauseState ?? runState;
               const activity = row.activity;
               const activityLabel = short(
-                activity?.latestText ||
-                  activity?.label ||
-                  (state === 'queued' ? 'waiting for a slot' : 'starting'),
+                pauseState === 'paused'
+                  ? 'Paused at a safe boundary'
+                  : pauseState === 'pausing'
+                    ? 'Pausing at a safe boundary'
+                    : activity?.latestText ||
+                      activity?.label ||
+                      (runState === 'queued'
+                        ? 'waiting for a slot'
+                        : 'starting'),
                 140,
               );
               const name = short(row.name, 70);
@@ -277,7 +291,7 @@ function DelegateSurface({
               const elapsedText = elapsed(
                 row.startedAt ?? row.createdAt,
                 row.finishedAt,
-                now,
+                row.pausedAt ?? now,
               );
               return (
                 <div

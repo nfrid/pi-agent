@@ -189,8 +189,12 @@ export function DelegateInspectorMetadata({
   row: DelegateStatus;
   now: number;
 }) {
-  const state = inspectorState(row.state);
-  const duration = elapsed(row.startedAt ?? row.createdAt, row.finishedAt, now);
+  const state = inspectorState(row.pauseState ?? row.state);
+  const duration = elapsed(
+    row.startedAt ?? row.createdAt,
+    row.finishedAt,
+    row.pausedAt ?? now,
+  );
   const lifecycle = row.lifecycle;
   return (
     <fieldset
@@ -306,7 +310,11 @@ function DelegateInspectorDetails({
       {runs.length > 0 && (
         <ol className="delegate-inspector-runs" aria-label="Run history">
           {runs.map((run, index) => {
-            const duration = elapsed(run.startedAt, run.finishedAt, now);
+            const duration = elapsed(
+              run.startedAt,
+              run.finishedAt,
+              row.pausedAt ?? now,
+            );
             const baseKey = `${run.state}:${run.startedAt ?? ''}:${run.finishedAt ?? ''}`;
             const occurrence = (runKeyOccurrences.get(baseKey) ?? 0) + 1;
             runKeyOccurrences.set(baseKey, occurrence);

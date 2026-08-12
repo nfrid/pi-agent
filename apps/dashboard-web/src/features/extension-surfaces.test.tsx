@@ -77,6 +77,8 @@ describe('live extension surface fixtures', () => {
               name: 'Still visible delegate',
               kind: 'background',
               state: 'running',
+              pauseState: 'paused',
+              pausedAt: 12_345,
               createdAt: 1,
               allowWrites: false,
             },
@@ -415,6 +417,29 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('diagnostic available');
     expect(markup).toContain('diagnostic artifact available');
     expect(markup).not.toContain('Observed failure');
+  });
+
+  it('uses per-delegate pause state and timestamp in inspector metadata', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateInspectorMetadata
+        now={99_000}
+        row={{
+          id: 'd1',
+          name: 'Paused delegate',
+          kind: 'background',
+          state: 'running',
+          pauseState: 'paused',
+          pausedAt: 12_000,
+          createdAt: 2_000,
+          startedAt: 2_000,
+          allowWrites: false,
+        }}
+      />,
+    );
+
+    expect(markup).toContain('paused');
+    expect(markup).toContain('10s');
+    expect(markup).not.toContain('1m');
   });
 
   it('renders validated structured results in a dedicated inspector section', () => {

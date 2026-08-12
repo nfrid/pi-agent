@@ -909,6 +909,10 @@ describe('activity row views and virtual transcript construction', () => {
     expect(html).toContain('live-pause-event');
     expect(html).toContain('Paused (with 2 delegates)');
     expect(html).toContain('Continue paused runtime');
+    expect(html).toContain('<svg');
+    expect(html).toContain('pause-icon');
+    expect(html).not.toContain('‖');
+    expect(html).not.toContain('▶');
     expect(html).toContain('disabled');
   });
 

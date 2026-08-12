@@ -3027,6 +3027,8 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
               name: `Dashboard delegate ${index + 1}`,
               kind: 'background',
               state: index === 0 ? 'running' : 'queued',
+              pauseState: index === 0 ? 'paused' : 'pausing',
+              ...(index === 0 ? { pausedAt: delegateStartedAt + 2_000 } : {}),
               createdAt: delegateStartedAt,
               allowWrites: index === 0,
               ...(index === 0
@@ -3194,14 +3196,18 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   ).toBe(true);
   expect(
     await delegatesPanel
-      .locator('.surface-running .surface-state')
+      .locator('.surface-paused .surface-state')
       .first()
       .evaluate((element) => getComputedStyle(element).animationName),
   ).toBe('none');
   const runningMeta = delegatesPanel.locator('.delegate-row-meta').first();
   await expect(runningMeta.locator('.delegate-row-status')).toContainText(
-    'running',
+    'paused',
   );
+  await expect(delegatesPanel.locator('.surface-pausing')).toHaveCount(17);
+  await expect(delegatesPanel.locator('.surface-paused')).toHaveCount(1);
+  await expect(delegatesPanel).toContainText('Paused at a safe boundary');
+  await expect(delegatesPanel).toContainText('Pausing at a safe boundary');
   await expect(runningMeta.locator('.delegate-row-properties')).toContainText(
     'run 2 · read/write · luna-high',
   );

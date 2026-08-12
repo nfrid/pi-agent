@@ -1664,6 +1664,10 @@ h2 {
 .surface-running {
   color: var(--green);
 }
+.surface-pausing,
+.surface-paused {
+  color: var(--orange);
+}
 .surface-done {
   color: var(--green);
 }
@@ -1714,13 +1718,41 @@ h2 {
   background: #bd93f90c;
 }
 .surface-state {
+  display: inline-grid;
   width: 18px;
+  place-items: center;
   color: var(--muted);
   text-align: center;
+}
+.pause-icon,
+.play-icon {
+  display: block;
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+.pausing-icon {
+  display: block;
+  width: 9px;
+  height: 9px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: pause-boundary-spin 0.9s linear infinite;
+}
+@keyframes pause-boundary-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .surface-running .surface-state {
   color: var(--green);
   animation: tui-pulse 1.2s steps(2, end) infinite;
+}
+.surface-pausing .surface-state,
+.surface-paused .surface-state {
+  color: var(--orange);
+  animation: none;
 }
 .surface-done .surface-state {
   color: var(--green);
@@ -4855,6 +4887,8 @@ details.session-event {
   border-left-color: var(--orange);
 }
 .live-pause-event .session-event-icon {
+  display: inline-grid;
+  place-items: center;
   color: var(--orange);
 }
 .live-compaction-event .session-event-icon {
@@ -4883,13 +4917,18 @@ details.session-event {
   cursor: not-allowed;
   opacity: 0.35;
 }
+.pause-continue-button .play-icon {
+  width: 9px;
+  height: 9px;
+}
 @keyframes live-compaction-pulse {
   50% {
     opacity: 0.35;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .live-compaction-event .session-event-icon {
+  .live-compaction-event .session-event-icon,
+  .pausing-icon {
     animation: none;
   }
 }

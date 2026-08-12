@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { runtimePauseStatus } from '../../features/extension-surfaces';
+import { PauseIcon, PlayIcon } from '../../features/pause-icon';
 import { DashboardTime } from '../../features/timestamp';
 import { Markdown } from '../../Markdown';
 import {
@@ -219,7 +220,7 @@ export function LivePauseEvent({ runtime }: { runtime?: RuntimeSnapshot }) {
       aria-live="polite"
     >
       <span className="session-event-icon" aria-hidden="true">
-        ‖
+        <PauseIcon className="pause-icon" />
       </span>
       <strong>{pause.label}</strong>
       <small>at a safe boundary</small>
@@ -229,7 +230,7 @@ export function LivePauseEvent({ runtime }: { runtime?: RuntimeSnapshot }) {
         aria-label="Continue paused runtime"
         isDisabled
       >
-        ▶
+        <PlayIcon className="play-icon" />
       </AriaButton>
     </div>
   );
