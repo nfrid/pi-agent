@@ -91,7 +91,7 @@ export function useSessionScroll({
     let touchY: number | undefined;
     let previousScrollY = window.scrollY;
     const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) cancelPendingTailScroll();
+      if (event.deltaY <= 0) cancelPendingTailScroll();
     };
     const onTouchStart = (event: TouchEvent) => {
       touchY = event.touches[0]?.clientY;
@@ -324,14 +324,29 @@ export function useSessionScroll({
   const jumpToLatest = useCallback(() => {
     userScrollIntentRef.current = false;
     stickToBottomRef.current = true;
+    initialTailSessionRef.current = id;
+    if (initialTailSettleTimerRef.current !== undefined)
+      window.clearTimeout(initialTailSettleTimerRef.current);
+    initialTailSettleTimerRef.current = window.setTimeout(() => {
+      initialTailSettleTimerRef.current = undefined;
+      if (initialTailSessionRef.current === id)
+        initialTailSessionRef.current = undefined;
+    }, 400);
     setAwayFromLatest(false);
     setTailScrollRequest((current) => current + 1);
     window.scrollTo(0, document.documentElement.scrollHeight);
     window.requestAnimationFrame(() => {
-      if (stickToBottomRef.current && !userScrollIntentRef.current)
-        window.scrollTo(0, document.documentElement.scrollHeight);
+      if (!stickToBottomRef.current || userScrollIntentRef.current) return;
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      // Clearing the rich editor and remeasuring virtual rows can change the
+      // document height one frame after submission. Honor the explicit jump
+      // through that second layout pass unless the user scrolls away.
+      window.requestAnimationFrame(() => {
+        if (stickToBottomRef.current && !userScrollIntentRef.current)
+          window.scrollTo(0, document.documentElement.scrollHeight);
+      });
     });
-  }, []);
+  }, [id]);
 
   return {
     awayFromLatest,
