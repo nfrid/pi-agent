@@ -1,0 +1,554 @@
+/* Global session contract: agent navigation, session context, and surface launchers. */
+.agent-thread-nav {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-alt) 72%, var(--bg));
+  color: var(--fg);
+}
+.agent-nav-drawer {
+  min-width: 0;
+}
+.agent-thread-nav-session {
+  position: fixed;
+  z-index: 12;
+  top: 14px;
+  left: max(clamp(16px, 4vw, 56px), calc(50vw - 564px));
+  width: 248px;
+  max-height: calc(100vh - 28px);
+}
+.agent-nav-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 14px 9px;
+}
+.agent-nav-header .eyebrow {
+  margin-bottom: 2px;
+  color: var(--dim);
+  font-size: 9px;
+}
+.agent-nav-header strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+.agent-nav-utility {
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.agent-nav-utility:hover {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+.agent-nav-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 10px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--dim);
+  padding: 5px 7px;
+}
+.agent-nav-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg);
+  font-size: 11px;
+}
+.agent-nav-search input::placeholder {
+  color: var(--dim);
+}
+.agent-nav-search button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+.agent-nav-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 7px 8px;
+  scrollbar-gutter: stable;
+}
+.agent-workspace-group + .agent-workspace-group {
+  margin-top: 12px;
+}
+.agent-workspace-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 7px 5px;
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 700;
+}
+.agent-workspace-heading-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 5px;
+}
+.agent-workspace-heading .agent-workspace-new {
+  display: inline-grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--purple);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.agent-workspace-heading .agent-workspace-new:hover {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+.agent-workspace-heading button {
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-workspace-heading button:hover:not(:disabled) {
+  color: var(--fg);
+}
+.agent-workspace-heading button:disabled {
+  cursor: default;
+}
+.agent-workspace-heading small {
+  color: var(--dim);
+  font-size: 9px;
+  font-weight: 500;
+}
+.agent-thread-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 7px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+.agent-thread-row:hover,
+.agent-thread-row.selected {
+  border-color: var(--line-soft);
+  background: color-mix(in srgb, var(--purple) 10%, var(--bg));
+  color: var(--fg);
+}
+.agent-thread-row.selected {
+  box-shadow: inset 2px 0 var(--purple);
+}
+.agent-thread-glyph {
+  width: 14px;
+  flex: none;
+  color: var(--dim);
+  font-size: 10px;
+  text-align: center;
+}
+/* Agent/session status-${status} classes are runtime and test contracts. */
+.agent-thread-row.status-working .agent-thread-glyph {
+  color: var(--green);
+}
+.agent-thread-row.status-paused .agent-thread-glyph {
+  color: var(--orange);
+}
+.agent-thread-row.status-compacting .agent-thread-glyph {
+  color: var(--purple);
+  animation: tui-pulse 1.2s steps(2, end) infinite;
+}
+.agent-thread-row:is(.status-working, .status-idle, .status-dormant)
+  .agent-thread-glyph {
+  font-size: 0;
+  line-height: 1;
+}
+.agent-thread-row:is(.status-working, .status-idle, .status-dormant)
+  .agent-thread-glyph::before {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  content: "";
+}
+.agent-thread-row:is(.status-working, .status-idle)
+  .agent-thread-glyph::before {
+  background: currentColor;
+}
+.agent-thread-row.status-dormant .agent-thread-glyph::before {
+  border: 1px dotted currentColor;
+}
+.agent-thread-row.status-waiting .agent-thread-glyph {
+  color: var(--orange);
+}
+.agent-thread-row.status-failed .agent-thread-glyph {
+  color: var(--red);
+}
+.agent-thread-copy {
+  display: grid;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  gap: 2px;
+}
+.agent-thread-copy strong,
+.agent-thread-copy small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-thread-copy strong {
+  color: inherit;
+  font-size: 11px;
+  font-weight: 600;
+}
+.agent-thread-copy small {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 9px;
+}
+.agent-thread-context {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-thread-time {
+  flex: none;
+  margin-left: auto;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+.agent-thread-row.status-idle .agent-thread-glyph,
+.agent-thread-row.status-dormant .agent-thread-glyph {
+  color: var(--dim);
+}
+.agent-thread-row.status-working .agent-thread-copy small,
+.agent-thread-row.status-compacting .agent-thread-copy small,
+.agent-thread-row.status-waiting .agent-thread-copy small,
+.agent-thread-row.status-failed .agent-thread-copy small {
+  color: var(--muted);
+}
+.agent-nav-empty {
+  color: var(--dim);
+  padding: 16px 8px;
+  font-size: 11px;
+}
+.agent-nav-more {
+  width: calc(100% - 20px);
+  margin: 0 10px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 8px;
+  cursor: pointer;
+  font-size: 10px;
+  text-align: left;
+}
+.agent-nav-more:hover {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+.agent-nav-footer {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+  border-top: 1px solid var(--line-soft);
+  padding: 8px;
+}
+.agent-nav-utility {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  padding: 5px 2px;
+  text-align: center;
+  font-size: 9px;
+  cursor: pointer;
+}
+.agent-nav-utility b {
+  position: absolute;
+  top: 0;
+  right: 3px;
+}
+.agent-nav-drawer > .agent-thread-nav {
+  height: 100%;
+}
+.agent-nav-handle,
+.agent-nav-backdrop {
+  display: none;
+}
+
+/* Compact, one-line session context. */
+.shell.session-shell {
+  padding-bottom: 0;
+}
+.session-page {
+  --session-control-edge: max(12px, env(safe-area-inset-bottom));
+  --session-control-gap: 12px;
+  min-width: 0;
+  padding-bottom: calc(
+    var(--session-control-height, 136px) +
+    var(--keyboard-inset, 0px) +
+    var(--session-control-edge) +
+    var(--session-control-gap)
+  );
+}
+.session-page[data-keyboard-open] {
+  --session-control-edge: 0px;
+}
+.session-page > .transcript {
+  margin-bottom: 0;
+}
+.session-context {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+  margin: -34px 0 17px;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  padding: 7px 0;
+  backdrop-filter: blur(12px);
+}
+.session-context-main,
+.session-identity,
+.session-breadcrumb {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.session-context-main {
+  gap: 7px;
+}
+.session-identity {
+  gap: 7px;
+  overflow: hidden;
+}
+.session-breadcrumb {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.session-breadcrumb > span {
+  flex: none;
+}
+.session-identity h1 {
+  max-width: min(40vw, 470px);
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-status {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  color: var(--dim);
+  font-size: 10px;
+  text-transform: capitalize;
+}
+.session-status i {
+  color: var(--dim);
+  font-size: 8px;
+  font-style: normal;
+}
+.session-status.status-working i {
+  color: var(--green);
+}
+.session-status.status-compacting i {
+  color: var(--purple);
+  animation: tui-pulse 1.2s steps(2, end) infinite;
+}
+.session-status.status-waiting i,
+.session-status.status-paused i {
+  color: var(--orange);
+}
+.session-status.status-failed i,
+.session-status.status-aborting i,
+.session-status.status-stopping i {
+  color: var(--red);
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-thread-row.status-compacting .agent-thread-glyph,
+  .session-status.status-compacting i {
+    animation: none;
+  }
+}
+.session-heading-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+}
+.session-icon-button {
+  display: inline-grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+}
+.session-icon-button:hover,
+.session-icon-button[aria-expanded="true"] {
+  border-color: var(--line-soft);
+  background: color-mix(in srgb, var(--purple) 10%, var(--bg));
+  color: var(--fg);
+}
+.session-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.session-details-trigger {
+  font-size: 20px;
+}
+.session-control-layer > .jump-latest {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 36px;
+  height: 36px;
+  border-color: var(--cyan);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
+  box-shadow: 0 7px 20px #0008;
+  color: var(--cyan);
+  padding: 0;
+}
+
+/* Status launchers stay above the composer; details are dedicated sheets. */
+.session-control-layer {
+  position: fixed;
+  z-index: 10;
+  right: auto;
+  bottom: calc(var(--session-control-edge) + var(--keyboard-inset, 0px));
+  left: calc(50% + 137px);
+  display: flex;
+  flex-direction: column;
+  width: min(820px, calc(100vw - 410px));
+  transform: translateX(-50%);
+}
+.extension-surfaces {
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+  gap: 6px;
+  margin: 0 0 6px;
+}
+.extension-surface {
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-alt) 76%, var(--bg));
+  box-shadow: none;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease;
+}
+.surface-launcher {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  gap: 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  padding: 6px 9px;
+  text-align: left;
+  cursor: pointer;
+}
+.surface-launcher:hover {
+  background: color-mix(in srgb, var(--purple) 9%, transparent);
+}
+.surface-launcher .surface-title {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+.surface-title-line {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.surface-launcher .eyebrow {
+  margin: 0;
+  color: var(--dim);
+  font-size: 9px;
+}
+.surface-launcher .surface-count {
+  min-width: 16px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--purple) 14%, transparent);
+  color: var(--muted);
+  padding: 0 5px;
+  font-size: 9px;
+  line-height: 15px;
+  text-align: center;
+}
+.surface-launcher strong {
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.surface-launcher .surface-chevron {
+  color: var(--purple);
+}

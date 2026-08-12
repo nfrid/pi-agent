@@ -54,7 +54,7 @@ describe('expanded transcript tool rows', () => {
     expect(markup).toContain('array · 1 item');
     expect(markup).not.toContain('<dt>');
     expect(markup).toContain('src/App.tsx');
-    expect(markup).toContain('<div class="markdown">');
+    expect(markup).toMatch(/class="markdown(?: |")/u);
     expect(markup).toContain('<strong>Review</strong>');
     expect(markup).toContain(
       '<a href="https://example.com" target="_blank" rel="noreferrer noopener">dashboard</a>',

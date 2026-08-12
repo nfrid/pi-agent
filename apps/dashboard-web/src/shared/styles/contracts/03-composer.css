@@ -1,0 +1,234 @@
+/* Global composer contract: retained semantic classes used by runtime controls and browser tests. */
+.composer {
+  display: block;
+  position: static;
+  margin-top: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-alt) 94%, var(--purple));
+  box-shadow: 0 8px 28px #0006;
+  padding: 9px;
+}
+.composer-secondary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.composer-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 11px;
+}
+.composer-primary {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 42%, transparent);
+  padding: 5px;
+}
+.composer.dragging {
+  border-style: dashed;
+  border-color: var(--cyan);
+  background: #343746cc;
+}
+.composer-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+}
+.composer-attach,
+.composer-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease;
+}
+.composer-attach {
+  gap: 3px;
+  width: max-content;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--cyan);
+  padding: 0 9px;
+}
+.composer-attach:hover {
+  border-color: var(--cyan);
+  background: #8be9fd12;
+  transform: translateY(-1px);
+}
+.composer-attach:disabled,
+.composer-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+.composer-previews {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0 0 7px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-alt) 92%, transparent);
+  padding: 6px;
+}
+.composer-preview {
+  position: relative;
+  flex: 0 0 58px;
+  width: 58px;
+  height: 58px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+}
+.composer-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.composer-preview button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--fg);
+  border-radius: 50%;
+  background: #282a36dd;
+  color: var(--fg);
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+.composer-preview button:hover {
+  color: var(--pink);
+  border-color: var(--pink);
+}
+.composer textarea {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  min-height: 38px;
+  max-height: 180px;
+  border: 0;
+  resize: vertical;
+  outline: 0;
+  background: transparent;
+  color: var(--fg);
+  padding: 7px;
+}
+.composer textarea::placeholder {
+  color: var(--muted);
+}
+.composer-send {
+  flex: none;
+  width: 38px;
+  border: 1px solid var(--purple);
+  background: var(--purple);
+  color: var(--bg);
+  padding: 0;
+  font-size: 19px;
+  font-weight: 800;
+}
+.composer-send:hover {
+  background: var(--pink);
+  border-color: var(--pink);
+  transform: translateY(-1px);
+}
+.composer-mode {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.composer-mode button {
+  border: 1px solid var(--line);
+  white-space: nowrap;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.composer-mode button.selected {
+  border-color: var(--pink);
+  color: var(--pink);
+  background: #ff79c612;
+}
+.context-indicator {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.context-label {
+  color: var(--purple);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.context-meter {
+  width: 54px;
+  height: 5px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  overflow: hidden;
+}
+.context-meter i {
+  display: block;
+  height: 100%;
+  background: var(--purple);
+}
+.context-indicator strong {
+  font-size: 10px;
+  font-weight: 500;
+}
+/* Runtime contextIndicatorData levels are a deliberately global class vocabulary. */
+.context-warning,
+.context-warning .context-label {
+  color: var(--orange);
+}
+.context-warning .context-meter i {
+  background: var(--orange);
+}
+.context-error,
+.context-error .context-label {
+  color: var(--red);
+}
+.context-error .context-meter i {
+  background: var(--red);
+}
+.composer.disabled {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+}
+.composer.disabled button {
+  margin: 0;
+  width: auto;
+}

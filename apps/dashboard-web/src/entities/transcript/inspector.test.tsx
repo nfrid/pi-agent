@@ -73,7 +73,7 @@ describe('transcript payload inspection', () => {
         }}
       />,
     );
-    expect(markup).toContain('<div class="markdown">');
+    expect(markup).toMatch(/class="markdown(?: |")/u);
     expect(markup).toContain('<h2>Notes</h2>');
     expect(markup).toContain(
       '<a href="https://example.com" target="_blank" rel="noreferrer noopener">dashboard</a>',
