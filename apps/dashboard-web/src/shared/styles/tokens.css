@@ -1,0 +1,19 @@
+:root {
+  --bg: #282a36;
+  --bg-alt: #343746;
+  --line: #6272a4;
+  --line-soft: #44475a;
+  --fg: #f8f8f2;
+  --muted: #a5add2;
+  --dim: #7f89ae;
+  --purple: #bd93f9;
+  --pink: #ff79c6;
+  --cyan: #8be9fd;
+  --green: #50fa7b;
+  --orange: #ffb86c;
+  --red: #ff5555;
+  --yellow: #f1fa8c;
+  --tool-pending: #303241;
+  --tool-success: #263a33;
+  --tool-error: #3b2832;
+}

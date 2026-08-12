@@ -20,7 +20,7 @@ describe('dashboard notification and usage previews', () => {
       </QueryClientProvider>,
     );
     expect(markup).toContain('newest of 10 unread notifications');
-    expect(markup.match(/class="notification"/g)).toHaveLength(8);
+    expect(markup.match(/<article/g)).toHaveLength(8);
     expect(markup).toContain('Notice 7');
     expect(markup).not.toContain('Notice 8');
   });
