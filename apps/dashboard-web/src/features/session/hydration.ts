@@ -1,0 +1,205 @@
+import {
+  type DashboardLiveStore,
+  dashboardHttpClient,
+  selectRuntimeForSession,
+  sessionQueryOptions,
+  useDashboardStore,
+} from '@pi-dashboard/client';
+import { useQuery } from '@tanstack/react-query';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+export function useSessionHydration({
+  id,
+  store,
+  onReplacement,
+}: {
+  id: string;
+  store: DashboardLiveStore;
+  onReplacement: (sessionId: string) => void;
+}) {
+  const query = useQuery(sessionQueryOptions(dashboardHttpClient, id));
+  const runtime = useDashboardStore(store, selectRuntimeForSession(id));
+  const resyncNonce = useDashboardStore(store, (state) => state.resyncNonce);
+  const storedMetadata = useDashboardStore(
+    store,
+    (state) => state.sessionsById[id],
+  );
+  const projection = useDashboardStore(
+    store,
+    (state) => state.transcriptsBySessionId[id],
+  );
+  const data = query.data
+    ? { ...query.data, metadata: storedMetadata ?? query.data.metadata }
+    : undefined;
+  const [error, setError] = useState<string>();
+  const [incompleteRetryNonce, setIncompleteRetryNonce] = useState(0);
+  const hydrationRetryCountRef = useRef(0);
+  const incompleteRetryCountRef = useRef(0);
+  const runtimeReconcileTimerRef = useRef<number | undefined>(undefined);
+  const runtimeWasOnlineRef = useRef(false);
+  const sessionRefetchRef = useRef<
+    ReturnType<typeof query.refetch> | undefined
+  >(undefined);
+  const refetchSession = query.refetch;
+  const requestSessionRefetch = useCallback(() => {
+    if (document.visibilityState !== 'visible') return undefined;
+    if (sessionRefetchRef.current) return sessionRefetchRef.current;
+    const pending = refetchSession();
+    sessionRefetchRef.current = pending;
+    void pending.then(
+      () => {
+        if (sessionRefetchRef.current === pending)
+          sessionRefetchRef.current = undefined;
+      },
+      () => {
+        if (sessionRefetchRef.current === pending)
+          sessionRefetchRef.current = undefined;
+      },
+    );
+    return pending;
+  }, [refetchSession]);
+
+  useEffect(() => {
+    if (!id) return;
+    setError(undefined);
+    hydrationRetryCountRef.current = 0;
+    incompleteRetryCountRef.current = 0;
+  }, [id]);
+
+  useEffect(() => {
+    // A refetch can reuse structurally equal data; its timestamp still marks a
+    // new hydration attempt that must be evaluated.
+    void query.dataUpdatedAt;
+    if (!query.data) return;
+    if (query.data.metadata.id !== id) {
+      onReplacement(query.data.metadata.id);
+      return;
+    }
+    if (store.hydrateSession(query.data)) {
+      hydrationRetryCountRef.current = 0;
+      if (query.data.entriesComplete !== false) setError(undefined);
+      return;
+    }
+    const attempt = hydrationRetryCountRef.current;
+    if (attempt >= 6) {
+      setError('Session changed repeatedly while loading. Retry when ready.');
+      return;
+    }
+    hydrationRetryCountRef.current = attempt + 1;
+    setError('Session changed while loading; retrying…');
+    const retry = window.setTimeout(
+      () => void requestSessionRefetch(),
+      Math.min(8_000, 250 * 2 ** attempt),
+    );
+    return () => window.clearTimeout(retry);
+  }, [
+    id,
+    onReplacement,
+    query.data,
+    query.dataUpdatedAt,
+    requestSessionRefetch,
+    store,
+  ]);
+
+  useEffect(() => {
+    if (resyncNonce > 0) void requestSessionRefetch();
+  }, [requestSessionRefetch, resyncNonce]);
+
+  useEffect(() => {
+    const online = Boolean(runtime && runtime.online !== false);
+    const wasOnline = runtimeWasOnlineRef.current;
+    runtimeWasOnlineRef.current = online;
+    if (!wasOnline || online) return;
+    // A short-lived print/runtime can exit immediately after its terminal
+    // event. Re-read once after shutdown, when Pi's JSONL branch is durable.
+    if (runtimeReconcileTimerRef.current !== undefined)
+      window.clearTimeout(runtimeReconcileTimerRef.current);
+    runtimeReconcileTimerRef.current = window.setTimeout(() => {
+      runtimeReconcileTimerRef.current = undefined;
+      void requestSessionRefetch();
+    }, 500);
+  }, [requestSessionRefetch, runtime]);
+
+  useEffect(() => {
+    const reconcileWhenVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      hydrationRetryCountRef.current = 0;
+      incompleteRetryCountRef.current = 0;
+      setIncompleteRetryNonce((current) => current + 1);
+      void requestSessionRefetch();
+    };
+    document.addEventListener('visibilitychange', reconcileWhenVisible);
+    return () =>
+      document.removeEventListener('visibilitychange', reconcileWhenVisible);
+  }, [requestSessionRefetch]);
+
+  useEffect(() => {
+    // Visibility increments this nonce to restart a previously suspended retry loop.
+    void incompleteRetryNonce;
+    if (query.data?.entriesComplete !== false) {
+      incompleteRetryCountRef.current = 0;
+      return;
+    }
+    let canceled = false;
+    let timer: number | undefined;
+    const retry = () => {
+      if (canceled || document.visibilityState !== 'visible') return;
+      if (incompleteRetryCountRef.current >= 6) {
+        setError('Session history is not ready yet. Retry when ready.');
+        return;
+      }
+      const attempt = incompleteRetryCountRef.current;
+      timer = window.setTimeout(
+        async () => {
+          if (canceled || document.visibilityState !== 'visible') return;
+          incompleteRetryCountRef.current = attempt + 1;
+          const result = await requestSessionRefetch();
+          if (!canceled && result?.data?.entriesComplete === false) retry();
+        },
+        Math.min(8_000, 500 * 2 ** attempt),
+      );
+    };
+    retry();
+    return () => {
+      canceled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [
+    incompleteRetryNonce,
+    query.data?.entriesComplete,
+    requestSessionRefetch,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (runtimeReconcileTimerRef.current !== undefined) {
+        window.clearTimeout(runtimeReconcileTimerRef.current);
+        runtimeReconcileTimerRef.current = undefined;
+      }
+    },
+    [],
+  );
+
+  const retrySession = useCallback(() => {
+    hydrationRetryCountRef.current = 0;
+    incompleteRetryCountRef.current = 0;
+    setError(undefined);
+    setIncompleteRetryNonce((current) => current + 1);
+    void requestSessionRefetch();
+  }, [requestSessionRefetch]);
+
+  return {
+    data,
+    queryError: query.error,
+    runtime,
+    storedMetadata,
+    error,
+    retrySession,
+    projection,
+    waitingForInitialHistory:
+      data?.entriesComplete === false &&
+      (!projection || projection.order.length === 0),
+  };
+}
+
+export type SessionHydration = ReturnType<typeof useSessionHydration>;
