@@ -290,6 +290,12 @@ export const dashboardRoutes: FastifyPluginAsync<{
     async () => context.snapshot(),
   );
   app.get('/api/events', async (request, reply) => {
+    // Hijacked replies bypass Fastify's normal header serialization. Copy the
+    // headers installed by the CORS hook so replay-gap responses remain
+    // readable when the dashboard switches between public and LAN daemons.
+    for (const [name, value] of Object.entries(reply.getHeaders())) {
+      if (value !== undefined) reply.raw.setHeader(name, value);
+    }
     reply.hijack();
     context.handleSse(request.raw, reply.raw, requestUrl(request));
   });
