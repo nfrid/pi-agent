@@ -739,18 +739,12 @@ export class DashboardServerImpl implements DashboardServer {
         ? (message as Record<string, unknown>)
         : undefined;
     if (record?.type === 'sessions' && Array.isArray(record.sessions)) {
-      const streamRecord = this.eventStream.publish((cursor, emittedAt) => ({
+      this.eventStream.publish((cursor, emittedAt) => ({
         type: 'sessions' as const,
         cursor,
         emittedAt,
         sessions: record.sessions as readonly SessionIndexEntry[],
       }));
-      // Preserve the legacy websocket contract; SSE/replay only receives the
-      // compact typed session-index record above.
-      this.ws.publish({
-        type: 'snapshot',
-        snapshot: this.snapshot(streamRecord.cursor),
-      });
       return;
     }
     if (record?.type === 'event' && record.event) {

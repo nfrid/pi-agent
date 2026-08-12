@@ -113,15 +113,13 @@ export class DashboardApplication {
   sessionMetadata(
     liveRuntimes = this.registry.snapshots(),
   ): SessionIndexEntry[] {
-    const activeSessions = new Map(
+    const activeRuntimes = new Map(
       liveRuntimes
         .filter((runtime) => runtime.online !== false)
-        .map((runtime) => [runtime.session.id, runtime.runtimeId]),
+        .map((runtime) => [runtime.session.id, runtime]),
     );
     return this.sessions.list().map((session) => {
-      const runtime = liveRuntimes.find(
-        (item) => item.session.id === session.id && item.online !== false,
-      );
+      const runtime = activeRuntimes.get(session.id);
       return {
         ...session,
         ...(runtime?.session.name !== undefined
@@ -130,7 +128,7 @@ export class DashboardApplication {
         ...(runtime?.session.title !== undefined
           ? { title: runtime.session.title }
           : {}),
-        activeRuntimeId: activeSessions.get(session.id),
+        activeRuntimeId: runtime?.runtimeId,
       };
     });
   }

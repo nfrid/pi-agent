@@ -432,10 +432,21 @@ describe('dashboard HTTP boundary', () => {
           events: readonly Record<string, unknown>[];
         };
       };
+      snapshot(
+        cursor?: number,
+      ): import('@pi-dashboard/protocol').BrowserSnapshot;
+    };
+    const originalSnapshot = implementation.snapshot.bind(server);
+    let constructions = 0;
+    implementation.snapshot = (cursor) => {
+      constructions += 1;
+      return originalSnapshot(cursor);
     };
     const before = implementation.eventStream.cursor;
     server.publishSessionIndexChange();
-    const record = implementation.eventStream.replayAfter(before).events[0];
+    const replay = implementation.eventStream.replayAfter(before).events;
+    expect(replay).toHaveLength(1);
+    const record = replay[0];
     expect(record).toMatchObject({
       type: 'sessions',
       cursor: before + 1,
@@ -443,6 +454,62 @@ describe('dashboard HTTP boundary', () => {
     });
     expect(record).not.toHaveProperty('snapshot');
     expect(JSON.stringify(record).length).toBeLessThan(1_000);
+    expect(constructions).toBe(0);
+  });
+
+  it('uses one online runtime consistently for session metadata overlays', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-session-overlay-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'shared-session.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'shared-session', cwd: '/tmp' })}\n`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const implementation = server as unknown as {
+      application: {
+        sessionMetadata(
+          runtimes: readonly unknown[],
+        ): readonly Record<string, unknown>[];
+      };
+    };
+    const sessions = implementation.application.sessionMetadata([
+      {
+        runtimeId: 'runtime-first',
+        online: true,
+        session: {
+          id: 'shared-session',
+          name: 'First name',
+          title: 'First title',
+        },
+      },
+      {
+        runtimeId: 'runtime-last',
+        online: true,
+        session: {
+          id: 'shared-session',
+          name: 'Last name',
+          title: 'Last title',
+        },
+      },
+    ]);
+    expect(sessions).toEqual([
+      expect.objectContaining({
+        id: 'shared-session',
+        activeRuntimeId: 'runtime-last',
+        name: 'Last name',
+        title: 'Last title',
+      }),
+    ]);
   });
 
   it('constructs one browser snapshot for each changed SSE/legacy update', async () => {
