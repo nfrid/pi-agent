@@ -837,7 +837,7 @@ describe('workspace-first agent navigation', () => {
         {
           id: 'idle-session',
           cwd: '/workspace/app',
-          startedAt: 200,
+          startedAt: 450,
           updatedAt: 2,
         },
         {
@@ -875,26 +875,36 @@ describe('workspace-first agent navigation', () => {
     const rows = agentThreadRows(snapshot);
     expect(rows.map((row) => [row.id, row.status])).toEqual([
       ['compacting-session', 'compacting'],
+      ['idle-session', 'idle'],
       ['working-session', 'working'],
       ['failed-session', 'failed'],
-      ['idle-session', 'idle'],
       ['offline-session', 'offline'],
       ['dormant-session', 'dormant'],
     ]);
-    const idle = rows[3];
-    if (!idle) throw new Error('idle row missing');
+    expect(
+      boundedAgentThreadRows(rows).map((row) => [row.id, row.status]),
+    ).toEqual([
+      ['compacting-session', 'compacting'],
+      ['idle-session', 'idle'],
+      ['working-session', 'working'],
+      ['failed-session', 'failed'],
+      ['offline-session', 'offline'],
+      ['dormant-session', 'dormant'],
+    ]);
+    const offline = rows[4];
+    if (!offline) throw new Error('offline row missing');
     const history = Array.from({ length: 100 }, (_, index) => ({
-      ...idle,
+      ...offline,
       id: `history-${index}`,
-      status: index % 2 === 0 ? ('idle' as const) : ('dormant' as const),
+      status: index % 2 === 0 ? ('offline' as const) : ('dormant' as const),
       updatedAt: index,
     }));
     expect(
-      boundedAgentThreadRows([...rows.slice(0, 3), ...history]),
-    ).toHaveLength(27);
+      boundedAgentThreadRows([...rows.slice(0, 4), ...history]),
+    ).toHaveLength(28);
     expect(
-      boundedAgentThreadRows([...rows.slice(0, 3), ...history], 48),
-    ).toHaveLength(51);
+      boundedAgentThreadRows([...rows.slice(0, 4), ...history], 48),
+    ).toHaveLength(52);
     const active = Array.from({ length: 60 }, (_, index) => ({
       ...rows[0],
       id: `active-${index}`,

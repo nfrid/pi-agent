@@ -103,16 +103,16 @@ function statusLabel(row: AgentThreadRow): string {
 const MAX_VISIBLE_ACTIVE_THREADS = 40;
 const MAX_VISIBLE_HISTORY_THREADS = 24;
 
-function isHistoricalThread(row: AgentThreadRow): boolean {
-  return row.status === 'idle' || row.status === 'dormant';
+function isInactiveThread(row: AgentThreadRow): boolean {
+  return row.status === 'offline' || row.status === 'dormant';
 }
 
 export function boundedAgentThreadRows(
   rows: readonly AgentThreadRow[],
   historyLimit = MAX_VISIBLE_HISTORY_THREADS,
 ): AgentThreadRow[] {
-  const active = rows.filter((row) => !isHistoricalThread(row));
-  const history = rows.filter(isHistoricalThread);
+  const active = rows.filter((row) => !isInactiveThread(row));
+  const history = rows.filter(isInactiveThread);
   return [
     ...active.slice(0, MAX_VISIBLE_ACTIVE_THREADS),
     ...history.slice(0, Math.max(0, historyLimit)),
@@ -180,8 +180,8 @@ export function AgentThreadNav({
   );
   const hiddenRowCount = Math.max(
     0,
-    filtered.filter(isHistoricalThread).length -
-      visibleRows.filter(isHistoricalThread).length,
+    filtered.filter(isInactiveThread).length -
+      visibleRows.filter(isInactiveThread).length,
   );
   const groups = useMemo(() => {
     const result = new Map<
