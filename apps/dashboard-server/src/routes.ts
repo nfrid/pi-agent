@@ -223,6 +223,8 @@ function installCorsAndAuth(
         'authorization, content-type, x-dashboard-token',
       );
       reply.header('access-control-allow-methods', 'GET, POST, OPTIONS');
+      if (request.headers['access-control-request-private-network'] === 'true')
+        reply.header('access-control-allow-private-network', 'true');
       reply.header('vary', 'Origin');
     }
     if (request.method === 'OPTIONS') {

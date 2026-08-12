@@ -161,13 +161,21 @@ describe('Fastify dashboard route plugin', () => {
     await app.register(dashboardRoutes, { context: context() });
     await app.ready();
 
-    await expect(
-      app.inject({
-        method: 'OPTIONS',
-        url: '/api/snapshot',
-        headers: { origin: 'http://dashboard.test' },
-      }),
-    ).resolves.toMatchObject({ statusCode: 204 });
+    const preflight = await app.inject({
+      method: 'OPTIONS',
+      url: '/api/snapshot',
+      headers: {
+        origin: 'http://dashboard.test',
+        'access-control-request-private-network': 'true',
+      },
+    });
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers['access-control-allow-origin']).toBe(
+      'http://dashboard.test',
+    );
+    expect(preflight.headers['access-control-allow-private-network']).toBe(
+      'true',
+    );
     await expect(
       app.inject({
         method: 'POST',
