@@ -1,5 +1,5 @@
-import { describe, expect, test } from 'vitest';
-import { PauseCoordinator, pauseLabel } from './state';
+import { describe, expect, test, vi } from 'vitest';
+import { getPauseCoordinator, PauseCoordinator, pauseLabel } from './state';
 
 describe('pause coordinator', () => {
   test('reaches paused only after the main agent and enrolled delegates', async () => {
@@ -37,6 +37,18 @@ describe('pause coordinator', () => {
     coordinator.resume();
     await waiting;
     expect(released).toBe(true);
+  });
+
+  test('shares pause state across separately loaded extension modules', async () => {
+    const scopeId = `module-reload-${Date.now()}`;
+    const coordinator = getPauseCoordinator(scopeId);
+    coordinator.request();
+
+    vi.resetModules();
+    const reloaded = await import('./state.js');
+    expect(reloaded.getPauseCoordinator(scopeId)).toBe(coordinator);
+    expect(reloaded.getPauseCoordinator(scopeId).isActive()).toBe(true);
+    reloaded.releasePauseCoordinator(scopeId);
   });
 
   test('ignores stale acknowledgements from an older generation', () => {

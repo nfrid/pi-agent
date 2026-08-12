@@ -118,9 +118,21 @@ export class PauseCoordinator {
   }
 }
 
-const coordinators = new Map<string, PauseCoordinator>();
+const pauseCoordinatorsKey = Symbol.for('pi.runtime-pause.coordinators');
+const pauseCoordinatorGlobal = globalThis as typeof globalThis & {
+  [pauseCoordinatorsKey]?: Map<string, PauseCoordinator>;
+};
+
+function coordinatorRegistry(): Map<string, PauseCoordinator> {
+  const existing = pauseCoordinatorGlobal[pauseCoordinatorsKey];
+  if (existing) return existing;
+  const created = new Map<string, PauseCoordinator>();
+  pauseCoordinatorGlobal[pauseCoordinatorsKey] = created;
+  return created;
+}
 
 export function getPauseCoordinator(scopeId: string): PauseCoordinator {
+  const coordinators = coordinatorRegistry();
   const existing = coordinators.get(scopeId);
   if (existing) return existing;
   const created = new PauseCoordinator();
@@ -129,6 +141,7 @@ export function getPauseCoordinator(scopeId: string): PauseCoordinator {
 }
 
 export function releasePauseCoordinator(scopeId: string): void {
+  const coordinators = coordinatorRegistry();
   const coordinator = coordinators.get(scopeId);
   coordinator?.resume();
   coordinators.delete(scopeId);
