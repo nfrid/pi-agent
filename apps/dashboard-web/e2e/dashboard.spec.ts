@@ -1508,10 +1508,10 @@ Note: Recovery completed after the final check.`,
     const firstItemLabel = firstItem?.querySelector<HTMLElement>(
       '.structured-result-field-label, .structured-result-label',
     );
-    const markdown = element.querySelector<HTMLElement>(
-      '.structured-result-markdown .markdown',
+    const markdownHeading = element.querySelector<HTMLElement>(
+      '.structured-result-markdown .markdown h2',
     );
-    const markdownHeading = markdown?.querySelector<HTMLElement>('h2');
+    const markdown = markdownHeading?.closest<HTMLElement>('.markdown');
     const markdownItem = markdown?.querySelector<HTMLElement>('li');
     const markdownPre = markdown?.querySelector<HTMLElement>('pre');
     const markdownCode = markdown?.querySelector<HTMLElement>('pre code');

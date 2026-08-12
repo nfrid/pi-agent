@@ -1647,6 +1647,10 @@ h2 {
 .structured-result-node-content {
   overflow-wrap: anywhere;
 }
+.structured-result-list,
+.structured-result-list-item {
+  list-style: none;
+}
 .structured-result-primitive-block {
   min-width: 0;
   margin: 10px 0 11px;
