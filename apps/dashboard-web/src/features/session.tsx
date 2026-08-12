@@ -61,6 +61,8 @@ export function visualViewportKeyboardInset(
   return Math.max(0, layoutHeight - viewportHeight - viewportOffsetTop);
 }
 
+const SESSION_TAIL_SETTLE_MS = 64;
+
 export function SessionView({
   id,
   snapshot,
@@ -83,6 +85,7 @@ export function SessionView({
     [go],
   );
   const query = useQuery(sessionQueryOptions(dashboardHttpClient, id));
+  const refetchSession = query.refetch;
   const projection = useDashboardStore(
     store,
     (state) => state.transcriptsBySessionId[id],
@@ -113,6 +116,7 @@ export function SessionView({
   const closeInspector = useCallback(() => setInspectorOpen(false), []);
   const scrolledSessionRef = useRef<string | undefined>(undefined);
   const autoScrollFrameRef = useRef<number | undefined>(undefined);
+  const tailReadyTimerRef = useRef<number | undefined>(undefined);
   const layoutScrollFrameRef = useRef<number | undefined>(undefined);
   const initialTailSessionRef = useRef<string | undefined>(undefined);
   const initialTailSettleTimerRef = useRef<number | undefined>(undefined);
@@ -145,7 +149,7 @@ export function SessionView({
   const requestSessionRefetch = useCallback(() => {
     if (document.visibilityState !== 'visible') return undefined;
     if (sessionRefetchRef.current) return sessionRefetchRef.current;
-    const pending = query.refetch();
+    const pending = refetchSession();
     sessionRefetchRef.current = pending;
     void pending.then(
       () => {
@@ -158,7 +162,7 @@ export function SessionView({
       },
     );
     return pending;
-  }, [query.refetch]);
+  }, [refetchSession]);
   useLayoutEffect(() => {
     // SessionRoute is reused while only the route id changes. Arm the new
     // session before its existing projection can paint at the old scroll
@@ -171,6 +175,10 @@ export function SessionView({
     if (initialTailSettleTimerRef.current !== undefined) {
       window.clearTimeout(initialTailSettleTimerRef.current);
       initialTailSettleTimerRef.current = undefined;
+    }
+    if (tailReadyTimerRef.current !== undefined) {
+      window.clearTimeout(tailReadyTimerRef.current);
+      tailReadyTimerRef.current = undefined;
     }
   }, [id]);
   useEffect(() => {
@@ -334,6 +342,10 @@ export function SessionView({
         window.cancelAnimationFrame(layoutScrollFrameRef.current);
         layoutScrollFrameRef.current = undefined;
       }
+      if (tailReadyTimerRef.current !== undefined) {
+        window.clearTimeout(tailReadyTimerRef.current);
+        tailReadyTimerRef.current = undefined;
+      }
     };
     const onPointerDown = (event: PointerEvent) => {
       const root = document.documentElement;
@@ -453,14 +465,26 @@ export function SessionView({
       }
       window.scrollTo(0, document.documentElement.scrollHeight);
       stickToBottomRef.current = true;
-      setTailReadySessionId(id);
-      if (initialTailSettleTimerRef.current !== undefined)
-        window.clearTimeout(initialTailSettleTimerRef.current);
-      initialTailSettleTimerRef.current = window.setTimeout(() => {
-        initialTailSettleTimerRef.current = undefined;
-        if (initialTailSessionRef.current === id)
-          initialTailSessionRef.current = undefined;
-      }, 400);
+      if (tailReadyTimerRef.current !== undefined)
+        window.clearTimeout(tailReadyTimerRef.current);
+      // Keep the curtain opaque while virtualization and the fixed composer
+      // finish their first layout pass. Cancellation still reveals the page
+      // immediately through cancelPendingTailScroll above.
+      tailReadyTimerRef.current = window.setTimeout(() => {
+        tailReadyTimerRef.current = undefined;
+        if (userScrollIntentRef.current) {
+          setTailReadySessionId(id);
+          return;
+        }
+        setTailReadySessionId(id);
+        if (initialTailSettleTimerRef.current !== undefined)
+          window.clearTimeout(initialTailSettleTimerRef.current);
+        initialTailSettleTimerRef.current = window.setTimeout(() => {
+          initialTailSettleTimerRef.current = undefined;
+          if (initialTailSessionRef.current === id)
+            initialTailSessionRef.current = undefined;
+        }, 400);
+      }, SESSION_TAIL_SETTLE_MS);
     });
     autoScrollFrameRef.current = frame;
     return () => {
@@ -478,6 +502,10 @@ export function SessionView({
       if (layoutScrollFrameRef.current !== undefined) {
         window.cancelAnimationFrame(layoutScrollFrameRef.current);
         layoutScrollFrameRef.current = undefined;
+      }
+      if (tailReadyTimerRef.current !== undefined) {
+        window.clearTimeout(tailReadyTimerRef.current);
+        tailReadyTimerRef.current = undefined;
       }
       if (initialTailSettleTimerRef.current !== undefined) {
         window.clearTimeout(initialTailSettleTimerRef.current);
@@ -633,6 +661,13 @@ export function SessionView({
           : runtime.liveState
     : 'dormant';
   const statusLabel = pauseStatus?.label ?? status;
+  const retrySession = useCallback(() => {
+    hydrationRetryCountRef.current = 0;
+    incompleteRetryCountRef.current = 0;
+    setError(undefined);
+    setIncompleteRetryNonce((current) => current + 1);
+    void requestSessionRefetch();
+  }, [requestSessionRefetch]);
   const waitingForInitialHistory =
     data?.entriesComplete === false &&
     (!projection || projection.order.length === 0);
@@ -675,32 +710,13 @@ export function SessionView({
               </div>
             </div>
           </header>
-          <div className="transcript session-transcript-loading" role="status">
-            <span className="session-loading-indicator" aria-hidden="true" />
-            <p>
-              {error ??
-                (query.error instanceof Error
-                  ? query.error.message
-                  : 'Loading session…')}
-            </p>
-            {(error || query.error) && (
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => {
-                  hydrationRetryCountRef.current = 0;
-                  incompleteRetryCountRef.current = 0;
-                  setError(undefined);
-                  setIncompleteRetryNonce((current) => current + 1);
-                  void requestSessionRefetch();
-                }}
-              >
-                Retry
-              </button>
-            )}
-          </div>
           <PendingInteractions runtime={runtime} />
         </section>
+        <SessionLoadingCurtain
+          error={error}
+          queryError={query.error}
+          onRetry={retrySession}
+        />
       </div>
     );
   }
@@ -869,7 +885,44 @@ export function SessionView({
         </div>
         <PendingInteractions runtime={runtime} />
       </section>
+      {tailReadySessionId !== id && (
+        <SessionLoadingCurtain
+          error={error}
+          queryError={query.error}
+          onRetry={retrySession}
+        />
+      )}
     </div>
+  );
+}
+
+function SessionLoadingCurtain({
+  error,
+  queryError,
+  onRetry,
+}: {
+  error: string | undefined;
+  queryError: Error | null;
+  onRetry: () => void;
+}) {
+  return (
+    <output
+      className="session-loading-curtain session-transcript-loading"
+      aria-live="polite"
+    >
+      <span className="session-loading-indicator" aria-hidden="true" />
+      <p>
+        {error ??
+          (queryError instanceof Error
+            ? queryError.message
+            : 'Loading session…')}
+      </p>
+      {(error || queryError) && (
+        <button type="button" className="secondary-button" onClick={onRetry}>
+          Retry
+        </button>
+      )}
+    </output>
   );
 }
 

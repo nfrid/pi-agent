@@ -207,8 +207,14 @@ select:focus-visible {
 .session-page {
   padding-bottom: 160px;
 }
-.session-page[data-tail-pending] {
-  visibility: hidden;
+.session-loading-curtain {
+  position: fixed;
+  inset: 52px 0 0;
+  z-index: 11;
+  min-height: 0;
+  margin: 0;
+  background: var(--bg);
+  pointer-events: none;
 }
 .session-control-layer {
   position: fixed;
@@ -624,6 +630,9 @@ h2 {
   overflow: hidden;
   background: #18192399;
   pointer-events: auto;
+}
+.session-page[data-tail-pending] .interaction-dock {
+  visibility: visible;
 }
 .interaction-dock .interaction {
   width: min(720px, 100%);
@@ -2461,6 +2470,9 @@ ol.delegate-inspector-runs > li small {
 .secondary-button:hover {
   background: #bd93f91c;
 }
+.session-loading-curtain .secondary-button {
+  pointer-events: auto;
+}
 .secondary-button:disabled {
   cursor: wait;
   opacity: 0.55;
@@ -3089,6 +3101,7 @@ ol.delegate-inspector-runs > li small {
 }
 .agent-thread-nav-session {
   position: fixed;
+  z-index: 12;
   top: 14px;
   left: max(clamp(16px, 4vw, 56px), calc(50vw - 564px));
   width: 248px;
@@ -3629,7 +3642,7 @@ ol.delegate-inspector-runs > li small {
 .surface-dialog-layer,
 .outline-sheet-layer {
   position: fixed;
-  animation: overlay-in 160ms ease-out both;
+  animation: overlay-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
   z-index: 45;
   inset: 0;
   pointer-events: auto;
@@ -3650,11 +3663,11 @@ ol.delegate-inspector-runs > li small {
   background: var(--bg-alt);
   box-shadow: -18px 0 48px #0008;
   pointer-events: auto;
-  animation: drawer-in 160ms ease-out both;
+  animation: drawer-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .surface-dialog-layer.is-exiting,
 .outline-sheet-layer.is-exiting {
-  animation: overlay-out 160ms ease-in both;
+  animation: overlay-out 160ms cubic-bezier(0.7, 0, 0.84, 0) both;
   pointer-events: none;
 }
 :where(
@@ -3663,7 +3676,7 @@ ol.delegate-inspector-runs > li small {
   .surface-dialog-layer.is-exiting .surface-dialog,
   .outline-sheet-layer.is-exiting .outline-sheet
 ) {
-  animation: drawer-out 160ms ease-in both;
+  animation: drawer-out 160ms cubic-bezier(0.7, 0, 0.84, 0) both;
   pointer-events: none;
 }
 .surface-dialog-header,
@@ -4152,7 +4165,7 @@ ol.delegate-inspector-runs > li small {
 @keyframes drawer-in {
   from {
     opacity: 0;
-    transform: translateX(10px);
+    transform: translateX(28px);
   }
   to {
     opacity: 1;
@@ -4166,7 +4179,7 @@ ol.delegate-inspector-runs > li small {
   }
   to {
     opacity: 0;
-    transform: translateX(10px);
+    transform: translateX(28px);
   }
 }
 @keyframes palette-in {
@@ -5328,6 +5341,10 @@ details.session-event {
     opacity: 1;
     transform: translate(0, -50%) scale(1);
   }
+}
+
+.session-page[data-tail-pending] .transcript {
+  visibility: hidden;
 }
 
 @media (prefers-reduced-motion: reduce) {

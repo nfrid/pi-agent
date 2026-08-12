@@ -36,6 +36,22 @@ async function swipe(
   );
 }
 
+async function sharedDrawerMotion(drawer: Locator) {
+  return drawer.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const transforms = element
+      .getAnimations()
+      .flatMap((animation) => animation.effect?.getKeyframes() ?? [])
+      .map((keyframe) => String(keyframe.transform ?? ''));
+    return {
+      animationName: style.animationName,
+      animationDuration: style.animationDuration,
+      animationTimingFunction: style.animationTimingFunction,
+      transforms,
+    };
+  });
+}
+
 test('mobile dashboard renders and supports project-scoped new chat', async ({
   page,
 }) => {
@@ -591,6 +607,13 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   ).toHaveAttribute('datetime', '2026-08-05T18:42:00.000Z');
   await page.getByRole('button', { name: 'Open transcript outline' }).click();
   const outline = page.getByRole('dialog', { name: 'Transcript outline' });
+  const outlineMotion = await sharedDrawerMotion(outline);
+  expect(outlineMotion).toMatchObject({
+    animationName: 'drawer-in',
+    animationDuration: '0.16s',
+    animationTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
+  });
+  expect(outlineMotion.transforms).toContain('translateX(28px)');
   await expect(outline).toHaveClass(/work-surface-dialog/);
   await expect(outline.locator('h2')).toHaveCount(0);
   await expect(outline.locator('.eyebrow')).toHaveText('Transcript outline');
@@ -607,6 +630,22 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     outline.locator('.transcript-outline-time').first(),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Close Transcript outline' }).click();
+  const detailsButton = page.getByRole('button', {
+    name: 'Details',
+    exact: true,
+  });
+  await detailsButton.click();
+  const details = page.getByRole('dialog', { name: 'Loaded shell' });
+  const detailsMotion = await sharedDrawerMotion(details);
+  expect(detailsMotion).toMatchObject({
+    animationName: 'drawer-in',
+    animationDuration: '0.16s',
+    animationTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
+  });
+  expect(detailsMotion.transforms).toContain('translateX(28px)');
+  await expect(details).toBeVisible();
+  await details.getByRole('button', { name: 'Close session details' }).click();
+  await expect(details).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Open agent list' }).click();
   const agentNav = page.getByRole('complementary', {
@@ -3362,6 +3401,13 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   const inspector = page.getByRole('dialog', {
     name: 'Existing session request',
   });
+  const detailsMotion = await sharedDrawerMotion(inspector);
+  expect(detailsMotion).toMatchObject({
+    animationName: 'drawer-in',
+    animationDuration: '0.16s',
+    animationTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
+  });
+  expect(detailsMotion.transforms).toContain('translateX(28px)');
   await expect(inspector).toBeVisible();
   await expect(page.locator('.session-heading')).toBeVisible();
   await expect(inspector).toContainText('Runtime controls');

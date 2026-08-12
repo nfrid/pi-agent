@@ -172,7 +172,7 @@ test('switching chats establishes the new transcript tail', async ({
       body: JSON.stringify({
         metadata: sessions[sessionIndex],
         entries: sessionEntries(id),
-        entriesComplete: true,
+        entriesComplete: false,
         serverId: snapshot.serverId,
         cursor: 1,
       }),
@@ -198,11 +198,16 @@ test('switching chats establishes the new transcript tail', async ({
     .click();
   await expect(page).toHaveURL(/\/sessions\/session-2$/u);
   await secondSessionRequest;
+  const loadingCurtain = page.locator('.session-loading-curtain');
   await expect(page.locator('.session-page-loading')).toBeVisible();
-  await expect(page.locator('.session-transcript-loading')).toBeVisible();
+  await expect(loadingCurtain).toBeVisible();
+  await expect(page.locator('.session-transcript-loading')).toHaveCount(1);
   await expect(page.locator('[data-transcript-row]:visible')).toHaveCount(0);
   releaseSecondSession();
+  await expect(loadingCurtain).toBeVisible();
+  await expect(page.locator('[data-transcript-row]:visible')).toHaveCount(0);
   await expect(page.getByText(/session-2 message 119/u)).toBeVisible();
+  await expect(loadingCurtain).toHaveCount(0);
   await expect.poll(atBottom).toBeLessThanOrEqual(2);
   await page.evaluate(() => {
     window.dispatchEvent(new WheelEvent('wheel', { deltaY: -240 }));
