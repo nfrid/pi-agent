@@ -30,7 +30,8 @@
     "test": "node scripts/clean-npm-env.mjs sh -c \"node scripts/check-node.mjs && vitest run\"",
     "session:metrics": "node scripts/session-metrics/index.mjs",
     "pi:update": "pi update && pnpm run pi:sdk-sync",
-    "pi:sdk-sync": "VERSION=$(pi --version) && TYPEBOX_VERSION=1.3.7 && pnpm add -E @earendil-works/pi-ai@$VERSION @earendil-works/pi-coding-agent@$VERSION @earendil-works/pi-tui@$VERSION typebox@$TYPEBOX_VERSION && pnpm --filter @pi-dashboard/activity-model add -E @earendil-works/pi-ai@$VERSION && pnpm --filter @pi-dashboard/server --filter @pi-dashboard/web --filter @pi-dashboard/extension-contributions add -E typebox@$TYPEBOX_VERSION"
+    "pi:patch-runtime": "node scripts/patch-installed-pi.mjs",
+    "pi:sdk-sync": "VERSION=$(pi --version) && TYPEBOX_VERSION=1.3.7 && pnpm add -E @earendil-works/pi-ai@$VERSION @earendil-works/pi-coding-agent@$VERSION @earendil-works/pi-tui@$VERSION typebox@$TYPEBOX_VERSION && pnpm --filter @pi-dashboard/activity-model add -E @earendil-works/pi-ai@$VERSION && pnpm --filter @pi-dashboard/server --filter @pi-dashboard/web --filter @pi-dashboard/extension-contributions add -E typebox@$TYPEBOX_VERSION && pnpm run pi:patch-runtime"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.84.1",
