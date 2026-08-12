@@ -58,15 +58,17 @@ describe('session index', () => {
     );
     await mkdir(path.join(root, 'project'));
     const file = path.join(root, 'project', 'session.jsonl');
+    const startedAt = '2026-08-12T10:20:30.000Z';
     await writeFile(
       file,
-      `${JSON.stringify({ type: 'session', version: 3, id: 'session-id', cwd: '/tmp/project' })}\n${JSON.stringify({ type: 'message', id: 'entry', message: { role: 'user', content: [{ type: 'image', mimeType: 'image/png', data: 'base64-bytes' }] } })}\n`,
+      `${JSON.stringify({ type: 'session', version: 3, id: 'session-id', timestamp: startedAt, cwd: '/tmp/project' })}\n${JSON.stringify({ type: 'message', id: 'entry', message: { role: 'user', content: [{ type: 'image', mimeType: 'image/png', data: 'base64-bytes' }] } })}\n`,
     );
     const index = new SessionIndex(root);
     await index.rebuild();
     expect(index.list()[0]).toMatchObject({
       id: 'session-id',
       file,
+      startedAt: Date.parse(startedAt),
     });
     expect(index.list()[0]?.entryCount).toBeUndefined();
     await expect(index.readEntries('not-known')).rejects.toThrow(

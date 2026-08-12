@@ -21,16 +21,12 @@ export type AgentThreadRow = {
   status: RuntimeSnapshot['liveState'] | 'offline' | 'dormant';
   runtime?: RuntimeSnapshot;
   session?: SessionIndexEntry;
+  startedAt: number;
   updatedAt: number;
 };
 
-function statusRank(status: AgentThreadRow['status']): number {
-  if (status === 'working' || status === 'compacting') return 0;
-  if (status === 'waiting') return 1;
-  if (status === 'failed') return 2;
-  if (status === 'idle') return 3;
-  if (status === 'dormant') return 4;
-  return 5;
+function dormantRank(status: AgentThreadRow['status']): number {
+  return status === 'dormant' ? 1 : 0;
 }
 
 export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
@@ -52,6 +48,7 @@ export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
       status,
       runtime,
       session,
+      startedAt: session?.startedAt ?? 0,
       updatedAt: session?.updatedAt ?? 0,
     });
   }
@@ -68,13 +65,14 @@ export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
       cwd: session.cwd,
       status: 'dormant',
       session,
+      startedAt: session.startedAt ?? 0,
       updatedAt: session.updatedAt,
     });
   }
   return [...rows.values()].sort(
     (left, right) =>
-      statusRank(left.status) - statusRank(right.status) ||
-      right.updatedAt - left.updatedAt ||
+      dormantRank(left.status) - dormantRank(right.status) ||
+      right.startedAt - left.startedAt ||
       left.title.localeCompare(right.title),
   );
 }

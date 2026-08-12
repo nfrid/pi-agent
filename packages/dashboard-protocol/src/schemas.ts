@@ -936,6 +936,8 @@ export const SessionIndexEntrySchema = Type.Object(
     workspaceId: Type.Optional(IdentifierSchema),
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
     title: Type.Optional(Type.String({ minLength: 1, maxLength: 96 })),
+    /** Session header timestamp, used for stable chronological ordering. */
+    startedAt: Type.Optional(FiniteNumberSchema),
     updatedAt: FiniteNumberSchema,
     activeRuntimeId: Type.Optional(IdentifierSchema),
     entryCount: Type.Optional(Type.Integer({ minimum: 0 })),

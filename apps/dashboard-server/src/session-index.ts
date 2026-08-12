@@ -780,6 +780,11 @@ export class SessionIndex {
         title: deriveSessionTitle(
           firstUserEntry === undefined ? [] : [firstUserEntry],
         ),
+        startedAt:
+          typeof header.timestamp === 'string' &&
+          Number.isFinite(Date.parse(header.timestamp))
+            ? Date.parse(header.timestamp)
+            : stat.birthtimeMs,
         updatedAt: stat.mtimeMs,
         header,
         lastEntryId,

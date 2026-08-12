@@ -823,11 +823,36 @@ describe('workspace-first agent navigation', () => {
       ],
       workspaces: [{ id: 'app', name: 'App', canonicalPath: '/workspace/app' }],
       sessions: [
-        { id: 'idle-session', cwd: '/workspace/app', updatedAt: 1 },
-        { id: 'failed-session', cwd: '/workspace/app', updatedAt: 2 },
-        { id: 'working-session', cwd: '/workspace/app', updatedAt: 3 },
-        { id: 'compacting-session', cwd: '/workspace/app', updatedAt: 5 },
-        { id: 'dormant-session', cwd: '/workspace/app', updatedAt: 4 },
+        {
+          id: 'idle-session',
+          cwd: '/workspace/app',
+          startedAt: 200,
+          updatedAt: 2,
+        },
+        {
+          id: 'failed-session',
+          cwd: '/workspace/app',
+          startedAt: 300,
+          updatedAt: 3,
+        },
+        {
+          id: 'working-session',
+          cwd: '/workspace/app',
+          startedAt: 400,
+          updatedAt: 5,
+        },
+        {
+          id: 'compacting-session',
+          cwd: '/workspace/app',
+          startedAt: 500,
+          updatedAt: 1,
+        },
+        {
+          id: 'dormant-session',
+          cwd: '/workspace/app',
+          startedAt: 600,
+          updatedAt: 6,
+        },
       ],
     } as never;
     const rows = agentThreadRows(snapshot);
