@@ -7,7 +7,6 @@ import {
   type BrowserSnapshot,
   isRecord,
   MAX_ID,
-  parseDashboardEventEnvelope,
   type RuntimeSnapshot,
   redactImageData,
   validateBridgeCommand,
@@ -736,7 +735,7 @@ export class DashboardServerImpl implements DashboardServer {
       try {
         streamRecord = this.eventStream.publish((cursor, emittedAt) => {
           const snapshot = includeSnapshot ? this.snapshot(cursor) : undefined;
-          return parseDashboardEventEnvelope({
+          return {
             cursor,
             emittedAt,
             event: record.event as BridgeEvent,
@@ -753,7 +752,7 @@ export class DashboardServerImpl implements DashboardServer {
               ? {}
               : { sessionId: record.sessionId as string }),
             ...(snapshot === undefined ? {} : { snapshot }),
-          });
+          };
         });
       } catch {
         // A malformed optional provider payload must not escape a runtime

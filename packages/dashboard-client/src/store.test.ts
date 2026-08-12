@@ -5,6 +5,7 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 import {
   DashboardLiveStore,
+  selectRuntimeForSession,
   selectSnapshot,
   sessionCursorRangeCovered,
 } from './store.js';
@@ -497,6 +498,97 @@ describe('DashboardLiveStore', () => {
         'persisted-message'
       ],
     ).toBeDefined();
+
+    // Late frames from the retired epoch still advance the global cursor, but
+    // cannot undo the authoritative reconnect or trigger lifecycle effects.
+    store.acceptStreamRecord({
+      cursor: 4,
+      emittedAt: 4,
+      runtimeId: 'runtime-1',
+      runtimeEpoch: 'epoch-a',
+      runtimeSeq: 99,
+      sessionId: 'session-1',
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'idle',
+        snapshot: { online: false },
+      },
+    } as StreamRecord);
+    store.acceptStreamRecord({
+      cursor: 5,
+      emittedAt: 5,
+      runtimeId: 'runtime-1',
+      runtimeEpoch: 'epoch-a',
+      runtimeSeq: 100,
+      sessionId: 'session-2',
+      event: {
+        type: 'runtime.hello',
+        protocolVersion: 1,
+        snapshot: {
+          ...runtime,
+          cwd: '/tmp/stale',
+          session: { id: 'session-2', entries: [], entriesComplete: false },
+        },
+      },
+    } as StreamRecord);
+    expect(store.getSnapshot().cursor).toBe(5);
+    expect(store.getSnapshot().runtimesById['runtime-1']).toMatchObject({
+      cwd: '/tmp/new',
+      online: true,
+      session: { id: 'session-1' },
+    });
+    expect(store.getSnapshot().sessionsById['session-1']?.activeRuntimeId).toBe(
+      'runtime-1',
+    );
+    expect(store.getSnapshot().sessionChangeById['session-1']).toBe(1);
+    expect(store.getSnapshot().sessionReplacementByRuntimeId['runtime-1']).toBe(
+      'session-1',
+    );
+    expect(
+      store.getSnapshot().sessionReplacementBySessionId['session-2'],
+    ).toBeUndefined();
+  });
+
+  it('selects the active runtime before preferring online over offline matches', () => {
+    const store = new DashboardLiveStore();
+    const oldRuntime = {
+      runtimeId: 'runtime-old',
+      online: false,
+      liveState: 'idle',
+      pendingInteractions: [],
+      session: { id: 'session-1', entries: [] },
+    };
+    const newRuntime = {
+      runtimeId: 'runtime-new',
+      online: true,
+      liveState: 'working',
+      pendingInteractions: [],
+      session: { id: 'session-1', entries: [] },
+    };
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      runtimes: [oldRuntime, newRuntime],
+      sessions: [
+        {
+          id: 'session-1',
+          file: '',
+          cwd: '/tmp',
+          updatedAt: 1,
+          activeRuntimeId: 'runtime-new',
+        },
+      ],
+    } as unknown as BrowserSnapshot);
+    expect(selectRuntimeForSession('session-1')(store.getSnapshot())).toBe(
+      store.getSnapshot().runtimesById['runtime-new'],
+    );
+    store.installSnapshot({
+      ...snapshot('daemon-1', 2),
+      runtimes: [oldRuntime, newRuntime],
+      sessions: [{ id: 'session-1', file: '', cwd: '/tmp', updatedAt: 2 }],
+    } as unknown as BrowserSnapshot);
+    expect(selectRuntimeForSession('session-1')(store.getSnapshot())).toBe(
+      store.getSnapshot().runtimesById['runtime-new'],
+    );
   });
 
   it('maps a reconnect session replacement without navigating same-session reconnects', () => {

@@ -691,6 +691,7 @@ export class DashboardLiveStore {
     )
       this.installSnapshot(envelope.snapshot, { source: 'sse' });
     let nextState = this.state;
+    let runtimeOrderingAccepted = envelope.runtimeId === undefined;
     const sessionId = sessionIdForEvent(envelope);
     const liveMessage = liveMessageIdentity(envelope);
     if (sessionId && liveMessage?.role === 'user')
@@ -738,18 +739,23 @@ export class DashboardLiveStore {
           // The browser snapshot already includes this runtime event. Advance
           // transport metadata without reducing the event a second time.
           const ordering = applyTransportOrdering(runtimeState, envelope);
-          this.runtimeReducerStates.set(envelope.runtimeId, {
-            snapshot: currentRuntime,
-            ...ordering.state,
-          });
+          runtimeOrderingAccepted = ordering.accepted;
+          if (ordering.accepted)
+            this.runtimeReducerStates.set(envelope.runtimeId, {
+              snapshot: currentRuntime,
+              ...ordering.state,
+            });
         } else {
           const reduced = applyRuntimeEvent(runtimeState, envelope);
-          this.runtimeReducerStates.set(envelope.runtimeId, reduced.state);
-          if (reduced.state.snapshot !== currentRuntime)
-            nextState = this.installRuntimeProjection(
-              nextState,
-              reduced.state.snapshot,
-            );
+          runtimeOrderingAccepted = reduced.accepted;
+          if (reduced.accepted) {
+            this.runtimeReducerStates.set(envelope.runtimeId, reduced.state);
+            if (reduced.state.snapshot !== currentRuntime)
+              nextState = this.installRuntimeProjection(
+                nextState,
+                reduced.state.snapshot,
+              );
+          }
         }
       } else if (envelope.event.type === 'runtime.hello') {
         // A reconnect hello is authoritative even if a shell was evicted while
@@ -758,6 +764,7 @@ export class DashboardLiveStore {
           createRuntimeReducerState(envelope.event.snapshot),
           envelope,
         );
+        runtimeOrderingAccepted = reduced.accepted;
         if (reduced.accepted) {
           this.runtimeReducerStates.set(envelope.runtimeId, reduced.state);
           nextState = this.installRuntimeProjection(
@@ -779,7 +786,11 @@ export class DashboardLiveStore {
         event.type === 'runtime.hello' ||
         event.type === 'session.changed' ||
         event.type === 'session.snapshot');
-    if (sessionId && semanticSessionUpdate)
+    if (
+      sessionId &&
+      semanticSessionUpdate &&
+      (event.type !== 'runtime.hello' || runtimeOrderingAccepted)
+    )
       sessionChangeById = {
         ...sessionChangeById,
         [sessionId]: (sessionChangeById[sessionId] ?? 0) + 1,
@@ -787,6 +798,7 @@ export class DashboardLiveStore {
     if (
       envelope.runtimeId &&
       sessionId &&
+      runtimeOrderingAccepted &&
       event.type === 'runtime.stateChanged' &&
       event.snapshot?.online === false
     ) {
@@ -800,9 +812,9 @@ export class DashboardLiveStore {
     }
     if (
       sessionId &&
-      (event.type === 'runtime.hello' ||
-        event.type === 'session.changed' ||
-        event.type === 'session.snapshot')
+      (event.type === 'session.changed' ||
+        event.type === 'session.snapshot' ||
+        (event.type === 'runtime.hello' && runtimeOrderingAccepted))
     ) {
       const sessionUpdate =
         event.type === 'runtime.hello' ? event.snapshot.session : event.session;
@@ -1496,7 +1508,14 @@ export const selectRuntime =
   (runtimeId: string) => (state: DashboardLiveState) =>
     state.runtimesById[runtimeId];
 export const selectRuntimeForSession =
-  (sessionId: string) => (state: DashboardLiveState) =>
-    Object.values(state.runtimesById).find(
+  (sessionId: string) => (state: DashboardLiveState) => {
+    const activeRuntimeId = state.sessionsById[sessionId]?.activeRuntimeId;
+    const activeRuntime = activeRuntimeId
+      ? state.runtimesById[activeRuntimeId]
+      : undefined;
+    if (activeRuntime?.session.id === sessionId) return activeRuntime;
+    const matching = Object.values(state.runtimesById).filter(
       (runtime) => runtime.session.id === sessionId,
     );
+    return matching.find((runtime) => runtime.online !== false) ?? matching[0];
+  };
