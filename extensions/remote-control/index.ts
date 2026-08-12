@@ -3,10 +3,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import { defineExtension } from '../shared/runtime/extension';
-import {
-  clearActiveCompaction,
-  trackActiveCompaction,
-} from './compaction-control';
+import { compactWithDashboardCancellation } from './compaction-shim';
 import {
   directString,
   directValue,
@@ -179,15 +176,16 @@ export default defineExtension('remote-control', (pi) => {
       session: sessionSnapshot(ctx),
     });
   });
-  pi.on('session_before_compact', (event, ctx) => {
-    trackActiveCompaction(event.signal);
+  pi.on('session_before_compact', async (event, ctx) => {
     emitCompactionStarted(runtime, ctx);
     event.signal.addEventListener('abort', () => emitState(runtime, ctx), {
       once: true,
     });
+    const result = await compactWithDashboardCancellation(event, ctx);
+    if (result.cancel) emitState(runtime, ctx);
+    return result;
   });
   pi.on('session_compact', (_event, ctx) => {
-    clearActiveCompaction();
     emitCompactionCompleted(runtime, ctx);
   });
   pi.on('before_agent_start', (_event, ctx) => {

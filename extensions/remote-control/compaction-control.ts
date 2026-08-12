@@ -1,46 +1,30 @@
-let activeCompactionSignal: AbortSignal | undefined;
+let activeCompactionController: AbortController | undefined;
 
-function emitInteractiveEscape(): void {
-  process.stdin.emit('data', '\u001b');
-}
+export type CancellableCompaction = {
+  signal: AbortSignal;
+  wasCancelled: () => boolean;
+  finish: () => void;
+};
 
-export function trackActiveCompaction(signal: AbortSignal): void {
-  activeCompactionSignal = signal;
-  signal.addEventListener(
-    'abort',
-    () => {
-      if (activeCompactionSignal === signal) activeCompactionSignal = undefined;
+export function beginCancellableCompaction(
+  parentSignal: AbortSignal,
+): CancellableCompaction {
+  const controller = new AbortController();
+  activeCompactionController = controller;
+  return {
+    signal: AbortSignal.any([parentSignal, controller.signal]),
+    wasCancelled: () => controller.signal.aborted,
+    finish: () => {
+      if (activeCompactionController === controller)
+        activeCompactionController = undefined;
     },
-    { once: true },
-  );
+  };
 }
 
-export function clearActiveCompaction(signal?: AbortSignal): void {
-  if (signal === undefined || activeCompactionSignal === signal)
-    activeCompactionSignal = undefined;
-}
-
-export async function cancelActiveCompaction(
-  emitEscape: () => void = emitInteractiveEscape,
-  timeoutMs = 500,
-): Promise<void> {
-  const signal = activeCompactionSignal;
-  if (!signal || signal.aborted)
+export function cancelActiveCompaction(): void {
+  const controller = activeCompactionController;
+  if (!controller || controller.signal.aborted)
     throw new Error('There is no active context compaction to cancel.');
-  const aborted = new Promise<boolean>((resolve) => {
-    const timer = setTimeout(() => resolve(false), timeoutMs);
-    signal.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        resolve(true);
-      },
-      { once: true },
-    );
-  });
-  emitEscape();
-  if (!(await aborted))
-    throw new Error(
-      'This Pi mode does not expose context compaction cancellation.',
-    );
+  controller.abort(new Error('Compaction cancelled from the dashboard.'));
+  activeCompactionController = undefined;
 }

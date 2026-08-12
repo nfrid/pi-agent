@@ -1,35 +1,32 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  beginCancellableCompaction,
   cancelActiveCompaction,
-  clearActiveCompaction,
-  trackActiveCompaction,
 } from './compaction-control';
 
-afterEach(() => clearActiveCompaction());
+let active: ReturnType<typeof beginCancellableCompaction> | undefined;
+afterEach(() => active?.finish());
 
 describe('remote compaction cancellation', () => {
-  it('waits for buffered TUI Escape handling before accepting cancellation', async () => {
-    const controller = new AbortController();
-    trackActiveCompaction(controller.signal);
+  it('aborts the extension-owned compaction signal directly', () => {
+    active = beginCancellableCompaction(new AbortController().signal);
 
-    await cancelActiveCompaction(
-      () => setTimeout(() => controller.abort(), 15),
-      100,
-    );
+    cancelActiveCompaction();
 
-    expect(controller.signal.aborted).toBe(true);
-    await expect(cancelActiveCompaction()).rejects.toThrow(
+    expect(active.signal.aborted).toBe(true);
+    expect(active.wasCancelled()).toBe(true);
+    expect(() => cancelActiveCompaction()).toThrow(
       'There is no active context compaction to cancel.',
     );
   });
 
-  it('rejects when the Pi mode does not turn Escape into compaction abort', async () => {
-    const controller = new AbortController();
-    trackActiveCompaction(controller.signal);
+  it('also follows cancellation from Pi', () => {
+    const parent = new AbortController();
+    active = beginCancellableCompaction(parent.signal);
 
-    await expect(cancelActiveCompaction(() => undefined, 5)).rejects.toThrow(
-      'This Pi mode does not expose context compaction cancellation.',
-    );
-    expect(controller.signal.aborted).toBe(false);
+    parent.abort();
+
+    expect(active.signal.aborted).toBe(true);
+    expect(active.wasCancelled()).toBe(false);
   });
 });
