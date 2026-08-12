@@ -1,129 +1,30 @@
-import type {
-  BrowserSnapshot,
-  RuntimeSnapshot,
-  SessionIndexEntry,
-  WorkspaceTarget,
-} from '@pi-dashboard/protocol';
-import { workspaceForPath } from '@pi-dashboard/protocol';
-import { type TouchEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { sessionDisplayTitle } from '../app-helpers';
+import type { BrowserSnapshot } from '@pi-dashboard/protocol';
+import { useMemo, useState } from 'react';
 import { useDashboardNavigate } from '../routes/navigation';
+import {
+  agentThreadRows,
+  boundedAgentThreadRows,
+  filterAgentThreadRows,
+  groupAgentThreadRows,
+  hiddenAgentThreadRowCount,
+  MAX_VISIBLE_HISTORY_THREADS,
+  shortPath,
+  statusGlyph,
+  statusLabel,
+} from './agent-thread-nav/model';
+import {
+  type AgentThreadNavMode,
+  useAgentThreadDrawer,
+} from './agent-thread-nav/use-agent-thread-drawer';
 import { useDashboardUtility } from './dashboard-utility-context';
-import { runtimePauseStatus } from './extension-surfaces';
-import { useOverlayPresence } from './overlay-presence';
 import { DashboardTime } from './timestamp';
 
-export type AgentThreadRow = {
-  id: string;
-  title: string;
-  workspaceId?: string;
-  workspaceName: string;
-  cwd: string;
-  status: RuntimeSnapshot['liveState'] | 'paused' | 'offline' | 'dormant';
-  statusLabel?: string;
-  runtime?: RuntimeSnapshot;
-  session?: SessionIndexEntry;
-  startedAt: number;
-  updatedAt: number;
-};
-
-function inactiveRank(status: AgentThreadRow['status']): number {
-  return status === 'offline' || status === 'dormant' ? 1 : 0;
-}
-
-export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
-  const now = Date.now();
-  const workspaces = snapshot.workspaces;
-  const sessionsById = new Map(
-    snapshot.sessions.map((session) => [session.id, session]),
-  );
-  const rows = new Map<string, AgentThreadRow>();
-  for (const runtime of snapshot.runtimes) {
-    const session = sessionsById.get(runtime.session.id);
-    const workspace = workspaceForPath(runtime.cwd, workspaces);
-    const pauseStatus = runtimePauseStatus(runtime);
-    const status =
-      runtime.online === false
-        ? 'offline'
-        : pauseStatus
-          ? 'paused'
-          : runtime.liveState;
-    rows.set(runtime.session.id, {
-      id: runtime.session.id,
-      title: sessionDisplayTitle(runtime.session, runtime.session.entries),
-      workspaceId: session?.workspaceId ?? workspace?.id,
-      workspaceName: workspace?.name ?? 'Other workspace',
-      cwd: runtime.cwd,
-      status,
-      statusLabel: pauseStatus?.label,
-      runtime,
-      session,
-      startedAt: session?.startedAt ?? now,
-      updatedAt: session?.updatedAt ?? now,
-    });
-  }
-  for (const session of snapshot.sessions) {
-    if (rows.has(session.id)) continue;
-    const workspace = workspaces.find(
-      (item) => item.id === session.workspaceId,
-    );
-    rows.set(session.id, {
-      id: session.id,
-      title: sessionDisplayTitle(session),
-      workspaceId: session.workspaceId,
-      workspaceName: workspace?.name ?? 'Other workspace',
-      cwd: session.cwd,
-      status: 'dormant',
-      session,
-      startedAt: session.startedAt ?? 0,
-      updatedAt: session.updatedAt,
-    });
-  }
-  return [...rows.values()].sort(
-    (left, right) =>
-      inactiveRank(left.status) - inactiveRank(right.status) ||
-      right.startedAt - left.startedAt ||
-      left.title.localeCompare(right.title),
-  );
-}
-
-function statusGlyph(status: AgentThreadRow['status']): string {
-  if (status === 'working') return '●';
-  if (status === 'compacting') return '◐';
-  if (status === 'waiting') return '◆';
-  if (status === 'failed') return '!';
-  if (status === 'offline') return '○';
-  if (status === 'dormant') return '◌';
-  return '●';
-}
-
-function statusLabel(row: AgentThreadRow): string {
-  return row.statusLabel ?? row.status;
-}
-
-const MAX_VISIBLE_ACTIVE_THREADS = 40;
-const MAX_VISIBLE_HISTORY_THREADS = 24;
-
-function isInactiveThread(row: AgentThreadRow): boolean {
-  return row.status === 'offline' || row.status === 'dormant';
-}
-
-export function boundedAgentThreadRows(
-  rows: readonly AgentThreadRow[],
-  historyLimit = MAX_VISIBLE_HISTORY_THREADS,
-): AgentThreadRow[] {
-  const active = rows.filter((row) => !isInactiveThread(row));
-  const history = rows.filter(isInactiveThread);
-  return [
-    ...active.slice(0, MAX_VISIBLE_ACTIVE_THREADS),
-    ...history.slice(0, Math.max(0, historyLimit)),
-  ];
-}
-
-function shortPath(path: string): string {
-  const parts = path.split('/').filter(Boolean);
-  return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path;
-}
+export type { AgentThreadRow } from './agent-thread-nav/model';
+export {
+  agentThreadRows,
+  boundedAgentThreadRows,
+  workspaceNameForSession,
+} from './agent-thread-nav/model';
 
 export function AgentThreadNav({
   snapshot,
@@ -133,7 +34,7 @@ export function AgentThreadNav({
   onOpenChange,
 }: {
   snapshot: BrowserSnapshot;
-  mode?: 'home' | 'session';
+  mode?: AgentThreadNavMode;
   currentSessionId?: string;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -142,159 +43,29 @@ export function AgentThreadNav({
   const utility = useDashboardUtility();
   const [query, setQuery] = useState('');
   const [historyLimit, setHistoryLimit] = useState(MAX_VISIBLE_HISTORY_THREADS);
-  const touchStart = useRef<{ x: number; y: number } | undefined>(undefined);
-  const edgeTouchStart = useRef<{ x: number; y: number } | undefined>(
-    undefined,
-  );
-  const drawerRef = useRef<HTMLElement>(null);
-  const handleRef = useRef<HTMLButtonElement>(null);
-  const [isMobile, setIsMobile] = useState(
-    () =>
-      typeof window !== 'undefined' &&
-      window.matchMedia('(max-width: 820px)').matches,
-  );
-  const { present: drawerPresent, exiting: drawerExiting } = useOverlayPresence(
-    mode === 'session' && open,
-  );
-  useEffect(() => {
-    if (mode !== 'session') return;
-    const media = window.matchMedia('(max-width: 820px)');
-    const update = () => setIsMobile(media.matches);
-    update();
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
-  }, [mode]);
+  const {
+    drawerRef,
+    handleRef,
+    drawerPresent,
+    drawerExiting,
+    isMobile,
+    onTouchStart,
+    onTouchEnd,
+  } = useAgentThreadDrawer({ mode, open, onOpenChange });
   const rows = useMemo(() => agentThreadRows(snapshot), [snapshot]);
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return needle
-      ? rows.filter((row) =>
-          `${row.title} ${row.workspaceName} ${row.cwd} ${row.status}`
-            .toLowerCase()
-            .includes(needle),
-        )
-      : rows;
-  }, [query, rows]);
+  const filtered = useMemo(
+    () => filterAgentThreadRows(rows, query),
+    [query, rows],
+  );
   const visibleRows = useMemo(
     () => boundedAgentThreadRows(filtered, historyLimit),
     [filtered, historyLimit],
   );
-  const hiddenRowCount = Math.max(
-    0,
-    filtered.filter(isInactiveThread).length -
-      visibleRows.filter(isInactiveThread).length,
+  const hiddenRowCount = hiddenAgentThreadRowCount(filtered, visibleRows);
+  const groups = useMemo(
+    () => groupAgentThreadRows(visibleRows),
+    [visibleRows],
   );
-  const groups = useMemo(() => {
-    const result = new Map<
-      string,
-      { workspaceId?: string; workspaceName: string; rows: AgentThreadRow[] }
-    >();
-    for (const row of visibleRows) {
-      const key = row.workspaceId ?? `other:${row.workspaceName}`;
-      const group =
-        result.get(key) ??
-        ({
-          workspaceId: row.workspaceId,
-          workspaceName: row.workspaceName,
-          rows: [],
-        } satisfies {
-          workspaceId?: string;
-          workspaceName: string;
-          rows: AgentThreadRow[];
-        });
-      group.rows.push(row);
-      result.set(key, group);
-    }
-    return [...result.entries()];
-  }, [visibleRows]);
-  const onTouchStart = (event: TouchEvent) => {
-    const touch = event.changedTouches[0];
-    if (touch) touchStart.current = { x: touch.clientX, y: touch.clientY };
-  };
-  const onTouchEnd = (event: TouchEvent) => {
-    const start = touchStart.current;
-    const touch = event.changedTouches[0];
-    touchStart.current = undefined;
-    if (!start || !touch || mode !== 'session') return;
-    const dx = touch.clientX - start.x;
-    const dy = Math.abs(touch.clientY - start.y);
-    if (start.x < 32 && dx > 52 && dx > dy * 1.25) onOpenChange?.(true);
-    if (open && dx < -52 && Math.abs(dx) > dy * 1.25) onOpenChange?.(false);
-  };
-  useEffect(() => {
-    if (mode !== 'session') return;
-    const onStart = (event: globalThis.TouchEvent) => {
-      if (
-        event.target instanceof Element &&
-        event.target.closest('[data-swipe-dismiss="right"]')
-      )
-        return;
-      const touch = event.changedTouches[0];
-      if (touch && touch.clientX < 32) {
-        event.preventDefault();
-        edgeTouchStart.current = { x: touch.clientX, y: touch.clientY };
-      }
-    };
-    const onEnd = (event: globalThis.TouchEvent) => {
-      const start = edgeTouchStart.current;
-      const touch = event.changedTouches[0];
-      edgeTouchStart.current = undefined;
-      if (!start || !touch) return;
-      const dx = touch.clientX - start.x;
-      const dy = Math.abs(touch.clientY - start.y);
-      if (dx > 52 && dx > dy * 1.25) onOpenChange?.(true);
-      else if (open && dx < -52 && Math.abs(dx) > dy * 1.25)
-        onOpenChange?.(false);
-    };
-    window.addEventListener('touchstart', onStart, { passive: false });
-    window.addEventListener('touchend', onEnd, { passive: true });
-    return () => {
-      window.removeEventListener('touchstart', onStart);
-      window.removeEventListener('touchend', onEnd);
-    };
-  }, [mode, onOpenChange, open]);
-  useEffect(() => {
-    if (mode !== 'session' || !open) return;
-    const mobile = window.matchMedia('(max-width: 820px)').matches;
-    const frame = mobile
-      ? window.requestAnimationFrame(() => {
-          const first = drawerRef.current?.querySelector<HTMLElement>(
-            'input, button:not(:disabled), [href]',
-          );
-          first?.focus();
-        })
-      : undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onOpenChange?.(false);
-        return;
-      }
-      if (!mobile || event.key !== 'Tab' || !drawerRef.current) return;
-      const focusable = Array.from(
-        drawerRef.current.querySelectorAll<HTMLElement>(
-          'input, button:not(:disabled), [href]',
-        ),
-      );
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (!first || !last) return;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      if (frame !== undefined) window.cancelAnimationFrame(frame);
-      window.removeEventListener('keydown', onKeyDown);
-      if (mobile && !document.querySelector('.interaction-dock'))
-        handleRef.current?.focus({ preventScroll: true });
-    };
-  }, [mode, onOpenChange, open]);
   const select = (id: string) => {
     go(`/sessions/${encodeURIComponent(id)}`);
     if (mode === 'session') onOpenChange?.(false);
@@ -496,16 +267,4 @@ export function AgentThreadNav({
       )}
     </>
   );
-}
-
-export function workspaceNameForSession(
-  snapshot: BrowserSnapshot,
-  session: SessionIndexEntry,
-  runtime?: RuntimeSnapshot,
-): string {
-  const workspace =
-    snapshot.workspaces.find(
-      (item: WorkspaceTarget) => item.id === session.workspaceId,
-    ) ?? workspaceForPath(runtime?.cwd ?? session.cwd, snapshot.workspaces);
-  return workspace?.name ?? 'Other workspace';
 }
