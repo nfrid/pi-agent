@@ -513,7 +513,6 @@ export function toTranscriptEntries(
       !visibleText &&
       thinking.length === 0 &&
       imageCount === 0 &&
-      !hasAssociatedTools &&
       !item.preparing
     )
       continue;

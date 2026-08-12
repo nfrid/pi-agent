@@ -379,6 +379,30 @@ describe('activity row views and virtual transcript construction', () => {
     ).toEqual([]);
   });
 
+  it('omits empty finished assistant envelopes while retaining standalone tools', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          messageId: 'assistant-empty',
+          content: [],
+          toolCallIds: ['call-1'],
+        },
+      },
+      {
+        type: 'tool',
+        tool: { toolCallId: 'call-1', name: 'read', status: 'complete' },
+      },
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      entry: { kind: 'tool' },
+      tool: { toolCallId: 'call-1', name: 'read' },
+    });
+  });
+
   it('projects semantic session events and hides extension persistence noise', () => {
     const todo = (status: string) => ({
       type: 'custom',
