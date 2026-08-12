@@ -129,7 +129,7 @@ export async function dispatchDashboardCommand(
       ctx.abort();
       return { accepted: true };
     case 'compact.cancel':
-      cancelActiveCompaction();
+      await cancelActiveCompaction();
       return { accepted: true };
     case 'shutdown':
       ctx.shutdown();

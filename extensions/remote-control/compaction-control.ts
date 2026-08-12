@@ -20,14 +20,26 @@ export function clearActiveCompaction(signal?: AbortSignal): void {
     activeCompactionSignal = undefined;
 }
 
-export function cancelActiveCompaction(
+export async function cancelActiveCompaction(
   emitEscape: () => void = emitInteractiveEscape,
-): void {
+  timeoutMs = 500,
+): Promise<void> {
   const signal = activeCompactionSignal;
   if (!signal || signal.aborted)
     throw new Error('There is no active context compaction to cancel.');
+  const aborted = new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        resolve(true);
+      },
+      { once: true },
+    );
+  });
   emitEscape();
-  if (!signal.aborted)
+  if (!(await aborted))
     throw new Error(
       'This Pi mode does not expose context compaction cancellation.',
     );
