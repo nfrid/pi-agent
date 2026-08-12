@@ -14,7 +14,13 @@ describe('expanded transcript tool rows', () => {
         status: 'valid',
         value: {
           outcome: 'done',
-          findings: [{ filePath: 'src/App.tsx', lineCount: 42 }],
+          findings: [
+            {
+              filePath: 'src/App.tsx',
+              lineCount: 42,
+              notes: '**Review** with [dashboard](https://example.com).',
+            },
+          ],
         },
       },
     ];
@@ -48,6 +54,11 @@ describe('expanded transcript tool rows', () => {
     expect(markup).toContain('array · 1 item');
     expect(markup).not.toContain('<dt>');
     expect(markup).toContain('src/App.tsx');
+    expect(markup).toContain('<div class="markdown">');
+    expect(markup).toContain('<strong>Review</strong>');
+    expect(markup).toContain(
+      '<a href="https://example.com" target="_blank" rel="noreferrer noopener">dashboard</a>',
+    );
     expect(markup).toContain('Raw JSON');
     expect(markup).toContain('&quot;outcome&quot;: &quot;done&quot;');
     expect(markup).not.toContain('StructuredPayloadView');

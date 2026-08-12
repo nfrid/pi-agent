@@ -1574,36 +1574,46 @@ h2 {
   overflow-wrap: anywhere;
   color: var(--muted);
 }
-.structured-result-node {
+/* Structured results are one document flow: depth only controls disclosure. */
+.structured-result-node,
+.structured-result-fields,
+.structured-result-list,
+.structured-result-field,
+.structured-result-list-item,
+.structured-result-node-content {
   min-width: 0;
-  margin: 4px 0;
-  border: 1px solid color-mix(in srgb, var(--line-soft) 70%, transparent);
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--bg) 28%, transparent);
-}
-.structured-result-root {
   margin: 0;
+  padding: 0;
   border: 0;
   background: transparent;
 }
-.structured-result-root > summary {
-  min-height: 26px;
-  padding-inline: 0;
-}
 .structured-result-node > summary {
-  display: flex;
-  align-items: baseline;
+  position: relative;
+  display: block;
   min-width: 0;
   min-height: 32px;
-  gap: 5px;
-  padding: 5px 7px;
+  margin: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line-soft) 72%, transparent);
   color: var(--fg);
   cursor: pointer;
-  list-style-position: inside;
+  list-style: none;
   overflow-wrap: anywhere;
   transition:
     background-color 140ms ease,
     color 140ms ease;
+}
+.structured-result-node > summary::-webkit-details-marker {
+  display: none;
+}
+.structured-result-node > summary::before {
+  position: absolute;
+  left: -13px;
+  color: var(--cyan);
+  content: "▸";
+}
+.structured-result-node[open] > summary::before {
+  content: "▾";
 }
 .structured-result-node > summary:hover {
   background: color-mix(in srgb, var(--cyan) 8%, transparent);
@@ -1614,10 +1624,8 @@ h2 {
   outline-offset: 2px;
   border-radius: 4px;
 }
-.structured-result-node > summary::marker {
-  color: var(--cyan);
-}
 .structured-result-label {
+  display: inline;
   min-width: 0;
   color: var(--fg);
   font-size: 11px;
@@ -1638,32 +1646,23 @@ h2 {
   overflow-wrap: anywhere;
 }
 .structured-result-node-content {
-  min-width: 0;
-  border-top: 1px solid color-mix(in srgb, var(--line-soft) 70%, transparent);
-  padding: 2px 8px 6px;
-}
-.structured-result-fields,
-.structured-result-list {
-  min-width: 0;
-  margin: 0;
-  padding-inline-start: 22px;
-}
-.structured-result-field,
-.structured-result-list-item {
-  min-width: 0;
-  margin: 5px 0;
   overflow-wrap: anywhere;
+}
+.structured-result-field + .structured-result-field,
+.structured-result-list-item + .structured-result-list-item {
+  border-top: 1px solid color-mix(in srgb, var(--line-soft) 58%, transparent);
 }
 .structured-result-primitive-block {
   min-width: 0;
-  margin: 7px 0 8px;
+  margin: 10px 0 11px;
   overflow-wrap: anywhere;
 }
 .structured-result-field-label {
   display: block;
-  margin-bottom: 2px;
+  margin: 10px 0 4px;
   color: var(--purple);
   font-size: 10px;
+  font-weight: 650;
   letter-spacing: 0.03em;
 }
 .structured-result-primitive {
@@ -1674,8 +1673,11 @@ h2 {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+.structured-result-markdown .markdown {
+  color: var(--muted);
+}
 .structured-result-omission {
-  margin: 5px 0;
+  margin: 10px 0 11px;
   color: var(--orange);
   font-size: 10px;
   overflow-wrap: anywhere;
@@ -1685,9 +1687,6 @@ h2 {
   .tool-inspector-raw > summary {
     min-height: 44px;
     padding-block: 10px;
-  }
-  .structured-result-node-content {
-    padding-inline: 4px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

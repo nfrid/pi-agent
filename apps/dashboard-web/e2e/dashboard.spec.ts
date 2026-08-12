@@ -1228,7 +1228,13 @@ Note: Recovery completed after the final check.`,
                         valid: true,
                         value: {
                           outcome: 'done',
-                          findings: [{ filePath: 'src/App.tsx' }],
+                          findings: [
+                            {
+                              filePath: 'src/App.tsx',
+                              notes:
+                                '## Finding notes\n\n- [dashboard](https://example.com)\n- use `code`',
+                            },
+                          ],
                         },
                         errors: [],
                       },
@@ -1449,6 +1455,17 @@ Note: Recovery completed after the final check.`,
   await expect(structuredDelegateResults).toContainText('Outcome');
   await expect(structuredDelegateResults).toContainText('done');
   await expect(structuredDelegateResults).toContainText('src/App.tsx');
+  await expect(
+    structuredDelegateResults.locator('.structured-result-markdown h2'),
+  ).toHaveText('Finding notes');
+  await expect(
+    structuredDelegateResults
+      .locator('.structured-result-markdown')
+      .getByRole('link', { name: 'dashboard' }),
+  ).toBeVisible();
+  await expect(
+    structuredDelegateResults.locator('.structured-result-markdown code'),
+  ).toHaveText('code');
   await expect(structuredDelegateResults.getByText('Raw JSON')).toBeVisible();
   const structuredPayload = structuredDelegateResults.locator(
     '.structured-result-value',
@@ -1472,6 +1489,37 @@ Note: Recovery completed after the final check.`,
   }));
   expect(payloadOverflow.scrollWidth).toBeLessThanOrEqual(
     payloadOverflow.clientWidth,
+  );
+  const structuredGeometry = await structuredPayload.evaluate((element) => {
+    const flowElements = Array.from(
+      element.querySelectorAll<HTMLElement>(
+        '.structured-result-summary, .structured-result-label, .structured-result-field-label, .structured-result-primitive',
+      ),
+    );
+    const list = element.querySelector<HTMLElement>('.structured-result-list');
+    const firstItem = list?.querySelector<HTMLElement>(
+      '.structured-result-list-item',
+    );
+    const firstItemLabel = firstItem?.querySelector<HTMLElement>(
+      '.structured-result-field-label, .structured-result-label',
+    );
+    return {
+      lefts: flowElements.map((flowElement) =>
+        Math.round(flowElement.getBoundingClientRect().left),
+      ),
+      listLeft: list?.getBoundingClientRect().left,
+      listPadding: list ? getComputedStyle(list).paddingInlineStart : undefined,
+      listMargin: list ? getComputedStyle(list).marginInlineStart : undefined,
+      firstItemLeft: firstItem?.getBoundingClientRect().left,
+      firstItemLabelLeft: firstItemLabel?.getBoundingClientRect().left,
+    };
+  });
+  expect(new Set(structuredGeometry.lefts).size).toBe(1);
+  expect(structuredGeometry.listPadding).toBe('0px');
+  expect(structuredGeometry.listMargin).toBe('0px');
+  expect(structuredGeometry.firstItemLeft).toBe(structuredGeometry.listLeft);
+  expect(structuredGeometry.firstItemLabelLeft).toBe(
+    structuredGeometry.listLeft,
   );
   expect(
     await page

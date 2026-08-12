@@ -53,12 +53,33 @@ describe('transcript payload inspection', () => {
     expect(markup).toContain('array · 1 item');
     expect(markup).toContain('>File path</strong>');
     expect(markup).toContain('src/App.tsx');
-    expect(markup).toContain('<ol class="structured-result-list">');
+    expect(markup).toContain('<div class="structured-result-list">');
+    expect(markup).toContain('>Item 1</strong>');
     expect(markup).toContain('types');
     expect(markup).not.toContain('<dl');
     expect(markup).not.toContain('<dt');
     expect(markup).not.toContain('<pre>');
     expect(markup).not.toContain('&quot;outcome&quot;');
+  });
+
+  it('renders string values through Markdown while keeping primitive paragraphs readable', () => {
+    const markup = renderToStaticMarkup(
+      <StructuredPayloadView
+        value={{
+          notes: '# Notes\n\n- [dashboard](https://example.com)\n- use `code`',
+          count: 2,
+          enabled: true,
+        }}
+      />,
+    );
+    expect(markup).toContain('<div class="markdown">');
+    expect(markup).toContain('<h1>Notes</h1>');
+    expect(markup).toContain(
+      '<a href="https://example.com" target="_blank" rel="noreferrer noopener">dashboard</a>',
+    );
+    expect(markup).toContain('<code>code</code>');
+    expect(markup).toContain('<p class="structured-result-primitive">2</p>');
+    expect(markup).toContain('<p class="structured-result-primitive">true</p>');
   });
 
   it('keeps depth, entry, and string bounds visible to readers', () => {

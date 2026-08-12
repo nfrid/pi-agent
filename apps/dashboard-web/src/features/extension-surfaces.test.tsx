@@ -456,7 +456,15 @@ describe('live extension surface fixtures', () => {
           result: {
             kind: 'structured',
             status: 'valid',
-            value: { outcome: 'done', findings: [{ path: 'src/index.ts' }] },
+            value: {
+              outcome: 'done',
+              findings: [
+                {
+                  path: 'src/index.ts',
+                  summary: '# Finding\n\nUse `code`.',
+                },
+              ],
+            },
           },
         }}
       />,
@@ -467,6 +475,10 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('object · 2 fields');
     expect(markup).toContain('>Findings</span>');
     expect(markup).toContain('array · 1 item');
+    expect(markup).toContain('<div class="markdown">');
+    expect(markup).toContain('<h1>Finding</h1>');
+    expect(markup).toContain('<code>code</code>');
+    expect(markup).not.toContain('<ol class="structured-result-list">');
     expect(markup).toContain('&quot;outcome&quot;: &quot;done&quot;');
     expect(markup).toContain('&quot;path&quot;: &quot;src/index.ts&quot;');
   });
