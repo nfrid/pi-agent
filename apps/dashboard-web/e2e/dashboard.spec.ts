@@ -2870,7 +2870,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   );
 });
 
-test('phase six mocked management flow covers refresh, fallback notification, project launch, and runtime lifecycle', async ({
+test('phase six mocked workspace flow covers refresh, fallback notification, agent launch, and runtime lifecycle', async ({
   page,
 }) => {
   test.setTimeout(30_000);

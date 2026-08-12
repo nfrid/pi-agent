@@ -12,12 +12,7 @@ describe('dashboard route tree', () => {
     });
     await router.load();
     expect(router.state.location.pathname).toBe('/workspaces/workspace-1/new');
-    for (const path of [
-      '/workspaces',
-      '/sessions',
-      '/inbox',
-      '/projects',
-    ] as const) {
+    for (const path of ['/workspaces', '/sessions', '/inbox'] as const) {
       await router.navigate({ to: path });
       expect(router.state.location.pathname).toBe(path);
     }
@@ -38,20 +33,5 @@ describe('dashboard route tree', () => {
       params: { sessionId: 's1' },
     });
     expect(router.state.location.pathname).toBe('/sessions/s1');
-    await router.navigate({
-      to: '/projects/$projectId',
-      params: { projectId: 'p1' },
-    });
-    expect(router.state.location.pathname).toBe('/projects/p1');
-    await router.navigate({
-      to: '/projects/$projectId/new',
-      params: { projectId: 'p1' },
-    });
-    expect(router.state.location.pathname).toBe('/projects/p1/new');
-    await router.navigate({
-      to: '/threads/$threadId',
-      params: { threadId: 't1' },
-    });
-    expect(router.state.location.pathname).toBe('/threads/t1');
   });
 });

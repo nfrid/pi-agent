@@ -68,7 +68,6 @@ export function SessionView({
   store,
   Composer,
   embedded = false,
-  onSessionReplacement,
 }: {
   id: string;
   snapshot: BrowserSnapshot;
@@ -76,21 +75,15 @@ export function SessionView({
   Composer: ComponentType<ComposerProps>;
   /** Render transcript controls without the full-page agent navigation shell. */
   embedded?: boolean;
-  /** Managed thread routes handle replacement without leaving their thread URL. */
-  onSessionReplacement?: (sessionId: string) => void;
 }) {
   const navigate = useNavigate();
   const replaceSession = useCallback(
     (sessionId: string) => {
-      if (onSessionReplacement) {
-        onSessionReplacement(sessionId);
-        return;
-      }
       void navigate({
         to: `/sessions/${encodeURIComponent(sessionId)}`,
       });
     },
-    [navigate, onSessionReplacement],
+    [navigate],
   );
   const query = useQuery(sessionQueryOptions(dashboardHttpClient, id));
   const projection = useDashboardStore(

@@ -22,11 +22,5 @@ export default defineConfig({
       use: { ...devices['Pixel 5'] },
       grepInvert: /@desktop/,
     },
-    {
-      name: 'desktop-management',
-      use: { ...devices['Desktop Chrome'] },
-      testMatch: '**/management.spec.ts',
-      grep: /@desktop/,
-    },
   ],
 });

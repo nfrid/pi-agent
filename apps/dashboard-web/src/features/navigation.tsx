@@ -36,30 +36,7 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
     !pathname.includes('/new/pending/');
   const activeSessionId = pathname.startsWith('/sessions/')
     ? decodeURIComponent(pathname.split('/')[2] ?? '')
-    : pathname.startsWith('/threads/')
-      ? snapshot.runs?.find(
-          (run) =>
-            run.threadId === decodeURIComponent(pathname.split('/')[2] ?? '') &&
-            run.piSessionId,
-        )?.piSessionId
-      : undefined;
-  const hasProjects = (snapshot.projects?.length ?? 0) > 0;
-  const managedActive = (snapshot.runs ?? []).filter(
-    (run) =>
-      run.status !== 'queued' &&
-      ['preparing', 'starting', 'running'].includes(run.status),
-  ).length;
-  const managedAttention = (snapshot.threads ?? []).filter((thread) => {
-    const latest = (snapshot.runs ?? [])
-      .filter((run) => run.threadId === thread.id)
-      .sort((a, b) => b.attempt - a.attempt || b.createdAt - a.createdAt)[0];
-    return (
-      thread.status === 'needs-input' ||
-      thread.status === 'failed' ||
-      latest?.status === 'waiting' ||
-      latest?.status === 'failed'
-    );
-  }).length;
+    : undefined;
   const paletteDisabled = Boolean(
     activeSessionId &&
       snapshot.runtimes.some(
@@ -71,53 +48,12 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
   return (
     <header className="navigation-shell">
       <div className="global-tools">
-        {hasProjects && (
-          <>
-            <button
-              type="button"
-              className="header-management-link"
-              onClick={() => go('/')}
-            >
-              Projects <b>{managedAttention}</b>
-            </button>
-            <span className="header-management-count">
-              {managedActive} active ·{' '}
-              {
-                (snapshot.runs ?? []).filter((run) => run.status === 'queued')
-                  .length
-              }{' '}
-              queued
-            </span>
-          </>
-        )}
         {showGlobalNew && (
           <button
             type="button"
             className="global-new-agent"
-            aria-label={hasProjects ? 'New thread' : 'New chat'}
+            aria-label="New chat"
             onClick={() => {
-              if (hasProjects) {
-                const projectMatch = pathname.match(
-                  /^\/projects\/([^/]+)(?:\/|$)/u,
-                );
-                const threadMatch = pathname.match(
-                  /^\/threads\/([^/]+)(?:\/|$)/u,
-                );
-                const threadProjectId = threadMatch?.[1]
-                  ? snapshot.threads?.find(
-                      (thread) =>
-                        thread.id === decodeURIComponent(threadMatch[1]),
-                    )?.projectId
-                  : undefined;
-                const projectId = projectMatch?.[1]
-                  ? decodeURIComponent(projectMatch[1])
-                  : threadMatch
-                    ? threadProjectId
-                    : snapshot.projects?.[0]?.id;
-                if (projectId)
-                  go(`/projects/${encodeURIComponent(projectId)}/new`);
-                return;
-              }
               const workspaceMatch = pathname.match(/^\/workspaces\/([^/]+)$/u);
               go(
                 newChatPath(
