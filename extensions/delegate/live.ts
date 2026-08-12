@@ -103,7 +103,7 @@ function statusSnapshot(
                 surfaceBudget.remaining -= resultValueLength;
                 return { value: resultValue };
               })()
-            : {}),
+            : { valueOmitted: true }),
       }
     : undefined;
   return {

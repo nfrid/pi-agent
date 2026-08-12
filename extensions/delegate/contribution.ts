@@ -118,6 +118,8 @@ const DelegateResultSchema = Type.Object(
       Type.Literal('invalid'),
     ]),
     value: Type.Optional(DelegateStructuredResultValueSchema),
+    /** True when the bounded live surface could not include the value. */
+    valueOmitted: Type.Optional(Type.Boolean()),
     errors: Type.Optional(
       Type.Array(Type.String({ maxLength: 240 }), { maxItems: 16 }),
     ),

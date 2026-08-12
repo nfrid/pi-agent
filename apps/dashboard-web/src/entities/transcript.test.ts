@@ -786,6 +786,12 @@ describe('activity row views and virtual transcript construction', () => {
           toolCallId: 'history-success',
           toolName: 'read',
           content: [{ type: 'text', text: 'ok' }],
+          details: {
+            mode: 'single',
+            runs: [
+              { structuredResult: { valid: true, value: { outcome: 'done' } } },
+            ],
+          },
           isError: false,
         },
       },
@@ -797,6 +803,12 @@ describe('activity row views and virtual transcript construction', () => {
           toolCallId: 'history-success',
           toolName: 'read',
           content: [{ type: 'text', text: 'ok' }],
+          details: {
+            mode: 'single',
+            runs: [
+              { structuredResult: { valid: true, value: { outcome: 'done' } } },
+            ],
+          },
           isError: false,
         },
       },
@@ -844,7 +856,18 @@ describe('activity row views and virtual transcript construction', () => {
     expect(successTool).toMatchObject({
       key: 'assistant-success-message:tool:history-success',
       entry: { kind: 'tool', status: 'success' },
+      tool: {
+        result: {
+          content: [{ type: 'text', text: 'ok' }],
+          details: {
+            runs: [
+              { structuredResult: { valid: true, value: { outcome: 'done' } } },
+            ],
+          },
+        },
+      },
     });
+    expect(JSON.stringify(successTool?.raw)).toContain('"outcome":"done"');
     expect(failedTool).toMatchObject({
       entry: { kind: 'tool', status: 'error', isError: true },
     });

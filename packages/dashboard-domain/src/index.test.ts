@@ -310,6 +310,67 @@ describe('dashboard domain reducers', () => {
     });
   });
 
+  it('retains structured tool result envelopes across live updates and snapshots', () => {
+    const result = {
+      content: [{ type: 'text', text: 'structured delegate handoff' }],
+      details: {
+        mode: 'single',
+        runs: [{ name: 'Audit', structuredResult: { valid: true } }],
+      },
+    };
+    let state = hydrateTranscript([], 's');
+    state = applyTranscriptEvent(
+      state,
+      envelope(1, 1, {
+        type: 'tool.finished',
+        sessionId: 's',
+        tool: {
+          toolCallId: 'delegate-call',
+          name: 'delegate',
+          result,
+          status: 'completed',
+        },
+      }),
+    ).state;
+    expect(state.items['delegate-call']).toMatchObject({
+      name: 'delegate',
+      result,
+    });
+
+    state = applyTranscriptEvent(state, {
+      cursor: 2,
+      emittedAt: 2,
+      runtimeId: 'r',
+      runtimeEpoch: 'epoch-1',
+      runtimeSeq: 2,
+      sessionId: 's',
+      event: {
+        type: 'session.snapshot',
+        session: {
+          id: 's',
+          entriesComplete: true,
+          entries: [
+            {
+              type: 'message',
+              message: {
+                role: 'toolResult',
+                toolCallId: 'delegate-call',
+                toolName: 'delegate',
+                content: result.content,
+                details: result.details,
+              },
+            },
+          ],
+        },
+      },
+    } as never).state;
+    expect(state.items['delegate-call']).toMatchObject({
+      name: 'delegate',
+      result,
+      status: 'finished',
+    });
+  });
+
   it('derives tool associations from normalized live message content', () => {
     const state = reduceTranscriptEvent(
       hydrateTranscript([], 's'),

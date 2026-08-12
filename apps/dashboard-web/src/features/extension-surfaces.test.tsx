@@ -466,6 +466,30 @@ describe('live extension surface fixtures', () => {
     expect(markup).toContain('&quot;path&quot;: &quot;src/index.ts&quot;');
   });
 
+  it('shows an explicit notice when a bounded live result omits its value', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateStructuredResultSection
+        row={{
+          id: 'd-omitted',
+          name: 'Large audit',
+          kind: 'background',
+          state: 'success',
+          createdAt: 1,
+          allowWrites: false,
+          result: {
+            kind: 'structured',
+            status: 'valid',
+            valueOmitted: true,
+          },
+        }}
+      />,
+    );
+    expect(markup).toContain(
+      'Structured result value unavailable in this bounded live snapshot.',
+    );
+    expect(markup).not.toContain('payload-preview');
+  });
+
   it('shows structured validation errors without rendering invalid values', () => {
     const markup = renderToStaticMarkup(
       <DelegateStructuredResultSection
