@@ -85,7 +85,15 @@ describe('delegate live surface', () => {
       run,
     );
     const details = makeDetails('single', [run]);
-    expect(details.runs[0]?.activities[0]).not.toHaveProperty('toolArguments');
+    expect(details.runs[0]?.activities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          toolName: 'read',
+          toolArguments: { path: 'src/live.ts' },
+          toolResult: { lines: 42 },
+        }),
+      ]),
+    );
     store.update(id, run);
 
     const viewModel = delegateSurface(store).viewModel as {

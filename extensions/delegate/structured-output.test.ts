@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import * as delegateChild from './delegate-child';
+import { processJsonLine } from './events';
 import { DelegateJobManager } from './jobs';
 import {
   LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
@@ -187,6 +188,45 @@ describe('structured delegate output handoff', () => {
     ] as never;
     run.stderr = 'stderr-child-secret';
     run.artifact = metadata(`art_${'a'.repeat(22)}`, 20);
+    processJsonLine(
+      JSON.stringify({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'thinking_delta',
+          contentIndex: 0,
+          delta: 'structured child thinking',
+        },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'normal-1',
+        toolName: 'bash',
+        args: { command: 'printf structured' },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'normal-1',
+        toolName: 'bash',
+        result: { output: 'structured output', exitCode: 0 },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'result-1',
+        toolName: 'delegate_result',
+        result: { details: { secret: 'structured-result-secret' } },
+        isError: false,
+      }),
+      run,
+    );
     setDelegateResultSpec(run, spec);
     captureDelegateResultEvent(
       run,
@@ -195,15 +235,40 @@ describe('structured delegate output handoff', () => {
     );
     settleDelegateResult(run);
 
-    expect(JSON.stringify(makeDetails('single', [run]))).not.toMatch(
+    const details = makeDetails('single', [run]);
+    const publicActivities = details.runs[0]?.activities ?? [];
+    expect(publicActivities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'thinking',
+          transcriptText: 'structured child thinking',
+        }),
+        expect.objectContaining({
+          type: 'tool',
+          toolName: 'bash',
+          toolArguments: { command: 'printf structured' },
+          toolResult: { output: 'structured output', exitCode: 0 },
+        }),
+      ]),
+    );
+    const terminal = publicActivities.find(
+      (activity) => activity.toolName === 'delegate_result',
+    );
+    expect(terminal).toBeDefined();
+    expect(terminal).not.toHaveProperty('toolArguments');
+    expect(terminal).not.toHaveProperty('toolResult');
+    expect(JSON.stringify(details)).not.toMatch(
       /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
     );
+    expect(JSON.stringify(details)).toContain('structured child thinking');
+    expect(JSON.stringify(details)).toContain('structured output');
     const statuses = new DelegateStatusStore();
     statuses.start([run], 'foreground');
     statuses.update('ds-1', run);
     expect(JSON.stringify(statuses.list())).not.toMatch(
       /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
     );
+    expect(JSON.stringify(statuses.list())).toContain('structured output');
 
     const jobs = new DelegateJobManager();
     const started = jobs.start({
@@ -216,6 +281,8 @@ describe('structured delegate output handoff', () => {
     expect(JSON.stringify(completed)).not.toMatch(
       /earlier-child-secret|terminal-child-secret|stderr-child-secret|structured-result-secret/,
     );
+    expect(JSON.stringify(completed)).toContain('structured child thinking');
+    expect(JSON.stringify(completed)).toContain('structured output');
     await jobs.dispose();
 
     const ownerCtx = {

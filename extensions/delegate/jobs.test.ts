@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
+import { processJsonLine } from './events';
 import {
   DelegateJobManager,
   type DelegateJobResult,
@@ -72,6 +73,62 @@ describe('DelegateJobManager', () => {
       handoff: expect.stringContaining('succeeded'),
     });
     expect(manager.runningCount).toBe(0);
+    await manager.dispose();
+  });
+
+  test('persists bounded thinking and normal tool payloads in job snapshots', async () => {
+    const result = successfulResult('persist execution');
+    const run = result.runs[0];
+    if (!run) throw new Error('missing run');
+    processJsonLine(
+      JSON.stringify({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'thinking_delta',
+          contentIndex: 0,
+          delta: 'job thinking',
+        },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'job-tool',
+        toolName: 'bash',
+        args: { command: 'printf job' },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'job-tool',
+        toolName: 'bash',
+        result: { output: 'job output', exitCode: 0 },
+      }),
+      run,
+    );
+    const manager = new DelegateJobManager();
+    const started = manager.start({
+      mode: 'single',
+      tasks: [run.task],
+      execute: async () => result,
+    });
+    const settled = await manager.peek(started.id, 1_000);
+    const persisted = settled.runs?.[0];
+    expect(persisted?.activities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'thinking',
+          transcriptText: 'job thinking',
+        }),
+        expect.objectContaining({
+          toolArguments: { command: 'printf job' },
+          toolResult: { output: 'job output', exitCode: 0 },
+        }),
+      ]),
+    );
     await manager.dispose();
   });
 

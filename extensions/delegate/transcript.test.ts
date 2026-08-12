@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { processJsonLine } from './events';
+import { getDetails } from './render-utils';
+import { makeDetails } from './tool-result';
 import {
   latestDelegateDetails,
   transcriptText,
@@ -74,6 +77,59 @@ describe('delegate transcript viewer data', () => {
     expect(transcriptVisibleRows(24)).toBe(15);
     expect(transcriptVisibleRows(24) + 4).toBeLessThanOrEqual(
       Math.floor(24 * 0.8),
+    );
+  });
+
+  it('retains bounded thinking and tool payloads through public details replay', () => {
+    const run = createRun('inspect persisted execution');
+    processJsonLine(
+      JSON.stringify({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'thinking_delta',
+          contentIndex: 0,
+          delta: 'bounded child thinking',
+        },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_start',
+        toolCallId: 'bash-1',
+        toolName: 'bash',
+        args: { command: 'printf persisted' },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolCallId: 'bash-1',
+        toolName: 'bash',
+        result: { output: 'persisted output', exitCode: 0 },
+      }),
+      run,
+    );
+
+    const persisted = JSON.parse(JSON.stringify(makeDetails('single', [run])));
+    const replayed = getDetails({ details: persisted });
+    const replayedRun = replayed?.runs[0];
+    expect(replayedRun?.activities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'thinking',
+          transcriptText: 'bounded child thinking',
+        }),
+        expect.objectContaining({
+          type: 'tool',
+          toolArguments: { command: 'printf persisted' },
+          toolResult: { output: 'persisted output', exitCode: 0 },
+        }),
+      ]),
+    );
+    expect(transcriptText(replayed?.runs ?? [])).toContain(
+      'bounded child thinking',
     );
   });
 

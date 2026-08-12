@@ -43,9 +43,9 @@ export interface DelegatedActivity {
   label: string;
   status: 'running' | 'completed' | 'error';
   latestText?: string;
-  /** Bounded complete thinking block; kept non-enumerable on run details. */
+  /** Bounded complete thinking block; serialized into human-facing details. */
   transcriptText?: string;
-  /** Tool fields are private on the run and projected only to the live surface. */
+  /** Bounded tool fields; serialized into human-facing details, not parent content. */
   toolName?: string;
   toolArguments?: unknown;
   toolResult?: unknown;

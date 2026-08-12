@@ -110,6 +110,33 @@ describe('output', () => {
     );
   });
 
+  test('does not copy retained child execution activity into parent content', () => {
+    const report = 'Outcome: done\nConclusion: only the handoff matters';
+    const baseline = reportedRun(report);
+    const withActivity = reportedRun(report);
+    withActivity.activities.push({
+      type: 'thinking',
+      label: 'thinking',
+      status: 'completed',
+      transcriptText: 'private child reasoning',
+    });
+    withActivity.activities.push({
+      type: 'tool',
+      label: 'bash',
+      status: 'completed',
+      toolName: 'bash',
+      toolArguments: { command: 'private child command' },
+      toolResult: { output: 'private child output' },
+    });
+
+    expect(buildParentHandoff([withActivity])).toBe(
+      buildParentHandoff([baseline]),
+    );
+    expect(buildParentHandoff([withActivity])).not.toContain(
+      'private child reasoning',
+    );
+  });
+
   test('keeps evidence and risks in the mandatory envelope', () => {
     const handoff = buildParentHandoff(
       [
