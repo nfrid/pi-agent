@@ -152,8 +152,13 @@ array indexes must use `*`, not a numeric segment. The only wildcard is `*`,
 and it may select an array's items (`/findings/*/title`). A named view cannot
 use `/`, because that would expose the complete result. Projection paths select
 the compact parent completion; named view paths select separate JSON artifacts.
-The full result
-is never copied into parent content or enumerable delegate details.
+The full result is never copied into parent content or enumerable delegate
+details. Human-facing delegate details, job snapshots, status surfaces, and
+dashboard transcript events carry only the bounded parent-visible projection;
+when its aggregate value budget cannot fit, they set `valueOmitted` and render
+an explicit unavailable notice. The complete validated result remains
+owner-session artifact-only (including named views), so these UI bounds never
+weaken artifact redaction.
 
 The global bounds are 16 KiB schema bytes, depth 8, 128 schema nodes, 64 array
 items, 4,096 Unicode characters per string, 64 KiB result bytes, 32 projection

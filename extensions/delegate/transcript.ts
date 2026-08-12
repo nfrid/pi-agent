@@ -113,7 +113,9 @@ export function transcriptText(runs: readonly DelegatedRun[]): string {
     const structuredText = structured
       ? structured.valid && structured.value !== undefined
         ? `Structured result:\n${formatStructuredResult(structured.value, MAX_ENTRY_CHARS)}`
-        : `Structured result invalid${structured.errors.length ? `:\n${structured.errors.join('\n')}` : '.'}`
+        : structured.valid && structured.valueOmitted
+          ? 'Structured result value unavailable in bounded public details.'
+          : `Structured result invalid${structured.errors.length ? `:\n${structured.errors.join('\n')}` : '.'}`
       : undefined;
     return `Subagent ${index + 1} · ${run.name} · ${run.state}\n${[body, structuredText].filter(Boolean).join('\n\n') || '(no transcript captured)'}`;
   });

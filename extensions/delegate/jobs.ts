@@ -7,6 +7,7 @@ import type {
 import { copyDelegateLifecycle } from './lifecycle';
 import { buildParentHandoff } from './output';
 import {
+  boundPublicStructuredRuns,
   serializeDelegateRunForPublic,
   serializeDelegateRunForStaleSession,
 } from './structured-result';
@@ -364,14 +365,20 @@ function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
     createdAt: record.createdAt,
     startedAt: record.startedAt,
     settledAt: record.settledAt,
-    runs: (record.snapshotRuns ?? record.runs)?.map((run) => {
-      const projected = serializeDelegateRunForPublic(run);
-      // JSON-like job snapshots clone the enumerable run, so retain the
-      // harness record for another trusted snapshot/owner-session projection.
-      const clone = { ...projected };
-      copyDelegateLifecycle(projected, clone);
-      return clone;
-    }),
+    runs: (() => {
+      const projectedRuns = (record.snapshotRuns ?? record.runs)?.map((run) =>
+        serializeDelegateRunForPublic(run),
+      );
+      if (!projectedRuns) return undefined;
+      const boundedRuns = boundPublicStructuredRuns(projectedRuns);
+      return boundedRuns.map((projected) => {
+        // JSON-like job snapshots clone the enumerable run, so retain the
+        // harness record for another trusted snapshot/owner-session projection.
+        const clone = { ...projected };
+        copyDelegateLifecycle(projected, clone);
+        return clone;
+      });
+    })(),
     handoff: record.handoff,
     error: record.error,
     deliveryEpoch: record.deliveryEpoch,

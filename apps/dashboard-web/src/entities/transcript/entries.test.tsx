@@ -52,7 +52,7 @@ describe('expanded transcript tool rows', () => {
       {
         label: 'Invalid audit · Run 1',
         status: 'invalid',
-        errors: ['/: expected result'],
+        errors: ['/: expected result', '/: expected result'],
       },
       {
         label: 'Omitted audit · Run 1',
@@ -65,6 +65,7 @@ describe('expanded transcript tool rows', () => {
     );
 
     expect(markup).toContain('/: expected result');
+    expect(markup.match(/\/: expected result/g)).toHaveLength(2);
     expect(markup).toContain(
       'Structured result value unavailable in this bounded snapshot.',
     );

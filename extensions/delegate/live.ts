@@ -97,7 +97,9 @@ function statusSnapshot(
             }
           : {}),
         ...(resultValue === undefined
-          ? {}
+          ? status.result.valueOmitted
+            ? { valueOmitted: true }
+            : {}
           : resultValueLength <= surfaceBudget.remaining
             ? (() => {
                 surfaceBudget.remaining -= resultValueLength;

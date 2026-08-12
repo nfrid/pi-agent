@@ -2,7 +2,6 @@ import type { DelegateResult } from './contribution';
 import { cloneDelegateLifecycle } from './lifecycle';
 import {
   getDelegateResultSpec,
-  getUserVisibleStructuredResult,
   serializeDelegateRunForPublic,
 } from './structured-result';
 import type {
@@ -165,7 +164,7 @@ function isSettled(state: DelegateRunState): boolean {
 }
 
 function resultProjection(run: DelegatedRun): DelegateResult | undefined {
-  const captured = getUserVisibleStructuredResult(run);
+  const captured = serializeDelegateRunForPublic(run).structuredResult;
   if (!getDelegateResultSpec(run) && !captured) return undefined;
   if (!isSettled(getRunState(run)))
     return { kind: 'structured', status: 'pending' };
@@ -181,6 +180,7 @@ function resultProjection(run: DelegatedRun): DelegateResult | undefined {
     ...(captured.valid && captured.value !== undefined
       ? { value: captured.value }
       : {}),
+    ...(captured.valid && captured.valueOmitted ? { valueOmitted: true } : {}),
     ...(captured.errors.length ? { errors: [...captured.errors] } : {}),
   };
 }

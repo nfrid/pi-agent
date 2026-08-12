@@ -1,5 +1,8 @@
 import { ensureDelegateLifecycle, setDelegateLifecycle } from './lifecycle';
-import { validateStructuredResult } from './structured-result-project';
+import {
+  projectStructuredResult,
+  validateStructuredResult,
+} from './structured-result-project';
 import {
   type NormalizedDelegateResultSpec,
   STRUCTURED_RESULT_CAPS,
@@ -142,11 +145,20 @@ export function settleDelegateResult(
     };
   }
   settlements.set(run, validation);
-  // Copy only the validated settlement into the enumerable human-facing run.
-  // Invalid attempts intentionally have no value field.
+  // Copy only the parent-visible projection into the enumerable human-facing
+  // run. The complete validated value stays in the private settlement for
+  // artifact publication and named views; invalid attempts intentionally have
+  // no value field.
+  const projection = validation.valid
+    ? projectStructuredResult(spec, validation.value)
+    : undefined;
   run.structuredResult = {
     valid: validation.valid,
-    ...(validation.valid ? { value: validation.value } : {}),
+    ...(projection?.value === undefined
+      ? validation.valid
+        ? { valueOmitted: true }
+        : {}
+      : { value: projection.value }),
     errors: [...validation.errors],
   };
   if (!validation.valid) {

@@ -588,7 +588,15 @@ describe('activity row views and virtual transcript construction', () => {
       message: {
         messageId: 'delegate-result-live',
         role: 'custom',
-        content: '# Background delegate job dj-1 (UX audit) success',
+        content: `# Background delegate job dj-1 (UX audit) success
+
+Delegated results: 1 run(s)
+
+Status: success
+Structured result: valid
+Projection: {"outcome":"done"}
+Projection omissions: /findings/*/evidence
+Note: Earlier attempt completed after recovery.`,
         phase: 'finished',
         data: {
           customType: 'delegate-job-result',
@@ -622,6 +630,7 @@ describe('activity row views and virtual transcript construction', () => {
       kind: 'delegate-result',
       label: 'Delegate finished · UX audit',
       status: 'success',
+      content: expect.stringContaining('Status: success'),
       structuredResults: [
         {
           label: 'UX audit',
@@ -633,6 +642,15 @@ describe('activity row views and virtual transcript construction', () => {
         },
       ],
     });
+    expect(
+      event?.kind === 'delegate-result' ? event.content : '',
+    ).not.toContain('Projection: {"outcome":"done"}');
+    expect(event?.kind === 'delegate-result' ? event.content : '').toContain(
+      'Note: Earlier attempt completed after recovery.',
+    );
+    expect(event?.kind === 'delegate-result' ? event.content : '').toContain(
+      'Projection omissions: /findings/*/evidence',
+    );
   });
 
   it('labels batch delegate structured results and preserves invalid or omitted states', () => {
@@ -700,6 +718,49 @@ describe('activity row views and virtual transcript construction', () => {
         },
       ],
     });
+  });
+
+  it('bounds oversized and batch structured payloads with explicit omission', () => {
+    const oversized = Array.from({ length: 16 }, (_, jobIndex) => ({
+      name: `Audit ${jobIndex + 1}`,
+      state: 'success',
+      runs: Array.from({ length: 5 }, (_, runIndex) => {
+        const index = jobIndex * 5 + runIndex;
+        return {
+          structuredResult: {
+            valid: true,
+            value:
+              index === 0
+                ? { visible: 'x'.repeat(70 * 1024) }
+                : { visible: `bounded-${index + 1}` },
+          },
+        };
+      }),
+    }));
+    const [item] = toTranscriptEntries([
+      {
+        type: 'custom_message',
+        customType: 'delegate-job-result',
+        display: true,
+        content: 'Batch delegates finished.',
+        details: { jobs: oversized },
+      },
+    ]);
+    const event = item?.event;
+    expect(event?.kind).toBe('delegate-result');
+    if (event?.kind !== 'delegate-result') return;
+    expect(event.structuredResults).toHaveLength(64);
+    expect(event.structuredResults?.[0]).toMatchObject({
+      status: 'valid',
+      valueOmitted: true,
+    });
+    expect(event.structuredResults?.[1]).toMatchObject({
+      status: 'valid',
+      value: { visible: 'bounded-2' },
+    });
+    expect(JSON.stringify(event.structuredResults)).not.toContain(
+      'x'.repeat(70 * 1024),
+    );
   });
 
   it('projects uncompleted assistant tool calls as pending activity', () => {

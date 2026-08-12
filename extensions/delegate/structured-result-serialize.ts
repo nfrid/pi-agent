@@ -4,8 +4,16 @@ import {
   getDelegateLifecycle,
   hydrateDelegateLifecycle,
 } from './lifecycle';
-import { getDelegateResultSpec } from './structured-result-channel';
-import type { DelegatedActivity, DelegatedRun } from './types';
+import {
+  getDelegateResultSpec,
+  getSettledDelegateResult,
+} from './structured-result-channel';
+import { projectStructuredResult } from './structured-result-project';
+import type {
+  DelegatedActivity,
+  DelegatedRun,
+  DelegateStructuredResult,
+} from './types';
 
 /**
  * Format a bounded structured value as a small, schema-agnostic outline for
@@ -136,9 +144,89 @@ function publicActivities(run: DelegatedRun): DelegatedActivity[] {
 }
 
 /**
- * Serialize a run for any public details/status/job surface. The validated
- * structured result is retained in its bounded human-facing field; child
- * messages, stderr, activity records for the terminating result, and
+ * The owner settlement is complete evidence for artifact publication, but it
+ * is not a public details value. Public run records carry only the declared
+ * parent projection, including an explicit omission when that projection is
+ * empty or unavailable after persistence.
+ */
+export const PUBLIC_STRUCTURED_RESULT_CAPS = {
+  aggregateBytes: 64 * 1024,
+  maxValues: 64,
+} as const;
+
+function structuredValueBytes(value: unknown): number | undefined {
+  try {
+    return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+/** Bound a batch of already-public runs before it enters job/session details. */
+export function boundPublicStructuredRuns(
+  runs: readonly DelegatedRun[],
+): DelegatedRun[] {
+  let remainingBytes = PUBLIC_STRUCTURED_RESULT_CAPS.aggregateBytes;
+  let values = 0;
+  return runs.map((run) => {
+    const structured = run.structuredResult;
+    if (!structured?.valid || structured.value === undefined) return run;
+    const bytes = structuredValueBytes(structured.value);
+    if (
+      bytes !== undefined &&
+      values < PUBLIC_STRUCTURED_RESULT_CAPS.maxValues &&
+      bytes <= remainingBytes
+    ) {
+      values++;
+      remainingBytes -= bytes;
+      return run;
+    }
+    const { value: _value, ...withoutValue } = structured;
+    return {
+      ...run,
+      structuredResult: { ...withoutValue, valueOmitted: true },
+    };
+  });
+}
+
+function publicStructuredResult(
+  run: DelegatedRun,
+): DelegateStructuredResult | undefined {
+  const captured = getSettledDelegateResult(run) ?? run.structuredResult;
+  if (!captured) return undefined;
+  if (!captured.valid)
+    return {
+      valid: false,
+      errors: [...captured.errors],
+    };
+
+  const spec = getDelegateResultSpec(run);
+  if (!spec)
+    return {
+      valid: true,
+      ...(captured.value === undefined
+        ? { valueOmitted: true }
+        : { value: captured.value }),
+      errors: [...captured.errors],
+    };
+
+  const projection =
+    captured.value === undefined
+      ? undefined
+      : projectStructuredResult(spec, captured.value);
+  return {
+    valid: true,
+    ...(projection?.value === undefined
+      ? { valueOmitted: true }
+      : { value: projection.value }),
+    errors: [...captured.errors],
+  };
+}
+
+/**
+ * Serialize a run for any public details/status/job surface. Only the
+ * parent-visible structured result projection is retained in its bounded
+ * human-facing field; child messages, stderr, activity records for the terminating result, and
  * child-shaped lifecycle fields never cross this boundary; lifecycle
  * projections come only from harness state.
  */
@@ -152,23 +240,38 @@ export function serializeDelegateRunForPublic(
   const {
     lifecycle: _childLifecycle,
     errorMessage: _errorMessage,
+    structuredResult: _structuredResult,
     ...base
   } = run;
+  const projectedStructuredResult = publicStructuredResult(run);
   const publicRun: DelegatedRun = structured
     ? {
         ...base,
         messages: [],
         stderr: '',
         activities: publicActivities(run),
+        ...(projectedStructuredResult
+          ? { structuredResult: projectedStructuredResult }
+          : {}),
         ...(lifecycle || !run.errorMessage
           ? {}
           : { errorMessage: run.errorMessage }),
       }
     : lifecycle
-      ? { ...base, stderr: '', activities: publicActivities(run) }
+      ? {
+          ...base,
+          stderr: '',
+          activities: publicActivities(run),
+          ...(projectedStructuredResult
+            ? { structuredResult: projectedStructuredResult }
+            : {}),
+        }
       : {
           ...base,
           activities: publicActivities(run),
+          ...(projectedStructuredResult
+            ? { structuredResult: projectedStructuredResult }
+            : {}),
           ...(run.errorMessage ? { errorMessage: run.errorMessage } : {}),
         };
   const projected = lifecycle

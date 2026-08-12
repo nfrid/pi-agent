@@ -96,7 +96,15 @@ describe('structured delegate output handoff', () => {
     );
     expect(handoff).toContain('Projection: {"title":"visible title"}');
     expect(handoff).not.toContain('artifact-only secret');
-    expect(JSON.stringify({ mode: 'single', runs: [run] })).toContain(
+    expect(JSON.stringify({ mode: 'single', runs: [run] })).not.toContain(
+      'artifact-only secret',
+    );
+    expect(makeDetails('single', [run]).runs[0]?.structuredResult).toEqual({
+      valid: true,
+      value: { title: 'visible title' },
+      errors: [],
+    });
+    expect(JSON.stringify(makeDetails('single', [run]))).not.toContain(
       'artifact-only secret',
     );
     expect(entries).toHaveLength(1);
@@ -199,9 +207,13 @@ describe('structured delegate output handoff', () => {
     const spec = normalizeDelegateResultSpec({
       schema: {
         type: 'object',
-        properties: { secret: { type: 'string' } },
-        required: ['secret'],
+        properties: {
+          public: { type: 'string' },
+          secret: { type: 'string' },
+        },
+        required: ['public', 'secret'],
       },
+      projection: ['/public'],
     });
     if (!spec) throw new Error('expected normalized result spec');
     const run = createRun('public structured result');
@@ -252,7 +264,12 @@ describe('structured delegate output handoff', () => {
         type: 'tool_execution_end',
         toolCallId: 'result-1',
         toolName: 'delegate_result',
-        result: { details: { secret: 'structured-result-secret' } },
+        result: {
+          details: {
+            public: 'structured-result-public',
+            secret: 'structured-result-secret',
+          },
+        },
         isError: false,
       }),
       run,
@@ -260,7 +277,12 @@ describe('structured delegate output handoff', () => {
     setDelegateResultSpec(run, spec);
     captureDelegateResultEvent(
       run,
-      { details: { secret: 'structured-result-secret' } },
+      {
+        details: {
+          public: 'structured-result-public',
+          secret: 'structured-result-secret',
+        },
+      },
       false,
     );
     settleDelegateResult(run);
@@ -287,7 +309,8 @@ describe('structured delegate output handoff', () => {
     expect(terminal).toBeDefined();
     expect(terminal).not.toHaveProperty('toolArguments');
     expect(terminal).not.toHaveProperty('toolResult');
-    expect(JSON.stringify(details)).toContain('structured-result-secret');
+    expect(JSON.stringify(details)).toContain('structured-result-public');
+    expect(JSON.stringify(details)).not.toContain('structured-result-secret');
     expect(JSON.stringify(details)).not.toMatch(
       /earlier-child-secret|terminal-child-secret|stderr-child-secret/,
     );
@@ -297,6 +320,9 @@ describe('structured delegate output handoff', () => {
     statuses.start([run], 'foreground');
     statuses.update('ds-1', run);
     expect(JSON.stringify(statuses.list())).toContain(
+      'structured-result-public',
+    );
+    expect(JSON.stringify(statuses.list())).not.toContain(
       'structured-result-secret',
     );
     expect(JSON.stringify(statuses.list())).not.toMatch(
@@ -312,7 +338,8 @@ describe('structured delegate output handoff', () => {
       execute: async () => ({ runs: [run], handoff: 'bounded' }),
     });
     const completed = await jobs.peek(started.id, 1_000);
-    expect(JSON.stringify(completed)).toContain('structured-result-secret');
+    expect(JSON.stringify(completed)).toContain('structured-result-public');
+    expect(JSON.stringify(completed)).not.toContain('structured-result-secret');
     expect(JSON.stringify(completed)).not.toMatch(
       /earlier-child-secret|terminal-child-secret|stderr-child-secret/,
     );
@@ -331,6 +358,9 @@ describe('structured delegate output handoff', () => {
       'owner-session',
     );
     expect(JSON.stringify(ownerResult.details)).toContain(
+      'structured-result-public',
+    );
+    expect(JSON.stringify(ownerResult.details)).not.toContain(
       'structured-result-secret',
     );
     expect(JSON.stringify(ownerResult.details)).not.toMatch(
@@ -347,6 +377,9 @@ describe('structured delegate output handoff', () => {
       'owner-session',
     );
     expect(JSON.stringify(foreignResult.details)).toContain(
+      'structured-result-public',
+    );
+    expect(JSON.stringify(foreignResult.details)).not.toContain(
       'structured-result-secret',
     );
     expect(JSON.stringify(foreignResult.details)).not.toMatch(
