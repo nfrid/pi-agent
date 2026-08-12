@@ -23,17 +23,15 @@ import {
 import { Button as AriaButton } from 'react-aria-components';
 import { newChatPath, useDashboardNavigate } from '../routes/navigation';
 import { AgentThreadNav } from './agent-thread-nav';
-import { MarkdownComposerEditor } from './composer';
-import {
-  ImageAttachmentInput,
-  ImageAttachmentPreviews,
-  useImageAttachments,
-} from './composer/attachments';
 import {
   ComposerModelControl,
+  ComposerRichSurface,
   ComposerThinkingControl,
-} from './composer/controls';
-import { ComposerRichSurface } from './composer/shell';
+  ImageAttachmentInput,
+  ImageAttachmentPreviews,
+  MarkdownComposerEditor,
+  useImageAttachments,
+} from './composer/public';
 import {
   configuredModelOptions,
   modelOptionValue,
