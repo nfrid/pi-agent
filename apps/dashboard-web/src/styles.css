@@ -5061,6 +5061,7 @@ details.session-event {
   .activity-step-dot,
 .session-page[data-runtime-paused] .tool-detail.step-pending .activity-step-dot,
 .session-page[data-runtime-paused] .surface-running .surface-state,
+.session-page[data-runtime-paused] .live-compaction-event .session-event-icon,
 .session-page[data-runtime-paused] .working-glyph,
 .session-page[data-runtime-paused] .compacting-glyph {
   animation: none;

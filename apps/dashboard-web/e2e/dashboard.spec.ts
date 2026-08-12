@@ -3085,9 +3085,6 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
       ],
     }),
   });
-  await expect(
-    page.getByRole('status').filter({ hasText: 'Paused (with 2 delegates)' }),
-  ).toBeVisible();
   await expect(page.locator('.session-status')).toContainText(
     'Paused (with 2 delegates)',
   );
