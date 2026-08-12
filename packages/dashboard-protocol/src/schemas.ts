@@ -1058,6 +1058,8 @@ export const DashboardEventEnvelopeSchema = Type.Object(
     runtimeEpoch: Type.Optional(IdentifierSchema),
     runtimeSeq: Type.Optional(Type.Integer({ minimum: 0 })),
     sessionId: Type.Optional(IdentifierSchema),
+    /** Narrow lifecycle upsert; full unread state remains snapshot-owned. */
+    notification: Type.Optional(NotificationEventSchema),
     event: BridgeEventSchema,
   },
   { additionalProperties: false },

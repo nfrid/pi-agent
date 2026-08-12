@@ -136,6 +136,64 @@ describe('runtime registry', () => {
     }
   });
 
+  it('reports registration and offline ordering provenance across reconnects', async () => {
+    const changes: import('./runtime-registry.js').RegistryChange[] = [];
+    const registry = new RuntimeRegistry({
+      expectedToken: () => true,
+      onChange: (change) => changes.push(change),
+    });
+    const first = new PassThrough();
+    registry.accept(first as never);
+    first.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    expect(changes[0]).toMatchObject({
+      kind: 'registered',
+      reconnected: false,
+      runtimeEpoch: expect.any(String),
+      runtimeSeq: 1,
+    });
+    first.destroy();
+    const offline = await eventually(() =>
+      changes.find((change) => change.kind === 'offline'),
+    );
+    expect(offline).toMatchObject({
+      runtimeEpoch: (changes[0] as { runtimeEpoch: string }).runtimeEpoch,
+      runtimeSeq: 2,
+    });
+
+    const replacement = new PassThrough();
+    registry.accept(replacement as never);
+    replacement.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 7,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: { ...snapshot, liveState: 'working' },
+        },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1')?.liveState === 'working');
+    expect(changes.at(-1)).toMatchObject({
+      kind: 'registered',
+      reconnected: true,
+      runtimeEpoch: expect.any(String),
+      runtimeSeq: 7,
+    });
+    expect((changes.at(-1) as { runtimeEpoch: string }).runtimeEpoch).not.toBe(
+      (changes[0] as { runtimeEpoch: string }).runtimeEpoch,
+    );
+    replacement.destroy();
+    registry.close();
+  });
+
   it('allows the same managed runtime identity to reconnect after extension reload', async () => {
     const registry = new RuntimeRegistry({ expectedToken: () => true });
     const first = new PassThrough();

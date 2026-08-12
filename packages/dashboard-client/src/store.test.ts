@@ -399,6 +399,83 @@ describe('DashboardLiveStore', () => {
     });
   });
 
+  it('applies lifecycle deltas without replacing the runtime shell', () => {
+    const store = new DashboardLiveStore();
+    const runtime = {
+      runtimeId: 'runtime-1',
+      ownership: 'external',
+      pid: 10,
+      cwd: '/tmp/old',
+      liveState: 'idle',
+      online: true,
+      pendingInteractions: [],
+      session: {
+        id: 'session-1',
+        entries: [{ type: 'message', id: 'existing' }],
+      },
+    };
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      runtimes: [runtime],
+      sessions: [{ id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 }],
+    } as unknown as BrowserSnapshot);
+
+    store.acceptStreamRecord({
+      cursor: 2,
+      emittedAt: 2,
+      runtimeId: 'runtime-1',
+      runtimeEpoch: 'epoch-a',
+      runtimeSeq: 2,
+      sessionId: 'session-1',
+      notification: {
+        id: 'offline-1',
+        kind: 'runtime-exited',
+        title: 'Disconnected',
+        body: 'Runtime went offline',
+        createdAt: 2,
+      },
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'idle',
+        snapshot: { online: false, lastSeenAt: 2 },
+      },
+    } as StreamRecord);
+    expect(store.getSnapshot().runtimesById['runtime-1']).toMatchObject({
+      runtimeId: 'runtime-1',
+      online: false,
+      session: { id: 'session-1', entries: [{ id: 'existing' }] },
+    });
+    expect(store.getSnapshot().notificationsById['offline-1']).toBeDefined();
+
+    store.acceptStreamRecord({
+      cursor: 3,
+      emittedAt: 3,
+      runtimeId: 'runtime-1',
+      runtimeEpoch: 'epoch-b',
+      runtimeSeq: 1,
+      sessionId: 'session-1',
+      event: {
+        type: 'runtime.hello',
+        protocolVersion: 1,
+        snapshot: {
+          ...runtime,
+          cwd: '/tmp/new',
+          liveState: 'working',
+          online: true,
+          session: { id: 'session-1', entries: [], entriesComplete: false },
+        },
+      },
+    } as StreamRecord);
+    expect(store.getSnapshot().runtimesById['runtime-1']).toMatchObject({
+      runtimeId: 'runtime-1',
+      cwd: '/tmp/new',
+      liveState: 'working',
+      online: true,
+      session: { id: 'session-1', entries: [], entriesComplete: false },
+    });
+    expect(store.getSnapshot().sessionChangeById['session-1']).toBe(1);
+  });
+
   it('retains runtime epoch ordering across no-snapshot browser events', () => {
     const store = new DashboardLiveStore();
     const runtime = {

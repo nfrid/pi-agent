@@ -467,13 +467,20 @@ describe('dashboard protocol', () => {
         runtimeEpoch: 'epoch-1',
         runtimeSeq: 1,
         sessionId: 'session-1',
+        notification: {
+          id: 'notification-1',
+          kind: 'runtime-exited',
+          title: 'Disconnected',
+          body: 'Runtime went offline',
+          createdAt: 100,
+        },
         event: {
           type: 'message.updated',
           sessionId: 'session-1',
           message,
         },
-      }).cursor,
-    ).toBe(1);
+      }).notification?.id,
+    ).toBe('notification-1');
     expect(
       parseDashboardStreamMessage({
         cursor: 2,

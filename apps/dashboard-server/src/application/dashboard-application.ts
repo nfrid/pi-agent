@@ -29,6 +29,9 @@ export interface ApplicationChange {
   runtimeId?: string;
   runtimeEpoch?: string;
   runtimeSeq?: number;
+  sessionId?: string;
+  /** Narrow lifecycle upsert; full unread state remains bootstrap/replay-gap data. */
+  notification?: NotificationEvent;
   snapshot?: RuntimeSnapshot;
 }
 
@@ -156,20 +159,59 @@ export class DashboardApplication {
     if (this.notifications.shouldPersistRuntime(change))
       this.metadata.saveRuntime(change.snapshot);
     this.manager.onRegistryChange(change);
-    this.notifications.handle(change);
-    return change.kind === 'event'
-      ? {
-          type: 'event',
-          event: change.event,
-          runtimeId: change.runtimeId,
-          ...(change.runtimeEpoch === undefined
-            ? {}
-            : { runtimeEpoch: change.runtimeEpoch }),
-          ...(change.runtimeSeq === undefined
-            ? {}
-            : { runtimeSeq: change.runtimeSeq }),
-        }
-      : { type: 'snapshot', snapshot: change.snapshot };
+    const notification = this.notifications.handle(change);
+    const provenance = {
+      ...(change.runtimeEpoch === undefined
+        ? {}
+        : { runtimeEpoch: change.runtimeEpoch }),
+      ...(change.runtimeSeq === undefined
+        ? {}
+        : { runtimeSeq: change.runtimeSeq }),
+    };
+    if (change.kind === 'registered' && change.reconnected) {
+      const snapshot = {
+        ...change.snapshot,
+        session: {
+          ...change.snapshot.session,
+          entries: [],
+          entriesComplete: false,
+        },
+      };
+      return {
+        type: 'event',
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+        runtimeId: snapshot.runtimeId,
+        sessionId: snapshot.session.id,
+        ...provenance,
+      };
+    }
+    if (change.kind === 'offline')
+      return {
+        type: 'event',
+        event: {
+          type: 'runtime.stateChanged',
+          state: change.snapshot.liveState,
+          snapshot: {
+            online: false,
+            ...(change.snapshot.lastSeenAt === undefined
+              ? {}
+              : { lastSeenAt: change.snapshot.lastSeenAt }),
+          },
+        },
+        runtimeId: change.snapshot.runtimeId,
+        sessionId: change.snapshot.session.id,
+        ...provenance,
+        ...(notification === undefined ? {} : { notification }),
+      };
+    if (change.kind === 'event')
+      return {
+        type: 'event',
+        event: change.event,
+        runtimeId: change.runtimeId,
+        ...provenance,
+        ...(notification === undefined ? {} : { notification }),
+      };
+    return { type: 'snapshot', snapshot: change.snapshot };
   }
 
   markNotificationRead(id: string): void {

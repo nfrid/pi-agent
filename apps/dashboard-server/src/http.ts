@@ -7,6 +7,7 @@ import {
   type BrowserSnapshot,
   isRecord,
   MAX_ID,
+  parseDashboardEventEnvelope,
   type RuntimeSnapshot,
   redactImageData,
   validateBridgeCommand,
@@ -49,12 +50,12 @@ function isSparseRuntimeSession(runtime: RuntimeSnapshot): boolean {
 
 /**
  * Browser reducers already own runtime/transcript projections for these
- * events. Session-index metadata, notifications, and runtime
- * registration/offline transitions remain snapshot-backed because they are not
- * fully represented by an event reducer.
+ * events. Session-index metadata and most notifications remain snapshot-backed;
+ * lifecycle registration/offline deltas use their small synthetic events.
  */
 function requiresBrowserSnapshot(change: RegistryChange): boolean {
-  if (change.kind !== 'event') return true;
+  if (change.kind === 'offline') return false;
+  if (change.kind === 'registered') return !change.reconnected;
   switch (change.event.type) {
     case 'runtime.stateChanged':
     case 'runtime.heartbeat':
@@ -735,7 +736,7 @@ export class DashboardServerImpl implements DashboardServer {
       try {
         streamRecord = this.eventStream.publish((cursor, emittedAt) => {
           const snapshot = includeSnapshot ? this.snapshot(cursor) : undefined;
-          return {
+          return parseDashboardEventEnvelope({
             cursor,
             emittedAt,
             event: record.event as BridgeEvent,
@@ -751,8 +752,11 @@ export class DashboardServerImpl implements DashboardServer {
             ...(record.sessionId === undefined
               ? {}
               : { sessionId: record.sessionId as string }),
+            ...(record.notification === undefined
+              ? {}
+              : { notification: record.notification }),
             ...(snapshot === undefined ? {} : { snapshot }),
-          };
+          });
         });
       } catch {
         // A malformed optional provider payload must not escape a runtime

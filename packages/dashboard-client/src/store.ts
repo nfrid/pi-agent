@@ -751,8 +751,30 @@ export class DashboardLiveStore {
               reduced.state.snapshot,
             );
         }
+      } else if (envelope.event.type === 'runtime.hello') {
+        // A reconnect hello is authoritative even if a shell was evicted while
+        // the stream was offline; keep the event reducer as the single owner.
+        const reduced = applyRuntimeEvent(
+          createRuntimeReducerState(envelope.event.snapshot),
+          envelope,
+        );
+        if (reduced.accepted) {
+          this.runtimeReducerStates.set(envelope.runtimeId, reduced.state);
+          nextState = this.installRuntimeProjection(
+            nextState,
+            reduced.state.snapshot,
+          );
+        }
       }
     }
+    if (envelope.notification)
+      nextState = {
+        ...nextState,
+        notificationsById: {
+          ...nextState.notificationsById,
+          [envelope.notification.id]: envelope.notification,
+        },
+      };
     let sessionChangeById = nextState.sessionChangeById;
     let sessionReplacementByRuntimeId = nextState.sessionReplacementByRuntimeId;
     let sessionReplacementBySessionId = nextState.sessionReplacementBySessionId;
@@ -762,6 +784,7 @@ export class DashboardLiveStore {
       (event.type === 'message.finished' ||
         event.type === 'tool.finished' ||
         event.type === 'agent.settled' ||
+        event.type === 'runtime.hello' ||
         event.type === 'session.changed' ||
         event.type === 'session.snapshot');
     if (sessionId && semanticSessionUpdate)
