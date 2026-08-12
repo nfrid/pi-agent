@@ -4,10 +4,6 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { defineExtension } from '../shared/runtime/extension';
 import {
-  clearActiveCompaction,
-  trackActiveCompaction,
-} from './compaction-control';
-import {
   directString,
   directValue,
   eventRecord,
@@ -180,14 +176,12 @@ export default defineExtension('remote-control', (pi) => {
     });
   });
   pi.on('session_before_compact', (event, ctx) => {
-    trackActiveCompaction(event.signal);
     emitCompactionStarted(runtime, ctx);
     event.signal.addEventListener('abort', () => emitState(runtime, ctx), {
       once: true,
     });
   });
   pi.on('session_compact', (_event, ctx) => {
-    clearActiveCompaction();
     emitCompactionCompleted(runtime, ctx);
   });
   pi.on('before_agent_start', (_event, ctx) => {
