@@ -131,8 +131,9 @@ interface SequenceState {
 }
 
 /**
- * Render faults tolerated before the shim is judged unsafe. One group can fail
- * on its own; a fault that keeps recurring is not a one-off.
+ * Consecutive render faults tolerated before the shim is judged unsafe. One
+ * group can fail on its own, but a successful group proves the renderer is
+ * still healthy and resets the budget.
  */
 const MAX_RENDER_FAILURES = 3;
 
@@ -520,7 +521,13 @@ export function installToolSequenceShim(
         return originalRenderOf(component, width);
       }
       if (sequence.leader !== component) return [];
-      return renderSequence(sequence, width);
+      const lines = renderSequence(sequence, width);
+      // Faults are a streak, not a lifetime allowance. Without this reset,
+      // three unrelated one-group fallbacks anywhere in a long session tear
+      // down grouping permanently even when healthy groups rendered between
+      // them.
+      failures = 0;
+      return lines;
     } catch (error) {
       // One broken group must take down neither the transcript nor the whole
       // feature: that group drops back to Pi's own rendering and the rest carry

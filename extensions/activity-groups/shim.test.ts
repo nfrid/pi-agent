@@ -584,6 +584,52 @@ describe('tool sequence shim', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it('does not accumulate isolated faults across successful groups', () => {
+    const onError = vi.fn();
+    const onWarn = vi.fn();
+    const h = harness({ onError, onWarn });
+    uninstall = installToolSequenceShim((sequence, options) => {
+      const title = sequence.items
+        .flatMap((item) =>
+          item.type === 'assistant'
+            ? item.message.content.flatMap((content) =>
+                content.type === 'text' ? [content.text] : [],
+              )
+            : [],
+        )
+        .at(0);
+      if (title?.includes('edit')) throw new Error('boom');
+      return {
+        invalidate: () => {},
+        render: () => [
+          `group:${sequence.id}:${sequence.items.length}:${options.streaming ? 'live' : 'done'}`,
+        ],
+      };
+    }, h.host);
+
+    turn(h, [{ name: 'edit' }], 'e0');
+    turn(h, [{ name: 'read' }], 'r0');
+    turn(h, [{ name: 'edit' }], 'e1');
+    turn(h, [{ name: 'read' }], 'r1');
+    turn(h, [{ name: 'edit' }], 'e2');
+    turn(h, [{ name: 'read' }], 'r2');
+
+    expect(h.render()).toEqual([
+      'assistant:Working on edit',
+      'tool:edit',
+      'group:group-2:2:done',
+      'assistant:Working on edit',
+      'tool:edit',
+      'group:group-4:2:done',
+      'assistant:Working on edit',
+      'tool:edit',
+      'group:group-6:2:live',
+    ]);
+    expect(onWarn).toHaveBeenCalledTimes(3);
+    expect(onError).not.toHaveBeenCalled();
+    expect(FakeTool.prototype.render.name).toBe('patchedToolRender');
+  });
+
   it('gives up once the faults keep coming', () => {
     const onError = vi.fn();
     const onWarn = vi.fn();
