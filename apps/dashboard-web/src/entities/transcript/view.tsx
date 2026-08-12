@@ -10,7 +10,6 @@ import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import {
   type Dispatch,
   type SetStateAction,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -19,33 +18,21 @@ import {
 import { Button as AriaButton } from 'react-aria-components';
 import { runtimePauseStatus } from '../../features/extension-surfaces';
 import { PauseIcon, PlayIcon } from '../../features/pause-icon';
-import { DashboardTime } from '../../features/timestamp';
-import { Markdown } from '../../Markdown';
 import {
   type TranscriptModelItem,
   toTranscriptEntries,
 } from '../../transcript';
-import { activityGroupPresentation, type TranscriptGroup } from './activity';
+import type { TranscriptGroup } from './activity';
 import { invokeActivityExpansion } from './activity-expansion';
-import { shouldShowActivityLead } from './activity-lead';
-import { CollapsedActivitySummary } from './activity-summary';
+import { TranscriptActivityGroup } from './activity-group';
 import { TranscriptEntry } from './entries';
-import {
-  activityGroupItemTimestamps,
-  buildTranscriptLandmarks,
-  type TranscriptLandmark,
-  transcriptItemTimestamp,
-} from './landmarks';
+import { buildTranscriptLandmarks, type TranscriptLandmark } from './landmarks';
 import { TranscriptOutline } from './outline';
 import {
   buildTranscriptGroupCoverage,
   buildVirtualTranscriptRows,
 } from './virtual-rows';
-import {
-  isNearPageBottom,
-  preserveVirtualScrollOffset,
-  restoreVirtualBottom,
-} from './virtual-scroll';
+import { useVirtualTranscriptScrollRestoration } from './virtual-scroll';
 
 export function Transcript({
   entries,
@@ -122,79 +109,24 @@ export function Transcript({
         const group = groupByStart.get(index);
         if (group) {
           const groupKey = items[group.start]?.key ?? 'unknown-group';
-          const expanded = open.has(groupKey);
-          const presentation = activityGroupPresentation(group, expanded);
           const groupItems = items.slice(group.start, group.end + 1);
-          const title = group.title;
-          const lead = items[group.start];
-          const visibleLead =
-            !lead?.preparing &&
-            lead?.role === 'assistant' &&
-            lead.text &&
-            shouldShowActivityLead(lead.text, title)
-              ? lead.text
-              : undefined;
-          const detailId = `activity-detail-${group.start}`;
           return (
-            <div
-              className={`activity-group ${presentation.className}`}
-              data-transcript-key={`group-${groupKey}`}
+            <TranscriptActivityGroup
               key={`group-${groupKey}`}
-            >
-              <AriaButton
-                type="button"
-                aria-expanded={expanded}
-                aria-controls={detailId}
-                onPress={() => {
-                  const nextExpanded = !expanded;
-                  setOpen((current) => {
-                    const next = new Set(current);
-                    nextExpanded ? next.add(groupKey) : next.delete(groupKey);
-                    return next;
-                  });
-                  invokeActivityExpansion(runtime, nextExpanded);
-                }}
-              >
-                <span className="activity-icon">{presentation.icon}</span>
-                <strong>{title}</strong>
-                <span className="sr-only">
-                  {group.toolCount} tool{group.toolCount === 1 ? '' : 's'} ·{' '}
-                  {presentation.label}
-                </span>
-                <small aria-hidden="true">{presentation.label}</small>
-                <DashboardTime
-                  className="transcript-time activity-time"
-                  timestamp={transcriptItemTimestamp(lead)}
-                />
-              </AriaButton>
-              {!expanded && (
-                <CollapsedActivitySummary
-                  group={group}
-                  items={groupItems}
-                  cwd={runtime?.cwd}
-                />
-              )}
-              {visibleLead && (
-                <div className="activity-lead">
-                  <span className="message-role">agent</span>
-                  <Markdown>{visibleLead}</Markdown>
-                </div>
-              )}
-              {expanded && (
-                <div className="activity-detail" id={detailId}>
-                  {groupItems.map((child, childIndex) => (
-                    <TranscriptEntry
-                      key={child.key}
-                      item={child}
-                      cwd={runtime?.cwd}
-                      timestampOverride={
-                        activityGroupItemTimestamps(groupItems)[childIndex]
-                      }
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
+              group={group}
+              groupKey={groupKey}
+              items={groupItems}
+              runtime={runtime}
+              expanded={open.has(groupKey)}
+              onToggle={(nextExpanded) => {
+                setOpen((current) => {
+                  const next = new Set(current);
+                  nextExpanded ? next.add(groupKey) : next.delete(groupKey);
+                  return next;
+                });
+                invokeActivityExpansion(runtime, nextExpanded);
+              }}
+            />
           );
         }
         if (groupCoverage[index]) return null;
@@ -358,183 +290,28 @@ function VirtualizedTranscript({
     if (rowIndex !== undefined)
       virtualizer.scrollToIndex(rowIndex, { align: 'start' });
   };
-  const anchorRef = useRef<{ key: string; top: number } | undefined>(undefined);
-  const bottomStuckRef = useRef(false);
-  const scrollIntentRevisionRef = useRef(0);
-  const restoreRevisionRef = useRef(0);
-  useEffect(() => {
-    const noteScrollIntent = () => {
-      scrollIntentRevisionRef.current += 1;
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest(
-          'input, textarea, [contenteditable="true"], [role="textbox"]',
-        )
-      )
-        return;
-      if (
-        [
-          'ArrowUp',
-          'ArrowDown',
-          'PageUp',
-          'PageDown',
-          'Home',
-          'End',
-          'Space',
-        ].includes(event.code)
-      )
-        noteScrollIntent();
-    };
-    window.addEventListener('wheel', noteScrollIntent, { passive: true });
-    window.addEventListener('touchmove', noteScrollIntent, { passive: true });
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.removeEventListener('wheel', noteScrollIntent);
-      window.removeEventListener('touchmove', noteScrollIntent);
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, []);
-  const captureScrollAnchor = (key: string) => {
-    const bottomStuck = isNearPageBottom(
-      document.documentElement.scrollHeight,
-      window.scrollY,
-      window.innerHeight,
-    );
-    bottomStuckRef.current = bottomStuck;
-    restoreRevisionRef.current = scrollIntentRevisionRef.current;
-    if (bottomStuck) {
-      anchorRef.current = undefined;
-      return;
-    }
-    const element = Array.from(
-      document.querySelectorAll<HTMLElement>('[data-transcript-row]'),
-    ).find((candidate) => candidate.dataset.transcriptRow === key);
-    if (element)
-      anchorRef.current = { key, top: element.getBoundingClientRect().top };
-  };
-  useLayoutEffect(() => {
-    const anchor = anchorRef.current;
-    const bottomStuck = bottomStuckRef.current;
-    const restoreRevision = restoreRevisionRef.current;
-    if (!anchor && !bottomStuck) return;
-    let measuredFrame: number | undefined;
-    const frame = window.requestAnimationFrame(() => {
-      measuredFrame = window.requestAnimationFrame(() => {
-        if (scrollIntentRevisionRef.current !== restoreRevision) {
-          anchorRef.current = undefined;
-          bottomStuckRef.current = false;
-          return;
-        }
-        if (bottomStuck) {
-          const top = restoreVirtualBottom(
-            document.documentElement.scrollHeight,
-            window.innerHeight,
-            true,
-          );
-          if (top !== undefined) window.scrollTo(0, top);
-        } else if (anchor) {
-          const element = Array.from(
-            document.querySelectorAll<HTMLElement>('[data-transcript-row]'),
-          ).find((candidate) => candidate.dataset.transcriptRow === anchor.key);
-          if (element)
-            window.scrollBy({
-              top: preserveVirtualScrollOffset(
-                anchor.top,
-                element.getBoundingClientRect().top,
-                false,
-              ),
-              left: 0,
-            });
-        }
-        anchorRef.current = undefined;
-        bottomStuckRef.current = false;
-      });
-    });
-    return () => {
-      window.cancelAnimationFrame(frame);
-      if (measuredFrame !== undefined)
-        window.cancelAnimationFrame(measuredFrame);
-    };
-  });
+  const captureScrollAnchor = useVirtualTranscriptScrollRestoration();
 
   const renderGroup = (group: TranscriptGroup) => {
     const groupKey = items[group.start]?.key ?? `group-${group.start}`;
-    const expanded = open.has(groupKey);
     const groupItems = items.slice(group.start, group.end + 1);
-    const presentation = activityGroupPresentation(group, expanded);
-    const title = group.title;
-    const lead = items[group.start];
-    const visibleLead =
-      !lead?.preparing &&
-      lead?.role === 'assistant' &&
-      lead.text &&
-      shouldShowActivityLead(lead.text, title)
-        ? lead.text
-        : undefined;
-    const detailId = `activity-detail-${group.start}`;
     return (
-      <div
-        className={`activity-group ${presentation.className}`}
-        data-transcript-key={`group-${groupKey}`}
-      >
-        <AriaButton
-          type="button"
-          aria-expanded={expanded}
-          aria-controls={detailId}
-          onPress={() => {
-            captureScrollAnchor(`group-${groupKey}`);
-            const nextExpanded = !expanded;
-            setOpen((current) => {
-              const next = new Set(current);
-              nextExpanded ? next.add(groupKey) : next.delete(groupKey);
-              return next;
-            });
-            invokeActivityExpansion(runtime, nextExpanded);
-          }}
-        >
-          <span className="activity-icon">{presentation.icon}</span>
-          <strong>{title}</strong>
-          <span className="sr-only">
-            {group.toolCount} tool{group.toolCount === 1 ? '' : 's'} ·{' '}
-            {presentation.label}
-          </span>
-          <small aria-hidden="true">{presentation.label}</small>
-          <DashboardTime
-            className="transcript-time activity-time"
-            timestamp={transcriptItemTimestamp(lead)}
-          />
-        </AriaButton>
-        {!expanded && (
-          <CollapsedActivitySummary
-            group={group}
-            items={groupItems}
-            cwd={runtime?.cwd}
-          />
-        )}
-        {visibleLead && (
-          <div className="activity-lead">
-            <span className="message-role">agent</span>
-            <Markdown>{visibleLead}</Markdown>
-          </div>
-        )}
-        {expanded && (
-          <div className="activity-detail" id={detailId}>
-            {groupItems.map((child, childIndex) => (
-              <TranscriptEntry
-                key={child.key}
-                item={child}
-                cwd={runtime?.cwd}
-                timestampOverride={
-                  activityGroupItemTimestamps(groupItems)[childIndex]
-                }
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      <TranscriptActivityGroup
+        group={group}
+        groupKey={groupKey}
+        items={groupItems}
+        runtime={runtime}
+        expanded={open.has(groupKey)}
+        captureScrollAnchor={captureScrollAnchor}
+        onToggle={(nextExpanded) => {
+          setOpen((current) => {
+            const next = new Set(current);
+            nextExpanded ? next.add(groupKey) : next.delete(groupKey);
+            return next;
+          });
+          invokeActivityExpansion(runtime, nextExpanded);
+        }}
+      />
     );
   };
 
