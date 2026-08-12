@@ -78,14 +78,15 @@ export function shutdownRemoteControlRuntime(
   stopSteeringUpdates();
   const announcesTermination =
     event.reason === 'quit' || event.reason === 'reload';
+  const isSessionReplacement = ['new', 'resume', 'fork'].includes(event.reason);
   const wasCurrent = runtime.isCurrent(ctx);
-  if (announcesTermination && wasCurrent)
+  if ((announcesTermination || isSessionReplacement) && wasCurrent)
     runtime.client.sendEvent({
       type: 'runtime.goodbye',
       reason: event.reason,
     });
   runtime.clearContext(ctx);
-  if (wasCurrent && !announcesTermination)
+  if (wasCurrent && !announcesTermination && !isSessionReplacement)
     runtime.client.sendEvent({
       type: 'runtime.stateChanged',
       state: 'idle',

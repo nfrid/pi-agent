@@ -135,7 +135,7 @@ describe('remote-control session lifecycle', () => {
     'new',
     'resume',
     'fork',
-  ])('stops the old bridge when a %s replacement tears down its extension runtime', (reason) => {
+  ])('announces %s before stopping the old bridge when a replacement tears down its extension runtime', (reason) => {
     const sendEvent = vi.fn(() => true);
     const stop = vi.fn();
     const clearContext = vi.fn();
@@ -152,10 +152,15 @@ describe('remote-control session lifecycle', () => {
 
     expect(stopSteeringUpdates).toHaveBeenCalledOnce();
     expect(clearContext).toHaveBeenCalledWith(ctx);
-    expect(stop).toHaveBeenCalledOnce();
-    expect(sendEvent).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'runtime.goodbye' }),
+    expect(sendEvent).toHaveBeenCalledTimes(1);
+    expect(sendEvent).toHaveBeenCalledWith({
+      type: 'runtime.goodbye',
+      reason,
+    });
+    expect(sendEvent.mock.invocationCallOrder[0]).toBeLessThan(
+      stop.mock.invocationCallOrder[0],
     );
+    expect(stop).toHaveBeenCalledOnce();
   });
 
   it.each(['quit', 'reload'])('announces %s and stops the bridge', (reason) => {

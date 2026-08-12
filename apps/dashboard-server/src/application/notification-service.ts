@@ -11,6 +11,12 @@ function isTranscriptEvent(change: RegistryChange): boolean {
   );
 }
 
+function isSessionReplacementGoodbye(change: RegistryChange): boolean {
+  if (change.kind !== 'event' || change.event.type !== 'runtime.goodbye')
+    return false;
+  return ['new', 'resume', 'fork'].includes(change.event.reason ?? '');
+}
+
 /** Derives durable/in-app notifications from runtime changes. */
 export class NotificationService {
   constructor(
@@ -57,7 +63,8 @@ export class NotificationService {
     }
     const shouldNotify =
       event.type === 'interaction.requested' ||
-      event.type === 'runtime.goodbye' ||
+      (event.type === 'runtime.goodbye' &&
+        !isSessionReplacementGoodbye(change)) ||
       (event.type === 'agent.settled' &&
         process.env.PI_DASHBOARD_NOTIFY_SETTLED === '1');
     if (!shouldNotify) return;
