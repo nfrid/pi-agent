@@ -155,6 +155,44 @@ describe('delegate control inbox', () => {
     expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
+  test('retries accepted feedback after sendMessage throws', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-control-retry-'));
+    roots.push(root);
+    const filePath = path.join(root, 'control.jsonl');
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({
+        id: 'feedback-retry',
+        kind: 'feedback',
+        message: 'retry me',
+        createdAt: Date.now(),
+      })}\n`,
+      'utf8',
+    );
+    const handlers = new Map<string, () => unknown>();
+    const sendMessage = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('unknown outcome');
+      })
+      .mockImplementation(() => undefined);
+    const pi = {
+      on(event: string, handler: () => unknown) {
+        handlers.set(event, handler);
+      },
+      sendMessage,
+    } as unknown as ExtensionAPI;
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    registerDelegateControl(pi, filePath);
+    handlers.get('turn_end')?.();
+    handlers.get('turn_end')?.();
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage.mock.calls[1]?.[0]).toMatchObject({
+      content: expect.stringContaining('retry me'),
+    });
+  });
+
   test('acknowledges a pause at the provider boundary and waits for resume', async () => {
     vi.useFakeTimers();
     const root = mkdtempSync(path.join(tmpdir(), 'delegate-pause-child-'));
@@ -210,6 +248,46 @@ describe('delegate control inbox', () => {
     await vi.advanceTimersByTimeAsync(100);
     await waiting;
     expect(resumed).toBe(true);
+  });
+
+  test('acknowledges pause when resume overtakes it before a provider poll', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-pause-overtake-'));
+    roots.push(root);
+    const filePath = path.join(root, 'control.jsonl');
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({
+        id: 'pause-overtaken',
+        kind: 'pause',
+        generation: 8,
+        createdAt: Date.now(),
+      })}\n${JSON.stringify({
+        id: 'resume-overtaking',
+        kind: 'resume',
+        generation: 8,
+        createdAt: Date.now(),
+      })}\n`,
+      'utf8',
+    );
+    const handlers = new Map<string, () => unknown>();
+    const pi = {
+      on(event: string, handler: () => unknown) {
+        handlers.set(event, handler);
+      },
+      sendMessage: vi.fn(),
+    } as unknown as ExtensionAPI;
+    const output = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    registerDelegateControl(pi, filePath);
+    await handlers.get('before_provider_request')?.();
+    expect(output).toHaveBeenCalledWith(
+      expect.stringContaining('"controlId":"pause-overtaken"'),
+    );
+    expect(output).toHaveBeenCalledWith(
+      expect.stringContaining('"controlId":"resume-overtaking"'),
+    );
   });
 
   test('observes resume appended after an acknowledged pause is truncated', async () => {

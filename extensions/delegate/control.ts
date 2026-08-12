@@ -320,6 +320,8 @@ export function registerDelegateControl(
         pendingPause = request;
       } else if (request.kind === 'resume') {
         if (request.generation === pausedGeneration) {
+          if (pendingPause) acknowledge(pendingPause);
+          acknowledgedGeneration = pausedGeneration;
           pausedGeneration = undefined;
           pendingPause = undefined;
         }
@@ -329,17 +331,20 @@ export function registerDelegateControl(
     return conversational;
   };
 
+  let retryConversational: DelegateControlRequest[] = [];
   const deliver = () => {
-    const requests = consume();
+    const requests = [...retryConversational, ...consume()];
     if (requests.length === 0) return;
     try {
       pi.sendMessage(controlMessage(requests), {
         deliverAs: 'steer',
         triggerTurn: true,
       });
+      retryConversational = [];
       for (const request of requests) acknowledge(request);
     } catch {
-      // An unknown send outcome must not replay feedback later.
+      // Keep accepted controls pending when sendMessage has an unknown outcome.
+      retryConversational = requests;
     }
   };
 
