@@ -211,4 +211,52 @@ describe('delegate control inbox', () => {
     await waiting;
     expect(resumed).toBe(true);
   });
+
+  test('observes resume appended after an acknowledged pause is truncated', async () => {
+    vi.useFakeTimers();
+    const root = mkdtempSync(path.join(tmpdir(), 'delegate-pause-compact-'));
+    roots.push(root);
+    const filePath = path.join(root, 'control.jsonl');
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({
+        id: 'pause-compact',
+        kind: 'pause',
+        generation: 9,
+        createdAt: Date.now(),
+      })}\n`,
+      'utf8',
+    );
+    const handlers = new Map<string, () => unknown>();
+    const pi = {
+      on(event: string, handler: () => unknown) {
+        handlers.set(event, handler);
+      },
+      sendMessage: vi.fn(),
+    } as unknown as ExtensionAPI;
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+    registerDelegateControl(pi, filePath);
+    let resumed = false;
+    const waiting = Promise.resolve(
+      handlers.get('before_provider_request')?.(),
+    ).then(() => {
+      resumed = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    writeFileSync(filePath, '', 'utf8');
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        id: 'resume-after-compact',
+        kind: 'resume',
+        generation: 9,
+        createdAt: Date.now(),
+      })}\n`,
+      'utf8',
+    );
+    await vi.advanceTimersByTimeAsync(100);
+    await waiting;
+    expect(resumed).toBe(true);
+  });
 });

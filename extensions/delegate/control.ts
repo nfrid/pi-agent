@@ -228,24 +228,20 @@ function isControlRequest(value: unknown): value is DelegateControlRequest {
 
 function readRequests(
   filePath: string,
-  state: { offset: number; inode?: number },
+  state: { seenIds: Set<string> },
 ): DelegateControlRequest[] {
   let text: string;
-  let inode: number | undefined;
   try {
-    const stats = statSync(filePath);
-    inode = typeof stats.ino === 'number' ? stats.ino : undefined;
     text = readFileSync(filePath, 'utf8');
   } catch {
     return [];
   }
-  if (inode !== state.inode || text.length < state.offset) state.offset = 0;
-  state.inode = inode;
-  const complete = text.slice(state.offset);
-  const lastNewline = complete.lastIndexOf('\n');
-  if (lastNewline < 0) return [];
-  state.offset += lastNewline + 1;
-  return complete
+  const lastNewline = text.lastIndexOf('\n');
+  if (lastNewline < 0) {
+    if (text.length === 0) state.seenIds.clear();
+    return [];
+  }
+  const requests = text
     .slice(0, lastNewline)
     .split('\n')
     .flatMap((line) => {
@@ -256,6 +252,12 @@ function readRequests(
         return [];
       }
     });
+  const presentIds = new Set(requests.map((request) => request.id));
+  const unread = requests.filter((request) => !state.seenIds.has(request.id));
+  // Pruning IDs absent from the current bounded file makes parent compaction
+  // observable even when truncate and append happen between child polls.
+  state.seenIds = presentIds;
+  return unread;
 }
 
 function formatRequests(requests: readonly DelegateControlRequest[]): string {
@@ -300,7 +302,7 @@ export function registerDelegateControl(
   filePath: string | undefined,
 ): void {
   if (!filePath?.trim()) return;
-  const state = { offset: 0, inode: undefined as number | undefined };
+  const state = { seenIds: new Set<string>() };
   let pausedGeneration: number | undefined;
   let pendingPause: DelegateControlRequest | undefined;
   let acknowledgedGeneration: number | undefined;
