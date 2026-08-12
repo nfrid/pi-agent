@@ -112,6 +112,92 @@ describe('DashboardLiveStore', () => {
     ).toBeUndefined();
   });
 
+  it('carries a launched runtime title into its first published session', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+
+    expect(
+      store.optimisticallyTitleRuntime(
+        'runtime-1',
+        '<skill name="review" location="/skills/review/SKILL.md">\nFollow these instructions.\n</skill>\n\nInspect the title flow',
+      ),
+    ).toBe(true);
+    expect(store.getSnapshot().optimisticRuntimeTitlesById['runtime-1']).toBe(
+      '[skill] review Inspect the title flow',
+    );
+
+    store.installSnapshot({
+      ...snapshot('daemon-1', 2),
+      runtimes: [
+        {
+          runtimeId: 'runtime-1',
+          liveState: 'working',
+          pendingInteractions: [],
+          extensionSurfaces: [],
+          session: { id: 'session-1', entries: [] },
+        },
+      ],
+      sessions: [
+        {
+          id: 'session-1',
+          file: '',
+          cwd: '/tmp',
+          updatedAt: 2,
+        },
+      ],
+    } as unknown as BrowserSnapshot);
+
+    expect(store.getSnapshot().runtimesById['runtime-1']?.session.title).toBe(
+      '[skill] review Inspect the title flow',
+    );
+    expect(store.getSnapshot().sessionsById['session-1']?.title).toBe(
+      '[skill] review Inspect the title flow',
+    );
+    expect(
+      store.getSnapshot().optimisticRuntimeTitlesById['runtime-1'],
+    ).toBeUndefined();
+
+    store.acceptStreamRecord({
+      cursor: 3,
+      emittedAt: 3,
+      runtimeId: 'runtime-1',
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'working',
+        snapshot: { pendingInteractions: [] },
+      },
+    } as unknown as StreamRecord);
+    expect(store.getSnapshot().optimisticSessionTitlesById['session-1']).toBe(
+      '[skill] review Inspect the title flow',
+    );
+
+    // A later server snapshot without persisted metadata must not regress the
+    // visible runtime title while the first message is still being written.
+    store.installSnapshot({
+      ...snapshot('daemon-1', 4),
+      runtimes: [
+        {
+          runtimeId: 'runtime-1',
+          liveState: 'working',
+          pendingInteractions: [],
+          extensionSurfaces: [],
+          session: { id: 'session-1', entries: [] },
+        },
+      ],
+      sessions: [
+        {
+          id: 'session-1',
+          file: '',
+          cwd: '/tmp',
+          updatedAt: 4,
+        },
+      ],
+    } as unknown as BrowserSnapshot);
+    expect(store.getSnapshot().runtimesById['runtime-1']?.session.title).toBe(
+      '[skill] review Inspect the title flow',
+    );
+  });
+
   it('does not replace an explicit session name with an optimistic prompt title', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot({

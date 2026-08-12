@@ -45,9 +45,20 @@ export function workspaceForPath(
 
 export const SESSION_TITLE_MAX_LENGTH = 96;
 
+const SKILL_ENVELOPE_RE =
+  /<skill name="([^"\r\n]+)" location="[^"\r\n]+">\r?\n[\s\S]*?\r?\n<\/skill>/gu;
+
+/** Replace injected skill instructions with the same compact label shown in Pi. */
+export function compactSessionTitleSkills(value: string): string {
+  return value.replace(
+    SKILL_ENVELOPE_RE,
+    (_envelope, name: string) => `[skill] ${name}`,
+  );
+}
+
 /** Normalize a user message into a compact, stable dashboard title. */
 export function normalizeSessionTitle(value: string): string | undefined {
-  const normalized = [...value.normalize('NFKC')]
+  const normalized = [...compactSessionTitleSkills(value).normalize('NFKC')]
     .map((character) => {
       const code = character.charCodeAt(0);
       return code < 32 || code === 127 ? ' ' : character;

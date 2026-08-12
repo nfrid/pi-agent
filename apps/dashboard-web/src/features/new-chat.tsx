@@ -332,6 +332,7 @@ export function NewChatView({
         runtimeId = result.runtimeId;
         if (attachments.length) setStartedRuntimeId(runtimeId);
       }
+      store.optimisticallyTitleRuntime(runtimeId, initialPrompt);
       if (attachments.length) {
         const started = await waitForStartedRuntime(store, runtimeId);
         if (started.model?.supportsImages !== true)

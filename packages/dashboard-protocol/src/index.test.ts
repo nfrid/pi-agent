@@ -292,6 +292,18 @@ describe('dashboard protocol', () => {
     expect(title).toBe('fix the dashboard');
     expect(
       deriveSessionTitle([
+        {
+          type: 'message',
+          message: {
+            role: 'user',
+            content:
+              '<skill name="pi-docs" location="/skills/pi-docs/SKILL.md">\nLong injected instructions that should not become the title.\n</skill>\n\nFix the dashboard title',
+          },
+        },
+      ]),
+    ).toBe('[skill] pi-docs Fix the dashboard title');
+    expect(
+      deriveSessionTitle([
         { type: 'message', message: { role: 'assistant', content: 'nope' } },
         {
           type: 'message',
