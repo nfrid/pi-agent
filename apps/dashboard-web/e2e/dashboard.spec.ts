@@ -393,6 +393,12 @@ test('session shell shows compaction progress', async ({ page }) => {
   await page.goto('/sessions/session-compacting');
 
   await expect(page.locator('.session-status')).toHaveText(/compacting/i);
+  await expect(page.locator('.compaction-progress-notice')).toContainText(
+    'Compacting context…',
+  );
+  await expect(page.locator('.compaction-progress-notice')).toContainText(
+    'The transcript will refresh when the new summary is ready.',
+  );
   await expect(page.locator('.composer')).toContainText('Compacting context…');
   await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
 });

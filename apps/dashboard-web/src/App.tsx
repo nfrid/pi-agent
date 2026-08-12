@@ -253,6 +253,9 @@ function RouteShell() {
           runtime.pendingInteractions.length > 0,
       ),
   );
+  const compactingRuntimes = dashboard.snapshot.runtimes.filter(
+    (runtime) => runtime.online !== false && runtime.liveState === 'compacting',
+  );
   return (
     <div className="app">
       <DashboardUtilityProvider
@@ -260,6 +263,23 @@ function RouteShell() {
         locationKey={routeState.pathname}
       >
         <Header snapshot={dashboard.snapshot} />
+        {compactingRuntimes.length > 0 && (
+          <div
+            className="compaction-progress-notice"
+            role="status"
+            aria-live="assertive"
+          >
+            <span className="compaction-progress-spinner" aria-hidden="true" />
+            <span>
+              <strong>Compacting context…</strong>
+              <small>
+                {compactingRuntimes.length === 1
+                  ? 'The transcript will refresh when the new summary is ready.'
+                  : `${compactingRuntimes.length} sessions are being compacted.`}
+              </small>
+            </span>
+          </div>
+        )}
         {(dashboard.error || dashboard.connectionState !== 'connected') && (
           <div className="notice sync-notice" role="status" aria-live="polite">
             {dashboard.error ??

@@ -171,6 +171,61 @@ select:focus-visible {
 .session-shell {
   padding-bottom: 16px;
 }
+.compaction-progress-notice {
+  position: sticky;
+  top: 52px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 18px;
+  border-bottom: 1px solid #bd93f966;
+  background: linear-gradient(
+    90deg,
+    #bd93f924,
+    #303241 30%,
+    #303241 70%,
+    #bd93f924
+  );
+  box-shadow: 0 8px 24px #00000038;
+  color: var(--purple);
+  text-align: left;
+}
+.compaction-progress-notice > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.compaction-progress-notice strong {
+  color: var(--fg);
+  font-size: 13px;
+}
+.compaction-progress-notice small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.compaction-progress-spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 2px solid #bd93f94d;
+  border-top-color: var(--purple);
+  border-radius: 50%;
+  animation: compaction-progress-spin 0.8s linear infinite;
+}
+@keyframes compaction-progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .compaction-progress-spinner {
+    animation: none;
+    border-color: var(--purple);
+  }
+}
 .session-page {
   padding-bottom: 160px;
 }
