@@ -1163,6 +1163,30 @@ test('dense mobile session keeps conversation and activity readable', async ({
             message: {
               role: 'assistant',
               content: [
+                { type: 'text', text: 'Checking the failed command.' },
+                {
+                  type: 'toolCall',
+                  id: 'call-2',
+                  name: 'bash',
+                  arguments: { command: 'false' },
+                },
+              ],
+            },
+          },
+          {
+            type: 'message',
+            message: {
+              role: 'toolResult',
+              toolCallId: 'call-2',
+              content: [{ type: 'text', text: 'Command failed' }],
+              isError: true,
+            },
+          },
+          {
+            type: 'message',
+            message: {
+              role: 'assistant',
+              content: [
                 {
                   type: 'text',
                   text: 'Result: **ready** with `inline code`.',
@@ -1357,6 +1381,16 @@ test('dense mobile session keeps conversation and activity readable', async ({
       ),
     )
     .toBeLessThanOrEqual(1);
+  const failedActivity = page.getByRole('button', {
+    name: /Checking the failed command.*1 tool.*failed/,
+  });
+  await expect(failedActivity).toBeVisible();
+  await failedActivity.click();
+  const failedExpandedDot = failedActivity
+    .locator('xpath=..')
+    .locator('.tool-detail.step-failed .activity-step-dot');
+  await expect(failedExpandedDot).toHaveText('!');
+  await failedActivity.click();
   const activity = page.getByRole('button', {
     name: /Checking the mobile transcript.*1 tool/,
   });

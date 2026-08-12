@@ -267,6 +267,8 @@ function TranscriptEntry({
       {
         name: tool.name,
         args: tool.arguments,
+        status: tool.status,
+        isError: tool.isError,
       },
       cwd,
     );

@@ -18,7 +18,10 @@ export type ActivityGroupSummary = {
 
 type ActivityGroupSummaryInput = Pick<TranscriptGroup, 'tools' | 'toolCount'>;
 
-type ActivityStepTool = TranscriptGroup['tools'][number];
+type ActivityStepTool = TranscriptGroup['tools'][number] & {
+  isError?: boolean;
+  status?: string;
+};
 
 export type ActivityStepParts = {
   label: string;
