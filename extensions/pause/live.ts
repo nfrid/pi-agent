@@ -19,6 +19,7 @@ const publisher = createLiveSurfacePublisher<PauseSnapshot>({
     version: 1 as const,
     phase: snapshot.phase,
     delegateCount: snapshot.delegateIds.length,
+    ...(snapshot.pausedAt === undefined ? {} : { pausedAt: snapshot.pausedAt }),
     label: snapshot.phase === 'paused' ? pauseLabel(snapshot) : 'Pausing…',
   }),
 });

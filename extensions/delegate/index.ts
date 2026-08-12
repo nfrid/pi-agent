@@ -162,8 +162,16 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     minWidth: DELEGATE_WIDGET_MIN_WIDTH,
     refreshMs: 1_000,
     isActive: () => activeStatuses().length > 0,
-    render: (width, theme) =>
-      renderDelegateWidget(activeStatuses(), widgetDetailed, width, theme),
+    render: (width, theme) => {
+      const pausedAt = getPauseCoordinator(scopeId).snapshot()?.pausedAt;
+      return renderDelegateWidget(
+        activeStatuses(),
+        widgetDetailed,
+        width,
+        theme,
+        pausedAt ?? Date.now(),
+      );
+    },
     onError: (error) =>
       console.error('delegate: failed to update the jobs widget', error),
   });

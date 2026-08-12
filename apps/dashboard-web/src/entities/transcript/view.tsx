@@ -17,6 +17,7 @@ import {
   useState,
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
+import { runtimePauseStatus } from '../../features/extension-surfaces';
 import { DashboardTime } from '../../features/timestamp';
 import { Markdown } from '../../Markdown';
 import {
@@ -203,6 +204,33 @@ export function Transcript({
         );
       })}
       <LiveCompactionEvent runtime={runtime} />
+      <LivePauseEvent runtime={runtime} />
+    </div>
+  );
+}
+
+export function LivePauseEvent({ runtime }: { runtime?: RuntimeSnapshot }) {
+  const pause = runtimePauseStatus(runtime);
+  if (pause?.phase !== 'paused') return null;
+  return (
+    <div
+      className="session-event event-pause live-pause-event"
+      role="status"
+      aria-live="polite"
+    >
+      <span className="session-event-icon" aria-hidden="true">
+        ‖
+      </span>
+      <strong>{pause.label}</strong>
+      <small>at a safe boundary</small>
+      <AriaButton
+        type="button"
+        className="pause-continue-button"
+        aria-label="Continue paused runtime"
+        isDisabled
+      >
+        ▶
+      </AriaButton>
     </div>
   );
 }
@@ -552,6 +580,7 @@ function VirtualizedTranscript({
         })}
       </div>
       <LiveCompactionEvent runtime={runtime} />
+      <LivePauseEvent runtime={runtime} />
     </div>
   );
 }

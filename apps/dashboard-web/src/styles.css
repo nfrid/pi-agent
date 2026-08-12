@@ -4851,10 +4851,17 @@ details.session-event {
 .live-compaction-event {
   border-left-color: var(--purple);
 }
+.live-pause-event {
+  border-left-color: var(--orange);
+}
+.live-pause-event .session-event-icon {
+  color: var(--orange);
+}
 .live-compaction-event .session-event-icon {
   animation: live-compaction-pulse 1.1s ease-in-out infinite;
 }
-.compaction-cancel-button {
+.compaction-cancel-button,
+.pause-continue-button {
   display: inline-grid;
   width: 22px;
   height: 22px;
@@ -4871,6 +4878,10 @@ details.session-event {
 .compaction-cancel-button:disabled {
   cursor: wait;
   opacity: 0.45;
+}
+.pause-continue-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 @keyframes live-compaction-pulse {
   50% {
@@ -5061,6 +5072,10 @@ details.session-event {
   .activity-step-dot,
 .session-page[data-runtime-paused] .tool-detail.step-pending .activity-step-dot,
 .session-page[data-runtime-paused] .surface-running .surface-state,
+.surface-dialog[data-runtime-paused] .surface-running .surface-state,
+.surface-dialog[data-runtime-paused]
+  .tool-detail.step-pending
+  .activity-step-dot,
 .session-page[data-runtime-paused] .live-compaction-event .session-event-icon,
 .session-page[data-runtime-paused] .working-glyph,
 .session-page[data-runtime-paused] .compacting-glyph {

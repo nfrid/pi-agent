@@ -47,6 +47,7 @@ export function DashboardDialog({
   className = 'surface-dialog',
   layerClassName = 'surface-dialog-layer',
   isOpen = true,
+  paused = false,
 }: {
   title: string;
   onClose: () => void;
@@ -58,6 +59,7 @@ export function DashboardDialog({
   className?: string;
   layerClassName?: string;
   isOpen?: boolean;
+  paused?: boolean;
 }) {
   const titleId = useId();
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -113,6 +115,7 @@ export function DashboardDialog({
           aria-labelledby={titleId}
           aria-modal="true"
           data-swipe-dismiss="right"
+          data-runtime-paused={paused ? '' : undefined}
         >
           <header className="surface-dialog-header">
             <div className="surface-dialog-heading">

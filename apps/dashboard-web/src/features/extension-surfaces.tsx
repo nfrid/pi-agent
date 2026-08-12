@@ -110,11 +110,23 @@ export function ExtensionSurfaceStack({
       className="extension-surfaces"
       aria-label="Live extension surfaces"
     >
-      {surfaces.map((surface) => (
-        <div className="extension-surface-slot" key={surface.id}>
-          {renderLiveExtensionSurface(surface)}
-        </div>
-      ))}
+      {surfaces.map((surface) => {
+        const context: DashboardRendererContext = {
+          surfaceId: surface.id,
+          rendererId: surface.rendererId,
+          placement: surface.placement,
+          pausedAt: runtimePauseStatus(runtime)?.pausedAt,
+        };
+        return (
+          <div className="extension-surface-slot" key={surface.id}>
+            {renderDashboardContribution(
+              surface.rendererId,
+              surface.viewModel,
+              context,
+            )}
+          </div>
+        );
+      })}
     </section>
   );
 }

@@ -60,6 +60,7 @@ describe('live extension surface fixtures', () => {
           version: 1,
           phase: 'paused',
           delegateCount: 2,
+          pausedAt: 12_345,
           label: 'Paused (with 2 delegates)',
         },
       },
@@ -83,9 +84,10 @@ describe('live extension surface fixtures', () => {
       },
     ]);
 
-    expect(runtimePauseStatus(runtime)?.label).toBe(
-      'Paused (with 2 delegates)',
-    );
+    expect(runtimePauseStatus(runtime)).toMatchObject({
+      label: 'Paused (with 2 delegates)',
+      pausedAt: 12_345,
+    });
     const markup = renderToStaticMarkup(
       <ExtensionSurfaceStack runtime={runtime} placement="composer" />,
     );

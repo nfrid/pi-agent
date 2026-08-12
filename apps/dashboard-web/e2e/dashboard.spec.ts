@@ -3012,6 +3012,7 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
             version: 1,
             phase: 'paused',
             delegateCount: 2,
+            pausedAt: delegateStartedAt + 2_000,
             label: 'Paused (with 2 delegates)',
           },
         },
@@ -3089,6 +3090,12 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
     'Paused (with 2 delegates)',
   );
   await expect(page.locator('.pause-status')).toHaveCount(0);
+  const pauseEvent = page.locator('.live-pause-event');
+  await expect(pauseEvent).toHaveCount(1);
+  await expect(pauseEvent).toContainText('Paused (with 2 delegates)');
+  await expect(
+    pauseEvent.getByRole('button', { name: 'Continue paused runtime' }),
+  ).toBeDisabled();
   const tasksLauncher = page.getByRole('button', {
     name: /Inspect the new drawer/,
   });
@@ -3203,9 +3210,8 @@ test('phase six mocked management flow covers refresh, fallback notification, pr
   ).toBeHidden();
   const runningElapsed = runningMeta.locator('.delegate-row-status');
   const initialElapsed = await runningElapsed.textContent();
-  await expect
-    .poll(() => runningElapsed.textContent())
-    .not.toBe(initialElapsed);
+  await page.waitForTimeout(1_200);
+  expect(await runningElapsed.textContent()).toBe(initialElapsed);
   const delegateScroll = await delegatesPanel
     .locator('.surface-scroll-region')
     .evaluate((element) => ({

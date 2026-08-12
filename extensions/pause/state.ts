@@ -4,6 +4,7 @@ export interface PauseSnapshot {
   generation: number;
   phase: PausePhase;
   mainReached: boolean;
+  pausedAt?: number;
   delegateIds: readonly string[];
   reachedDelegateIds: readonly string[];
 }
@@ -14,6 +15,7 @@ export class PauseCoordinator {
   private generation = 0;
   private active = false;
   private mainReached = false;
+  private pausedAt: number | undefined;
   private readonly delegates = new Set<string>();
   private readonly reachedDelegates = new Set<string>();
   private release: (() => void) | undefined;
@@ -26,6 +28,7 @@ export class PauseCoordinator {
       generation: this.generation,
       phase: this.isFullyPaused() ? 'paused' : 'pausing',
       mainReached: this.mainReached,
+      ...(this.pausedAt === undefined ? {} : { pausedAt: this.pausedAt }),
       delegateIds: [...this.delegates],
       reachedDelegateIds: [...this.reachedDelegates],
     };
@@ -36,6 +39,7 @@ export class PauseCoordinator {
       this.active = true;
       this.generation++;
       this.mainReached = false;
+      this.pausedAt = undefined;
       this.delegates.clear();
       this.reachedDelegates.clear();
       this.releasePromise = new Promise<void>((resolve) => {
@@ -83,6 +87,7 @@ export class PauseCoordinator {
     const release = this.release;
     this.active = false;
     this.mainReached = false;
+    this.pausedAt = undefined;
     this.delegates.clear();
     this.reachedDelegates.clear();
     this.release = undefined;
@@ -113,6 +118,10 @@ export class PauseCoordinator {
   }
 
   private changed(): void {
+    if (this.active)
+      this.pausedAt = this.isFullyPaused()
+        ? (this.pausedAt ?? Date.now())
+        : undefined;
     const snapshot = this.snapshot();
     for (const listener of this.listeners) listener(snapshot);
   }

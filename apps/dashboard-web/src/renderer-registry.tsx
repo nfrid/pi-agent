@@ -22,6 +22,8 @@ export interface DashboardRendererContext {
   readonly surfaceId?: string;
   readonly rendererId?: string;
   readonly placement?: ExtensionSurfacePlacement;
+  /** Freeze live elapsed-time renderers at the reached pause boundary. */
+  readonly pausedAt?: number;
 }
 
 export interface DashboardRenderer {

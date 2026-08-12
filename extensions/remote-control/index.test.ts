@@ -1556,24 +1556,57 @@ describe('remote-control bridge', () => {
     const socket = new net.Socket();
     const write = vi.spyOn(socket, 'write').mockReturnValue(true);
     Reflect.set(client, 'socket', socket);
-    hub.publish('tasks', [
+    hub.publish('pause', [
       {
-        id: 'tasks.current',
-        rendererId: 'tasks.current',
-        placement: 'left-rail',
-        viewModel: { version: 1, tasks: [] },
+        id: 'runtime.pause-status',
+        rendererId: 'runtime.pause-status',
+        viewModel: {
+          version: 1,
+          phase: 'pausing',
+          delegateCount: 0,
+          label: 'Pausing…',
+        },
       },
     ]);
-    const frame = JSON.parse(String(write.mock.calls[0]?.[0])) as {
-      event: { type: string; snapshot?: RuntimeSnapshot };
-    };
-    expect(frame.event).toMatchObject({
+    hub.publish('pause', [
+      {
+        id: 'runtime.pause-status',
+        rendererId: 'runtime.pause-status',
+        viewModel: {
+          version: 1,
+          phase: 'paused',
+          delegateCount: 0,
+          pausedAt: 12_345,
+          label: 'Paused',
+        },
+      },
+    ]);
+    const frames = write.mock.calls.map(
+      (call) =>
+        JSON.parse(String(call[0])) as {
+          event: { type: string; snapshot?: RuntimeSnapshot };
+        },
+    );
+    expect(frames).toHaveLength(2);
+    expect(frames[0]?.event).toMatchObject({
       type: 'runtime.stateChanged',
-      snapshot: { extensionSurfaces: [{ id: 'tasks.current' }] },
+      snapshot: {
+        extensionSurfaces: [
+          { viewModel: { phase: 'pausing', label: 'Pausing…' } },
+        ],
+      },
+    });
+    expect(frames[1]?.event).toMatchObject({
+      type: 'runtime.stateChanged',
+      snapshot: {
+        extensionSurfaces: [
+          { viewModel: { phase: 'paused', pausedAt: 12_345, label: 'Paused' } },
+        ],
+      },
     });
     client.stop();
     hub.publish('tasks', []);
-    expect(write).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledTimes(2);
   });
 
   it('processes queue drafts without waiting behind a long semantic command', async () => {

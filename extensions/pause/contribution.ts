@@ -17,6 +17,7 @@ export const PauseStatusViewModelSchema = Type.Object(
     version: Type.Literal(1),
     phase: Type.Union([Type.Literal('pausing'), Type.Literal('paused')]),
     delegateCount: Type.Integer({ minimum: 0, maximum: 20 }),
+    pausedAt: Type.Optional(Type.Number({ minimum: 0 })),
     label: Type.String({ minLength: 1, maxLength: 64 }),
   },
   { additionalProperties: false },

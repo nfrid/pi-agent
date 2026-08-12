@@ -29,6 +29,7 @@ import {
   transcriptRoleLabel,
 } from './transcript';
 import { SkillInvocationView } from './transcript/entries';
+import { LivePauseEvent } from './transcript/view';
 
 describe('activity row views and virtual transcript construction', () => {
   it('projects skill protocol envelopes as compact invocation data', () => {
@@ -883,6 +884,54 @@ describe('activity row views and virtual transcript construction', () => {
     );
     expect([...groupByStart.keys()]).toEqual([1, 6]);
     expect([...groupCoverage]).toEqual([0, 1, 1, 1, 0, 0, 1, 1, 0]);
+  });
+
+  it('renders a fully reached pause as a transient transcript event', () => {
+    const html = renderToStaticMarkup(
+      createElement(LivePauseEvent, {
+        runtime: {
+          extensionSurfaces: [
+            {
+              id: 'runtime.pause-status',
+              rendererId: 'runtime.pause-status',
+              viewModel: {
+                version: 1,
+                phase: 'paused',
+                delegateCount: 2,
+                pausedAt: 12_345,
+                label: 'Paused (with 2 delegates)',
+              },
+            },
+          ],
+        } as never,
+      }),
+    );
+    expect(html).toContain('live-pause-event');
+    expect(html).toContain('Paused (with 2 delegates)');
+    expect(html).toContain('Continue paused runtime');
+    expect(html).toContain('disabled');
+  });
+
+  it('does not render a transcript pause event before the safe boundary', () => {
+    const html = renderToStaticMarkup(
+      createElement(LivePauseEvent, {
+        runtime: {
+          extensionSurfaces: [
+            {
+              id: 'runtime.pause-status',
+              rendererId: 'runtime.pause-status',
+              viewModel: {
+                version: 1,
+                phase: 'pausing',
+                delegateCount: 0,
+                label: 'Pausing…',
+              },
+            },
+          ],
+        } as never,
+      }),
+    );
+    expect(html).toBe('');
   });
 
   it('uses the same live presentation for regular and virtual group rows', () => {

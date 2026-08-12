@@ -16,11 +16,29 @@ describe('pause coordinator', () => {
     coordinator.markDelegateReached(requested.generation, 'two');
     const paused = coordinator.snapshot();
     expect(paused?.phase).toBe('paused');
+    expect(paused?.pausedAt).toEqual(expect.any(Number));
     expect(paused && pauseLabel(paused)).toBe('Paused (with 2 delegates)');
 
     coordinator.resume();
     expect(coordinator.snapshot()).toBeUndefined();
     expect(updates).toContain('paused');
+  });
+
+  test('clears the freeze boundary if a late delegate reopens pausing', () => {
+    const coordinator = new PauseCoordinator();
+    const requested = coordinator.request();
+    coordinator.markMainReached(requested.generation);
+    expect(coordinator.snapshot()?.pausedAt).toEqual(expect.any(Number));
+
+    coordinator.enrollDelegates(requested.generation, ['late']);
+    expect(coordinator.snapshot()?.phase).toBe('pausing');
+    expect(coordinator.snapshot()?.pausedAt).toBeUndefined();
+
+    coordinator.markDelegateReached(requested.generation, 'late');
+    expect(coordinator.snapshot()).toMatchObject({
+      phase: 'paused',
+      pausedAt: expect.any(Number),
+    });
   });
 
   test('blocks a reached boundary until the matching pause resumes', async () => {

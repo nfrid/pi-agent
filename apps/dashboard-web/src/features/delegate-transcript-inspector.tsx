@@ -309,11 +309,13 @@ export function DelegateTranscriptInspector({
   row,
   now,
   isOpen,
+  paused = false,
   onClose,
 }: {
   row: DelegateStatus;
   now: number;
   isOpen: boolean;
+  paused?: boolean;
   onClose: () => void;
 }) {
   const entries = row.transcript ?? [];
@@ -325,6 +327,7 @@ export function DelegateTranscriptInspector({
       headerContent={<DelegateInspectorMetadata row={row} now={now} />}
       className="surface-dialog delegate-transcript-dialog"
       isOpen={isOpen}
+      paused={paused}
       onClose={onClose}
     >
       <div className="delegate-transcript-inspector-body">

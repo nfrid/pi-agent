@@ -113,6 +113,7 @@ function WorkSurface({
   visibleCount,
   dialogClassName = 'surface-dialog work-surface-dialog',
   headerStats,
+  paused = false,
   children,
 }: {
   title: string;
@@ -122,6 +123,7 @@ function WorkSurface({
   visibleCount: number;
   dialogClassName?: string;
   headerStats?: ReactNode;
+  paused?: boolean;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -174,6 +176,7 @@ function WorkSurface({
         className={dialogClassName}
         headerContent={headerStats}
         isOpen={open}
+        paused={paused}
         onClose={() => setOpen(false)}
       >
         <div className="work-surface-content">{children}</div>
@@ -187,7 +190,13 @@ function delegateContext(row: DelegateStatus): string | undefined {
   return row.context;
 }
 
-function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
+function DelegateSurface({
+  surface,
+  pausedAt,
+}: {
+  surface: ExtensionSurface;
+  pausedAt?: number;
+}) {
   const model = surface.viewModel as DelegateStatusViewModel;
   const rows = delegateRows(model);
   const stats = delegateStats(rows);
@@ -195,7 +204,7 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
   const [lastInspectorRow, setLastInspectorRow] = useState<DelegateStatus>();
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const hasLiveElapsed = stats.running + stats.queued > 0;
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => pausedAt ?? Date.now());
   useEffect(() => {
     if (rows.length > 0) return;
     setSelectedId(undefined);
@@ -204,10 +213,14 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
   }, [rows.length]);
   useEffect(() => {
     if (!hasLiveElapsed) return;
+    if (pausedAt !== undefined) {
+      setNow(pausedAt);
+      return;
+    }
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
-  }, [hasLiveElapsed]);
+  }, [hasLiveElapsed, pausedAt]);
   const selected = rows.find((row) => row.id === selectedId);
   const inspectorRow = selected ?? lastInspectorRow;
   const title = 'Delegates';
@@ -243,6 +256,7 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
         visibleCount={rows.length}
         dialogClassName="surface-dialog work-surface-dialog delegate-surface-dialog"
         headerStats={statsView}
+        paused={pausedAt !== undefined}
       >
         <div className="delegate-scroll surface-scroll-region">
           <div className="delegate-rows">
@@ -317,6 +331,7 @@ function DelegateSurface({ surface }: { surface: ExtensionSurface }) {
           row={inspectorRow}
           now={now}
           isOpen={inspectorOpen}
+          paused={pausedAt !== undefined}
           onClose={() => setInspectorOpen(false)}
         />
       )}
@@ -332,7 +347,13 @@ function taskDependencies(row: TaskSurfaceTask): readonly string[] {
   return row.dependsOn.slice(0, 6);
 }
 
-function TasksSurface({ surface }: { surface: ExtensionSurface }) {
+function TasksSurface({
+  surface,
+  paused,
+}: {
+  surface: ExtensionSurface;
+  paused?: boolean;
+}) {
   const model = surface.viewModel as TaskStateViewModel;
   const rows = taskRows(model);
   const completed = model.stats.done;
@@ -354,6 +375,7 @@ function TasksSurface({ surface }: { surface: ExtensionSurface }) {
       summary={summary}
       count={`${completed}/${total}`}
       visibleCount={total}
+      paused={paused}
       headerStats={
         <SurfaceStats
           className="work-header-stats"
@@ -443,6 +465,7 @@ export function renderDelegateSurface(
   return (
     <DelegateSurface
       surface={surfaceForRenderer(input, context, 'delegate.status')}
+      pausedAt={context?.pausedAt}
     />
   );
 }
@@ -454,6 +477,7 @@ export function renderTasksSurface(
   return (
     <TasksSurface
       surface={surfaceForRenderer(input, context, 'tasks.current')}
+      paused={context?.pausedAt !== undefined}
     />
   );
 }
