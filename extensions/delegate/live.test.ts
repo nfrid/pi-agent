@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { processJsonLine } from './events';
 import { delegateSurface } from './live';
 import { DelegateStatusStore } from './status';
+import { makeDetails } from './tool-result';
 import { createRun } from './types';
 
 describe('delegate live surface', () => {
@@ -45,6 +46,28 @@ describe('delegate live surface', () => {
     const [id] = store.start([run], 'background');
     processJsonLine(
       JSON.stringify({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'thinking_delta',
+          contentIndex: 0,
+          delta: 'Checking the live path.',
+        },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
+        type: 'message_update',
+        assistantMessageEvent: {
+          type: 'thinking_end',
+          contentIndex: 0,
+          content: 'Checking the live path.',
+        },
+      }),
+      run,
+    );
+    processJsonLine(
+      JSON.stringify({
         type: 'tool_execution_start',
         toolCallId: 'read-1',
         toolName: 'read',
@@ -61,6 +84,8 @@ describe('delegate live surface', () => {
       }),
       run,
     );
+    const details = makeDetails('single', [run]);
+    expect(details.runs[0]?.activities[0]).not.toHaveProperty('toolArguments');
     store.update(id, run);
 
     const viewModel = delegateSurface(store).viewModel as {
@@ -68,6 +93,10 @@ describe('delegate live surface', () => {
     };
     expect(viewModel.statuses[0]?.transcript).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          type: 'thinking',
+          text: 'Checking the live path.',
+        }),
         expect.objectContaining({
           type: 'tool',
           name: 'read',

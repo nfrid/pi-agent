@@ -350,9 +350,8 @@ export function registerDelegateTool(
                       { mode: 'single', tasks: [item] },
                       {
                         control,
-                        onUpdate: (partial) => {
-                          const run = partial.details?.runs?.[0];
-                          if (run && statusIds?.[index])
+                        onRunUpdate: (run) => {
+                          if (statusIds?.[index])
                             backgroundRuntime.statuses.update(
                               statusIds[index],
                               run,
@@ -413,14 +412,11 @@ export function registerDelegateTool(
       let runs: Awaited<ReturnType<typeof runPreparedDelegateExecution>>;
       try {
         runs = await runPreparedDelegateExecution(runCtx, execution, {
-          onUpdate: (partial) => {
-            if (statusIds)
-              backgroundRuntime?.statuses.updateMany(
-                statusIds,
-                partial.details?.runs ?? [],
-              );
-            onUpdate?.(partial);
+          onRunUpdate: (run, index = 0) => {
+            const statusId = statusIds?.[index];
+            if (statusId) backgroundRuntime?.statuses.update(statusId, run);
           },
+          onUpdate,
         });
       } catch (error) {
         if (statusIds) backgroundRuntime?.statuses.finish(statusIds);
@@ -437,10 +433,7 @@ export function registerDelegateTool(
         // delegateToolResult publishes lifecycle diagnostics before returning;
         // refresh terminal status with that owner-safe projection rather than
         // leaving live status at its pre-materialization view.
-        backgroundRuntime?.statuses.updateMany(
-          statusIds,
-          result.details?.runs ?? runs,
-        );
+        backgroundRuntime?.statuses.updateMany(statusIds, runs);
         backgroundRuntime?.statuses.resultEntered(statusIds);
       }
       return result;

@@ -1102,6 +1102,7 @@ describe('async delegate extension', () => {
           label: 'bash npm test -- --changed',
           status: 'running',
         });
+        options.onRunUpdate?.(live);
         options.onUpdate?.({
           content: [{ type: 'text', text: 'running' }],
           details: { mode: 'single', runs: [live] },

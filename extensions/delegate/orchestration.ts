@@ -81,6 +81,7 @@ export function pendingRuns(
 
 type RunHooks = {
   onUpdate?: (partial: import('./types').DelegateProgressUpdate) => void;
+  onRunUpdate?: (run: DelegatedRun, index?: number) => void;
   control?: import('./runner').RunDelegateOptions['control'];
   onWorktreeRunning?: (worktree: PreparedWorktree) => void;
 };
@@ -158,6 +159,7 @@ async function runPreparedWithLifecycle(
       signal,
       control: hooks.control,
       onUpdate: hooks.onUpdate,
+      onRunUpdate: hooks.onRunUpdate,
       mode,
       onWorktreeRunning: (worktree) => {
         markedRunning = true;
@@ -336,10 +338,9 @@ export async function runPreparedDelegateExecution(
       runCtx.config.maxConcurrency,
       async (item, index) => {
         const run = await runPreparedWithLifecycle(runCtx, item, 'parallel', {
-          onUpdate: (partial) => {
-            const current = partial.details?.runs?.[0];
-            if (current)
-              liveRuns[index] = { ...current, warnings: item.warnings };
+          onRunUpdate: (current) => {
+            liveRuns[index] = current;
+            hooks.onRunUpdate?.(current, index);
             emit();
           },
           onWorktreeRunning: (worktree) => {

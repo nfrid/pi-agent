@@ -117,6 +117,8 @@ export interface RunDelegateOptions {
   /** Parent-side inbox used for bounded feedback and checkpoint requests. */
   control?: DelegateControlChannel;
   onUpdate?: OnUpdate;
+  /** In-process live status hook; raw runs never enter public tool details. */
+  onRunUpdate?: (run: DelegatedRun) => void;
   mode: DelegateDetails['mode'];
 }
 
@@ -204,6 +206,7 @@ export async function runDelegate(
   let releaseSession: (() => void) | undefined;
 
   const emitUpdate = () => {
+    options.onRunUpdate?.(run);
     options.onUpdate?.({
       content: [{ type: 'text', text: progressText(run) }],
       details: makeDetails(options.mode, [run]),

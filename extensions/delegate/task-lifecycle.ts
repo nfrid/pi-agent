@@ -367,7 +367,12 @@ export async function runPreparedDelegateTask(
   prepared: PreparedDelegateTask,
   options: Pick<
     RunDelegateOptions,
-    'timeoutMs' | 'maxConcurrency' | 'signal' | 'onUpdate' | 'mode'
+    | 'timeoutMs'
+    | 'maxConcurrency'
+    | 'signal'
+    | 'onUpdate'
+    | 'onRunUpdate'
+    | 'mode'
   > & {
     control?: RunDelegateOptions['control'];
     onWorktreeRunning?: (worktree: PreparedWorktree) => void;
@@ -404,6 +409,7 @@ export async function runPreparedDelegateTask(
     signal: options.signal,
     control: options.control,
     onUpdate: options.onUpdate,
+    onRunUpdate: options.onRunUpdate,
     mode: options.mode,
   });
   run.warnings = [...(run.warnings ?? []), ...prepared.warnings];
