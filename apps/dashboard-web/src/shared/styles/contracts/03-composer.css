@@ -160,7 +160,7 @@
   transform: translateY(-1px);
 }
 .composer-abort {
-  width: 30px;
+  width: 38px;
   border: 1px solid var(--orange);
   background: transparent;
   color: var(--orange);

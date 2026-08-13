@@ -2,6 +2,7 @@ import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { useMemo, useState } from 'react';
 import { useDashboardNavigate } from '../routes/navigation';
 import {
+  type AgentThreadRow,
   agentThreadRows,
   boundedAgentThreadRows,
   filterAgentThreadRows,
@@ -18,7 +19,10 @@ import {
 } from './agent-thread-nav/use-agent-thread-drawer';
 import styles from './agent-thread-nav.module.css';
 import { useDashboardUtility } from './dashboard-utility-context';
-import { RuntimeLifecycleActions } from './runtime-actions';
+import {
+  RuntimeLifecycleActions,
+  type RuntimeLifecycleThreadProps,
+} from './runtime-actions';
 import { DashboardTime } from './timestamp';
 
 export type { AgentThreadRow } from './agent-thread-nav/model';
@@ -27,6 +31,51 @@ export {
   boundedAgentThreadRows,
   workspaceNameForSession,
 } from './agent-thread-nav/model';
+
+function AgentThreadLink({
+  row,
+  selected,
+  onSelect,
+  lifecycleProps,
+}: {
+  row: AgentThreadRow;
+  selected: boolean;
+  onSelect: () => void;
+  lifecycleProps?: RuntimeLifecycleThreadProps;
+}) {
+  return (
+    <button
+      {...lifecycleProps}
+      type="button"
+      className={`agent-thread-link ${styles.threadLink}`}
+      aria-current={selected ? 'page' : undefined}
+      aria-label={`${row.title} ${statusLabel(row)}`}
+      onClick={onSelect}
+    >
+      <span
+        className={`agent-thread-glyph ${styles.threadGlyph}`}
+        aria-hidden="true"
+      >
+        {statusGlyph(row.status)}
+      </span>
+      <span className={`agent-thread-copy ${styles.threadCopy}`}>
+        <strong>{row.title}</strong>
+        <small>
+          <span className={`agent-thread-context ${styles.threadContext}`}>
+            <span>{statusLabel(row)}</span>
+            <span aria-hidden="true"> · </span>
+            <span>{shortPath(row.cwd)}</span>
+          </span>
+          <DashboardTime
+            className={`agent-thread-time ${styles.threadTime}`}
+            timestamp={row.updatedAt}
+            context="sidebar"
+          />
+        </small>
+      </span>
+    </button>
+  );
+}
 
 export function AgentThreadNav({
   snapshot,
@@ -165,49 +214,34 @@ export function AgentThreadNav({
             </div>
             {group.rows.map((row) => {
               const selected = row.id === currentSessionId;
+              const rowClassName = `agent-thread-row ${styles.threadRow} ${selected ? 'selected' : ''} status-${row.status}`;
+              const renderThreadLink = (
+                lifecycleProps?: RuntimeLifecycleThreadProps,
+              ) => (
+                <AgentThreadLink
+                  row={row}
+                  selected={selected}
+                  onSelect={() => select(row.id)}
+                  lifecycleProps={lifecycleProps}
+                />
+              );
+
+              if (!row.runtime) {
+                return (
+                  <div className={rowClassName} key={row.id}>
+                    {renderThreadLink()}
+                  </div>
+                );
+              }
               return (
-                <div
-                  className={`agent-thread-row ${styles.threadRow} ${selected ? 'selected' : ''} status-${row.status}`}
+                <RuntimeLifecycleActions
                   key={row.id}
+                  runtime={row.runtime}
+                  title={row.title}
+                  rowClassName={rowClassName}
                 >
-                  <button
-                    type="button"
-                    className={`agent-thread-link ${styles.threadLink}`}
-                    aria-current={selected ? 'page' : undefined}
-                    aria-label={`${row.title} ${statusLabel(row)}`}
-                    onClick={() => select(row.id)}
-                  >
-                    <span
-                      className={`agent-thread-glyph ${styles.threadGlyph}`}
-                      aria-hidden="true"
-                    >
-                      {statusGlyph(row.status)}
-                    </span>
-                    <span className={`agent-thread-copy ${styles.threadCopy}`}>
-                      <strong>{row.title}</strong>
-                      <small>
-                        <span
-                          className={`agent-thread-context ${styles.threadContext}`}
-                        >
-                          <span>{statusLabel(row)}</span>
-                          <span aria-hidden="true"> · </span>
-                          <span>{shortPath(row.cwd)}</span>
-                        </span>
-                        <DashboardTime
-                          className={`agent-thread-time ${styles.threadTime}`}
-                          timestamp={row.updatedAt}
-                          context="sidebar"
-                        />
-                      </small>
-                    </span>
-                  </button>
-                  {row.runtime && (
-                    <RuntimeLifecycleActions
-                      runtime={row.runtime}
-                      title={row.title}
-                    />
-                  )}
-                </div>
+                  {renderThreadLink}
+                </RuntimeLifecycleActions>
               );
             })}
           </section>

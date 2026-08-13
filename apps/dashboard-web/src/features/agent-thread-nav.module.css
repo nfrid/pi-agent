@@ -176,47 +176,17 @@
   outline: 2px solid var(--purple);
   outline-offset: 1px;
 }
-.lifecycleActions {
-  position: absolute;
-  top: 50%;
-  right: 2px;
-  z-index: 2;
-  transform: translateY(-50%);
-}
-.lifecycleActionsTrigger {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
-  color: var(--dim);
-  padding: 0;
-  cursor: pointer;
-  font-size: 15px;
-  line-height: 1;
-  opacity: 0;
-}
-.threadRow:hover .lifecycleActionsTrigger,
-.threadRow:focus-within .lifecycleActionsTrigger,
-.lifecycleActionsTrigger[aria-expanded="true"] {
-  border-color: var(--line-soft);
-  color: var(--fg);
-  opacity: 1;
-}
-.lifecycleActionsTrigger:hover,
-.lifecycleActionsTrigger:focus-visible {
-  border-color: var(--purple);
-  outline: none;
-}
 .lifecycleActionsMenu {
   position: absolute;
   top: calc(100% - 2px);
   right: 0;
+  z-index: 4;
   display: grid;
   min-width: 112px;
+  max-width: min(220px, calc(100vw - 24px));
+  max-height: min(240px, calc(100dvh - 24px));
   gap: 2px;
+  overflow-y: auto;
   border: 1px solid var(--line-soft);
   border-radius: 6px;
   background: var(--bg-alt);
@@ -428,14 +398,10 @@
   text-align: center;
 }
 @media (max-width: 820px) {
-  .lifecycleActionsTrigger {
-    width: 44px;
-    height: 44px;
-    border-color: transparent;
-    opacity: 1;
-  }
   .lifecycleActionsMenu {
     right: 0;
+    max-width: calc(100vw - 24px);
+    max-height: min(240px, calc(100dvh - 24px));
   }
 }
 @media (prefers-reduced-motion: reduce) {

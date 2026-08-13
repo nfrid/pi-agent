@@ -276,6 +276,162 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   ).toBeVisible();
 });
 
+test('runtime row lifecycle menu supports desktop, touch, and keyboard access', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 900, height: 700 });
+  await page.route('**/api/usage', async (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/events?*', async (route) =>
+    route.fulfill({
+      contentType: 'text/event-stream',
+      body: ': heartbeat\n\n',
+    }),
+  );
+  await page.route('**/api/snapshot', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        revision: 1,
+        runtimes: [
+          {
+            runtimeId: 'runtime-context-menu',
+            ownership: 'external',
+            pid: 1,
+            cwd: '/tmp/context-menu',
+            liveState: 'working',
+            online: true,
+            session: {
+              id: 'session-context-menu',
+              title: 'Context menu session',
+              entries: [],
+            },
+            pendingInteractions: [],
+          },
+        ],
+        workspaces: [],
+        sessions: [
+          {
+            id: 'session-context-menu',
+            file: '',
+            cwd: '/tmp/context-menu',
+            title: 'Context menu session',
+            updatedAt: Date.now(),
+          },
+        ],
+        unread: [],
+      }),
+    }),
+  );
+  await page.route('**/api/sessions/session-context-menu', async (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        metadata: {
+          id: 'session-context-menu',
+          file: '',
+          cwd: '/tmp/context-menu',
+          title: 'Context menu session',
+          updatedAt: Date.now(),
+        },
+        entries: [],
+        entriesComplete: true,
+      }),
+    }),
+  );
+
+  await page.goto('/');
+  const row = page.locator('.agent-thread-row.status-working');
+  const thread = row.getByRole('button', {
+    name: 'Context menu session working',
+  });
+  await expect(thread).toHaveAttribute('aria-haspopup', 'menu');
+  await expect(row.locator('.agent-thread-actions-trigger')).toHaveCount(0);
+
+  await row.click({ button: 'right' });
+  const menu = page.getByRole('menu', {
+    name: 'Actions for Context menu session',
+  });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem').first()).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(thread).toBeFocused();
+
+  await thread.press('Shift+F10');
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem').first()).toBeFocused();
+  await page.keyboard.press('Escape');
+  await thread.press('ContextMenu');
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await row.evaluate((element) => {
+    element.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        pointerId: 17,
+        pointerType: 'touch',
+        clientX: 20,
+        clientY: 20,
+      }),
+    );
+  });
+  await page.waitForTimeout(550);
+  await expect(menu).toBeVisible();
+  await row.evaluate((element) => {
+    element.dispatchEvent(
+      new PointerEvent('pointerup', {
+        bubbles: true,
+        pointerId: 17,
+        pointerType: 'touch',
+        clientX: 20,
+        clientY: 20,
+      }),
+    );
+  });
+  await thread.click();
+  await expect(page).toHaveURL(/\/$/u);
+  await expect(menu).toHaveCount(0);
+
+  await row.evaluate((element) => {
+    element.dispatchEvent(
+      new PointerEvent('pointerdown', {
+        bubbles: true,
+        pointerId: 18,
+        pointerType: 'touch',
+        clientX: 20,
+        clientY: 20,
+      }),
+    );
+    element.dispatchEvent(
+      new PointerEvent('pointermove', {
+        bubbles: true,
+        pointerId: 18,
+        pointerType: 'touch',
+        clientX: 32,
+        clientY: 20,
+      }),
+    );
+  });
+  await page.waitForTimeout(550);
+  await expect(menu).toHaveCount(0);
+
+  await thread.click();
+  await expect(page).toHaveURL(/\/sessions\/session-context-menu$/u);
+  const abort = page.locator('.composer-abort');
+  await expect(abort).toBeVisible();
+  await expect
+    .poll(() =>
+      abort.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return { width: rect.width, height: rect.height };
+      }),
+    )
+    .toEqual({ width: 38, height: 38 });
+});
+
 test('session title supports reliable inline renaming', async ({ page }) => {
   const session = {
     id: 'session-rename',
