@@ -219,39 +219,71 @@ describe('immutable todo turn snapshots', () => {
 });
 
 describe('registerTodoContext', () => {
-  it('wires turn snapshots and compact/tree recovery unconditionally', () => {
+  function registeredContext() {
     const handlers = new Map<string, (...args: unknown[]) => unknown>();
     const pi = {
       on(event: string, handler: (...args: unknown[]) => unknown) {
         handlers.set(event, handler);
       },
     } as unknown as ExtensionAPI;
-
     registerTodoContext(pi, store);
+    return handlers;
+  }
 
-    expect([...handlers.keys()].sort()).toEqual([
-      'before_agent_start',
-      'context',
-      'session_compact',
-      'session_start',
-      'session_tree',
-    ]);
+  it('does not inject a snapshot into a fresh empty session', () => {
+    store = createTaskStore();
+    const handlers = registeredContext();
+    expect(handlers.get('before_agent_start')?.()).toBeUndefined();
+    expect(
+      (handlers.get('context')?.({ messages: [] }) as { messages: unknown[] })
+        .messages,
+    ).toEqual([]);
+  });
+
+  it('injects active state at turn start', () => {
+    store = createTaskStore();
+    mutate(store, 'add', { action: 'add', text: 'active task' });
+    const handlers = registeredContext();
     const turnStart = handlers.get('before_agent_start')?.() as {
       message: { customType: string; content: string };
     };
     expect(turnStart.message.customType).toBe(TODO_SNAPSHOT_TYPE);
-    expect(turnStart.message.content).toContain(
-      'Todo state at the start of this user turn',
-    );
+    expect(turnStart.message.content).toContain('active task');
+  });
 
+  it('injects an empty reset after used state is cleared', () => {
+    store = createTaskStore();
+    mutate(store, 'add', { action: 'add', text: 'stale task' });
+    const handlers = registeredContext();
+    handlers.get('before_agent_start')?.();
+    store.state.tasks = [];
+    const contextualized = handlers.get('context')?.({
+      messages: [snapshot('stale task snapshot', 1)],
+    }) as { messages: TodoContextMessages };
+    expect(contextualized.messages).toHaveLength(1);
+    expect(contextualized.messages[0]).toMatchObject({
+      role: 'custom',
+      customType: TODO_SNAPSHOT_TYPE,
+    });
+    expect(
+      (contextualized.messages[0] as { content: string }).content,
+    ).not.toContain('stale task');
+  });
+
+  it('recovers active state after compaction/tree recovery', () => {
+    store = createTaskStore();
+    mutate(store, 'add', { action: 'add', text: 'recover me' });
+    const handlers = registeredContext();
     handlers.get('session_compact')?.();
     const contextualized = handlers.get('context')?.({
-      messages: [snapshot('persisted', 1), result(1)],
+      messages: [snapshot('old', 1), result(1)],
     }) as { messages: TodoContextMessages };
-    expect(contextualized.messages[0]).toEqual(snapshot('persisted', 1));
     expect(contextualized.messages.at(-1)).toMatchObject({
       role: 'custom',
       customType: TODO_SNAPSHOT_TYPE,
+    });
+    expect(contextualized.messages.at(-1)).toMatchObject({
+      content: expect.stringContaining('recover me'),
     });
   });
 });
