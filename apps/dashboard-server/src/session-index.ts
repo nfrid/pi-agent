@@ -241,27 +241,41 @@ export class SessionIndex {
     if (requestedLeafId !== undefined || options.resolveLatestLeaf) {
       const resolveLatestLeaf =
         options.resolveLatestLeaf === true && requestedLeafId === undefined;
+      const publicBranchResult = (
+        result: Awaited<ReturnType<SessionIndex['readBranchEntries']>>,
+      ) => {
+        const {
+          leafId: _leafId,
+          entriesTruncated: _entriesTruncated,
+          ...response
+        } = result;
+        return response;
+      };
       if (!resolveLatestLeaf)
-        return this.readBranchEntries(
-          id,
-          indexed.file,
-          stat,
-          metadata,
-          requestedLeafId,
-          cursor,
-          false,
+        return publicBranchResult(
+          await this.readBranchEntries(
+            id,
+            indexed.file,
+            stat,
+            metadata,
+            requestedLeafId,
+            cursor,
+            false,
+          ),
         );
       let latestStat = stat;
       for (let attempt = 0; attempt < LATEST_LEAF_READ_ATTEMPTS; attempt += 1) {
         try {
-          return await this.readBranchEntries(
-            id,
-            indexed.file,
-            latestStat,
-            metadata,
-            undefined,
-            cursor,
-            true,
+          return publicBranchResult(
+            await this.readBranchEntries(
+              id,
+              indexed.file,
+              latestStat,
+              metadata,
+              undefined,
+              cursor,
+              true,
+            ),
           );
         } catch (error) {
           if (

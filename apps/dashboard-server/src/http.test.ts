@@ -17,6 +17,7 @@ import {
   parseDashboardStreamMessage,
   parseFrame,
   serializeFrame,
+  tryParseSessionApiResponse,
 } from '@pi-dashboard/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
@@ -1149,7 +1150,11 @@ describe('dashboard HTTP boundary', () => {
       { headers: { 'x-dashboard-token': 'test-token' } },
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
+    const body = await response.json();
+    expect(tryParseSessionApiResponse(body)).toBeDefined();
+    expect(body).not.toHaveProperty('leafId');
+    expect(body).not.toHaveProperty('entriesTruncated');
+    expect(body).toMatchObject({
       entries: [
         { type: 'session', id: 'working-session' },
         { type: 'model_change', id: 'setup' },
