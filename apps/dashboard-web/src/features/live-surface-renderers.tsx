@@ -226,7 +226,8 @@ export function selectedDelegateInspectionRow(
   rows: readonly DelegateInspectionStatus[],
   fallback: DelegateInspectionStatus | undefined,
 ): DelegateInspectionStatus | undefined {
-  return rows.find((row) => row.lineageId === selectedLineageId) ?? fallback;
+  if (selectedLineageId === undefined) return fallback;
+  return rows.find((row) => row.lineageId === selectedLineageId);
 }
 
 export function DelegateSurface({
@@ -262,11 +263,17 @@ export function DelegateSurface({
   const hasLiveElapsed = stats.running + stats.queued > 0;
   const [now, setNow] = useState(() => pausedAt ?? Date.now());
   useEffect(() => {
-    if (rows.length > 0) return;
+    if (
+      rows.length > 0 &&
+      selectedLineageId !== undefined &&
+      rows.some((row) => row.lineageId === selectedLineageId)
+    )
+      return;
+    if (rows.length > 0 && selectedLineageId === undefined) return;
     setSelectedLineageId(undefined);
     setLastInspectorRow(undefined);
     setInspectorOpen(false);
-  }, [rows.length]);
+  }, [rows, selectedLineageId]);
   useEffect(() => {
     if (!hasLiveElapsed) return;
     if (pausedAt !== undefined) {

@@ -733,6 +733,38 @@ function detailInvocation(
   };
 }
 
+function aggregateHistoryGroup(
+  lineageId: string,
+  runs: readonly DelegateHistoryInvocation[],
+  truncated: boolean,
+): DelegateHistoryGroup {
+  const first = runs[0];
+  const current = runs.at(-1);
+  if (!first || !current) throw new Error('Delegate history lineage is empty.');
+  return {
+    id: lineageId,
+    runId: current.runId,
+    lineageId,
+    name: current.name,
+    kind: current.kind,
+    state: current.state,
+    createdAt: first.createdAt,
+    ...(current.startedAt === undefined
+      ? {}
+      : { startedAt: current.startedAt }),
+    ...(current.finishedAt === undefined
+      ? {}
+      : { finishedAt: current.finishedAt }),
+    ...(current.jobId === undefined ? {} : { jobId: current.jobId }),
+    ...(current.route === undefined ? {} : { route: current.route }),
+    ...(current.context === undefined ? {} : { context: current.context }),
+    allowWrites: current.allowWrites,
+    runCount: runs.length,
+    runs: [...runs],
+    ...(truncated ? { truncated: true } : {}),
+  };
+}
+
 /**
  * Extract all parent-persisted delegate invocations from one selected branch.
  * Branch entries must already have been selected by SessionIndex.
@@ -747,6 +779,7 @@ export function delegateHistoryFromBranch(
     string,
     { runs: DelegateHistoryInvocation[]; truncated: boolean }
   >();
+  const orderedRuns: { lineageId: string; runId: string }[] = [];
   let totalRuns = 0;
   let responseTruncated = options.truncated === true;
   for (const occurrence of occurrences(branch)) {
@@ -772,43 +805,23 @@ export function delegateHistoryFromBranch(
       continue;
     }
     group.runs.push(run);
+    orderedRuns.push({ lineageId: run.lineageId, runId: run.runId });
     totalRuns += 1;
   }
 
-  const grouped: DelegateHistoryGroup[] = [...groups.entries()].map(
-    ([lineageId, group]) => {
-      const { runs } = group;
-      const current = runs[runs.length - 1];
-      // The map cannot contain an empty list, but retain a defensive guard so
-      // malformed future adapters cannot create an invalid protocol response.
-      if (!current) throw new Error('Delegate history lineage is empty.');
-      return {
-        id: lineageId,
-        runId: current.runId,
-        lineageId,
-        name: current.name,
-        kind: current.kind,
-        state: current.state,
-        createdAt: runs[0]?.createdAt ?? current.createdAt,
-        ...(current.startedAt === undefined
-          ? {}
-          : { startedAt: current.startedAt }),
-        ...(current.finishedAt === undefined
-          ? {}
-          : { finishedAt: current.finishedAt }),
-        ...(current.jobId === undefined ? {} : { jobId: current.jobId }),
-        ...(current.route === undefined ? {} : { route: current.route }),
-        ...(current.context === undefined ? {} : { context: current.context }),
-        allowWrites: current.allowWrites,
-        runCount: runs.length,
-        runs,
-        ...(group.truncated ? { truncated: true } : {}),
-      };
-    },
-  );
+  const buildGroups = (): DelegateHistoryGroup[] =>
+    [...groups.entries()].flatMap(([lineageId, group]) =>
+      group.runs.length > 0
+        ? [aggregateHistoryGroup(lineageId, group.runs, group.truncated)]
+        : [],
+    );
+  let grouped = buildGroups();
   // Count and per-field limits are not sufficient when many run tasks are
-  // unusually large. Trim oldest rows from the end until the summary itself
-  // is bounded, preserving the stable IDs of rows that remain.
+  // unusually large. Remove the oldest accepted runs/groups first while
+  // retaining the newest accepted run, then rebuild every aggregate field from
+  // the survivors.
+  const newestRunIndex = orderedRuns.length - 1;
+  let trimIndex = 0;
   while (
     JSON.stringify({
       version: 2,
@@ -818,22 +831,21 @@ export function delegateHistoryFromBranch(
     }).length *
       4 >
       MAX_DELEGATE_HISTORY_SUMMARY_BYTES &&
-    grouped.length > 0
+    grouped.length > 0 &&
+    trimIndex < orderedRuns.length
   ) {
-    const lastIndex = grouped.length - 1;
-    const last = grouped[lastIndex];
-    if (!last) break;
-    const runs = last.runs.slice(0, -1);
-    if (runs.length === 0) grouped.pop();
-    else
-      grouped[lastIndex] = {
-        ...last,
-        runId: runs[runs.length - 1]?.runId ?? last.runId,
-        state: runs[runs.length - 1]?.state ?? last.state,
-        runCount: runs.length,
-        runs,
-        truncated: true,
-      };
+    const candidate = orderedRuns[trimIndex];
+    trimIndex += 1;
+    if (!candidate || trimIndex - 1 === newestRunIndex) continue;
+    const group = groups.get(candidate.lineageId);
+    if (!group) continue;
+    const runIndex = group.runs.findIndex(
+      (run) => run.runId === candidate.runId,
+    );
+    if (runIndex < 0) continue;
+    group.runs.splice(runIndex, 1);
+    group.truncated = true;
+    grouped = buildGroups();
     responseTruncated = true;
   }
   return {

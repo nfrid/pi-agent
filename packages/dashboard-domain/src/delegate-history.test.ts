@@ -136,6 +136,76 @@ describe('delegate history adapter', () => {
     expect(parseDelegateHistoryResponse(response)).toEqual(response);
   });
 
+  it('trims oldest oversized continuations while retaining the newest run', () => {
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      ...Array.from({ length: 8 }, (_, index) => ({
+        type: 'message',
+        id: `result-${index}`,
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            mode: 'single',
+            runs: [
+              oldRun({
+                name: `Continuation ${index}`,
+                task: 'x'.repeat(20_000),
+                continuation: `continuation-${index}`,
+                state: 'success',
+                startedAt: index + 10,
+                finishedAt: index + 11,
+                routing: { route: `route-${index}` },
+                backgroundJobId: `job-${index}`,
+              }),
+            ],
+          },
+        },
+      })),
+      {
+        type: 'message',
+        id: 'result-8',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            mode: 'single',
+            runs: [
+              oldRun({
+                name: 'Continuation 7 current',
+                task: 'x'.repeat(20_000),
+                continuation: 'continuation-7',
+                state: 'error',
+                startedAt: 18,
+                finishedAt: 19,
+                routing: { route: 'route-current' },
+                backgroundJobId: 'job-current',
+              }),
+            ],
+          },
+        },
+      },
+    ];
+
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    const newest = response.groups.at(-1);
+    expect(response.truncated).toBe(true);
+    expect(newest).toMatchObject({
+      name: 'Continuation 7 current',
+      runId: newest?.runs.at(-1)?.runId,
+      state: 'error',
+      createdAt: 17,
+      startedAt: 18,
+      finishedAt: 19,
+      jobId: 'job-current',
+      route: 'route-current',
+      runCount: 2,
+    });
+    expect(newest?.runs).toHaveLength(2);
+    expect(newest?.runs[0]?.task).toBe('x'.repeat(20_000));
+    expect(parseDelegateHistoryResponse(response)).toEqual(response);
+  });
+
   it('bounds selected detail payloads and marks omitted fields', () => {
     const branch = [
       { type: 'session', id: 'parent-1' },
