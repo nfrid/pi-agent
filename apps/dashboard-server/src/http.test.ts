@@ -32,6 +32,89 @@ afterEach(async () => {
 });
 
 describe('dashboard HTTP boundary', () => {
+  it('loads delegate history summaries without details and fetches one selected run lazily', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-delegate-history-lazy-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    const sessionEntries = [
+      { type: 'session', id: 'lazy-session', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'delegate-result-1',
+        parentId: null,
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            runs: [
+              {
+                runId: 'run-1',
+                lineageId: 'lineage-1',
+                name: 'Lazy worker',
+                task: 'inspect the source',
+                state: 'success',
+                messages: [
+                  {
+                    role: 'assistant',
+                    content: [{ type: 'text', text: 'selected response' }],
+                  },
+                ],
+                activities: [
+                  {
+                    type: 'tool',
+                    label: 'large activity',
+                    transcriptText: 'distinctive large activity payload',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ];
+    await writeFile(
+      path.join(sessionDir, 'lazy-session.jsonl'),
+      `${sessionEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const headers = { 'x-dashboard-token': 'test-token' };
+    const summaryResponse = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/lazy-session/delegate-history`,
+      { headers },
+    );
+    expect(summaryResponse.status).toBe(200);
+    const summary = (await summaryResponse.json()) as Record<string, unknown>;
+    expect(JSON.stringify(summary)).not.toContain(
+      'distinctive large activity payload',
+    );
+    expect(summary).not.toHaveProperty('details');
+    const group = (summary.groups as Array<Record<string, unknown>>)[0];
+    const run = (group?.runs as Array<Record<string, unknown>>)[0];
+    expect(run).not.toHaveProperty('details');
+    const detailResponse = await fetch(
+      `http://127.0.0.1:${server.port}/api/sessions/lazy-session/delegate-history/runs/run-1?lineageId=lineage-1&leafId=delegate-result-1`,
+      { headers },
+    );
+    expect(detailResponse.status).toBe(200);
+    const detail = (await detailResponse.json()) as Record<string, unknown>;
+    expect(detail.run).toMatchObject({
+      runId: 'run-1',
+      details: {
+        response: 'selected response',
+        activities: [{ text: 'distinctive large activity payload' }],
+      },
+    });
+  });
+
   it('marks all unread notifications through one authenticated request', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-read-all-'),

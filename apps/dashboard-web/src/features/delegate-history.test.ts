@@ -180,7 +180,6 @@ describe('delegate history composition', () => {
                 state: 'running' as const,
                 createdAt: 5,
                 allowWrites: false,
-                details: { truncated: false },
               },
             ],
           },

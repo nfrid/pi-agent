@@ -1,11 +1,14 @@
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
+import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 import type { DashboardHttpClient } from './http-client.js';
 import {
   commandMutationOptions,
   composerCommandsQueryOptions,
   createThreadMutationOptions,
+  dashboardQueryKeys,
   delegateHistoryQueryOptions,
+  delegateHistoryRunQueryOptions,
   renameSessionMutationOptions,
   snapshotQueryOptions,
   snapshotRequestGeneration,
@@ -42,7 +45,7 @@ describe('dashboard query and mutation factories', () => {
 
   it('queries persisted delegate history by session ID', async () => {
     const delegateHistory = vi.fn(async () => ({
-      version: 1 as const,
+      version: 2 as const,
       sessionId: 'session-1',
       groups: [],
     }));
@@ -59,11 +62,116 @@ describe('dashboard query and mutation factories', () => {
     await expect(
       options.queryFn({ signal: undefined } as never),
     ).resolves.toEqual({
-      version: 1,
+      version: 2,
       sessionId: 'session-1',
       groups: [],
     });
     expect(delegateHistory).toHaveBeenCalledWith('session-1', undefined);
+  });
+
+  it('keys one delegate detail by session, lineage, run, and leaf', async () => {
+    const delegateHistoryRun = vi.fn(async () => ({
+      version: 1 as const,
+      sessionId: 'session-1',
+      lineageId: 'lineage-1',
+      runId: 'run-1',
+      leafId: 'leaf-1',
+      run: {
+        runId: 'run-1',
+        lineageId: 'lineage-1',
+        name: 'Worker',
+        kind: 'background' as const,
+        state: 'success' as const,
+        createdAt: 1,
+        allowWrites: false,
+        details: { truncated: false },
+      },
+    }));
+    const options = delegateHistoryRunQueryOptions(
+      { delegateHistoryRun } as unknown as DashboardHttpClient,
+      'session-1',
+      'lineage-1',
+      'run-1',
+      'leaf-1',
+    );
+    expect(options.queryKey).toEqual([
+      'dashboard',
+      'delegate-history-detail',
+      'session-1',
+      'run',
+      'lineage-1',
+      'run-1',
+      'leaf-1',
+    ]);
+    expect(options.queryKey.slice(0, 3)).toEqual([
+      'dashboard',
+      'delegate-history-detail',
+      'session-1',
+    ]);
+    expect(options.queryKey).not.toEqual(
+      expect.arrayContaining(['delegate-history', 'session-1']),
+    );
+    if (!options.queryFn) throw new Error('Query function is missing.');
+    await expect(
+      options.queryFn({ signal: undefined } as never),
+    ).resolves.toEqual(expect.objectContaining({ runId: 'run-1' }));
+    expect(delegateHistoryRun).toHaveBeenCalledWith(
+      'session-1',
+      'run-1',
+      { lineageId: 'lineage-1', leafId: 'leaf-1' },
+      undefined,
+    );
+  });
+
+  it('switches detail runs through separate cached queries without refetching A', async () => {
+    const calls: string[] = [];
+    const delegateHistoryRun = vi.fn(
+      async (_sessionId: string, runId: string) => {
+        calls.push(runId);
+        return {
+          version: 1 as const,
+          sessionId: 'session-1',
+          lineageId: 'lineage-1',
+          runId,
+          leafId: 'leaf-1',
+          run: {
+            runId,
+            lineageId: 'lineage-1',
+            name: 'Worker',
+            kind: 'background' as const,
+            state: 'success' as const,
+            createdAt: 1,
+            allowWrites: false,
+            details: { response: `detail-${runId}`, truncated: false },
+          },
+        };
+      },
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const query = (runId: string) =>
+      queryClient.fetchQuery(
+        delegateHistoryRunQueryOptions(
+          { delegateHistoryRun } as unknown as DashboardHttpClient,
+          'session-1',
+          'lineage-1',
+          runId,
+          'leaf-1',
+        ),
+      );
+
+    await query('run-a');
+    await query('run-b');
+    await query('run-a');
+    expect(calls).toEqual(['run-a', 'run-b']);
+
+    // Summary settlement refreshes do not invalidate cached detail payloads.
+    await queryClient.invalidateQueries({
+      queryKey: dashboardQueryKeys.delegateHistory('session-1'),
+    });
+    await query('run-a');
+    expect(calls).toEqual(['run-a', 'run-b']);
   });
 
   it('keeps the live baseline authoritative and does not expire snapshots', () => {

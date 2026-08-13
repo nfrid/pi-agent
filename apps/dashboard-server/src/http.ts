@@ -4,12 +4,15 @@ import type http from 'node:http';
 import type { URL } from 'node:url';
 import {
   delegateHistoryFromBranch,
+  delegateHistoryRunDetailFromBranch,
   isDelegateHistoryEntry,
 } from '@pi-dashboard/domain';
 import {
   type BridgeEvent,
   type BrowserSnapshot,
   type DelegateHistoryResponse,
+  type DelegateHistoryRunDetailResponse,
+  type DelegateHistoryRunQuery,
   isRecord,
   MAX_ID,
   MAX_SESSION_INDEX_DELTA_ITEMS,
@@ -55,6 +58,18 @@ function hasTranscriptEntries(entries: readonly unknown[]): boolean {
 
 function isSparseRuntimeSession(runtime: RuntimeSnapshot): boolean {
   return !hasTranscriptEntries(runtime.session.entries);
+}
+
+function validDelegateIdentifier(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_ID &&
+    !Array.from(value).some((character) => {
+      const code = character.charCodeAt(0);
+      return code < 32 || code === 127;
+    })
+  );
 }
 
 /**
@@ -209,6 +224,8 @@ export class DashboardServerImpl implements DashboardServer {
       usage: () => this.application.usage.get(),
       readSession: (id, before) => this.sessionResult(id, before),
       readDelegateHistory: (id) => this.delegateHistoryResult(id),
+      readDelegateHistoryRun: (id, runId, query) =>
+        this.delegateHistoryRunResult(id, runId, query),
       renameSession: async (id, name) => {
         if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
           throw new Error('Invalid session id.');
@@ -535,6 +552,55 @@ export class DashboardServerImpl implements DashboardServer {
     return delegateHistoryFromBranch(id, result.entries, result.leafId, {
       truncated: result.entriesTruncated,
     });
+  }
+
+  private async delegateHistoryRunResult(
+    id: string,
+    runId: string,
+    query: DelegateHistoryRunQuery,
+  ): Promise<DelegateHistoryRunDetailResponse> {
+    if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
+      throw new Error('Invalid session id.');
+    if (!validDelegateIdentifier(runId))
+      throw new Error('Invalid delegate run ID.');
+    if (
+      query.lineageId !== undefined &&
+      !validDelegateIdentifier(query.lineageId)
+    )
+      throw new Error('Invalid delegate lineage ID.');
+    if (query.leafId !== undefined && !validDelegateIdentifier(query.leafId))
+      throw new Error('Invalid session leaf ID.');
+    const runtime = this.registry
+      .snapshots()
+      .find((item) => item.session.id === id && item.online !== false);
+    const runtimeLeafId = (
+      value: RuntimeSnapshot | undefined,
+    ): string | undefined => {
+      const leafId = value
+        ? (value.session as { leafId?: unknown }).leafId
+        : undefined;
+      return typeof leafId === 'string' && leafId.length > 0
+        ? leafId
+        : undefined;
+    };
+    const working =
+      runtime?.liveState === 'working' || runtime?.liveState === 'compacting';
+    const leafId =
+      query.leafId ??
+      (runtime && !working ? runtimeLeafId(runtime) : undefined);
+    const result = await this.sessions.readSelectedBranchEntries(
+      id,
+      leafId,
+      isDelegateHistoryEntry,
+      { resolveLatestLeaf: leafId === undefined },
+    );
+    return delegateHistoryRunDetailFromBranch(
+      id,
+      result.entries,
+      runId,
+      query.lineageId,
+      result.leafId,
+    );
   }
 
   private async sessionResult(id: string, before?: string): Promise<unknown> {

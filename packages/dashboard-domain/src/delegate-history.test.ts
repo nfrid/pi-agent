@@ -1,6 +1,12 @@
-import { parseDelegateHistoryResponse } from '@pi-dashboard/protocol';
+import {
+  parseDelegateHistoryResponse,
+  parseDelegateHistoryRunDetailResponse,
+} from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
-import { delegateHistoryFromBranch } from './delegate-history.js';
+import {
+  delegateHistoryFromBranch,
+  delegateHistoryRunDetailFromBranch,
+} from './delegate-history.js';
 
 function oldRun(overrides: Record<string, unknown> = {}) {
   return {
@@ -14,7 +20,7 @@ function oldRun(overrides: Record<string, unknown> = {}) {
 }
 
 describe('delegate history adapter', () => {
-  it('extracts foreground and background details from the selected branch', () => {
+  it('extracts foreground and background summary metadata from the selected branch', () => {
     const response = delegateHistoryFromBranch(
       'parent-1',
       [
@@ -65,9 +71,42 @@ describe('delegate history adapter', () => {
     expect(response.groups[0]?.runs[1]).toMatchObject({
       kind: 'background',
       jobId: 'job-1',
-      details: { task: 'inspect the change', truncated: false },
+      task: 'inspect the change',
     });
+    expect(response.groups[0]?.runs[1]).not.toHaveProperty('details');
     expect(parseDelegateHistoryResponse(response)).toEqual(response);
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      [
+        { type: 'session', id: 'parent-1' },
+        {
+          type: 'message',
+          id: 'background-result',
+          message: {
+            customType: 'delegate-job-result',
+            details: {
+              jobs: [
+                {
+                  id: 'job-1',
+                  name: 'Background review',
+                  state: 'success',
+                  runs: [oldRun({ continuation: 'legacy-token' })],
+                },
+              ],
+            },
+          },
+        },
+      ],
+      response.groups[0]?.runs[1]?.runId ?? '',
+      response.groups[0]?.runs[1]?.lineageId,
+      'background-result',
+    );
+    expect(
+      parseDelegateHistoryRunDetailResponse(detail).run.details,
+    ).toMatchObject({
+      task: 'inspect the change',
+      truncated: false,
+    });
   });
 
   it('bounds runs per lineage and marks omitted records', () => {
@@ -96,8 +135,8 @@ describe('delegate history adapter', () => {
     expect(parseDelegateHistoryResponse(response)).toEqual(response);
   });
 
-  it('bounds legacy detail payloads and marks omitted fields', () => {
-    const response = delegateHistoryFromBranch('parent-1', [
+  it('bounds selected detail payloads and marks omitted fields', () => {
+    const branch = [
       { type: 'session', id: 'parent-1' },
       {
         type: 'message',
@@ -120,15 +159,22 @@ describe('delegate history adapter', () => {
           },
         },
       },
-    ]);
-    const details = response.groups[0]?.runs[0]?.details;
+    ];
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      branch,
+      response.groups[0]?.runs[0]?.runId ?? '',
+      response.groups[0]?.runs[0]?.lineageId,
+    );
+    const details = detail.run.details;
     expect(details.truncated).toBe(true);
     expect(details.task?.length).toBeLessThanOrEqual(20_000);
     expect(parseDelegateHistoryResponse(response)).toEqual(response);
   });
 
-  it('projects bounded assistant response and public errors without stderr', () => {
-    const response = delegateHistoryFromBranch('parent-1', [
+  it('projects selected public response and errors without stderr', () => {
+    const branch = [
       { type: 'session', id: 'parent-1' },
       {
         type: 'message',
@@ -157,16 +203,23 @@ describe('delegate history adapter', () => {
           },
         },
       },
-    ]);
-    expect(response.groups[0]?.runs[0]?.details).toMatchObject({
+    ];
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      branch,
+      response.groups[0]?.runs[0]?.runId ?? '',
+      response.groups[0]?.runs[0]?.lineageId,
+    );
+    expect(detail.run.details).toMatchObject({
       response: 'Answer one.\nAnswer two.',
       error: 'The runner failed safely.',
     });
-    expect(JSON.stringify(response)).not.toContain('private stderr');
+    expect(JSON.stringify(detail)).not.toContain('private stderr');
   });
 
-  it('keeps structured runs with absent messages valid', () => {
-    const response = delegateHistoryFromBranch('parent-1', [
+  it('keeps selected structured runs with absent messages valid', () => {
+    const branch = [
       { type: 'session', id: 'parent-1' },
       {
         type: 'message',
@@ -186,15 +239,23 @@ describe('delegate history adapter', () => {
           },
         },
       },
-    ]);
-    expect(response.groups[0]?.runs[0]).toMatchObject({
+    ];
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      branch,
+      response.groups[0]?.runs[0]?.runId ?? '',
+      response.groups[0]?.runs[0]?.lineageId,
+    );
+    expect(response.groups[0]?.runs[0]).toMatchObject({ state: 'success' });
+    expect(detail.run).toMatchObject({
       state: 'success',
       details: {
         structuredResult: { valid: true, errors: [] },
         truncated: false,
       },
     });
-    expect(response.groups[0]?.runs[0]?.details).not.toHaveProperty('response');
+    expect(detail.run.details).not.toHaveProperty('response');
   });
 
   it('keeps new identities and gives old standalone runs distinct stable IDs', () => {

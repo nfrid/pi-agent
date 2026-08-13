@@ -13,9 +13,11 @@ import type { DashboardRendererContext } from '../renderer-registry';
 import {
   composeDelegateHistory,
   type DelegateCompositeGroup,
+  type DelegateCompositeRun,
   type DelegateInspectionStatus,
 } from './delegate-history';
 import {
+  type DelegateInspectorDetailState,
   type DelegateInspectorRunOption,
   DelegateTranscriptInspector,
 } from './delegate-transcript-inspector';
@@ -231,10 +233,18 @@ export function DelegateSurface({
   surface,
   pausedAt,
   history,
+  historyLoading = false,
+  historyError,
+  onRunSelected,
+  detail,
 }: {
   surface: ExtensionSurface;
   pausedAt?: number;
   history?: import('@pi-dashboard/protocol').DelegateHistoryResponse;
+  historyLoading?: boolean;
+  historyError?: unknown;
+  onRunSelected?: (run: DelegateCompositeRun) => void;
+  detail?: DelegateInspectorDetailState;
 }) {
   const model = surface.viewModel as DelegateStatusViewModel;
   const liveRows = delegateRows(model);
@@ -283,15 +293,19 @@ export function DelegateSurface({
       row.pauseState !== undefined ||
       ['running', 'queued'].includes(stateLabel(row.state)),
   );
-  const summary = historyIncomplete
-    ? 'History incomplete · some work omitted'
-    : active
-      ? short(text(active.name, 'Subagent'), 42)
-      : stats.failed
-        ? `${stats.failed} need attention`
-        : stats.aborted
-          ? `${stats.aborted} stopped`
-          : 'All delegates complete';
+  const summary = historyLoading
+    ? 'Loading delegate history…'
+    : historyError
+      ? 'Delegate history unavailable'
+      : historyIncomplete
+        ? 'History incomplete · some work omitted'
+        : active
+          ? short(text(active.name, 'Subagent'), 42)
+          : stats.failed
+            ? `${stats.failed} need attention`
+            : stats.aborted
+              ? `${stats.aborted} stopped`
+              : 'All delegates complete';
   const activeCount = rows.filter(
     (row) =>
       row.pauseState !== undefined ||
@@ -333,12 +347,27 @@ export function DelegateSurface({
         label="Delegates"
         summary={summary}
         count={`${activeCount} active · ${finishedCount} finished`}
-        visibleCount={rows.length + (historyIncomplete ? 1 : 0)}
+        visibleCount={
+          rows.length +
+          (historyIncomplete ? 1 : 0) +
+          (historyLoading || historyError ? 1 : 0)
+        }
         drawerClassName="surface-drawer work-surface-drawer delegate-surface-drawer"
         headerStats={statsView}
         paused={pausedAt !== undefined}
       >
         <div className="delegate-scroll surface-scroll-region">
+          {historyLoading && (
+            <p className="delegate-history-status" role="status">
+              Loading delegate history…
+            </p>
+          )}
+          {historyError !== undefined && !historyLoading && (
+            <p className="delegate-history-status" role="alert">
+              Unable to load delegate history. Live delegate status remains
+              available.
+            </p>
+          )}
           <div className="delegate-rows">
             {delegateSections.map(
               (section) =>
@@ -382,6 +411,15 @@ export function DelegateSurface({
                             className="delegate-row-toggle"
                             aria-haspopup="dialog"
                             onPress={() => {
+                              onRunSelected?.(
+                                group.runs.find(
+                                  (run) => run.id === row.runId,
+                                ) ?? {
+                                  id: row.runId,
+                                  label: '',
+                                  row,
+                                },
+                              );
                               setSelectedLineageId(row.lineageId);
                               setLastInspectorRow(row);
                               setInspectorOpen(true);
@@ -432,6 +470,8 @@ export function DelegateSurface({
           row={inspectorRow}
           now={now}
           runOptions={inspectorRuns}
+          detail={detail}
+          onRunSelected={onRunSelected}
           isOpen={inspectorOpen}
           paused={pausedAt !== undefined}
           onClose={() => setInspectorOpen(false)}

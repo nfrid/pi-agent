@@ -8,6 +8,9 @@ import {
   CheckoutReviewCommandSchema,
   type ComposerCommandCatalogue,
   type DelegateHistoryResponse,
+  type DelegateHistoryRunDetailResponse,
+  type DelegateHistoryRunQuery,
+  DelegateHistoryRunQuerySchema,
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
   RetryCommandSchema,
@@ -90,6 +93,11 @@ export interface DashboardRouteContext {
   usage(): Promise<{ usage: unknown; error?: string }>;
   readSession(id: string, before?: string): Promise<unknown>;
   readDelegateHistory(id: string): Promise<DelegateHistoryResponse>;
+  readDelegateHistoryRun(
+    id: string,
+    runId: string,
+    query: DelegateHistoryRunQuery,
+  ): Promise<DelegateHistoryRunDetailResponse>;
   renameSession(id: string, name: string): Promise<unknown>;
   startRuntime(input: unknown): Promise<unknown>;
   restartRuntime?(runtimeId: string, commandId: string): Promise<unknown>;
@@ -511,6 +519,24 @@ export const dashboardRoutes: FastifyPluginAsync<{
     async (request, reply) => {
       try {
         return await context.readDelegateHistory(request.params.id);
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
+  app.get<{
+    Params: { id: string; runId: string };
+    Querystring: DelegateHistoryRunQuery;
+  }>(
+    '/api/sessions/:id/delegate-history/runs/:runId',
+    { schema: { querystring: DelegateHistoryRunQuerySchema } },
+    async (request, reply) => {
+      try {
+        return await context.readDelegateHistoryRun(
+          request.params.id,
+          request.params.runId,
+          request.query,
+        );
       } catch (error) {
         return sendError(reply, error);
       }

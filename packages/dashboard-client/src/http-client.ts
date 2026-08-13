@@ -6,6 +6,8 @@ import {
   type ComposerCommandCatalogue,
   type DashboardStreamMessage,
   type DelegateHistoryResponse,
+  type DelegateHistoryRunDetailResponse,
+  type DelegateHistoryRunQuery,
   type Project,
   type ProjectAdoptCommand,
   type ProjectCreateCommand,
@@ -20,6 +22,7 @@ import {
   tryParseComposerCommandCatalogue,
   tryParseDashboardStreamMessage,
   tryParseDelegateHistoryResponse,
+  tryParseDelegateHistoryRunDetailResponse,
   tryParseSessionApiResponse,
 } from '@pi-dashboard/protocol';
 import {
@@ -312,6 +315,38 @@ export class DashboardHttpClient {
     signal?: AbortSignal,
   ): Promise<DelegateHistoryResponse> {
     return this.delegateHistory(id, signal);
+  }
+
+  async delegateHistoryRun(
+    id: string,
+    runId: string,
+    options: DelegateHistoryRunQuery = {},
+    signal?: AbortSignal,
+  ): Promise<DelegateHistoryRunDetailResponse> {
+    const query = new URLSearchParams();
+    if (options.lineageId !== undefined)
+      query.set('lineageId', options.lineageId);
+    if (options.leafId !== undefined) query.set('leafId', options.leafId);
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    const value = await this.request<unknown>(
+      `/api/sessions/${encodeURIComponent(id)}/delegate-history/runs/${encodeURIComponent(runId)}${suffix}`,
+      signal ? { signal } : {},
+    );
+    const response = tryParseDelegateHistoryRunDetailResponse(value);
+    if (!response)
+      throw new Error(
+        'Dashboard returned invalid delegate history run detail data.',
+      );
+    return response;
+  }
+
+  async delegateHistoryDetail(
+    id: string,
+    runId: string,
+    options: DelegateHistoryRunQuery = {},
+    signal?: AbortSignal,
+  ): Promise<DelegateHistoryRunDetailResponse> {
+    return this.delegateHistoryRun(id, runId, options, signal);
   }
 
   async usage(): Promise<{ usage?: unknown; error?: string }> {

@@ -27,9 +27,25 @@ function context(): DashboardRouteContext {
     usage: async () => ({ usage: null }),
     readSession: async () => ({ entries: [], metadata: { id: 's' } }),
     readDelegateHistory: async () => ({
-      version: 1,
+      version: 2,
       sessionId: 's',
       groups: [],
+    }),
+    readDelegateHistoryRun: async (id, runId, query) => ({
+      version: 1,
+      sessionId: id,
+      lineageId: query.lineageId ?? 'lineage-1',
+      runId,
+      run: {
+        runId,
+        lineageId: query.lineageId ?? 'lineage-1',
+        name: 'Worker',
+        kind: 'background',
+        state: 'success',
+        createdAt: 1,
+        allowWrites: false,
+        details: { truncated: false },
+      },
     }),
     renameSession: async () => ({ metadata: { id: 's' } }),
     startRuntime: async () => ({ runtimeId: 'runtime' }),
@@ -100,7 +116,7 @@ describe('Fastify dashboard route plugin', () => {
     apps.push(app);
     const routeContext = context();
     routeContext.readDelegateHistory = vi.fn(async (id) => ({
-      version: 1 as const,
+      version: 2 as const,
       sessionId: id,
       groups: [],
     }));
@@ -116,11 +132,51 @@ describe('Fastify dashboard route plugin', () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      version: 1,
+      version: 2,
       sessionId: 'offline-1',
       groups: [],
     });
     expect(routeContext.readDelegateHistory).toHaveBeenCalledWith('offline-1');
+  });
+
+  it('serves one selected delegate run detail with branch query pins', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.readDelegateHistoryRun = vi.fn(async (id, runId, query) => ({
+      version: 1 as const,
+      sessionId: id,
+      leafId: query.leafId,
+      lineageId: query.lineageId ?? 'lineage-1',
+      runId,
+      run: {
+        runId,
+        lineageId: query.lineageId ?? 'lineage-1',
+        name: 'Worker',
+        kind: 'background' as const,
+        state: 'success' as const,
+        createdAt: 1,
+        allowWrites: false,
+        details: { response: 'selected only', truncated: false },
+      },
+    }));
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/offline-1/delegate-history/runs/run-1?lineageId=lineage-1&leafId=leaf-1',
+      headers: {
+        origin: 'http://dashboard.test',
+        'x-dashboard-token': 'route-token',
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().runId).toBe('run-1');
+    expect(routeContext.readDelegateHistoryRun).toHaveBeenCalledWith(
+      'offline-1',
+      'run-1',
+      { lineageId: 'lineage-1', leafId: 'leaf-1' },
+    );
   });
 
   it('serves authenticated workspace composer commands and rejects unknown ids', async () => {

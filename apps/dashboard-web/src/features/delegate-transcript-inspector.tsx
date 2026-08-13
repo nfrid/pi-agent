@@ -1,3 +1,4 @@
+import type { DelegateHistoryRunDetailResponse } from '@pi-dashboard/protocol';
 import { useEffect, useRef, useState } from 'react';
 import type {
   DelegateStatus,
@@ -6,7 +7,10 @@ import type {
 import { TranscriptEntry } from '../entities/transcript/entries';
 import { StructuredResultSection } from '../entities/transcript/inspector';
 import type { TranscriptModelItem } from '../transcript';
-import type { DelegateInspectionStatus } from './delegate-history';
+import {
+  type DelegateInspectionStatus,
+  delegateHistoryInvocationToStatus,
+} from './delegate-history';
 import { SurfaceDrawer } from './surface-drawer';
 
 function text(value: string | undefined, fallback = ''): string {
@@ -349,6 +353,16 @@ export interface DelegateInspectorRunOption {
   id: string;
   label: string;
   row: DelegateInspectionStatus;
+  /** True when this option came from the durable summary response. */
+  persisted?: boolean;
+  /** True when the live runtime currently overlays this option. */
+  live?: boolean;
+}
+
+export interface DelegateInspectorDetailState {
+  run?: DelegateHistoryRunDetailResponse;
+  loading?: boolean;
+  error?: unknown;
 }
 
 /** Keep a historical selection stable while the live composite is refreshed. */
@@ -370,6 +384,8 @@ export function DelegateTranscriptInspector({
   row,
   now,
   runOptions,
+  detail,
+  onRunSelected,
   isOpen,
   paused = false,
   onClose,
@@ -377,6 +393,8 @@ export function DelegateTranscriptInspector({
   row: DelegateInspectionStatus;
   now: number;
   runOptions?: readonly DelegateInspectorRunOption[];
+  detail?: DelegateInspectorDetailState;
+  onRunSelected?: (run: DelegateInspectorRunOption) => void;
   isOpen: boolean;
   paused?: boolean;
   onClose: () => void;
@@ -395,13 +413,18 @@ export function DelegateTranscriptInspector({
   }, [row.lineageId, runOptions, selectedRunId]);
   const selectedRun = runOptions?.find((run) => run.id === selectedRunId);
   const inspectedRow = selectedRun?.row ?? row;
-  const entries = inspectedRow.transcript ?? [];
+  const selectedDetail =
+    detail?.run && detail.run.runId === inspectedRow.runId
+      ? delegateHistoryInvocationToStatus(detail.run.run)
+      : undefined;
+  const displayedRow = selectedDetail ?? inspectedRow;
+  const entries = displayedRow.transcript ?? [];
   return (
     <SurfaceDrawer
       title="Delegate transcript"
       eyebrow="Delegate"
-      headerSummary={text(inspectedRow.name, 'Subagent')}
-      headerContent={<DelegateInspectorMetadata row={inspectedRow} now={now} />}
+      headerSummary={text(displayedRow.name, 'Subagent')}
+      headerContent={<DelegateInspectorMetadata row={displayedRow} now={now} />}
       className="surface-drawer delegate-transcript-drawer"
       isOpen={isOpen}
       paused={paused}
@@ -419,23 +442,36 @@ export function DelegateTranscriptInspector({
                 type="button"
                 key={run.id}
                 aria-pressed={run.id === inspectedRow.runId}
-                onClick={() => setSelectedRunId(run.id)}
+                onClick={() => {
+                  setSelectedRunId(run.id);
+                  onRunSelected?.(run);
+                }}
               >
                 {run.label}
               </button>
             ))}
           </fieldset>
         )}
-        <DelegateStructuredResultSection row={inspectedRow} />
-        <DelegateInspectorDetails row={inspectedRow} now={now} />
-        {entries.length > 0 || inspectedRow.transcriptTruncated ? (
+        {detail?.loading && (
+          <p className="delegate-transcript-loading" role="status">
+            Loading persisted delegate transcript…
+          </p>
+        )}
+        {detail?.error !== undefined && !detail.loading && (
+          <p className="delegate-transcript-error" role="alert">
+            Unable to load this persisted delegate transcript.
+          </p>
+        )}
+        <DelegateStructuredResultSection row={displayedRow} />
+        <DelegateInspectorDetails row={displayedRow} now={now} />
+        {entries.length > 0 || displayedRow.transcriptTruncated ? (
           <DelegateTranscript
             entries={entries}
-            truncated={inspectedRow.transcriptTruncated === true}
+            truncated={displayedRow.transcriptTruncated === true}
             truncatedMessage={
-              inspectedRow.historyIncomplete
+              displayedRow.historyIncomplete
                 ? 'Delegate history is incomplete; some historical runs or transcript entries were omitted from this view.'
-                : inspectedRow.historical
+                : displayedRow.historical
                   ? 'Earlier historical transcript entries were omitted from this view.'
                   : undefined
             }

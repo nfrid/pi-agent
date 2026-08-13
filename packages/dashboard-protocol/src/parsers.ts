@@ -27,6 +27,8 @@ import {
   DashboardStreamMessageSchema,
   type DelegateHistoryResponse,
   DelegateHistoryResponseSchema,
+  type DelegateHistoryRunDetailResponse,
+  DelegateHistoryRunDetailResponseSchema,
   type InteractionSnapshot,
   InteractionSnapshotSchema,
   MAX_FRAME_BYTES,
@@ -611,6 +613,27 @@ export function tryParseDelegateHistoryResponse(
 ): DelegateHistoryResponse | undefined {
   return tryParseSchema(DelegateHistoryResponseSchema, value);
 }
+
+export function parseDelegateHistoryRunDetailResponse(
+  value: unknown,
+): DelegateHistoryRunDetailResponse {
+  return parseSchema(
+    DelegateHistoryRunDetailResponseSchema,
+    value,
+    'delegate history run detail response',
+  );
+}
+export function tryParseDelegateHistoryRunDetailResponse(
+  value: unknown,
+): DelegateHistoryRunDetailResponse | undefined {
+  return tryParseSchema(DelegateHistoryRunDetailResponseSchema, value);
+}
+
+export const parseDelegateHistoryDetailResponse =
+  parseDelegateHistoryRunDetailResponse;
+export const tryParseDelegateHistoryDetailResponse =
+  tryParseDelegateHistoryRunDetailResponse;
+
 export function tryParseSessionApiResponse(
   value: unknown,
 ): SessionApiResponse | undefined {

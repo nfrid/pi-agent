@@ -3,6 +3,8 @@ import type {
   DelegateHistoryGroup,
   DelegateHistoryInvocation,
   DelegateHistoryResponse,
+  DelegateHistoryRunDetail,
+  DelegateHistoryRunDetailResponse,
 } from '@pi-dashboard/protocol';
 import {
   MAX_DELEGATE_HISTORY_DETAIL_BYTES,
@@ -10,6 +12,7 @@ import {
   MAX_DELEGATE_HISTORY_DETAIL_TEXT,
   MAX_DELEGATE_HISTORY_GROUPS,
   MAX_DELEGATE_HISTORY_RUNS_PER_GROUP,
+  MAX_DELEGATE_HISTORY_SUMMARY_BYTES,
   MAX_DELEGATE_HISTORY_TASK,
   MAX_DELEGATE_HISTORY_TOTAL_RUNS,
 } from '@pi-dashboard/protocol';
@@ -499,6 +502,15 @@ function invocation(
     ...(route === undefined ? {} : { route }),
     ...(context === undefined ? {} : { context }),
     allowWrites,
+  };
+}
+
+function detailInvocation(
+  sessionId: string,
+  occurrence: DelegateOccurrence,
+): DelegateHistoryRunDetail {
+  return {
+    ...invocation(sessionId, occurrence),
     details: publicDetails(occurrence.run),
   };
 }
@@ -576,13 +588,71 @@ export function delegateHistoryFromBranch(
       };
     },
   );
+  // Count and per-field limits are not sufficient when many run tasks are
+  // unusually large. Trim oldest rows from the end until the summary itself
+  // is bounded, preserving the stable IDs of rows that remain.
+  while (
+    JSON.stringify({
+      version: 2,
+      sessionId,
+      ...(leafId ? { leafId } : {}),
+      groups: grouped,
+    }).length *
+      4 >
+      MAX_DELEGATE_HISTORY_SUMMARY_BYTES &&
+    grouped.length > 0
+  ) {
+    const lastIndex = grouped.length - 1;
+    const last = grouped[lastIndex];
+    if (!last) break;
+    const runs = last.runs.slice(0, -1);
+    if (runs.length === 0) grouped.pop();
+    else
+      grouped[lastIndex] = {
+        ...last,
+        runId: runs[runs.length - 1]?.runId ?? last.runId,
+        state: runs[runs.length - 1]?.state ?? last.state,
+        runCount: runs.length,
+        runs,
+        truncated: true,
+      };
+    responseTruncated = true;
+  }
   return {
-    version: 1,
+    version: 2,
     sessionId,
     ...(leafId ? { leafId } : {}),
     ...(responseTruncated ? { truncated: true } : {}),
     groups: grouped,
   };
+}
+
+/**
+ * Extract one selected invocation and its bounded public detail payload from a
+ * parent-session branch. The caller must select/pin the branch before calling
+ * this adapter; no child session or continuation data is exposed.
+ */
+export function delegateHistoryRunDetailFromBranch(
+  sessionId: string,
+  branch: readonly unknown[],
+  runId: string,
+  lineageId?: string,
+  leafId?: string,
+): DelegateHistoryRunDetailResponse {
+  for (const occurrence of occurrences(branch)) {
+    const summary = invocation(sessionId, occurrence);
+    if (summary.runId !== runId) continue;
+    if (lineageId !== undefined && summary.lineageId !== lineageId) continue;
+    return {
+      version: 1,
+      sessionId,
+      ...(leafId ? { leafId } : {}),
+      lineageId: summary.lineageId,
+      runId: summary.runId,
+      run: detailInvocation(sessionId, occurrence),
+    };
+  }
+  throw new Error('Delegate run was not found on the selected session branch.');
 }
 
 export const extractDelegateHistory = delegateHistoryFromBranch;

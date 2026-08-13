@@ -180,7 +180,7 @@ describe('live extension surface fixtures', () => {
         }}
         history={
           {
-            version: 1,
+            version: 2,
             sessionId: 'offline-session',
             truncated: true,
             groups: [],
