@@ -60,4 +60,17 @@ describe('PWA assets', () => {
       height: 180,
     });
   });
+
+  it('keeps the service worker limited to updates and notifications', () => {
+    const serviceWorker = readPublic('sw.js').toString('utf8');
+
+    expect(serviceWorker).toContain("'__PI_DASHBOARD_BUILD_ID__'");
+    expect(serviceWorker).toContain('self.skipWaiting()');
+    expect(serviceWorker).toContain("key.startsWith('pi-dashboard-')");
+    expect(serviceWorker).toContain('self.clients.claim()');
+    expect(serviceWorker).toContain('client.navigate(client.url)');
+    expect(serviceWorker).not.toContain('addAll');
+    expect(serviceWorker).not.toContain('respondWith');
+    expect(serviceWorker).not.toContain("caches.match('/')");
+  });
 });
