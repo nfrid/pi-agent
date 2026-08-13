@@ -17,12 +17,19 @@ const response: SessionApiResponse = {
   entries: [],
 };
 
-function HydrationProbe({ store }: { store: DashboardLiveStore }) {
-  useSessionHydration({
+function HydrationProbe({
+  store,
+  onHydration,
+}: {
+  store: DashboardLiveStore;
+  onHydration?: (value: ReturnType<typeof useSessionHydration>) => void;
+}) {
+  const hydration = useSessionHydration({
     id: 'session-1',
     store,
     onReplacement: () => undefined,
   });
+  onHydration?.(hydration);
   return null;
 }
 
@@ -33,6 +40,123 @@ describe('isCurrentSessionResponse', () => {
     expect(isCurrentSessionResponse('session-a', response)).toBe(true);
     expect(isCurrentSessionResponse('session-b', response)).toBe(false);
     expect(isCurrentSessionResponse('session-a', undefined)).toBe(false);
+  });
+
+  it('does not retry a bounded incomplete history tail', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    });
+    vi.stubGlobal('window', { setTimeout, clearTimeout });
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const paginated: SessionApiResponse = {
+      ...response,
+      entries: [
+        {
+          type: 'message',
+          id: 'entry-10',
+          message: { role: 'user', content: 'older tail' },
+        },
+      ],
+      entriesComplete: false,
+      history: {
+        version: 1,
+        start: 10,
+        end: 20,
+        hasOlder: true,
+        nextBefore: 'older-cursor',
+      },
+    };
+    const session = vi
+      .spyOn(dashboardHttpClient, 'session')
+      .mockResolvedValue(paginated);
+    const store = new DashboardLiveStore();
+    let waitingForInitialHistory: boolean | undefined;
+    store.hydrateSession(paginated);
+    vi.spyOn(store, 'hydrateSession').mockReturnValue(
+      store.getSnapshot().transcriptsBySessionId['session-1'],
+    );
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(
+      dashboardQueryKeys.session('session-1'),
+      paginated,
+    );
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(
+          createElement(
+            QueryClientProvider,
+            { client: queryClient },
+            createElement(HydrationProbe, {
+              store,
+              onHydration: (value) => {
+                waitingForInitialHistory = value.waitingForInitialHistory;
+              },
+            }),
+          ),
+        );
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(waitingForInitialHistory).toBe(false);
+      expect(session).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      session.mockRestore();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries incomplete history when no older-page cursor exists', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    });
+    vi.stubGlobal('window', { setTimeout, clearTimeout });
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const notReady: SessionApiResponse = {
+      ...response,
+      entriesComplete: false,
+    };
+    const session = vi
+      .spyOn(dashboardHttpClient, 'session')
+      .mockResolvedValue(notReady);
+    const store = new DashboardLiveStore();
+    vi.spyOn(store, 'hydrateSession').mockReturnValue({} as never);
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(dashboardQueryKeys.session('session-1'), notReady);
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(
+          createElement(
+            QueryClientProvider,
+            { client: queryClient },
+            createElement(HydrationProbe, { store }),
+          ),
+        );
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(session).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      session.mockRestore();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
   });
 
   it('does not refetch active sessions for session metadata records', async () => {
@@ -200,7 +324,9 @@ describe('isCurrentSessionResponse', () => {
         });
       });
       await expect.poll(() => session).toHaveBeenCalledTimes(1);
-      expect(store.getSnapshot().sessionChangeById).toEqual({ 'session-1': 1 });
+      expect(store.getSnapshot().sessionChangeById).toEqual({
+        'session-1': 1,
+      });
 
       await act(async () => {
         store.acceptStreamRecord({

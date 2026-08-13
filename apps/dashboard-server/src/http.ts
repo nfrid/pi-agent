@@ -40,6 +40,7 @@ import type { RegistryChange } from './runtime-registry.js';
 
 /** Keep session deltas comfortably below the 2 MiB SSE frame limit. */
 const MAX_SESSION_INDEX_DELTA_BYTES = 1_500_000;
+const MAX_SESSION_RESPONSE_ENTRY_BYTES = 384 * 1024;
 
 const NON_RENDERED_SESSION_ENTRY_TYPES = new Set([
   'session',
@@ -60,6 +61,59 @@ function hasTranscriptEntries(entries: readonly unknown[]): boolean {
 
 function isSparseRuntimeSession(runtime: RuntimeSnapshot): boolean {
   return !hasTranscriptEntries(runtime.session.entries);
+}
+
+function runtimeEntriesExceedPageBudget(runtime: RuntimeSnapshot): boolean {
+  let bytes = 0;
+  for (const entry of runtime.session.entries) {
+    bytes += Buffer.byteLength(JSON.stringify(redactImageData(entry)) ?? '');
+    if (bytes > MAX_SESSION_RESPONSE_ENTRY_BYTES) return true;
+  }
+  return false;
+}
+
+function boundedRuntimeEntries(entries: readonly unknown[]): {
+  entries: unknown[];
+  complete: boolean;
+} {
+  const selected: unknown[] = [];
+  let bytes = 0;
+  let complete = true;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = redactImageData(entries[index]);
+    const serialized = JSON.stringify(entry) ?? '';
+    const sourceBytes = Buffer.byteLength(serialized);
+    let output: unknown;
+    if (sourceBytes > MAX_SESSION_RESPONSE_ENTRY_BYTES) {
+      complete = false;
+      output = {
+        type: 'history_omission',
+        ...(isRecord(entry) && typeof entry.id === 'string'
+          ? { id: entry.id }
+          : {}),
+        ...(isRecord(entry) && typeof entry.type === 'string'
+          ? { originalType: entry.type }
+          : {}),
+        reason: 'entry-exceeds-page-budget',
+        originalBytes: sourceBytes,
+      };
+    } else output = entry;
+    const outputBytes = Buffer.byteLength(JSON.stringify(output) ?? '');
+    if (
+      selected.length > 0 &&
+      bytes + outputBytes > MAX_SESSION_RESPONSE_ENTRY_BYTES
+    ) {
+      complete = false;
+      break;
+    }
+    selected.push(output);
+    bytes += outputBytes;
+  }
+  selected.reverse();
+  return {
+    entries: selected,
+    complete: complete && selected.length === entries.length,
+  };
 }
 
 function validDelegateIdentifier(value: unknown): value is string {
@@ -97,6 +151,7 @@ function requiresBrowserSnapshot(change: RegistryChange): boolean {
       return process.env.PI_DASHBOARD_NOTIFY_SETTLED === '1';
     case 'session.changed':
     case 'session.snapshot':
+      return false;
     case 'interaction.requested':
     case 'interaction.resolved':
     case 'runtime.goodbye':
@@ -649,9 +704,10 @@ export class DashboardServerImpl implements DashboardServer {
     };
     const runtimeResult = (runtime: RuntimeSnapshot) => {
       const indexedMetadata = this.sessions.get(id);
+      const bounded = boundedRuntimeEntries(runtime.session.entries);
       const entriesComplete =
         (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
-        true;
+          true && bounded.complete;
       return {
         serverId: this.serverId,
         cursor,
@@ -668,7 +724,7 @@ export class DashboardServerImpl implements DashboardServer {
           activeRuntimeId: runtime.runtimeId,
           entryCount: runtime.session.entries.length,
         },
-        entries: redactImageData(runtime.session.entries),
+        entries: bounded.entries,
         entriesComplete,
       };
     };
@@ -724,7 +780,8 @@ export class DashboardServerImpl implements DashboardServer {
           !runtimeIsWorking(runtime) &&
           (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
             true &&
-          !isSparseRuntimeSession(runtime)
+          !isSparseRuntimeSession(runtime) &&
+          !runtimeEntriesExceedPageBudget(runtime)
         )
           return runtimeResult(runtime);
         result = await readForRuntime(runtime);
@@ -784,7 +841,11 @@ export class DashboardServerImpl implements DashboardServer {
         // While working, disk is authoritative even when the cached runtime
         // snapshot looks complete: it can be one or more turns behind.
         return withRuntimeMetadata;
-      if (runtimeEntriesComplete && !isSparseRuntimeSession(runtime))
+      if (
+        runtimeEntriesComplete &&
+        !isSparseRuntimeSession(runtime) &&
+        !runtimeEntriesExceedPageBudget(runtime)
+      )
         return runtimeResult(runtime);
       if (runtimeEntriesComplete) {
         // A branch can be serialized successfully yet contain only session

@@ -632,9 +632,29 @@ export class RuntimeRegistry {
       runtimeSeq: frame.seq,
     });
     if (!reduced.accepted) return;
-    record.reducerState = reduced.state;
+    const compactSessionPatch =
+      (event.type === 'runtime.stateChanged' ||
+        event.type === 'runtime.heartbeat') &&
+      event.snapshot?.session?.entriesComplete === false &&
+      event.snapshot.session.entries.length === 0;
+    const reducedState = compactSessionPatch
+      ? {
+          ...reduced.state,
+          // A compact runtime patch updates public metadata only. Preserve the
+          // registry's full session authority until a session snapshot arrives.
+          snapshot: {
+            ...reduced.state.snapshot,
+            session: {
+              ...reduced.state.snapshot.session,
+              entries: record.snapshot.session.entries,
+              entriesComplete: false,
+            },
+          },
+        }
+      : reduced.state;
+    record.reducerState = reducedState;
     record.snapshot = {
-      ...reduced.state.snapshot,
+      ...reducedState.snapshot,
       online: true,
       lastSeenAt: Date.now(),
     };

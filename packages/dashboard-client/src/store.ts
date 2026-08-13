@@ -110,6 +110,43 @@ function runtimeIndex(
   return Object.fromEntries(items.map((item) => [item.runtimeId, item]));
 }
 
+function sameTranscriptValue(left: unknown, right: unknown): boolean {
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Keep the canonical projection authoritative while retaining object identity
+ * for transcript rows that did not change during routine HTTP recovery.
+ */
+function reuseTranscriptProjection(
+  previous: TranscriptProjection | undefined,
+  next: TranscriptProjection,
+): TranscriptProjection {
+  if (!previous) return next;
+  const items = { ...next.items };
+  for (const [id, item] of Object.entries(next.items)) {
+    const prior = previous.items[id];
+    if (prior && sameTranscriptValue(prior, item)) items[id] = prior;
+  }
+  const orderIsSame =
+    previous.order.length === next.order.length &&
+    previous.order.every((id, index) => next.order[index] === id);
+  const itemIds = Object.keys(items);
+  const previousItemIds = Object.keys(previous.items);
+  const itemsAreSame =
+    itemIds.length === previousItemIds.length &&
+    itemIds.every((id) => items[id] === previous.items[id]);
+  return {
+    ...next,
+    ...(orderIsSame ? { order: previous.order } : {}),
+    ...(itemsAreSame ? { items: previous.items } : { items }),
+  };
+}
+
 function mergePrependedTranscript(
   current: TranscriptProjection,
   older: TranscriptProjection,
@@ -156,29 +193,6 @@ function mergePrependedTranscript(
   };
 }
 
-function emptyState(): DashboardLiveState {
-  return {
-    revision: 0,
-    snapshotCursor: 0,
-    cursor: 0,
-    connection: { status: 'connecting', lastCursor: 0 },
-    workspacesById: {},
-    workspaceOrder: [],
-    runtimesById: {},
-    sessionsById: {},
-    optimisticSessionTitlesById: {},
-    optimisticRuntimeTitlesById: {},
-    sessionChangeById: {},
-    sessionReplacementByRuntimeId: {},
-    sessionReplacementBySessionId: {},
-    notificationsById: {},
-    transcriptsBySessionId: {},
-    cursorHistory: [],
-    recentEvents: [],
-    resyncNonce: 0,
-  };
-}
-
 function hasOnlineRuntimeOverlay(
   state: DashboardLiveState,
   sessionId: string,
@@ -204,6 +218,29 @@ function transcriptMetadataChanged(
     previous.entryCount !== next.entryCount ||
     previous.file !== next.file
   );
+}
+
+function emptyState(): DashboardLiveState {
+  return {
+    revision: 0,
+    snapshotCursor: 0,
+    cursor: 0,
+    connection: { status: 'connecting', lastCursor: 0 },
+    workspacesById: {},
+    workspaceOrder: [],
+    runtimesById: {},
+    sessionsById: {},
+    optimisticSessionTitlesById: {},
+    optimisticRuntimeTitlesById: {},
+    sessionChangeById: {},
+    sessionReplacementByRuntimeId: {},
+    sessionReplacementBySessionId: {},
+    notificationsById: {},
+    transcriptsBySessionId: {},
+    cursorHistory: [],
+    recentEvents: [],
+    resyncNonce: 0,
+  };
 }
 
 function sessionIdForEvent(
@@ -902,10 +939,7 @@ export class DashboardLiveStore {
     const event = envelope.event;
     const semanticSessionUpdate =
       Boolean(sessionId) &&
-      (event.type === 'message.finished' ||
-        event.type === 'tool.finished' ||
-        event.type === 'agent.settled' ||
-        event.type === 'runtime.hello' ||
+      (event.type === 'runtime.hello' ||
         event.type === 'session.changed' ||
         event.type === 'session.snapshot');
     if (
@@ -1179,6 +1213,7 @@ export class DashboardLiveStore {
         };
       }
     }
+    projection = reuseTranscriptProjection(currentProjection, projection);
     const currentMetadata = this.state.sessionsById[response.metadata.id];
     const optimisticTitle =
       this.state.optimisticSessionTitlesById[response.metadata.id];

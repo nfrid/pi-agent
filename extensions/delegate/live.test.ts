@@ -153,10 +153,13 @@ describe('delegate live surface', () => {
     ).statuses;
     expect(
       statuses.filter((status) => status.result?.value !== undefined),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(
-      statuses.find((status) => status.result?.valueOmitted),
-    ).toMatchObject({ result: { status: 'valid', valueOmitted: true } });
+      statuses.filter((status) => status.result?.valueOmitted),
+    ).toHaveLength(2);
+    expect(
+      JSON.stringify(delegateSurface(store).viewModel).length,
+    ).toBeLessThan(20 * 1024);
     expect(
       statuses.every((status) =>
         (status.result?.errors ?? []).every((error) => error.length <= 240),

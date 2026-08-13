@@ -44,13 +44,17 @@ export function useSessionHydration({
     : undefined;
   const queryDataId = query.data?.metadata.id;
   const queryEntriesComplete = query.data?.entriesComplete;
+  // An incomplete response with a cursor is a valid bounded tail page. Older
+  // history is user-driven pagination, not a signal that the branch is still
+  // being serialized.
+  const queryHasOlderHistory =
+    query.data?.history?.hasOlder === true ||
+    query.data?.history?.nextBefore !== undefined;
   const [error, setError] = useState<string>();
   const [incompleteRetryNonce, setIncompleteRetryNonce] = useState(0);
   const hydrationRetryCountRef = useRef(0);
   const incompleteRetryCountRef = useRef(0);
   const sessionChangeRef = useRef({ id, value: sessionChange });
-  const runtimeReconcileTimerRef = useRef<number | undefined>(undefined);
-  const runtimeWasOnlineRef = useRef(false);
   const sessionRefetchRef = useRef<
     | {
         id: string;
@@ -136,21 +140,6 @@ export function useSessionHydration({
   }, [requestSessionRefetch, resyncNonce]);
 
   useEffect(() => {
-    const online = Boolean(runtime && runtime.online !== false);
-    const wasOnline = runtimeWasOnlineRef.current;
-    runtimeWasOnlineRef.current = online;
-    if (!wasOnline || online) return;
-    // A short-lived print/runtime can exit immediately after its terminal
-    // event. Re-read once after shutdown, when Pi's JSONL branch is durable.
-    if (runtimeReconcileTimerRef.current !== undefined)
-      window.clearTimeout(runtimeReconcileTimerRef.current);
-    runtimeReconcileTimerRef.current = window.setTimeout(() => {
-      runtimeReconcileTimerRef.current = undefined;
-      void requestSessionRefetch();
-    }, 500);
-  }, [requestSessionRefetch, runtime]);
-
-  useEffect(() => {
     const reconcileWhenVisible = () => {
       if (document.visibilityState !== 'visible') return;
       hydrationRetryCountRef.current = 0;
@@ -166,7 +155,11 @@ export function useSessionHydration({
   useEffect(() => {
     // Visibility increments this nonce to restart a previously suspended retry loop.
     void incompleteRetryNonce;
-    if (queryDataId !== id || queryEntriesComplete !== false) {
+    if (
+      queryDataId !== id ||
+      queryEntriesComplete !== false ||
+      queryHasOlderHistory
+    ) {
       incompleteRetryCountRef.current = 0;
       return;
     }
@@ -204,18 +197,9 @@ export function useSessionHydration({
     incompleteRetryNonce,
     queryDataId,
     queryEntriesComplete,
+    queryHasOlderHistory,
     requestSessionRefetch,
   ]);
-
-  useEffect(
-    () => () => {
-      if (runtimeReconcileTimerRef.current !== undefined) {
-        window.clearTimeout(runtimeReconcileTimerRef.current);
-        runtimeReconcileTimerRef.current = undefined;
-      }
-    },
-    [],
-  );
 
   const retrySession = useCallback(() => {
     hydrationRetryCountRef.current = 0;

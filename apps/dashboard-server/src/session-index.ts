@@ -76,7 +76,9 @@ interface HistoryCursor {
   leafId?: string;
 }
 
-const HISTORY_PAGE_BYTES = 8 * 1024 * 1024;
+// Keep ordinary transcript pages below the transport envelope limit. Delegate
+// history uses its own projection budget below and is intentionally unchanged.
+const HISTORY_PAGE_BYTES = 384 * 1024;
 const LATEST_LEAF_READ_ATTEMPTS = 3;
 
 type SessionFileVersion = {
@@ -356,15 +358,17 @@ export class SessionIndex {
               : entry;
           const prefixHash = seenHasher.copy().digest('hex');
           updateHistoryHash(seenHasher, serialized);
-          const outputBytes = Buffer.byteLength(JSON.stringify(outputEntry));
+          // Omission markers are tiny, but their source entry still consumes a
+          // page slot so a multi-megabyte history remains pageable.
+          const budgetBytes = Math.min(originalBytes, HISTORY_PAGE_BYTES);
           page.push({
             ordinal,
             entry: outputEntry,
             prefixHash,
-            bytes: outputBytes,
+            bytes: budgetBytes,
           });
-          pageBytes += outputBytes;
-          while (pageBytes > HISTORY_PAGE_BYTES && page.length > 0) {
+          pageBytes += budgetBytes;
+          while (pageBytes > HISTORY_PAGE_BYTES && page.length > 1) {
             const shifted = page.shift();
             if (!shifted) break;
             pageBytes -= shifted.bytes;
@@ -655,17 +659,21 @@ export class SessionIndex {
                 originalBytes: outputEntryBytes,
               }
             : outputEntry;
+        const pageBudgetBytes =
+          selector === undefined
+            ? Math.min(Buffer.byteLength(serialized), HISTORY_PAGE_BYTES)
+            : retainedBytes;
         page.push({
           ordinal: outputOrdinal,
           entry: output,
           prefixHash,
-          bytes: retainedBytes,
+          bytes: pageBudgetBytes,
         });
-        pageBytes += retainedBytes;
+        pageBytes += pageBudgetBytes;
         while (
           selector === undefined &&
           pageBytes > HISTORY_PAGE_BYTES &&
-          page.length > 0
+          page.length > 1
         ) {
           const shifted = page.shift();
           if (!shifted) break;
