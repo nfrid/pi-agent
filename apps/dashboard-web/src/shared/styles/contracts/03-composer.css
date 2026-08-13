@@ -46,7 +46,8 @@
   gap: 5px;
 }
 .composer-attach,
-.composer-send {
+.composer-send,
+.composer-abort {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -72,7 +73,8 @@
   transform: translateY(-1px);
 }
 .composer-attach:disabled,
-.composer-send:disabled {
+.composer-send:disabled,
+.composer-abort:disabled {
   opacity: 0.4;
   cursor: not-allowed;
   transform: none;
@@ -155,6 +157,20 @@
 .composer-send:hover {
   background: var(--pink);
   border-color: var(--pink);
+  transform: translateY(-1px);
+}
+.composer-abort {
+  width: 30px;
+  border: 1px solid var(--orange);
+  background: transparent;
+  color: var(--orange);
+  padding: 0;
+  font-size: 12px;
+}
+.composer-abort:hover {
+  border-color: var(--pink);
+  background: #ff79c612;
+  color: var(--pink);
   transform: translateY(-1px);
 }
 .composer-mode {

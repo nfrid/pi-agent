@@ -538,9 +538,13 @@ test('session shell shows compaction progress', async ({ page }) => {
   });
   await expect(composer).toBeEditable();
   await composer.fill('Send after compaction');
-  await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Queue message' }),
+  ).toBeEnabled();
   await composer.press('Meta+Enter');
-  expect(commands).toEqual([]);
+  await expect
+    .poll(() => commands.at(-1))
+    .toMatchObject({ type: 'queue.add', text: 'Send after compaction' });
 
   await page.getByRole('button', { name: 'Cancel context compaction' }).click();
   await expect
@@ -3266,6 +3270,12 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(deliveryMode).toHaveText('Steer');
   await expect(deliveryMode).toHaveAttribute('aria-pressed', 'true');
   const workingComposerInput = page.getByLabel('Message Pi');
+  const abortTurn = page.getByRole('button', { name: 'Abort turn' });
+  await expect(abortTurn).toBeVisible();
+  await abortTurn.click();
+  await expect
+    .poll(() => mocks.commands.some((command) => command.type === 'abort'))
+    .toBe(true);
   await workingComposerInput.fill('/compact');
   await expect(
     page.getByRole('listbox', { name: 'Available commands' }),
@@ -3663,9 +3673,16 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   const pauseEvent = page.locator('.live-pause-event');
   await expect(pauseEvent).toHaveCount(1);
   await expect(pauseEvent).toContainText('Paused (with 2 delegates)');
-  await expect(
-    pauseEvent.getByRole('button', { name: 'Continue paused runtime' }),
-  ).toBeDisabled();
+  const continueButton = pauseEvent.getByRole('button', {
+    name: 'Continue paused runtime',
+  });
+  await expect(continueButton).toBeEnabled();
+  await continueButton.click();
+  await expect
+    .poll(() =>
+      mocks.commands.some((command) => command.actionId === 'runtime.continue'),
+    )
+    .toBe(true);
   const tasksLauncher = page.getByRole('button', {
     name: /Inspect the new drawer/,
   });

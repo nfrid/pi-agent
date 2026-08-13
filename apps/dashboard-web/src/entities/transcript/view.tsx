@@ -16,6 +16,7 @@ import {
   useState,
 } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
+import { CONTINUE_ACTION_ID } from '../../../../../extensions/pause/contribution';
 import { runtimePauseStatus } from '../../features/extension-surfaces';
 import { PauseIcon, PlayIcon } from '../../features/pause-icon';
 import {
@@ -144,10 +145,28 @@ export function Transcript({
 
 export function LivePauseEvent({ runtime }: { runtime?: RuntimeSnapshot }) {
   const pause = runtimePauseStatus(runtime);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string>();
   if (pause?.phase !== 'paused') return null;
+  const continueRuntime = async () => {
+    if (!runtime || pending || runtime.online === false) return;
+    setPending(true);
+    setError(undefined);
+    try {
+      await dashboardHttpClient.invokeAction(
+        runtime.runtimeId,
+        CONTINUE_ACTION_ID,
+        {},
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPending(false);
+    }
+  };
   return (
     <div
-      className="session-event event-pause live-pause-event"
+      className={`session-event event-pause live-pause-event${error ? ' event-failed' : ''}`}
       role="status"
       aria-live="polite"
     >
@@ -155,12 +174,13 @@ export function LivePauseEvent({ runtime }: { runtime?: RuntimeSnapshot }) {
         <PauseIcon className="pause-icon" />
       </span>
       <strong>{pause.label}</strong>
-      <small>at a safe boundary</small>
+      <small>{error ?? (pending ? 'continuing…' : 'at a safe boundary')}</small>
       <AriaButton
         type="button"
         className="pause-continue-button"
         aria-label="Continue paused runtime"
-        isDisabled
+        isDisabled={pending || runtime?.online === false}
+        onPress={() => void continueRuntime()}
       >
         <PlayIcon className="play-icon" />
       </AriaButton>
