@@ -459,7 +459,7 @@ export function DelegateTranscriptInspector({
             Loading persisted delegate transcript…
           </p>
         )}
-        {detail?.error !== undefined && !detail.loading && (
+        {detail?.error != null && !detail.loading && (
           <p className="delegate-transcript-error" role="alert">
             Unable to load this persisted delegate transcript.
           </p>
