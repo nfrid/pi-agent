@@ -246,7 +246,6 @@
   padding: 7px 0;
 }
 .session-transcript-scroll {
-  --transcript-nested-sticky-offset: 42px;
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -287,69 +286,26 @@
   width: 100%;
 }
 
-/* Sticky transcript landmarks are relative to the transcript scrollport. The
-   group owns the rounded surface; descendants remain visible so sticky can
-   escape the group's content box in both normal and virtualized rows. */
+/* The group header is the only sticky transcript landmark. Keep the group
+   overflow visible so it can remain attached to the session scrollport. */
 .activity-group {
   overflow: visible;
 }
 .activity-group > .activity-group-header {
-  border-radius: 8px 8px 0 0;
+  position: sticky;
+  top: 0;
+  z-index: 24;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg-alt);
 }
 .activity-group > .activity-detail,
 .activity-group > .activity-lead {
   border-radius: 0 0 8px 8px;
 }
-.activity-group:has(> .activity-detail) > .activity-group-header {
-  position: sticky;
-  top: 0;
-  z-index: 24;
-  border-bottom: 1px solid var(--line-soft);
-  background: var(--bg-alt);
-}
-.tool-detail[open] > summary.activity-step {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  border-block: 1px solid var(--line-soft);
-  background: var(--bg-alt);
-}
-.activity-group .tool-detail[open] > summary.activity-step {
-  top: var(--transcript-nested-sticky-offset, 0px);
-  z-index: 22;
-}
-.transcript-primary-summary,
-.session-event-summary {
-  position: sticky;
-  top: 0;
-  z-index: 18;
-  border-block: 1px solid var(--line-soft);
-  background: var(--bg-alt);
-}
-.activity-group .transcript-primary-summary,
-.activity-group .session-event-summary {
-  top: var(--transcript-nested-sticky-offset, 0px);
-}
-.tool-inspector-raw > .tool-inspector-raw-summary {
-  top: 0;
-}
-.activity-group .tool-detail .tool-inspector-raw > .tool-inspector-raw-summary {
-  top: calc(var(--transcript-nested-sticky-offset, 0px) * 2);
-  z-index: 21;
-}
-.transcript-virtual-row {
-  overflow: visible;
-}
 
 .session-page[data-tail-pending] .transcript {
   visibility: hidden;
-}
-
-.surface-drawer-body .tool-inspector-raw > .tool-inspector-raw-summary,
-.surface-drawer-body .tool-detail[open] > summary.activity-step,
-.surface-drawer-body .transcript-primary-summary,
-.surface-drawer-body .session-event-summary {
-  top: 0;
 }
 
 @media (max-width: 820px) {

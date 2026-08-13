@@ -190,17 +190,12 @@
   padding-top: 8px;
 }
 .tool-inspector-raw > summary {
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 10px;
-}
-.tool-inspector-raw > .tool-inspector-raw-summary {
-  position: sticky;
-  top: 0;
-  z-index: 16;
   border-block: 1px solid var(--line-soft);
   background: var(--bg-alt);
   padding-block: 7px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
 }
 .tool-inspector pre,
 .payload-preview pre {
@@ -249,18 +244,27 @@
   padding: 6px 0;
 }
 .tool-code-line {
-  display: block;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
   min-width: 0;
-  padding: 0 9px 0 25px;
-  text-indent: -16px;
+  padding: 0 9px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 .tool-code-line > code {
+  display: block;
+  min-width: 0;
   white-space: inherit;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+.tool-code-continuation-indent {
+  padding-inline-start: 0.75em;
+}
+.tool-code-continuation-indent > .tool-code-first-line {
+  margin-inline-start: -0.75em;
 }
 .tool-code-line-added {
   background: color-mix(in srgb, var(--green) 12%, transparent);
