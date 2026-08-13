@@ -4,6 +4,7 @@ import type {
   BuildSystemPromptOptions,
   ToolInfo,
 } from '@earendil-works/pi-coding-agent';
+import { loadInstruction } from '../shared/instructions';
 import {
   filterGlobalContextFiles,
   formatSkillsForPrompt,
@@ -129,12 +130,18 @@ export function formatPromptInfo(
     options.contextFiles ?? [],
     options.cwd,
   );
+  const tools = options.selectedTools ?? ['read', 'bash', 'edit', 'write'];
   const instructions = loadAgentInstructions();
+  if (tools.includes('delegate')) {
+    instructions.push(
+      loadInstruction('instructions/delegate/parent.md'),
+      loadInstruction('instructions/delegate/routing.md'),
+    );
+  }
   const allSkills = options.skills ?? [];
   const visibleSkills = allSkills.filter(
     (skill) => !skill.disableModelInvocation,
   );
-  const tools = options.selectedTools ?? ['read', 'bash', 'edit', 'write'];
   const skillIndex = tools.includes('read')
     ? formatSkillsForPrompt(visibleSkills)
     : '';
@@ -154,7 +161,7 @@ export function formatPromptInfo(
     ),
     `Unsupported direct prompt inputs (not loaded): customPrompt=${customPromptSize} chars, appendSystemPrompt=${appendSize} chars`,
     `Structured tool prompt guidelines: ${options.promptGuidelines?.length ?? 0}`,
-    `Agent instructions: ${instructions.length}`,
+    `Human instruction sources: ${instructions.length}`,
     ...instructions.map(
       (instruction) =>
         `- ${instruction.path}: ${sizeLine('', estimateSize(instruction.content)).slice(2)}`,

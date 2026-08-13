@@ -242,6 +242,7 @@ describe('prompt diagnostics', () => {
       customPrompt: 'custom',
       appendSystemPrompt: 'append',
       promptGuidelines: ['direct'],
+      selectedTools: ['read', 'delegate'],
     });
     const info = formatPromptInfo(
       promptOptions,
@@ -253,9 +254,11 @@ describe('prompt diagnostics', () => {
     expect(info).toContain(
       'Unsupported direct prompt inputs (not loaded): customPrompt=6 chars, appendSystemPrompt=6 chars',
     );
-    expect(info).toContain('Agent instructions: 2');
+    expect(info).toContain('Human instruction sources: 4');
     expect(info).toContain('working-style.md:');
     expect(info).toContain('interaction.md:');
+    expect(info).toContain('delegate/parent.md:');
+    expect(info).toContain('delegate/routing.md:');
     expect(info).toContain('Structured tool prompt guidelines: 1');
   });
 

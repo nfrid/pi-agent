@@ -19,13 +19,13 @@ function compactPromptText(value: string | undefined): string {
 }
 
 export function formatDelegateRoutingConfig(config: DelegateConfig): string {
+  const policy = loadInstruction('instructions/delegate/routing.md').content;
   if (config.error)
-    return `<delegate_routing>\nUnavailable: ${escapeXml(config.error)}\n</delegate_routing>`;
+    return `<delegate_routing>\n${policy}\n\nUnavailable: ${escapeXml(config.error)}\n</delegate_routing>`;
   const catalog = describeDelegateRouting(config).map(
     (route) =>
       `- ${escapeXml(route.route)}: model=${escapeXml(route.model)}; thinking=${route.thinking}; relativeCost=${route.relativeCost}\n    use for: ${escapeXml(compactPromptText(route.useFor))}\n    avoid: ${escapeXml(compactPromptText(route.avoid))}`,
   );
-  const policy = loadInstruction('instructions/delegate/routing.md').content;
   return `<delegate_routing>
 ${policy}
 

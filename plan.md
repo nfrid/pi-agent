@@ -39,7 +39,7 @@ Rules:
 - Markdown is inserted verbatim after trimming outer whitespace. The loader does not generate, summarize, or rewrite it.
 - No frontmatter, JSON, YAML, manifests, IDs, priorities, templating language, or token-budget configuration.
 - Missing required instruction files should fail clearly rather than silently changing agent behavior.
-- Read on prompt construction rather than caching, so edits apply on the next agent turn.
+- Do not add an extra content cache. Canonical agent-policy edits apply on the next turn; extension-owned tool-policy edits apply after Pi reloads the extension.
 - `/prompt-info` reports each loaded source path and its size.
 
 Do not move every prompt-adjacent string into Markdown. Use Markdown for meaningful prose a human is expected to refine: working style, communication policy, delegation judgment, report contracts, and routing judgment. Keep short tool descriptions, validation messages, labels, and generated capability facts in TypeScript.

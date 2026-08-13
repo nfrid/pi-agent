@@ -3,7 +3,6 @@ import {
   asToolSchema,
   type NormalizedDelegateResultSpec,
   normalizeDelegateResultSpec,
-  STRUCTURED_RESULT_CAPS,
 } from './structured-result-schema';
 
 /** Parse only the bounded schema passed to a child process. */
@@ -27,7 +26,7 @@ export function registerChildDelegateResultTool(
   pi.registerTool({
     name: 'delegate_result',
     label: 'Delegate result',
-    description: `Return the complete machine-readable result required by the parent. Use as the final action; if an attempt is rejected, correct it and retry (at most ${STRUCTURED_RESULT_CAPS.maxAttempts} attempts). The last valid attempt wins.`,
+    description: 'Submit the complete machine-readable result and terminate.',
     promptSnippet:
       'Return the complete structured delegate result and terminate',
     parameters: asToolSchema(spec.schema),

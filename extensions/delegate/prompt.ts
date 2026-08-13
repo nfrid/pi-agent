@@ -47,7 +47,7 @@ export function buildDelegatePrompt(
     ? `\n\n${options.handoffText.trim()}\n${DELEGATE_HANDOFF_PROMPT_SUFFIX}`
     : '';
   const structured = options.resultSpec
-    ? `\n\nThis task has a machine-readable completion contract. Use the terminating delegate_result tool as your final action; if an attempt is rejected, correct it and retry, up to ${STRUCTURED_RESULT_CAPS.maxAttempts} total attempts. Its parameters are the complete result object. Do not put the result JSON in prose, and do not call delegate_result until all investigation is complete. The bounded schema is:\n<delegate_result_schema>\n${JSON.stringify(options.resultSpec.schema)}\n</delegate_result_schema>`
+    ? `\n\nThe delegate_result tool accepts up to ${STRUCTURED_RESULT_CAPS.maxAttempts} attempts. The bounded schema is:\n<delegate_result_schema>\n${JSON.stringify(options.resultSpec.schema)}\n</delegate_result_schema>`
     : '';
   const policy = loadInstruction(
     options.resultSpec
