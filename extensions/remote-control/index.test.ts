@@ -45,6 +45,7 @@ import {
   thinkingLevelsSnapshot,
   withoutOpaqueData,
 } from './index';
+import { emitTurnEnd } from './runtime';
 
 registerAskUserCapability();
 registerActivityGroupsCapability();
@@ -993,6 +994,96 @@ describe('dashboard-owned queue drafts', () => {
     expect(runtime.snapshot().session.id).toBe('session-queue-2');
     runtime.clearContext(second);
     expect(runtime.queueDrafts.list()).toEqual([]);
+  });
+
+  const turnEndContext = (
+    sessionId: string,
+    usage: NonNullable<RuntimeSnapshot['contextUsage']>,
+  ) =>
+    ({
+      cwd: '/tmp',
+      model: undefined,
+      thinkingLevel: 'off',
+      sessionManager: {
+        getBranch: () => [],
+        getSessionId: () => sessionId,
+        getSessionFile: () => undefined,
+        getSessionName: () => undefined,
+        getCwd: () => '/tmp',
+        getLeafId: () => undefined,
+      },
+      getContextUsage: () => usage,
+      isIdle: () => false,
+    }) as unknown as ExtensionContext;
+
+  it('publishes context usage at turn_end while the agent remains working', () => {
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    if (!runtime) throw new Error('runtime was not created');
+    const context = turnEndContext('session-turn-end-context', {
+      tokens: 12_345,
+      contextWindow: 100_000,
+      percent: 12.345,
+    });
+    runtime.setContext(context);
+    const sendEvent = vi.spyOn(runtime.client, 'sendEvent');
+
+    emitTurnEnd(runtime, {} as ExtensionAPI, context);
+
+    expect(sendEvent).toHaveBeenCalledTimes(1);
+    expect(sendEvent).toHaveBeenCalledWith({
+      type: 'runtime.stateChanged',
+      state: 'working',
+      snapshot: expect.objectContaining({
+        liveState: 'working',
+        contextUsage: {
+          tokens: 12_345,
+          contextWindow: 100_000,
+          percent: 12.345,
+        },
+      }),
+    });
+    runtime.clearContext(context);
+  });
+
+  it('refreshes context usage after delivering a steer draft', () => {
+    const sendUserMessage = vi.fn();
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    if (!runtime) throw new Error('runtime was not created');
+    const context = turnEndContext('session-turn-end-steer', {
+      tokens: 23_456,
+      contextWindow: 100_000,
+      percent: 23.456,
+    });
+    runtime.setContext(context);
+    runtime.queueDrafts.add({
+      clientId: 'steer-turn-end',
+      mode: 'steer',
+      text: 'steer me',
+    });
+    const sendEvent = vi.spyOn(runtime.client, 'sendEvent');
+
+    emitTurnEnd(
+      runtime,
+      { sendUserMessage } as unknown as ExtensionAPI,
+      context,
+    );
+
+    expect(sendUserMessage).toHaveBeenCalledWith('steer me', {
+      deliverAs: 'steer',
+    });
+    expect(sendEvent).toHaveBeenCalledTimes(1);
+    expect(sendEvent).toHaveBeenCalledWith({
+      type: 'runtime.stateChanged',
+      state: 'working',
+      snapshot: expect.objectContaining({
+        contextUsage: {
+          tokens: 23_456,
+          contextWindow: 100_000,
+          percent: 23.456,
+        },
+      }),
+    });
+    runtime.clearContext(context);
   });
 
   it('expands queued prompt templates before Pi delivery', async () => {
