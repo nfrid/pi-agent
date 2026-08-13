@@ -1,5 +1,30 @@
-import { describe, expect, it } from 'vitest';
-import { isCurrentSessionResponse } from './hydration';
+import {
+  DashboardLiveStore,
+  dashboardHttpClient,
+  dashboardQueryKeys,
+} from '@pi-dashboard/client';
+import type { SessionApiResponse } from '@pi-dashboard/protocol';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createElement } from 'react';
+import { act, create } from 'react-test-renderer';
+import { describe, expect, it, vi } from 'vitest';
+import { isCurrentSessionResponse, useSessionHydration } from './hydration';
+
+const response: SessionApiResponse = {
+  serverId: 'daemon-1',
+  cursor: 1,
+  metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
+  entries: [],
+};
+
+function HydrationProbe({ store }: { store: DashboardLiveStore }) {
+  useSessionHydration({
+    id: 'session-1',
+    store,
+    onReplacement: () => undefined,
+  });
+  return null;
+}
 
 describe('isCurrentSessionResponse', () => {
   it('accepts only a response for the current session ID', () => {
@@ -8,5 +33,76 @@ describe('isCurrentSessionResponse', () => {
     expect(isCurrentSessionResponse('session-a', response)).toBe(true);
     expect(isCurrentSessionResponse('session-b', response)).toBe(false);
     expect(isCurrentSessionResponse('session-a', undefined)).toBe(false);
+  });
+
+  it('does not refetch for session metadata records but keeps semantic changes scoped', async () => {
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    });
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const session = vi
+      .spyOn(dashboardHttpClient, 'session')
+      .mockResolvedValue(response);
+    const store = new DashboardLiveStore();
+    vi.spyOn(store, 'hydrateSession').mockReturnValue({} as never);
+    store.installSnapshot({
+      serverId: 'daemon-1',
+      revision: 1,
+      cursor: 1,
+      runtimes: [],
+      workspaces: [],
+      sessions: [response.metadata],
+      unread: [],
+    });
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(dashboardQueryKeys.session('session-1'), response);
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(
+          createElement(
+            QueryClientProvider,
+            { client: queryClient },
+            createElement(HydrationProbe, { store }),
+          ),
+        );
+      });
+
+      await act(async () => {
+        for (let cursor = 2; cursor <= 21; cursor += 1)
+          store.acceptStreamRecord({
+            type: 'sessions',
+            cursor,
+            emittedAt: cursor,
+            upsert: [
+              {
+                ...response.metadata,
+                updatedAt: cursor,
+              },
+            ],
+            remove: [],
+          });
+      });
+      expect(store.getSnapshot().resyncNonce).toBe(0);
+      expect(session).not.toHaveBeenCalled();
+
+      await act(async () => {
+        store.acceptStreamRecord({
+          cursor: 22,
+          emittedAt: 22,
+          sessionId: 'session-1',
+          event: { type: 'agent.settled', sessionId: 'session-1' },
+        });
+      });
+      await expect.poll(() => session).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      session.mockRestore();
+      vi.unstubAllGlobals();
+    }
   });
 });

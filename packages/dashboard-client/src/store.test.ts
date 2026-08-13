@@ -159,7 +159,7 @@ describe('DashboardLiveStore', () => {
     ).toBeDefined();
     expect(store.getSnapshot().cursor).toBe(2);
     expect(store.getSnapshot().cursorHistory).toContain(2);
-    expect(store.getSnapshot().resyncNonce).toBe(beforeNonce + 1);
+    expect(store.getSnapshot().resyncNonce).toBe(beforeNonce);
     expect(
       store.acceptStreamRecord({
         type: 'sessions',
@@ -178,6 +178,41 @@ describe('DashboardLiveStore', () => {
         remove: [],
       }),
     ).toThrow(ReplayGapError);
+  });
+
+  it('does not resync hydrated transcripts for repeated session metadata records', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      sessions: [{ id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 }],
+    } as unknown as BrowserSnapshot);
+    store.hydrateSession(sessionResponse(1));
+
+    for (let cursor = 2; cursor <= 101; cursor += 1) {
+      expect(
+        store.acceptStreamRecord({
+          type: 'sessions',
+          cursor,
+          emittedAt: cursor,
+          upsert: [
+            {
+              id: 'session-1',
+              file: '/tmp/session.jsonl',
+              cwd: '/tmp',
+              updatedAt: cursor,
+            },
+          ],
+          remove: [],
+        }),
+      ).toBe(true);
+    }
+
+    expect(store.getSnapshot().sessionsById['session-1']?.updatedAt).toBe(101);
+    expect(store.getSnapshot().cursor).toBe(101);
+    expect(store.getSnapshot().resyncNonce).toBe(0);
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1'],
+    ).toBeDefined();
   });
 
   it('preserves optimistic titles across authoritative session-index records', () => {
@@ -1076,6 +1111,36 @@ describe('DashboardLiveStore', () => {
     });
     expect(store.getSnapshot().cursor).toBe(8);
     expect(store.getSnapshot().cursorHistory).toEqual([8]);
+  });
+
+  it('increments the recovery nonce exactly once when a replay gap rebases the snapshot', async () => {
+    vi.stubGlobal('navigator', { onLine: true });
+    const store = new DashboardLiveStore();
+    let snapshots = 0;
+    let events = 0;
+    const client = {
+      snapshot: async () => {
+        snapshots += 1;
+        return snapshot('daemon-1', snapshots === 1 ? 1 : 8);
+      },
+      events: async () => {
+        events += 1;
+        if (events === 1) throw new ReplayGapError();
+        return new Response(
+          new ReadableStream<Uint8Array>({ start: () => undefined }),
+        );
+      },
+    } as never;
+
+    const stop = store.connect(client);
+    try {
+      await expect.poll(() => store.getSnapshot().resyncNonce).toBe(1);
+      expect(snapshots).toBe(2);
+      expect(events).toBe(1);
+    } finally {
+      stop();
+      vi.unstubAllGlobals();
+    }
   });
 
   it('hydrates at an HTTP cursor and replays buffered records newer than it', () => {
