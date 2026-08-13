@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
@@ -13,14 +12,6 @@ const proxy = {
 const dashboardBuildId =
   process.env.PI_DASHBOARD_BUILD_ID?.trim() || randomUUID();
 const versionPayload = `${JSON.stringify({ version: dashboardBuildId })}\n`;
-const serviceWorkerSource = readFileSync(
-  path.resolve(__dirname, 'public/sw.js'),
-  'utf8',
-);
-const serviceWorkerPayload = serviceWorkerSource.replace(
-  "'__PI_DASHBOARD_BUILD_ID__'",
-  JSON.stringify(dashboardBuildId),
-);
 
 function dashboardVersionPlugin(): Plugin {
   return {
@@ -31,22 +22,12 @@ function dashboardVersionPlugin(): Plugin {
         response.setHeader('Cache-Control', 'no-store');
         response.end(versionPayload);
       });
-      server.middlewares.use('/sw.js', (_request, response) => {
-        response.setHeader('Content-Type', 'application/javascript');
-        response.setHeader('Cache-Control', 'no-store');
-        response.end(serviceWorkerPayload);
-      });
     },
     generateBundle() {
       this.emitFile({
         type: 'asset',
         fileName: 'version.json',
         source: versionPayload,
-      });
-      this.emitFile({
-        type: 'asset',
-        fileName: 'sw.js',
-        source: serviceWorkerPayload,
       });
     },
   };

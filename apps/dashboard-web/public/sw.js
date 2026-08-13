@@ -1,29 +1,39 @@
-const DASHBOARD_BUILD_ID = '__PI_DASHBOARD_BUILD_ID__';
-void DASHBOARD_BUILD_ID;
-
+const CACHE = 'pi-dashboard-v2';
 self.addEventListener('install', (event) =>
-  event.waitUntil(self.skipWaiting()),
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['/']))),
 );
 self.addEventListener('activate', (event) =>
   event.waitUntil(
-    (async () => {
-      const windows = await self.clients.matchAll({
-        type: 'window',
-        includeUncontrolled: true,
-      });
-      const cacheKeys = await caches.keys();
-      await Promise.all(
-        cacheKeys
-          .filter((key) => key.startsWith('pi-dashboard-'))
-          .map((key) => caches.delete(key)),
-      );
-      await self.clients.claim();
-      await Promise.all(
-        windows.map((client) => client.navigate(client.url).catch(() => null)),
-      );
-    })(),
+    Promise.all([
+      self.clients.claim(),
+      caches
+        .keys()
+        .then((keys) =>
+          Promise.all(
+            keys
+              .filter((key) => key !== CACHE)
+              .map((key) => caches.delete(key)),
+          ),
+        ),
+    ]),
   ),
 );
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/api/')) return;
+  event.respondWith(
+    fetch(event.request).catch(() =>
+      caches
+        .match(event.request)
+        .then(
+          (cached) =>
+            cached ||
+            (event.request.mode === 'navigate' ? caches.match('/') : undefined),
+        ),
+    ),
+  );
+});
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') void self.skipWaiting();
 });
