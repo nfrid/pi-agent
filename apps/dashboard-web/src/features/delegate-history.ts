@@ -107,6 +107,30 @@ function historyTranscript(
     status: activity.status ?? 'completed',
     ...(activity.at === undefined ? {} : { at: activity.at }),
   })) satisfies DelegateTranscriptEntry[];
+  const response: DelegateTranscriptEntry[] = run.details.response
+    ? [
+        {
+          id: `${run.runId}:response`,
+          type: 'assistant',
+          label: 'Response',
+          text: run.details.response,
+          status: 'completed',
+          at: run.finishedAt ?? run.createdAt,
+        },
+      ]
+    : [];
+  const error: DelegateTranscriptEntry[] = run.details.error
+    ? [
+        {
+          id: `${run.runId}:error`,
+          type: 'error',
+          label: 'Error',
+          text: run.details.error,
+          status: 'error',
+          at: run.finishedAt ?? run.createdAt,
+        },
+      ]
+    : [];
   const warnings = (run.details.warnings ?? []).map((warning, index) => ({
     id: `${run.runId}:warning-${index}`,
     type: 'assistant' as const,
@@ -115,7 +139,7 @@ function historyTranscript(
     status: 'completed' as const,
     at: run.finishedAt ?? run.createdAt,
   }));
-  return [...task, ...activities, ...warnings];
+  return [...task, ...activities, ...response, ...error, ...warnings];
 }
 
 function activitySummary(
@@ -183,25 +207,42 @@ export function delegateHistoryInvocationToStatus(
   };
 }
 
+function liveCurrentRunStatus(live: DelegateStatus): DelegateStatus {
+  const currentRun = live.runCount ?? live.runs?.length ?? 1;
+  if (!live.transcript) return live;
+  return {
+    ...live,
+    // A live lineage row is aggregate, but each inspector option must expose
+    // only the transcript segment belonging to that invocation.
+    transcript: live.transcript.filter(
+      (entry) =>
+        entry.run === currentRun ||
+        (currentRun === 1 && entry.run === undefined),
+    ),
+  };
+}
+
 function augmentLiveStatus(
   live: DelegateStatus,
   durable: DelegateInspectionStatus | undefined,
 ): DelegateInspectionStatus {
-  if (!durable) return live;
+  const currentLive = liveCurrentRunStatus(live);
+  if (!durable) return currentLive;
   return {
     ...durable,
-    ...live,
+    ...currentLive,
     // The live stream is authoritative for the current state, while durable
     // details fill the bounded fields the live surface does not carry.
     id: durable.id,
     transcript:
-      live.transcript && live.transcript.length > 0
-        ? live.transcript
+      currentLive.transcript && currentLive.transcript.length > 0
+        ? currentLive.transcript
         : durable.transcript,
     transcriptTruncated:
-      live.transcriptTruncated === true || durable.transcriptTruncated === true,
-    result: live.result ?? durable.result,
-    lifecycle: live.lifecycle ?? durable.lifecycle,
+      currentLive.transcriptTruncated === true ||
+      durable.transcriptTruncated === true,
+    result: currentLive.result ?? durable.result,
+    lifecycle: currentLive.lifecycle ?? durable.lifecycle,
     warnings: durable.warnings,
   } as DelegateInspectionStatus;
 }
@@ -310,18 +351,19 @@ function groupModel(
 }
 
 function liveOnlyGroup(live: DelegateStatus): DelegateCompositeGroup {
-  const row: DelegateInspectionStatus = { ...live, id: live.lineageId };
+  const current = liveCurrentRunStatus(live);
+  const row: DelegateInspectionStatus = { ...current, id: live.lineageId };
   return {
     lineageId: live.lineageId,
     row,
     runs: [
       {
-        id: live.runId,
-        label: `Current · Run ${live.runCount ?? 1}`,
-        row: live,
+        id: current.runId,
+        label: `Current · Run ${current.runCount ?? 1}`,
+        row: current,
       },
     ],
-    section: sectionFor(live, true),
+    section: sectionFor(current, true),
   };
 }
 

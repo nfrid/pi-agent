@@ -127,6 +127,76 @@ describe('delegate history adapter', () => {
     expect(parseDelegateHistoryResponse(response)).toEqual(response);
   });
 
+  it('projects bounded assistant response and public errors without stderr', () => {
+    const response = delegateHistoryFromBranch('parent-1', [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'result-public-details',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            mode: 'single',
+            runs: [
+              oldRun({
+                messages: [
+                  {
+                    role: 'assistant',
+                    content: [{ type: 'text', text: 'Answer one.' }],
+                  },
+                  {
+                    role: 'assistant',
+                    content: [{ type: 'text', text: 'Answer two.' }],
+                  },
+                ],
+                errorMessage: 'The runner failed safely.',
+                stderr: 'private stderr must not cross the boundary',
+              }),
+            ],
+          },
+        },
+      },
+    ]);
+    expect(response.groups[0]?.runs[0]?.details).toMatchObject({
+      response: 'Answer one.\nAnswer two.',
+      error: 'The runner failed safely.',
+    });
+    expect(JSON.stringify(response)).not.toContain('private stderr');
+  });
+
+  it('keeps structured runs with absent messages valid', () => {
+    const response = delegateHistoryFromBranch('parent-1', [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'result-empty-messages',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            mode: 'single',
+            runs: [
+              oldRun({
+                state: undefined,
+                messages: [],
+                structuredResult: { valid: true, errors: [] },
+              }),
+            ],
+          },
+        },
+      },
+    ]);
+    expect(response.groups[0]?.runs[0]).toMatchObject({
+      state: 'success',
+      details: {
+        structuredResult: { valid: true, errors: [] },
+        truncated: false,
+      },
+    });
+    expect(response.groups[0]?.runs[0]?.details).not.toHaveProperty('response');
+  });
+
   it('keeps new identities and gives old standalone runs distinct stable IDs', () => {
     const branch = [
       { type: 'session', id: 'parent-1' },

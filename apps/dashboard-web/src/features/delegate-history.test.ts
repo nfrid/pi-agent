@@ -32,6 +32,8 @@ const history = {
           allowWrites: false,
           details: {
             task: 'first attempt',
+            response: 'The first durable response.',
+            error: 'The first durable error.',
             activities: [
               {
                 type: 'tool',
@@ -101,6 +103,18 @@ describe('delegate history composition', () => {
       name: 'read',
       arguments: { path: 'src/a.ts' },
     });
+    expect(row.transcript).toContainEqual(
+      expect.objectContaining({
+        type: 'assistant',
+        text: 'The first durable response.',
+      }),
+    );
+    expect(row.transcript).toContainEqual(
+      expect.objectContaining({
+        type: 'error',
+        text: 'The first durable error.',
+      }),
+    );
     expect(row.lifecycle?.reason).toBe('timeout');
     expect(row.warnings).toEqual(['The first attempt timed out.']);
     expect(row.transcriptTruncated).toBe(true);
@@ -118,6 +132,74 @@ describe('delegate history composition', () => {
     expect(
       model.sections.find((section) => section.id === 'history')?.groups,
     ).toHaveLength(0);
+  });
+
+  it('keeps each continuation run option on its own transcript segment', () => {
+    const live = {
+      ...liveRun3,
+      runCount: 3,
+      transcript: [
+        {
+          id: '1:old',
+          type: 'assistant' as const,
+          label: 'Response',
+          text: 'run one',
+          run: 1,
+        },
+        {
+          id: '2:old',
+          type: 'assistant' as const,
+          label: 'Response',
+          text: 'run two',
+          run: 2,
+        },
+        {
+          id: '3:new',
+          type: 'assistant' as const,
+          label: 'Response',
+          text: 'run three',
+          run: 3,
+        },
+      ],
+    };
+    const model = composeDelegateHistory(
+      {
+        ...history,
+        groups: [
+          {
+            ...history.groups[0],
+            runId: 'run-3',
+            runCount: 3,
+            runs: [
+              ...history.groups[0].runs,
+              {
+                runId: 'run-3',
+                lineageId: 'lineage-1',
+                name: 'Historical worker',
+                kind: 'background' as const,
+                state: 'running' as const,
+                createdAt: 5,
+                allowWrites: false,
+                details: { truncated: false },
+              },
+            ],
+          },
+        ],
+      },
+      [live],
+    );
+    const runs = model.groups[0]?.runs ?? [];
+    const runOneText = runs[0]?.row.transcript?.map((entry) => entry.text);
+    const runTwoText = runs[1]?.row.transcript?.map((entry) => entry.text);
+    expect(runOneText).toContain('first attempt');
+    expect(runOneText).not.toContain('run two');
+    expect(runOneText).not.toContain('run three');
+    expect(runTwoText).toContain('second attempt');
+    expect(runTwoText).not.toContain('run one');
+    expect(runTwoText).not.toContain('run three');
+    expect(runs[2]?.row.transcript).toEqual([
+      expect.objectContaining({ text: 'run three', run: 3 }),
+    ]);
   });
 
   it('marks omitted runs in a truncated lineage for inspection', () => {

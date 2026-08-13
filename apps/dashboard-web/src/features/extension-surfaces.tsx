@@ -123,9 +123,14 @@ export function reconcileDelegateLiveRuns(
     DelegateStatusViewModel['statuses'][number],
     'runId' | 'state' | 'pauseState'
   >[],
-): { next: Map<string, string>; shouldInvalidate: boolean } {
+): {
+  next: Map<string, string>;
+  shouldInvalidate: boolean;
+  settledRunIds: string[];
+} {
   const next = new Map(previous);
   const currentKeys = new Set<string>();
+  const settledRunIds: string[] = [];
   let shouldInvalidate = false;
   for (const row of liveRows) {
     const key = `${sessionId}:${row.runId}`;
@@ -136,8 +141,10 @@ export function reconcileDelegateLiveRuns(
       prior &&
       isActiveDelegateState(prior) &&
       !isActiveDelegateState(current)
-    )
+    ) {
       shouldInvalidate = true;
+      settledRunIds.push(row.runId);
+    }
     next.set(key, current);
   }
   for (const key of next.keys()) {
@@ -152,7 +159,93 @@ export function reconcileDelegateLiveRuns(
       shouldInvalidate = true;
     }
   }
-  return { next, shouldInvalidate };
+  return { next, shouldInvalidate, settledRunIds };
+}
+
+export function delegateHistoryRunIds(
+  history: import('@pi-dashboard/protocol').DelegateHistoryResponse | undefined,
+): ReadonlySet<string> {
+  return new Set(
+    history?.groups.flatMap((group) => group.runs.map((run) => run.runId)) ??
+      [],
+  );
+}
+
+const DELEGATE_HISTORY_MAX_RETRIES = 3;
+const DELEGATE_HISTORY_RETRY_DELAY_MS = 250;
+
+export interface DelegateHistoryRefreshCoordinator {
+  markSettled(runIds: readonly string[]): void;
+  observe(runIds: ReadonlySet<string>): void;
+  refresh(): void;
+  dispose(): void;
+}
+
+/** Refresh durable history a bounded number of times after live settlement. */
+export function createDelegateHistoryRefreshCoordinator(
+  refresh: () => void,
+  options: {
+    maxRetries?: number;
+    retryDelayMs?: number;
+  } = {},
+): DelegateHistoryRefreshCoordinator {
+  const pending = new Map<string, number>();
+  const maxRetries = options.maxRetries ?? DELEGATE_HISTORY_MAX_RETRIES;
+  const retryDelayMs = options.retryDelayMs ?? DELEGATE_HISTORY_RETRY_DELAY_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
+
+  const clearTimer = () => {
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    timer = undefined;
+  };
+  const schedule = () => {
+    if (disposed || timer !== undefined || pending.size === 0) return;
+    timer = setTimeout(() => {
+      timer = undefined;
+      if (disposed || pending.size === 0) return;
+      let shouldRefresh = false;
+      for (const [runId, attempt] of pending) {
+        if (attempt >= maxRetries) {
+          pending.delete(runId);
+          continue;
+        }
+        pending.set(runId, attempt + 1);
+        shouldRefresh = true;
+      }
+      if (shouldRefresh) refresh();
+      schedule();
+    }, retryDelayMs);
+  };
+
+  return {
+    markSettled(runIds) {
+      if (disposed) return;
+      let added = false;
+      for (const runId of runIds) {
+        if (!pending.has(runId)) {
+          pending.set(runId, 0);
+          added = true;
+        }
+      }
+      if (added) refresh();
+      schedule();
+    },
+    observe(runIds) {
+      if (disposed) return;
+      for (const runId of runIds) pending.delete(runId);
+      if (pending.size === 0) clearTimer();
+    },
+    refresh() {
+      if (!disposed) refresh();
+    },
+    dispose() {
+      disposed = true;
+      pending.clear();
+      clearTimer();
+    },
+  };
 }
 
 /**
@@ -173,18 +266,37 @@ export function DelegateHistorySurface({
   const live = delegateSurface(runtime);
   const liveRows = live?.model.statuses ?? [];
   const previousStates = useRef(new Map<string, string>());
+  const previousSessionId = useRef<string | undefined>(undefined);
+  const refreshCoordinator = useMemo(
+    () =>
+      createDelegateHistoryRefreshCoordinator(() => {
+        void queryClient.invalidateQueries({
+          queryKey: dashboardQueryKeys.delegateHistory(id),
+        });
+      }),
+    [id, queryClient],
+  );
+  useEffect(() => () => refreshCoordinator.dispose(), [refreshCoordinator]);
   useEffect(() => {
+    if (previousSessionId.current !== id) {
+      previousStates.current = new Map();
+      previousSessionId.current = id;
+    }
+    const historyRunIds = delegateHistoryRunIds(historyQuery.data);
+    refreshCoordinator.observe(historyRunIds);
     const reconciliation = reconcileDelegateLiveRuns(
       id,
       previousStates.current,
       liveRows,
     );
     previousStates.current = reconciliation.next;
-    if (reconciliation.shouldInvalidate)
-      void queryClient.invalidateQueries({
-        queryKey: dashboardQueryKeys.delegateHistory(id),
-      });
-  }, [id, liveRows, queryClient]);
+    const unresolvedSettlements = reconciliation.settledRunIds.filter(
+      (runId) => !historyRunIds.has(runId),
+    );
+    refreshCoordinator.markSettled(unresolvedSettlements);
+    if (reconciliation.shouldInvalidate && unresolvedSettlements.length === 0)
+      refreshCoordinator.refresh();
+  }, [id, liveRows, historyQuery.data, refreshCoordinator]);
   if (runtime?.pendingInteractions?.length) return null;
   if (
     !historyQuery.data?.groups.length &&
