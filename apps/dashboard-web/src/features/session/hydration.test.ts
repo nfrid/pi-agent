@@ -99,6 +99,48 @@ describe('isCurrentSessionResponse', () => {
           cursor: 22,
           emittedAt: 22,
           sessionId: 'session-1',
+          event: {
+            type: 'session.snapshot',
+            session: {
+              id: 'session-1',
+              entries: [
+                {
+                  type: 'message',
+                  message: {
+                    id: 'complete-live-message',
+                    role: 'user',
+                    content: 'complete snapshot',
+                  },
+                },
+              ],
+              entriesComplete: true,
+            },
+          },
+        });
+        store.acceptStreamRecord({
+          cursor: 23,
+          emittedAt: 23,
+          runtimeId: 'runtime-1',
+          sessionId: 'session-1',
+          event: {
+            type: 'runtime.stateChanged',
+            state: 'idle',
+            snapshot: {
+              session: { id: 'session-1', entries: [], entriesComplete: false },
+            },
+          },
+        });
+      });
+      expect(
+        store.getSnapshot().sessionChangeById['session-1'],
+      ).toBeUndefined();
+      expect(session).not.toHaveBeenCalled();
+
+      await act(async () => {
+        store.acceptStreamRecord({
+          cursor: 24,
+          emittedAt: 24,
+          sessionId: 'session-1',
           event: { type: 'agent.settled', sessionId: 'session-1' },
         });
       });

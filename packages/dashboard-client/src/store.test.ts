@@ -1737,6 +1737,57 @@ describe('DashboardLiveStore', () => {
     ).toBeUndefined();
   });
 
+  it('hydrates complete snapshots without a refetch counter but invalidates incomplete ones', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+
+    expect(
+      store.acceptStreamRecord({
+        cursor: 2,
+        emittedAt: 2,
+        event: {
+          type: 'session.snapshot',
+          session: {
+            id: 'session-1',
+            entriesComplete: true,
+            entries: [
+              {
+                type: 'message',
+                message: {
+                  id: 'complete-message',
+                  role: 'user',
+                  content: 'from the complete snapshot',
+                },
+              },
+            ],
+          },
+        },
+      } as never),
+    ).toBe(true);
+    expect(store.getSnapshot().sessionChangeById['session-1']).toBeUndefined();
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.items[
+        'complete-message'
+      ],
+    ).toBeDefined();
+
+    expect(
+      store.acceptStreamRecord({
+        cursor: 3,
+        emittedAt: 3,
+        event: {
+          type: 'session.snapshot',
+          session: {
+            id: 'session-1',
+            entries: [],
+            entriesComplete: false,
+          },
+        },
+      } as never),
+    ).toBe(true);
+    expect(store.getSnapshot().sessionChangeById['session-1']).toBe(1);
+  });
+
   it('does not let stale HTTP hydration resurrect a complete tree replacement', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 4));

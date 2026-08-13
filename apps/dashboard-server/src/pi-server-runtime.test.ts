@@ -14,6 +14,10 @@ function nativeSession() {
     cwd: '/tmp/worktree',
     createdAt: 1,
     updatedAt: 1,
+    file: '/tmp/pi-session-1.jsonl',
+    name: 'Native session',
+    title: 'Native session title',
+    leafId: 'native-leaf-1',
     phase: 'idle' as const,
     model: { provider: 'test', id: 'model' },
     thinkingLevel: 'off' as const,
@@ -246,6 +250,79 @@ describe('PiClient runtime provider experiment', () => {
     await pi.send(attached, { type: 'steer', text: 'next' });
     expect(fake.lease.steer).toHaveBeenCalledWith('next');
     await pi.stop(attached);
+  });
+
+  it('publishes a bounded runtime invalidation before the full transcript snapshot', async () => {
+    const fake = fakeClient();
+    const changes: unknown[] = [];
+    const registry = new RuntimeRegistry({
+      expectedToken: () => true,
+      onChange: (change) => changes.push(change),
+    });
+    const provider = new PiClientRuntimeProvider(registry, {
+      clientFactory: async () => fake.client as never,
+    });
+    const binding = await provider.start(input());
+    fake.setTranscript([
+      {
+        id: 'native-entry-1',
+        role: 'user',
+        content: [{ type: 'text', text: 'Persist this transcript' }],
+        timestamp: 2,
+      },
+    ]);
+    const beforePrompt = changes.length;
+
+    await provider.send(binding, {
+      type: 'prompt',
+      text: 'continue',
+    });
+
+    const published = changes.slice(beforePrompt) as Array<{
+      kind?: string;
+      event?: {
+        type?: string;
+        snapshot?: { session?: Record<string, unknown> };
+        session?: Record<string, unknown>;
+      };
+    }>;
+    const stateChanged = published.find(
+      (change) =>
+        change.kind === 'event' &&
+        change.event?.type === 'runtime.stateChanged',
+    );
+    const fullSnapshot = published.find(
+      (change) =>
+        change.kind === 'event' && change.event?.type === 'session.snapshot',
+    );
+    expect(stateChanged?.event?.snapshot?.session).toEqual({
+      id: 'pi-session-1',
+      file: '/tmp/pi-session-1.jsonl',
+      name: 'Native session',
+      title: 'Native session title',
+      cwd: '/tmp/worktree',
+      leafId: 'native-leaf-1',
+      entries: [],
+      entriesComplete: false,
+    });
+    expect(fullSnapshot?.event?.session).toMatchObject({
+      id: 'pi-session-1',
+      file: '/tmp/pi-session-1.jsonl',
+      name: 'Native session',
+      title: 'Native session title',
+      cwd: '/tmp/worktree',
+      leafId: 'native-leaf-1',
+      entries: [
+        {
+          id: 'native-entry-1',
+          role: 'user',
+          content: [{ type: 'text', text: 'Persist this transcript' }],
+        },
+      ],
+      entriesComplete: true,
+    });
+    expect(stateChanged?.event?.snapshot?.session?.entries).toEqual([]);
+    await provider.stop(binding);
   });
 
   it('normalizes native tool transcript items for dashboard hydration', async () => {

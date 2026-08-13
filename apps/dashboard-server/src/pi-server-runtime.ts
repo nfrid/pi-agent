@@ -174,10 +174,20 @@ function sessionSnapshot(
     Buffer.byteLength(JSON.stringify(entries)) > MAX_TRANSCRIPT_BYTES
   )
     entries.shift();
+  // Keep metadata supplied by newer native clients without making the managed
+  // adapter depend on fields older PiClient snapshots do not expose.
+  const metadata = native as unknown as {
+    file?: string;
+    title?: string;
+    leafId?: string;
+  };
   return {
     id: native.id,
+    ...(metadata.file === undefined ? {} : { file: metadata.file }),
     ...(native.name ? { name: native.name } : {}),
+    ...(metadata.title === undefined ? {} : { title: metadata.title }),
     cwd: native.cwd,
+    ...(metadata.leafId === undefined ? {} : { leafId: metadata.leafId }),
     entries,
     entriesComplete: complete && entries.length === normalized.length,
   };
@@ -186,6 +196,7 @@ function sessionSnapshot(
 function runtimeSnapshot(
   input: RuntimeStartInput,
   native: NonNullable<LeaseLike['snapshot']>,
+  session = sessionSnapshot(native),
 ): RuntimeSnapshot {
   return {
     runtimeId: input.runtimeId,
@@ -195,7 +206,7 @@ function runtimeSnapshot(
     pid: process.pid,
     cwd: native.cwd || input.cwd,
     liveState: native.phase === 'idle' ? 'idle' : 'working',
-    session: sessionSnapshot(native),
+    session,
     model: {
       provider: native.model.provider,
       model: native.model.id,
@@ -204,6 +215,19 @@ function runtimeSnapshot(
     pendingInteractions: [],
     online: true,
     lastSeenAt: Date.now(),
+  };
+}
+
+function sessionInvalidationPatch(session: SessionSnapshot): SessionSnapshot {
+  return {
+    id: session.id,
+    ...(session.file === undefined ? {} : { file: session.file }),
+    ...(session.name === undefined ? {} : { name: session.name }),
+    ...(session.title === undefined ? {} : { title: session.title }),
+    ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+    ...(session.leafId === undefined ? {} : { leafId: session.leafId }),
+    entries: [],
+    entriesComplete: false,
   };
 }
 
@@ -482,14 +506,19 @@ class NativeContext {
   private publish(native: NonNullable<LeaseLike['snapshot']>): void {
     if (this.disposed) return;
     const next = this.liveState(native);
+    const session = sessionSnapshot(native);
+    const snapshot = runtimeSnapshot(this.input, native, session);
     this.sendEvent({
       type: 'runtime.stateChanged',
       state: next,
-      snapshot: runtimeSnapshot(this.input, native),
+      snapshot: {
+        ...snapshot,
+        session: sessionInvalidationPatch(session),
+      },
     });
     this.sendEvent({
       type: 'session.snapshot',
-      session: sessionSnapshot(native),
+      session,
     });
     if (this.previousPhase !== 'idle' && native.phase === 'idle')
       this.sendEvent({ type: 'agent.settled', sessionId: native.id });
