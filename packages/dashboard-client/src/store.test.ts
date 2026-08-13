@@ -274,7 +274,10 @@ describe('DashboardLiveStore', () => {
       remove: [],
     });
 
-    expect(store.getSnapshot().sessionChangeById).toEqual({});
+    expect(store.getSnapshot().sessionChangeById).toEqual({
+      'session-1': 1,
+      'session-2': 1,
+    });
   });
 
   it('preserves optimistic titles across authoritative session-index records', () => {

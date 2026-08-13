@@ -193,6 +193,33 @@ function mergePrependedTranscript(
   };
 }
 
+function hasOnlineRuntimeOverlay(
+  state: DashboardLiveState,
+  sessionId: string,
+  activeRuntimeId: string | undefined,
+): boolean {
+  const activeRuntime = activeRuntimeId
+    ? state.runtimesById[activeRuntimeId]
+    : undefined;
+  if (activeRuntime?.session.id === sessionId && activeRuntime.online !== false)
+    return true;
+  return Object.values(state.runtimesById).some(
+    (runtime) => runtime.session.id === sessionId && runtime.online !== false,
+  );
+}
+
+function transcriptMetadataChanged(
+  previous: SessionIndexEntry | undefined,
+  next: SessionIndexEntry,
+): boolean {
+  if (!previous) return false;
+  return (
+    previous.updatedAt !== next.updatedAt ||
+    previous.entryCount !== next.entryCount ||
+    previous.file !== next.file
+  );
+}
+
 function emptyState(): DashboardLiveState {
   return {
     revision: 0,
@@ -747,9 +774,23 @@ export class DashboardLiveStore {
         record.upsert,
         record.remove,
       );
+      const sessionChangeById = { ...this.state.sessionChangeById };
+      for (const session of record.upsert) {
+        const previous = this.state.sessionsById[session.id];
+        if (
+          transcriptMetadataChanged(previous, session) &&
+          !hasOnlineRuntimeOverlay(
+            this.state,
+            session.id,
+            previous?.activeRuntimeId ?? session.activeRuntimeId,
+          )
+        )
+          sessionChangeById[session.id] =
+            (sessionChangeById[session.id] ?? 0) + 1;
+      }
       this.publish({
         ...projected,
-        sessionChangeById: this.state.sessionChangeById,
+        sessionChangeById,
         cursor: record.cursor,
         connection: { ...projected.connection, lastCursor: record.cursor },
         cursorHistory: [...projected.cursorHistory, record.cursor].slice(

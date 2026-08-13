@@ -44,6 +44,12 @@ export function useSessionHydration({
     : undefined;
   const queryDataId = query.data?.metadata.id;
   const queryEntriesComplete = query.data?.entriesComplete;
+  // An incomplete response with a cursor is a valid bounded tail page. Older
+  // history is user-driven pagination, not a signal that the branch is still
+  // being serialized.
+  const queryHasOlderHistory =
+    query.data?.history?.hasOlder === true ||
+    query.data?.history?.nextBefore !== undefined;
   const [error, setError] = useState<string>();
   const [incompleteRetryNonce, setIncompleteRetryNonce] = useState(0);
   const hydrationRetryCountRef = useRef(0);
@@ -149,7 +155,11 @@ export function useSessionHydration({
   useEffect(() => {
     // Visibility increments this nonce to restart a previously suspended retry loop.
     void incompleteRetryNonce;
-    if (queryDataId !== id || queryEntriesComplete !== false) {
+    if (
+      queryDataId !== id ||
+      queryEntriesComplete !== false ||
+      queryHasOlderHistory
+    ) {
       incompleteRetryCountRef.current = 0;
       return;
     }
@@ -187,6 +197,7 @@ export function useSessionHydration({
     incompleteRetryNonce,
     queryDataId,
     queryEntriesComplete,
+    queryHasOlderHistory,
     requestSessionRefetch,
   ]);
 
