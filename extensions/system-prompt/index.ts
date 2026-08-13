@@ -12,9 +12,9 @@ import {
 import { findOuterMetaSkillPath } from './skills';
 
 export {
-  type LoadedAgentInstruction,
-  loadAgentInstruction,
-} from '../shared/agent-instructions';
+  type LoadedInstruction,
+  loadInstruction,
+} from '../shared/instructions';
 export {
   buildSystemPrompt,
   filterGlobalContextFiles,

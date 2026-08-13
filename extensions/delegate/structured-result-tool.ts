@@ -30,11 +30,6 @@ export function registerChildDelegateResultTool(
     description: `Return the complete machine-readable result required by the parent. Use as the final action; if an attempt is rejected, correct it and retry (at most ${STRUCTURED_RESULT_CAPS.maxAttempts} attempts). The last valid attempt wins.`,
     promptSnippet:
       'Return the complete structured delegate result and terminate',
-    promptGuidelines: [
-      `Use delegate_result as the final action for this task. If an attempt is rejected, correct it and retry, up to ${STRUCTURED_RESULT_CAPS.maxAttempts} total attempts; the last valid attempt wins.`,
-      'Pass the complete result object, not a prose summary or a partial projection.',
-      'Do not put the structured result JSON in an assistant prose message.',
-    ],
     parameters: asToolSchema(spec.schema),
     async execute(_toolCallId: string, params: unknown) {
       return {

@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs';
-import * as path from 'node:path';
 import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { type Static, Type } from 'typebox';
+import { loadInstruction } from '../shared/instructions';
 import { type DelegateConfig, loadDelegateConfig } from './config';
 import { createDelegateControlChannel } from './control';
 import type { DelegateJobManager } from './jobs';
@@ -23,11 +22,6 @@ import {
   delegateToolResult,
   makeDetails,
 } from './tool-result';
-
-const PARENT_POLICY = readFileSync(
-  path.resolve(__dirname, '../../instructions/delegate/parent.md'),
-  'utf8',
-).trim();
 
 const RouteSchema = Type.String({
   minLength: 1,
@@ -235,7 +229,7 @@ export function delegatePromptGuidelines(
   config?: DelegateConfig,
 ): string[] {
   return [
-    PARENT_POLICY,
+    loadInstruction('instructions/delegate/parent.md').content,
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd, config)}`,
   ];
 }

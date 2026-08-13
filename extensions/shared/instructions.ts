@@ -2,16 +2,16 @@ import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 
-export interface LoadedAgentInstruction {
+export interface LoadedInstruction {
   path: string;
   content: string;
 }
 
-/** Load one explicitly named Markdown file below the Pi agent directory. */
-export function loadAgentInstruction(
+/** Load one explicitly named instruction file below the Pi agent directory. */
+export function loadInstruction(
   agentRelativePath: string,
   agentDir = getAgentDir(),
-): LoadedAgentInstruction {
+): LoadedInstruction {
   if (isAbsolute(agentRelativePath)) {
     throw new Error(
       `Agent instruction path must be relative to the agent directory: ${agentRelativePath}`,

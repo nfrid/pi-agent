@@ -725,7 +725,9 @@ describe('delegate', () => {
     const guidelines = delegatePromptGuidelines('/tmp/project').join('\n');
     expect(guidelines).toContain('Delegate route catalog:');
     expect(guidelines).toContain('## Delegation judgment');
-    expect(guidelines).toContain('Forward only compact results by default');
+    expect(guidelines).toContain(
+      'final verification, and user-facing synthesis with the parent',
+    );
     expect(guidelines).toContain('<delegate_routing>');
     expect(guidelines).toContain('luna-low: model=gpt-5.6-luna');
   });

@@ -15,7 +15,7 @@ import {
   filterGlobalContextFiles,
   findOuterMetaSkillPath,
   formatPromptInfo,
-  loadAgentInstruction,
+  loadInstruction,
   summarizeContextMessages,
 } from './index';
 
@@ -76,9 +76,7 @@ describe('canonical prompt composition', () => {
       join(agentDir, 'instructions', 'agent', 'example.md'),
       '\n  example policy  \n',
     );
-    expect(
-      loadAgentInstruction('instructions/agent/example.md', agentDir),
-    ).toEqual({
+    expect(loadInstruction('instructions/agent/example.md', agentDir)).toEqual({
       path: join(agentDir, 'instructions', 'agent', 'example.md'),
       content: 'example policy',
     });

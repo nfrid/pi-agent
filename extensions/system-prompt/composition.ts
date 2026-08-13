@@ -5,9 +5,9 @@ import {
   getAgentDir,
 } from '@earendil-works/pi-coding-agent';
 import {
-  type LoadedAgentInstruction,
-  loadAgentInstruction,
-} from '../shared/agent-instructions';
+  type LoadedInstruction,
+  loadInstruction,
+} from '../shared/instructions';
 
 const BASH_GUIDELINES = [
   'Combine related bash discovery into one pipeline; run unrelated checks in parallel.',
@@ -15,11 +15,9 @@ const BASH_GUIDELINES = [
   'Use separate calls when results need judgment, and before writes or destructive work; prefer read, edit, and write tools for file contents.',
 ];
 
-export function loadAgentInstructions(): LoadedAgentInstruction[] {
-  const workingStyle = loadAgentInstruction(
-    'instructions/agent/working-style.md',
-  );
-  const interaction = loadAgentInstruction('instructions/agent/interaction.md');
+export function loadAgentInstructions(): LoadedInstruction[] {
+  const workingStyle = loadInstruction('instructions/agent/working-style.md');
+  const interaction = loadInstruction('instructions/agent/interaction.md');
   return [workingStyle, interaction];
 }
 
@@ -69,7 +67,7 @@ function currentDate(): string {
 
 function appendAgentInstructions(
   prompt: string,
-  instructions: readonly LoadedAgentInstruction[],
+  instructions: readonly LoadedInstruction[],
 ): string {
   const content = instructions
     .map((instruction) => instruction.content)
@@ -99,7 +97,7 @@ function finalizePrompt(
   skills: NonNullable<BuildSystemPromptOptions['skills']>,
   includeSkills: boolean,
   cwd: string,
-  instructions: readonly LoadedAgentInstruction[],
+  instructions: readonly LoadedInstruction[],
 ): string {
   let finalized = appendAgentInstructions(prompt, instructions);
   finalized = appendProjectContext(finalized, contextFiles);

@@ -1,15 +1,9 @@
-import { readFileSync } from 'node:fs';
-import * as path from 'node:path';
+import { loadInstruction } from '../shared/instructions';
 import {
   type DelegateConfig,
   describeDelegateRouting,
   loadDelegateConfig,
 } from './config';
-
-const ROUTING_POLICY = readFileSync(
-  path.resolve(__dirname, '../../instructions/delegate/routing.md'),
-  'utf8',
-).trim();
 
 // Text content only, never attribute values: quotes and apostrophes need no
 // escaping here, and escaping them makes the prose the model reads harder.
@@ -31,8 +25,9 @@ export function formatDelegateRoutingConfig(config: DelegateConfig): string {
     (route) =>
       `- ${escapeXml(route.route)}: model=${escapeXml(route.model)}; thinking=${route.thinking}; relativeCost=${route.relativeCost}\n    use for: ${escapeXml(compactPromptText(route.useFor))}\n    avoid: ${escapeXml(compactPromptText(route.avoid))}`,
   );
+  const policy = loadInstruction('instructions/delegate/routing.md').content;
   return `<delegate_routing>
-${ROUTING_POLICY}
+${policy}
 
 Catalog, cheapest first (dynamic):
 ${catalog.length > 0 ? catalog.join('\n') : '- (none)'}
