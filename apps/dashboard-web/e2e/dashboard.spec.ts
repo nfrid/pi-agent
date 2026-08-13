@@ -661,7 +661,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     animationDuration: '0.16s',
     animationTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
   });
-  expect(outlineMotion.transforms).toContain('translateX(28px)');
+  expect(outlineMotion.transforms).toContain('translateX(100%)');
   await expect(outline).toHaveClass(/work-surface-dialog/);
   await expect(outline.locator('h2')).toHaveCount(0);
   await expect(outline.locator('.eyebrow')).toHaveText('Transcript outline');
@@ -710,7 +710,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     animationDuration: '0.16s',
     animationTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
   });
-  expect(detailsMotion.transforms).toContain('translateX(28px)');
+  expect(detailsMotion.transforms).toContain('translateX(100%)');
   await expect(details).toBeVisible();
   await expect
     .poll(() =>
@@ -3850,7 +3850,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
     animationDuration: '0.16s',
     animationTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
   });
-  expect(detailsMotion.transforms).toContain('translateX(28px)');
+  expect(detailsMotion.transforms).toContain('translateX(100%)');
   await expect(inspector).toBeVisible();
   await expect
     .poll(() =>
@@ -3876,6 +3876,9 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   await expect(detailsButton).toBeFocused();
   await detailsButton.click();
   await expect(inspector).toBeVisible();
+  await inspector.evaluate((element) =>
+    Promise.all(element.getAnimations().map((animation) => animation.finished)),
+  );
   const readDesktopGeometry = () =>
     page.evaluate(() => {
       const rail = document
