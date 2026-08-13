@@ -12,7 +12,6 @@ import {
   BoundedPayloadPreview,
   StructuredResultSection,
   ToolInspector,
-  toolInspectorRecord,
 } from './inspector';
 import { transcriptItemTimestamp, transcriptRoleLabel } from './landmarks';
 
@@ -307,7 +306,6 @@ function TranscriptEntry({
   }
   if (item.tool) {
     const tool = item.tool;
-    const record = toolInspectorRecord(tool);
     const action = activityStepParts(
       {
         name: tool.name,
@@ -324,7 +322,7 @@ function TranscriptEntry({
         <summary className="activity-step">
           <ActivityStepContent action={action} timestamp={timestamp} />
         </summary>
-        <ToolInspector tool={record} />
+        <ToolInspector tool={tool} />
       </details>
     );
   }

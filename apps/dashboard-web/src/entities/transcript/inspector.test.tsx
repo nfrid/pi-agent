@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   BoundedPayloadPreview,
   boundedInspectorText,
+  normalizeToolResultText,
   StructuredPayloadView,
   ToolInspector,
+  toolPresentationKind,
+  toolPreviewLanguage,
 } from './inspector';
 
 describe('transcript payload inspection', () => {
@@ -130,6 +133,140 @@ describe('transcript payload inspection', () => {
       <BoundedPayloadPreview value={cycle} label="cyclic payload" />,
     );
     expect(rawMarkup).toContain('[unavailable payload]');
+  });
+
+  it('selects specialized tools only for valid payloads and preserves malformed fallback', () => {
+    expect(
+      toolPresentationKind({
+        name: 'write',
+        arguments: { path: 'src/app.ts', content: 'const ready = true;' },
+      }),
+    ).toBe('write');
+    expect(
+      toolPresentationKind({
+        name: 'edit',
+        arguments: {
+          path: 'src/app.ts',
+          edits: [{ oldText: 'a', newText: 'b' }],
+        },
+      }),
+    ).toBe('edit');
+    expect(
+      toolPresentationKind({
+        name: 'bash',
+        arguments: { command: 'printf ok' },
+      }),
+    ).toBe('command');
+    expect(toolPreviewLanguage('src/app.ts')).toBe('typescript');
+    expect(toolPreviewLanguage('src/app.unknown')).toBe('plaintext');
+    expect(
+      toolPresentationKind({
+        name: 'edit',
+        arguments: { path: 'src/app.ts', edits: [{ oldText: 'missing' }] },
+      }),
+    ).toBeUndefined();
+    const fallback = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'edit',
+          arguments: { path: 'app.ts', edits: [{ oldText: 1 }] },
+        }}
+      />,
+    );
+    expect(fallback).toContain('Arguments');
+    expect(fallback).toContain('Raw tool record');
+  });
+
+  it('renders write additions and one maintained diff preview per edit replacement', () => {
+    const write = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'write',
+          arguments: { path: 'src/app.ts', content: 'const ready = true;\n' },
+        }}
+      />,
+    );
+    expect(write).toContain('Write · src/app.ts');
+    expect(write).toContain('Newly written content · additions only');
+    expect(write).toContain('tool-code-line-added');
+    expect(write).toContain('tool-code-prefix');
+    expect(write).not.toContain('full-file diff');
+
+    const edit = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'edit',
+          arguments: {
+            path: 'src/app.ts',
+            edits: [
+              { oldText: 'const a = 1;', newText: 'const a = 2;' },
+              { oldText: 'remove()', newText: 'insert()' },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(edit.match(/>Replacement [12]<\/h5>/gu)).toHaveLength(2);
+    expect(edit).toContain(
+      'Replacement preview; this is not a repository or full-file diff.',
+    );
+    expect(edit).toContain('tool-code-line-removed');
+    expect(edit).toContain('tool-code-line-added');
+  });
+
+  it('normalizes only supported result text shapes and presents command errors as terminal output', () => {
+    expect(normalizeToolResultText('plain output')).toBe('plain output');
+    expect(
+      normalizeToolResultText([
+        { type: 'text', text: 'first' },
+        { type: 'text', text: ' second' },
+      ]),
+    ).toBe('first second');
+    expect(
+      normalizeToolResultText({ content: [{ type: 'text', text: 'nested' }] }),
+    ).toBe('nested');
+    expect(normalizeToolResultText({ output: 'do not guess' })).toBeUndefined();
+    const command = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'exec',
+          arguments: { command: 'pnpm test' },
+          result: {
+            content: [{ type: 'text', text: 'failed output' }],
+            exitCode: 2,
+          },
+          status: 'error',
+          isError: true,
+        }}
+      />,
+    );
+    expect(command).toContain('Command');
+    expect(command).toContain('Terminal result');
+    expect(command).toContain('failed output');
+    expect(command).toContain('Status: error');
+    expect(command).toContain('Exit code: 2');
+    expect(command).toContain('tool-terminal-result-error');
+    expect(command).toContain('Raw Arguments');
+    expect(command).toContain('Raw Result');
+  });
+
+  it('uses plaintext for unknown extensions and keeps preview/source truncation truthful', () => {
+    const longContent = 'x'.repeat(12_001);
+    const markup = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'write',
+          arguments: { path: 'src/app.unknown', content: longContent },
+          data: { argumentsTruncated: true },
+        }}
+      />,
+    );
+    expect(markup).toContain('Newly written content');
+    expect(markup).toContain('preview is truncated after 12,000 characters');
+    expect(markup).toContain(
+      'Source truncated this arguments before it reached the dashboard.',
+    );
+    expect(markup).toContain('Raw Arguments');
   });
 
   it('separates arguments and result before the expandable raw fallback', () => {

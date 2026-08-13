@@ -206,6 +206,108 @@
 .payload-truncation {
   margin: 5px 0;
 }
+.tool-specialized {
+  min-width: 0;
+}
+.tool-presentation-label,
+.tool-terminal-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 5px 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+.tool-code-preview,
+.tool-terminal-output {
+  min-width: 0;
+  max-width: 100%;
+  margin: 7px 0;
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--bg) 80%, #000 20%);
+  color: var(--fg);
+  font-size: 11px;
+  line-height: 1.5;
+  tab-size: 2;
+  white-space: pre;
+}
+.tool-code-preview {
+  padding: 6px 0;
+}
+.tool-code-line {
+  display: block;
+  min-width: max-content;
+  padding: 0 9px;
+}
+.tool-code-line-added {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+}
+.tool-code-line-removed {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+.tool-code-line-context {
+  color: var(--muted);
+}
+.tool-code-prefix {
+  display: inline-block;
+  width: 16px;
+  color: var(--dim);
+  user-select: none;
+}
+.tool-code-line-added .tool-code-prefix {
+  color: var(--green);
+}
+.tool-code-line-removed .tool-code-prefix {
+  color: var(--red);
+}
+.tool-replacement {
+  min-width: 0;
+  margin: 10px 0;
+}
+.tool-replacement h5 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tool-terminal-output {
+  max-height: 300px;
+  padding: 9px;
+  color: var(--fg);
+}
+.tool-terminal-result-error {
+  border-left-color: var(--red);
+}
+.tool-terminal-result-error .tool-terminal-output {
+  color: var(--red);
+}
+.tool-code-preview .hljs-keyword,
+.tool-code-preview .hljs-selector-tag,
+.tool-code-preview .hljs-title,
+.tool-code-preview .hljs-built_in {
+  color: var(--purple);
+}
+.tool-code-preview .hljs-string,
+.tool-code-preview .hljs-attr,
+.tool-code-preview .hljs-attribute {
+  color: var(--green);
+}
+.tool-code-preview .hljs-comment {
+  color: var(--dim);
+}
+.tool-code-preview .hljs-number,
+.tool-code-preview .hljs-literal {
+  color: var(--orange);
+}
+@media (max-width: 600px) {
+  .tool-code-preview,
+  .tool-terminal-output {
+    font-size: 10px;
+  }
+}
 .structured-result-value {
   min-width: 0;
   overflow-wrap: anywhere;
