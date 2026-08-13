@@ -361,9 +361,6 @@ export function parseStartRuntimeRequest(value: unknown): StartRuntimeRequest {
   if (input.sessionId) result.sessionId = input.sessionId;
   if (input.name) result.name = input.name;
   if (input.initialPrompt) result.initialPrompt = input.initialPrompt;
-  if (input.acknowledgeSharedWorkingDirectory !== undefined)
-    result.acknowledgeSharedWorkingDirectory =
-      input.acknowledgeSharedWorkingDirectory;
   if (input.model) {
     if (
       !safeIdentifier(input.model.provider, 200) ||

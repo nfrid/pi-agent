@@ -240,18 +240,13 @@ describe('project-scoped new chat', () => {
     );
   });
 
-  it('builds the first-message start request and explicit warning continuation', () => {
+  it('builds the first-message start request with optional model settings', () => {
     expect(newChatRequest('workspace-1', '  inspect this  ')).toEqual({
       workspaceId: 'workspace-1',
       initialPrompt: '  inspect this  ',
     });
-    expect(newChatRequest('workspace-1', 'inspect this', true)).toEqual({
-      workspaceId: 'workspace-1',
-      initialPrompt: 'inspect this',
-      acknowledgeSharedWorkingDirectory: true,
-    });
     expect(
-      newChatRequest('workspace-1', 'use luna', false, {
+      newChatRequest('workspace-1', 'use luna', {
         provider: 'openai-codex',
         model: 'gpt-5.6-luna',
         thinking: 'high',
@@ -343,13 +338,6 @@ describe('project-scoped new chat', () => {
     expect(resumeRuntimeRequest('workspace-1', 'session-1')).toEqual({
       workspaceId: 'workspace-1',
       sessionId: 'session-1',
-    });
-    expect(
-      resumeRuntimeRequest('workspace-1', 'session-1', true),
-    ).toMatchObject({
-      workspaceId: 'workspace-1',
-      sessionId: 'session-1',
-      acknowledgeSharedWorkingDirectory: true,
     });
     expect(resumeRuntimeRequest(undefined, 'session-1')).toBeUndefined();
   });

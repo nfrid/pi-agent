@@ -210,9 +210,6 @@
   cursor: not-allowed;
   opacity: 0.45;
 }
-.session-details-trigger {
-  font-size: 20px;
-}
 .session-control-layer > .jump-latest {
   position: absolute;
   right: 0;

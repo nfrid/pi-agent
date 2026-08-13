@@ -209,22 +209,6 @@ export class RuntimeManager {
     const cwd = realpathSync.native(
       request.checkoutCwd ?? workspace.canonicalPath,
     );
-    const conflict = this.registry
-      .snapshots()
-      .find(
-        (runtime) =>
-          runtime.online !== false && this.sameLocation(runtime.cwd, cwd),
-      );
-    if (conflict && !request.acknowledgeSharedWorkingDirectory) {
-      const error = new Error(
-        'Another active agent is using this working directory. Both agents may modify the same files.',
-      );
-      Object.assign(error, {
-        code: 'shared-working-directory',
-        runtimeId: conflict.runtimeId,
-      });
-      throw error;
-    }
     let sessionFile: string | undefined;
     if (request.sessionId) {
       const session = this.sessions.get(request.sessionId);
@@ -543,13 +527,5 @@ export class RuntimeManager {
 
   private safePid(pid: number): boolean {
     return Number.isSafeInteger(pid) && pid > 0;
-  }
-
-  private sameLocation(left: string, right: string): boolean {
-    try {
-      return realpathSync.native(left) === realpathSync.native(right);
-    } catch {
-      return left === right;
-    }
   }
 }

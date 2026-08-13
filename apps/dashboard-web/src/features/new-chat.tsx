@@ -39,22 +39,8 @@ import {
 } from './model-option';
 import styles from './new-chat.module.css';
 
-function errorDetails(cause: unknown): { message: string; code?: string } {
-  if (cause instanceof Error) {
-    const error = cause as Error & { code?: unknown };
-    return {
-      message: cause.message,
-      ...(typeof error.code === 'string' ? { code: error.code } : {}),
-    };
-  }
-  return { message: String(cause) };
-}
-
-function isSharedWorkingDirectoryWarning(message: string, code?: string) {
-  return (
-    code === 'shared-working-directory' ||
-    /shared-working-directory|both agents/i.test(message)
-  );
+function errorMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 type NewChatModel = NonNullable<StartRuntimeRequest['model']>;
@@ -116,16 +102,12 @@ export function newChatThinkingLevels(
 export function newChatRequest(
   workspaceId: string,
   initialPrompt: string | undefined,
-  acknowledgeSharedWorkingDirectory = false,
   model?: NewChatModel,
 ): StartRuntimeRequest {
   return {
     workspaceId,
     ...(initialPrompt ? { initialPrompt } : {}),
     ...(model ? { model } : {}),
-    ...(acknowledgeSharedWorkingDirectory
-      ? { acknowledgeSharedWorkingDirectory: true }
-      : {}),
   };
 }
 
@@ -199,7 +181,6 @@ export function NewChatView({
       : (thinkingLevels[0] ?? ''),
   );
   const [error, setError] = useState<string>();
-  const [sharedWarning, setSharedWarning] = useState(false);
   const runtime = useDashboardStore(
     store,
     (state) =>
@@ -278,7 +259,7 @@ export function NewChatView({
     );
   }
 
-  const submit = async (event: FormEvent, acknowledge = false) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     const initialPrompt = text.trim();
     if ((!initialPrompt && !attachments.length) || busy) return;
@@ -288,7 +269,6 @@ export function NewChatView({
     }
     setBusy(true);
     setError(undefined);
-    setSharedWarning(false);
     try {
       let runtimeId = startedRuntimeId;
       if (!runtimeId) {
@@ -296,7 +276,6 @@ export function NewChatView({
           newChatRequest(
             workspaceId,
             attachments.length ? undefined : initialPrompt,
-            acknowledge,
             selectedModel && {
               provider: selectedModel.provider,
               model: selectedModel.model,
@@ -321,11 +300,7 @@ export function NewChatView({
       clearAttachments();
       go(pendingChatPath(workspaceId, runtimeId));
     } catch (cause) {
-      const details = errorDetails(cause);
-      setError(details.message);
-      setSharedWarning(
-        isSharedWorkingDirectoryWarning(details.message, details.code),
-      );
+      setError(errorMessage(cause));
     } finally {
       setBusy(false);
     }
@@ -476,16 +451,6 @@ export function NewChatView({
                   role="alert"
                 >
                   <p className="error">{error}</p>
-                  {sharedWarning && (
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      disabled={busy}
-                      onClick={(event) => void submit(event, true)}
-                    >
-                      Continue
-                    </button>
-                  )}
                 </div>
               )}
             </div>
