@@ -2859,6 +2859,38 @@ function phase6Snapshot(
   };
 }
 
+function markdownActivityEntries() {
+  return [
+    {
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'text',
+            text: '**Review the workspace**\n\nThis preamble has a [guide](https://example.com/guide) and enough ordinary text to wrap around the timestamp accessory before continuing on a full-width line below it. It keeps flowing beside the accessory for several lines so the float is genuinely tested.\n\nThe following paragraph should use the full header width.',
+          },
+          {
+            type: 'toolCall',
+            id: 'markdown-read',
+            name: 'read',
+            arguments: { path: 'src/index.ts' },
+          },
+        ],
+      },
+    },
+    {
+      type: 'message',
+      message: {
+        role: 'toolResult',
+        toolCallId: 'markdown-read',
+        content: [{ type: 'text', text: 'read complete' }],
+        isError: false,
+      },
+    },
+  ];
+}
+
 function repeatedActivityEntries() {
   return [
     ...Array.from({ length: 84 }, (_, index) => ({
@@ -3237,6 +3269,107 @@ async function installPhase6Mocks(
   };
 }
 
+test('activity header renders Markdown and tracks its sticky tool offset @desktop', async ({
+  page,
+}) => {
+  await installPhase6Mocks(page, {
+    entries: markdownActivityEntries(),
+    pendingInteractions: [],
+  });
+  await page.setViewportSize({ width: 960, height: 760 });
+  await page.goto('/sessions/s1');
+
+  const group = page.locator('.activity-group').first();
+  const header = group.locator('.activity-group-header');
+  await expect(header.locator('.markdown strong')).toHaveText(
+    'Review the workspace',
+  );
+  await expect(header.locator('.markdown a')).toHaveAttribute(
+    'href',
+    'https://example.com/guide',
+  );
+  await expect(header.locator('small')).toHaveCount(0);
+  const headerMetrics = await header.evaluate((element) => {
+    const groupElement = element.closest('.activity-group');
+    if (!groupElement) throw new Error('activity group missing');
+    const headerHeight = element.getBoundingClientRect().height;
+    const markdown = element.querySelector<HTMLElement>('.markdown');
+    const firstParagraph = markdown?.querySelector<HTMLElement>(':scope > p');
+    const laterParagraph =
+      markdown?.querySelector<HTMLElement>(':scope > p + p');
+    const toggle = element.querySelector<HTMLElement>('.activity-group-toggle');
+    if (!markdown || !firstParagraph || !laterParagraph || !toggle)
+      throw new Error('activity Markdown geometry missing');
+    const firstLine = firstParagraph.getClientRects()[0];
+    if (!firstLine) throw new Error('activity first line missing');
+    const laterBlock = laterParagraph.getBoundingClientRect();
+    const toggleRect = toggle.getBoundingClientRect();
+    return {
+      headerHeight,
+      firstLineTop: firstLine.top,
+      firstLineBottom: firstLine.bottom,
+      firstLineWidth: firstLine.width,
+      laterBlockWidth: laterBlock.width,
+      toggleTop: toggleRect.top,
+      toggleBottom: toggleRect.bottom,
+      toggleRight: toggleRect.right,
+      firstLineRight: firstLine.right,
+      laterBlockRight: laterBlock.right,
+      offset: Number.parseFloat(
+        getComputedStyle(groupElement).getPropertyValue(
+          '--activity-header-height',
+        ),
+      ),
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+      markdownWidth: markdown.getBoundingClientRect().width,
+      headerWidth: element.getBoundingClientRect().width,
+    };
+  });
+  expect(headerMetrics.headerHeight).toBeGreaterThan(42);
+  expect(
+    Math.abs(headerMetrics.offset - headerMetrics.headerHeight),
+  ).toBeLessThan(1);
+  expect(headerMetrics.scrollWidth).toBeLessThanOrEqual(
+    headerMetrics.clientWidth,
+  );
+  expect(headerMetrics.markdownWidth).toBeLessThanOrEqual(
+    headerMetrics.headerWidth,
+  );
+  expect(headerMetrics.firstLineBottom).toBeGreaterThan(
+    headerMetrics.toggleTop,
+  );
+  expect(headerMetrics.firstLineTop).toBeLessThan(headerMetrics.toggleBottom);
+  expect(headerMetrics.firstLineRight).toBeGreaterThan(
+    headerMetrics.toggleRight,
+  );
+  expect(headerMetrics.laterBlockWidth).toBeGreaterThan(
+    headerMetrics.firstLineWidth + 20,
+  );
+  expect(headerMetrics.laterBlockRight).toBeGreaterThan(
+    headerMetrics.firstLineRight,
+  );
+
+  await header.getByRole('button').click();
+  const toolSummary = group.locator('.tool-detail > summary.activity-step');
+  await expect(toolSummary).toBeVisible();
+  await toolSummary.click();
+  await expect
+    .poll(() =>
+      toolSummary.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).top),
+      ),
+    )
+    .toBeGreaterThan(headerMetrics.offset - 1);
+  await expect
+    .poll(() =>
+      toolSummary.evaluate((element) =>
+        Number.parseFloat(getComputedStyle(element).top),
+      ),
+    )
+    .toBeLessThan(headerMetrics.offset + 1);
+});
+
 test('virtual transcript focus and group layout stay inside simple contracts', async ({
   page,
 }) => {
@@ -3268,7 +3401,7 @@ test('virtual transcript focus and group layout stay inside simple contracts', a
   await expect(headers).toHaveCount(4);
   for (let round = 0; round < 3; round += 1) {
     for (let index = 0; index < 4; index += 1) {
-      await headers.nth(index).click();
+      await headers.nth(index).getByRole('button').click();
       await expect
         .poll(() =>
           page
@@ -3290,7 +3423,7 @@ test('virtual transcript focus and group layout stay inside simple contracts', a
         .toBe(true);
     }
     for (let index = 3; index >= 0; index -= 1)
-      await headers.nth(index).click();
+      await headers.nth(index).getByRole('button').click();
   }
 
   const collapsedHeader = headers.nth(0);
@@ -3342,7 +3475,7 @@ test('virtual transcript focus and group layout stay inside simple contracts', a
   expect(collapsedSticky.backgroundColor).not.toBe('transparent');
   expect(collapsedSticky.top).toBeGreaterThanOrEqual(-1);
   expect(collapsedSticky.top).toBeLessThan(12);
-  await collapsedHeader.click();
+  await collapsedHeader.getByRole('button').click();
   await collapsedRow.evaluate((row) => {
     const scrollElement = row.closest('.session-transcript-scroll');
     if (!scrollElement) throw new Error('transcript scrollport missing');

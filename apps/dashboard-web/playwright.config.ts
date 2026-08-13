@@ -22,5 +22,10 @@ export default defineConfig({
       use: { ...devices['Pixel 5'] },
       grepInvert: /@desktop/,
     },
+    {
+      name: 'desktop',
+      use: { ...devices['Desktop Chrome'] },
+      grep: /@desktop/,
+    },
   ],
 });

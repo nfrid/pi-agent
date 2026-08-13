@@ -243,10 +243,13 @@ function TranscriptEntry({
   item,
   cwd,
   timestampOverride,
+  suppressAssistantText = false,
 }: {
   item: TranscriptModelItem;
   cwd?: string;
   timestampOverride?: number | string;
+  /** The activity header owns the preamble; retain all supplemental content. */
+  suppressAssistantText?: boolean;
 }) {
   const timestamp = transcriptItemTimestamp(item) ?? timestampOverride;
   if (item.event)
@@ -262,6 +265,13 @@ function TranscriptEntry({
         <DashboardTime className="transcript-time" timestamp={timestamp} />
       </output>
     );
+  if (
+    item.role &&
+    suppressAssistantText &&
+    !item.imageCount &&
+    !item.thinking?.length
+  )
+    return null;
   if (item.role && (item.text || item.imageCount || item.thinking?.length)) {
     const skill =
       item.role === 'user' && item.text
@@ -279,7 +289,7 @@ function TranscriptEntry({
         {item.role === 'assistant' && item.thinking?.length ? (
           <ThinkingBlobs thinking={item.thinking} timestamp={timestamp} />
         ) : null}
-        {item.text || item.imageCount ? (
+        {(item.text && !suppressAssistantText) || item.imageCount ? (
           <article
             className={`message-bubble message-${item.role}${item.deliveryMode === 'steer' ? ' message-steering' : ''}`}
           >
@@ -298,7 +308,9 @@ function TranscriptEntry({
                 attached
               </span>
             ) : null}
-            {item.text ? <Markdown>{item.text}</Markdown> : null}
+            {item.text && !suppressAssistantText ? (
+              <Markdown>{item.text}</Markdown>
+            ) : null}
           </article>
         ) : null}
       </div>

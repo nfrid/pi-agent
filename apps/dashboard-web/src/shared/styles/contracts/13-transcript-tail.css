@@ -86,30 +86,6 @@
 }
 
 @media (max-width: 820px) {
-  .activity-group > button .activity-icon {
-    flex: 0 0 auto;
-  }
-  .activity-group > button strong {
-    flex: 1 1 0;
-  }
-  .activity-group > button small {
-    display: none;
-  }
-  .activity-group > button::after {
-    order: 2;
-    content: "›";
-    flex: 0 0 auto;
-    color: var(--dim);
-    font-size: 16px;
-    line-height: 1;
-    transition: transform 140ms ease;
-  }
-  .activity-group > button[aria-expanded="true"]::after {
-    transform: rotate(90deg);
-  }
-  .activity-group > button .activity-time {
-    order: 3;
-  }
   :where(.preparing-toolcall strong) {
     min-width: 0;
     overflow: hidden;
@@ -290,6 +266,7 @@
 /* Group headers pin to the transcript edge. Expanded tool headers pin within
    their own details boundary, below a containing group header when present. */
 .activity-group {
+  --activity-header-height: 42px;
   overflow: visible;
   border-radius: 0;
 }
@@ -298,12 +275,8 @@
   top: 0;
   z-index: 24;
   min-height: 42px;
-  flex-wrap: nowrap;
   border-radius: 0;
   background: var(--bg-alt);
-}
-.activity-group > .activity-group-header small {
-  width: auto;
 }
 .tool-detail[open] > summary.activity-step {
   position: sticky;
@@ -313,7 +286,7 @@
   border-bottom: 1px solid var(--line-soft);
 }
 .activity-group .tool-detail[open] > summary.activity-step {
-  top: 42px;
+  top: var(--activity-header-height, 42px);
   z-index: 22;
   background: #2e2f3d; /* TODO: picked activity group bg, probably need to make group bg solid color */
 }

@@ -182,21 +182,16 @@ details.session-event {
 .activity-group .activity-icon {
   color: var(--activity-status-color);
 }
-.activity-group > button {
+.activity-group-header {
   min-height: 42px;
   padding: 9px 13px 9px 14px;
   transition: background 140ms ease;
 }
-.activity-group > button:hover {
+.activity-group-header:hover {
   background: color-mix(in srgb, var(--purple) 7%, var(--bg-alt));
 }
-.activity-group > button strong {
-  color: var(--fg);
-  font-size: 12px;
-}
 .activity-summary,
-.activity-detail,
-.activity-lead {
+.activity-detail {
   border-top: 0;
   background: color-mix(in srgb, var(--bg) 36%, transparent);
 }

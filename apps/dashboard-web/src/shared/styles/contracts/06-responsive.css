@@ -29,9 +29,6 @@
   .runtime-owner {
     display: none;
   }
-  .activity-group > button {
-    flex-wrap: wrap;
-  }
   .composer-secondary {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 5px;
@@ -55,10 +52,6 @@
     min-width: 74px;
     width: 74px;
     max-width: 74px;
-  }
-  .activity-group > button small {
-    width: 100%;
-    margin-left: 28px;
   }
   .context-indicator {
     margin-left: auto;
@@ -168,9 +161,5 @@
   .session-heading h1,
   .section-heading h1 {
     overflow-wrap: anywhere;
-  }
-  .activity-group > button small {
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 }

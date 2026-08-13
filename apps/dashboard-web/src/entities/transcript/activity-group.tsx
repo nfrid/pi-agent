@@ -1,10 +1,10 @@
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import { useEffect, useRef } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { DashboardTime } from '../../features/timestamp';
 import { Markdown } from '../../Markdown';
 import type { TranscriptModelItem } from '../../transcript';
 import { activityGroupPresentation, type TranscriptGroup } from './activity';
-import { shouldShowActivityLead } from './activity-lead';
 import { CollapsedActivitySummary } from './activity-summary';
 import { TranscriptEntry } from './entries';
 import {
@@ -31,55 +31,90 @@ export function TranscriptActivityGroup({
 }) {
   const presentation = activityGroupPresentation(group, expanded);
   const lead = items[0];
-  const visibleLead =
-    !lead?.preparing &&
-    lead?.role === 'assistant' &&
-    lead.text &&
-    shouldShowActivityLead(lead.text, group.title)
+  const preamble =
+    !lead?.preparing && lead?.role === 'assistant' && lead.text
       ? lead.text
       : undefined;
   const detailId = `activity-detail-${group.start}`;
   const timestamps = activityGroupItemTimestamps(items);
+  const groupRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const groupElement = groupRef.current;
+    const headerElement = headerRef.current;
+    if (
+      !groupElement ||
+      !headerElement ||
+      typeof ResizeObserver === 'undefined'
+    )
+      return;
+
+    const updateHeaderHeight = () => {
+      groupElement.style.setProperty(
+        '--activity-header-height',
+        `${headerElement.getBoundingClientRect().height}px`,
+      );
+    };
+    updateHeaderHeight();
+    const observer = new ResizeObserver(updateHeaderHeight);
+    observer.observe(headerElement);
+    return () => observer.disconnect();
+  }, []);
+
+  const toggle = () => {
+    captureScrollAnchor?.(`group-${groupKey}`);
+    onToggle(!expanded);
+  };
+  const accessibleLabel = `${expanded ? 'Collapse' : 'Expand'} activity: ${
+    group.title
+  }; ${group.toolCount} tool${group.toolCount === 1 ? '' : 's'}; ${
+    presentation.label
+  }`;
 
   return (
     <div
+      ref={groupRef}
       className={`activity-group ${presentation.className}`}
       data-transcript-key={`group-${groupKey}`}
     >
-      <AriaButton
-        className="activity-group-header"
-        type="button"
-        aria-expanded={expanded}
-        aria-controls={detailId}
-        onPress={() => {
-          captureScrollAnchor?.(`group-${groupKey}`);
-          onToggle(!expanded);
-        }}
-      >
-        <span className="activity-icon">{presentation.icon}</span>
-        <strong>{group.title}</strong>
-        <span className="sr-only">
+      <header ref={headerRef} className="activity-group-header">
+        <span className="activity-group-accessories">
+          <DashboardTime
+            className="transcript-time activity-time"
+            timestamp={transcriptItemTimestamp(lead)}
+          />
+        </span>
+        <AriaButton
+          className="activity-group-toggle"
+          type="button"
+          aria-label={accessibleLabel}
+          aria-expanded={expanded}
+          aria-controls={detailId}
+          onPress={toggle}
+        >
+          <span className="activity-icon" aria-hidden="true">
+            {presentation.icon}
+          </span>
+        </AriaButton>
+        <span className="sr-only activity-group-status">
           {group.toolCount} tool{group.toolCount === 1 ? '' : 's'} ·{' '}
           {presentation.label}
         </span>
-        <small aria-hidden="true">{presentation.label}</small>
-        <DashboardTime
-          className="transcript-time activity-time"
-          timestamp={transcriptItemTimestamp(lead)}
-        />
-      </AriaButton>
+        {preamble ? (
+          <div className="activity-group-preamble">
+            <Markdown>{preamble}</Markdown>
+          </div>
+        ) : (
+          <strong className="activity-group-fallback">{group.title}</strong>
+        )}
+      </header>
       {!expanded && (
         <CollapsedActivitySummary
           group={group}
           items={items}
           cwd={runtime?.cwd}
         />
-      )}
-      {visibleLead && (
-        <div className="activity-lead">
-          <span className="message-role">agent</span>
-          <Markdown>{visibleLead}</Markdown>
-        </div>
       )}
       {expanded && (
         <div className="activity-detail" id={detailId}>
@@ -89,6 +124,7 @@ export function TranscriptActivityGroup({
               item={child}
               cwd={runtime?.cwd}
               timestampOverride={timestamps[childIndex]}
+              suppressAssistantText={child === lead && Boolean(preamble)}
             />
           ))}
         </div>
