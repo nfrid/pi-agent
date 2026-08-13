@@ -184,7 +184,22 @@ describe('DashboardLiveStore', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot({
       ...snapshot('daemon-1', 1),
-      sessions: [{ id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 }],
+      runtimes: [
+        {
+          runtimeId: 'runtime-1',
+          online: true,
+          session: { id: 'session-1', entries: [] },
+        },
+      ],
+      sessions: [
+        {
+          id: 'session-1',
+          file: '',
+          cwd: '/tmp',
+          updatedAt: 1,
+          activeRuntimeId: 'runtime-1',
+        },
+      ],
     } as unknown as BrowserSnapshot);
     store.hydrateSession(sessionResponse(1));
 
@@ -200,6 +215,7 @@ describe('DashboardLiveStore', () => {
               file: '/tmp/session.jsonl',
               cwd: '/tmp',
               updatedAt: cursor,
+              activeRuntimeId: 'runtime-1',
             },
           ],
           remove: [],
@@ -210,9 +226,58 @@ describe('DashboardLiveStore', () => {
     expect(store.getSnapshot().sessionsById['session-1']?.updatedAt).toBe(101);
     expect(store.getSnapshot().cursor).toBe(101);
     expect(store.getSnapshot().resyncNonce).toBe(0);
+    expect(store.getSnapshot().sessionChangeById['session-1']).toBeUndefined();
     expect(
       store.getSnapshot().transcriptsBySessionId['session-1'],
     ).toBeDefined();
+  });
+
+  it('scopes dormant transcript metadata changes to the changed session', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      sessions: [
+        { id: 'session-1', file: '/tmp/one.jsonl', cwd: '/tmp', updatedAt: 1 },
+        { id: 'session-2', file: '/tmp/two.jsonl', cwd: '/tmp', updatedAt: 1 },
+      ],
+    } as unknown as BrowserSnapshot);
+    store.hydrateSession({
+      ...sessionResponse(1),
+      metadata: {
+        id: 'session-1',
+        file: '/tmp/one.jsonl',
+        cwd: '/tmp',
+        updatedAt: 1,
+        entryCount: 1,
+      },
+    });
+
+    store.acceptStreamRecord({
+      type: 'sessions',
+      cursor: 2,
+      emittedAt: 2,
+      upsert: [
+        {
+          id: 'session-1',
+          file: '/tmp/one.jsonl',
+          cwd: '/tmp',
+          updatedAt: 2,
+          entryCount: 2,
+        },
+        {
+          id: 'session-2',
+          file: '/tmp/two.jsonl',
+          cwd: '/tmp',
+          updatedAt: 2,
+        },
+      ],
+      remove: [],
+    });
+
+    expect(store.getSnapshot().sessionChangeById).toEqual({
+      'session-1': 1,
+      'session-2': 1,
+    });
   });
 
   it('preserves optimistic titles across authoritative session-index records', () => {
