@@ -18,6 +18,7 @@ import {
 } from './agent-thread-nav/use-agent-thread-drawer';
 import styles from './agent-thread-nav.module.css';
 import { useDashboardUtility } from './dashboard-utility-context';
+import { RuntimeLifecycleActions } from './runtime-actions';
 import { DashboardTime } from './timestamp';
 
 export type { AgentThreadRow } from './agent-thread-nav/model';
@@ -165,38 +166,48 @@ export function AgentThreadNav({
             {group.rows.map((row) => {
               const selected = row.id === currentSessionId;
               return (
-                <button
-                  type="button"
+                <div
                   className={`agent-thread-row ${styles.threadRow} ${selected ? 'selected' : ''} status-${row.status}`}
-                  aria-current={selected ? 'page' : undefined}
-                  aria-label={`${row.title} ${statusLabel(row)}`}
                   key={row.id}
-                  onClick={() => select(row.id)}
                 >
-                  <span
-                    className={`agent-thread-glyph ${styles.threadGlyph}`}
-                    aria-hidden="true"
+                  <button
+                    type="button"
+                    className={`agent-thread-link ${styles.threadLink}`}
+                    aria-current={selected ? 'page' : undefined}
+                    aria-label={`${row.title} ${statusLabel(row)}`}
+                    onClick={() => select(row.id)}
                   >
-                    {statusGlyph(row.status)}
-                  </span>
-                  <span className={`agent-thread-copy ${styles.threadCopy}`}>
-                    <strong>{row.title}</strong>
-                    <small>
-                      <span
-                        className={`agent-thread-context ${styles.threadContext}`}
-                      >
-                        <span>{statusLabel(row)}</span>
-                        <span aria-hidden="true"> · </span>
-                        <span>{shortPath(row.cwd)}</span>
-                      </span>
-                      <DashboardTime
-                        className={`agent-thread-time ${styles.threadTime}`}
-                        timestamp={row.updatedAt}
-                        context="sidebar"
-                      />
-                    </small>
-                  </span>
-                </button>
+                    <span
+                      className={`agent-thread-glyph ${styles.threadGlyph}`}
+                      aria-hidden="true"
+                    >
+                      {statusGlyph(row.status)}
+                    </span>
+                    <span className={`agent-thread-copy ${styles.threadCopy}`}>
+                      <strong>{row.title}</strong>
+                      <small>
+                        <span
+                          className={`agent-thread-context ${styles.threadContext}`}
+                        >
+                          <span>{statusLabel(row)}</span>
+                          <span aria-hidden="true"> · </span>
+                          <span>{shortPath(row.cwd)}</span>
+                        </span>
+                        <DashboardTime
+                          className={`agent-thread-time ${styles.threadTime}`}
+                          timestamp={row.updatedAt}
+                          context="sidebar"
+                        />
+                      </small>
+                    </span>
+                  </button>
+                  {row.runtime && (
+                    <RuntimeLifecycleActions
+                      runtime={row.runtime}
+                      title={row.title}
+                    />
+                  )}
+                </div>
               );
             })}
           </section>
