@@ -160,6 +160,7 @@ describe('session index', () => {
       });
       parentId = id;
     }
+    expect(JSON.stringify(entries[1]).length).toBeGreaterThan(512 * 1024);
     await writeFile(
       file,
       `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
@@ -179,6 +180,7 @@ describe('session index', () => {
     expect(
       result.entries.map((entry) => (entry as { id?: string }).id),
     ).toEqual(['entry-2', 'entry-8']);
+    expect(JSON.stringify(result.entries)).not.toContain('x'.repeat(1_024));
     expect(result.entriesTruncated).toBe(false);
     expect(result.leafId).toBe('entry-8');
   });

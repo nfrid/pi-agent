@@ -53,8 +53,9 @@ describe('dashboard HTTP boundary', () => {
                 runId: 'run-1',
                 lineageId: 'lineage-1',
                 name: 'Lazy worker',
-                task: 'inspect the source',
+                task: 'inspect the source '.repeat(20_000),
                 state: 'success',
+                rawPayload: 'not retained in summary or detail'.repeat(20_000),
                 messages: [
                   {
                     role: 'assistant',
@@ -65,7 +66,8 @@ describe('dashboard HTTP boundary', () => {
                   {
                     type: 'tool',
                     label: 'large activity',
-                    transcriptText: 'distinctive large activity payload',
+                    transcriptText:
+                      'distinctive large activity payload '.repeat(10_000),
                   },
                 ],
               },
@@ -74,6 +76,9 @@ describe('dashboard HTTP boundary', () => {
         },
       },
     ];
+    expect(JSON.stringify(sessionEntries[1]).length).toBeGreaterThan(
+      512 * 1024,
+    );
     await writeFile(
       path.join(sessionDir, 'lazy-session.jsonl'),
       `${sessionEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
@@ -100,6 +105,9 @@ describe('dashboard HTTP boundary', () => {
     expect(JSON.stringify(summary)).not.toContain(
       'distinctive large activity payload',
     );
+    expect(JSON.stringify(summary)).not.toContain(
+      'not retained in summary or detail',
+    );
     expect(summary).not.toHaveProperty('details');
     const group = (summary.groups as Array<Record<string, unknown>>)[0];
     const run = (group?.runs as Array<Record<string, unknown>>)[0];
@@ -114,9 +122,28 @@ describe('dashboard HTTP boundary', () => {
       runId: 'run-1',
       details: {
         response: 'selected response',
-        activities: [{ text: 'distinctive large activity payload' }],
+        activities: [
+          {
+            text: expect.stringContaining('distinctive large activity payload'),
+          },
+        ],
+        truncated: true,
       },
     });
+    const details = (detail.run as Record<string, unknown>).details as Record<
+      string,
+      unknown
+    >;
+    expect((details.task as string).length).toBeLessThanOrEqual(20_000);
+    expect(
+      (
+        (details.activities as Array<Record<string, unknown>>)[0]
+          ?.text as string
+      ).length,
+    ).toBeLessThanOrEqual(8_000);
+    expect(JSON.stringify(detail)).not.toContain(
+      'not retained in summary or detail',
+    );
   });
 
   it('marks all unread notifications through one authenticated request', async () => {

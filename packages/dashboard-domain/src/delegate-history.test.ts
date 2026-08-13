@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   delegateHistoryFromBranch,
   delegateHistoryRunDetailFromBranch,
+  projectDelegateHistoryEntry,
 } from './delegate-history.js';
 
 function oldRun(overrides: Record<string, unknown> = {}) {
@@ -326,6 +327,69 @@ describe('delegate history adapter', () => {
       },
     });
     expect(detail.run.details).not.toHaveProperty('response');
+  });
+
+  it('projects oversized persisted entries before summary and detail scans', () => {
+    const entry = {
+      type: 'message',
+      id: 'oversized-result',
+      message: {
+        role: 'toolResult',
+        toolName: 'delegate',
+        details: {
+          runs: [
+            oldRun({
+              runId: 'oversized-run',
+              lineageId: 'oversized-lineage',
+              task: 'inspect '.repeat(20_000),
+              rawPayload: 'raw payload must not be retained '.repeat(20_000),
+              activities: [
+                {
+                  type: 'tool',
+                  label: 'large activity',
+                  transcriptText: 'public activity '.repeat(10_000),
+                },
+              ],
+            }),
+          ],
+        },
+      },
+    };
+    const summaryProjection = projectDelegateHistoryEntry(entry, {
+      sessionId: 'parent-1',
+    });
+    expect(JSON.stringify(summaryProjection.entry).length).toBeLessThan(
+      512 * 1024,
+    );
+    expect(JSON.stringify(summaryProjection.entry)).not.toContain(
+      'raw payload must not be retained',
+    );
+    const summary = delegateHistoryFromBranch('parent-1', [
+      { type: 'session', id: 'parent-1' },
+      summaryProjection.entry,
+    ]);
+    expect(summary.groups[0]?.runs[0]).toMatchObject({
+      runId: 'oversized-run',
+      lineageId: 'oversized-lineage',
+    });
+    const detailProjection = projectDelegateHistoryEntry(entry, {
+      sessionId: 'parent-1',
+      detailRunId: 'oversized-run',
+    });
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      [detailProjection.entry],
+      'oversized-run',
+      'oversized-lineage',
+    );
+    expect(detail.run.details).toMatchObject({
+      activities: [{ text: expect.stringContaining('public activity') }],
+      truncated: true,
+    });
+    expect(detail.run.details.task?.length).toBeLessThanOrEqual(20_000);
+    expect(JSON.stringify(detail)).not.toContain(
+      'raw payload must not be retained',
+    );
   });
 
   it('keeps new identities and gives old standalone runs distinct stable IDs', () => {
