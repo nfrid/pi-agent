@@ -84,7 +84,7 @@ export function SessionView({
       id,
       data,
       store,
-      scrollElementRef: transcriptScrollRef,
+      scrollElementRef: embedded ? undefined : transcriptScrollRef,
     });
   const sessionMounted = Boolean(data && projection);
 
@@ -208,7 +208,13 @@ export function SessionView({
           onOpenOutline={() => setOutlineOpen(true)}
           store={store}
         />
-        <div ref={transcriptScrollRef} className="session-transcript-scroll">
+        <div
+          ref={transcriptScrollRef}
+          className="session-transcript-scroll"
+          role="region"
+          aria-label="Transcript"
+          tabIndex={0}
+        >
           {history?.hasOlder && (
             <SessionHistoryControl
               loading={historyLoading}
@@ -223,7 +229,8 @@ export function SessionView({
             tailScrollRequest={tailScrollRequest}
             outlineOpen={outlineOpen}
             onOutlineOpenChange={setOutlineOpen}
-            scrollElementRef={transcriptScrollRef}
+            scrollElementRef={embedded ? undefined : transcriptScrollRef}
+            virtualize={!embedded}
           />
         </div>
         <SessionControlLayer

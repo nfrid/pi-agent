@@ -44,6 +44,7 @@ export function Transcript({
   outlineOpen,
   onOutlineOpenChange,
   scrollElementRef,
+  virtualize = false,
 }: {
   /** Legacy raw-entry input retained for embedders. */
   entries?: unknown[];
@@ -53,10 +54,11 @@ export function Transcript({
   tailScrollRequest?: number;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
+  /** Session routes opt into virtualization only with an attached scrollport. */
+  virtualize?: boolean;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
 }) {
-  const ownedScrollElementRef = useRef<HTMLDivElement>(null);
-  const transcriptScrollElementRef = scrollElementRef ?? ownedScrollElementRef;
+  const transcriptScrollElementRef = scrollElementRef;
   const input = projection ?? entries ?? [];
   const items = useMemo(() => toTranscriptEntries(input), [input]);
   const modelEntries = useMemo(() => items.map((item) => item.entry), [items]);
@@ -81,18 +83,19 @@ export function Transcript({
     [groups, items],
   );
   const jumpToLandmark = (landmark: TranscriptLandmark) => {
-    const scrollElement = transcriptScrollElementRef.current;
-    if (!scrollElement) return;
-    let target: HTMLElement | undefined;
-    for (const element of scrollElement.querySelectorAll<HTMLElement>(
-      '[data-transcript-key]',
-    )) {
-      if (element.dataset.transcriptKey === landmark.key) {
-        target = element;
-        break;
-      }
-    }
+    const scrollElement = transcriptScrollElementRef?.current;
+    const target = scrollElement
+      ? Array.from(
+          scrollElement.querySelectorAll<HTMLElement>('[data-transcript-key]'),
+        ).find((element) => element.dataset.transcriptKey === landmark.key)
+      : document.querySelector<HTMLElement>(
+          `[data-transcript-key="${CSS.escape(landmark.key)}"]`,
+        );
     if (!target) return;
+    if (!scrollElement) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     scrollElement.scrollTo({
       top:
         scrollElement.scrollTop +
@@ -105,7 +108,7 @@ export function Transcript({
     () => buildTranscriptGroupCoverage(items.length, groups),
     [groups, items.length],
   );
-  if (items.length > 80)
+  if (items.length > 80 && virtualize && transcriptScrollElementRef)
     return (
       <VirtualizedTranscript
         items={items}

@@ -102,6 +102,12 @@ export function useSessionScroll({
     };
     let touchY: number | undefined;
     let previousScrollTop = scrollElement.scrollTop;
+    const onPointerDown = () => {
+      // A native scrollbar drag does not reliably emit wheel/touch events.
+      // Pointer intent must cancel the initial tail curtain before its next
+      // forced layout frame writes scrollTop again.
+      cancelPendingTailScroll();
+    };
     const onWheel = (event: WheelEvent) => {
       if (event.deltaY < 0) cancelPendingTailScroll();
     };
@@ -160,6 +166,9 @@ export function useSessionScroll({
       );
     };
     scrollElement.addEventListener('scroll', update, { passive: true });
+    scrollElement.addEventListener('pointerdown', onPointerDown, {
+      passive: true,
+    });
     scrollElement.addEventListener('wheel', onWheel, { passive: true });
     scrollElement.addEventListener('touchstart', onTouchStart, {
       passive: true,
@@ -169,6 +178,7 @@ export function useSessionScroll({
     update();
     return () => {
       scrollElement.removeEventListener('scroll', update);
+      scrollElement.removeEventListener('pointerdown', onPointerDown);
       scrollElement.removeEventListener('wheel', onWheel);
       scrollElement.removeEventListener('touchstart', onTouchStart);
       scrollElement.removeEventListener('touchmove', onTouchMove);
