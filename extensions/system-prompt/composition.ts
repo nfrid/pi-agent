@@ -71,11 +71,10 @@ function appendAgentInstructions(
   prompt: string,
   instructions: readonly LoadedAgentInstruction[],
 ): string {
-  let nextPrompt = `${prompt}\n\n<agent_instructions>\n`;
-  for (const instruction of instructions) {
-    nextPrompt += `<agent_instruction source="${escapeXml(instruction.path)}">\n${instruction.content}\n</agent_instruction>\n`;
-  }
-  return `${nextPrompt}</agent_instructions>\n`;
+  const content = instructions
+    .map((instruction) => instruction.content)
+    .join('\n\n');
+  return `${prompt}\n\n<agent_instructions>\n${content}\n</agent_instructions>\n`;
 }
 
 function appendProjectContext(
