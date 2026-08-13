@@ -14,6 +14,7 @@
   align-items: center;
   min-width: 0;
   gap: 6px;
+  padding: 8px 0;
 }
 .tool-detail > summary.activity-step .activity-tool-argument {
   min-width: 0;
@@ -308,12 +309,13 @@
   position: sticky;
   top: 0;
   z-index: 20;
-  background: var(--bg);
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--line-soft);
 }
 .activity-group .tool-detail[open] > summary.activity-step {
   top: 42px;
   z-index: 22;
-  background: color-mix(in srgb, var(--bg) 48%, var(--bg-alt));
+  background: #2e2f3d; /* TODO: picked activity group bg, probably need to make group bg solid color */
 }
 
 .session-page[data-tail-pending] .transcript {

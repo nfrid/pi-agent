@@ -320,7 +320,6 @@
 }
 .delegate-transcript-inspector-body {
   min-height: 0;
-  padding: 14px 18px 28px;
 }
 .delegate-inspector-details {
   margin: 0 0 12px;
@@ -387,7 +386,6 @@ ol.delegate-inspector-runs > li small {
 }
 .delegate-transcript {
   display: grid;
-  gap: 6px;
   min-width: 0;
 }
 .delegate-transcript .tool-detail {

@@ -357,9 +357,6 @@
     justify-content: flex-start;
     order: 3;
   }
-  .delegate-transcript-inspector-body {
-    padding: 12px 13px 24px;
-  }
   .surface-drawer {
     top: 0;
     right: 0;

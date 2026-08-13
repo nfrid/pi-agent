@@ -136,8 +136,6 @@
   color: var(--fg);
 }
 .tool-inspector {
-  margin-top: 8px;
-  border-top: 1px solid var(--line-soft);
   padding-top: 8px;
 }
 .tool-inspector dl {

@@ -155,7 +155,6 @@
 }
 .transcript-entry {
   border-bottom: 1px solid var(--line-soft);
-  padding: 8px 0;
   color: var(--muted);
   font-size: 11px;
 }
