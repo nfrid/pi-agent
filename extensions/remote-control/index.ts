@@ -59,14 +59,14 @@ export function emitCompactionStarted(
 export function emitCompactionCompleted(
   runtime: import('./runtime').RemoteControlRuntime,
   ctx: ExtensionContext,
+  entry: unknown,
 ): void {
-  runtime.setContext(ctx);
-  if (!runtime.isCurrent(ctx)) return;
-  // Settle first so the snapshot-triggered browser refetch reads the completed branch.
   emitState(runtime, ctx);
+  if (!runtime.isCurrent(ctx)) return;
   runtime.client.sendEvent({
-    type: 'session.snapshot',
-    session: sessionSnapshot(ctx),
+    type: 'session.compacted',
+    sessionId: ctx.sessionManager.getSessionId(),
+    entry,
   });
 }
 
@@ -187,8 +187,8 @@ export default defineExtension('remote-control', (pi) => {
     if (result.cancel) emitState(runtime, ctx);
     return result;
   });
-  pi.on('session_compact', (_event, ctx) => {
-    emitCompactionCompleted(runtime, ctx);
+  pi.on('session_compact', (event, ctx) => {
+    emitCompactionCompleted(runtime, ctx, event.compactionEntry);
   });
   pi.on('before_agent_start', (_event, ctx) => {
     if (!runtime.isCurrent(ctx)) return;

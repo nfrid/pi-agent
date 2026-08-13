@@ -421,6 +421,17 @@ describe('dashboard protocol', () => {
     ).toBe(false);
     expect(
       isBridgeEvent({
+        type: 'session.compacted',
+        sessionId: 's',
+        entry: {
+          type: 'compaction',
+          id: 'compact-1',
+          summary: 'Earlier work.',
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isBridgeEvent({
         type: 'interaction.resolved',
         interactionId: 'i',
       }),

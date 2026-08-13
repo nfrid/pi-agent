@@ -75,7 +75,7 @@ function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe('remote-control session lifecycle', () => {
-  it('publishes compaction progress and refreshes the completed session', () => {
+  it('publishes compaction progress and the saved completion entry', () => {
     const events: unknown[] = [];
     const broker = new InteractionBroker();
     const runtime = {
@@ -105,8 +105,13 @@ describe('remote-control session lifecycle', () => {
       },
     } as unknown as ExtensionContext;
 
+    const compactionEntry = {
+      type: 'compaction',
+      id: 'compact-leaf',
+      summary: 'Earlier context.',
+    };
     emitCompactionStarted(runtime, ctx);
-    emitCompactionCompleted(runtime, ctx);
+    emitCompactionCompleted(runtime, ctx, compactionEntry);
 
     expect(events).toEqual([
       {
@@ -119,14 +124,11 @@ describe('remote-control session lifecycle', () => {
         state: 'idle',
         snapshot: { liveState: 'idle' },
       },
-      expect.objectContaining({
-        type: 'session.snapshot',
-        session: expect.objectContaining({
-          id: 'session-compact',
-          leafId: 'compact-leaf',
-          entries: [{ type: 'compaction', id: 'compact-leaf' }],
-        }),
-      }),
+      {
+        type: 'session.compacted',
+        sessionId: 'session-compact',
+        entry: compactionEntry,
+      },
     ]);
     expect(runtime.setContext).toHaveBeenCalled();
   });

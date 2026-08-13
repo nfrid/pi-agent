@@ -594,6 +594,14 @@ const SessionEventSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+const SessionCompactedEventSchema = Type.Object(
+  {
+    type: Type.Literal('session.compacted'),
+    sessionId: IdentifierSchema,
+    entry: UnknownSchema,
+  },
+  { additionalProperties: false },
+);
 const MessageEventSchema = Type.Object(
   {
     type: Type.Union([
@@ -682,6 +690,7 @@ export const BridgeEventSchema = Type.Union([
   RuntimeHelloEventSchema,
   RuntimeStateEventSchema,
   SessionEventSchema,
+  SessionCompactedEventSchema,
   MessageEventSchema,
   ToolEventSchema,
   AgentSettledEventSchema,
@@ -704,6 +713,7 @@ export type BridgeEvent =
   | (Omit<Static<typeof SessionEventSchema>, 'session'> & {
       session: SessionSnapshot;
     })
+  | Static<typeof SessionCompactedEventSchema>
   | Static<typeof MessageEventSchema>
   | Static<typeof ToolEventSchema>
   | Static<typeof AgentSettledEventSchema>

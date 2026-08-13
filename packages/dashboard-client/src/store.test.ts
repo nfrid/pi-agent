@@ -44,6 +44,44 @@ const sessionResponse = (
   }) as SessionApiResponse;
 
 describe('DashboardLiveStore', () => {
+  it('applies compaction completion as a transcript delta', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.hydrateSession({
+      ...sessionResponse(1),
+      entries: [
+        {
+          type: 'message',
+          id: 'prompt-1',
+          message: { role: 'user', content: 'Keep this message.' },
+        },
+      ],
+    });
+
+    expect(
+      store.acceptStreamRecord({
+        cursor: 2,
+        emittedAt: 2,
+        sessionId: 'session-1',
+        event: {
+          type: 'session.compacted',
+          sessionId: 'session-1',
+          entry: {
+            type: 'compaction',
+            id: 'compact-1',
+            summary: 'Earlier work.',
+          },
+        },
+      }),
+    ).toBe(true);
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual(['prompt-1', 'compact-1']);
+    expect(projection?.items['compact-1']).toMatchObject({
+      kind: 'other',
+      raw: { type: 'compaction', summary: 'Earlier work.' },
+    });
+  });
+
   it('authoritatively replaces sessions without clearing transcripts and handles replay ordering', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot({

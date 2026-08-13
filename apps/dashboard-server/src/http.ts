@@ -66,6 +66,7 @@ function requiresBrowserSnapshot(change: RegistryChange): boolean {
     case 'message.started':
     case 'message.updated':
     case 'message.finished':
+    case 'session.compacted':
     case 'tool.started':
     case 'tool.updated':
     case 'tool.finished':

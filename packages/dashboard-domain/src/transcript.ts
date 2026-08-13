@@ -550,6 +550,22 @@ export function applyTranscriptEvent(
     return { state, accepted: true };
   if (!state.sessionId && eventSession)
     state = { ...state, sessionId: eventSession };
+  if (event.type === 'session.compacted') {
+    if (!isRecord(event.entry)) return { state, accepted: true };
+    const id = persistedEntryId(event.entry);
+    if (!id) return { state, accepted: true };
+    return {
+      state: {
+        ...state,
+        order: state.order.includes(id) ? state.order : [...state.order, id],
+        items: {
+          ...state.items,
+          [id]: { kind: 'other', id, raw: event.entry },
+        },
+      },
+      accepted: true,
+    };
+  }
   if (event.type === 'session.snapshot') {
     if (
       (event.session as { entriesComplete?: boolean }).entriesComplete !== true

@@ -371,6 +371,40 @@ describe('dashboard domain reducers', () => {
     });
   });
 
+  it('appends a completed compaction entry without replacing the transcript', () => {
+    const initial = hydrateTranscript(
+      [
+        {
+          type: 'message',
+          id: 'prompt-1',
+          message: { role: 'user', content: 'Keep this message.' },
+        },
+      ],
+      's',
+    );
+    const state = applyTranscriptEvent(initial, {
+      cursor: 1,
+      emittedAt: 1,
+      sessionId: 's',
+      event: {
+        type: 'session.compacted',
+        sessionId: 's',
+        entry: {
+          type: 'compaction',
+          id: 'compact-1',
+          summary: 'Earlier work.',
+        },
+      },
+    }).state;
+
+    expect(state.order).toEqual(['prompt-1', 'compact-1']);
+    expect(state.items['prompt-1']).toBeDefined();
+    expect(state.items['compact-1']).toMatchObject({
+      kind: 'other',
+      raw: { type: 'compaction', summary: 'Earlier work.' },
+    });
+  });
+
   it('derives tool associations from normalized live message content', () => {
     const state = reduceTranscriptEvent(
       hydrateTranscript([], 's'),
