@@ -63,7 +63,7 @@ async function sessionHeadingFramesAfterClick(button: Locator) {
       visibility: string;
       animations: number;
     }> = [];
-    for (let index = 0; index < 12; index += 1) {
+    for (let index = 0; index < 30; index += 1) {
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => resolve()),
       );
@@ -3929,7 +3929,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
               ? getComputedStyle(heading).visibility
               : 'missing',
           });
-        }, 16),
+        }, 48),
     );
   });
   expect(exitState).toEqual({ exiting: true, headingVisibility: 'visible' });

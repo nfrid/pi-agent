@@ -4,11 +4,13 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
 } from 'react';
 import { Dialog as AriaDialog, ModalOverlay } from 'react-aria-components';
-import { useOverlayPresence } from './overlay-presence';
+import { DASHBOARD_MOTION_MS, useOverlayPresence } from './overlay-presence';
 import { useSwipeToDismiss } from './swipe-to-dismiss';
 
+const DIALOG_HEADING_LEAD_MS = 120;
 const openDialogTokens = new Set<symbol>();
 
 function syncDialogPresenceClass() {
@@ -82,25 +84,29 @@ export function DashboardDialog({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
   const dialogTokenRef = useRef(Symbol('dashboard-dialog'));
-  const { present, exiting } = useOverlayPresence(isOpen);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const { present, exiting } = useOverlayPresence(dialogOpen);
   const swipeHandlers = useSwipeToDismiss(onClose);
   useEffect(() => {
     const token = dialogTokenRef.current;
-    let commitFrame: number | undefined;
-    const paintFrame = window.requestAnimationFrame(() => {
-      // One rAF callback still runs before the next paint. Wait for a second
-      // frame so the dialog and the heading's starting state are committed to
-      // screen before toggling the transition class on <html>.
-      commitFrame = window.requestAnimationFrame(() => {
-        if (isOpen) openDialogTokens.add(token);
-        else openDialogTokens.delete(token);
-        syncDialogPresenceClass();
-      });
-    });
-    return () => {
-      window.cancelAnimationFrame(paintFrame);
-      if (commitFrame !== undefined) window.cancelAnimationFrame(commitFrame);
-    };
+    if (isOpen) {
+      // Start the page motion before mounting an opaque full-screen drawer.
+      // Otherwise mobile dialogs cover the heading before it can be seen.
+      openDialogTokens.add(token);
+      syncDialogPresenceClass();
+      const timeout = window.setTimeout(
+        () => setDialogOpen(true),
+        DIALOG_HEADING_LEAD_MS,
+      );
+      return () => window.clearTimeout(timeout);
+    }
+    setDialogOpen(false);
+    // Keep the heading hidden until the drawer's exit animation is complete.
+    const timeout = window.setTimeout(() => {
+      openDialogTokens.delete(token);
+      syncDialogPresenceClass();
+    }, DASHBOARD_MOTION_MS);
+    return () => window.clearTimeout(timeout);
   }, [isOpen]);
   useEffect(() => {
     const token = dialogTokenRef.current;
