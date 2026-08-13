@@ -211,13 +211,12 @@
   box-shadow: 0 7px 20px #0008;
   color: var(--cyan);
   padding: 0;
-  z-index: 30;
 }
 
 /* Status launchers stay above the composer; details are dedicated sheets. */
 .session-control-layer {
   position: relative;
-  z-index: 10;
+  z-index: 30;
   right: auto;
   bottom: auto;
   left: auto;

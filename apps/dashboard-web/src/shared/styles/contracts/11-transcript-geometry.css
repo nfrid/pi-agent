@@ -2,6 +2,7 @@
 /* Quiet desktop minimap; coarse pointers get the same content in the sheet. */
 .transcript {
   position: relative;
+  padding: 8px 0;
 }
 .transcript-minimap {
   position: fixed;
