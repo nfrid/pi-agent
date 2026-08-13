@@ -24,6 +24,8 @@ export const dashboardQueryKeys = {
   session: (id: string) => ['dashboard', 'session', id] as const,
   delegateHistory: (id: string) =>
     ['dashboard', 'delegate-history', id] as const,
+  delegateHistoryDetail: (id: string) =>
+    ['dashboard', 'delegate-history-detail', id] as const,
   delegateHistoryRun: (
     sessionId: string,
     lineageId: string,
@@ -31,9 +33,7 @@ export const dashboardQueryKeys = {
     leafId?: string,
   ) =>
     [
-      'dashboard',
-      'delegate-history',
-      sessionId,
+      ...dashboardQueryKeys.delegateHistoryDetail(sessionId),
       'run',
       lineageId,
       runId,

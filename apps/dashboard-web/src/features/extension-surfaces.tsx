@@ -351,6 +351,12 @@ export function DelegateHistorySurface({
     void queryClient.invalidateQueries({
       queryKey: dashboardQueryKeys.delegateHistory(id),
     });
+    // A branch/session revision changes the durable authority for both the
+    // summary and any selected-run payload. Settlement polling intentionally
+    // invalidates only the summary key below, so cached details survive it.
+    void queryClient.invalidateQueries({
+      queryKey: dashboardQueryKeys.delegateHistoryDetail(id),
+    });
   }, [id, queryClient, sessionChange]);
   useEffect(() => {
     if (previousSessionId.current !== id) {

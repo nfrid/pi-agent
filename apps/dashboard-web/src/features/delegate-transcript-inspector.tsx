@@ -385,6 +385,7 @@ export function DelegateTranscriptInspector({
   now,
   runOptions,
   detail,
+  onRunSelected,
   isOpen,
   paused = false,
   onClose,
@@ -393,6 +394,7 @@ export function DelegateTranscriptInspector({
   now: number;
   runOptions?: readonly DelegateInspectorRunOption[];
   detail?: DelegateInspectorDetailState;
+  onRunSelected?: (run: DelegateInspectorRunOption) => void;
   isOpen: boolean;
   paused?: boolean;
   onClose: () => void;
@@ -440,7 +442,10 @@ export function DelegateTranscriptInspector({
                 type="button"
                 key={run.id}
                 aria-pressed={run.id === inspectedRow.runId}
-                onClick={() => setSelectedRunId(run.id)}
+                onClick={() => {
+                  setSelectedRunId(run.id);
+                  onRunSelected?.(run);
+                }}
               >
                 {run.label}
               </button>

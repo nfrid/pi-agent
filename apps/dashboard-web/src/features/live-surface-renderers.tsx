@@ -471,6 +471,7 @@ export function DelegateSurface({
           now={now}
           runOptions={inspectorRuns}
           detail={detail}
+          onRunSelected={onRunSelected}
           isOpen={inspectorOpen}
           paused={pausedAt !== undefined}
           onClose={() => setInspectorOpen(false)}
