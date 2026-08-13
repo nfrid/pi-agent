@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
 import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { type Static, Type } from 'typebox';
@@ -22,6 +24,11 @@ import {
   makeDetails,
 } from './tool-result';
 
+const PARENT_POLICY = readFileSync(
+  path.resolve(__dirname, '../../instructions/delegate/parent.md'),
+  'utf8',
+).trim();
+
 const RouteSchema = Type.String({
   minLength: 1,
   maxLength: 512,
@@ -43,11 +50,11 @@ const BaseSchema = StringEnum(['wip', 'head'] as const, {
 });
 const AllowWritesSchema = Type.Boolean({
   description:
-    'Let a task edit files. This capability is independent from workspace isolation; continuations inherit it when omitted and cannot change it explicitly.',
+    'Let a task edit files. This does not sandbox shell commands; continuations inherit it when omitted and cannot change it explicitly.',
 });
 const IsolationSchema = StringEnum(['shared', 'worktree'] as const, {
   description:
-    'Workspace mode. Fresh read-only tasks default to shared and writable tasks to worktree. Read-only worktrees are supported; writable shared tasks are rejected. A fresh worktreePath implies worktree isolation. Continuations inherit this when omitted and cannot change it explicitly.',
+    'Repository workspace mode. Worktrees isolate checkout files, not shell or external side effects; fresh read-only tasks default to shared and writable tasks to worktree. Writable shared tasks are rejected. Continuations inherit this when omitted and cannot change it explicitly.',
 });
 const WorktreePathSchema = Type.String({
   minLength: 1,
@@ -146,7 +153,7 @@ export type DelegateResultSpec = Static<typeof ResultSpecSchema>;
 
 const BackgroundSchema = Type.Boolean({
   description:
-    'Run asynchronously and return a job ID immediately after setup. Completion is delivered automatically.',
+    'Run asynchronously and return a job ID immediately; completion is delivered automatically.',
 });
 
 const NameSchema = Type.String({
@@ -228,17 +235,7 @@ export function delegatePromptGuidelines(
   config?: DelegateConfig,
 ): string[] {
   return [
-    'Give every subagent a short, specific name that describes its role or phase.',
-    'Your context is the resource that runs out first; a child spends its own. Delegate — implementation and edits included, not only exploration and review — when the work needs more reading than its result is worth carrying, or when independent pieces can run at once. Do the work yourself when finishing it is quicker than briefing it, and do not invent research/implement/test/review stages that add nothing.',
-    'Brief a writable task like a ticket: what done looks like, the command that proves it, and what to leave alone. A child that has to infer its finish line will pick one of its own.',
-    'Isolation and write capability are separate: fresh read-only work defaults to the shared checkout, while writable work defaults to a worktree. Choose read-only worktree isolation for long audits when parent changes may overlap; after fixing audit findings, use a fresh isolated delegate to review those fixes. To use an existing checkout, provide an absolute worktreePath; it must be a clean linked Git worktree for cwd, and the harness records but never removes, merges, or drops its branch.',
-    'Own delegation deliberately: keep task decomposition, final decisions, and user-facing synthesis with yourself. Preserve parent context by forwarding only the decisions and evidence a child needs, not the whole conversation; use contextNote for relevant decisions, constraints, and findings, and use branch only when exact parent history matters. Small, tightly coupled work is often faster and safer to do yourself.',
-    'Continue a read-only isolated child without refresh to revisit the same snapshot, or use refresh wip/head for targeted verification after fixes; a refreshed continuation preserves context but is not independent evidence. Start a fresh delegate for an independent regression review.',
-    'A child that comes back with a "Blocked:" question is waiting on you, not failing. Answer it — from what you know, or by looking — and continue that child; re-briefing a fresh one throws away the context it already built. Decide it yourself unless it is genuinely the user\'s call.',
-    "Parallelize only independent work: if one task depends on another's findings, inspect enough of the compact prerequisite envelope to confirm its outcome, relevant conclusion/evidence, assumptions, and risks; use handoffFrom only when exact upstream detail is needed. Worktree-isolated tasks each get their own checkout, so writable tasks can run in parallel even on overlapping files. Use background delegation when foreground work can continue meanwhile; use foreground delegation when the next parent action must await the result.",
-    'A writable run leaves its work as commits on the branch it reports; integrate it yourself with delegate_branches rather than handing the merge to the user. A delegate-output artifact being available is not an instruction to retrieve it: use the compact envelope unless exact upstream wording would change a decision, and then use handoffFrom (or artifact retrieval) deliberately.',
-    'For machine-readable work, provide result with exactly one of compact shape or bounded schema, plus optional projection paths and named static views. Prefer shape for ordinary required-by-default objects, lists, enums, and optional fields; use schema for precise advanced constraints. Every projection entry and views value must be a canonical path starting with `/` (for example, `/summary`, never `summary`). The child must finish through delegate_result; the full validated JSON stays in an owner-session artifact, while only selected projections enter the parent envelope. Use handoffFrom with {handle, view} to forward a named view without retrieving the full artifact into your context. Omit result for the exact legacy prose contract.',
-    'Supervise proportionally: inspect and verify high-risk or consequential work, while letting routine bounded work return a compact report. Treat child results as claims to verify: trust reported checks and concrete evidence, and re-check or continue the child when an important claim has none. A subagent can report work it did not finish, and weakening a test is a common way a task comes back "passing".',
+    PARENT_POLICY,
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd, config)}`,
   ];
 }
@@ -259,9 +256,9 @@ export function registerDelegateTool(
     name: 'delegate',
     label: 'Delegate',
     description:
-      'Delegate work to child Pi processes with their own context. Fresh tasks and fresh batch items require a name; continuations with persisted names may omit it. Fresh tasks need one exact catalog route; continuations reuse persisted route, write capability, isolation, and worktree selection when omitted. Fresh writable tasks default to an isolated git worktree; fresh read-only tasks default to the shared checkout, or may explicitly use a worktree snapshot. Provide an absolute worktreePath only for an existing clean linked worktree belonging to cwd; caller-owned paths are never nested, committed to by read-only cleanup, merged, or deleted by the harness. Writable shared tasks are rejected. Use result for a bounded machine-readable child contract, or omit it for legacy prose. Use handoffFrom with a prior delegate-output artifact handle; {handle, view} forwards only a registered named view and the bytes stay out of the parent-visible result. Set background true for independent work that should complete asynchronously.',
+      'Run focused child agents with separate context. Choose a route, workspace mode, and either a prose or structured result contract; background completion is delivered automatically.',
     promptSnippet:
-      'Hand a child implementation, exploration, review, validation, or independent parallel work whenever a subagent would save your own context.',
+      'Hand off focused implementation, review, validation, or independent work when a child saves your context.',
     promptGuidelines: delegatePromptGuidelines(cwd, promptConfig),
     parameters: DelegateParamsSchema,
     renderCall: renderDelegateCall,
