@@ -220,8 +220,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .session-context,
-  .session-page.pending-interaction-open .session-context,
   .transcript-minimap-marker i,
   .transcript-minimap-preview {
     transition: none;

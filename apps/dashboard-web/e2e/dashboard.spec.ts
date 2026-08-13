@@ -2934,7 +2934,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     name: 'Pending questions',
   });
   await expect(pendingDialog).toHaveCount(1);
-  await expect(page.locator('.session-heading')).toBeHidden();
+  await expect(page.locator('.session-heading')).toBeVisible();
   await expect(pendingDialog).toHaveAttribute('aria-modal', 'true');
   const firstInteraction = page.getByRole('group', {
     name: 'Use the first answer?',
