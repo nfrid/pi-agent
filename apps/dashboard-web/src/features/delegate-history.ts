@@ -3,6 +3,7 @@ import type {
   DelegateHistoryGroup,
   DelegateHistoryInvocation,
   DelegateHistoryResponse,
+  DelegateHistoryRunDetail,
 } from '@pi-dashboard/protocol';
 import type {
   DelegateResult,
@@ -25,6 +26,8 @@ export interface DelegateCompositeRun {
   id: string;
   label: string;
   row: DelegateInspectionStatus;
+  persisted?: boolean;
+  live?: boolean;
 }
 
 export type DelegateCompositeSection = 'active' | 'recent' | 'history';
@@ -79,20 +82,22 @@ function historyResult(
 
 function historyTranscript(
   run: DelegateHistoryInvocation,
+  details: DelegateHistoryDetails | undefined,
 ): DelegateTranscriptEntry[] {
-  const task: DelegateTranscriptEntry[] = run.details.task
+  if (!details) return [];
+  const task: DelegateTranscriptEntry[] = details.task
     ? [
         {
           id: `${run.runId}:task`,
           type: 'task',
           label: 'Task',
-          text: run.details.task,
+          text: details.task,
           status: 'completed',
           at: run.queuedAt ?? run.createdAt,
         },
       ]
     : [];
-  const activities = (run.details.activities ?? []).map((activity, index) => ({
+  const activities = (details.activities ?? []).map((activity, index) => ({
     id: activity.id ?? `${run.runId}:activity-${index}`,
     type: activity.type,
     label: activity.label,
@@ -107,31 +112,31 @@ function historyTranscript(
     status: activity.status ?? 'completed',
     ...(activity.at === undefined ? {} : { at: activity.at }),
   })) satisfies DelegateTranscriptEntry[];
-  const response: DelegateTranscriptEntry[] = run.details.response
+  const response: DelegateTranscriptEntry[] = details.response
     ? [
         {
           id: `${run.runId}:response`,
           type: 'assistant',
           label: 'Response',
-          text: run.details.response,
+          text: details.response,
           status: 'completed',
           at: run.finishedAt ?? run.createdAt,
         },
       ]
     : [];
-  const error: DelegateTranscriptEntry[] = run.details.error
+  const error: DelegateTranscriptEntry[] = details.error
     ? [
         {
           id: `${run.runId}:error`,
           type: 'error',
           label: 'Error',
-          text: run.details.error,
+          text: details.error,
           status: 'error',
           at: run.finishedAt ?? run.createdAt,
         },
       ]
     : [];
-  const warnings = (run.details.warnings ?? []).map((warning, index) => ({
+  const warnings = (details.warnings ?? []).map((warning, index) => ({
     id: `${run.runId}:warning-${index}`,
     type: 'assistant' as const,
     label: 'Warning',
@@ -143,9 +148,9 @@ function historyTranscript(
 }
 
 function activitySummary(
-  details: DelegateHistoryDetails,
+  details: DelegateHistoryDetails | undefined,
 ): DelegatedActivity | undefined {
-  const activity = details.activities?.at(-1);
+  const activity = details?.activities?.at(-1);
   if (!activity) return undefined;
   return {
     id: activity.id,
@@ -158,9 +163,16 @@ function activitySummary(
 
 /** Adapt one durable invocation to the existing live inspector row shape. */
 export function delegateHistoryInvocationToStatus(
-  run: DelegateHistoryInvocation,
+  run: DelegateHistoryInvocation | DelegateHistoryRunDetail,
+  explicitDetails?: DelegateHistoryDetails,
 ): DelegateInspectionStatus {
-  const lifecycle = run.details.lifecycle;
+  // The optional compatibility read keeps this adapter useful to callers that
+  // still hold an older in-memory response, while the v2 wire summary never
+  // contains this property.
+  const details =
+    explicitDetails ??
+    ('details' in run && run.details ? run.details : undefined);
+  const lifecycle = details?.lifecycle;
   return {
     id: run.runId,
     runId: run.runId,
@@ -175,7 +187,7 @@ export function delegateHistoryInvocationToStatus(
     ...(run.route === undefined ? {} : { route: run.route }),
     ...(run.context === undefined ? {} : { context: run.context }),
     allowWrites: run.allowWrites,
-    activity: activitySummary(run.details),
+    activity: activitySummary(details),
     runCount: 1,
     runs: [
       {
@@ -184,10 +196,10 @@ export function delegateHistoryInvocationToStatus(
         ...(run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt }),
       },
     ],
-    transcript: historyTranscript(run),
-    ...(run.details.truncated ? { transcriptTruncated: true } : {}),
-    ...(historyResult(run.details)
-      ? { result: historyResult(run.details) }
+    transcript: historyTranscript(run, details),
+    ...(details?.truncated ? { transcriptTruncated: true } : {}),
+    ...(details && historyResult(details)
+      ? { result: historyResult(details) }
       : {}),
     ...(lifecycle
       ? {
@@ -202,7 +214,7 @@ export function delegateHistoryInvocationToStatus(
           },
         }
       : {}),
-    ...(run.details.warnings?.length ? { warnings: run.details.warnings } : {}),
+    ...(details?.warnings?.length ? { warnings: details.warnings } : {}),
     historical: true,
   };
 }
@@ -285,11 +297,12 @@ function groupModel(
   group: DelegateHistoryGroup,
   live: DelegateStatus | undefined,
 ): DelegateCompositeGroup {
-  const durableRuns = group.runs.map((run) => {
+  const durableRuns: DelegateCompositeRun[] = group.runs.map((run) => {
     const row = delegateHistoryInvocationToStatus(run);
     return {
       id: run.runId,
       label: '',
+      persisted: true,
       row: group.truncated
         ? { ...row, transcriptTruncated: true, historyIncomplete: true }
         : row,
@@ -314,12 +327,16 @@ function groupModel(
       runs[liveDurableIndex] = {
         id: incompleteLiveRow.runId,
         label: '',
+        persisted: true,
+        live: true,
         row: incompleteLiveRow,
       };
     } else {
       runs.push({
         id: incompleteLiveRow.runId,
         label: '',
+        persisted: false,
+        live: true,
         row: incompleteLiveRow,
       });
     }
@@ -360,6 +377,8 @@ function liveOnlyGroup(live: DelegateStatus): DelegateCompositeGroup {
       {
         id: current.runId,
         label: `Current · Run ${current.runCount ?? 1}`,
+        persisted: false,
+        live: true,
         row: current,
       },
     ],

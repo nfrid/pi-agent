@@ -6,6 +6,7 @@ import {
   composerCommandsQueryOptions,
   createThreadMutationOptions,
   delegateHistoryQueryOptions,
+  delegateHistoryRunQueryOptions,
   renameSessionMutationOptions,
   snapshotQueryOptions,
   snapshotRequestGeneration,
@@ -42,7 +43,7 @@ describe('dashboard query and mutation factories', () => {
 
   it('queries persisted delegate history by session ID', async () => {
     const delegateHistory = vi.fn(async () => ({
-      version: 1 as const,
+      version: 2 as const,
       sessionId: 'session-1',
       groups: [],
     }));
@@ -59,11 +60,57 @@ describe('dashboard query and mutation factories', () => {
     await expect(
       options.queryFn({ signal: undefined } as never),
     ).resolves.toEqual({
-      version: 1,
+      version: 2,
       sessionId: 'session-1',
       groups: [],
     });
     expect(delegateHistory).toHaveBeenCalledWith('session-1', undefined);
+  });
+
+  it('keys one delegate detail by session, lineage, run, and leaf', async () => {
+    const delegateHistoryRun = vi.fn(async () => ({
+      version: 1 as const,
+      sessionId: 'session-1',
+      lineageId: 'lineage-1',
+      runId: 'run-1',
+      leafId: 'leaf-1',
+      run: {
+        runId: 'run-1',
+        lineageId: 'lineage-1',
+        name: 'Worker',
+        kind: 'background' as const,
+        state: 'success' as const,
+        createdAt: 1,
+        allowWrites: false,
+        details: { truncated: false },
+      },
+    }));
+    const options = delegateHistoryRunQueryOptions(
+      { delegateHistoryRun } as unknown as DashboardHttpClient,
+      'session-1',
+      'lineage-1',
+      'run-1',
+      'leaf-1',
+    );
+    expect(options.queryKey).toEqual([
+      'dashboard',
+      'delegate-history',
+      'session-1',
+      'run',
+      'lineage-1',
+      'run-1',
+      'leaf-1',
+    ]);
+    if (!options.queryFn) throw new Error('Query function is missing.');
+    await expect(
+      options.queryFn({ signal: undefined } as never),
+    ).resolves.toEqual(expect.objectContaining({ runId: 'run-1' }));
+    expect(delegateHistoryRun).toHaveBeenCalledWith(
+      'session-1',
+      'run-1',
+      { lineageId: 'lineage-1', leafId: 'leaf-1' },
+      undefined,
+    );
   });
 
   it('keeps the live baseline authoritative and does not expire snapshots', () => {

@@ -1252,6 +1252,7 @@ const DelegateHistoryInvocationSchema = Type.Object(
     runId: IdentifierSchema,
     lineageId: IdentifierSchema,
     name: Type.String({ minLength: 1, maxLength: 2_000 }),
+    /** Task is run metadata; transcript/activity payloads are detail-only. */
     task: Type.Optional(Type.String({ maxLength: MAX_DELEGATE_HISTORY_TASK })),
     kind: DelegateHistoryKindSchema,
     state: DelegateHistoryStateSchema,
@@ -1269,14 +1270,44 @@ const DelegateHistoryInvocationSchema = Type.Object(
       ]),
     ),
     allowWrites: Type.Boolean(),
-    /** Public, bounded delegate details retained by the parent session. */
-    details: DelegateHistoryDetailsSchema,
   },
   { additionalProperties: false },
 );
 export type DelegateHistoryInvocation = Static<
   typeof DelegateHistoryInvocationSchema
 >;
+
+/** One selected invocation with its bounded, public transcript payload. */
+export const DelegateHistoryRunDetailSchema = Type.Object(
+  {
+    runId: IdentifierSchema,
+    lineageId: IdentifierSchema,
+    name: Type.String({ minLength: 1, maxLength: 2_000 }),
+    task: Type.Optional(Type.String({ maxLength: MAX_DELEGATE_HISTORY_TASK })),
+    kind: DelegateHistoryKindSchema,
+    state: DelegateHistoryStateSchema,
+    createdAt: FiniteNumberSchema,
+    queuedAt: Type.Optional(FiniteNumberSchema),
+    startedAt: Type.Optional(FiniteNumberSchema),
+    finishedAt: Type.Optional(FiniteNumberSchema),
+    jobId: Type.Optional(IdentifierSchema),
+    route: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    context: Type.Optional(
+      Type.Union([
+        Type.Literal('branch'),
+        Type.Literal('fresh'),
+        Type.Literal('continuation'),
+      ]),
+    ),
+    allowWrites: Type.Boolean(),
+    details: DelegateHistoryDetailsSchema,
+  },
+  { additionalProperties: false },
+);
+export type DelegateHistoryRunDetail = Static<
+  typeof DelegateHistoryRunDetailSchema
+>;
+
 const DelegateHistoryGroupSchema = Type.Object(
   {
     /** Stable lineage row identity; unlike live status IDs this survives reload. */
@@ -1313,14 +1344,14 @@ const DelegateHistoryGroupSchema = Type.Object(
   { additionalProperties: false },
 );
 export type DelegateHistoryGroup = Static<typeof DelegateHistoryGroupSchema>;
+
+/** Version 2 deliberately contains metadata only; details are fetched per run. */
 export const DelegateHistoryResponseSchema = Type.Object(
   {
-    version: Type.Literal(1),
+    version: Type.Literal(2),
     sessionId: IdentifierSchema,
     leafId: Type.Optional(IdentifierSchema),
-    /** True when hard response caps omitted persisted delegate records/details. */
     truncated: Type.Optional(Type.Boolean()),
-    /** Lineage-grouped invocations from the selected persisted session branch. */
     groups: Type.Readonly(
       Type.Array(DelegateHistoryGroupSchema, {
         maxItems: MAX_DELEGATE_HISTORY_GROUPS,
@@ -1332,6 +1363,36 @@ export const DelegateHistoryResponseSchema = Type.Object(
 export type DelegateHistoryResponse = Static<
   typeof DelegateHistoryResponseSchema
 >;
+
+export const DelegateHistoryRunQuerySchema = Type.Object(
+  {
+    lineageId: Type.Optional(IdentifierSchema),
+    leafId: Type.Optional(IdentifierSchema),
+  },
+  { additionalProperties: false },
+);
+export type DelegateHistoryRunQuery = Static<
+  typeof DelegateHistoryRunQuerySchema
+>;
+
+export const DelegateHistoryRunDetailResponseSchema = Type.Object(
+  {
+    version: Type.Literal(1),
+    sessionId: IdentifierSchema,
+    leafId: Type.Optional(IdentifierSchema),
+    lineageId: IdentifierSchema,
+    runId: IdentifierSchema,
+    run: DelegateHistoryRunDetailSchema,
+  },
+  { additionalProperties: false },
+);
+export type DelegateHistoryRunDetailResponse = Static<
+  typeof DelegateHistoryRunDetailResponseSchema
+>;
+/** Compatibility-friendly descriptive aliases for the selected-run response. */
+export const DelegateHistoryDetailResponseSchema =
+  DelegateHistoryRunDetailResponseSchema;
+export type DelegateHistoryDetailResponse = DelegateHistoryRunDetailResponse;
 
 export const SessionDelegateHistoryResponseSchema =
   DelegateHistoryResponseSchema;

@@ -131,7 +131,7 @@ describe('DashboardHttpClient command requests', () => {
     const fetch = vi.fn(
       async () =>
         new Response(
-          JSON.stringify({ version: 1, sessionId: 'session-1', groups: [] }),
+          JSON.stringify({ version: 2, sessionId: 'session-1', groups: [] }),
           { status: 200 },
         ),
     );
@@ -144,12 +144,59 @@ describe('DashboardHttpClient command requests', () => {
       },
     });
     await expect(client.delegateHistory('session-1')).resolves.toMatchObject({
-      version: 1,
+      version: 2,
       sessionId: 'session-1',
       groups: [],
     });
     expect(fetch).toHaveBeenCalledWith(
       '/api/sessions/session-1/delegate-history',
+      expect.objectContaining({ headers: expect.anything() }),
+    );
+  });
+
+  it('fetches one selected delegate detail with lineage and leaf pins', async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            version: 1,
+            sessionId: 'session-1',
+            lineageId: 'lineage-1',
+            runId: 'run-1',
+            leafId: 'leaf-1',
+            run: {
+              runId: 'run-1',
+              lineageId: 'lineage-1',
+              name: 'Worker',
+              kind: 'background',
+              state: 'success',
+              createdAt: 1,
+              allowWrites: false,
+              details: { response: 'selected', truncated: false },
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: {
+        get: () => undefined,
+        set: () => undefined,
+        clear: () => undefined,
+      },
+    });
+    await expect(
+      client.delegateHistoryRun('session-1', 'run-1', {
+        lineageId: 'lineage-1',
+        leafId: 'leaf-1',
+      }),
+    ).resolves.toMatchObject({
+      runId: 'run-1',
+      run: { details: { response: 'selected' } },
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/sessions/session-1/delegate-history/runs/run-1?lineageId=lineage-1&leafId=leaf-1',
       expect.objectContaining({ headers: expect.anything() }),
     );
   });

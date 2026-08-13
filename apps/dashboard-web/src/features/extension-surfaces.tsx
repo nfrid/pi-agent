@@ -2,6 +2,7 @@ import {
   dashboardHttpClient,
   dashboardQueryKeys,
   delegateHistoryQueryOptions,
+  delegateHistoryRunQueryOptions,
 } from '@pi-dashboard/client';
 import {
   type ExtensionSurface,
@@ -10,7 +11,7 @@ import {
 } from '@pi-dashboard/extension-contributions';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Value } from 'typebox/value';
 import {
   DELEGATE_RENDERER_ID,
@@ -27,6 +28,7 @@ import {
   type DashboardRendererContext,
   renderDashboardContribution,
 } from '../renderer-registry';
+import type { DelegateCompositeRun } from './delegate-history';
 import { DelegateSurface } from './live-surface-renderers';
 
 /** Compatibility export for callers that used the old dashboard-local name. */
@@ -278,6 +280,25 @@ export function DelegateHistorySurface({
   const queryClient = useQueryClient();
   const live = delegateSurface(runtime);
   const liveRows = live?.model.statuses ?? [];
+  const [detailSelection, setDetailSelection] = useState<{
+    lineageId: string;
+    runId: string;
+    shouldFetch: boolean;
+  }>();
+  const detailSessionId = useRef(id);
+  const detailOptions = delegateHistoryRunQueryOptions(
+    dashboardHttpClient,
+    id,
+    detailSelection?.lineageId ?? '',
+    detailSelection?.runId ?? '',
+    historyQuery.data?.leafId,
+  );
+  const detailQuery = useQuery({
+    ...detailOptions,
+    // Live overlays and live-only rows already own their current transcript.
+    // Persisted terminal summary rows are the only rows that load details.
+    enabled: detailSelection?.shouldFetch === true,
+  });
   const previousStates = useRef(new Map<string, string>());
   const previousSessionId = useRef<string | undefined>(undefined);
   const previousSessionChange = useRef<
@@ -293,6 +314,35 @@ export function DelegateHistorySurface({
     [id, queryClient],
   );
   useEffect(() => () => refreshCoordinator.dispose(), [refreshCoordinator]);
+  useEffect(() => {
+    if (detailSessionId.current === id) return;
+    detailSessionId.current = id;
+    setDetailSelection(undefined);
+  }, [id]);
+  useEffect(() => {
+    if (!detailSelection || detailSelection.shouldFetch) return;
+    const liveCurrent = liveRows.some(
+      (row) =>
+        row.runId === detailSelection.runId &&
+        row.lineageId === detailSelection.lineageId,
+    );
+    const persisted = historyQuery.data?.groups.some((group) =>
+      group.runs.some(
+        (run) =>
+          run.runId === detailSelection.runId &&
+          run.lineageId === detailSelection.lineageId,
+      ),
+    );
+    // A live overlay may intentionally suppress a detail request. Once it is
+    // gone and the summary still contains the stable run identity, load the
+    // selected durable transcript without requiring another click.
+    if (!liveCurrent && persisted)
+      setDetailSelection((current) =>
+        current && !current.shouldFetch
+          ? { ...current, shouldFetch: true }
+          : current,
+      );
+  }, [detailSelection, historyQuery.data, liveRows]);
   useEffect(() => {
     const previous = previousSessionChange.current;
     const current = { id, revision: sessionChange };
@@ -323,10 +373,14 @@ export function DelegateHistorySurface({
       refreshCoordinator.refresh();
   }, [id, liveRows, historyQuery.data, refreshCoordinator]);
   if (runtime?.pendingInteractions?.length) return null;
+  const historyLoading = historyQuery.isPending && !historyQuery.data;
+  const historyError = historyQuery.isError && !historyQuery.data;
   if (
     !historyQuery.data?.groups.length &&
     !historyQuery.data?.truncated &&
-    liveRows.length === 0
+    liveRows.length === 0 &&
+    !historyLoading &&
+    !historyError
   )
     return null;
   const surface =
@@ -346,6 +400,28 @@ export function DelegateHistorySurface({
           surface={surface}
           pausedAt={runtimePauseStatus(runtime)?.pausedAt}
           history={historyQuery.data}
+          historyLoading={historyLoading}
+          historyError={historyError ? historyQuery.error : undefined}
+          onRunSelected={(run: DelegateCompositeRun) => {
+            const hasLiveTranscript = Boolean(run.row.transcript?.length);
+            setDetailSelection({
+              lineageId: run.row.lineageId,
+              runId: run.id,
+              shouldFetch:
+                run.persisted === true &&
+                run.live !== true &&
+                !hasLiveTranscript,
+            });
+          }}
+          detail={
+            detailSelection?.shouldFetch
+              ? {
+                  run: detailQuery.data,
+                  loading: detailQuery.isPending,
+                  error: detailQuery.error,
+                }
+              : undefined
+          }
         />
       </div>
     </section>

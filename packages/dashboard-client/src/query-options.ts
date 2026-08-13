@@ -1,6 +1,7 @@
 import type {
   BrowserSnapshot,
   DelegateHistoryResponse,
+  DelegateHistoryRunDetailResponse,
   ProjectAdoptCommand,
   ProjectCreateCommand,
   RetryCommand,
@@ -23,6 +24,21 @@ export const dashboardQueryKeys = {
   session: (id: string) => ['dashboard', 'session', id] as const,
   delegateHistory: (id: string) =>
     ['dashboard', 'delegate-history', id] as const,
+  delegateHistoryRun: (
+    sessionId: string,
+    lineageId: string,
+    runId: string,
+    leafId?: string,
+  ) =>
+    [
+      'dashboard',
+      'delegate-history',
+      sessionId,
+      'run',
+      lineageId,
+      runId,
+      leafId ?? '',
+    ] as const,
   workspace: (id: string) => ['dashboard', 'workspace', id] as const,
   composerCommands: (workspaceId: string) =>
     ['dashboard', 'composer-commands', workspaceId] as const,
@@ -119,6 +135,35 @@ export function delegateHistoryQueryOptions(
 }
 
 export const sessionDelegateHistoryQueryOptions = delegateHistoryQueryOptions;
+
+export function delegateHistoryRunQueryOptions(
+  client: DashboardHttpClient,
+  sessionId: string,
+  lineageId: string,
+  runId: string,
+  leafId?: string,
+) {
+  return queryOptions<DelegateHistoryRunDetailResponse>({
+    queryKey: dashboardQueryKeys.delegateHistoryRun(
+      sessionId,
+      lineageId,
+      runId,
+      leafId,
+    ),
+    queryFn: ({ signal }) =>
+      client.delegateHistoryRun(
+        sessionId,
+        runId,
+        { lineageId, ...(leafId === undefined ? {} : { leafId }) },
+        signal,
+      ),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: networkRetry,
+    enabled: Boolean(sessionId && lineageId && runId),
+  });
+}
+
+export const delegateHistoryDetailQueryOptions = delegateHistoryRunQueryOptions;
 
 export function usageQueryOptions(client: DashboardHttpClient) {
   return queryOptions({

@@ -10,6 +10,7 @@ export const MAX_COMPOSER_COMMAND_NAME = 128;
 export const MAX_COMPOSER_COMMAND_DESCRIPTION = 1_024;
 export const MAX_COMPOSER_COMMAND_ARGUMENT_HINT = 256;
 /** Bounds for the durable delegate history query response. */
+export const MAX_DELEGATE_HISTORY_SUMMARY_BYTES = 512 * 1024;
 export const MAX_DELEGATE_HISTORY_GROUPS = 256;
 export const MAX_DELEGATE_HISTORY_RUNS_PER_GROUP = 128;
 export const MAX_DELEGATE_HISTORY_TOTAL_RUNS = 2_048;

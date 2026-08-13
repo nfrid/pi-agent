@@ -16,6 +16,7 @@ import {
   parseDashboardEventEnvelope,
   parseDashboardStreamMessage,
   parseDelegateHistoryResponse,
+  parseDelegateHistoryRunDetailResponse,
   parseFrame,
   parseNormalizedMessagePayload,
   parseRuntimeExtensionSurface,
@@ -34,9 +35,9 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
-  it('validates grouped delegate history with persisted detail payloads', () => {
+  it('strictly separates summary history from one selected run detail', () => {
     const response = parseDelegateHistoryResponse({
-      version: 1,
+      version: 2,
       sessionId: 'session-1',
       leafId: 'leaf-1',
       groups: [
@@ -59,37 +60,44 @@ describe('dashboard protocol', () => {
               state: 'success',
               createdAt: 1,
               allowWrites: false,
-              details: {
-                response: 'The bounded assistant response.',
-                error: 'The bounded public error.',
-                structuredResult: { valid: true, errors: [] },
-                truncated: false,
-              },
             },
           ],
         },
       ],
     });
-    expect(response.groups[0]?.runs[0]?.details).toEqual({
-      response: 'The bounded assistant response.',
-      error: 'The bounded public error.',
-      structuredResult: { valid: true, errors: [] },
-      truncated: false,
-    });
-    expect(() =>
-      parseDelegateHistoryResponse({ ...response, version: 2 }),
-    ).toThrow();
+    expect(response.groups[0]?.runs[0]).not.toHaveProperty('details');
     expect(() =>
       parseDelegateHistoryResponse({
         ...response,
         groups: [
           {
             ...response.groups[0],
-            runs: [{ ...response.groups[0]?.runs[0], continuation: 'secret' }],
+            runs: [
+              { ...response.groups[0]?.runs[0], details: { truncated: false } },
+            ],
           },
         ],
       }),
     ).toThrow();
+    expect(
+      parseDelegateHistoryRunDetailResponse({
+        version: 1,
+        sessionId: 'session-1',
+        leafId: 'leaf-1',
+        lineageId: 'lineage-1',
+        runId: 'run-1',
+        run: {
+          ...response.groups[0].runs[0],
+          details: {
+            response: 'The selected bounded response.',
+            structuredResult: { valid: true, errors: [] },
+            truncated: false,
+          },
+        },
+      }),
+    ).toMatchObject({
+      run: { details: { response: 'The selected bounded response.' } },
+    });
   });
 
   it('validates optional paginated session history metadata', () => {
