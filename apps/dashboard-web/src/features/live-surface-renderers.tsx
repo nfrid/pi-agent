@@ -105,7 +105,7 @@ function focusAfterSurfaceHides(launcher: HTMLButtonElement | null) {
   )
     return;
   const fallback = document.querySelector<HTMLElement>(
-    '[aria-label="Send a message"] [role="textbox"], .session-details-trigger:not(:disabled)',
+    '[aria-label="Send a message"] [role="textbox"]',
   );
   if (fallback?.getClientRects().length)
     fallback.focus({ preventScroll: true });

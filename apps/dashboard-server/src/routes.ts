@@ -141,8 +141,7 @@ function errorCode(error: unknown): string | undefined {
 
 function errorStatus(error: unknown): number {
   const code = errorCode(error);
-  return code === 'shared-working-directory' ||
-    code === 'active-session' ||
+  return code === 'active-session' ||
     code === 'merge-conflict' ||
     code === 'restart-precondition' ||
     code === 'idempotency-conflict' ||

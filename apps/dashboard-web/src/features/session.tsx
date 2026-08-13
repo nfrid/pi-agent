@@ -18,7 +18,6 @@ import { runtimePauseStatus } from './extension-surfaces';
 import { PendingInteractions } from './pending-interaction';
 import { useOlderSessionHistory } from './session/history';
 import { useSessionHydration } from './session/hydration';
-import { SessionInspector } from './session/inspector';
 import { useSessionScroll } from './session/scroll';
 import {
   type SessionComposerProps,
@@ -34,7 +33,6 @@ export {
   interactionKeyAction,
   selectedInteractionPreview,
 } from './pending-interaction';
-export { SessionInspector } from './session/inspector';
 export { visualViewportKeyboardInset } from './session/viewport';
 
 export function SessionView({
@@ -62,12 +60,10 @@ export function SessionView({
     store,
     selectSessionReplacement(id),
   );
-  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [agentNavOpen, setAgentNavOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const outlineTriggerRef = useRef<HTMLButtonElement>(null);
   const outlineWasOpenRef = useRef(false);
-  const closeInspector = useCallback(() => setInspectorOpen(false), []);
   const {
     data,
     error,
@@ -95,9 +91,8 @@ export function SessionView({
   }, [outlineOpen]);
   useEffect(() => {
     // A pending question is a higher-priority modal than the optional
-    // inspector; never leave either fixed surface competing for the viewport.
+    // transcript surfaces; never leave fixed surfaces competing for the viewport.
     if (runtime?.pendingInteractions.length) {
-      setInspectorOpen(false);
       setAgentNavOpen(false);
       setOutlineOpen(false);
     }
@@ -159,7 +154,6 @@ export function SessionView({
     );
   }
 
-  const runtimeError = runtime?.lastError;
   const hasPendingInteraction = Boolean(runtime?.pendingInteractions.length);
   const workspaceName = workspaceNameForSession(
     snapshot,
@@ -196,22 +190,8 @@ export function SessionView({
           entries={data.entries}
           status={status}
           statusLabel={statusLabel}
-          inspectorOpen={inspectorOpen}
-          hasPendingInteraction={hasPendingInteraction}
           outlineTriggerRef={outlineTriggerRef}
           onOpenOutline={() => setOutlineOpen(true)}
-          onOpenInspector={() => {
-            if (!hasPendingInteraction) setInspectorOpen(true);
-          }}
-          store={store}
-        />
-        <SessionInspector
-          id={id}
-          open={inspectorOpen}
-          onClose={closeInspector}
-          data={data}
-          runtime={runtime}
-          runtimeError={runtimeError}
           store={store}
         />
         {history?.hasOlder && (

@@ -457,31 +457,6 @@ h2 {
   gap: 8px;
   justify-items: end;
 }
-.session-rename {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 11px;
-}
-.session-rename input {
-  width: 180px;
-  background: var(--bg-alt);
-  color: var(--fg);
-  border: 1px solid var(--line);
-  padding: 6px 8px;
-}
-.session-rename button {
-  border: 1px solid var(--purple);
-  background: transparent;
-  color: var(--purple);
-  padding: 6px 9px;
-  cursor: pointer;
-}
-.session-rename button:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
 .actions {
   display: flex;
   gap: 8px;

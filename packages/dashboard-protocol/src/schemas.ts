@@ -1225,7 +1225,6 @@ export const StartRuntimeRequestSchema = Type.Object(
     initialPrompt: Type.Optional(
       Type.String({ minLength: 1, maxLength: 100_000 }),
     ),
-    acknowledgeSharedWorkingDirectory: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

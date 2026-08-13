@@ -6,15 +6,11 @@ import type {
 export function resumeRuntimeRequest(
   workspaceId: string | undefined,
   sessionId: string,
-  acknowledgeSharedWorkingDirectory = false,
 ): StartRuntimeRequest | undefined {
   if (!workspaceId) return undefined;
   return {
     workspaceId,
     sessionId,
-    ...(acknowledgeSharedWorkingDirectory
-      ? { acknowledgeSharedWorkingDirectory: true }
-      : {}),
   };
 }
 

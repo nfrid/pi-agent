@@ -195,57 +195,6 @@
   margin-bottom: 18px;
   color: var(--fg);
 }
-/* Session inspector: the quiet header opens a deeper command-center view on demand. */
-.session-details-trigger {
-  flex: none;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  padding: 7px 11px;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 650;
-  white-space: nowrap;
-}
-.session-details-trigger:hover,
-.session-details-trigger[aria-expanded="true"] {
-  border-color: var(--purple);
-  background: #bd93f91c;
-  color: var(--fg);
-}
-.session-details-trigger:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-.inspector-section {
-  border-bottom: 1px solid var(--line-soft);
-  padding: 18px 0;
-}
-.inspector-section h3 {
-  margin: 0 0 11px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-.inspector-section .session-rename {
-  flex-wrap: wrap;
-}
-.inspector-section .session-rename input {
-  min-width: 0;
-  flex: 1;
-  width: 120px;
-}
-.inspector-section .session-rename .error {
-  flex-basis: 100%;
-}
-.inspector-section .actions {
-  flex-wrap: wrap;
-}
-.inspector-error {
-  margin: 18px 0 0;
-  font-size: 12px;
-}
 @media (min-width: 821px) {
   .session-control-layer {
     left: calc(50% + 120px);

@@ -185,6 +185,35 @@ describe('managed runtime launch safety', () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it('allows concurrent launches sharing a checkout', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-shared-'));
+    const start = vi.fn(async ({ runtimeId }: { runtimeId: string }) =>
+      binding(runtimeId),
+    );
+    const manager = new RuntimeManager(
+      {
+        snapshots: () => [{ ...runtime('existing'), cwd: root, online: true }],
+      } as never,
+      { start } as never,
+      {} as never,
+      {
+        managedLaunches: () => [],
+        recordManagedLaunch: vi.fn(),
+      } as never,
+      '/tmp/bridge.sock',
+    );
+    manager.setWorkspaces([workspace(root)]);
+
+    await expect(
+      manager.launch({ workspaceId: 'workspace-1' }),
+    ).resolves.toMatchObject({ runtimeId: expect.any(String) });
+    expect(start).toHaveBeenCalledOnce();
+    expect(start.mock.calls[0]?.[0]).toMatchObject({
+      cwd: await realpath(root),
+    });
+    await rm(root, { recursive: true, force: true });
+  });
+
   it('delivers an initial prompt even if hello races tmux launch completion', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-runtime-prompt-'));
     const sendCommand = vi.fn().mockResolvedValue({ accepted: true });

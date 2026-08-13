@@ -51,11 +51,8 @@ export function SessionHeader({
   entries,
   status,
   statusLabel,
-  inspectorOpen,
-  hasPendingInteraction,
   outlineTriggerRef,
   onOpenOutline,
-  onOpenInspector,
   store,
 }: {
   id: string;
@@ -64,11 +61,8 @@ export function SessionHeader({
   entries: readonly unknown[];
   status: string;
   statusLabel: string;
-  inspectorOpen: boolean;
-  hasPendingInteraction: boolean;
   outlineTriggerRef: RefObject<HTMLButtonElement | null>;
   onOpenOutline: () => void;
-  onOpenInspector: () => void;
   store: DashboardLiveStore;
 }) {
   const title = sessionDisplayTitle(data, entries);
@@ -106,29 +100,6 @@ export function SessionHeader({
             <span className="session-icon-glyph" aria-hidden="true">
               ≡
             </span>
-          </button>
-          <button
-            type="button"
-            className="session-icon-button session-details-trigger"
-            aria-label="Details"
-            aria-haspopup="dialog"
-            aria-expanded={inspectorOpen}
-            aria-controls="session-inspector"
-            disabled={hasPendingInteraction}
-            title={
-              hasPendingInteraction
-                ? 'Answer the pending question before opening session details'
-                : 'Session details'
-            }
-            onClick={onOpenInspector}
-          >
-            <span
-              className="session-icon-glyph session-more-glyph"
-              aria-hidden="true"
-            >
-              •••
-            </span>
-            <span className="sr-only">Details</span>
           </button>
         </div>
       </header>

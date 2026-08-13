@@ -112,13 +112,6 @@
     width: 100%;
     justify-items: stretch;
   }
-  .session-rename {
-    flex-wrap: wrap;
-  }
-  .session-rename input {
-    flex: 1;
-    min-width: 120px;
-  }
   .session-heading .actions {
     align-self: stretch;
   }
@@ -127,9 +120,6 @@
   }
   .session-heading .actions button {
     flex: 1 1 auto;
-  }
-  .session-rename button {
-    flex: none;
   }
   .interaction-dock {
     padding: 58px 13px 215px;
@@ -188,12 +178,6 @@
   .session-heading h1,
   .section-heading h1 {
     overflow-wrap: anywhere;
-  }
-  .session-rename {
-    width: 100%;
-  }
-  .session-rename input {
-    width: 0;
   }
   .activity-group > button small {
     overflow: hidden;
