@@ -162,6 +162,8 @@ const DelegateTranscriptEntrySchema = Type.Object(
 export const DelegateStatusSchema = Type.Object(
   {
     id: Type.String({ minLength: 1, maxLength: 256 }),
+    runId: Type.String({ minLength: 1, maxLength: 256 }),
+    lineageId: Type.String({ minLength: 1, maxLength: 256 }),
     name: Type.String({ minLength: 1, maxLength: 2_000 }),
     kind: Type.Union([Type.Literal('foreground'), Type.Literal('background')]),
     state: DelegateRunStateSchema,

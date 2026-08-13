@@ -26,6 +26,8 @@ describe('delegate status store', () => {
     expect(store.list()).toMatchObject([
       {
         id,
+        runId: run.runId,
+        lineageId: id,
         name: 'Audit for regressions',
         kind: 'foreground',
         state: 'queued',

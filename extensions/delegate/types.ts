@@ -1,5 +1,10 @@
 import type { Message } from '@earendil-works/pi-ai';
 import type { ArtifactMetadata } from '../shared/artifacts';
+import {
+  createOpaqueId,
+  deriveCompatibilityLineageId,
+  deriveCompatibilityRunId,
+} from './identity';
 import type { WorktreeSummary } from './worktree/model';
 
 /** Harness-observed causes for a non-successful delegate settlement. */
@@ -125,6 +130,10 @@ export interface DelegateCheckpoint {
 }
 
 export interface DelegateRunMetadata {
+  /** Stable identity for this invocation; generated for every new run. */
+  runId?: string;
+  /** Stable child-session lineage, when preparation has a delegate session. */
+  lineageId?: string;
   name?: string;
   cwd?: string;
   context?: DelegateContext;
@@ -148,6 +157,7 @@ export interface DelegateRunMetadata {
 }
 
 export interface DelegatedRun extends DelegateRunMetadata {
+  runId: string;
   name: string;
   task: string;
   exitCode: number;
@@ -178,7 +188,9 @@ export interface DelegateDetails {
  * shape at the loading/rendering boundary only; current code uses
  * DelegatedRun with a required state.
  */
-export type LegacyDelegatedRun = Omit<DelegatedRun, 'state'> & {
+export type LegacyDelegatedRun = Omit<DelegatedRun, 'state' | 'runId'> & {
+  /** Added at the trusted persisted-details boundary for old tool records. */
+  runId?: string;
   state?: DelegateRunState;
 };
 
@@ -214,6 +226,7 @@ export function createRun(
     state: 'queued',
     queuedAt: Date.now(),
     ...metadata,
+    runId: metadata.runId ?? createOpaqueId(),
     name: metadata.name?.trim() || 'Subagent',
   };
 }
@@ -248,15 +261,27 @@ function inferLegacyRunState(run: LegacyDelegatedRun): DelegateRunState {
 
 /** Normalize old persisted tool details before they enter current code. */
 export function normalizeDelegateRun(run: LegacyDelegatedRun): DelegatedRun {
-  return run.state
+  const runId = run.runId ?? deriveCompatibilityRunId(run);
+  const lineageId =
+    run.lineageId ??
+    (run.continuation
+      ? deriveCompatibilityLineageId(run.continuation)
+      : undefined);
+  return run.state && run.runId && (run.lineageId || !run.continuation)
     ? (run as DelegatedRun)
-    : { ...run, state: inferLegacyRunState(run) };
+    : {
+        ...run,
+        runId,
+        ...(lineageId ? { lineageId } : {}),
+        state: run.state ?? inferLegacyRunState(run),
+      };
 }
 
 export function normalizeDelegateDetails(
   details: LegacyDelegateDetails,
 ): DelegateDetails {
-  if (details.runs.every((run) => run.state)) return details as DelegateDetails;
+  if (details.runs.every((run) => run.state && run.runId))
+    return details as DelegateDetails;
   return {
     ...details,
     runs: details.runs.map(normalizeDelegateRun),

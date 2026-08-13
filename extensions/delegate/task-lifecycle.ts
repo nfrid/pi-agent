@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { createOpaqueId } from './identity';
 import { persistSessionRoute, removeSessionSafely } from './routing-warnings';
 import { type RunDelegateOptions, runDelegate } from './runner';
 import {
@@ -74,6 +75,8 @@ export interface ContinuationPreflight {
 }
 
 export interface PreparedDelegateTask extends ContinuationPreflight {
+  /** Stable identity for this prepared invocation, reused by live/public views. */
+  runId: string;
   plan: DelegateTaskPlan;
   /** Setup failed before a child run could be created. */
   setupFailure?: unknown;
@@ -288,6 +291,7 @@ export async function prepareDelegateTask(
 
     return {
       ...state,
+      runId: createOpaqueId(),
       plan,
       session,
       ...(routeRollback ? { routeRollback } : {}),
@@ -387,6 +391,8 @@ export async function runPreparedDelegateTask(
     );
   if (prepared.worktree) options.onWorktreeRunning?.(prepared.worktree);
   const run = await runDelegate({
+    runId: prepared.runId,
+    lineageId: prepared.session.lineageId,
     cwd: prepared.cwd,
     name: prepared.plan.name,
     task: prepared.plan.task,

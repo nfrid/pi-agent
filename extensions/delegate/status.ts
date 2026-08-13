@@ -40,6 +40,10 @@ export interface DelegateTranscriptEntry {
 
 export interface DelegateStatusSnapshot {
   id: string;
+  /** Stable invocation identity for the current aggregated run. */
+  runId: string;
+  /** Stable child-session lineage identity shared by continuations. */
+  lineageId: string;
   name: string;
   kind: DelegateStatusKind;
   state: DelegateRunState;
@@ -66,8 +70,6 @@ export interface DelegateStatusSnapshot {
 }
 
 interface DelegateStatusRecord extends DelegateStatusSnapshot {
-  /** Stable child-session identity shared by fresh and continued invocations. */
-  lineageId: string;
   /** The completion has been returned or delivered into the parent context. */
   resultEntered: boolean;
   /** The parent fully settled with this result and may clear it next run. */
@@ -220,7 +222,8 @@ export class DelegateStatusStore {
       const id = `ds-${++this.counter}`;
       this.records.set(id, {
         id,
-        lineageId: run.continuation ?? id,
+        runId: run.runId,
+        lineageId: run.lineageId ?? run.continuation ?? id,
         name: run.name,
         kind,
         state: getRunState(run),
@@ -247,6 +250,7 @@ export class DelegateStatusStore {
     const run = serializeDelegateRunForPublic(inputRun);
     const record = this.records.get(id);
     if (!record) return;
+    record.runId = run.runId;
     record.name = run.name;
     record.state = getRunState(run);
     record.startedAt = run.startedAt;
@@ -268,6 +272,7 @@ export class DelegateStatusStore {
       const inputRun = runs[index];
       if (!record || !inputRun) continue;
       const run = serializeDelegateRunForPublic(inputRun);
+      record.runId = run.runId;
       record.name = run.name;
       record.state = getRunState(run);
       record.startedAt = run.startedAt;
@@ -412,7 +417,6 @@ export class DelegateStatusStore {
       if (!current)
         throw new Error('Delegate status lineage unexpectedly has no runs.');
       const {
-        lineageId: _lineageId,
         resultEntered: _resultEntered,
         clearOnNextUserMessage: _clearOnNextUserMessage,
         runCount: _runCount,

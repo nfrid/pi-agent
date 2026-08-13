@@ -3,6 +3,7 @@ import type {
   ExtensionContext,
 } from '@earendil-works/pi-coding-agent';
 import type { DelegateConfig } from './config';
+import { createOpaqueId } from './identity';
 import { ensureDelegateLifecycle, setDelegateLifecycle } from './lifecycle';
 import {
   type BuiltDelegateTask,
@@ -58,6 +59,8 @@ export function pendingRuns(
 ): DelegatedRun[] {
   return execution.tasks.map((item) => {
     const run = createRun(item.plan.task, item.plan.routing, {
+      runId: item.runId,
+      lineageId: item.session.lineageId || item.plan.resumed?.lineageId,
       name: item.plan.name,
       cwd: item.cwd,
       context: item.plan.context,
@@ -133,11 +136,17 @@ async function runPreparedWithLifecycle(
 ): Promise<DelegatedRun> {
   const { config, signal } = runCtx;
   const parallel = mode === 'parallel';
+  // Setup failures still represent one stable invocation in public details.
+  const runId = prepared.runId;
+  const lineageId =
+    prepared.session.lineageId || prepared.plan.resumed?.lineageId;
   if (prepared.setupFailure) {
     return failedLifecycleRun(
       prepared.plan.task,
       prepared.plan.routing,
       {
+        runId,
+        lineageId,
         name: prepared.plan.name,
         cwd: prepared.cwd,
         context: prepared.plan.context,
@@ -176,6 +185,8 @@ async function runPreparedWithLifecycle(
       prepared.plan.task,
       prepared.plan.routing,
       {
+        runId,
+        lineageId,
         name: prepared.plan.name,
         cwd: prepared.cwd,
         context: prepared.plan.context,
@@ -234,8 +245,10 @@ function setupFailurePlans(
     ...task.preflight,
     plan: task.plan,
     worktree: undefined,
+    runId: createOpaqueId(),
     session: {
       token: task.plan.resumed?.token ?? '',
+      lineageId: task.plan.resumed?.lineageId ?? '',
       filePath: '',
       cwd: task.preflight.cwd,
       isolation: task.preflight.isolation,

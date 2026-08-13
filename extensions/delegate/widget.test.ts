@@ -47,6 +47,8 @@ function status(
 ): DelegateStatusSnapshot {
   return {
     id: 'ds-1',
+    runId: 'run-1',
+    lineageId: 'lineage-1',
     name: 'Phase 5 review',
     kind: 'foreground',
     state: 'running',

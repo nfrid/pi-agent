@@ -21,6 +21,8 @@ describe('delegate live contribution', () => {
         statuses: [
           {
             id: 'ds-1',
+            runId: 'run-1',
+            lineageId: 'lineage-1',
             name: 'Review',
             kind: 'foreground',
             state: 'running',
@@ -57,6 +59,8 @@ describe('delegate live contribution', () => {
         statuses: [
           {
             id: 'ds-2',
+            runId: 'run-2',
+            lineageId: 'lineage-2',
             name: 'Oversized',
             kind: 'foreground',
             state: 'running',
