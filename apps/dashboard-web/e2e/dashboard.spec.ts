@@ -349,11 +349,16 @@ test('runtime row lifecycle menu supports desktop, touch, and keyboard access', 
   await expect(thread).toHaveAttribute('aria-haspopup', 'menu');
   await expect(row.locator('.agent-thread-actions-trigger')).toHaveCount(0);
 
+  const rowBox = await row.boundingBox();
+  if (!rowBox) throw new Error('Runtime row is not laid out.');
+  await page.mouse.click(rowBox.x + 2, rowBox.y + rowBox.height / 2);
+  await expect(page).toHaveURL(/\/sessions\/session-context-menu$/u);
+  await page.goto('/');
+  await expect(row).toBeVisible();
+
   const menu = page.getByRole('menu', {
     name: 'Actions for Context menu session',
   });
-  const rowBox = await row.boundingBox();
-  if (!rowBox) throw new Error('Runtime row is not laid out.');
   const viewport = await page.evaluate(() => ({
     width: window.innerWidth,
     height: window.innerHeight,

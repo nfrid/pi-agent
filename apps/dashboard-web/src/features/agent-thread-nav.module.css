@@ -150,9 +150,9 @@
   border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  padding: 8px 7px;
   text-align: left;
   cursor: pointer;
+  padding: 0;
   transition:
     background 150ms ease,
     border-color 150ms ease,
@@ -161,13 +161,14 @@
 .threadLink {
   display: flex;
   align-items: center;
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
   gap: 8px;
   border: 0;
   background: transparent;
   color: inherit;
-  padding: 0;
+  padding: 8px 7px;
   text-align: left;
   cursor: pointer;
   font: inherit;
