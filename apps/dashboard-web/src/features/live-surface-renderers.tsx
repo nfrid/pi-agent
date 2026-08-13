@@ -219,6 +219,14 @@ export function delegateActivityLabel(
   return 'starting';
 }
 
+export function selectedDelegateInspectionRow(
+  selectedLineageId: string | undefined,
+  rows: readonly DelegateInspectionStatus[],
+  fallback: DelegateInspectionStatus | undefined,
+): DelegateInspectionStatus | undefined {
+  return rows.find((row) => row.lineageId === selectedLineageId) ?? fallback;
+}
+
 export function DelegateSurface({
   surface,
   pausedAt,
@@ -237,7 +245,7 @@ export function DelegateSurface({
   const rows = composite?.groups.map((group) => group.row) ?? liveRows;
   const historyIncomplete = history?.truncated === true;
   const stats = delegateStats(rows);
-  const [selectedId, setSelectedId] = useState<string>();
+  const [selectedLineageId, setSelectedLineageId] = useState<string>();
   const [lastInspectorRow, setLastInspectorRow] =
     useState<DelegateInspectionStatus>();
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -245,7 +253,7 @@ export function DelegateSurface({
   const [now, setNow] = useState(() => pausedAt ?? Date.now());
   useEffect(() => {
     if (rows.length > 0) return;
-    setSelectedId(undefined);
+    setSelectedLineageId(undefined);
     setLastInspectorRow(undefined);
     setInspectorOpen(false);
   }, [rows.length]);
@@ -259,11 +267,14 @@ export function DelegateSurface({
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [hasLiveElapsed, pausedAt]);
-  const selected = rows.find((row) => row.id === selectedId);
   const selectedGroup = composite?.groups.find(
-    (group) => group.row.id === selectedId,
+    (group) => group.lineageId === selectedLineageId,
   );
-  const inspectorRow = selected ?? lastInspectorRow;
+  const inspectorRow = selectedDelegateInspectionRow(
+    selectedLineageId,
+    rows,
+    lastInspectorRow,
+  );
   const inspectorRuns: readonly DelegateInspectorRunOption[] | undefined =
     selectedGroup?.runs;
   const title = 'Delegates';
@@ -371,7 +382,7 @@ export function DelegateSurface({
                             className="delegate-row-toggle"
                             aria-haspopup="dialog"
                             onPress={() => {
-                              setSelectedId(row.id);
+                              setSelectedLineageId(row.lineageId);
                               setLastInspectorRow(row);
                               setInspectorOpen(true);
                             }}

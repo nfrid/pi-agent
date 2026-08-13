@@ -248,6 +248,17 @@ export function createDelegateHistoryRefreshCoordinator(
   };
 }
 
+export function delegateHistoryRevisionChanged(
+  previous: { id: string; revision: number } | undefined,
+  current: { id: string; revision: number },
+): boolean {
+  return (
+    previous !== undefined &&
+    previous.id === current.id &&
+    previous.revision !== current.revision
+  );
+}
+
 /**
  * The session-owned delegate surface composes durable history with the
  * optional runtime projection. It deliberately lives outside the live store.
@@ -255,9 +266,11 @@ export function createDelegateHistoryRefreshCoordinator(
 export function DelegateHistorySurface({
   id,
   runtime,
+  sessionChange,
 }: {
   id: string;
   runtime: RuntimeSnapshot | undefined;
+  sessionChange: number;
 }) {
   const historyQuery = useQuery(
     delegateHistoryQueryOptions(dashboardHttpClient, id),
@@ -267,6 +280,9 @@ export function DelegateHistorySurface({
   const liveRows = live?.model.statuses ?? [];
   const previousStates = useRef(new Map<string, string>());
   const previousSessionId = useRef<string | undefined>(undefined);
+  const previousSessionChange = useRef<
+    { id: string; revision: number } | undefined
+  >(undefined);
   const refreshCoordinator = useMemo(
     () =>
       createDelegateHistoryRefreshCoordinator(() => {
@@ -277,6 +293,15 @@ export function DelegateHistorySurface({
     [id, queryClient],
   );
   useEffect(() => () => refreshCoordinator.dispose(), [refreshCoordinator]);
+  useEffect(() => {
+    const previous = previousSessionChange.current;
+    const current = { id, revision: sessionChange };
+    previousSessionChange.current = current;
+    if (!delegateHistoryRevisionChanged(previous, current)) return;
+    void queryClient.invalidateQueries({
+      queryKey: dashboardQueryKeys.delegateHistory(id),
+    });
+  }, [id, queryClient, sessionChange]);
   useEffect(() => {
     if (previousSessionId.current !== id) {
       previousStates.current = new Map();

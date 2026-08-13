@@ -229,6 +229,7 @@ export function useSessionHydration({
     data,
     queryError: query.error,
     runtime,
+    sessionChange,
     storedMetadata,
     error,
     retrySession,
