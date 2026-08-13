@@ -473,7 +473,7 @@ export function DelegateHistorySurface({
               ? {
                   run: detailQuery.data,
                   loading: detailQuery.isPending,
-                  error: detailQuery.error,
+                  error: detailQuery.isError ? detailQuery.error : undefined,
                 }
               : undefined
           }
