@@ -466,10 +466,6 @@ h2 {
   border-color: var(--red);
   color: var(--red);
 }
-.transcript {
-  width: min(100%, 820px);
-  margin: 28px 0;
-}
 .message-bubble {
   max-width: 760px;
 }
