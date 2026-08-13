@@ -3906,13 +3906,28 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
       const inspector = document
         .querySelector('.session-inspector')
         ?.getBoundingClientRect();
-      return rail && composer && inspector && composerElement
+      const heading = document
+        .querySelector('.session-heading')
+        ?.getBoundingClientRect();
+      const transcript = document
+        .querySelector('.transcript')
+        ?.getBoundingClientRect();
+      return rail &&
+        composer &&
+        inspector &&
+        heading &&
+        transcript &&
+        composerElement
         ? {
             railRight: rail.right,
             composerLeft: composer.left,
             composerRight: composer.right,
             composerVisibility: getComputedStyle(composerElement).visibility,
+            headingLeft: heading.left,
+            headingRight: heading.right,
             inspectorLeft: inspector.left,
+            transcriptLeft: transcript.left,
+            transcriptRight: transcript.right,
           }
         : undefined;
     });
@@ -3923,6 +3938,8 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
       geometry?.railRight ?? Number.POSITIVE_INFINITY,
     );
     expect(geometry?.composerVisibility).toBe('visible');
+    expect(geometry?.headingLeft).toBe(geometry?.transcriptLeft);
+    expect(geometry?.headingRight).toBe(geometry?.transcriptRight);
     expect(geometry?.inspectorLeft).toBeLessThan(
       geometry?.composerRight ?? Number.NEGATIVE_INFINITY,
     );

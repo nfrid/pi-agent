@@ -40,13 +40,20 @@
 .session-context {
   position: fixed;
   top: 0;
+  right: max(
+    calc(max(0px, (100% - 1240px) / 2) + clamp(16px, 4vw, 56px)),
+    calc(50% - 546px)
+  );
+  left: max(
+    calc(max(0px, (100% - 1240px) / 2) + clamp(16px, 4vw, 56px) + 272px),
+    calc(50% - 274px)
+  );
   z-index: 46;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   min-height: 48px;
-  width: inherit;
   margin: 0;
   border-bottom: 1px solid var(--line-soft);
   background: color-mix(in srgb, var(--bg) 94%, transparent);
