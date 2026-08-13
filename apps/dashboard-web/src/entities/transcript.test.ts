@@ -1130,7 +1130,7 @@ Note: Earlier attempt completed after recovery.`,
     expect(html).toContain('pause-icon');
     expect(html).not.toContain('‖');
     expect(html).not.toContain('▶');
-    expect(html).toContain('disabled');
+    expect(html).not.toContain('disabled');
   });
 
   it('does not render a transcript pause event before the safe boundary', () => {

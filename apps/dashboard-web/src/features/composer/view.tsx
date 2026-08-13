@@ -111,9 +111,14 @@ export function Composer({
     !runtime ||
     runtime.online === false ||
     runtime.liveState === 'stopping' ||
-    runtime.liveState === 'waiting';
-  const submissionDisabled = disabled || runtime.liveState === 'compacting';
-  const attachmentsEnabled = runtime ? runtimeSupportsImages(runtime) : false;
+    runtime.liveState === 'waiting' ||
+    runtime.pendingInteractions.length > 0;
+  const queueable =
+    runtime?.liveState === 'working' || runtime?.liveState === 'compacting';
+  const submissionDisabled = disabled;
+  const attachmentsEnabled =
+    runtime?.liveState !== 'compacting' &&
+    (runtime ? runtimeSupportsImages(runtime) : false);
   const {
     attachments,
     dragging,
@@ -230,9 +235,8 @@ export function Composer({
       type: runtime.liveState === 'idle' ? 'prompt' : mode,
       text: trimmedText,
     };
-    if (command.type === 'prompt') onPromptSubmitted?.(trimmedText);
-    const queueTextOnly =
-      runtime.liveState === 'working' && attachments.length === 0;
+    if (runtime.liveState === 'idle') onPromptSubmitted?.(trimmedText);
+    const queueTextOnly = queueable && attachments.length === 0;
     try {
       if (queueTextOnly) {
         const queueId = newQueueId();
@@ -274,6 +278,19 @@ export function Composer({
         setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (mountedRef.current) setBusy(false);
+    }
+  };
+  const abortTurn = async () => {
+    if (busy || commandMutation.isPending) return;
+    setError(undefined);
+    try {
+      await commandMutation.mutateAsync({
+        runtimeId: runtime.runtimeId,
+        command: { type: 'abort' },
+      });
+    } catch (cause) {
+      if (mountedRef.current)
+        setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
   return (
@@ -357,18 +374,25 @@ export function Composer({
                 (!text.trim() && !attachments.length)
               }
               aria-label={
-                runtime.liveState === 'working' && !attachments.length
-                  ? 'Queue message'
-                  : 'Send'
+                queueable && !attachments.length ? 'Queue message' : 'Send'
               }
             >
               <span aria-hidden="true">↑</span>
               <span className="sr-only">
-                {runtime.liveState === 'working' && !attachments.length
-                  ? 'Queue'
-                  : 'Send'}
+                {queueable && !attachments.length ? 'Queue' : 'Send'}
               </span>
             </AriaButton>
+            {runtime.liveState === 'working' && (
+              <AriaButton
+                type="button"
+                className="composer-abort"
+                isDisabled={busy || commandMutation.isPending}
+                onPress={() => void abortTurn()}
+                aria-label="Abort turn"
+              >
+                <span aria-hidden="true">■</span>
+              </AriaButton>
+            )}
           </div>
         </ComposerRichSurface>
         <div className="composer-secondary">

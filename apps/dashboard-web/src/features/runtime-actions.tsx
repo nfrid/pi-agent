@@ -1,5 +1,4 @@
 import {
-  actionMutationOptions,
   commandMutationOptions,
   dashboardHttpClient,
   restartRuntimeMutationOptions,
@@ -9,39 +8,17 @@ import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
-import {
-  CONTINUE_ACTION_ID,
-  PAUSE_ACTION_ID,
-} from '../../../../extensions/pause/contribution';
-import { runtimePauseStatus } from './extension-surfaces';
-
 export function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
   const navigate = useNavigate();
   const [error, setError] = useState<string>();
   const [restarting, setRestarting] = useState(false);
   const command = useMutation(commandMutationOptions(dashboardHttpClient));
-  const action = useMutation(actionMutationOptions(dashboardHttpClient));
   const stop = useMutation(stopRuntimeMutationOptions(dashboardHttpClient));
   const restart = useMutation(
     restartRuntimeMutationOptions(dashboardHttpClient),
   );
   const busy =
-    restarting ||
-    command.isPending ||
-    action.isPending ||
-    stop.isPending ||
-    restart.isPending;
-  const supportsAction = (actionId: string) =>
-    Boolean(
-      runtime.capabilities?.manifests.some((manifest) =>
-        manifest.actions.some((candidate) => candidate.id === actionId),
-      ),
-    );
-  const compactSupported = supportsAction('session.compact');
-  const pauseSupported = supportsAction(PAUSE_ACTION_ID);
-  const continueSupported = supportsAction(CONTINUE_ACTION_ID);
-  const pauseStatus = runtimePauseStatus(runtime);
-  const paused = Boolean(pauseStatus);
+    restarting || command.isPending || stop.isPending || restart.isPending;
   const run = async (operation: () => Promise<unknown>) => {
     setError(undefined);
     try {
@@ -67,45 +44,6 @@ export function RuntimeActions({ runtime }: { runtime: RuntimeSnapshot }) {
       >
         Abort
       </button>
-      {pauseStatus && (
-        <span className="runtime-pause-label" role="status">
-          {pauseStatus.label}
-        </span>
-      )}
-      {pauseSupported && continueSupported && (
-        <button
-          type="button"
-          disabled={onlineOnly}
-          onClick={() =>
-            void run(() =>
-              action.mutateAsync({
-                runtimeId: runtime.runtimeId,
-                actionId: paused ? CONTINUE_ACTION_ID : PAUSE_ACTION_ID,
-                input: {},
-              }),
-            )
-          }
-        >
-          {paused ? 'Continue' : 'Pause'}
-        </button>
-      )}
-      {compactSupported && (
-        <button
-          type="button"
-          disabled={onlineOnly}
-          onClick={() =>
-            void run(() =>
-              action.mutateAsync({
-                runtimeId: runtime.runtimeId,
-                actionId: 'session.compact',
-                input: {},
-              }),
-            )
-          }
-        >
-          Compact
-        </button>
-      )}
       <button
         type="button"
         className="danger"
