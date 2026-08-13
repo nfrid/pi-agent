@@ -2,7 +2,10 @@ import type { DashboardLiveStore } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import type { ComponentType, RefObject } from 'react';
 import { sessionDisplayTitle } from '../../app-helpers';
-import { ExtensionSurfaceStack } from '../extension-surfaces';
+import {
+  DelegateHistorySurface,
+  ExtensionSurfaceStack,
+} from '../extension-surfaces';
 import { InlineSessionRename } from '../session-rename';
 
 export type SessionComposerProps = {
@@ -172,7 +175,12 @@ export function SessionControlLayer({
           ↓
         </button>
       )}
-      <ExtensionSurfaceStack runtime={runtime} placement="composer" />
+      <DelegateHistorySurface id={sessionId} runtime={runtime} />
+      <ExtensionSurfaceStack
+        runtime={runtime}
+        placement="composer"
+        excludeDelegate
+      />
       <Composer
         key={sessionId}
         runtime={runtime}

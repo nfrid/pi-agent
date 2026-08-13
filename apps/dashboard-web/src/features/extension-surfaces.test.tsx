@@ -1,4 +1,7 @@
-import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type {
+  DelegateHistoryResponse,
+  RuntimeSnapshot,
+} from '@pi-dashboard/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { StructuredDelegateResults } from '../entities/transcript/entries';
@@ -11,15 +14,117 @@ import {
   DelegateTranscript,
   dashboardSurfacePlacement,
   ExtensionSurfaceStack,
+  reconcileDelegateLiveRuns,
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
   runtimePauseStatus,
 } from './extension-surfaces';
+import {
+  DelegateSurface,
+  delegateActivityLabel,
+} from './live-surface-renderers';
 
 const runtimeFixture = (extensionSurfaces: unknown): RuntimeSnapshot =>
   ({ extensionSurfaces }) as unknown as RuntimeSnapshot;
 
 describe('live extension surface fixtures', () => {
+  it('invalidates once for settled transitions and every disappeared run', () => {
+    const transitioned = reconcileDelegateLiveRuns(
+      'session-1',
+      new Map([['session-1:active', 'running']]),
+      [{ runId: 'active', state: 'success' }],
+    );
+    expect(transitioned.shouldInvalidate).toBe(true);
+    const settledAgain = reconcileDelegateLiveRuns(
+      'session-1',
+      transitioned.next,
+      [{ runId: 'active', state: 'success' }],
+    );
+    expect(settledAgain.shouldInvalidate).toBe(false);
+
+    const disappeared = reconcileDelegateLiveRuns(
+      'session-1',
+      new Map([
+        ['session-1:active', 'running'],
+        ['session-1:settled', 'success'],
+      ]),
+      [],
+    );
+    expect(disappeared.shouldInvalidate).toBe(true);
+    expect(disappeared.next.size).toBe(0);
+    expect(
+      reconcileDelegateLiveRuns('session-1', disappeared.next, [])
+        .shouldInvalidate,
+    ).toBe(false);
+  });
+
+  it('shows an explicit incomplete-history message in the transcript inspector', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateTranscript
+        entries={[]}
+        truncated
+        truncatedMessage="Delegate history is incomplete; some historical runs were omitted."
+      />,
+    );
+    expect(markup).toContain('Delegate history is incomplete');
+  });
+
+  it('shows one explicit notice when durable history is truncated', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateSurface
+        surface={{
+          id: 'delegate-history',
+          rendererId: 'delegate.status',
+          viewModel: { version: 1, statuses: [] },
+        }}
+        history={
+          {
+            version: 1,
+            sessionId: 'offline-session',
+            truncated: true,
+            groups: [],
+          } as DelegateHistoryResponse
+        }
+      />,
+    );
+    expect(markup).toContain('History incomplete');
+  });
+
+  it('uses a truthful fallback for settled historical rows without activity', () => {
+    expect(
+      delegateActivityLabel(
+        {
+          id: 'lineage-1',
+          runId: 'run-1',
+          lineageId: 'lineage-1',
+          name: 'Historical worker',
+          kind: 'background',
+          state: 'success',
+          createdAt: 1,
+          allowWrites: false,
+          historical: true,
+          runCount: 1,
+        },
+        'done',
+      ),
+    ).toBe('1 run · historical');
+    expect(
+      delegateActivityLabel(
+        {
+          id: 'live-1',
+          runId: 'run-live',
+          lineageId: 'lineage-live',
+          name: 'Live worker',
+          kind: 'background',
+          state: 'running',
+          createdAt: 1,
+          allowWrites: false,
+        },
+        'running',
+      ),
+    ).toBe('starting');
+  });
+
   it('maps typed extension placement semantics to dashboard host slots', () => {
     expect(dashboardSurfacePlacement('composer')).toBe('composer');
     expect(dashboardSurfacePlacement('above-composer')).toBe('composer');
@@ -75,6 +180,8 @@ describe('live extension surface fixtures', () => {
           statuses: [
             {
               id: 'd1',
+              runId: 'run-d1',
+              lineageId: 'lineage-d1',
               name: 'Still visible delegate',
               kind: 'background',
               state: 'running',
@@ -109,6 +216,8 @@ describe('live extension surface fixtures', () => {
         statuses: [
           {
             id: 'd1',
+            runId: 'run-d1',
+            lineageId: 'lineage-d1',
             name: 'Compact delegate',
             kind: 'background',
             state: 'running',
@@ -165,6 +274,8 @@ describe('live extension surface fixtures', () => {
               statuses: [
                 {
                   id: 'd1',
+                  runId: 'run-d1',
+                  lineageId: 'lineage-d1',
                   name: 'Queued delegate',
                   kind: 'background',
                   state: 'queued',
@@ -282,6 +393,8 @@ describe('live extension surface fixtures', () => {
             statuses: [
               {
                 id: 'd1',
+                runId: 'run-d1',
+                lineageId: 'lineage-d1',
                 name: 'Stopped delegate',
                 kind: 'background',
                 state: 'aborted',
@@ -388,6 +501,8 @@ describe('live extension surface fixtures', () => {
         now={2_000}
         row={{
           id: 'd1',
+          runId: 'run-d1',
+          lineageId: 'lineage-d1',
           name: 'Recover build',
           kind: 'background',
           state: 'timed-out',
@@ -426,6 +541,8 @@ describe('live extension surface fixtures', () => {
         now={99_000}
         row={{
           id: 'd1',
+          runId: 'run-d1',
+          lineageId: 'lineage-d1',
           name: 'Paused delegate',
           kind: 'background',
           state: 'running',
@@ -448,6 +565,8 @@ describe('live extension surface fixtures', () => {
       <DelegateStructuredResultSection
         row={{
           id: 'd1',
+          runId: 'run-d1',
+          lineageId: 'lineage-d1',
           name: 'Structured audit',
           kind: 'background',
           state: 'success',
@@ -495,6 +614,8 @@ describe('live extension surface fixtures', () => {
       <DelegateStructuredResultSection
         row={{
           id: 'd-equivalent',
+          runId: 'run-d-equivalent',
+          lineageId: 'lineage-d-equivalent',
           name: 'Audit',
           kind: 'background',
           state: 'success',
@@ -525,6 +646,8 @@ describe('live extension surface fixtures', () => {
       <DelegateStructuredResultSection
         row={{
           id: 'd-omitted',
+          runId: 'run-d-omitted',
+          lineageId: 'lineage-d-omitted',
           name: 'Large audit',
           kind: 'background',
           state: 'success',
@@ -549,6 +672,8 @@ describe('live extension surface fixtures', () => {
       <DelegateStructuredResultSection
         row={{
           id: 'd2',
+          runId: 'run-d2',
+          lineageId: 'lineage-d2',
           name: 'Invalid audit',
           kind: 'foreground',
           state: 'error',

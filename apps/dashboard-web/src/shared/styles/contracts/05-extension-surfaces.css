@@ -119,6 +119,58 @@
 .surface-queued {
   color: var(--muted);
 }
+.delegate-section-title {
+  margin: 7px 11px 3px;
+  color: var(--purple);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.delegate-inspector-run-picker {
+  display: flex;
+  margin: 0 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  padding: 0 0 8px;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.delegate-inspector-run-picker legend {
+  width: 100%;
+  margin: 0 0 4px;
+  color: var(--dim);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.delegate-inspector-run-picker button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.delegate-inspector-run-picker button[aria-pressed="true"] {
+  border-color: var(--purple);
+  color: var(--fg);
+}
+.delegate-inspector-warnings {
+  margin: 9px 0;
+  border-left: 2px solid var(--orange);
+  padding-left: 8px;
+  color: var(--orange);
+}
+.delegate-inspector-warnings strong {
+  font-size: 9px;
+  text-transform: uppercase;
+}
+.delegate-inspector-warnings ul {
+  margin: 4px 0 0;
+  padding-left: 15px;
+}
 .delegate-rows,
 .task-rows {
   display: grid;

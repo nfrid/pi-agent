@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type {
   DelegateStatus,
   DelegateTranscriptEntry,
@@ -5,6 +6,7 @@ import type {
 import { TranscriptEntry } from '../entities/transcript/entries';
 import { StructuredResultSection } from '../entities/transcript/inspector';
 import type { TranscriptModelItem } from '../transcript';
+import type { DelegateInspectionStatus } from './delegate-history';
 import { SurfaceDrawer } from './surface-drawer';
 
 function text(value: string | undefined, fallback = ''): string {
@@ -156,9 +158,11 @@ function delegateItemTimestamp(item: TranscriptModelItem): number | undefined {
 export function DelegateTranscript({
   entries,
   truncated = false,
+  truncatedMessage = 'Earlier transcript entries were omitted from this live view.',
 }: {
   entries: readonly DelegateTranscriptEntry[];
   truncated?: boolean;
+  truncatedMessage?: string;
 }) {
   const items = delegateTranscriptItems(entries);
   return (
@@ -171,9 +175,7 @@ export function DelegateTranscript({
         />
       ))}
       {truncated && (
-        <p className="delegate-transcript-truncated">
-          Earlier transcript entries were omitted from this live view.
-        </p>
+        <p className="delegate-transcript-truncated">{truncatedMessage}</p>
       )}
     </section>
   );
@@ -183,7 +185,7 @@ export function DelegateInspectorMetadata({
   row,
   now,
 }: {
-  row: DelegateStatus;
+  row: DelegateInspectionStatus;
   now: number;
 }) {
   const state = inspectorState(row.pauseState ?? row.state);
@@ -238,7 +240,7 @@ function artifactHandle(row: DelegateStatus): string | undefined {
 export function DelegateStructuredResultSection({
   row,
 }: {
-  row: DelegateStatus;
+  row: DelegateInspectionStatus;
 }) {
   if (!row.result) return null;
   return (
@@ -257,11 +259,12 @@ function DelegateInspectorDetails({
   row,
   now,
 }: {
-  row: DelegateStatus;
+  row: DelegateInspectionStatus;
   now: number;
 }) {
   const lifecycle = row.lifecycle;
   const runs = row.runs ?? [];
+  const warnings = row.warnings ?? [];
   const runKeyOccurrences = new Map<string, number>();
   const handle = artifactHandle(row);
   return (
@@ -291,6 +294,16 @@ function DelegateInspectorDetails({
           </div>
         )}
       </dl>
+      {warnings.length > 0 && (
+        <div className="delegate-inspector-warnings">
+          <strong>Warnings</strong>
+          <ul>
+            {warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {runs.length > 0 && (
         <ol className="delegate-inspector-runs" aria-label="Run history">
           {runs.map((run, index) => {
@@ -332,38 +345,77 @@ function DelegateInspectorDetails({
   );
 }
 
+export interface DelegateInspectorRunOption {
+  id: string;
+  label: string;
+  row: DelegateInspectionStatus;
+}
+
 export function DelegateTranscriptInspector({
   row,
   now,
+  runOptions,
   isOpen,
   paused = false,
   onClose,
 }: {
-  row: DelegateStatus;
+  row: DelegateInspectionStatus;
   now: number;
+  runOptions?: readonly DelegateInspectorRunOption[];
   isOpen: boolean;
   paused?: boolean;
   onClose: () => void;
 }) {
-  const entries = row.transcript ?? [];
+  const [selectedRunId, setSelectedRunId] = useState<string>();
+  useEffect(() => {
+    setSelectedRunId(runOptions?.at(-1)?.id);
+  }, [runOptions]);
+  const selectedRun = runOptions?.find((run) => run.id === selectedRunId);
+  const inspectedRow = selectedRun?.row ?? row;
+  const entries = inspectedRow.transcript ?? [];
   return (
     <SurfaceDrawer
       title="Delegate transcript"
       eyebrow="Delegate"
-      headerSummary={text(row.name, 'Subagent')}
-      headerContent={<DelegateInspectorMetadata row={row} now={now} />}
+      headerSummary={text(inspectedRow.name, 'Subagent')}
+      headerContent={<DelegateInspectorMetadata row={inspectedRow} now={now} />}
       className="surface-drawer delegate-transcript-drawer"
       isOpen={isOpen}
       paused={paused}
       onClose={onClose}
     >
       <div className="delegate-transcript-inspector-body">
-        <DelegateStructuredResultSection row={row} />
-        <DelegateInspectorDetails row={row} now={now} />
-        {entries.length > 0 || row.transcriptTruncated ? (
+        {runOptions && runOptions.length > 1 && (
+          <fieldset
+            className="delegate-inspector-run-picker"
+            aria-label="Select delegate run"
+          >
+            <legend>Runs in this continuation</legend>
+            {runOptions.map((run) => (
+              <button
+                type="button"
+                key={run.id}
+                aria-pressed={run.id === inspectedRow.runId}
+                onClick={() => setSelectedRunId(run.id)}
+              >
+                {run.label}
+              </button>
+            ))}
+          </fieldset>
+        )}
+        <DelegateStructuredResultSection row={inspectedRow} />
+        <DelegateInspectorDetails row={inspectedRow} now={now} />
+        {entries.length > 0 || inspectedRow.transcriptTruncated ? (
           <DelegateTranscript
             entries={entries}
-            truncated={row.transcriptTruncated === true}
+            truncated={inspectedRow.transcriptTruncated === true}
+            truncatedMessage={
+              inspectedRow.historyIncomplete
+                ? 'Delegate history is incomplete; some historical runs or transcript entries were omitted from this view.'
+                : inspectedRow.historical
+                  ? 'Earlier historical transcript entries were omitted from this view.'
+                  : undefined
+            }
           />
         ) : (
           <p className="delegate-transcript-empty">

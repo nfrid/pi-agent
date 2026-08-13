@@ -1,5 +1,5 @@
 import type { ExtensionSurface } from '@pi-dashboard/extension-contributions';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import type {
   DelegateStatus,
@@ -10,7 +10,15 @@ import type {
   TaskSurfaceTask,
 } from '../../../../extensions/tasks/contribution';
 import type { DashboardRendererContext } from '../renderer-registry';
-import { DelegateTranscriptInspector } from './delegate-transcript-inspector';
+import {
+  composeDelegateHistory,
+  type DelegateCompositeGroup,
+  type DelegateInspectionStatus,
+} from './delegate-history';
+import {
+  type DelegateInspectorRunOption,
+  DelegateTranscriptInspector,
+} from './delegate-transcript-inspector';
 import { PauseIcon } from './pause-icon';
 import { SurfaceDrawer, SurfaceStats } from './surface-drawer';
 
@@ -196,18 +204,42 @@ function delegateContext(row: DelegateStatus): string | undefined {
   return row.context;
 }
 
-function DelegateSurface({
+export function delegateActivityLabel(
+  row: DelegateInspectionStatus,
+  runState: string,
+  pauseState?: string,
+): string {
+  if (pauseState === 'paused') return 'Paused at a safe boundary';
+  if (pauseState === 'pausing') return 'Pausing at a safe boundary';
+  if (row.activity?.latestText || row.activity?.label)
+    return row.activity.latestText || row.activity.label;
+  if (runState === 'queued') return 'waiting for a slot';
+  if (row.historical && !['queued', 'running'].includes(runState))
+    return `${row.runCount ?? 1} run${row.runCount === 1 ? '' : 's'} · historical`;
+  return 'starting';
+}
+
+export function DelegateSurface({
   surface,
   pausedAt,
+  history,
 }: {
   surface: ExtensionSurface;
   pausedAt?: number;
+  history?: import('@pi-dashboard/protocol').DelegateHistoryResponse;
 }) {
   const model = surface.viewModel as DelegateStatusViewModel;
-  const rows = delegateRows(model);
+  const liveRows = delegateRows(model);
+  const composite = useMemo(
+    () => (history ? composeDelegateHistory(history, liveRows) : undefined),
+    [history, liveRows],
+  );
+  const rows = composite?.groups.map((group) => group.row) ?? liveRows;
+  const historyIncomplete = history?.truncated === true;
   const stats = delegateStats(rows);
   const [selectedId, setSelectedId] = useState<string>();
-  const [lastInspectorRow, setLastInspectorRow] = useState<DelegateStatus>();
+  const [lastInspectorRow, setLastInspectorRow] =
+    useState<DelegateInspectionStatus>();
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const hasLiveElapsed = stats.running + stats.queued > 0;
   const [now, setNow] = useState(() => pausedAt ?? Date.now());
@@ -228,19 +260,32 @@ function DelegateSurface({
     return () => window.clearInterval(timer);
   }, [hasLiveElapsed, pausedAt]);
   const selected = rows.find((row) => row.id === selectedId);
-  const inspectorRow = selected ?? lastInspectorRow;
-  const title = 'Delegates';
-  const active = rows.find((row) =>
-    ['running', 'queued'].includes(stateLabel(row.state)),
+  const selectedGroup = composite?.groups.find(
+    (group) => group.row.id === selectedId,
   );
-  const summary = active
-    ? short(text(active.name, 'Subagent'), 42)
-    : stats.failed
-      ? `${stats.failed} need attention`
-      : stats.aborted
-        ? `${stats.aborted} stopped`
-        : 'All delegates complete';
-  const activeCount = stats.running + stats.queued;
+  const inspectorRow = selected ?? lastInspectorRow;
+  const inspectorRuns: readonly DelegateInspectorRunOption[] | undefined =
+    selectedGroup?.runs;
+  const title = 'Delegates';
+  const active = rows.find(
+    (row) =>
+      row.pauseState !== undefined ||
+      ['running', 'queued'].includes(stateLabel(row.state)),
+  );
+  const summary = historyIncomplete
+    ? 'History incomplete · some work omitted'
+    : active
+      ? short(text(active.name, 'Subagent'), 42)
+      : stats.failed
+        ? `${stats.failed} need attention`
+        : stats.aborted
+          ? `${stats.aborted} stopped`
+          : 'All delegates complete';
+  const activeCount = rows.filter(
+    (row) =>
+      row.pauseState !== undefined ||
+      ['running', 'queued'].includes(stateLabel(row.state)),
+  ).length;
   const finishedCount = rows.length - activeCount;
   const statsView = (
     <SurfaceStats
@@ -252,6 +297,24 @@ function DelegateSurface({
       ]}
     />
   );
+  const delegateSections =
+    composite?.sections ??
+    ([
+      {
+        id: 'active' as const,
+        label: '',
+        groups: rows.map((row) => ({
+          lineageId: row.lineageId,
+          row,
+          runs: [],
+          section: 'active' as const,
+        })),
+      },
+    ] satisfies readonly {
+      id: 'active';
+      label: string;
+      groups: readonly DelegateCompositeGroup[];
+    }[]);
   return (
     <>
       <WorkSurface
@@ -259,84 +322,97 @@ function DelegateSurface({
         label="Delegates"
         summary={summary}
         count={`${activeCount} active · ${finishedCount} finished`}
-        visibleCount={rows.length}
+        visibleCount={rows.length + (historyIncomplete ? 1 : 0)}
         drawerClassName="surface-drawer work-surface-drawer delegate-surface-drawer"
         headerStats={statsView}
         paused={pausedAt !== undefined}
       >
         <div className="delegate-scroll surface-scroll-region">
           <div className="delegate-rows">
-            {rows.map((row) => {
-              const runState = stateLabel(row.state);
-              const pauseState = row.pauseState;
-              const state = pauseState ?? runState;
-              const activity = row.activity;
-              const activityLabel = short(
-                pauseState === 'paused'
-                  ? 'Paused at a safe boundary'
-                  : pauseState === 'pausing'
-                    ? 'Pausing at a safe boundary'
-                    : activity?.latestText ||
-                      activity?.label ||
-                      (runState === 'queued'
-                        ? 'waiting for a slot'
-                        : 'starting'),
-                140,
-              );
-              const name = short(row.name, 70);
-              const route = row.route ?? '';
-              const context = delegateContext(row) ?? '';
-              const access =
-                row.allowWrites === true ? 'read/write' : 'read-only';
-              const elapsedText = elapsed(
-                row.startedAt ?? row.createdAt,
-                row.finishedAt,
-                row.pausedAt ?? now,
-              );
-              return (
-                <div
-                  className={`delegate-row ${stateClass(state)}`}
-                  key={`${surface.id}-${row.id}`}
-                >
-                  <AriaButton
-                    type="button"
-                    className="delegate-row-toggle"
-                    aria-haspopup="dialog"
-                    onPress={() => {
-                      setSelectedId(row.id);
-                      setLastInspectorRow(row);
-                      setInspectorOpen(true);
-                    }}
+            {delegateSections.map(
+              (section) =>
+                section.groups.length > 0 && (
+                  <section
+                    className="delegate-section"
+                    key={section.id}
+                    aria-label={section.label || undefined}
                   >
-                    <span className="surface-state" aria-hidden="true">
-                      {stateGlyph(state)}
-                    </span>
-                    <span className="delegate-row-main">
-                      <strong>{name}</strong>
-                      <small>{activityLabel}</small>
-                    </span>
-                    <span className="delegate-row-meta">
-                      <span className="delegate-row-status">
-                        {state}
-                        {elapsedText ? ` · ${elapsedText}` : ''}
-                      </span>
-                      <span className="delegate-row-properties">
-                        {[context, access, route].filter(Boolean).join(' · ')}
-                        {elapsedText && (
-                          <span className="delegate-row-mobile-elapsed">
-                            {' · '}
-                            {elapsedText}
-                          </span>
-                        )}
-                      </span>
-                    </span>
-                    <span className="delegate-row-chevron" aria-hidden="true">
-                      ›
-                    </span>
-                  </AriaButton>
-                </div>
-              );
-            })}
+                    {section.label && (
+                      <h3 className="delegate-section-title">
+                        {section.label}
+                      </h3>
+                    )}
+                    {section.groups.map((group: DelegateCompositeGroup) => {
+                      const row = group.row;
+                      const runState = stateLabel(row.state);
+                      const pauseState = row.pauseState;
+                      const state = pauseState ?? runState;
+                      const activityLabel = short(
+                        delegateActivityLabel(row, runState, pauseState),
+                        140,
+                      );
+                      const name = short(row.name, 70);
+                      const route = row.route ?? '';
+                      const context = delegateContext(row) ?? '';
+                      const access =
+                        row.allowWrites === true ? 'read/write' : 'read-only';
+                      const elapsedText = elapsed(
+                        row.startedAt ?? row.createdAt,
+                        row.finishedAt,
+                        row.pausedAt ?? now,
+                      );
+                      return (
+                        <div
+                          className={`delegate-row ${stateClass(state)}`}
+                          key={`${surface.id}-${row.id}`}
+                        >
+                          <AriaButton
+                            type="button"
+                            className="delegate-row-toggle"
+                            aria-haspopup="dialog"
+                            onPress={() => {
+                              setSelectedId(row.id);
+                              setLastInspectorRow(row);
+                              setInspectorOpen(true);
+                            }}
+                          >
+                            <span className="surface-state" aria-hidden="true">
+                              {stateGlyph(state)}
+                            </span>
+                            <span className="delegate-row-main">
+                              <strong>{name}</strong>
+                              <small>{activityLabel}</small>
+                            </span>
+                            <span className="delegate-row-meta">
+                              <span className="delegate-row-status">
+                                {state}
+                                {elapsedText ? ` · ${elapsedText}` : ''}
+                              </span>
+                              <span className="delegate-row-properties">
+                                {[context, access, route]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                                {elapsedText && (
+                                  <span className="delegate-row-mobile-elapsed">
+                                    {' · '}
+                                    {elapsedText}
+                                  </span>
+                                )}
+                              </span>
+                            </span>
+                            <span
+                              className="delegate-row-chevron"
+                              aria-hidden="true"
+                            >
+                              ›
+                            </span>
+                          </AriaButton>
+                        </div>
+                      );
+                    })}
+                  </section>
+                ),
+            )}
           </div>
         </div>
       </WorkSurface>
@@ -344,6 +420,7 @@ function DelegateSurface({
         <DelegateTranscriptInspector
           row={inspectorRow}
           now={now}
+          runOptions={inspectorRuns}
           isOpen={inspectorOpen}
           paused={pausedAt !== undefined}
           onClose={() => setInspectorOpen(false)}
