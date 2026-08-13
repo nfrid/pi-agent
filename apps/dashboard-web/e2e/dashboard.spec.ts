@@ -634,6 +634,16 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     name: 'Details',
     exact: true,
   });
+  const controlLayer = page.locator('.session-control-layer');
+  const controlLayerLayout = await controlLayer.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const bounds = element.getBoundingClientRect();
+    return {
+      visibility: style.visibility,
+      left: bounds.left,
+      width: bounds.width,
+    };
+  });
   await detailsButton.click();
   const details = page.getByRole('dialog', { name: 'Loaded shell' });
   const detailsMotion = await sharedDrawerMotion(details);
@@ -644,6 +654,17 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   });
   expect(detailsMotion.transforms).toContain('translateX(28px)');
   await expect(details).toBeVisible();
+  expect(
+    await controlLayer.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const bounds = element.getBoundingClientRect();
+      return {
+        visibility: style.visibility,
+        left: bounds.left,
+        width: bounds.width,
+      };
+    }),
+  ).toEqual(controlLayerLayout);
   await expect(details).toHaveClass(/utility-dialog/);
   expect(
     await details.evaluate((element) => {

@@ -246,25 +246,9 @@
   margin: 18px 0 0;
   font-size: 12px;
 }
-.session-page.inspector-open {
-  --inspector-width: 500px;
-}
 @media (min-width: 821px) {
   .session-control-layer {
     left: calc(50% + 120px);
     width: min(calc(100vw - 284px), 1016px);
-  }
-  .session-page.inspector-open .session-control-layer {
-    left: calc(50% - 75px);
-    width: min(calc(100vw - 674px), 1016px);
-  }
-  .session-page.inspector-open .interaction-dock {
-    padding-right: calc(13px + var(--inspector-width));
-    padding-left: 253px;
-  }
-}
-@media (max-width: 820px) {
-  .session-page.inspector-open .session-control-layer {
-    visibility: hidden;
   }
 }

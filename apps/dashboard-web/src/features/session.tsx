@@ -187,7 +187,7 @@ export function SessionView({
         ref={sessionPageRef}
         data-tail-pending={tailReadySessionId === id ? undefined : ''}
         data-runtime-paused={pauseStatus ? '' : undefined}
-        className={`session-page ${inspectorOpen ? 'inspector-open' : ''} ${hasPendingInteraction ? 'has-pending-interaction pending-interaction-open' : ''}`}
+        className={`session-page ${hasPendingInteraction ? 'has-pending-interaction pending-interaction-open' : ''}`}
       >
         <SessionHeader
           workspaceName={workspaceName}
