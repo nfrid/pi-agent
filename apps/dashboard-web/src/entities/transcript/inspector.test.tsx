@@ -186,6 +186,9 @@ describe('transcript payload inspection', () => {
         }}
       />,
     );
+    expect(write.indexOf('Status')).toBeLessThan(
+      write.indexOf('Write · src/app.ts'),
+    );
     expect(write).toContain('Write · src/app.ts');
     expect(write).toContain('Newly written content · additions only');
     expect(write).toContain('tool-code-line-added');
@@ -212,6 +215,22 @@ describe('transcript payload inspection', () => {
     );
     expect(edit).toContain('tool-code-line-removed');
     expect(edit).toContain('tool-code-line-added');
+
+    const duplicateEdit = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'edit',
+          arguments: {
+            path: 'src/app.ts',
+            edits: [
+              { oldText: 'same', newText: 'replacement' },
+              { oldText: 'same', newText: 'replacement' },
+            ],
+          },
+        }}
+      />,
+    );
+    expect(duplicateEdit.match(/>Replacement [12]<\/h5>/gu)).toHaveLength(2);
   });
 
   it('normalizes only supported result text shapes and presents command errors as terminal output', () => {
@@ -248,6 +267,58 @@ describe('transcript payload inspection', () => {
     expect(command).toContain('tool-terminal-result-error');
     expect(command).toContain('Raw Arguments');
     expect(command).toContain('Raw Result');
+  });
+
+  it('bounds command previews and discloses argument and result truncation', () => {
+    const longCommand = `printf '${'x'.repeat(12_001)}'`;
+    const markup = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'bash',
+          arguments: { command: longCommand },
+          result: 'done',
+          data: { argumentsTruncated: true, resultTruncated: true },
+        }}
+      />,
+    );
+    expect(markup).not.toContain(longCommand);
+    expect(markup).toContain(
+      'Arguments preview is truncated after 12,000 characters',
+    );
+    expect(markup).toContain(
+      'Source truncated this arguments before it reached the dashboard.',
+    );
+    expect(markup).toContain(
+      'Source truncated this result before it reached the dashboard.',
+    );
+  });
+
+  it('preserves result source-truncation disclosure on write and edit presentations', () => {
+    const write = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'write',
+          arguments: { path: 'src/app.ts', content: 'const ready = true;' },
+          data: { resultTruncated: true },
+        }}
+      />,
+    );
+    const edit = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'edit',
+          arguments: {
+            path: 'src/app.ts',
+            edits: [{ oldText: 'old', newText: 'new' }],
+          },
+          data: { resultTruncated: true },
+        }}
+      />,
+    );
+    const notice =
+      'Source truncated this result before it reached the dashboard.';
+    expect(write).toContain(notice);
+    expect(edit).toContain(notice);
   });
 
   it('uses plaintext for unknown extensions and keeps preview/source truncation truthful', () => {

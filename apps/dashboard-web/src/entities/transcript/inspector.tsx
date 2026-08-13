@@ -568,6 +568,10 @@ function replacementDiffLines(
   return diffLines(oldBounded, newBounded);
 }
 
+function replacementDisplayKey(index: number): string {
+  return `replacement-${index}`;
+}
+
 function ReplacementPreview({
   oldText,
   newText,
@@ -687,6 +691,11 @@ function SpecializedToolInspector({
           sourceTruncated={sourceArgumentsTruncated}
           textTruncated={false}
         />
+        <PreviewTruncation
+          label="Result"
+          sourceTruncated={sourceTruncated(tool, 'result')}
+          textTruncated={false}
+        />
       </section>
     );
   }
@@ -706,7 +715,7 @@ function SpecializedToolInspector({
           <ReplacementPreview
             {...replacement}
             index={index}
-            key={`replacement-${replacement.oldText}-${replacement.newText}`}
+            key={replacementDisplayKey(index)}
             language={language}
           />
         ))}
@@ -719,11 +728,17 @@ function SpecializedToolInspector({
               newText.length > SPECIALIZED_PREVIEW_MAX_TEXT,
           )}
         />
+        <PreviewTruncation
+          label="Result"
+          sourceTruncated={sourceTruncated(tool, 'result')}
+          textTruncated={false}
+        />
       </section>
     );
   }
   const command = toolCommand(tool);
   if (kind === 'command' && command) {
+    const boundedCommand = boundedSpecializedText(command);
     const resultText = normalizedResultText(tool.result);
     const resultBounded =
       resultText === undefined ? undefined : boundedSpecializedText(resultText);
@@ -737,8 +752,13 @@ function SpecializedToolInspector({
         >
           <h4>Command</h4>
           <pre className="tool-code-preview tool-command-preview">
-            <HighlightedLine language="bash" value={command} />
+            <HighlightedLine language="bash" value={boundedCommand.text} />
           </pre>
+          <PreviewTruncation
+            label="Arguments"
+            sourceTruncated={sourceArgumentsTruncated}
+            textTruncated={boundedCommand.truncated}
+          />
         </section>
         {resultBounded !== undefined ? (
           <section
@@ -763,7 +783,13 @@ function SpecializedToolInspector({
               textTruncated={resultBounded.truncated}
             />
           </section>
-        ) : null}
+        ) : (
+          <PreviewTruncation
+            label="Result"
+            sourceTruncated={sourceTruncated(tool, 'result')}
+            textTruncated={false}
+          />
+        )}
       </div>
     );
   }
@@ -909,6 +935,12 @@ function ToolInspector({
   const argumentsValue = record.arguments ?? record.args;
   return (
     <div className="tool-inspector">
+      <dl className="tool-inspector-status">
+        <div>
+          <dt>Status</dt>
+          <dd>{String(status)}</dd>
+        </div>
+      </dl>
       {specializedKind ? (
         <SpecializedToolInspector kind={specializedKind} tool={record} />
       ) : null}
@@ -924,12 +956,6 @@ function ToolInspector({
           <BoundedPayloadPreview value={record.result} label="result" />
         </details>
       ) : null}
-      <dl className="tool-inspector-status">
-        <div>
-          <dt>Status</dt>
-          <dd>{String(status)}</dd>
-        </div>
-      </dl>
       {!specializedKind && argumentsValue !== undefined && (
         <PayloadSection
           title="Arguments"
