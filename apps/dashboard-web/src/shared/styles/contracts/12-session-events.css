@@ -299,8 +299,8 @@ details.session-event {
   .activity-step-dot,
 .session-page[data-runtime-paused] .tool-detail.step-pending .activity-step-dot,
 .session-page[data-runtime-paused] .surface-running .surface-state,
-.surface-dialog[data-runtime-paused] .surface-running .surface-state,
-.surface-dialog[data-runtime-paused]
+.surface-drawer[data-runtime-paused] .surface-running .surface-state,
+.surface-drawer[data-runtime-paused]
   .tool-detail.step-pending
   .activity-step-dot,
 .session-page[data-runtime-paused] .live-compaction-event .session-event-icon {

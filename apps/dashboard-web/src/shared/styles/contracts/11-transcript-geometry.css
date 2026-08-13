@@ -346,21 +346,21 @@
   .extension-surfaces {
     grid-template-columns: minmax(0, 1fr);
   }
-  .work-surface-dialog .surface-dialog-header {
+  .work-surface-drawer .surface-drawer-header {
     align-items: center;
   }
-  .work-surface-dialog .surface-dialog-header-content {
+  .work-surface-drawer .surface-drawer-header-content {
     flex: none;
     max-width: 100%;
   }
-  .work-surface-dialog .work-header-stats {
+  .work-surface-drawer .work-header-stats {
     width: max-content;
   }
-  .delegate-transcript-dialog .surface-dialog-header {
+  .delegate-transcript-drawer .surface-drawer-header {
     flex-wrap: wrap;
     gap: 8px;
   }
-  .delegate-transcript-dialog .surface-dialog-heading {
+  .delegate-transcript-drawer .surface-drawer-heading {
     flex: 1 1 150px;
   }
   .delegate-inspector-metadata {
@@ -371,7 +371,7 @@
   .delegate-transcript-inspector-body {
     padding: 12px 13px 24px;
   }
-  .surface-dialog {
+  .surface-drawer {
     top: 0;
     right: 0;
     bottom: 0;
@@ -428,8 +428,8 @@ body:has(.session-page) .global-tools > .palette-trigger {
   .command-palette,
   .agent-nav-backdrop,
   .agent-nav-drawer,
-  .surface-dialog-layer,
-  .surface-dialog,
+  .surface-drawer-layer,
+  .surface-drawer,
   .outline-sheet,
   .session-inspector,
   .composer,
@@ -438,7 +438,7 @@ body:has(.session-page) .global-tools > .palette-trigger {
   .transcript-outline-item,
   .transcript-minimap-marker,
   .agent-nav-drawer,
-  .surface-dialog,
+  .surface-drawer,
   .outline-sheet {
     transition: none;
     animation: none;
@@ -452,7 +452,7 @@ body:has(.session-page) .global-tools > .palette-trigger {
     opacity 240ms cubic-bezier(0.16, 1, 0.3, 1),
     transform 240ms cubic-bezier(0.16, 1, 0.3, 1);
 }
-html:has(.surface-dialog-layer:not(.is-exiting)) .session-context,
+html:has(.surface-drawer-layer:not(.is-exiting)) .session-context,
 .session-page.modal-open .session-context {
   opacity: 0;
   transform: translateY(-24px);

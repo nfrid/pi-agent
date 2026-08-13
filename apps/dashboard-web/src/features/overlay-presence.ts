@@ -19,26 +19,22 @@ export function useOverlayPresence(open: boolean): {
   present: boolean;
   exiting: boolean;
 } {
-  const [present, setPresent] = useState(open);
-  const [exiting, setExiting] = useState(false);
+  const [retained, setRetained] = useState(open);
+  const present = open || retained;
+  const exiting = retained && !open;
 
   useEffect(() => {
     if (open) {
-      setPresent(true);
-      setExiting(false);
+      setRetained(true);
       return;
     }
-    if (!present) return;
-    setExiting(true);
+    if (!retained) return;
     const timeout = window.setTimeout(
-      () => {
-        setPresent(false);
-        setExiting(false);
-      },
+      () => setRetained(false),
       prefersReducedMotion() ? 0 : DASHBOARD_MOTION_MS,
     );
     return () => window.clearTimeout(timeout);
-  }, [open, present]);
+  }, [open, retained]);
 
   return { present, exiting };
 }

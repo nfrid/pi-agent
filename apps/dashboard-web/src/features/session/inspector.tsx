@@ -4,9 +4,9 @@ import type {
   SessionApiResponse,
 } from '@pi-dashboard/protocol';
 import { sessionDisplayTitle } from '../../app-helpers';
-import { DashboardDialog } from '../dashboard-dialog';
 import { RuntimeActions } from '../runtime-actions';
 import { SessionRename } from '../session-rename';
+import { SurfaceDrawer } from '../surface-drawer';
 
 type SessionInspectorData = Pick<SessionApiResponse, 'metadata' | 'entries'>;
 
@@ -29,13 +29,13 @@ export function SessionInspector({
 }) {
   const title = sessionDisplayTitle(data.metadata, data.entries);
   return (
-    <DashboardDialog
-      dialogId="session-inspector"
+    <SurfaceDrawer
+      drawerId="session-inspector"
       titleId="session-inspector-title"
       title={title}
       eyebrow="Session details"
       closeLabel="Close session details"
-      className="surface-dialog utility-dialog session-inspector"
+      className="surface-drawer utility-drawer session-inspector"
       isOpen={open}
       onClose={onClose}
     >
@@ -68,6 +68,6 @@ export function SessionInspector({
       {!runtime && (
         <p className="muted">No active runtime is attached to this session.</p>
       )}
-    </DashboardDialog>
+    </SurfaceDrawer>
   );
 }

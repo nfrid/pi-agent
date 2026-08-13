@@ -221,7 +221,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .session-context,
-  html:has(.surface-dialog-layer:not(.is-exiting)) .session-context,
+  html:has(.surface-drawer-layer:not(.is-exiting)) .session-context,
   .session-page.modal-open .session-context,
   .transcript-minimap-marker i,
   .transcript-minimap-preview {

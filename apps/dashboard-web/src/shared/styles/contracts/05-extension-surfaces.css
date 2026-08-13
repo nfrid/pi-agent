@@ -245,7 +245,7 @@
   font-size: 16px;
   text-align: right;
 }
-.delegate-transcript-dialog {
+.delegate-transcript-drawer {
   width: min(760px, 100vw);
 }
 .delegate-inspector-metadata {

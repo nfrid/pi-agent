@@ -1,9 +1,9 @@
 import { Outlet, useRouterState } from '@tanstack/react-router';
-import { DashboardDialog } from '../features/dashboard-dialog';
 import {
   DashboardUtilityProvider,
   useDashboardUtility,
 } from '../features/dashboard-utility-context';
+import { SurfaceDrawer } from '../features/surface-drawer';
 import {
   Header,
   InboxView,
@@ -86,10 +86,10 @@ function DashboardUtilityOverlay({
           ? 'Inbox'
           : 'Dashboard utility';
   return (
-    <DashboardDialog
+    <SurfaceDrawer
       title={title}
       eyebrow="Workspace utility"
-      className="surface-dialog utility-dialog"
+      className="surface-drawer utility-drawer"
       isOpen={Boolean(utility?.open && utility.panel)}
       onClose={() => utility?.close()}
     >
@@ -100,6 +100,6 @@ function DashboardUtilityOverlay({
       {utility?.panel === 'inbox' && (
         <InboxView snapshot={snapshot} usageError={usageError} />
       )}
-    </DashboardDialog>
+    </SurfaceDrawer>
   );
 }

@@ -669,16 +669,16 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     animationTimingFunction: 'cubic-bezier(0.16, 1, 0.3, 1)',
   });
   expect(outlineMotion.transforms).toContain('translateX(100%)');
-  await expect(outline).toHaveClass(/work-surface-dialog/);
+  await expect(outline).toHaveClass(/work-surface-drawer/);
   await expect(outline.locator('h2')).toHaveCount(0);
   await expect(outline.locator('.eyebrow')).toHaveText('Transcript outline');
-  await expect(outline.locator('.surface-dialog-summary')).toContainText(
+  await expect(outline.locator('.surface-drawer-summary')).toContainText(
     'Navigate transcript landmarks',
   );
   await expect(outline.locator('.surface-stats')).toContainText('landmarks');
   expect(
     await outline
-      .locator('.surface-dialog-body')
+      .locator('.surface-drawer-body')
       .evaluate((element) => getComputedStyle(element).padding),
   ).toBe('0px');
   await expect(
@@ -749,7 +749,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
       };
     }),
   ).toEqual(controlLayerLayout);
-  await expect(details).toHaveClass(/utility-dialog/);
+  await expect(details).toHaveClass(/utility-drawer/);
   expect(
     await details.evaluate((element) => {
       const style = getComputedStyle(element);
@@ -763,7 +763,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   ).toEqual({ top: '0px', bottom: '0px', fillsViewport: true });
   expect(
     await details
-      .locator('.surface-dialog-body')
+      .locator('.surface-drawer-body')
       .evaluate((element) => getComputedStyle(element).paddingTop),
   ).toBe('14px');
   const returnHeadingFrames = await sessionHeadingFramesAfterClick(
@@ -3404,17 +3404,17 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
     .getByRole('button', { name: 'Close Workspaces' })
     .click();
   // The panel stays mounted for its visual exit but leaves the accessibility tree.
-  const exitingUtility = page.locator('.surface-dialog-layer.is-exiting');
+  const exitingUtility = page.locator('.surface-drawer-layer.is-exiting');
   await expect(exitingUtility.locator('> div')).toHaveAttribute(
     'aria-hidden',
     'true',
   );
-  await expect(page.locator('.utility-dialog')).toHaveCount(1);
-  await expect(page.locator('.utility-dialog')).toHaveCount(0);
+  await expect(page.locator('.utility-drawer')).toHaveCount(1);
+  await expect(page.locator('.utility-drawer')).toHaveCount(0);
   await page.getByRole('button', { name: 'Open agent list' }).click();
   await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Workspaces' })).toBeVisible();
-  await page.locator('.surface-dialog-layer').evaluate((element) => {
+  await page.locator('.surface-drawer-layer').evaluate((element) => {
     element.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   });
   await expect(page.getByRole('dialog', { name: 'Workspaces' })).toHaveCount(0);
@@ -3618,10 +3618,10 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   await tasksLauncher.click();
   const tasksPanel = page.getByRole('dialog', { name: 'Tasks' });
   await expect(tasksPanel).toBeVisible();
-  await expect(tasksPanel).toHaveClass(/work-surface-dialog/);
+  await expect(tasksPanel).toHaveClass(/work-surface-drawer/);
   await expect(tasksPanel.locator('h2')).toHaveCount(0);
   await expect(tasksPanel.locator('.eyebrow')).toHaveText('Tasks');
-  await expect(tasksPanel.locator('.surface-dialog-summary')).toContainText(
+  await expect(tasksPanel.locator('.surface-drawer-summary')).toContainText(
     'Inspect the new drawer',
   );
   await expect(tasksPanel.locator('.surface-stats')).toContainText('1 active');
@@ -3630,7 +3630,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   );
   expect(
     await tasksPanel
-      .locator('.surface-dialog-body')
+      .locator('.surface-drawer-body')
       .evaluate((element) => getComputedStyle(element).padding),
   ).toBe('0px');
   await expect(tasksPanel).toContainText('0 of 18 complete');
@@ -3672,7 +3672,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   await expect(delegatesPanel).toBeVisible();
   await expect(delegatesPanel.locator('h2')).toHaveCount(0);
   await expect(delegatesPanel.locator('.eyebrow')).toHaveText('Delegates');
-  const delegateBody = delegatesPanel.locator('.surface-dialog-body');
+  const delegateBody = delegatesPanel.locator('.surface-drawer-body');
   expect(
     await delegateBody.evaluate((element) => ({
       top: getComputedStyle(element).paddingTop,
@@ -3710,7 +3710,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   expect(
     await delegateStats.evaluate((element) =>
       element.parentElement?.classList.contains(
-        'surface-dialog-header-content',
+        'surface-drawer-header-content',
       ),
     ),
   ).toBe(true);
@@ -3772,7 +3772,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   });
   await expect(transcriptInspector).toBeVisible();
   await expect(
-    transcriptInspector.locator('.surface-dialog-summary'),
+    transcriptInspector.locator('.surface-drawer-summary'),
   ).toContainText('Dashboard delegate 1');
   await expect(
     transcriptInspector.locator('.delegate-inspector-metadata'),
@@ -3807,7 +3807,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
     .getByRole('button', { name: 'Close Delegate transcript' })
     .click();
   // The controlled drawer stays mounted for its exit animation and focus return.
-  const exitingDelegateInspector = page.locator('.delegate-transcript-dialog');
+  const exitingDelegateInspector = page.locator('.delegate-transcript-drawer');
   await expect(exitingDelegateInspector).toHaveCount(1);
   await expect(transcriptInspector).toHaveCount(0);
   await expect(exitingDelegateInspector).toHaveCount(0);
@@ -3877,7 +3877,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   await detailsButton.click();
   await expect(inspector).toBeVisible();
   await page
-    .locator('.surface-dialog-layer')
+    .locator('.surface-drawer-layer')
     .click({ position: { x: 2, y: 2 } });
   await expect(inspector).toHaveCount(0);
   await expect(detailsButton).toBeFocused();
@@ -3920,27 +3920,21 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   await page.setViewportSize({ width: 1024, height: 900 });
   expect((await readDesktopGeometry())?.composerVisibility).toBe('visible');
   await page.setViewportSize({ width: 1440, height: 900 });
-  const exitState = await page.evaluate(() => {
+  const exitState = await page.evaluate(async () => {
     document
       .querySelector<HTMLButtonElement>(
         '#session-inspector button[aria-label="Close session details"]',
       )
       ?.click();
-    return new Promise<{ exiting: boolean; headingVisibility: string }>(
-      (resolve) =>
-        window.setTimeout(() => {
-          const layer = document.querySelector('.surface-dialog-layer');
-          const heading = document.querySelector(
-            '.session-page .session-heading h1',
-          );
-          resolve({
-            exiting: layer?.classList.contains('is-exiting') ?? false,
-            headingVisibility: heading
-              ? getComputedStyle(heading).visibility
-              : 'missing',
-          });
-        }, 48),
-    );
+    await Promise.resolve();
+    const layer = document.querySelector('.surface-drawer-layer');
+    const heading = document.querySelector('.session-page .session-heading h1');
+    return {
+      exiting: layer?.classList.contains('is-exiting') ?? false,
+      headingVisibility: heading
+        ? getComputedStyle(heading).visibility
+        : 'missing',
+    };
   });
   expect(exitState).toEqual({ exiting: true, headingVisibility: 'visible' });
   await expect(inspector).toHaveCount(0);

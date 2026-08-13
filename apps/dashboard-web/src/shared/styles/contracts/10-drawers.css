@@ -1,5 +1,5 @@
-/* Global dialog contract: surface drawers and final composer layout pass. */
-.surface-dialog-layer {
+/* Global drawer contract: overlay surfaces and final composer layout pass. */
+.surface-drawer-layer {
   position: fixed;
   animation: overlay-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
   z-index: 45;
@@ -10,7 +10,7 @@
 [data-swipe-dismiss="right"] {
   touch-action: pan-y;
 }
-.surface-dialog {
+.surface-drawer {
   position: absolute;
   top: 0;
   right: 0;
@@ -24,19 +24,19 @@
   pointer-events: auto;
   animation: drawer-in 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-.surface-dialog-layer.is-exiting {
+.surface-drawer-layer.is-exiting {
   animation: overlay-out 160ms cubic-bezier(0.7, 0, 0.84, 0) both;
   pointer-events: none;
 }
 :where(
-  .surface-dialog[data-exiting],
+  .surface-drawer[data-exiting],
   .outline-sheet[data-exiting],
-  .surface-dialog-layer.is-exiting .surface-dialog
+  .surface-drawer-layer.is-exiting .surface-drawer
 ) {
   animation: drawer-out 160ms cubic-bezier(0.7, 0, 0.84, 0) both;
   pointer-events: none;
 }
-.surface-dialog-header,
+.surface-drawer-header,
 .outline-sheet > header {
   display: flex;
   align-items: flex-start;
@@ -45,22 +45,22 @@
   border-bottom: 1px solid var(--line-soft);
   padding: 16px 18px 13px;
 }
-.surface-dialog-header h2,
+.surface-drawer-header h2,
 .outline-sheet h2 {
   margin: 0;
   color: var(--fg);
   font-size: 16px;
 }
-.surface-dialog-header .eyebrow,
+.surface-drawer-header .eyebrow,
 .outline-sheet .eyebrow {
   margin: 0 0 3px;
   color: var(--purple);
 }
-.surface-dialog-heading,
-.surface-dialog-header-content {
+.surface-drawer-heading,
+.surface-drawer-header-content {
   min-width: 0;
 }
-.surface-dialog-summary {
+.surface-drawer-summary {
   margin-top: 4px;
   overflow: hidden;
   color: var(--muted);
@@ -68,25 +68,25 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.surface-dialog-header-content {
+.surface-drawer-header-content {
   margin: auto 0 auto auto;
 }
-.surface-dialog-header > .session-icon-button {
+.surface-drawer-header > .session-icon-button {
   flex: none;
 }
-.surface-dialog-body {
+.surface-drawer-body {
   min-height: 0;
   overflow: auto;
   padding: 0 18px 28px;
 }
-.surface-dialog-body .surface-detail-list {
+.surface-drawer-body .surface-detail-list {
   max-height: none;
 }
-.surface-dialog-body .task-progress {
+.surface-drawer-body .task-progress {
   padding-right: 0;
   padding-left: 0;
 }
-.work-surface-dialog .surface-dialog-body {
+.work-surface-drawer .surface-drawer-body {
   display: flex;
   min-height: 0;
   flex: 1;
@@ -117,7 +117,7 @@
   color: currentColor;
   font-variant-numeric: tabular-nums;
 }
-.surface-dialog-header-content .surface-stats {
+.surface-drawer-header-content .surface-stats {
   padding: 0;
 }
 .work-header-stats {
@@ -139,15 +139,15 @@
 .work-header-stats > span + span {
   border-left: 1px solid color-mix(in srgb, var(--line) 72%, currentColor);
 }
-.work-surface-dialog .task-progress {
+.work-surface-drawer .task-progress {
   flex: none;
   padding: 12px 18px 10px;
 }
-.work-surface-dialog .task-progress strong {
+.work-surface-drawer .task-progress strong {
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
-.work-surface-dialog .surface-scroll-region {
+.work-surface-drawer .surface-scroll-region {
   min-height: 0;
   flex: 1;
   overflow-x: hidden;
@@ -157,41 +157,41 @@
   scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
-.work-surface-dialog :is(.delegate-row, .task-row, .surface-row) {
+.work-surface-drawer :is(.delegate-row, .task-row, .surface-row) {
   border-top: 0;
   border-bottom: 1px solid var(--line-soft);
 }
-.work-surface-dialog :is(.delegate-row, .task-row, .surface-row):first-child {
+.work-surface-drawer :is(.delegate-row, .task-row, .surface-row):first-child {
   border-top: 1px solid var(--line-soft);
 }
-.utility-dialog .surface-dialog-body {
+.utility-drawer .surface-drawer-body {
   padding-top: 14px;
 }
-.utility-dialog .page-heading {
+.utility-drawer .page-heading {
   align-items: center;
   margin: 0 0 14px;
 }
-.utility-dialog .page-heading h1 {
+.utility-drawer .page-heading h1 {
   display: none;
 }
-.utility-dialog .page-heading .muted {
+.utility-drawer .page-heading .muted {
   margin: 0;
   font-size: 11px;
 }
-.utility-dialog .workspace-list,
-.utility-dialog .session-list {
+.utility-drawer .workspace-list,
+.utility-drawer .session-list {
   gap: 6px;
 }
-.utility-dialog .workspace-card,
-.utility-dialog .session-row {
+.utility-drawer .workspace-card,
+.utility-drawer .session-row {
   border-radius: 7px;
   padding: 12px 13px;
 }
-.utility-dialog .workspace-card strong,
-.utility-dialog .session-row strong {
+.utility-drawer .workspace-card strong,
+.utility-drawer .session-row strong {
   font-size: 12px;
 }
-.utility-dialog .inbox-preferences {
+.utility-drawer .inbox-preferences {
   margin-bottom: 18px;
   padding: 13px;
 }

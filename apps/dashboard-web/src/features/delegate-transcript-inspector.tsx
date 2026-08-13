@@ -5,7 +5,7 @@ import type {
 import { TranscriptEntry } from '../entities/transcript/entries';
 import { StructuredResultSection } from '../entities/transcript/inspector';
 import type { TranscriptModelItem } from '../transcript';
-import { DashboardDialog } from './dashboard-dialog';
+import { SurfaceDrawer } from './surface-drawer';
 
 function text(value: string | undefined, fallback = ''): string {
   return value?.trim() || fallback;
@@ -347,12 +347,12 @@ export function DelegateTranscriptInspector({
 }) {
   const entries = row.transcript ?? [];
   return (
-    <DashboardDialog
+    <SurfaceDrawer
       title="Delegate transcript"
       eyebrow="Delegate"
       headerSummary={text(row.name, 'Subagent')}
       headerContent={<DelegateInspectorMetadata row={row} now={now} />}
-      className="surface-dialog delegate-transcript-dialog"
+      className="surface-drawer delegate-transcript-drawer"
       isOpen={isOpen}
       paused={paused}
       onClose={onClose}
@@ -371,6 +371,6 @@ export function DelegateTranscriptInspector({
           </p>
         )}
       </div>
-    </DashboardDialog>
+    </SurfaceDrawer>
   );
 }

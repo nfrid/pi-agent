@@ -10,9 +10,9 @@ import type {
   TaskSurfaceTask,
 } from '../../../../extensions/tasks/contribution';
 import type { DashboardRendererContext } from '../renderer-registry';
-import { DashboardDialog, SurfaceStats } from './dashboard-dialog';
 import { DelegateTranscriptInspector } from './delegate-transcript-inspector';
 import { PauseIcon } from './pause-icon';
+import { SurfaceDrawer, SurfaceStats } from './surface-drawer';
 
 function text(value: string | undefined, fallback = ''): string {
   return value?.trim() || fallback;
@@ -117,7 +117,7 @@ function WorkSurface({
   summary,
   count,
   visibleCount,
-  dialogClassName = 'surface-dialog work-surface-dialog',
+  drawerClassName = 'surface-drawer work-surface-drawer',
   headerStats,
   paused = false,
   children,
@@ -127,7 +127,7 @@ function WorkSurface({
   summary: string;
   count: ReactNode;
   visibleCount: number;
-  dialogClassName?: string;
+  drawerClassName?: string;
   headerStats?: ReactNode;
   paused?: boolean;
   children: ReactNode;
@@ -141,7 +141,7 @@ function WorkSurface({
       return;
     }
     // A delta can remove every row while the surface is open. Close the
-    // controlled dialog first so its exit/focus handling does not retain a
+    // controlled drawer first so its exit/focus handling does not retain a
     // launcher or transcript row that no longer exists.
     setOpen(false);
     const timeout = window.setTimeout(() => {
@@ -174,19 +174,19 @@ function WorkSurface({
           </span>
         </AriaButton>
       </article>
-      <DashboardDialog
+      <SurfaceDrawer
         title={title}
         eyebrow={label}
         hideTitle
         headerSummary={summary}
-        className={dialogClassName}
+        className={drawerClassName}
         headerContent={headerStats}
         isOpen={open}
         paused={paused}
         onClose={() => setOpen(false)}
       >
         <div className="work-surface-content">{children}</div>
-      </DashboardDialog>
+      </SurfaceDrawer>
     </>
   );
 }
@@ -260,7 +260,7 @@ function DelegateSurface({
         summary={summary}
         count={`${activeCount} active · ${finishedCount} finished`}
         visibleCount={rows.length}
-        dialogClassName="surface-dialog work-surface-dialog delegate-surface-dialog"
+        drawerClassName="surface-drawer work-surface-drawer delegate-surface-drawer"
         headerStats={statsView}
         paused={pausedAt !== undefined}
       >

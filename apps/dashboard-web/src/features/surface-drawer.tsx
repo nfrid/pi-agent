@@ -36,7 +36,7 @@ export function SurfaceStats({
   );
 }
 
-export function DashboardDialog({
+export function SurfaceDrawer({
   title,
   onClose,
   children,
@@ -44,9 +44,9 @@ export function DashboardDialog({
   headerSummary,
   eyebrow = 'Live work',
   hideTitle = false,
-  className = 'surface-dialog',
-  layerClassName = 'surface-dialog-layer',
-  dialogId,
+  className = 'surface-drawer',
+  layerClassName = 'surface-drawer-layer',
+  drawerId,
   titleId: providedTitleId,
   closeLabel,
   isOpen = true,
@@ -61,7 +61,7 @@ export function DashboardDialog({
   hideTitle?: boolean;
   className?: string;
   layerClassName?: string;
-  dialogId?: string;
+  drawerId?: string;
   titleId?: string;
   closeLabel?: string;
   isOpen?: boolean;
@@ -106,7 +106,7 @@ export function DashboardDialog({
         if (!nextOpen) onClose();
       }}
     >
-      {/* FocusScope owns focus; this wrapper forwards Escape from the dialog. */}
+      {/* FocusScope owns focus; this wrapper forwards Escape from the drawer. */}
       <div
         aria-hidden={exiting || undefined}
         inert={exiting || undefined}
@@ -119,25 +119,25 @@ export function DashboardDialog({
       >
         <AriaDialog
           ref={swipeHandlers.ref}
-          id={dialogId}
+          id={drawerId}
           className={className}
           aria-labelledby={titleId}
           aria-modal="true"
           data-swipe-dismiss="right"
           data-runtime-paused={paused ? '' : undefined}
         >
-          <header className="surface-dialog-header">
-            <div className="surface-dialog-heading">
+          <header className="surface-drawer-header">
+            <div className="surface-drawer-heading">
               <p className="eyebrow" id={hideTitle ? titleId : undefined}>
                 {eyebrow}
               </p>
               {!hideTitle && <h2 id={titleId}>{title}</h2>}
               {headerSummary && (
-                <div className="surface-dialog-summary">{headerSummary}</div>
+                <div className="surface-drawer-summary">{headerSummary}</div>
               )}
             </div>
             {headerContent && (
-              <div className="surface-dialog-header-content">
+              <div className="surface-drawer-header-content">
                 {headerContent}
               </div>
             )}
@@ -150,7 +150,7 @@ export function DashboardDialog({
               ×
             </button>
           </header>
-          <div className="surface-dialog-body">{children}</div>
+          <div className="surface-drawer-body">{children}</div>
         </AriaDialog>
       </div>
     </ModalOverlay>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { DashboardDialog, SurfaceStats } from '../../features/dashboard-dialog';
+import { SurfaceDrawer, SurfaceStats } from '../../features/surface-drawer';
 import { DashboardTime } from '../../features/timestamp';
 import {
   sampleTranscriptLandmarks,
@@ -153,7 +153,7 @@ export function TranscriptOutline({
           </button>
         ))}
       </aside>
-      <DashboardDialog
+      <SurfaceDrawer
         isOpen={open}
         title="Transcript outline"
         eyebrow="Transcript outline"
@@ -166,11 +166,11 @@ export function TranscriptOutline({
             stats={[{ label: 'landmarks', value: outlineLandmarks.length }]}
           />
         }
-        className="surface-dialog work-surface-dialog outline-sheet"
+        className="surface-drawer work-surface-drawer outline-sheet"
         onClose={() => onOpenChange?.(false)}
       >
         <div className="work-surface-content">{list}</div>
-      </DashboardDialog>
+      </SurfaceDrawer>
     </>
   );
 }
