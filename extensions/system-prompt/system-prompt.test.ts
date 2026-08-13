@@ -7,7 +7,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   aggregateAssistantUsage,
   buildSystemPrompt,
@@ -15,10 +15,21 @@ import {
   filterGlobalContextFiles,
   findOuterMetaSkillPath,
   formatPromptInfo,
+  loadAgentInstruction,
   summarizeContextMessages,
 } from './index';
 
 const temporaryDirectories: string[] = [];
+const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+
+beforeAll(() => {
+  process.env.PI_CODING_AGENT_DIR = process.cwd();
+});
+
+afterAll(() => {
+  if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+});
 
 function temporaryDirectory(): string {
   const path = mkdtempSync(join(tmpdir(), 'system-prompt-'));
@@ -58,6 +69,21 @@ afterEach(() => {
 });
 
 describe('canonical prompt composition', () => {
+  it('loads an explicit agent-relative instruction and trims its content', () => {
+    const agentDir = temporaryDirectory();
+    mkdirSync(join(agentDir, 'instructions', 'agent'), { recursive: true });
+    writeFileSync(
+      join(agentDir, 'instructions', 'agent', 'example.md'),
+      '\n  example policy  \n',
+    );
+    expect(
+      loadAgentInstruction('instructions/agent/example.md', agentDir),
+    ).toEqual({
+      path: join(agentDir, 'instructions', 'agent', 'example.md'),
+      content: 'example policy',
+    });
+  });
+
   it('keeps the agent-repository context local to that repository', () => {
     const files = [
       { path: '/home/me/.pi/agent/AGENTS.md', content: 'agent repo rules' },
@@ -75,7 +101,7 @@ describe('canonical prompt composition', () => {
     ).toEqual(files);
   });
 
-  it('ignores direct prompt replacement and append inputs', () => {
+  it('does not support direct prompt replacement or append inputs', () => {
     const prompt = buildSystemPrompt(
       options({
         customPrompt: 'UNCONTROLLED CUSTOM PROMPT',
@@ -91,17 +117,42 @@ describe('canonical prompt composition', () => {
     expect(prompt).not.toContain('UNCONTROLLED APPEND');
   });
 
-  it('keeps phase labels out of prompts with no transcript to print them', () => {
-    const interactive = buildSystemPrompt(options(), 'tui');
-    const headless = buildSystemPrompt(options(), 'json');
-    expect(interactive).toContain('concrete outcome and scope');
-    expect(interactive).toContain(
-      'natural ongoing-action form for the language',
+  it('loads each Markdown instruction exactly once in interactive and headless prompts', () => {
+    const prompts = [
+      buildSystemPrompt(options(), 'tui'),
+      buildSystemPrompt(options(), 'json'),
+    ];
+    for (const prompt of prompts) {
+      expect(prompt).toContain('<agent_instructions>\n# Working style');
+      expect(prompt).toContain('\n\n# Interaction\n');
+      expect(prompt).toContain('\n</agent_instructions>');
+      expect(prompt.match(/# Working style/g)).toHaveLength(1);
+      expect(prompt.match(/# Interaction/g)).toHaveLength(1);
+      expect(prompt).not.toContain('<agent_instruction source=');
+      expect(prompt).not.toContain('instructions/agent/working-style.md');
+      expect(prompt).not.toContain('instructions/agent/interaction.md');
+      expect(prompt).not.toContain('natural ongoing-action form');
+    }
+  });
+
+  it('fails clearly when a required instruction file is missing', () => {
+    const agentDir = temporaryDirectory();
+    mkdirSync(join(agentDir, 'instructions', 'agent'), { recursive: true });
+    writeFileSync(
+      join(agentDir, 'instructions', 'agent', 'working-style.md'),
+      'working style',
     );
-    expect(interactive).toContain('in English, use a verb ending in -ing');
-    expect(headless).not.toContain('natural ongoing-action form');
-    for (const prompt of [interactive, headless])
-      expect(prompt).toContain('state the assumption in one line');
+    const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    try {
+      expect(() => buildSystemPrompt(options(), 'tui')).toThrow(
+        /Required agent instruction could not be loaded: instructions\/agent\/interaction\.md/,
+      );
+    } finally {
+      if (previousAgentDir === undefined)
+        delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
   });
 
   it('retains official skill loading instructions and filters explicit-only skills', () => {
@@ -201,7 +252,12 @@ describe('prompt diagnostics', () => {
       aggregateAssistantUsage([]),
     );
     expect(info).toContain('Last emitted canonical system prompt: 21 chars');
-    expect(info).toContain('customPrompt=6 chars, appendSystemPrompt=6 chars');
+    expect(info).toContain(
+      'Unsupported direct prompt inputs (not loaded): customPrompt=6 chars, appendSystemPrompt=6 chars',
+    );
+    expect(info).toContain('Agent instructions: 2');
+    expect(info).toContain('working-style.md:');
+    expect(info).toContain('interaction.md:');
     expect(info).toContain('Structured tool prompt guidelines: 1');
   });
 

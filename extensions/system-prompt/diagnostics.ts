@@ -4,7 +4,11 @@ import type {
   BuildSystemPromptOptions,
   ToolInfo,
 } from '@earendil-works/pi-coding-agent';
-import { filterGlobalContextFiles, formatSkillsForPrompt } from './composition';
+import {
+  filterGlobalContextFiles,
+  formatSkillsForPrompt,
+  loadAgentInstructions,
+} from './composition';
 
 export interface SizeEstimate {
   characters: number;
@@ -125,6 +129,7 @@ export function formatPromptInfo(
     options.contextFiles ?? [],
     options.cwd,
   );
+  const instructions = loadAgentInstructions();
   const allSkills = options.skills ?? [];
   const visibleSkills = allSkills.filter(
     (skill) => !skill.disableModelInvocation,
@@ -147,8 +152,13 @@ export function formatPromptInfo(
       'Last emitted canonical system prompt',
       estimateSize(emittedPrompt),
     ),
-    `Ignored direct prompt inputs: customPrompt=${customPromptSize} chars, appendSystemPrompt=${appendSize} chars`,
+    `Unsupported direct prompt inputs (not loaded): customPrompt=${customPromptSize} chars, appendSystemPrompt=${appendSize} chars`,
     `Structured tool prompt guidelines: ${options.promptGuidelines?.length ?? 0}`,
+    `Agent instructions: ${instructions.length}`,
+    ...instructions.map(
+      (instruction) =>
+        `- ${instruction.path}: ${sizeLine('', estimateSize(instruction.content)).slice(2)}`,
+    ),
     `Context files: ${contextFiles.length}`,
     ...contextFiles.map(
       (file) =>
