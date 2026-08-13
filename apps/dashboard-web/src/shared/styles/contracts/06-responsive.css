@@ -11,7 +11,7 @@
     font-size: 11px;
   }
   .shell {
-    padding: 1px 13px 100px;
+    padding: 22px 13px 100px;
   }
   .extension-surfaces {
     grid-template-columns: minmax(0, 1fr);
