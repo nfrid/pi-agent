@@ -7,6 +7,7 @@ import {
   type BrowserSnapshot,
   isRecord,
   MAX_ID,
+  MAX_SESSION_INDEX_DELTA_ITEMS,
   type RuntimeSnapshot,
   redactImageData,
   type SessionIndexEntry,
@@ -26,6 +27,9 @@ import { WsCompatChannel } from './http/ws-channel.js';
 import { createPushSender } from './push.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 import type { RegistryChange } from './runtime-registry.js';
+
+/** Keep session deltas comfortably below the 2 MiB SSE frame limit. */
+const MAX_SESSION_INDEX_DELTA_BYTES = 1_500_000;
 
 const NON_RENDERED_SESSION_ENTRY_TYPES = new Set([
   'session',
@@ -730,6 +734,25 @@ export class DashboardServerImpl implements DashboardServer {
     if (this.lifecycle !== 'started') return;
     const delta = this.application.sessionMetadataDelta();
     if (!delta) return;
+    if (
+      delta.upsert.length > MAX_SESSION_INDEX_DELTA_ITEMS ||
+      delta.remove.length > MAX_SESSION_INDEX_DELTA_ITEMS ||
+      Buffer.byteLength(
+        JSON.stringify({
+          type: 'sessions',
+          cursor: this.eventStream.cursor + 1,
+          emittedAt: Date.now(),
+          upsert: delta.upsert,
+          remove: delta.remove,
+        }),
+        'utf8',
+      ) >= MAX_SESSION_INDEX_DELTA_BYTES
+    ) {
+      // The baseline has already advanced. A full snapshot is authoritative
+      // and resets it again while keeping the SSE frame bounded by its writer.
+      this.changed();
+      return;
+    }
     this.changed({ type: 'sessions', ...delta });
   }
 

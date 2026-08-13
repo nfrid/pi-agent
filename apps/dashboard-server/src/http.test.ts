@@ -12,7 +12,9 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  MAX_SESSION_INDEX_DELTA_ITEMS,
   parseDashboardMessage,
+  parseDashboardStreamMessage,
   parseFrame,
   serializeFrame,
 } from '@pi-dashboard/protocol';
@@ -480,6 +482,50 @@ describe('dashboard HTTP boundary', () => {
       upsert: [],
       remove: ['changed-session'],
     });
+  });
+
+  it('falls back to an authoritative snapshot for oversized session deltas', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-sessions-stream-fallback-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const implementation = server as unknown as {
+      application: {
+        sessionMetadataDelta: () => {
+          upsert: readonly unknown[];
+          remove: readonly string[];
+        };
+      };
+      eventStream: {
+        cursor: number;
+        replayAfter(cursor: number): {
+          events: readonly Record<string, unknown>[];
+        };
+      };
+    };
+    implementation.application.sessionMetadataDelta = () => ({
+      upsert: [],
+      remove: Array.from(
+        { length: MAX_SESSION_INDEX_DELTA_ITEMS + 1 },
+        (_, index) => `removed-${index}`,
+      ),
+    });
+    const before = implementation.eventStream.cursor;
+    server.publishSessionIndexChange();
+    const record = implementation.eventStream.replayAfter(before).events[0];
+    expect(record).toMatchObject({
+      type: 'snapshot',
+      cursor: before + 1,
+      snapshot: { serverId: server.snapshot().serverId },
+    });
+    expect(() => parseDashboardStreamMessage(record)).not.toThrow();
   });
 
   it('uses one online runtime consistently for session metadata overlays', async () => {

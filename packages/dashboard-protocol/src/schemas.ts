@@ -26,6 +26,7 @@ import {
   MAX_COMPOSER_COMMANDS,
   MAX_ID,
   MAX_PATH,
+  MAX_SESSION_INDEX_DELTA_ITEMS,
   MAX_TEXT,
 } from './limits.js';
 import {
@@ -1161,9 +1162,13 @@ export const DashboardSessionIndexStreamSchema = Type.Object(
     cursor: Type.Integer({ minimum: 0 }),
     emittedAt: FiniteNumberSchema,
     /** Changed or newly indexed session metadata only. */
-    upsert: Type.Array(SessionIndexEntrySchema, { maxItems: 4096 }),
+    upsert: Type.Array(SessionIndexEntrySchema, {
+      maxItems: MAX_SESSION_INDEX_DELTA_ITEMS,
+    }),
     /** IDs removed from the authoritative session index. */
-    remove: Type.Array(IdentifierSchema, { maxItems: 4096 }),
+    remove: Type.Array(IdentifierSchema, {
+      maxItems: MAX_SESSION_INDEX_DELTA_ITEMS,
+    }),
   },
   { additionalProperties: false },
 );
