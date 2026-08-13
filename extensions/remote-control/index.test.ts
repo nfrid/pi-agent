@@ -26,7 +26,7 @@ import { beginsFreshUserTurn } from '../shared/runtime/agent-lifecycle';
 import { LiveSurfaceHub } from '../shared/runtime/live-surfaces';
 import { setPendingProcessCount } from '../shared/runtime/pending-processes';
 import { registerTasksCapability } from '../tasks/register-capability';
-import remoteControl, {
+import {
   BridgeClient,
   composerCommandsSnapshot,
   createRemoteControlRuntime,
@@ -45,6 +45,7 @@ import remoteControl, {
   thinkingLevelsSnapshot,
   withoutOpaqueData,
 } from './index';
+import { emitTurnEnd } from './runtime';
 
 registerAskUserCapability();
 registerActivityGroupsCapability();
@@ -72,83 +73,6 @@ function waitFor(predicate: () => boolean): Promise<void> {
           : setTimeout(tick, 5);
     tick();
   });
-}
-
-type RegisteredHandler = (event: unknown, ctx: ExtensionContext) => unknown;
-type TestFrame = {
-  kind?: string;
-  id?: string;
-  event?: {
-    type?: string;
-    state?: string;
-    snapshot?: Record<string, unknown>;
-  };
-};
-
-async function registerRemoteControlForTest(
-  usage: () => RuntimeSnapshot['contextUsage'],
-) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-turn-end-'));
-  const socketPath = path.join(directory, 'bridge.sock');
-  const previousSocket = process.env.PI_DASHBOARD_SOCKET;
-  process.env.PI_DASHBOARD_SOCKET = socketPath;
-  const received: TestFrame[] = [];
-  let buffer = '';
-  let connection: net.Socket | undefined;
-  const server = net.createServer((socket) => {
-    connection = socket;
-    socket.setEncoding('utf8');
-    socket.on('data', (chunk) => {
-      buffer += String(chunk);
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines.filter(Boolean))
-        received.push(JSON.parse(line) as TestFrame);
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
-  const handlers = new Map<string, RegisteredHandler>();
-  const sendUserMessage = vi.fn();
-  const pi = {
-    on: (event: string, handler: RegisteredHandler) => {
-      handlers.set(event, handler);
-    },
-    events: { on: () => vi.fn() },
-    getCommands: () => [],
-    sendUserMessage,
-  } as unknown as ExtensionAPI;
-  remoteControl(pi);
-  const context = {
-    cwd: '/tmp',
-    model: undefined,
-    thinkingLevel: 'off',
-    sessionManager: {
-      getBranch: () => [],
-      getSessionId: () => 'session-registered-turn-end',
-      getSessionFile: () => undefined,
-      getSessionName: () => undefined,
-      getCwd: () => '/tmp',
-      getLeafId: () => undefined,
-    },
-    getContextUsage: usage,
-    isIdle: () => false,
-  } as unknown as ExtensionContext;
-  const emit = async (event: string, value: unknown = {}) => {
-    await handlers.get(event)?.(value, context);
-  };
-  await emit('session_start');
-  await waitFor(() => Boolean(connection));
-  await waitFor(() =>
-    received.some((frame) => frame.event?.type === 'runtime.hello'),
-  );
-  const cleanup = async () => {
-    await emit('session_shutdown', { reason: 'quit' });
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    if (previousSocket === undefined) delete process.env.PI_DASHBOARD_SOCKET;
-    else process.env.PI_DASHBOARD_SOCKET = previousSocket;
-    await rm(directory, { recursive: true, force: true });
-  };
-  return { context, connection, emit, received, sendUserMessage, cleanup };
 }
 
 describe('remote-control session lifecycle', () => {
@@ -1072,104 +996,94 @@ describe('dashboard-owned queue drafts', () => {
     expect(runtime.queueDrafts.list()).toEqual([]);
   });
 
-  it('registered turn_end publishes fresh context usage while working without drafts', async () => {
-    let contextUsage: RuntimeSnapshot['contextUsage'] = {
+  const turnEndContext = (
+    sessionId: string,
+    usage: NonNullable<RuntimeSnapshot['contextUsage']>,
+  ) =>
+    ({
+      cwd: '/tmp',
+      model: undefined,
+      thinkingLevel: 'off',
+      sessionManager: {
+        getBranch: () => [],
+        getSessionId: () => sessionId,
+        getSessionFile: () => undefined,
+        getSessionName: () => undefined,
+        getCwd: () => '/tmp',
+        getLeafId: () => undefined,
+      },
+      getContextUsage: () => usage,
+      isIdle: () => false,
+    }) as unknown as ExtensionContext;
+
+  it('publishes context usage at turn_end while the agent remains working', () => {
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    if (!runtime) throw new Error('runtime was not created');
+    const context = turnEndContext('session-turn-end-context', {
       tokens: 12_345,
       contextWindow: 100_000,
       percent: 12.345,
-    };
-    const testRuntime = await registerRemoteControlForTest(() => contextUsage);
-    try {
-      testRuntime.received.length = 0;
-      contextUsage = {
-        tokens: 23_456,
-        contextWindow: 100_000,
-        percent: 23.456,
-      };
-      await testRuntime.emit('turn_end');
-      await waitFor(() =>
-        testRuntime.received.some(
-          (frame) => frame.event?.type === 'runtime.stateChanged',
-        ),
-      );
-      const stateEvents = testRuntime.received.filter(
-        (frame) => frame.event?.type === 'runtime.stateChanged',
-      );
-      expect(stateEvents).toHaveLength(1);
-      expect(stateEvents[0]).toMatchObject({
-        event: {
-          state: 'working',
-          snapshot: {
-            liveState: 'working',
-            contextUsage: {
-              tokens: 23_456,
-              contextWindow: 100_000,
-              percent: 23.456,
-            },
-          },
+    });
+    runtime.setContext(context);
+    const sendEvent = vi.spyOn(runtime.client, 'sendEvent');
+
+    emitTurnEnd(runtime, {} as ExtensionAPI, context);
+
+    expect(sendEvent).toHaveBeenCalledTimes(1);
+    expect(sendEvent).toHaveBeenCalledWith({
+      type: 'runtime.stateChanged',
+      state: 'working',
+      snapshot: expect.objectContaining({
+        liveState: 'working',
+        contextUsage: {
+          tokens: 12_345,
+          contextWindow: 100_000,
+          percent: 12.345,
         },
-      });
-    } finally {
-      await testRuntime.cleanup();
-    }
+      }),
+    });
+    runtime.clearContext(context);
   });
 
-  it('registered turn_end delivers steer drafts and emits one refreshed state event', async () => {
-    let contextUsage: RuntimeSnapshot['contextUsage'] = {
-      tokens: 1_000,
+  it('refreshes context usage after delivering a steer draft', () => {
+    const sendUserMessage = vi.fn();
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    if (!runtime) throw new Error('runtime was not created');
+    const context = turnEndContext('session-turn-end-steer', {
+      tokens: 23_456,
       contextWindow: 100_000,
-      percent: 1,
-    };
-    const testRuntime = await registerRemoteControlForTest(() => contextUsage);
-    try {
-      testRuntime.connection.write(
-        serializeFrame({
-          kind: 'command',
-          command: {
-            id: 'queue-steer-1',
-            type: 'queue.add',
-            clientId: 'steer-draft-1',
-            mode: 'steer',
-            text: 'steer me',
-          },
-        }),
-      );
-      await waitFor(() =>
-        testRuntime.received.some(
-          (frame) => frame.kind === 'ack' && frame.id === 'queue-steer-1',
-        ),
-      );
-      testRuntime.received.length = 0;
-      contextUsage = { tokens: 2_000, contextWindow: 100_000, percent: 2 };
-      await testRuntime.emit('turn_end');
-      await waitFor(() =>
-        testRuntime.received.some(
-          (frame) => frame.event?.type === 'runtime.stateChanged',
-        ),
-      );
-      expect(testRuntime.sendUserMessage).toHaveBeenCalledOnce();
-      expect(testRuntime.sendUserMessage).toHaveBeenCalledWith('steer me', {
-        deliverAs: 'steer',
-      });
-      const stateEvents = testRuntime.received.filter(
-        (frame) => frame.event?.type === 'runtime.stateChanged',
-      );
-      expect(stateEvents).toHaveLength(1);
-      expect(stateEvents[0]).toMatchObject({
-        event: {
-          state: 'working',
-          snapshot: {
-            contextUsage: {
-              tokens: 2_000,
-              contextWindow: 100_000,
-              percent: 2,
-            },
-          },
+      percent: 23.456,
+    });
+    runtime.setContext(context);
+    runtime.queueDrafts.add({
+      clientId: 'steer-turn-end',
+      mode: 'steer',
+      text: 'steer me',
+    });
+    const sendEvent = vi.spyOn(runtime.client, 'sendEvent');
+
+    emitTurnEnd(
+      runtime,
+      { sendUserMessage } as unknown as ExtensionAPI,
+      context,
+    );
+
+    expect(sendUserMessage).toHaveBeenCalledWith('steer me', {
+      deliverAs: 'steer',
+    });
+    expect(sendEvent).toHaveBeenCalledTimes(1);
+    expect(sendEvent).toHaveBeenCalledWith({
+      type: 'runtime.stateChanged',
+      state: 'working',
+      snapshot: expect.objectContaining({
+        contextUsage: {
+          tokens: 23_456,
+          contextWindow: 100_000,
+          percent: 23.456,
         },
-      });
-    } finally {
-      await testRuntime.cleanup();
-    }
+      }),
+    });
+    runtime.clearContext(context);
   });
 
   it('expands queued prompt templates before Pi delivery', async () => {
