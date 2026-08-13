@@ -28,6 +28,7 @@ const ACK_TIMEOUT_MS = 15_000;
 const PRE_HELLO_TIMEOUT_MS = 5_000;
 export const RUNTIME_COMMAND_QUEUE_LIMIT = 64;
 export const RUNTIME_HEARTBEAT_TIMEOUT_MS = 30_000;
+export const RUNTIME_DISCONNECT_GRACE_MS = 1_000;
 
 type QueuedCommand = {
   command: BridgeCommand;
@@ -54,6 +55,8 @@ type RuntimeRecord = {
   commandRunning: boolean;
   queueDraftCommandsRunning: number;
   writeBlocked: boolean;
+  disconnectTimer?: NodeJS.Timeout;
+  disconnectGraceMs: number;
   /** Semantic action IDs already handed to Pi in this runtime epoch. */
   actionCommandIds: NonIdempotentActionIdGuard;
 };
@@ -102,6 +105,7 @@ export interface RuntimeRegistryOptions {
   ) => boolean;
   allowExternalWithoutToken?: boolean;
   commandTimeoutMs?: number;
+  disconnectGraceMs?: number;
   onChange?: (change: RegistryChange) => void;
 }
 
@@ -206,6 +210,10 @@ export class RuntimeRegistry {
             return reject();
           if (this.forgotten.has(snapshot.runtimeId)) return reject();
           const old = this.runtimes.get(snapshot.runtimeId);
+          if (old?.disconnectTimer) {
+            clearTimeout(old.disconnectTimer);
+            old.disconnectTimer = undefined;
+          }
           if (old?.socket && old.socket !== socket) old.socket.destroy();
           // A v1 bridge may put the capability snapshot only on hello. Install
           // it into the authoritative runtime snapshot when it validates; an
@@ -280,6 +288,9 @@ export class RuntimeRegistry {
             commandRunning: false,
             queueDraftCommandsRunning: 0,
             writeBlocked: false,
+            disconnectGraceMs: hello.capabilities?.heartbeat
+              ? (this.options.disconnectGraceMs ?? RUNTIME_DISCONNECT_GRACE_MS)
+              : 0,
             actionCommandIds: new NonIdempotentActionIdGuard(),
           };
           this.runtimes.set(snapshot.runtimeId, record);
@@ -302,28 +313,50 @@ export class RuntimeRegistry {
       clearTimeout(helloTimer);
       socket.off('data', onData);
       if (!record) return;
-      if (record.socket === socket) record.socket = undefined;
+      const disconnectedRecord = record;
+      if (disconnectedRecord.socket === socket)
+        disconnectedRecord.socket = undefined;
       const disconnected = new Error('Runtime bridge disconnected.');
-      for (const pending of record.pending.values()) {
+      for (const pending of disconnectedRecord.pending.values()) {
         clearTimeout(pending.timer);
         pending.reject(disconnected);
       }
-      record.pending.clear();
-      for (const queued of record.commandQueue) queued.reject(disconnected);
-      record.commandQueue = [];
-      record.writeBlocked = false;
-      if (this.runtimes.get(record.snapshot.runtimeId) === record) {
-        record.snapshot = {
-          ...record.snapshot,
+      disconnectedRecord.pending.clear();
+      for (const queued of disconnectedRecord.commandQueue)
+        queued.reject(disconnected);
+      disconnectedRecord.commandQueue = [];
+      disconnectedRecord.writeBlocked = false;
+      const publishOffline = () => {
+        disconnectedRecord.disconnectTimer = undefined;
+        if (
+          this.runtimes.get(disconnectedRecord.snapshot.runtimeId) !==
+            disconnectedRecord ||
+          disconnectedRecord.socket
+        )
+          return;
+        disconnectedRecord.snapshot = {
+          ...disconnectedRecord.snapshot,
           online: false,
           lastSeenAt: Date.now(),
         };
         this.options.onChange?.({
           kind: 'offline',
-          snapshot: record.snapshot,
-          runtimeEpoch: record.runtimeEpoch,
-          runtimeSeq: record.reducerState.lastRuntimeSeq + 1,
+          snapshot: disconnectedRecord.snapshot,
+          runtimeEpoch: disconnectedRecord.runtimeEpoch,
+          runtimeSeq: disconnectedRecord.reducerState.lastRuntimeSeq + 1,
         });
+      };
+      if (
+        this.runtimes.get(disconnectedRecord.snapshot.runtimeId) ===
+        disconnectedRecord
+      ) {
+        if (disconnectedRecord.disconnectGraceMs > 0) {
+          disconnectedRecord.disconnectTimer = setTimeout(
+            publishOffline,
+            disconnectedRecord.disconnectGraceMs,
+          );
+          disconnectedRecord.disconnectTimer.unref?.();
+        } else publishOffline();
       }
     });
     socket.once('error', () => socket.destroy());
@@ -335,6 +368,7 @@ export class RuntimeRegistry {
     if (tombstone) this.forgotten.add(runtimeId);
     if (!record) return undefined;
     this.runtimes.delete(runtimeId);
+    if (record.disconnectTimer) clearTimeout(record.disconnectTimer);
     const removed = new Error('Runtime was removed.');
     for (const pending of record.pending.values()) {
       clearTimeout(pending.timer);
@@ -484,6 +518,7 @@ export class RuntimeRegistry {
   close(): void {
     const closed = new Error('Runtime registry closed.');
     for (const record of this.runtimes.values()) {
+      if (record.disconnectTimer) clearTimeout(record.disconnectTimer);
       for (const pending of record.pending.values()) {
         clearTimeout(pending.timer);
         pending.reject(closed);

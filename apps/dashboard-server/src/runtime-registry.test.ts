@@ -194,6 +194,51 @@ describe('runtime registry', () => {
     registry.close();
   });
 
+  it('suppresses transient offline changes while heartbeat runtimes reconnect', async () => {
+    const changes: import('./runtime-registry.js').RegistryChange[] = [];
+    const registry = new RuntimeRegistry({
+      expectedToken: () => true,
+      disconnectGraceMs: 20,
+      onChange: (change) => changes.push(change),
+    });
+    const connect = (seq: number) => {
+      const bridge = new PassThrough();
+      registry.accept(bridge as never);
+      bridge.write(
+        serializeFrame({
+          kind: 'event',
+          seq,
+          event: {
+            type: 'runtime.hello',
+            protocolVersion: 1,
+            capabilities: { heartbeat: true },
+            snapshot,
+          },
+        }),
+      );
+      return bridge;
+    };
+
+    const first = connect(1);
+    await eventually(() => registry.isOnline('runtime-1'));
+    first.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(changes.some((change) => change.kind === 'offline')).toBe(false);
+
+    const replacement = connect(2);
+    await eventually(() =>
+      changes.some(
+        (change) => change.kind === 'registered' && change.reconnected,
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(changes.some((change) => change.kind === 'offline')).toBe(false);
+
+    replacement.destroy();
+    await eventually(() => changes.some((change) => change.kind === 'offline'));
+    registry.close();
+  });
+
   it('allows the same managed runtime identity to reconnect after extension reload', async () => {
     const registry = new RuntimeRegistry({ expectedToken: () => true });
     const first = new PassThrough();
