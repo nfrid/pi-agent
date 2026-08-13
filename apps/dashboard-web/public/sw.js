@@ -7,7 +7,10 @@ self.addEventListener('install', (event) =>
 self.addEventListener('activate', (event) =>
   event.waitUntil(
     (async () => {
-      const windows = await self.clients.matchAll({ type: 'window' });
+      const windows = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
       const cacheKeys = await caches.keys();
       await Promise.all(
         cacheKeys
