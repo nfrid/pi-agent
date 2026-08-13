@@ -2,6 +2,7 @@ import type {
   ContextEvent,
   ExtensionAPI,
 } from '@earendil-works/pi-coding-agent';
+import { unfinished } from './domain';
 import { turnSnapshotText } from './format';
 import {
   EXT,
@@ -110,9 +111,13 @@ export function transformTodoContext(
 
 export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
   let needsRecovery = false;
+  let hasTodoHistory = false;
+
+  const hasActiveTasks = () => store.state.tasks.some(unfinished);
 
   pi.on('session_start', () => {
     needsRecovery = false;
+    hasTodoHistory = store.state.tasks.length > 0;
   });
   pi.on('session_compact', () => {
     needsRecovery = true;
@@ -122,6 +127,8 @@ export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
   });
   pi.on('before_agent_start', () => {
     needsRecovery = false;
+    if (hasActiveTasks()) hasTodoHistory = true;
+    if (!hasTodoHistory) return undefined;
     return {
       message: {
         customType: TODO_SNAPSHOT_TYPE,
@@ -130,12 +137,33 @@ export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
       },
     };
   });
-  pi.on('context', (event) => ({
-    messages: transformTodoContext(
-      event.messages,
-      turnSnapshotText(store),
-      Date.now(),
-      needsRecovery,
-    ),
-  }));
+  pi.on('context', (event) => {
+    if (store.state.tasks.length > 0) hasTodoHistory = true;
+    if (
+      event.messages.some(
+        (message) =>
+          isTodoSnapshot(message) ||
+          (message.role === 'toolResult' && message.toolName === TOOL),
+      )
+    )
+      hasTodoHistory = true;
+    if (!hasTodoHistory)
+      return {
+        messages: event.messages.filter((message) => !isLegacyReplay(message)),
+      };
+
+    // Once the list is cleared, old snapshots would otherwise keep stale tasks
+    // visible. The empty snapshot is the explicit reset for that prior state.
+    const input = hasActiveTasks()
+      ? event.messages
+      : event.messages.filter((message) => !isTodoSnapshot(message));
+    return {
+      messages: transformTodoContext(
+        input,
+        turnSnapshotText(store),
+        Date.now(),
+        needsRecovery,
+      ),
+    };
+  });
 }
