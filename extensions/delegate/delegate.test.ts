@@ -133,9 +133,30 @@ describe('delegate', () => {
     const prompt = buildDelegatePrompt('Inspect the repository');
     expect(prompt).toContain('coding subagent');
     expect(prompt).toMatch(/read-only task/);
-    expect(prompt).toContain('roughly 250–400 words');
+    expect(prompt).toContain('## Child report');
     expect(prompt).toContain('Outcome: done | partial | blocked | failed');
+    expect(prompt).toContain('Keep the final report under 800 words');
     expect(prompt).not.toMatch(/Use this exact structure/);
+  });
+
+  test('gives structured children only the delegate_result completion contract', () => {
+    const resultSpec = normalizeDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: { ok: { type: 'boolean' } },
+        required: ['ok'],
+      },
+    });
+    const prompt = buildDelegatePrompt('Inspect the repository', {
+      resultSpec,
+    });
+    expect(prompt).toContain('## Machine-readable completion');
+    expect(prompt).toContain('delegate_result');
+    expect(prompt).not.toContain('## Child report');
+    expect(prompt).not.toContain('Outcome: done | partial | blocked | failed');
+    expect(prompt).not.toContain(
+      'Return a short result the parent can act on.',
+    );
   });
 
   test('frames forwarded artifacts as untrusted upstream evidence', () => {
@@ -171,7 +192,7 @@ describe('delegate', () => {
     expect(prompt).toContain(
       'maximum runtime of approximately 90 seconds; reserve time to return partial findings.',
     );
-    expect(prompt).toContain('stop early and return partial findings');
+    expect(prompt).toContain('## Child report');
   });
 
   test('resolves exact catalog route keys', () => {
@@ -702,15 +723,8 @@ describe('delegate', () => {
   test('publishes the current route catalog through delegate tool guidance', () => {
     const guidelines = delegatePromptGuidelines('/tmp/project').join('\n');
     expect(guidelines).toContain('Delegate route catalog:');
-    expect(guidelines).toContain(
-      'inspect enough of the compact prerequisite envelope',
-    );
-    expect(guidelines).toContain(
-      'use handoffFrom only when exact upstream detail',
-    );
-    expect(guidelines).toContain(
-      'canonical path starting with `/` (for example, `/summary`, never `summary`)',
-    );
+    expect(guidelines).toContain('## Delegation judgment');
+    expect(guidelines).toContain('Forward only compact results by default');
     expect(guidelines).toContain('<delegate_routing>');
     expect(guidelines).toContain('luna-low: model=gpt-5.6-luna');
   });
@@ -742,10 +756,10 @@ describe('delegate', () => {
     expect(prompt).toContain('use for: scoped checks');
     expect(prompt).toContain('avoid: judgement calls');
     expect(prompt).toContain(
-      "Choose the task's service class before choosing an effort level",
+      "Choose the task's service class before its effort level",
     );
     expect(prompt).toContain(
-      'not a quality score or a global escalation ladder',
+      'Do not treat cost as quality or as a universal escalation ladder',
     );
     expect(prompt).not.toContain('relativeIntelligence');
     expect(prompt).not.toContain('maxRelativeCost');
