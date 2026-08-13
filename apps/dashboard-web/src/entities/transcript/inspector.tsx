@@ -1,9 +1,36 @@
 import type { TranscriptRenderToolItem } from '@pi-dashboard/domain';
+import { diffLines } from 'diff';
+import hljs from 'highlight.js/lib/core';
+// highlight.js does not publish declarations for individual language modules.
+import bashLanguage from 'highlight.js/lib/languages/bash';
+import cssLanguage from 'highlight.js/lib/languages/css';
+import javascriptLanguage from 'highlight.js/lib/languages/javascript';
+import jsonLanguage from 'highlight.js/lib/languages/json';
+import markdownLanguage from 'highlight.js/lib/languages/markdown';
+import plaintextLanguage from 'highlight.js/lib/languages/plaintext';
+import pythonLanguage from 'highlight.js/lib/languages/python';
+import typescriptLanguage from 'highlight.js/lib/languages/typescript';
+import xmlLanguage from 'highlight.js/lib/languages/xml';
 import type { ReactNode } from 'react';
 import { Markdown } from '../../Markdown';
 
 const INSPECTOR_MAX_TEXT = 1_200;
 const INSPECTOR_MAX_DEPTH = 3;
+const SPECIALIZED_PREVIEW_MAX_TEXT = 12_000;
+
+hljs.registerLanguage('bash', bashLanguage);
+hljs.registerLanguage('css', cssLanguage);
+hljs.registerLanguage('javascript', javascriptLanguage);
+hljs.registerLanguage('json', jsonLanguage);
+hljs.registerLanguage('markdown', markdownLanguage);
+hljs.registerLanguage('plaintext', plaintextLanguage);
+hljs.registerLanguage('python', pythonLanguage);
+hljs.registerLanguage('typescript', typescriptLanguage);
+hljs.registerLanguage('xml', xmlLanguage);
+hljs.registerAliases(['sh', 'shell', 'zsh'], { languageName: 'bash' });
+hljs.registerAliases(['js', 'jsx'], { languageName: 'javascript' });
+hljs.registerAliases(['ts', 'tsx'], { languageName: 'typescript' });
+hljs.registerAliases(['html'], { languageName: 'xml' });
 const INSPECTOR_MAX_KEYS = 16;
 const INSPECTOR_MAX_RAW_TEXT = 12_000;
 
@@ -330,6 +357,445 @@ function stringifyValue(value: unknown): string | undefined {
   }
 }
 
+type SpecializedToolKind = 'write' | 'edit' | 'command';
+
+type ToolRecord = Record<string, unknown>;
+
+function toolArguments(tool: ToolRecord): ToolRecord | undefined {
+  const value = tool.arguments ?? tool.args;
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as ToolRecord)
+    : undefined;
+}
+
+function toolName(tool: ToolRecord): string | undefined {
+  return typeof tool.name === 'string'
+    ? tool.name.split('.').at(-1)?.toLowerCase()
+    : undefined;
+}
+
+function toolPath(tool: ToolRecord): string | undefined {
+  const args = toolArguments(tool);
+  const path = args?.path ?? args?.file_path;
+  return typeof path === 'string' && path.trim() ? path : undefined;
+}
+
+function toolCommand(tool: ToolRecord): string | undefined {
+  const args = toolArguments(tool);
+  for (const key of ['command', 'cmd', 'script']) {
+    if (typeof args?.[key] === 'string' && args[key].trim())
+      return args[key] as string;
+  }
+  return undefined;
+}
+
+function validEditReplacements(
+  tool: ToolRecord,
+): Array<{ oldText: string; newText: string }> {
+  const edits = toolArguments(tool)?.edits;
+  if (!Array.isArray(edits)) return [];
+  return edits.filter(
+    (edit): edit is { oldText: string; newText: string } =>
+      edit !== null &&
+      typeof edit === 'object' &&
+      !Array.isArray(edit) &&
+      typeof (edit as ToolRecord).oldText === 'string' &&
+      typeof (edit as ToolRecord).newText === 'string',
+  );
+}
+
+/** Select only complete tool payloads for the specialized presentation. */
+export function toolPresentationKind(
+  tool: ToolRecord,
+): SpecializedToolKind | undefined {
+  const name = toolName(tool);
+  if (
+    name === 'write' &&
+    toolPath(tool) &&
+    typeof toolArguments(tool)?.content === 'string'
+  )
+    return 'write';
+  if (name === 'edit' && toolPath(tool) && validEditReplacements(tool).length)
+    return 'edit';
+  if (
+    (name === 'bash' || name === 'shell' || name === 'exec') &&
+    toolCommand(tool)
+  )
+    return 'command';
+  return undefined;
+}
+
+export function toolPreviewLanguage(path: string): string {
+  const extension = path.toLowerCase().split('.').at(-1);
+  switch (extension) {
+    case 'js':
+    case 'jsx':
+      return 'javascript';
+    case 'ts':
+    case 'tsx':
+      return 'typescript';
+    case 'json':
+    case 'jsonc':
+      return 'json';
+    case 'css':
+    case 'scss':
+    case 'less':
+      return 'css';
+    case 'md':
+    case 'markdown':
+      return 'markdown';
+    case 'py':
+      return 'python';
+    case 'sh':
+    case 'bash':
+    case 'zsh':
+      return 'bash';
+    case 'html':
+    case 'htm':
+    case 'xml':
+      return 'xml';
+    default:
+      return 'plaintext';
+  }
+}
+
+function highlightedMarkup(value: string, language: string): string {
+  return hljs.highlight(value, { language, ignoreIllegals: true }).value;
+}
+
+function HighlightedLine({
+  value,
+  language,
+}: {
+  value: string;
+  language: string;
+}) {
+  return (
+    // highlight.js returns escaped markup with only its registered grammar
+    // spans; this is presentation-only and never contains tool payload HTML.
+    <code
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: highlight.js output is escaped syntax markup.
+      dangerouslySetInnerHTML={{ __html: highlightedMarkup(value, language) }}
+    />
+  );
+}
+
+function boundedSpecializedText(value: string): {
+  text: string;
+  truncated: boolean;
+} {
+  return {
+    text: value.slice(0, SPECIALIZED_PREVIEW_MAX_TEXT),
+    truncated: value.length > SPECIALIZED_PREVIEW_MAX_TEXT,
+  };
+}
+
+function PreviewTruncation({
+  label,
+  sourceTruncated: isSourceTruncated,
+  textTruncated,
+}: {
+  label: string;
+  sourceTruncated: boolean;
+  textTruncated: boolean;
+}) {
+  return (
+    <>
+      {textTruncated ? (
+        <p className="payload-truncation-label">
+          {label} preview is truncated after{' '}
+          {SPECIALIZED_PREVIEW_MAX_TEXT.toLocaleString()} characters; remaining
+          characters are not displayed.
+        </p>
+      ) : null}
+      {isSourceTruncated ? (
+        <small className="payload-truncation-label">
+          Source truncated this {label.toLowerCase()} before it reached the
+          dashboard.
+        </small>
+      ) : null}
+    </>
+  );
+}
+
+function HighlightedAdditions({
+  value,
+  language,
+  label,
+}: {
+  value: string;
+  language: string;
+  label: string;
+}) {
+  const bounded = boundedSpecializedText(value);
+  const lines = bounded.text.split(/\r\n|\r|\n/u);
+  if (lines.at(-1) === '' && lines.length > 1) lines.pop();
+  const occurrences = new Map<string, number>();
+  return (
+    <>
+      <pre className="tool-code-preview tool-code-additions">
+        {lines.map((line) => {
+          const occurrence = (occurrences.get(line) ?? 0) + 1;
+          occurrences.set(line, occurrence);
+          return (
+            <span
+              className="tool-code-line tool-code-line-added"
+              key={`${line}-${occurrence}`}
+            >
+              <span className="tool-code-prefix" aria-hidden="true">
+                +
+              </span>
+              <HighlightedLine language={language} value={line || ' '} />
+            </span>
+          );
+        })}
+      </pre>
+      <PreviewTruncation
+        label={label}
+        sourceTruncated={false}
+        textTruncated={bounded.truncated}
+      />
+    </>
+  );
+}
+
+function replacementDiffLines(
+  oldText: string,
+  newText: string,
+): Array<{ value: string; added?: boolean; removed?: boolean }> {
+  const oldBounded = boundedSpecializedText(oldText).text;
+  const newBounded = boundedSpecializedText(newText).text;
+  return diffLines(oldBounded, newBounded);
+}
+
+function replacementDisplayKey(index: number): string {
+  return `replacement-${index}`;
+}
+
+function ReplacementPreview({
+  oldText,
+  newText,
+  language,
+  index,
+}: {
+  oldText: string;
+  newText: string;
+  language: string;
+  index: number;
+}) {
+  return (
+    <section className="tool-replacement">
+      <h5>Replacement {index + 1}</h5>
+      <pre className="tool-code-preview tool-replacement-preview">
+        {(() => {
+          const occurrences = new Map<string, number>();
+          return replacementDiffLines(oldText, newText).flatMap((part) => {
+            const lines = part.value.split(/\r\n|\r|\n/u);
+            if (lines.at(-1) === '' && lines.length > 1) lines.pop();
+            const prefix = part.added ? '+' : part.removed ? '-' : ' ';
+            const className = part.added
+              ? 'tool-code-line-added'
+              : part.removed
+                ? 'tool-code-line-removed'
+                : 'tool-code-line-context';
+            return lines.map((line) => {
+              const identity = `${prefix}-${line}`;
+              const occurrence = (occurrences.get(identity) ?? 0) + 1;
+              occurrences.set(identity, occurrence);
+              return (
+                <span
+                  className={`tool-code-line ${className}`}
+                  key={`${identity}-${occurrence}`}
+                >
+                  <span className="tool-code-prefix" aria-hidden="true">
+                    {prefix}
+                  </span>
+                  <HighlightedLine language={language} value={line || ' '} />
+                </span>
+              );
+            });
+          });
+        })()}
+      </pre>
+    </section>
+  );
+}
+
+function normalizedResultText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '';
+    const textParts = value.map((part) => {
+      if (
+        part &&
+        typeof part === 'object' &&
+        !Array.isArray(part) &&
+        (part as ToolRecord).type === 'text' &&
+        typeof (part as ToolRecord).text === 'string'
+      )
+        return (part as ToolRecord).text as string;
+      return undefined;
+    });
+    return textParts.every((part): part is string => part !== undefined)
+      ? textParts.join('')
+      : undefined;
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const content = (value as ToolRecord).content;
+    return content === undefined ? undefined : normalizedResultText(content);
+  }
+  return undefined;
+}
+
+export function normalizeToolResultText(value: unknown): string | undefined {
+  return normalizedResultText(value);
+}
+
+function resultExitCode(value: unknown): number | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return undefined;
+  const exitCode = (value as ToolRecord).exitCode;
+  return typeof exitCode === 'number' && Number.isFinite(exitCode)
+    ? exitCode
+    : undefined;
+}
+
+function SpecializedToolInspector({
+  tool,
+  kind,
+}: {
+  tool: ToolRecord;
+  kind: SpecializedToolKind;
+}) {
+  const path = toolPath(tool);
+  const args = toolArguments(tool);
+  const sourceArgumentsTruncated = sourceTruncated(tool, 'arguments');
+  if (kind === 'write' && path && typeof args?.content === 'string') {
+    const language = toolPreviewLanguage(path);
+    return (
+      <section
+        className="payload-section tool-specialized tool-write-presentation"
+        aria-label="Write presentation"
+      >
+        <h4>Write · {path}</h4>
+        <p className="tool-presentation-label">
+          Newly written content · additions only
+        </p>
+        <HighlightedAdditions
+          label="Newly written content"
+          language={language}
+          value={args.content}
+        />
+        <PreviewTruncation
+          label="Arguments"
+          sourceTruncated={sourceArgumentsTruncated}
+          textTruncated={false}
+        />
+        <PreviewTruncation
+          label="Result"
+          sourceTruncated={sourceTruncated(tool, 'result')}
+          textTruncated={false}
+        />
+      </section>
+    );
+  }
+  if (kind === 'edit' && path) {
+    const language = toolPreviewLanguage(path);
+    const replacements = validEditReplacements(tool);
+    return (
+      <section
+        className="payload-section tool-specialized tool-edit-presentation"
+        aria-label="Edit presentation"
+      >
+        <h4>Replacement preview · {path}</h4>
+        <p className="tool-presentation-label">
+          Replacement preview; this is not a repository or full-file diff.
+        </p>
+        {replacements.map((replacement, index) => (
+          <ReplacementPreview
+            {...replacement}
+            index={index}
+            key={replacementDisplayKey(index)}
+            language={language}
+          />
+        ))}
+        <PreviewTruncation
+          label="Arguments"
+          sourceTruncated={sourceArgumentsTruncated}
+          textTruncated={replacements.some(
+            ({ oldText, newText }) =>
+              oldText.length > SPECIALIZED_PREVIEW_MAX_TEXT ||
+              newText.length > SPECIALIZED_PREVIEW_MAX_TEXT,
+          )}
+        />
+        <PreviewTruncation
+          label="Result"
+          sourceTruncated={sourceTruncated(tool, 'result')}
+          textTruncated={false}
+        />
+      </section>
+    );
+  }
+  const command = toolCommand(tool);
+  if (kind === 'command' && command) {
+    const boundedCommand = boundedSpecializedText(command);
+    const resultText = normalizedResultText(tool.result);
+    const resultBounded =
+      resultText === undefined ? undefined : boundedSpecializedText(resultText);
+    const exitCode = resultExitCode(tool.result);
+    const status = tool.status ?? (tool.isError === true ? 'error' : undefined);
+    return (
+      <div className="tool-specialized tool-command-presentation">
+        <section
+          className="payload-section tool-command-input"
+          aria-label="Command"
+        >
+          <h4>Command</h4>
+          <pre className="tool-code-preview tool-command-preview">
+            <HighlightedLine language="bash" value={boundedCommand.text} />
+          </pre>
+          <PreviewTruncation
+            label="Arguments"
+            sourceTruncated={sourceArgumentsTruncated}
+            textTruncated={boundedCommand.truncated}
+          />
+        </section>
+        {resultBounded !== undefined ? (
+          <section
+            className={`payload-section tool-terminal-result${tool.isError || status === 'error' ? ' tool-terminal-result-error' : ''}`}
+            aria-label="Terminal result"
+          >
+            <h4>Terminal result</h4>
+            {status !== undefined || exitCode !== undefined ? (
+              <p className="tool-terminal-meta">
+                {status !== undefined ? (
+                  <span>Status: {String(status)}</span>
+                ) : null}
+                {exitCode !== undefined ? (
+                  <span>Exit code: {exitCode}</span>
+                ) : null}
+              </p>
+            ) : null}
+            <pre className="tool-terminal-output">{resultBounded.text}</pre>
+            <PreviewTruncation
+              label="Result"
+              sourceTruncated={sourceTruncated(tool, 'result')}
+              textTruncated={resultBounded.truncated}
+            />
+          </section>
+        ) : (
+          <PreviewTruncation
+            label="Result"
+            sourceTruncated={sourceTruncated(tool, 'result')}
+            textTruncated={false}
+          />
+        )}
+      </div>
+    );
+  }
+  return null;
+}
+
 export function BoundedPayloadPreview({
   value,
   label = 'payload',
@@ -450,9 +916,23 @@ function sourceTruncated(
   );
 }
 
-function ToolInspector({ tool }: { tool: Record<string, unknown> }) {
-  const status = tool.status ?? (tool.isError ? 'error' : 'pending');
-  const argumentsValue = tool.arguments ?? tool.args;
+function ToolInspector({
+  tool,
+}: {
+  tool: Record<string, unknown> | TranscriptRenderToolItem;
+}) {
+  const record = tool as Record<string, unknown>;
+  const selectedKind = toolPresentationKind(record);
+  // An unsupported persisted result shape is malformed for the terminal
+  // presentation; retain the established Arguments/Result JSON fallback.
+  const specializedKind =
+    selectedKind === 'command' &&
+    record.result !== undefined &&
+    normalizeToolResultText(record.result) === undefined
+      ? undefined
+      : selectedKind;
+  const status = record.status ?? (record.isError ? 'error' : 'pending');
+  const argumentsValue = record.arguments ?? record.args;
   return (
     <div className="tool-inspector">
       <dl className="tool-inspector-status">
@@ -461,23 +941,38 @@ function ToolInspector({ tool }: { tool: Record<string, unknown> }) {
           <dd>{String(status)}</dd>
         </div>
       </dl>
-      {argumentsValue !== undefined && (
+      {specializedKind ? (
+        <SpecializedToolInspector kind={specializedKind} tool={record} />
+      ) : null}
+      {specializedKind && argumentsValue !== undefined ? (
+        <details className="tool-inspector-raw">
+          <summary>Raw Arguments</summary>
+          <BoundedPayloadPreview value={argumentsValue} label="arguments" />
+        </details>
+      ) : null}
+      {specializedKind && record.result !== undefined ? (
+        <details className="tool-inspector-raw">
+          <summary>Raw Result</summary>
+          <BoundedPayloadPreview value={record.result} label="result" />
+        </details>
+      ) : null}
+      {!specializedKind && argumentsValue !== undefined && (
         <PayloadSection
           title="Arguments"
           value={argumentsValue}
-          sourceTruncated={sourceTruncated(tool, 'arguments')}
+          sourceTruncated={sourceTruncated(record, 'arguments')}
         />
       )}
-      {tool.result !== undefined && (
+      {!specializedKind && record.result !== undefined && (
         <PayloadSection
           title="Result"
-          value={tool.result}
-          sourceTruncated={sourceTruncated(tool, 'result')}
+          value={record.result}
+          sourceTruncated={sourceTruncated(record, 'result')}
         />
       )}
       <details className="tool-inspector-raw">
         <summary>Raw tool record</summary>
-        <BoundedPayloadPreview value={tool} label="raw tool record" />
+        <BoundedPayloadPreview value={record} label="raw tool record" />
       </details>
     </div>
   );
