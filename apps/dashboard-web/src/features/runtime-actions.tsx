@@ -13,9 +13,11 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import navStyles from './agent-thread-nav.module.css';
 
 export type RuntimeLifecycleActionAvailability = {
@@ -60,8 +62,19 @@ type ActiveTouch = {
   clientY: number;
 };
 
+type MenuPoint = {
+  x: number;
+  y: number;
+};
+
+type MenuPosition = {
+  left: number;
+  top: number;
+};
+
 const LONG_PRESS_DELAY = 500;
 const LONG_PRESS_MOVE_TOLERANCE = 8;
+const VIEWPORT_MARGIN = 8;
 
 export function RuntimeLifecycleActions({
   runtime,
@@ -77,6 +90,11 @@ export function RuntimeLifecycleActions({
   const activeTouchRef = useRef<ActiveTouch | undefined>(undefined);
   const longPressTriggeredRef = useRef(false);
   const [open, setOpen] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState<MenuPoint>();
+  const [menuPosition, setMenuPosition] = useState<MenuPosition>({
+    left: VIEWPORT_MARGIN,
+    top: VIEWPORT_MARGIN,
+  });
   const [error, setError] = useState<string>();
   const [gracefulStopFailed, setGracefulStopFailed] = useState(false);
   const [restarting, setRestarting] = useState(false);
@@ -104,8 +122,10 @@ export function RuntimeLifecycleActions({
     longPressTriggeredRef.current = false;
   }, []);
 
-  const openMenu = useCallback(() => {
+  const openMenu = useCallback((point: MenuPoint) => {
     setError(undefined);
+    setMenuAnchor(point);
+    setMenuPosition({ left: point.x, top: point.y });
     setOpen(true);
   }, []);
 
@@ -137,8 +157,35 @@ export function RuntimeLifecycleActions({
       ?.focus();
   }, [open]);
 
+  useLayoutEffect(() => {
+    if (!open || !menuAnchor) return;
+    const menu = menuRef.current;
+    if (!menu) return;
+
+    const { width, height } = menu.getBoundingClientRect();
+    const maxLeft = window.innerWidth - width - VIEWPORT_MARGIN;
+    const maxTop = window.innerHeight - height - VIEWPORT_MARGIN;
+    const left = Math.min(
+      Math.max(menuAnchor.x, VIEWPORT_MARGIN),
+      Math.max(VIEWPORT_MARGIN, maxLeft),
+    );
+    const preferredTop =
+      menuAnchor.y + height <= window.innerHeight - VIEWPORT_MARGIN
+        ? menuAnchor.y
+        : menuAnchor.y - height;
+    const top = Math.min(
+      Math.max(preferredTop, VIEWPORT_MARGIN),
+      Math.max(VIEWPORT_MARGIN, maxTop),
+    );
+
+    setMenuPosition((current) =>
+      current.left === left && current.top === top ? current : { left, top },
+    );
+  }, [menuAnchor, open]);
+
   useEffect(() => {
     if (!open) return;
+    const closeForViewportChange = () => closeMenu(true);
     const onPointerDown = (event: globalThis.PointerEvent) => {
       if (
         event.target instanceof Node &&
@@ -157,9 +204,13 @@ export function RuntimeLifecycleActions({
     };
     window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', closeForViewportChange);
+    window.addEventListener('scroll', closeForViewportChange, true);
     return () => {
       window.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', closeForViewportChange);
+      window.removeEventListener('scroll', closeForViewportChange, true);
     };
   }, [closeMenu, open]);
 
@@ -171,7 +222,7 @@ export function RuntimeLifecycleActions({
       )
         return;
       event.preventDefault();
-      openMenu();
+      openMenu({ x: event.clientX, y: event.clientY });
     },
     [openMenu],
   );
@@ -191,7 +242,7 @@ export function RuntimeLifecycleActions({
         if (activeTouchRef.current?.pointerId !== pointerId) return;
         longPressTimerRef.current = undefined;
         longPressTriggeredRef.current = true;
-        openMenu();
+        openMenu({ x: clientX, y: clientY });
       }, LONG_PRESS_DELAY);
     },
     [cancelLongPress, openMenu],
@@ -251,7 +302,12 @@ export function RuntimeLifecycleActions({
     if (invokesMenu) {
       event.preventDefault();
       event.stopPropagation();
-      openMenu();
+      const button = threadButtonRef.current;
+      const buttonRect = button?.getBoundingClientRect();
+      openMenu({
+        x: buttonRect?.left ?? VIEWPORT_MARGIN,
+        y: buttonRect?.bottom ?? VIEWPORT_MARGIN,
+      });
       return;
     }
     if (event.key === 'Escape' && open) {
@@ -336,68 +392,71 @@ export function RuntimeLifecycleActions({
         'aria-controls': open ? menuId : undefined,
         onKeyDown: handleThreadKeyDown,
       })}
-      {open && (
-        <div
-          ref={menuRef}
-          id={menuId}
-          className={`agent-thread-actions-menu ${navStyles.lifecycleActionsMenu}`}
-          role="menu"
-          aria-label={`Actions for ${title}`}
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') {
-              event.preventDefault();
-              event.stopPropagation();
-              closeMenu(true);
-            }
-          }}
-        >
-          {availability.canStop && (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              onClick={(event) => {
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            id={menuId}
+            className={`agent-thread-actions-menu ${navStyles.lifecycleActionsMenu}`}
+            role="menu"
+            style={{ left: menuPosition.left, top: menuPosition.top }}
+            aria-label={`Actions for ${title}`}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
                 event.stopPropagation();
-                void runStop(false);
-              }}
-            >
-              Stop
-            </button>
-          )}
-          {availability.canForceStop && (
-            <button
-              type="button"
-              role="menuitem"
-              className={`danger ${navStyles.lifecycleActionDanger}`}
-              disabled={busy}
-              onClick={(event) => {
-                event.stopPropagation();
-                void runStop(true);
-              }}
-            >
-              Force stop
-            </button>
-          )}
-          {availability.canRestart && (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              onClick={(event) => {
-                event.stopPropagation();
-                void runRestart();
-              }}
-            >
-              {restarting ? 'Restarting…' : 'Restart'}
-            </button>
-          )}
-          {error && (
-            <span className="error" role="alert">
-              {error}
-            </span>
-          )}
-        </div>
-      )}
+                closeMenu(true);
+              }
+            }}
+          >
+            {availability.canStop && (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={busy}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void runStop(false);
+                }}
+              >
+                Stop
+              </button>
+            )}
+            {availability.canForceStop && (
+              <button
+                type="button"
+                role="menuitem"
+                className={`danger ${navStyles.lifecycleActionDanger}`}
+                disabled={busy}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void runStop(true);
+                }}
+              >
+                Force stop
+              </button>
+            )}
+            {availability.canRestart && (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={busy}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void runRestart();
+                }}
+              >
+                {restarting ? 'Restarting…' : 'Restart'}
+              </button>
+            )}
+            {error && (
+              <span className="error" role="alert">
+                {error}
+              </span>
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

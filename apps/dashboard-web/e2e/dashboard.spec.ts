@@ -349,48 +349,111 @@ test('runtime row lifecycle menu supports desktop, touch, and keyboard access', 
   await expect(thread).toHaveAttribute('aria-haspopup', 'menu');
   await expect(row.locator('.agent-thread-actions-trigger')).toHaveCount(0);
 
-  await row.click({ button: 'right' });
+  const rowBox = await row.boundingBox();
+  if (!rowBox) throw new Error('Runtime row is not laid out.');
+  await page.mouse.click(rowBox.x + 2, rowBox.y + rowBox.height / 2);
+  await expect(page).toHaveURL(/\/sessions\/session-context-menu$/u);
+  await page.goto('/');
+  await expect(row).toBeVisible();
+
   const menu = page.getByRole('menu', {
     name: 'Actions for Context menu session',
   });
+  const viewport = await page.evaluate(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
+  const cursorPoint = {
+    x: rowBox.x + Math.min(24, rowBox.width / 2),
+    y: rowBox.y + rowBox.height / 2,
+  };
+  await page.mouse.click(cursorPoint.x, cursorPoint.y, { button: 'right' });
   await expect(menu).toBeVisible();
+  const cursorMenuBox = await menu.boundingBox();
+  if (!cursorMenuBox) throw new Error('Context menu is not laid out.');
+  expect(Math.abs(cursorMenuBox.x - cursorPoint.x)).toBeLessThan(2);
+  expect(Math.abs(cursorMenuBox.y - cursorPoint.y)).toBeLessThan(2);
+  expect(
+    await menu.evaluate((element) => element.parentElement === document.body),
+  ).toBe(true);
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
   await expect(thread).toBeFocused();
 
+  const edgePoint = { x: viewport.width - 2, y: viewport.height - 2 };
+  await row.evaluate((element, point) => {
+    element.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: point.x,
+        clientY: point.y,
+      }),
+    );
+  }, edgePoint);
+  await expect(menu).toBeVisible();
+  const edgeMenuBox = await menu.boundingBox();
+  if (!edgeMenuBox) throw new Error('Edge context menu is not laid out.');
+  expect(edgeMenuBox.x).toBeGreaterThanOrEqual(8);
+  expect(edgeMenuBox.y).toBeGreaterThanOrEqual(8);
+  expect(edgeMenuBox.x + edgeMenuBox.width).toBeLessThanOrEqual(
+    viewport.width - 8,
+  );
+  expect(edgeMenuBox.y + edgeMenuBox.height).toBeLessThanOrEqual(
+    viewport.height - 8,
+  );
+  expect(edgeMenuBox.x).toBeLessThan(edgePoint.x);
+  expect(edgeMenuBox.y).toBeLessThan(edgePoint.y);
+  await page.keyboard.press('Escape');
+
   await thread.press('Shift+F10');
   await expect(menu).toBeVisible();
+  const keyboardButtonBox = await thread.boundingBox();
+  const keyboardMenuBox = await menu.boundingBox();
+  if (!keyboardButtonBox || !keyboardMenuBox)
+    throw new Error('Keyboard context menu is not laid out.');
+  expect(Math.abs(keyboardMenuBox.x - keyboardButtonBox.x)).toBeLessThan(2);
+  expect(
+    Math.abs(
+      keyboardMenuBox.y - (keyboardButtonBox.y + keyboardButtonBox.height),
+    ),
+  ).toBeLessThan(2);
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
   await page.keyboard.press('Escape');
   await thread.press('ContextMenu');
   await expect(menu).toBeVisible();
   await page.keyboard.press('Escape');
 
-  await row.evaluate((element) => {
+  const longPressPoint = { x: 52, y: 220 };
+  await row.evaluate((element, point) => {
     element.dispatchEvent(
       new PointerEvent('pointerdown', {
         bubbles: true,
         pointerId: 17,
         pointerType: 'touch',
-        clientX: 20,
-        clientY: 20,
+        clientX: point.x,
+        clientY: point.y,
       }),
     );
-  });
+  }, longPressPoint);
   await page.waitForTimeout(550);
   await expect(menu).toBeVisible();
-  await row.evaluate((element) => {
+  const longPressMenuBox = await menu.boundingBox();
+  if (!longPressMenuBox) throw new Error('Long-press menu is not laid out.');
+  expect(Math.abs(longPressMenuBox.x - longPressPoint.x)).toBeLessThan(2);
+  expect(Math.abs(longPressMenuBox.y - longPressPoint.y)).toBeLessThan(2);
+  await row.evaluate((element, point) => {
     element.dispatchEvent(
       new PointerEvent('pointerup', {
         bubbles: true,
         pointerId: 17,
         pointerType: 'touch',
-        clientX: 20,
-        clientY: 20,
+        clientX: point.x,
+        clientY: point.y,
       }),
     );
-  });
+  }, longPressPoint);
   await thread.click();
   await expect(page).toHaveURL(/\/$/u);
   await expect(menu).toHaveCount(0);
