@@ -27,6 +27,7 @@ export type ActivityStepParts = {
   label: string;
   action: string;
   argument?: string;
+  lineChanges?: FileLineChanges;
   role: 'edit' | 'read' | 'search' | 'command' | 'other';
   state: 'complete' | 'pending' | 'failed';
 };
@@ -161,12 +162,12 @@ function fileLineChanges(
 
 function fileLineChangeLabel(changes: FileLineChanges): string {
   return [
-    changes.added ? `+${changes.added} added` : undefined,
-    changes.changed ? `~${changes.changed} changed` : undefined,
-    changes.removed ? `-${changes.removed} removed` : undefined,
+    changes.added ? `+${changes.added}` : undefined,
+    changes.changed ? `~${changes.changed}` : undefined,
+    changes.removed ? `-${changes.removed}` : undefined,
   ]
     .filter(Boolean)
-    .join(' · ');
+    .join(' ');
 }
 
 function readPathArgument(path: string, args: unknown, cwd: string): string {
@@ -196,6 +197,7 @@ export function activityStepParts(
   const path = toolPath(tool.args);
   let action: string;
   let argument: string | undefined;
+  let lineChanges: FileLineChanges | undefined;
   if (name === 'bash' || name === 'shell' || name === 'exec') {
     action = 'Running';
     const command =
@@ -311,10 +313,7 @@ export function activityStepParts(
     else argument = mode;
   } else if (path) {
     const edits = arrayArg(tool.args, 'edits');
-    const lineChanges = fileLineChanges(name, tool.args);
-    const lineChangeLabel = lineChanges
-      ? fileLineChangeLabel(lineChanges)
-      : undefined;
+    lineChanges = fileLineChanges(name, tool.args);
     action =
       name === 'read'
         ? 'Reading'
@@ -326,13 +325,7 @@ export function activityStepParts(
     argument =
       name === 'read'
         ? readPathArgument(path, tool.args, cwd)
-        : [
-            displayActivityPath(path, cwd),
-            lineChangeLabel ||
-              (edits.length ? countLabel(edits.length, 'change') : undefined),
-          ]
-            .filter(Boolean)
-            .join(' · ');
+        : `${displayActivityPath(path, cwd)}${!lineChanges && edits.length ? ` · ${countLabel(edits.length, 'change')}` : ''}`;
   } else {
     action = `Running ${name}`;
     const fallback = toolActionSummary(tool);
@@ -342,10 +335,14 @@ export function activityStepParts(
   const displayedArgument = argument
     ? compactActivityArgument(argument)
     : undefined;
+  const changeLabel = lineChanges
+    ? fileLineChangeLabel(lineChanges)
+    : undefined;
   return {
-    label: displayedArgument ? `${action} ${displayedArgument}` : action,
+    label: [action, displayedArgument, changeLabel].filter(Boolean).join(' '),
     action,
     ...(displayedArgument ? { argument: displayedArgument } : {}),
+    ...(lineChanges ? { lineChanges } : {}),
     role,
     state,
   };

@@ -102,6 +102,46 @@ describe('expanded transcript tool rows', () => {
     expect(markup).not.toContain('Raw JSON');
   });
 
+  it('renders compact colored line metrics for edit tools', () => {
+    const item: TranscriptModelItem = {
+      key: 'tool:edit-call',
+      raw: {},
+      entry: {
+        kind: 'tool',
+        name: 'edit',
+        args: {},
+        status: 'success',
+      },
+      tool: {
+        kind: 'tool',
+        key: 'tool:edit-call',
+        toolCallId: 'edit-call',
+        name: 'edit',
+        arguments: {
+          path: 'src/App.tsx',
+          edits: [
+            {
+              oldText: 'old one\nold two',
+              newText: 'new one\nnew two\nnew three',
+            },
+            { oldText: 'remove me', newText: '' },
+          ],
+        },
+        status: 'success',
+      },
+    };
+
+    const markup = renderToStaticMarkup(<TranscriptEntry item={item} />);
+
+    expect(markup).toContain('class="activity-tool-argument-text"');
+    expect(markup).toContain('class="line-change-added">+1</span>');
+    expect(markup).toContain('class="line-change-changed">~2</span>');
+    expect(markup).toContain('class="line-change-removed">-1</span>');
+    expect(markup).not.toContain(' added</span>');
+    expect(markup).not.toContain(' changed</span>');
+    expect(markup).not.toContain(' removed</span>');
+  });
+
   it('shows an error marker for failed tool calls', () => {
     const item: TranscriptModelItem = {
       key: 'tool:error-call',

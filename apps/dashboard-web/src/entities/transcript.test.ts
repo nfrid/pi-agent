@@ -334,7 +334,8 @@ describe('activity row views and virtual transcript construction', () => {
       }),
     ).toMatchObject({
       action: 'Writing',
-      argument: 'src/new.ts · +3 added',
+      argument: 'src/new.ts',
+      lineChanges: { added: 3, changed: 0, removed: 0 },
     });
     expect(
       activityStepParts({
@@ -356,7 +357,8 @@ describe('activity row views and virtual transcript construction', () => {
       }),
     ).toMatchObject({
       action: 'Editing',
-      argument: 'src/App.tsx · +2 added · ~2 changed · -2 removed',
+      argument: 'src/App.tsx',
+      lineChanges: { added: 2, changed: 2, removed: 2 },
     });
   });
 

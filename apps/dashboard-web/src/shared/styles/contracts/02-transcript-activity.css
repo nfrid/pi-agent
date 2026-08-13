@@ -111,10 +111,33 @@
   text-transform: uppercase;
 }
 .activity-tool-argument {
+  display: flex;
   min-width: 0;
+  align-items: baseline;
+  gap: 6px;
   overflow: hidden;
   color: var(--fg);
+}
+.activity-tool-argument-text {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
+}
+.activity-line-changes {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.line-change-added {
+  color: var(--green);
+}
+.line-change-changed {
+  color: var(--orange);
+}
+.line-change-removed {
+  color: var(--red);
 }
 .activity-earlier {
   display: block;
