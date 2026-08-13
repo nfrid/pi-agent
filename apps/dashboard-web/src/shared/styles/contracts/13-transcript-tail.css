@@ -220,6 +220,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .session-context,
+  .session-page.modal-open .session-context,
   .transcript-minimap-marker i,
   .transcript-minimap-preview {
     transition: none;

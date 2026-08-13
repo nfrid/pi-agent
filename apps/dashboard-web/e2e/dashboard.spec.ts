@@ -654,6 +654,22 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   });
   expect(detailsMotion.transforms).toContain('translateX(28px)');
   await expect(details).toBeVisible();
+  const sessionHeading = page.locator('.session-heading');
+  await expect(sessionHeading).toBeHidden();
+  expect(
+    await sessionHeading.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        opacity: style.opacity,
+        transform: style.transform,
+        transitionDuration: style.transitionDuration,
+      };
+    }),
+  ).toEqual({
+    opacity: '0',
+    transform: 'matrix(1, 0, 0, 1, 0, -10)',
+    transitionDuration: '0.14s, 0.14s, 0s',
+  });
   expect(
     await controlLayer.evaluate((element) => {
       const style = getComputedStyle(element);
@@ -684,6 +700,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   ).toBe('14px');
   await details.getByRole('button', { name: 'Close session details' }).click();
   await expect(details).toHaveCount(0);
+  await expect(sessionHeading).toBeVisible();
 
   await page.getByRole('button', { name: 'Open agent list' }).click();
   const agentNav = page.getByRole('complementary', {
@@ -3760,7 +3777,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   });
   expect(detailsMotion.transforms).toContain('translateX(28px)');
   await expect(inspector).toBeVisible();
-  await expect(page.locator('.session-heading')).toBeVisible();
+  await expect(page.locator('.session-heading')).toBeHidden();
   await expect(inspector).toContainText('Runtime controls');
   await expect(inspector).not.toContainText('Live work');
   await expect(inspector).not.toContainText('test/vision');

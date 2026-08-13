@@ -442,6 +442,22 @@ body:has(.session-page) .global-tools > .palette-trigger {
 }
 
 /* Dashboard UX refinement: dynamic composing, legible actions, and dock navigation. */
+.session-context {
+  transition:
+    opacity 170ms ease,
+    transform 170ms ease,
+    visibility 0s linear 0s;
+}
+.session-page.modal-open .session-context {
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-10px);
+  pointer-events: none;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    visibility 0s linear 140ms;
+}
 .session-context-main,
 .session-identity,
 .session-breadcrumb {
