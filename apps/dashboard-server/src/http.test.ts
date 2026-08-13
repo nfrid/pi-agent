@@ -486,7 +486,7 @@ describe('dashboard HTTP boundary', () => {
 
   it('falls back to an authoritative snapshot for oversized session deltas', async () => {
     const root = await mkdtemp(
-      path.join(os.tmpdir(), 'pi-dashboard-sessions-stream-fallback-'),
+      path.join(os.tmpdir(), 'pi-dash-stream-fallback-'),
     );
     server = await createDashboardServer({
       port: 0,
