@@ -65,17 +65,9 @@ export function SessionView({
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [agentNavOpen, setAgentNavOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
-  const [modalHeadingHidden, setModalHeadingHidden] = useState(false);
   const outlineTriggerRef = useRef<HTMLButtonElement>(null);
   const outlineWasOpenRef = useRef(false);
   const closeInspector = useCallback(() => setInspectorOpen(false), []);
-  const modalSurfaceOpen = inspectorOpen || outlineOpen || agentNavOpen;
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      setModalHeadingHidden(modalSurfaceOpen);
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [modalSurfaceOpen]);
   const {
     data,
     error,
@@ -195,7 +187,7 @@ export function SessionView({
         ref={sessionPageRef}
         data-tail-pending={tailReadySessionId === id ? undefined : ''}
         data-runtime-paused={pauseStatus ? '' : undefined}
-        className={`session-page${hasPendingInteraction ? ' has-pending-interaction' : ''}${modalHeadingHidden ? ' modal-open' : ''}`}
+        className={`session-page${hasPendingInteraction ? ' has-pending-interaction' : ''}${agentNavOpen ? ' modal-open' : ''}`}
       >
         <SessionHeader
           workspaceName={workspaceName}

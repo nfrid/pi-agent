@@ -9,6 +9,15 @@ import { Dialog as AriaDialog, ModalOverlay } from 'react-aria-components';
 import { useOverlayPresence } from './overlay-presence';
 import { useSwipeToDismiss } from './swipe-to-dismiss';
 
+const openDialogTokens = new Set<symbol>();
+
+function syncDialogPresenceClass() {
+  document.documentElement.classList.toggle(
+    'dashboard-dialog-open',
+    openDialogTokens.size > 0,
+  );
+}
+
 /** Shared overlay primitive for dashboard sheets and panels. */
 export function SurfaceStats({
   stats,
@@ -72,8 +81,25 @@ export function DashboardDialog({
   const resolvedCloseLabel = closeLabel ?? `Close ${title}`;
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const wasOpenRef = useRef(false);
+  const dialogTokenRef = useRef(Symbol('dashboard-dialog'));
   const { present, exiting } = useOverlayPresence(isOpen);
   const swipeHandlers = useSwipeToDismiss(onClose);
+  useEffect(() => {
+    const token = dialogTokenRef.current;
+    const frame = window.requestAnimationFrame(() => {
+      if (isOpen) openDialogTokens.add(token);
+      else openDialogTokens.delete(token);
+      syncDialogPresenceClass();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [isOpen]);
+  useEffect(() => {
+    const token = dialogTokenRef.current;
+    return () => {
+      openDialogTokens.delete(token);
+      syncDialogPresenceClass();
+    };
+  }, []);
   useEffect(() => {
     if (isOpen && !wasOpenRef.current) {
       previousFocusRef.current = document.activeElement as HTMLElement | null;

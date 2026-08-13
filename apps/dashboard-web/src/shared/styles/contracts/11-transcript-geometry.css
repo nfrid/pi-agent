@@ -448,6 +448,7 @@ body:has(.session-page) .global-tools > .palette-trigger {
     transform 170ms ease,
     visibility 0s linear 0s;
 }
+.dashboard-dialog-open .session-context,
 .session-page.modal-open .session-context {
   visibility: hidden;
   opacity: 0;

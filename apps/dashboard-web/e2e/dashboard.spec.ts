@@ -3638,7 +3638,18 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   ).toBeGreaterThan(0);
   await tasksPanel.getByRole('button', { name: 'Close Tasks' }).click();
   await expect(tasksPanel).toHaveCount(0);
-  await delegatesLauncher.click();
+  const sessionHeading = page.locator('.session-heading');
+  await expect
+    .poll(() =>
+      sessionHeading.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { opacity: style.opacity, transform: style.transform };
+      }),
+    )
+    .toEqual({ opacity: '1', transform: 'none' });
+  const delegateHeadingFrames =
+    await sessionHeadingFramesAfterClick(delegatesLauncher);
+  expect(hasVisibleHeadingMotion(delegateHeadingFrames)).toBe(true);
   const delegatesPanel = page.getByRole('dialog', { name: 'Delegates' });
   await expect(delegatesPanel).toBeVisible();
   await expect(delegatesPanel.locator('h2')).toHaveCount(0);
@@ -3874,12 +3885,13 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
     expect(geometry?.composerLeft).toBeGreaterThanOrEqual(
       geometry?.railRight ?? Number.POSITIVE_INFINITY,
     );
-    expect(geometry?.composerRight).toBeLessThanOrEqual(
-      geometry?.inspectorLeft ?? Number.NEGATIVE_INFINITY,
+    expect(geometry?.composerVisibility).toBe('visible');
+    expect(geometry?.inspectorLeft).toBeLessThan(
+      geometry?.composerRight ?? Number.NEGATIVE_INFINITY,
     );
   }
   await page.setViewportSize({ width: 1024, height: 900 });
-  expect((await readDesktopGeometry())?.composerVisibility).toBe('hidden');
+  expect((await readDesktopGeometry())?.composerVisibility).toBe('visible');
   await page.setViewportSize({ width: 1440, height: 900 });
   const exitState = await page.evaluate(() => {
     document
