@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   DelegateStatus,
   DelegateTranscriptEntry,
@@ -351,6 +351,21 @@ export interface DelegateInspectorRunOption {
   row: DelegateInspectionStatus;
 }
 
+/** Keep a historical selection stable while the live composite is refreshed. */
+export function selectedDelegateRunId(
+  previousId: string | undefined,
+  options: readonly DelegateInspectorRunOption[] | undefined,
+  lineageChanged: boolean,
+): string | undefined {
+  if (
+    !lineageChanged &&
+    previousId &&
+    options?.some((run) => run.id === previousId)
+  )
+    return previousId;
+  return options?.at(-1)?.id;
+}
+
 export function DelegateTranscriptInspector({
   row,
   now,
@@ -367,9 +382,17 @@ export function DelegateTranscriptInspector({
   onClose: () => void;
 }) {
   const [selectedRunId, setSelectedRunId] = useState<string>();
+  const lineageRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    setSelectedRunId(runOptions?.at(-1)?.id);
-  }, [runOptions]);
+    const lineageChanged = lineageRef.current !== row.lineageId;
+    lineageRef.current = row.lineageId;
+    const nextId = selectedDelegateRunId(
+      selectedRunId,
+      runOptions,
+      lineageChanged,
+    );
+    if (nextId !== selectedRunId) setSelectedRunId(nextId);
+  }, [row.lineageId, runOptions, selectedRunId]);
   const selectedRun = runOptions?.find((run) => run.id === selectedRunId);
   const inspectedRow = selectedRun?.row ?? row;
   const entries = inspectedRow.transcript ?? [];

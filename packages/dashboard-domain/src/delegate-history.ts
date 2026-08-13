@@ -89,21 +89,24 @@ function compatibilityLineageId(continuation: string): string {
   return `dl-${stableHash(`delegate-lineage:${continuation}`)}`;
 }
 
-function hasAssistantText(run: RecordValue): boolean {
-  if (!Array.isArray(run.messages)) return false;
-  return run.messages.some((message) => {
-    if (!isRecord(message) || message.role !== 'assistant') return false;
-    if (typeof message.content === 'string')
-      return message.content.trim().length > 0;
-    if (!Array.isArray(message.content)) return false;
-    return message.content.some(
-      (part) =>
-        isRecord(part) &&
-        part.type === 'text' &&
-        typeof part.text === 'string' &&
-        part.text.trim().length > 0,
+function assistantResponse(run: RecordValue): string | undefined {
+  if (!Array.isArray(run.messages)) return undefined;
+  const messages = run.messages.flatMap((message) => {
+    if (!isRecord(message) || message.role !== 'assistant') return [];
+    if (typeof message.content === 'string') return [message.content];
+    if (!Array.isArray(message.content)) return [];
+    return message.content.flatMap((part) =>
+      isRecord(part) && part.type === 'text' && typeof part.text === 'string'
+        ? [part.text]
+        : [],
     );
   });
+  const text = messages.join('\n').trim();
+  return text.length > 0 ? text : undefined;
+}
+
+function hasAssistantText(run: RecordValue): boolean {
+  return assistantResponse(run) !== undefined;
 }
 
 function normalizedState(
@@ -132,12 +135,14 @@ function normalizedState(
   if (run.exitCode === -1) return 'running';
   if (run.stopReason === 'aborted') return 'aborted';
   if (run.exitCode === 124) return 'timed-out';
+  const structuredResultIsValid =
+    isRecord(run.structuredResult) && run.structuredResult.valid === true;
   if (
     run.stopReason === 'error' ||
     run.stopReason === 'aborted' ||
     (typeof run.exitCode === 'number' && run.exitCode !== 0) ||
     run.errorMessage ||
-    !hasAssistantText(run)
+    (!hasAssistantText(run) && !structuredResultIsValid)
   )
     return 'error';
   return 'success';
@@ -281,6 +286,18 @@ function publicDetails(run: RecordValue): DelegateHistoryDetails {
   const details: RecordValue = {};
   const task = boundedString(run.task, MAX_DELEGATE_HISTORY_TASK, budget);
   if (task) details.task = task;
+  const response = boundedString(
+    assistantResponse(run),
+    MAX_DELEGATE_HISTORY_DETAIL_TEXT,
+    budget,
+  );
+  if (response) details.response = response;
+  const error = boundedString(
+    typeof run.errorMessage === 'string' ? run.errorMessage.trim() : undefined,
+    MAX_DELEGATE_HISTORY_DETAIL_TEXT,
+    budget,
+  );
+  if (error) details.error = error;
   if (Array.isArray(run.activities)) {
     const activities: RecordValue[] = [];
     for (const activity of run.activities.slice(

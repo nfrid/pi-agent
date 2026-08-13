@@ -1220,6 +1220,14 @@ const DelegateHistoryLifecycleSchema = Type.Object(
 const DelegateHistoryDetailsSchema = Type.Object(
   {
     task: Type.Optional(Type.String({ maxLength: MAX_DELEGATE_HISTORY_TASK })),
+    /** Bounded assistant response text from public run messages only. */
+    response: Type.Optional(
+      Type.String({ maxLength: MAX_DELEGATE_HISTORY_DETAIL_TEXT }),
+    ),
+    /** Bounded public run error; stderr is intentionally never persisted here. */
+    error: Type.Optional(
+      Type.String({ maxLength: MAX_DELEGATE_HISTORY_DETAIL_TEXT }),
+    ),
     activities: Type.Optional(
       Type.Readonly(
         Type.Array(DelegateHistoryActivitySchema, {

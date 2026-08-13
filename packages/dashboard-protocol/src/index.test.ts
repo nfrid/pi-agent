@@ -60,6 +60,8 @@ describe('dashboard protocol', () => {
               createdAt: 1,
               allowWrites: false,
               details: {
+                response: 'The bounded assistant response.',
+                error: 'The bounded public error.',
                 structuredResult: { valid: true, errors: [] },
                 truncated: false,
               },
@@ -69,6 +71,8 @@ describe('dashboard protocol', () => {
       ],
     });
     expect(response.groups[0]?.runs[0]?.details).toEqual({
+      response: 'The bounded assistant response.',
+      error: 'The bounded public error.',
       structuredResult: { valid: true, errors: [] },
       truncated: false,
     });

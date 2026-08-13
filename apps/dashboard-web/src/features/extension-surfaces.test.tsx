@@ -3,14 +3,16 @@ import type {
   RuntimeSnapshot,
 } from '@pi-dashboard/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { StructuredDelegateResults } from '../entities/transcript/entries';
 import {
   DelegateInspectorMetadata,
   DelegateStructuredResultSection,
   delegateTranscriptItems,
+  selectedDelegateRunId,
 } from './delegate-transcript-inspector';
 import {
+  createDelegateHistoryRefreshCoordinator,
   DelegateTranscript,
   dashboardSurfacePlacement,
   ExtensionSurfaceStack,
@@ -28,6 +30,31 @@ const runtimeFixture = (extensionSurfaces: unknown): RuntimeSnapshot =>
   ({ extensionSurfaces }) as unknown as RuntimeSnapshot;
 
 describe('live extension surface fixtures', () => {
+  it('retries unsettled durable history with a bounded fake-timer policy', () => {
+    vi.useFakeTimers();
+    try {
+      const refresh = vi.fn();
+      const coordinator = createDelegateHistoryRefreshCoordinator(refresh, {
+        maxRetries: 2,
+        retryDelayMs: 100,
+      });
+      coordinator.markSettled(['run-1']);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(100);
+      expect(refresh).toHaveBeenCalledTimes(2);
+      vi.advanceTimersByTime(100);
+      expect(refresh).toHaveBeenCalledTimes(3);
+      vi.advanceTimersByTime(100);
+      expect(refresh).toHaveBeenCalledTimes(3);
+      coordinator.observe(new Set(['run-1']));
+      vi.advanceTimersByTime(1_000);
+      expect(refresh).toHaveBeenCalledTimes(3);
+      coordinator.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('invalidates once for settled transitions and every disappeared run', () => {
     const transitioned = reconcileDelegateLiveRuns(
       'session-1',
@@ -56,6 +83,36 @@ describe('live extension surface fixtures', () => {
       reconcileDelegateLiveRuns('session-1', disappeared.next, [])
         .shouldInvalidate,
     ).toBe(false);
+  });
+
+  it('preserves an inspected historical run across refreshed options', () => {
+    const option = (id: string) => ({
+      id,
+      label: id,
+      row: {
+        id,
+        runId: id,
+        lineageId: 'lineage-1',
+        name: id,
+        kind: 'background' as const,
+        state: 'success' as const,
+        createdAt: 1,
+        allowWrites: false,
+      },
+    });
+    const first = [option('run-1'), option('run-2')];
+    expect(selectedDelegateRunId('run-1', first, false)).toBe('run-1');
+    expect(
+      selectedDelegateRunId(
+        'run-1',
+        [option('run-1'), option('run-2'), option('run-3')],
+        false,
+      ),
+    ).toBe('run-1');
+    expect(selectedDelegateRunId('run-1', [option('run-2')], false)).toBe(
+      'run-2',
+    );
+    expect(selectedDelegateRunId('run-1', first, true)).toBe('run-2');
   });
 
   it('shows an explicit incomplete-history message in the transcript inspector', () => {
