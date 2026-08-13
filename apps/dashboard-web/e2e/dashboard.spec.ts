@@ -3489,12 +3489,15 @@ async function assertLargeEditPreview(page: Page, historyCount: number) {
       toolTop: toolSummary.getBoundingClientRect().top - scrollTop,
       groupPosition: getComputedStyle(group).position,
       toolPosition: getComputedStyle(toolSummary).position,
+      toolBackground: getComputedStyle(toolSummary).backgroundColor,
     };
   });
   expect(sticky.groupTop).toBeGreaterThanOrEqual(-1);
   expect(sticky.groupTop).toBeLessThan(3);
   expect(sticky.groupPosition).toBe('sticky');
   expect(sticky.toolPosition).toBe('sticky');
+  expect(sticky.toolBackground).not.toBe('rgba(0, 0, 0, 0)');
+  expect(sticky.toolBackground).not.toBe('transparent');
   expect(sticky.toolTop - sticky.groupTop).toBeGreaterThanOrEqual(41);
   expect(sticky.toolTop - sticky.groupTop).toBeLessThanOrEqual(43);
 
