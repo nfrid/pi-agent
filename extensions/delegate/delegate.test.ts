@@ -132,10 +132,11 @@ describe('delegate', () => {
   test('defaults children to read-only work with compact report guidance', () => {
     const prompt = buildDelegatePrompt('Inspect the repository');
     expect(prompt).toContain('coding subagent');
-    expect(prompt).toMatch(/read-only task/);
+    expect(prompt).toMatch(/read-only/);
     expect(prompt).toContain('## Child report');
     expect(prompt).toContain('Outcome: done | partial | blocked | failed');
-    expect(prompt).toContain('Keep the final report under 800 words');
+    expect(prompt).toContain('Keep the report compact and actionable');
+    expect(prompt).not.toContain('800 words');
     expect(prompt).not.toMatch(/Use this exact structure/);
   });
 
@@ -756,11 +757,15 @@ describe('delegate', () => {
     expect(prompt).toContain('use for: scoped checks');
     expect(prompt).toContain('avoid: judgement calls');
     expect(prompt).toContain(
-      "Choose the task's service class before its effort level",
+      'Choose the cheapest route whose stated `use for` fits the task',
     );
     expect(prompt).toContain(
-      'Do not treat cost as quality or as a universal escalation ladder',
+      'stronger reasoning for ambiguous, cross-cutting, or consequential work',
     );
+    expect(prompt).toContain(
+      'Continuations reuse their persisted route unless explicitly overridden',
+    );
+    expect(prompt).not.toContain('service class');
     expect(prompt).not.toContain('relativeIntelligence');
     expect(prompt).not.toContain('maxRelativeCost');
     expect(prompt).not.toContain('Luna');

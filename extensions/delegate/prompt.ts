@@ -43,10 +43,10 @@ export function buildDelegatePrompt(
   if (options.allowWrites && !options.branch)
     throw new Error('Writable delegate prompts require a worktree branch.');
   const capability = options.allowWrites
-    ? `You are working in your own git worktree on branch ${options.branch}. Repository files in this checkout are isolated from the parent checkout and other agents. Your shell is not sandboxed: commands may affect shared external state such as the home directory, processes, network, and services. Edit freely in this worktree; commit as you go with clear messages — the branch is how your work reaches the parent, and anything left uncommitted is committed for you under a generic message. Do not merge, rebase, push, or switch branches: the parent integrates this branch.`
+    ? `You are working in an isolated git worktree on branch ${options.branch}; repository-file changes do not affect the parent checkout or other agents. Your shell is unsandboxed and can affect shared external state such as the home directory, processes, network, and services. Edit this worktree freely; commit as you go with clear messages — the branch is how your work reaches the parent, and anything left uncommitted is committed for you under a generic message. Do not merge, rebase, push, or switch branches: the parent integrates this branch.`
     : options.branch
-      ? `Treat this as a read-only task in an isolated git worktree on branch ${options.branch}: inspect and report, do not edit repository files. This is an instruction and tool restriction, not a security boundary; your shell can still affect shared external state such as the home directory, processes, network, and services. The snapshot remains reviewable.`
-      : 'Treat this as a read-only task in the shared checkout: inspect and report, do not edit repository files. This is an instruction and tool restriction, not a security boundary; your shell can affect the shared checkout and external state such as the home directory, processes, network, and services.';
+      ? `Treat this as read-only in isolated git worktree branch ${options.branch}: do not edit repository files. The worktree isolates repository files, not the unsandboxed shell or shared external state such as the home directory, processes, network, and services.`
+      : 'Treat this as read-only in the shared checkout: do not edit repository files. The shell is unsandboxed and can affect the checkout and external state such as the home directory, processes, network, and services.';
   const context = options.contextNote?.trim()
     ? `\n\nContext from the parent agent:\n${options.contextNote.trim()}`
     : '';
