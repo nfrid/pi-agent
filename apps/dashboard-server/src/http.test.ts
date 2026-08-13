@@ -1168,10 +1168,17 @@ describe('dashboard HTTP boundary', () => {
     );
     const sessionDir = path.join(root, 'sessions');
     await mkdir(sessionDir, { recursive: true });
+    const sessionFile = path.join(sessionDir, 'idle.jsonl');
+    const startedAt = '2026-08-12T10:20:30.000Z';
     await writeFile(
-      path.join(sessionDir, 'idle.jsonl'),
+      sessionFile,
       `${[
-        { type: 'session', id: 'idle-session', cwd: '/tmp/project' },
+        {
+          type: 'session',
+          id: 'idle-session',
+          timestamp: startedAt,
+          cwd: '/tmp/project',
+        },
         { type: 'model_change', id: 'setup', parentId: null },
         {
           type: 'message',
@@ -1197,9 +1204,10 @@ describe('dashboard HTTP boundary', () => {
       bridge.once('connect', resolve);
       bridge.once('error', reject);
     });
+    const indexedUpdatedAt = (await stat(sessionFile)).mtimeMs;
     const helloSession = {
       id: 'idle-session',
-      file: path.join(sessionDir, 'idle.jsonl'),
+      file: sessionFile,
       cwd: '/tmp/project',
       entriesComplete: true,
       entries: [
@@ -1238,6 +1246,10 @@ describe('dashboard HTTP boundary', () => {
     expect(await before.json()).toMatchObject({
       entries: [{ id: 'stale-runtime-entry' }],
       entriesComplete: true,
+      metadata: {
+        startedAt: Date.parse(startedAt),
+        updatedAt: indexedUpdatedAt,
+      },
     });
     bridge.write(
       serializeFrame({
@@ -1249,7 +1261,7 @@ describe('dashboard HTTP boundary', () => {
           snapshot: {
             session: {
               id: 'idle-session',
-              file: path.join(sessionDir, 'idle.jsonl'),
+              file: sessionFile,
               cwd: '/tmp/project',
               entries: [],
               entriesComplete: false,

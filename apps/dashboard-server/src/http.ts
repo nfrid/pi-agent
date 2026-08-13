@@ -531,6 +531,7 @@ export class DashboardServerImpl implements DashboardServer {
         : undefined;
     };
     const runtimeResult = (runtime: RuntimeSnapshot) => {
+      const indexedMetadata = this.sessions.get(id);
       const entriesComplete =
         (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
         true;
@@ -539,12 +540,14 @@ export class DashboardServerImpl implements DashboardServer {
         cursor,
         ...runtimeTransport(runtime),
         metadata: {
+          ...indexedMetadata,
           id,
-          file: runtime.session.file ?? '',
-          cwd: runtime.session.cwd ?? runtime.cwd,
-          name: runtime.session.name,
-          title: runtime.session.title,
-          updatedAt: runtime.lastSeenAt ?? Date.now(),
+          file: runtime.session.file ?? indexedMetadata?.file ?? '',
+          cwd: runtime.session.cwd ?? indexedMetadata?.cwd ?? runtime.cwd,
+          name: runtime.session.name ?? indexedMetadata?.name,
+          title: runtime.session.title ?? indexedMetadata?.title,
+          updatedAt:
+            indexedMetadata?.updatedAt ?? runtime.lastSeenAt ?? Date.now(),
           activeRuntimeId: runtime.runtimeId,
           entryCount: runtime.session.entries.length,
         },

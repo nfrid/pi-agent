@@ -82,6 +82,40 @@ describe('DashboardLiveStore', () => {
     });
   });
 
+  it('preserves indexed chronology when hydrating an active runtime session', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot({
+      ...snapshot('daemon-1', 1),
+      sessions: [
+        {
+          id: 'session-1',
+          file: '/tmp/session.jsonl',
+          cwd: '/tmp',
+          startedAt: 10,
+          updatedAt: 20,
+          activeRuntimeId: 'runtime-1',
+        },
+      ],
+    });
+
+    store.hydrateSession({
+      ...sessionResponse(2),
+      metadata: {
+        id: 'session-1',
+        file: '/tmp/session.jsonl',
+        cwd: '/tmp',
+        updatedAt: 999,
+        activeRuntimeId: 'runtime-1',
+      },
+    });
+
+    expect(store.getSnapshot().sessionsById['session-1']).toMatchObject({
+      startedAt: 10,
+      updatedAt: 20,
+      activeRuntimeId: 'runtime-1',
+    });
+  });
+
   it('authoritatively replaces sessions without clearing transcripts and handles replay ordering', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot({

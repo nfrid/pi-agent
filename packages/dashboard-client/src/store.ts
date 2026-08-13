@@ -1145,6 +1145,13 @@ export class DashboardLiveStore {
       this.state.optimisticSessionTitlesById[response.metadata.id];
     const metadata = {
       ...response.metadata,
+      ...(response.metadata.startedAt === undefined &&
+      currentMetadata?.startedAt !== undefined
+        ? { startedAt: currentMetadata.startedAt }
+        : {}),
+      ...(response.metadata.activeRuntimeId !== undefined && currentMetadata
+        ? { updatedAt: currentMetadata.updatedAt }
+        : {}),
       ...(response.metadata.name === undefined && currentMetadata?.name
         ? { name: currentMetadata.name }
         : {}),
@@ -1200,6 +1207,13 @@ export class DashboardLiveStore {
     const optimisticTitle = this.state.optimisticSessionTitlesById[sessionId];
     const metadata = {
       ...response.metadata,
+      ...(response.metadata.startedAt === undefined &&
+      currentMetadata?.startedAt !== undefined
+        ? { startedAt: currentMetadata.startedAt }
+        : {}),
+      ...(response.metadata.activeRuntimeId !== undefined && currentMetadata
+        ? { updatedAt: currentMetadata.updatedAt }
+        : {}),
       ...(response.metadata.name === undefined && currentMetadata?.name
         ? { name: currentMetadata.name }
         : {}),
