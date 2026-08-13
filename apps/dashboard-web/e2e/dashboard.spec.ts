@@ -949,6 +949,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(page.locator('.transcript-virtualized')).toContainText(
     'Prior history',
   );
+  await expect(page.locator('.transcript-virtualized')).toHaveCount(1);
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   await expect(
     page
@@ -2858,6 +2859,59 @@ function phase6Snapshot(
   };
 }
 
+function repeatedActivityEntries() {
+  return [
+    ...Array.from({ length: 84 }, (_, index) => ({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: `Earlier history ${index + 1}` }],
+      },
+    })),
+    ...Array.from({ length: 4 }, (_, index) => [
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: `Activity group ${index + 1}` },
+            {
+              type: 'toolCall',
+              id: `repeated-read-${index}`,
+              name: 'read',
+              arguments: { path: `/tmp/project/file-${index}.ts` },
+            },
+          ],
+        },
+      },
+      {
+        type: 'message',
+        message: {
+          role: 'toolResult',
+          toolCallId: `repeated-read-${index}`,
+          content: [{ type: 'text', text: `result ${index + 1}` }],
+          isError: false,
+        },
+      },
+    ]).flat(),
+    {
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: Array.from(
+              { length: 80 },
+              (_, index) => `Trailing context ${index + 1}`,
+            ).join('\n'),
+          },
+        ],
+      },
+    },
+  ];
+}
+
 function phase6EditEntries(historyCount: number) {
   const oldText = Array.from(
     { length: 420 },
@@ -3168,6 +3222,123 @@ async function installPhase6Mocks(
   };
 }
 
+test('virtual transcript focus and group layout stay inside simple contracts', async ({
+  page,
+}) => {
+  const mocks = await installPhase6Mocks(page, {
+    entries: repeatedActivityEntries(),
+    pendingInteractions: [],
+  });
+  await page.goto('/sessions/s1');
+  const composer = page.locator('.composer');
+  const composerInput = page.locator('.composer [role="textbox"]');
+  await expect(composerInput).toBeVisible();
+  await composerInput.focus();
+  const composerFocus = await composer.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return {
+      outlineStyle: style.outlineStyle,
+      boxShadow: style.boxShadow,
+      rect,
+    };
+  });
+  expect(composerFocus.outlineStyle).toBe('none');
+  expect(composerFocus.boxShadow).toContain('inset');
+  expect(composerFocus.rect.width).toBeGreaterThan(0);
+  expect(composerFocus.rect.height).toBeGreaterThan(0);
+
+  const headers = page.locator('.activity-group-header');
+  await expect(page.locator('.transcript-virtualized')).toHaveCount(1);
+  await expect(headers).toHaveCount(4);
+  for (let round = 0; round < 3; round += 1) {
+    for (let index = 0; index < 4; index += 1) {
+      await headers.nth(index).click();
+      await expect
+        .poll(() =>
+          page
+            .locator('.transcript-virtual-row:visible')
+            .evaluateAll((elements) => {
+              const rows = elements
+                .map((element) => {
+                  const rect = element.getBoundingClientRect();
+                  return { top: rect.top, bottom: rect.bottom };
+                })
+                .sort((a, b) => a.top - b.top);
+              return rows.every(
+                (row, rowIndex) =>
+                  rowIndex === 0 ||
+                  row.top >= (rows[rowIndex - 1]?.bottom ?? 0) - 1,
+              );
+            }),
+        )
+        .toBe(true);
+    }
+    for (let index = 3; index >= 0; index -= 1)
+      await headers.nth(index).click();
+  }
+
+  const collapsedHeader = headers.nth(0);
+  const collapsedRow = collapsedHeader.locator(
+    'xpath=ancestor::div[@data-transcript-row]',
+  );
+  await collapsedRow.evaluate((row) => {
+    const scrollElement = row.closest('.session-transcript-scroll');
+    if (!scrollElement) throw new Error('transcript scrollport missing');
+    scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    scrollElement.scrollTop +=
+      row.getBoundingClientRect().top -
+      scrollElement.getBoundingClientRect().top;
+  });
+  const collapsedSticky = await collapsedHeader.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const radii = [
+      style.borderTopLeftRadius,
+      style.borderTopRightRadius,
+      style.borderBottomRightRadius,
+      style.borderBottomLeftRadius,
+    ];
+    const scroll = element.closest('.session-transcript-scroll');
+    const top = scroll
+      ? element.getBoundingClientRect().top - scroll.getBoundingClientRect().top
+      : Number.NaN;
+    return { position: style.position, radii, top };
+  });
+  expect(collapsedSticky.position).toBe('sticky');
+  expect(collapsedSticky.radii).toEqual(['0px', '0px', '0px', '0px']);
+  expect(collapsedSticky.top).toBeGreaterThanOrEqual(-1);
+  expect(collapsedSticky.top).toBeLessThan(12);
+  await collapsedHeader.click();
+  await collapsedRow.evaluate((row) => {
+    const scrollElement = row.closest('.session-transcript-scroll');
+    if (!scrollElement) throw new Error('transcript scrollport missing');
+    scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    scrollElement.scrollTop +=
+      row.getBoundingClientRect().top -
+      scrollElement.getBoundingClientRect().top;
+  });
+  const expandedSticky = await collapsedHeader.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const scroll = element.closest('.session-transcript-scroll');
+    const rect = element.getBoundingClientRect();
+    return {
+      position: style.position,
+      radii: [
+        style.borderTopLeftRadius,
+        style.borderTopRightRadius,
+        style.borderBottomRightRadius,
+        style.borderBottomLeftRadius,
+      ],
+      top: scroll ? rect.top - scroll.getBoundingClientRect().top : Number.NaN,
+    };
+  });
+  expect(expandedSticky.position).toBe('sticky');
+  expect(expandedSticky.radii).toEqual(['0px', '0px', '0px', '0px']);
+  expect(expandedSticky.top).toBeGreaterThanOrEqual(-1);
+  expect(expandedSticky.top).toBeLessThan(12);
+  await mocks.close();
+});
+
 async function assertLargeEditPreview(page: Page, historyCount: number) {
   const mocks = await installPhase6Mocks(page, {
     entries: phase6EditEntries(historyCount),
@@ -3199,16 +3370,36 @@ async function assertLargeEditPreview(page: Page, historyCount: number) {
   await expect(preview).toBeVisible();
   const previewMetrics = await preview.evaluate((element) => {
     const style = getComputedStyle(element);
+    const codeLine = element.querySelector<HTMLElement>('.tool-code-line');
+    const codeCell = codeLine?.querySelector<HTMLElement>(':scope > code');
     return {
       height: element.getBoundingClientRect().height,
       scrollHeight: element.scrollHeight,
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
       overflowY: style.overflowY,
       contain: style.contain,
+      lineDisplay: codeLine ? getComputedStyle(codeLine).display : '',
+      lineColumns: codeLine
+        ? getComputedStyle(codeLine).gridTemplateColumns
+        : '',
+      continuationClass:
+        codeCell?.classList.contains('tool-code-continuation-indent') ?? false,
+      continuationPadding: codeCell
+        ? getComputedStyle(codeCell).paddingInlineStart
+        : '',
     };
   });
   expect(previewMetrics.scrollHeight).toBeGreaterThan(previewMetrics.height);
   expect(previewMetrics.overflowY).toBe('auto');
   expect(previewMetrics.contain).toContain('paint');
+  expect(previewMetrics.scrollWidth).toBeLessThanOrEqual(
+    previewMetrics.clientWidth,
+  );
+  expect(previewMetrics.lineDisplay).toBe('grid');
+  expect(previewMetrics.lineColumns).toContain('16px');
+  expect(previewMetrics.continuationClass).toBe(true);
+  expect(previewMetrics.continuationPadding).not.toBe('0px');
 
   await transcriptScroll(page).evaluate((scrollElement) => {
     const group = scrollElement.querySelector<HTMLElement>('.activity-group');
@@ -3225,18 +3416,18 @@ async function assertLargeEditPreview(page: Page, historyCount: number) {
     const toolSummary = scrollElement.querySelector<HTMLElement>(
       '.activity-group .tool-detail[open] > summary.activity-step',
     );
-    if (!group || !toolSummary)
-      throw new Error('sticky transcript surfaces missing');
+    if (!group || !toolSummary) throw new Error('transcript surfaces missing');
     const scrollTop = scrollElement.getBoundingClientRect().top;
     return {
       groupTop: group.getBoundingClientRect().top - scrollTop,
-      toolTop: toolSummary.getBoundingClientRect().top - scrollTop,
+      groupPosition: getComputedStyle(group).position,
+      toolPosition: getComputedStyle(toolSummary).position,
     };
   });
   expect(sticky.groupTop).toBeGreaterThanOrEqual(-1);
   expect(sticky.groupTop).toBeLessThan(3);
-  expect(sticky.toolTop).toBeGreaterThanOrEqual(40);
-  expect(sticky.toolTop).toBeLessThan(70);
+  expect(sticky.groupPosition).toBe('sticky');
+  expect(sticky.toolPosition).toBe('static');
 
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
   expect(await transcriptGap(page)).toBeLessThan(3);

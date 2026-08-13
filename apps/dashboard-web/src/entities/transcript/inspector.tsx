@@ -478,17 +478,26 @@ function highlightedMarkup(value: string, language: string): string {
 function HighlightedLine({
   value,
   language,
+  continuationIndent = false,
 }: {
   value: string;
   language: string;
+  continuationIndent?: boolean;
 }) {
   return (
     // highlight.js returns escaped markup with only its registered grammar
     // spans; this is presentation-only and never contains tool payload HTML.
     <code
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: highlight.js output is escaped syntax markup.
-      dangerouslySetInnerHTML={{ __html: highlightedMarkup(value, language) }}
-    />
+      className={
+        continuationIndent ? 'tool-code-continuation-indent' : undefined
+      }
+    >
+      <span
+        className={continuationIndent ? 'tool-code-first-line' : undefined}
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: highlight.js output is escaped syntax markup.
+        dangerouslySetInnerHTML={{ __html: highlightedMarkup(value, language) }}
+      />
+    </code>
   );
 }
 
@@ -557,7 +566,11 @@ function HighlightedAdditions({
             <span className="tool-code-prefix" aria-hidden="true">
               +
             </span>
-            <HighlightedLine language={language} value={line || ' '} />
+            <HighlightedLine
+              continuationIndent
+              language={language}
+              value={line || ' '}
+            />
           </span>
         );
       })}
@@ -623,7 +636,11 @@ function ReplacementPreview({
                   <span className="tool-code-prefix" aria-hidden="true">
                     {prefix}
                   </span>
-                  <HighlightedLine language={language} value={line || ' '} />
+                  <HighlightedLine
+                    continuationIndent
+                    language={language}
+                    value={line || ' '}
+                  />
                 </span>
               );
             });
@@ -880,7 +897,7 @@ export function StructuredResultSection({
         <>
           <StructuredPayloadView value={result.value} />
           <details className="tool-inspector-raw">
-            <summary className="tool-inspector-raw-summary">Raw JSON</summary>
+            <summary>Raw JSON</summary>
             <BoundedPayloadPreview value={result.value} label={rawJsonLabel} />
           </details>
         </>
@@ -968,15 +985,13 @@ function ToolInspector({
       ) : null}
       {specializedKind && argumentsValue !== undefined ? (
         <details className="tool-inspector-raw">
-          <summary className="tool-inspector-raw-summary">
-            Raw Arguments
-          </summary>
+          <summary>Raw Arguments</summary>
           <BoundedPayloadPreview value={argumentsValue} label="arguments" />
         </details>
       ) : null}
       {specializedKind && record.result !== undefined ? (
         <details className="tool-inspector-raw">
-          <summary className="tool-inspector-raw-summary">Raw Result</summary>
+          <summary>Raw Result</summary>
           <BoundedPayloadPreview value={record.result} label="result" />
         </details>
       ) : null}
@@ -995,9 +1010,7 @@ function ToolInspector({
         />
       )}
       <details className="tool-inspector-raw">
-        <summary className="tool-inspector-raw-summary">
-          Raw tool record
-        </summary>
+        <summary>Raw tool record</summary>
         <BoundedPayloadPreview value={record} label="raw tool record" />
       </details>
     </div>

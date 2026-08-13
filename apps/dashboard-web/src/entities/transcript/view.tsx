@@ -285,6 +285,7 @@ function VirtualizedTranscript({
     [groups, items],
   );
   const virtualizerRef = useRef<HTMLDivElement>(null);
+  const affectedRowKeyRef = useRef<string | undefined>(undefined);
   const virtualizer = useVirtualizer({
     count: rows.length,
     estimateSize: (index) => (rows[index]?.kind === 'group' ? 132 : 96),
@@ -304,7 +305,23 @@ function VirtualizedTranscript({
   useLayoutEffect(() => {
     void open;
     void rows.length;
-    virtualizer.measure();
+    const rowKey = affectedRowKeyRef.current;
+    affectedRowKeyRef.current = undefined;
+    if (!rowKey) return;
+    const row = Array.from(
+      virtualizerRef.current?.querySelectorAll<HTMLElement>('[data-index]') ??
+        [],
+    ).find((element) => element.dataset.transcriptRow === rowKey);
+    if (!row) return;
+    virtualizer.measureElement(row);
+    const frame = window.requestAnimationFrame(() => {
+      const settledRow = Array.from(
+        virtualizerRef.current?.querySelectorAll<HTMLElement>('[data-index]') ??
+          [],
+      ).find((element) => element.dataset.transcriptRow === rowKey);
+      if (settledRow) virtualizer.measureElement(settledRow);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [open, rows.length, virtualizer]);
   const landmarks = useMemo(
     () => buildTranscriptLandmarks(items, groups),
@@ -349,6 +366,7 @@ function VirtualizedTranscript({
         expanded={open.has(groupKey)}
         captureScrollAnchor={captureScrollAnchor}
         onToggle={(nextExpanded) => {
+          affectedRowKeyRef.current = `group-${groupKey}`;
           setOpen((current) => {
             const next = new Set(current);
             nextExpanded ? next.add(groupKey) : next.delete(groupKey);

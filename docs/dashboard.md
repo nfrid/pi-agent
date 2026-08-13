@@ -170,8 +170,8 @@ The UI supports launch/restart/stop, prompt/steer/follow-up input, image
 attachments, abort, model and thinking selection, session rename, interaction
 answer/cancel, workspace refresh, notifications, push subscription, capability
 actions, structured tool inspectors, and a keyboard-first command palette.
-Long transcripts are virtualized while short transcripts retain normal document
-flow.
+Short transcripts retain normal document flow, while long transcripts are
+virtualized. Activity-group headers are the sole sticky transcript landmark.
 
 ## Dashboard UI principle
 
