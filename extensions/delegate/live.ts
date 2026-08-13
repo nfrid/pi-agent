@@ -110,6 +110,8 @@ function statusSnapshot(
     : undefined;
   return {
     id: text(status.id, 256),
+    runId: text(status.runId, 256),
+    lineageId: text(status.lineageId, 256),
     name: text(status.name, 2_000) || 'Subagent',
     kind: status.kind,
     state: status.state,

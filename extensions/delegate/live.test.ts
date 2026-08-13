@@ -28,6 +28,8 @@ describe('delegate live surface', () => {
         statuses: [
           {
             id,
+            runId: run.runId,
+            lineageId: id,
             name: 'Subagent',
             state: 'running',
             pauseState: 'paused',

@@ -92,6 +92,10 @@ function progressText(run: DelegatedRun): string {
 }
 
 export interface RunDelegateOptions {
+  /** Stable invocation identity allocated during preparation. */
+  runId?: string;
+  /** Stable child-session lineage from the prepared durable session. */
+  lineageId?: string;
   cwd: string;
   name?: string;
   task: string;
@@ -190,6 +194,8 @@ export async function runDelegate(
   const writeRequested = options.writeRequested ?? options.allowWrites ?? false;
   const allowWrites = options.allowWrites === true;
   const run = createRun(options.task, options.routing, {
+    runId: options.runId,
+    lineageId: options.lineageId,
     name: options.name,
     cwd: options.cwd,
     context: options.context,

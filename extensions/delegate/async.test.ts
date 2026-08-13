@@ -68,6 +68,7 @@ function prepared(
   token = 'continuation-token',
 ): PreparedDelegateTask {
   return {
+    runId: 'run-test',
     plan: {
       name: `${task} agent`,
       task,
@@ -87,6 +88,7 @@ function prepared(
     },
     session: {
       token,
+      lineageId: `lineage-${token}`,
       filePath: '/tmp/delegate.jsonl',
       cwd: '/tmp/project',
       isolation: 'shared',

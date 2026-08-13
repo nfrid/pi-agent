@@ -463,6 +463,10 @@ describe('delegate', () => {
       const header = JSON.parse(
         readFileSync(session.filePath, 'utf8').trim(),
       ) as Record<string, unknown>;
+      const metadata = JSON.parse(
+        readFileSync(session.filePath.replace(/\.jsonl$/, '.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      expect(metadata.lineageId).toBe(session.lineageId);
       expect(header).toMatchObject({
         type: 'session',
         id: session.token,
@@ -564,10 +568,21 @@ describe('delegate', () => {
         const metadataPath = session.filePath.replace(/\.jsonl$/, '.json');
         const metadata = JSON.parse(readFileSync(metadataPath, 'utf8')) as {
           isolation?: unknown;
+          lineageId?: unknown;
         };
         delete metadata.isolation;
+        if (session === shared) delete metadata.lineageId;
         writeFileSync(metadataPath, `${JSON.stringify(metadata)}\n`);
       }
+      const legacyFirst = resolveDelegateSession(shared.token);
+      const legacySecond = resolveDelegateSession(shared.token);
+      expect(legacyFirst?.lineageId).toBeDefined();
+      expect(legacySecond?.lineageId).toBe(legacyFirst?.lineageId);
+      expect(
+        JSON.parse(
+          readFileSync(shared.filePath.replace(/\.jsonl$/, '.json'), 'utf8'),
+        ),
+      ).not.toHaveProperty('lineageId');
       expect(resolveDelegateSession(shared.token)?.isolation).toBe('shared');
       expect(resolveDelegateSession(isolated.token)?.isolation).toBe(
         'worktree',

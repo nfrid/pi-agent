@@ -11,6 +11,7 @@ import {
 import * as path from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { atomicWriteFileSync, atomicWriteJsonSync } from '../shared/fs/atomic';
+import { createOpaqueId, deriveCompatibilityLineageId } from './identity';
 import type { DelegateIsolation, DelegateRouteState } from './types';
 
 interface SessionSnapshotSource {
@@ -20,6 +21,8 @@ interface SessionSnapshotSource {
 
 export interface DelegateSession {
   token: string;
+  /** Stable child-session lineage shared by all continuations. */
+  lineageId: string;
   filePath: string;
   cwd: string;
   /** The original fresh-run display name; absent only on legacy metadata. */
@@ -36,6 +39,8 @@ export interface DelegateSession {
 
 interface DelegateSessionMetadata {
   token: string;
+  /** Absent only in metadata written before lineage identities existed. */
+  lineageId?: string;
   cwd: string;
   createdAt: string;
   /** Persisted for new sessions so continuations can omit their name. */
@@ -118,6 +123,7 @@ export function createDelegateSession(options: {
   routing?: DelegateRouteState;
 }): DelegateSession {
   const token = randomUUID();
+  const lineageId = createOpaqueId();
   const createdAt = new Date().toISOString();
   const dir = sessionDir();
   const { filePath, metadataPath } = sessionPaths(token);
@@ -131,6 +137,7 @@ export function createDelegateSession(options: {
     );
     const metadata: DelegateSessionMetadata = {
       token,
+      lineageId,
       cwd: options.cwd,
       createdAt,
       ...(name ? { name } : {}),
@@ -153,6 +160,7 @@ export function createDelegateSession(options: {
   }
   return {
     token,
+    lineageId,
     filePath,
     cwd: options.cwd,
     ...(name ? { name } : {}),
@@ -182,6 +190,10 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
       return null;
     return {
       token,
+      lineageId:
+        typeof metadata.lineageId === 'string' && metadata.lineageId.trim()
+          ? metadata.lineageId.trim()
+          : deriveCompatibilityLineageId(token),
       filePath,
       cwd: metadata.cwd,
       ...(typeof metadata.name === 'string' && metadata.name.trim()

@@ -67,6 +67,7 @@ function prepared(
   overrides: Partial<PreparedDelegateTask> = {},
 ): PreparedDelegateTask {
   return {
+    runId: 'run-test',
     plan: {
       name: 'Test agent',
       task: 'inspect',
@@ -80,6 +81,7 @@ function prepared(
     },
     session: {
       token: 'tok',
+      lineageId: 'lineage-test',
       filePath: '/tmp/delegate.jsonl',
       cwd: '/tmp/project',
       isolation: 'shared',
@@ -884,6 +886,8 @@ describe('pending delegate runs', () => {
     });
     const run = pendingRuns({ mode: 'single', tasks: [task] })[0];
     expect(run).toMatchObject({
+      runId: task.runId,
+      lineageId: task.session.lineageId,
       allowWrites: false,
       isolation: 'worktree',
       worktree: {
@@ -891,6 +895,12 @@ describe('pending delegate runs', () => {
         branch: 'pi/audit',
         worktreePath: '/repo/.worktrees/audit',
       },
+    });
+    expect(
+      toolResult.makeDetails('single', run ? [run] : []).runs[0],
+    ).toMatchObject({
+      runId: task.runId,
+      lineageId: task.session.lineageId,
     });
   });
 });

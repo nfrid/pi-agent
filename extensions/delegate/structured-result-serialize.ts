@@ -1,4 +1,8 @@
 import {
+  deriveCompatibilityLineageId,
+  deriveCompatibilityRunId,
+} from './identity';
+import {
   copyDelegateLifecycle,
   ensureDelegateLifecycle,
   getDelegateLifecycle,
@@ -237,12 +241,21 @@ export function serializeDelegateRunForPublic(
   const structured = Boolean(getDelegateResultSpec(run));
   const lifecycle = ensureDelegateLifecycle(run);
   const includeArtifacts = options.includeArtifacts !== false;
+  const compatibilityLineageId =
+    run.lineageId ??
+    (run.continuation
+      ? deriveCompatibilityLineageId(run.continuation)
+      : undefined);
   const {
     lifecycle: _childLifecycle,
     errorMessage: _errorMessage,
     structuredResult: _structuredResult,
     ...base
-  } = run;
+  } = {
+    ...run,
+    runId: run.runId ?? deriveCompatibilityRunId(run),
+    ...(compatibilityLineageId ? { lineageId: compatibilityLineageId } : {}),
+  };
   const projectedStructuredResult = publicStructuredResult(run);
   const publicRun: DelegatedRun = structured
     ? {
