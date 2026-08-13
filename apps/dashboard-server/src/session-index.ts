@@ -31,6 +31,20 @@ export interface SessionReadOptions {
   resolveLatestLeaf?: boolean;
 }
 
+export interface SelectedBranchReadResult {
+  metadata: SessionIndexEntry;
+  /** Candidate entries only; non-candidate transcript entries are never retained. */
+  entries: unknown[];
+  leafId?: string;
+  entriesTruncated: boolean;
+}
+
+export type SelectedBranchEntrySelector = (entry: unknown) => boolean;
+
+const MAX_SELECTED_BRANCH_ENTRIES = 2_048;
+const MAX_SELECTED_BRANCH_BYTES = 8 * 1024 * 1024;
+const MAX_SELECTED_BRANCH_ENTRY_BYTES = 512 * 1024;
+
 interface HistoryCursor {
   version: 1;
   sessionId: string;
@@ -372,6 +386,56 @@ export class SessionIndex {
   }
 
   /**
+   * Scan one selected branch while retaining only entries matching the
+   * server-internal selector. The ancestry pass still validates every branch
+   * identity, but transcript payloads outside the selector never accumulate.
+   */
+  async readSelectedBranchEntries(
+    id: string,
+    leafId: string | undefined,
+    selector: SelectedBranchEntrySelector,
+    options: SessionReadOptions = {},
+  ): Promise<SelectedBranchReadResult> {
+    const indexed = this.files.get(id);
+    if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
+      throw new Error('Unknown session.');
+    const stat = await fs.stat(indexed.file).catch(() => undefined);
+    if (!stat) throw new Error('Unknown session.');
+    const { header: _header, lastEntryId: _lastEntryId, ...metadata } = indexed;
+    let latestStat = stat;
+    for (let attempt = 0; attempt < LATEST_LEAF_READ_ATTEMPTS; attempt += 1) {
+      try {
+        const result = await this.readBranchEntries(
+          id,
+          indexed.file,
+          latestStat,
+          metadata,
+          leafId,
+          undefined,
+          options.resolveLatestLeaf === true && leafId === undefined,
+          selector,
+        );
+        return {
+          metadata: result.metadata,
+          entries: result.entries,
+          ...(result.leafId === undefined ? {} : { leafId: result.leafId }),
+          entriesTruncated: result.entriesTruncated,
+        };
+      } catch (error) {
+        if (
+          !(error instanceof SessionFileChangedError) ||
+          attempt === LATEST_LEAF_READ_ATTEMPTS - 1
+        )
+          throw error;
+        const refreshed = await fs.stat(indexed.file).catch(() => undefined);
+        if (!refreshed) throw new Error('Unknown session.');
+        latestStat = refreshed;
+      }
+    }
+    throw new Error('Unable to resolve the latest session branch.');
+  }
+
+  /**
    * Read only the ancestry rooted at an active runtime leaf. A normal session
    * read intentionally retains append-only history semantics; branch reads are
    * selected explicitly because the file can contain multiple trees.
@@ -384,11 +448,14 @@ export class SessionIndex {
     leafId: string | undefined,
     cursor: HistoryCursor | undefined,
     resolveLatestLeaf: boolean,
+    selector?: SelectedBranchEntrySelector,
   ): Promise<{
     metadata: SessionIndexEntry;
     entries: unknown[];
     entriesComplete: boolean;
     history: SessionHistoryPage;
+    leafId?: string;
+    entriesTruncated: boolean;
   }> {
     const parents = new Map<string, unknown>();
     const ordinals = new Map<string, number>();
@@ -434,27 +501,35 @@ export class SessionIndex {
     // resolution rather than returning a page for the old file version.
     if (resolveLatestLeaf) await verifySessionFileVersion(file, stat);
     const resolvedLeafId = resolveLatestLeaf ? latestEntryId : leafId;
-    if (!headerSeen || !resolvedLeafId || !parents.has(resolvedLeafId))
-      throw new Error('Invalid session branch.');
+    if (!headerSeen) throw new Error('Invalid session branch.');
 
     const branchIds = new Set<string>();
-    let currentId = resolvedLeafId;
-    while (true) {
-      if (branchIds.has(currentId)) throw new Error('Invalid session branch.');
-      branchIds.add(currentId);
-      const parentId = parents.get(currentId);
-      if (parentId === undefined || parentId === null) break;
-      if (typeof parentId !== 'string' || !parents.has(parentId))
+    if (resolvedLeafId === undefined) {
+      // A valid session may contain only its header so far. There is no
+      // ancestry to select in that case, and its delegate history is empty.
+      if (parents.size > 0) throw new Error('Invalid session branch.');
+    } else {
+      if (!parents.has(resolvedLeafId))
         throw new Error('Invalid session branch.');
-      const currentOrdinal = ordinals.get(currentId);
-      const parentOrdinal = ordinals.get(parentId);
-      if (
-        currentOrdinal === undefined ||
-        parentOrdinal === undefined ||
-        parentOrdinal >= currentOrdinal
-      )
-        throw new Error('Invalid session branch.');
-      currentId = parentId;
+      let currentId = resolvedLeafId;
+      while (true) {
+        if (branchIds.has(currentId))
+          throw new Error('Invalid session branch.');
+        branchIds.add(currentId);
+        const parentId = parents.get(currentId);
+        if (parentId === undefined || parentId === null) break;
+        if (typeof parentId !== 'string' || !parents.has(parentId))
+          throw new Error('Invalid session branch.');
+        const currentOrdinal = ordinals.get(currentId);
+        const parentOrdinal = ordinals.get(parentId);
+        if (
+          currentOrdinal === undefined ||
+          parentOrdinal === undefined ||
+          parentOrdinal >= currentOrdinal
+        )
+          throw new Error('Invalid session branch.');
+        currentId = parentId;
+      }
     }
 
     type PageEntry = {
@@ -467,6 +542,7 @@ export class SessionIndex {
     let pageBytes = 0;
     let branchOrdinal = 0;
     let selectedCount = 0;
+    let entriesTruncated = false;
     let headerInSecondPass = false;
     let reachedUpperBound = false;
     const seenHasher = createHash('sha256');
@@ -510,7 +586,21 @@ export class SessionIndex {
         const prefixHash = seenHasher.copy().digest('hex');
         updateHistoryHash(seenHasher, serialized);
         if (!selected) continue;
+        const outputOrdinal = branchOrdinal;
+        const candidate = selector === undefined || selector(entry);
+        branchOrdinal += 1;
+        selectedCount += 1;
+        if (!candidate) continue;
         const originalBytes = Buffer.byteLength(serialized);
+        if (
+          selector !== undefined &&
+          (originalBytes > MAX_SELECTED_BRANCH_ENTRY_BYTES ||
+            page.length >= MAX_SELECTED_BRANCH_ENTRIES ||
+            pageBytes + originalBytes > MAX_SELECTED_BRANCH_BYTES)
+        ) {
+          entriesTruncated = true;
+          continue;
+        }
         const outputEntry =
           originalBytes > HISTORY_PAGE_BYTES
             ? {
@@ -527,19 +617,21 @@ export class SessionIndex {
             : entry;
         const outputBytes = Buffer.byteLength(JSON.stringify(outputEntry));
         page.push({
-          ordinal: branchOrdinal,
+          ordinal: outputOrdinal,
           entry: outputEntry,
           prefixHash,
           bytes: outputBytes,
         });
         pageBytes += outputBytes;
-        while (pageBytes > HISTORY_PAGE_BYTES && page.length > 0) {
+        while (
+          selector === undefined &&
+          pageBytes > HISTORY_PAGE_BYTES &&
+          page.length > 0
+        ) {
           const shifted = page.shift();
           if (!shifted) break;
           pageBytes -= shifted.bytes;
         }
-        branchOrdinal += 1;
-        selectedCount += 1;
       }
     } finally {
       secondPassLines.close();
@@ -576,6 +668,8 @@ export class SessionIndex {
       metadata,
       entries: page.map((item) => item.entry),
       entriesComplete: cursor === undefined && start === 0,
+      ...(resolvedLeafId === undefined ? {} : { leafId: resolvedLeafId }),
+      entriesTruncated,
       history: {
         version: 1,
         start,

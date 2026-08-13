@@ -137,6 +137,52 @@ describe('session index', () => {
     ).rejects.toThrow('Invalid session branch');
   });
 
+  it('scans a selected branch while retaining only matching entries', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-selected-branch-'),
+    );
+    const file = path.join(root, 'selected-branch.jsonl');
+    const entries: Record<string, unknown>[] = [
+      { type: 'session', id: 'selected-branch-id', cwd: '/tmp' },
+    ];
+    let parentId: string | null = null;
+    for (let index = 0; index < 9; index += 1) {
+      const id = `entry-${index}`;
+      entries.push({
+        type: index === 2 || index === 8 ? 'delegate-candidate' : 'message',
+        id,
+        parentId,
+        message: {
+          role: 'assistant',
+          content:
+            index === 2 || index === 8 ? 'delegate' : 'x'.repeat(1_100_000),
+        },
+      });
+      parentId = id;
+    }
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+
+    const result = await index.readSelectedBranchEntries(
+      'selected-branch-id',
+      undefined,
+      (entry) =>
+        typeof entry === 'object' &&
+        entry !== null &&
+        (entry as { type?: unknown }).type === 'delegate-candidate',
+      { resolveLatestLeaf: true },
+    );
+    expect(
+      result.entries.map((entry) => (entry as { id?: string }).id),
+    ).toEqual(['entry-2', 'entry-8']);
+    expect(result.entriesTruncated).toBe(false);
+    expect(result.leafId).toBe('entry-8');
+  });
+
   it('resolves a working branch leaf from the latest JSONL entry', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-latest-leaf-'),

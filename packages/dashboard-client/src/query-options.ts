@@ -1,5 +1,6 @@
 import type {
   BrowserSnapshot,
+  DelegateHistoryResponse,
   ProjectAdoptCommand,
   ProjectCreateCommand,
   RetryCommand,
@@ -20,6 +21,8 @@ export const dashboardQueryKeys = {
   snapshot: () => ['dashboard', 'snapshot'] as const,
   usage: () => ['dashboard', 'usage'] as const,
   session: (id: string) => ['dashboard', 'session', id] as const,
+  delegateHistory: (id: string) =>
+    ['dashboard', 'delegate-history', id] as const,
   workspace: (id: string) => ['dashboard', 'workspace', id] as const,
   composerCommands: (workspaceId: string) =>
     ['dashboard', 'composer-commands', workspaceId] as const,
@@ -101,6 +104,21 @@ export function sessionQueryOptions(client: DashboardHttpClient, id: string) {
     enabled: Boolean(id),
   });
 }
+
+export function delegateHistoryQueryOptions(
+  client: DashboardHttpClient,
+  id: string,
+) {
+  return queryOptions<DelegateHistoryResponse>({
+    queryKey: dashboardQueryKeys.delegateHistory(id),
+    queryFn: ({ signal }) => client.delegateHistory(id, signal),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: networkRetry,
+    enabled: Boolean(id),
+  });
+}
+
+export const sessionDelegateHistoryQueryOptions = delegateHistoryQueryOptions;
 
 export function usageQueryOptions(client: DashboardHttpClient) {
   return queryOptions({

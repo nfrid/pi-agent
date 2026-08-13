@@ -15,6 +15,7 @@ import {
   parseComposerCommandCatalogue,
   parseDashboardEventEnvelope,
   parseDashboardStreamMessage,
+  parseDelegateHistoryResponse,
   parseFrame,
   parseNormalizedMessagePayload,
   parseRuntimeExtensionSurface,
@@ -33,6 +34,60 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('validates grouped delegate history with persisted detail payloads', () => {
+    const response = parseDelegateHistoryResponse({
+      version: 1,
+      sessionId: 'session-1',
+      leafId: 'leaf-1',
+      groups: [
+        {
+          id: 'lineage-1',
+          runId: 'run-1',
+          lineageId: 'lineage-1',
+          name: 'Review',
+          kind: 'foreground',
+          state: 'success',
+          createdAt: 1,
+          allowWrites: false,
+          runCount: 1,
+          runs: [
+            {
+              runId: 'run-1',
+              lineageId: 'lineage-1',
+              name: 'Review',
+              kind: 'foreground',
+              state: 'success',
+              createdAt: 1,
+              allowWrites: false,
+              details: {
+                structuredResult: { valid: true, errors: [] },
+                truncated: false,
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(response.groups[0]?.runs[0]?.details).toEqual({
+      structuredResult: { valid: true, errors: [] },
+      truncated: false,
+    });
+    expect(() =>
+      parseDelegateHistoryResponse({ ...response, version: 2 }),
+    ).toThrow();
+    expect(() =>
+      parseDelegateHistoryResponse({
+        ...response,
+        groups: [
+          {
+            ...response.groups[0],
+            runs: [{ ...response.groups[0]?.runs[0], continuation: 'secret' }],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
   it('validates optional paginated session history metadata', () => {
     const response = {
       metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },

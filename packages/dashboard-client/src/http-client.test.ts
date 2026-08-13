@@ -127,6 +127,33 @@ describe('DashboardHttpClient command requests', () => {
     expect(calls[0]?.[0]).toBe('/api/sessions/session-1?before=opaque%20token');
   });
 
+  it('fetches and validates persisted delegate history', async () => {
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ version: 1, sessionId: 'session-1', groups: [] }),
+          { status: 200 },
+        ),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: {
+        get: () => undefined,
+        set: () => undefined,
+        clear: () => undefined,
+      },
+    });
+    await expect(client.delegateHistory('session-1')).resolves.toMatchObject({
+      version: 1,
+      sessionId: 'session-1',
+      groups: [],
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/sessions/session-1/delegate-history',
+      expect.objectContaining({ headers: expect.anything() }),
+    );
+  });
+
   it('allocates one command ID without changing caller-owned IDs', async () => {
     const fetch = vi.fn(
       async () =>

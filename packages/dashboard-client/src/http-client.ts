@@ -5,6 +5,7 @@ import {
   type CommandReceipt,
   type ComposerCommandCatalogue,
   type DashboardStreamMessage,
+  type DelegateHistoryResponse,
   type Project,
   type ProjectAdoptCommand,
   type ProjectCreateCommand,
@@ -18,6 +19,7 @@ import {
   tryParseBrowserSnapshot,
   tryParseComposerCommandCatalogue,
   tryParseDashboardStreamMessage,
+  tryParseDelegateHistoryResponse,
   tryParseSessionApiResponse,
 } from '@pi-dashboard/protocol';
 import {
@@ -289,6 +291,27 @@ export class DashboardHttpClient {
     signal?: AbortSignal,
   ): Promise<SessionApiResponse> {
     return this.session(id, signal, before);
+  }
+
+  async delegateHistory(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<DelegateHistoryResponse> {
+    const value = await this.request<unknown>(
+      `/api/sessions/${encodeURIComponent(id)}/delegate-history`,
+      signal ? { signal } : {},
+    );
+    const response = tryParseDelegateHistoryResponse(value);
+    if (!response)
+      throw new Error('Dashboard returned invalid delegate history data.');
+    return response;
+  }
+
+  async sessionDelegateHistory(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<DelegateHistoryResponse> {
+    return this.delegateHistory(id, signal);
   }
 
   async usage(): Promise<{ usage?: unknown; error?: string }> {

@@ -24,6 +24,11 @@ import {
   MAX_COMPOSER_COMMAND_DESCRIPTION,
   MAX_COMPOSER_COMMAND_NAME,
   MAX_COMPOSER_COMMANDS,
+  MAX_DELEGATE_HISTORY_DETAIL_ENTRIES,
+  MAX_DELEGATE_HISTORY_DETAIL_TEXT,
+  MAX_DELEGATE_HISTORY_GROUPS,
+  MAX_DELEGATE_HISTORY_RUNS_PER_GROUP,
+  MAX_DELEGATE_HISTORY_TASK,
   MAX_ID,
   MAX_PATH,
   MAX_SESSION_INDEX_DELTA_ITEMS,
@@ -1134,6 +1139,195 @@ export type SessionApiResponse = Static<typeof SessionApiResponseSchema>;
 /** Existing response spelling retained for v1 clients. */
 export const SessionResponseSchema = SessionApiResponseSchema;
 export type SessionResponse = SessionApiResponse;
+
+const DelegateHistoryStateSchema = Type.Union([
+  Type.Literal('queued'),
+  Type.Literal('running'),
+  Type.Literal('success'),
+  Type.Literal('error'),
+  Type.Literal('aborted'),
+  Type.Literal('timed-out'),
+]);
+export type DelegateHistoryState = Static<typeof DelegateHistoryStateSchema>;
+const DelegateHistoryKindSchema = Type.Union([
+  Type.Literal('foreground'),
+  Type.Literal('background'),
+]);
+export type DelegateHistoryKind = Static<typeof DelegateHistoryKindSchema>;
+const DelegateHistoryScalarSchema = Type.Union([
+  Type.String({ maxLength: MAX_DELEGATE_HISTORY_DETAIL_TEXT }),
+  Type.Number(),
+  Type.Boolean(),
+  Type.Null(),
+]);
+function delegateHistoryValueSchema(
+  depth: number,
+): ReturnType<typeof Type.Union> {
+  if (depth <= 0) return DelegateHistoryScalarSchema;
+  const child = delegateHistoryValueSchema(depth - 1);
+  return Type.Union([
+    DelegateHistoryScalarSchema,
+    Type.Array(child, { maxItems: 32 }),
+    Type.Record(Type.String({ maxLength: 128 }), child, { maxProperties: 32 }),
+  ]);
+}
+const DelegateHistoryValueSchema = delegateHistoryValueSchema(6);
+const DelegateHistoryActivitySchema = Type.Object(
+  {
+    id: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    type: Type.Union([Type.Literal('thinking'), Type.Literal('tool')]),
+    label: Type.String({ minLength: 1, maxLength: 2_000 }),
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    text: Type.Optional(
+      Type.String({ maxLength: MAX_DELEGATE_HISTORY_DETAIL_TEXT }),
+    ),
+    arguments: Type.Optional(DelegateHistoryValueSchema),
+    result: Type.Optional(DelegateHistoryValueSchema),
+    argumentsTruncated: Type.Optional(Type.Boolean()),
+    resultTruncated: Type.Optional(Type.Boolean()),
+    status: Type.Optional(
+      Type.Union([
+        Type.Literal('running'),
+        Type.Literal('completed'),
+        Type.Literal('error'),
+      ]),
+    ),
+    at: Type.Optional(FiniteNumberSchema),
+  },
+  { additionalProperties: false },
+);
+const DelegateHistoryStructuredResultSchema = Type.Object(
+  {
+    valid: Type.Boolean(),
+    value: Type.Optional(DelegateHistoryValueSchema),
+    valueOmitted: Type.Optional(Type.Boolean()),
+    errors: Type.Array(Type.String({ maxLength: 240 }), { maxItems: 16 }),
+  },
+  { additionalProperties: false },
+);
+const DelegateHistoryLifecycleSchema = Type.Object(
+  {
+    reason: Type.String({ minLength: 1, maxLength: 128 }),
+    diagnostic: Type.Optional(
+      Type.String({ maxLength: MAX_DELEGATE_HISTORY_DETAIL_TEXT }),
+    ),
+    continuationUsable: Type.Boolean(),
+    writableBranchRetained: Type.Boolean(),
+    readOnlySnapshotRetained: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+const DelegateHistoryDetailsSchema = Type.Object(
+  {
+    task: Type.Optional(Type.String({ maxLength: MAX_DELEGATE_HISTORY_TASK })),
+    activities: Type.Optional(
+      Type.Readonly(
+        Type.Array(DelegateHistoryActivitySchema, {
+          maxItems: MAX_DELEGATE_HISTORY_DETAIL_ENTRIES,
+        }),
+      ),
+    ),
+    structuredResult: Type.Optional(DelegateHistoryStructuredResultSchema),
+    lifecycle: Type.Optional(DelegateHistoryLifecycleSchema),
+    warnings: Type.Optional(
+      Type.Array(Type.String({ maxLength: 512 }), { maxItems: 32 }),
+    ),
+    truncated: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+export type DelegateHistoryDetails = Static<
+  typeof DelegateHistoryDetailsSchema
+>;
+const DelegateHistoryInvocationSchema = Type.Object(
+  {
+    runId: IdentifierSchema,
+    lineageId: IdentifierSchema,
+    name: Type.String({ minLength: 1, maxLength: 2_000 }),
+    task: Type.Optional(Type.String({ maxLength: MAX_DELEGATE_HISTORY_TASK })),
+    kind: DelegateHistoryKindSchema,
+    state: DelegateHistoryStateSchema,
+    createdAt: FiniteNumberSchema,
+    queuedAt: Type.Optional(FiniteNumberSchema),
+    startedAt: Type.Optional(FiniteNumberSchema),
+    finishedAt: Type.Optional(FiniteNumberSchema),
+    jobId: Type.Optional(IdentifierSchema),
+    route: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    context: Type.Optional(
+      Type.Union([
+        Type.Literal('branch'),
+        Type.Literal('fresh'),
+        Type.Literal('continuation'),
+      ]),
+    ),
+    allowWrites: Type.Boolean(),
+    /** Public, bounded delegate details retained by the parent session. */
+    details: DelegateHistoryDetailsSchema,
+  },
+  { additionalProperties: false },
+);
+export type DelegateHistoryInvocation = Static<
+  typeof DelegateHistoryInvocationSchema
+>;
+const DelegateHistoryGroupSchema = Type.Object(
+  {
+    /** Stable lineage row identity; unlike live status IDs this survives reload. */
+    id: IdentifierSchema,
+    runId: IdentifierSchema,
+    lineageId: IdentifierSchema,
+    name: Type.String({ minLength: 1, maxLength: 2_000 }),
+    kind: DelegateHistoryKindSchema,
+    state: DelegateHistoryStateSchema,
+    createdAt: FiniteNumberSchema,
+    startedAt: Type.Optional(FiniteNumberSchema),
+    finishedAt: Type.Optional(FiniteNumberSchema),
+    jobId: Type.Optional(IdentifierSchema),
+    route: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    context: Type.Optional(
+      Type.Union([
+        Type.Literal('branch'),
+        Type.Literal('fresh'),
+        Type.Literal('continuation'),
+      ]),
+    ),
+    allowWrites: Type.Boolean(),
+    runCount: Type.Integer({
+      minimum: 1,
+      maximum: MAX_DELEGATE_HISTORY_RUNS_PER_GROUP,
+    }),
+    runs: Type.Readonly(
+      Type.Array(DelegateHistoryInvocationSchema, {
+        maxItems: MAX_DELEGATE_HISTORY_RUNS_PER_GROUP,
+      }),
+    ),
+    truncated: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type DelegateHistoryGroup = Static<typeof DelegateHistoryGroupSchema>;
+export const DelegateHistoryResponseSchema = Type.Object(
+  {
+    version: Type.Literal(1),
+    sessionId: IdentifierSchema,
+    leafId: Type.Optional(IdentifierSchema),
+    /** True when hard response caps omitted persisted delegate records/details. */
+    truncated: Type.Optional(Type.Boolean()),
+    /** Lineage-grouped invocations from the selected persisted session branch. */
+    groups: Type.Readonly(
+      Type.Array(DelegateHistoryGroupSchema, {
+        maxItems: MAX_DELEGATE_HISTORY_GROUPS,
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type DelegateHistoryResponse = Static<
+  typeof DelegateHistoryResponseSchema
+>;
+
+export const SessionDelegateHistoryResponseSchema =
+  DelegateHistoryResponseSchema;
+export type SessionDelegateHistoryResponse = DelegateHistoryResponse;
 export const SessionSnapshotResponseSchema = Type.Object(
   { session: SessionProjectionSchema, cursor: Type.Integer({ minimum: 0 }) },
   { additionalProperties: false },

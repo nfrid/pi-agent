@@ -7,6 +7,7 @@ import {
   CheckoutActionCommandSchema,
   CheckoutReviewCommandSchema,
   type ComposerCommandCatalogue,
+  type DelegateHistoryResponse,
   ProjectAdoptCommandSchema,
   ProjectCreateCommandSchema,
   RetryCommandSchema,
@@ -88,6 +89,7 @@ export interface DashboardRouteContext {
   composerCommands(workspaceId: string): Promise<ComposerCommandCatalogue>;
   usage(): Promise<{ usage: unknown; error?: string }>;
   readSession(id: string, before?: string): Promise<unknown>;
+  readDelegateHistory(id: string): Promise<DelegateHistoryResponse>;
   renameSession(id: string, name: string): Promise<unknown>;
   startRuntime(input: unknown): Promise<unknown>;
   restartRuntime?(runtimeId: string, commandId: string): Promise<unknown>;
@@ -504,6 +506,16 @@ export const dashboardRoutes: FastifyPluginAsync<{
       return sendError(reply, error);
     }
   });
+  app.get<{ Params: { id: string } }>(
+    '/api/sessions/:id/delegate-history',
+    async (request, reply) => {
+      try {
+        return await context.readDelegateHistory(request.params.id);
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
   app.post<{
     Params: { id: string };
     Body: { name?: unknown };

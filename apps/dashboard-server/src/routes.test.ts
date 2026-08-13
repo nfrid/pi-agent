@@ -26,6 +26,11 @@ function context(): DashboardRouteContext {
     composerCommands: async () => ({ commands: [] }),
     usage: async () => ({ usage: null }),
     readSession: async () => ({ entries: [], metadata: { id: 's' } }),
+    readDelegateHistory: async () => ({
+      version: 1,
+      sessionId: 's',
+      groups: [],
+    }),
     renameSession: async () => ({ metadata: { id: 's' } }),
     startRuntime: async () => ({ runtimeId: 'runtime' }),
     commandRuntime: async () => ({ accepted: true }),
@@ -88,6 +93,34 @@ describe('Fastify dashboard route plugin', () => {
     });
     expect(restarted.statusCode).toBe(200);
     expect(restart).toHaveBeenCalledWith('runtime-1', 'restart-1');
+  });
+
+  it('serves authenticated delegate history by session ID', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.readDelegateHistory = vi.fn(async (id) => ({
+      version: 1 as const,
+      sessionId: id,
+      groups: [],
+    }));
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/offline-1/delegate-history',
+      headers: {
+        origin: 'http://dashboard.test',
+        'x-dashboard-token': 'route-token',
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      version: 1,
+      sessionId: 'offline-1',
+      groups: [],
+    });
+    expect(routeContext.readDelegateHistory).toHaveBeenCalledWith('offline-1');
   });
 
   it('serves authenticated workspace composer commands and rejects unknown ids', async () => {

@@ -25,6 +25,8 @@ import {
   DashboardMessageSchema,
   type DashboardStreamMessage,
   DashboardStreamMessageSchema,
+  type DelegateHistoryResponse,
+  DelegateHistoryResponseSchema,
   type InteractionSnapshot,
   InteractionSnapshotSchema,
   MAX_FRAME_BYTES,
@@ -593,6 +595,21 @@ export function tryParseComposerCommandCatalogue(
 
 export function parseSessionApiResponse(value: unknown): SessionApiResponse {
   return parseSchema(SessionApiResponseSchema, value, 'session API response');
+}
+
+export function parseDelegateHistoryResponse(
+  value: unknown,
+): DelegateHistoryResponse {
+  return parseSchema(
+    DelegateHistoryResponseSchema,
+    value,
+    'delegate history response',
+  );
+}
+export function tryParseDelegateHistoryResponse(
+  value: unknown,
+): DelegateHistoryResponse | undefined {
+  return tryParseSchema(DelegateHistoryResponseSchema, value);
 }
 export function tryParseSessionApiResponse(
   value: unknown,
