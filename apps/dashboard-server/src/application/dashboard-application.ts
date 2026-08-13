@@ -3,6 +3,7 @@ import type {
   BrowserSnapshot,
   NotificationEvent,
   RuntimeSnapshot,
+  RuntimeSnapshotPatch,
   SessionIndexEntry,
   SessionSnapshot,
   WorkspaceTarget,
@@ -80,6 +81,67 @@ export function compactPublicSession(
   return { ...session, entries: [], entriesComplete: false };
 }
 
+function compactPublicExtensionSurfaces(
+  surfaces: RuntimeSnapshot['extensionSurfaces'],
+): RuntimeSnapshot['extensionSurfaces'] {
+  return surfaces?.map((surface) => {
+    if (
+      surface.rendererId !== 'delegate.status' ||
+      !surface.viewModel ||
+      typeof surface.viewModel !== 'object' ||
+      !Array.isArray((surface.viewModel as { statuses?: unknown }).statuses)
+    )
+      return surface;
+    const statuses = (
+      surface.viewModel as { statuses: Array<Record<string, unknown>> }
+    ).statuses.map((status) => {
+      const { transcript, result, ...metadata } = status;
+      const compactResult =
+        result && typeof result === 'object'
+          ? (() => {
+              const { value, ...resultMetadata } = result as Record<
+                string,
+                unknown
+              >;
+              return {
+                ...resultMetadata,
+                ...(value === undefined ? {} : { valueOmitted: true }),
+              };
+            })()
+          : result;
+      return {
+        ...metadata,
+        ...(compactResult === undefined ? {} : { result: compactResult }),
+        ...(Array.isArray(transcript) && transcript.length > 0
+          ? { transcriptTruncated: true }
+          : {}),
+      };
+    });
+    return {
+      ...surface,
+      viewModel: { ...surface.viewModel, statuses },
+    };
+  });
+}
+
+function compactPublicRuntime<T extends RuntimeSnapshot | RuntimeSnapshotPatch>(
+  runtime: T,
+): T {
+  return {
+    ...runtime,
+    ...(runtime.session === undefined
+      ? {}
+      : { session: compactPublicSession(runtime.session) }),
+    ...(runtime.extensionSurfaces === undefined
+      ? {}
+      : {
+          extensionSurfaces: compactPublicExtensionSurfaces(
+            runtime.extensionSurfaces,
+          ),
+        }),
+  } as T;
+}
+
 /**
  * Public event projection. RuntimeRegistry retains full snapshots for server
  * authority, but SSE and WebSocket consumers only receive metadata patches.
@@ -89,21 +151,15 @@ export function projectPublicBridgeEvent(event: BridgeEvent): BridgeEvent {
     case 'runtime.hello':
       return {
         ...event,
-        snapshot: {
-          ...event.snapshot,
-          session: compactPublicSession(event.snapshot.session),
-        },
+        snapshot: compactPublicRuntime(event.snapshot),
       };
     case 'runtime.heartbeat':
     case 'runtime.stateChanged':
-      return event.snapshot?.session === undefined
+      return event.snapshot === undefined
         ? event
         : {
             ...event,
-            snapshot: {
-              ...event.snapshot,
-              session: compactPublicSession(event.snapshot.session),
-            },
+            snapshot: compactPublicRuntime(event.snapshot),
           };
     case 'session.changed':
     case 'session.snapshot':
@@ -251,10 +307,7 @@ export class DashboardApplication {
       serverId,
       revision,
       cursor,
-      runtimes: liveRuntimes.map((runtime) => ({
-        ...runtime,
-        session: { ...runtime.session, entries: [] },
-      })),
+      runtimes: liveRuntimes.map((runtime) => compactPublicRuntime(runtime)),
       workspaces: this.workspaces.list(),
       projects: this.orchestration.projectSummaries(),
       checkouts: this.orchestration.checkoutSummaries(),

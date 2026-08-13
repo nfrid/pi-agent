@@ -36,6 +36,62 @@ const runtime: RuntimeSnapshot = {
 };
 
 describe('public runtime event projection', () => {
+  it('strips eager delegate detail from public runtime surfaces', () => {
+    const extensionSurfaces = [
+      {
+        id: 'delegate.status',
+        rendererId: 'delegate.status',
+        placement: 'right-rail' as const,
+        viewModel: {
+          version: 1,
+          statuses: [
+            {
+              id: 'delegate-1',
+              name: 'Worker',
+              state: 'success',
+              transcript: [{ text: 'large eager delegate transcript' }],
+              result: {
+                kind: 'structured',
+                status: 'valid',
+                value: { response: 'large eager delegate result' },
+              },
+            },
+          ],
+        },
+      },
+    ];
+    const projected = projectPublicBridgeEvent({
+      type: 'runtime.stateChanged',
+      state: 'idle',
+      snapshot: { extensionSurfaces },
+    });
+    expect(projected).toMatchObject({
+      type: 'runtime.stateChanged',
+      snapshot: {
+        extensionSurfaces: [
+          {
+            viewModel: {
+              statuses: [
+                {
+                  id: 'delegate-1',
+                  name: 'Worker',
+                  state: 'success',
+                  transcriptTruncated: true,
+                  result: {
+                    kind: 'structured',
+                    status: 'valid',
+                    valueOmitted: true,
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(projected)).not.toContain('large eager delegate');
+  });
+
   it('strips transcript entries from all session-bearing public events', () => {
     const events: BridgeEvent[] = [
       { type: 'runtime.hello', protocolVersion: 1, snapshot: runtime },
