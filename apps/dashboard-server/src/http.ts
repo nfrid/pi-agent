@@ -6,6 +6,7 @@ import {
   delegateHistoryFromBranch,
   delegateHistoryRunDetailFromBranch,
   isDelegateHistoryEntry,
+  projectDelegateHistoryEntry,
 } from '@pi-dashboard/domain';
 import {
   type BridgeEvent,
@@ -547,7 +548,11 @@ export class DashboardServerImpl implements DashboardServer {
       id,
       leafId,
       isDelegateHistoryEntry,
-      { resolveLatestLeaf: leafId === undefined },
+      {
+        resolveLatestLeaf: leafId === undefined,
+        projectEntry: (entry) =>
+          projectDelegateHistoryEntry(entry, { sessionId: id }),
+      },
     );
     return delegateHistoryFromBranch(id, result.entries, result.leafId, {
       truncated: result.entriesTruncated,
@@ -592,7 +597,14 @@ export class DashboardServerImpl implements DashboardServer {
       id,
       leafId,
       isDelegateHistoryEntry,
-      { resolveLatestLeaf: leafId === undefined },
+      {
+        resolveLatestLeaf: leafId === undefined,
+        projectEntry: (entry) =>
+          projectDelegateHistoryEntry(entry, {
+            sessionId: id,
+            detailRunId: runId,
+          }),
+      },
     );
     return delegateHistoryRunDetailFromBranch(
       id,

@@ -31,6 +31,24 @@ export interface SessionReadOptions {
   resolveLatestLeaf?: boolean;
 }
 
+export interface SelectedBranchEntryProjection {
+  /** The bounded entry retained by the selected-branch scan. */
+  entry: unknown;
+  /** Whether the projector omitted data from the selected entry. */
+  truncated?: boolean;
+  /** In-memory size of non-serialized projection data, such as a detail view. */
+  retainedBytes?: number;
+}
+
+export type SelectedBranchEntryProjector = (
+  entry: unknown,
+) => SelectedBranchEntryProjection;
+
+export interface SelectedBranchReadOptions extends SessionReadOptions {
+  /** Project selected entries before they are retained in the page. */
+  projectEntry?: SelectedBranchEntryProjector;
+}
+
 export interface SelectedBranchReadResult {
   metadata: SessionIndexEntry;
   /** Candidate entries only; non-candidate transcript entries are never retained. */
@@ -408,7 +426,7 @@ export class SessionIndex {
     id: string,
     leafId: string | undefined,
     selector: SelectedBranchEntrySelector,
-    options: SessionReadOptions = {},
+    options: SelectedBranchReadOptions = {},
   ): Promise<SelectedBranchReadResult> {
     const indexed = this.files.get(id);
     if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
@@ -428,6 +446,7 @@ export class SessionIndex {
           undefined,
           options.resolveLatestLeaf === true && leafId === undefined,
           selector,
+          options.projectEntry,
         );
         return {
           metadata: result.metadata,
@@ -463,6 +482,7 @@ export class SessionIndex {
     cursor: HistoryCursor | undefined,
     resolveLatestLeaf: boolean,
     selector?: SelectedBranchEntrySelector,
+    projectEntry?: SelectedBranchEntryProjector,
   ): Promise<{
     metadata: SessionIndexEntry;
     entries: unknown[];
@@ -605,38 +625,43 @@ export class SessionIndex {
         branchOrdinal += 1;
         selectedCount += 1;
         if (!candidate) continue;
-        const originalBytes = Buffer.byteLength(serialized);
+        const projection = projectEntry?.(entry);
+        const outputEntry = projection?.entry ?? entry;
+        const outputSerialized = JSON.stringify(outputEntry);
+        const outputEntryBytes = Buffer.byteLength(outputSerialized);
+        const retainedBytes = projection?.retainedBytes ?? outputEntryBytes;
         if (
           selector !== undefined &&
-          (originalBytes > MAX_SELECTED_BRANCH_ENTRY_BYTES ||
+          (retainedBytes > MAX_SELECTED_BRANCH_ENTRY_BYTES ||
             page.length >= MAX_SELECTED_BRANCH_ENTRIES ||
-            pageBytes + originalBytes > MAX_SELECTED_BRANCH_BYTES)
+            pageBytes + retainedBytes > MAX_SELECTED_BRANCH_BYTES)
         ) {
           entriesTruncated = true;
           continue;
         }
-        const outputEntry =
-          originalBytes > HISTORY_PAGE_BYTES
+        if (projection?.truncated === true) entriesTruncated = true;
+        const output =
+          outputEntryBytes > HISTORY_PAGE_BYTES
             ? {
                 type: 'history_omission',
-                ...(isRecord(entry) && typeof entry.id === 'string'
-                  ? { id: entry.id }
+                ...(isRecord(outputEntry) && typeof outputEntry.id === 'string'
+                  ? { id: outputEntry.id }
                   : {}),
-                ...(isRecord(entry) && typeof entry.type === 'string'
-                  ? { originalType: entry.type }
+                ...(isRecord(outputEntry) &&
+                typeof outputEntry.type === 'string'
+                  ? { originalType: outputEntry.type }
                   : {}),
                 reason: 'entry-exceeds-page-budget',
-                originalBytes,
+                originalBytes: outputEntryBytes,
               }
-            : entry;
-        const outputBytes = Buffer.byteLength(JSON.stringify(outputEntry));
+            : outputEntry;
         page.push({
           ordinal: outputOrdinal,
-          entry: outputEntry,
+          entry: output,
           prefixHash,
-          bytes: outputBytes,
+          bytes: retainedBytes,
         });
-        pageBytes += outputBytes;
+        pageBytes += retainedBytes;
         while (
           selector === undefined &&
           pageBytes > HISTORY_PAGE_BYTES &&

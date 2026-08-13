@@ -26,6 +26,11 @@ interface RecordValue {
   [key: string]: unknown;
 }
 
+const PROJECTED_DETAILS: unique symbol = Symbol('delegate-history-details');
+type ProjectedRun = RecordValue & {
+  [PROJECTED_DETAILS]?: DelegateHistoryDetails;
+};
+
 type DelegateOccurrence = {
   run: RecordValue;
   kind: 'foreground' | 'background';
@@ -53,6 +58,10 @@ function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value)
     ? value
     : undefined;
+}
+
+function serializedBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
 
 function entryTimestamp(entry: RecordValue): number | undefined {
@@ -282,6 +291,8 @@ function boundedActivity(
 }
 
 function publicDetails(run: RecordValue): DelegateHistoryDetails {
+  const projected = (run as ProjectedRun)[PROJECTED_DETAILS];
+  if (projected) return projected;
   const budget: DetailBudget = {
     remaining: MAX_DELEGATE_HISTORY_DETAIL_BYTES,
     truncated: false,
@@ -365,6 +376,213 @@ function publicDetails(run: RecordValue): DelegateHistoryDetails {
   if (JSON.stringify(details).length * 4 > MAX_DELEGATE_HISTORY_DETAIL_BYTES)
     return { truncated: true };
   return details as DelegateHistoryDetails;
+}
+
+export interface DelegateHistoryEntryProjectionOptions {
+  /** Parent session identity used for legacy entry-aware run IDs. */
+  sessionId: string;
+  /** Keep public detail data only for this selected run. */
+  detailRunId?: string;
+}
+
+export interface DelegateHistoryEntryProjection {
+  entry: unknown;
+  truncated?: boolean;
+  /** Includes bounded detail data carried outside JSON serialization. */
+  retainedBytes?: number;
+}
+
+function projectedEntryMetadata(entry: RecordValue): RecordValue {
+  const result: RecordValue = {};
+  const type = stringValue(entry.type, 128);
+  const id = stringValue(entry.id, 256);
+  if (type) result.type = type;
+  if (id) result.id = id;
+  if (entry.parentId === null) result.parentId = null;
+  else {
+    const parentId = stringValue(entry.parentId, 256);
+    if (parentId) result.parentId = parentId;
+  }
+  if (typeof entry.timestamp === 'number' && Number.isFinite(entry.timestamp))
+    result.timestamp = entry.timestamp;
+  else {
+    const timestamp = stringValue(entry.timestamp, 128);
+    if (timestamp) result.timestamp = timestamp;
+  }
+  return result;
+}
+
+function projectRun(
+  run: RecordValue,
+  entryIdentity: string | undefined,
+  runIndex: string,
+  options: DelegateHistoryEntryProjectionOptions,
+  fallbackState?: unknown,
+): { run: ProjectedRun; matches: boolean; detailBytes?: number } {
+  const explicitRunId = stringValue(run.runId, 256);
+  const runId =
+    explicitRunId ??
+    (entryIdentity === undefined
+      ? undefined
+      : compatibilityRunId(options.sessionId, entryIdentity, runIndex));
+  const projected: ProjectedRun = {};
+  if (runId) projected.runId = runId;
+  const lineageId = stringValue(run.lineageId, 256);
+  const continuation = stringValue(run.continuation, 4096);
+  if (lineageId) projected.lineageId = lineageId;
+  if (continuation) projected.continuation = continuation;
+  const name = stringValue(run.name, 2_000);
+  const task = stringValue(run.task, MAX_DELEGATE_HISTORY_TASK);
+  if (name) projected.name = name;
+  if (task) projected.task = task;
+  projected.state = normalizedState(run, fallbackState);
+  for (const key of ['queuedAt', 'startedAt', 'finishedAt'] as const) {
+    const value = finiteNumber(run[key]);
+    if (value !== undefined) projected[key] = value;
+  }
+  const jobId = stringValue(run.backgroundJobId, 256);
+  if (jobId) projected.backgroundJobId = jobId;
+  const route = isRecord(run.routing)
+    ? stringValue(run.routing.route, 512)
+    : undefined;
+  if (route) projected.routing = { route };
+  const context = validContext(run.context);
+  if (context) projected.context = context;
+  if (run.allowWrites === true) projected.allowWrites = true;
+  if (isRecord(run.structuredResult))
+    projected.structuredResult = { valid: run.structuredResult.valid === true };
+  const hasError =
+    typeof run.errorMessage === 'string' && run.errorMessage.trim().length > 0;
+  if (hasError) projected.errorMessage = 'error';
+  const matches = runId !== undefined && runId === options.detailRunId;
+  if (matches) {
+    const details = publicDetails(run);
+    projected[PROJECTED_DETAILS] = details;
+    return {
+      run: projected,
+      matches,
+      detailBytes: serializedBytes(details),
+    };
+  }
+  return { run: projected, matches };
+}
+
+function projectJobMetadata(job: RecordValue): RecordValue {
+  const result: RecordValue = {};
+  for (const [key, max] of [
+    ['id', 256],
+    ['name', 2_000],
+    ['route', 512],
+  ] as const) {
+    const value = stringValue(job[key], max);
+    if (value) result[key] = value;
+  }
+  const state = stringValue(job.state, 32);
+  if (state) result.state = state;
+  const settledAt = finiteNumber(job.settledAt);
+  if (settledAt !== undefined) result.settledAt = settledAt;
+  if (job.allowWrites === true) result.allowWrites = true;
+  return result;
+}
+
+/**
+ * Replace a delegate result with bounded metadata before selected-branch
+ * storage. Summary scans keep no transcript payload; detail scans retain the
+ * existing public projection for only the requested run.
+ */
+export function projectDelegateHistoryEntry(
+  value: unknown,
+  options: DelegateHistoryEntryProjectionOptions,
+): DelegateHistoryEntryProjection {
+  if (!isRecord(value)) return { entry: value };
+  const result = projectedEntryMetadata(value);
+  const entryIdentity = stringValue(value.id, 256);
+  const sourceMessage = isRecord(value.message) ? value.message : value;
+  if (
+    sourceMessage.role === 'toolResult' &&
+    sourceMessage.toolName === 'delegate' &&
+    isRecord(sourceMessage.details) &&
+    Array.isArray(sourceMessage.details.runs)
+  ) {
+    const runs: RecordValue[] = [];
+    let detailBytes = 0;
+    let truncated = false;
+    for (const [runIndex, sourceRun] of sourceMessage.details.runs.entries()) {
+      if (!isRecord(sourceRun)) continue;
+      const projected = projectRun(
+        sourceRun,
+        entryIdentity,
+        String(runIndex),
+        options,
+      );
+      if (
+        options.detailRunId !== undefined
+          ? projected.matches
+          : runs.length < MAX_DELEGATE_HISTORY_TOTAL_RUNS
+      ) {
+        runs.push(projected.run);
+        detailBytes += projected.detailBytes ?? 0;
+      } else truncated = true;
+    }
+    result.message = {
+      role: 'toolResult',
+      toolName: 'delegate',
+      details: { runs },
+    };
+    return {
+      entry: result,
+      ...(truncated ? { truncated: true } : {}),
+      retainedBytes: serializedBytes(result) + detailBytes,
+    };
+  }
+  if (
+    sourceMessage.customType === 'delegate-job-result' &&
+    isRecord(sourceMessage.details) &&
+    Array.isArray(sourceMessage.details.jobs)
+  ) {
+    const jobs: RecordValue[] = [];
+    let runCount = 0;
+    let detailBytes = 0;
+    let truncated = false;
+    for (const [jobIndex, sourceJob] of sourceMessage.details.jobs.entries()) {
+      if (!isRecord(sourceJob) || !Array.isArray(sourceJob.runs)) continue;
+      const projectedRuns: RecordValue[] = [];
+      for (const [runIndex, sourceRun] of sourceJob.runs.entries()) {
+        if (!isRecord(sourceRun)) continue;
+        const projected = projectRun(
+          sourceRun,
+          entryIdentity,
+          `${jobIndex}:${runIndex}`,
+          options,
+          sourceJob.state,
+        );
+        if (
+          options.detailRunId !== undefined
+            ? projected.matches
+            : runCount < MAX_DELEGATE_HISTORY_TOTAL_RUNS
+        ) {
+          projectedRuns.push(projected.run);
+          detailBytes += projected.detailBytes ?? 0;
+          runCount += 1;
+        } else truncated = true;
+      }
+      if (projectedRuns.length > 0)
+        jobs.push({ ...projectJobMetadata(sourceJob), runs: projectedRuns });
+    }
+    const projectedMessage = {
+      customType: 'delegate-job-result',
+      details: { jobs },
+    };
+    if (isRecord(value.message)) result.message = projectedMessage;
+    else result.customType = 'delegate-job-result';
+    if (!isRecord(value.message)) result.details = projectedMessage.details;
+    return {
+      entry: result,
+      ...(truncated ? { truncated: true } : {}),
+      retainedBytes: serializedBytes(result) + detailBytes,
+    };
+  }
+  return { entry: result };
 }
 
 function foregroundDetails(
