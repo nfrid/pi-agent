@@ -15,7 +15,6 @@ import {
   createRemoteControlRuntime,
   emitAgentSettlement,
   emitState,
-  emitTurnEnd,
   flushQueueDrafts,
 } from './runtime';
 import { sessionSnapshot } from './runtime-snapshot-adapter';
@@ -42,7 +41,6 @@ export type { RemoteControlRuntime } from './runtime';
 export {
   createRemoteControlRuntime,
   emitAgentSettlement,
-  emitTurnEnd,
   flushQueueDrafts,
 } from './runtime';
 export {
@@ -198,7 +196,7 @@ export default defineExtension('remote-control', (pi) => {
   });
   pi.on('agent_start', (_event, ctx) => emitState(runtime, ctx));
   pi.on('turn_end', (_event, ctx) => {
-    emitTurnEnd(runtime, pi, ctx);
+    if (!flushQueueDrafts(runtime, pi, ctx, 'steer')) emitState(runtime, ctx);
   });
   pi.on('agent_settled', (_event, ctx) => {
     emitAgentSettlement(runtime, ctx);
