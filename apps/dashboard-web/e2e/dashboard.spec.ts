@@ -712,7 +712,11 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   });
   expect(detailsMotion.transforms).toContain('translateX(28px)');
   await expect(details).toBeVisible();
-  await expect(sessionHeading).toBeHidden();
+  await expect
+    .poll(() =>
+      sessionHeading.evaluate((element) => getComputedStyle(element).opacity),
+    )
+    .toBe('0');
   expect(
     await sessionHeading.evaluate((element) => {
       const style = getComputedStyle(element);
@@ -724,8 +728,8 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     }),
   ).toEqual({
     opacity: '0',
-    transform: 'matrix(1, 0, 0, 1, 0, -10)',
-    transitionDuration: '0.14s, 0.14s, 0s',
+    transform: 'matrix(1, 0, 0, 1, 0, -24)',
+    transitionDuration: '0.24s, 0.24s',
   });
   expect(
     await controlLayer.evaluate((element) => {
@@ -3848,7 +3852,13 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   });
   expect(detailsMotion.transforms).toContain('translateX(28px)');
   await expect(inspector).toBeVisible();
-  await expect(page.locator('.session-heading')).toBeHidden();
+  await expect
+    .poll(() =>
+      page
+        .locator('.session-heading')
+        .evaluate((element) => getComputedStyle(element).opacity),
+    )
+    .toBe('0');
   await expect(inspector).toContainText('Runtime controls');
   await expect(inspector).not.toContainText('Live work');
   await expect(inspector).not.toContainText('test/vision');
