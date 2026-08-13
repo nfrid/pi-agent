@@ -61,6 +61,8 @@ async function sessionHeadingFramesAfterClick(button: Locator) {
       opacity: string;
       transform: string;
       visibility: string;
+      position: string;
+      top: number;
       animations: number;
     }> = [];
     for (let index = 0; index < 30; index += 1) {
@@ -72,6 +74,8 @@ async function sessionHeadingFramesAfterClick(button: Locator) {
         opacity: style.opacity,
         transform: style.transform,
         visibility: style.visibility,
+        position: style.position,
+        top: heading.getBoundingClientRect().top,
         animations: heading.getAnimations().length,
       });
     }
@@ -88,6 +92,9 @@ function hasVisibleHeadingMotion(
     direction === 'hide' ? firstOpacity > 0.9 : firstOpacity < 0.1;
   return (
     startsAtRest &&
+    frames.every(
+      (frame) => frame.position === 'fixed' && Math.abs(frame.top) <= 25,
+    ) &&
     frames.some((frame) => {
       const opacity = Number(frame.opacity);
       return (
@@ -3924,7 +3931,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
         window.setTimeout(() => {
           const layer = document.querySelector('.surface-dialog-layer');
           const heading = document.querySelector(
-            '.session-page > .session-heading h1',
+            '.session-page .session-heading h1',
           );
           resolve({
             exiting: layer?.classList.contains('is-exiting') ?? false,

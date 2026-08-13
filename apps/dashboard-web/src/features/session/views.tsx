@@ -66,61 +66,63 @@ export function SessionHeader({
   onOpenInspector: () => void;
 }) {
   return (
-    <header className="session-context session-heading">
-      <div className="session-context-main">
-        <div className="session-identity">
-          <div className="session-breadcrumb">
-            <span className="session-workspace">{workspaceName}</span>
-            <span className="session-breadcrumb-separator" aria-hidden="true">
-              /
+    <div className="session-context-slot">
+      <header className="session-context session-heading">
+        <div className="session-context-main">
+          <div className="session-identity">
+            <div className="session-breadcrumb">
+              <span className="session-workspace">{workspaceName}</span>
+              <span className="session-breadcrumb-separator" aria-hidden="true">
+                /
+              </span>
+              <h1 title={sessionDisplayTitle(data, entries)}>
+                {sessionDisplayTitle(data, entries)}
+              </h1>
+            </div>
+            <span className={`session-status status-${status}`}>
+              <i aria-hidden="true">●</i> {statusLabel}
             </span>
-            <h1 title={sessionDisplayTitle(data, entries)}>
-              {sessionDisplayTitle(data, entries)}
-            </h1>
           </div>
-          <span className={`session-status status-${status}`}>
-            <i aria-hidden="true">●</i> {statusLabel}
-          </span>
         </div>
-      </div>
-      <div className="session-heading-actions">
-        <button
-          type="button"
-          ref={outlineTriggerRef}
-          className="session-icon-button outline-trigger"
-          aria-label="Open transcript outline"
-          aria-haspopup="dialog"
-          onClick={onOpenOutline}
-        >
-          <span className="session-icon-glyph" aria-hidden="true">
-            ≡
-          </span>
-        </button>
-        <button
-          type="button"
-          className="session-icon-button session-details-trigger"
-          aria-label="Details"
-          aria-haspopup="dialog"
-          aria-expanded={inspectorOpen}
-          aria-controls="session-inspector"
-          disabled={hasPendingInteraction}
-          title={
-            hasPendingInteraction
-              ? 'Answer the pending question before opening session details'
-              : 'Session details'
-          }
-          onClick={onOpenInspector}
-        >
-          <span
-            className="session-icon-glyph session-more-glyph"
-            aria-hidden="true"
+        <div className="session-heading-actions">
+          <button
+            type="button"
+            ref={outlineTriggerRef}
+            className="session-icon-button outline-trigger"
+            aria-label="Open transcript outline"
+            aria-haspopup="dialog"
+            onClick={onOpenOutline}
           >
-            •••
-          </span>
-          <span className="sr-only">Details</span>
-        </button>
-      </div>
-    </header>
+            <span className="session-icon-glyph" aria-hidden="true">
+              ≡
+            </span>
+          </button>
+          <button
+            type="button"
+            className="session-icon-button session-details-trigger"
+            aria-label="Details"
+            aria-haspopup="dialog"
+            aria-expanded={inspectorOpen}
+            aria-controls="session-inspector"
+            disabled={hasPendingInteraction}
+            title={
+              hasPendingInteraction
+                ? 'Answer the pending question before opening session details'
+                : 'Session details'
+            }
+            onClick={onOpenInspector}
+          >
+            <span
+              className="session-icon-glyph session-more-glyph"
+              aria-hidden="true"
+            >
+              •••
+            </span>
+            <span className="sr-only">Details</span>
+          </button>
+        </div>
+      </header>
+    </div>
   );
 }
 
@@ -217,25 +219,27 @@ export function SessionLoadingHeader({
   statusLabel: string;
 }) {
   return (
-    <header className="session-context session-heading">
-      <div className="session-context-main">
-        <div className="session-identity">
-          <div className="session-breadcrumb">
-            <span className="session-workspace">Session</span>
-            <span className="session-breadcrumb-separator" aria-hidden="true">
-              /
+    <div className="session-context-slot">
+      <header className="session-context session-heading">
+        <div className="session-context-main">
+          <div className="session-identity">
+            <div className="session-breadcrumb">
+              <span className="session-workspace">Session</span>
+              <span className="session-breadcrumb-separator" aria-hidden="true">
+                /
+              </span>
+              <h1>
+                {metadata
+                  ? sessionDisplayTitle(metadata)
+                  : runtime?.session.title || runtime?.session.name || id}
+              </h1>
+            </div>
+            <span className={`session-status status-${status}`}>
+              <i aria-hidden="true">●</i> {statusLabel}
             </span>
-            <h1>
-              {metadata
-                ? sessionDisplayTitle(metadata)
-                : runtime?.session.title || runtime?.session.name || id}
-            </h1>
           </div>
-          <span className={`session-status status-${status}`}>
-            <i aria-hidden="true">●</i> {statusLabel}
-          </span>
         </div>
-      </div>
-    </header>
+      </header>
+    </div>
   );
 }

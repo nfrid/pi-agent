@@ -33,16 +33,21 @@
 .session-page > .transcript {
   margin-bottom: 0;
 }
+.session-context-slot {
+  height: 31px;
+  min-width: 0;
+}
 .session-context {
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 8;
+  z-index: 46;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   min-height: 48px;
-  margin: -34px 0 17px;
+  width: inherit;
+  margin: 0;
   border-bottom: 1px solid var(--line-soft);
   background: color-mix(in srgb, var(--bg) 94%, transparent);
   padding: 7px 0;

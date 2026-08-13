@@ -287,12 +287,16 @@
     --session-control-edge: max(8px, env(safe-area-inset-bottom));
     --session-control-gap: 6px;
   }
+  .session-context-slot {
+    height: 37px;
+  }
   .session-context {
-    top: 0;
+    right: 0;
+    left: 0;
     flex-direction: row;
     align-items: center;
     min-height: 46px;
-    margin: -22px -13px 13px;
+    width: auto;
     padding: 6px 13px;
   }
   .session-context-main {
