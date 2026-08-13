@@ -52,6 +52,47 @@ async function sharedDrawerMotion(drawer: Locator) {
   });
 }
 
+async function sessionHeadingFramesAfterClick(button: Locator) {
+  return button.evaluate(async (element) => {
+    const heading = document.querySelector<HTMLElement>('.session-heading');
+    if (!heading) throw new Error('Session heading missing');
+    element.click();
+    const frames: Array<{
+      opacity: string;
+      transform: string;
+      visibility: string;
+      animations: number;
+    }> = [];
+    for (let index = 0; index < 12; index += 1) {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve()),
+      );
+      const style = getComputedStyle(heading);
+      frames.push({
+        opacity: style.opacity,
+        transform: style.transform,
+        visibility: style.visibility,
+        animations: heading.getAnimations().length,
+      });
+    }
+    return frames;
+  });
+}
+
+function hasVisibleHeadingMotion(
+  frames: Awaited<ReturnType<typeof sessionHeadingFramesAfterClick>>,
+) {
+  return frames.some((frame) => {
+    const opacity = Number(frame.opacity);
+    return (
+      frame.visibility === 'visible' &&
+      frame.animations > 0 &&
+      opacity > 0.2 &&
+      opacity < 0.8
+    );
+  });
+}
+
 test('mobile dashboard renders and supports project-scoped new chat', async ({
   page,
 }) => {
@@ -630,6 +671,15 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
     outline.locator('.transcript-outline-time').first(),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Close Transcript outline' }).click();
+  const sessionHeading = page.locator('.session-heading');
+  await expect
+    .poll(() =>
+      sessionHeading.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { opacity: style.opacity, transform: style.transform };
+      }),
+    )
+    .toEqual({ opacity: '1', transform: 'none' });
   const detailsButton = page.getByRole('button', {
     name: 'Details',
     exact: true,
@@ -644,7 +694,8 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
       width: bounds.width,
     };
   });
-  await detailsButton.click();
+  const headingFrames = await sessionHeadingFramesAfterClick(detailsButton);
+  expect(hasVisibleHeadingMotion(headingFrames)).toBe(true);
   const details = page.getByRole('dialog', { name: 'Loaded shell' });
   const detailsMotion = await sharedDrawerMotion(details);
   expect(detailsMotion).toMatchObject({
@@ -654,7 +705,6 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   });
   expect(detailsMotion.transforms).toContain('translateX(28px)');
   await expect(details).toBeVisible();
-  const sessionHeading = page.locator('.session-heading');
   await expect(sessionHeading).toBeHidden();
   expect(
     await sessionHeading.evaluate((element) => {
@@ -698,7 +748,10 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
       .locator('.surface-dialog-body')
       .evaluate((element) => getComputedStyle(element).paddingTop),
   ).toBe('14px');
-  await details.getByRole('button', { name: 'Close session details' }).click();
+  const returnHeadingFrames = await sessionHeadingFramesAfterClick(
+    details.getByRole('button', { name: 'Close session details' }),
+  );
+  expect(hasVisibleHeadingMotion(returnHeadingFrames)).toBe(true);
   await expect(details).toHaveCount(0);
   await expect(sessionHeading).toBeVisible();
 
