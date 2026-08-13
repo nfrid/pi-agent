@@ -82,6 +82,10 @@ describe('dashboard HTTP boundary', () => {
       port: 0,
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
+      socketPath: path.join(
+        os.tmpdir(),
+        `dh-${path.basename(root).slice(-6)}.sock`,
+      ),
       sessionDir,
       sesh: { list: async () => [] },
     });
