@@ -18,12 +18,14 @@ export function useSessionScroll({
   data,
   projection,
   sessionMounted,
+  enabled,
   scrollElementRef,
 }: {
   id: string;
   data: { entries: readonly unknown[] } | undefined;
   projection: TranscriptProjection | undefined;
   sessionMounted: boolean;
+  enabled: boolean;
   scrollElementRef: RefObject<SessionScrollElement | null>;
 }) {
   const [awayFromLatest, setAwayFromLatest] = useState(false);
@@ -62,26 +64,26 @@ export function useSessionScroll({
   }, []);
 
   useLayoutEffect(() => {
-    initialTailSessionRef.current = id;
+    initialTailSessionRef.current = enabled ? id : undefined;
     userScrollIntentRef.current = false;
     stickToBottomRef.current = true;
-    setTailReadySessionId(undefined);
+    setTailReadySessionId(enabled ? undefined : id);
     setAwayFromLatest(false);
     clearTimers();
-  }, [clearTimers, id]);
+  }, [clearTimers, enabled, id]);
 
   useLayoutEffect(() => {
     cancelExplicitJumpFrames();
-    mountedSessionIdRef.current = sessionMounted ? id : undefined;
+    mountedSessionIdRef.current = enabled && sessionMounted ? id : undefined;
     return () => {
       cancelExplicitJumpFrames();
       if (mountedSessionIdRef.current === id)
         mountedSessionIdRef.current = undefined;
     };
-  }, [cancelExplicitJumpFrames, id, sessionMounted]);
+  }, [cancelExplicitJumpFrames, enabled, id, sessionMounted]);
 
   useEffect(() => {
-    if (!sessionMounted) return;
+    if (!enabled || !sessionMounted) return;
     const scrollElement = scrollElementRef.current;
     if (!scrollElement) return;
     const cancelPendingTailScroll = () => {
@@ -190,9 +192,11 @@ export function useSessionScroll({
     id,
     scrollElementRef,
     sessionMounted,
+    enabled,
   ]);
 
   useLayoutEffect(() => {
+    if (!enabled) return;
     const scrollElement = scrollElementRef.current;
     if (!data || !projection || !scrollElement) return;
     const enteringSession = scrolledSessionRef.current !== id;
@@ -243,7 +247,7 @@ export function useSessionScroll({
       window.cancelAnimationFrame(frame);
       autoScrollFrameRef.current = undefined;
     };
-  }, [clearTimers, data, id, projection, scrollElementRef]);
+  }, [clearTimers, data, enabled, id, projection, scrollElementRef]);
 
   useEffect(
     () => () => {
@@ -258,7 +262,7 @@ export function useSessionScroll({
   );
 
   useLayoutEffect(() => {
-    if (!sessionMounted) return;
+    if (!enabled || !sessionMounted) return;
     const page = sessionPageRef.current;
     const controlLayer = controlLayerRef.current;
     const scrollElement = scrollElementRef.current;
@@ -319,9 +323,10 @@ export function useSessionScroll({
         layoutScrollFrameRef.current = undefined;
       }
     };
-  }, [id, scrollElementRef, sessionMounted]);
+  }, [enabled, id, scrollElementRef, sessionMounted]);
 
   const jumpToLatest = useCallback(() => {
+    if (!enabled) return;
     const scrollElement = scrollElementRef.current;
     if (mountedSessionIdRef.current !== id || !scrollElement) return;
     cancelExplicitJumpFrames();
@@ -364,10 +369,10 @@ export function useSessionScroll({
           scrollElement.scrollTop = scrollElement.scrollHeight;
       });
     });
-  }, [cancelExplicitJumpFrames, clearTimers, id, scrollElementRef]);
+  }, [cancelExplicitJumpFrames, clearTimers, enabled, id, scrollElementRef]);
 
   return {
-    awayFromLatest,
+    awayFromLatest: enabled ? awayFromLatest : false,
     controlLayerRef,
     jumpToLatest,
     sessionPageRef,

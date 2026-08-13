@@ -43,6 +43,7 @@ export function Transcript({
   tailScrollRequest,
   outlineOpen,
   onOutlineOpenChange,
+  onBeforeScroll,
   scrollElementRef,
   virtualize = false,
 }: {
@@ -54,6 +55,7 @@ export function Transcript({
   tailScrollRequest?: number;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
+  onBeforeScroll?: () => void;
   /** Session routes opt into virtualization only with an attached scrollport. */
   virtualize?: boolean;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
@@ -83,6 +85,7 @@ export function Transcript({
     [groups, items],
   );
   const jumpToLandmark = (landmark: TranscriptLandmark) => {
+    onBeforeScroll?.();
     const scrollElement = transcriptScrollElementRef?.current;
     const target = scrollElement
       ? Array.from(
@@ -119,6 +122,7 @@ export function Transcript({
         tailScrollRequest={tailScrollRequest}
         outlineOpen={outlineOpen}
         onOutlineOpenChange={onOutlineOpenChange}
+        onBeforeScroll={onBeforeScroll}
         scrollElementRef={transcriptScrollElementRef}
       />
     );
@@ -262,6 +266,7 @@ function VirtualizedTranscript({
   tailScrollRequest,
   outlineOpen,
   onOutlineOpenChange,
+  onBeforeScroll,
   scrollElementRef,
 }: {
   items: readonly TranscriptModelItem[];
@@ -272,6 +277,7 @@ function VirtualizedTranscript({
   tailScrollRequest?: number;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
+  onBeforeScroll?: () => void;
   scrollElementRef: RefObject<HTMLDivElement | null>;
 }) {
   const rows = useMemo(
@@ -323,6 +329,7 @@ function VirtualizedTranscript({
     return result;
   }, [items, rows]);
   const jumpToLandmark = (landmark: TranscriptLandmark) => {
+    onBeforeScroll?.();
     const rowIndex = rowIndexByKey.get(landmark.key);
     if (rowIndex !== undefined)
       virtualizer.scrollToIndex(rowIndex, { align: 'start' });

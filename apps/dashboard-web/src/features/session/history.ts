@@ -73,6 +73,8 @@ export function useOlderSessionHistory({
   const scrollIntentRevisionRef = useRef(0);
   const prependRestoreRef = useRef<PrependRestore | undefined>(undefined);
   const prependRestoreFrameRef = useRef<number | undefined>(undefined);
+  const prependRestoreFrameCountRef = useRef(0);
+  const prependRestoreDeadlineRef = useRef(0);
   const cancelPrependRestoreFrame = useCallback(() => {
     if (prependRestoreFrameRef.current !== undefined) {
       window.cancelAnimationFrame(prependRestoreFrameRef.current);
@@ -81,8 +83,16 @@ export function useOlderSessionHistory({
   }, []);
   const clearPrependRestore = useCallback(() => {
     prependRestoreRef.current = undefined;
+    prependRestoreFrameCountRef.current = 0;
+    prependRestoreDeadlineRef.current = 0;
     cancelPrependRestoreFrame();
   }, [cancelPrependRestoreFrame]);
+  const cancelScrollRestore = useCallback(() => {
+    scrollIntentRevisionRef.current += 1;
+    const request = historyRequestRef.current;
+    if (request) request.scrollAnchor = undefined;
+    clearPrependRestore();
+  }, [clearPrependRestore]);
 
   useEffect(() => {
     if (!id) return;
@@ -149,13 +159,13 @@ export function useOlderSessionHistory({
     scrollElement.addEventListener('touchmove', noteScrollIntent, {
       passive: true,
     });
-    scrollElement.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown);
     return () => {
       scrollElement.removeEventListener('pointerdown', noteScrollIntent);
       scrollElement.removeEventListener('wheel', noteScrollIntent);
       scrollElement.removeEventListener('touchstart', noteScrollIntent);
       scrollElement.removeEventListener('touchmove', noteScrollIntent);
-      scrollElement.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onKeyDown);
     };
   }, [clearPrependRestore, scrollElementRef, sessionMounted]);
 
@@ -242,6 +252,10 @@ export function useOlderSessionHistory({
               intentRevision: request.intentRevision,
             }
           : undefined;
+      if (prependRestoreRef.current) {
+        prependRestoreFrameCountRef.current = 0;
+        prependRestoreDeadlineRef.current = Date.now() + 2_000;
+      }
       setHistory(page.history);
       setPrependRevision((revision) => revision + 1);
     } catch (loadError) {
@@ -292,6 +306,14 @@ export function useOlderSessionHistory({
     };
     const applyRestore = () => {
       prependRestoreFrameRef.current = undefined;
+      prependRestoreFrameCountRef.current += 1;
+      if (
+        prependRestoreFrameCountRef.current > 120 ||
+        Date.now() > prependRestoreDeadlineRef.current
+      ) {
+        clearPrependRestore();
+        return;
+      }
       if (!isValidRestore()) {
         clearPrependRestore();
         return;
@@ -372,5 +394,6 @@ export function useOlderSessionHistory({
     historyLoading,
     historyError,
     loadEarlierHistory,
+    cancelScrollRestore,
   };
 }

@@ -80,14 +80,19 @@ export function SessionView({
     onReplacement: replaceSession,
   });
   const sessionMounted = Boolean(data && projection);
-  const { history, historyError, historyLoading, loadEarlierHistory } =
-    useOlderSessionHistory({
-      id,
-      data,
-      store,
-      sessionMounted,
-      scrollElementRef: embedded ? undefined : transcriptScrollRef,
-    });
+  const {
+    history,
+    historyError,
+    historyLoading,
+    loadEarlierHistory,
+    cancelScrollRestore,
+  } = useOlderSessionHistory({
+    id,
+    data,
+    store,
+    sessionMounted,
+    scrollElementRef: embedded ? undefined : transcriptScrollRef,
+  });
 
   useEffect(() => {
     if (outlineOpen) outlineWasOpenRef.current = true;
@@ -116,8 +121,13 @@ export function SessionView({
     data,
     projection,
     sessionMounted,
+    enabled: !embedded,
     scrollElementRef: transcriptScrollRef,
   });
+  const handleJumpToLatest = useCallback(() => {
+    cancelScrollRestore();
+    jumpToLatest();
+  }, [cancelScrollRestore, jumpToLatest]);
   useEffect(() => {
     if (replacementSessionId && replacementSessionId !== id)
       replaceSession(replacementSessionId);
@@ -160,11 +170,13 @@ export function SessionView({
           />
           <PendingInteractions runtime={runtime} />
         </section>
-        <SessionLoadingCurtain
-          error={error}
-          queryError={queryError}
-          onRetry={retrySession}
-        />
+        {!embedded && (
+          <SessionLoadingCurtain
+            error={error}
+            queryError={queryError}
+            onRetry={retrySession}
+          />
+        )}
       </div>
     );
   }
@@ -194,7 +206,9 @@ export function SessionView({
       )}
       <section
         ref={sessionPageRef}
-        data-tail-pending={tailReadySessionId === id ? undefined : ''}
+        data-tail-pending={
+          !embedded && tailReadySessionId !== id ? '' : undefined
+        }
         data-runtime-paused={pauseStatus ? '' : undefined}
         className={`session-page${embedded ? ' session-page-embedded' : ''}${hasPendingInteraction ? ' has-pending-interaction' : ''}${agentNavOpen ? ' modal-open' : ''}`}
       >
@@ -228,6 +242,7 @@ export function SessionView({
             tailScrollRequest={tailScrollRequest}
             outlineOpen={outlineOpen}
             onOutlineOpenChange={setOutlineOpen}
+            onBeforeScroll={cancelScrollRestore}
             scrollElementRef={embedded ? undefined : transcriptScrollRef}
             virtualize={!embedded}
           />
@@ -235,19 +250,20 @@ export function SessionView({
         <SessionControlLayer
           controlLayerRef={controlLayerRef}
           awayFromLatest={awayFromLatest}
-          onJumpToLatest={jumpToLatest}
+          onJumpToLatest={handleJumpToLatest}
           Composer={Composer}
           runtime={runtime}
           runtimes={snapshot.runtimes}
           sessionId={id}
           workspaceId={workspaceId}
           onPromptSubmitted={(text) => {
+            cancelScrollRestore();
             store.optimisticallyTitleSession(id, text);
           }}
         />
         <PendingInteractions runtime={runtime} />
       </section>
-      {tailReadySessionId !== id && (
+      {!embedded && tailReadySessionId !== id && (
         <SessionLoadingCurtain
           error={error}
           queryError={queryError}
