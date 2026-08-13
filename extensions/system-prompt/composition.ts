@@ -4,39 +4,24 @@ import {
   formatSkillsForPrompt as formatPiSkillsForPrompt,
   getAgentDir,
 } from '@earendil-works/pi-coding-agent';
+import {
+  type LoadedAgentInstruction,
+  loadAgentInstruction,
+} from '../shared/agent-instructions';
 
-const GUIDELINES = {
-  KISS: 'Prefer the simplest design that solves the problem. Add structure only when it clearly pays for itself now.',
-  concise:
-    'Be concise and direct. Lead with the answer. Skip restating the request and filler; add detail only when it improves correctness.',
+const BASH_GUIDELINES = [
+  'Combine related bash discovery into one pipeline; run unrelated checks in parallel.',
+  'Keep bash output bounded with targeted paths, filters, counts, excerpts, diffs, or short summaries.',
+  'Use separate calls when results need judgment, and before writes or destructive work; prefer read, edit, and write tools for file contents.',
+];
 
-  // The prompt says how to work and how to talk; without these it never says
-  // to finish. Ambiguity is resolved in the open rather than handed back,
-  // because a stated assumption costs one line and a question costs a turn.
-  autonomy: [
-    'Take the most reasonable reading of an ambiguous request, state the assumption in one line, and carry on. Hand the choice back only when it is destructive, irreversible, or genuinely undecidable from the repository.',
-    "Finish before yielding: run the project's own checks on what you changed, act on what they say, and report what you actually verified rather than what you expect to hold.",
-  ],
-
-  // A phase of work is legible to the reader only if it is announced before it
-  // starts. It also gives the transcript UI a real boundary and a name for
-  // what follows, which beats anything inferred from the tool calls.
-  //
-  // The form is asked for as a label rather than a sentence because that is
-  // what it becomes: the UI prints this line alone in place of the whole
-  // phase. Interactive modes only: a delegated child has no transcript, so
-  // there the label is pure cost.
-  narration: [
-    'When you begin a distinct phase of work, write a short preamble naming its concrete outcome and scope, using a natural ongoing-action form for the language: in English, use a verb ending in -ing — "Verifying session-expiry handling in the auth middleware", "Simplifying activity-group titles and updating their tests"; in other languages, use that language\'s natural equivalent. Write it before the calls that do the work, in the same message as them.',
-    'Make the preamble specific and useful rather than generic process narration: name the result or area, not yourself; avoid "Let me", "Thinking", "Working", "Inspecting files", and individual tool calls. Label changes of direction, not steps, and write nothing on a turn that continues the last announced phase.',
-  ],
-
-  bash: [
-    'Combine related bash discovery into one pipeline; run unrelated checks in parallel.',
-    'Keep bash output bounded with targeted paths, filters, counts, excerpts, diffs, or short summaries.',
-    'Use separate calls when results need judgment, and before writes or destructive work; prefer read, edit, and write tools for file contents.',
-  ],
-};
+export function loadAgentInstructions(): LoadedAgentInstruction[] {
+  const workingStyle = loadAgentInstruction(
+    'instructions/agent/working-style.md',
+  );
+  const interaction = loadAgentInstruction('instructions/agent/interaction.md');
+  return [workingStyle, interaction];
+}
 
 export function formatSkillsForPrompt(
   skills: NonNullable<BuildSystemPromptOptions['skills']>,
@@ -82,6 +67,17 @@ function currentDate(): string {
   return `${year}-${month}-${day}`;
 }
 
+function appendAgentInstructions(
+  prompt: string,
+  instructions: readonly LoadedAgentInstruction[],
+): string {
+  let nextPrompt = `${prompt}\n\n<agent_instructions>\n`;
+  for (const instruction of instructions) {
+    nextPrompt += `<agent_instruction source="${escapeXml(instruction.path)}">\n${instruction.content}\n</agent_instruction>\n`;
+  }
+  return `${nextPrompt}</agent_instructions>\n`;
+}
+
 function appendProjectContext(
   prompt: string,
   contextFiles: NonNullable<BuildSystemPromptOptions['contextFiles']>,
@@ -104,17 +100,14 @@ function finalizePrompt(
   skills: NonNullable<BuildSystemPromptOptions['skills']>,
   includeSkills: boolean,
   cwd: string,
+  instructions: readonly LoadedAgentInstruction[],
 ): string {
-  let finalized = appendProjectContext(prompt, contextFiles);
+  let finalized = appendAgentInstructions(prompt, instructions);
+  finalized = appendProjectContext(finalized, contextFiles);
   if (includeSkills) finalized += formatSkillsForPrompt(skills);
   finalized += `\nCurrent date: ${currentDate()}`;
   finalized += `\nCurrent working directory: ${cwd.replace(/\\/g, '/')}`;
   return finalized;
-}
-
-/** Modes that render a transcript, and can therefore use phase labels. */
-function isInteractiveMode(mode: string | undefined): boolean {
-  return mode === undefined || mode === 'tui' || mode === 'rpc';
 }
 
 export function buildSystemPrompt(
@@ -134,6 +127,7 @@ export function buildSystemPrompt(
     cwd,
   );
   const skills = providedSkills ?? [];
+  const instructions = loadAgentInstructions();
   const tools = selectedTools || ['read', 'bash', 'edit', 'write'];
   const hasBash = tools.includes('bash');
   const hasRead = tools.includes('read');
@@ -170,7 +164,7 @@ export function buildSystemPrompt(
     if (!hasGrep && !hasFind && !hasLs) {
       addGuidelines('Use bash for listing and searching files (ls, rg, find)');
     }
-    addGuidelines(GUIDELINES.bash);
+    addGuidelines(BASH_GUIDELINES);
   }
 
   for (const guideline of promptGuidelines ?? []) {
@@ -184,10 +178,6 @@ export function buildSystemPrompt(
     );
   }
 
-  addGuidelines(GUIDELINES.KISS);
-  addGuidelines(GUIDELINES.concise);
-  addGuidelines(GUIDELINES.autonomy);
-  if (isInteractiveMode(mode)) addGuidelines(GUIDELINES.narration);
   const guidelines = guidelinesList
     .map((guideline) => `- ${guideline}`)
     .join('\n');
@@ -203,5 +193,12 @@ ${toolsList}
 Guidelines:
 ${guidelines}`;
 
-  return finalizePrompt(prompt, contextFiles, skills, hasRead, cwd);
+  return finalizePrompt(
+    prompt,
+    contextFiles,
+    skills,
+    hasRead,
+    cwd,
+    instructions,
+  );
 }
