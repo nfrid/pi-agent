@@ -148,6 +148,7 @@ export function SessionControlLayer({
   onJumpToLatest,
   Composer,
   runtime,
+  sessionChange,
   runtimes,
   sessionId,
   workspaceId,
@@ -158,6 +159,7 @@ export function SessionControlLayer({
   onJumpToLatest: () => void;
   Composer: ComponentType<SessionComposerProps>;
   runtime: RuntimeSnapshot | undefined;
+  sessionChange: number;
   runtimes: readonly RuntimeSnapshot[];
   sessionId: string;
   workspaceId: string | undefined;
@@ -175,7 +177,11 @@ export function SessionControlLayer({
           ↓
         </button>
       )}
-      <DelegateHistorySurface id={sessionId} runtime={runtime} />
+      <DelegateHistorySurface
+        id={sessionId}
+        runtime={runtime}
+        sessionChange={sessionChange}
+      />
       <ExtensionSurfaceStack
         runtime={runtime}
         placement="composer"

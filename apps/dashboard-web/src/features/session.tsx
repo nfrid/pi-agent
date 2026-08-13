@@ -70,6 +70,7 @@ export function SessionView({
     error,
     queryError,
     runtime,
+    sessionChange,
     storedMetadata,
     projection,
     retrySession,
@@ -253,6 +254,7 @@ export function SessionView({
           onJumpToLatest={handleJumpToLatest}
           Composer={Composer}
           runtime={runtime}
+          sessionChange={sessionChange}
           runtimes={snapshot.runtimes}
           sessionId={id}
           workspaceId={workspaceId}

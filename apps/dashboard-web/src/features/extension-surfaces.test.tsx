@@ -15,6 +15,7 @@ import {
   createDelegateHistoryRefreshCoordinator,
   DelegateTranscript,
   dashboardSurfacePlacement,
+  delegateHistoryRevisionChanged,
   ExtensionSurfaceStack,
   reconcileDelegateLiveRuns,
   renderLiveExtensionSurface,
@@ -24,12 +25,55 @@ import {
 import {
   DelegateSurface,
   delegateActivityLabel,
+  selectedDelegateInspectionRow,
 } from './live-surface-renderers';
 
 const runtimeFixture = (extensionSurfaces: unknown): RuntimeSnapshot =>
   ({ extensionSurfaces }) as unknown as RuntimeSnapshot;
 
 describe('live extension surface fixtures', () => {
+  it('refreshes delegate history only for revisions of the mounted session', () => {
+    expect(
+      delegateHistoryRevisionChanged(undefined, {
+        id: 'session-1',
+        revision: 0,
+      }),
+    ).toBe(false);
+    expect(
+      delegateHistoryRevisionChanged(
+        { id: 'session-1', revision: 0 },
+        { id: 'session-1', revision: 1 },
+      ),
+    ).toBe(true);
+    expect(
+      delegateHistoryRevisionChanged(
+        { id: 'session-1', revision: 1 },
+        { id: 'session-2', revision: 2 },
+      ),
+    ).toBe(false);
+  });
+
+  it('prefers the current lineage row over the inspected fallback', () => {
+    const liveRow = {
+      id: 'live-lineage-row',
+      runId: 'run-3',
+      lineageId: 'lineage-1',
+      name: 'Worker',
+      kind: 'background' as const,
+      state: 'running' as const,
+      createdAt: 1,
+      allowWrites: false,
+    };
+    const durable = { ...liveRow, id: 'lineage-1', state: 'success' as const };
+    const fallback = { ...liveRow };
+    expect(
+      selectedDelegateInspectionRow('lineage-1', [durable], fallback),
+    ).toBe(durable);
+    expect(selectedDelegateInspectionRow('missing', [], fallback)).toBe(
+      fallback,
+    );
+  });
+
   it('retries unsettled durable history with a bounded fake-timer policy', () => {
     vi.useFakeTimers();
     try {
