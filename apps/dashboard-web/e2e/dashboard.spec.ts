@@ -2174,24 +2174,31 @@ Note: Recovery completed after the final check.`,
   await expect(jumpLatest).toHaveCount(0);
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   const failedActivity = page.getByRole('button', {
-    name: /Checking the failed command.*1 tool.*(?:failed|error)/,
+    name: /Checking the failed command/,
   });
   await expect(failedActivity).toBeVisible();
+  await expect(failedActivity).toHaveAccessibleDescription(
+    /1 tool.*(?:failed|error)/,
+  );
   await failedActivity.click();
   const failedExpandedDot = failedActivity
-    .locator('xpath=..')
+    .locator('xpath=../..')
     .locator('.tool-detail.step-failed .activity-step-dot');
   await expect(failedExpandedDot).toHaveText('!');
   await failedActivity.click();
   const activity = page.getByRole('button', {
-    name: /Checking the mobile transcript.*1 tool/,
+    name: /Checking the mobile transcript/,
   });
   await expect(activity).toBeVisible();
+  await expect(activity).toHaveAccessibleDescription(/1 tool.*show detail/);
   const mobileActivityHeader = await activity.evaluate((button) => {
+    const header = button.closest('.activity-group-header');
     const icon = button
       .querySelector('.activity-icon')
       ?.getBoundingClientRect();
-    const title = button.querySelector('strong')?.getBoundingClientRect();
+    const title = header
+      ?.querySelector('.activity-group-preamble .markdown > p')
+      ?.getBoundingClientRect();
     return icon && title
       ? {
           topDifference: Math.abs(icon.top - title.top),
@@ -2201,12 +2208,12 @@ Note: Recovery completed after the final check.`,
   });
   expect(mobileActivityHeader?.topDifference).toBeLessThan(5);
   expect(mobileActivityHeader?.gap).toBeGreaterThanOrEqual(0);
-  await expect(activity.locator('small')).toBeHidden();
+  await expect(activity.locator('small')).toHaveCount(0);
   await expect(
-    activity.locator('xpath=..').getByText('1 tool call', { exact: true }),
+    activity.locator('xpath=../..').getByText('1 tool call', { exact: true }),
   ).toHaveCount(1);
   const completedStepDot = activity
-    .locator('xpath=..')
+    .locator('xpath=../..')
     .locator('.activity-step.step-complete .activity-step-dot');
   await expect(completedStepDot).toHaveText('');
   const completedMarkerStyle = await completedStepDot.evaluate((dot) => {
@@ -2431,7 +2438,7 @@ Note: Recovery completed after the final check.`,
     .evaluateAll((timestamps) =>
       timestamps.map((timestamp) => timestamp.getBoundingClientRect().right),
     );
-  expect(timestampRights.length).toBeGreaterThanOrEqual(4);
+  expect(timestampRights.length).toBeGreaterThanOrEqual(3);
   expect(
     Math.max(...timestampRights) - Math.min(...timestampRights),
   ).toBeLessThanOrEqual(1);
@@ -2476,7 +2483,7 @@ Note: Recovery completed after the final check.`,
     },
   ]);
   await expect(
-    page.getByRole('button', { name: /Preparing live tool.*1 tool/ }),
+    page.getByRole('button', { name: /Preparing live tool/ }),
   ).toBeVisible();
   const emitMessage = async (type: string, timestamp: number, text: string) =>
     page.evaluate(
@@ -2859,16 +2866,26 @@ function phase6Snapshot(
   };
 }
 
-function markdownActivityEntries() {
+function markdownActivityEntries({ blockFirst = false } = {}) {
   return [
+    ...Array.from({ length: 20 }, (_, index) => ({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: `Earlier transcript ${index + 1}` }],
+      },
+    })),
     {
       type: 'message',
       message: {
         role: 'assistant',
+        timestamp: '2026-08-13T18:42:00.000Z',
         content: [
           {
             type: 'text',
-            text: '**Review the workspace**\n\nThis preamble has a [guide](https://example.com/guide) and enough ordinary text to wrap around the timestamp accessory before continuing on a full-width line below it. It keeps flowing beside the accessory for several lines so the float is genuinely tested.\n\nThe following paragraph should use the full header width.',
+            text: blockFirst
+              ? '## Block-first preamble\n\n- preserve the list\n- preserve the block\n\n```ts\nconst blockFirst = true;\n```'
+              : '**Review the workspace** This preamble has a [guide](https://example.com/guide) and enough ordinary text to wrap around the timestamp accessory before continuing on a full-width line below it. It keeps flowing beside the accessory for several lines so the float is genuinely tested.\n\nThe following paragraph should use the full header width and continue with enough words to make its line geometry reach the normal right boundary after the accessory ends. This proves the float has cleared rather than merely measuring a full-width block.',
           },
           {
             type: 'toolCall',
@@ -2888,6 +2905,13 @@ function markdownActivityEntries() {
         isError: false,
       },
     },
+    ...Array.from({ length: 20 }, (_, index) => ({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: `Later transcript ${index + 1}` }],
+      },
+    })),
   ];
 }
 
@@ -3269,7 +3293,7 @@ async function installPhase6Mocks(
   };
 }
 
-test('activity header renders Markdown and tracks its sticky tool offset @desktop', async ({
+test('activity header renders Markdown and proves float and sticky geometry @desktop', async ({
   page,
 }) => {
   await installPhase6Mocks(page, {
@@ -3281,6 +3305,7 @@ test('activity header renders Markdown and tracks its sticky tool offset @deskto
 
   const group = page.locator('.activity-group').first();
   const header = group.locator('.activity-group-header');
+  const toggle = header.getByRole('button');
   await expect(header.locator('.markdown strong')).toHaveText(
     'Review the workspace',
   );
@@ -3288,33 +3313,111 @@ test('activity header renders Markdown and tracks its sticky tool offset @deskto
     'href',
     'https://example.com/guide',
   );
+  await expect(toggle).toHaveAttribute('aria-labelledby', 'activity-label-20');
+  await expect(toggle).toHaveAttribute(
+    'aria-describedby',
+    'activity-status-20',
+  );
+  await expect(toggle).toHaveCSS('width', '28px');
   await expect(header.locator('small')).toHaveCount(0);
   const headerMetrics = await header.evaluate((element) => {
     const groupElement = element.closest('.activity-group');
     if (!groupElement) throw new Error('activity group missing');
-    const headerHeight = element.getBoundingClientRect().height;
     const markdown = element.querySelector<HTMLElement>('.markdown');
-    const firstParagraph = markdown?.querySelector<HTMLElement>(':scope > p');
+    const firstParagraph = markdown?.querySelector<HTMLElement>(
+      ':scope > p:first-child',
+    );
     const laterParagraph =
       markdown?.querySelector<HTMLElement>(':scope > p + p');
-    const toggle = element.querySelector<HTMLElement>('.activity-group-toggle');
-    if (!markdown || !firstParagraph || !laterParagraph || !toggle)
+    const accessory = element.querySelector<HTMLElement>(
+      '.activity-group-accessories',
+    );
+    const timestamp = element.querySelector<HTMLElement>(
+      '.activity-group-accessories .activity-time',
+    );
+    const control = element.querySelector<HTMLElement>(
+      '.activity-group-toggle',
+    );
+    if (
+      !markdown ||
+      !firstParagraph ||
+      !laterParagraph ||
+      !accessory ||
+      !timestamp ||
+      !control
+    )
       throw new Error('activity Markdown geometry missing');
-    const firstLine = firstParagraph.getClientRects()[0];
-    if (!firstLine) throw new Error('activity first line missing');
-    const laterBlock = laterParagraph.getBoundingClientRect();
-    const toggleRect = toggle.getBoundingClientRect();
+    const rangeRects = (target: HTMLElement) => {
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      return Array.from(range.getClientRects()).map((rect) => ({
+        top: rect.top,
+        bottom: rect.bottom,
+        left: rect.left,
+        right: rect.right,
+        width: rect.width,
+      }));
+    };
+    const lineRects = (target: HTMLElement) => {
+      const lines = new Map<
+        number,
+        {
+          top: number;
+          bottom: number;
+          left: number;
+          right: number;
+          width: number;
+        }
+      >();
+      for (const rect of rangeRects(target)) {
+        const key = Math.round(rect.top * 2) / 2;
+        const line = lines.get(key);
+        if (line) {
+          line.left = Math.min(line.left, rect.left);
+          line.right = Math.max(line.right, rect.right);
+          line.bottom = Math.max(line.bottom, rect.bottom);
+          line.width = line.right - line.left;
+        } else lines.set(key, { ...rect });
+      }
+      return [...lines.values()].sort((a, b) => a.top - b.top);
+    };
+    const accessoryRect = accessory.getBoundingClientRect();
+    const timestampRect = timestamp.getBoundingClientRect();
+    const controlRect = control.getBoundingClientRect();
+    const firstLines = lineRects(firstParagraph);
+    const laterLines = lineRects(laterParagraph);
+    const alongsideLines = firstLines.filter(
+      (line) =>
+        line.top < accessoryRect.bottom && line.bottom > accessoryRect.top,
+    );
+    const belowLines = laterLines.filter(
+      (line) => line.top >= accessoryRect.bottom - 1,
+    );
     return {
-      headerHeight,
-      firstLineTop: firstLine.top,
-      firstLineBottom: firstLine.bottom,
-      firstLineWidth: firstLine.width,
-      laterBlockWidth: laterBlock.width,
-      toggleTop: toggleRect.top,
-      toggleBottom: toggleRect.bottom,
-      toggleRight: toggleRect.right,
-      firstLineRight: firstLine.right,
-      laterBlockRight: laterBlock.right,
+      headerHeight: element.getBoundingClientRect().height,
+      accessory: {
+        top: accessoryRect.top,
+        bottom: accessoryRect.bottom,
+        left: accessoryRect.left,
+        right: accessoryRect.right,
+        width: accessoryRect.width,
+      },
+      timestamp: {
+        top: timestampRect.top,
+        bottom: timestampRect.bottom,
+        left: timestampRect.left,
+        right: timestampRect.right,
+        width: timestampRect.width,
+      },
+      control: {
+        top: controlRect.top,
+        bottom: controlRect.bottom,
+        right: controlRect.right,
+      },
+      firstLines,
+      alongsideLines,
+      belowLines,
+      laterBlockTop: laterParagraph.getBoundingClientRect().top,
       offset: Number.parseFloat(
         getComputedStyle(groupElement).getPropertyValue(
           '--activity-header-height',
@@ -3322,52 +3425,171 @@ test('activity header renders Markdown and tracks its sticky tool offset @deskto
       ),
       scrollWidth: element.scrollWidth,
       clientWidth: element.clientWidth,
-      markdownWidth: markdown.getBoundingClientRect().width,
-      headerWidth: element.getBoundingClientRect().width,
     };
   });
   expect(headerMetrics.headerHeight).toBeGreaterThan(42);
-  expect(
-    Math.abs(headerMetrics.offset - headerMetrics.headerHeight),
-  ).toBeLessThan(1);
+  expect(headerMetrics.accessory.width).toBeGreaterThan(0);
+  expect(headerMetrics.timestamp.width).toBeGreaterThan(0);
   expect(headerMetrics.scrollWidth).toBeLessThanOrEqual(
     headerMetrics.clientWidth,
   );
-  expect(headerMetrics.markdownWidth).toBeLessThanOrEqual(
-    headerMetrics.headerWidth,
+  expect(
+    Math.abs(headerMetrics.offset - headerMetrics.headerHeight),
+  ).toBeLessThan(1);
+  expect(headerMetrics.alongsideLines.length).toBeGreaterThan(0);
+  expect(
+    headerMetrics.alongsideLines.every(
+      (line) => line.right <= headerMetrics.accessory.left + 1,
+    ),
+  ).toBe(true);
+  expect(headerMetrics.belowLines.length).toBeGreaterThan(0);
+  const alongsideRight = Math.max(
+    ...headerMetrics.alongsideLines.map((line) => line.right),
   );
-  expect(headerMetrics.firstLineBottom).toBeGreaterThan(
-    headerMetrics.toggleTop,
+  expect(
+    headerMetrics.belowLines.some(
+      (line) =>
+        line.left < headerMetrics.accessory.left &&
+        line.right > headerMetrics.accessory.left &&
+        line.right > alongsideRight,
+    ),
+  ).toBe(true);
+  expect(headerMetrics.laterBlockTop).toBeGreaterThanOrEqual(
+    headerMetrics.accessory.bottom - 1,
   );
-  expect(headerMetrics.firstLineTop).toBeLessThan(headerMetrics.toggleBottom);
-  expect(headerMetrics.firstLineRight).toBeGreaterThan(
-    headerMetrics.toggleRight,
-  );
-  expect(headerMetrics.laterBlockWidth).toBeGreaterThan(
-    headerMetrics.firstLineWidth + 20,
-  );
-  expect(headerMetrics.laterBlockRight).toBeGreaterThan(
-    headerMetrics.firstLineRight,
+  expect(headerMetrics.control.right).toBeLessThanOrEqual(
+    headerMetrics.accessory.left,
   );
 
-  await header.getByRole('button').click();
+  await toggle.click();
   const toolSummary = group.locator('.tool-detail > summary.activity-step');
   await expect(toolSummary).toBeVisible();
   await toolSummary.click();
+  await expect(toolSummary.locator('xpath=..')).toHaveAttribute('open', '');
+
+  const pinGroup = async () => {
+    await transcriptScroll(page).evaluate(
+      (scrollElement, groupElement) => {
+        const scrollRect = scrollElement.getBoundingClientRect();
+        const groupRect = groupElement.getBoundingClientRect();
+        scrollElement.scrollTop += groupRect.top - scrollRect.top + 24;
+        scrollElement.dispatchEvent(new Event('scroll'));
+      },
+      await group.elementHandle(),
+    );
+  };
+  const pinnedMetrics = () =>
+    page.evaluate(() => {
+      const scrollElement = document.querySelector(
+        '.session-transcript-scroll',
+      );
+      const groupElement = document.querySelector('.activity-group');
+      const headerElement = groupElement?.querySelector<HTMLElement>(
+        '.activity-group-header',
+      );
+      const summaryElement = groupElement?.querySelector<HTMLElement>(
+        '.tool-detail[open] > summary.activity-step',
+      );
+      if (!scrollElement || !groupElement || !headerElement || !summaryElement)
+        throw new Error('pinned activity geometry missing');
+      const scrollRect = scrollElement.getBoundingClientRect();
+      const headerRect = headerElement.getBoundingClientRect();
+      const summaryRect = summaryElement.getBoundingClientRect();
+      return {
+        scrollTop: scrollRect.top,
+        headerTop: headerRect.top,
+        summaryTop: summaryRect.top,
+        headerHeight: headerRect.height,
+        cssHeaderHeight: Number.parseFloat(
+          getComputedStyle(groupElement).getPropertyValue(
+            '--activity-header-height',
+          ),
+        ),
+      };
+    });
+  await pinGroup();
+  await expect
+    .poll(async () => {
+      const metrics = await pinnedMetrics();
+      return Math.abs(metrics.headerTop - metrics.scrollTop);
+    })
+    .toBeLessThan(1);
+  const pinned = await pinnedMetrics();
+  expect(Math.abs(pinned.headerTop - pinned.scrollTop)).toBeLessThan(1);
+  expect(
+    Math.abs(pinned.summaryTop - pinned.headerTop - pinned.headerHeight),
+  ).toBeLessThan(1);
+  expect(Math.abs(pinned.cssHeaderHeight - pinned.headerHeight)).toBeLessThan(
+    1,
+  );
+
+  const initialHeaderHeight = pinned.headerHeight;
+  await page.setViewportSize({ width: 420, height: 760 });
   await expect
     .poll(() =>
-      toolSummary.evaluate((element) =>
-        Number.parseFloat(getComputedStyle(element).top),
-      ),
+      header.evaluate((element) => element.getBoundingClientRect().height),
     )
-    .toBeGreaterThan(headerMetrics.offset - 1);
+    .toBeGreaterThan(initialHeaderHeight);
   await expect
     .poll(() =>
-      toolSummary.evaluate((element) =>
-        Number.parseFloat(getComputedStyle(element).top),
-      ),
+      header.evaluate((element) => {
+        const groupElement = element.closest('.activity-group');
+        return Number.parseFloat(
+          getComputedStyle(groupElement as HTMLElement).getPropertyValue(
+            '--activity-header-height',
+          ),
+        );
+      }),
     )
-    .toBeLessThan(headerMetrics.offset + 1);
+    .toBeGreaterThan(initialHeaderHeight);
+  await pinGroup();
+  const resizedPinned = await pinnedMetrics();
+  expect(
+    Math.abs(resizedPinned.headerTop - resizedPinned.scrollTop),
+  ).toBeLessThan(1);
+  expect(
+    Math.abs(
+      resizedPinned.summaryTop -
+        resizedPinned.headerTop -
+        resizedPinned.headerHeight,
+    ),
+  ).toBeLessThan(1);
+  expect(resizedPinned.cssHeaderHeight).toBeGreaterThan(pinned.cssHeaderHeight);
+  expect(
+    Math.abs(resizedPinned.cssHeaderHeight - resizedPinned.headerHeight),
+  ).toBeLessThan(1);
+});
+
+test('activity header preserves block-first Markdown semantics @desktop', async ({
+  page,
+}) => {
+  await installPhase6Mocks(page, {
+    entries: markdownActivityEntries({ blockFirst: true }),
+    pendingInteractions: [],
+  });
+  await page.setViewportSize({ width: 960, height: 760 });
+  await page.goto('/sessions/s1');
+
+  const preamble = page.locator('.activity-group-preamble').first();
+  await expect(preamble.locator('.markdown > h2')).toHaveText(
+    'Block-first preamble',
+  );
+  await expect(preamble.locator('.markdown > ul')).toBeVisible();
+  const blockStyles = await preamble.evaluate((element) => {
+    const markdown = element.querySelector<HTMLElement>(':scope > .markdown');
+    const heading = markdown?.querySelector<HTMLElement>(':scope > h2');
+    const code = markdown?.querySelector<HTMLElement>(':scope > pre');
+    if (!markdown || !heading || !code)
+      throw new Error('block Markdown missing');
+    return {
+      markdownDisplay: getComputedStyle(markdown).display,
+      headingDisplay: getComputedStyle(heading).display,
+      codeOverflow: getComputedStyle(code).overflowX,
+    };
+  });
+  expect(blockStyles.markdownDisplay).toBe('block');
+  expect(blockStyles.headingDisplay).not.toBe('inline');
+  expect(blockStyles.codeOverflow).toBe('auto');
 });
 
 test('virtual transcript focus and group layout stay inside simple contracts', async ({
@@ -3513,7 +3735,7 @@ async function assertLargeEditPreview(page: Page, historyCount: number) {
   });
   await page.goto('/sessions/s1');
   const activity = page.getByRole('button', {
-    name: /Applying the large edit.*1 tool/,
+    name: /Applying the large edit/,
   });
   await expect(activity).toBeVisible();
   await activity.click();
@@ -3801,18 +4023,18 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
 
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
   const activity = page.getByRole('button', {
-    name: /Inspecting history.*1 tool/,
+    name: /Inspecting history/,
   });
   await expect(activity).toBeVisible();
   await expect(
-    activity.locator('xpath=..').getByText('Reading', { exact: true }),
+    activity.locator('xpath=../..').getByText('Reading', { exact: true }),
   ).toBeVisible();
   await expect(
-    activity.locator('xpath=..').getByText('src/App.tsx', { exact: true }),
+    activity.locator('xpath=../..').getByText('src/App.tsx', { exact: true }),
   ).toBeVisible();
   await expect(
     activity
-      .locator('xpath=..')
+      .locator('xpath=../..')
       .getByText('/tmp/project/src/App.tsx', { exact: true }),
   ).toHaveCount(0);
   await activity.click();

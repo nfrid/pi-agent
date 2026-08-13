@@ -52,6 +52,8 @@ describe('TranscriptActivityGroup', () => {
     );
     expect(collapsed).toContain('aria-expanded="false"');
     expect(collapsed).toContain('aria-controls="activity-detail-0"');
+    expect(collapsed).toContain('aria-labelledby="activity-label-0"');
+    expect(collapsed).toContain('aria-describedby="activity-status-0"');
     expect(collapsed).toContain('class="activity-summary"');
     expect(collapsed).not.toContain('class="activity-detail"');
     expect(collapsed).toContain('class="activity-group-preamble"');
@@ -69,6 +71,52 @@ describe('TranscriptActivityGroup', () => {
     expect(
       expanded.match(/<strong>Inspecting the workspace<\/strong>/g),
     ).toHaveLength(1);
+  });
+
+  it('keeps block-first Markdown semantic and outside the toggle', () => {
+    const items = toTranscriptEntries([
+      {
+        type: 'message',
+        id: 'assistant-block-first',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: '# Block-first preamble\n\n- preserve the list\n- preserve the block',
+            },
+            { type: 'toolCall', id: 'call-block', name: 'read' },
+          ],
+        },
+      },
+      {
+        type: 'tool',
+        tool: {
+          toolCallId: 'call-block',
+          name: 'read',
+          status: 'complete',
+          result: 'block preserved',
+        },
+      },
+    ]);
+    const [group] = projectActivityGroups(items.map(({ entry }) => entry));
+    expect(group).toBeDefined();
+    if (!group) throw new Error('expected an activity group');
+    const markup = renderToStaticMarkup(
+      <TranscriptActivityGroup
+        group={group}
+        groupKey="assistant-block-first"
+        items={items.slice(group.start, group.end + 1)}
+        expanded={false}
+        onToggle={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('<h1>Block-first preamble</h1>');
+    expect(markup).toContain('<ul>');
+    const button = markup.match(/<button[^>]*>[\s\S]*?<\/button>/u)?.[0];
+    expect(button).toBeDefined();
+    expect(button).not.toContain('Block-first preamble');
   });
 
   it('keeps lead thinking and attachments in expanded detail', () => {

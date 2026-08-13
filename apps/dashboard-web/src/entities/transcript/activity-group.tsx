@@ -36,6 +36,8 @@ export function TranscriptActivityGroup({
       ? lead.text
       : undefined;
   const detailId = `activity-detail-${group.start}`;
+  const labelId = `activity-label-${group.start}`;
+  const statusId = `activity-status-${group.start}`;
   const timestamps = activityGroupItemTimestamps(items);
   const groupRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLElement>(null);
@@ -66,12 +68,6 @@ export function TranscriptActivityGroup({
     captureScrollAnchor?.(`group-${groupKey}`);
     onToggle(!expanded);
   };
-  const accessibleLabel = `${expanded ? 'Collapse' : 'Expand'} activity: ${
-    group.title
-  }; ${group.toolCount} tool${group.toolCount === 1 ? '' : 's'}; ${
-    presentation.label
-  }`;
-
   return (
     <div
       ref={groupRef}
@@ -88,7 +84,8 @@ export function TranscriptActivityGroup({
         <AriaButton
           className="activity-group-toggle"
           type="button"
-          aria-label={accessibleLabel}
+          aria-labelledby={labelId}
+          aria-describedby={statusId}
           aria-expanded={expanded}
           aria-controls={detailId}
           onPress={toggle}
@@ -97,16 +94,18 @@ export function TranscriptActivityGroup({
             {presentation.icon}
           </span>
         </AriaButton>
-        <span className="sr-only activity-group-status">
+        <span id={statusId} className="sr-only activity-group-status">
           {group.toolCount} tool{group.toolCount === 1 ? '' : 's'} ·{' '}
           {presentation.label}
         </span>
         {preamble ? (
-          <div className="activity-group-preamble">
+          <div id={labelId} className="activity-group-preamble">
             <Markdown>{preamble}</Markdown>
           </div>
         ) : (
-          <strong className="activity-group-fallback">{group.title}</strong>
+          <strong id={labelId} className="activity-group-fallback">
+            {group.title}
+          </strong>
         )}
       </header>
       {!expanded && (

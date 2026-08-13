@@ -28,19 +28,25 @@
 }
 .activity-group-toggle {
   display: inline-grid;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   place-items: center;
-  margin-inline-end: 7px;
+  margin-inline-end: 4px;
   vertical-align: middle;
-  border: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
   background: transparent;
   padding: 0;
   cursor: pointer;
 }
+.activity-group-toggle:hover {
+  border-color: var(--line-soft);
+  background: color-mix(in srgb, var(--cyan) 10%, transparent);
+}
 .activity-group-toggle:focus-visible {
-  outline: 1px solid var(--cyan);
-  outline-offset: 2px;
+  border-color: var(--cyan);
+  outline: 2px solid var(--cyan);
+  outline-offset: 1px;
 }
 .activity-group-accessories {
   display: inline-flex;
@@ -55,16 +61,24 @@
   margin-left: 0;
 }
 .activity-group-preamble {
-  display: inline;
+  display: block;
   min-width: 0;
   font-size: 12px;
 }
-.activity-group-preamble .markdown {
+.activity-group-preamble:has(> .markdown > p:first-child) {
   display: inline;
+}
+.activity-group-preamble .markdown {
   min-width: 0;
+  overflow-x: auto;
+}
+.activity-group-preamble:has(> .markdown > p:first-child) > .markdown {
+  display: inline;
   overflow-x: visible;
 }
-.activity-group-preamble .markdown > :first-child {
+.activity-group-preamble:has(> .markdown > p:first-child)
+  .markdown
+  > p:first-child {
   display: inline;
   margin-top: 0;
 }
