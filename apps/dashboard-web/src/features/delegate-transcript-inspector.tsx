@@ -414,7 +414,9 @@ export function DelegateTranscriptInspector({
   const selectedRun = runOptions?.find((run) => run.id === selectedRunId);
   const inspectedRow = selectedRun?.row ?? row;
   const selectedDetail =
-    detail?.run && detail.run.runId === inspectedRow.runId
+    detail?.run &&
+    detail.run.runId === inspectedRow.runId &&
+    detail.run.lineageId === inspectedRow.lineageId
       ? delegateHistoryInvocationToStatus(detail.run.run)
       : undefined;
   const displayedRow = selectedDetail ?? inspectedRow;

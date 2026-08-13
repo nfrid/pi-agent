@@ -69,9 +69,9 @@ describe('live extension surface fixtures', () => {
     expect(
       selectedDelegateInspectionRow('lineage-1', [durable], fallback),
     ).toBe(durable);
-    expect(selectedDelegateInspectionRow('missing', [], fallback)).toBe(
-      fallback,
-    );
+    expect(
+      selectedDelegateInspectionRow('missing', [], fallback),
+    ).toBeUndefined();
   });
 
   it('retries unsettled durable history with a bounded fake-timer policy', () => {

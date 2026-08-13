@@ -35,7 +35,7 @@ describe('isCurrentSessionResponse', () => {
     expect(isCurrentSessionResponse('session-a', undefined)).toBe(false);
   });
 
-  it('does not refetch for session metadata records but keeps semantic changes scoped', async () => {
+  it('does not refetch active sessions for session metadata records', async () => {
     vi.stubGlobal('document', {
       visibilityState: 'visible',
       addEventListener: () => undefined,
@@ -51,9 +51,15 @@ describe('isCurrentSessionResponse', () => {
       serverId: 'daemon-1',
       revision: 1,
       cursor: 1,
-      runtimes: [],
+      runtimes: [
+        {
+          runtimeId: 'runtime-1',
+          online: true,
+          session: { id: 'session-1', entries: [] },
+        } as never,
+      ],
       workspaces: [],
-      sessions: [response.metadata],
+      sessions: [{ ...response.metadata, activeRuntimeId: 'runtime-1' }],
       unread: [],
     });
     const queryClient = new QueryClient();
@@ -97,6 +103,102 @@ describe('isCurrentSessionResponse', () => {
         });
       });
       await expect.poll(() => session).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      session.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('refetches one mounted dormant session for one external append only', async () => {
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    });
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const session = vi
+      .spyOn(dashboardHttpClient, 'session')
+      .mockResolvedValue(response);
+    const store = new DashboardLiveStore();
+    vi.spyOn(store, 'hydrateSession').mockReturnValue({} as never);
+    store.installSnapshot({
+      serverId: 'daemon-1',
+      revision: 1,
+      cursor: 1,
+      runtimes: [],
+      workspaces: [],
+      sessions: [
+        {
+          ...response.metadata,
+          entryCount: 1,
+        },
+        {
+          id: 'session-2',
+          file: '/tmp/other.jsonl',
+          cwd: '/tmp',
+          updatedAt: 1,
+          entryCount: 1,
+        },
+      ],
+      unread: [],
+    });
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(dashboardQueryKeys.session('session-1'), response);
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(
+          createElement(
+            QueryClientProvider,
+            { client: queryClient },
+            createElement(HydrationProbe, { store }),
+          ),
+        );
+      });
+
+      await act(async () => {
+        store.acceptStreamRecord({
+          type: 'sessions',
+          cursor: 2,
+          emittedAt: 2,
+          upsert: [
+            {
+              ...response.metadata,
+              updatedAt: 2,
+              entryCount: 2,
+            },
+          ],
+          remove: [],
+        });
+      });
+      await expect.poll(() => session).toHaveBeenCalledTimes(1);
+      expect(store.getSnapshot().sessionChangeById).toEqual({ 'session-1': 1 });
+
+      await act(async () => {
+        store.acceptStreamRecord({
+          type: 'sessions',
+          cursor: 3,
+          emittedAt: 3,
+          upsert: [
+            {
+              id: 'session-2',
+              file: '/tmp/other.jsonl',
+              cwd: '/tmp',
+              updatedAt: 2,
+              entryCount: 2,
+            },
+          ],
+          remove: [],
+        });
+      });
+      expect(store.getSnapshot().sessionChangeById).toEqual({
+        'session-1': 1,
+        'session-2': 1,
+      });
+      expect(session).toHaveBeenCalledTimes(1);
     } finally {
       await act(async () => {
         renderer?.unmount();
