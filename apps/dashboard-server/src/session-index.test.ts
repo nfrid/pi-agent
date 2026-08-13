@@ -312,13 +312,19 @@ describe('session index', () => {
     expect(session.history.start).toBeGreaterThan(0);
     expect(session.history.end).toBe(11);
     expect(session.entries.length).toBeGreaterThan(0);
-    expect(JSON.stringify(session.entries).length).toBeLessThanOrEqual(
-      8 * 1024 * 1024,
-    );
+    expect(JSON.stringify(session.entries).length).toBeLessThan(500 * 1024);
+    expect(session.history.hasOlder).toBe(true);
+    expect(session.history.nextBefore).toBeTruthy();
     expect(session.entries.at(-1)).toMatchObject({ id: 'message-9' });
     expect(session.entries).not.toContainEqual(
       expect.objectContaining({ id: 'message-0' }),
     );
+    const older = await index.readEntries(
+      'large-id',
+      session.history.nextBefore,
+    );
+    expect(older.history.end).toBe(session.history.start);
+    expect(older.history.start).toBeLessThan(older.history.end);
   });
 
   it('loads immediately preceding pages and rejects malformed or stale cursors', async () => {
@@ -355,20 +361,27 @@ describe('session index', () => {
     expect(recent.entries).not.toContainEqual(
       expect.objectContaining({ id: 'first-user' }),
     );
-    const older = await index.readEntries(
+    const immediateOlder = await index.readEntries(
       'paged-id',
       recent.history.nextBefore,
     );
-    expect(older.history.end).toBe(recent.history.start);
+    expect(immediateOlder.history.end).toBe(recent.history.start);
+    expect(JSON.stringify(immediateOlder.entries).length).toBeLessThan(
+      500 * 1024,
+    );
+    expect(immediateOlder.entriesComplete).toBe(false);
+    let older = immediateOlder;
+    while (
+      !older.entries.some(
+        (entry) => (entry as { id?: string }).id === 'first-user',
+      ) &&
+      older.history.hasOlder
+    ) {
+      older = await index.readEntries('paged-id', older.history.nextBefore);
+    }
     expect(older.entries).toContainEqual(
       expect.objectContaining({ id: 'first-user' }),
     );
-    expect(
-      older.entries.some(
-        (entry) => (entry as { id?: string }).id === 'large-9',
-      ),
-    ).toBe(false);
-    expect(older.entriesComplete).toBe(false);
     await writeFile(
       firstFile,
       `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n${JSON.stringify({ type: 'message', id: 'newer-entry', message: { role: 'assistant', content: 'newer' } })}\n`,
@@ -381,7 +394,9 @@ describe('session index', () => {
     expect(olderAfterAppend.history.end).toBe(recent.history.start);
     expect(
       olderAfterAppend.entries.map((entry) => (entry as { id?: string }).id),
-    ).toEqual(older.entries.map((entry) => (entry as { id?: string }).id));
+    ).toEqual(
+      immediateOlder.entries.map((entry) => (entry as { id?: string }).id),
+    );
     await expect(index.readEntries('paged-id', 'not-a-cursor')).rejects.toThrow(
       'Invalid history cursor',
     );
@@ -428,7 +443,9 @@ describe('session index', () => {
           (entry) => (entry as { type?: string }).type === 'history_omission',
         )
         .map((entry) => (entry as { id?: string }).id)
-        .filter((id): id is string => id !== undefined),
+        .filter((id): id is string =>
+          Boolean(id?.startsWith('oversized-user-')),
+        ),
     );
     while (page.history.hasOlder) {
       const before = page.history.nextBefore;
@@ -440,7 +457,7 @@ describe('session index', () => {
       for (const entry of page.entries) {
         if ((entry as { type?: string }).type !== 'history_omission') continue;
         const id = (entry as { id?: string }).id;
-        if (id) seenOmissions.add(id);
+        if (id?.startsWith('oversized-user-')) seenOmissions.add(id);
       }
     }
     expect(seenOmissions).toEqual(new Set(oversizedIds));

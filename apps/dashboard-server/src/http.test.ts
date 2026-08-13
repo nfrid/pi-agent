@@ -1085,6 +1085,8 @@ describe('dashboard HTTP boundary', () => {
       type: 'session.snapshot',
       session: { id: 'revision-session', entries: [], entriesComplete: false },
     });
+    expect(compactSessionDelta.snapshot).toBeUndefined();
+    expect(routineSnapshotConstructions).toBe(0);
     expect(JSON.stringify(compactSessionDelta)).not.toContain(
       'distinctive websocket transcript text',
     );

@@ -110,6 +110,43 @@ function runtimeIndex(
   return Object.fromEntries(items.map((item) => [item.runtimeId, item]));
 }
 
+function sameTranscriptValue(left: unknown, right: unknown): boolean {
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Keep the canonical projection authoritative while retaining object identity
+ * for transcript rows that did not change during routine HTTP recovery.
+ */
+function reuseTranscriptProjection(
+  previous: TranscriptProjection | undefined,
+  next: TranscriptProjection,
+): TranscriptProjection {
+  if (!previous) return next;
+  const items = { ...next.items };
+  for (const [id, item] of Object.entries(next.items)) {
+    const prior = previous.items[id];
+    if (prior && sameTranscriptValue(prior, item)) items[id] = prior;
+  }
+  const orderIsSame =
+    previous.order.length === next.order.length &&
+    previous.order.every((id, index) => next.order[index] === id);
+  const itemIds = Object.keys(items);
+  const previousItemIds = Object.keys(previous.items);
+  const itemsAreSame =
+    itemIds.length === previousItemIds.length &&
+    itemIds.every((id) => items[id] === previous.items[id]);
+  return {
+    ...next,
+    ...(orderIsSame ? { order: previous.order } : {}),
+    ...(itemsAreSame ? { items: previous.items } : { items }),
+  };
+}
+
 function mergePrependedTranscript(
   current: TranscriptProjection,
   older: TranscriptProjection,
@@ -177,33 +214,6 @@ function emptyState(): DashboardLiveState {
     recentEvents: [],
     resyncNonce: 0,
   };
-}
-
-function hasOnlineRuntimeOverlay(
-  state: DashboardLiveState,
-  sessionId: string,
-  activeRuntimeId: string | undefined,
-): boolean {
-  const activeRuntime = activeRuntimeId
-    ? state.runtimesById[activeRuntimeId]
-    : undefined;
-  if (activeRuntime?.session.id === sessionId && activeRuntime.online !== false)
-    return true;
-  return Object.values(state.runtimesById).some(
-    (runtime) => runtime.session.id === sessionId && runtime.online !== false,
-  );
-}
-
-function transcriptMetadataChanged(
-  previous: SessionIndexEntry | undefined,
-  next: SessionIndexEntry,
-): boolean {
-  if (!previous) return false;
-  return (
-    previous.updatedAt !== next.updatedAt ||
-    previous.entryCount !== next.entryCount ||
-    previous.file !== next.file
-  );
 }
 
 function sessionIdForEvent(
@@ -737,23 +747,9 @@ export class DashboardLiveStore {
         record.upsert,
         record.remove,
       );
-      const sessionChangeById = { ...this.state.sessionChangeById };
-      for (const session of record.upsert) {
-        const previous = this.state.sessionsById[session.id];
-        if (
-          transcriptMetadataChanged(previous, session) &&
-          !hasOnlineRuntimeOverlay(
-            this.state,
-            session.id,
-            previous?.activeRuntimeId ?? session.activeRuntimeId,
-          )
-        )
-          sessionChangeById[session.id] =
-            (sessionChangeById[session.id] ?? 0) + 1;
-      }
       this.publish({
         ...projected,
-        sessionChangeById,
+        sessionChangeById: this.state.sessionChangeById,
         cursor: record.cursor,
         connection: { ...projected.connection, lastCursor: record.cursor },
         cursorHistory: [...projected.cursorHistory, record.cursor].slice(
@@ -902,10 +898,7 @@ export class DashboardLiveStore {
     const event = envelope.event;
     const semanticSessionUpdate =
       Boolean(sessionId) &&
-      (event.type === 'message.finished' ||
-        event.type === 'tool.finished' ||
-        event.type === 'agent.settled' ||
-        event.type === 'runtime.hello' ||
+      (event.type === 'runtime.hello' ||
         event.type === 'session.changed' ||
         event.type === 'session.snapshot');
     if (
@@ -1179,6 +1172,7 @@ export class DashboardLiveStore {
         };
       }
     }
+    projection = reuseTranscriptProjection(currentProjection, projection);
     const currentMetadata = this.state.sessionsById[response.metadata.id];
     const optimisticTitle =
       this.state.optimisticSessionTitlesById[response.metadata.id];

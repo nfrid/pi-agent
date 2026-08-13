@@ -64,6 +64,12 @@ function fakeClient() {
   const setTranscript = (transcript: unknown[]): void => {
     current = { ...current, transcript };
   };
+  const setExtras = (extras: Record<string, unknown>): void => {
+    current = { ...current, ...extras } as FakeSession;
+    listeners.forEach((listener) => {
+      listener(current);
+    });
+  };
   const lease = {
     id: current.id,
     get active() {
@@ -111,6 +117,7 @@ function fakeClient() {
     disconnect,
     setPhase,
     setTranscript,
+    setExtras,
   };
 }
 
@@ -303,14 +310,8 @@ describe('PiClient runtime provider experiment', () => {
       title: 'Native session title',
       cwd: '/tmp/worktree',
       leafId: 'native-leaf-1',
-      entries: [
-        {
-          id: 'native-entry-1',
-          role: 'user',
-          content: [{ type: 'text', text: 'Persist this transcript' }],
-        },
-      ],
-      entriesComplete: true,
+      entries: [],
+      entriesComplete: false,
     });
     expect(fullSnapshot?.event?.session).toMatchObject({
       id: 'pi-session-1',
@@ -329,12 +330,67 @@ describe('PiClient runtime provider experiment', () => {
       entriesComplete: true,
     });
     expect(fullSnapshot?.event?.session?.entries).toHaveLength(1);
+    expect(registry.get('runtime-pi-1')?.session.entries).toHaveLength(1);
     expect(
       published.filter(
         (change) =>
           change.kind === 'event' && change.event?.type === 'session.snapshot',
       ),
     ).toHaveLength(1);
+    await provider.stop(binding);
+  });
+
+  it('sends changed managed surface data without repeating unchanged heavy fields', async () => {
+    const fake = fakeClient();
+    const changes: unknown[] = [];
+    const registry = new RuntimeRegistry({
+      expectedToken: () => true,
+      onChange: (change) => changes.push(change),
+    });
+    const provider = new PiClientRuntimeProvider(registry, {
+      clientFactory: async () => fake.client as never,
+    });
+    const surface = {
+      id: 'managed.surface',
+      rendererId: 'managed.renderer',
+      placement: 'right-rail',
+      viewModel: { version: 1 },
+    };
+    const binding = await provider.start(input());
+    fake.setExtras({ extensionSurfaces: [surface] });
+    const beforeUnchanged = changes.length;
+    fake.setPhase('turn');
+    const unchangedEvent = changes
+      .slice(beforeUnchanged)
+      .find(
+        (change) =>
+          (change as { kind?: string; event?: { type?: string } }).kind ===
+            'event' &&
+          (change as { event?: { type?: string } }).event?.type ===
+            'runtime.stateChanged',
+      ) as { event?: { snapshot?: Record<string, unknown> } } | undefined;
+    expect(unchangedEvent?.event?.snapshot?.extensionSurfaces).toBeUndefined();
+    const unchanged = registry.get('runtime-pi-1');
+    expect(unchanged?.extensionSurfaces).toEqual([surface]);
+    const beforeChanged = changes.length;
+    fake.setExtras({
+      extensionSurfaces: [{ ...surface, viewModel: { version: 2 } }],
+    });
+    const changedEvent = changes
+      .slice(beforeChanged)
+      .find(
+        (change) =>
+          (change as { kind?: string; event?: { type?: string } }).kind ===
+            'event' &&
+          (change as { event?: { type?: string } }).event?.type ===
+            'runtime.stateChanged',
+      ) as { event?: { snapshot?: Record<string, unknown> } } | undefined;
+    expect(changedEvent?.event?.snapshot?.extensionSurfaces).toEqual([
+      { ...surface, viewModel: { version: 2 } },
+    ]);
+    expect(registry.get('runtime-pi-1')?.extensionSurfaces).toEqual([
+      { ...surface, viewModel: { version: 2 } },
+    ]);
     await provider.stop(binding);
   });
 

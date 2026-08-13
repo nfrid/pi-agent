@@ -10,7 +10,9 @@ import type { DelegateStatusSnapshot, DelegateStatusStore } from './status';
 
 export const DELEGATE_EXTENSION_ID = 'delegate';
 const MAX_SURFACE_STATUSES = 24;
-const MAX_TRANSCRIPT_SURFACE_CHARS = 96_000;
+// Live surfaces are an activity hint. Persisted delegate history remains the
+// lazy authority for full transcript/result detail.
+const MAX_SURFACE_DETAIL_CHARS = 14 * 1024;
 const MAX_LIFECYCLE_DIAGNOSTIC_CHARS = 4_000;
 
 function text(value: string, max: number): string {
@@ -23,6 +25,27 @@ function payloadLength(value: unknown): number {
   } catch {
     return 0;
   }
+}
+
+function takeValue(
+  value: unknown,
+  budget: { remaining: number },
+): { included: true; value: unknown } | { included: false } {
+  const size = payloadLength(value);
+  if (size > budget.remaining) return { included: false };
+  budget.remaining -= size;
+  return { included: true, value };
+}
+
+function takeText(
+  value: string,
+  max: number,
+  budget: { remaining: number },
+): string | undefined {
+  const result = text(value, Math.min(max, budget.remaining));
+  if (!result) return undefined;
+  budget.remaining -= result.length;
+  return result;
 }
 
 function transcriptSnapshot(
@@ -83,29 +106,32 @@ function statusSnapshot(
   surfaceBudget: { remaining: number },
 ) {
   const resultValue = status.result?.value;
-  const resultValueLength =
-    resultValue === undefined ? 0 : payloadLength(resultValue);
   const result = status.result
     ? {
         kind: status.result.kind,
         status: status.result.status,
         ...(status.result.errors?.length
-          ? {
-              errors: status.result.errors
-                .slice(0, 16)
-                .map((error) => text(error, 240)),
-            }
+          ? (() => {
+              const errors: string[] = [];
+              for (const error of status.result?.errors ?? []) {
+                const bounded = takeText(error, 240, surfaceBudget);
+                if (bounded === undefined) break;
+                errors.push(bounded);
+                if (errors.length === 16) break;
+              }
+              return errors.length > 0 ? { errors } : {};
+            })()
           : {}),
         ...(resultValue === undefined
           ? status.result.valueOmitted
             ? { valueOmitted: true }
             : {}
-          : resultValueLength <= surfaceBudget.remaining
-            ? (() => {
-                surfaceBudget.remaining -= resultValueLength;
-                return { value: resultValue };
-              })()
-            : { valueOmitted: true }),
+          : (() => {
+              const included = takeValue(resultValue, surfaceBudget);
+              return included.included
+                ? { value: included.value }
+                : { valueOmitted: true };
+            })()),
       }
     : undefined;
   return {
@@ -122,7 +148,12 @@ function statusSnapshot(
       : { finishedAt: status.finishedAt }),
     ...(status.jobId ? { jobId: text(status.jobId, 256) } : {}),
     ...(status.route ? { route: text(status.route, 512) } : {}),
-    ...(status.context ? { context: status.context } : {}),
+    ...(status.context
+      ? (() => {
+          const included = takeValue(status.context, surfaceBudget);
+          return included.included ? { context: included.value } : {};
+        })()
+      : {}),
     allowWrites: status.allowWrites,
     ...(status.pauseState ? { pauseState: status.pauseState } : {}),
     ...(status.pausedAt === undefined ? {} : { pausedAt: status.pausedAt }),
@@ -136,7 +167,14 @@ function statusSnapshot(
             label: text(status.activity.label, 2_000),
             status: status.activity.status,
             ...(status.activity.latestText
-              ? { latestText: text(status.activity.latestText, 10_000) }
+              ? (() => {
+                  const latestText = takeText(
+                    status.activity.latestText,
+                    2_000,
+                    surfaceBudget,
+                  );
+                  return latestText ? { latestText } : {};
+                })()
               : {}),
           },
         }
@@ -161,12 +199,14 @@ function statusSnapshot(
           lifecycle: {
             reason: status.lifecycle.reason,
             ...(status.lifecycle.diagnostic !== undefined
-              ? {
-                  diagnostic: text(
+              ? (() => {
+                  const diagnostic = takeText(
                     status.lifecycle.diagnostic,
                     MAX_LIFECYCLE_DIAGNOSTIC_CHARS,
-                  ),
-                }
+                    surfaceBudget,
+                  );
+                  return diagnostic === undefined ? {} : { diagnostic };
+                })()
               : {}),
             ...(typeof status.lifecycle.diagnosticArtifact?.handle === 'string'
               ? {
@@ -196,7 +236,7 @@ const publisher = createLiveSurfacePublisher<DelegateStatusStore>({
   viewModelSchema: DelegateStatusViewModelSchema,
   invalidMessage: 'Delegate status surface is invalid.',
   buildViewModel: (store) => {
-    const transcriptBudget = { remaining: MAX_TRANSCRIPT_SURFACE_CHARS };
+    const transcriptBudget = { remaining: MAX_SURFACE_DETAIL_CHARS };
     const statuses = store
       .list()
       .sort((left, right) => {

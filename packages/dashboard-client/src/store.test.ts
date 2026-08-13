@@ -274,10 +274,7 @@ describe('DashboardLiveStore', () => {
       remove: [],
     });
 
-    expect(store.getSnapshot().sessionChangeById).toEqual({
-      'session-1': 1,
-      'session-2': 1,
-    });
+    expect(store.getSnapshot().sessionChangeById).toEqual({});
   });
 
   it('preserves optimistic titles across authoritative session-index records', () => {
@@ -1138,7 +1135,9 @@ describe('DashboardLiveStore', () => {
       expect(notifications).toBe(2);
       message(4, 'message.finished', 'hello');
       expect(notifications).toBe(3);
-      expect(store.getSnapshot().sessionChangeById['session-1']).toBe(1);
+      expect(
+        store.getSnapshot().sessionChangeById['session-1'],
+      ).toBeUndefined();
       unsubscribe();
     } finally {
       vi.useRealTimers();
@@ -1239,6 +1238,50 @@ describe('DashboardLiveStore', () => {
       role: 'user',
       content: 'Persisted message',
     });
+  });
+
+  it('reuses unchanged transcript items across identical and append-only recovery', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    const entries = [
+      {
+        type: 'message',
+        id: 'entry-a',
+        message: { role: 'user', content: 'first' },
+      },
+      {
+        type: 'message',
+        id: 'entry-b',
+        message: { role: 'assistant', content: 'answer' },
+      },
+    ];
+    const initial = store.hydrateSession({
+      ...sessionResponse(1),
+      entries,
+    });
+    const firstItem = initial?.items['entry-a'];
+    const secondItem = initial?.items['entry-b'];
+    const identical = store.hydrateSession({
+      ...sessionResponse(2),
+      entries,
+    });
+    expect(identical?.order).toEqual(['entry-a', 'entry-b']);
+    expect(identical?.items['entry-a']).toBe(firstItem);
+    expect(identical?.items['entry-b']).toBe(secondItem);
+    const appended = store.hydrateSession({
+      ...sessionResponse(3),
+      entries: [
+        ...entries,
+        {
+          type: 'message',
+          id: 'entry-c',
+          message: { role: 'user', content: 'continue' },
+        },
+      ],
+    });
+    expect(appended?.order).toEqual(['entry-a', 'entry-b', 'entry-c']);
+    expect(appended?.items['entry-a']).toBe(firstItem);
+    expect(appended?.items['entry-b']).toBe(secondItem);
   });
 
   it('installs authoritative history when a live tail arrived first', () => {
@@ -1776,6 +1819,48 @@ describe('DashboardLiveStore', () => {
       } as never),
     ).toBe(true);
     expect(store.getSnapshot().sessionChangeById['session-1']).toBe(1);
+  });
+
+  it('does not recover for terminal granular events', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    for (const [cursor, event] of [
+      [
+        2,
+        {
+          type: 'tool.finished',
+          sessionId: 'session-1',
+          tool: {
+            toolCallId: 'call-1',
+            name: 'read',
+            result: 'done',
+            status: 'completed',
+          },
+        },
+      ],
+      [3, { type: 'agent.settled', sessionId: 'session-1' }],
+      [
+        4,
+        {
+          type: 'message.finished',
+          sessionId: 'session-1',
+          message: {
+            messageId: 'message-1',
+            role: 'assistant',
+            content: 'done',
+          },
+        },
+      ],
+    ] as const)
+      expect(
+        store.acceptStreamRecord({
+          cursor,
+          emittedAt: cursor,
+          sessionId: 'session-1',
+          event,
+        } as never),
+      ).toBe(true);
+    expect(store.getSnapshot().sessionChangeById['session-1']).toBeUndefined();
   });
 
   it('does not let stale HTTP hydration resurrect a complete tree replacement', () => {

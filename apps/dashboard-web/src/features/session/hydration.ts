@@ -49,8 +49,6 @@ export function useSessionHydration({
   const hydrationRetryCountRef = useRef(0);
   const incompleteRetryCountRef = useRef(0);
   const sessionChangeRef = useRef({ id, value: sessionChange });
-  const runtimeReconcileTimerRef = useRef<number | undefined>(undefined);
-  const runtimeWasOnlineRef = useRef(false);
   const sessionRefetchRef = useRef<
     | {
         id: string;
@@ -136,21 +134,6 @@ export function useSessionHydration({
   }, [requestSessionRefetch, resyncNonce]);
 
   useEffect(() => {
-    const online = Boolean(runtime && runtime.online !== false);
-    const wasOnline = runtimeWasOnlineRef.current;
-    runtimeWasOnlineRef.current = online;
-    if (!wasOnline || online) return;
-    // A short-lived print/runtime can exit immediately after its terminal
-    // event. Re-read once after shutdown, when Pi's JSONL branch is durable.
-    if (runtimeReconcileTimerRef.current !== undefined)
-      window.clearTimeout(runtimeReconcileTimerRef.current);
-    runtimeReconcileTimerRef.current = window.setTimeout(() => {
-      runtimeReconcileTimerRef.current = undefined;
-      void requestSessionRefetch();
-    }, 500);
-  }, [requestSessionRefetch, runtime]);
-
-  useEffect(() => {
     const reconcileWhenVisible = () => {
       if (document.visibilityState !== 'visible') return;
       hydrationRetryCountRef.current = 0;
@@ -206,16 +189,6 @@ export function useSessionHydration({
     queryEntriesComplete,
     requestSessionRefetch,
   ]);
-
-  useEffect(
-    () => () => {
-      if (runtimeReconcileTimerRef.current !== undefined) {
-        window.clearTimeout(runtimeReconcileTimerRef.current);
-        runtimeReconcileTimerRef.current = undefined;
-      }
-    },
-    [],
-  );
 
   const retrySession = useCallback(() => {
     hydrationRetryCountRef.current = 0;

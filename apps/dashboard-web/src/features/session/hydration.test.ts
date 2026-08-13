@@ -137,7 +137,7 @@ describe('isCurrentSessionResponse', () => {
     }
   });
 
-  it('refetches one mounted dormant session for one external append only', async () => {
+  it('does not refetch a mounted session for metadata-only appends', async () => {
     vi.stubGlobal('document', {
       visibilityState: 'visible',
       addEventListener: () => undefined,
@@ -199,8 +199,8 @@ describe('isCurrentSessionResponse', () => {
           remove: [],
         });
       });
-      await expect.poll(() => session).toHaveBeenCalledTimes(1);
-      expect(store.getSnapshot().sessionChangeById).toEqual({ 'session-1': 1 });
+      expect(session).not.toHaveBeenCalled();
+      expect(store.getSnapshot().sessionChangeById).toEqual({});
 
       await act(async () => {
         store.acceptStreamRecord({
@@ -219,11 +219,8 @@ describe('isCurrentSessionResponse', () => {
           remove: [],
         });
       });
-      expect(store.getSnapshot().sessionChangeById).toEqual({
-        'session-1': 1,
-        'session-2': 1,
-      });
-      expect(session).toHaveBeenCalledTimes(1);
+      expect(store.getSnapshot().sessionChangeById).toEqual({});
+      expect(session).not.toHaveBeenCalled();
     } finally {
       await act(async () => {
         renderer?.unmount();

@@ -11,6 +11,7 @@ import type {
   RuntimeLocation,
   RuntimeProviderEvent,
   RuntimeSnapshot,
+  RuntimeSnapshotPatch,
   RuntimeStartInput,
   SessionSnapshot,
 } from '@pi-dashboard/protocol';
@@ -213,6 +214,7 @@ function runtimeSnapshot(
   native: NonNullable<LeaseLike['snapshot']>,
   session = sessionSnapshot(native),
 ): RuntimeSnapshot {
+  const optional = native as unknown as Record<string, unknown>;
   return {
     runtimeId: input.runtimeId,
     ownership: 'managed',
@@ -220,6 +222,9 @@ function runtimeSnapshot(
     // signals this value because this binding has no tmux placement.
     pid: process.pid,
     cwd: native.cwd || input.cwd,
+    ...(typeof optional.workspaceHint === 'string'
+      ? { workspaceHint: optional.workspaceHint }
+      : {}),
     liveState: native.phase === 'idle' ? 'idle' : 'working',
     session,
     model: {
@@ -227,10 +232,85 @@ function runtimeSnapshot(
       model: native.model.id,
       thinking: native.thinkingLevel,
     },
-    pendingInteractions: [],
+    ...(Array.isArray(optional.modelCatalog)
+      ? {
+          modelCatalog:
+            optional.modelCatalog as RuntimeSnapshot['modelCatalog'],
+        }
+      : {}),
+    ...(Array.isArray(optional.composerCommands)
+      ? {
+          composerCommands:
+            optional.composerCommands as RuntimeSnapshot['composerCommands'],
+        }
+      : {}),
+    ...(Array.isArray(optional.thinkingLevels)
+      ? {
+          thinkingLevels:
+            optional.thinkingLevels as RuntimeSnapshot['thinkingLevels'],
+        }
+      : {}),
+    ...(optional.contextUsage === undefined
+      ? {}
+      : {
+          contextUsage:
+            optional.contextUsage as RuntimeSnapshot['contextUsage'],
+        }),
+    ...(Array.isArray(optional.pendingInteractions)
+      ? {
+          pendingInteractions:
+            optional.pendingInteractions as RuntimeSnapshot['pendingInteractions'],
+        }
+      : { pendingInteractions: [] }),
+    ...(Array.isArray(optional.queueDrafts)
+      ? { queueDrafts: optional.queueDrafts as RuntimeSnapshot['queueDrafts'] }
+      : {}),
+    ...(typeof optional.lastError === 'string'
+      ? { lastError: optional.lastError }
+      : {}),
+    ...(optional.capabilities === undefined
+      ? {}
+      : {
+          capabilities:
+            optional.capabilities as RuntimeSnapshot['capabilities'],
+        }),
+    ...(Array.isArray(optional.extensionSurfaces)
+      ? {
+          extensionSurfaces:
+            optional.extensionSurfaces as RuntimeSnapshot['extensionSurfaces'],
+        }
+      : {}),
     online: true,
     lastSeenAt: Date.now(),
   };
+}
+
+function sameSnapshotValue(left: unknown, right: unknown): boolean {
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Native callbacks frequently repeat the same extension/catalog payloads.
+ * Keep the registry's full snapshot authoritative while sending only changed
+ * top-level fields over the managed bridge.
+ */
+function runtimeSnapshotPatch(
+  previous: RuntimeSnapshot,
+  next: RuntimeSnapshot,
+): RuntimeSnapshotPatch {
+  const patch: Record<string, unknown> = {};
+  for (const key of Object.keys(next) as Array<keyof RuntimeSnapshot>) {
+    if (sameSnapshotValue(previous[key], next[key])) continue;
+    patch[key] =
+      key === 'session'
+        ? { ...next.session, entries: [], entriesComplete: false }
+        : next[key];
+  }
+  return patch as RuntimeSnapshotPatch;
 }
 
 function commandId(command: BridgeCommand): string {
@@ -413,6 +493,7 @@ class NativeContext {
   private unsubscribeConnection: (() => void) | undefined;
   private disposed = false;
   private previousTranscriptFingerprint: string;
+  private previousRuntimeSnapshot: RuntimeSnapshot;
 
   constructor(
     private readonly input: RuntimeStartInput,
@@ -425,6 +506,7 @@ class NativeContext {
     if (!snapshot) throw new Error('Pi session snapshot disappeared.');
     this.previousPhase = snapshot.phase;
     this.previousTranscriptFingerprint = transcriptFingerprint(snapshot);
+    this.previousRuntimeSnapshot = runtimeSnapshot(this.input, snapshot);
   }
 
   start(): void {
@@ -515,16 +597,23 @@ class NativeContext {
       fingerprint !== this.previousTranscriptFingerprint;
     const session = sessionSnapshot(native);
     const snapshot = runtimeSnapshot(this.input, native, session);
+    const snapshotPatch = runtimeSnapshotPatch(
+      this.previousRuntimeSnapshot,
+      snapshot,
+    );
     this.sendEvent({
       type: 'runtime.stateChanged',
       state: next,
-      snapshot,
+      ...(Object.keys(snapshotPatch).length > 0
+        ? { snapshot: snapshotPatch }
+        : {}),
     });
     if (transcriptChanged)
       this.sendEvent({
         type: 'session.snapshot',
         session,
       });
+    this.previousRuntimeSnapshot = snapshot;
     if (this.previousPhase !== 'idle' && native.phase === 'idle')
       this.sendEvent({ type: 'agent.settled', sessionId: native.id });
     this.previousPhase = native.phase;
