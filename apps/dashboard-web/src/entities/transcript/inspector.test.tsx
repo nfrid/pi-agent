@@ -215,6 +215,20 @@ describe('transcript payload inspection', () => {
     );
     expect(edit).toContain('tool-code-line-removed');
     expect(edit).toContain('tool-code-line-added');
+    expect(edit).toContain('class="sr-only">Removed line: </span>');
+    expect(edit).toContain('class="sr-only">Added line: </span>');
+    const contextEdit = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'edit',
+          arguments: {
+            path: 'src/app.ts',
+            edits: [{ oldText: 'keep\nremove()', newText: 'keep\ninsert()' }],
+          },
+        }}
+      />,
+    );
+    expect(contextEdit).toContain('class="sr-only">Context line: </span>');
 
     const duplicateEdit = renderToStaticMarkup(
       <ToolInspector
@@ -233,6 +247,52 @@ describe('transcript payload inspection', () => {
     expect(duplicateEdit.match(/>Replacement [12]<\/h5>/gu)).toHaveLength(2);
   });
 
+  it('falls back to generic JSON for malformed or over-cap edit lists', () => {
+    const mixedMalformed = {
+      name: 'edit',
+      arguments: {
+        path: 'src/app.ts',
+        edits: [{ oldText: 'a', newText: 'b' }, ['not-an-edit']],
+      },
+    };
+    expect(toolPresentationKind(mixedMalformed)).toBeUndefined();
+    const malformedMarkup = renderToStaticMarkup(
+      <ToolInspector tool={mixedMalformed} />,
+    );
+    expect(malformedMarkup).toContain('Arguments');
+    expect(malformedMarkup).not.toContain('Replacement preview · src/app.ts');
+
+    const overCap = {
+      name: 'edit',
+      arguments: {
+        path: 'src/app.ts',
+        edits: Array.from({ length: 25 }, (_, index) => ({
+          oldText: `old-${index}`,
+          newText: `new-${index}`,
+        })),
+      },
+    };
+    expect(toolPresentationKind(overCap)).toBeUndefined();
+    const overCapMarkup = renderToStaticMarkup(
+      <ToolInspector tool={overCap} />,
+    );
+    expect(overCapMarkup).toContain('Arguments');
+    expect(overCapMarkup).not.toContain('Replacement 1');
+  });
+
+  it('renders empty writes as an explicit empty preview', () => {
+    const markup = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'write',
+          arguments: { path: 'src/empty.ts', content: '' },
+        }}
+      />,
+    );
+    expect(markup).toContain('No content');
+    expect(markup).not.toContain('tool-code-line-added');
+  });
+
   it('normalizes only supported result text shapes and presents command errors as terminal output', () => {
     expect(normalizeToolResultText('plain output')).toBe('plain output');
     expect(
@@ -245,6 +305,17 @@ describe('transcript payload inspection', () => {
       normalizeToolResultText({ content: [{ type: 'text', text: 'nested' }] }),
     ).toBe('nested');
     expect(normalizeToolResultText({ output: 'do not guess' })).toBeUndefined();
+    expect(normalizeToolResultText({ content: { content: 'nested' } })).toBe(
+      'nested',
+    );
+    expect(normalizeToolResultText({ content: 'x'.repeat(12_001) })).toBe(
+      'x'.repeat(12_000),
+    );
+    expect(
+      normalizeToolResultText(
+        Array.from({ length: 129 }, () => ({ type: 'text', text: 'x' })),
+      ),
+    ).toBeUndefined();
     const command = renderToStaticMarkup(
       <ToolInspector
         tool={{
@@ -276,7 +347,7 @@ describe('transcript payload inspection', () => {
         tool={{
           name: 'bash',
           arguments: { command: longCommand },
-          result: 'done',
+          result: 'z'.repeat(12_001),
           data: { argumentsTruncated: true, resultTruncated: true },
         }}
       />,
@@ -285,6 +356,10 @@ describe('transcript payload inspection', () => {
     expect(markup).toContain(
       'Arguments preview is truncated after 12,000 characters',
     );
+    expect(markup).toContain(
+      'Result preview is truncated after 12,000 characters',
+    );
+    expect(markup).not.toContain('z'.repeat(12_001));
     expect(markup).toContain(
       'Source truncated this arguments before it reached the dashboard.',
     );
