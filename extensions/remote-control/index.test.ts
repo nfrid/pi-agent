@@ -35,6 +35,7 @@ import {
   emitAgentSettlement,
   emitCompactionCompleted,
   emitCompactionStarted,
+  emitTurnEnd,
   expandDashboardInput,
   flushQueueDrafts,
   LiveEventNormalizer,
@@ -993,6 +994,48 @@ describe('dashboard-owned queue drafts', () => {
     expect(runtime.snapshot().session.id).toBe('session-queue-2');
     runtime.clearContext(second);
     expect(runtime.queueDrafts.list()).toEqual([]);
+  });
+
+  it('publishes context usage at turn_end while the agent remains working', () => {
+    const runtime = createRemoteControlRuntime({} as ExtensionAPI);
+    if (!runtime) throw new Error('runtime was not created');
+    const context = {
+      cwd: '/tmp',
+      model: undefined,
+      thinkingLevel: 'off',
+      sessionManager: {
+        getBranch: () => [],
+        getSessionId: () => 'session-turn-end-context',
+        getSessionFile: () => undefined,
+        getSessionName: () => undefined,
+        getCwd: () => '/tmp',
+        getLeafId: () => undefined,
+      },
+      getContextUsage: () => ({
+        tokens: 12_345,
+        contextWindow: 100_000,
+        percent: 12.345,
+      }),
+      isIdle: () => false,
+    } as unknown as ExtensionContext;
+    runtime.setContext(context);
+    const sendEvent = vi.spyOn(runtime.client, 'sendEvent');
+
+    emitTurnEnd(runtime, {} as ExtensionAPI, context);
+
+    expect(sendEvent).toHaveBeenCalledWith({
+      type: 'runtime.stateChanged',
+      state: 'working',
+      snapshot: expect.objectContaining({
+        liveState: 'working',
+        contextUsage: {
+          tokens: 12_345,
+          contextWindow: 100_000,
+          percent: 12.345,
+        },
+      }),
+    });
+    runtime.clearContext(context);
   });
 
   it('expands queued prompt templates before Pi delivery', async () => {

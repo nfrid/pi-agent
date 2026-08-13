@@ -317,6 +317,14 @@ export function createRemoteControlRuntime(
   };
 }
 
+export function emitTurnEnd(
+  runtime: RemoteControlRuntime,
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+): void {
+  if (!flushQueueDrafts(runtime, pi, ctx, 'steer')) emitState(runtime, ctx);
+}
+
 export function flushQueueDrafts(
   runtime: RemoteControlRuntime,
   pi: ExtensionAPI,
