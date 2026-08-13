@@ -52,61 +52,6 @@ async function sharedDrawerMotion(drawer: Locator) {
   });
 }
 
-async function sessionHeadingFramesAfterClick(button: Locator) {
-  return button.evaluate(async (element) => {
-    const heading = document.querySelector<HTMLElement>('.session-heading');
-    if (!heading) throw new Error('Session heading missing');
-    element.click();
-    const frames: Array<{
-      opacity: string;
-      transform: string;
-      visibility: string;
-      position: string;
-      top: number;
-      animations: number;
-    }> = [];
-    for (let index = 0; index < 30; index += 1) {
-      await new Promise<void>((resolve) =>
-        requestAnimationFrame(() => resolve()),
-      );
-      const style = getComputedStyle(heading);
-      frames.push({
-        opacity: style.opacity,
-        transform: style.transform,
-        visibility: style.visibility,
-        position: style.position,
-        top: heading.getBoundingClientRect().top,
-        animations: heading.getAnimations().length,
-      });
-    }
-    return frames;
-  });
-}
-
-function hasVisibleHeadingMotion(
-  frames: Awaited<ReturnType<typeof sessionHeadingFramesAfterClick>>,
-  direction: 'hide' | 'show' = 'hide',
-) {
-  const firstOpacity = Number(frames[0]?.opacity);
-  const startsAtRest =
-    direction === 'hide' ? firstOpacity > 0.9 : firstOpacity < 0.1;
-  return (
-    startsAtRest &&
-    frames.every(
-      (frame) => frame.position === 'fixed' && Math.abs(frame.top) <= 25,
-    ) &&
-    frames.some((frame) => {
-      const opacity = Number(frame.opacity);
-      return (
-        frame.visibility === 'visible' &&
-        frame.animations > 0 &&
-        opacity > 0.2 &&
-        opacity < 0.8
-      );
-    })
-  );
-}
-
 test('mobile dashboard renders and supports project-scoped new chat', async ({
   page,
 }) => {
@@ -824,8 +769,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
       width: bounds.width,
     };
   });
-  const headingFrames = await sessionHeadingFramesAfterClick(detailsButton);
-  expect(hasVisibleHeadingMotion(headingFrames)).toBe(true);
+  await detailsButton.click();
   const details = page.getByRole('dialog', { name: 'Loaded shell' });
   const detailsMotion = await sharedDrawerMotion(details);
   expect(detailsMotion).toMatchObject({
@@ -835,24 +779,26 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   });
   expect(detailsMotion.transforms).toContain('translateX(100%)');
   await expect(details).toBeVisible();
-  await expect
-    .poll(() =>
-      sessionHeading.evaluate((element) => getComputedStyle(element).opacity),
-    )
-    .toBe('0');
   expect(
     await sessionHeading.evaluate((element) => {
       const style = getComputedStyle(element);
+      const layer = document.querySelector<HTMLElement>(
+        '.surface-drawer-layer',
+      );
       return {
         opacity: style.opacity,
         transform: style.transform,
-        transitionDuration: style.transitionDuration,
+        animations: element.getAnimations().length,
+        belowDrawer:
+          layer !== null &&
+          Number(style.zIndex) < Number(getComputedStyle(layer).zIndex),
       };
     }),
   ).toEqual({
-    opacity: '0',
-    transform: 'matrix(1, 0, 0, 1, 0, -24)',
-    transitionDuration: '0.24s, 0.24s',
+    opacity: '1',
+    transform: 'none',
+    animations: 0,
+    belowDrawer: true,
   });
   expect(
     await controlLayer.evaluate((element) => {
@@ -882,10 +828,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
       .locator('.surface-drawer-body')
       .evaluate((element) => getComputedStyle(element).paddingTop),
   ).toBe('14px');
-  const returnHeadingFrames = await sessionHeadingFramesAfterClick(
-    details.getByRole('button', { name: 'Close session details' }),
-  );
-  expect(hasVisibleHeadingMotion(returnHeadingFrames, 'show')).toBe(true);
+  await details.getByRole('button', { name: 'Close session details' }).click();
   await expect(details).toHaveCount(0);
   await expect(sessionHeading).toBeVisible();
 
@@ -3781,9 +3724,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
       }),
     )
     .toEqual({ opacity: '1', transform: 'none' });
-  const delegateHeadingFrames =
-    await sessionHeadingFramesAfterClick(delegatesLauncher);
-  expect(hasVisibleHeadingMotion(delegateHeadingFrames)).toBe(true);
+  await delegatesLauncher.click();
   const delegatesPanel = page.getByRole('dialog', { name: 'Delegates' });
   await expect(delegatesPanel).toBeVisible();
   await expect(delegatesPanel.locator('h2')).toHaveCount(0);
@@ -3975,13 +3916,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   });
   expect(detailsMotion.transforms).toContain('translateX(100%)');
   await expect(inspector).toBeVisible();
-  await expect
-    .poll(() =>
-      page
-        .locator('.session-heading')
-        .evaluate((element) => getComputedStyle(element).opacity),
-    )
-    .toBe('0');
+  await expect(page.locator('.session-heading')).toHaveCSS('opacity', '1');
   await expect(inspector).toContainText('Runtime controls');
   await expect(inspector).not.toContainText('Live work');
   await expect(inspector).not.toContainText('test/vision');

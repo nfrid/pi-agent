@@ -48,7 +48,7 @@
     calc(max(0px, (100% - 1240px) / 2) + clamp(16px, 4vw, 56px) + 272px),
     calc(50% - 274px)
   );
-  z-index: 46;
+  z-index: 44;
   display: flex;
   align-items: center;
   justify-content: space-between;
