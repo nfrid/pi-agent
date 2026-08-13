@@ -1,5 +1,25 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
 
+function transcriptScroll(page: Page) {
+  return page.locator('.session-transcript-scroll');
+}
+
+async function transcriptGap(page: Page) {
+  return transcriptScroll(page).evaluate(
+    (element) =>
+      element.scrollHeight - element.scrollTop - element.clientHeight,
+  );
+}
+
+async function scrollTranscript(page: Page, top: number) {
+  await transcriptScroll(page).evaluate((element, nextTop) => {
+    if (nextTop < element.scrollTop)
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    element.scrollTop = nextTop;
+    element.dispatchEvent(new Event('scroll'));
+  }, top);
+}
+
 async function swipe(
   target: Locator,
   { dx, dy = 0 }: { dx: number; dy?: number },
@@ -929,15 +949,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(page.locator('.transcript-virtualized')).toContainText(
     'Prior history',
   );
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          document.documentElement.scrollHeight -
-          (window.scrollY + window.innerHeight),
-      ),
-    )
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   await expect(
     page
       .getByRole('article')
@@ -1019,11 +1031,13 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   const composer = page.getByLabel('Message Pi');
   await expect(composer).toBeVisible();
   await composer.fill('Draft survives navigation and refresh');
-  await page.evaluate(() => {
-    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
-    window.scrollTo(0, 0);
+  await transcriptScroll(page).evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    element.scrollTop = 0;
   });
-  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await expect
+    .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
+    .toBe(0);
   await page.getByRole('button', { name: 'Open agent list' }).click();
   await page
     .getByRole('complementary', { name: 'Agents and threads' })
@@ -1035,15 +1049,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(page.locator('.session-page')).not.toHaveAttribute(
     'data-tail-pending',
   );
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          document.documentElement.scrollHeight -
-          (window.scrollY + window.innerHeight),
-      ),
-    )
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -1185,27 +1191,21 @@ test('delayed command completion does not scroll a destination session', async (
   await expect(page.locator('.session-page')).not.toHaveAttribute(
     'data-tail-pending',
   );
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          document.documentElement.scrollHeight -
-          (window.scrollY + window.innerHeight),
-      ),
-    )
-    .toBeLessThanOrEqual(1);
-  await page.evaluate(() => {
-    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
-    window.scrollTo(0, 0);
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
+  await transcriptScroll(page).evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    element.scrollTop = 0;
   });
-  const destinationScrollY = await page.evaluate(() => window.scrollY);
-  expect(destinationScrollY).toBe(0);
+  const destinationScrollTop = await transcriptScroll(page).evaluate(
+    (element) => element.scrollTop,
+  );
+  expect(destinationScrollTop).toBe(0);
 
   releaseCommand();
   await expect.poll(() => commandCompleted).toBe(true);
   await expect
-    .poll(() => page.evaluate(() => window.scrollY))
-    .toBe(destinationScrollY);
+    .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
+    .toBe(destinationScrollTop);
 });
 
 test('live transport contains malformed data and reconnects without HTTP polling', async ({
@@ -2141,9 +2141,10 @@ Note: Recovery completed after the final check.`,
     .getByRole('button', { name: 'Earlier message 1', exact: true })
     .click();
   await expect(reopenedOutline).toHaveCount(0);
-  await page.evaluate(() => {
-    window.scrollTo(0, 0);
-    window.dispatchEvent(new Event('scroll'));
+  await transcriptScroll(page).evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
   });
   const jumpLatest = page.getByRole('button', {
     name: 'Jump to latest transcript activity',
@@ -2170,15 +2171,7 @@ Note: Recovery completed after the final check.`,
   expect(jumpGeometry.bottom).toBeLessThan(jumpGeometry.composerTop ?? 0);
   await jumpLatest.click();
   await expect(jumpLatest).toHaveCount(0);
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          document.documentElement.scrollHeight -
-          (window.scrollY + window.innerHeight),
-      ),
-    )
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   const failedActivity = page.getByRole('button', {
     name: /Checking the failed command.*1 tool.*(?:failed|error)/,
   });
@@ -2244,34 +2237,22 @@ Note: Recovery completed after the final check.`,
     buffer: Buffer.from([137, 80, 78, 71]),
   });
   await expect(page.getByAltText('picker.png')).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(() => {
-        const layer = document.querySelector('.session-control-layer');
-        const sessionPage = document.querySelector('.session-page');
-        if (!layer || !sessionPage) return 0;
-        return (
-          Number.parseFloat(getComputedStyle(sessionPage).paddingBottom) -
-          layer.getBoundingClientRect().height
-        );
-      }),
-    )
-    .toBeGreaterThanOrEqual(13);
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          document.documentElement.scrollHeight -
-          (window.scrollY + window.innerHeight),
-      ),
-    )
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   const attachmentLayout = await page.evaluate(() => {
     const composer = document.querySelector('.composer');
     const previews = document.querySelector('.composer-previews');
     const controlLayer = document.querySelector('.session-control-layer');
+    const transcriptScrollElement = document.querySelector(
+      '.session-transcript-scroll',
+    );
     const sessionPage = document.querySelector('.session-page');
-    if (!composer || !previews || !controlLayer || !sessionPage)
+    if (
+      !composer ||
+      !previews ||
+      !controlLayer ||
+      !transcriptScrollElement ||
+      !sessionPage
+    )
       throw new Error('Composer layout not found');
     const composerRect = composer.getBoundingClientRect();
     const previewsRect = previews.getBoundingClientRect();
@@ -2283,13 +2264,7 @@ Note: Recovery completed after the final check.`,
       composerBottom: composerRect.bottom,
       controlHeight: controlLayer.getBoundingClientRect().height,
       controlTop: controlLayer.getBoundingClientRect().top,
-      transcriptTailBottom: Array.from(
-        document.querySelectorAll<HTMLElement>(
-          '.transcript [data-transcript-row]',
-        ),
-      )
-        .at(-1)
-        ?.getBoundingClientRect().bottom,
+      transcriptBottom: transcriptScrollElement.getBoundingClientRect().bottom,
       pagePaddingBottom: Number.parseFloat(
         getComputedStyle(sessionPage).paddingBottom,
       ),
@@ -2304,19 +2279,13 @@ Note: Recovery completed after the final check.`,
   expect(attachmentLayout.previewsBottom).toBeLessThanOrEqual(
     attachmentLayout.composerBottom,
   );
-  expect(attachmentLayout.pagePaddingBottom).toBeGreaterThanOrEqual(
-    attachmentLayout.controlHeight + 13,
-  );
-  expect(attachmentLayout.pagePaddingBottom).toBeLessThanOrEqual(
-    attachmentLayout.controlHeight + 16,
-  );
-  expect(attachmentLayout.transcriptTailBottom).toBeLessThanOrEqual(
-    attachmentLayout.controlTop,
+  expect(attachmentLayout.pagePaddingBottom).toBe(0);
+  expect(attachmentLayout.transcriptBottom).toBeLessThanOrEqual(
+    attachmentLayout.controlTop + 1,
   );
   expect(
-    attachmentLayout.controlTop -
-      (attachmentLayout.transcriptTailBottom ?? attachmentLayout.controlTop),
-  ).toBeLessThanOrEqual(8);
+    attachmentLayout.controlTop - attachmentLayout.transcriptBottom,
+  ).toBeLessThanOrEqual(1);
   await page.getByRole('button', { name: 'Remove picker.png' }).click();
   await page.evaluate(() => {
     const transfer = new DataTransfer();
@@ -2357,20 +2326,17 @@ Note: Recovery completed after the final check.`,
   expect(commandBody).toContain('drop.jpeg');
   await expect(page.getByAltText('paste.webp')).toHaveCount(0);
   await expect(page.getByLabel('Context window 50% [136k/272k]')).toBeVisible();
-  expect(
-    await page.evaluate(
-      () =>
-        window.scrollY + window.innerHeight >=
-        document.documentElement.scrollHeight - 2,
-    ),
-  ).toBe(true);
+  expect(await transcriptGap(page)).toBeLessThanOrEqual(1);
   expect(await page.locator('.mobile-bottom-nav')).toHaveCount(0);
   const composerViewportLayout = await page.evaluate(() => {
     const composer = document
       .querySelector('.composer')
       ?.getBoundingClientRect();
     return composer
-      ? { bottom: composer.bottom, viewport: window.innerHeight }
+      ? {
+          bottom: composer.bottom,
+          viewport: window.visualViewport?.height ?? window.innerHeight,
+        }
       : undefined;
   });
   expect(composerViewportLayout?.bottom).toBeLessThanOrEqual(
@@ -2387,37 +2353,45 @@ Note: Recovery completed after the final check.`,
   });
   await expect
     .poll(() =>
-      page
-        .locator('.session-page')
-        .evaluate((element) =>
+      page.locator('.session-page').evaluate((element) => {
+        const viewport = window.visualViewport;
+        const visibleBottom = viewport
+          ? viewport.offsetTop + viewport.height
+          : window.innerHeight;
+        return (
+          visibleBottom -
+          element.getBoundingClientRect().top -
           Number.parseFloat(
-            getComputedStyle(element).getPropertyValue('--keyboard-inset'),
-          ),
-        ),
+            getComputedStyle(element).getPropertyValue(
+              '--session-viewport-height',
+            ),
+          )
+        );
+      }),
     )
-    .toBe(240);
+    .toBeLessThanOrEqual(1);
   const keyboardComposerBottom = await page
     .locator('.composer')
     .evaluate((element) => element.getBoundingClientRect().bottom);
   const keyboardVisibleBottom = (composerViewportLayout?.viewport ?? 0) - 240;
-  expect(keyboardComposerBottom).toBeLessThanOrEqual(keyboardVisibleBottom);
-  expect(keyboardVisibleBottom - keyboardComposerBottom).toBeLessThanOrEqual(1);
-  const keyboardScrollY = await page.evaluate(() => {
+  expect(keyboardComposerBottom).toBeLessThanOrEqual(keyboardVisibleBottom + 1);
+  expect(keyboardVisibleBottom - keyboardComposerBottom).toBeLessThanOrEqual(8);
+  const documentScroll = await page.evaluate(() => {
+    const before = window.scrollY;
     window.scrollBy(0, -48);
     window.visualViewport?.dispatchEvent(new Event('scroll'));
-    return window.scrollY;
+    return { before, after: window.scrollY };
   });
-  await page.waitForTimeout(50);
-  expect(await page.evaluate(() => window.scrollY)).toBe(keyboardScrollY);
+  expect(documentScroll.after).toBe(documentScroll.before);
   await page.evaluate(() => {
     const viewport = window.visualViewport;
     if (!viewport) return;
     Reflect.deleteProperty(viewport, 'height');
     viewport.dispatchEvent(new Event('resize'));
   });
-  await page.evaluate(() =>
-    window.scrollTo(0, document.documentElement.scrollHeight),
-  );
+  await transcriptScroll(page).evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
   await expect(activity).toBeVisible();
   await activity.click();
   const expandedAction = page.locator('.tool-detail > summary.activity-step');
@@ -2538,15 +2512,7 @@ Note: Recovery completed after the final check.`,
   await page.reload();
   await expect(page.locator('.session-status')).toContainText('ready');
   await expect(page.getByLabel('Message Pi')).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          window.scrollY + window.innerHeight >=
-          document.documentElement.scrollHeight - 2,
-      ),
-    )
-    .toBe(true);
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   await emitMessage('message.finished', 123, 'Live dashboard message');
   await expect(
     page.locator('.message-bubble').getByText('Live dashboard message'),
@@ -2568,23 +2534,15 @@ Note: Recovery completed after the final check.`,
   await expect(
     page.locator('.message-bubble').getByText('Delta during settled turn'),
   ).toBeVisible();
-  await page.evaluate(() => {
-    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -400 }));
-    window.scrollBy(0, -400);
+  await transcriptScroll(page).evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -400 }));
+    element.scrollTop = Math.max(0, element.scrollTop - 400);
   });
   await emitMessage('message.started', 456, 'Message while reading history');
   await expect(
     page.locator('.message-bubble').getByText('Message while reading history'),
   ).toHaveCount(1);
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          document.documentElement.scrollHeight -
-          (window.scrollY + window.innerHeight),
-      ),
-    )
-    .toBeGreaterThan(120);
+  await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
   expect(
     await page
       .locator('body')
@@ -2900,7 +2858,57 @@ function phase6Snapshot(
   };
 }
 
-async function installPhase6Mocks(page: Page) {
+function phase6EditEntries(historyCount: number) {
+  const oldText = Array.from(
+    { length: 420 },
+    (_, index) => `const oldValue${index} = ${index};`,
+  ).join('\n');
+  const newText = Array.from(
+    { length: 420 },
+    (_, index) => `const newValue${index} = ${index};`,
+  ).join('\n');
+  return [
+    ...Array.from({ length: historyCount }, (_, index) => ({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: `History ${index + 1}` }],
+      },
+    })),
+    {
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Applying the large edit' },
+          {
+            type: 'toolCall',
+            id: `large-edit-${historyCount}`,
+            name: 'edit',
+            arguments: {
+              path: 'src/large.ts',
+              edits: [{ oldText, newText }],
+            },
+          },
+        ],
+      },
+    },
+    {
+      type: 'message',
+      message: {
+        role: 'toolResult',
+        toolCallId: `large-edit-${historyCount}`,
+        content: [{ type: 'text', text: 'updated' }],
+        isError: false,
+      },
+    },
+  ];
+}
+
+async function installPhase6Mocks(
+  page: Page,
+  options: { entries?: unknown[]; pendingInteractions?: unknown[] } = {},
+) {
   const commands: Array<Record<string, unknown>> = [];
   const starts: Array<Record<string, unknown>> = [];
   const stops: Array<Record<string, unknown>> = [];
@@ -2985,7 +2993,13 @@ async function installPhase6Mocks(page: Page) {
   await page.route('**/api/snapshot', (route) =>
     route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify(phase6Snapshot()),
+      body: JSON.stringify(
+        phase6Snapshot(
+          options.pendingInteractions === undefined
+            ? {}
+            : { pendingInteractions: options.pendingInteractions },
+        ),
+      ),
     }),
   );
   await page.route('**/api/workspaces/*/composer-commands', (route) =>
@@ -3027,7 +3041,7 @@ async function installPhase6Mocks(page: Page) {
           activeRuntimeId: 'r1',
           entryCount: 87,
         },
-        entries: phase6Entries(),
+        entries: options.entries ?? phase6Entries(),
       }),
     }),
   );
@@ -3152,6 +3166,91 @@ async function installPhase6Mocks(page: Page) {
         ).phase6Stream.count(),
       ),
   };
+}
+
+async function assertLargeEditPreview(page: Page, historyCount: number) {
+  const mocks = await installPhase6Mocks(page, {
+    entries: phase6EditEntries(historyCount),
+    pendingInteractions: [],
+  });
+  await page.goto('/sessions/s1');
+  const activity = page.getByRole('button', {
+    name: /Applying the large edit.*1 tool/,
+  });
+  await expect(activity).toBeVisible();
+  await activity.click();
+  const tool = page.locator('.tool-detail').filter({ hasText: 'Editing' });
+  await expect(tool).toBeVisible();
+  const toolSummary = tool.locator(':scope > summary.activity-step');
+  await transcriptScroll(page).evaluate((scrollElement) => {
+    const target = scrollElement.querySelector<HTMLElement>(
+      '.tool-detail > summary.activity-step',
+    );
+    if (!target) throw new Error('tool summary missing');
+    scrollElement.scrollTop +=
+      target.getBoundingClientRect().top -
+      scrollElement.getBoundingClientRect().top -
+      scrollElement.clientHeight / 2;
+  });
+  await toolSummary.evaluate((element) => (element as HTMLElement).click());
+  const preview = page
+    .locator('.tool-edit-presentation .tool-code-preview')
+    .first();
+  await expect(preview).toBeVisible();
+  const previewMetrics = await preview.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      height: element.getBoundingClientRect().height,
+      scrollHeight: element.scrollHeight,
+      overflowY: style.overflowY,
+      contain: style.contain,
+    };
+  });
+  expect(previewMetrics.scrollHeight).toBeGreaterThan(previewMetrics.height);
+  expect(previewMetrics.overflowY).toBe('auto');
+  expect(previewMetrics.contain).toContain('paint');
+
+  await transcriptScroll(page).evaluate((scrollElement) => {
+    const group = scrollElement.querySelector<HTMLElement>('.activity-group');
+    if (!group) throw new Error('activity group missing');
+    scrollElement.scrollTop +=
+      group.getBoundingClientRect().top -
+      scrollElement.getBoundingClientRect().top +
+      250;
+  });
+  const sticky = await transcriptScroll(page).evaluate((scrollElement) => {
+    const group = scrollElement.querySelector<HTMLElement>(
+      '.activity-group-header',
+    );
+    const toolSummary = scrollElement.querySelector<HTMLElement>(
+      '.activity-group .tool-detail[open] > summary.activity-step',
+    );
+    if (!group || !toolSummary)
+      throw new Error('sticky transcript surfaces missing');
+    const scrollTop = scrollElement.getBoundingClientRect().top;
+    return {
+      groupTop: group.getBoundingClientRect().top - scrollTop,
+      toolTop: toolSummary.getBoundingClientRect().top - scrollTop,
+    };
+  });
+  expect(sticky.groupTop).toBeGreaterThanOrEqual(-1);
+  expect(sticky.groupTop).toBeLessThan(3);
+  expect(sticky.toolTop).toBeGreaterThanOrEqual(40);
+  expect(sticky.toolTop).toBeLessThan(70);
+
+  await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
+  expect(await transcriptGap(page)).toBeLessThan(3);
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  await mocks.close();
+}
+
+for (const historyCount of [6, 84]) {
+  test(`large edit preview has no tail gap (${historyCount} items)`, async ({
+    page,
+  }) => {
+    test.setTimeout(30_000);
+    await assertLargeEditPreview(page, historyCount);
+  });
 }
 
 test('phase six mocked session flow covers semantic controls and reconnect safety', async ({
@@ -3304,9 +3403,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     });
   }
 
-  await page.evaluate(() =>
-    window.scrollTo(0, document.documentElement.scrollHeight),
-  );
+  await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
   const activity = page.getByRole('button', {
     name: /Inspecting history.*1 tool/,
   });
@@ -3343,7 +3440,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     )
     .toBe(2);
 
-  await page.mouse.wheel(0, -100_000);
+  await scrollTranscript(page, 0);
   await page.waitForTimeout(150);
   await expect(
     page.getByRole('paragraph').filter({ hasText: /^Earlier history 1$/u }),
@@ -3360,16 +3457,8 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
       },
     },
   });
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          document.documentElement.scrollHeight -
-          (window.scrollY + window.innerHeight),
-      ),
-    )
-    .toBeGreaterThan(120);
-  await page.mouse.wheel(0, 100_000);
+  await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
+  await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
   await expect(page.getByText('Live update while reading')).toBeVisible();
   await mocks.emit({
     type: 'snapshot',
@@ -3443,27 +3532,11 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(
     page.getByRole('button', { name: 'Preview', exact: true }),
   ).toHaveCount(0);
-  await page.mouse.wheel(0, -100_000);
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          document.documentElement.scrollHeight -
-          (window.scrollY + window.innerHeight),
-      ),
-    )
-    .toBeGreaterThan(120);
+  await scrollTranscript(page, 0);
+  await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
   await composerInput.fill('stream this');
   await page.getByRole('button', { name: 'Send' }).click();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          document.documentElement.scrollHeight -
-          (window.scrollY + window.innerHeight),
-      ),
-    )
-    .toBeLessThanOrEqual(1);
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
   await expect
     .poll(() => mocks.commands.some((command) => command.type === 'prompt'))
     .toBe(true);
@@ -3572,9 +3645,10 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
     name: 'Agents and threads',
   });
   const lifecycleMenuTrigger = agentNav
-    .getByRole('button', { name: /^Actions for / })
+    .getByRole('button', { name: /Existing session request waiting/ })
     .first();
-  await lifecycleMenuTrigger.click();
+  await lifecycleMenuTrigger.focus();
+  await lifecycleMenuTrigger.press('Shift+F10');
   const lifecycleMenu = agentNav.getByRole('menu');
   await expect(
     lifecycleMenu.getByRole('menuitem', { name: 'Stop' }),
@@ -3585,7 +3659,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   await expect(
     lifecycleMenu.getByRole('menuitem', { name: 'Force stop' }),
   ).toHaveCount(0);
-  await lifecycleMenuTrigger.click();
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
   await page

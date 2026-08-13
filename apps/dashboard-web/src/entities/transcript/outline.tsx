@@ -1,3 +1,4 @@
+import type { RefObject } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SurfaceDrawer, SurfaceStats } from '../../features/surface-drawer';
 import { DashboardTime } from '../../features/timestamp';
@@ -39,11 +40,13 @@ export function TranscriptOutline({
   open = false,
   onOpenChange,
   onJump,
+  scrollElementRef,
 }: {
   landmarks: readonly TranscriptLandmark[];
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   onJump: (landmark: TranscriptLandmark) => void;
+  scrollElementRef?: RefObject<HTMLDivElement | null>;
 }) {
   const outlineLandmarks = useMemo(
     () => sampleTranscriptLandmarks(landmarks, 160),
@@ -78,15 +81,23 @@ export function TranscriptOutline({
         frame = undefined;
         const currentOutline = outlineLandmarksRef.current;
         const currentMinimap = minimapLandmarksRef.current;
+        const scrollElement = scrollElementRef?.current;
+        if (!scrollElement) return;
         const elements = new Map(
           Array.from(
-            document.querySelectorAll<HTMLElement>('[data-transcript-key]'),
+            scrollElement.querySelectorAll<HTMLElement>(
+              '[data-transcript-key]',
+            ),
           ).map((element) => [element.dataset.transcriptKey, element]),
         );
+        const viewportTop = scrollElement.getBoundingClientRect().top;
         let active: TranscriptLandmark | undefined;
         for (const landmark of currentOutline) {
           const element = elements.get(landmark.key);
-          if (element && element.getBoundingClientRect().top <= 120)
+          if (
+            element &&
+            element.getBoundingClientRect().top <= viewportTop + 12
+          )
             active = landmark;
         }
         if (active) {
@@ -97,13 +108,14 @@ export function TranscriptOutline({
         }
       });
     };
-    window.addEventListener('scroll', updateActive, { passive: true });
+    const scrollElement = scrollElementRef?.current;
+    scrollElement?.addEventListener('scroll', updateActive, { passive: true });
     updateActive();
     return () => {
-      window.removeEventListener('scroll', updateActive);
+      scrollElement?.removeEventListener('scroll', updateActive);
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
-  }, [landmarkRevision]);
+  }, [landmarkRevision, scrollElementRef]);
   const list = (
     <div className="transcript-outline-list surface-scroll-region">
       {outlineLandmarks.length ? (

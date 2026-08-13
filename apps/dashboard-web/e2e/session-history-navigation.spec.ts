@@ -1,4 +1,14 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
+
+const transcriptScroll = (page: Page) =>
+  page.locator('.session-transcript-scroll');
+
+async function transcriptGap(page: Page) {
+  return transcriptScroll(page).evaluate(
+    (element) =>
+      element.scrollHeight - element.scrollTop - element.clientHeight,
+  );
+}
 
 const snapshot = {
   serverId: 'history-navigation-test',
@@ -179,17 +189,13 @@ test('switching chats establishes the new transcript tail', async ({
     });
   });
 
-  const atBottom = () =>
-    page.evaluate(
-      () =>
-        document.documentElement.scrollHeight -
-        (window.scrollY + window.innerHeight),
-    );
   await page.goto('/sessions/session-1');
-  await expect.poll(atBottom).toBeLessThanOrEqual(2);
-  await page.evaluate(() => window.scrollTo(0, 300));
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(2);
+  await transcriptScroll(page).evaluate((element) => {
+    element.scrollTop = Math.min(300, element.scrollHeight);
+  });
   await expect
-    .poll(() => page.evaluate(() => window.scrollY))
+    .poll(() => transcriptScroll(page).evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
   await page.getByRole('button', { name: 'Open agent list' }).click();
   await page
@@ -208,10 +214,10 @@ test('switching chats establishes the new transcript tail', async ({
   await expect(page.locator('[data-transcript-row]:visible')).toHaveCount(0);
   await expect(page.getByText(/session-2 message 119/u)).toBeVisible();
   await expect(loadingCurtain).toHaveCount(0);
-  await expect.poll(atBottom).toBeLessThanOrEqual(2);
-  await page.evaluate(() => {
-    window.dispatchEvent(new WheelEvent('wheel', { deltaY: -240 }));
-    window.scrollBy(0, -240);
+  await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(2);
+  await transcriptScroll(page).evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -240 }));
+    element.scrollTop = Math.max(0, element.scrollTop - 240);
   });
-  await expect.poll(atBottom).toBeGreaterThan(120);
+  await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
 });

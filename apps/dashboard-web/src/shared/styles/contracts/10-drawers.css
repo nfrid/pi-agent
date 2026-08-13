@@ -79,6 +79,12 @@
   overflow: auto;
   padding: 0 18px 28px;
 }
+.surface-drawer-body .tool-inspector-raw > .tool-inspector-raw-summary,
+.surface-drawer-body .tool-detail[open] > summary.activity-step,
+.surface-drawer-body .transcript-primary-summary,
+.surface-drawer-body .session-event-summary {
+  top: 0;
+}
 .surface-drawer-body .surface-detail-list {
   max-height: none;
 }

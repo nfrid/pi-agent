@@ -161,7 +161,7 @@ function TranscriptEventEntry({
       className={className}
       onToggle={(toggleEvent) => setExpanded(toggleEvent.currentTarget.open)}
     >
-      <summary>
+      <summary className="session-event-summary">
         {heading}
         <span className="session-event-disclosure" aria-hidden="true">
           ›
@@ -210,7 +210,7 @@ export function SkillInvocationView({
   return (
     <div className="skill-invocation">
       <details>
-        <summary>
+        <summary className="transcript-primary-summary">
           <span className="activity-icon" aria-hidden="true">
             ✦
           </span>
@@ -329,7 +329,7 @@ function TranscriptEntry({
   const raw = item.raw;
   return (
     <details className="transcript-entry">
-      <summary>
+      <summary className="transcript-primary-summary">
         {typeof raw === 'object' && raw && 'type' in raw
           ? String((raw as { type?: unknown }).type)
           : 'entry'}

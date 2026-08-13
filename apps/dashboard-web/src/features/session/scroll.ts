@@ -1,5 +1,6 @@
 import type { TranscriptProjection } from '@pi-dashboard/domain';
 import {
+  type RefObject,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -7,20 +8,23 @@ import {
   useState,
 } from 'react';
 import { isNearPageBottom, shouldShowJumpToLatest } from '../../app-helpers';
-import { visualViewportKeyboardInset } from './viewport';
 
 const SESSION_TAIL_SETTLE_MS = 64;
+
+type SessionScrollElement = HTMLDivElement;
 
 export function useSessionScroll({
   id,
   data,
   projection,
   sessionMounted,
+  scrollElementRef,
 }: {
   id: string;
   data: { entries: readonly unknown[] } | undefined;
   projection: TranscriptProjection | undefined;
   sessionMounted: boolean;
+  scrollElementRef: RefObject<SessionScrollElement | null>;
 }) {
   const [awayFromLatest, setAwayFromLatest] = useState(false);
   const [tailScrollRequest, setTailScrollRequest] = useState(0);
@@ -39,30 +43,32 @@ export function useSessionScroll({
   const stickToBottomRef = useRef(true);
   const sessionPageRef = useRef<HTMLElement>(null);
   const controlLayerRef = useRef<HTMLDivElement>(null);
+
   const cancelExplicitJumpFrames = useCallback(() => {
     for (const frame of explicitJumpFramesRef.current)
       window.cancelAnimationFrame(frame);
     explicitJumpFramesRef.current = [];
   }, []);
 
+  const clearTimers = useCallback(() => {
+    if (tailReadyTimerRef.current !== undefined) {
+      window.clearTimeout(tailReadyTimerRef.current);
+      tailReadyTimerRef.current = undefined;
+    }
+    if (initialTailSettleTimerRef.current !== undefined) {
+      window.clearTimeout(initialTailSettleTimerRef.current);
+      initialTailSettleTimerRef.current = undefined;
+    }
+  }, []);
+
   useLayoutEffect(() => {
-    // SessionRoute is reused while only the route id changes. Arm the new
-    // session before its existing projection can paint at the old scroll
-    // position.
     initialTailSessionRef.current = id;
     userScrollIntentRef.current = false;
     stickToBottomRef.current = true;
     setTailReadySessionId(undefined);
     setAwayFromLatest(false);
-    if (initialTailSettleTimerRef.current !== undefined) {
-      window.clearTimeout(initialTailSettleTimerRef.current);
-      initialTailSettleTimerRef.current = undefined;
-    }
-    if (tailReadyTimerRef.current !== undefined) {
-      window.clearTimeout(tailReadyTimerRef.current);
-      tailReadyTimerRef.current = undefined;
-    }
-  }, [id]);
+    clearTimers();
+  }, [clearTimers, id]);
 
   useLayoutEffect(() => {
     cancelExplicitJumpFrames();
@@ -75,16 +81,16 @@ export function useSessionScroll({
   }, [cancelExplicitJumpFrames, id, sessionMounted]);
 
   useEffect(() => {
+    if (!sessionMounted) return;
+    const scrollElement = scrollElementRef.current;
+    if (!scrollElement) return;
     const cancelPendingTailScroll = () => {
       cancelExplicitJumpFrames();
       userScrollIntentRef.current = true;
       stickToBottomRef.current = false;
       initialTailSessionRef.current = undefined;
       setTailReadySessionId(id);
-      if (initialTailSettleTimerRef.current !== undefined) {
-        window.clearTimeout(initialTailSettleTimerRef.current);
-        initialTailSettleTimerRef.current = undefined;
-      }
+      clearTimers();
       if (autoScrollFrameRef.current !== undefined) {
         window.cancelAnimationFrame(autoScrollFrameRef.current);
         autoScrollFrameRef.current = undefined;
@@ -93,21 +99,9 @@ export function useSessionScroll({
         window.cancelAnimationFrame(layoutScrollFrameRef.current);
         layoutScrollFrameRef.current = undefined;
       }
-      if (tailReadyTimerRef.current !== undefined) {
-        window.clearTimeout(tailReadyTimerRef.current);
-        tailReadyTimerRef.current = undefined;
-      }
-    };
-    const onPointerDown = (event: PointerEvent) => {
-      const root = document.documentElement;
-      if (
-        event.clientX >= root.clientWidth ||
-        event.clientY >= root.clientHeight
-      )
-        cancelPendingTailScroll();
     };
     let touchY: number | undefined;
-    let previousScrollY = window.scrollY;
+    let previousScrollTop = scrollElement.scrollTop;
     const onWheel = (event: WheelEvent) => {
       if (event.deltaY < 0) cancelPendingTailScroll();
     };
@@ -133,14 +127,14 @@ export function useSessionScroll({
         cancelPendingTailScroll();
     };
     const update = () => {
-      const scrolledUp = window.scrollY < previousScrollY - 1;
-      previousScrollY = window.scrollY;
+      const scrolledUp = scrollElement.scrollTop < previousScrollTop - 1;
+      previousScrollTop = scrollElement.scrollTop;
       if (scrolledUp && initialTailSessionRef.current !== id)
         cancelPendingTailScroll();
       const nearLatest = isNearPageBottom(
-        document.documentElement.scrollHeight,
-        window.scrollY,
-        window.innerHeight,
+        scrollElement.scrollHeight,
+        scrollElement.scrollTop,
+        scrollElement.clientHeight,
       );
       if (stickToBottomRef.current && !userScrollIntentRef.current) {
         setAwayFromLatest(false);
@@ -148,7 +142,7 @@ export function useSessionScroll({
           layoutScrollFrameRef.current = window.requestAnimationFrame(() => {
             layoutScrollFrameRef.current = undefined;
             if (stickToBottomRef.current && !userScrollIntentRef.current)
-              window.scrollTo(0, document.documentElement.scrollHeight);
+              scrollElement.scrollTop = scrollElement.scrollHeight;
           });
         }
         return;
@@ -159,41 +153,45 @@ export function useSessionScroll({
       }
       setAwayFromLatest(
         shouldShowJumpToLatest(
-          document.documentElement.scrollHeight,
-          window.scrollY,
-          window.innerHeight,
+          scrollElement.scrollHeight,
+          scrollElement.scrollTop,
+          scrollElement.clientHeight,
         ),
       );
     };
-    window.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('wheel', onWheel, { passive: true });
-    window.addEventListener('touchstart', onTouchStart, { passive: true });
-    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    scrollElement.addEventListener('scroll', update, { passive: true });
+    scrollElement.addEventListener('wheel', onWheel, { passive: true });
+    scrollElement.addEventListener('touchstart', onTouchStart, {
+      passive: true,
+    });
+    scrollElement.addEventListener('touchmove', onTouchMove, { passive: true });
     window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('pointerdown', onPointerDown);
     update();
     return () => {
-      window.removeEventListener('scroll', update);
-      window.removeEventListener('wheel', onWheel);
-      window.removeEventListener('touchstart', onTouchStart);
-      window.removeEventListener('touchmove', onTouchMove);
+      scrollElement.removeEventListener('scroll', update);
+      scrollElement.removeEventListener('wheel', onWheel);
+      scrollElement.removeEventListener('touchstart', onTouchStart);
+      scrollElement.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('pointerdown', onPointerDown);
     };
-  }, [cancelExplicitJumpFrames, id]);
+  }, [
+    cancelExplicitJumpFrames,
+    clearTimers,
+    id,
+    scrollElementRef,
+    sessionMounted,
+  ]);
 
   useLayoutEffect(() => {
-    if (!data || !projection) return;
+    const scrollElement = scrollElementRef.current;
+    if (!data || !projection || !scrollElement) return;
     const enteringSession = scrolledSessionRef.current !== id;
     if (enteringSession) {
       userScrollIntentRef.current = false;
       stickToBottomRef.current = true;
       initialTailSessionRef.current = id;
-      if (initialTailSettleTimerRef.current !== undefined) {
-        window.clearTimeout(initialTailSettleTimerRef.current);
-        initialTailSettleTimerRef.current = undefined;
-      }
-      window.scrollTo(0, document.documentElement.scrollHeight);
+      clearTimers();
+      scrollElement.scrollTop = scrollElement.scrollHeight;
     }
     if (enteringSession && autoScrollFrameRef.current !== undefined) {
       window.cancelAnimationFrame(autoScrollFrameRef.current);
@@ -205,9 +203,6 @@ export function useSessionScroll({
     const frame = window.requestAnimationFrame(() => {
       if (autoScrollFrameRef.current === frame)
         autoScrollFrameRef.current = undefined;
-      // Virtualization can increase the document height before this frame and
-      // make the scroll listener clear stickiness. Entering a session must
-      // still establish the initial tail position.
       if (
         userScrollIntentRef.current ||
         (!enteringSession && !stickToBottomRef.current)
@@ -215,13 +210,9 @@ export function useSessionScroll({
         setTailReadySessionId(id);
         return;
       }
-      window.scrollTo(0, document.documentElement.scrollHeight);
+      scrollElement.scrollTop = scrollElement.scrollHeight;
       stickToBottomRef.current = true;
-      if (tailReadyTimerRef.current !== undefined)
-        window.clearTimeout(tailReadyTimerRef.current);
-      // Keep the curtain opaque while virtualization and the fixed composer
-      // finish their first layout pass. Cancellation still reveals the page
-      // immediately through cancelPendingTailScroll above.
+      clearTimers();
       tailReadyTimerRef.current = window.setTimeout(() => {
         tailReadyTimerRef.current = undefined;
         if (userScrollIntentRef.current) {
@@ -229,8 +220,6 @@ export function useSessionScroll({
           return;
         }
         setTailReadySessionId(id);
-        if (initialTailSettleTimerRef.current !== undefined)
-          window.clearTimeout(initialTailSettleTimerRef.current);
         initialTailSettleTimerRef.current = window.setTimeout(() => {
           initialTailSettleTimerRef.current = undefined;
           if (initialTailSessionRef.current === id)
@@ -244,55 +233,39 @@ export function useSessionScroll({
       window.cancelAnimationFrame(frame);
       autoScrollFrameRef.current = undefined;
     };
-  }, [data, projection, id]);
+  }, [clearTimers, data, id, projection, scrollElementRef]);
 
   useEffect(
     () => () => {
       cancelExplicitJumpFrames();
-      if (autoScrollFrameRef.current !== undefined) {
+      if (autoScrollFrameRef.current !== undefined)
         window.cancelAnimationFrame(autoScrollFrameRef.current);
-        autoScrollFrameRef.current = undefined;
-      }
-      if (layoutScrollFrameRef.current !== undefined) {
+      if (layoutScrollFrameRef.current !== undefined)
         window.cancelAnimationFrame(layoutScrollFrameRef.current);
-        layoutScrollFrameRef.current = undefined;
-      }
-      if (tailReadyTimerRef.current !== undefined) {
-        window.clearTimeout(tailReadyTimerRef.current);
-        tailReadyTimerRef.current = undefined;
-      }
-      if (initialTailSettleTimerRef.current !== undefined) {
-        window.clearTimeout(initialTailSettleTimerRef.current);
-        initialTailSettleTimerRef.current = undefined;
-      }
+      clearTimers();
     },
-    [cancelExplicitJumpFrames],
+    [cancelExplicitJumpFrames, clearTimers],
   );
 
   useLayoutEffect(() => {
-    void id;
     if (!sessionMounted) return;
     const page = sessionPageRef.current;
     const controlLayer = controlLayerRef.current;
-    if (!page || !controlLayer) return;
+    const scrollElement = scrollElementRef.current;
+    if (!page || !controlLayer || !scrollElement) return;
     const update = (preserveLatest: boolean) => {
       const viewport = window.visualViewport;
-      const keyboardInset = viewport
-        ? visualViewportKeyboardInset(
-            window.innerHeight,
-            viewport.height,
-            viewport.offsetTop,
-          )
-        : 0;
-      page.style.setProperty(
-        '--session-control-height',
-        `${Math.ceil(controlLayer.getBoundingClientRect().height)}px`,
+      const visibleBottom = viewport
+        ? viewport.offsetTop + viewport.height
+        : window.innerHeight;
+      const availableHeight = Math.max(
+        0,
+        visibleBottom - page.getBoundingClientRect().top,
       );
       page.style.setProperty(
-        '--keyboard-inset',
-        `${Math.ceil(keyboardInset)}px`,
+        '--session-viewport-height',
+        `${Math.ceil(availableHeight)}px`,
       );
-      page.toggleAttribute('data-keyboard-open', keyboardInset > 0);
       const initialTailPending =
         initialTailSessionRef.current === id && !userScrollIntentRef.current;
       if (
@@ -310,7 +283,7 @@ export function useSessionScroll({
           userScrollIntentRef.current
         )
           return;
-        window.scrollTo(0, document.documentElement.scrollHeight);
+        scrollElement.scrollTop = scrollElement.scrollHeight;
       });
     };
     const onResize = () => update(true);
@@ -319,11 +292,9 @@ export function useSessionScroll({
       typeof ResizeObserver === 'undefined'
         ? undefined
         : new ResizeObserver(onResize);
-    // The transcript, especially its virtualized rows, can finish measuring
-    // after the first navigation frame. Keep a newly opened session pinned to
-    // its tail while the page height settles, unless the user scrolls away.
     observer?.observe(page);
     observer?.observe(controlLayer);
+    observer?.observe(scrollElement);
     window.addEventListener('resize', onResize);
     window.visualViewport?.addEventListener('resize', onResize);
     window.visualViewport?.addEventListener('scroll', onViewportScroll);
@@ -338,16 +309,16 @@ export function useSessionScroll({
         layoutScrollFrameRef.current = undefined;
       }
     };
-  }, [id, sessionMounted]);
+  }, [id, scrollElementRef, sessionMounted]);
 
   const jumpToLatest = useCallback(() => {
-    if (mountedSessionIdRef.current !== id) return;
+    const scrollElement = scrollElementRef.current;
+    if (mountedSessionIdRef.current !== id || !scrollElement) return;
     cancelExplicitJumpFrames();
     userScrollIntentRef.current = false;
     stickToBottomRef.current = true;
     initialTailSessionRef.current = id;
-    if (initialTailSettleTimerRef.current !== undefined)
-      window.clearTimeout(initialTailSettleTimerRef.current);
+    clearTimers();
     initialTailSettleTimerRef.current = window.setTimeout(() => {
       initialTailSettleTimerRef.current = undefined;
       if (initialTailSessionRef.current === id)
@@ -355,7 +326,7 @@ export function useSessionScroll({
     }, 400);
     setAwayFromLatest(false);
     setTailScrollRequest((current) => current + 1);
-    window.scrollTo(0, document.documentElement.scrollHeight);
+    scrollElement.scrollTop = scrollElement.scrollHeight;
     const scheduleExplicitJumpFrame = (callback: () => void) => {
       let frame: number;
       frame = window.requestAnimationFrame(() => {
@@ -373,20 +344,17 @@ export function useSessionScroll({
         userScrollIntentRef.current
       )
         return;
-      window.scrollTo(0, document.documentElement.scrollHeight);
-      // Clearing the rich editor and remeasuring virtual rows can change the
-      // document height one frame after submission. Honor the explicit jump
-      // through that second layout pass unless the user scrolls away.
+      scrollElement.scrollTop = scrollElement.scrollHeight;
       scheduleExplicitJumpFrame(() => {
         if (
           mountedSessionIdRef.current === id &&
           stickToBottomRef.current &&
           !userScrollIntentRef.current
         )
-          window.scrollTo(0, document.documentElement.scrollHeight);
+          scrollElement.scrollTop = scrollElement.scrollHeight;
       });
     });
-  }, [cancelExplicitJumpFrames, id]);
+  }, [cancelExplicitJumpFrames, clearTimers, id, scrollElementRef]);
 
   return {
     awayFromLatest,

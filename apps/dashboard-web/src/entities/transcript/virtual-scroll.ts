@@ -1,3 +1,4 @@
+import type { RefObject } from 'react';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 
 /** Virtual scroll offset helpers for the transcript list. */
@@ -26,14 +27,18 @@ export function isNearPageBottom(
   return scrollHeight - scrollY - innerHeight <= threshold;
 }
 
-/** Preserve the page position while a virtual transcript row changes size. */
-export function useVirtualTranscriptScrollRestoration() {
+/** Preserve the scroll position while a virtual transcript row changes size. */
+export function useVirtualTranscriptScrollRestoration(
+  scrollElementRef: RefObject<HTMLDivElement | null>,
+) {
   const anchorRef = useRef<{ key: string; top: number } | undefined>(undefined);
   const bottomStuckRef = useRef(false);
   const scrollIntentRevisionRef = useRef(0);
   const restoreRevisionRef = useRef(0);
 
   useEffect(() => {
+    const scrollElement = scrollElementRef.current;
+    if (!scrollElement) return;
     const noteScrollIntent = () => {
       scrollIntentRevisionRef.current += 1;
     };
@@ -59,21 +64,27 @@ export function useVirtualTranscriptScrollRestoration() {
       )
         noteScrollIntent();
     };
-    window.addEventListener('wheel', noteScrollIntent, { passive: true });
-    window.addEventListener('touchmove', noteScrollIntent, { passive: true });
+    scrollElement.addEventListener('wheel', noteScrollIntent, {
+      passive: true,
+    });
+    scrollElement.addEventListener('touchmove', noteScrollIntent, {
+      passive: true,
+    });
     window.addEventListener('keydown', onKeyDown);
     return () => {
-      window.removeEventListener('wheel', noteScrollIntent);
-      window.removeEventListener('touchmove', noteScrollIntent);
+      scrollElement.removeEventListener('wheel', noteScrollIntent);
+      scrollElement.removeEventListener('touchmove', noteScrollIntent);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, []);
+  }, [scrollElementRef]);
 
   const captureScrollAnchor = (key: string) => {
+    const scrollElement = scrollElementRef.current;
+    if (!scrollElement) return;
     const bottomStuck = isNearPageBottom(
-      document.documentElement.scrollHeight,
-      window.scrollY,
-      window.innerHeight,
+      scrollElement.scrollHeight,
+      scrollElement.scrollTop,
+      scrollElement.clientHeight,
     );
     bottomStuckRef.current = bottomStuck;
     restoreRevisionRef.current = scrollIntentRevisionRef.current;
@@ -82,17 +93,23 @@ export function useVirtualTranscriptScrollRestoration() {
       return;
     }
     const element = Array.from(
-      document.querySelectorAll<HTMLElement>('[data-transcript-row]'),
+      scrollElement.querySelectorAll<HTMLElement>('[data-transcript-row]'),
     ).find((candidate) => candidate.dataset.transcriptRow === key);
     if (element)
-      anchorRef.current = { key, top: element.getBoundingClientRect().top };
+      anchorRef.current = {
+        key,
+        top:
+          element.getBoundingClientRect().top -
+          scrollElement.getBoundingClientRect().top,
+      };
   };
 
   useLayoutEffect(() => {
+    const scrollElement = scrollElementRef.current;
     const anchor = anchorRef.current;
     const bottomStuck = bottomStuckRef.current;
     const restoreRevision = restoreRevisionRef.current;
-    if (!anchor && !bottomStuck) return;
+    if (!scrollElement || (!anchor && !bottomStuck)) return;
     let measuredFrame: number | undefined;
     const frame = window.requestAnimationFrame(() => {
       measuredFrame = window.requestAnimationFrame(() => {
@@ -103,24 +120,23 @@ export function useVirtualTranscriptScrollRestoration() {
         }
         if (bottomStuck) {
           const top = restoreVirtualBottom(
-            document.documentElement.scrollHeight,
-            window.innerHeight,
+            scrollElement.scrollHeight,
+            scrollElement.clientHeight,
             true,
           );
-          if (top !== undefined) window.scrollTo(0, top);
+          if (top !== undefined) scrollElement.scrollTop = top;
         } else if (anchor) {
           const element = Array.from(
-            document.querySelectorAll<HTMLElement>('[data-transcript-row]'),
+            scrollElement.querySelectorAll<HTMLElement>(
+              '[data-transcript-row]',
+            ),
           ).find((candidate) => candidate.dataset.transcriptRow === anchor.key);
-          if (element)
-            window.scrollBy({
-              top: preserveVirtualScrollOffset(
-                anchor.top,
-                element.getBoundingClientRect().top,
-                false,
-              ),
-              left: 0,
-            });
+          if (element) {
+            const nextTop =
+              element.getBoundingClientRect().top -
+              scrollElement.getBoundingClientRect().top;
+            scrollElement.scrollTop += nextTop - anchor.top;
+          }
         }
         anchorRef.current = undefined;
         bottomStuckRef.current = false;

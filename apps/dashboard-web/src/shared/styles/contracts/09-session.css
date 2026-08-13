@@ -17,18 +17,7 @@
   padding-bottom: 0;
 }
 .session-page {
-  --session-control-edge: max(12px, env(safe-area-inset-bottom));
-  --session-control-gap: 12px;
   min-width: 0;
-  padding-bottom: calc(
-    var(--session-control-height, 136px) +
-    var(--keyboard-inset, 0px) +
-    var(--session-control-edge) +
-    var(--session-control-gap)
-  );
-}
-.session-page[data-keyboard-open] {
-  --session-control-edge: 0px;
 }
 .session-page > .transcript {
   margin-bottom: 0;
@@ -226,11 +215,11 @@
 
 /* Status launchers stay above the composer; details are dedicated sheets. */
 .session-control-layer {
-  position: fixed;
+  position: relative;
   z-index: 10;
   right: auto;
-  bottom: calc(var(--session-control-edge) + var(--keyboard-inset, 0px));
-  left: calc(50% + 137px);
+  bottom: auto;
+  left: auto;
   display: flex;
   flex-direction: column;
   width: min(820px, calc(100vw - 410px));

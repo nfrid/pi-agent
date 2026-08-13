@@ -173,6 +173,13 @@ actions, structured tool inspectors, and a keyboard-first command palette.
 Long transcripts are virtualized while short transcripts retain normal document
 flow.
 
+## Dashboard UI principle
+
+Prefer content over labels and chrome: expanded technical payloads should be
+concise and scannable, avoiding headings that merely restate the containing
+action. Add explanation only when it resolves ambiguity, communicates an error,
+or makes a safety boundary clear.
+
 ## Security boundaries
 
 Keep the daemon bound to loopback and publish it only through a private HTTPS

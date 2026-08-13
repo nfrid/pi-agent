@@ -6,7 +6,14 @@ import type {
   SessionApiResponse,
   SessionHistory,
 } from '@pi-dashboard/protocol';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import type { RefObject } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 export function isContiguousOlderHistory(
   sessionId: string,
@@ -31,10 +38,12 @@ export function useOlderSessionHistory({
   id,
   data,
   store,
+  scrollElementRef,
 }: {
   id: string;
   data: SessionApiResponse | undefined;
   store: DashboardLiveStore;
+  scrollElementRef?: RefObject<HTMLDivElement | null>;
 }) {
   const [history, setHistory] = useState<SessionApiResponse['history']>();
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -48,6 +57,9 @@ export function useOlderSessionHistory({
         controller: AbortController;
       }
     | undefined
+  >(undefined);
+  const prependScrollRef = useRef<
+    { scrollHeight: number; scrollTop: number } | undefined
   >(undefined);
 
   useEffect(() => {
@@ -85,6 +97,12 @@ export function useOlderSessionHistory({
       !currentHistory.nextBefore
     )
       return;
+    const scrollElement = scrollElementRef?.current;
+    if (scrollElement)
+      prependScrollRef.current = {
+        scrollHeight: scrollElement.scrollHeight,
+        scrollTop: scrollElement.scrollTop,
+      };
     const request = {
       id,
       generation: historyGenerationRef.current,
@@ -132,7 +150,18 @@ export function useOlderSessionHistory({
         setHistoryLoading(false);
       }
     }
-  }, [history, historyLoading, id, store]);
+  }, [history, historyLoading, id, scrollElementRef, store]);
+
+  useLayoutEffect(() => {
+    void data;
+    void history;
+    const scrollElement = scrollElementRef?.current;
+    const before = prependScrollRef.current;
+    if (!scrollElement || !before) return;
+    const delta = scrollElement.scrollHeight - before.scrollHeight;
+    if (delta) scrollElement.scrollTop = before.scrollTop + delta;
+    prependScrollRef.current = undefined;
+  }, [data, history, scrollElementRef]);
 
   return {
     history,

@@ -20,6 +20,9 @@ const snapshot = {
 const metadata = snapshot.sessions[0];
 
 test('loads earlier session history on demand', async ({ page }) => {
+  await page.addInitScript(() =>
+    localStorage.setItem('pi-dashboard-token', 'test-token'),
+  );
   await page.route('**/api/snapshot', (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -31,12 +34,17 @@ test('loads earlier session history on demand', async ({ page }) => {
   );
   let beforeRequest: string | undefined;
   let initialReads = 0;
+  let releaseOlder!: () => void;
+  const olderResponse = new Promise<void>((resolve) => {
+    releaseOlder = resolve;
+  });
   await page.route('**/api/sessions/session-1*', async (route) => {
     const url = new URL(route.request().url());
     beforeRequest = url.searchParams.get('before') ?? undefined;
     const older = beforeRequest !== undefined;
     if (!older) initialReads += 1;
     const hasHistory = older || initialReads > 1;
+    if (older) await olderResponse;
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
@@ -51,6 +59,14 @@ test('loads earlier session history on demand', async ({ page }) => {
               },
             ]
           : [
+              ...Array.from({ length: 90 }, (_, index) => ({
+                type: 'message',
+                id: `history-${index}`,
+                message: {
+                  role: 'user',
+                  content: `history ${index}`,
+                },
+              })),
               {
                 type: 'message',
                 id: 'latest',
@@ -83,8 +99,39 @@ test('loads earlier session history on demand', async ({ page }) => {
   ).toBeVisible();
   await expect.poll(() => initialReads).toBeGreaterThan(1);
   await page.getByRole('button', { name: 'Load earlier history' }).click();
-  await expect(page.getByText('first request')).toBeVisible();
   await expect.poll(() => beforeRequest).toBe('token-1');
+  const beforePrepend = await page
+    .locator('.session-transcript-scroll')
+    .evaluate((element) => ({
+      scrollHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
+    }));
+  releaseOlder();
+  await expect
+    .poll(() =>
+      page
+        .locator('.session-transcript-scroll')
+        .evaluate((element) => element.scrollHeight),
+    )
+    .toBeGreaterThan(beforePrepend.scrollHeight);
+  const afterPrepend = await page
+    .locator('.session-transcript-scroll')
+    .evaluate((element) => ({
+      scrollHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
+    }));
+  expect(afterPrepend.scrollHeight).toBeGreaterThan(beforePrepend.scrollHeight);
+  expect(afterPrepend.scrollTop).toBeCloseTo(
+    beforePrepend.scrollTop +
+      (afterPrepend.scrollHeight - beforePrepend.scrollHeight),
+    0,
+  );
+  await page.locator('.session-transcript-scroll').evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
+  });
+  await expect(page.getByText('first request')).toBeVisible();
   await expect(
     page.getByRole('button', {
       name: /Load earlier history|Retry earlier history/,

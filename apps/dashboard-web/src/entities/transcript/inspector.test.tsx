@@ -186,13 +186,11 @@ describe('transcript payload inspection', () => {
         }}
       />,
     );
-    expect(write.indexOf('Status')).toBeLessThan(
-      write.indexOf('Write · src/app.ts'),
-    );
-    expect(write).toContain('Write · src/app.ts');
-    expect(write).toContain('Newly written content · additions only');
     expect(write).toContain('tool-code-line-added');
     expect(write).toContain('tool-code-prefix');
+    expect(write).not.toContain('Write · src/app.ts');
+    expect(write).not.toContain('Newly written content · additions only');
+    expect(write).not.toContain('<h4>');
     expect(write).not.toContain('full-file diff');
 
     const edit = renderToStaticMarkup(
@@ -209,10 +207,13 @@ describe('transcript payload inspection', () => {
         }}
       />,
     );
-    expect(edit.match(/>Replacement [12]<\/h5>/gu)).toHaveLength(2);
-    expect(edit).toContain(
+    expect(edit.match(/>Replacement [12]<\/h5>/gu)).toBeNull();
+    expect(edit).toContain('aria-label="Edit replacement 1"');
+    expect(edit).toContain('aria-label="Edit replacement 2"');
+    expect(edit).not.toContain(
       'Replacement preview; this is not a repository or full-file diff.',
     );
+    expect(edit).not.toContain('<h4>');
     expect(edit).toContain('tool-code-line-removed');
     expect(edit).toContain('tool-code-line-added');
     expect(edit).toContain('class="sr-only">Removed line: </span>');
@@ -244,7 +245,10 @@ describe('transcript payload inspection', () => {
         }}
       />,
     );
-    expect(duplicateEdit.match(/>Replacement [12]<\/h5>/gu)).toHaveLength(2);
+    expect(duplicateEdit.match(/>Replacement [12]<\/h5>/gu)).toBeNull();
+    expect(
+      duplicateEdit.match(/aria-label="Edit replacement [12]"/gu),
+    ).toHaveLength(2);
   });
 
   it('falls back to generic JSON for malformed or over-cap edit lists', () => {
@@ -293,6 +297,27 @@ describe('transcript payload inspection', () => {
     expect(markup).not.toContain('tool-code-line-added');
   });
 
+  it('highlights meaningful bash syntax and keeps the command body padded', () => {
+    const markup = renderToStaticMarkup(
+      <ToolInspector
+        tool={{
+          name: 'bash',
+          arguments: {
+            command:
+              'ROOT="src"; pnpm run check --filter "$ROOT" | tee out.txt $(printf %s "$ROOT") # inspect',
+          },
+        }}
+      />,
+    );
+    expect(markup).toContain('tool-command-preview');
+    expect(markup).toContain('hljs-string');
+    expect(markup).toContain('hljs-variable');
+    expect(markup).toContain('hljs-built_in');
+    expect(markup).toContain('hljs-comment');
+    expect(markup).not.toContain('<h4>Command</h4>');
+    expect(markup).not.toContain('<h4>Terminal result</h4>');
+  });
+
   it('normalizes only supported result text shapes and presents command errors as terminal output', () => {
     expect(normalizeToolResultText('plain output')).toBe('plain output');
     expect(
@@ -330,17 +355,19 @@ describe('transcript payload inspection', () => {
         }}
       />,
     );
-    expect(command).toContain('Command');
-    expect(command).toContain('Terminal result');
+    expect(command).toContain('aria-label="Command"');
+    expect(command).toContain('aria-label="Terminal result"');
     expect(command).toContain('failed output');
-    expect(command).toContain('Status: error');
-    expect(command).toContain('Exit code: 2');
+    expect(command).not.toContain('Status: error');
+    expect(command).toContain('exit 2');
+    expect(command).not.toContain('<h4>Command</h4>');
+    expect(command).not.toContain('<h4>Terminal result</h4>');
     expect(command).toContain('tool-terminal-result-error');
     expect(command).toContain('Raw Arguments');
     expect(command).toContain('Raw Result');
   });
 
-  it('bounds command previews and discloses argument and result truncation', () => {
+  it('keeps full specialized arguments while bounding only command results', () => {
     const longCommand = `printf '${'x'.repeat(12_001)}'`;
     const markup = renderToStaticMarkup(
       <ToolInspector
@@ -352,8 +379,8 @@ describe('transcript payload inspection', () => {
         }}
       />,
     );
-    expect(markup).not.toContain(longCommand);
-    expect(markup).toContain(
+    expect(markup).toContain('x'.repeat(12_001));
+    expect(markup).not.toContain(
       'Arguments preview is truncated after 12,000 characters',
     );
     expect(markup).toContain(
@@ -407,8 +434,11 @@ describe('transcript payload inspection', () => {
         }}
       />,
     );
-    expect(markup).toContain('Newly written content');
-    expect(markup).toContain('preview is truncated after 12,000 characters');
+    expect(markup).toContain('tool-code-line-added');
+    expect(markup).toContain('x'.repeat(12_001));
+    expect(markup).not.toContain(
+      'preview is truncated after 12,000 characters',
+    );
     expect(markup).toContain(
       'Source truncated this arguments before it reached the dashboard.',
     );
