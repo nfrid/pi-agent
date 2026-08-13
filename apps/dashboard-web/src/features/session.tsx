@@ -190,6 +190,7 @@ export function SessionView({
         className={`session-page${hasPendingInteraction ? ' has-pending-interaction' : ''}${agentNavOpen ? ' modal-open' : ''}`}
       >
         <SessionHeader
+          id={id}
           workspaceName={workspaceName}
           data={data.metadata}
           entries={data.entries}
@@ -202,6 +203,7 @@ export function SessionView({
           onOpenInspector={() => {
             if (!hasPendingInteraction) setInspectorOpen(true);
           }}
+          store={store}
         />
         <SessionInspector
           id={id}

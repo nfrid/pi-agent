@@ -1,7 +1,9 @@
+import type { DashboardLiveStore } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import type { ComponentType, RefObject } from 'react';
 import { sessionDisplayTitle } from '../../app-helpers';
 import { ExtensionSurfaceStack } from '../extension-surfaces';
+import { InlineSessionRename } from '../session-rename';
 
 export type SessionComposerProps = {
   runtime: RuntimeSnapshot | undefined;
@@ -43,6 +45,7 @@ export function SessionLoadingCurtain({
 }
 
 export function SessionHeader({
+  id,
   workspaceName,
   data,
   entries,
@@ -53,7 +56,9 @@ export function SessionHeader({
   outlineTriggerRef,
   onOpenOutline,
   onOpenInspector,
+  store,
 }: {
+  id: string;
   workspaceName: string;
   data: Parameters<typeof sessionDisplayTitle>[0];
   entries: readonly unknown[];
@@ -64,7 +69,9 @@ export function SessionHeader({
   outlineTriggerRef: RefObject<HTMLButtonElement | null>;
   onOpenOutline: () => void;
   onOpenInspector: () => void;
+  store: DashboardLiveStore;
 }) {
+  const title = sessionDisplayTitle(data, entries);
   return (
     <div className="session-context-slot">
       <header className="session-context session-heading">
@@ -75,9 +82,12 @@ export function SessionHeader({
               <span className="session-breadcrumb-separator" aria-hidden="true">
                 /
               </span>
-              <h1 title={sessionDisplayTitle(data, entries)}>
-                {sessionDisplayTitle(data, entries)}
-              </h1>
+              <InlineSessionRename
+                id={id}
+                title={title}
+                store={store}
+                onRenamed={(name) => store.updateSessionMetadata(id, { name })}
+              />
             </div>
             <span className={`session-status status-${status}`}>
               <i aria-hidden="true">●</i> {statusLabel}

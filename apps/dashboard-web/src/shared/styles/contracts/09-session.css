@@ -93,6 +93,59 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.session-title-button {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  padding: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+.session-title-button:focus-visible {
+  border-radius: 2px;
+  outline: 1px solid var(--purple);
+  outline-offset: 2px;
+}
+.session-identity h1.session-title-editing {
+  position: relative;
+  width: min(40vw, 470px);
+  overflow: visible;
+}
+.session-title-editing input {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--purple);
+  border-radius: 3px;
+  background: var(--bg-alt);
+  color: var(--fg);
+  font: inherit;
+  padding: 3px 6px;
+  outline: none;
+}
+.session-title-editing input[aria-invalid="true"] {
+  border-color: var(--red);
+}
+.session-title-error {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 1;
+  max-width: min(70vw, 420px);
+  border: 1px solid var(--red);
+  border-radius: 4px;
+  background: var(--bg-alt);
+  color: var(--red);
+  font-size: 11px;
+  font-weight: 400;
+  padding: 5px 7px;
+  white-space: normal;
+}
 .session-status {
   display: inline-flex;
   align-items: center;

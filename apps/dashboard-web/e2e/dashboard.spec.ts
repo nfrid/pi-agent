@@ -331,6 +331,112 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
   ).toBeVisible();
 });
 
+test('session title supports reliable inline renaming', async ({ page }) => {
+  const session = {
+    id: 'session-rename',
+    file: '',
+    cwd: '/tmp/project',
+    title: 'Original title',
+    updatedAt: Date.now(),
+  };
+  await page.route('**/api/snapshot', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        revision: 1,
+        runtimes: [
+          {
+            runtimeId: 'runtime-rename',
+            ownership: 'external',
+            pid: 1,
+            cwd: session.cwd,
+            liveState: 'idle',
+            online: true,
+            session: { id: session.id, title: session.title, entries: [] },
+            pendingInteractions: [],
+          },
+        ],
+        workspaces: [],
+        sessions: [session],
+        unread: [],
+      }),
+    }),
+  );
+  await page.route('**/api/sessions/session-rename', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        metadata: session,
+        entries: [
+          {
+            type: 'message',
+            message: { role: 'user', content: 'Original request' },
+          },
+        ],
+        entriesComplete: true,
+      }),
+    }),
+  );
+  let failNextRename = false;
+  const renamedValues: string[] = [];
+  await page.route('**/api/sessions/session-rename/name', async (route) => {
+    const body = route.request().postDataJSON() as { name: string };
+    renamedValues.push(body.name);
+    if (failNextRename) {
+      failNextRename = false;
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'Rename unavailable' }),
+      });
+      return;
+    }
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ accepted: true }),
+    });
+  });
+
+  await page.goto('/sessions/session-rename');
+  const heading = page.getByRole('heading', { level: 1 });
+  await expect(heading).toHaveText('Original title');
+
+  await page
+    .getByRole('button', { name: 'Rename session: Original title' })
+    .dblclick();
+  const input = page.getByRole('textbox', { name: 'Session name' });
+  await expect(input).toBeFocused();
+  await input.fill('Renamed title');
+  await input.press('Enter');
+  await expect(heading).toHaveText('Renamed title');
+  expect(renamedValues).toEqual(['Renamed title']);
+
+  await page
+    .getByRole('button', { name: 'Rename session: Renamed title' })
+    .dblclick();
+  await input.fill('Discarded title');
+  await input.press('Escape');
+  await expect(heading).toHaveText('Renamed title');
+  expect(renamedValues).toEqual(['Renamed title']);
+
+  failNextRename = true;
+  await page
+    .getByRole('button', { name: 'Rename session: Renamed title' })
+    .dblclick();
+  await input.fill('Broken title');
+  await input.press('Enter');
+  await expect(page.getByRole('alert')).toContainText('Rename unavailable');
+  await expect(input).toBeFocused();
+  await input.fill('Recovered title');
+  await input.press('Enter');
+  await expect(heading).toHaveText('Recovered title');
+  expect(renamedValues).toEqual([
+    'Renamed title',
+    'Broken title',
+    'Recovered title',
+  ]);
+});
+
 test('command palette identifies the runtime before invoking repeated actions', async ({
   page,
 }) => {
