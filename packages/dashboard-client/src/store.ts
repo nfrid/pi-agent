@@ -457,15 +457,20 @@ export class DashboardLiveStore {
     };
   }
 
-  /** Replace the session index without disturbing hydrated transcript pages. */
+  /** Apply a session-index delta without disturbing hydrated transcript pages. */
   private installSessionIndexProjection(
     state: DashboardLiveState,
-    sessions: readonly SessionIndexEntry[],
+    upsert: readonly SessionIndexEntry[],
+    remove: readonly string[],
   ): DashboardLiveState {
     const optimisticSessions = { ...state.optimisticSessionTitlesById };
     const optimisticRuntimes = { ...state.optimisticRuntimeTitlesById };
-    const sessionsById: Record<string, SessionIndexEntry> = {};
-    for (const session of sessions) {
+    const sessionsById = { ...state.sessionsById };
+    for (const id of remove) {
+      delete sessionsById[id];
+      delete optimisticSessions[id];
+    }
+    for (const session of upsert) {
       const pendingTitle = session.activeRuntimeId
         ? optimisticRuntimes[session.activeRuntimeId]
         : undefined;
@@ -702,7 +707,8 @@ export class DashboardLiveStore {
         throw new ReplayGapError();
       const projected = this.installSessionIndexProjection(
         this.state,
-        record.sessions,
+        record.upsert,
+        record.remove,
       );
       this.publish({
         ...projected,

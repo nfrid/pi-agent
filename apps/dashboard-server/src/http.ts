@@ -7,6 +7,7 @@ import {
   type BrowserSnapshot,
   isRecord,
   MAX_ID,
+  MAX_SESSION_INDEX_DELTA_ITEMS,
   type RuntimeSnapshot,
   redactImageData,
   type SessionIndexEntry,
@@ -26,6 +27,9 @@ import { WsCompatChannel } from './http/ws-channel.js';
 import { createPushSender } from './push.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 import type { RegistryChange } from './runtime-registry.js';
+
+/** Keep session deltas comfortably below the 2 MiB SSE frame limit. */
+const MAX_SESSION_INDEX_DELTA_BYTES = 1_500_000;
 
 const NON_RENDERED_SESSION_ENTRY_TYPES = new Set([
   'session',
@@ -50,8 +54,8 @@ function isSparseRuntimeSession(runtime: RuntimeSnapshot): boolean {
 
 /**
  * Browser reducers already own runtime/transcript projections for these
- * events. Session-index metadata and most notifications remain snapshot-backed;
- * lifecycle registration/offline deltas use their small synthetic events.
+ * events. Session-index metadata uses dedicated deltas; lifecycle
+ * registration/offline deltas use their small synthetic events.
  */
 function requiresBrowserSnapshot(change: RegistryChange): boolean {
   if (change.kind === 'offline') return false;
@@ -384,6 +388,8 @@ export class DashboardServerImpl implements DashboardServer {
       }
       await this.refreshWorkspaces();
       await this.sessions.start(this.workspaces);
+      // Seed metadata before the file watcher is allowed to publish deltas.
+      this.application.initializeSessionMetadataBaseline();
       await this.application.orchestrationService?.start();
       if (!this.pushConfigured)
         this.push = await createPushSender(this.metadata);
@@ -726,10 +732,28 @@ export class DashboardServerImpl implements DashboardServer {
 
   public publishSessionIndexChange(): void {
     if (this.lifecycle !== 'started') return;
-    this.changed({
-      type: 'sessions',
-      sessions: this.application.sessionMetadata(),
-    });
+    const delta = this.application.sessionMetadataDelta();
+    if (!delta) return;
+    if (
+      delta.upsert.length > MAX_SESSION_INDEX_DELTA_ITEMS ||
+      delta.remove.length > MAX_SESSION_INDEX_DELTA_ITEMS ||
+      Buffer.byteLength(
+        JSON.stringify({
+          type: 'sessions',
+          cursor: this.eventStream.cursor + 1,
+          emittedAt: Date.now(),
+          upsert: delta.upsert,
+          remove: delta.remove,
+        }),
+        'utf8',
+      ) >= MAX_SESSION_INDEX_DELTA_BYTES
+    ) {
+      // The baseline has already advanced. A full snapshot is authoritative
+      // and resets it again while keeping the SSE frame bounded by its writer.
+      this.changed();
+      return;
+    }
+    this.changed({ type: 'sessions', ...delta });
   }
 
   private changed(message?: unknown): void {
@@ -738,12 +762,17 @@ export class DashboardServerImpl implements DashboardServer {
       message && typeof message === 'object' && !Array.isArray(message)
         ? (message as Record<string, unknown>)
         : undefined;
-    if (record?.type === 'sessions' && Array.isArray(record.sessions)) {
+    if (
+      record?.type === 'sessions' &&
+      Array.isArray(record.upsert) &&
+      Array.isArray(record.remove)
+    ) {
       this.eventStream.publish((cursor, emittedAt) => ({
         type: 'sessions' as const,
         cursor,
         emittedAt,
-        sessions: record.sessions as readonly SessionIndexEntry[],
+        upsert: record.upsert as readonly SessionIndexEntry[],
+        remove: record.remove as readonly string[],
       }));
       return;
     }

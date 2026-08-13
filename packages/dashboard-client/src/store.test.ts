@@ -61,7 +61,7 @@ describe('DashboardLiveStore', () => {
         type: 'sessions',
         cursor: 2,
         emittedAt: 2,
-        sessions: [
+        upsert: [
           {
             id: 'session-1',
             file: '/tmp/session.jsonl',
@@ -70,6 +70,7 @@ describe('DashboardLiveStore', () => {
           },
           { id: 'new-session', file: '', cwd: '/tmp', updatedAt: 2 },
         ],
+        remove: ['removed'],
       }),
     ).toBe(true);
     expect(store.getSnapshot().sessionsById).toEqual({
@@ -92,7 +93,8 @@ describe('DashboardLiveStore', () => {
         type: 'sessions',
         cursor: 2,
         emittedAt: 3,
-        sessions: [],
+        upsert: [],
+        remove: [],
       }),
     ).toBe(false);
     expect(() =>
@@ -100,7 +102,8 @@ describe('DashboardLiveStore', () => {
         type: 'sessions',
         cursor: 4,
         emittedAt: 4,
-        sessions: [],
+        upsert: [],
+        remove: [],
       }),
     ).toThrow(ReplayGapError);
   });
@@ -162,7 +165,8 @@ describe('DashboardLiveStore', () => {
       type: 'sessions',
       cursor: 4,
       emittedAt: 4,
-      sessions: [metadata],
+      upsert: [metadata],
+      remove: [],
     });
     expect(store.getSnapshot().sessionsById['session-1']?.title).toBe(
       'first request',

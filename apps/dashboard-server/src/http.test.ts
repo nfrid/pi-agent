@@ -4,6 +4,7 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
@@ -11,7 +12,9 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  MAX_SESSION_INDEX_DELTA_ITEMS,
   parseDashboardMessage,
+  parseDashboardStreamMessage,
   parseFrame,
   serializeFrame,
 } from '@pi-dashboard/protocol';
@@ -417,11 +420,15 @@ describe('dashboard HTTP boundary', () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-sessions-stream-'),
     );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    const sessions = new SessionIndex(sessionDir);
     server = await createDashboardServer({
       port: 0,
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
-      sessionDir: path.join(root, 'sessions'),
+      sessionDir,
+      sessions,
       sesh: { list: async () => [] },
     });
     await server.start();
@@ -443,6 +450,16 @@ describe('dashboard HTTP boundary', () => {
       return originalSnapshot(cursor);
     };
     const before = implementation.eventStream.cursor;
+    // An unchanged watcher notification consumes neither a cursor nor a
+    // revision.
+    server.publishSessionIndexChange();
+    server.publishSessionIndexChange();
+    expect(implementation.eventStream.cursor).toBe(before);
+    await writeFile(
+      path.join(sessionDir, 'changed-session.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'changed-session', cwd: '/tmp' })}\n`,
+    );
+    await sessions.rebuild();
     server.publishSessionIndexChange();
     const replay = implementation.eventStream.replayAfter(before).events;
     expect(replay).toHaveLength(1);
@@ -450,11 +467,65 @@ describe('dashboard HTTP boundary', () => {
     expect(record).toMatchObject({
       type: 'sessions',
       cursor: before + 1,
-      sessions: [],
+      upsert: [expect.objectContaining({ id: 'changed-session' })],
+      remove: [],
     });
     expect(record).not.toHaveProperty('snapshot');
-    expect(JSON.stringify(record).length).toBeLessThan(1_000);
+    expect(JSON.stringify(record).length).toBeLessThan(5_000);
     expect(constructions).toBe(0);
+    await rm(path.join(sessionDir, 'changed-session.jsonl'));
+    await sessions.rebuild();
+    server.publishSessionIndexChange();
+    const removal = implementation.eventStream.replayAfter(before).events[1];
+    expect(removal).toMatchObject({
+      type: 'sessions',
+      upsert: [],
+      remove: ['changed-session'],
+    });
+  });
+
+  it('falls back to an authoritative snapshot for oversized session deltas', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-sessions-stream-fallback-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const implementation = server as unknown as {
+      application: {
+        sessionMetadataDelta: () => {
+          upsert: readonly unknown[];
+          remove: readonly string[];
+        };
+      };
+      eventStream: {
+        cursor: number;
+        replayAfter(cursor: number): {
+          events: readonly Record<string, unknown>[];
+        };
+      };
+    };
+    implementation.application.sessionMetadataDelta = () => ({
+      upsert: [],
+      remove: Array.from(
+        { length: MAX_SESSION_INDEX_DELTA_ITEMS + 1 },
+        (_, index) => `removed-${index}`,
+      ),
+    });
+    const before = implementation.eventStream.cursor;
+    server.publishSessionIndexChange();
+    const record = implementation.eventStream.replayAfter(before).events[0];
+    expect(record).toMatchObject({
+      type: 'snapshot',
+      cursor: before + 1,
+      snapshot: { serverId: server.snapshot().serverId },
+    });
+    expect(() => parseDashboardStreamMessage(record)).not.toThrow();
   });
 
   it('uses one online runtime consistently for session metadata overlays', async () => {
