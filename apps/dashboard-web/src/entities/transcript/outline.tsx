@@ -82,15 +82,16 @@ export function TranscriptOutline({
         const currentOutline = outlineLandmarksRef.current;
         const currentMinimap = minimapLandmarksRef.current;
         const scrollElement = scrollElementRef?.current;
-        if (!scrollElement) return;
         const elements = new Map(
           Array.from(
-            scrollElement.querySelectorAll<HTMLElement>(
+            (scrollElement ?? document).querySelectorAll<HTMLElement>(
               '[data-transcript-key]',
             ),
           ).map((element) => [element.dataset.transcriptKey, element]),
         );
-        const viewportTop = scrollElement.getBoundingClientRect().top;
+        const viewportTop = scrollElement
+          ? scrollElement.getBoundingClientRect().top
+          : 0;
         let active: TranscriptLandmark | undefined;
         for (const landmark of currentOutline) {
           const element = elements.get(landmark.key);
@@ -109,10 +110,16 @@ export function TranscriptOutline({
       });
     };
     const scrollElement = scrollElementRef?.current;
-    scrollElement?.addEventListener('scroll', updateActive, { passive: true });
+    if (scrollElement)
+      scrollElement.addEventListener('scroll', updateActive, {
+        passive: true,
+      });
+    else window.addEventListener('scroll', updateActive, { passive: true });
     updateActive();
     return () => {
-      scrollElement?.removeEventListener('scroll', updateActive);
+      if (scrollElement)
+        scrollElement.removeEventListener('scroll', updateActive);
+      else window.removeEventListener('scroll', updateActive);
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
   }, [landmarkRevision, scrollElementRef]);

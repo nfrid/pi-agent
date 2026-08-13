@@ -7,13 +7,7 @@ import type {
   SessionHistory,
 } from '@pi-dashboard/protocol';
 import type { RefObject } from 'react';
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export function isContiguousOlderHistory(
   sessionId: string,
@@ -60,10 +54,12 @@ export function useOlderSessionHistory({
   data,
   store,
   scrollElementRef,
+  sessionMounted,
 }: {
   id: string;
   data: SessionApiResponse | undefined;
   store: DashboardLiveStore;
+  sessionMounted: boolean;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
 }) {
   const [history, setHistory] = useState<SessionApiResponse['history']>();
@@ -76,13 +72,24 @@ export function useOlderSessionHistory({
   const historyRequestSequenceRef = useRef(0);
   const scrollIntentRevisionRef = useRef(0);
   const prependRestoreRef = useRef<PrependRestore | undefined>(undefined);
+  const prependRestoreFrameRef = useRef<number | undefined>(undefined);
+  const cancelPrependRestoreFrame = useCallback(() => {
+    if (prependRestoreFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(prependRestoreFrameRef.current);
+      prependRestoreFrameRef.current = undefined;
+    }
+  }, []);
+  const clearPrependRestore = useCallback(() => {
+    prependRestoreRef.current = undefined;
+    cancelPrependRestoreFrame();
+  }, [cancelPrependRestoreFrame]);
 
   useEffect(() => {
     if (!id) return;
     historyGenerationRef.current += 1;
     historyRequestRef.current?.controller.abort();
     historyRequestRef.current = undefined;
-    prependRestoreRef.current = undefined;
+    clearPrependRestore();
     historySessionRef.current = undefined;
     setHistory(undefined);
     setHistoryLoading(false);
@@ -91,17 +98,22 @@ export function useOlderSessionHistory({
       historyGenerationRef.current += 1;
       historyRequestRef.current?.controller.abort();
       historyRequestRef.current = undefined;
-      prependRestoreRef.current = undefined;
+      clearPrependRestore();
     };
-  }, [id]);
+  }, [clearPrependRestore, id]);
+
+  useEffect(() => {
+    if (!sessionMounted) clearPrependRestore();
+  }, [clearPrependRestore, sessionMounted]);
 
   useEffect(() => {
     const scrollElement = scrollElementRef?.current;
-    if (!scrollElement) return;
+    if (!sessionMounted || !scrollElement) return;
     const noteScrollIntent = () => {
       scrollIntentRevisionRef.current += 1;
       const request = historyRequestRef.current;
       if (request) request.scrollAnchor = undefined;
+      clearPrependRestore();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
@@ -145,7 +157,7 @@ export function useOlderSessionHistory({
       scrollElement.removeEventListener('touchmove', noteScrollIntent);
       scrollElement.removeEventListener('keydown', onKeyDown);
     };
-  }, [scrollElementRef]);
+  }, [clearPrependRestore, scrollElementRef, sessionMounted]);
 
   useEffect(() => {
     if (
@@ -189,7 +201,7 @@ export function useOlderSessionHistory({
     const clearRequestRestore = () => {
       request.scrollAnchor = undefined;
       if (prependRestoreRef.current?.requestId === request.requestId)
-        prependRestoreRef.current = undefined;
+        clearPrependRestore();
     };
     const isCurrentRequest = () =>
       historyRequestRef.current === request &&
@@ -250,24 +262,110 @@ export function useOlderSessionHistory({
         setHistoryLoading(false);
       }
     }
-  }, [history, historyLoading, id, scrollElementRef, store]);
+  }, [
+    clearPrependRestore,
+    history,
+    historyLoading,
+    id,
+    scrollElementRef,
+    store,
+  ]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
+    // These values are the render signal for the prepended transcript.
+    void data;
+    void history;
+    void prependRevision;
     const scrollElement = scrollElementRef?.current;
     const restore = prependRestoreRef.current;
-    if (!scrollElement || !restore) return;
-    if (
-      restore.id !== id ||
-      restore.generation !== historyGenerationRef.current ||
-      restore.intentRevision !== scrollIntentRevisionRef.current
-    ) {
-      prependRestoreRef.current = undefined;
-      return;
-    }
-    const delta = scrollElement.scrollHeight - restore.scrollHeight;
-    if (delta) scrollElement.scrollTop = restore.scrollTop + delta;
-    prependRestoreRef.current = undefined;
-  }, [id, prependRevision, scrollElementRef]);
+    if (!sessionMounted || !scrollElement || !restore) return;
+    let lastObservedHeight = restore.scrollHeight;
+    let stableHeightFrames = 0;
+    const isValidRestore = () => {
+      const current = prependRestoreRef.current;
+      return (
+        current === restore &&
+        restore.id === id &&
+        restore.generation === historyGenerationRef.current &&
+        restore.intentRevision === scrollIntentRevisionRef.current
+      );
+    };
+    const applyRestore = () => {
+      prependRestoreFrameRef.current = undefined;
+      if (!isValidRestore()) {
+        clearPrependRestore();
+        return;
+      }
+      const currentHeight = scrollElement.scrollHeight;
+      const delta = currentHeight - restore.scrollHeight;
+      // History state can commit before virtualization has rendered the
+      // prepended rows. Keep the anchor until the actual height delta exists
+      // and remains stable for a frame.
+      if (delta === 0) {
+        lastObservedHeight = currentHeight;
+        stableHeightFrames = 0;
+        scheduleRestore();
+        return;
+      }
+      if (currentHeight !== lastObservedHeight) {
+        lastObservedHeight = currentHeight;
+        stableHeightFrames = 0;
+      } else stableHeightFrames += 1;
+      scrollElement.scrollTop = restore.scrollTop + delta;
+      if (stableHeightFrames < 8) {
+        scheduleRestore();
+        return;
+      }
+      clearPrependRestore();
+    };
+    const scheduleRestore = () => {
+      if (prependRestoreFrameRef.current === undefined)
+        prependRestoreFrameRef.current =
+          window.requestAnimationFrame(applyRestore);
+    };
+    const observer =
+      typeof MutationObserver === 'undefined'
+        ? undefined
+        : new MutationObserver(() => {
+            cancelPrependRestoreFrame();
+            applyRestore();
+          });
+    observer?.observe(scrollElement, {
+      attributes: true,
+      attributeFilter: ['style'],
+      childList: true,
+      subtree: true,
+    });
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(() => {
+            cancelPrependRestoreFrame();
+            applyRestore();
+          });
+    resizeObserver?.observe(scrollElement);
+    const transcriptContent = scrollElement.querySelector<HTMLElement>(
+      '.transcript, .transcript-virtualizer',
+    );
+    if (transcriptContent && transcriptContent !== scrollElement)
+      resizeObserver?.observe(transcriptContent);
+    applyRestore();
+
+    return () => {
+      observer?.disconnect();
+      resizeObserver?.disconnect();
+      cancelPrependRestoreFrame();
+    };
+  }, [
+    cancelPrependRestoreFrame,
+    clearPrependRestore,
+    data,
+    history,
+    id,
+    prependRevision,
+    scrollElementRef,
+    sessionMounted,
+  ]);
 
   return {
     history,

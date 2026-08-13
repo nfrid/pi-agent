@@ -79,14 +79,15 @@ export function SessionView({
     store,
     onReplacement: replaceSession,
   });
+  const sessionMounted = Boolean(data && projection);
   const { history, historyError, historyLoading, loadEarlierHistory } =
     useOlderSessionHistory({
       id,
       data,
       store,
+      sessionMounted,
       scrollElementRef: embedded ? undefined : transcriptScrollRef,
     });
-  const sessionMounted = Boolean(data && projection);
 
   useEffect(() => {
     if (outlineOpen) outlineWasOpenRef.current = true;
@@ -208,12 +209,10 @@ export function SessionView({
           onOpenOutline={() => setOutlineOpen(true)}
           store={store}
         />
-        <div
+        <section
           ref={transcriptScrollRef}
           className="session-transcript-scroll"
-          role="region"
           aria-label="Transcript"
-          tabIndex={0}
         >
           {history?.hasOlder && (
             <SessionHistoryControl
@@ -232,7 +231,7 @@ export function SessionView({
             scrollElementRef={embedded ? undefined : transcriptScrollRef}
             virtualize={!embedded}
           />
-        </div>
+        </section>
         <SessionControlLayer
           controlLayerRef={controlLayerRef}
           awayFromLatest={awayFromLatest}
