@@ -410,11 +410,11 @@ test('session shell shows compaction progress', async ({ page }) => {
       body: ': heartbeat\n\n',
     }),
   );
-  let cancellationCommand: unknown;
+  const commands: unknown[] = [];
   await page.route(
     '**/api/runtimes/runtime-compacting/command',
     async (route) => {
-      cancellationCommand = route.request().postDataJSON();
+      commands.push(route.request().postDataJSON());
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({ accepted: true }),
@@ -478,12 +478,22 @@ test('session shell shows compaction progress', async ({ page }) => {
   const compactionEvent = page.locator('.live-compaction-event');
   await expect(compactionEvent).toContainText('Compacting context…');
   await expect(compactionEvent).toContainText('in progress');
-  await expect(page.locator('.composer')).toContainText('Compacting context…');
+  await expect(
+    page.getByText('Compacting context…', { exact: true }),
+  ).toHaveCount(1);
+  const composer = page.getByRole('textbox', {
+    name: 'Message Pi',
+    exact: true,
+  });
+  await expect(composer).toBeEditable();
+  await composer.fill('Send after compaction');
   await expect(page.getByRole('button', { name: 'Send' })).toBeDisabled();
+  await composer.press('Meta+Enter');
+  expect(commands).toEqual([]);
 
   await page.getByRole('button', { name: 'Cancel context compaction' }).click();
   await expect
-    .poll(() => cancellationCommand)
+    .poll(() => commands.at(-1))
     .toMatchObject({
       type: 'compact.cancel',
     });

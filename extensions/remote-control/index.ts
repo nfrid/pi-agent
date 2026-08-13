@@ -62,11 +62,12 @@ export function emitCompactionCompleted(
 ): void {
   runtime.setContext(ctx);
   if (!runtime.isCurrent(ctx)) return;
+  // Settle first so the snapshot-triggered browser refetch reads the completed branch.
+  emitState(runtime, ctx);
   runtime.client.sendEvent({
     type: 'session.snapshot',
     session: sessionSnapshot(ctx),
   });
-  emitState(runtime, ctx);
 }
 
 export function shutdownRemoteControlRuntime(

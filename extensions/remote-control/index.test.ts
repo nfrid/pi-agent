@@ -114,6 +114,11 @@ describe('remote-control session lifecycle', () => {
         state: 'compacting',
         snapshot: { liveState: 'compacting' },
       },
+      {
+        type: 'runtime.stateChanged',
+        state: 'idle',
+        snapshot: { liveState: 'idle' },
+      },
       expect.objectContaining({
         type: 'session.snapshot',
         session: expect.objectContaining({
@@ -122,11 +127,6 @@ describe('remote-control session lifecycle', () => {
           entries: [{ type: 'compaction', id: 'compact-leaf' }],
         }),
       }),
-      {
-        type: 'runtime.stateChanged',
-        state: 'idle',
-        snapshot: { liveState: 'idle' },
-      },
     ]);
     expect(runtime.setContext).toHaveBeenCalled();
   });

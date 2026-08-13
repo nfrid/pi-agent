@@ -111,8 +111,8 @@ export function Composer({
     !runtime ||
     runtime.online === false ||
     runtime.liveState === 'stopping' ||
-    runtime.liveState === 'compacting' ||
     runtime.liveState === 'waiting';
+  const submissionDisabled = disabled || runtime.liveState === 'compacting';
   const attachmentsEnabled = runtime ? runtimeSupportsImages(runtime) : false;
   const {
     attachments,
@@ -218,7 +218,8 @@ export function Composer({
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     const trimmedText = text.trim();
-    if ((!trimmedText && !attachments.length) || disabled || busy) return;
+    if ((!trimmedText && !attachments.length) || submissionDisabled || busy)
+      return;
     if (attachments.length > 0 && !attachmentsEnabled) {
       setError('The selected model does not support image input.');
       return;
@@ -304,7 +305,10 @@ export function Composer({
           busy={busy}
           onRemove={removeImage}
         />
-        <ComposerRichSurface onPasteCapture={onPasteCapture}>
+        <ComposerRichSurface
+          onPasteCapture={onPasteCapture}
+          submissionDisabled={submissionDisabled || busy}
+        >
           <Suspense
             fallback={
               <div className="composer-editor-loading" role="status">
@@ -324,11 +328,7 @@ export function Composer({
               }
               onChange={updateText}
               placeholder={
-                runtime.liveState === 'compacting'
-                  ? 'Compacting context…'
-                  : disabled
-                    ? 'Agent is waiting for input'
-                    : 'Message Pi…'
+                disabled ? 'Agent is waiting for input' : 'Message Pi…'
               }
               readOnly={disabled || busy}
             />
@@ -352,7 +352,9 @@ export function Composer({
               type="submit"
               className="composer-send"
               isDisabled={
-                disabled || busy || (!text.trim() && !attachments.length)
+                submissionDisabled ||
+                busy ||
+                (!text.trim() && !attachments.length)
               }
               aria-label={
                 runtime.liveState === 'working' && !attachments.length
@@ -390,9 +392,6 @@ export function Composer({
               </>
             )}
             {runtime.liveState === 'idle' && <span>Prompt</span>}
-            {runtime.liveState === 'compacting' && (
-              <span>Compacting context…</span>
-            )}
             {runtime.liveState === 'waiting' && <span>Answer above</span>}
             <ContextIndicator usage={runtime.contextUsage} />
           </div>
