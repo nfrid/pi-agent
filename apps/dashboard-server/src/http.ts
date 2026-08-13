@@ -50,8 +50,8 @@ function isSparseRuntimeSession(runtime: RuntimeSnapshot): boolean {
 
 /**
  * Browser reducers already own runtime/transcript projections for these
- * events. Session-index metadata and most notifications remain snapshot-backed;
- * lifecycle registration/offline deltas use their small synthetic events.
+ * events. Session-index metadata uses dedicated deltas; lifecycle
+ * registration/offline deltas use their small synthetic events.
  */
 function requiresBrowserSnapshot(change: RegistryChange): boolean {
   if (change.kind === 'offline') return false;
@@ -384,6 +384,8 @@ export class DashboardServerImpl implements DashboardServer {
       }
       await this.refreshWorkspaces();
       await this.sessions.start(this.workspaces);
+      // Seed metadata before the file watcher is allowed to publish deltas.
+      this.application.initializeSessionMetadataBaseline();
       await this.application.orchestrationService?.start();
       if (!this.pushConfigured)
         this.push = await createPushSender(this.metadata);
@@ -726,10 +728,9 @@ export class DashboardServerImpl implements DashboardServer {
 
   public publishSessionIndexChange(): void {
     if (this.lifecycle !== 'started') return;
-    this.changed({
-      type: 'sessions',
-      sessions: this.application.sessionMetadata(),
-    });
+    const delta = this.application.sessionMetadataDelta();
+    if (!delta) return;
+    this.changed({ type: 'sessions', ...delta });
   }
 
   private changed(message?: unknown): void {
@@ -738,12 +739,17 @@ export class DashboardServerImpl implements DashboardServer {
       message && typeof message === 'object' && !Array.isArray(message)
         ? (message as Record<string, unknown>)
         : undefined;
-    if (record?.type === 'sessions' && Array.isArray(record.sessions)) {
+    if (
+      record?.type === 'sessions' &&
+      Array.isArray(record.upsert) &&
+      Array.isArray(record.remove)
+    ) {
       this.eventStream.publish((cursor, emittedAt) => ({
         type: 'sessions' as const,
         cursor,
         emittedAt,
-        sessions: record.sessions as readonly SessionIndexEntry[],
+        upsert: record.upsert as readonly SessionIndexEntry[],
+        remove: record.remove as readonly string[],
       }));
       return;
     }

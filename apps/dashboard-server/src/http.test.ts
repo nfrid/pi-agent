@@ -4,6 +4,7 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  rm,
   stat,
   writeFile,
 } from 'node:fs/promises';
@@ -417,11 +418,15 @@ describe('dashboard HTTP boundary', () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-sessions-stream-'),
     );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    const sessions = new SessionIndex(sessionDir);
     server = await createDashboardServer({
       port: 0,
       authToken: 'test-token',
       stateDir: path.join(root, 'state'),
-      sessionDir: path.join(root, 'sessions'),
+      sessionDir,
+      sessions,
       sesh: { list: async () => [] },
     });
     await server.start();
@@ -443,6 +448,16 @@ describe('dashboard HTTP boundary', () => {
       return originalSnapshot(cursor);
     };
     const before = implementation.eventStream.cursor;
+    // An unchanged watcher notification consumes neither a cursor nor a
+    // revision.
+    server.publishSessionIndexChange();
+    server.publishSessionIndexChange();
+    expect(implementation.eventStream.cursor).toBe(before);
+    await writeFile(
+      path.join(sessionDir, 'changed-session.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'changed-session', cwd: '/tmp' })}\n`,
+    );
+    await sessions.rebuild();
     server.publishSessionIndexChange();
     const replay = implementation.eventStream.replayAfter(before).events;
     expect(replay).toHaveLength(1);
@@ -450,11 +465,21 @@ describe('dashboard HTTP boundary', () => {
     expect(record).toMatchObject({
       type: 'sessions',
       cursor: before + 1,
-      sessions: [],
+      upsert: [expect.objectContaining({ id: 'changed-session' })],
+      remove: [],
     });
     expect(record).not.toHaveProperty('snapshot');
-    expect(JSON.stringify(record).length).toBeLessThan(1_000);
+    expect(JSON.stringify(record).length).toBeLessThan(5_000);
     expect(constructions).toBe(0);
+    await rm(path.join(sessionDir, 'changed-session.jsonl'));
+    await sessions.rebuild();
+    server.publishSessionIndexChange();
+    const removal = implementation.eventStream.replayAfter(before).events[1];
+    expect(removal).toMatchObject({
+      type: 'sessions',
+      upsert: [],
+      remove: ['changed-session'],
+    });
   });
 
   it('uses one online runtime consistently for session metadata overlays', async () => {

@@ -1160,7 +1160,10 @@ export const DashboardSessionIndexStreamSchema = Type.Object(
     type: Type.Literal('sessions'),
     cursor: Type.Integer({ minimum: 0 }),
     emittedAt: FiniteNumberSchema,
-    sessions: Type.Array(SessionIndexEntrySchema),
+    /** Changed or newly indexed session metadata only. */
+    upsert: Type.Array(SessionIndexEntrySchema, { maxItems: 4096 }),
+    /** IDs removed from the authoritative session index. */
+    remove: Type.Array(IdentifierSchema, { maxItems: 4096 }),
   },
   { additionalProperties: false },
 );

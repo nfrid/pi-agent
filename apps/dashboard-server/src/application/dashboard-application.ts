@@ -48,6 +48,30 @@ export interface DashboardApplicationOptions {
   orchestration?: OrchestrationService;
 }
 
+export interface SessionMetadataDelta {
+  readonly upsert: readonly SessionIndexEntry[];
+  readonly remove: readonly string[];
+}
+
+const SESSION_METADATA_FIELDS = [
+  'file',
+  'cwd',
+  'workspaceId',
+  'name',
+  'title',
+  'startedAt',
+  'updatedAt',
+  'activeRuntimeId',
+  'entryCount',
+] as const satisfies readonly (keyof SessionIndexEntry)[];
+
+function sameSessionMetadata(
+  left: SessionIndexEntry,
+  right: SessionIndexEntry,
+): boolean {
+  return SESSION_METADATA_FIELDS.every((field) => left[field] === right[field]);
+}
+
 /** Framework-independent application boundary for the dashboard daemon. */
 export class DashboardApplication {
   readonly runtime: RuntimeService;
@@ -63,6 +87,8 @@ export class DashboardApplication {
   private readonly metadata: MetadataStore;
   readonly orchestration: SqliteOrchestrationRepository;
   private readonly sessionIndex: SessionIndex;
+  /** Metadata emitted by the last authoritative snapshot/index publication. */
+  private sessionMetadataBaseline?: ReadonlyMap<string, SessionIndexEntry>;
   readonly orchestrationService?: OrchestrationService;
 
   constructor(options: DashboardApplicationOptions) {
@@ -99,6 +125,7 @@ export class DashboardApplication {
     await this.uploads.start();
     await this.workspaces.refresh();
     await this.sessionsStart();
+    this.initializeSessionMetadataBaseline();
   }
 
   async refreshWorkspaces(): Promise<WorkspaceTarget[]> {
@@ -133,12 +160,52 @@ export class DashboardApplication {
     });
   }
 
+  private setSessionMetadataBaseline(
+    sessions: readonly SessionIndexEntry[],
+  ): void {
+    this.sessionMetadataBaseline = new Map(
+      sessions.map((session) => [session.id, session]),
+    );
+  }
+
+  /** Establish the metadata comparison point before watcher callbacks publish. */
+  initializeSessionMetadataBaseline(
+    liveRuntimes = this.registry.snapshots(),
+  ): void {
+    this.setSessionMetadataBaseline(this.sessionMetadata(liveRuntimes));
+  }
+
+  /**
+   * Compare current authoritative metadata with the last snapshot/index
+   * publication. The baseline advances even when there is no delta, so a
+   * runtime overlay observed between watcher callbacks cannot be replayed as
+   * stale metadata later.
+   */
+  sessionMetadataDelta(): SessionMetadataDelta | undefined {
+    const current = this.sessionMetadata();
+    const prior = this.sessionMetadataBaseline;
+    this.setSessionMetadataBaseline(current);
+    if (!prior) return undefined;
+    const currentById = new Map(
+      current.map((session) => [session.id, session]),
+    );
+    const upsert = current.filter((session) => {
+      const previous = prior.get(session.id);
+      return previous === undefined || !sameSessionMetadata(previous, session);
+    });
+    const remove = [...prior.keys()].filter((id) => !currentById.has(id));
+    if (upsert.length === 0 && remove.length === 0) return undefined;
+    return { upsert, remove };
+  }
+
   snapshot(
     serverId: string,
     revision: number,
     cursor = this.eventStream.cursor,
   ): BrowserSnapshot {
     const liveRuntimes = this.registry.snapshots();
+    const sessions = this.sessionMetadata(liveRuntimes);
+    this.setSessionMetadataBaseline(sessions);
     return {
       serverId,
       revision,
@@ -152,7 +219,7 @@ export class DashboardApplication {
       checkouts: this.orchestration.checkoutSummaries(),
       threads: this.orchestration.threadSummaries(),
       runs: this.orchestration.runSummaries(),
-      sessions: this.sessionMetadata(liveRuntimes),
+      sessions,
       usage: this.usage.cached(),
       unread: this.metadata.unreadNotifications(),
     };

@@ -501,7 +501,7 @@ describe('dashboard protocol', () => {
         type: 'sessions',
         cursor: 3,
         emittedAt: 102,
-        sessions: [
+        upsert: [
           {
             id: 'session-1',
             file: '/tmp/session.jsonl',
@@ -509,6 +509,7 @@ describe('dashboard protocol', () => {
             updatedAt: 1,
           },
         ],
+        remove: [],
       }),
     ).toMatchObject({ type: 'sessions', cursor: 3 });
     expect(() =>
@@ -516,8 +517,32 @@ describe('dashboard protocol', () => {
         type: 'sessions',
         cursor: 3,
         emittedAt: 102,
-        sessions: [],
+        upsert: [],
+        remove: [],
         extra: true,
+      }),
+    ).toThrow();
+    expect(() =>
+      parseDashboardStreamMessage({
+        type: 'sessions',
+        cursor: 4,
+        emittedAt: 103,
+        upsert: Array.from({ length: 4097 }, (_, index) => ({
+          id: `session-${index}`,
+          file: '',
+          cwd: '/tmp',
+          updatedAt: 1,
+        })),
+        remove: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      parseDashboardStreamMessage({
+        type: 'sessions',
+        cursor: 4,
+        emittedAt: 103,
+        upsert: [],
+        remove: Array.from({ length: 4097 }, (_, index) => `session-${index}`),
       }),
     ).toThrow();
   });

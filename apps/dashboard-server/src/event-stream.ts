@@ -26,7 +26,8 @@ export interface DashboardSessionIndexStreamRecord {
   readonly type: 'sessions';
   readonly cursor: number;
   readonly emittedAt: number;
-  readonly sessions: readonly SessionIndexEntry[];
+  readonly upsert: readonly SessionIndexEntry[];
+  readonly remove: readonly string[];
 }
 
 export type DashboardEventStreamRecord =
