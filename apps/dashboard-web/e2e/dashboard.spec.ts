@@ -81,16 +81,23 @@ async function sessionHeadingFramesAfterClick(button: Locator) {
 
 function hasVisibleHeadingMotion(
   frames: Awaited<ReturnType<typeof sessionHeadingFramesAfterClick>>,
+  direction: 'hide' | 'show' = 'hide',
 ) {
-  return frames.some((frame) => {
-    const opacity = Number(frame.opacity);
-    return (
-      frame.visibility === 'visible' &&
-      frame.animations > 0 &&
-      opacity > 0.2 &&
-      opacity < 0.8
-    );
-  });
+  const firstOpacity = Number(frames[0]?.opacity);
+  const startsAtRest =
+    direction === 'hide' ? firstOpacity > 0.9 : firstOpacity < 0.1;
+  return (
+    startsAtRest &&
+    frames.some((frame) => {
+      const opacity = Number(frame.opacity);
+      return (
+        frame.visibility === 'visible' &&
+        frame.animations > 0 &&
+        opacity > 0.2 &&
+        opacity < 0.8
+      );
+    })
+  );
 }
 
 test('mobile dashboard renders and supports project-scoped new chat', async ({
@@ -751,7 +758,7 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   const returnHeadingFrames = await sessionHeadingFramesAfterClick(
     details.getByRole('button', { name: 'Close session details' }),
   );
-  expect(hasVisibleHeadingMotion(returnHeadingFrames)).toBe(true);
+  expect(hasVisibleHeadingMotion(returnHeadingFrames, 'show')).toBe(true);
   await expect(details).toHaveCount(0);
   await expect(sessionHeading).toBeVisible();
 

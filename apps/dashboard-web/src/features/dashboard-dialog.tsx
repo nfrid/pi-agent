@@ -86,12 +86,21 @@ export function DashboardDialog({
   const swipeHandlers = useSwipeToDismiss(onClose);
   useEffect(() => {
     const token = dialogTokenRef.current;
-    const frame = window.requestAnimationFrame(() => {
-      if (isOpen) openDialogTokens.add(token);
-      else openDialogTokens.delete(token);
-      syncDialogPresenceClass();
+    let commitFrame: number | undefined;
+    const paintFrame = window.requestAnimationFrame(() => {
+      // One rAF callback still runs before the next paint. Wait for a second
+      // frame so the dialog and the heading's starting state are committed to
+      // screen before toggling the transition class on <html>.
+      commitFrame = window.requestAnimationFrame(() => {
+        if (isOpen) openDialogTokens.add(token);
+        else openDialogTokens.delete(token);
+        syncDialogPresenceClass();
+      });
     });
-    return () => window.cancelAnimationFrame(frame);
+    return () => {
+      window.cancelAnimationFrame(paintFrame);
+      if (commitFrame !== undefined) window.cancelAnimationFrame(commitFrame);
+    };
   }, [isOpen]);
   useEffect(() => {
     const token = dialogTokenRef.current;
