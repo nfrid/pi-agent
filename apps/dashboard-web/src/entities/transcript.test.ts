@@ -326,6 +326,40 @@ describe('activity row views and virtual transcript construction', () => {
     ).toMatchObject({ action: 'Editing', argument: 'src/App.tsx · 3 changes' });
   });
 
+  it('shows git-like line counts for write and edit tools', () => {
+    expect(
+      activityStepParts({
+        name: 'write',
+        args: { path: 'src/new.ts', content: 'one\ntwo\nthree\n' },
+      }),
+    ).toMatchObject({
+      action: 'Writing',
+      argument: 'src/new.ts · +3 added',
+    });
+    expect(
+      activityStepParts({
+        name: 'edit',
+        args: {
+          path: 'src/App.tsx',
+          edits: [
+            {
+              oldText: 'same\nold one\nold two\ntail',
+              newText: 'same\nnew one\nnew two\nnew three\ntail',
+            },
+            { oldText: 'remove me\nand me', newText: '' },
+            {
+              oldText: 'before\nafter',
+              newText: 'before\ninserted\nafter',
+            },
+          ],
+        },
+      }),
+    ).toMatchObject({
+      action: 'Editing',
+      argument: 'src/App.tsx · +2 added · ~2 changed · -2 removed',
+    });
+  });
+
   it('derives a bounded latest-step summary from the canonical group model', () => {
     const group = {
       toolCount: 5,

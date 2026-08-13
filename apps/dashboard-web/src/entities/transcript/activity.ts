@@ -82,6 +82,93 @@ function countLabel(count: number, singular: string): string {
   return `${count} ${count === 1 ? singular : `${singular}s`}`;
 }
 
+type FileLineChanges = {
+  added: number;
+  changed: number;
+  removed: number;
+};
+
+function textLines(text: string): string[] {
+  if (!text) return [];
+  const lines = text.split(/\r\n|\r|\n/u);
+  if (/\r\n|\r|\n$/u.test(text)) lines.pop();
+  return lines;
+}
+
+function replacementLineChanges(
+  oldText: string,
+  newText: string,
+): FileLineChanges {
+  const before = textLines(oldText);
+  const after = textLines(newText);
+  let start = 0;
+  let beforeEnd = before.length - 1;
+  let afterEnd = after.length - 1;
+  while (
+    start <= beforeEnd &&
+    start <= afterEnd &&
+    before[start] === after[start]
+  )
+    start += 1;
+  while (
+    beforeEnd >= start &&
+    afterEnd >= start &&
+    before[beforeEnd] === after[afterEnd]
+  ) {
+    beforeEnd -= 1;
+    afterEnd -= 1;
+  }
+  const removedLines = Math.max(0, beforeEnd - start + 1);
+  const addedLines = Math.max(0, afterEnd - start + 1);
+  const changed = Math.min(removedLines, addedLines);
+  return {
+    added: addedLines - changed,
+    changed,
+    removed: removedLines - changed,
+  };
+}
+
+function fileLineChanges(
+  name: string,
+  args: unknown,
+): FileLineChanges | undefined {
+  const record = activityArgs(args);
+  if (name === 'write' && typeof record?.content === 'string')
+    return { added: textLines(record.content).length, changed: 0, removed: 0 };
+  if (name !== 'edit') return undefined;
+  const edits = arrayArg(args, 'edits');
+  if (!edits.length) return undefined;
+  const total: FileLineChanges = { added: 0, changed: 0, removed: 0 };
+  let counted = false;
+  for (const edit of edits) {
+    const replacement = activityArgs(edit);
+    if (
+      typeof replacement?.oldText !== 'string' ||
+      typeof replacement.newText !== 'string'
+    )
+      continue;
+    const changes = replacementLineChanges(
+      replacement.oldText,
+      replacement.newText,
+    );
+    total.added += changes.added;
+    total.changed += changes.changed;
+    total.removed += changes.removed;
+    counted = true;
+  }
+  return counted ? total : undefined;
+}
+
+function fileLineChangeLabel(changes: FileLineChanges): string {
+  return [
+    changes.added ? `+${changes.added} added` : undefined,
+    changes.changed ? `~${changes.changed} changed` : undefined,
+    changes.removed ? `-${changes.removed} removed` : undefined,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 function readPathArgument(path: string, args: unknown, cwd: string): string {
   const displayed = displayActivityPath(path, cwd);
   const offset = numberArg(args, 'offset');
@@ -223,7 +310,11 @@ export function activityStepParts(
       argument = `lines ${offset + 1}${limit === undefined ? '' : `–${offset + limit}`}`;
     else argument = mode;
   } else if (path) {
-    const changes = arrayArg(tool.args, 'edits');
+    const edits = arrayArg(tool.args, 'edits');
+    const lineChanges = fileLineChanges(name, tool.args);
+    const lineChangeLabel = lineChanges
+      ? fileLineChangeLabel(lineChanges)
+      : undefined;
     action =
       name === 'read'
         ? 'Reading'
@@ -235,7 +326,13 @@ export function activityStepParts(
     argument =
       name === 'read'
         ? readPathArgument(path, tool.args, cwd)
-        : `${displayActivityPath(path, cwd)}${changes.length ? ` · ${countLabel(changes.length, 'change')}` : ''}`;
+        : [
+            displayActivityPath(path, cwd),
+            lineChangeLabel ||
+              (edits.length ? countLabel(edits.length, 'change') : undefined),
+          ]
+            .filter(Boolean)
+            .join(' · ');
   } else {
     action = `Running ${name}`;
     const fallback = toolActionSummary(tool);
