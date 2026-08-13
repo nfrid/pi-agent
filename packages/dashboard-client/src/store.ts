@@ -717,9 +717,6 @@ export class DashboardLiveStore {
         cursorHistory: [...projected.cursorHistory, record.cursor].slice(
           -LIVE_BUFFER_LIMIT,
         ),
-        // A session-index update can invalidate the currently mounted branch;
-        // refetch it without replacing the transcript projection.
-        resyncNonce: this.state.resyncNonce + 1,
       });
       return true;
     }
