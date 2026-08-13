@@ -90,7 +90,6 @@
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
-  gap: 7px;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
