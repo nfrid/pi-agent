@@ -380,16 +380,6 @@
   .delegate-transcript-inspector-body {
     padding: 12px 13px 24px;
   }
-  .session-inspector {
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    width: auto;
-    border: 0;
-    border-top: 1px solid var(--line);
-    box-shadow: 0 -16px 42px #0009;
-  }
   .surface-dialog {
     top: 0;
     right: 0;
@@ -401,83 +391,6 @@
   }
   .transcript-minimap {
     display: none;
-  }
-}
-.session-inspector.surface-dialog {
-  width: min(390px, 100vw);
-  border-left: 1px solid var(--line);
-  background: var(--bg-alt);
-  box-shadow: -18px 0 48px #0008;
-  color: var(--fg);
-  outline: 0;
-}
-.session-inspector.surface-dialog .surface-dialog-header {
-  align-items: flex-start;
-  gap: 18px;
-  flex: none;
-  background: color-mix(in srgb, var(--bg-alt) 96%, var(--purple));
-  padding: 20px 20px 16px;
-}
-.session-inspector.surface-dialog .surface-dialog-header h2 {
-  max-width: 310px;
-  font-size: 18px;
-}
-.session-inspector.surface-dialog
-  .surface-dialog-header
-  > .session-icon-button {
-  width: 31px;
-  height: 31px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 21px;
-  line-height: 1;
-}
-.session-inspector.surface-dialog
-  .surface-dialog-header
-  > .session-icon-button:hover {
-  border-color: var(--pink);
-  color: var(--pink);
-}
-.session-inspector.surface-dialog .surface-dialog-body {
-  display: flex;
-  min-height: 0;
-  flex: 1;
-  overflow: hidden;
-  padding: 0;
-}
-.session-inspector.surface-dialog .inspector-body {
-  min-height: 0;
-  flex: 1;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 0 20px 32px;
-  scrollbar-gutter: stable;
-}
-@media (max-width: 820px) {
-  .session-inspector.surface-dialog {
-    top: 62px;
-    right: 0;
-    bottom: 68px;
-    left: 0;
-    width: auto;
-    border-top: 1px solid var(--line);
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    border-left: 0;
-    box-shadow: 0 -12px 38px #0008;
-  }
-  .session-inspector.surface-dialog .surface-dialog-header {
-    padding: 15px 13px 13px;
-  }
-  .session-inspector.surface-dialog .surface-dialog-header h2 {
-    max-width: calc(100vw - 85px);
-    font-size: 17px;
-  }
-  .session-inspector.surface-dialog .inspector-body {
-    padding: 0 13px 24px;
   }
 }
 @media (max-width: 430px) {

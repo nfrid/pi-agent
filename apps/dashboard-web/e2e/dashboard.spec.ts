@@ -644,6 +644,23 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   });
   expect(detailsMotion.transforms).toContain('translateX(28px)');
   await expect(details).toBeVisible();
+  await expect(details).toHaveClass(/utility-dialog/);
+  expect(
+    await details.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        top: style.top,
+        bottom: style.bottom,
+        fillsViewport:
+          element.getBoundingClientRect().width === window.innerWidth,
+      };
+    }),
+  ).toEqual({ top: '0px', bottom: '0px', fillsViewport: true });
+  expect(
+    await details
+      .locator('.surface-dialog-body')
+      .evaluate((element) => getComputedStyle(element).paddingTop),
+  ).toBe('14px');
   await details.getByRole('button', { name: 'Close session details' }).click();
   await expect(details).toHaveCount(0);
 

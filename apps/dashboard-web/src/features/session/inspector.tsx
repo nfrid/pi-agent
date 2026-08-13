@@ -35,43 +35,39 @@ export function SessionInspector({
       title={title}
       eyebrow="Session details"
       closeLabel="Close session details"
-      className="surface-dialog session-inspector"
+      className="surface-dialog utility-dialog session-inspector"
       isOpen={open}
       onClose={onClose}
     >
-      <div className="inspector-body">
+      <section
+        className="inspector-section"
+        aria-labelledby="inspector-rename-heading"
+      >
+        <h3 id="inspector-rename-heading">Name</h3>
+        <SessionRename
+          id={id}
+          initialName={data.metadata.name}
+          store={store}
+          onRenamed={(name) => store.updateSessionMetadata(id, { name })}
+        />
+      </section>
+      {runtime && (
         <section
           className="inspector-section"
-          aria-labelledby="inspector-rename-heading"
+          aria-labelledby="inspector-controls-heading"
         >
-          <h3 id="inspector-rename-heading">Name</h3>
-          <SessionRename
-            id={id}
-            initialName={data.metadata.name}
-            store={store}
-            onRenamed={(name) => store.updateSessionMetadata(id, { name })}
-          />
+          <h3 id="inspector-controls-heading">Runtime controls</h3>
+          <RuntimeActions runtime={runtime} />
         </section>
-        {runtime && (
-          <section
-            className="inspector-section"
-            aria-labelledby="inspector-controls-heading"
-          >
-            <h3 id="inspector-controls-heading">Runtime controls</h3>
-            <RuntimeActions runtime={runtime} />
-          </section>
-        )}
-        {runtimeError && (
-          <div className="error notice inspector-error" role="alert">
-            Runtime failure: {runtimeError}
-          </div>
-        )}
-        {!runtime && (
-          <p className="muted">
-            No active runtime is attached to this session.
-          </p>
-        )}
-      </div>
+      )}
+      {runtimeError && (
+        <div className="error notice inspector-error" role="alert">
+          Runtime failure: {runtimeError}
+        </div>
+      )}
+      {!runtime && (
+        <p className="muted">No active runtime is attached to this session.</p>
+      )}
     </DashboardDialog>
   );
 }
