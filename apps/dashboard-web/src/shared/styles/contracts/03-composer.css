@@ -56,8 +56,7 @@
   cursor: pointer;
   transition:
     border-color 120ms ease,
-    background 120ms ease,
-    transform 120ms ease;
+    background 120ms ease;
 }
 .composer-attach {
   gap: 3px;
@@ -70,14 +69,12 @@
 .composer-attach:hover {
   border-color: var(--cyan);
   background: #8be9fd12;
-  transform: translateY(-1px);
 }
 .composer-attach:disabled,
 .composer-send:disabled,
 .composer-abort:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-  transform: none;
 }
 .composer-previews {
   display: flex;
@@ -157,7 +154,6 @@
 .composer-send:hover {
   background: var(--pink);
   border-color: var(--pink);
-  transform: translateY(-1px);
 }
 .composer-abort {
   width: 38px;
@@ -171,7 +167,6 @@
   border-color: var(--pink);
   background: #ff79c612;
   color: var(--pink);
-  transform: translateY(-1px);
 }
 .composer-mode {
   display: flex;
