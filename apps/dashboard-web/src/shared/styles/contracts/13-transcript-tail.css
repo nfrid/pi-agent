@@ -286,22 +286,32 @@
   width: 100%;
 }
 
-/* The group header is the only sticky transcript landmark. Keep the group
-   overflow visible so it can remain attached to the session scrollport. */
+/* Group headers pin to the transcript edge. Expanded tool headers pin within
+   their own details boundary, below a containing group header when present. */
 .activity-group {
   overflow: visible;
+  border-radius: 0;
 }
 .activity-group > .activity-group-header {
   position: sticky;
   top: 0;
   z-index: 24;
+  min-height: 42px;
+  flex-wrap: nowrap;
   border-radius: 0;
-  border-bottom: 1px solid var(--line-soft);
   background: var(--bg-alt);
 }
-.activity-group > .activity-detail,
-.activity-group > .activity-lead {
-  border-radius: 0 0 8px 8px;
+.activity-group > .activity-group-header small {
+  width: auto;
+}
+.tool-detail[open] > summary.activity-step {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.activity-group .tool-detail[open] > summary.activity-step {
+  top: 42px;
+  z-index: 22;
 }
 
 .session-page[data-tail-pending] .transcript {

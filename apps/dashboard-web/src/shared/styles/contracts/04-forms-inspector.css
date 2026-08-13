@@ -185,14 +185,12 @@
   word-break: break-word;
 }
 .tool-inspector-raw {
-  margin-top: 9px;
-  border-top: 1px solid var(--line-soft);
-  padding-top: 8px;
+  margin: 0;
+  border: 0;
+  padding: 0;
 }
 .tool-inspector-raw > summary {
-  border-block: 1px solid var(--line-soft);
-  background: var(--bg-alt);
-  padding-block: 7px;
+  padding-block: 4px;
   color: var(--muted);
   cursor: pointer;
   font-size: 10px;
@@ -511,8 +509,7 @@
   overflow-wrap: anywhere;
 }
 @media (max-width: 600px) {
-  .structured-result-node > summary,
-  .tool-inspector-raw > summary {
+  .structured-result-node > summary {
     min-height: 44px;
     padding-block: 10px;
   }

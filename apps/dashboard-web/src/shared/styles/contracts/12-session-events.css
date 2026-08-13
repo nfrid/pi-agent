@@ -188,7 +188,7 @@ details.session-event {
   transition: background 140ms ease;
 }
 .activity-group > button:hover {
-  background: color-mix(in srgb, var(--purple) 7%, transparent);
+  background: color-mix(in srgb, var(--purple) 7%, var(--bg-alt));
 }
 .activity-group > button strong {
   color: var(--fg);

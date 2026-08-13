@@ -2956,6 +2956,21 @@ function phase6EditEntries(historyCount: number) {
         isError: false,
       },
     },
+    {
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'text',
+            text: Array.from(
+              { length: 60 },
+              (_, index) => `Later transcript context ${index + 1}`,
+            ).join('\n'),
+          },
+        ],
+      },
+    },
   ];
 }
 
@@ -3290,8 +3305,11 @@ test('virtual transcript focus and group layout stay inside simple contracts', a
       row.getBoundingClientRect().top -
       scrollElement.getBoundingClientRect().top;
   });
+  await collapsedHeader.hover();
   const collapsedSticky = await collapsedHeader.evaluate((element) => {
     const style = getComputedStyle(element);
+    const group = element.closest('.activity-group');
+    const groupStyle = group ? getComputedStyle(group) : undefined;
     const radii = [
       style.borderTopLeftRadius,
       style.borderTopRightRadius,
@@ -3302,10 +3320,26 @@ test('virtual transcript focus and group layout stay inside simple contracts', a
     const top = scroll
       ? element.getBoundingClientRect().top - scroll.getBoundingClientRect().top
       : Number.NaN;
-    return { position: style.position, radii, top };
+    return {
+      position: style.position,
+      radii,
+      top,
+      backgroundColor: style.backgroundColor,
+      groupRadii: groupStyle
+        ? [
+            groupStyle.borderTopLeftRadius,
+            groupStyle.borderTopRightRadius,
+            groupStyle.borderBottomRightRadius,
+            groupStyle.borderBottomLeftRadius,
+          ]
+        : [],
+    };
   });
   expect(collapsedSticky.position).toBe('sticky');
   expect(collapsedSticky.radii).toEqual(['0px', '0px', '0px', '0px']);
+  expect(collapsedSticky.groupRadii).toEqual(['0px', '0px', '0px', '0px']);
+  expect(collapsedSticky.backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+  expect(collapsedSticky.backgroundColor).not.toBe('transparent');
   expect(collapsedSticky.top).toBeGreaterThanOrEqual(-1);
   expect(collapsedSticky.top).toBeLessThan(12);
   await collapsedHeader.click();
@@ -3401,13 +3435,45 @@ async function assertLargeEditPreview(page: Page, historyCount: number) {
   expect(previewMetrics.continuationClass).toBe(true);
   expect(previewMetrics.continuationPadding).not.toBe('0px');
 
+  const rawDividerMetrics = await tool
+    .locator('.tool-inspector-raw')
+    .evaluateAll((elements) =>
+      elements.map((element) => {
+        const detailStyle = getComputedStyle(element);
+        const summary = element.querySelector(':scope > summary');
+        const summaryStyle = summary ? getComputedStyle(summary) : undefined;
+        return {
+          detailTop: detailStyle.borderTopWidth,
+          detailBottom: detailStyle.borderBottomWidth,
+          summaryTop: summaryStyle?.borderTopWidth,
+          summaryBottom: summaryStyle?.borderBottomWidth,
+          summaryPaddingTop: summaryStyle?.paddingTop,
+          summaryPaddingBottom: summaryStyle?.paddingBottom,
+        };
+      }),
+    );
+  expect(rawDividerMetrics).toHaveLength(3);
+  expect(rawDividerMetrics).toEqual(
+    rawDividerMetrics.map(() => ({
+      detailTop: '0px',
+      detailBottom: '0px',
+      summaryTop: '0px',
+      summaryBottom: '0px',
+      summaryPaddingTop: '4px',
+      summaryPaddingBottom: '4px',
+    })),
+  );
+
   await transcriptScroll(page).evaluate((scrollElement) => {
-    const group = scrollElement.querySelector<HTMLElement>('.activity-group');
-    if (!group) throw new Error('activity group missing');
+    const toolSummary = scrollElement.querySelector<HTMLElement>(
+      '.activity-group .tool-detail[open] > summary.activity-step',
+    );
+    if (!toolSummary) throw new Error('expanded tool summary missing');
     scrollElement.scrollTop +=
-      group.getBoundingClientRect().top -
-      scrollElement.getBoundingClientRect().top +
-      250;
+      toolSummary.getBoundingClientRect().top -
+      scrollElement.getBoundingClientRect().top -
+      42 +
+      80;
   });
   const sticky = await transcriptScroll(page).evaluate((scrollElement) => {
     const group = scrollElement.querySelector<HTMLElement>(
@@ -3420,6 +3486,7 @@ async function assertLargeEditPreview(page: Page, historyCount: number) {
     const scrollTop = scrollElement.getBoundingClientRect().top;
     return {
       groupTop: group.getBoundingClientRect().top - scrollTop,
+      toolTop: toolSummary.getBoundingClientRect().top - scrollTop,
       groupPosition: getComputedStyle(group).position,
       toolPosition: getComputedStyle(toolSummary).position,
     };
@@ -3427,7 +3494,9 @@ async function assertLargeEditPreview(page: Page, historyCount: number) {
   expect(sticky.groupTop).toBeGreaterThanOrEqual(-1);
   expect(sticky.groupTop).toBeLessThan(3);
   expect(sticky.groupPosition).toBe('sticky');
-  expect(sticky.toolPosition).toBe('static');
+  expect(sticky.toolPosition).toBe('sticky');
+  expect(sticky.toolTop - sticky.groupTop).toBeGreaterThanOrEqual(41);
+  expect(sticky.toolTop - sticky.groupTop).toBeLessThanOrEqual(43);
 
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
   expect(await transcriptGap(page)).toBeLessThan(3);
