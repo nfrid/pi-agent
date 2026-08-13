@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Socket } from 'node:net';
 import { Duplex, type DuplexOptions } from 'node:stream';
 import type { PiSessionHandle } from '@earendil-works/pi-client';
@@ -137,6 +138,20 @@ function modelRef(
   return model ? { provider: model.provider, id: model.model } : undefined;
 }
 
+function normalizedTranscript(
+  native: NonNullable<LeaseLike['snapshot']>,
+): unknown[] {
+  return native.transcript.map(normalizeTranscriptEntry);
+}
+
+function transcriptFingerprint(
+  native: NonNullable<LeaseLike['snapshot']>,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify(normalizedTranscript(native)), 'utf8')
+    .digest('hex');
+}
+
 function normalizeTranscriptEntry(entry: unknown): unknown {
   if (
     !entry ||
@@ -166,7 +181,7 @@ function normalizeTranscriptEntry(entry: unknown): unknown {
 function sessionSnapshot(
   native: NonNullable<LeaseLike['snapshot']>,
 ): SessionSnapshot {
-  const normalized = native.transcript.map(normalizeTranscriptEntry);
+  const normalized = normalizedTranscript(native);
   const entries = normalized.slice(-MAX_TRANSCRIPT_ITEMS);
   const complete = entries.length === normalized.length;
   while (
@@ -215,19 +230,6 @@ function runtimeSnapshot(
     pendingInteractions: [],
     online: true,
     lastSeenAt: Date.now(),
-  };
-}
-
-function sessionInvalidationPatch(session: SessionSnapshot): SessionSnapshot {
-  return {
-    id: session.id,
-    ...(session.file === undefined ? {} : { file: session.file }),
-    ...(session.name === undefined ? {} : { name: session.name }),
-    ...(session.title === undefined ? {} : { title: session.title }),
-    ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
-    ...(session.leafId === undefined ? {} : { leafId: session.leafId }),
-    entries: [],
-    entriesComplete: false,
   };
 }
 
@@ -410,6 +412,7 @@ class NativeContext {
   private unsubscribeSnapshot: (() => void) | undefined;
   private unsubscribeConnection: (() => void) | undefined;
   private disposed = false;
+  private previousTranscriptFingerprint: string;
 
   constructor(
     private readonly input: RuntimeStartInput,
@@ -421,6 +424,7 @@ class NativeContext {
     const snapshot = lease.snapshot;
     if (!snapshot) throw new Error('Pi session snapshot disappeared.');
     this.previousPhase = snapshot.phase;
+    this.previousTranscriptFingerprint = transcriptFingerprint(snapshot);
   }
 
   start(): void {
@@ -506,23 +510,25 @@ class NativeContext {
   private publish(native: NonNullable<LeaseLike['snapshot']>): void {
     if (this.disposed) return;
     const next = this.liveState(native);
+    const fingerprint = transcriptFingerprint(native);
+    const transcriptChanged =
+      fingerprint !== this.previousTranscriptFingerprint;
     const session = sessionSnapshot(native);
     const snapshot = runtimeSnapshot(this.input, native, session);
     this.sendEvent({
       type: 'runtime.stateChanged',
       state: next,
-      snapshot: {
-        ...snapshot,
-        session: sessionInvalidationPatch(session),
-      },
+      snapshot,
     });
-    this.sendEvent({
-      type: 'session.snapshot',
-      session,
-    });
+    if (transcriptChanged)
+      this.sendEvent({
+        type: 'session.snapshot',
+        session,
+      });
     if (this.previousPhase !== 'idle' && native.phase === 'idle')
       this.sendEvent({ type: 'agent.settled', sessionId: native.id });
     this.previousPhase = native.phase;
+    this.previousTranscriptFingerprint = fingerprint;
   }
 
   private liveState(

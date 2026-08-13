@@ -908,13 +908,9 @@ export class DashboardLiveStore {
         event.type === 'runtime.hello' ||
         event.type === 'session.changed' ||
         event.type === 'session.snapshot');
-    const completeSessionSnapshot =
-      event.type === 'session.snapshot' &&
-      event.session.entriesComplete === true;
     if (
       sessionId &&
       semanticSessionUpdate &&
-      !completeSessionSnapshot &&
       (event.type !== 'runtime.hello' || runtimeOrderingAccepted)
     )
       sessionChangeById = {

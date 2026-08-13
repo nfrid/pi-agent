@@ -4,6 +4,7 @@ import type {
   NotificationEvent,
   RuntimeSnapshot,
   SessionIndexEntry,
+  SessionSnapshot,
   WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { DashboardEventStream } from '../event-stream.js';
@@ -70,6 +71,46 @@ function sameSessionMetadata(
   right: SessionIndexEntry,
 ): boolean {
   return SESSION_METADATA_FIELDS.every((field) => left[field] === right[field]);
+}
+
+/** Remove transcript payloads before an event crosses the browser boundary. */
+export function compactPublicSession(
+  session: SessionSnapshot,
+): SessionSnapshot {
+  return { ...session, entries: [], entriesComplete: false };
+}
+
+/**
+ * Public event projection. RuntimeRegistry retains full snapshots for server
+ * authority, but SSE and WebSocket consumers only receive metadata patches.
+ */
+export function projectPublicBridgeEvent(event: BridgeEvent): BridgeEvent {
+  switch (event.type) {
+    case 'runtime.hello':
+      return {
+        ...event,
+        snapshot: {
+          ...event.snapshot,
+          session: compactPublicSession(event.snapshot.session),
+        },
+      };
+    case 'runtime.heartbeat':
+    case 'runtime.stateChanged':
+      return event.snapshot?.session === undefined
+        ? event
+        : {
+            ...event,
+            snapshot: {
+              ...event.snapshot,
+              session: compactPublicSession(event.snapshot.session),
+            },
+          };
+    case 'session.changed':
+    case 'session.snapshot':
+      return { ...event, session: compactPublicSession(event.session) };
+    default:
+      return event;
+  }
 }
 
 /** Framework-independent application boundary for the dashboard daemon. */
@@ -276,7 +317,7 @@ export class DashboardApplication {
     if (change.kind === 'event')
       return {
         type: 'event',
-        event: change.event,
+        event: projectPublicBridgeEvent(change.event),
         runtimeId: change.runtimeId,
         ...provenance,
       };

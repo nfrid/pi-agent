@@ -103,20 +103,16 @@ describe('isCurrentSessionResponse', () => {
             type: 'session.snapshot',
             session: {
               id: 'session-1',
-              entries: [
-                {
-                  type: 'message',
-                  message: {
-                    id: 'complete-live-message',
-                    role: 'user',
-                    content: 'complete snapshot',
-                  },
-                },
-              ],
-              entriesComplete: true,
+              entries: [],
+              entriesComplete: false,
             },
           },
         });
+      });
+      await expect.poll(() => session).toHaveBeenCalledTimes(1);
+      expect(store.getSnapshot().sessionChangeById['session-1']).toBe(1);
+
+      await act(async () => {
         store.acceptStreamRecord({
           cursor: 23,
           emittedAt: 23,
@@ -131,20 +127,7 @@ describe('isCurrentSessionResponse', () => {
           },
         });
       });
-      expect(
-        store.getSnapshot().sessionChangeById['session-1'],
-      ).toBeUndefined();
-      expect(session).not.toHaveBeenCalled();
-
-      await act(async () => {
-        store.acceptStreamRecord({
-          cursor: 24,
-          emittedAt: 24,
-          sessionId: 'session-1',
-          event: { type: 'agent.settled', sessionId: 'session-1' },
-        });
-      });
-      await expect.poll(() => session).toHaveBeenCalledTimes(1);
+      expect(session).toHaveBeenCalledTimes(1);
     } finally {
       await act(async () => {
         renderer?.unmount();

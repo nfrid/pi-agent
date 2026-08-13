@@ -138,7 +138,7 @@ describe('PiClient runtime provider experiment', () => {
       type: 'prompt',
       text: 'do the work',
     });
-    expect(registry.transportProvenance('runtime-pi-1')?.runtimeSeq).toBe(5);
+    expect(registry.transportProvenance('runtime-pi-1')?.runtimeSeq).toBe(3);
     for (let index = 0; index < 70; index += 1)
       await registry.sendCommand('runtime-pi-1', {
         id: `prompt-${index + 2}`,
@@ -252,7 +252,7 @@ describe('PiClient runtime provider experiment', () => {
     await pi.stop(attached);
   });
 
-  it('publishes a bounded runtime invalidation before the full transcript snapshot', async () => {
+  it('deduplicates managed transcript invalidations across repeated publishes', async () => {
     const fake = fakeClient();
     const changes: unknown[] = [];
     const registry = new RuntimeRegistry({
@@ -286,24 +286,31 @@ describe('PiClient runtime provider experiment', () => {
         session?: Record<string, unknown>;
       };
     }>;
-    const stateChanged = published.find(
-      (change) =>
-        change.kind === 'event' &&
-        change.event?.type === 'runtime.stateChanged',
-    );
     const fullSnapshot = published.find(
       (change) =>
         change.kind === 'event' && change.event?.type === 'session.snapshot',
     );
-    expect(stateChanged?.event?.snapshot?.session).toEqual({
+    const stateChanges = published.filter(
+      (change) =>
+        change.kind === 'event' &&
+        change.event?.type === 'runtime.stateChanged',
+    );
+    expect(stateChanges).toHaveLength(2);
+    expect(stateChanges[0]?.event?.snapshot?.session).toMatchObject({
       id: 'pi-session-1',
       file: '/tmp/pi-session-1.jsonl',
       name: 'Native session',
       title: 'Native session title',
       cwd: '/tmp/worktree',
       leafId: 'native-leaf-1',
-      entries: [],
-      entriesComplete: false,
+      entries: [
+        {
+          id: 'native-entry-1',
+          role: 'user',
+          content: [{ type: 'text', text: 'Persist this transcript' }],
+        },
+      ],
+      entriesComplete: true,
     });
     expect(fullSnapshot?.event?.session).toMatchObject({
       id: 'pi-session-1',
@@ -321,7 +328,13 @@ describe('PiClient runtime provider experiment', () => {
       ],
       entriesComplete: true,
     });
-    expect(stateChanged?.event?.snapshot?.session?.entries).toEqual([]);
+    expect(fullSnapshot?.event?.session?.entries).toHaveLength(1);
+    expect(
+      published.filter(
+        (change) =>
+          change.kind === 'event' && change.event?.type === 'session.snapshot',
+      ),
+    ).toHaveLength(1);
     await provider.stop(binding);
   });
 

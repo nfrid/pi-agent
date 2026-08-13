@@ -1737,7 +1737,7 @@ describe('DashboardLiveStore', () => {
     ).toBeUndefined();
   });
 
-  it('hydrates complete snapshots without a refetch counter but invalidates incomplete ones', () => {
+  it('invalidates compact session snapshots while runtime state changes stay local', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
 
@@ -1745,31 +1745,21 @@ describe('DashboardLiveStore', () => {
       store.acceptStreamRecord({
         cursor: 2,
         emittedAt: 2,
+        runtimeId: 'runtime-1',
         event: {
-          type: 'session.snapshot',
-          session: {
-            id: 'session-1',
-            entriesComplete: true,
-            entries: [
-              {
-                type: 'message',
-                message: {
-                  id: 'complete-message',
-                  role: 'user',
-                  content: 'from the complete snapshot',
-                },
-              },
-            ],
+          type: 'runtime.stateChanged',
+          state: 'working',
+          snapshot: {
+            session: {
+              id: 'session-1',
+              entries: [],
+              entriesComplete: false,
+            },
           },
         },
       } as never),
     ).toBe(true);
     expect(store.getSnapshot().sessionChangeById['session-1']).toBeUndefined();
-    expect(
-      store.getSnapshot().transcriptsBySessionId['session-1']?.items[
-        'complete-message'
-      ],
-    ).toBeDefined();
 
     expect(
       store.acceptStreamRecord({
