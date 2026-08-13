@@ -23,9 +23,6 @@
   margin: 0;
   padding: 42px clamp(24px, 5vw, 72px) 96px;
 }
-.session-shell {
-  padding-bottom: 24px;
-}
 .page-heading {
   align-items: center;
   margin-bottom: 31px;

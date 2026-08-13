@@ -533,54 +533,35 @@ function PreviewTruncation({
 function HighlightedAdditions({
   value,
   language,
-  label,
 }: {
   value: string;
   language: string;
-  label: string;
 }) {
-  const bounded = boundedSpecializedText(value);
   if (value.length === 0) {
-    return (
-      <>
-        <p className="tool-empty-content">No content</p>
-        <PreviewTruncation
-          label={label}
-          sourceTruncated={false}
-          textTruncated={false}
-        />
-      </>
-    );
+    return <p className="tool-empty-content">No content</p>;
   }
-  const lines = bounded.text.split(/\r\n|\r|\n/u);
+  const lines = value.split(/\r\n|\r|\n/u);
   if (lines.at(-1) === '' && lines.length > 1) lines.pop();
   const occurrences = new Map<string, number>();
   return (
-    <>
-      <pre className="tool-code-preview tool-code-additions">
-        {lines.map((line) => {
-          const occurrence = (occurrences.get(line) ?? 0) + 1;
-          occurrences.set(line, occurrence);
-          return (
-            <span
-              className="tool-code-line tool-code-line-added"
-              key={`${line}-${occurrence}`}
-            >
-              <span className="sr-only">Added line: </span>
-              <span className="tool-code-prefix" aria-hidden="true">
-                +
-              </span>
-              <HighlightedLine language={language} value={line || ' '} />
+    <pre className="tool-code-preview tool-code-additions">
+      {lines.map((line) => {
+        const occurrence = (occurrences.get(line) ?? 0) + 1;
+        occurrences.set(line, occurrence);
+        return (
+          <span
+            className="tool-code-line tool-code-line-added"
+            key={`${line}-${occurrence}`}
+          >
+            <span className="sr-only">Added line: </span>
+            <span className="tool-code-prefix" aria-hidden="true">
+              +
             </span>
-          );
-        })}
-      </pre>
-      <PreviewTruncation
-        label={label}
-        sourceTruncated={false}
-        textTruncated={bounded.truncated}
-      />
-    </>
+            <HighlightedLine language={language} value={line || ' '} />
+          </span>
+        );
+      })}
+    </pre>
   );
 }
 
@@ -588,9 +569,7 @@ function replacementDiffLines(
   oldText: string,
   newText: string,
 ): Array<{ value: string; added?: boolean; removed?: boolean }> {
-  const oldBounded = boundedSpecializedText(oldText).text;
-  const newBounded = boundedSpecializedText(newText).text;
-  return diffLines(oldBounded, newBounded);
+  return diffLines(oldText, newText);
 }
 
 function replacementDisplayKey(index: number): string {
@@ -609,8 +588,10 @@ function ReplacementPreview({
   index: number;
 }) {
   return (
-    <section className="tool-replacement">
-      <h5>Replacement {index + 1}</h5>
+    <section
+      className="tool-replacement"
+      aria-label={`Edit replacement ${index + 1}`}
+    >
       <pre className="tool-code-preview tool-replacement-preview">
         {(() => {
           const occurrences = new Map<string, number>();
@@ -737,15 +718,7 @@ function SpecializedToolInspector({
         className="payload-section tool-specialized tool-write-presentation"
         aria-label="Write presentation"
       >
-        <h4>Write · {path}</h4>
-        <p className="tool-presentation-label">
-          Newly written content · additions only
-        </p>
-        <HighlightedAdditions
-          label="Newly written content"
-          language={language}
-          value={args.content}
-        />
+        <HighlightedAdditions language={language} value={args.content} />
         <PreviewTruncation
           label="Arguments"
           sourceTruncated={sourceArgumentsTruncated}
@@ -767,10 +740,6 @@ function SpecializedToolInspector({
         className="payload-section tool-specialized tool-edit-presentation"
         aria-label="Edit presentation"
       >
-        <h4>Replacement preview · {path}</h4>
-        <p className="tool-presentation-label">
-          Replacement preview; this is not a repository or full-file diff.
-        </p>
         {replacements.map((replacement, index) => (
           <ReplacementPreview
             {...replacement}
@@ -782,11 +751,7 @@ function SpecializedToolInspector({
         <PreviewTruncation
           label="Arguments"
           sourceTruncated={sourceArgumentsTruncated}
-          textTruncated={replacements.some(
-            ({ oldText, newText }) =>
-              oldText.length > SPECIALIZED_PREVIEW_MAX_TEXT ||
-              newText.length > SPECIALIZED_PREVIEW_MAX_TEXT,
-          )}
+          textTruncated={false}
         />
         <PreviewTruncation
           label="Result"
@@ -798,7 +763,6 @@ function SpecializedToolInspector({
   }
   const command = toolCommand(tool);
   if (kind === 'command' && command) {
-    const boundedCommand = boundedSpecializedText(command);
     const resultNormalized = normalizedResultText(tool.result);
     const resultBounded =
       resultNormalized === undefined
@@ -811,38 +775,28 @@ function SpecializedToolInspector({
             };
           })();
     const exitCode = resultExitCode(tool.result);
-    const status = tool.status ?? (tool.isError === true ? 'error' : undefined);
     return (
       <div className="tool-specialized tool-command-presentation">
         <section
           className="payload-section tool-command-input"
           aria-label="Command"
         >
-          <h4>Command</h4>
           <pre className="tool-code-preview tool-command-preview">
-            <HighlightedLine language="bash" value={boundedCommand.text} />
+            <HighlightedLine language="bash" value={command} />
           </pre>
           <PreviewTruncation
             label="Arguments"
             sourceTruncated={sourceArgumentsTruncated}
-            textTruncated={boundedCommand.truncated}
+            textTruncated={false}
           />
         </section>
         {resultBounded !== undefined ? (
           <section
-            className={`payload-section tool-terminal-result${tool.isError || status === 'error' ? ' tool-terminal-result-error' : ''}`}
+            className={`payload-section tool-terminal-result${tool.isError || tool.status === 'error' ? ' tool-terminal-result-error' : ''}`}
             aria-label="Terminal result"
           >
-            <h4>Terminal result</h4>
-            {status !== undefined || exitCode !== undefined ? (
-              <p className="tool-terminal-meta">
-                {status !== undefined ? (
-                  <span>Status: {String(status)}</span>
-                ) : null}
-                {exitCode !== undefined ? (
-                  <span>Exit code: {exitCode}</span>
-                ) : null}
-              </p>
+            {exitCode !== undefined ? (
+              <small className="tool-terminal-meta">exit {exitCode}</small>
             ) : null}
             <pre className="tool-terminal-output">{resultBounded.text}</pre>
             <PreviewTruncation
@@ -926,7 +880,7 @@ export function StructuredResultSection({
         <>
           <StructuredPayloadView value={result.value} />
           <details className="tool-inspector-raw">
-            <summary>Raw JSON</summary>
+            <summary className="tool-inspector-raw-summary">Raw JSON</summary>
             <BoundedPayloadPreview value={result.value} label={rawJsonLabel} />
           </details>
         </>
@@ -1014,13 +968,15 @@ function ToolInspector({
       ) : null}
       {specializedKind && argumentsValue !== undefined ? (
         <details className="tool-inspector-raw">
-          <summary>Raw Arguments</summary>
+          <summary className="tool-inspector-raw-summary">
+            Raw Arguments
+          </summary>
           <BoundedPayloadPreview value={argumentsValue} label="arguments" />
         </details>
       ) : null}
       {specializedKind && record.result !== undefined ? (
         <details className="tool-inspector-raw">
-          <summary>Raw Result</summary>
+          <summary className="tool-inspector-raw-summary">Raw Result</summary>
           <BoundedPayloadPreview value={record.result} label="result" />
         </details>
       ) : null}
@@ -1039,7 +995,9 @@ function ToolInspector({
         />
       )}
       <details className="tool-inspector-raw">
-        <summary>Raw tool record</summary>
+        <summary className="tool-inspector-raw-summary">
+          Raw tool record
+        </summary>
         <BoundedPayloadPreview value={record} label="raw tool record" />
       </details>
     </div>

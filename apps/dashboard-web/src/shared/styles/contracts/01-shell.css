@@ -45,12 +45,6 @@
   margin: 0 auto;
   padding: 30px 22px 90px;
 }
-.session-shell {
-  padding-bottom: 16px;
-}
-.session-page {
-  padding-bottom: 160px;
-}
 .session-loading-curtain {
   position: fixed;
   inset: 52px 0 0;

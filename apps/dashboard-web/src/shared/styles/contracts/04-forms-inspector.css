@@ -194,11 +194,20 @@
   cursor: pointer;
   font-size: 10px;
 }
+.tool-inspector-raw > .tool-inspector-raw-summary {
+  position: sticky;
+  top: 0;
+  z-index: 16;
+  border-block: 1px solid var(--line-soft);
+  background: var(--bg-alt);
+  padding-block: 7px;
+}
 .tool-inspector pre,
 .payload-preview pre {
   max-height: 240px;
   margin: 0;
   overflow: auto;
+  contain: paint;
 }
 .payload-truncation,
 .payload-truncation-label {
@@ -211,7 +220,6 @@
 .tool-specialized {
   min-width: 0;
 }
-.tool-presentation-label,
 .tool-terminal-meta {
   display: flex;
   flex-wrap: wrap;
@@ -226,21 +234,33 @@
   max-width: 100%;
   margin: 7px 0;
   overflow: auto;
+  contain: paint;
   border: 1px solid var(--line-soft);
   background: color-mix(in srgb, var(--bg) 80%, #000 20%);
   color: var(--fg);
   font-size: 11px;
   line-height: 1.5;
   tab-size: 2;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .tool-code-preview {
   padding: 6px 0;
 }
 .tool-code-line {
   display: block;
-  min-width: max-content;
-  padding: 0 9px;
+  min-width: 0;
+  padding: 0 9px 0 25px;
+  text-indent: -16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.tool-code-line > code {
+  white-space: inherit;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .tool-code-line-added {
   background: color-mix(in srgb, var(--green) 12%, transparent);
@@ -256,6 +276,7 @@
   width: 16px;
   color: var(--dim);
   user-select: none;
+  vertical-align: top;
 }
 .tool-empty-content {
   margin: 8px 0;
@@ -272,18 +293,19 @@
   min-width: 0;
   margin: 10px 0;
 }
-.tool-replacement h5 {
-  margin: 0;
-  color: var(--fg);
-  font-size: 10px;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
 .tool-terminal-output {
   max-height: 300px;
   padding: 9px;
   color: var(--fg);
+}
+.tool-command-preview {
+  padding-inline: 9px;
+}
+.tool-terminal-meta {
+  display: block;
+  margin: 5px 0;
+  color: var(--dim);
+  font-size: 10px;
 }
 .tool-terminal-result-error {
   border-left-color: var(--red);
@@ -291,23 +313,69 @@
 .tool-terminal-result-error .tool-terminal-output {
   color: var(--red);
 }
+/* Dracula highlight.js palette. Keep this local so payload markup stays portable. */
+.tool-code-preview .hljs-comment,
+.tool-code-preview .hljs-doctag {
+  color: #6272a4;
+}
 .tool-code-preview .hljs-keyword,
+.tool-code-preview .hljs-meta .hljs-keyword,
+.tool-code-preview .hljs-section,
 .tool-code-preview .hljs-selector-tag,
+.tool-code-preview .hljs-type,
+.tool-code-preview .hljs-name,
 .tool-code-preview .hljs-title,
-.tool-code-preview .hljs-built_in {
-  color: var(--purple);
+.tool-code-preview .hljs-title.class_,
+.tool-code-preview .hljs-title.class,
+.tool-code-preview .hljs-class .hljs-title,
+.tool-code-preview .hljs-title.function_ {
+  color: #ff79c6;
+}
+.tool-code-preview .hljs-built_in,
+.tool-code-preview .hljs-function .hljs-title,
+.tool-code-preview .hljs-params {
+  color: #8be9fd;
 }
 .tool-code-preview .hljs-string,
+.tool-code-preview .hljs-addition,
+.tool-code-preview .hljs-quote,
+.tool-code-preview .hljs-symbol,
+.tool-code-preview .hljs-template-tag,
+.tool-code-preview .hljs-template-variable,
 .tool-code-preview .hljs-attr,
-.tool-code-preview .hljs-attribute {
-  color: var(--green);
-}
-.tool-code-preview .hljs-comment {
-  color: var(--dim);
+.tool-code-preview .hljs-attribute,
+.tool-code-preview .hljs-tag .hljs-attr,
+.tool-code-preview .hljs-tag .hljs-name,
+.tool-code-preview .hljs-variable.language_ {
+  color: #50fa7b;
 }
 .tool-code-preview .hljs-number,
-.tool-code-preview .hljs-literal {
-  color: var(--orange);
+.tool-code-preview .hljs-literal,
+.tool-code-preview .hljs-regexp,
+.tool-code-preview .hljs-variable,
+.tool-code-preview .hljs-selector-attr,
+.tool-code-preview .hljs-selector-pseudo,
+.tool-code-preview .hljs-selector-id,
+.tool-code-preview .hljs-selector-class {
+  color: #bd93f9;
+}
+.tool-code-preview .hljs-subst {
+  color: #f8f8f2;
+}
+.tool-code-preview .hljs-meta,
+.tool-code-preview .hljs-operator {
+  color: #ff79c6;
+}
+.tool-code-preview .hljs-punctuation {
+  color: #f8f8f2;
+}
+.tool-code-preview .hljs-emphasis {
+  color: #f8f8f2;
+  font-style: italic;
+}
+.tool-code-preview .hljs-strong {
+  color: #50fa7b;
+  font-weight: 700;
 }
 @media (max-width: 600px) {
   .tool-code-preview,

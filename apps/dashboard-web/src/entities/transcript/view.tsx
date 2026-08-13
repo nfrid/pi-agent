@@ -6,9 +6,10 @@ import {
 import type { TranscriptProjection } from '@pi-dashboard/domain';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
-import { useWindowVirtualizer } from '@tanstack/react-virtual';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   type Dispatch,
+  type RefObject,
   type SetStateAction,
   useLayoutEffect,
   useMemo,
@@ -42,6 +43,9 @@ export function Transcript({
   tailScrollRequest,
   outlineOpen,
   onOutlineOpenChange,
+  onBeforeScroll,
+  scrollElementRef,
+  virtualize = false,
 }: {
   /** Legacy raw-entry input retained for embedders. */
   entries?: unknown[];
@@ -51,7 +55,12 @@ export function Transcript({
   tailScrollRequest?: number;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
+  onBeforeScroll?: () => void;
+  /** Session routes opt into virtualization only with an attached scrollport. */
+  virtualize?: boolean;
+  scrollElementRef?: RefObject<HTMLDivElement | null>;
 }) {
+  const transcriptScrollElementRef = scrollElementRef;
   const input = projection ?? entries ?? [];
   const items = useMemo(() => toTranscriptEntries(input), [input]);
   const modelEntries = useMemo(() => items.map((item) => item.entry), [items]);
@@ -76,16 +85,33 @@ export function Transcript({
     [groups, items],
   );
   const jumpToLandmark = (landmark: TranscriptLandmark) => {
-    const target = Array.from(
-      document.querySelectorAll<HTMLElement>('[data-transcript-key]'),
-    ).find((element) => element.dataset.transcriptKey === landmark.key);
-    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    onBeforeScroll?.();
+    const scrollElement = transcriptScrollElementRef?.current;
+    const target = scrollElement
+      ? Array.from(
+          scrollElement.querySelectorAll<HTMLElement>('[data-transcript-key]'),
+        ).find((element) => element.dataset.transcriptKey === landmark.key)
+      : document.querySelector<HTMLElement>(
+          `[data-transcript-key="${CSS.escape(landmark.key)}"]`,
+        );
+    if (!target) return;
+    if (!scrollElement) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    scrollElement.scrollTo({
+      top:
+        scrollElement.scrollTop +
+        target.getBoundingClientRect().top -
+        scrollElement.getBoundingClientRect().top,
+      behavior: 'smooth',
+    });
   };
   const { groupByStart, groupCoverage } = useMemo(
     () => buildTranscriptGroupCoverage(items.length, groups),
     [groups, items.length],
   );
-  if (items.length > 80)
+  if (items.length > 80 && virtualize && transcriptScrollElementRef)
     return (
       <VirtualizedTranscript
         items={items}
@@ -96,6 +122,8 @@ export function Transcript({
         tailScrollRequest={tailScrollRequest}
         outlineOpen={outlineOpen}
         onOutlineOpenChange={onOutlineOpenChange}
+        onBeforeScroll={onBeforeScroll}
+        scrollElementRef={transcriptScrollElementRef}
       />
     );
   return (
@@ -105,6 +133,7 @@ export function Transcript({
         open={outlineOpen}
         onOpenChange={onOutlineOpenChange}
         onJump={jumpToLandmark}
+        scrollElementRef={transcriptScrollElementRef}
       />
       {items.map((item, index) => {
         const group = groupByStart.get(index);
@@ -237,6 +266,8 @@ function VirtualizedTranscript({
   tailScrollRequest,
   outlineOpen,
   onOutlineOpenChange,
+  onBeforeScroll,
+  scrollElementRef,
 }: {
   items: readonly TranscriptModelItem[];
   groups: readonly TranscriptGroup[];
@@ -246,18 +277,19 @@ function VirtualizedTranscript({
   tailScrollRequest?: number;
   outlineOpen?: boolean;
   onOutlineOpenChange?: (open: boolean) => void;
+  onBeforeScroll?: () => void;
+  scrollElementRef: RefObject<HTMLDivElement | null>;
 }) {
   const rows = useMemo(
     () => buildVirtualTranscriptRows(items, groups),
     [groups, items],
   );
   const virtualizerRef = useRef<HTMLDivElement>(null);
-  const [scrollMargin, setScrollMargin] = useState(0);
-  const virtualizer = useWindowVirtualizer({
+  const virtualizer = useVirtualizer({
     count: rows.length,
     estimateSize: (index) => (rows[index]?.kind === 'group' ? 132 : 96),
     overscan: 8,
-    scrollMargin,
+    getScrollElement: () => scrollElementRef?.current ?? null,
     getItemKey: (index) => rows[index]?.key ?? `transcript-row-${index}`,
     measureElement: (element) => element.getBoundingClientRect().height,
   });
@@ -270,19 +302,10 @@ function VirtualizedTranscript({
     return () => window.cancelAnimationFrame(frame);
   }, [rows.length, tailScrollRequest, virtualizer]);
   useLayoutEffect(() => {
+    void open;
     void rows.length;
-    const measure = () => {
-      const element = virtualizerRef.current;
-      if (!element) return;
-      const next = element.getBoundingClientRect().top + window.scrollY;
-      setScrollMargin((current) =>
-        Math.abs(current - next) < 1 ? current : next,
-      );
-    };
-    measure();
-    window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
-  }, [rows.length]);
+    virtualizer.measure();
+  }, [open, rows.length, virtualizer]);
   const landmarks = useMemo(
     () => buildTranscriptLandmarks(items, groups),
     [groups, items],
@@ -306,11 +329,13 @@ function VirtualizedTranscript({
     return result;
   }, [items, rows]);
   const jumpToLandmark = (landmark: TranscriptLandmark) => {
+    onBeforeScroll?.();
     const rowIndex = rowIndexByKey.get(landmark.key);
     if (rowIndex !== undefined)
       virtualizer.scrollToIndex(rowIndex, { align: 'start' });
   };
-  const captureScrollAnchor = useVirtualTranscriptScrollRestoration();
+  const captureScrollAnchor =
+    useVirtualTranscriptScrollRestoration(scrollElementRef);
 
   const renderGroup = (group: TranscriptGroup) => {
     const groupKey = items[group.start]?.key ?? `group-${group.start}`;
@@ -342,6 +367,7 @@ function VirtualizedTranscript({
         open={outlineOpen}
         onOpenChange={onOutlineOpenChange}
         onJump={jumpToLandmark}
+        scrollElementRef={scrollElementRef}
       />
       <div
         ref={virtualizerRef}
@@ -360,10 +386,9 @@ function VirtualizedTranscript({
               className="transcript-virtual-row"
               style={{
                 position: 'absolute',
-                top: 0,
+                top: virtualRow.start,
                 left: 0,
                 width: '100%',
-                transform: `translateY(${virtualRow.start - scrollMargin}px)`,
               }}
             >
               {row.kind === 'group' ? (

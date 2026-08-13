@@ -283,10 +283,6 @@
     cursor: pointer;
     transform: translateY(-50%);
   }
-  .session-page {
-    --session-control-edge: max(8px, env(safe-area-inset-bottom));
-    --session-control-gap: 6px;
-  }
   .session-context-slot {
     height: 37px;
   }
@@ -335,13 +331,6 @@
     border-color: color-mix(in srgb, var(--cyan) 72%, var(--line));
     box-shadow: 0 8px 24px #0009;
     font-size: 22px;
-  }
-  .session-control-layer {
-    right: 13px;
-    bottom: calc(var(--session-control-edge) + var(--keyboard-inset, 0px));
-    left: 13px;
-    width: auto;
-    transform: none;
   }
   .extension-surfaces {
     grid-template-columns: minmax(0, 1fr);

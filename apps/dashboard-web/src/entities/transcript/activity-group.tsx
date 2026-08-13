@@ -47,6 +47,7 @@ export function TranscriptActivityGroup({
       data-transcript-key={`group-${groupKey}`}
     >
       <AriaButton
+        className="activity-group-header"
         type="button"
         aria-expanded={expanded}
         aria-controls={detailId}

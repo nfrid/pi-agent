@@ -13,16 +13,6 @@
   .shell {
     padding: 22px 13px 100px;
   }
-  .session-shell {
-    padding-bottom: 8px;
-  }
-  .session-page {
-    padding-bottom: 150px;
-  }
-  .session-control-layer {
-    bottom: max(6px, env(safe-area-inset-bottom));
-    width: calc(100vw - 26px);
-  }
   .extension-surfaces {
     grid-template-columns: minmax(0, 1fr);
     gap: 5px;

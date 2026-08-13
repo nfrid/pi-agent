@@ -63,6 +63,7 @@ export function SessionView({
   const [agentNavOpen, setAgentNavOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const outlineTriggerRef = useRef<HTMLButtonElement>(null);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
   const outlineWasOpenRef = useRef(false);
   const {
     data,
@@ -78,9 +79,20 @@ export function SessionView({
     store,
     onReplacement: replaceSession,
   });
-  const { history, historyError, historyLoading, loadEarlierHistory } =
-    useOlderSessionHistory({ id, data, store });
   const sessionMounted = Boolean(data && projection);
+  const {
+    history,
+    historyError,
+    historyLoading,
+    loadEarlierHistory,
+    cancelScrollRestore,
+  } = useOlderSessionHistory({
+    id,
+    data,
+    store,
+    sessionMounted,
+    scrollElementRef: embedded ? undefined : transcriptScrollRef,
+  });
 
   useEffect(() => {
     if (outlineOpen) outlineWasOpenRef.current = true;
@@ -104,7 +116,18 @@ export function SessionView({
     sessionPageRef,
     tailReadySessionId,
     tailScrollRequest,
-  } = useSessionScroll({ id, data, projection, sessionMounted });
+  } = useSessionScroll({
+    id,
+    data,
+    projection,
+    sessionMounted,
+    enabled: !embedded,
+    scrollElementRef: transcriptScrollRef,
+  });
+  const handleJumpToLatest = useCallback(() => {
+    cancelScrollRestore();
+    jumpToLatest();
+  }, [cancelScrollRestore, jumpToLatest]);
   useEffect(() => {
     if (replacementSessionId && replacementSessionId !== id)
       replaceSession(replacementSessionId);
@@ -135,7 +158,9 @@ export function SessionView({
             onOpenChange={setAgentNavOpen}
           />
         )}
-        <section className="session-page session-page-loading">
+        <section
+          className={`session-page session-page-loading${embedded ? ' session-page-embedded' : ''}`}
+        >
           <SessionLoadingHeader
             id={id}
             metadata={storedMetadata}
@@ -145,11 +170,13 @@ export function SessionView({
           />
           <PendingInteractions runtime={runtime} />
         </section>
-        <SessionLoadingCurtain
-          error={error}
-          queryError={queryError}
-          onRetry={retrySession}
-        />
+        {!embedded && (
+          <SessionLoadingCurtain
+            error={error}
+            queryError={queryError}
+            onRetry={retrySession}
+          />
+        )}
       </div>
     );
   }
@@ -179,9 +206,11 @@ export function SessionView({
       )}
       <section
         ref={sessionPageRef}
-        data-tail-pending={tailReadySessionId === id ? undefined : ''}
+        data-tail-pending={
+          !embedded && tailReadySessionId !== id ? '' : undefined
+        }
         data-runtime-paused={pauseStatus ? '' : undefined}
-        className={`session-page${hasPendingInteraction ? ' has-pending-interaction' : ''}${agentNavOpen ? ' modal-open' : ''}`}
+        className={`session-page${embedded ? ' session-page-embedded' : ''}${hasPendingInteraction ? ' has-pending-interaction' : ''}${agentNavOpen ? ' modal-open' : ''}`}
       >
         <SessionHeader
           id={id}
@@ -194,37 +223,47 @@ export function SessionView({
           onOpenOutline={() => setOutlineOpen(true)}
           store={store}
         />
-        {history?.hasOlder && (
-          <SessionHistoryControl
-            loading={historyLoading}
-            error={historyError}
-            onLoad={() => void loadEarlierHistory()}
+        <section
+          ref={transcriptScrollRef}
+          className="session-transcript-scroll"
+          aria-label="Transcript"
+        >
+          {history?.hasOlder && (
+            <SessionHistoryControl
+              loading={historyLoading}
+              error={historyError}
+              onLoad={() => void loadEarlierHistory()}
+            />
+          )}
+          <Transcript
+            key={id}
+            projection={projection}
+            runtime={runtime}
+            tailScrollRequest={tailScrollRequest}
+            outlineOpen={outlineOpen}
+            onOutlineOpenChange={setOutlineOpen}
+            onBeforeScroll={cancelScrollRestore}
+            scrollElementRef={embedded ? undefined : transcriptScrollRef}
+            virtualize={!embedded}
           />
-        )}
-        <Transcript
-          key={id}
-          projection={projection}
-          runtime={runtime}
-          tailScrollRequest={tailScrollRequest}
-          outlineOpen={outlineOpen}
-          onOutlineOpenChange={setOutlineOpen}
-        />
+        </section>
         <SessionControlLayer
           controlLayerRef={controlLayerRef}
           awayFromLatest={awayFromLatest}
-          onJumpToLatest={jumpToLatest}
+          onJumpToLatest={handleJumpToLatest}
           Composer={Composer}
           runtime={runtime}
           runtimes={snapshot.runtimes}
           sessionId={id}
           workspaceId={workspaceId}
           onPromptSubmitted={(text) => {
+            cancelScrollRestore();
             store.optimisticallyTitleSession(id, text);
           }}
         />
         <PendingInteractions runtime={runtime} />
       </section>
-      {tailReadySessionId !== id && (
+      {!embedded && tailReadySessionId !== id && (
         <SessionLoadingCurtain
           error={error}
           queryError={queryError}
