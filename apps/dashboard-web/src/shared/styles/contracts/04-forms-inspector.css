@@ -181,6 +181,8 @@
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .tool-inspector-raw {
   margin-top: 9px;
@@ -254,6 +256,11 @@
   width: 16px;
   color: var(--dim);
   user-select: none;
+}
+.tool-empty-content {
+  margin: 8px 0;
+  color: var(--muted);
+  font-style: italic;
 }
 .tool-code-line-added .tool-code-prefix {
   color: var(--green);

@@ -33,6 +33,9 @@ hljs.registerAliases(['ts', 'tsx'], { languageName: 'typescript' });
 hljs.registerAliases(['html'], { languageName: 'xml' });
 const INSPECTOR_MAX_KEYS = 16;
 const INSPECTOR_MAX_RAW_TEXT = 12_000;
+const SPECIALIZED_EDIT_MAX_REPLACEMENTS = 24;
+const RESULT_TEXT_MAX_DEPTH = 6;
+const RESULT_TEXT_MAX_BLOCKS = 128;
 
 type BoundedValue = { text: string; truncated: boolean };
 
@@ -393,15 +396,24 @@ function validEditReplacements(
   tool: ToolRecord,
 ): Array<{ oldText: string; newText: string }> {
   const edits = toolArguments(tool)?.edits;
-  if (!Array.isArray(edits)) return [];
-  return edits.filter(
-    (edit): edit is { oldText: string; newText: string } =>
-      edit !== null &&
-      typeof edit === 'object' &&
-      !Array.isArray(edit) &&
-      typeof (edit as ToolRecord).oldText === 'string' &&
-      typeof (edit as ToolRecord).newText === 'string',
-  );
+  if (
+    !Array.isArray(edits) ||
+    edits.length === 0 ||
+    edits.length > SPECIALIZED_EDIT_MAX_REPLACEMENTS
+  )
+    return [];
+  if (
+    !edits.every(
+      (edit) =>
+        edit !== null &&
+        typeof edit === 'object' &&
+        !Array.isArray(edit) &&
+        typeof (edit as ToolRecord).oldText === 'string' &&
+        typeof (edit as ToolRecord).newText === 'string',
+    )
+  )
+    return [];
+  return edits as Array<{ oldText: string; newText: string }>;
 }
 
 /** Select only complete tool payloads for the specialized presentation. */
@@ -528,6 +540,18 @@ function HighlightedAdditions({
   label: string;
 }) {
   const bounded = boundedSpecializedText(value);
+  if (value.length === 0) {
+    return (
+      <>
+        <p className="tool-empty-content">No content</p>
+        <PreviewTruncation
+          label={label}
+          sourceTruncated={false}
+          textTruncated={false}
+        />
+      </>
+    );
+  }
   const lines = bounded.text.split(/\r\n|\r|\n/u);
   if (lines.at(-1) === '' && lines.length > 1) lines.pop();
   const occurrences = new Map<string, number>();
@@ -542,6 +566,7 @@ function HighlightedAdditions({
               className="tool-code-line tool-code-line-added"
               key={`${line}-${occurrence}`}
             >
+              <span className="sr-only">Added line: </span>
               <span className="tool-code-prefix" aria-hidden="true">
                 +
               </span>
@@ -607,6 +632,13 @@ function ReplacementPreview({
                   className={`tool-code-line ${className}`}
                   key={`${identity}-${occurrence}`}
                 >
+                  <span className="sr-only">
+                    {part.added
+                      ? 'Added line: '
+                      : part.removed
+                        ? 'Removed line: '
+                        : 'Context line: '}
+                  </span>
                   <span className="tool-code-prefix" aria-hidden="true">
                     {prefix}
                   </span>
@@ -621,34 +653,62 @@ function ReplacementPreview({
   );
 }
 
-function normalizedResultText(value: unknown): string | undefined {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) {
-    if (value.length === 0) return '';
-    const textParts = value.map((part) => {
-      if (
-        part &&
-        typeof part === 'object' &&
-        !Array.isArray(part) &&
-        (part as ToolRecord).type === 'text' &&
-        typeof (part as ToolRecord).text === 'string'
-      )
-        return (part as ToolRecord).text as string;
-      return undefined;
-    });
-    return textParts.every((part): part is string => part !== undefined)
-      ? textParts.join('')
-      : undefined;
+type NormalizedResultText = { text: string; truncated: boolean };
+
+type ResultTextWork = { value: unknown; depth: number };
+
+function normalizedResultText(
+  value: unknown,
+): NormalizedResultText | undefined {
+  const work: ResultTextWork[] = [{ value, depth: 0 }];
+  let text = '';
+  let blockCount = 0;
+  let truncated = false;
+
+  while (work.length > 0) {
+    const item = work.pop() as ResultTextWork;
+    if (item.depth > RESULT_TEXT_MAX_DEPTH) return undefined;
+    if (typeof item.value === 'string') {
+      blockCount += 1;
+      if (blockCount > RESULT_TEXT_MAX_BLOCKS) return undefined;
+      const remaining = SPECIALIZED_PREVIEW_MAX_TEXT - text.length;
+      if (remaining <= 0) {
+        truncated ||= item.value.length > 0;
+      } else {
+        text += item.value.slice(0, remaining);
+        truncated ||= item.value.length > remaining;
+      }
+      continue;
+    }
+    if (Array.isArray(item.value)) {
+      if (item.value.length > RESULT_TEXT_MAX_BLOCKS) return undefined;
+      for (let index = item.value.length - 1; index >= 0; index -= 1) {
+        const part = item.value[index];
+        if (
+          part === null ||
+          typeof part !== 'object' ||
+          Array.isArray(part) ||
+          (part as ToolRecord).type !== 'text' ||
+          typeof (part as ToolRecord).text !== 'string'
+        )
+          return undefined;
+        work.push({ value: (part as ToolRecord).text, depth: item.depth });
+      }
+      continue;
+    }
+    if (item.value && typeof item.value === 'object') {
+      const content = (item.value as ToolRecord).content;
+      if (content === undefined) return undefined;
+      work.push({ value: content, depth: item.depth + 1 });
+      continue;
+    }
+    return undefined;
   }
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const content = (value as ToolRecord).content;
-    return content === undefined ? undefined : normalizedResultText(content);
-  }
-  return undefined;
+  return { text, truncated };
 }
 
 export function normalizeToolResultText(value: unknown): string | undefined {
-  return normalizedResultText(value);
+  return normalizedResultText(value)?.text;
 }
 
 function resultExitCode(value: unknown): number | undefined {
@@ -739,9 +799,17 @@ function SpecializedToolInspector({
   const command = toolCommand(tool);
   if (kind === 'command' && command) {
     const boundedCommand = boundedSpecializedText(command);
-    const resultText = normalizedResultText(tool.result);
+    const resultNormalized = normalizedResultText(tool.result);
     const resultBounded =
-      resultText === undefined ? undefined : boundedSpecializedText(resultText);
+      resultNormalized === undefined
+        ? undefined
+        : (() => {
+            const bounded = boundedSpecializedText(resultNormalized.text);
+            return {
+              text: bounded.text,
+              truncated: resultNormalized.truncated || bounded.truncated,
+            };
+          })();
     const exitCode = resultExitCode(tool.result);
     const status = tool.status ?? (tool.isError === true ? 'error' : undefined);
     return (
