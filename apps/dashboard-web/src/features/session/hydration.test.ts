@@ -99,10 +99,35 @@ describe('isCurrentSessionResponse', () => {
           cursor: 22,
           emittedAt: 22,
           sessionId: 'session-1',
-          event: { type: 'agent.settled', sessionId: 'session-1' },
+          event: {
+            type: 'session.snapshot',
+            session: {
+              id: 'session-1',
+              entries: [],
+              entriesComplete: false,
+            },
+          },
         });
       });
       await expect.poll(() => session).toHaveBeenCalledTimes(1);
+      expect(store.getSnapshot().sessionChangeById['session-1']).toBe(1);
+
+      await act(async () => {
+        store.acceptStreamRecord({
+          cursor: 23,
+          emittedAt: 23,
+          runtimeId: 'runtime-1',
+          sessionId: 'session-1',
+          event: {
+            type: 'runtime.stateChanged',
+            state: 'idle',
+            snapshot: {
+              session: { id: 'session-1', entries: [], entriesComplete: false },
+            },
+          },
+        });
+      });
+      expect(session).toHaveBeenCalledTimes(1);
     } finally {
       await act(async () => {
         renderer?.unmount();

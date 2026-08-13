@@ -375,7 +375,19 @@ describe('dashboard HTTP boundary', () => {
           pid: 1,
           cwd,
           liveState: 'idle' as const,
-          session: { id: 'lifecycle-session', entries: [] },
+          session: {
+            id: 'lifecycle-session',
+            entries: [
+              {
+                type: 'message',
+                message: {
+                  role: 'user',
+                  content: 'distinctive lifecycle transcript text',
+                },
+              },
+            ],
+            entriesComplete: true,
+          },
           pendingInteractions: [],
         },
       },
@@ -412,6 +424,9 @@ describe('dashboard HTTP boundary', () => {
         },
       },
     });
+    expect(JSON.stringify(replay)).not.toContain(
+      'distinctive lifecycle transcript text',
+    );
     for (const record of lifecycle)
       expect(record).not.toHaveProperty('snapshot');
 
@@ -437,6 +452,7 @@ describe('dashboard HTTP boundary', () => {
     await reader?.cancel();
     expect(frames).toHaveLength(replay.length);
     expect(frames.slice(1).every((frame) => !('snapshot' in frame))).toBe(true);
+    expect(text).not.toContain('distinctive lifecycle transcript text');
     replacement.destroy();
   });
 
@@ -1046,6 +1062,36 @@ describe('dashboard HTTP boundary', () => {
       serializeFrame({
         kind: 'event',
         seq: 4,
+        event: {
+          type: 'session.snapshot',
+          session: {
+            id: 'revision-session',
+            entries: [
+              {
+                type: 'message',
+                message: {
+                  role: 'user',
+                  content: 'distinctive websocket transcript text',
+                },
+              },
+            ],
+            entriesComplete: true,
+          },
+        },
+      }),
+    );
+    const compactSessionDelta = await waitForMessage();
+    expect(compactSessionDelta.event).toMatchObject({
+      type: 'session.snapshot',
+      session: { id: 'revision-session', entries: [], entriesComplete: false },
+    });
+    expect(JSON.stringify(compactSessionDelta)).not.toContain(
+      'distinctive websocket transcript text',
+    );
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 5,
         event: { type: 'runtime.goodbye' },
       }),
     );

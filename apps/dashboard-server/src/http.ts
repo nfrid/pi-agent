@@ -25,6 +25,7 @@ import {
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { projectPublicBridgeEvent } from './application/dashboard-application.js';
 import type {
   DashboardDependencies,
   DashboardServerOptions,
@@ -897,6 +898,7 @@ export class DashboardServerImpl implements DashboardServer {
       return;
     }
     if (record?.type === 'event' && record.event) {
+      const publicEvent = projectPublicBridgeEvent(record.event as BridgeEvent);
       const includeSnapshot =
         record.snapshot !== undefined && typeof record.snapshot === 'object';
       let streamRecord: Extract<
@@ -909,7 +911,7 @@ export class DashboardServerImpl implements DashboardServer {
           return {
             cursor,
             emittedAt,
-            event: record.event as BridgeEvent,
+            event: publicEvent,
             ...(record.runtimeId === undefined
               ? {}
               : { runtimeId: record.runtimeId as string }),
@@ -938,7 +940,7 @@ export class DashboardServerImpl implements DashboardServer {
           typeof record.runtimeId === 'string' && record.runtimeId.length > 0
             ? record.runtimeId
             : 'dashboard',
-        event: record.event,
+        event: publicEvent,
         ...(includeSnapshot && streamRecord.snapshot !== undefined
           ? { snapshot: streamRecord.snapshot }
           : {}),

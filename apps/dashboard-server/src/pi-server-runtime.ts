@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Socket } from 'node:net';
 import { Duplex, type DuplexOptions } from 'node:stream';
 import type { PiSessionHandle } from '@earendil-works/pi-client';
@@ -137,6 +138,20 @@ function modelRef(
   return model ? { provider: model.provider, id: model.model } : undefined;
 }
 
+function normalizedTranscript(
+  native: NonNullable<LeaseLike['snapshot']>,
+): unknown[] {
+  return native.transcript.map(normalizeTranscriptEntry);
+}
+
+function transcriptFingerprint(
+  native: NonNullable<LeaseLike['snapshot']>,
+): string {
+  return createHash('sha256')
+    .update(JSON.stringify(normalizedTranscript(native)), 'utf8')
+    .digest('hex');
+}
+
 function normalizeTranscriptEntry(entry: unknown): unknown {
   if (
     !entry ||
@@ -166,7 +181,7 @@ function normalizeTranscriptEntry(entry: unknown): unknown {
 function sessionSnapshot(
   native: NonNullable<LeaseLike['snapshot']>,
 ): SessionSnapshot {
-  const normalized = native.transcript.map(normalizeTranscriptEntry);
+  const normalized = normalizedTranscript(native);
   const entries = normalized.slice(-MAX_TRANSCRIPT_ITEMS);
   const complete = entries.length === normalized.length;
   while (
@@ -174,10 +189,20 @@ function sessionSnapshot(
     Buffer.byteLength(JSON.stringify(entries)) > MAX_TRANSCRIPT_BYTES
   )
     entries.shift();
+  // Keep metadata supplied by newer native clients without making the managed
+  // adapter depend on fields older PiClient snapshots do not expose.
+  const metadata = native as unknown as {
+    file?: string;
+    title?: string;
+    leafId?: string;
+  };
   return {
     id: native.id,
+    ...(metadata.file === undefined ? {} : { file: metadata.file }),
     ...(native.name ? { name: native.name } : {}),
+    ...(metadata.title === undefined ? {} : { title: metadata.title }),
     cwd: native.cwd,
+    ...(metadata.leafId === undefined ? {} : { leafId: metadata.leafId }),
     entries,
     entriesComplete: complete && entries.length === normalized.length,
   };
@@ -186,6 +211,7 @@ function sessionSnapshot(
 function runtimeSnapshot(
   input: RuntimeStartInput,
   native: NonNullable<LeaseLike['snapshot']>,
+  session = sessionSnapshot(native),
 ): RuntimeSnapshot {
   return {
     runtimeId: input.runtimeId,
@@ -195,7 +221,7 @@ function runtimeSnapshot(
     pid: process.pid,
     cwd: native.cwd || input.cwd,
     liveState: native.phase === 'idle' ? 'idle' : 'working',
-    session: sessionSnapshot(native),
+    session,
     model: {
       provider: native.model.provider,
       model: native.model.id,
@@ -386,6 +412,7 @@ class NativeContext {
   private unsubscribeSnapshot: (() => void) | undefined;
   private unsubscribeConnection: (() => void) | undefined;
   private disposed = false;
+  private previousTranscriptFingerprint: string;
 
   constructor(
     private readonly input: RuntimeStartInput,
@@ -397,6 +424,7 @@ class NativeContext {
     const snapshot = lease.snapshot;
     if (!snapshot) throw new Error('Pi session snapshot disappeared.');
     this.previousPhase = snapshot.phase;
+    this.previousTranscriptFingerprint = transcriptFingerprint(snapshot);
   }
 
   start(): void {
@@ -482,18 +510,25 @@ class NativeContext {
   private publish(native: NonNullable<LeaseLike['snapshot']>): void {
     if (this.disposed) return;
     const next = this.liveState(native);
+    const fingerprint = transcriptFingerprint(native);
+    const transcriptChanged =
+      fingerprint !== this.previousTranscriptFingerprint;
+    const session = sessionSnapshot(native);
+    const snapshot = runtimeSnapshot(this.input, native, session);
     this.sendEvent({
       type: 'runtime.stateChanged',
       state: next,
-      snapshot: runtimeSnapshot(this.input, native),
+      snapshot,
     });
-    this.sendEvent({
-      type: 'session.snapshot',
-      session: sessionSnapshot(native),
-    });
+    if (transcriptChanged)
+      this.sendEvent({
+        type: 'session.snapshot',
+        session,
+      });
     if (this.previousPhase !== 'idle' && native.phase === 'idle')
       this.sendEvent({ type: 'agent.settled', sessionId: native.id });
     this.previousPhase = native.phase;
+    this.previousTranscriptFingerprint = fingerprint;
   }
 
   private liveState(

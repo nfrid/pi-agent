@@ -1737,6 +1737,47 @@ describe('DashboardLiveStore', () => {
     ).toBeUndefined();
   });
 
+  it('invalidates compact session snapshots while runtime state changes stay local', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+
+    expect(
+      store.acceptStreamRecord({
+        cursor: 2,
+        emittedAt: 2,
+        runtimeId: 'runtime-1',
+        event: {
+          type: 'runtime.stateChanged',
+          state: 'working',
+          snapshot: {
+            session: {
+              id: 'session-1',
+              entries: [],
+              entriesComplete: false,
+            },
+          },
+        },
+      } as never),
+    ).toBe(true);
+    expect(store.getSnapshot().sessionChangeById['session-1']).toBeUndefined();
+
+    expect(
+      store.acceptStreamRecord({
+        cursor: 3,
+        emittedAt: 3,
+        event: {
+          type: 'session.snapshot',
+          session: {
+            id: 'session-1',
+            entries: [],
+            entriesComplete: false,
+          },
+        },
+      } as never),
+    ).toBe(true);
+    expect(store.getSnapshot().sessionChangeById['session-1']).toBe(1);
+  });
+
   it('does not let stale HTTP hydration resurrect a complete tree replacement', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 4));
