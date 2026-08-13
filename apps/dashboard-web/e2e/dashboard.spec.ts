@@ -3446,6 +3446,24 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   const mocks = await installPhase6Mocks(page);
   await page.goto('/');
   await page.getByRole('button', { name: 'Open agent list' }).click();
+  const agentNav = page.getByRole('complementary', {
+    name: 'Agents and threads',
+  });
+  const lifecycleMenuTrigger = agentNav
+    .getByRole('button', { name: /^Actions for / })
+    .first();
+  await lifecycleMenuTrigger.click();
+  const lifecycleMenu = agentNav.getByRole('menu');
+  await expect(
+    lifecycleMenu.getByRole('menuitem', { name: 'Stop' }),
+  ).toBeVisible();
+  await expect(
+    lifecycleMenu.getByRole('menuitem', { name: 'Restart' }),
+  ).toBeVisible();
+  await expect(
+    lifecycleMenu.getByRole('menuitem', { name: 'Force stop' }),
+  ).toHaveCount(0);
+  await lifecycleMenuTrigger.click();
   await page.getByRole('button', { name: 'Workspaces', exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
   await page

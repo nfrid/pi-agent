@@ -140,6 +140,7 @@
   font-weight: 500;
 }
 .threadRow {
+  position: relative;
   display: flex;
   align-items: center;
   width: 100%;
@@ -156,6 +157,106 @@
     background 150ms ease,
     border-color 150ms ease,
     color 150ms ease;
+}
+.threadLink {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.threadLink:focus-visible {
+  outline: 2px solid var(--purple);
+  outline-offset: 1px;
+}
+.lifecycleActions {
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  z-index: 2;
+  transform: translateY(-50%);
+}
+.lifecycleActionsTrigger {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
+  color: var(--dim);
+  padding: 0;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0;
+}
+.threadRow:hover .lifecycleActionsTrigger,
+.threadRow:focus-within .lifecycleActionsTrigger,
+.lifecycleActionsTrigger[aria-expanded="true"] {
+  border-color: var(--line-soft);
+  color: var(--fg);
+  opacity: 1;
+}
+.lifecycleActionsTrigger:hover,
+.lifecycleActionsTrigger:focus-visible {
+  border-color: var(--purple);
+  outline: none;
+}
+.lifecycleActionsMenu {
+  position: absolute;
+  top: calc(100% - 2px);
+  right: 0;
+  display: grid;
+  min-width: 112px;
+  gap: 2px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--bg-alt);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--bg) 70%, transparent);
+  padding: 4px;
+}
+.lifecycleActionsMenu button {
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+.lifecycleActionsMenu button:hover:not(:disabled),
+.lifecycleActionsMenu button:focus-visible {
+  background: color-mix(in srgb, var(--purple) 12%, var(--bg));
+  color: var(--fg);
+  outline: none;
+}
+.lifecycleActionsMenu button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+.lifecycleActionsMenu .lifecycleActionDanger {
+  color: var(--red);
+}
+.lifecycleActionsMenu .lifecycleActionDanger:hover:not(:disabled),
+.lifecycleActionsMenu .lifecycleActionDanger:focus-visible {
+  color: var(--red);
+}
+.lifecycleActionsMenu :global(.error) {
+  max-width: 180px;
+  padding: 4px 6px;
+  font-size: 9px;
+  overflow-wrap: anywhere;
 }
 .threadRow:hover,
 .threadRow:global(.selected) {
@@ -325,6 +426,17 @@
   padding: 0 4px;
   font-size: 9px;
   text-align: center;
+}
+@media (max-width: 820px) {
+  .lifecycleActionsTrigger {
+    width: 44px;
+    height: 44px;
+    border-color: transparent;
+    opacity: 1;
+  }
+  .lifecycleActionsMenu {
+    right: 0;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .threadRow {
