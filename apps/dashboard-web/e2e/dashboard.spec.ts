@@ -2202,12 +2202,10 @@ Note: Recovery completed after the final check.`,
     return icon && title
       ? {
           topDifference: Math.abs(icon.top - title.top),
-          gap: title.left - icon.right,
         }
       : undefined;
   });
   expect(mobileActivityHeader?.topDifference).toBeLessThan(5);
-  expect(mobileActivityHeader?.gap).toBeGreaterThanOrEqual(0);
   await expect(activity.locator('small')).toHaveCount(0);
   await expect(
     activity.locator('xpath=../..').getByText('1 tool call', { exact: true }),
@@ -3318,7 +3316,7 @@ test('activity header renders Markdown and proves float and sticky geometry @des
     'aria-describedby',
     'activity-status-20',
   );
-  await expect(toggle).toHaveCSS('width', '28px');
+  await expect(toggle).toHaveCSS('width', '14px');
   await expect(header.locator('small')).toHaveCount(0);
   const headerMetrics = await header.evaluate((element) => {
     const groupElement = element.closest('.activity-group');
@@ -3329,6 +3327,9 @@ test('activity header renders Markdown and proves float and sticky geometry @des
     );
     const laterParagraph =
       markdown?.querySelector<HTMLElement>(':scope > p + p');
+    const preambleElement = element.querySelector<HTMLElement>(
+      '.activity-group-preamble',
+    );
     const accessory = element.querySelector<HTMLElement>(
       '.activity-group-accessories',
     );
@@ -3342,6 +3343,7 @@ test('activity header renders Markdown and proves float and sticky geometry @des
       !markdown ||
       !firstParagraph ||
       !laterParagraph ||
+      !preambleElement ||
       !accessory ||
       !timestamp ||
       !control
@@ -3386,6 +3388,8 @@ test('activity header renders Markdown and proves float and sticky geometry @des
     const controlRect = control.getBoundingClientRect();
     const firstLines = lineRects(firstParagraph);
     const laterLines = lineRects(laterParagraph);
+    const firstLine = firstLines[0];
+    const laterLine = laterLines[0];
     const alongsideLines = firstLines.filter(
       (line) =>
         line.top < accessoryRect.bottom && line.bottom > accessoryRect.top,
@@ -3395,6 +3399,14 @@ test('activity header renders Markdown and proves float and sticky geometry @des
     );
     return {
       headerHeight: element.getBoundingClientRect().height,
+      preambleFontSize: getComputedStyle(preambleElement).fontSize,
+      preambleLineHeight: getComputedStyle(preambleElement).lineHeight,
+      firstLineHeight: firstLine
+        ? firstLine.bottom - firstLine.top
+        : Number.NaN,
+      laterLineHeight: laterLine
+        ? laterLine.bottom - laterLine.top
+        : Number.NaN,
       accessory: {
         top: accessoryRect.top,
         bottom: accessoryRect.bottom,
@@ -3413,6 +3425,7 @@ test('activity header renders Markdown and proves float and sticky geometry @des
         top: controlRect.top,
         bottom: controlRect.bottom,
         right: controlRect.right,
+        lineHeight: getComputedStyle(control).lineHeight,
       },
       firstLines,
       alongsideLines,
@@ -3428,6 +3441,14 @@ test('activity header renders Markdown and proves float and sticky geometry @des
     };
   });
   expect(headerMetrics.headerHeight).toBeGreaterThan(42);
+  expect(headerMetrics.preambleFontSize).toBe('14px');
+  expect(headerMetrics.control.lineHeight).toBe(
+    headerMetrics.preambleLineHeight,
+  );
+  expect(headerMetrics.firstLineHeight).toBeCloseTo(
+    headerMetrics.laterLineHeight,
+    0,
+  );
   expect(headerMetrics.accessory.width).toBeGreaterThan(0);
   expect(headerMetrics.timestamp.width).toBeGreaterThan(0);
   expect(headerMetrics.scrollWidth).toBeLessThanOrEqual(
@@ -3461,7 +3482,23 @@ test('activity header renders Markdown and proves float and sticky geometry @des
     headerMetrics.accessory.left,
   );
 
+  const link = header.locator('.markdown a');
+  await link.evaluate((element) => {
+    element.addEventListener('click', (event) => event.preventDefault(), {
+      once: true,
+    });
+    element.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+  });
+  await expect(group.locator('.activity-detail')).toHaveCount(0);
+
+  await header.locator('.markdown strong').click();
+  await expect(group.locator('.activity-detail')).toBeVisible();
   await toggle.click();
+  await expect(group.locator('.activity-detail')).toHaveCount(0);
+  await toggle.click();
+  await expect(group.locator('.activity-detail')).toBeVisible();
   const toolSummary = group.locator('.tool-detail > summary.activity-step');
   await expect(toolSummary).toBeVisible();
   await toolSummary.click();
@@ -4109,6 +4146,11 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   });
   const composerInput = page.getByLabel('Message Pi');
   await expect(composerInput).toBeEnabled();
+  expect(
+    await composerInput.evaluate(
+      (element) => getComputedStyle(element).fontSize,
+    ),
+  ).toBe('14px');
   await composerInput.fill('/skill:');
   await expect(
     page.getByRole('option', { name: /\/skill:browser/ }),

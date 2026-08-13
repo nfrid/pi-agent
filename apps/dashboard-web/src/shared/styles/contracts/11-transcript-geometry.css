@@ -521,7 +521,7 @@ body:has(.session-page) .global-tools > .palette-trigger {
   padding: 10px 8px 8px;
   color: var(--fg);
   font-family: inherit;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.55;
 }
 .composer-rich-editor > :first-child {

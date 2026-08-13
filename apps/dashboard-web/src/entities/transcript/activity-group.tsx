@@ -1,5 +1,5 @@
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
-import { useEffect, useRef } from 'react';
+import { type MouseEvent, useEffect, useRef } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { DashboardTime } from '../../features/timestamp';
 import { Markdown } from '../../Markdown';
@@ -68,13 +68,29 @@ export function TranscriptActivityGroup({
     captureScrollAnchor?.(`group-${groupKey}`);
     onToggle(!expanded);
   };
+  const handleHeaderClick = (event: MouseEvent<HTMLElement>) => {
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest(
+        'a, button, input, select, textarea, summary, [contenteditable="true"], [role="button"], [role="link"], [tabindex]:not([tabindex="-1"])',
+      )
+    )
+      return;
+    toggle();
+  };
   return (
     <div
       ref={groupRef}
       className={`activity-group ${presentation.className}`}
       data-transcript-key={`group-${groupKey}`}
     >
-      <header ref={headerRef} className="activity-group-header">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the nested button remains the keyboard control while the header surface delegates pointer clicks. */}
+      <header
+        ref={headerRef}
+        className="activity-group-header"
+        onClick={handleHeaderClick}
+      >
         <span className="activity-group-accessories">
           <DashboardTime
             className="transcript-time activity-time"
