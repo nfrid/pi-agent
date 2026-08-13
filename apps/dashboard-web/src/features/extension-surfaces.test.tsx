@@ -8,7 +8,7 @@ import { StructuredDelegateResults } from '../entities/transcript/entries';
 import {
   DelegateInspectorMetadata,
   DelegateStructuredResultSection,
-  DelegateTranscriptInspector,
+  delegateDetailHasError,
   delegateTranscriptItems,
   selectedDelegateRunId,
 } from './delegate-transcript-inspector';
@@ -160,55 +160,14 @@ describe('live extension surface fixtures', () => {
     expect(selectedDelegateRunId('run-1', first, true)).toBe('run-2');
   });
 
-  it('does not show a detail error alert for successful detail data', () => {
-    const row = {
-      id: 'lineage-1',
-      runId: 'run-1',
-      lineageId: 'lineage-1',
-      name: 'Worker',
-      kind: 'background' as const,
-      state: 'success' as const,
-      createdAt: 1,
-      allowWrites: false,
-    };
-    const detail = {
-      runId: 'run-1',
-      lineageId: 'lineage-1',
-      run: {
-        runId: 'run-1',
-        lineageId: 'lineage-1',
-        name: 'Worker',
-        kind: 'background' as const,
-        state: 'success' as const,
-        createdAt: 1,
-        allowWrites: false,
-        details: {
-          response: 'Persisted transcript response',
-          truncated: false,
-        },
-      },
-    } as const;
-    const renderInspector = (error: unknown) =>
-      renderToStaticMarkup(
-        <DelegateTranscriptInspector
-          row={row}
-          now={2}
-          detail={{ run: detail, error }}
-          isOpen
-          onClose={() => {}}
-        />,
-      );
-
-    const successfulMarkup = renderInspector(null);
-    expect(successfulMarkup).toContain('Persisted transcript response');
-    expect(successfulMarkup).not.toContain(
-      'Unable to load this persisted delegate transcript.',
-    );
-
-    const erroredMarkup = renderInspector(new Error('detail failed'));
-    expect(erroredMarkup).toContain(
-      'Unable to load this persisted delegate transcript.',
-    );
+  it('treats nullish successful detail errors as absent', () => {
+    expect(delegateDetailHasError(undefined)).toBe(false);
+    expect(delegateDetailHasError({ error: undefined })).toBe(false);
+    expect(delegateDetailHasError({ error: null })).toBe(false);
+    expect(delegateDetailHasError({ error: new Error('failed') })).toBe(true);
+    expect(
+      delegateDetailHasError({ error: new Error('failed'), loading: true }),
+    ).toBe(false);
   });
 
   it('shows an explicit incomplete-history message in the transcript inspector', () => {

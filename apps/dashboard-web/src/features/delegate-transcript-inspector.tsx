@@ -365,6 +365,12 @@ export interface DelegateInspectorDetailState {
   error?: unknown;
 }
 
+export function delegateDetailHasError(
+  detail: DelegateInspectorDetailState | undefined,
+): boolean {
+  return detail?.error != null && detail.loading !== true;
+}
+
 /** Keep a historical selection stable while the live composite is refreshed. */
 export function selectedDelegateRunId(
   previousId: string | undefined,
@@ -459,7 +465,7 @@ export function DelegateTranscriptInspector({
             Loading persisted delegate transcript…
           </p>
         )}
-        {detail?.error != null && !detail.loading && (
+        {delegateDetailHasError(detail) && (
           <p className="delegate-transcript-error" role="alert">
             Unable to load this persisted delegate transcript.
           </p>
