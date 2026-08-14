@@ -158,6 +158,12 @@ describe('dashboard tRPC boundary', () => {
       headers: authHeaders(),
     });
     expect(removedBootstrap.statusCode).toBe(404);
+    const removedSessionRoute = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/s',
+      headers: authHeaders(),
+    });
+    expect(removedSessionRoute.statusCode).toBe(404);
   });
 
   it('serves authoritative shell and session queries', async () => {
