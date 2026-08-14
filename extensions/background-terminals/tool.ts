@@ -1,6 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { loadGuidelines } from '../shared/instructions';
 import { formatPeek, formatSummary } from './format';
 import type { BackgroundManager } from './manager';
 import { renderBackgroundCall, renderBackgroundResult } from './renderers';
@@ -12,7 +13,7 @@ import {
 } from './schema';
 
 const DESCRIPTION =
-  'Manage long-running, non-interactive Bash commands. Use start for servers, watchers, and long builds; use regular bash for quick commands. Completion is delivered automatically. Actions: start, peek, list, stop.';
+  'Use this tool for non-interactive commands expected to outlive the current turn, such as servers, watchers, dev processes, and long builds; use ordinary bash for short commands that should finish within the current turn. Each process runs `/bin/bash -c` with the command as supplied and has no stdin, so it must not require input; quote shell syntax for Bash and set a working directory when needed. Processes belong to the current session and are cleaned up when that session shuts down. Output is retained in bounded tails, so inspect recent output rather than expecting an unbounded log. Completion is delivered automatically. When a process settles, its message resumes the agent turn; do not block waiting here.';
 
 function requireText(value: string | undefined, name: string): string {
   const text = value?.trim();
@@ -38,6 +39,9 @@ export function registerBackgroundTool(
     description: DESCRIPTION,
     promptSnippet:
       'Start, inspect, and stop long-running non-interactive Bash commands',
+    promptGuidelines: loadGuidelines(
+      'extensions/background-terminals/instructions.md',
+    ),
     parameters: Parameters,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const active = getManager();

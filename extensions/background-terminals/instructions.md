@@ -1,0 +1,3 @@
+- Use background for work that is expected to outlive the current turn; use ordinary bash for short commands.
+- When a background process is the only remaining dependency, end the turn with one short waiting notice; do not add a recap or poll for it.
+- Completion resumes automatically when the background process settles, so continue from that completion rather than asking the user to check it.
