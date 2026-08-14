@@ -1,7 +1,7 @@
 import {
   type AuthoritativeSessionSnapshot,
   type BrowserSnapshot,
-  PROTOCOL_VERSION,
+  DASHBOARD_PROTOCOL_VERSION,
   type ProtocolInfo,
   ProtocolInfoSchema,
   parseAuthoritativeSessionSnapshot,
@@ -147,7 +147,7 @@ export function createDashboardRouter(context: DashboardTrpcContext) {
       .query((): ProtocolInfo => {
         try {
           return {
-            protocolVersion: PROTOCOL_VERSION,
+            protocolVersion: DASHBOARD_PROTOCOL_VERSION,
             serverId: context.serverId(),
             capabilities: { shellSnapshot: true, sessionSnapshot: true },
           };
@@ -165,7 +165,7 @@ export function createDashboardRouter(context: DashboardTrpcContext) {
       )
       .output((value: unknown) => parseShellSnapshotResponse(value))
       .query(({ input }) => {
-        if (input.protocolVersion !== PROTOCOL_VERSION)
+        if (input.protocolVersion !== DASHBOARD_PROTOCOL_VERSION)
           throw toDashboardTrpcError(protocolMismatch());
         try {
           const response = context.shellSnapshot();

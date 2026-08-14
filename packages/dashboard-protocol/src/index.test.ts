@@ -615,7 +615,7 @@ describe('dashboard protocol', () => {
     expect(
       isBridgeEvent({
         type: 'runtime.hello',
-        protocolVersion: 2,
+        protocolVersion: 1,
         capabilities: { heartbeat: true },
         snapshot: helloSnapshot,
       }),
@@ -624,6 +624,14 @@ describe('dashboard protocol', () => {
       isBridgeEvent({
         type: 'runtime.hello',
         protocolVersion: 2,
+        capabilities: { heartbeat: true },
+        snapshot: helloSnapshot,
+      }),
+    ).toBe(false);
+    expect(
+      isBridgeEvent({
+        type: 'runtime.hello',
+        protocolVersion: 1,
         capabilities: { heartbeat: false },
         snapshot: helloSnapshot,
       }),
@@ -631,7 +639,7 @@ describe('dashboard protocol', () => {
     expect(
       isBridgeEvent({
         type: 'runtime.hello',
-        protocolVersion: 2,
+        protocolVersion: 1,
         snapshot: { runtimeId: 'r', pid: 1 },
       }),
     ).toBe(false);

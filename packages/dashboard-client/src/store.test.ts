@@ -772,7 +772,7 @@ describe('DashboardLiveStore', () => {
       sessionId: 'session-1',
       event: {
         type: 'runtime.hello',
-        protocolVersion: 2,
+        protocolVersion: 1,
         snapshot: {
           ...runtime,
           cwd: '/tmp/new',
@@ -826,7 +826,7 @@ describe('DashboardLiveStore', () => {
       sessionId: 'session-2',
       event: {
         type: 'runtime.hello',
-        protocolVersion: 2,
+        protocolVersion: 1,
         snapshot: {
           ...runtime,
           cwd: '/tmp/stale',
@@ -923,7 +923,7 @@ describe('DashboardLiveStore', () => {
       sessionId: 'session-2',
       event: {
         type: 'runtime.hello',
-        protocolVersion: 2,
+        protocolVersion: 1,
         snapshot: {
           ...runtime,
           online: true,

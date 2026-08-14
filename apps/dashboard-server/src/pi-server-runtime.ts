@@ -18,6 +18,7 @@ import type {
 import {
   type BridgeCommand,
   type BridgeEvent,
+  PROTOCOL_VERSION,
   parseFrame,
   serializeFrame,
 } from '@pi-dashboard/protocol';
@@ -533,7 +534,7 @@ class NativeContext {
   sendHello(native: NonNullable<LeaseLike['snapshot']>): void {
     this.sendEvent({
       type: 'runtime.hello',
-      protocolVersion: 2,
+      protocolVersion: PROTOCOL_VERSION,
       token: this.input.launchToken,
       identityToken: this.input.identityToken,
       snapshot: runtimeSnapshot(this.input, native),

@@ -70,7 +70,10 @@ export {
   ThreadSummarySchema,
 } from './orchestration-contracts.js';
 
-export const PROTOCOL_VERSION = 2;
+/** Version of the extension/runtime bridge protocol. Keep stable for stored and running extensions. */
+export const PROTOCOL_VERSION = 1;
+/** Version of the browser HTTP/tRPC dashboard protocol. */
+export const DASHBOARD_PROTOCOL_VERSION = 2;
 export const MAX_FRAME_BYTES = 512 * 1024;
 
 /** Capabilities advertised by the authenticated dashboard HTTP boundary. */
@@ -86,7 +89,7 @@ export type ProtocolCapabilities = Static<typeof ProtocolCapabilitiesSchema>;
 /** Version and finite query capabilities negotiated before bootstrap. */
 export const ProtocolInfoSchema = Type.Object(
   {
-    protocolVersion: Type.Literal(PROTOCOL_VERSION),
+    protocolVersion: Type.Literal(DASHBOARD_PROTOCOL_VERSION),
     /** The daemon generation used by snapshots and live transports. */
     serverId: Type.String({ minLength: 1, maxLength: 512 }),
     capabilities: ProtocolCapabilitiesSchema,

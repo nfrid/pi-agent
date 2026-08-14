@@ -471,7 +471,7 @@ describe('dashboard HTTP boundary', () => {
       seq: 1,
       event: {
         type: 'runtime.hello' as const,
-        protocolVersion: 2 as const,
+        protocolVersion: 1 as const,
         snapshot: {
           runtimeId: 'lifecycle-runtime',
           ownership: 'external' as const,
@@ -966,7 +966,7 @@ describe('dashboard HTTP boundary', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 2,
+          protocolVersion: 1,
           snapshot: {
             runtimeId: 'startup-runtime',
             ownership: 'external',
@@ -1094,7 +1094,7 @@ describe('dashboard HTTP boundary', () => {
     });
     const hello = {
       type: 'runtime.hello' as const,
-      protocolVersion: 2,
+      protocolVersion: 1,
       snapshot: {
         runtimeId: 'revision-runtime',
         ownership: 'external' as const,
@@ -1233,7 +1233,7 @@ describe('dashboard HTTP boundary', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 2,
+          protocolVersion: 1,
           snapshot: {
             runtimeId: 'image-runtime',
             ownership: 'external',

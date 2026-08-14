@@ -1,4 +1,7 @@
-import type { BrowserSnapshot } from '@pi-dashboard/protocol';
+import {
+  type BrowserSnapshot,
+  DASHBOARD_PROTOCOL_VERSION,
+} from '@pi-dashboard/protocol';
 import type { Page } from '@playwright/test';
 
 export type DashboardFixtureOptions = {
@@ -29,7 +32,7 @@ export async function installDashboardBootstrap(
       contentType: 'application/json',
       body: trpcData(
         options.protocolInfo ?? {
-          protocolVersion: 2,
+          protocolVersion: DASHBOARD_PROTOCOL_VERSION,
           serverId: snapshot.serverId,
           capabilities: { shellSnapshot: true, sessionSnapshot: true },
         },

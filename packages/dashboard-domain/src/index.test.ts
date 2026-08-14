@@ -1206,7 +1206,7 @@ describe('dashboard domain reducers', () => {
       runtimeSeq: 1,
       event: {
         type: 'runtime.hello',
-        protocolVersion: 2,
+        protocolVersion: 1,
         snapshot: { ...snapshot(), liveState: 'working' },
       },
     });

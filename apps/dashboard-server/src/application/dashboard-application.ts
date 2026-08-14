@@ -14,6 +14,7 @@ import {
   type NormalizedMessagePayload,
   type NormalizedToolPayload,
   type NotificationEvent,
+  PROTOCOL_VERSION,
   type RuntimeSnapshot,
   type RuntimeSnapshotPatch,
   type SessionIndexEntry,
@@ -1009,7 +1010,11 @@ export class DashboardApplication {
       };
       return {
         type: 'event',
-        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: PROTOCOL_VERSION,
+          snapshot,
+        },
         runtimeId: snapshot.runtimeId,
         sessionId: snapshot.session.id,
         ...provenance,

@@ -16,6 +16,7 @@ import {
   type BridgeCommand,
   type BridgeEvent,
   MAX_QUEUE_DRAFTS,
+  PROTOCOL_VERSION,
   parseFrame,
   type RuntimeSnapshot,
   redactBridgeEvent,
@@ -187,7 +188,7 @@ export class RuntimeRegistry {
           >;
           const snapshot = hello.snapshot;
           if (
-            hello.protocolVersion !== 2 ||
+            hello.protocolVersion !== PROTOCOL_VERSION ||
             !snapshot.runtimeId ||
             !snapshot.cwd ||
             !snapshot.session?.id

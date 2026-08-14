@@ -205,6 +205,7 @@ export {
   ComposerCommandEntrySchema,
   ComposerCommandSourceSchema,
   ComposerCommandsResponseSchema,
+  DASHBOARD_PROTOCOL_VERSION,
   DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
   DASHBOARD_SUPPORTED_BUILTINS,
   DashboardEventEnvelopeSchema,

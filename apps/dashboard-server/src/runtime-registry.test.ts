@@ -51,6 +51,36 @@ function eventually<T>(read: () => T | undefined): Promise<T> {
 }
 
 describe('runtime registry', () => {
+  it('accepts bridge hello v1 and rejects the retired v2 hello', async () => {
+    const accepted = new RuntimeRegistry({ expectedToken: () => true });
+    const v1 = new PassThrough();
+    accepted.accept(v1 as never);
+    v1.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => accepted.get('runtime-1'));
+    expect(accepted.get('runtime-1')).toBeDefined();
+    accepted.close();
+
+    const rejected = new RuntimeRegistry({ expectedToken: () => true });
+    const v2 = new PassThrough();
+    rejected.accept(v2 as never);
+    v2.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }).replace('"protocolVersion":1', '"protocolVersion":2'),
+    );
+    await eventually(() => (v2.destroyed ? true : undefined));
+    expect(rejected.get('runtime-1')).toBeUndefined();
+    rejected.close();
+  });
+
   it('tombstones forgotten runtimes so leaked clients cannot reconnect', async () => {
     const registry = new RuntimeRegistry({ expectedToken: () => true });
     const first = new PassThrough();
@@ -59,7 +89,7 @@ describe('runtime registry', () => {
       serializeFrame({
         kind: 'event',
         seq: 1,
-        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
       }),
     );
     await eventually(() => registry.get('runtime-1'));
@@ -73,7 +103,7 @@ describe('runtime registry', () => {
       serializeFrame({
         kind: 'event',
         seq: 1,
-        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
       }),
     );
     await new Promise((resolve) => setTimeout(resolve, 1));
@@ -121,7 +151,7 @@ describe('runtime registry', () => {
           seq: 1,
           event: {
             type: 'runtime.hello',
-            protocolVersion: 2,
+            protocolVersion: 1,
             capabilities: candidate.capabilities,
             snapshot: { ...snapshot, runtimeId: `legacy-${index}` },
           },
@@ -148,7 +178,7 @@ describe('runtime registry', () => {
       serializeFrame({
         kind: 'event',
         seq: 1,
-        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
       }),
     );
     await eventually(() => registry.get('runtime-1'));
@@ -175,7 +205,7 @@ describe('runtime registry', () => {
         seq: 7,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 2,
+          protocolVersion: 1,
           snapshot: { ...snapshot, liveState: 'working' },
         },
       }),
@@ -210,7 +240,7 @@ describe('runtime registry', () => {
           seq,
           event: {
             type: 'runtime.hello',
-            protocolVersion: 2,
+            protocolVersion: 1,
             capabilities: { heartbeat: true },
             snapshot,
           },
@@ -247,7 +277,7 @@ describe('runtime registry', () => {
       serializeFrame({
         kind: 'event',
         seq: 1,
-        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
       }),
     );
     await eventually(() => registry.get('runtime-1'));
@@ -267,7 +297,7 @@ describe('runtime registry', () => {
       serializeFrame({
         kind: 'event',
         seq: 1,
-        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
       }),
     );
     await eventually(() => registry.get('runtime-1'));
@@ -283,7 +313,7 @@ describe('runtime registry', () => {
       serializeFrame({
         kind: 'event',
         seq: 1,
-        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
       }),
     );
     await eventually(() => registry.get('runtime-1'));
@@ -328,7 +358,7 @@ describe('runtime registry', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 2,
+          protocolVersion: 1,
           snapshot: { ...snapshot, capabilities: initialCapabilities },
         },
       }),
@@ -399,7 +429,7 @@ describe('runtime registry', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 2,
+          protocolVersion: 1,
           snapshot: {
             ...snapshot,
             session: {
@@ -482,7 +512,7 @@ describe('runtime registry', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 2,
+          protocolVersion: 1,
           snapshot: { ...snapshot, capabilities: actionCapabilities },
         },
       }),
@@ -544,7 +574,7 @@ describe('runtime registry', () => {
       serializeFrame({
         kind: 'event',
         seq: 1,
-        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
       }),
     );
     await eventually(() => registry.get('runtime-1'));
@@ -565,7 +595,7 @@ describe('runtime registry', () => {
       serializeFrame({
         kind: 'event',
         seq: 1,
-        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
       }),
     );
     await expect(commandPromise).rejects.toThrow('disconnected');
@@ -588,7 +618,7 @@ describe('runtime registry', () => {
       serializeFrame({
         kind: 'event',
         seq: 1,
-        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
       }),
     );
     await eventually(() => registry.get('runtime-1'));
@@ -663,7 +693,7 @@ describe('runtime registry', () => {
       serializeFrame({
         kind: 'event',
         seq: 1,
-        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
       }),
     );
     await eventually(() => registry.get('runtime-1'));
@@ -685,7 +715,7 @@ describe('runtime registry', () => {
       serializeFrame({
         kind: 'event',
         seq: 1,
-        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
       }),
     );
     await eventually(() => registry.get('runtime-1'));
@@ -723,7 +753,7 @@ describe('runtime registry', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 2,
+          protocolVersion: 1,
           token: 'one',
           snapshot,
         },

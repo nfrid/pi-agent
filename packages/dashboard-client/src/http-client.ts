@@ -5,11 +5,11 @@ import {
   type Checkout,
   type CommandReceipt,
   type ComposerCommandCatalogue,
+  DASHBOARD_PROTOCOL_VERSION,
   type DashboardStreamMessage,
   type DelegateHistoryResponse,
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
-  PROTOCOL_VERSION,
   type Project,
   type ProjectAdoptCommand,
   type ProjectCreateCommand,
@@ -178,7 +178,7 @@ function dashboardErrorFromTrpc(cause: unknown): DashboardHttpError {
         : undefined;
   if (domainCode === 'protocol-mismatch' && actual !== undefined)
     return new DashboardProtocolMismatchError(
-      PROTOCOL_VERSION,
+      DASHBOARD_PROTOCOL_VERSION,
       actual,
       typeof data?.serverId === 'string' ? data.serverId : undefined,
     );
@@ -358,10 +358,10 @@ export class DashboardHttpClient {
       if (
         typeof record?.protocolVersion === 'number' &&
         Number.isInteger(record.protocolVersion) &&
-        record.protocolVersion !== PROTOCOL_VERSION
+        record.protocolVersion !== DASHBOARD_PROTOCOL_VERSION
       )
         throw new DashboardProtocolMismatchError(
-          PROTOCOL_VERSION,
+          DASHBOARD_PROTOCOL_VERSION,
           record.protocolVersion,
           typeof record.serverId === 'string' ? record.serverId : undefined,
         );
@@ -448,7 +448,7 @@ export class DashboardHttpClient {
     let value: unknown;
     try {
       value = await client.shellSnapshot.query({
-        protocolVersion: PROTOCOL_VERSION,
+        protocolVersion: DASHBOARD_PROTOCOL_VERSION,
       });
     } catch (cause) {
       throw dashboardErrorFromTrpc(cause);
