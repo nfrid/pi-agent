@@ -46,6 +46,7 @@ const readSchema = Type.Object(
 );
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+const DESCRIPTION = `Read the contents of a file. Supports text files and raster images (jpg, png, gif, webp, bmp). Images are sent as attachments. For images, crop selects an exact source-pixel region and reports source/returned dimensions; crops are limited to ${IMAGE_CROP_LIMITS.maxCropDimension}x${IMAGE_CROP_LIMITS.maxCropDimension} and ${IMAGE_CROP_LIMITS.maxCropPixels.toLocaleString('en-US')} pixels. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files.`;
 
 function normalizeReadPath(path: string, cwd: string): string {
   let normalized = path.replace(UNICODE_SPACES, ' ');
@@ -87,9 +88,8 @@ export default function imageReadExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'read',
     label: 'read',
-    description: `Read the contents of a file. Supports text files and raster images (jpg, png, gif, webp, bmp). Images are sent as attachments. For images, crop selects an exact source-pixel region and reports source/returned dimensions; crops are limited to ${IMAGE_CROP_LIMITS.maxCropDimension}x${IMAGE_CROP_LIMITS.maxCropDimension} and ${IMAGE_CROP_LIMITS.maxCropPixels.toLocaleString('en-US')} pixels. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files.`,
+    description: DESCRIPTION,
     promptSnippet: 'Read file contents or an exact raster-image crop',
-    promptGuidelines: ['Use read to examine files instead of cat or sed.'],
     parameters: readSchema,
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       if (!params.crop) {

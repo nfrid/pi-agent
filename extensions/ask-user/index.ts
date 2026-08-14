@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
+import { loadGuidelines } from '../shared/instructions';
 import { defineExtension } from '../shared/runtime/extension';
 import { getInteractionBroker } from './broker';
 import { TOOL_NAME } from './constants';
@@ -20,18 +21,17 @@ export default defineExtension('ask-user', (pi: ExtensionAPI) => {
   });
 });
 
+const DESCRIPTION =
+  'Ask the user one question and wait for an answer. Supports free-form answers, optional labeled choices with values and descriptions, markdown previews for choices, and an optional custom-answer field.';
+
 function registerAskUserTool(pi: ExtensionAPI): void {
   pi.registerTool<typeof ParamsSchema, Answer>({
     name: TOOL_NAME,
     label: 'Ask User',
-    description:
-      'Ask the user a question and wait for their answer. For decisions that are genuinely theirs to make, not for ambiguity you can resolve yourself.',
+    description: DESCRIPTION,
     promptSnippet:
       'Ask the user a question with optional choices, optional markdown previews, and a custom-answer field',
-    promptGuidelines: [
-      "Ask only when the answer is the user's to give — a destructive or irreversible step, or a preference the repository cannot settle. Anything you can decide, decide: pick the best reading, say what you assumed, and continue.",
-      'When you do ask, ask once and ask narrowly: one concrete question, with the likely answers as choices, and choice.preview when a short code or ASCII comparison decides it.',
-    ],
+    promptGuidelines: loadGuidelines('instructions.md', __dirname),
     parameters: ParamsSchema,
     executionMode: 'sequential',
 

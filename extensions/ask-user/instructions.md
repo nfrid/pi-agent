@@ -1,0 +1,2 @@
+- Ask only when the answer belongs to the user: a destructive or irreversible step, or a preference the repository cannot settle. Decide anything you can resolve yourself, state the assumption, and continue.
+- When asking, ask once and narrowly: one concrete question with the likely answers as choices; include a choice preview when a short code or ASCII comparison would decide it.

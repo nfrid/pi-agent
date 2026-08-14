@@ -1,0 +1,3 @@
+- Use todo when work has multiple meaningful steps whose progress or ordering is useful; skip it for trivial one-shot requests and simple questions.
+- Keep the todo list synchronized with meaningful progress and plan changes rather than narrating or restating the plan in free-form text.
+- Prefer the todo state already supplied in context; use list when the exact current state is needed or when the user asks to see it.

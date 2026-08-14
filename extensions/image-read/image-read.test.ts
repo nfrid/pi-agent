@@ -123,6 +123,14 @@ function registeredReadTool() {
 }
 
 describe('image read crops', () => {
+  it('keeps detailed read mechanics in the description, not prompt guidelines', () => {
+    const tool = registeredReadTool();
+    expect(tool.description).toContain(
+      'For text files, output is truncated to 2000 lines or 50KB',
+    );
+    expect(tool.promptGuidelines).toBeUndefined();
+  });
+
   it('returns the exact requested source pixels and dimensions', async () => {
     const result = await cropRasterImage(gridPng(), {
       x: 1,
