@@ -15,6 +15,7 @@ import {
   filterGlobalContextFiles,
   findOuterMetaSkillPath,
   formatPromptInfo,
+  loadGuidelines,
   loadInstruction,
   summarizeContextMessages,
 } from './index';
@@ -82,6 +83,24 @@ describe('canonical prompt composition', () => {
     });
   });
 
+  it('loads non-empty bullet guidelines and rejects malformed files', () => {
+    const agentDir = temporaryDirectory();
+    const instructionsDir = join(agentDir, 'instructions', 'agent');
+    mkdirSync(instructionsDir, { recursive: true });
+    writeFileSync(join(instructionsDir, 'guidelines.md'), '- first\n- second\n');
+    expect(
+      loadGuidelines('instructions/agent/guidelines.md', agentDir),
+    ).toEqual(['first', 'second']);
+    writeFileSync(join(instructionsDir, 'guidelines.md'), '# heading');
+    expect(() =>
+      loadGuidelines('instructions/agent/guidelines.md', agentDir),
+    ).toThrow(/only non-empty '- ' bullet entries.*line 1/);
+    writeFileSync(join(instructionsDir, 'guidelines.md'), '');
+    expect(() =>
+      loadGuidelines('instructions/agent/guidelines.md', agentDir),
+    ).toThrow(/guideline file is empty/);
+  });
+
   it('keeps the agent-repository context local to that repository', () => {
     const files = [
       { path: '/home/me/.pi/agent/AGENTS.md', content: 'agent repo rules' },
@@ -123,9 +142,12 @@ describe('canonical prompt composition', () => {
     for (const prompt of prompts) {
       expect(prompt).toContain('<agent_instructions>\n# Working style');
       expect(prompt).toContain('\n\n# Interaction\n');
+      expect(prompt).toContain('\n\n# Tool use\n');
+      expect(prompt).toContain('\n\n- Keep command output bounded');
       expect(prompt).toContain('\n</agent_instructions>');
       expect(prompt.match(/# Working style/g)).toHaveLength(1);
       expect(prompt.match(/# Interaction/g)).toHaveLength(1);
+      expect(prompt.match(/# Tool use/g)).toHaveLength(1);
       expect(prompt).not.toContain('<agent_instruction source=');
       expect(prompt).not.toContain('instructions/agent/working-style.md');
       expect(prompt).not.toContain('instructions/agent/interaction.md');
@@ -254,9 +276,10 @@ describe('prompt diagnostics', () => {
     expect(info).toContain(
       'Unsupported direct prompt inputs (not loaded): customPrompt=6 chars, appendSystemPrompt=6 chars',
     );
-    expect(info).toContain('Human instruction sources: 4');
+    expect(info).toContain('Human instruction sources: 5');
     expect(info).toContain('working-style.md:');
     expect(info).toContain('interaction.md:');
+    expect(info).toContain('tool-use.md:');
     expect(info).toContain('delegate/parent.md:');
     expect(info).toContain('delegate/routing.md:');
     expect(info).toContain('Structured tool prompt guidelines: 1');
