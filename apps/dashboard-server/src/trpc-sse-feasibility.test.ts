@@ -1,3 +1,4 @@
+import { Writable } from 'node:stream';
 import {
   type BrowserSnapshotSchema,
   DashboardSnapshotResponseSchema,
@@ -27,6 +28,7 @@ const FRAME_LIMIT = 2 * 1024 * 1024;
 const DEV_ORIGIN = 'http://dashboard.test';
 const MAX_QUEUE_COUNT = 8;
 const MAX_QUEUE_BYTES = 4096;
+const MAX_REPLAY_BYTES = 16 * 1024;
 
 type FeedName = 'shell' | 'session' | 'resume' | 'generation';
 type StreamMessage = Static<typeof DashboardStreamMessageSchema>;
@@ -122,6 +124,7 @@ class Feed {
   generation = 'g1';
   sequence = 0;
   readonly records: FeedRecord[] = [];
+  replayBytes = 0;
   readonly subscribers = new Set<Subscriber>();
   coalesced = 0;
   overflowTerminations = 0;
@@ -139,6 +142,8 @@ class Feed {
         0,
       ),
       queuedBytes: [...this.subscribers].reduce((n, sub) => n + sub.bytes, 0),
+      replayCount: this.records.length,
+      replayBytes: this.replayBytes,
       coalesced: this.coalesced,
       overflowTerminations: this.overflowTerminations,
     };
@@ -149,16 +154,14 @@ class Feed {
       parseSchema(DashboardStreamMessageSchema, data, 'stream output'),
     );
     const parsed = data;
-    const bytes = Buffer.byteLength(JSON.stringify(parsed));
+    const id = opaqueId(this.generation, this.name, seq);
+    // This is the exact frame emitted by tRPC's tracked SSE producer.
+    const bytes = Buffer.byteLength(
+      `data: ${JSON.stringify(parsed)}\nid: ${id}\n\n`,
+    );
     if (bytes > FRAME_LIMIT)
       throw new Error(`SSE frame exceeds ${FRAME_LIMIT} bytes.`);
-    return {
-      id: opaqueId(this.generation, this.name, seq),
-      data: parsed,
-      seq,
-      key,
-      bytes,
-    };
+    return { id, data: parsed, seq, key, bytes };
   }
 
   private seed(after?: string): FeedRecord[] {
@@ -180,13 +183,23 @@ class Feed {
   }
 
   async *subscribe(after: string | undefined, signal?: AbortSignal) {
+    const queue = this.seed(after);
     const sub: Subscriber = {
-      queue: this.seed(after),
-      bytes: 0,
+      queue,
+      bytes: queue.reduce((n, record) => n + record.bytes, 0),
       closed: false,
     };
-    sub.bytes = sub.queue.reduce((n, record) => n + record.bytes, 0);
     this.subscribers.add(sub);
+    if (
+      sub.queue.length > this.maxQueueCount ||
+      sub.bytes > this.maxQueueBytes
+    ) {
+      this.overflowTerminations += 1;
+      this.closeSubscriber(
+        sub,
+        new Error('Subscriber seed exceeded its count/byte bound.'),
+      );
+    }
     const abort = () =>
       this.closeSubscriber(sub, new Error('Subscription aborted.'));
     if (signal?.aborted) abort();
@@ -209,8 +222,7 @@ class Feed {
       );
     this.sequence = seq;
     const record = this.record(eventRecord(this.name, seq), seq, key);
-    this.records.push(record);
-    while (this.records.length > MAX_QUEUE_COUNT) this.records.shift();
+    this.appendReplay(record);
     this.deliver(record);
     return record;
   }
@@ -225,10 +237,22 @@ class Feed {
     };
     this.sequence = seq;
     const record = this.record(data, seq);
-    this.records.push(record);
-    while (this.records.length > MAX_QUEUE_COUNT) this.records.shift();
+    this.appendReplay(record);
     this.deliver(record);
     return record;
+  }
+
+  private appendReplay(record: FeedRecord): void {
+    this.records.push(record);
+    this.replayBytes += record.bytes;
+    while (
+      this.records.length > MAX_QUEUE_COUNT ||
+      this.replayBytes > MAX_REPLAY_BYTES
+    ) {
+      const removed = this.records.shift();
+      if (!removed) break;
+      this.replayBytes -= removed.bytes;
+    }
   }
 
   disconnectOldest(): void {
@@ -243,6 +267,7 @@ class Feed {
     this.generation = generation;
     this.sequence = 0;
     this.records.length = 0;
+    this.replayBytes = 0;
   }
 
   private deliver(record: FeedRecord): void {
@@ -335,7 +360,7 @@ const t = initTRPC
   .create({
     sse: {
       ping: { enabled: true, intervalMs: 10 },
-      client: { reconnectAfterInactivityMs: 100 },
+      client: { reconnectAfterInactivityMs: 1000 },
     },
   });
 
@@ -409,6 +434,7 @@ function wrapSseResponse(
     dropPing: boolean;
     stallAfterId?: () => string | undefined;
     onPing: () => void;
+    onChunk: (bytes: number) => void;
   },
 ): Response {
   const reader = response.body?.getReader();
@@ -417,12 +443,68 @@ function wrapSseResponse(
   const encoder = new TextEncoder();
   let pending = '';
   let stalled = false;
+  let chunkPhase = 0;
+  let rawPending = new Uint8Array();
+  const enqueueFragmentedBytes = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    bytes: Uint8Array,
+  ) => {
+    // Deliberately split at offsets unrelated to SSE record boundaries.
+    for (let offset = 0; offset < bytes.byteLength; ) {
+      const size = Math.min(
+        chunkPhase++ % 2 === 0 ? 11 : 29,
+        bytes.byteLength - offset,
+      );
+      const fragment = bytes.slice(offset, offset + size);
+      options.onChunk(fragment.byteLength);
+      controller.enqueue(fragment);
+      offset += size;
+    }
+  };
+  const enqueueFragmented = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    text: string,
+  ) => enqueueFragmentedBytes(controller, encoder.encode(text));
+  const enqueueCoalesced = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    bytes: Uint8Array,
+    flush = false,
+  ) => {
+    const combined = new Uint8Array(rawPending.byteLength + bytes.byteLength);
+    combined.set(rawPending);
+    combined.set(bytes, rawPending.byteLength);
+    rawPending = combined;
+    flush ||= [...rawPending].some(
+      (byte, index) => byte === 10 && rawPending[index + 1] === 10,
+    );
+    while (rawPending.byteLength > 0) {
+      const target = chunkPhase % 2 === 0 ? 11 : 29;
+      if (!flush && rawPending.byteLength < target) break;
+      const size = flush ? Math.min(target, rawPending.byteLength) : target;
+      const fragment = rawPending.slice(0, size);
+      rawPending = rawPending.slice(size);
+      chunkPhase += 1;
+      options.onChunk(fragment.byteLength);
+      controller.enqueue(fragment);
+    }
+  };
   const body = new ReadableStream<Uint8Array>({
     async pull(controller) {
       const next = await reader.read();
       if (next.done) {
-        if (pending) controller.enqueue(encoder.encode(pending));
+        if (!options.dropPing && !options.stallAfterId) {
+          enqueueCoalesced(controller, new Uint8Array(), true);
+        } else {
+          pending += decoder.decode();
+          if (pending) enqueueFragmented(controller, pending);
+        }
         controller.close();
+        return;
+      }
+      if (!options.dropPing && !options.stallAfterId) {
+        if (new TextDecoder().decode(next.value).includes('event: ping'))
+          options.onPing();
+        enqueueCoalesced(controller, next.value);
         return;
       }
       pending += decoder.decode(next.value, { stream: true });
@@ -438,7 +520,7 @@ function wrapSseResponse(
         if (!stalled) output += `${frame}\n\n`;
         if (stallId && stallId === id) stalled = true;
       }
-      if (output) controller.enqueue(encoder.encode(output));
+      if (output) enqueueFragmented(controller, output);
     },
     async cancel(reason) {
       await reader.cancel(reason);
@@ -465,20 +547,28 @@ describe('Phase 0 tRPC 11.18.0 Fastify SSE feasibility', () => {
     const sseRequestOrigins: Array<string | undefined> = [];
     const eventSourceUrls: string[] = [];
     const trace: Array<{ url: string; headerNames: string[] }> = [];
+    const logLines: string[] = [];
+    const sseChunkSizes: number[] = [];
     let pingFrames = 0;
+    let generationAttempts = 0;
     let resumeAttempts = 0;
     let stallFirstResumeConnection = true;
     const allowedOrigins = [DEV_ORIGIN];
-    const app = Fastify({ logger: false });
+    const logSink = new Writable({
+      write(chunk, _encoding, callback) {
+        logLines.push(String(chunk));
+        callback();
+      },
+    });
+    const app = Fastify({ logger: { level: 'info', stream: logSink } });
     apps.push(app);
     app.addHook('onRequest', async (request, reply) => {
       requestUrls.push(request.url);
       if (request.url.startsWith('/trpc/stream'))
         sseRequestOrigins.push(request.headers.origin);
-      trace.push({
-        url: request.url,
-        headerNames: Object.keys(request.headers).sort(),
-      });
+      const headerNames = Object.keys(request.headers).sort();
+      trace.push({ url: request.url, headerNames });
+      request.log.info({ url: request.url, headerNames }, 'dashboard request');
       const origin = request.headers.origin;
       if (origin && allowedOrigins.includes(origin)) {
         reply.header('access-control-allow-origin', origin);
@@ -543,6 +633,7 @@ describe('Phase 0 tRPC 11.18.0 Fastify SSE feasibility', () => {
       const response = await fetch(url, { ...init, headers });
       const inputValue = decodedInput(url);
       const isResume = inputValue?.feed === 'resume';
+      if (inputValue?.feed === 'generation') generationAttempts += 1;
       if (isResume) {
         resumeAttempts += 1;
         if (resumeAttempts === 2 && !publishedWhileDisconnected) {
@@ -556,8 +647,6 @@ describe('Phase 0 tRPC 11.18.0 Fastify SSE feasibility', () => {
           });
         }
       }
-      if (inputValue?.feed === 'generation' && behavior === 'normal')
-        return response;
       return wrapSseResponse(response, {
         dropPing: behavior === 'stall',
         stallAfterId:
@@ -565,6 +654,7 @@ describe('Phase 0 tRPC 11.18.0 Fastify SSE feasibility', () => {
         onPing: () => {
           pingFrames += 1;
         },
+        onChunk: (bytes) => sseChunkSizes.push(bytes),
       });
     };
     const makeEventSource = (mode: FetchMode): typeof FetchEventSource =>
@@ -809,7 +899,7 @@ describe('Phase 0 tRPC 11.18.0 Fastify SSE feasibility', () => {
         'resume listener cleanup',
       );
 
-      // 5: stale generation gets one fresh authoritative snapshot; g2 reconnects do not reset again.
+      // 5: automatic tRPC reconnects reset exactly once across a generation rotation.
       const generation = open({ feed: 'generation' });
       await waitFor(
         () => generation.data.length === 1,
@@ -817,46 +907,54 @@ describe('Phase 0 tRPC 11.18.0 Fastify SSE feasibility', () => {
       );
       const oldId = feeds.generation.publish(1).id;
       await waitFor(() => generation.data.length === 2, 'generation g1 event');
-      generation.subscription.unsubscribe();
-      await waitFor(
-        () => feeds.generation.metrics.listeners === 0,
-        'generation g1 cleanup',
-      );
+      feeds.generation.disconnectOldest();
       feeds.generation.rotate('g2');
-      const reset = open({ feed: 'generation', after: oldId });
-      await waitFor(() => reset.data.length === 1, 'fresh g2 snapshot');
-      const resetSnapshot = reset.data[0] as Extract<
+      await waitFor(
+        () => generation.data.length === 3 && generationAttempts >= 2,
+        'automatic g2 reset snapshot',
+      );
+      const resetSnapshot = generation.data[2] as Extract<
         StreamMessage,
         { type: 'snapshot' }
       >;
       expect(resetSnapshot.type).toBe('snapshot');
       expect(resetSnapshot.snapshot.serverId).toBe('g2');
-      const g2Id = feeds.generation.publish(1).id;
-      await waitFor(() => reset.data.length === 2, 'first g2 event');
-      reset.subscription.unsubscribe();
-      await waitFor(
-        () => feeds.generation.metrics.listeners === 0,
-        'g2 cleanup',
-      );
-      const resumedG2 = open({ feed: 'generation', after: g2Id });
-      await waitFor(
-        () => feeds.generation.metrics.listeners === 1,
-        'g2 reconnect listener',
-      );
-      feeds.generation.publish(2);
-      await waitFor(
-        () => resumedG2.data.length === 1,
-        'g2 reconnect without reset',
-      );
-      expect(resumedG2.data).toHaveLength(1);
+      const generationRetry = eventSourceUrls
+        .filter((url) => decodedInput(url)?.feed === 'generation')
+        .at(-1);
+      expect(decodedInput(generationRetry ?? '')?.lastEventId).toBe(oldId);
       expect(
-        (resumedG2.data[0] as Extract<StreamMessage, { type: 'sessions' }>)
-          .type,
-      ).toBe('sessions');
-      resumedG2.subscription.unsubscribe();
+        generation.data.filter(
+          (value) => (value as { type?: string }).type === 'snapshot',
+        ),
+      ).toHaveLength(2);
+
+      const g2Id = feeds.generation.publish(1).id;
+      await waitFor(() => generation.data.length === 4, 'first g2 event');
+      feeds.generation.disconnectOldest();
+      await waitFor(
+        () =>
+          feeds.generation.metrics.listeners === 1 && generationAttempts >= 3,
+        'automatic g2 resume listener',
+      );
+      const secondGenerationRetry = eventSourceUrls
+        .filter((url) => decodedInput(url)?.feed === 'generation')
+        .at(-1);
+      expect(decodedInput(secondGenerationRetry ?? '')?.lastEventId).toBe(g2Id);
+      feeds.generation.publish(2);
+      await waitFor(() => generation.data.length === 5, 'g2 resumed event');
+      expect(generation.data.slice(4)).toEqual([
+        expect.objectContaining({ type: 'sessions', cursor: 2 }),
+      ]);
+      expect(
+        generation.data.filter(
+          (value) => (value as { type?: string }).type === 'snapshot',
+        ),
+      ).toHaveLength(2);
+      generation.subscription.unsubscribe();
       await waitFor(
         () => feeds.generation.metrics.listeners === 0,
-        'g2 reconnect cleanup',
+        'generation reconnect cleanup',
       );
 
       // 8, 9, 10: abort cleanup, bounded paused queues, deterministic replaceable coalescing/overflow.
@@ -905,9 +1003,39 @@ describe('Phase 0 tRPC 11.18.0 Fastify SSE feasibility', () => {
       expect(overflowFeed.metrics.overflowTerminations).toBe(1);
       await expect(overflow.next()).rejects.toThrow('overflowed');
 
+      // Replay has independent count and byte caps, and oversized seeded replay terminates cleanly.
+      const replayFeed = new Feed('resume');
+      replayFeed.publishLarge('r'.repeat(6000));
+      replayFeed.publishLarge('r'.repeat(6000));
+      replayFeed.publishLarge('r'.repeat(6000));
+      expect(replayFeed.metrics.replayBytes).toBeLessThanOrEqual(
+        MAX_REPLAY_BYTES,
+      );
+      expect(replayFeed.records.map((record) => record.seq)).toEqual([2, 3]);
+      const seedFeed = new Feed('resume');
+      const seedCursor = seedFeed.publish(1).id;
+      seedFeed.publishLarge('s'.repeat(6000));
+      const seededOverflow = seedFeed.subscribe(seedCursor);
+      await expect(seededOverflow.next()).rejects.toThrow(
+        'Subscriber seed exceeded',
+      );
+      expect(seedFeed.metrics.listeners).toBe(0);
+      expect(seedFeed.metrics.queuedBytes).toBe(0);
+
+      // Paused subscribers reject large queued records and clear byte accounting.
+      const largePausedFeed = new Feed('session');
+      const largePaused = largePausedFeed.subscribe(undefined);
+      await largePaused.next();
+      largePausedFeed.publishLarge('q'.repeat(6000));
+      expect(largePausedFeed.metrics.queuedCount).toBe(0);
+      expect(largePausedFeed.metrics.queuedBytes).toBe(0);
+      expect(largePausedFeed.metrics.overflowTerminations).toBe(1);
+      await expect(largePaused.next()).rejects.toThrow('overflowed');
+
       // 11: explicit 2 MiB browser-facing frame limit, with a valid large frame below it.
       const large = open({ feed: 'generation' }, sameClient);
       await waitFor(() => large.data.length === 1, 'large-frame subscription');
+      await new Promise((resolve) => setTimeout(resolve, 50));
       const belowLimit = 'x'.repeat(1_500_000);
       feeds.generation.publishLarge(belowLimit);
       await waitFor(
@@ -939,10 +1067,13 @@ describe('Phase 0 tRPC 11.18.0 Fastify SSE feasibility', () => {
         StreamMessage,
         { type: 'snapshot' }
       >;
+
       expect(largeSnapshot.type).toBe('snapshot');
       expect((largeSnapshot.snapshot.usage as string).length).toBe(
         belowLimit.length,
       );
+      expect(sseChunkSizes.some((size) => size === 11)).toBe(true);
+      expect(sseChunkSizes.some((size) => size === 29)).toBe(true);
       expect(sseRequestOrigins).toContain(undefined);
       expect(() =>
         feeds.generation.publishLarge('x'.repeat(FRAME_LIMIT)),
@@ -981,9 +1112,14 @@ describe('Phase 0 tRPC 11.18.0 Fastify SSE feasibility', () => {
         }
       }
       expect(JSON.stringify(trace)).not.toContain(TOKEN);
+      expect(logLines.join('')).toContain('/trpc/status');
+      expect(logLines.join('')).toContain('x-dashboard-token');
+      expect(logLines.join('')).not.toContain(TOKEN);
       expect(JSON.stringify(requestUrls)).not.toContain(TOKEN);
       expect(JSON.stringify(eventSourceUrls)).not.toContain(TOKEN);
-      expect(eventSourceUrls.some((url) => url.includes('after'))).toBe(true);
+      expect(
+        eventSourceUrls.some((url) => decodedInput(url)?.lastEventId === oldId),
+      ).toBe(true);
       expect(
         eventSourceUrls.every((url) => !url.includes('connectionParams')),
       ).toBe(true);
