@@ -1777,6 +1777,7 @@ export type ShellFeedDomain = Static<typeof ShellFeedDomainSchema>;
 export const ShellFeedEventSchema = Type.Object(
   {
     type: Type.Literal('shell-event'),
+    sequence: Type.Integer({ minimum: 0 }),
     domain: ShellFeedDomainSchema,
     revision: Type.Integer({ minimum: 0 }),
     sessionId: Type.Optional(IdentifierSchema),
@@ -1806,6 +1807,7 @@ export type ShellFeedMessage = Static<typeof ShellFeedMessageSchema>;
 export const SessionFeedEventSchema = Type.Object(
   {
     type: Type.Literal('session-event'),
+    sequence: Type.Integer({ minimum: 0 }),
     sessionId: IdentifierSchema,
     runtimeId: Type.Optional(IdentifierSchema),
     runtimeEpoch: Type.Optional(IdentifierSchema),

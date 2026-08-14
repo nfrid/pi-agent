@@ -1,7 +1,6 @@
 import type {
   FeedCaughtUp,
   SessionFeedMessage,
-  ShellFeedEvent,
   ShellFeedMessage,
 } from '@pi-dashboard/protocol';
 import type { DashboardTokenStore } from './authentication.js';
@@ -21,10 +20,8 @@ type DomainEntry = {
   generation: number;
   refs: number;
   sequence: number;
-  eventOrder: number;
   sequenceKnown: boolean;
   lastEventId?: FeedCursorValue;
-  seen: Set<string>;
   subscription?: Subscription;
   opening: number;
   rebasing: boolean;
@@ -107,8 +104,12 @@ export class DashboardConnectionRuntime {
   private started = false;
   private shellGeneration = 0;
   private shellSequence = 0;
+  private shellSequenceKnown = false;
+  private shellSnapshotCoverage = 0;
+  private shellRefreshTarget = 0;
+  private shellRefreshNeeded = false;
+  private shellCaughtUpTarget?: number;
   private shellLastEventId?: FeedCursorValue;
-  private shellSeen = new Set<string>();
   private shellOpening = 0;
   private shellSubscription?: Subscription;
   private shellRebasing = false;
@@ -199,9 +200,7 @@ export class DashboardConnectionRuntime {
         generation: 1,
         refs: 0,
         sequence: 0,
-        eventOrder: 0,
-        sequenceKnown: true,
-        seen: new Set(),
+        sequenceKnown: false,
         opening: 0,
         rebasing: false,
       };
@@ -278,8 +277,12 @@ export class DashboardConnectionRuntime {
     if (rebase) {
       this.shellGeneration += 1;
       this.shellSequence = 0;
+      this.shellSequenceKnown = false;
+      this.shellSnapshotCoverage = 0;
+      this.shellRefreshTarget = 0;
+      this.shellRefreshNeeded = false;
+      this.shellCaughtUpTarget = undefined;
       this.shellLastEventId = undefined;
-      this.shellSeen = new Set();
       this.shellRebasing = false;
       this.store.beginShellSync(this.shellGeneration);
     }
@@ -318,63 +321,120 @@ export class DashboardConnectionRuntime {
 
   private acceptShell(value: unknown): void {
     const tracked = trackedValue<ShellValue>(value);
-    if (tracked.id && this.shellSeen.has(tracked.id)) return;
+    if (!tracked.id) return;
     const payload = tracked.data;
     const sequence = numericSequence(payload);
-    if (sequence !== undefined) {
-      if (isCaughtUp(payload) && sequence === this.shellSequence) {
-        this.shellLastEventId = tracked.id ?? this.shellLastEventId;
-        this.store.completeShellSync(sequence, tracked.id);
-        return;
-      }
-      if (sequence <= this.shellSequence) return;
-      if (this.shellSequence > 0 && sequence > this.shellSequence + 1) {
+    if (sequence === undefined) return;
+    if (isCaughtUp(payload)) {
+      if (this.shellSequenceKnown && sequence < this.shellSequence) return;
+      if (this.shellSequenceKnown && sequence > this.shellSequence) {
         this.rebaseShell();
         return;
       }
       this.shellSequence = sequence;
-    }
-    if (tracked.id) {
-      this.shellSeen.add(tracked.id);
+      this.shellSequenceKnown = true;
       this.shellLastEventId = tracked.id;
+      this.shellCaughtUpTarget = sequence;
+      if (this.shellSnapshotCoverage >= sequence)
+        this.store.completeShellSync(sequence, tracked.id);
+      else void this.drainShellRefresh();
+      return;
     }
+    if (this.shellSequenceKnown && sequence <= this.shellSequence) return;
+    if (this.shellSequenceKnown && sequence > this.shellSequence + 1) {
+      this.rebaseShell();
+      return;
+    }
+    this.shellSequence = sequence;
+    this.shellSequenceKnown = true;
+    this.shellLastEventId = tracked.id;
     if (payload.type === 'snapshot') {
+      this.shellSnapshotCoverage = Math.max(
+        this.shellSnapshotCoverage,
+        payload.snapshot.cursor,
+      );
+      if (this.shellSnapshotCoverage >= this.shellRefreshTarget)
+        this.shellRefreshNeeded = false;
       this.store.acceptShellSnapshot(
         payload.snapshot.snapshot,
-        payload.sequence,
+        payload.snapshot.cursor,
         this.shellGeneration,
         tracked.id,
       );
+      if (
+        this.shellCaughtUpTarget !== undefined &&
+        this.shellSnapshotCoverage >= this.shellCaughtUpTarget
+      )
+        this.store.completeShellSync(this.shellCaughtUpTarget, tracked.id);
       return;
     }
-    if (payload.type === 'caught-up') {
-      this.store.completeShellSync(payload.sequence, tracked.id);
-      return;
-    }
-    void this.refreshShell(payload);
+    this.shellRefreshTarget = Math.max(this.shellRefreshTarget, sequence);
+    this.shellRefreshNeeded = true;
+    if (this.store.getSnapshot().shellSync.status !== 'synchronizing')
+      this.store.beginShellSync(
+        this.shellGeneration,
+        this.shellSnapshotCoverage,
+      );
+    void this.drainShellRefresh();
   }
 
-  private async refreshShell(event: ShellFeedEvent): Promise<void> {
-    if (this.shellRefresh) return this.shellRefresh;
-    this.shellRefresh = this.client
-      .snapshot()
-      .then((snapshot) => {
-        if (this.started)
-          this.store.acceptShellSnapshot(
-            snapshot,
-            this.shellSequence,
-            this.shellGeneration,
-            this.shellLastEventId,
-          );
-      })
-      .catch((error) => {
-        if (this.started) this.store.failShellSync(messageError(error));
-      })
-      .finally(() => {
-        this.shellRefresh = undefined;
-      });
-    void event;
-    return this.shellRefresh;
+  /** Drain one semantic refresh and at most one follow-up for a burst. */
+  private async drainShellRefresh(): Promise<void> {
+    if (this.shellRefresh || !this.started) return;
+    const generation = this.shellGeneration;
+    const run = (async () => {
+      for (let read = 0; read < 2; read += 1) {
+        const target = Math.max(
+          this.shellRefreshTarget,
+          this.shellCaughtUpTarget ?? 0,
+        );
+        if (!this.shellRefreshNeeded && this.shellSnapshotCoverage >= target) {
+          if (this.shellCaughtUpTarget !== undefined)
+            this.store.completeShellSync(
+              this.shellCaughtUpTarget,
+              this.shellLastEventId,
+            );
+          return;
+        }
+        const snapshot = await this.client.snapshot();
+        if (!this.started || generation !== this.shellGeneration) return;
+        // The authoritative cursor is the feed coverage. Never label an old
+        // finite read with a newer event sequence captured while it awaited.
+        this.shellSnapshotCoverage = Math.max(
+          this.shellSnapshotCoverage,
+          snapshot.cursor,
+        );
+        this.store.acceptShellSnapshot(
+          snapshot,
+          snapshot.cursor,
+          generation,
+          this.shellLastEventId,
+        );
+        const latestTarget = Math.max(
+          this.shellRefreshTarget,
+          this.shellCaughtUpTarget ?? 0,
+        );
+        if (this.shellSnapshotCoverage >= latestTarget) {
+          this.shellRefreshNeeded = false;
+          if (this.shellCaughtUpTarget !== undefined)
+            this.store.completeShellSync(
+              this.shellCaughtUpTarget,
+              this.shellLastEventId,
+            );
+          return;
+        }
+      }
+      // A stale finite read is not retried indefinitely. A later semantic
+      // event starts another bounded drain.
+    })();
+    this.shellRefresh = run;
+    try {
+      await run;
+    } catch (error) {
+      if (this.started) this.store.failShellSync(messageError(error));
+    } finally {
+      if (this.shellRefresh === run) this.shellRefresh = undefined;
+    }
   }
 
   private rebaseShell(): void {
@@ -395,10 +455,8 @@ export class DashboardConnectionRuntime {
     if (rebase) {
       entry.generation += 1;
       entry.sequence = 0;
-      entry.eventOrder = 0;
-      entry.sequenceKnown = true;
+      entry.sequenceKnown = false;
       entry.lastEventId = undefined;
-      entry.seen = new Set();
       entry.rebasing = false;
       this.store.beginSessionSync(entry.id, entry.generation);
     }
@@ -435,62 +493,42 @@ export class DashboardConnectionRuntime {
 
   private acceptSession(entry: DomainEntry, value: unknown): void {
     const tracked = trackedValue<SessionValue>(value);
-    if (tracked.id && entry.seen.has(tracked.id)) return;
+    if (!tracked.id) return;
     const payload = tracked.data;
     const sequence = numericSequence(payload);
-    if (sequence !== undefined) {
-      if (isCaughtUp(payload)) {
-        if (entry.sequenceKnown && sequence < entry.sequence) return;
-        entry.sequence = sequence;
-        entry.eventOrder = sequence;
-        entry.sequenceKnown = true;
-        entry.lastEventId = tracked.id ?? entry.lastEventId;
-        this.store.completeSessionSync(entry.id, sequence, tracked.id);
-        return;
-      }
-      if (entry.sequenceKnown && sequence <= entry.sequence) return;
-      if (
-        entry.sequenceKnown &&
-        entry.sequence > 0 &&
-        sequence > entry.sequence + 1
-      ) {
+    if (sequence === undefined) return;
+    if (isCaughtUp(payload)) {
+      if (entry.sequenceKnown && sequence < entry.sequence) return;
+      if (entry.sequenceKnown && sequence > entry.sequence) {
         this.rebaseSession(entry);
         return;
       }
       entry.sequence = sequence;
-      entry.eventOrder = sequence;
       entry.sequenceKnown = true;
-    } else if (!tracked.id) {
-      // Untracked values are not expected from the production link. Refuse
-      // them rather than accepting a record that cannot be resumed safely.
-      return;
-    } else {
-      // Session event payloads intentionally carry runtime ordering, while the
-      // feed sequence remains opaque in the tracked ID. Use arrival order only
-      // for reducer ordering; the tracked ID remains the sole resume cursor.
-      entry.eventOrder += 1;
-      entry.sequenceKnown = false;
-    }
-    if (tracked.id) {
-      entry.seen.add(tracked.id);
       entry.lastEventId = tracked.id;
+      this.store.completeSessionSync(entry.id, sequence, tracked.id);
+      return;
     }
+    if (entry.sequenceKnown && sequence <= entry.sequence) return;
+    if (entry.sequenceKnown && sequence > entry.sequence + 1) {
+      this.rebaseSession(entry);
+      return;
+    }
+    entry.sequence = sequence;
+    entry.sequenceKnown = true;
+    entry.lastEventId = tracked.id;
     if (payload.type === 'snapshot') {
       this.store.acceptSessionSnapshot(
         payload.snapshot,
-        payload.sequence,
+        payload.snapshot.cursor,
         entry.generation,
         tracked.id,
       );
       return;
     }
-    if (payload.type === 'caught-up') {
-      this.store.completeSessionSync(entry.id, payload.sequence, tracked.id);
-      return;
-    }
     this.store.acceptSessionEvent(
       entry.id,
-      entry.eventOrder,
+      sequence,
       payload,
       entry.generation,
     );

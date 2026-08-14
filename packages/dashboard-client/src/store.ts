@@ -49,6 +49,7 @@ export interface DomainSyncState {
   status: SyncStatus;
   generation: number;
   sequence: number;
+  sequenceKnown: boolean;
   cursor?: string;
   error?: string;
 }
@@ -249,7 +250,12 @@ function emptyState(): DashboardLiveState {
     snapshotCursor: 0,
     cursor: 0,
     connection: { status: 'offline', lastCursor: 0 },
-    shellSync: { status: 'empty', generation: 0, sequence: 0 },
+    shellSync: {
+      status: 'empty',
+      generation: 0,
+      sequence: 0,
+      sequenceKnown: false,
+    },
     sessionSyncById: {},
     workspacesById: {},
     workspaceOrder: [],
@@ -757,6 +763,7 @@ export class DashboardLiveStore {
       status: 'synchronizing',
       generation,
       sequence,
+      sequenceKnown: false,
       error: undefined,
     });
   }
@@ -765,6 +772,7 @@ export class DashboardLiveStore {
     this.updateDomain('shell', undefined, {
       status: 'live',
       sequence,
+      sequenceKnown: true,
       ...(cursor === undefined ? {} : { cursor }),
       error: undefined,
     });
@@ -784,6 +792,7 @@ export class DashboardLiveStore {
       status: cached && current ? 'cached' : 'synchronizing',
       generation,
       sequence: 0,
+      sequenceKnown: false,
       error: undefined,
     });
   }
@@ -796,6 +805,7 @@ export class DashboardLiveStore {
     this.updateDomain('session', sessionId, {
       status: 'live',
       sequence,
+      sequenceKnown: true,
       ...(cursor === undefined ? {} : { cursor }),
       error: undefined,
     });
@@ -813,7 +823,10 @@ export class DashboardLiveStore {
     cursor?: string,
   ): boolean {
     const current = this.state.shellSync;
-    if (current.generation !== generation || sequence < current.sequence)
+    if (
+      current.generation !== generation ||
+      (current.sequenceKnown && sequence <= current.sequence)
+    )
       return false;
     const accepted = this.installSnapshot(next, { source: 'sse' });
     if (!accepted) return false;
@@ -823,6 +836,7 @@ export class DashboardLiveStore {
         status: 'synchronizing',
         generation,
         sequence,
+        sequenceKnown: true,
         ...(cursor === undefined ? {} : { cursor }),
       },
     });
@@ -839,7 +853,8 @@ export class DashboardLiveStore {
     const current = this.state.sessionSyncById[response.metadata.id];
     if (
       current &&
-      (current.generation !== generation || sequence < current.sequence)
+      (current.generation !== generation ||
+        (current.sequenceKnown && sequence <= current.sequence))
     )
       return false;
     const projection = this.hydrateSession(response, { replace: true });
@@ -852,6 +867,7 @@ export class DashboardLiveStore {
           status: 'synchronizing',
           generation,
           sequence,
+          sequenceKnown: true,
           ...(cursor === undefined ? {} : { cursor }),
         },
       },
@@ -1221,8 +1237,10 @@ export class DashboardLiveStore {
                     status: 'synchronizing' as const,
                     generation: domain.generation,
                     sequence: 0,
+                    sequenceKnown: false,
                   }),
                   sequence: envelope.cursor,
+                  sequenceKnown: true,
                   generation: domain.generation,
                 },
               },
@@ -1261,7 +1279,7 @@ export class DashboardLiveStore {
   ): boolean {
     const current = this.state.sessionSyncById[sessionId];
     if (current && current.generation !== generation) return false;
-    if (current && sequence <= current.sequence) return false;
+    if (current?.sequenceKnown && sequence <= current.sequence) return false;
     return this.acceptStreamRecord(
       {
         cursor: sequence,
@@ -1922,6 +1940,7 @@ export const selectSessionSync =
       status: 'empty' as const,
       generation: 0,
       sequence: 0,
+      sequenceKnown: false,
     };
 export const selectTranscript =
   (sessionId: string) => (state: DashboardLiveState) =>

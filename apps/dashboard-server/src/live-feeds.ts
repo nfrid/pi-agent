@@ -39,6 +39,7 @@ export class ShellFeed extends BoundedFeed<
     this.publish(
       {
         type: 'shell-event',
+        sequence: this.sequence + 1,
         domain,
         revision,
         ...(sessionId === undefined ? {} : { sessionId }),
@@ -69,13 +70,17 @@ export class SessionFeed extends BoundedFeed<
 
   publishEvent(
     event: BridgeEvent,
-    metadata: Omit<SessionFeedEvent, 'type' | 'sessionId' | 'event'> = {},
+    metadata: Omit<
+      SessionFeedEvent,
+      'type' | 'sessionId' | 'event' | 'sequence'
+    > = {},
     key?: string,
   ): void {
     this.lastPublishedAt = Date.now();
     this.publish(
       {
         type: 'session-event',
+        sequence: this.sequence + 1,
         sessionId: this.sessionId,
         event: event as SessionFeedEvent['event'],
         ...metadata,
@@ -107,7 +112,10 @@ export class SessionFeedRegistry {
   publish(
     sessionId: string,
     event: BridgeEvent,
-    metadata: Omit<SessionFeedEvent, 'type' | 'sessionId' | 'event'> = {},
+    metadata: Omit<
+      SessionFeedEvent,
+      'type' | 'sessionId' | 'event' | 'sequence'
+    > = {},
     key?: string,
   ): void {
     this.get(sessionId).publishEvent(event, metadata, key);

@@ -188,8 +188,16 @@ describe('production tRPC feed procedures', () => {
       expect(payloads).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ type: 'snapshot' }),
-          expect.objectContaining({ type: 'shell-event', data: { value: 1 } }),
-          expect.objectContaining({ type: 'shell-event', data: { value: 2 } }),
+          expect.objectContaining({
+            type: 'shell-event',
+            sequence: 1,
+            data: { value: 1 },
+          }),
+          expect.objectContaining({
+            type: 'shell-event',
+            sequence: 2,
+            data: { value: 2 },
+          }),
         ]),
       );
     } finally {
@@ -322,7 +330,10 @@ describe('production tRPC feed procedures', () => {
     });
     feed.publishSemantic('invalidation', 1, { refresh: true });
     const live = await stream.next();
-    expect((live.value as unknown[])[1]).toMatchObject({ type: 'shell-event' });
+    expect((live.value as unknown[])[1]).toMatchObject({
+      type: 'shell-event',
+      sequence: 1,
+    });
     await stream.return(undefined);
     expect(feed.metrics().subscribers).toBe(0);
   });
