@@ -8,6 +8,7 @@ const dashboardTarget = `http://127.0.0.1:${process.env.PI_DASHBOARD_PORT ?? 417
 const proxy = {
   '/api': { target: dashboardTarget },
   '/ws': { target: dashboardTarget, ws: true },
+  '/trpc': { target: dashboardTarget },
 };
 const dashboardBuildId =
   process.env.PI_DASHBOARD_BUILD_ID?.trim() || randomUUID();
@@ -33,7 +34,7 @@ function dashboardVersionPlugin(): Plugin {
   };
 }
 
-export default defineConfig({
+const config = defineConfig({
   envDir: workspaceRoot,
   define: {
     __DASHBOARD_BUILD_ID__: JSON.stringify(dashboardBuildId),
@@ -75,3 +76,5 @@ export default defineConfig({
     proxy,
   },
 });
+
+export default config;
