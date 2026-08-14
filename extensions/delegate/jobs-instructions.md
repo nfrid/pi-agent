@@ -1,0 +1,2 @@
+- Use delegate_jobs feedback only when concrete corrective guidance is needed for a background child.
+- Use peek for deliberate inspection or once when a bounded timeout will change the next action; never repeat it to poll.

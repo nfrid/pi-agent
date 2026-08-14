@@ -16,6 +16,11 @@ interface ThemeLike {
 interface RegisteredTool {
   description: string;
   promptGuidelines: string[];
+  parameters: {
+    properties?: {
+      action?: { description?: string };
+    };
+  };
   execute: (
     id: string,
     params: {
@@ -48,7 +53,7 @@ const theme: ThemeLike = {
 };
 
 describe('delegate_jobs rendering', () => {
-  test('offers automatic completion and bounded live steering', async () => {
+  test('keeps job mechanics in the description and workflow guidance concise', async () => {
     const manager = new DelegateJobManager();
     let tool: RegisteredTool | undefined;
     const pi = {
@@ -65,15 +70,19 @@ describe('delegate_jobs rendering', () => {
     expect(tool?.description).toContain(
       'Use feedback with one bounded message to steer a running child',
     );
-    expect(tool?.promptGuidelines.join('\n')).toContain(
-      'Background completion resumes the parent automatically',
+    const actionDescription = tool?.parameters.properties?.action?.description;
+    expect(actionDescription).toContain('list shows tracked jobs');
+    expect(actionDescription).toContain('peek inspects one job');
+    expect(actionDescription).toContain('feedback sends corrective guidance');
+    expect(actionDescription).toContain('cancel stops one or more jobs');
+    expect(tool?.description).not.toContain('Actions:');
+    const guidelines = tool?.promptGuidelines.join('\n') ?? '';
+    expect(guidelines).toContain(
+      'Use delegate_jobs feedback only when concrete corrective guidance is needed',
     );
-    expect(tool?.promptGuidelines.join('\n')).toContain(
-      'Use delegate_jobs feedback only for concrete corrective guidance',
-    );
-    expect(tool?.promptGuidelines.join('\n')).toContain(
-      'never repeat it to poll',
-    );
+    expect(guidelines).toContain('never repeat it to poll');
+    expect(guidelines).not.toContain('Background completion resumes');
+    expect(guidelines).not.toContain('/continue');
     await manager.dispose();
   });
 

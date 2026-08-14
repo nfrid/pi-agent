@@ -1,7 +1,7 @@
 import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { type Static, Type } from 'typebox';
-import { loadInstruction } from '../shared/instructions';
+import { loadGuidelines } from '../shared/instructions';
 import { type DelegateConfig, loadDelegateConfig } from './config';
 import { createDelegateControlChannel } from './control';
 import type { DelegateJobManager } from './jobs';
@@ -22,6 +22,9 @@ import {
   delegateToolResult,
   makeDetails,
 } from './tool-result';
+
+const DELEGATE_TOOL_DESCRIPTION =
+  'Run focused child agents with separate context. Choose a route, workspace mode, and either a prose or structured result contract; background completion is delivered automatically.';
 
 const RouteSchema = Type.String({
   minLength: 1,
@@ -229,7 +232,9 @@ export function delegatePromptGuidelines(
   config?: DelegateConfig,
 ): string[] {
   return [
-    loadInstruction('instructions/delegate/parent.md').content,
+    // Parent workflow preferences belong to the delegate extension and are
+    // validated as bullet-only guidelines at load time.
+    ...loadGuidelines('instructions.md', __dirname),
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd, config)}`,
   ];
 }
@@ -249,8 +254,7 @@ export function registerDelegateTool(
   pi.registerTool({
     name: 'delegate',
     label: 'Delegate',
-    description:
-      'Run focused child agents with separate context. Choose a route, workspace mode, and either a prose or structured result contract; background completion is delivered automatically.',
+    description: DELEGATE_TOOL_DESCRIPTION,
     promptSnippet:
       'Hand off focused implementation, review, validation, or independent work when a child saves your context.',
     promptGuidelines: delegatePromptGuidelines(cwd, promptConfig),

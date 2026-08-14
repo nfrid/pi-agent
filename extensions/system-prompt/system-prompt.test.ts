@@ -87,7 +87,10 @@ describe('canonical prompt composition', () => {
     const agentDir = temporaryDirectory();
     const instructionsDir = join(agentDir, 'instructions', 'agent');
     mkdirSync(instructionsDir, { recursive: true });
-    writeFileSync(join(instructionsDir, 'guidelines.md'), '- first\n- second\n');
+    writeFileSync(
+      join(instructionsDir, 'guidelines.md'),
+      '- first\n- second\n',
+    );
     expect(
       loadGuidelines('instructions/agent/guidelines.md', agentDir),
     ).toEqual(['first', 'second']);
@@ -276,12 +279,12 @@ describe('prompt diagnostics', () => {
     expect(info).toContain(
       'Unsupported direct prompt inputs (not loaded): customPrompt=6 chars, appendSystemPrompt=6 chars',
     );
-    expect(info).toContain('Human instruction sources: 5');
+    expect(info).toContain('Human instruction sources: 3');
     expect(info).toContain('working-style.md:');
     expect(info).toContain('interaction.md:');
     expect(info).toContain('tool-use.md:');
-    expect(info).toContain('delegate/parent.md:');
-    expect(info).toContain('delegate/routing.md:');
+    expect(info).not.toContain('delegate/parent.md');
+    expect(info).not.toContain('delegate/routing.md');
     expect(info).toContain('Structured tool prompt guidelines: 1');
   });
 

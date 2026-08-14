@@ -1,4 +1,3 @@
-import { loadInstruction } from '../shared/instructions';
 import {
   type DelegateConfig,
   describeDelegateRouting,
@@ -18,8 +17,12 @@ function compactPromptText(value: string | undefined): string {
   return value?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
+/** Human route-selection policy paired with the generated route catalog. */
+export const DELEGATE_ROUTING_POLICY =
+  'Choose the cheapest route whose stated `use for` fits the task. Use stronger reasoning for ambiguous, cross-cutting, or consequential work; use a cheaper route when the objective and finish check are bounded. Continuations reuse their persisted route unless explicitly overridden.';
+
 export function formatDelegateRoutingConfig(config: DelegateConfig): string {
-  const policy = loadInstruction('instructions/delegate/routing.md').content;
+  const policy = DELEGATE_ROUTING_POLICY;
   if (config.error)
     return `<delegate_routing>\n${policy}\n\nUnavailable: ${escapeXml(config.error)}\n</delegate_routing>`;
   const catalog = describeDelegateRouting(config).map(

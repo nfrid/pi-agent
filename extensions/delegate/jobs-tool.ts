@@ -5,11 +5,13 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
+import { loadGuidelines } from '../shared/instructions';
 import type { DelegateJobManager, DelegateJobSnapshot } from './jobs';
 
 const Parameters = Type.Object({
   action: StringEnum(['list', 'peek', 'feedback', 'cancel'] as const, {
-    description: 'Operation to perform',
+    description:
+      'list shows tracked jobs; peek inspects one job and can wait briefly; feedback sends corrective guidance to a queued or running job; cancel stops one or more jobs.',
   }),
   id: Type.Optional(
     Type.String({ description: 'Job ID for peek or feedback' }),
@@ -32,6 +34,9 @@ const Parameters = Type.Object({
     }),
   ),
 });
+
+const DELEGATE_JOBS_DESCRIPTION =
+  'Inspect, steer, and cancel asynchronous delegate jobs. Completions are delivered automatically. Use feedback with one bounded message to steer a running child at its next safe checkpoint; a settled job reports that feedback was not delivered. Use peek for deliberate inspection, not polling.';
 
 function requireText(value: string | undefined, name: string): string {
   const text = value?.trim();
@@ -88,14 +93,9 @@ export function registerDelegateJobsTool(
   >({
     name: 'delegate_jobs',
     label: 'Delegate Jobs',
-    description:
-      'Inspect, steer, and cancel asynchronous delegate jobs. Completions are delivered automatically. Use feedback with one bounded message to steer a running child at its next safe checkpoint; a settled job reports that feedback was not delivered. Use peek for deliberate inspection, not polling. Actions: list, peek, feedback, cancel.',
+    description: DELEGATE_JOBS_DESCRIPTION,
     promptSnippet: 'Inspect, steer, or cancel asynchronous delegate jobs',
-    promptGuidelines: [
-      'Use delegate_jobs feedback only for concrete corrective guidance to a queued or running background child; it is bounded and delivered at a safe checkpoint, not an interruption of an in-flight tool call.',
-      'Background completion resumes the parent automatically; /continue manually resumes an interrupted turn.',
-      'Use peek only for deliberate inspection or once when a bounded timeout will change the next action, and never repeat it to poll.',
-    ],
+    promptGuidelines: loadGuidelines('jobs-instructions.md', __dirname),
     parameters: Parameters,
     async execute(
       _toolCallId,

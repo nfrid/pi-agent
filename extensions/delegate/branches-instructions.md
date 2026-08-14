@@ -1,0 +1,3 @@
+- Review a writable branch before merging and rerun the task's verification check yourself; a clean merge can still be wrong.
+- Merge sibling branches one at a time and review between them.
+- Drop a branch after its work is integrated so list shows what is still outstanding.
