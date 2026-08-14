@@ -72,6 +72,32 @@ export {
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_FRAME_BYTES = 512 * 1024;
+
+/** Capabilities advertised by the authenticated dashboard HTTP boundary. */
+export const ProtocolCapabilitiesSchema = Type.Object(
+  { bootstrap: Type.Literal(true) },
+  { additionalProperties: false },
+);
+export type ProtocolCapabilities = Static<typeof ProtocolCapabilitiesSchema>;
+
+/** Version and finite query capabilities negotiated before bootstrap. */
+export const ProtocolInfoSchema = Type.Object(
+  {
+    protocolVersion: Type.Literal(PROTOCOL_VERSION),
+    /** The daemon generation used by snapshots and live transports. */
+    serverId: Type.String({ minLength: 1, maxLength: 512 }),
+    capabilities: ProtocolCapabilitiesSchema,
+  },
+  { additionalProperties: false },
+);
+export type ProtocolInfo = Static<typeof ProtocolInfoSchema>;
+
+/** Browser protocol version supplied to the bootstrap query. */
+export const BootstrapRequestSchema = Type.Object(
+  { protocolVersion: Type.Integer({ minimum: 1 }) },
+  { additionalProperties: false },
+);
+export type BootstrapRequest = Static<typeof BootstrapRequestSchema>;
 export type {
   ExtensionSurface,
   ExtensionSurfaceList,

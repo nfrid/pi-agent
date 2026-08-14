@@ -108,6 +108,7 @@ export {
   tryParseThreadCreateCommand,
 } from './orchestration-parsers.js';
 export {
+  parseBootstrapRequest,
   parseBrowserSnapshot,
   parseComposerCommandCatalogue,
   parseDashboardEventEnvelope,
@@ -116,9 +117,11 @@ export {
   parseDelegateHistoryDetailResponse,
   parseDelegateHistoryResponse,
   parseDelegateHistoryRunDetailResponse,
+  parseProtocolInfo,
   parseSessionApiResponse,
   parseSessionRenameRequest,
   parseStartRuntimeRequest,
+  tryParseBootstrapRequest,
   tryParseBrowserSnapshot,
   tryParseComposerCommandCatalogue,
   tryParseDashboardEventEnvelope,
@@ -127,6 +130,7 @@ export {
   tryParseDelegateHistoryDetailResponse,
   tryParseDelegateHistoryResponse,
   tryParseDelegateHistoryRunDetailResponse,
+  tryParseProtocolInfo,
   tryParseSessionApiResponse,
   tryParseSessionRenameRequest,
   tryParseStartRuntimeRequest,
@@ -135,6 +139,7 @@ export {
   validateStartRuntimeRequest,
 } from './parsers.js';
 export type {
+  BootstrapRequest,
   BridgeEventEnvelope,
   BrowserMessage,
   BrowserSnapshot,
@@ -160,6 +165,8 @@ export type {
   DelegateHistoryState,
   EventEnvelope,
   NotificationEvent,
+  ProtocolCapabilities,
+  ProtocolInfo,
   SessionApiResponse,
   SessionDelegateHistoryResponse,
   SessionHistory,
@@ -172,6 +179,7 @@ export type {
   WorkspaceTarget,
 } from './schemas.js';
 export {
+  BootstrapRequestSchema,
   BridgeEventEnvelopeSchema,
   BrowserMessageSchema,
   BrowserSnapshotSchema,
@@ -195,6 +203,9 @@ export {
   DelegateHistoryRunQuerySchema,
   EventEnvelopeSchema,
   NotificationEventSchema,
+  PROTOCOL_VERSION,
+  ProtocolCapabilitiesSchema,
+  ProtocolInfoSchema,
   SessionApiResponseSchema,
   SessionDelegateHistoryResponseSchema,
   SessionHistorySchema,
