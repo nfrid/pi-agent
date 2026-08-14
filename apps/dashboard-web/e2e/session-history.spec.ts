@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { installDashboardBootstrap } from './dashboard-fixtures';
+import {
+  dashboardTrpcInput,
+  installDashboardBootstrap,
+} from './dashboard-fixtures';
 
 const snapshot = {
   serverId: 'history-test',
@@ -35,14 +38,12 @@ test('loads earlier session history on demand', async ({ page }) => {
     releaseOlder = resolve;
   });
   await page.route('**/trpc/sessionSnapshot*', async (route) => {
-    const url = new URL(route.request().url());
-    const input = JSON.parse(url.searchParams.get('input') ?? '{}') as {
+    const input = dashboardTrpcInput(route.request()) as {
       before?: string;
     };
     beforeRequest = input.before;
     const older = beforeRequest !== undefined;
     if (!older) initialReads += 1;
-    const hasHistory = older || initialReads > 1;
     if (older) await olderResponse;
     await route.fulfill({
       contentType: 'application/json',
@@ -77,19 +78,15 @@ test('loads earlier session history on demand', async ({ page }) => {
             entriesComplete: false,
             serverId: 'history-test',
             cursor: 1,
-            ...(hasHistory
-              ? {
-                  history: older
-                    ? { version: 1, start: 0, end: 2, hasOlder: false }
-                    : {
-                        version: 1,
-                        start: 2,
-                        end: 3,
-                        hasOlder: true,
-                        nextBefore: 'token-1',
-                      },
-                }
-              : {}),
+            history: older
+              ? { version: 1, start: 0, end: 2, hasOlder: false }
+              : {
+                  version: 1,
+                  start: 2,
+                  end: 3,
+                  hasOlder: true,
+                  nextBefore: 'token-1',
+                },
             active: {
               pendingInteractions: [],
               messages: [],
@@ -108,7 +105,7 @@ test('loads earlier session history on demand', async ({ page }) => {
   await expect(
     page.getByRole('button', { name: 'Load earlier history' }),
   ).toBeVisible();
-  await expect.poll(() => initialReads).toBeGreaterThan(1);
+  await expect.poll(() => initialReads).toBe(1);
   await page.getByRole('button', { name: 'Load earlier history' }).click();
   await expect.poll(() => beforeRequest).toBe('token-1');
   const beforePrepend = await page

@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
-import { installDashboardBootstrap } from './dashboard-fixtures';
+import {
+  dashboardTrpcInput,
+  installDashboardBootstrap,
+} from './dashboard-fixtures';
 
 const snapshot = {
   serverId: 'delegate-history-e2e',
@@ -124,9 +127,9 @@ test('shows and inspects a persisted delegate in an offline session', async ({
     },
   );
   await page.route('**/trpc/sessionSnapshot*', (route) => {
-    const input = JSON.parse(
-      new URL(route.request().url()).searchParams.get('input') ?? '{}',
-    ) as { sessionId?: string };
+    const input = dashboardTrpcInput(route.request()) as {
+      sessionId?: string;
+    };
     if (input.sessionId !== 'historical-session') return route.fallback();
     return route.fulfill({
       contentType: 'application/json',

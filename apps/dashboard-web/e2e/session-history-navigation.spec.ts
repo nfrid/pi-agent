@@ -1,5 +1,8 @@
 import { expect, type Page, test } from '@playwright/test';
-import { installDashboardBootstrap } from './dashboard-fixtures';
+import {
+  dashboardTrpcInput,
+  installDashboardBootstrap,
+} from './dashboard-fixtures';
 
 const transcriptScroll = (page: Page) =>
   page.locator('.session-transcript-scroll');
@@ -67,8 +70,7 @@ test('aborts older history when navigating away from a session', async ({
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
   await page.route('**/trpc/sessionSnapshot*', async (route) => {
-    const url = new URL(route.request().url());
-    const input = JSON.parse(url.searchParams.get('input') ?? '{}') as {
+    const input = dashboardTrpcInput(route.request()) as {
       sessionId?: string;
       before?: string;
     };
@@ -190,9 +192,9 @@ test('switching chats establishes the new transcript tail', async ({
     releaseSecondSession = resolve;
   });
   await page.route('**/trpc/sessionSnapshot*', async (route) => {
-    const input = JSON.parse(
-      new URL(route.request().url()).searchParams.get('input') ?? '{}',
-    ) as { sessionId?: string };
+    const input = dashboardTrpcInput(route.request()) as {
+      sessionId?: string;
+    };
     const id = input.sessionId ?? '';
     const sessionIndex = id === 'session-2' ? 1 : 0;
     if (id === 'session-2') {
@@ -284,9 +286,9 @@ test('active to old to active ignores a delayed stale latest snapshot', async ({
   );
   let activeRequests = 0;
   await page.route('**/trpc/sessionSnapshot*', async (route) => {
-    const input = JSON.parse(
-      new URL(route.request().url()).searchParams.get('input') ?? '{}',
-    ) as { sessionId?: string };
+    const input = dashboardTrpcInput(route.request()) as {
+      sessionId?: string;
+    };
     const id = input.sessionId ?? '';
     if (id === 'session-1') {
       activeRequests += 1;

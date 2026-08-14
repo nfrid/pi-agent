@@ -2,7 +2,7 @@ import {
   type BrowserSnapshot,
   DASHBOARD_PROTOCOL_VERSION,
 } from '@pi-dashboard/protocol';
-import type { Page } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 
 export type DashboardFixtureOptions = {
   protocolInfo?: Record<string, unknown>;
@@ -12,6 +12,22 @@ export type DashboardFixtureOptions = {
 
 function trpcData(data: unknown): string {
   return JSON.stringify({ result: { data } });
+}
+
+/** Decode the stock tRPC input from either POST bodies or legacy GET URLs. */
+export function dashboardTrpcInput(request: Request): Record<string, unknown> {
+  try {
+    const raw =
+      request.method() === 'POST'
+        ? request.postData()
+        : new URL(request.url()).searchParams.get('input');
+    const input = raw ? JSON.parse(raw) : {};
+    return input && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 /** Install the same authenticated protocol-v2 shell read used by production. */
@@ -48,15 +64,9 @@ export async function installDashboardBootstrap(
     }),
   );
   await page.route('**/trpc/sessionSnapshot*', async (route) => {
-    const requestUrl = new URL(route.request().url());
-    let sessionId = 'session-1';
-    try {
-      const input = JSON.parse(requestUrl.searchParams.get('input') ?? '{}');
-      if (typeof input.sessionId === 'string') sessionId = input.sessionId;
-    } catch {
-      // The production client/parser reports malformed tRPC input; fixtures
-      // keep a deterministic fallback response for unrelated startup reads.
-    }
+    const input = dashboardTrpcInput(route.request());
+    const sessionId =
+      typeof input.sessionId === 'string' ? input.sessionId : 'session-1';
     const metadata = snapshot.sessions.find(
       (session) => session.id === sessionId,
     ) ?? {

@@ -1,5 +1,8 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
-import { installDashboardBootstrap } from './dashboard-fixtures';
+import {
+  dashboardTrpcInput,
+  installDashboardBootstrap,
+} from './dashboard-fixtures';
 
 function transcriptScroll(page: Page) {
   return page.locator('.session-transcript-scroll');
@@ -1121,9 +1124,9 @@ test('delayed command completion does not scroll a destination session', async (
     unread: [],
   });
   await page.route('**/trpc/sessionSnapshot*', async (route) => {
-    const input = JSON.parse(
-      new URL(route.request().url()).searchParams.get('input') ?? '{}',
-    ) as { sessionId?: string };
+    const input = dashboardTrpcInput(route.request()) as {
+      sessionId?: string;
+    };
     const sessionId = input.sessionId;
     const title =
       sessionId === 'session-destination' ? 'Destination' : 'Source';
