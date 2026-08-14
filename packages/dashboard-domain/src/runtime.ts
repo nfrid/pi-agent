@@ -128,9 +128,7 @@ function mergeDelegateSurfacePatch(
     if (!status || typeof status !== 'object' || Array.isArray(status))
       return status;
     const current = status as Record<string, unknown>;
-    const previousStatus = previousByLineage.get(
-      current.lineageId as string,
-    );
+    const previousStatus = previousByLineage.get(current.lineageId as string);
     if (!previousStatus) return status;
     return {
       ...previousStatus,

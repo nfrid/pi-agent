@@ -19,11 +19,11 @@ import {
   isRecord,
   MAX_ID,
   MAX_SESSION_INDEX_DELTA_ITEMS,
-  tryParseActiveDelegateTranscriptBaseline,
-  tryParseDelegateTranscriptEntry,
   type RuntimeSnapshot,
   redactImageData,
   type SessionIndexEntry,
+  tryParseActiveDelegateTranscriptBaseline,
+  tryParseDelegateTranscriptEntry,
   validateBridgeCommand,
   validateSessionRenameRequest,
   type WorkspaceTarget,
@@ -700,7 +700,9 @@ export class DashboardServerImpl implements DashboardServer {
       this.eventStream.cursor,
       id,
       runtime,
-      runtime ? this.registry.transportProvenance(runtime.runtimeId) : undefined,
+      runtime
+        ? this.registry.transportProvenance(runtime.runtimeId)
+        : undefined,
     );
   }
 

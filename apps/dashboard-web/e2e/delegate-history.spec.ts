@@ -19,50 +19,53 @@ const snapshot = {
 
 const metadata = snapshot.sessions[0];
 
+const historicalRun = {
+  runId: 'run-e2e',
+  lineageId: 'lineage-e2e',
+  name: 'Offline historical worker',
+  kind: 'background',
+  state: 'success',
+  createdAt: 1,
+  finishedAt: 2,
+  allowWrites: false,
+};
+
 const history = {
-  version: 1,
+  version: 2,
   sessionId: 'historical-session',
   groups: [
     {
       id: 'lineage-e2e',
-      runId: 'run-e2e',
-      lineageId: 'lineage-e2e',
-      name: 'Offline historical worker',
-      kind: 'background',
-      state: 'success',
-      createdAt: 1,
-      finishedAt: 2,
-      allowWrites: false,
+      ...historicalRun,
       runCount: 1,
-      runs: [
-        {
-          runId: 'run-e2e',
-          lineageId: 'lineage-e2e',
-          name: 'Offline historical worker',
-          kind: 'background',
-          state: 'success',
-          createdAt: 1,
-          finishedAt: 2,
-          allowWrites: false,
-          details: {
-            task: 'Inspect the historical fixture',
-            activities: [
-              {
-                type: 'tool',
-                label: 'read fixture',
-                name: 'read',
-                arguments: { path: 'fixture.txt' },
-                result: { content: 'historical result' },
-                status: 'completed',
-              },
-            ],
-            warnings: ['This transcript is historical.'],
-            truncated: true,
-          },
-        },
-      ],
+      runs: [historicalRun],
     },
   ],
+};
+
+const historyDetail = {
+  version: 1,
+  sessionId: 'historical-session',
+  lineageId: 'lineage-e2e',
+  runId: 'run-e2e',
+  run: {
+    ...historicalRun,
+    details: {
+      task: 'Inspect the historical fixture',
+      activities: [
+        {
+          type: 'tool',
+          label: 'read fixture',
+          name: 'read',
+          arguments: { path: 'fixture.txt' },
+          result: { content: 'historical result' },
+          status: 'completed',
+        },
+      ],
+      warnings: ['This transcript is historical.'],
+      truncated: true,
+    },
+  },
 };
 
 test('shows and inspects a persisted delegate in an offline session', async ({
@@ -79,6 +82,20 @@ test('shows and inspects a persisted delegate in an offline session', async ({
   );
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  await page.route('**/api/events?*', (route) =>
+    route.fulfill({
+      contentType: 'text/event-stream',
+      body: '',
+    }),
+  );
+  await page.route(
+    '**/api/sessions/historical-session/delegate-history/runs/run-e2e?*',
+    (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify(historyDetail),
+      }),
   );
   await page.route(
     '**/api/sessions/historical-session/delegate-history',
@@ -116,8 +133,7 @@ test('shows and inspects a persisted delegate in an offline session', async ({
   });
   await expect(delegateLauncher).toBeVisible();
   await delegateLauncher.click();
-  await expect(page.getByText('read fixture')).toBeVisible();
-  await page.getByText('read fixture').click();
+  await page.getByRole('button', { name: /Offline historical worker/ }).click();
   await expect(page.getByText('Inspect the historical fixture')).toBeVisible();
   await expect(
     page.getByText('Earlier historical transcript entries were omitted'),

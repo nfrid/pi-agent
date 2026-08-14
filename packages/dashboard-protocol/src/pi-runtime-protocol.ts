@@ -3,9 +3,9 @@
 export { MAX_ID } from './limits.js';
 export {
   isBridgeEvent,
+  parseActiveDelegateTranscriptBaseline,
   parseBridgeCommand,
   parseBridgeEvent,
-  parseActiveDelegateTranscriptBaseline,
   parseBridgeFrame,
   parseDelegateTranscriptEntry,
   parseFrame,
@@ -18,9 +18,9 @@ export {
   serializeFrame,
   tryParseActiveDelegateTranscriptBaseline,
   tryParseBridgeCommand,
-  tryParseDelegateTranscriptEntry,
   tryParseBridgeEvent,
   tryParseBridgeFrame,
+  tryParseDelegateTranscriptEntry,
   tryParseInteractionSnapshot,
   tryParseNormalizedMessagePayload,
   tryParseNormalizedToolPayload,
