@@ -13,6 +13,7 @@ import { findOuterMetaSkillPath } from './skills';
 
 export {
   type LoadedInstruction,
+  loadGuidelines,
   loadInstruction,
 } from '../shared/instructions';
 export {

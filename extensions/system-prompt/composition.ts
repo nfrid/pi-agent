@@ -6,19 +6,22 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import {
   type LoadedInstruction,
+  loadGuidelines,
   loadInstruction,
 } from '../shared/instructions';
-
-const BASH_GUIDELINES = [
-  'Combine related bash discovery into one pipeline; run unrelated checks in parallel.',
-  'Keep bash output bounded with targeted paths, filters, counts, excerpts, diffs, or short summaries.',
-  'Use separate calls when results need judgment, and before writes or destructive work; prefer read, edit, and write tools for file contents.',
-];
 
 export function loadAgentInstructions(): LoadedInstruction[] {
   const workingStyle = loadInstruction('instructions/agent/working-style.md');
   const interaction = loadInstruction('instructions/agent/interaction.md');
-  return [workingStyle, interaction];
+  const toolUse = loadGuidelines('instructions/agent/tool-use.md');
+  return [
+    workingStyle,
+    interaction,
+    {
+      path: 'instructions/agent/tool-use.md',
+      content: toolUse.map((guideline) => `- ${guideline}`).join('\n'),
+    },
+  ];
 }
 
 export function formatSkillsForPrompt(
@@ -161,7 +164,6 @@ export function buildSystemPrompt(
     if (!hasGrep && !hasFind && !hasLs) {
       addGuidelines('Use bash for listing and searching files (ls, rg, find)');
     }
-    addGuidelines(BASH_GUIDELINES);
   }
 
   for (const guideline of promptGuidelines ?? []) {
