@@ -6,6 +6,7 @@ import tasks from './index';
 type Handler = (...args: unknown[]) => unknown;
 
 type TodoTool = {
+  promptGuidelines?: string[];
   execute: (
     id: string,
     params: { action: string; text?: string },
@@ -49,6 +50,11 @@ describe('tasks extension lifecycle', () => {
     const shutdown = (scope: string) =>
       emit('session_shutdown', {}, context(scope));
     await start('tasks-scope-A');
+    expect(tool?.promptGuidelines).toEqual([
+      'Use todo when work has multiple meaningful steps whose progress or ordering is useful; skip it for trivial one-shot requests and simple questions.',
+      'Keep the todo list synchronized with meaningful progress and plan changes rather than narrating or restating the plan in free-form text.',
+      'Prefer the todo state already supplied in context; use list when the exact current state is needed or when the user asks to see it.',
+    ]);
     await start('tasks-scope-B');
     try {
       await tool?.execute(

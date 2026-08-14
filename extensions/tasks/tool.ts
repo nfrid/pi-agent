@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
+import { loadGuidelines } from '../shared/instructions';
 import { normalizeId, stats } from './domain';
 import { dashboard } from './format';
 import {
@@ -12,6 +13,8 @@ import {
 import { applyMutation } from './mutations';
 import type { TaskStore } from './store';
 
+const DESCRIPTION =
+  'Session-scoped todo list with task dependencies, statuses, priorities, notes, and atomic mutations. Actions include list, add, update, start, done, block, drop, remove, clear_done, replace, and batch. Use batch for ordered non-batch mutations; use replace to provide the complete desired task set. Dependencies reference prerequisite task ids, and notes hold extra context or block reasons.';
 const TODO_RESULT_TRUNCATION_MARKER =
   '\n… todo output truncated; use todo action:list after narrowing the active set.';
 
@@ -28,16 +31,10 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
   pi.registerTool<typeof paramsSchema, ToolDetails>({
     name: TOOL,
     label: 'Todo',
-    description:
-      'Session-scoped todo list with dependencies and batch mutations. Use for multi-step work; update when the plan changes.',
+    description: DESCRIPTION,
     promptSnippet:
       'Manage the session todo list with dependencies and statuses; batch known mutations into one call',
-    promptGuidelines: [
-      'Use todo for real multi-step work only; skip it for trivial one-shot questions or restating the request.',
-      'Batch known mutations in one call (e.g. done T1 then start T2). Split only when a later step needs a prior result. Use replace only when rewriting the complete task set.',
-      'Use start/done/block/drop at meaningful state changes; avoid list, since the current todo state is already provided in context, unless the user asks for it.',
-      'When adding dependencies, make depends_on point to prerequisite task ids; keep task text short and put context in notes.',
-    ],
+    promptGuidelines: loadGuidelines('instructions.md', __dirname),
     parameters: paramsSchema,
     executionMode: 'sequential',
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
