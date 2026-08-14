@@ -1,6 +1,7 @@
 import {
   applyTranscriptEvent,
   createTranscriptProjection,
+  hydrateTranscript,
   type TranscriptItem,
   type TranscriptProjection,
 } from '@pi-dashboard/domain';
@@ -151,8 +152,51 @@ function compactPublicRuntime<T extends RuntimeSnapshot | RuntimeSnapshotPatch>(
   } as T;
 }
 
+function shellRuntime(runtime: RuntimeSnapshot): RuntimeSnapshot {
+  const compacted = compactPublicRuntime(runtime);
+  let truncated = false;
+  const pendingInteractions = runtime.pendingInteractions
+    .slice(0, 128)
+    .filter((interaction) => {
+      const keep =
+        Buffer.byteLength(JSON.stringify(interaction) ?? '') <=
+        MAX_SHELL_INTERACTION_BYTES;
+      if (!keep) truncated = true;
+      return keep;
+    });
+  if (runtime.pendingInteractions.length > pendingInteractions.length)
+    truncated = true;
+  const extensionSurfaces = compacted.extensionSurfaces
+    ?.slice(0, MAX_SHELL_SURFACES)
+    .map((surface) => {
+      const bytes = Buffer.byteLength(JSON.stringify(surface) ?? '');
+      if (bytes <= MAX_SHELL_SURFACE_BYTES) return surface;
+      truncated = true;
+      return { ...surface, viewModel: { truncated: true } };
+    });
+  if ((compacted.extensionSurfaces?.length ?? 0) > MAX_SHELL_SURFACES)
+    truncated = true;
+  return {
+    ...compacted,
+    pendingInteractions,
+    ...(extensionSurfaces === undefined ? {} : { extensionSurfaces }),
+    ...(truncated ? { shellStateTruncated: true } : {}),
+  } as RuntimeSnapshot;
+}
+
+function boundedShellUsage(value: unknown): unknown {
+  if (value === undefined) return value;
+  return Buffer.byteLength(JSON.stringify(value) ?? '') <=
+    MAX_SHELL_SURFACE_BYTES
+    ? value
+    : { truncated: true };
+}
+
 const MAX_ACTIVE_ENTITIES = 256;
 const MAX_ACTIVE_BYTES = 512 * 1024;
+const MAX_SHELL_INTERACTION_BYTES = 32 * 1024;
+const MAX_SHELL_SURFACE_BYTES = 64 * 1024;
+const MAX_SHELL_SURFACES = 32;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,200}$/;
 
 type ActiveTranscriptState = {
@@ -163,6 +207,10 @@ type ActiveTranscriptState = {
   pendingInteractions: readonly InteractionSnapshot[];
   projection: TranscriptProjection;
   truncated: boolean;
+  /** Terminal lifecycle entities not yet observed in a persisted page. */
+  unresolvedTerminalIds: readonly string[];
+  /** Set on settlement/offline/reconnect until a complete disk read proves safety. */
+  uncertain: boolean;
 };
 
 type ActiveCapture = {
@@ -254,11 +302,15 @@ function activeDelegateRuns(runtime: RuntimeSnapshot): {
     const sourceTranscript = Array.isArray(value.transcript)
       ? value.transcript
       : [];
+    if (value.transcript !== undefined && !Array.isArray(value.transcript))
+      truncated = true;
     if (sourceTranscript.length > 128) truncated = true;
     const transcript = sourceTranscript.flatMap((entry) => {
       const parsed = tryParseDelegateTranscriptEntry(entry);
       return parsed ? [parsed] : [];
     });
+    if (transcript.length !== Math.min(sourceTranscript.length, 128))
+      truncated = true;
     runs.push({
       runId: value.runId,
       lineageId: value.lineageId,
@@ -297,8 +349,14 @@ function activeDelegateRuns(runtime: RuntimeSnapshot): {
 
 function itemMessage(
   item: TranscriptItem,
+  includeTerminal = false,
 ): NormalizedMessagePayload | undefined {
-  if (item.kind !== 'message' || item.status !== 'streaming') return undefined;
+  if (
+    item.kind !== 'message' ||
+    (item.status !== 'streaming' &&
+      !(includeTerminal && item.status === 'finished'))
+  )
+    return undefined;
   return {
     messageId: item.messageId,
     role: item.role,
@@ -308,15 +366,23 @@ function itemMessage(
     ...(item.toolCallIds === undefined
       ? {}
       : { toolCallIds: [...item.toolCallIds] }),
-    phase: 'updated',
+    phase: item.status === 'streaming' ? 'updated' : 'finished',
     ...(item.data === undefined ? {} : { data: item.data }),
   };
 }
 
-function itemTool(item: TranscriptItem): NormalizedToolPayload | undefined {
+function itemTool(
+  item: TranscriptItem,
+  includeTerminal = false,
+): NormalizedToolPayload | undefined {
   if (
     item.kind !== 'tool' ||
-    (item.status !== 'pending' && item.status !== 'running')
+    (item.status !== 'pending' &&
+      item.status !== 'running' &&
+      !(
+        includeTerminal &&
+        (item.status === 'finished' || item.status === 'error')
+      ))
   )
     return undefined;
   return {
@@ -328,7 +394,10 @@ function itemTool(item: TranscriptItem): NormalizedToolPayload | undefined {
     status: item.status,
     ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
     ...(item.data === undefined ? {} : { data: item.data }),
-    phase: 'updated',
+    phase:
+      item.status === 'pending' || item.status === 'running'
+        ? 'updated'
+        : 'finished',
   };
 }
 
@@ -497,14 +566,14 @@ export class DashboardApplication {
       serverId,
       revision,
       cursor,
-      runtimes: liveRuntimes.map((runtime) => compactPublicRuntime(runtime)),
+      runtimes: liveRuntimes.map((runtime) => shellRuntime(runtime)),
       workspaces: this.workspaces.list(),
       projects: this.orchestration.projectSummaries(),
       checkouts: this.orchestration.checkoutSummaries(),
       threads: this.orchestration.threadSummaries(),
       runs: this.orchestration.runSummaries(),
       sessions,
-      usage: this.usage.cached(),
+      usage: boundedShellUsage(this.usage.cached()),
       unread: this.metadata.unreadNotifications(),
     };
   }
@@ -515,10 +584,9 @@ export class DashboardApplication {
     revision: number,
     cursor = this.eventStream.cursor,
   ): BrowserSnapshot {
-    // Event-stream publication passes its allocated cursor explicitly. Direct
-    // callers retain the historical ability to request that cursor.
-    if (cursor === this.eventStream.cursor)
-      return this.shellSnapshot(serverId, revision);
+    // Event-stream publication passes its allocated cursor explicitly. Keep
+    // this compatibility builder independent of the stricter shell query so
+    // bootstrap/SSE/WS payloads retain their historical shape.
     const liveRuntimes = this.registry.snapshots();
     const sessions = this.sessionMetadata(liveRuntimes);
     this.setSessionMetadataBaseline(sessions);
@@ -542,7 +610,12 @@ export class DashboardApplication {
     const sessionId = change.snapshot.session?.id;
     if (!sessionId) return;
     if (change.kind === 'offline') {
-      this.activeTranscripts.delete(sessionId);
+      const prior = this.activeTranscripts.get(sessionId);
+      if (prior)
+        this.activeTranscripts.set(sessionId, {
+          ...prior,
+          uncertain: true,
+        });
       return;
     }
     const runtimeEpoch = change.runtimeEpoch ?? change.snapshot.runtimeId;
@@ -556,6 +629,8 @@ export class DashboardApplication {
         pendingInteractions: change.snapshot.pendingInteractions.slice(0, 128),
         projection: createTranscriptProjection(sessionId),
         truncated: false,
+        unresolvedTerminalIds: [],
+        uncertain: true,
       });
       return;
     }
@@ -567,6 +642,8 @@ export class DashboardApplication {
       pendingInteractions: [],
       projection: createTranscriptProjection(sessionId),
       truncated: false,
+      unresolvedTerminalIds: [],
+      uncertain: true,
     };
     if (prior.runtimeEpoch !== runtimeEpoch) {
       this.activeTranscripts.set(sessionId, {
@@ -578,16 +655,18 @@ export class DashboardApplication {
         pendingInteractions: change.snapshot.pendingInteractions.slice(0, 128),
         projection: createTranscriptProjection(sessionId),
         truncated: false,
+        unresolvedTerminalIds: [],
+        uncertain: true,
       });
       return;
     }
     let projection = prior.projection;
     let truncated = prior.truncated;
+    let unresolvedTerminalIds = [...prior.unresolvedTerminalIds];
+    let uncertain = prior.uncertain;
     if (change.kind === 'event') {
-      if (change.event.type === 'agent.settled') {
-        projection = createTranscriptProjection(sessionId);
-        truncated = false;
-      } else {
+      const settled = change.event.type === 'agent.settled';
+      if (!settled) {
         const reduced = applyTranscriptEvent(projection, {
           event: change.event,
           sessionId,
@@ -595,6 +674,47 @@ export class DashboardApplication {
           runtimeSeq,
         });
         projection = reduced.state;
+        if (
+          change.event.type === 'message.finished' ||
+          change.event.type === 'tool.finished'
+        ) {
+          unresolvedTerminalIds = [
+            ...new Set(
+              projection.order.filter((id) => {
+                const item = projection.items[id];
+                return (
+                  (item?.kind === 'message' && item.status === 'finished') ||
+                  (item?.kind === 'tool' &&
+                    (item.status === 'finished' || item.status === 'error'))
+                );
+              }),
+            ),
+          ];
+          // A malformed terminal payload may not produce a reducer item. It
+          // is still unsafe to claim durability until a complete read proves
+          // that no lifecycle state was lost.
+          if (unresolvedTerminalIds.length === 0) uncertain = true;
+        }
+        // A live lifecycle event is represented by the bounded reducer. A
+        // heartbeat/state patch after reconnect is not enough to clear the
+        // uncertainty because it carries no message/tool replay.
+        if (
+          change.event.type.startsWith('message.') ||
+          change.event.type.startsWith('tool.') ||
+          change.event.type === 'delegate.transcript.updated' ||
+          change.event.type === 'interaction.requested' ||
+          change.event.type === 'interaction.resolved'
+        )
+          uncertain = false;
+        if (
+          (change.event.type === 'message.finished' ||
+            change.event.type === 'tool.finished') &&
+          unresolvedTerminalIds.length === 0
+        )
+          uncertain = true;
+      } else {
+        // Keep terminal items visible until the persisted read confirms them.
+        uncertain = true;
       }
       const trimmed = trimProjection(projection, truncated);
       projection = trimmed.projection;
@@ -609,9 +729,12 @@ export class DashboardApplication {
       pendingInteractions: change.snapshot.pendingInteractions.slice(0, 128),
       projection,
       truncated,
+      unresolvedTerminalIds,
+      uncertain:
+        change.kind === 'event' && change.event.type === 'runtime.goodbye'
+          ? true
+          : uncertain,
     });
-    if (change.kind === 'event' && change.event.type === 'runtime.goodbye')
-      this.activeTranscripts.delete(sessionId);
   }
 
   private captureActive(sessionId: string): ActiveCapture {
@@ -629,13 +752,14 @@ export class DashboardApplication {
     const runtime = capture.runtime;
     const messages: NormalizedMessagePayload[] = [];
     const tools: NormalizedToolPayload[] = [];
+    const unresolved = new Set(state?.unresolvedTerminalIds ?? []);
     if (state) {
       for (const id of state.projection.order) {
         const item = state.projection.items[id];
         if (!item) continue;
-        const message = itemMessage(item);
+        const message = itemMessage(item, unresolved.has(id));
         if (message) messages.push(message);
-        const tool = itemTool(item);
+        const tool = itemTool(item, unresolved.has(id));
         if (tool) tools.push(tool);
       }
     }
@@ -653,7 +777,11 @@ export class DashboardApplication {
       ? activeDelegateRuns(runtime)
       : { runs: [], truncated: false };
     let delegates = delegateProjection.runs;
-    let truncated = (state?.truncated ?? false) || delegateProjection.truncated;
+    let truncated =
+      (state?.truncated ?? false) ||
+      (state?.uncertain ?? false) ||
+      unresolved.size > 0 ||
+      delegateProjection.truncated;
     if (
       (state?.pendingInteractions.length ??
         runtime?.pendingInteractions.length ??
@@ -753,16 +881,20 @@ export class DashboardApplication {
       indexed: SessionIndexEntry | undefined,
     ): SessionRead => {
       const entries = runtime.session.entries.slice(-2048);
-      const complete = entries.length === runtime.session.entries.length;
+      const complete =
+        runtime.session.entriesComplete === true &&
+        entries.length === runtime.session.entries.length;
       return {
         metadata: runtimeMetadata(runtime, indexed),
         entries: [...entries],
         entriesComplete: complete,
+        // A runtime-only page has no opaque file cursor. Do not advertise a
+        // pageable older range that cannot be requested safely.
         history: {
           version: 1,
-          start: complete ? 0 : runtime.session.entries.length - entries.length,
-          end: runtime.session.entries.length,
-          hasOlder: !complete,
+          start: 0,
+          end: entries.length,
+          hasOlder: false,
         },
       };
     };
@@ -796,21 +928,45 @@ export class DashboardApplication {
           !sameRuntimeCapture(capture, this.captureActive(sessionId)))
       )
         continue;
+      let resolvedCapture = capture;
+      if (before === undefined && capture.state) {
+        const persisted = hydrateTranscript(result.entries, sessionId);
+        const persistedIds = new Set(Object.keys(persisted.items));
+        const unresolvedTerminalIds =
+          capture.state.unresolvedTerminalIds.filter(
+            (id) => !persistedIds.has(id),
+          );
+        const fullyProved =
+          result.entriesComplete &&
+          unresolvedTerminalIds.length === 0 &&
+          !runtimeIsWorking(capture.runtime);
+        const state = {
+          ...capture.state,
+          unresolvedTerminalIds,
+          uncertain: fullyProved ? false : capture.state.uncertain,
+        };
+        this.activeTranscripts.set(sessionId, state);
+        resolvedCapture = { ...capture, state };
+      }
       const active =
         before === undefined
-          ? this.activeOverlay(capture)
+          ? this.activeOverlay(resolvedCapture)
           : this.activeOverlay({});
-      const provenance = capture.runtime
-        ? this.registry.transportProvenance(capture.runtime.runtimeId)
+      const provenance = resolvedCapture.runtime
+        ? this.registry.transportProvenance(resolvedCapture.runtime.runtimeId)
         : undefined;
       const runtimeEpoch =
-        provenance?.runtimeEpoch ?? capture.state?.runtimeEpoch;
-      const runtimeSeq = provenance?.runtimeSeq ?? capture.state?.runtimeSeq;
-      const metadata = capture.runtime
-        ? runtimeMetadata(capture.runtime, result.metadata)
+        provenance?.runtimeEpoch ?? resolvedCapture.state?.runtimeEpoch;
+      const runtimeSeq =
+        provenance?.runtimeSeq ?? resolvedCapture.state?.runtimeSeq;
+      const metadata = resolvedCapture.runtime
+        ? runtimeMetadata(resolvedCapture.runtime, result.metadata)
         : result.metadata;
       const completeThroughCursor =
-        before === undefined && result.entriesComplete && !active.truncated;
+        before === undefined &&
+        result.entriesComplete &&
+        !active.truncated &&
+        (!resolvedCapture.runtime || resolvedCapture.state !== undefined);
       return {
         metadata,
         entries: result.entries,

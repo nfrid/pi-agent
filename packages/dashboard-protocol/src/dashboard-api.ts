@@ -14,6 +14,7 @@ export {
   MAX_DELEGATE_HISTORY_TASK,
   MAX_DELEGATE_HISTORY_TOTAL_RUNS,
   MAX_SESSION_INDEX_DELTA_ITEMS,
+  MAX_SHELL_SNAPSHOT_BYTES,
   MAX_TEXT,
 } from './limits.js';
 
@@ -222,6 +223,7 @@ export {
   DelegateHistoryRunDetailResponseSchema,
   DelegateHistoryRunDetailSchema,
   DelegateHistoryRunQuerySchema,
+  DelegateTranscriptEntryIdSchema,
   EventEnvelopeSchema,
   NotificationEventSchema,
   PROTOCOL_VERSION,

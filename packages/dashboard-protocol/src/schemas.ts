@@ -610,10 +610,16 @@ function delegateTranscriptPayloadSchema(depth: number): TSchema {
   ]);
 }
 
+/** Live delegate IDs may include a longer extension-generated lineage path. */
+export const DelegateTranscriptEntryIdSchema = Type.String({
+  minLength: 1,
+  maxLength: 512,
+  pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+});
 /** Bounded public activity entry shared by live delegate transport and history. */
 export const DelegateTranscriptEntrySchema = Type.Object(
   {
-    id: IdentifierSchema,
+    id: DelegateTranscriptEntryIdSchema,
     type: Type.Union([
       Type.Literal('task'),
       Type.Literal('thinking'),
@@ -1196,6 +1202,15 @@ const ShellRuntimeSnapshotSchema = Type.Object(
       },
       { additionalProperties: false },
     ),
+    pendingInteractions: Type.Readonly(
+      Type.Array(InteractionSnapshotSchema, { maxItems: 128 }),
+    ),
+    extensionSurfaces: Type.Optional(
+      Type.Readonly(
+        Type.Array(RuntimeExtensionSurfaceSchema, { maxItems: 32 }),
+      ),
+    ),
+    shellStateTruncated: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

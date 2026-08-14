@@ -13,6 +13,7 @@ import {
   MAX_QUEUE_DRAFT_TEXT,
   MAX_QUEUE_DRAFTS,
   MAX_RUNTIME_EXTENSION_SURFACES,
+  MAX_SHELL_SNAPSHOT_BYTES,
   ProtocolInfoSchema,
   parseActiveDelegateTranscriptBaseline,
   parseAuthoritativeSessionSnapshot,
@@ -267,6 +268,15 @@ describe('dashboard protocol', () => {
             role: 'assistant',
             content: 'x',
           })),
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      parseShellSnapshotResponse({
+        ...shell,
+        snapshot: {
+          ...shell.snapshot,
+          usage: 'x'.repeat(MAX_SHELL_SNAPSHOT_BYTES),
         },
       }),
     ).toThrow();

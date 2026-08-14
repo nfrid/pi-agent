@@ -5,7 +5,12 @@ import {
 import { Type } from 'typebox';
 import { Value } from 'typebox/value';
 
-import { MAX_ID, MAX_PATH, SESSION_NAME_MAX_LENGTH } from './limits.js';
+import {
+  MAX_ID,
+  MAX_PATH,
+  MAX_SHELL_SNAPSHOT_BYTES,
+  SESSION_NAME_MAX_LENGTH,
+} from './limits.js';
 import {
   type ActiveDelegateTranscriptBaseline,
   ActiveDelegateTranscriptBaselineSchema,
@@ -102,6 +107,12 @@ function assertShellHasNoTranscript(snapshot: ShellSnapshot): void {
       throw new Error('Shell snapshot contains transcript entries.');
 }
 
+function assertShellSize(value: unknown): void {
+  const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  if (bytes > MAX_SHELL_SNAPSHOT_BYTES)
+    throw new Error('Shell snapshot is too large.');
+}
+
 export function parseShellSnapshotResponse(
   value: unknown,
 ): ShellSnapshotResponse {
@@ -113,6 +124,7 @@ export function parseShellSnapshotResponse(
   assertShellHasNoTranscript(response.snapshot);
   if (response.cursor !== response.snapshot.cursor)
     throw new Error('Shell snapshot cursor mismatch.');
+  assertShellSize(response);
   return response;
 }
 
@@ -129,6 +141,7 @@ export function tryParseShellSnapshotResponse(
 export function parseShellSnapshot(value: unknown): ShellSnapshot {
   const snapshot = parseSchema(ShellSnapshotSchema, value, 'shell snapshot');
   assertShellHasNoTranscript(snapshot);
+  assertShellSize(snapshot);
   return snapshot;
 }
 
