@@ -1,7 +1,9 @@
+import { resolve } from 'node:path';
 import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
+import { loadGuidelines } from '../shared/instructions';
 import {
   type BranchEntry,
   formatBranchDetail,
@@ -92,20 +94,20 @@ function text(value: string) {
   return { content: [{ type: 'text' as const, text: value }] };
 }
 
+export const DELEGATE_BRANCHES_DESCRIPTION =
+  "Review and integrate harness-managed delegate branches, or inspect caller-owned worktrees without taking ownership. list defaults to this parent session; set scope: all for repository history. review gives you the task's commits and diff measured from its own starting point by default; set incremental: true to show only task patches not represented in current parent HEAD. Use summaryOnly, exact repository-relative paths, or patchBudget for bounded review. merge either lands cleanly or leaves your checkout untouched, and refuses caller-owned branches. drop never deletes a caller-owned checkout or branch. Actions: list, review, merge, drop.";
+
 export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
   pi.registerTool<typeof Parameters, BranchesDetails>({
     name: 'delegate_branches',
     label: 'Delegate Branches',
-    description:
-      "Review and integrate harness-managed delegate branches, or inspect caller-owned worktrees without taking ownership. list defaults to this parent session; set scope: all for repository history. review gives you the task's commits and diff measured from its own starting point by default; set incremental: true to show only task patches not represented in current parent HEAD. Use summaryOnly, exact repository-relative paths, or patchBudget for bounded review. merge either lands cleanly or leaves your checkout untouched, and refuses caller-owned branches. drop never deletes a caller-owned checkout or branch. Actions: list, review, merge, drop.",
+    description: DELEGATE_BRANCHES_DESCRIPTION,
     promptSnippet:
       'Review or merge writable delegate branches; continue or drop retired read-only snapshots',
-    promptGuidelines: [
-      'After a writable run, review its branch before merging, and run the check the task was given yourself. A branch that merges cleanly can still be wrong.',
-      'For a continued branch after integration, use review with incremental: true to inspect only task patches not represented in current HEAD; omit it for the full recorded-range audit. Use summaryOnly or exact paths before requesting a bounded patchBudget; omitted paths are evidence that the view is partial.',
-      'Merge sibling branches one at a time, reviewing between them: parallel tasks never collide in their worktrees, but their merges can.',
-      'Drop a branch once its work is merged, so list stays a picture of what is still outstanding. A retired read-only snapshot is not mergeable: continue it for the same source or targeted refresh, or drop it when no longer needed.',
-    ],
+    promptGuidelines: loadGuidelines(
+      'extensions/delegate/branches-instructions.md',
+      resolve(__dirname, '../..'),
+    ),
     parameters: Parameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const reviewSelectorUsed =

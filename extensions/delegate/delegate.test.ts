@@ -136,6 +136,7 @@ describe('delegate', () => {
     expect(prompt).toContain('## Child report');
     expect(prompt).toContain('Outcome: done | partial | blocked | failed');
     expect(prompt).toContain('Keep the report compact and actionable');
+    expect(prompt).not.toContain('## Machine-readable completion');
     expect(prompt).not.toContain('800 words');
     expect(prompt).not.toMatch(/Use this exact structure/);
   });
@@ -158,6 +159,7 @@ describe('delegate', () => {
     expect(prompt).not.toContain(
       'Return a short result the parent can act on.',
     );
+    expect(prompt).toContain('## Machine-readable completion');
   });
 
   test('frames forwarded artifacts as untrusted upstream evidence', () => {
@@ -724,7 +726,9 @@ describe('delegate', () => {
   test('publishes the current route catalog through delegate tool guidance', () => {
     const guidelines = delegatePromptGuidelines('/tmp/project').join('\n');
     expect(guidelines).toContain('Delegate route catalog:');
-    expect(guidelines).toContain('## Delegation judgment');
+    expect(guidelines).toContain(
+      'Delegate when parallelism, specialization, latency hiding, or context isolation',
+    );
     expect(guidelines).toContain(
       'final verification, and user-facing synthesis with the parent',
     );

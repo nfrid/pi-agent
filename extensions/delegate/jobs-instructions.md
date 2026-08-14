@@ -1,0 +1,3 @@
+- Use delegate_jobs feedback only for concrete corrective guidance to a queued or running background child; it is bounded and delivered at a safe checkpoint, not an interruption of an in-flight tool call.
+- Background completion resumes the parent automatically; /continue manually resumes an interrupted turn.
+- Use peek only for deliberate inspection or once when a bounded timeout will change the next action, and never repeat it to poll.

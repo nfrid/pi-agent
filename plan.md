@@ -14,23 +14,24 @@ This is a cleanup, not a prompt-framework project. Prefer deletion and small con
 
 ### Human-authored instructions
 
-Use a plainly named, centralized Markdown surface:
+Use plainly named Markdown surfaces:
 
 ```text
 instructions/
   agent/
     working-style.md
     interaction.md
+    tool-use.md
+extensions/
   delegate/
-    parent.md
-    child-prose.md
-    child-structured.md
-    routing.md
+    instructions.md
+    jobs-instructions.md
+    branches-instructions.md
 ```
 
-This repo is the global Pi agent configuration, so a separate `personal` category adds no useful meaning. `instructions/agent/` is the durable global agent policy. Other directories group substantial human-authored policy by feature.
+This repo is the global Pi agent configuration, so a separate `personal` category adds no useful meaning. `instructions/agent/` is the durable global agent policy. Extension-owned Markdown stays beside the extension that loads it.
 
-Keep extension code and instruction files close in ownership even though the Markdown is centralized: `instructions/delegate/*` is owned by `extensions/delegate/*`, for example. A short comment at the loading site should name the Markdown source. `/prompt-info` should report which instruction files contributed to the emitted prompt.
+Keep extension code and instruction files close in ownership. A short comment at the loading site should name the Markdown source. `/prompt-info` should report canonical agent instruction files; extension tool guidelines remain attached to their registered tools.
 
 Rules:
 
@@ -42,7 +43,7 @@ Rules:
 - Do not add an extra content cache. Canonical agent-policy edits apply on the next turn; extension-owned tool-policy edits apply after Pi reloads the extension.
 - `/prompt-info` reports each loaded source path and its size.
 
-Do not move every prompt-adjacent string into Markdown. Use Markdown for meaningful prose a human is expected to refine: working style, communication policy, delegation judgment, report contracts, and routing judgment. Keep short tool descriptions, validation messages, labels, and generated capability facts in TypeScript.
+Do not move every prompt-adjacent string into Markdown. Use Markdown for meaningful workflow preferences a human is expected to refine: working style, communication policy, delegation judgment, and tool-specific judgment. Keep completion contracts, route-selection policy, short tool descriptions, validation messages, labels, and generated capability facts in TypeScript when they are mechanical and coupled to extension behavior.
 
 The canonical builder should continue to avoid arbitrary `customPrompt` and `appendSystemPrompt` strings for now. They create a second, less inspectable authority path. Replace the current implication that they are accidentally ignored with an explicit tested decision that human-authored global policy comes from `instructions/`.
 
@@ -163,14 +164,7 @@ Make focused moves and deletions; do not redesign tool registration or externali
 
 #### Delegate policy
 
-Move the concise, human-maintained delegation prose to:
-
-- `instructions/delegate/parent.md`;
-- `instructions/delegate/child-prose.md`;
-- `instructions/delegate/child-structured.md`;
-- `instructions/delegate/routing.md`.
-
-Keep task text, branch names, timeout, result schema, route rows, and capability facts generated in TypeScript. Compose those facts with the Markdown instructions; do not add a template engine.
+Keep the concise parent workflow preferences in the bullet-only extension-local `extensions/delegate/instructions.md`, loaded with `loadGuidelines` into the delegate tool's parent prompt guidelines. Keep jobs and branches judgment in their focused extension-local `jobs-instructions.md` and `branches-instructions.md` files. Keep prose and structured child completion contracts in clearly named top-level TypeScript constants beside `buildDelegatePrompt`, and keep route-selection policy in a top-level TypeScript constant beside the generated route catalog. Keep task text, branch names, timeout, result schema, route rows, and capability facts generated in TypeScript; do not add a template engine.
 
 Reduce the parent policy to the rules that require judgment:
 
@@ -199,7 +193,7 @@ Review todo, structured result, edit, branch, and background contributions using
 - Is this an action, parameter, default, limit, or invalid combination? Leave it to schema/runtime.
 - Is the same instruction already present elsewhere? Keep only its clearest owner.
 
-For structured result, `instructions/delegate/child-structured.md` plus terminating runtime behavior should own completion. Remove repeated global guidelines that add no judgment.
+For structured result, the structured TypeScript contract plus terminating runtime behavior should own completion. Remove repeated global guidelines that add no judgment.
 
 Do not automatically create Markdown for todo, edit, branch, background, or every other tool. Their remaining human policy is too small to justify extra files unless the cleanup reveals a substantial coherent passage worth maintaining independently.
 

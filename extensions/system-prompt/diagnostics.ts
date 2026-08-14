@@ -4,7 +4,6 @@ import type {
   BuildSystemPromptOptions,
   ToolInfo,
 } from '@earendil-works/pi-coding-agent';
-import { loadInstruction } from '../shared/instructions';
 import {
   filterGlobalContextFiles,
   formatSkillsForPrompt,
@@ -131,13 +130,9 @@ export function formatPromptInfo(
     options.cwd,
   );
   const tools = options.selectedTools ?? ['read', 'bash', 'edit', 'write'];
+  // Extension tool guidelines are represented in promptGuidelines; only the
+  // canonical agent instruction files are source-attributed here.
   const instructions = loadAgentInstructions();
-  if (tools.includes('delegate')) {
-    instructions.push(
-      loadInstruction('instructions/delegate/parent.md'),
-      loadInstruction('instructions/delegate/routing.md'),
-    );
-  }
   const allSkills = options.skills ?? [];
   const visibleSkills = allSkills.filter(
     (skill) => !skill.disableModelInvocation,

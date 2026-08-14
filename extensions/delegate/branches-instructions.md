@@ -1,0 +1,4 @@
+- After a writable run, review its branch before merging, and run the check the task was given yourself. A branch that merges cleanly can still be wrong.
+- For a continued branch after integration, use review with incremental: true to inspect only task patches not represented in current HEAD; omit it for the full recorded-range audit. Use summaryOnly or exact paths before requesting a bounded patchBudget; omitted paths are evidence that the view is partial.
+- Merge sibling branches one at a time, reviewing between them: parallel tasks never collide in their worktrees, but their merges can.
+- Drop a branch once its work is merged, so list stays a picture of what is still outstanding. A retired read-only snapshot is not mergeable: continue it for the same source or targeted refresh, or drop it when no longer needed.
