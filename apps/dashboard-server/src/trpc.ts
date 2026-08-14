@@ -36,6 +36,8 @@ export const DASHBOARD_DOMAIN_CODES = [
 export type DashboardDomainCode = (typeof DASHBOARD_DOMAIN_CODES)[number];
 
 const domainCodes = new Set<string>(DASHBOARD_DOMAIN_CODES);
+const databaseDetailPattern =
+  /sqlite|unique constraint|constraint failed|database is locked|no such table|malformed database/i;
 
 function domainCode(error: unknown): DashboardDomainCode | undefined {
   let current: unknown = error;
@@ -68,11 +70,25 @@ function transportCode(
   return 'BAD_REQUEST';
 }
 
+function containsDatabaseDetail(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; depth < 3 && current; depth += 1) {
+    const message = current instanceof Error ? current.message : '';
+    if (databaseDetailPattern.test(message)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 function publicMessage(
   error: unknown,
   code: DashboardDomainCode | undefined,
 ): string {
-  if (code === 'active-writer' || code === 'sqlite-constraint')
+  if (
+    code === 'active-writer' ||
+    code === 'sqlite-constraint' ||
+    containsDatabaseDetail(error)
+  )
     return 'The orchestration request conflicts with existing state.';
   if (error instanceof Error && error.message.length > 0) return error.message;
   return 'Dashboard request failed.';
