@@ -229,7 +229,7 @@ describe('live extension surface fixtures', () => {
           transcript: [{ id: 'task', type: 'task', label: 'Task' }],
         },
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('invalidates once for settled transitions and every disappeared run', () => {

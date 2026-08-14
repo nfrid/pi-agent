@@ -120,6 +120,52 @@ describe('delegate live surface', () => {
     );
   });
 
+  it('gives each active delegate an independent transcript budget and omits settled detail', () => {
+    const store = new DelegateStatusStore();
+    const makeRun = (task: string, state: 'running' | 'success') => {
+      const run = createRun(task);
+      run.state = state;
+      run.activities = Array.from({ length: 8 }, (_, index) => ({
+        type: 'tool' as const,
+        id: `${task}-${index}`,
+        label: 'x'.repeat(2_000),
+        status: 'completed' as const,
+      }));
+      return run;
+    };
+    const first = makeRun('first', 'running');
+    const second = makeRun('second', 'running');
+    const activeRuns = [first, second];
+    const [firstId, secondId] = store.start(activeRuns, 'background');
+    store.update(firstId, first);
+    store.update(secondId, second);
+    const settled = makeRun('settled', 'success');
+    const [settledId] = store.start([settled], 'background');
+    store.update(settledId, settled);
+
+    const statuses = (
+      delegateSurface(store).viewModel as {
+        statuses: Array<{
+          state: string;
+          transcript?: unknown[];
+          transcriptTruncated?: boolean;
+        }>;
+      }
+    ).statuses;
+    const active = statuses.filter((status) => status.state === 'running');
+    expect(active).toHaveLength(2);
+    expect(
+      active.every(
+        (status) =>
+          JSON.stringify(status.transcript).length > 14 * 1024 &&
+          status.transcriptTruncated === true,
+      ),
+    ).toBe(true);
+    expect(
+      statuses.find((status) => status.state === 'success'),
+    ).not.toMatchObject({ transcript: expect.anything() });
+  });
+
   it('bounds aggregate structured values and validation errors on the dashboard surface', () => {
     const store = new DelegateStatusStore();
     const value = Object.fromEntries(
