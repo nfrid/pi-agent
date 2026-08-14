@@ -1,5 +1,6 @@
 import {
   dashboardHttpClient,
+  dashboardHttpErrorKind,
   snapshotQueryOptions,
   snapshotRequestGeneration,
   usageQueryOptions,
@@ -13,10 +14,11 @@ import { RouterProvider } from '@tanstack/react-router';
 import { type FormEvent, useEffect, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import { useDashboardShell } from '../dashboard-transport';
+import { reloadDashboard } from '../pwa-update';
 import { dashboardRouterInstance } from '../routes/tree';
 import { DashboardContext } from './dashboard-context';
 
-const queryClient = new QueryClient({
+export const dashboardQueryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false } },
 });
 
@@ -48,9 +50,26 @@ function AuthPrompt() {
 
 export function DashboardBootstrap() {
   return (
-    <QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={dashboardQueryClient}>
       <DashboardApp />
     </QueryClientProvider>
+  );
+}
+
+function ReloadRequiredState() {
+  return (
+    <main className="shell centered">
+      <div role="alert" aria-live="assertive">
+        <h1>Dashboard update required</h1>
+        <p>
+          This dashboard is out of date. Reload to connect to the current
+          server.
+        </p>
+        <button type="button" onClick={() => void reloadDashboard()}>
+          Reload to update
+        </button>
+      </div>
+    </main>
   );
 }
 
@@ -84,11 +103,10 @@ function DashboardApp() {
     if (usageQuery.data?.error)
       dashboard.store.setUsageError(usageQuery.data.error);
   }, [dashboard.store, usageQuery.data]);
-  if (
-    !dashboard.snapshot &&
-    snapshotQuery.error instanceof Error &&
-    snapshotQuery.error.message.includes('Authentication')
-  )
+  const startupErrorKind = dashboardHttpErrorKind(snapshotQuery.error);
+  if (!dashboard.snapshot && startupErrorKind === 'protocol-mismatch')
+    return <ReloadRequiredState />;
+  if (!dashboard.snapshot && startupErrorKind === 'authentication')
     return <AuthPrompt />;
   if (!dashboard.snapshot)
     return (

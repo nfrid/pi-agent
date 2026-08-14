@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { installDashboardBootstrap } from './dashboard-fixtures';
 
 const snapshot = {
   serverId: 'history-test',
@@ -23,12 +24,7 @@ test('loads earlier session history on demand', async ({ page }) => {
   await page.addInitScript(() =>
     localStorage.setItem('pi-dashboard-token', 'test-token'),
   );
-  await page.route('**/api/snapshot', (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify(snapshot),
-    }),
-  );
+  await installDashboardBootstrap(page, snapshot);
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );

@@ -1,7 +1,10 @@
 import type { BrowserSnapshot } from '@pi-dashboard/protocol';
 import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
-import type { DashboardHttpClient } from './http-client.js';
+import {
+  type DashboardHttpClient,
+  DashboardProtocolMismatchError,
+} from './http-client.js';
 import {
   activeDelegateTranscriptQueryOptions,
   commandMutationOptions,
@@ -272,14 +275,15 @@ describe('dashboard query and mutation factories', () => {
     expect(store.getSnapshot().serverId).toBe('daemon-b');
   });
 
-  it('does not retry authentication failures in fetch queries', () => {
+  it('does not retry authentication or protocol mismatch failures', () => {
     const retry = snapshotQueryOptions(client).retry;
     expect(typeof retry).toBe('function');
-    expect(
-      (retry as (count: number, error: unknown) => boolean)(0, { status: 401 }),
-    ).toBe(false);
-    expect(
-      (retry as (count: number, error: unknown) => boolean)(0, { status: 500 }),
-    ).toBe(true);
+    const shouldRetry = retry as (count: number, error: unknown) => boolean;
+    expect(shouldRetry(0, { status: 401 })).toBe(false);
+    expect(shouldRetry(0, new DashboardProtocolMismatchError(1, 2))).toBe(
+      false,
+    );
+    expect(shouldRetry(0, { status: 500 })).toBe(true);
+    expect(shouldRetry(0, { kind: 'malformed-output' })).toBe(true);
   });
 });

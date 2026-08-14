@@ -145,6 +145,23 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+/** Read an HTTP classification without relying on human-readable messages. */
+export function dashboardHttpErrorKind(
+  error: unknown,
+): DashboardHttpErrorKind | undefined {
+  if (error instanceof DashboardProtocolMismatchError)
+    return 'protocol-mismatch';
+  const kind = record(error)?.kind;
+  return kind === 'authentication' ||
+    kind === 'domain' ||
+    kind === 'malformed-output' ||
+    kind === 'network' ||
+    kind === 'protocol-mismatch' ||
+    kind === 'request'
+    ? kind
+    : undefined;
+}
+
 function dashboardErrorFromTrpc(cause: unknown): DashboardHttpError {
   if (cause instanceof DashboardHttpError) return cause;
   const source = record(cause);

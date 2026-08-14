@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import { installDashboardBootstrap } from './dashboard-fixtures';
 
 function transcriptScroll(page: Page) {
   return page.locator('.session-transcript-scroll');
@@ -105,60 +106,57 @@ test('mobile dashboard renders and supports project-scoped new chat', async ({
       }),
     }),
   );
-  await page.route('**/api/snapshot', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        revision: 1,
-        runtimes: [
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-mobile',
+    revision: 1,
+    cursor: 1,
+    runtimes: [
+      {
+        runtimeId: 'ghost',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
+        liveState: 'idle',
+        online: false,
+        lastSeenAt: 20,
+        model: {
+          provider: 'test',
+          model: 'careful',
+          thinking: 'high',
+          supportsImages: true,
+        },
+        modelCatalog: [
+          { provider: 'test', model: 'fast', name: 'Fast' },
           {
-            runtimeId: 'ghost',
-            ownership: 'external',
-            pid: 1,
-            cwd: '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
-            liveState: 'idle',
-            online: false,
-            lastSeenAt: 20,
-            model: {
-              provider: 'test',
-              model: 'careful',
-              thinking: 'high',
-              supportsImages: true,
-            },
-            modelCatalog: [
-              { provider: 'test', model: 'fast', name: 'Fast' },
-              {
-                provider: 'test',
-                model: 'careful',
-                name: 'Careful',
-                supportsImages: true,
-              },
-            ],
-            thinkingLevels: ['off', 'medium', 'high'],
-            session: {
-              id: 'ghost-session',
-              title: 'A deliberately long session title that must wrap safely',
-              entries: [],
-            },
-            pendingInteractions: [],
+            provider: 'test',
+            model: 'careful',
+            name: 'Careful',
+            supportsImages: true,
           },
         ],
-        workspaces: [
-          {
-            id: 'w',
-            name: 'Demo',
-            path: '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
-            canonicalPath:
-              '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
-            source: 'directory',
-            active: false,
-          },
-        ],
-        sessions: [],
-        unread: [],
-      }),
-    }),
-  );
+        thinkingLevels: ['off', 'medium', 'high'],
+        session: {
+          id: 'ghost-session',
+          title: 'A deliberately long session title that must wrap safely',
+          entries: [],
+        },
+        pendingInteractions: [],
+      },
+    ],
+    workspaces: [
+      {
+        id: 'w',
+        name: 'Demo',
+        path: '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
+        canonicalPath:
+          '/Users/example/this-is-a-deliberately-long-workspace-path/with-more-segments/project',
+        source: 'directory',
+        active: false,
+      },
+    ],
+    sessions: [],
+    unread: [],
+  });
   await page.goto('/');
   await expect(
     page.getByRole('heading', { name: 'No thread selected' }),
@@ -309,41 +307,38 @@ test('runtime row lifecycle menu supports desktop, touch, and keyboard access', 
       body: ': heartbeat\n\n',
     }),
   );
-  await page.route('**/api/snapshot', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        revision: 1,
-        runtimes: [
-          {
-            runtimeId: 'runtime-context-menu',
-            ownership: 'external',
-            pid: 1,
-            cwd: '/tmp/context-menu',
-            liveState: 'working',
-            online: true,
-            session: {
-              id: 'session-context-menu',
-              title: 'Context menu session',
-              entries: [],
-            },
-            pendingInteractions: [],
-          },
-        ],
-        workspaces: [],
-        sessions: [
-          {
-            id: 'session-context-menu',
-            file: '',
-            cwd: '/tmp/context-menu',
-            title: 'Context menu session',
-            updatedAt: Date.now(),
-          },
-        ],
-        unread: [],
-      }),
-    }),
-  );
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-context-menu',
+    revision: 1,
+    cursor: 1,
+    runtimes: [
+      {
+        runtimeId: 'runtime-context-menu',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp/context-menu',
+        liveState: 'working',
+        online: true,
+        session: {
+          id: 'session-context-menu',
+          title: 'Context menu session',
+          entries: [],
+        },
+        pendingInteractions: [],
+      },
+    ],
+    workspaces: [],
+    sessions: [
+      {
+        id: 'session-context-menu',
+        file: '',
+        cwd: '/tmp/context-menu',
+        title: 'Context menu session',
+        updatedAt: Date.now(),
+      },
+    ],
+    unread: [],
+  });
   await page.route('**/api/sessions/session-context-menu', async (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -523,29 +518,26 @@ test('session title supports reliable inline renaming', async ({ page }) => {
     title: 'Original title',
     updatedAt: Date.now(),
   };
-  await page.route('**/api/snapshot', (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        revision: 1,
-        runtimes: [
-          {
-            runtimeId: 'runtime-rename',
-            ownership: 'external',
-            pid: 1,
-            cwd: session.cwd,
-            liveState: 'idle',
-            online: true,
-            session: { id: session.id, title: session.title, entries: [] },
-            pendingInteractions: [],
-          },
-        ],
-        workspaces: [],
-        sessions: [session],
-        unread: [],
-      }),
-    }),
-  );
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-rename',
+    revision: 1,
+    cursor: 1,
+    runtimes: [
+      {
+        runtimeId: 'runtime-rename',
+        ownership: 'external',
+        pid: 1,
+        cwd: session.cwd,
+        liveState: 'idle',
+        online: true,
+        session: { id: session.id, title: session.title, entries: [] },
+        pendingInteractions: [],
+      },
+    ],
+    workspaces: [],
+    sessions: [session],
+    unread: [],
+  });
   await page.route('**/api/sessions/session-rename', (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -626,15 +618,15 @@ test('command palette identifies the runtime before invoking repeated actions', 
 }) => {
   const runtime = (runtimeId: string, title: string, cwd: string) => ({
     runtimeId,
-    ownership: 'external',
+    ownership: 'external' as const,
     pid: 1,
     cwd,
-    liveState: 'working',
+    liveState: 'working' as const,
     online: true,
     session: { id: `session-${runtimeId}`, title, entries: [] },
     pendingInteractions: [],
     capabilities: {
-      version: 1,
+      version: 1 as const,
       capabilities: [],
       manifests: [
         {
@@ -649,21 +641,18 @@ test('command palette identifies the runtime before invoking repeated actions', 
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await page.route('**/api/snapshot', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        revision: 1,
-        runtimes: [
-          runtime('runtime-alpha', 'Alpha agent', '/workspace/alpha'),
-          runtime('runtime-beta', 'Beta agent', '/workspace/beta'),
-        ],
-        workspaces: [],
-        sessions: [],
-        unread: [],
-      }),
-    }),
-  );
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-palette',
+    revision: 1,
+    cursor: 1,
+    runtimes: [
+      runtime('runtime-alpha', 'Alpha agent', '/workspace/alpha'),
+      runtime('runtime-beta', 'Beta agent', '/workspace/beta'),
+    ],
+    workspaces: [],
+    sessions: [],
+    unread: [],
+  });
   let invokedRuntime: string | undefined;
   await page.route('**/api/runtimes/*/command', async (route) => {
     invokedRuntime = new URL(route.request().url()).pathname.split('/')[3];
@@ -725,7 +714,7 @@ test('session shell shows compaction progress', async ({ page }) => {
       entriesComplete: true,
     },
     pendingInteractions: [],
-  };
+  } as const;
   const metadata = {
     id: 'session-compacting',
     file: '',
@@ -733,20 +722,15 @@ test('session shell shows compaction progress', async ({ page }) => {
     title: 'Compacting session',
     updatedAt: Date.now(),
   };
-  await page.route('**/api/snapshot', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        serverId: 'server-compacting',
-        revision: 1,
-        cursor: 0,
-        runtimes: [runtime],
-        workspaces: [],
-        sessions: [metadata],
-        unread: [],
-      }),
-    }),
-  );
+  await installDashboardBootstrap(page, {
+    serverId: 'server-compacting',
+    revision: 1,
+    cursor: 0,
+    runtimes: [runtime],
+    workspaces: [],
+    sessions: [metadata],
+    unread: [],
+  });
   await page.route('**/api/sessions/session-compacting', async (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -809,50 +793,45 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
       body: ': heartbeat\n\n',
     });
   });
-  await page.route('**/api/snapshot', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        serverId: 'server-loading',
-        revision: 1,
-        cursor: 0,
-        runtimes: [
-          {
-            runtimeId: 'runtime-loading',
-            ownership: 'external',
-            pid: 1,
-            cwd: '/tmp',
-            liveState: 'idle',
-            online: true,
-            session: {
-              id: 'session-loading',
-              title: 'Loaded shell',
-              entries: [],
-            },
-            pendingInteractions: [],
-          },
-        ],
-        workspaces: [],
-        sessions: [
-          {
-            id: 'session-loading',
-            file: '',
-            cwd: '/tmp',
-            title: 'Loaded shell',
-            updatedAt: Date.parse('2026-08-05T18:42:00.000Z'),
-          },
-          {
-            id: 'session-dormant',
-            file: '',
-            cwd: '/tmp/archive',
-            title: 'Dormant thread',
-            updatedAt: Date.parse('2026-08-04T12:00:00.000Z'),
-          },
-        ],
-        unread: [],
-      }),
-    }),
-  );
+  await installDashboardBootstrap(page, {
+    serverId: 'server-loading',
+    revision: 1,
+    cursor: 0,
+    runtimes: [
+      {
+        runtimeId: 'runtime-loading',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        online: true,
+        session: {
+          id: 'session-loading',
+          title: 'Loaded shell',
+          entries: [],
+        },
+        pendingInteractions: [],
+      },
+    ],
+    workspaces: [],
+    sessions: [
+      {
+        id: 'session-loading',
+        file: '',
+        cwd: '/tmp',
+        title: 'Loaded shell',
+        updatedAt: Date.parse('2026-08-05T18:42:00.000Z'),
+      },
+      {
+        id: 'session-dormant',
+        file: '',
+        cwd: '/tmp/archive',
+        title: 'Dormant thread',
+        updatedAt: Date.parse('2026-08-04T12:00:00.000Z'),
+      },
+    ],
+    unread: [],
+  });
   await page.route('**/api/sessions/session-dormant', async (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -1113,37 +1092,34 @@ test('delayed command completion does not scroll a destination session', async (
       },
     },
   ];
-  await page.route('**/api/snapshot', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        revision: 1,
-        runtimes: [
-          {
-            runtimeId: 'runtime-source',
-            ownership: 'external',
-            pid: 1,
-            cwd: '/tmp',
-            liveState: 'idle',
-            online: true,
-            session: {
-              id: 'session-source',
-              title: 'Source session',
-              entries: [],
-            },
-            model: { provider: 'test', model: 'text', supportsImages: false },
-            pendingInteractions: [],
-          },
-        ],
-        workspaces: [],
-        sessions: [
-          metadata('session-source', 'Source session'),
-          metadata('session-destination', 'Destination session'),
-        ],
-        unread: [],
-      }),
-    }),
-  );
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-delayed-command',
+    revision: 1,
+    cursor: 1,
+    runtimes: [
+      {
+        runtimeId: 'runtime-source',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        online: true,
+        session: {
+          id: 'session-source',
+          title: 'Source session',
+          entries: [],
+        },
+        model: { provider: 'test', model: 'text', supportsImages: false },
+        pendingInteractions: [],
+      },
+    ],
+    workspaces: [],
+    sessions: [
+      metadata('session-source', 'Source session'),
+      metadata('session-destination', 'Destination session'),
+    ],
+    unread: [],
+  });
   await page.route('**/api/sessions/*', async (route) => {
     const sessionId = new URL(route.request().url()).pathname.split('/').pop();
     const title =
@@ -1369,38 +1345,35 @@ test('live transport contains malformed data and reconnects without HTTP polling
     await route.fulfill({ contentType: 'application/json', body: '{}' });
   });
   page.on('request', (request) => {
-    if (request.url().includes('/api/snapshot')) snapshotRequests += 1;
+    if (new URL(request.url()).pathname.endsWith('/trpc/bootstrap'))
+      snapshotRequests += 1;
   });
-  await page.route('**/api/snapshot', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        serverId: 'server-1',
-        revision: 1,
-        runtimes: [],
-        workspaces: [
-          {
-            id: 'workspace-1',
-            name: 'Live generation 1',
-            path: '/tmp',
-            canonicalPath: '/tmp',
-            source: 'directory',
-            active: false,
-          },
-        ],
-        sessions: [],
-        unread: [
-          {
-            id: 'generation-1',
-            kind: 'settled',
-            title: 'Live generation 1',
-            body: 'Generation marker',
-            createdAt: 1,
-          },
-        ],
-      }),
-    }),
-  );
+  await installDashboardBootstrap(page, {
+    serverId: 'server-1',
+    revision: 1,
+    cursor: 1,
+    runtimes: [],
+    workspaces: [
+      {
+        id: 'workspace-1',
+        name: 'Live generation 1',
+        path: '/tmp',
+        canonicalPath: '/tmp',
+        source: 'directory',
+        active: false,
+      },
+    ],
+    sessions: [],
+    unread: [
+      {
+        id: 'generation-1',
+        kind: 'settled',
+        title: 'Live generation 1',
+        body: 'Generation marker',
+        createdAt: 1,
+      },
+    ],
+  });
   await page.goto('/');
   await expect(
     page.getByRole('heading', { name: 'No thread selected' }),
@@ -1585,38 +1558,35 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await page.route('**/api/snapshot', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        revision: 1,
-        runtimes: [
-          {
-            runtimeId: 'r1',
-            ownership: 'external',
-            pid: 1,
-            cwd: '/tmp',
-            liveState: 'idle',
-            session: { id: 's1', entries: [] },
-            model: {
-              provider: 'test',
-              model: 'vision',
-              supportsImages: true,
-            },
-            contextUsage: {
-              tokens: 136_000,
-              contextWindow: 272_000,
-              percent: 50,
-            },
-            pendingInteractions: [],
-          },
-        ],
-        workspaces: [],
-        sessions: [],
-        unread: [],
-      }),
-    }),
-  );
+  await installDashboardBootstrap(page, {
+    serverId: 'dashboard-dense-mobile',
+    revision: 1,
+    cursor: 1,
+    runtimes: [
+      {
+        runtimeId: 'r1',
+        ownership: 'external',
+        pid: 1,
+        cwd: '/tmp',
+        liveState: 'idle',
+        session: { id: 's1', entries: [] },
+        model: {
+          provider: 'test',
+          model: 'vision',
+          supportsImages: true,
+        },
+        contextUsage: {
+          tokens: 136_000,
+          contextWindow: 272_000,
+          percent: 50,
+        },
+        pendingInteractions: [],
+      },
+    ],
+    workspaces: [],
+    sessions: [],
+    unread: [],
+  });
   let commandContentType = '';
   let commandBody = '';
   await page.route(/\/api\/runtimes\/r1\/command$/, async (route) => {
@@ -2785,7 +2755,7 @@ function phase6Snapshot(
     extensionSurfaces?: unknown[];
     runtimes?: unknown[];
   } = {},
-) {
+): import('@pi-dashboard/protocol').BrowserSnapshot {
   return {
     serverId: 'phase-six',
     revision: 1,
@@ -2861,7 +2831,7 @@ function phase6Snapshot(
         createdAt: 1,
       },
     ],
-  };
+  } as import('@pi-dashboard/protocol').BrowserSnapshot;
 }
 
 function markdownActivityEntries({ blockFirst = false } = {}) {
@@ -3113,17 +3083,13 @@ async function installPhase6Mocks(
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await page.route('**/api/snapshot', (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify(
-        phase6Snapshot(
-          options.pendingInteractions === undefined
-            ? {}
-            : { pendingInteractions: options.pendingInteractions },
-        ),
-      ),
-    }),
+  await installDashboardBootstrap(
+    page,
+    phase6Snapshot(
+      options.pendingInteractions === undefined
+        ? {}
+        : { pendingInteractions: options.pendingInteractions },
+    ),
   );
   await page.route('**/api/workspaces/*/composer-commands', (route) =>
     route.fulfill({
@@ -4309,7 +4275,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
     .first();
   await lifecycleMenuTrigger.focus();
   await lifecycleMenuTrigger.press('Shift+F10');
-  const lifecycleMenu = agentNav.getByRole('menu');
+  const lifecycleMenu = page.getByRole('menu');
   await expect(
     lifecycleMenu.getByRole('menuitem', { name: 'Stop' }),
   ).toBeVisible();

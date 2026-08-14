@@ -50,10 +50,19 @@ export function fetchDashboardVersion(
   return request;
 }
 
-async function reloadDashboard(): Promise<void> {
+export async function reloadDashboard(): Promise<void> {
   try {
     const registration = await navigator.serviceWorker?.getRegistration();
+    if (registration?.update) {
+      try {
+        await registration.update();
+      } catch {
+        // A failed update must not strand the user on an incompatible shell.
+      }
+    }
     registration?.waiting?.postMessage({ type: 'SKIP_WAITING' });
+  } catch {
+    // A missing or unavailable registration is still recoverable by reload.
   } finally {
     window.location.reload();
   }
