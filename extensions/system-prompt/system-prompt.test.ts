@@ -174,17 +174,41 @@ describe('canonical prompt composition', () => {
     expect(prompt.match(/Preserve the current work mode/g)).toHaveLength(1);
   });
 
-  it('includes activity-group preambles only in transcript-rendering modes', () => {
+  it('includes bilingual active micro-plan guidance only in transcript-rendering modes', () => {
     const tuiPrompt = buildSystemPrompt(options(), 'tui');
     const rpcPrompt = buildSystemPrompt(options(), 'rpc');
     const defaultPrompt = buildSystemPrompt(options());
     const headlessPrompt = buildSystemPrompt(options(), 'json');
 
     for (const prompt of [tuiPrompt, rpcPrompt, defaultPrompt]) {
-      expect(prompt).toContain('natural ongoing-action form');
-      expect(prompt).toContain('Write it before the calls that do the work');
-      expect(prompt).toContain('Label changes of direction, not steps');
+      expect(prompt).toContain(
+        'short active preamble: an account of current intent that groups the upcoming work into a micro-plan—not merely a title',
+      );
+      expect(prompt).toContain(
+        'In English, normally open with subjectless `-ing`; in Russian, use a natural first-person present form without `Я`',
+      );
+      expect(prompt).toContain(
+        'not a standalone converb/deепричастие such as `Проверяя` as the lead',
+      );
+      expect(prompt).toContain(
+        'Add a concise purpose, reason, dependency, or nearest likely/conditional next step when useful',
+      );
+      expect(prompt).toContain(
+        'including future/perfective forms for genuinely upcoming actions',
+      );
+      expect(prompt).toContain(
+        'Use semantic concision, not a hard word or character cap: one compact sentence is usual, and two are acceptable when useful.',
+      );
+      expect(prompt).toContain(
+        'Put it before the calls that do the work, in the same message.',
+      );
+      expect(prompt).toContain('label direction changes rather than steps');
+      expect(prompt).toContain(
+        'reject completed-work recaps, speculative full roadmaps, generic narration, and individual tool-call narration',
+      );
+      expect(prompt).not.toContain('natural ongoing-action form');
     }
+    expect(headlessPrompt).not.toContain('short active preamble');
     expect(headlessPrompt).not.toContain('natural ongoing-action form');
   });
 
