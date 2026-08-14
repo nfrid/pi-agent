@@ -27,7 +27,6 @@ type DomainEntry = {
   sequence: number;
   sequenceKnown: boolean;
   snapshotId?: FeedCursorValue;
-  lastEventId?: FeedCursorValue;
   subscription?: Subscription;
   opening: number;
   rebasing: boolean;
@@ -141,7 +140,6 @@ export class DashboardConnectionRuntime {
   private shellRefreshTarget = 0;
   private shellRefreshNeeded = false;
   private shellCaughtUpTarget?: number;
-  private shellLastEventId?: FeedCursorValue;
   private shellOpening = 0;
   private shellSubscription?: Subscription;
   private shellRebasing = false;
@@ -307,10 +305,9 @@ export class DashboardConnectionRuntime {
     if (!this.started || !this.isOnline()) return;
     this.closeSubscriptions();
     this.store.setConnection('connecting');
-    void this.openShell(false, this.shellLastEventId);
+    void this.openShell(false);
     for (const entry of this.sessions.values())
-      if (entry.refs > 0)
-        void this.openSession(entry, false, entry.lastEventId);
+      if (entry.refs > 0) void this.openSession(entry, false);
   }
 
   private async getClient(): Promise<DashboardTrpcClient> {
@@ -328,35 +325,36 @@ export class DashboardConnectionRuntime {
     this.shellRefreshTarget = 0;
     this.shellRefreshNeeded = false;
     this.shellCaughtUpTarget = undefined;
-    this.shellLastEventId = undefined;
     this.shellRebasing = false;
     this.store.beginShellSync(this.shellGeneration);
   }
 
-  private async openShell(rebase: boolean, after?: string): Promise<void> {
+  private async openShell(rebase: boolean): Promise<void> {
     if (!this.started || !this.isOnline()) return;
     const opening = ++this.shellOpening;
     if (rebase) this.resetShellDomain();
     try {
       const client = await this.getClient();
       if (!this.started || opening !== this.shellOpening) return;
-      const input = after ? { lastEventId: after } : {};
-      const subscription = client.shellSubscribe.subscribe(input, {
-        onData: (value) => {
-          if (opening !== this.shellOpening || !this.started) return;
-          this.store.setConnection('connected');
-          this.acceptShell(value as unknown);
+      const subscription = client.shellSubscribe.subscribe(
+        {},
+        {
+          onData: (value) => {
+            if (opening !== this.shellOpening || !this.started) return;
+            this.store.setConnection('connected');
+            this.acceptShell(value as unknown);
+          },
+          onError: (error) => {
+            if (opening !== this.shellOpening || !this.started) return;
+            const kind = connectionErrorKind(error);
+            if (kind === 'authentication' || kind === 'protocol-mismatch') {
+              this.store.setConnection('blocked', messageError(error), kind);
+              return;
+            }
+            this.store.setConnection('error', messageError(error), kind);
+          },
         },
-        onError: (error) => {
-          if (opening !== this.shellOpening || !this.started) return;
-          const kind = connectionErrorKind(error);
-          if (kind === 'authentication' || kind === 'protocol-mismatch') {
-            this.store.setConnection('blocked', messageError(error), kind);
-            return;
-          }
-          this.store.setConnection('error', messageError(error), kind);
-        },
-      });
+      );
       if (opening !== this.shellOpening || !this.started) {
         subscription.unsubscribe();
         return;
@@ -391,7 +389,6 @@ export class DashboardConnectionRuntime {
       this.shellSequence = sequence;
       this.shellSequenceKnown = true;
       this.shellSnapshotId = tracked.id;
-      this.shellLastEventId = tracked.id;
       this.shellSnapshotCoverage = Math.max(
         this.shellSnapshotCoverage,
         payload.snapshot.cursor,
@@ -402,7 +399,6 @@ export class DashboardConnectionRuntime {
         payload.snapshot.snapshot,
         payload.snapshot.cursor,
         this.shellGeneration,
-        tracked.id,
         true,
       );
       if (serverChanged) this.reacquireSessions();
@@ -410,7 +406,7 @@ export class DashboardConnectionRuntime {
         this.shellCaughtUpTarget !== undefined &&
         this.shellSnapshotCoverage >= this.shellCaughtUpTarget
       )
-        this.store.completeShellSync(this.shellCaughtUpTarget, tracked.id);
+        this.store.completeShellSync(this.shellCaughtUpTarget);
       return;
     }
     if (isCaughtUp(payload)) {
@@ -421,10 +417,9 @@ export class DashboardConnectionRuntime {
       }
       this.shellSequence = sequence;
       this.shellSequenceKnown = true;
-      this.shellLastEventId = tracked.id;
       this.shellCaughtUpTarget = sequence;
       if (this.shellSnapshotCoverage >= sequence)
-        this.store.completeShellSync(sequence, tracked.id);
+        this.store.completeShellSync(sequence);
       else void this.drainShellRefresh();
       return;
     }
@@ -435,7 +430,6 @@ export class DashboardConnectionRuntime {
     }
     this.shellSequence = sequence;
     this.shellSequenceKnown = true;
-    this.shellLastEventId = tracked.id;
     this.shellRefreshTarget = Math.max(this.shellRefreshTarget, sequence);
     this.shellRefreshNeeded = true;
     if (this.store.getSnapshot().shellSync.status !== 'synchronizing')
@@ -458,10 +452,7 @@ export class DashboardConnectionRuntime {
         );
         if (!this.shellRefreshNeeded && this.shellSnapshotCoverage >= target) {
           if (this.shellCaughtUpTarget !== undefined)
-            this.store.completeShellSync(
-              this.shellCaughtUpTarget,
-              this.shellLastEventId,
-            );
+            this.store.completeShellSync(this.shellCaughtUpTarget);
           return;
         }
         const snapshot = await this.client.snapshot();
@@ -472,12 +463,7 @@ export class DashboardConnectionRuntime {
           this.shellSnapshotCoverage,
           snapshot.cursor,
         );
-        this.store.acceptShellSnapshot(
-          snapshot,
-          snapshot.cursor,
-          generation,
-          this.shellLastEventId,
-        );
+        this.store.acceptShellSnapshot(snapshot, snapshot.cursor, generation);
         const latestTarget = Math.max(
           this.shellRefreshTarget,
           this.shellCaughtUpTarget ?? 0,
@@ -485,10 +471,7 @@ export class DashboardConnectionRuntime {
         if (this.shellSnapshotCoverage >= latestTarget) {
           this.shellRefreshNeeded = false;
           if (this.shellCaughtUpTarget !== undefined)
-            this.store.completeShellSync(
-              this.shellCaughtUpTarget,
-              this.shellLastEventId,
-            );
+            this.store.completeShellSync(this.shellCaughtUpTarget);
           return;
         }
       }
@@ -525,7 +508,6 @@ export class DashboardConnectionRuntime {
   private async openSession(
     entry: DomainEntry,
     rebase: boolean,
-    after?: string,
   ): Promise<void> {
     if (!this.started || entry.refs === 0 || !this.isOnline()) return;
     const opening = ++entry.opening;
@@ -534,7 +516,6 @@ export class DashboardConnectionRuntime {
       entry.sequence = 0;
       entry.sequenceKnown = false;
       entry.snapshotId = undefined;
-      entry.lastEventId = undefined;
       entry.rebasing = false;
       this.store.beginSessionSync(entry.id, entry.generation);
     }
@@ -542,10 +523,7 @@ export class DashboardConnectionRuntime {
       const client = await this.getClient();
       if (!this.started || entry.opening !== opening || entry.refs === 0)
         return;
-      const input = {
-        sessionId: entry.id,
-        ...(after ? { lastEventId: after } : {}),
-      };
+      const input = { sessionId: entry.id };
       const subscription = client.sessionSubscribe.subscribe(input, {
         onData: (value) => {
           if (!this.started || entry.opening !== opening || entry.refs === 0)
@@ -590,12 +568,10 @@ export class DashboardConnectionRuntime {
       entry.sequence = sequence;
       entry.sequenceKnown = true;
       entry.snapshotId = tracked.id;
-      entry.lastEventId = tracked.id;
       this.store.acceptSessionSnapshot(
         payload.snapshot,
         payload.snapshot.cursor,
         entry.generation,
-        tracked.id,
         true,
       );
       return;
@@ -608,8 +584,7 @@ export class DashboardConnectionRuntime {
       }
       entry.sequence = sequence;
       entry.sequenceKnown = true;
-      entry.lastEventId = tracked.id;
-      this.store.completeSessionSync(entry.id, sequence, tracked.id);
+      this.store.completeSessionSync(entry.id, sequence);
       return;
     }
     if (entry.sequenceKnown && sequence <= entry.sequence) return;
@@ -619,7 +594,6 @@ export class DashboardConnectionRuntime {
     }
     entry.sequence = sequence;
     entry.sequenceKnown = true;
-    entry.lastEventId = tracked.id;
     this.store.acceptSessionEvent(
       entry.id,
       sequence,

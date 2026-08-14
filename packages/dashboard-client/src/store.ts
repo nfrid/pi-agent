@@ -49,7 +49,6 @@ export interface DomainSyncState {
   generation: number;
   sequence: number;
   sequenceKnown: boolean;
-  cursor?: string;
   error?: string;
 }
 
@@ -776,12 +775,11 @@ export class DashboardLiveStore {
     });
   }
 
-  completeShellSync(sequence: number, cursor?: string): void {
+  completeShellSync(sequence: number): void {
     this.updateDomain('shell', undefined, {
       status: 'live',
       sequence,
       sequenceKnown: true,
-      ...(cursor === undefined ? {} : { cursor }),
       error: undefined,
     });
   }
@@ -805,16 +803,11 @@ export class DashboardLiveStore {
     });
   }
 
-  completeSessionSync(
-    sessionId: string,
-    sequence: number,
-    cursor?: string,
-  ): void {
+  completeSessionSync(sessionId: string, sequence: number): void {
     this.updateDomain('session', sessionId, {
       status: 'live',
       sequence,
       sequenceKnown: true,
-      ...(cursor === undefined ? {} : { cursor }),
       error: undefined,
     });
   }
@@ -828,7 +821,6 @@ export class DashboardLiveStore {
     next: BrowserSnapshot,
     sequence: number,
     generation: number,
-    cursor?: string,
     authoritativeRebase = false,
   ): boolean {
     const current = this.state.shellSync;
@@ -851,7 +843,6 @@ export class DashboardLiveStore {
         generation,
         sequence,
         sequenceKnown: true,
-        ...(cursor === undefined ? {} : { cursor }),
       },
     });
     return true;
@@ -862,7 +853,6 @@ export class DashboardLiveStore {
     response: SessionApiResponse,
     sequence: number,
     generation: number,
-    cursor?: string,
     authoritativeRebase = false,
   ): boolean {
     const current = this.state.sessionSyncById[response.metadata.id];
@@ -885,7 +875,6 @@ export class DashboardLiveStore {
           generation,
           sequence,
           sequenceKnown: true,
-          ...(cursor === undefined ? {} : { cursor }),
         },
       },
       sessionSnapshotsById: {

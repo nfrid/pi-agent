@@ -1835,8 +1835,7 @@ export type SessionFeedMessage = Static<typeof SessionFeedMessageSchema>;
 
 export const ShellFeedInputSchema = Type.Object(
   {
-    after: Type.Optional(FeedCursorSchema),
-    /** Cursor spelling used by tRPC's automatic subscription reconnect. */
+    /** Injected exclusively by tRPC's automatic subscription reconnect. */
     lastEventId: Type.Optional(FeedCursorSchema),
   },
   { additionalProperties: false },
@@ -1845,8 +1844,7 @@ export type ShellFeedInput = Static<typeof ShellFeedInputSchema>;
 export const SessionFeedInputSchema = Type.Object(
   {
     sessionId: IdentifierSchema,
-    after: Type.Optional(FeedCursorSchema),
-    /** Cursor spelling used by tRPC's automatic subscription reconnect. */
+    /** Injected exclusively by tRPC's automatic subscription reconnect. */
     lastEventId: Type.Optional(FeedCursorSchema),
   },
   { additionalProperties: false },

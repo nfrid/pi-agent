@@ -44,6 +44,7 @@ describe('feed protocol contracts', () => {
   });
 
   it('rejects numeric, credential-like, and unknown feed fields', () => {
+    expect(() => parseShellFeedInput({ after: 'cursor-opaque' })).toThrow();
     expect(() => parseShellFeedInput({ after: 4 })).toThrow();
     expect(() => parseShellFeedInput({ lastEventId: 4 })).toThrow();
     expect(() => parseShellFeedInput({ cursor: '4' })).toThrow();

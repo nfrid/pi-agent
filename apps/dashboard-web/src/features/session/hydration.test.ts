@@ -82,7 +82,7 @@ describe('useSessionHydration', () => {
       unread: [],
     });
     store.beginSessionSync('session-1', 1);
-    store.acceptSessionSnapshot(response, 0, 1, 'session-snapshot', true);
+    store.acceptSessionSnapshot(response, 0, 1, true);
     vi.spyOn(store, 'acquireSession').mockReturnValue({
       sessionId: 'session-1',
       release: () => undefined,

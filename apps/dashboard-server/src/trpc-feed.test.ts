@@ -240,7 +240,7 @@ describe('production tRPC feed procedures', () => {
     await expect(stream.next()).rejects.toBeInstanceOf(Error);
     expect(feed.metrics().subscribers).toBe(0);
 
-    const resumed = await caller.shellSubscribe({ after: lastId });
+    const resumed = await caller.shellSubscribe({ lastEventId: lastId });
     const rebased = (await resumed.next()).value as unknown[];
     expect(rebased[1]).toMatchObject({ type: 'snapshot' });
     await resumed.return(undefined);
@@ -283,7 +283,7 @@ describe('production tRPC feed procedures', () => {
     ).toThrow();
     await expect(waiting).rejects.toBeInstanceOf(Error);
 
-    const resumed = await caller.shellSubscribe({ after: lastId });
+    const resumed = await caller.shellSubscribe({ lastEventId: lastId });
     const resumedValue = (await resumed.next()).value as unknown[];
     expect(resumedValue[0]).toEqual(expect.any(String));
     expect(resumedValue[1]).toEqual(
@@ -291,7 +291,9 @@ describe('production tRPC feed procedures', () => {
     );
     await resumed.return(undefined);
 
-    const settled = await caller.shellSubscribe({ after: resumedValue[0] });
+    const settled = await caller.shellSubscribe({
+      lastEventId: resumedValue[0],
+    });
     const settledValue = (await settled.next()).value as unknown[];
     expect(settledValue[1]).toMatchObject({ type: 'caught-up' });
     await settled.return(undefined);
