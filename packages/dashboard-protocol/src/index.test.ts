@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ActiveDelegateTranscriptBaselineSchema,
+  BootstrapRequestSchema,
   ComposerCommandCatalogueSchema,
   DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
   deriveSessionTitle,
@@ -12,7 +13,9 @@ import {
   MAX_QUEUE_DRAFT_TEXT,
   MAX_QUEUE_DRAFTS,
   MAX_RUNTIME_EXTENSION_SURFACES,
+  ProtocolInfoSchema,
   parseActiveDelegateTranscriptBaseline,
+  parseBootstrapRequest,
   parseBridgeCommand,
   parseBridgeEvent,
   parseComposerCommandCatalogue,
@@ -22,6 +25,7 @@ import {
   parseDelegateHistoryRunDetailResponse,
   parseFrame,
   parseNormalizedMessagePayload,
+  parseProtocolInfo,
   parseRuntimeExtensionSurface,
   parseRuntimeSnapshot,
   parseSessionAdoptCommand,
@@ -38,6 +42,30 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('negotiates strict protocol information and bootstrap requests', () => {
+    const info = parseProtocolInfo({
+      protocolVersion: 1,
+      serverId: 'generation-1',
+      capabilities: { bootstrap: true },
+    });
+    expect(info.capabilities.bootstrap).toBe(true);
+    expect(parseBootstrapRequest({ protocolVersion: 1 })).toEqual({
+      protocolVersion: 1,
+    });
+    expect(ProtocolInfoSchema).toBeDefined();
+    expect(BootstrapRequestSchema).toBeDefined();
+    expect(() =>
+      parseProtocolInfo({
+        ...info,
+        capabilities: { bootstrap: true, extra: true },
+      }),
+    ).toThrow();
+    expect(() => parseBootstrapRequest({ protocolVersion: '1' })).toThrow();
+    expect(() =>
+      parseBootstrapRequest({ protocolVersion: 1, extra: true }),
+    ).toThrow();
+  });
+
   it('validates active delegate baselines and transcript upsert events', () => {
     const entry = {
       id: '2:tool-1',

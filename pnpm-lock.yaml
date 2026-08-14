@@ -93,6 +93,9 @@ importers:
       '@pi-dashboard/worktree-manager':
         specifier: workspace:*
         version: link:../../packages/worktree-manager
+      '@trpc/server':
+        specifier: 11.18.0
+        version: 11.18.0(typescript@5.9.3)
       fastify:
         specifier: 5.11.2
         version: 5.11.2
@@ -109,9 +112,6 @@ importers:
       '@trpc/client':
         specifier: 11.18.0
         version: 11.18.0(@trpc/server@11.18.0(typescript@5.9.3))(typescript@5.9.3)
-      '@trpc/server':
-        specifier: 11.18.0
-        version: 11.18.0(typescript@5.9.3)
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1

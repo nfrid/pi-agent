@@ -370,6 +370,7 @@ export class DashboardServerImpl implements DashboardServer {
   private routeContext(): DashboardRouteContext {
     return {
       token: this.token,
+      serverId: () => this.serverId,
       origins: () => this.origins,
       snapshot: () =>
         this.application.snapshot(

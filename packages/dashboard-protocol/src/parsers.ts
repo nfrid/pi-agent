@@ -9,6 +9,8 @@ import { MAX_ID, MAX_PATH, SESSION_NAME_MAX_LENGTH } from './limits.js';
 import {
   type ActiveDelegateTranscriptBaseline,
   ActiveDelegateTranscriptBaselineSchema,
+  type BootstrapRequest,
+  BootstrapRequestSchema,
   type BridgeCommand,
   BridgeCommandSchema,
   type BridgeEvent,
@@ -40,6 +42,8 @@ import {
   NormalizedMessagePayloadSchema,
   type NormalizedToolPayload,
   NormalizedToolPayloadSchema,
+  type ProtocolInfo,
+  ProtocolInfoSchema,
   type QueueDraftMode,
   type RuntimeHelloCapabilities,
   type RuntimeSnapshot,
@@ -63,6 +67,21 @@ import {
   safeIdentifier,
   tryParseSchema,
 } from './utils.js';
+
+export function parseProtocolInfo(value: unknown): ProtocolInfo {
+  return parseSchema(ProtocolInfoSchema, value, 'protocol info');
+}
+export function tryParseProtocolInfo(value: unknown): ProtocolInfo | undefined {
+  return tryParseSchema(ProtocolInfoSchema, value);
+}
+export function parseBootstrapRequest(value: unknown): BootstrapRequest {
+  return parseSchema(BootstrapRequestSchema, value, 'bootstrap request');
+}
+export function tryParseBootstrapRequest(
+  value: unknown,
+): BootstrapRequest | undefined {
+  return tryParseSchema(BootstrapRequestSchema, value);
+}
 
 function validateImages(value: unknown): BridgeImageAttachment[] {
   if (value === undefined) return [];

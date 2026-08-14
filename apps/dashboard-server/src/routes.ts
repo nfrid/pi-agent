@@ -27,6 +27,7 @@ import type {
 } from 'fastify';
 import { Type } from 'typebox';
 import { allowedOrigin, authorizeRequest } from './security.js';
+import { registerDashboardTrpc } from './trpc.js';
 
 const MAX_JSON_BODY = 512 * 1024;
 const MAX_MULTIPART_BODY = 12 * 1024 * 1024 + 256 * 1024;
@@ -86,6 +87,8 @@ function parseJsonBody(
 
 export interface DashboardRouteContext {
   readonly token: string;
+  /** Optional for legacy route-only test contexts; production supplies the daemon generation. */
+  serverId?(): string;
   origins(): readonly string[];
   snapshot(): BrowserSnapshot;
   workspaces(): WorkspaceTarget[];
@@ -287,6 +290,10 @@ export const dashboardRoutes: FastifyPluginAsync<{
     (_request, body, done) => done(null, body),
   );
   installCorsAndAuth(app, context);
+  registerDashboardTrpc(app, {
+    serverId: () => context.serverId?.() ?? context.snapshot().serverId,
+    snapshot: context.snapshot,
+  });
   app.setNotFoundHandler((_request, reply) =>
     reply.code(404).send({ error: 'Not found.' }),
   );
