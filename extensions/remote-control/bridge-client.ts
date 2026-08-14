@@ -52,11 +52,19 @@ function delegateTranscriptEntries(
       const candidate = status as {
         lineageId?: unknown;
         runId?: unknown;
+        state?: unknown;
+        pauseState?: unknown;
         transcript?: unknown;
       };
       if (
         typeof candidate.lineageId !== 'string' ||
         typeof candidate.runId !== 'string' ||
+        !(
+          candidate.state === 'queued' ||
+          candidate.state === 'running' ||
+          candidate.pauseState === 'pausing' ||
+          candidate.pauseState === 'paused'
+        ) ||
         !Array.isArray(candidate.transcript)
       )
         continue;
@@ -79,9 +87,9 @@ function delegateTranscriptEntries(
 }
 
 function compactDelegateSurfaces(
-  surfaces: readonly RuntimeExtensionSurface[],
-): readonly RuntimeExtensionSurface[] {
-  return surfaces.map((surface) => {
+  surfaces: readonly RuntimeExtensionSurface[] | undefined,
+): readonly RuntimeExtensionSurface[] | undefined {
+  return surfaces?.map((surface) => {
     if (surface.rendererId !== 'delegate.status') return surface;
     const model = surface.viewModel;
     if (!model || typeof model !== 'object' || Array.isArray(model))
@@ -98,10 +106,12 @@ function compactDelegateSurfaces(
           const {
             transcript: _transcript,
             result,
+            activity,
             ...metadata
           } = status as {
             transcript?: unknown;
             result?: unknown;
+            activity?: unknown;
             [key: string]: unknown;
           };
           const compactResult =
@@ -119,12 +129,22 @@ function compactDelegateSurfaces(
                   };
                 })()
               : result;
+          const compactActivity =
+            activity && typeof activity === 'object' && !Array.isArray(activity)
+              ? (() => {
+                  const { latestText: _latestText, ...rest } = activity as Record<
+                    string,
+                    unknown
+                  >;
+                  return rest;
+                })()
+              : activity;
           return {
             ...metadata,
+            ...(compactActivity === undefined
+              ? {}
+              : { activity: compactActivity }),
             ...(compactResult === undefined ? {} : { result: compactResult }),
-            ...(Array.isArray(_transcript) && _transcript.length > 0
-              ? { transcriptTruncated: true }
-              : {}),
           };
         }),
       },
@@ -219,6 +239,7 @@ export class BridgeClient {
     string,
     DelegateTranscriptSurfaceEntry
   >();
+  private compactDelegateSurfaces: readonly RuntimeExtensionSurface[] = [];
 
   constructor(private readonly options: BridgeClientOptions) {
     this.bindServices(options.broker, options.liveSurfaces);
@@ -242,9 +263,9 @@ export class BridgeClient {
     this.unsubscribeLiveSurfaces = undefined;
     this.broker = broker;
     this.liveSurfaces = liveSurfaces;
-    this.delegateTranscriptEntries = delegateTranscriptEntries(
-      liveSurfaces?.snapshot?.() ?? [],
-    );
+    const currentSurfaces = liveSurfaces?.snapshot?.() ?? [];
+    this.delegateTranscriptEntries = delegateTranscriptEntries(currentSurfaces);
+    this.compactDelegateSurfaces = compactDelegateSurfaces(currentSurfaces) ?? [];
     this.unsubscribeBroker = broker?.subscribe((event) => {
       if (event.kind === 'requested') {
         this.sendEvent({
@@ -270,16 +291,22 @@ export class BridgeClient {
             JSON.stringify(previous.entry) !== JSON.stringify(next.entry)
           );
         });
+        const compactSurfaces = compactDelegateSurfaces(surfaces) ?? [];
+        const metadataChanged =
+          JSON.stringify(this.compactDelegateSurfaces) !==
+          JSON.stringify(compactSurfaces);
         // Update the reconnect authority before publishing either frame. The
         // compact metadata patch must establish new runs before their transcript
         // upserts arrive at the runtime reducer.
         this.delegateTranscriptEntries = nextEntries;
+        this.compactDelegateSurfaces = compactSurfaces;
         this.options.onLiveSurfacesChanged?.(surfaces);
-        this.sendEvent({
-          type: 'runtime.stateChanged',
-          state: current.liveState,
-          snapshot: { extensionSurfaces: compactDelegateSurfaces(surfaces) },
-        });
+        if (metadataChanged)
+          this.sendEvent({
+            type: 'runtime.stateChanged',
+            state: current.liveState,
+            snapshot: { extensionSurfaces: compactSurfaces },
+          });
         for (const next of changedEntries) {
           this.sendEvent({
             type: 'delegate.transcript.updated',
@@ -378,6 +405,9 @@ export class BridgeClient {
         capabilities: this.resolveCapabilities(),
         ...(this.broker ? { pendingInteractions: interactions } : undefined),
       };
+      const fullSurfaces = this.liveSurfaces?.snapshot?.() ?? snapshot.extensionSurfaces;
+      const compactSurfaces = compactDelegateSurfaces(fullSurfaces);
+      this.compactDelegateSurfaces = compactSurfaces ?? [];
       const helloSent = this.sendEvent({
         type: 'runtime.hello',
         protocolVersion: PROTOCOL_VERSION,
@@ -387,9 +417,27 @@ export class BridgeClient {
           heartbeat: true,
           extensions: this.resolveCapabilities(),
         },
-        snapshot,
+        snapshot: {
+          ...snapshot,
+          ...(compactSurfaces === undefined
+            ? {}
+            : { extensionSurfaces: compactSurfaces }),
+        },
       });
       if (!helloSent) return;
+      // Hello carries compact row metadata. Replay current bounded active
+      // entries after it so the registry rebuilds transcript authority without
+      // risking an oversized hello frame.
+      const replayEntries = delegateTranscriptEntries(fullSurfaces ?? []);
+      this.delegateTranscriptEntries = replayEntries;
+      for (const entry of replayEntries.values())
+        this.sendEvent({
+          type: 'delegate.transcript.updated',
+          sessionId: snapshot.session.id,
+          lineageId: entry.lineageId,
+          runId: entry.runId,
+          entry: entry.entry,
+        });
       // A daemon restart gets a complete interaction set, not only events
       // emitted after this connection was established.
       for (const interaction of interactions)

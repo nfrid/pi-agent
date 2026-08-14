@@ -10,9 +10,10 @@ import type { DelegateStatusSnapshot, DelegateStatusStore } from './status';
 
 export const DELEGATE_EXTENSION_ID = 'delegate';
 const MAX_SURFACE_STATUSES = 24;
-// Live surfaces are an activity hint. Persisted delegate history remains the
-// lazy authority for full transcript/result detail.
+// Routine surfaces carry row metadata; active transcript authority is replayed
+// separately and bounded per lineage so one busy delegate cannot starve another.
 const MAX_SURFACE_DETAIL_CHARS = 14 * 1024;
+const MAX_ACTIVE_TRANSCRIPT_CHARS = 16 * 1024;
 const MAX_LIFECYCLE_DIAGNOSTIC_CHARS = 4_000;
 
 function text(value: string, max: number): string {
@@ -55,6 +56,8 @@ function transcriptSnapshot(
   const entries = status.transcript ?? [];
   const projected = [];
   let truncated = status.transcriptTruncated === true;
+  if (budget.remaining <= 0)
+    return truncated ? { transcriptTruncated: true } : {};
   for (const entry of entries) {
     if (budget.remaining <= 0) {
       truncated = true;
@@ -105,6 +108,7 @@ function statusSnapshot(
   status: DelegateStatusSnapshot,
   surfaceBudget: { remaining: number },
 ) {
+  const active = status.state === 'queued' || status.state === 'running';
   const resultValue = status.result?.value;
   const result = status.result
     ? {
@@ -224,7 +228,11 @@ function statusSnapshot(
           },
         }
       : {}),
-    ...transcriptSnapshot(status, surfaceBudget),
+    // Settled transcript detail is owned by persisted delegate history. Active
+    // rows retain an independent bounded authority for baseline/reconnect replay.
+    ...transcriptSnapshot(status, {
+      remaining: active ? MAX_ACTIVE_TRANSCRIPT_CHARS : 0,
+    }),
   };
 }
 
@@ -236,7 +244,7 @@ const publisher = createLiveSurfacePublisher<DelegateStatusStore>({
   viewModelSchema: DelegateStatusViewModelSchema,
   invalidMessage: 'Delegate status surface is invalid.',
   buildViewModel: (store) => {
-    const transcriptBudget = { remaining: MAX_SURFACE_DETAIL_CHARS };
+    const surfaceBudget = { remaining: MAX_SURFACE_DETAIL_CHARS };
     const statuses = store
       .list()
       .sort((left, right) => {
@@ -249,9 +257,7 @@ const publisher = createLiveSurfacePublisher<DelegateStatusStore>({
       .slice(0, MAX_SURFACE_STATUSES);
     return {
       version: 1 as const,
-      statuses: statuses.map((status) =>
-        statusSnapshot(status, transcriptBudget),
-      ),
+      statuses: statuses.map((status) => statusSnapshot(status, surfaceBudget)),
     };
   },
 });

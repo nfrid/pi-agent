@@ -76,7 +76,6 @@ describe('public runtime event projection', () => {
                   id: 'delegate-1',
                   name: 'Worker',
                   state: 'success',
-                  transcriptTruncated: true,
                   result: {
                     kind: 'structured',
                     status: 'valid',
