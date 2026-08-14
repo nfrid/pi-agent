@@ -26,6 +26,13 @@ function context(): DashboardRouteContext {
     composerCommands: async () => ({ commands: [] }),
     usage: async () => ({ usage: null }),
     readSession: async () => ({ entries: [], metadata: { id: 's' } }),
+    readActiveDelegateTranscripts: async (id) => ({
+      version: 1,
+      serverId: 'server',
+      cursor: 1,
+      sessionId: id,
+      runs: [],
+    }),
     readDelegateHistory: async () => ({
       version: 2,
       sessionId: 's',
@@ -137,6 +144,41 @@ describe('Fastify dashboard route plugin', () => {
       groups: [],
     });
     expect(routeContext.readDelegateHistory).toHaveBeenCalledWith('offline-1');
+  });
+
+  it('serves an authenticated active delegate transcript baseline', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    routeContext.readActiveDelegateTranscripts = vi.fn(async (id) => ({
+      version: 1 as const,
+      serverId: 'server-1',
+      cursor: 7,
+      sessionId: id,
+      runtimeId: 'runtime-1',
+      runtimeEpoch: 'epoch-1',
+      runtimeSeq: 3,
+      runs: [],
+    }));
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/sessions/active-1/delegate-transcripts/active',
+      headers: {
+        origin: 'http://dashboard.test',
+        'x-dashboard-token': 'route-token',
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      sessionId: 'active-1',
+      runtimeEpoch: 'epoch-1',
+      runs: [],
+    });
+    expect(routeContext.readActiveDelegateTranscripts).toHaveBeenCalledWith(
+      'active-1',
+    );
   });
 
   it('serves one selected delegate run detail with branch query pins', async () => {

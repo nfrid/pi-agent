@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ActiveDelegateTranscriptBaselineSchema,
   ComposerCommandCatalogueSchema,
   DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
   deriveSessionTitle,
@@ -17,6 +18,8 @@ import {
   parseDashboardStreamMessage,
   parseDelegateHistoryResponse,
   parseDelegateHistoryRunDetailResponse,
+  parseActiveDelegateTranscriptBaseline,
+  parseBridgeEvent,
   parseFrame,
   parseNormalizedMessagePayload,
   parseRuntimeExtensionSurface,
@@ -35,6 +38,52 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('validates active delegate baselines and transcript upsert events', () => {
+    const entry = {
+      id: '2:tool-1',
+      type: 'tool' as const,
+      label: 'read source.ts',
+      name: 'read',
+      status: 'completed' as const,
+      arguments: { path: 'source.ts' },
+      result: { lines: 3 },
+      run: 2,
+    };
+    expect(
+      parseActiveDelegateTranscriptBaseline({
+        version: 1,
+        serverId: 'server-1',
+        cursor: 4,
+        sessionId: 'session-1',
+        runtimeId: 'runtime-1',
+        runtimeEpoch: 'epoch-1',
+        runtimeSeq: 7,
+        runs: [
+          {
+            runId: 'run-1',
+            lineageId: 'lineage-1',
+            name: 'Worker',
+            kind: 'background',
+            state: 'running',
+            createdAt: 1,
+            allowWrites: false,
+            transcript: [entry],
+          },
+        ],
+      }),
+    ).toMatchObject({ runs: [{ transcript: [entry] }] });
+    expect(
+      parseBridgeEvent({
+        type: 'delegate.transcript.updated',
+        sessionId: 'session-1',
+        lineageId: 'lineage-1',
+        runId: 'run-1',
+        entry,
+      }),
+    ).toMatchObject({ type: 'delegate.transcript.updated', entry });
+    expect(ActiveDelegateTranscriptBaselineSchema).toBeDefined();
+  });
+
   it('strictly separates summary history from one selected run detail', () => {
     const response = parseDelegateHistoryResponse({
       version: 2,

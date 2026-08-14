@@ -18,7 +18,7 @@ import {
   tryParseExtensionSurface,
   tryParseExtensionSurfaceList,
 } from '@pi-dashboard/extension-contributions';
-import { type Static, Type } from 'typebox';
+import { type Static, type TSchema, Type } from 'typebox';
 import {
   MAX_COMPOSER_COMMAND_ARGUMENT_HINT,
   MAX_COMPOSER_COMMAND_DESCRIPTION,
@@ -567,6 +567,129 @@ export type RuntimeHelloCapabilities = Static<
   typeof RuntimeHelloCapabilitiesSchema
 >;
 
+const DelegateTranscriptPayloadScalarSchema = Type.Union([
+  Type.Null(),
+  Type.Boolean(),
+  Type.Number(),
+  Type.String({ maxLength: 1_024 }),
+]);
+
+function delegateTranscriptPayloadSchema(depth: number): TSchema {
+  if (depth <= 0) return DelegateTranscriptPayloadScalarSchema;
+  const child = delegateTranscriptPayloadSchema(depth - 1);
+  return Type.Union([
+    DelegateTranscriptPayloadScalarSchema,
+    Type.Array(child, { maxItems: 16 }),
+    Type.Record(Type.String({ maxLength: 128 }), child, { maxProperties: 16 }),
+  ]);
+}
+
+/** Bounded public activity entry shared by live delegate transport and history. */
+export const DelegateTranscriptEntrySchema = Type.Object(
+  {
+    id: IdentifierSchema,
+    type: Type.Union([
+      Type.Literal('task'),
+      Type.Literal('thinking'),
+      Type.Literal('tool'),
+      Type.Literal('assistant'),
+      Type.Literal('error'),
+    ]),
+    label: Type.String({ minLength: 1, maxLength: 2_000 }),
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    arguments: Type.Optional(delegateTranscriptPayloadSchema(4)),
+    result: Type.Optional(delegateTranscriptPayloadSchema(4)),
+    argumentsTruncated: Type.Optional(Type.Boolean()),
+    resultTruncated: Type.Optional(Type.Boolean()),
+    text: Type.Optional(Type.String({ maxLength: 8_000 })),
+    status: Type.Optional(
+      Type.Union([
+        Type.Literal('running'),
+        Type.Literal('completed'),
+        Type.Literal('error'),
+      ]),
+    ),
+    at: Type.Optional(FiniteNumberSchema),
+    run: Type.Optional(Type.Integer({ minimum: 1, maximum: 64 })),
+  },
+  { additionalProperties: false },
+);
+export type DelegateTranscriptEntry = Static<
+  typeof DelegateTranscriptEntrySchema
+>;
+
+const DelegateLiveRunStateSchema = Type.Union([
+  Type.Literal('queued'),
+  Type.Literal('running'),
+  Type.Literal('success'),
+  Type.Literal('error'),
+  Type.Literal('aborted'),
+  Type.Literal('timed-out'),
+]);
+const DelegateLiveRunSchema = Type.Object(
+  {
+    runId: IdentifierSchema,
+    lineageId: IdentifierSchema,
+    name: Type.String({ minLength: 1, maxLength: 2_000 }),
+    kind: Type.Union([Type.Literal('foreground'), Type.Literal('background')]),
+    state: DelegateLiveRunStateSchema,
+    createdAt: FiniteNumberSchema,
+    startedAt: Type.Optional(FiniteNumberSchema),
+    finishedAt: Type.Optional(FiniteNumberSchema),
+    jobId: Type.Optional(IdentifierSchema),
+    route: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })),
+    context: Type.Optional(
+      Type.Union([
+        Type.Literal('branch'),
+        Type.Literal('fresh'),
+        Type.Literal('continuation'),
+      ]),
+    ),
+    allowWrites: Type.Boolean(),
+    pauseState: Type.Optional(
+      Type.Union([Type.Literal('pausing'), Type.Literal('paused')]),
+    ),
+    pausedAt: Type.Optional(Type.Number()),
+    transcript: Type.Readonly(
+      Type.Array(DelegateTranscriptEntrySchema, { maxItems: 128 }),
+    ),
+    transcriptTruncated: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export type DelegateLiveRun = Static<typeof DelegateLiveRunSchema>;
+
+export const ActiveDelegateTranscriptBaselineSchema = Type.Object(
+  {
+    version: Type.Literal(1),
+    serverId: IdentifierSchema,
+    cursor: Type.Integer({ minimum: 0 }),
+    sessionId: IdentifierSchema,
+    runtimeId: Type.Optional(IdentifierSchema),
+    runtimeEpoch: Type.Optional(IdentifierSchema),
+    runtimeSeq: Type.Optional(Type.Integer({ minimum: 0 })),
+    runs: Type.Readonly(Type.Array(DelegateLiveRunSchema, { maxItems: 64 })),
+  },
+  { additionalProperties: false },
+);
+export type ActiveDelegateTranscriptBaseline = Static<
+  typeof ActiveDelegateTranscriptBaselineSchema
+>;
+
+export const DelegateTranscriptUpdatedEventSchema = Type.Object(
+  {
+    type: Type.Literal('delegate.transcript.updated'),
+    sessionId: IdentifierSchema,
+    lineageId: IdentifierSchema,
+    runId: IdentifierSchema,
+    entry: DelegateTranscriptEntrySchema,
+  },
+  { additionalProperties: false },
+);
+export type DelegateTranscriptUpdatedEvent = Static<
+  typeof DelegateTranscriptUpdatedEventSchema
+>;
+
 const RuntimeHelloEventSchema = Type.Object(
   {
     type: Type.Literal('runtime.hello'),
@@ -698,6 +821,7 @@ export const BridgeEventSchema = Type.Union([
   SessionCompactedEventSchema,
   MessageEventSchema,
   ToolEventSchema,
+  DelegateTranscriptUpdatedEventSchema,
   AgentSettledEventSchema,
   InteractionRequestedEventSchema,
   InteractionResolvedEventSchema,
@@ -721,6 +845,7 @@ export type BridgeEvent =
   | Static<typeof SessionCompactedEventSchema>
   | Static<typeof MessageEventSchema>
   | Static<typeof ToolEventSchema>
+  | Static<typeof DelegateTranscriptUpdatedEventSchema>
   | Static<typeof AgentSettledEventSchema>
   | (Omit<Static<typeof InteractionRequestedEventSchema>, 'interaction'> & {
       interaction: InteractionSnapshot;

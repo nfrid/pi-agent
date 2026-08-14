@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import {
   ArchiveThreadCommandSchema,
+  type ActiveDelegateTranscriptBaseline,
   type BrowserSnapshot,
   CancelCommandSchema,
   CheckoutActionCommandSchema,
@@ -92,6 +93,9 @@ export interface DashboardRouteContext {
   composerCommands(workspaceId: string): Promise<ComposerCommandCatalogue>;
   usage(): Promise<{ usage: unknown; error?: string }>;
   readSession(id: string, before?: string): Promise<unknown>;
+  readActiveDelegateTranscripts(
+    id: string,
+  ): Promise<ActiveDelegateTranscriptBaseline>;
   readDelegateHistory(id: string): Promise<DelegateHistoryResponse>;
   readDelegateHistoryRun(
     id: string,
@@ -514,6 +518,16 @@ export const dashboardRoutes: FastifyPluginAsync<{
       return sendError(reply, error);
     }
   });
+  app.get<{ Params: { id: string } }>(
+    '/api/sessions/:id/delegate-transcripts/active',
+    async (request, reply) => {
+      try {
+        return await context.readActiveDelegateTranscripts(request.params.id);
+      } catch (error) {
+        return sendError(reply, error);
+      }
+    },
+  );
   app.get<{ Params: { id: string } }>(
     '/api/sessions/:id/delegate-history',
     async (request, reply) => {

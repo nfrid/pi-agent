@@ -9,14 +9,18 @@ import {
   projectDelegateHistoryEntry,
 } from '@pi-dashboard/domain';
 import {
+  type ActiveDelegateTranscriptBaseline,
   type BridgeEvent,
   type BrowserSnapshot,
   type DelegateHistoryResponse,
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
+  type DelegateLiveRun,
   isRecord,
   MAX_ID,
   MAX_SESSION_INDEX_DELTA_ITEMS,
+  tryParseActiveDelegateTranscriptBaseline,
+  tryParseDelegateTranscriptEntry,
   type RuntimeSnapshot,
   redactImageData,
   type SessionIndexEntry,
@@ -128,6 +132,107 @@ function validDelegateIdentifier(value: unknown): value is string {
   );
 }
 
+function activeDelegateTranscriptBaseline(
+  serverId: string,
+  cursor: number,
+  sessionId: string,
+  runtime: RuntimeSnapshot | undefined,
+  provenance?: { runtimeEpoch: string; runtimeSeq: number },
+): ActiveDelegateTranscriptBaseline {
+  const base = {
+    version: 1 as const,
+    serverId,
+    cursor,
+    sessionId,
+    ...(runtime ? { runtimeId: runtime.runtimeId } : {}),
+    ...(provenance ? { runtimeEpoch: provenance.runtimeEpoch } : {}),
+    ...(provenance && provenance.runtimeSeq >= 0
+      ? { runtimeSeq: provenance.runtimeSeq }
+      : {}),
+    runs: [] as DelegateLiveRun[],
+  };
+  if (!runtime || runtime.online === false) return base;
+  const surfaces = runtime.extensionSurfaces ?? [];
+  const delegateSurface = surfaces.find(
+    (surface) => surface.rendererId === 'delegate.status',
+  );
+  const model = delegateSurface?.viewModel;
+  const statuses =
+    model && typeof model === 'object' && !Array.isArray(model)
+      ? (model as { statuses?: unknown }).statuses
+      : undefined;
+  const runs: DelegateLiveRun[] = [];
+  if (Array.isArray(statuses)) {
+    for (const status of statuses.slice(0, 64)) {
+      if (!status || typeof status !== 'object' || Array.isArray(status))
+        continue;
+      const value = status as Record<string, unknown>;
+      const state = value.state;
+      const pauseState = value.pauseState;
+      if (
+        !(
+          state === 'queued' ||
+          state === 'running' ||
+          pauseState === 'pausing' ||
+          pauseState === 'paused'
+        )
+      )
+        continue;
+      if (
+        typeof value.runId !== 'string' ||
+        typeof value.lineageId !== 'string' ||
+        typeof value.name !== 'string' ||
+        typeof value.kind !== 'string' ||
+        typeof value.createdAt !== 'number' ||
+        !Number.isFinite(value.createdAt) ||
+        typeof value.allowWrites !== 'boolean'
+      )
+        continue;
+      const transcript = Array.isArray(value.transcript)
+        ? value.transcript.flatMap((entry) => {
+            const parsed = tryParseDelegateTranscriptEntry(entry);
+            return parsed ? [parsed] : [];
+          })
+        : [];
+      runs.push({
+        runId: value.runId,
+        lineageId: value.lineageId,
+        name: value.name,
+        kind: value.kind as DelegateLiveRun['kind'],
+        state: state as DelegateLiveRun['state'],
+        createdAt: value.createdAt,
+        ...(typeof value.startedAt === 'number'
+          ? { startedAt: value.startedAt }
+          : {}),
+        ...(typeof value.finishedAt === 'number'
+          ? { finishedAt: value.finishedAt }
+          : {}),
+        ...(typeof value.jobId === 'string' ? { jobId: value.jobId } : {}),
+        ...(typeof value.route === 'string' ? { route: value.route } : {}),
+        ...(typeof value.context === 'string'
+          ? { context: value.context as DelegateLiveRun['context'] }
+          : {}),
+        allowWrites: value.allowWrites,
+        ...(pauseState === 'pausing' || pauseState === 'paused'
+          ? { pauseState }
+          : {}),
+        ...(typeof value.pausedAt === 'number'
+          ? { pausedAt: value.pausedAt }
+          : {}),
+        transcript: transcript.slice(0, 128),
+        ...(value.transcriptTruncated === true
+          ? { transcriptTruncated: true }
+          : {}),
+      });
+    }
+  }
+  const result = {
+    ...base,
+    runs,
+  };
+  return tryParseActiveDelegateTranscriptBaseline(result) ?? base;
+}
+
 /**
  * Browser reducers already own runtime/transcript projections for these
  * events. Session-index metadata uses dedicated deltas; lifecycle
@@ -146,6 +251,7 @@ function requiresBrowserSnapshot(change: RegistryChange): boolean {
     case 'tool.started':
     case 'tool.updated':
     case 'tool.finished':
+    case 'delegate.transcript.updated':
       return false;
     case 'agent.settled':
       return process.env.PI_DASHBOARD_NOTIFY_SETTLED === '1';
@@ -280,6 +386,8 @@ export class DashboardServerImpl implements DashboardServer {
         ),
       usage: () => this.application.usage.get(),
       readSession: (id, before) => this.sessionResult(id, before),
+      readActiveDelegateTranscripts: (id) =>
+        this.activeDelegateTranscriptResult(id),
       readDelegateHistory: (id) => this.delegateHistoryResult(id),
       readDelegateHistoryRun: (id, runId, query) =>
         this.delegateHistoryRunResult(id, runId, query),
@@ -577,6 +685,23 @@ export class DashboardServerImpl implements DashboardServer {
     const workspaces = await this.application.refreshWorkspaces();
     this.workspaces = workspaces;
     return workspaces;
+  }
+
+  private async activeDelegateTranscriptResult(
+    id: string,
+  ): Promise<ActiveDelegateTranscriptBaseline> {
+    if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
+      throw new Error('Invalid session id.');
+    const runtime = this.registry
+      .snapshots()
+      .find((item) => item.session.id === id && item.online !== false);
+    return activeDelegateTranscriptBaseline(
+      this.serverId,
+      this.eventStream.cursor,
+      id,
+      runtime,
+      runtime ? this.registry.transportProvenance(runtime.runtimeId) : undefined,
+    );
   }
 
   private async delegateHistoryResult(
