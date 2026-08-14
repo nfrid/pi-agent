@@ -24,7 +24,12 @@ import {
 } from '@pi-dashboard/protocol';
 import { useSyncExternalStore } from 'react';
 import { DashboardEventStream } from './event-stream.js';
-import { type DashboardHttpClient, ReplayGapError } from './http-client.js';
+import {
+  type ClientSessionApiResponse,
+  type DashboardHttpClient,
+  ReplayGapError,
+  SESSION_REQUEST_ORDER,
+} from './http-client.js';
 
 export const LIVE_BUFFER_LIMIT = 256;
 export const LIVE_RENDER_INTERVAL_MS = 32;
@@ -409,6 +414,8 @@ export class DashboardLiveStore {
   private state: DashboardLiveState = emptyState();
   private listeners = new Set<() => void>();
   private generation = 0;
+  /** Latest reads are ordered per session; historical pages are intentionally excluded. */
+  private latestSessionRequestOrders = new Map<string, number>();
   /** Runtime snapshots omit transport metadata; retain it outside the wire model. */
   private runtimeReducerStates = new Map<string, RuntimeReducerState>();
   private stream?: DashboardEventStream;
@@ -722,6 +729,7 @@ export class DashboardLiveStore {
     if (!decision.accepted) return false;
     if (decision.reset) {
       this.generation += 1;
+      this.latestSessionRequestOrders.clear();
       this.runtimeReducerStates.clear();
       const resetState = this.installSnapshotProjection(
         {
@@ -1065,6 +1073,12 @@ export class DashboardLiveStore {
   hydrateSession(
     response: SessionApiResponse,
   ): TranscriptProjection | undefined {
+    const sessionResponse = response as ClientSessionApiResponse & {
+      __dashboardHistorical?: boolean;
+    };
+    const requestOrder = sessionResponse.__dashboardHistorical
+      ? undefined
+      : sessionResponse[SESSION_REQUEST_ORDER];
     if (
       response.serverId !== undefined &&
       this.state.serverId !== undefined &&
@@ -1080,6 +1094,12 @@ export class DashboardLiveStore {
       )
     )
       return undefined;
+    if (requestOrder !== undefined) {
+      const accepted = this.latestSessionRequestOrders.get(
+        response.metadata.id,
+      );
+      if (accepted !== undefined && requestOrder < accepted) return undefined;
+    }
     // A session response can arrive while older records from the same SSE
     // replay are still pending. Its entries are authoritative, but transport
     // ordering is covered only through the cursor the stream has accepted.
@@ -1138,13 +1158,13 @@ export class DashboardLiveStore {
     // from persisted history. Feed it through the same transcript reducer as
     // SSE events so streaming messages/tools keep stable identities and a
     // persisted terminal replacement naturally wins without duplication.
-    const sessionResponse = response as SessionApiResponse & {
+    const authoritativeResponse = response as SessionApiResponse & {
       active?: AuthoritativeSessionSnapshot['active'];
       __dashboardHistorical?: boolean;
     };
-    const active = sessionResponse.__dashboardHistorical
+    const active = authoritativeResponse.__dashboardHistorical
       ? undefined
-      : sessionResponse.active;
+      : authoritativeResponse.active;
     const activeEpoch = active?.runtimeEpoch ?? response.runtimeEpoch;
     const activeIsCurrent =
       active !== undefined &&
@@ -1369,6 +1389,8 @@ export class DashboardLiveStore {
       };
     }
     this.publish(nextState);
+    if (requestOrder !== undefined)
+      this.latestSessionRequestOrders.set(response.metadata.id, requestOrder);
     return projection;
   }
 
@@ -1522,6 +1544,7 @@ export class DashboardLiveStore {
 
   clearServer(): void {
     this.generation += 1;
+    this.latestSessionRequestOrders.clear();
     this.publish(emptyState());
   }
 

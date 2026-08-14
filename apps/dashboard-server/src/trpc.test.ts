@@ -1,13 +1,24 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import {
   AuthoritativeSessionSnapshotSchema,
   parseProtocolInfo,
   parseShellSnapshotRequest,
+  type RuntimeSnapshot,
   ShellSnapshotResponseSchema,
+  serializeFrame,
   tryParseSchema,
 } from '@pi-dashboard/protocol';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
+import { DashboardApplication } from './application/dashboard-application.js';
+import { DashboardEventStream } from './event-stream.js';
+import { MetadataStore } from './metadata.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
+import { RuntimeRegistry } from './runtime-registry.js';
+import { SessionIndex } from './session-index.js';
 import { toDashboardTrpcError } from './trpc.js';
 
 const apps: ReturnType<typeof Fastify>[] = [];
@@ -120,6 +131,79 @@ function input(value: unknown): string {
   return encodeURIComponent(JSON.stringify(value));
 }
 
+async function realSessionSnapshotFixture() {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'dashboard-trpc-session-'));
+  const sessionDir = path.join(root, 'sessions');
+  const file = path.join(sessionDir, 'session-1.jsonl');
+  await mkdir(sessionDir, { recursive: true });
+  await writeFile(
+    file,
+    `${[
+      { type: 'session', id: 'session-1', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'old-prompt',
+        parentId: null,
+        message: { role: 'user', content: 'old' },
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join('\n')}\n`,
+  );
+  const metadata = new MetadataStore(
+    path.join(root, 'state', 'dashboard.sqlite'),
+  );
+  const sessions = new SessionIndex(sessionDir, metadata);
+  let application: DashboardApplication | undefined;
+  const registry = new RuntimeRegistry({
+    allowExternalWithoutToken: true,
+    onChange: (change) => application?.onRegistryChange(change),
+  });
+  application = new DashboardApplication({
+    registry,
+    manager: { onRegistryChange: () => undefined } as never,
+    sessions,
+    metadata,
+    sesh: { list: async () => [] },
+    usage: { get: async () => null },
+    push: { notify: async () => undefined },
+    stateDir: path.join(root, 'state'),
+    eventStream: new DashboardEventStream(),
+  });
+  await application.start();
+  const runtime: RuntimeSnapshot = {
+    runtimeId: 'runtime-1',
+    ownership: 'external',
+    pid: 1,
+    cwd: '/tmp',
+    liveState: 'working',
+    session: {
+      id: 'session-1',
+      file,
+      cwd: '/tmp',
+      entries: [],
+      entriesComplete: false,
+    },
+    pendingInteractions: [],
+  };
+  const socket = new PassThrough();
+  registry.accept(socket as never);
+  socket.write(
+    serializeFrame({
+      kind: 'event',
+      seq: 1,
+      event: { type: 'runtime.hello', protocolVersion: 1, snapshot: runtime },
+    }),
+  );
+  const deadline = Date.now() + 500;
+  while (!registry.get('runtime-1')) {
+    if (Date.now() > deadline)
+      throw new Error('runtime registration timed out');
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  return { application, file, registry, root, sessions };
+}
+
 describe('dashboard tRPC boundary', () => {
   it('serves authenticated protocol-v2 info and the production shell shape', async () => {
     const app = Fastify();
@@ -193,6 +277,68 @@ describe('dashboard tRPC boundary', () => {
       ),
     ).toEqual(session.json().result.data);
     expect(session.json().result.data.completeThroughCursor).toBe(true);
+  });
+
+  it('serves latest-leaf freshness and sparse runtime fallback through sessionSnapshot', async () => {
+    const fixture = await realSessionSnapshotFixture();
+    try {
+      const app = Fastify();
+      apps.push(app);
+      const routeContext = context();
+      routeContext.sessionSnapshot = (sessionId, before) =>
+        fixture.application.sessionSnapshot(
+          'integration-generation',
+          sessionId,
+          before,
+        );
+      await app.register(dashboardRoutes, { context: routeContext });
+      await app.ready();
+
+      const request = () =>
+        app.inject({
+          method: 'GET',
+          url: `/trpc/sessionSnapshot?input=${input({ sessionId: 'session-1' })}`,
+          headers: authHeaders(),
+        });
+      const first = await request();
+      expect(first.statusCode).toBe(200);
+      expect(first.json().result.data.completeThroughCursor).toBe(true);
+      expect(first.json().result.data.entries).toHaveLength(2);
+
+      await writeFile(
+        fixture.file,
+        `${JSON.stringify({ type: 'session', id: 'session-1', cwd: '/tmp' })}\n${JSON.stringify(
+          {
+            type: 'message',
+            id: 'old-prompt',
+            parentId: null,
+            message: { role: 'user', content: 'old' },
+          },
+        )}\n${JSON.stringify({
+          type: 'message',
+          id: 'new-prompt',
+          parentId: 'old-prompt',
+          message: { role: 'user', content: 'new' },
+        })}\n`,
+      );
+      await fixture.sessions.refresh([]);
+      const fresh = await request();
+      expect(
+        fresh
+          .json()
+          .result.data.entries.map((entry: { id?: string }) => entry.id),
+      ).toContain('new-prompt');
+
+      await rm(fixture.file);
+      const sparse = await request();
+      expect(sparse.statusCode).toBe(200);
+      expect(sparse.json().result.data.entriesComplete).toBe(false);
+      expect(sparse.json().result.data.completeThroughCursor).toBe(false);
+    } finally {
+      fixture.registry.close();
+      await fixture.application.close();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
   });
 
   it('rejects malformed requests and reports a stable protocol mismatch code', async () => {

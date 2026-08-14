@@ -3,7 +3,7 @@ import type {
   SessionApiResponse,
 } from '@pi-dashboard/protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { ReplayGapError } from './http-client.js';
+import { ReplayGapError, SESSION_REQUEST_ORDER } from './http-client.js';
 import {
   DashboardLiveStore,
   selectRuntimeForSession,
@@ -43,7 +43,141 @@ const sessionResponse = (
     entries: [],
   }) as SessionApiResponse;
 
+function orderedResponse(
+  response: SessionApiResponse,
+  order: number,
+): SessionApiResponse {
+  Object.defineProperty(response, SESSION_REQUEST_ORDER, { value: order });
+  return response;
+}
+
 describe('DashboardLiveStore', () => {
+  it('rejects a stale same-generation latest response before it regresses live state', () => {
+    const store = new DashboardLiveStore();
+    const runtime = {
+      runtimeId: 'runtime-1',
+      online: true,
+      liveState: 'working',
+      session: { id: 'session-1', entries: [] },
+      pendingInteractions: [],
+      extensionSurfaces: [],
+    } as never;
+    store.installSnapshot({
+      ...snapshot('daemon-1', 4),
+      runtimes: [runtime],
+      sessions: [
+        { ...sessionResponse(4).metadata, activeRuntimeId: 'runtime-1' },
+      ],
+    });
+    const latest = (messageId: string, order: number) => {
+      const response = {
+        ...sessionResponse(4),
+        metadata: {
+          ...sessionResponse(4).metadata,
+          activeRuntimeId: 'runtime-1',
+        },
+        entriesComplete: true,
+        active: {
+          runtimeId: 'runtime-1',
+          pendingInteractions: [],
+          messages: [{ messageId, role: 'assistant', content: messageId }],
+          tools: [
+            {
+              toolCallId: `${messageId}-tool`,
+              name: 'read',
+              status: 'running',
+            },
+          ],
+          delegates: [
+            {
+              runId: `${messageId}-delegate`,
+              lineageId: 'lineage-1',
+              name: 'worker',
+              kind: 'background',
+              state: 'running',
+              createdAt: 1,
+              allowWrites: false,
+              transcript: [],
+            },
+          ],
+          truncated: false,
+        },
+        completeThroughCursor: true,
+      } as SessionApiResponse;
+      Object.defineProperty(response, SESSION_REQUEST_ORDER, { value: order });
+      return response;
+    };
+
+    store.hydrateSession(latest('response-a', 1));
+    store.hydrateSession(latest('response-b', 2));
+    expect(store.hydrateSession(latest('response-a', 1))).toBeUndefined();
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual(['response-b', 'response-b-tool']);
+    expect(projection?.items['response-a']).toBeUndefined();
+    const projectedRuntime = store.getSnapshot().runtimesById['runtime-1'];
+    expect(projectedRuntime?.extensionSurfaces?.[0]?.viewModel).toMatchObject({
+      statuses: [{ runId: 'response-b-delegate' }],
+    });
+  });
+
+  it('does not poison ordering from invalid higher-order responses', () => {
+    const wrongServerStore = new DashboardLiveStore();
+    wrongServerStore.installSnapshot(snapshot('daemon-1', 4));
+    expect(
+      wrongServerStore.hydrateSession(
+        orderedResponse(
+          { ...sessionResponse(4, 'daemon-2'), entriesComplete: true },
+          2,
+        ),
+      ),
+    ).toBeUndefined();
+    expect(
+      wrongServerStore.hydrateSession(
+        orderedResponse({ ...sessionResponse(4), entriesComplete: true }, 1),
+      ),
+    ).toBeDefined();
+
+    const uncoveredStore = new DashboardLiveStore();
+    uncoveredStore.installSnapshot(snapshot('daemon-1', 4));
+    expect(
+      uncoveredStore.hydrateSession(
+        orderedResponse({ ...sessionResponse(99), entriesComplete: true }, 2),
+      ),
+    ).toBeUndefined();
+    expect(
+      uncoveredStore.hydrateSession(
+        orderedResponse({ ...sessionResponse(4), entriesComplete: true }, 1),
+      ),
+    ).toBeDefined();
+  });
+
+  it('accepts an idempotent replay of the same latest request order', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 4));
+    const response = orderedResponse(
+      {
+        ...sessionResponse(4),
+        entriesComplete: true,
+        entries: [
+          {
+            type: 'message',
+            id: 'accepted-message',
+            message: { role: 'assistant', content: 'accepted' },
+          },
+        ],
+      },
+      1,
+    );
+    const first = store.hydrateSession(response);
+    const replay = store.hydrateSession(response);
+    expect(first).toBeDefined();
+    expect(replay?.order).toEqual(['accepted-message']);
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['accepted-message']);
+  });
+
   it('hydrates active messages and tools through the canonical projection without duplicate terminal rows', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 4));

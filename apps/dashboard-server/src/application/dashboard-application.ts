@@ -212,6 +212,8 @@ type ActiveTranscriptState = {
   unresolvedTerminalIds: readonly string[];
   /** Set on settlement/offline/reconnect until a complete disk read proves safety. */
   uncertain: boolean;
+  /** Registration provenance; reconnects require authoritative reconciliation. */
+  reconnected: boolean;
 };
 
 type ActiveCapture = {
@@ -631,7 +633,10 @@ export class DashboardApplication {
         projection: createTranscriptProjection(sessionId),
         truncated: false,
         unresolvedTerminalIds: [],
-        uncertain: true,
+        // A fresh registration starts with a complete live observation. A
+        // reconnect starts uncertain because its earlier lifecycle is unknown.
+        uncertain: change.reconnected === true,
+        reconnected: change.reconnected === true,
       });
       return;
     }
@@ -645,6 +650,7 @@ export class DashboardApplication {
       truncated: false,
       unresolvedTerminalIds: [],
       uncertain: true,
+      reconnected: false,
     };
     if (prior.runtimeEpoch !== runtimeEpoch) {
       this.activeTranscripts.set(sessionId, {
@@ -658,6 +664,8 @@ export class DashboardApplication {
         truncated: false,
         unresolvedTerminalIds: [],
         uncertain: true,
+        reconnected:
+          change.kind === 'registered' && change.reconnected === true,
       });
       return;
     }
@@ -696,17 +704,9 @@ export class DashboardApplication {
           // that no lifecycle state was lost.
           if (unresolvedTerminalIds.length === 0) uncertain = true;
         }
-        // A live lifecycle event is represented by the bounded reducer. A
-        // heartbeat/state patch after reconnect is not enough to clear the
-        // uncertainty because it carries no message/tool replay.
-        if (
-          change.event.type.startsWith('message.') ||
-          change.event.type.startsWith('tool.') ||
-          change.event.type === 'delegate.transcript.updated' ||
-          change.event.type === 'interaction.requested' ||
-          change.event.type === 'interaction.resolved'
-        )
-          uncertain = false;
+        // Live lifecycle events update the bounded projection but do not
+        // prove that earlier persisted lifecycle events were replayed. In
+        // particular, they must not clear uncertainty carried by reconnect.
         if (
           (change.event.type === 'message.finished' ||
             change.event.type === 'tool.finished') &&

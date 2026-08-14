@@ -159,6 +159,55 @@ describe('isCurrentSessionResponse', () => {
     }
   });
 
+  it('refetches a visible active snapshot until completeThroughCursor is proven', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    });
+    vi.stubGlobal('window', { setTimeout, clearTimeout });
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const incomplete: SessionApiResponse = {
+      ...response,
+      entriesComplete: true,
+      completeThroughCursor: false,
+    };
+    const session = vi
+      .spyOn(dashboardHttpClient, 'session')
+      .mockResolvedValue(incomplete);
+    const store = new DashboardLiveStore();
+    vi.spyOn(store, 'hydrateSession').mockReturnValue({} as never);
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(
+      dashboardQueryKeys.session('session-1'),
+      incomplete,
+    );
+    let renderer: ReturnType<typeof create> | undefined;
+    try {
+      await act(async () => {
+        renderer = create(
+          createElement(
+            QueryClientProvider,
+            { client: queryClient },
+            createElement(HydrationProbe, { store }),
+          ),
+        );
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(500);
+      });
+      expect(session).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      session.mockRestore();
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
   it('does not refetch active sessions for session metadata records', async () => {
     vi.stubGlobal('document', {
       visibilityState: 'visible',

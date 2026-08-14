@@ -43,6 +43,12 @@ export type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+/** Internal ordering metadata assigned when a latest-session request starts. */
+export const SESSION_REQUEST_ORDER = '__dashboardRequestOrder' as const;
+export type ClientSessionApiResponse = SessionApiResponse & {
+  [SESSION_REQUEST_ORDER]?: number;
+};
+
 export type DashboardHttpErrorKind =
   | 'authentication'
   | 'domain'
@@ -278,6 +284,7 @@ export class DashboardHttpClient {
   private readonly selectionTimeoutMs: number;
   private endpointSelection?: Promise<EndpointSelection>;
   private snapshotInFlight?: Promise<BrowserSnapshot>;
+  private sessionRequestOrder = 0;
 
   constructor(options: DashboardHttpClientOptions = {}) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl ?? '');
@@ -467,6 +474,10 @@ export class DashboardHttpClient {
     signal?: AbortSignal,
     before?: string,
   ): Promise<SessionApiResponse> {
+    // Historical pages have an independent ordering domain. Only latest
+    // reads participate in the per-client monotonic order consumed by the
+    // store, so a slow `before` page can never suppress a latest response.
+    const requestOrder = before === undefined ? ++this.sessionRequestOrder : 0;
     const client = createDashboardTrpcClient({
       baseUrl: (await this.ensureEndpoint()).baseUrl,
       fetch: this.fetchImpl,
@@ -487,11 +498,14 @@ export class DashboardHttpClient {
         'Dashboard returned invalid authoritative session data.',
         value,
       );
-    return (
-      before === undefined
-        ? response
-        : { ...response, __dashboardHistorical: true }
-    ) as SessionApiResponse;
+    if (before !== undefined)
+      return { ...response, __dashboardHistorical: true } as SessionApiResponse;
+    // Keep this enumerable: query caches may structurally clone response
+    // objects, while the ordering metadata must survive to the store boundary.
+    return {
+      ...response,
+      [SESSION_REQUEST_ORDER]: requestOrder,
+    } as ClientSessionApiResponse;
   }
 
   async sessionBefore(
