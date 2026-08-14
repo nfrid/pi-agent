@@ -157,6 +157,23 @@ describe('canonical prompt composition', () => {
     }
   });
 
+  it('keeps work-mode and repair-loop guidance in the canonical agent prompt', () => {
+    const prompt = buildSystemPrompt(options(), 'json');
+    expect(prompt).toContain(
+      'Preserve the current work mode across turns—exploration, plan-only, implementation, review, or operation.',
+    );
+    expect(prompt).toContain(
+      'Leave plan-only only after an explicit transition; do not edit before then.',
+    );
+    expect(prompt).toContain(
+      'Treat scope-changing corrections as accepted constraints and non-goals',
+    );
+    expect(prompt).toContain(
+      'when retries yield no new evidence—summarize remaining blockers and stop rather than widening scope.',
+    );
+    expect(prompt.match(/Preserve the current work mode/g)).toHaveLength(1);
+  });
+
   it('includes activity-group preambles only in transcript-rendering modes', () => {
     const tuiPrompt = buildSystemPrompt(options(), 'tui');
     const rpcPrompt = buildSystemPrompt(options(), 'rpc');

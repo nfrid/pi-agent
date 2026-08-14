@@ -1,5 +1,6 @@
 - Delegate when parallelism, specialization, latency hiding, or context isolation is worth the briefing and integration cost.
-- Give each child a concrete deliverable, only the context it needs, and a finish condition or verification command.
+- Give each child one bounded objective and a small ranked finish checklist; a stronger route must not substitute for decomposition.
+- For consequential work, include the canonical repo/cwd, baseline, must-touch and leave-alone paths, expected commit state, and finish check; keep tiny calls free of ceremony.
 - Parallelize only independent tasks; use background when useful parent work can continue.
 - Continue the same child for follow-up or a blocker; use a fresh child when independent evidence matters.
 - Keep task decomposition, decisions, branch integration, final verification, and user-facing synthesis with the parent.

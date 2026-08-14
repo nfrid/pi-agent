@@ -136,6 +136,10 @@ describe('delegate', () => {
     expect(prompt).toContain('## Child report');
     expect(prompt).toContain('Outcome: done | partial | blocked | failed');
     expect(prompt).toContain('Keep the report compact and actionable');
+    expect(prompt).toContain(
+      'Separate completion of the delegated work/report from any candidate verdict',
+    );
+    expect(prompt).toContain('unmet gates or check blockers clearly');
     expect(prompt).not.toContain('## Machine-readable completion');
     expect(prompt).not.toContain('800 words');
     expect(prompt).not.toMatch(/Use this exact structure/);
@@ -731,6 +735,15 @@ describe('delegate', () => {
     );
     expect(guidelines).toContain(
       'final verification, and user-facing synthesis with the parent',
+    );
+    expect(guidelines).toContain(
+      'one bounded objective and a small ranked finish checklist',
+    );
+    expect(guidelines).toContain(
+      'a stronger route must not substitute for decomposition',
+    );
+    expect(guidelines).toContain(
+      'canonical repo/cwd, baseline, must-touch and leave-alone paths',
     );
     expect(guidelines).toContain('<delegate_routing>');
     expect(guidelines).toContain('luna-low: model=gpt-5.6-luna');
