@@ -110,6 +110,86 @@ describe('delegate history adapter', () => {
     });
   });
 
+  it('collapses modern background launch placeholders onto terminal runs', () => {
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'launch-1',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            runs: [
+              oldRun({
+                runId: 'run-modern',
+                lineageId: 'lineage-modern',
+                backgroundJobId: 'job-modern',
+                state: 'queued',
+                activities: [],
+              }),
+            ],
+          },
+        },
+      },
+      {
+        type: 'custom_message',
+        id: 'completion-1',
+        message: {
+          customType: 'delegate-job-result',
+          details: {
+            jobs: [
+              {
+                id: 'job-modern',
+                state: 'success',
+                runs: [
+                  oldRun({
+                    runId: 'run-modern',
+                    lineageId: 'lineage-modern',
+                    backgroundJobId: 'job-modern',
+                    state: 'success',
+                    messages: [
+                      {
+                        role: 'assistant',
+                        content: [{ type: 'text', text: 'terminal response' }],
+                      },
+                    ],
+                    activities: [
+                      {
+                        type: 'tool',
+                        label: 'terminal activity',
+                        transcriptText: 'terminal activity output',
+                        status: 'completed',
+                      },
+                    ],
+                  }),
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ];
+
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups[0]?.runs).toHaveLength(1);
+    expect(response.groups[0]?.runs[0]).toMatchObject({
+      runId: 'run-modern',
+      state: 'success',
+      jobId: 'job-modern',
+    });
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      branch,
+      'run-modern',
+      'lineage-modern',
+    );
+    expect(detail.run.details).toMatchObject({
+      response: 'terminal response',
+      activities: [{ text: 'terminal activity output' }],
+    });
+  });
+
   it('bounds runs per lineage and marks omitted records', () => {
     const branch = [
       { type: 'session', id: 'parent-1' },
