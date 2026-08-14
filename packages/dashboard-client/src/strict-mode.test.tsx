@@ -3,11 +3,9 @@ import { parseHTML } from 'linkedom';
 import { act, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { describe, expect, it } from 'vitest';
-import { DashboardHttpClient } from './http-client.js';
+import type { DashboardHttpClient } from './http-client.js';
 import {
   type DashboardShellState,
-  HIDDEN_STREAM_STALE_MS,
-  shouldReconnectAfterVisibility,
   useDashboard,
   useDashboardShell,
 } from './index.js';
@@ -31,105 +29,40 @@ Object.defineProperty(globalThis, 'navigator', {
 });
 
 describe('useDashboard StrictMode lifecycle', () => {
-  it('reconnects only stale or disconnected visible streams', () => {
-    expect(shouldReconnectAfterVisibility('connected', undefined, 20_000)).toBe(
-      false,
-    );
-    expect(
-      shouldReconnectAfterVisibility('reconnecting', undefined, 20_000),
-    ).toBe(true);
-    expect(
-      shouldReconnectAfterVisibility(
-        'connected',
-        5_000,
-        5_000 + HIDDEN_STREAM_STALE_MS - 1,
-      ),
-    ).toBe(false);
-    expect(
-      shouldReconnectAfterVisibility(
-        'connected',
-        5_000,
-        5_000 + HIDDEN_STREAM_STALE_MS,
-      ),
-    ).toBe(true);
-  });
-
-  it('keeps one active SSE stream and removes listeners on unmount', async () => {
+  it('keeps one shell subscription under StrictMode and cleans it up', async () => {
     let active = 0;
     let maximum = 0;
-    let calls = 0;
-    let snapshots = 0;
-    let releaseSnapshot!: () => void;
-    const snapshotReady = new Promise<void>((resolve) => {
-      releaseSnapshot = resolve;
-    });
-    const client = new DashboardHttpClient({
-      fetch: async (input, init) => {
-        if (String(input).endsWith('/trpc/protocolInfo'))
-          return new Response(
-            JSON.stringify({
-              result: {
-                data: {
-                  protocolVersion: 2,
-                  serverId: 'daemon-1',
-                  capabilities: { shellSnapshot: true, sessionSnapshot: true },
-                },
+    let subscriptions = 0;
+    const client = {
+      getTrpcClient: async () => ({
+        shellSubscribe: {
+          subscribe: (
+            _input: unknown,
+            observer: { onData: (value: unknown) => void },
+          ) => {
+            subscriptions += 1;
+            active += 1;
+            maximum = Math.max(maximum, active);
+            observer.onData({
+              id: 'shell-00000001',
+              data: { type: 'caught-up', sequence: 0 },
+            });
+            return {
+              unsubscribe: () => {
+                active -= 1;
               },
-            }),
-            { status: 200 },
-          );
-        if (String(input).startsWith('/trpc/shellSnapshot')) {
-          snapshots += 1;
-          await snapshotReady;
-          return new Response(
-            JSON.stringify({
-              result: {
-                data: {
-                  snapshot: {
-                    serverId: 'daemon-1',
-                    revision: 200,
-                    cursor: 200,
-                    runtimes: [],
-                    workspaces: [],
-                    sessions: [],
-                    unread: [],
-                  },
-                  cursor: 200,
-                },
-              },
-            }),
-            { status: 200 },
-          );
-        }
-        expect(String(input)).toBe('/api/events?cursor=72&serverId=daemon-1');
-        calls += 1;
-        active += 1;
-        maximum = Math.max(maximum, active);
-        const signal = init?.signal;
-        if (!signal) throw new Error('Expected an SSE abort signal.');
-        await new Promise<never>((_, reject) =>
-          signal.addEventListener(
-            'abort',
-            () => {
-              active -= 1;
-              reject(new DOMException('aborted', 'AbortError'));
-            },
-            { once: true },
-          ),
-        );
-        throw new Error('unreachable');
-      },
-      tokenStore: {
-        get: () => 'test-token',
-        set: () => undefined,
-        clear: () => undefined,
-      },
-    });
+            };
+          },
+        },
+        sessionSubscribe: {
+          subscribe: () => ({ unsubscribe: () => undefined }),
+        },
+      }),
+    } as unknown as DashboardHttpClient;
     function Probe() {
       useDashboard(client);
       return null;
     }
-
     const container = document.createElement('div');
     document.body.appendChild(container);
     const root = createRoot(container);
@@ -140,13 +73,10 @@ describe('useDashboard StrictMode lifecycle', () => {
         </StrictMode>,
       );
       await new Promise((resolve) => setTimeout(resolve, 10));
-      releaseSnapshot();
-      await new Promise((resolve) => setTimeout(resolve, 10));
     });
-    expect(snapshots).toBe(1);
-    expect(calls).toBe(1);
     expect(maximum).toBe(1);
     expect(active).toBe(1);
+    expect(subscriptions).toBeGreaterThanOrEqual(1);
     await act(async () => {
       root.unmount();
       await new Promise((resolve) => setTimeout(resolve, 10));

@@ -232,7 +232,7 @@ const dashboardRouter = t.router({
               }
             : item.kind === 'caught-up'
               ? { type: 'caught-up', sequence: item.sequence }
-              : item.event;
+              : { ...item.event, sequence: item.sequence };
         yield tracked(item.id, parseShellFeedMessage(message));
       }
     }),
@@ -263,7 +263,7 @@ const dashboardRouter = t.router({
               }
             : item.kind === 'caught-up'
               ? { type: 'caught-up', sequence: item.sequence }
-              : item.event;
+              : { ...item.event, sequence: item.sequence };
         yield tracked(item.id, parseSessionFeedMessage(message));
       }
     }),

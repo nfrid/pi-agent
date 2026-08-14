@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseSessionFeedInput,
+  parseSessionFeedMessage,
   parseShellFeedInput,
   parseShellFeedMessage,
+  tryParseSessionFeedMessage,
   tryParseShellFeedMessage,
 } from './parsers.js';
 
@@ -22,6 +24,23 @@ describe('feed protocol contracts', () => {
       type: 'caught-up',
       sequence: 4,
     });
+    expect(
+      parseShellFeedMessage({
+        type: 'shell-event',
+        sequence: 5,
+        domain: 'invalidation',
+        revision: 6,
+        data: { refresh: true },
+      }),
+    ).toMatchObject({ type: 'shell-event', sequence: 5 });
+    expect(
+      parseSessionFeedMessage({
+        type: 'session-event',
+        sequence: 6,
+        sessionId: 'session-a',
+        event: { type: 'agent.settled', sessionId: 'session-a' },
+      }),
+    ).toMatchObject({ type: 'session-event', sequence: 6 });
   });
 
   it('rejects numeric, credential-like, and unknown feed fields', () => {
@@ -30,6 +49,21 @@ describe('feed protocol contracts', () => {
     expect(() => parseShellFeedInput({ cursor: '4' })).toThrow();
     expect(
       tryParseShellFeedMessage({ type: 'caught-up', sequence: -1 }),
+    ).toBeUndefined();
+    expect(
+      tryParseShellFeedMessage({
+        type: 'shell-event',
+        domain: 'invalidation',
+        revision: 1,
+        data: {},
+      }),
+    ).toBeUndefined();
+    expect(
+      tryParseSessionFeedMessage({
+        type: 'session-event',
+        sessionId: 'session-a',
+        event: { type: 'agent.settled', sessionId: 'session-a' },
+      }),
     ).toBeUndefined();
   });
 });
