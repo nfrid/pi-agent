@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createElement } from 'react';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
-import { isCurrentSessionResponse, useSessionHydration } from './hydration';
+import { useSessionHydration } from './hydration';
 
 const response: SessionApiResponse = {
   serverId: 'daemon-1',
@@ -33,15 +33,7 @@ function HydrationProbe({
   return null;
 }
 
-describe('isCurrentSessionResponse', () => {
-  it('accepts only a response for the current session ID', () => {
-    const response = { metadata: { id: 'session-a' } };
-
-    expect(isCurrentSessionResponse('session-a', response)).toBe(true);
-    expect(isCurrentSessionResponse('session-b', response)).toBe(false);
-    expect(isCurrentSessionResponse('session-a', undefined)).toBe(false);
-  });
-
+describe('useSessionHydration', () => {
   it('does not retry a bounded incomplete history tail', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('document', {
@@ -114,7 +106,7 @@ describe('isCurrentSessionResponse', () => {
     }
   });
 
-  it('retries incomplete history when no older-page cursor exists', async () => {
+  it('waits for evidence instead of polling incomplete history', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('document', {
       visibilityState: 'visible',
@@ -146,9 +138,9 @@ describe('isCurrentSessionResponse', () => {
         );
       });
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
+        await vi.advanceTimersByTimeAsync(10_000);
       });
-      expect(session).toHaveBeenCalledTimes(1);
+      expect(session).not.toHaveBeenCalled();
     } finally {
       await act(async () => {
         renderer?.unmount();
@@ -159,7 +151,7 @@ describe('isCurrentSessionResponse', () => {
     }
   });
 
-  it('refetches a visible active snapshot until completeThroughCursor is proven', async () => {
+  it('waits for evidence instead of polling an uncertain active snapshot', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('document', {
       visibilityState: 'visible',
@@ -195,9 +187,9 @@ describe('isCurrentSessionResponse', () => {
         );
       });
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(500);
+        await vi.advanceTimersByTimeAsync(10_000);
       });
-      expect(session).toHaveBeenCalledTimes(1);
+      expect(session).not.toHaveBeenCalled();
     } finally {
       await act(async () => {
         renderer?.unmount();

@@ -141,7 +141,7 @@ describe('DashboardHttpClient command requests', () => {
     );
   });
 
-  it('requests an older session page with an encoded opaque cursor', async () => {
+  it('requests an older session page with its opaque cursor in a POST body', async () => {
     const fetch = vi.fn(async () =>
       trpcResponse({
         metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
@@ -170,9 +170,14 @@ describe('DashboardHttpClient command requests', () => {
     });
     await client.sessionBefore('session-1', 'opaque token');
     const calls = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
-    expect(calls[0]?.[0]).toBe(
-      '/trpc/sessionSnapshot?input=%7B%22sessionId%22%3A%22session-1%22%2C%22before%22%3A%22opaque%20token%22%7D',
-    );
+    expect(calls[0]?.[0]).toBe('/trpc/sessionSnapshot');
+    expect(calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId: 'session-1',
+        before: 'opaque token',
+      }),
+    });
   });
 
   it('orders latest session responses while isolating historical pages', async () => {
@@ -499,10 +504,15 @@ describe('DashboardHttpClient snapshot requests', () => {
       tokenStore: tokenStore(),
     });
     await expect(client.snapshot()).resolves.toEqual(validSnapshot);
-    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+    const calls = fetch.mock.calls as unknown as Array<
+      [RequestInfo | URL, RequestInit]
+    >;
+    expect(calls.map(([input]) => input)).toEqual([
       '/trpc/protocolInfo',
-      '/trpc/shellSnapshot?input=%7B%22protocolVersion%22%3A2%7D',
+      '/trpc/shellSnapshot',
     ]);
+    expect(calls.map(([, init]) => init.method)).toEqual(['POST', 'POST']);
+    expect(calls[1]?.[1].body).toBe(JSON.stringify({ protocolVersion: 2 }));
 
     const invalid = new DashboardHttpClient({
       fetch: vi.fn(async () => trpcResponse({ snapshot: validSnapshot })),
@@ -652,7 +662,7 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
       '/lan/trpc/protocolInfo',
       '/base/trpc/protocolInfo',
-      '/base/trpc/shellSnapshot?input=%7B%22protocolVersion%22%3A2%7D',
+      '/base/trpc/shellSnapshot',
     ]);
   });
 
@@ -675,7 +685,7 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
       '/lan/trpc/protocolInfo',
       '/base/trpc/protocolInfo',
-      '/base/trpc/shellSnapshot?input=%7B%22protocolVersion%22%3A2%7D',
+      '/base/trpc/shellSnapshot',
     ]);
   });
 

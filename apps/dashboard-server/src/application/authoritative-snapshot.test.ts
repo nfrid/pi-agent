@@ -281,6 +281,7 @@ describe('authoritative application snapshot lifecycle', () => {
         messageId: 'terminal-1',
         role: 'assistant',
         content: 'done',
+        timestamp: 100,
         phase: 'finished',
       },
     });
@@ -307,7 +308,7 @@ describe('authoritative application snapshot lifecycle', () => {
     expect(offline.completeThroughCursor).toBe(false);
     await writeFile(
       f.file,
-      `${JSON.stringify({ type: 'session', id: 'snapshot-session', cwd: '/tmp/snapshot' })}\n${JSON.stringify({ type: 'message', id: 'terminal-1', message: { messageId: 'terminal-1', role: 'assistant', content: 'done' } })}\n`,
+      `${JSON.stringify({ type: 'session', id: 'snapshot-session', cwd: '/tmp/snapshot' })}\n${JSON.stringify({ type: 'message', id: 'persisted-terminal', message: { role: 'assistant', content: 'done', timestamp: 100 } })}\n`,
     );
     await f.sessions.refresh([]);
     const durable = await f.app.sessionSnapshot(
@@ -331,6 +332,81 @@ describe('authoritative application snapshot lifecycle', () => {
     );
     expect(oldSnapshot.completeThroughCursor).toBe(true);
     expect(oldSnapshot.active.messages).toEqual([]);
+  });
+
+  it('does not confuse earlier repeated message or tool content with current durability', async () => {
+    const f = await fixture('snapshot-session', [
+      { type: 'session', id: 'snapshot-session', cwd: '/tmp/snapshot' },
+      {
+        type: 'message',
+        id: 'old-message',
+        message: {
+          role: 'assistant',
+          content: 'repeated',
+          timestamp: 1,
+        },
+      },
+      {
+        type: 'tool',
+        id: 'old-tool-entry',
+        tool: {
+          toolCallId: 'old-tool',
+          name: 'read',
+          arguments: { path: 'same' },
+          result: 'same',
+          status: 'finished',
+        },
+      },
+    ]);
+    const live = runtime(f.file);
+    f.register(live);
+    f.event(live, {
+      type: 'message.finished',
+      sessionId: 'snapshot-session',
+      message: {
+        messageId: 'new-message',
+        role: 'assistant',
+        content: 'repeated',
+        timestamp: 2,
+        phase: 'finished',
+      },
+    });
+    f.event(
+      live,
+      {
+        type: 'tool.finished',
+        sessionId: 'snapshot-session',
+        tool: {
+          toolCallId: 'new-tool',
+          name: 'read',
+          arguments: { path: 'same' },
+          result: 'same',
+          status: 'finished',
+          phase: 'finished',
+        },
+      },
+      'epoch-1',
+      3,
+    );
+    const idle = runtime(f.file, { liveState: 'idle' });
+    f.event(
+      idle,
+      { type: 'agent.settled', sessionId: 'snapshot-session' },
+      'epoch-1',
+      4,
+    );
+
+    const snapshot = await f.app.sessionSnapshot(
+      'generation-repeated',
+      'snapshot-session',
+    );
+    expect(snapshot.active.messages).toMatchObject([
+      { messageId: 'new-message', phase: 'finished' },
+    ]);
+    expect(snapshot.active.tools).toMatchObject([
+      { toolCallId: 'new-tool', phase: 'finished' },
+    ]);
+    expect(snapshot.completeThroughCursor).toBe(false);
   });
 
   it('does not overclaim compact runtime fallback, and keeps before pagination separate', async () => {
@@ -365,6 +441,45 @@ describe('authoritative application snapshot lifecycle', () => {
     );
     expect(older.active.messages).toEqual([]);
     expect(older.completeThroughCursor).toBe(false);
+  });
+
+  it('does not restart a session read for unrelated global events', async () => {
+    const f = await fixture();
+    f.register(runtime(f.file));
+    const originalRead = f.sessions.readEntries.bind(f.sessions);
+    let release!: () => void;
+    let started!: () => void;
+    const startedPromise = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const releasePromise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const readSpy = vi
+      .spyOn(f.sessions, 'readEntries')
+      .mockImplementation(async (...args) => {
+        started();
+        await releasePromise;
+        return originalRead(...args);
+      });
+
+    const pending = f.app.sessionSnapshot(
+      'generation-unrelated',
+      'snapshot-session',
+    );
+    await startedPromise;
+    f.app.eventStream.publish((cursor, emittedAt) => ({
+      type: 'snapshot',
+      cursor,
+      emittedAt,
+      snapshot: f.app.shellSnapshot('generation-unrelated', cursor),
+    }));
+    release();
+
+    const snapshot = await pending;
+    expect(snapshot.cursor).toBe(0);
+    expect(readSpy).toHaveBeenCalledTimes(1);
+    readSpy.mockRestore();
   });
 
   it('retries a disk read across a reconnect epoch and bounds shell state', async () => {

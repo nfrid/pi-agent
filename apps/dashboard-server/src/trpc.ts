@@ -219,6 +219,7 @@ export function registerDashboardTrpc(
         res: reply,
         path: request.params.path,
         createContext: () => context,
+        allowMethodOverride: true,
       });
     },
   );

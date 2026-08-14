@@ -257,17 +257,19 @@ describe('dashboard tRPC boundary', () => {
     await app.ready();
 
     const shell = await app.inject({
-      method: 'GET',
-      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 2 })}`,
+      method: 'POST',
+      url: '/trpc/shellSnapshot',
       headers: authHeaders(),
+      payload: { protocolVersion: 2 },
     });
     expect(shell.statusCode).toBe(200);
     expect(shell.json().result.data.snapshot.runtimes).toEqual([]);
 
     const session = await app.inject({
-      method: 'GET',
-      url: `/trpc/sessionSnapshot?input=${input({ sessionId: 's' })}`,
+      method: 'POST',
+      url: '/trpc/sessionSnapshot',
       headers: authHeaders(),
+      payload: { sessionId: 's' },
     });
     expect(session.statusCode).toBe(200);
     expect(

@@ -9,15 +9,6 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-type SessionResponseWithId = { metadata: { id: string } };
-
-export function isCurrentSessionResponse<T extends SessionResponseWithId>(
-  id: string,
-  response: T | undefined,
-): response is T {
-  return response?.metadata.id === id;
-}
-
 export function useSessionHydration({
   id,
   store,
@@ -42,19 +33,8 @@ export function useSessionHydration({
   const data = query.data
     ? { ...query.data, metadata: storedMetadata ?? query.data.metadata }
     : undefined;
-  const queryDataId = query.data?.metadata.id;
-  const queryEntriesComplete = query.data?.entriesComplete;
-  const queryCompleteThroughCursor = query.data?.completeThroughCursor;
-  // An incomplete response with a cursor is a valid bounded tail page. Older
-  // history is user-driven pagination, not a signal that the branch is still
-  // being serialized.
-  const queryHasOlderHistory =
-    query.data?.history?.hasOlder === true ||
-    query.data?.history?.nextBefore !== undefined;
   const [error, setError] = useState<string>();
-  const [incompleteRetryNonce, setIncompleteRetryNonce] = useState(0);
   const hydrationRetryCountRef = useRef(0);
-  const incompleteRetryCountRef = useRef(0);
   const sessionChangeRef = useRef({ id, value: sessionChange });
   const sessionRefetchRef = useRef<
     | {
@@ -91,7 +71,6 @@ export function useSessionHydration({
     if (!id) return;
     setError(undefined);
     hydrationRetryCountRef.current = 0;
-    incompleteRetryCountRef.current = 0;
   }, [id]);
 
   useEffect(() => {
@@ -105,11 +84,7 @@ export function useSessionHydration({
     }
     if (store.hydrateSession(query.data)) {
       hydrationRetryCountRef.current = 0;
-      if (
-        query.data.entriesComplete !== false &&
-        query.data.completeThroughCursor !== false
-      )
-        setError(undefined);
+      setError(undefined);
       return;
     }
     const attempt = hydrationRetryCountRef.current;
@@ -148,8 +123,6 @@ export function useSessionHydration({
     const reconcileWhenVisible = () => {
       if (document.visibilityState !== 'visible') return;
       hydrationRetryCountRef.current = 0;
-      incompleteRetryCountRef.current = 0;
-      setIncompleteRetryNonce((current) => current + 1);
       void requestSessionRefetch();
     };
     document.addEventListener('visibilitychange', reconcileWhenVisible);
@@ -157,62 +130,9 @@ export function useSessionHydration({
       document.removeEventListener('visibilitychange', reconcileWhenVisible);
   }, [requestSessionRefetch]);
 
-  useEffect(() => {
-    // Visibility increments this nonce to restart a previously suspended retry loop.
-    void incompleteRetryNonce;
-    if (
-      queryDataId !== id ||
-      (queryCompleteThroughCursor !== false &&
-        (queryEntriesComplete !== false || queryHasOlderHistory))
-    ) {
-      incompleteRetryCountRef.current = 0;
-      return;
-    }
-    let canceled = false;
-    let timer: number | undefined;
-    const retry = () => {
-      if (canceled || document.visibilityState !== 'visible') return;
-      if (incompleteRetryCountRef.current >= 6) {
-        setError('Session history is not ready yet. Retry when ready.');
-        return;
-      }
-      const attempt = incompleteRetryCountRef.current;
-      timer = window.setTimeout(
-        async () => {
-          if (canceled || document.visibilityState !== 'visible') return;
-          incompleteRetryCountRef.current = attempt + 1;
-          const result = await requestSessionRefetch();
-          if (
-            !canceled &&
-            isCurrentSessionResponse(id, result?.data) &&
-            (result.data.entriesComplete === false ||
-              result.data.completeThroughCursor === false)
-          )
-            retry();
-        },
-        Math.min(8_000, 500 * 2 ** attempt),
-      );
-    };
-    retry();
-    return () => {
-      canceled = true;
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [
-    id,
-    incompleteRetryNonce,
-    queryDataId,
-    queryEntriesComplete,
-    queryCompleteThroughCursor,
-    queryHasOlderHistory,
-    requestSessionRefetch,
-  ]);
-
   const retrySession = useCallback(() => {
     hydrationRetryCountRef.current = 0;
-    incompleteRetryCountRef.current = 0;
     setError(undefined);
-    setIncompleteRetryNonce((current) => current + 1);
     void requestSessionRefetch();
   }, [requestSessionRefetch]);
 

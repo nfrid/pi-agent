@@ -372,6 +372,29 @@ function itemMessage(
   };
 }
 
+function terminalMessageKey(
+  item: TranscriptItem | undefined,
+): string | undefined {
+  if (item?.kind !== 'message' || item.timestamp === undefined)
+    return undefined;
+  try {
+    return JSON.stringify([item.role, item.timestamp, item.content]);
+  } catch {
+    return undefined;
+  }
+}
+
+function persistedTerminalMessageCounts(
+  projection: TranscriptProjection,
+): ReadonlyMap<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of Object.values(projection.items)) {
+    const key = terminalMessageKey(item);
+    if (key !== undefined) counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
 function itemTool(
   item: TranscriptItem,
   includeTerminal = false,
@@ -919,18 +942,21 @@ export class DashboardApplication {
       }
       if (
         before === undefined &&
-        (this.eventStream.cursor !== cursor ||
-          !sameRuntimeCapture(capture, this.captureActive(sessionId)))
+        !sameRuntimeCapture(capture, this.captureActive(sessionId))
       )
         continue;
       let resolvedCapture = capture;
       if (before === undefined && capture.state) {
         const persisted = hydrateTranscript(result.entries, sessionId);
         const persistedIds = new Set(Object.keys(persisted.items));
+        const persistedMessageCounts =
+          persistedTerminalMessageCounts(persisted);
         const unresolvedTerminalIds =
-          capture.state.unresolvedTerminalIds.filter(
-            (id) => !persistedIds.has(id),
-          );
+          capture.state.unresolvedTerminalIds.filter((id) => {
+            if (persistedIds.has(id)) return false;
+            const key = terminalMessageKey(capture.state?.projection.items[id]);
+            return key === undefined || persistedMessageCounts.get(key) !== 1;
+          });
         const fullyProved =
           result.entriesComplete &&
           unresolvedTerminalIds.length === 0 &&
