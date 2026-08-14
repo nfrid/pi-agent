@@ -65,18 +65,25 @@ describe('useDashboard StrictMode lifecycle', () => {
     });
     const client = new DashboardHttpClient({
       fetch: async (input, init) => {
-        if (String(input) === '/api/snapshot') {
+        if (String(input).startsWith('/trpc/bootstrap')) {
           snapshots += 1;
           await snapshotReady;
           return new Response(
             JSON.stringify({
-              serverId: 'daemon-1',
-              revision: 200,
-              cursor: 200,
-              runtimes: [],
-              workspaces: [],
-              sessions: [],
-              unread: [],
+              result: {
+                data: {
+                  snapshot: {
+                    serverId: 'daemon-1',
+                    revision: 200,
+                    cursor: 200,
+                    runtimes: [],
+                    workspaces: [],
+                    sessions: [],
+                    unread: [],
+                  },
+                  cursor: 200,
+                },
+              },
             }),
             { status: 200 },
           );

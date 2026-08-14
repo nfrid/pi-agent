@@ -2263,11 +2263,10 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
       `http://127.0.0.1:${server.port}/api/snapshot`,
       { headers },
     );
-    expect(snapshot.status).toBe(200);
-    expect(await snapshot.json()).toMatchObject({ runtimes: [] });
+    expect(snapshot.status).toBe(404);
   });
 
-  it('requires auth/origin, supports CORS preflight, and returns an authoritative snapshot', async () => {
+  it('requires auth/origin, supports CORS preflight, and removes the legacy snapshot route', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-http-'));
     server = await createDashboardServer({
       port: 0,
@@ -2290,15 +2289,11 @@ ${JSON.stringify({ type: 'message', id: 'm1', message: { role: 'user', content: 
     const sameOriginResponse = await fetch(url, {
       headers: { 'x-dashboard-token': 'test-token' },
     });
-    expect(sameOriginResponse.status).toBe(200);
+    expect(sameOriginResponse.status).toBe(404);
     const response = await fetch(url, {
       headers: { Origin: origin, 'x-dashboard-token': 'test-token' },
     });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(404);
     expect(response.headers.get('access-control-allow-origin')).toBe(origin);
-    expect((await response.json()) as { runtimes: unknown[] }).toMatchObject({
-      runtimes: [],
-      workspaces: [],
-    });
   });
 });

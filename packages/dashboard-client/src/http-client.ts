@@ -9,9 +9,11 @@ import {
   type DelegateHistoryResponse,
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
+  PROTOCOL_VERSION,
   type Project,
   type ProjectAdoptCommand,
   type ProjectCreateCommand,
+  type ProtocolInfo,
   type RetryCommand,
   type Run,
   type SessionAdoptCommand,
@@ -22,54 +24,194 @@ import {
   tryParseActiveDelegateTranscriptBaseline,
   tryParseBrowserSnapshot,
   tryParseComposerCommandCatalogue,
+  tryParseDashboardSnapshotResponse,
   tryParseDashboardStreamMessage,
   tryParseDelegateHistoryResponse,
   tryParseDelegateHistoryRunDetailResponse,
+  tryParseProtocolInfo,
   tryParseSessionApiResponse,
 } from '@pi-dashboard/protocol';
 import {
   browserDashboardTokenStore,
   type DashboardTokenStore,
 } from './authentication.js';
+import { createDashboardTrpcClient } from './trpc-client.js';
 
 export type FetchLike = (
   input: RequestInfo | URL,
   init?: RequestInit,
 ) => Promise<Response>;
 
+export type DashboardHttpErrorKind =
+  | 'authentication'
+  | 'domain'
+  | 'malformed-output'
+  | 'network'
+  | 'protocol-mismatch'
+  | 'request';
+
+interface DashboardHttpErrorOptions {
+  kind?: DashboardHttpErrorKind;
+  code?: string;
+}
+
+function errorCode(value: unknown): string | undefined {
+  return value && typeof value === 'object' && 'code' in value
+    ? typeof (value as { code?: unknown }).code === 'string'
+      ? (value as { code: string }).code
+      : undefined
+    : undefined;
+}
+
+function errorKind(
+  status: number,
+  code: string | undefined,
+): DashboardHttpErrorKind {
+  if (
+    status === 401 ||
+    status === 403 ||
+    code === 'UNAUTHORIZED' ||
+    code === 'FORBIDDEN'
+  )
+    return 'authentication';
+  return code ? 'domain' : 'request';
+}
+
 export class DashboardHttpError extends Error {
   readonly status: number;
   readonly code?: string;
   readonly details: unknown;
+  readonly kind: DashboardHttpErrorKind;
 
-  constructor(status: number, message: string, details: unknown = undefined) {
+  constructor(
+    status: number,
+    message: string,
+    details: unknown = undefined,
+    options: DashboardHttpErrorOptions = {},
+  ) {
     super(message);
     this.name = 'DashboardHttpError';
     this.status = status;
     this.details = details;
-    this.code =
-      details && typeof details === 'object' && 'code' in details
-        ? typeof (details as { code?: unknown }).code === 'string'
-          ? (details as { code: string }).code
-          : undefined
-        : undefined;
+    this.code = options.code ?? errorCode(details);
+    this.kind = options.kind ?? errorKind(status, this.code);
   }
 }
 
-export function normalizeLegacySnapshot(value: unknown): unknown {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
-  const snapshot = value as Record<string, unknown>;
-  return {
-    ...snapshot,
-    ...(snapshot.serverId === undefined ? { serverId: 'legacy' } : {}),
-    ...(snapshot.revision === undefined ? { revision: 0 } : {}),
-    ...(snapshot.cursor === undefined ? { cursor: 0 } : {}),
-    ...(snapshot.unread === undefined ? { unread: [] } : {}),
-  };
+export class DashboardProtocolMismatchError extends DashboardHttpError {
+  readonly expected: number;
+  readonly actual: number;
+  readonly serverId: string | undefined;
+
+  constructor(expected: number, actual: number, serverId?: string) {
+    super(
+      400,
+      `Dashboard protocol mismatch (expected ${expected}, received ${actual}).`,
+      {
+        code: 'protocol-mismatch',
+        expected,
+        actual,
+        ...(serverId ? { serverId } : {}),
+      },
+      { kind: 'protocol-mismatch', code: 'protocol-mismatch' },
+    );
+    this.name = 'DashboardProtocolMismatchError';
+    this.expected = expected;
+    this.actual = actual;
+    this.serverId = serverId;
+  }
+}
+
+function malformedOutput(
+  message: string,
+  details?: unknown,
+): DashboardHttpError {
+  return new DashboardHttpError(502, message, details, {
+    kind: 'malformed-output',
+    code: 'malformed-output',
+  });
+}
+
+function networkError(cause: unknown): DashboardHttpError {
+  return new DashboardHttpError(0, 'Dashboard network request failed.', cause, {
+    kind: 'network',
+    code: 'network-error',
+  });
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function dashboardErrorFromTrpc(cause: unknown): DashboardHttpError {
+  if (cause instanceof DashboardHttpError) return cause;
+  const source = record(cause);
+  const data = record(source?.data) ?? record(record(source?.shape)?.data);
+  const transportCode = typeof data?.code === 'string' ? data.code : undefined;
+  const domainCode =
+    typeof data?.domainCode === 'string' ? data.domainCode : undefined;
+  const actual =
+    typeof data?.actual === 'number'
+      ? data.actual
+      : typeof data?.protocolVersion === 'number'
+        ? data.protocolVersion
+        : undefined;
+  if (domainCode === 'protocol-mismatch' && actual !== undefined)
+    return new DashboardProtocolMismatchError(
+      PROTOCOL_VERSION,
+      actual,
+      typeof data?.serverId === 'string' ? data.serverId : undefined,
+    );
+  const meta = record(source?.meta);
+  const metaResponse = record(meta?.response);
+  const status =
+    typeof data?.httpStatus === 'number'
+      ? data.httpStatus
+      : transportCode === 'UNAUTHORIZED'
+        ? 401
+        : transportCode === 'FORBIDDEN'
+          ? 403
+          : transportCode === 'NOT_FOUND'
+            ? 404
+            : transportCode === 'CONFLICT'
+              ? 409
+              : transportCode === 'BAD_REQUEST'
+                ? 400
+                : typeof metaResponse?.status === 'number'
+                  ? metaResponse.status
+                  : undefined;
+  if (!data) {
+    if (status === 401 || status === 403)
+      return new DashboardHttpError(
+        status,
+        cause instanceof Error ? cause.message : 'Authentication required.',
+        meta?.responseJSON ?? cause,
+        { kind: 'authentication', code: 'authentication' },
+      );
+    if (status !== undefined && status >= 200 && status < 300)
+      return malformedOutput(
+        'Dashboard returned an invalid tRPC response.',
+        meta?.responseJSON ?? cause,
+      );
+    return networkError(cause);
+  }
+  const resolvedStatus = status ?? 500;
+  const message =
+    cause instanceof Error ? cause.message : 'Dashboard request failed.';
+  return new DashboardHttpError(resolvedStatus, message, data, {
+    kind: domainCode
+      ? 'domain'
+      : resolvedStatus === 401 || resolvedStatus === 403
+        ? 'authentication'
+        : 'request',
+    code: domainCode ?? transportCode,
+  });
 }
 
 export function asBrowserSnapshot(value: unknown): BrowserSnapshot | undefined {
-  return tryParseBrowserSnapshot(normalizeLegacySnapshot(value));
+  return tryParseBrowserSnapshot(value);
 }
 
 export function asSessionResponse(
@@ -100,7 +242,7 @@ export interface DashboardHttpClientOptions {
 
 type EndpointSelection = {
   baseUrl: string;
-  snapshot?: BrowserSnapshot;
+  protocolInfo?: ProtocolInfo;
 };
 
 function normalizeBaseUrl(value: string): string {
@@ -115,7 +257,6 @@ export class DashboardHttpClient {
   private readonly candidateBaseUrls: readonly string[];
   private readonly selectionTimeoutMs: number;
   private endpointSelection?: Promise<EndpointSelection>;
-  private selectedSnapshot?: BrowserSnapshot;
   private snapshotInFlight?: Promise<BrowserSnapshot>;
 
   constructor(options: DashboardHttpClientOptions = {}) {
@@ -141,8 +282,10 @@ export class DashboardHttpClient {
     this.tokenStore = options.tokenStore ?? browserDashboardTokenStore;
   }
 
-  private ensureEndpoint(): Promise<EndpointSelection> {
-    if (this.candidateBaseUrls.length === 1)
+  private ensureEndpoint(
+    probeSingleCandidate = false,
+  ): Promise<EndpointSelection> {
+    if (!probeSingleCandidate && this.candidateBaseUrls.length === 1)
       return Promise.resolve({ baseUrl: this.baseUrl });
     if (!this.endpointSelection) {
       this.endpointSelection = this.selectEndpoint();
@@ -152,35 +295,32 @@ export class DashboardHttpClient {
 
   private async selectEndpoint(): Promise<EndpointSelection> {
     for (const baseUrl of this.candidateBaseUrls) {
-      const snapshot = await this.probeEndpoint(baseUrl);
-      if (snapshot) {
-        this.selectedSnapshot = snapshot;
-        return { baseUrl, snapshot };
+      try {
+        const protocolInfo = await this.probeEndpoint(baseUrl);
+        if (protocolInfo) return { baseUrl, protocolInfo };
+      } catch (cause) {
+        // A known incompatible daemon must surface for reload handling; it is
+        // not a probe failure that can be hidden by selecting another daemon.
+        if (cause instanceof DashboardProtocolMismatchError) throw cause;
       }
     }
-    // The configured base URL is always the last candidate. Keep it pinned
-    // even when every probe failed so normal requests are never retried.
+    // Other probe failures retain the configured-last fallback behavior.
     return { baseUrl: this.baseUrl };
   }
 
   private async probeEndpoint(
     baseUrl: string,
-  ): Promise<BrowserSnapshot | undefined> {
+  ): Promise<ProtocolInfo | undefined> {
     const controller = new AbortController();
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    const token = this.tokenStore.get();
-    const headers = new Headers({ accept: 'application/json' });
-    if (token) headers.set('x-dashboard-token', token);
-    let request: Promise<Response>;
-    try {
-      request = this.fetchImpl(`${baseUrl}/api/snapshot`, {
-        method: 'GET',
-        headers,
-        signal: controller.signal,
-      });
-    } catch {
-      return undefined;
-    }
+    const client = createDashboardTrpcClient({
+      baseUrl,
+      fetch: this.fetchImpl,
+      tokenStore: this.tokenStore,
+    });
+    const request = client.protocolInfo.query(undefined, {
+      signal: controller.signal,
+    });
     const timedOut = new Promise<never>((_, reject) => {
       timeout = setTimeout(() => {
         controller.abort();
@@ -188,11 +328,26 @@ export class DashboardHttpClient {
       }, this.selectionTimeoutMs);
     });
     try {
-      const response = await Promise.race([request, timedOut]);
-      if (!response.ok) return undefined;
-      return asBrowserSnapshot(await responseBody(response));
-    } catch {
-      return undefined;
+      const value = await Promise.race([request, timedOut]);
+      const protocolInfo = tryParseProtocolInfo(value);
+      if (protocolInfo) return protocolInfo;
+      const record =
+        value && typeof value === 'object' && !Array.isArray(value)
+          ? (value as Record<string, unknown>)
+          : undefined;
+      if (
+        typeof record?.protocolVersion === 'number' &&
+        Number.isInteger(record.protocolVersion) &&
+        record.protocolVersion !== PROTOCOL_VERSION
+      )
+        throw new DashboardProtocolMismatchError(
+          PROTOCOL_VERSION,
+          record.protocolVersion,
+          typeof record.serverId === 'string' ? record.serverId : undefined,
+        );
+      throw malformedOutput('Dashboard returned invalid protocol info.', value);
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
     } finally {
       if (timeout !== undefined) clearTimeout(timeout);
     }
@@ -214,11 +369,17 @@ export class DashboardHttpClient {
     const headers = new Headers(init.headers);
     if (!headers.has('content-type') && !(init.body instanceof FormData))
       headers.set('content-type', 'application/json');
-    if (token) headers.set('x-dashboard-token', token);
-    const response = await this.fetchImpl(`${baseUrl}${path}`, {
-      ...init,
-      headers,
-    });
+    if (token && !headers.has('authorization'))
+      headers.set('x-dashboard-token', token);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${baseUrl}${path}`, {
+        ...init,
+        headers,
+      });
+    } catch (cause) {
+      throw networkError(cause);
+    }
     const body = await responseBody(response);
     if (!response.ok) {
       const message =
@@ -239,18 +400,9 @@ export class DashboardHttpClient {
 
   snapshot(): Promise<BrowserSnapshot> {
     if (this.snapshotInFlight) return this.snapshotInFlight;
-    const request =
-      this.candidateBaseUrls.length === 1
-        ? this.readSnapshot()
-        : this.ensureEndpoint().then(async () => {
-            // Endpoint selection already made an authenticated, validated
-            // snapshot request. Consume it for the first public snapshot read
-            // only.
-            const selectedSnapshot = this.selectedSnapshot;
-            this.selectedSnapshot = undefined;
-            if (selectedSnapshot) return selectedSnapshot;
-            return this.readSnapshot();
-          });
+    const request = this.ensureEndpoint(true).then(({ baseUrl }) =>
+      this.bootstrapAt(baseUrl),
+    );
     this.snapshotInFlight = request;
     // Keep only the in-flight request. Failed and successful reads must both
     // be eligible for a later refresh while concurrent callers share one read.
@@ -267,11 +419,27 @@ export class DashboardHttpClient {
     return request;
   }
 
-  private async readSnapshot(): Promise<BrowserSnapshot> {
-    const value = await this.request<unknown>('/api/snapshot');
-    const snapshot = asBrowserSnapshot(value);
-    if (!snapshot) throw new Error('Dashboard returned an invalid snapshot.');
-    return snapshot;
+  private async bootstrapAt(baseUrl: string): Promise<BrowserSnapshot> {
+    const client = createDashboardTrpcClient({
+      baseUrl,
+      fetch: this.fetchImpl,
+      tokenStore: this.tokenStore,
+    });
+    let value: unknown;
+    try {
+      value = await client.bootstrap.query({
+        protocolVersion: PROTOCOL_VERSION,
+      });
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
+    }
+    const response = tryParseDashboardSnapshotResponse(value);
+    if (!response || response.cursor !== response.snapshot.cursor)
+      throw malformedOutput(
+        'Dashboard returned an invalid bootstrap response.',
+        value,
+      );
+    return response.snapshot;
   }
 
   async session(
@@ -286,7 +454,8 @@ export class DashboardHttpClient {
       signal ? { signal } : {},
     );
     const response = tryParseSessionApiResponse(value);
-    if (!response) throw new Error('Dashboard returned invalid session data.');
+    if (!response)
+      throw malformedOutput('Dashboard returned invalid session data.', value);
     return response;
   }
 
@@ -308,7 +477,10 @@ export class DashboardHttpClient {
     );
     const response = tryParseActiveDelegateTranscriptBaseline(value);
     if (!response)
-      throw new Error('Invalid active delegate transcript response.');
+      throw malformedOutput(
+        'Invalid active delegate transcript response.',
+        value,
+      );
     return response;
   }
 
@@ -322,7 +494,10 @@ export class DashboardHttpClient {
     );
     const response = tryParseDelegateHistoryResponse(value);
     if (!response)
-      throw new Error('Dashboard returned invalid delegate history data.');
+      throw malformedOutput(
+        'Dashboard returned invalid delegate history data.',
+        value,
+      );
     return response;
   }
 
@@ -350,8 +525,9 @@ export class DashboardHttpClient {
     );
     const response = tryParseDelegateHistoryRunDetailResponse(value);
     if (!response)
-      throw new Error(
+      throw malformedOutput(
         'Dashboard returned invalid delegate history run detail data.',
+        value,
       );
     return response;
   }
@@ -379,7 +555,10 @@ export class DashboardHttpClient {
     );
     const catalogue = tryParseComposerCommandCatalogue(value);
     if (!catalogue)
-      throw new Error('Dashboard returned invalid composer command data.');
+      throw malformedOutput(
+        'Dashboard returned invalid composer command data.',
+        value,
+      );
     return catalogue;
   }
 
@@ -640,16 +819,21 @@ export class DashboardHttpClient {
     if (!token) throw new DashboardHttpError(401, 'Authentication required.');
     const params = new URLSearchParams({ cursor: String(cursor) });
     if (serverId) params.set('serverId', serverId);
-    const response = await this.fetchImpl(
-      `${baseUrl}/api/events?${params.toString()}`,
-      {
-        headers: {
-          accept: 'text/event-stream',
-          'x-dashboard-token': token,
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${baseUrl}/api/events?${params.toString()}`,
+        {
+          headers: {
+            accept: 'text/event-stream',
+            'x-dashboard-token': token,
+          },
+          signal,
         },
-        signal,
-      },
-    );
+      );
+    } catch (cause) {
+      throw networkError(cause);
+    }
     if (response.status === 409) {
       const body = await responseBody(response);
       if (
@@ -669,7 +853,8 @@ export class DashboardHttpClient {
 
   async parseStreamRecord(value: unknown): Promise<DashboardStreamMessage> {
     const record = tryParseDashboardStreamMessage(value);
-    if (!record) throw new Error('Dashboard returned an invalid event.');
+    if (!record)
+      throw malformedOutput('Dashboard returned an invalid event.', value);
     return record;
   }
 }

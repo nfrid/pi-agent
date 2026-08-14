@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DashboardHttpClient } from './http-client.js';
+import {
+  DashboardHttpClient,
+  DashboardProtocolMismatchError,
+} from './http-client.js';
 
 const validSnapshot = {
   serverId: 'daemon-1',
@@ -11,8 +14,43 @@ const validSnapshot = {
   unread: [],
 };
 
+function trpcResponse(value: unknown): Response {
+  return new Response(JSON.stringify({ result: { data: value } }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function protocolInfoResponse(): Response {
+  return trpcResponse({
+    protocolVersion: 1,
+    serverId: validSnapshot.serverId,
+    capabilities: { bootstrap: true },
+  });
+}
+
 function snapshotResponse(): Response {
-  return new Response(JSON.stringify(validSnapshot), { status: 200 });
+  return trpcResponse({
+    snapshot: validSnapshot,
+    cursor: validSnapshot.cursor,
+  });
+}
+
+function trpcErrorResponse(
+  code: string,
+  httpStatus: number,
+  extra: Record<string, unknown> = {},
+): Response {
+  return new Response(
+    JSON.stringify({
+      error: {
+        message: 'dashboard error',
+        code: -32000,
+        data: { code, httpStatus, ...extra },
+      },
+    }),
+    { status: httpStatus, headers: { 'content-type': 'application/json' } },
+  );
 }
 
 function tokenStore() {
@@ -367,20 +405,11 @@ describe('DashboardHttpClient snapshot requests', () => {
     const ready = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const fetch = vi.fn(async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
       await ready;
-      return new Response(
-        JSON.stringify({
-          serverId: 'daemon-1',
-          revision: 1,
-          cursor: 7,
-          runtimes: [],
-          workspaces: [],
-          sessions: [],
-          unread: [],
-        }),
-        { status: 200 },
-      );
+      return String(input).endsWith('/protocolInfo')
+        ? protocolInfoResponse()
+        : snapshotResponse();
     });
     const client = new DashboardHttpClient({
       fetch,
@@ -392,14 +421,126 @@ describe('DashboardHttpClient snapshot requests', () => {
     });
     const first = client.snapshot();
     const second = client.snapshot();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fetch).toHaveBeenCalledTimes(1);
     release();
     await expect(Promise.all([first, second])).resolves.toEqual([
       expect.objectContaining({ cursor: 7 }),
       expect.objectContaining({ cursor: 7 }),
     ]);
-    await client.snapshot();
     expect(fetch).toHaveBeenCalledTimes(2);
+    await client.snapshot();
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('probes one candidate before the authenticated tRPC bootstrap and rejects malformed output', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith('/protocolInfo')
+        ? protocolInfoResponse()
+        : snapshotResponse(),
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: tokenStore(),
+    });
+    await expect(client.snapshot()).resolves.toEqual(validSnapshot);
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/trpc/protocolInfo',
+      '/trpc/bootstrap?input=%7B%22protocolVersion%22%3A1%7D',
+    ]);
+
+    const invalid = new DashboardHttpClient({
+      fetch: vi.fn(async () => trpcResponse({ snapshot: validSnapshot })),
+      tokenStore: tokenStore(),
+    });
+    await expect(invalid.snapshot()).rejects.toMatchObject({
+      kind: 'malformed-output',
+      code: 'malformed-output',
+    });
+  });
+
+  it('classifies authentication, domain, and network tRPC failures', async () => {
+    const authentication = new DashboardHttpClient({
+      fetch: vi.fn(async () => trpcErrorResponse('UNAUTHORIZED', 401)),
+      tokenStore: tokenStore(),
+    });
+    await expect(authentication.snapshot()).rejects.toMatchObject({
+      kind: 'authentication',
+      status: 401,
+    });
+    const plainAuthentication = new DashboardHttpClient({
+      fetch: vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: 'Authentication required.' }), {
+            status: 401,
+          }),
+      ),
+      tokenStore: tokenStore(),
+    });
+    await expect(plainAuthentication.snapshot()).rejects.toMatchObject({
+      kind: 'authentication',
+      status: 401,
+    });
+
+    const domain = new DashboardHttpClient({
+      fetch: vi.fn(async () =>
+        trpcErrorResponse('BAD_REQUEST', 400, {
+          domainCode: 'active-session',
+        }),
+      ),
+      tokenStore: tokenStore(),
+    });
+    await expect(domain.snapshot()).rejects.toMatchObject({
+      kind: 'domain',
+      code: 'active-session',
+      status: 400,
+    });
+
+    const network = new DashboardHttpClient({
+      fetch: vi.fn(async () => {
+        throw new Error('offline');
+      }),
+      tokenStore: tokenStore(),
+    });
+    await expect(network.snapshot()).rejects.toMatchObject({
+      kind: 'network',
+      code: 'network-error',
+    });
+  });
+
+  it('reads the token per tRPC request without putting it in the URL or input', async () => {
+    let token = 'first-token';
+    const fetch = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        expect(String(_input)).not.toContain(token);
+        expect(String(init?.body ?? '')).not.toContain(token);
+        return String(_input).endsWith('/protocolInfo')
+          ? protocolInfoResponse()
+          : snapshotResponse();
+      },
+    );
+    const client = new DashboardHttpClient({
+      fetch,
+      tokenStore: {
+        get: () => token,
+        set: () => undefined,
+        clear: () => undefined,
+      },
+    });
+    await client.snapshot();
+    token = 'second-token';
+    await client.snapshot();
+    for (const index of [0, 1])
+      expect(
+        new Headers((fetch.mock.calls[index]?.[1] as RequestInit).headers).get(
+          'x-dashboard-token',
+        ),
+      ).toBe('first-token');
+    expect(
+      new Headers((fetch.mock.calls[2]?.[1] as RequestInit).headers).get(
+        'x-dashboard-token',
+      ),
+    ).toBe('second-token');
   });
 });
 
@@ -408,7 +549,7 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     const fetch = vi.fn(
       async (input: RequestInfo | URL, _init?: RequestInit) => {
         const url = String(input);
-        if (url === '/lan/api/snapshot') return snapshotResponse();
+        if (url === '/lan/trpc/protocolInfo') return protocolInfoResponse();
         return new Response(JSON.stringify({ usage: {} }), { status: 200 });
       },
     );
@@ -422,7 +563,7 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     await client.usage();
 
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
-      '/lan/api/snapshot',
+      '/lan/trpc/protocolInfo',
       '/lan/api/usage',
     ]);
     expect(
@@ -437,8 +578,10 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     ['unauthorized', 401],
   ])('falls back after a LAN %s probe', async (_label, status) => {
     const fetch = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === '/lan/api/snapshot')
+      if (String(input) === '/lan/trpc/protocolInfo')
         return new Response('{}', { status });
+      if (String(input) === '/base/trpc/protocolInfo')
+        return protocolInfoResponse();
       return snapshotResponse();
     });
     const client = new DashboardHttpClient({
@@ -452,16 +595,19 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
       serverId: 'daemon-1',
     });
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
-      '/lan/api/snapshot',
-      '/base/api/snapshot',
+      '/lan/trpc/protocolInfo',
+      '/base/trpc/protocolInfo',
+      '/base/trpc/bootstrap?input=%7B%22protocolVersion%22%3A1%7D',
     ]);
   });
 
   it('falls back after a LAN probe returns an invalid snapshot', async () => {
     const fetch = vi.fn(async (input: RequestInfo | URL) =>
-      String(input) === '/lan/api/snapshot'
-        ? new Response(JSON.stringify({ invalid: true }), { status: 200 })
-        : snapshotResponse(),
+      String(input) === '/lan/trpc/protocolInfo'
+        ? trpcResponse({ invalid: true })
+        : String(input) === '/base/trpc/protocolInfo'
+          ? protocolInfoResponse()
+          : snapshotResponse(),
     );
     const client = new DashboardHttpClient({
       baseUrl: '/base',
@@ -472,8 +618,9 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
 
     await client.snapshot();
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
-      '/lan/api/snapshot',
-      '/base/api/snapshot',
+      '/lan/trpc/protocolInfo',
+      '/base/trpc/protocolInfo',
+      '/base/trpc/bootstrap?input=%7B%22protocolVersion%22%3A1%7D',
     ]);
   });
 
@@ -483,9 +630,9 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
       release = resolve;
     });
     const fetch = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input) === '/lan/api/snapshot') {
+      if (String(input) === '/lan/trpc/protocolInfo') {
         await probeReady;
-        return snapshotResponse();
+        return protocolInfoResponse();
       }
       return new Response(JSON.stringify({ usage: {} }), { status: 200 });
     });
@@ -498,18 +645,23 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
 
     const first = client.usage();
     const second = client.usage();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fetch).toHaveBeenCalledTimes(1);
     release();
     await Promise.all([first, second]);
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
-      '/lan/api/snapshot',
+      '/lan/trpc/protocolInfo',
       '/lan/api/usage',
       '/lan/api/usage',
     ]);
   });
 
   it('reuses the selection snapshot for the first public snapshot', async () => {
-    const fetch = vi.fn(async () => snapshotResponse());
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith('/protocolInfo')
+        ? protocolInfoResponse()
+        : snapshotResponse(),
+    );
     const client = new DashboardHttpClient({
       baseUrl: '/base',
       candidateBaseUrls: ['/lan'],
@@ -518,16 +670,75 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     });
 
     await expect(client.snapshot()).resolves.toMatchObject({ cursor: 7 });
-    expect(fetch).toHaveBeenCalledTimes(1);
-    await client.snapshot();
     expect(fetch).toHaveBeenCalledTimes(2);
+    await client.snapshot();
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('classifies an incompatible protocolInfo response with generation metadata', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith('/protocolInfo')
+        ? trpcResponse({
+            protocolVersion: 2,
+            serverId: 'old-generation',
+            capabilities: { bootstrap: true },
+          })
+        : snapshotResponse(),
+    );
+    const client = new DashboardHttpClient({
+      baseUrl: '/base',
+      candidateBaseUrls: ['/lan'],
+      fetch,
+      tokenStore: tokenStore(),
+    });
+    await expect(client.snapshot()).rejects.toBeInstanceOf(
+      DashboardProtocolMismatchError,
+    );
+    await expect(client.snapshot()).rejects.toMatchObject({
+      expected: 1,
+      actual: 2,
+      serverId: 'old-generation',
+      code: 'protocol-mismatch',
+      kind: 'protocol-mismatch',
+    });
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/lan/trpc/protocolInfo',
+    ]);
+  });
+
+  it('does not bootstrap or pin a fallback after a one-candidate protocol mismatch', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/protocolInfo'))
+        return trpcResponse({
+          protocolVersion: 2,
+          serverId: 'incompatible-generation',
+          capabilities: { bootstrap: true },
+        });
+      throw new Error('bootstrap must not be called');
+    });
+    const client = new DashboardHttpClient({
+      baseUrl: '/only',
+      fetch,
+      tokenStore: tokenStore(),
+    });
+    const error = await client.snapshot().catch((cause) => cause);
+    expect(error).toMatchObject({
+      expected: 1,
+      actual: 2,
+      serverId: 'incompatible-generation',
+      code: 'protocol-mismatch',
+    });
+    expect(error).toBeInstanceOf(DashboardProtocolMismatchError);
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/only/trpc/protocolInfo',
+    ]);
   });
 
   it('sends a mutation once, only after endpoint selection', async () => {
     const fetch = vi.fn(
       async (input: RequestInfo | URL, _init?: RequestInit) =>
-        String(input).endsWith('/api/snapshot')
-          ? snapshotResponse()
+        String(input).endsWith('/trpc/protocolInfo')
+          ? protocolInfoResponse()
           : new Response(JSON.stringify({ ok: true }), { status: 200 }),
     );
     const client = new DashboardHttpClient({
@@ -539,7 +750,7 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
 
     await client.sendCommand('runtime-1', { id: 'command-1', type: 'abort' });
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
-      '/lan/api/snapshot',
+      '/lan/trpc/protocolInfo',
       '/lan/api/runtimes/runtime-1/command',
     ]);
     expect(fetch.mock.calls[1]?.[1]).toEqual(
@@ -573,8 +784,8 @@ describe('DashboardHttpClient event requests', () => {
 
   it('uses the pinned endpoint for the event stream', async () => {
     const fetch = vi.fn(async (input: RequestInfo | URL) =>
-      String(input).endsWith('/api/snapshot')
-        ? snapshotResponse()
+      String(input).endsWith('/trpc/protocolInfo')
+        ? protocolInfoResponse()
         : new Response(null, { status: 200 }),
     );
     const client = new DashboardHttpClient({
@@ -586,7 +797,7 @@ describe('DashboardHttpClient event requests', () => {
 
     await client.events(4, new AbortController().signal);
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
-      '/lan/api/snapshot',
+      '/lan/trpc/protocolInfo',
       '/lan/api/events?cursor=4',
     ]);
   });

@@ -87,8 +87,7 @@ function parseJsonBody(
 
 export interface DashboardRouteContext {
   readonly token: string;
-  /** Optional for legacy route-only test contexts; production supplies the daemon generation. */
-  serverId?(): string;
+  serverId(): string;
   origins(): readonly string[];
   snapshot(): BrowserSnapshot;
   workspaces(): WorkspaceTarget[];
@@ -291,7 +290,7 @@ export const dashboardRoutes: FastifyPluginAsync<{
   );
   installCorsAndAuth(app, context);
   registerDashboardTrpc(app, {
-    serverId: () => context.serverId?.() ?? context.snapshot().serverId,
+    serverId: context.serverId,
     snapshot: context.snapshot,
   });
   app.setNotFoundHandler((_request, reply) =>
@@ -303,11 +302,6 @@ export const dashboardRoutes: FastifyPluginAsync<{
     '/api/health',
     { schema: { response: { 200: Type.Object({ ok: Type.Boolean() }) } } },
     async () => ({ ok: true }),
-  );
-  app.get(
-    '/api/snapshot',
-    { schema: { response: { 200: Type.Any() } } },
-    async () => context.snapshot(),
   );
   app.get('/api/events', async (request, reply) => {
     // Hijacked replies bypass Fastify's normal header serialization. Copy the

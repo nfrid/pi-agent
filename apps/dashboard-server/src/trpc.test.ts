@@ -11,6 +11,8 @@ import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 const apps: ReturnType<typeof Fastify>[] = [];
 const TOKEN = 'trpc-test-token';
 const ORIGIN = 'http://dashboard.test';
+const RAW_BOOTSTRAP_URL =
+  '/trpc/bootstrap?input=%7B%22protocolVersion%22%3A1%7D';
 
 function snapshot() {
   return {
@@ -96,7 +98,7 @@ function input(value: unknown): string {
 }
 
 describe('dashboard tRPC boundary', () => {
-  it('serves authenticated protocolInfo and bootstrap from one generation/cursor', async () => {
+  it('serves authenticated protocolInfo and the production raw GET bootstrap shape', async () => {
     const app = Fastify();
     apps.push(app);
     await app.register(dashboardRoutes, { context: context() });
@@ -116,7 +118,7 @@ describe('dashboard tRPC boundary', () => {
 
     const bootstrapResponse = await app.inject({
       method: 'GET',
-      url: `/trpc/bootstrap?input=${input({ protocolVersion: 1 })}`,
+      url: RAW_BOOTSTRAP_URL,
       headers: authHeaders(),
     });
     expect(bootstrapResponse.statusCode).toBe(200);
