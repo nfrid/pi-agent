@@ -31,7 +31,6 @@ import {
   MAX_DELEGATE_HISTORY_TASK,
   MAX_ID,
   MAX_PATH,
-  MAX_SESSION_INDEX_DELTA_ITEMS,
   MAX_TEXT,
 } from './limits.js';
 import {
@@ -1698,53 +1697,6 @@ export const ShellSnapshotResponseSchema = Type.Object(
   { additionalProperties: false },
 );
 export type ShellSnapshotResponse = Static<typeof ShellSnapshotResponseSchema>;
-
-/**
- * SSE-only snapshot records are separate from event envelopes so a client can
- * distinguish an authoritative replacement from a reducer input.
- */
-export const DashboardSnapshotStreamSchema = Type.Object(
-  {
-    type: Type.Literal('snapshot'),
-    cursor: Type.Integer({ minimum: 0 }),
-    emittedAt: FiniteNumberSchema,
-    snapshot: BrowserSnapshotSchema,
-  },
-  { additionalProperties: false },
-);
-export type DashboardSnapshotStream = Static<
-  typeof DashboardSnapshotStreamSchema
->;
-export const DashboardSessionIndexStreamSchema = Type.Object(
-  {
-    type: Type.Literal('sessions'),
-    cursor: Type.Integer({ minimum: 0 }),
-    emittedAt: FiniteNumberSchema,
-    /** Changed or newly indexed session metadata only. */
-    upsert: Type.Array(SessionIndexEntrySchema, {
-      maxItems: MAX_SESSION_INDEX_DELTA_ITEMS,
-    }),
-    /** IDs removed from the authoritative session index. */
-    remove: Type.Array(IdentifierSchema, {
-      maxItems: MAX_SESSION_INDEX_DELTA_ITEMS,
-    }),
-  },
-  { additionalProperties: false },
-);
-export type DashboardSessionIndexStreamRecord = Static<
-  typeof DashboardSessionIndexStreamSchema
->;
-/** Explicit record spelling retained alongside the stream naming convention. */
-export const DashboardSessionIndexStreamRecordSchema =
-  DashboardSessionIndexStreamSchema;
-export const DashboardStreamMessageSchema = Type.Union([
-  DashboardEventEnvelopeSchema,
-  DashboardSnapshotStreamSchema,
-  DashboardSessionIndexStreamSchema,
-]);
-export type DashboardStreamMessage = Static<
-  typeof DashboardStreamMessageSchema
->;
 
 /** Opaque tRPC tracked IDs. Numeric sequence values are never resumable alone. */
 export const FeedCursorSchema = Type.String({

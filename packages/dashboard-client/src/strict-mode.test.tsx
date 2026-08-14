@@ -132,7 +132,7 @@ describe('useDashboard StrictMode lifecycle', () => {
     });
     const rendersAfterSnapshot = renders;
     await act(async () => {
-      dashboard?.store.acceptStreamRecord({
+      dashboard?.store.applyEventEnvelope({
         cursor: 2,
         emittedAt: 2,
         sessionId: 'session-1',

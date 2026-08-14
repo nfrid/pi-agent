@@ -4,7 +4,7 @@ export const MAX_TEXT = 100_000;
 /** Aggregate cap for the authoritative lightweight shell query response. */
 export const MAX_SHELL_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 export const SESSION_NAME_MAX_LENGTH = 512;
-/** Maximum entries in one session-index delta record. */
+/** Maximum entries in one semantic session-index shell update. */
 export const MAX_SESSION_INDEX_DELTA_ITEMS = 4_096;
 /** Maximum entries in one composer slash-command catalogue. */
 export const MAX_COMPOSER_COMMANDS = 256;

@@ -32,8 +32,6 @@ import {
   DashboardEventEnvelopeSchema,
   type DashboardMessage,
   DashboardMessageSchema,
-  type DashboardStreamMessage,
-  DashboardStreamMessageSchema,
   type DelegateHistoryResponse,
   DelegateHistoryResponseSchema,
   type DelegateHistoryRunDetailResponse,
@@ -708,28 +706,6 @@ export function tryParseDashboardEventEnvelope(
 ): DashboardEventEnvelope | undefined {
   try {
     return parseDashboardEventEnvelope(value);
-  } catch {
-    return undefined;
-  }
-}
-export function parseDashboardStreamMessage(
-  value: unknown,
-): DashboardStreamMessage {
-  const message = parseSchema(
-    DashboardStreamMessageSchema,
-    value,
-    'dashboard stream message',
-  );
-  if ('event' in message) validateDashboardEventEnvelopeCapabilities(message);
-  else if (message.type === 'snapshot')
-    validateBrowserSnapshotCapabilities(message.snapshot);
-  return message;
-}
-export function tryParseDashboardStreamMessage(
-  value: unknown,
-): DashboardStreamMessage | undefined {
-  try {
-    return parseDashboardStreamMessage(value);
   } catch {
     return undefined;
   }

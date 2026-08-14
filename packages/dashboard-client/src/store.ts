@@ -12,7 +12,6 @@ import {
   type BrowserSnapshot,
   type CheckoutSummary,
   type DashboardEventEnvelope,
-  type DashboardStreamMessage,
   deriveSessionTitle,
   type ProjectSummary,
   type RunSummary,
@@ -217,33 +216,6 @@ function mergePrependedTranscript(
     ],
     items,
   };
-}
-
-function hasOnlineRuntimeOverlay(
-  state: DashboardLiveState,
-  sessionId: string,
-  activeRuntimeId: string | undefined,
-): boolean {
-  const activeRuntime = activeRuntimeId
-    ? state.runtimesById[activeRuntimeId]
-    : undefined;
-  if (activeRuntime?.session.id === sessionId && activeRuntime.online !== false)
-    return true;
-  return Object.values(state.runtimesById).some(
-    (runtime) => runtime.session.id === sessionId && runtime.online !== false,
-  );
-}
-
-function transcriptMetadataChanged(
-  previous: SessionIndexEntry | undefined,
-  next: SessionIndexEntry,
-): boolean {
-  if (!previous) return false;
-  return (
-    previous.updatedAt !== next.updatedAt ||
-    previous.entryCount !== next.entryCount ||
-    previous.file !== next.file
-  );
 }
 
 function emptyState(): DashboardLiveState {
@@ -549,66 +521,6 @@ export class DashboardLiveStore {
       optimisticSessionTitlesById: optimisticSessions,
       optimisticRuntimeTitlesById: optimisticRuntimes,
       notificationsById: indexed(snapshot.unread),
-    };
-  }
-
-  /** Apply a session-index delta without disturbing hydrated transcript pages. */
-  private installSessionIndexProjection(
-    state: DashboardLiveState,
-    upsert: readonly SessionIndexEntry[],
-    remove: readonly string[],
-  ): DashboardLiveState {
-    const optimisticSessions = { ...state.optimisticSessionTitlesById };
-    const optimisticRuntimes = { ...state.optimisticRuntimeTitlesById };
-    const sessionsById = { ...state.sessionsById };
-    for (const id of remove) {
-      delete sessionsById[id];
-      delete optimisticSessions[id];
-    }
-    for (const session of upsert) {
-      const pendingTitle = session.activeRuntimeId
-        ? optimisticRuntimes[session.activeRuntimeId]
-        : undefined;
-      if (pendingTitle !== undefined) {
-        delete optimisticRuntimes[session.activeRuntimeId as string];
-        optimisticSessions[session.id] = pendingTitle;
-      }
-      const optimisticTitle = optimisticSessions[session.id];
-      if (
-        session.name === undefined &&
-        session.title === undefined &&
-        optimisticTitle !== undefined
-      )
-        sessionsById[session.id] = { ...session, title: optimisticTitle };
-      else {
-        sessionsById[session.id] = session;
-        if (session.name !== undefined || session.title !== undefined)
-          delete optimisticSessions[session.id];
-      }
-    }
-    const runtimesById = { ...state.runtimesById };
-    for (const [runtimeId, runtime] of Object.entries(runtimesById)) {
-      const metadata = sessionsById[runtime.session.id];
-      if (!metadata) continue;
-      const optimisticTitle = optimisticSessions[runtime.session.id];
-      const title = metadata.title ?? optimisticTitle;
-      runtimesById[runtimeId] = {
-        ...runtime,
-        session: {
-          ...runtime.session,
-          ...(metadata.name === undefined ? {} : { name: metadata.name }),
-          ...(metadata.title === undefined && title === undefined
-            ? {}
-            : { title }),
-        },
-      };
-    }
-    return {
-      ...state,
-      runtimesById,
-      sessionsById,
-      optimisticSessionTitlesById: optimisticSessions,
-      optimisticRuntimeTitlesById: optimisticRuntimes,
     };
   }
 
@@ -946,66 +858,10 @@ export class DashboardLiveStore {
     return true;
   }
 
-  acceptStreamRecord(
-    record: DashboardStreamMessage,
+  applyEventEnvelope(
+    envelope: DashboardEventEnvelope,
     domain?: { sessionId: string; generation: number },
   ): boolean {
-    if (!domain && 'type' in record && record.type === 'sessions') {
-      const priorCursor = this.state.cursor;
-      if (record.cursor <= priorCursor) return false;
-      if (record.cursor > priorCursor + 1 && this.state.serverId !== undefined)
-        return false;
-      const projected = this.installSessionIndexProjection(
-        this.state,
-        record.upsert,
-        record.remove,
-      );
-      const sessionChangeById = { ...this.state.sessionChangeById };
-      for (const session of record.upsert) {
-        const previous = this.state.sessionsById[session.id];
-        if (
-          transcriptMetadataChanged(previous, session) &&
-          !hasOnlineRuntimeOverlay(
-            this.state,
-            session.id,
-            previous?.activeRuntimeId ?? session.activeRuntimeId,
-          )
-        )
-          sessionChangeById[session.id] =
-            (sessionChangeById[session.id] ?? 0) + 1;
-      }
-      this.publish({
-        ...projected,
-        sessionChangeById,
-        cursor: record.cursor,
-        connection: { ...projected.connection, lastCursor: record.cursor },
-      });
-      return true;
-    }
-    if (!domain && 'type' in record && record.type === 'snapshot') {
-      if (
-        record.snapshot.serverId === this.state.serverId &&
-        record.cursor <= this.state.cursor
-      )
-        return false;
-      const projectionIsOlder =
-        record.snapshot.serverId === this.state.serverId &&
-        record.snapshot.cursor < this.state.snapshotCursor;
-      if (!projectionIsOlder) {
-        const accepted = this.installSnapshot(record.snapshot, {
-          source: 'sse',
-        });
-        if (!accepted) return false;
-      }
-      if (record.cursor === this.state.cursor) return true;
-      this.publish({
-        ...this.state,
-        cursor: record.cursor,
-        connection: { ...this.state.connection, lastCursor: record.cursor },
-      });
-      return true;
-    }
-    const envelope = record as DashboardEventEnvelope;
     const priorCursor = domain
       ? (this.state.sessionSyncById[domain.sessionId]?.sequence ?? 0)
       : this.state.cursor;
@@ -1279,7 +1135,7 @@ export class DashboardLiveStore {
     const current = this.state.sessionSyncById[sessionId];
     if (current && current.generation !== generation) return false;
     if (current?.sequenceKnown && sequence <= current.sequence) return false;
-    return this.acceptStreamRecord(
+    return this.applyEventEnvelope(
       {
         cursor: sequence,
         emittedAt: Date.now(),
@@ -1329,9 +1185,9 @@ export class DashboardLiveStore {
     // Finite mutation/recovery responses retain their request-order guard but
     // never replay a removed global browser event buffer.
     const coveredCursor = snapshotCursor;
-    const currentProjection = options.replace
-      ? undefined
-      : this.state.transcriptsBySessionId[response.metadata.id];
+    const previousProjection =
+      this.state.transcriptsBySessionId[response.metadata.id];
+    const currentProjection = options.replace ? undefined : previousProjection;
     const sessionEvents: DashboardEventEnvelope[] = [];
     const replayCursor = coveredCursor;
     const baselineRuntimeSeq = response.runtimeSeq;
@@ -1411,13 +1267,13 @@ export class DashboardLiveStore {
     }
     const retiredEpochs = new Set([
       ...projection.retiredEpochs,
-      ...(currentProjection?.retiredEpochs ?? []),
+      ...(previousProjection?.retiredEpochs ?? []),
     ]);
     if (
-      currentProjection?.runtimeEpoch !== undefined &&
-      currentProjection.runtimeEpoch !== projection.runtimeEpoch
+      previousProjection?.runtimeEpoch !== undefined &&
+      previousProjection.runtimeEpoch !== projection.runtimeEpoch
     )
-      retiredEpochs.add(currentProjection.runtimeEpoch);
+      retiredEpochs.add(previousProjection.runtimeEpoch);
     const responseRuntimeSeq =
       response.runtimeEpoch !== undefined &&
       response.runtimeEpoch === projection.runtimeEpoch
@@ -1478,7 +1334,7 @@ export class DashboardLiveStore {
         };
       }
     }
-    projection = reuseTranscriptProjection(currentProjection, projection);
+    projection = reuseTranscriptProjection(previousProjection, projection);
     const currentMetadata = this.state.sessionsById[response.metadata.id];
     const optimisticTitle =
       this.state.optimisticSessionTitlesById[response.metadata.id];

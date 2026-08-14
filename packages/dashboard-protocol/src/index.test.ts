@@ -20,7 +20,6 @@ import {
   parseBridgeEvent,
   parseComposerCommandCatalogue,
   parseDashboardEventEnvelope,
-  parseDashboardStreamMessage,
   parseDelegateHistoryResponse,
   parseDelegateHistoryRunDetailResponse,
   parseFrame,
@@ -734,63 +733,6 @@ describe('dashboard protocol', () => {
           body: 'Runtime went offline',
           createdAt: 100,
         },
-      }),
-    ).toThrow();
-    expect(
-      parseDashboardStreamMessage({
-        cursor: 2,
-        emittedAt: 101,
-        runtimeId: 'runtime-1',
-        event: { type: 'agent.settled', sessionId: 'session-1' },
-      }).cursor,
-    ).toBe(2);
-    expect(
-      parseDashboardStreamMessage({
-        type: 'sessions',
-        cursor: 3,
-        emittedAt: 102,
-        upsert: [
-          {
-            id: 'session-1',
-            file: '/tmp/session.jsonl',
-            cwd: '/tmp',
-            updatedAt: 1,
-          },
-        ],
-        remove: [],
-      }),
-    ).toMatchObject({ type: 'sessions', cursor: 3 });
-    expect(() =>
-      parseDashboardStreamMessage({
-        type: 'sessions',
-        cursor: 3,
-        emittedAt: 102,
-        upsert: [],
-        remove: [],
-        extra: true,
-      }),
-    ).toThrow();
-    expect(() =>
-      parseDashboardStreamMessage({
-        type: 'sessions',
-        cursor: 4,
-        emittedAt: 103,
-        upsert: Array.from({ length: 4097 }, (_, index) => ({
-          id: `session-${index}`,
-          file: '',
-          cwd: '/tmp',
-          updatedAt: 1,
-        })),
-        remove: [],
-      }),
-    ).toThrow();
-    expect(() =>
-      parseDashboardStreamMessage({
-        type: 'sessions',
-        cursor: 4,
-        emittedAt: 103,
-        upsert: [],
-        remove: Array.from({ length: 4097 }, (_, index) => `session-${index}`),
       }),
     ).toThrow();
   });

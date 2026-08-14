@@ -21,7 +21,7 @@ const snapshot = (serverId: string, cursor: number): BrowserSnapshot =>
     unread: [],
   }) as BrowserSnapshot;
 
-type StreamRecord = Parameters<DashboardLiveStore['acceptStreamRecord']>[0];
+type StreamRecord = Parameters<DashboardLiveStore['applyEventEnvelope']>[0];
 
 const envelope = (cursor: number, sessionId = 'session-1'): StreamRecord =>
   ({
@@ -248,7 +248,7 @@ describe('DashboardLiveStore', () => {
     });
 
     expect(
-      store.acceptStreamRecord({
+      store.applyEventEnvelope({
         cursor: 2,
         emittedAt: 2,
         sessionId: 'session-1',
@@ -305,245 +305,6 @@ describe('DashboardLiveStore', () => {
     });
   });
 
-  it('authoritatively replaces sessions without clearing transcripts and handles replay ordering', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot({
-      ...snapshot('daemon-1', 1),
-      sessions: [
-        { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
-        { id: 'removed', file: '', cwd: '/tmp', updatedAt: 1 },
-      ],
-    } as unknown as BrowserSnapshot);
-    store.hydrateSession(sessionResponse(1));
-    expect(
-      store.acceptStreamRecord({
-        type: 'sessions',
-        cursor: 2,
-        emittedAt: 2,
-        upsert: [
-          {
-            id: 'session-1',
-            file: '/tmp/session.jsonl',
-            cwd: '/tmp',
-            updatedAt: 2,
-          },
-          { id: 'new-session', file: '', cwd: '/tmp', updatedAt: 2 },
-        ],
-        remove: ['removed'],
-      }),
-    ).toBe(true);
-    expect(store.getSnapshot().sessionsById).toEqual({
-      'session-1': {
-        id: 'session-1',
-        file: '/tmp/session.jsonl',
-        cwd: '/tmp',
-        updatedAt: 2,
-      },
-      'new-session': { id: 'new-session', file: '', cwd: '/tmp', updatedAt: 2 },
-    });
-    expect(
-      store.getSnapshot().transcriptsBySessionId['session-1'],
-    ).toBeDefined();
-    expect(store.getSnapshot().cursor).toBe(2);
-    expect(
-      store.acceptStreamRecord({
-        type: 'sessions',
-        cursor: 2,
-        emittedAt: 3,
-        upsert: [],
-        remove: [],
-      }),
-    ).toBe(false);
-    expect(
-      store.acceptStreamRecord({
-        type: 'sessions',
-        cursor: 4,
-        emittedAt: 4,
-        upsert: [],
-        remove: [],
-      }),
-    ).toBe(false);
-  });
-
-  it('does not resync hydrated transcripts for repeated session metadata records', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot({
-      ...snapshot('daemon-1', 1),
-      runtimes: [
-        {
-          runtimeId: 'runtime-1',
-          online: true,
-          session: { id: 'session-1', entries: [] },
-        },
-      ],
-      sessions: [
-        {
-          id: 'session-1',
-          file: '',
-          cwd: '/tmp',
-          updatedAt: 1,
-          activeRuntimeId: 'runtime-1',
-        },
-      ],
-    } as unknown as BrowserSnapshot);
-    store.hydrateSession(sessionResponse(1));
-
-    for (let cursor = 2; cursor <= 101; cursor += 1) {
-      expect(
-        store.acceptStreamRecord({
-          type: 'sessions',
-          cursor,
-          emittedAt: cursor,
-          upsert: [
-            {
-              id: 'session-1',
-              file: '/tmp/session.jsonl',
-              cwd: '/tmp',
-              updatedAt: cursor,
-              activeRuntimeId: 'runtime-1',
-            },
-          ],
-          remove: [],
-        }),
-      ).toBe(true);
-    }
-
-    expect(store.getSnapshot().sessionsById['session-1']?.updatedAt).toBe(101);
-    expect(store.getSnapshot().cursor).toBe(101);
-    expect(store.getSnapshot().sessionChangeById['session-1']).toBeUndefined();
-    expect(
-      store.getSnapshot().transcriptsBySessionId['session-1'],
-    ).toBeDefined();
-  });
-
-  it('scopes dormant transcript metadata changes to the changed session', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot({
-      ...snapshot('daemon-1', 1),
-      sessions: [
-        { id: 'session-1', file: '/tmp/one.jsonl', cwd: '/tmp', updatedAt: 1 },
-        { id: 'session-2', file: '/tmp/two.jsonl', cwd: '/tmp', updatedAt: 1 },
-      ],
-    } as unknown as BrowserSnapshot);
-    store.hydrateSession({
-      ...sessionResponse(1),
-      metadata: {
-        id: 'session-1',
-        file: '/tmp/one.jsonl',
-        cwd: '/tmp',
-        updatedAt: 1,
-        entryCount: 1,
-      },
-    });
-
-    store.acceptStreamRecord({
-      type: 'sessions',
-      cursor: 2,
-      emittedAt: 2,
-      upsert: [
-        {
-          id: 'session-1',
-          file: '/tmp/one.jsonl',
-          cwd: '/tmp',
-          updatedAt: 2,
-          entryCount: 2,
-        },
-        {
-          id: 'session-2',
-          file: '/tmp/two.jsonl',
-          cwd: '/tmp',
-          updatedAt: 2,
-        },
-      ],
-      remove: [],
-    });
-
-    expect(store.getSnapshot().sessionChangeById).toEqual({
-      'session-1': 1,
-      'session-2': 1,
-    });
-  });
-
-  it('preserves optimistic titles across authoritative session-index records', () => {
-    const store = new DashboardLiveStore();
-    const metadata = {
-      id: 'session-1',
-      file: '',
-      cwd: '/tmp',
-      updatedAt: 1,
-    };
-    store.installSnapshot({
-      ...snapshot('daemon-1', 1),
-      sessions: [metadata],
-    } as unknown as BrowserSnapshot);
-
-    expect(
-      store.optimisticallyTitleSession('session-1', '  first request  '),
-    ).toBe(true);
-    expect(store.getSnapshot().sessionsById['session-1']?.title).toBe(
-      'first request',
-    );
-    expect(store.getSnapshot().optimisticSessionTitlesById['session-1']).toBe(
-      'first request',
-    );
-    store.hydrateSession(sessionResponse(1));
-    expect(store.getSnapshot().sessionsById['session-1']?.title).toBe(
-      'first request',
-    );
-
-    // Neither a live user message nor settlement may make the optimistic
-    // title disappear while the session branch is still being persisted.
-    store.acceptStreamRecord({
-      cursor: 2,
-      emittedAt: 2,
-      sessionId: 'session-1',
-      event: {
-        type: 'message.finished',
-        sessionId: 'session-1',
-        message: {
-          messageId: 'user-1',
-          role: 'user',
-          content: 'first request',
-        },
-      },
-    } as StreamRecord);
-    store.acceptStreamRecord({
-      cursor: 3,
-      emittedAt: 3,
-      sessionId: 'session-1',
-      event: { type: 'agent.settled', sessionId: 'session-1' },
-    } as StreamRecord);
-    expect(store.getSnapshot().sessionsById['session-1']?.title).toBe(
-      'first request',
-    );
-
-    store.acceptStreamRecord({
-      type: 'sessions',
-      cursor: 4,
-      emittedAt: 4,
-      upsert: [metadata],
-      remove: [],
-    });
-    expect(store.getSnapshot().sessionsById['session-1']?.title).toBe(
-      'first request',
-    );
-    store.acceptStreamRecord({
-      cursor: 5,
-      emittedAt: 5,
-      sessionId: 'session-1',
-      event: {
-        type: 'session.changed',
-        session: { id: 'session-1', entries: [], title: 'Authoritative title' },
-      },
-    } as StreamRecord);
-    expect(store.getSnapshot().sessionsById['session-1']?.title).toBe(
-      'Authoritative title',
-    );
-    expect(
-      store.getSnapshot().optimisticSessionTitlesById['session-1'],
-    ).toBeUndefined();
-  });
-
   it('carries a launched runtime title into its first published session', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
@@ -589,7 +350,7 @@ describe('DashboardLiveStore', () => {
       store.getSnapshot().optimisticRuntimeTitlesById['runtime-1'],
     ).toBeUndefined();
 
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 3,
       emittedAt: 3,
       runtimeId: 'runtime-1',
@@ -645,7 +406,7 @@ describe('DashboardLiveStore', () => {
       ],
     } as unknown as BrowserSnapshot);
 
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 2,
       emittedAt: 2,
       runtimeId: 'runtime-1',
@@ -689,7 +450,7 @@ describe('DashboardLiveStore', () => {
       'Indexed TUI title',
     );
 
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 4,
       emittedAt: 4,
       runtimeId: 'runtime-1',
@@ -781,7 +542,7 @@ describe('DashboardLiveStore', () => {
       ],
     } as unknown as BrowserSnapshot);
 
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 2,
       emittedAt: 2,
       runtimeId: 'runtime-1',
@@ -870,7 +631,7 @@ describe('DashboardLiveStore', () => {
       ],
     } as never);
 
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 2,
       emittedAt: 2,
       runtimeId: 'runtime-1',
@@ -891,7 +652,7 @@ describe('DashboardLiveStore', () => {
     expect(
       store.getSnapshot().sessionsById['session-1']?.activeRuntimeId,
     ).toBeUndefined();
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 3,
       emittedAt: 3,
       runtimeId: 'runtime-1',
@@ -932,7 +693,7 @@ describe('DashboardLiveStore', () => {
 
     // Late frames from the retired epoch still advance the global cursor, but
     // cannot undo the authoritative reconnect or trigger lifecycle effects.
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 4,
       emittedAt: 4,
       runtimeId: 'runtime-1',
@@ -945,7 +706,7 @@ describe('DashboardLiveStore', () => {
         snapshot: { online: false },
       },
     } as StreamRecord);
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 5,
       emittedAt: 5,
       runtimeId: 'runtime-1',
@@ -1042,7 +803,7 @@ describe('DashboardLiveStore', () => {
         { id: 'session-2', file: '', cwd: '/tmp', updatedAt: 1 },
       ],
     } as unknown as BrowserSnapshot);
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 2,
       emittedAt: 2,
       runtimeId: 'runtime-1',
@@ -1102,10 +863,10 @@ describe('DashboardLiveStore', () => {
         event: { type: 'runtime.stateChanged', state, snapshot: {} },
       }) as StreamRecord;
 
-    store.acceptStreamRecord(runtimeEvent(2, 'epoch-a', 1, 'working'));
-    store.acceptStreamRecord(runtimeEvent(3, 'epoch-b', 1, 'waiting'));
+    store.applyEventEnvelope(runtimeEvent(2, 'epoch-a', 1, 'working'));
+    store.applyEventEnvelope(runtimeEvent(3, 'epoch-b', 1, 'waiting'));
     expect(
-      store.acceptStreamRecord(runtimeEvent(4, 'epoch-a', 99, 'idle')),
+      store.applyEventEnvelope(runtimeEvent(4, 'epoch-a', 99, 'idle')),
     ).toBe(true);
     expect(store.getSnapshot().runtimesById['runtime-1'].liveState).toBe(
       'waiting',
@@ -1125,7 +886,7 @@ describe('DashboardLiveStore', () => {
       ...snapshot('daemon-1', 1),
       runtimes: [runtime],
     } as unknown as BrowserSnapshot);
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 2,
       emittedAt: 2,
       runtimeId: 'runtime-1',
@@ -1142,7 +903,7 @@ describe('DashboardLiveStore', () => {
       ...snapshot('daemon-1', 3),
       runtimes: [{ ...runtime, liveState: 'waiting' }],
     } as unknown as BrowserSnapshot;
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 3,
       emittedAt: 3,
       runtimeId: 'runtime-1',
@@ -1160,7 +921,7 @@ describe('DashboardLiveStore', () => {
       'waiting',
     );
 
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 4,
       emittedAt: 4,
       runtimeId: 'runtime-1',
@@ -1198,7 +959,7 @@ describe('DashboardLiveStore', () => {
       sessions: [metadata],
     } as unknown as BrowserSnapshot);
 
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 2,
       emittedAt: 2,
       runtimeId: 'runtime-1',
@@ -1230,9 +991,9 @@ describe('DashboardLiveStore', () => {
   it('rejects gaps without retaining global browser event history', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 4));
-    store.acceptStreamRecord(envelope(5));
-    expect(store.acceptStreamRecord(envelope(7))).toBe(false);
-    store.acceptStreamRecord(envelope(6));
+    store.applyEventEnvelope(envelope(5));
+    expect(store.applyEventEnvelope(envelope(7))).toBe(false);
+    store.applyEventEnvelope(envelope(6));
     expect(store.getSnapshot().cursor).toBe(6);
   });
 
@@ -1251,7 +1012,7 @@ describe('DashboardLiveStore', () => {
         type: 'message.started' | 'message.updated' | 'message.finished',
         content: string,
       ) =>
-        store.acceptStreamRecord({
+        store.applyEventEnvelope({
           cursor,
           emittedAt: cursor,
           sessionId: 'session-1',
@@ -1288,24 +1049,6 @@ describe('DashboardLiveStore', () => {
     }
   });
 
-  it('advances replay without regressing a newer HTTP projection', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot(snapshot('daemon-1', 5), {
-      source: 'http',
-      requestGeneration: 0,
-    });
-    expect(
-      store.acceptStreamRecord({
-        type: 'snapshot',
-        cursor: 1,
-        emittedAt: 1,
-        snapshot: snapshot('daemon-1', 1),
-      } as StreamRecord),
-    ).toBe(true);
-    expect(store.getSnapshot().cursor).toBe(1);
-    expect(selectSnapshot(store.getSnapshot())?.cursor).toBe(5);
-  });
-
   it('rebases the stream cursor after a replay gap snapshot', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 5), {
@@ -1323,8 +1066,8 @@ describe('DashboardLiveStore', () => {
   it('hydrates a finite response without replaying removed global records', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 3));
-    store.acceptStreamRecord(envelope(4));
-    store.acceptStreamRecord(envelope(5));
+    store.applyEventEnvelope(envelope(4));
+    store.applyEventEnvelope(envelope(5));
     const projection = store.hydrateSession(sessionResponse(3));
     expect(projection?.sessionId).toBe('session-1');
     expect(projection?.lastCursor).toBe(3);
@@ -1406,7 +1149,7 @@ describe('DashboardLiveStore', () => {
       [3, 'message.updated', 'Final answer'],
       [4, 'message.finished', 'Final answer'],
     ] as const)
-      store.acceptStreamRecord({
+      store.applyEventEnvelope({
         cursor,
         emittedAt: cursor,
         runtimeEpoch: 'epoch-a',
@@ -1468,7 +1211,7 @@ describe('DashboardLiveStore', () => {
       ],
     });
 
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 5,
       emittedAt: 5,
       sessionId: 'session-1',
@@ -1559,7 +1302,7 @@ describe('DashboardLiveStore', () => {
       entriesComplete: false,
       entries: [],
     });
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 2,
       emittedAt: 2,
       sessionId: 'session-1',
@@ -1615,7 +1358,7 @@ describe('DashboardLiveStore', () => {
       ],
     });
     expect(initial?.items['initial-stale']).toBeDefined();
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 2,
       emittedAt: 2,
       sessionId: 'session-1',
@@ -1660,7 +1403,7 @@ describe('DashboardLiveStore', () => {
     store.installSnapshot(snapshot('daemon-1', 1));
 
     expect(
-      store.acceptStreamRecord({
+      store.applyEventEnvelope({
         cursor: 2,
         emittedAt: 2,
         runtimeId: 'runtime-1',
@@ -1680,7 +1423,7 @@ describe('DashboardLiveStore', () => {
     expect(store.getSnapshot().sessionChangeById['session-1']).toBeUndefined();
 
     expect(
-      store.acceptStreamRecord({
+      store.applyEventEnvelope({
         cursor: 3,
         emittedAt: 3,
         event: {
@@ -1728,7 +1471,7 @@ describe('DashboardLiveStore', () => {
       ],
     ] as const)
       expect(
-        store.acceptStreamRecord({
+        store.applyEventEnvelope({
           cursor,
           emittedAt: cursor,
           sessionId: 'session-1',
@@ -1741,74 +1484,87 @@ describe('DashboardLiveStore', () => {
   it('attributes reconnect hydration to the response runtime epoch', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
-    store.hydrateSession({
-      ...sessionResponse(1),
-      runtimeEpoch: 'epoch-a',
-      runtimeSeq: 0,
-      entries: [
+    expect(
+      store.acceptSessionSnapshot(
         {
-          type: 'message',
-          message: { id: 'history-a', role: 'user', content: 'before' },
+          ...sessionResponse(1),
+          runtimeEpoch: 'epoch-a',
+          runtimeSeq: 0,
+          entries: [
+            {
+              type: 'message',
+              message: { id: 'history-a', role: 'user', content: 'before' },
+            },
+          ],
         },
-      ],
-    });
-    store.acceptStreamRecord({
-      cursor: 2,
-      emittedAt: 2,
-      runtimeEpoch: 'epoch-a',
-      runtimeSeq: 1,
-      sessionId: 'session-1',
-      event: {
-        type: 'message.finished',
-        sessionId: 'session-1',
-        message: {
-          messageId: 'answer-a',
-          role: 'assistant',
-          content: 'answer',
-          phase: 'finished',
+        1,
+        0,
+        true,
+      ),
+    ).toBe(true);
+    store.acceptSessionEvent(
+      'session-1',
+      2,
+      {
+        runtimeEpoch: 'epoch-a',
+        runtimeSeq: 1,
+        event: {
+          type: 'message.finished',
+          sessionId: 'session-1',
+          message: {
+            messageId: 'answer-a',
+            role: 'assistant',
+            content: 'answer',
+            phase: 'finished',
+          },
         },
       },
-    } as never);
-    store.acceptStreamRecord({
-      type: 'snapshot',
-      cursor: 3,
-      emittedAt: 3,
-      snapshot: snapshot('daemon-1', 3),
-    } as StreamRecord);
-    const hydrated = store.hydrateSession({
-      ...sessionResponse(3),
-      runtimeEpoch: 'epoch-b',
-      runtimeSeq: 0,
-      entries: [
+      0,
+    );
+    expect(
+      store.acceptSessionSnapshot(
         {
-          type: 'message',
-          message: { id: 'history-a', role: 'user', content: 'before' },
+          ...sessionResponse(3),
+          runtimeEpoch: 'epoch-b',
+          runtimeSeq: 0,
+          entries: [
+            {
+              type: 'message',
+              message: { id: 'history-a', role: 'user', content: 'before' },
+            },
+            {
+              type: 'message',
+              message: { id: 'answer-a', role: 'assistant', content: 'answer' },
+            },
+          ],
         },
-        {
-          type: 'message',
-          message: { id: 'answer-a', role: 'assistant', content: 'answer' },
-        },
-      ],
-    });
+        3,
+        0,
+        true,
+      ),
+    ).toBe(true);
+    const hydrated = store.getSnapshot().transcriptsBySessionId['session-1'];
     expect(hydrated?.runtimeEpoch).toBe('epoch-b');
     expect(hydrated?.retiredEpochs).toContain('epoch-a');
-    const next = store.acceptStreamRecord({
-      cursor: 4,
-      emittedAt: 4,
-      runtimeEpoch: 'epoch-b',
-      runtimeSeq: 1,
-      sessionId: 'session-1',
-      event: {
-        type: 'message.finished',
-        sessionId: 'session-1',
-        message: {
-          messageId: 'answer-b',
-          role: 'assistant',
-          content: 'after reconnect',
-          phase: 'finished',
+    const next = store.acceptSessionEvent(
+      'session-1',
+      4,
+      {
+        runtimeEpoch: 'epoch-b',
+        runtimeSeq: 1,
+        event: {
+          type: 'message.finished',
+          sessionId: 'session-1',
+          message: {
+            messageId: 'answer-b',
+            role: 'assistant',
+            content: 'after reconnect',
+            phase: 'finished',
+          },
         },
       },
-    } as never);
+      0,
+    );
     expect(next).toBe(true);
     const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
     expect(projection?.items['history-a']).toBeDefined();
@@ -1819,7 +1575,7 @@ describe('DashboardLiveStore', () => {
   it('lets an authoritative session read replace a live branch after replay ages out', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 2,
       emittedAt: 2,
       event: {
@@ -1837,7 +1593,7 @@ describe('DashboardLiveStore', () => {
       },
     } as never);
     for (let cursor = 3; cursor <= 260; cursor += 1)
-      store.acceptStreamRecord(envelope(cursor, 'session-2'));
+      store.applyEventEnvelope(envelope(cursor, 'session-2'));
 
     const projection = store.hydrateSession({
       ...sessionResponse(260),
@@ -1864,7 +1620,7 @@ describe('DashboardLiveStore', () => {
       ],
       sessions: [{ id: 'old-session', file: '', cwd: '/tmp', updatedAt: 1 }],
     } as unknown as BrowserSnapshot);
-    store.acceptStreamRecord({
+    store.applyEventEnvelope({
       cursor: 5,
       emittedAt: 5,
       runtimeId: 'runtime-1',
