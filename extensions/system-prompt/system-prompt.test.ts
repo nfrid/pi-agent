@@ -166,7 +166,7 @@ describe('canonical prompt composition', () => {
       'Leave plan-only only after an explicit transition; do not edit before then.',
     );
     expect(prompt).toContain(
-      'Treat scope-changing corrections as accepted constraints and non-goals',
+      'Treat scope-changing corrections as updates to accepted constraints; preserve any resulting non-goals without verbose restatement.',
     );
     expect(prompt).toContain(
       'when retries yield no new evidence—summarize remaining blockers and stop rather than widening scope.',

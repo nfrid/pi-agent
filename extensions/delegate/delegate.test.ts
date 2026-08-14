@@ -137,9 +137,11 @@ describe('delegate', () => {
     expect(prompt).toContain('Outcome: done | partial | blocked | failed');
     expect(prompt).toContain('Keep the report compact and actionable');
     expect(prompt).toContain(
-      'Separate completion of the delegated work/report from any candidate verdict',
+      'state the candidate verdict separately (accept, reject, or partial) from completion of the review/report',
     );
-    expect(prompt).toContain('unmet gates or check blockers clearly');
+    expect(prompt).toContain(
+      'state unmet gates or check blockers even when the review is complete',
+    );
     expect(prompt).not.toContain('## Machine-readable completion');
     expect(prompt).not.toContain('800 words');
     expect(prompt).not.toMatch(/Use this exact structure/);
