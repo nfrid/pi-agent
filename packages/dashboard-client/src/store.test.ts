@@ -44,6 +44,62 @@ const sessionResponse = (
   }) as SessionApiResponse;
 
 describe('DashboardLiveStore', () => {
+  it('hydrates active messages and tools through the canonical projection without duplicate terminal rows', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 4));
+    store.hydrateSession({
+      ...sessionResponse(4),
+      entriesComplete: true,
+      entries: [
+        {
+          type: 'message',
+          id: 'assistant-1',
+          message: { role: 'assistant', content: 'persisted answer' },
+        },
+      ],
+      active: {
+        pendingInteractions: [],
+        messages: [
+          {
+            messageId: 'assistant-1',
+            role: 'assistant',
+            content: 'persisted answer',
+          },
+          {
+            messageId: 'assistant-live',
+            role: 'assistant',
+            content: 'streaming answer',
+          },
+        ],
+        tools: [
+          {
+            toolCallId: 'tool-live',
+            name: 'search',
+            status: 'running',
+          },
+        ],
+        delegates: [],
+        truncated: false,
+      },
+      completeThroughCursor: false,
+    } as SessionApiResponse);
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual([
+      'assistant-1',
+      'assistant-live',
+      'tool-live',
+    ]);
+    expect(projection?.items['assistant-live']).toMatchObject({
+      kind: 'message',
+      status: 'streaming',
+    });
+    expect(projection?.items['tool-live']).toMatchObject({
+      kind: 'tool',
+      status: 'running',
+    });
+  });
+
   it('applies compaction completion as a transcript delta', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

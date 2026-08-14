@@ -187,7 +187,7 @@ export class RuntimeRegistry {
           >;
           const snapshot = hello.snapshot;
           if (
-            hello.protocolVersion !== 1 ||
+            hello.protocolVersion !== 2 ||
             !snapshot.runtimeId ||
             !snapshot.cwd ||
             !snapshot.session?.id

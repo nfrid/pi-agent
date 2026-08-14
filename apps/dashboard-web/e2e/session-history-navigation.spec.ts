@@ -66,29 +66,45 @@ test('aborts older history when navigating away from a session', async ({
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await page.route('**/api/sessions/*', async (route) => {
+  await page.route('**/trpc/sessionSnapshot*', async (route) => {
     const url = new URL(route.request().url());
-    const id = url.pathname.split('/').at(-1) ?? '';
-    const before = url.searchParams.get('before');
+    const input = JSON.parse(url.searchParams.get('input') ?? '{}') as {
+      sessionId?: string;
+      before?: string;
+    };
+    const id = input.sessionId ?? '';
+    const before = input.before;
     if (id === 'session-1' && before) {
       olderStarted();
       await olderRequestRelease;
       return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
-          metadata: snapshot.sessions[0],
-          entries: [
-            { type: 'session', id: 'session-1', cwd: '/tmp' },
-            {
-              type: 'message',
-              id: 'first-user',
-              message: { role: 'user', content: 'old session one' },
+          result: {
+            data: {
+              metadata: snapshot.sessions[0],
+              entries: [
+                { type: 'session', id: 'session-1', cwd: '/tmp' },
+                {
+                  type: 'message',
+                  id: 'first-user',
+                  message: { role: 'user', content: 'old session one' },
+                },
+              ],
+              entriesComplete: false,
+              serverId: snapshot.serverId,
+              cursor: 1,
+              history: { version: 1, start: 0, end: 2, hasOlder: false },
+              active: {
+                pendingInteractions: [],
+                messages: [],
+                tools: [],
+                delegates: [],
+                truncated: false,
+              },
+              completeThroughCursor: false,
             },
-          ],
-          entriesComplete: false,
-          serverId: snapshot.serverId,
-          cursor: 1,
-          history: { version: 1, start: 0, end: 2, hasOlder: false },
+          },
         }),
       });
     }
@@ -96,22 +112,34 @@ test('aborts older history when navigating away from a session', async ({
     return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        metadata: snapshot.sessions[session === 'session-2' ? 1 : 0],
-        entries: entries[session],
-        entriesComplete: false,
-        serverId: snapshot.serverId,
-        cursor: 1,
-        ...(session === 'session-1'
-          ? {
-              history: {
-                version: 1,
-                start: 2,
-                end: 3,
-                hasOlder: true,
-                nextBefore: 'token-1',
-              },
-            }
-          : {}),
+        result: {
+          data: {
+            metadata: snapshot.sessions[session === 'session-2' ? 1 : 0],
+            entries: entries[session],
+            entriesComplete: false,
+            serverId: snapshot.serverId,
+            cursor: 1,
+            ...(session === 'session-1'
+              ? {
+                  history: {
+                    version: 1,
+                    start: 2,
+                    end: 3,
+                    hasOlder: true,
+                    nextBefore: 'token-1',
+                  },
+                }
+              : {}),
+            active: {
+              pendingInteractions: [],
+              messages: [],
+              tools: [],
+              delegates: [],
+              truncated: false,
+            },
+            completeThroughCursor: false,
+          },
+        },
       }),
     });
   });
@@ -161,8 +189,11 @@ test('switching chats establishes the new transcript tail', async ({
   const secondSessionResponse = new Promise<void>((resolve) => {
     releaseSecondSession = resolve;
   });
-  await page.route('**/api/sessions/*', async (route) => {
-    const id = new URL(route.request().url()).pathname.split('/').at(-1) ?? '';
+  await page.route('**/trpc/sessionSnapshot*', async (route) => {
+    const input = JSON.parse(
+      new URL(route.request().url()).searchParams.get('input') ?? '{}',
+    ) as { sessionId?: string };
+    const id = input.sessionId ?? '';
     const sessionIndex = id === 'session-2' ? 1 : 0;
     if (id === 'session-2') {
       secondSessionStarted();
@@ -171,11 +202,23 @@ test('switching chats establishes the new transcript tail', async ({
     return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        metadata: sessions[sessionIndex],
-        entries: sessionEntries(id),
-        entriesComplete: false,
-        serverId: snapshot.serverId,
-        cursor: 1,
+        result: {
+          data: {
+            metadata: sessions[sessionIndex],
+            entries: sessionEntries(id),
+            entriesComplete: false,
+            serverId: snapshot.serverId,
+            cursor: 1,
+            active: {
+              pendingInteractions: [],
+              messages: [],
+              tools: [],
+              delegates: [],
+              truncated: false,
+            },
+            completeThroughCursor: false,
+          },
+        },
       }),
     });
   });

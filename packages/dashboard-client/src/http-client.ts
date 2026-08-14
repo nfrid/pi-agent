@@ -1,6 +1,5 @@
 import {
   type ActiveDelegateTranscriptBaseline,
-  type AuthoritativeSessionSnapshot,
   type BrowserSnapshot,
   type CancelCommand,
   type Checkout,
@@ -23,15 +22,15 @@ import {
   type Thread,
   type ThreadCreateCommand,
   tryParseActiveDelegateTranscriptBaseline,
+  tryParseAuthoritativeSessionSnapshot,
   tryParseBrowserSnapshot,
   tryParseComposerCommandCatalogue,
-  tryParseShellSnapshotResponse,
   tryParseDashboardStreamMessage,
   tryParseDelegateHistoryResponse,
   tryParseDelegateHistoryRunDetailResponse,
   tryParseProtocolInfo,
-  tryParseAuthoritativeSessionSnapshot,
   tryParseSessionApiResponse,
+  tryParseShellSnapshotResponse,
 } from '@pi-dashboard/protocol';
 import {
   browserDashboardTokenStore,
@@ -488,7 +487,11 @@ export class DashboardHttpClient {
         'Dashboard returned invalid authoritative session data.',
         value,
       );
-    return response as SessionApiResponse;
+    return (
+      before === undefined
+        ? response
+        : { ...response, __dashboardHistorical: true }
+    ) as SessionApiResponse;
   }
 
   async sessionBefore(

@@ -1138,11 +1138,13 @@ export class DashboardLiveStore {
     // from persisted history. Feed it through the same transcript reducer as
     // SSE events so streaming messages/tools keep stable identities and a
     // persisted terminal replacement naturally wins without duplication.
-    const active = (
-      response as SessionApiResponse & {
-        active?: AuthoritativeSessionSnapshot['active'];
-      }
-    ).active;
+    const sessionResponse = response as SessionApiResponse & {
+      active?: AuthoritativeSessionSnapshot['active'];
+      __dashboardHistorical?: boolean;
+    };
+    const active = sessionResponse.__dashboardHistorical
+      ? undefined
+      : sessionResponse.active;
     const activeEpoch = active?.runtimeEpoch ?? response.runtimeEpoch;
     const activeIsCurrent =
       active !== undefined &&
@@ -1163,17 +1165,23 @@ export class DashboardLiveStore {
           sessionId: response.metadata.id,
         }) as never;
       for (const message of active.messages)
-        projection = reduceTranscriptEvent(projection, reducerInput({
-          type: 'message.updated',
-          sessionId: response.metadata.id,
-          message,
-        }));
+        projection = reduceTranscriptEvent(
+          projection,
+          reducerInput({
+            type: 'message.updated',
+            sessionId: response.metadata.id,
+            message,
+          }),
+        );
       for (const tool of active.tools)
-        projection = reduceTranscriptEvent(projection, reducerInput({
-          type: 'tool.updated',
-          sessionId: response.metadata.id,
-          tool,
-        }));
+        projection = reduceTranscriptEvent(
+          projection,
+          reducerInput({
+            type: 'tool.updated',
+            sessionId: response.metadata.id,
+            tool,
+          }),
+        );
     }
     const canonicalLiveMessageIds = persistedLiveMessageIds(
       projection,

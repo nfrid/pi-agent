@@ -110,7 +110,6 @@ export {
 } from './orchestration-parsers.js';
 export {
   parseAuthoritativeSessionSnapshot,
-  parseShellSnapshotRequest,
   parseBrowserSnapshot,
   parseComposerCommandCatalogue,
   parseDashboardEventEnvelope,
@@ -126,10 +125,10 @@ export {
   parseSessionSnapshotRequest,
   parseSessionSnapshotResponseV2,
   parseShellSnapshot,
+  parseShellSnapshotRequest,
   parseShellSnapshotResponse,
   parseStartRuntimeRequest,
   tryParseAuthoritativeSessionSnapshot,
-  tryParseShellSnapshotRequest,
   tryParseBrowserSnapshot,
   tryParseComposerCommandCatalogue,
   tryParseDashboardEventEnvelope,
@@ -145,6 +144,7 @@ export {
   tryParseSessionSnapshotRequest,
   tryParseSessionSnapshotResponseV2,
   tryParseShellSnapshot,
+  tryParseShellSnapshotRequest,
   tryParseShellSnapshotResponse,
   tryParseStartRuntimeRequest,
   validateSessionName,
@@ -153,7 +153,6 @@ export {
 } from './parsers.js';
 export type {
   AuthoritativeSessionSnapshot,
-  ShellSnapshotRequest,
   BridgeEventEnvelope,
   BrowserMessage,
   BrowserSnapshot,
@@ -192,13 +191,13 @@ export type {
   SessionSnapshotRequest,
   SessionSnapshotResponse,
   ShellSnapshot,
+  ShellSnapshotRequest,
   ShellSnapshotResponse,
   StartRuntimeRequest,
   WorkspaceTarget,
 } from './schemas.js';
 export {
   AuthoritativeSessionSnapshotSchema,
-  ShellSnapshotRequestSchema,
   BridgeEventEnvelopeSchema,
   BrowserMessageSchema,
   BrowserSnapshotSchema,
@@ -236,6 +235,7 @@ export {
   SessionSnapshotRequestSchema,
   SessionSnapshotResponseSchema,
   SessionSnapshotResponseV2Schema,
+  ShellSnapshotRequestSchema,
   ShellSnapshotResponseSchema,
   ShellSnapshotSchema,
   StartRuntimeRequestSchema,

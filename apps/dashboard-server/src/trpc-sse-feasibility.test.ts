@@ -1,11 +1,11 @@
 import { Writable } from 'node:stream';
 import {
   type BrowserSnapshotSchema,
-  ShellSnapshotResponseSchema,
   DashboardStreamMessageSchema,
   parseDashboardStreamMessage,
   parseSchema,
   SessionRenameRequestSchema,
+  ShellSnapshotResponseSchema,
 } from '@pi-dashboard/protocol';
 import {
   createTRPCClient,

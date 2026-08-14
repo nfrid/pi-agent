@@ -54,13 +54,14 @@ export async function installDashboardBootstrap(
       // The production client/parser reports malformed tRPC input; fixtures
       // keep a deterministic fallback response for unrelated startup reads.
     }
-    const metadata =
-      snapshot.sessions.find((session) => session.id === sessionId) ?? {
-        id: sessionId,
-        file: '',
-        cwd: '',
-        updatedAt: 1,
-      };
+    const metadata = snapshot.sessions.find(
+      (session) => session.id === sessionId,
+    ) ?? {
+      id: sessionId,
+      file: '',
+      cwd: '',
+      updatedAt: 1,
+    };
     await route.fulfill({
       contentType: 'application/json',
       body: trpcData(

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   ActiveDelegateTranscriptBaselineSchema,
-  ShellSnapshotRequestSchema,
   ComposerCommandCatalogueSchema,
   DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
   deriveSessionTitle,
@@ -17,7 +16,6 @@ import {
   ProtocolInfoSchema,
   parseActiveDelegateTranscriptBaseline,
   parseAuthoritativeSessionSnapshot,
-  parseShellSnapshotRequest,
   parseBridgeCommand,
   parseBridgeEvent,
   parseComposerCommandCatalogue,
@@ -32,9 +30,11 @@ import {
   parseRuntimeSnapshot,
   parseSessionAdoptCommand,
   parseSessionApiResponse,
+  parseShellSnapshotRequest,
   parseShellSnapshotResponse,
   RuntimeExtensionSurfaceSchema,
   redactImageData,
+  ShellSnapshotRequestSchema,
   serializeFrame,
   tryParseNormalizedToolPayload,
   validateBridgeCommand,

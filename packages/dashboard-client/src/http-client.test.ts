@@ -141,24 +141,23 @@ describe('DashboardHttpClient command requests', () => {
   });
 
   it('requests an older session page with an encoded opaque cursor', async () => {
-    const fetch = vi.fn(
-      async () =>
-        trpcResponse({
-          metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
-          entries: [],
-          history: { version: 1, start: 0, end: 0, hasOlder: false },
-          entriesComplete: true,
-          serverId: 'server-1',
-          cursor: 1,
-          active: {
-            pendingInteractions: [],
-            messages: [],
-            tools: [],
-            delegates: [],
-            truncated: false,
-          },
-          completeThroughCursor: true,
-        }),
+    const fetch = vi.fn(async () =>
+      trpcResponse({
+        metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
+        entries: [],
+        history: { version: 1, start: 0, end: 0, hasOlder: false },
+        entriesComplete: true,
+        serverId: 'server-1',
+        cursor: 1,
+        active: {
+          pendingInteractions: [],
+          messages: [],
+          tools: [],
+          delegates: [],
+          truncated: false,
+        },
+        completeThroughCursor: true,
+      }),
     );
     const client = new DashboardHttpClient({
       fetch,

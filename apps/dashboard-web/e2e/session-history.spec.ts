@@ -34,9 +34,12 @@ test('loads earlier session history on demand', async ({ page }) => {
   const olderResponse = new Promise<void>((resolve) => {
     releaseOlder = resolve;
   });
-  await page.route('**/api/sessions/session-1*', async (route) => {
+  await page.route('**/trpc/sessionSnapshot*', async (route) => {
     const url = new URL(route.request().url());
-    beforeRequest = url.searchParams.get('before') ?? undefined;
+    const input = JSON.parse(url.searchParams.get('input') ?? '{}') as {
+      before?: string;
+    };
+    beforeRequest = input.before;
     const older = beforeRequest !== undefined;
     if (!older) initialReads += 1;
     const hasHistory = older || initialReads > 1;
@@ -44,47 +47,59 @@ test('loads earlier session history on demand', async ({ page }) => {
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        metadata,
-        entries: older
-          ? [
-              { type: 'session', id: 'session-1', cwd: '/tmp' },
-              {
-                type: 'message',
-                id: 'first-user',
-                message: { role: 'user', content: 'first request' },
-              },
-            ]
-          : [
-              ...Array.from({ length: 90 }, (_, index) => ({
-                type: 'message',
-                id: `history-${index}`,
-                message: {
-                  role: 'user',
-                  content: `history ${index}`,
-                },
-              })),
-              {
-                type: 'message',
-                id: 'latest',
-                message: { role: 'assistant', content: 'latest response' },
-              },
-            ],
-        entriesComplete: false,
-        serverId: 'history-test',
-        cursor: 1,
-        ...(hasHistory
-          ? {
-              history: older
-                ? { version: 1, start: 0, end: 2, hasOlder: false }
-                : {
-                    version: 1,
-                    start: 2,
-                    end: 3,
-                    hasOlder: true,
-                    nextBefore: 'token-1',
+        result: {
+          data: {
+            metadata,
+            entries: older
+              ? [
+                  { type: 'session', id: 'session-1', cwd: '/tmp' },
+                  {
+                    type: 'message',
+                    id: 'first-user',
+                    message: { role: 'user', content: 'first request' },
                   },
-            }
-          : {}),
+                ]
+              : [
+                  ...Array.from({ length: 90 }, (_, index) => ({
+                    type: 'message',
+                    id: `history-${index}`,
+                    message: {
+                      role: 'user',
+                      content: `history ${index}`,
+                    },
+                  })),
+                  {
+                    type: 'message',
+                    id: 'latest',
+                    message: { role: 'assistant', content: 'latest response' },
+                  },
+                ],
+            entriesComplete: false,
+            serverId: 'history-test',
+            cursor: 1,
+            ...(hasHistory
+              ? {
+                  history: older
+                    ? { version: 1, start: 0, end: 2, hasOlder: false }
+                    : {
+                        version: 1,
+                        start: 2,
+                        end: 3,
+                        hasOlder: true,
+                        nextBefore: 'token-1',
+                      },
+                }
+              : {}),
+            active: {
+              pendingInteractions: [],
+              messages: [],
+              tools: [],
+              delegates: [],
+              truncated: false,
+            },
+            completeThroughCursor: false,
+          },
+        },
       }),
     });
   });

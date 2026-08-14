@@ -1,6 +1,5 @@
 import {
   type AuthoritativeSessionSnapshot,
-  ShellSnapshotRequestSchema,
   type BrowserSnapshot,
   PROTOCOL_VERSION,
   type ProtocolInfo,
@@ -9,6 +8,7 @@ import {
   parseSchema,
   parseShellSnapshotResponse,
   SessionSnapshotRequestSchema,
+  ShellSnapshotRequestSchema,
 } from '@pi-dashboard/protocol';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { fastifyRequestHandler } from '@trpc/server/adapters/fastify';
@@ -168,8 +168,7 @@ export function createDashboardRouter(context: DashboardTrpcContext) {
         if (input.protocolVersion !== PROTOCOL_VERSION)
           throw toDashboardTrpcError(protocolMismatch());
         try {
-          const response =
-            context.shellSnapshot();
+          const response = context.shellSnapshot();
           return parseShellSnapshotResponse(response);
         } catch (error) {
           throw toDashboardTrpcError(error);

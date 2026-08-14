@@ -123,24 +123,41 @@ test('shows and inspects a persisted delegate in an offline session', async ({
       });
     },
   );
-  await page.route('**/api/sessions/historical-session', (route) => {
-    if (route.request().url().includes('/delegate-history'))
-      return route.fallback();
+  await page.route('**/trpc/sessionSnapshot*', (route) => {
+    const input = JSON.parse(
+      new URL(route.request().url()).searchParams.get('input') ?? '{}',
+    ) as { sessionId?: string };
+    if (input.sessionId !== 'historical-session') return route.fallback();
     return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        metadata,
-        entries: [
-          { type: 'session', id: 'historical-session', cwd: '/tmp' },
-          {
-            type: 'message',
-            id: 'historical-message',
-            message: { role: 'user', content: 'Show persisted delegate work' },
+        result: {
+          data: {
+            metadata,
+            entries: [
+              { type: 'session', id: 'historical-session', cwd: '/tmp' },
+              {
+                type: 'message',
+                id: 'historical-message',
+                message: {
+                  role: 'user',
+                  content: 'Show persisted delegate work',
+                },
+              },
+            ],
+            entriesComplete: true,
+            serverId: 'delegate-history-e2e',
+            cursor: 1,
+            active: {
+              pendingInteractions: [],
+              messages: [],
+              tools: [],
+              delegates: [],
+              truncated: false,
+            },
+            completeThroughCursor: true,
           },
-        ],
-        entriesComplete: true,
-        serverId: 'delegate-history-e2e',
-        cursor: 1,
+        },
       }),
     });
   });

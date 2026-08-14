@@ -1120,16 +1120,36 @@ test('delayed command completion does not scroll a destination session', async (
     ],
     unread: [],
   });
-  await page.route('**/api/sessions/*', async (route) => {
-    const sessionId = new URL(route.request().url()).pathname.split('/').pop();
+  await page.route('**/trpc/sessionSnapshot*', async (route) => {
+    const input = JSON.parse(
+      new URL(route.request().url()).searchParams.get('input') ?? '{}',
+    ) as { sessionId?: string };
+    const sessionId = input.sessionId;
     const title =
       sessionId === 'session-destination' ? 'Destination' : 'Source';
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        metadata: metadata(sessionId ?? 'session-source', `${title} session`),
-        entries: entries(title),
-        entriesComplete: true,
+        result: {
+          data: {
+            metadata: metadata(
+              sessionId ?? 'session-source',
+              `${title} session`,
+            ),
+            entries: entries(title),
+            entriesComplete: true,
+            serverId: 'dashboard-delayed-command',
+            cursor: 1,
+            active: {
+              pendingInteractions: [],
+              messages: [],
+              tools: [],
+              delegates: [],
+              truncated: false,
+            },
+            completeThroughCursor: true,
+          },
+        },
       }),
     });
   });
@@ -3117,22 +3137,35 @@ async function installPhase6Mocks(
       }),
     }),
   );
-  await page.route('**/api/sessions/s1', (route) =>
+  await page.route('**/trpc/sessionSnapshot*', (route) =>
     route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        serverId: 'phase-six',
-        cursor: 1,
-        metadata: {
-          id: 's1',
-          file: '/tmp/project/session.jsonl',
-          cwd: '/tmp/project',
-          title: 'Existing session request',
-          updatedAt: 1,
-          activeRuntimeId: 'r1',
-          entryCount: 87,
+        result: {
+          data: {
+            serverId: 'phase-six',
+            cursor: 1,
+            metadata: {
+              id: 's1',
+              file: '/tmp/project/session.jsonl',
+              cwd: '/tmp/project',
+              title: 'Existing session request',
+              updatedAt: 1,
+              activeRuntimeId: 'r1',
+              entryCount: 87,
+            },
+            entries: options.entries ?? phase6Entries(),
+            entriesComplete: true,
+            active: {
+              pendingInteractions: [],
+              messages: [],
+              tools: [],
+              delegates: [],
+              truncated: false,
+            },
+            completeThroughCursor: true,
+          },
         },
-        entries: options.entries ?? phase6Entries(),
       }),
     }),
   );
@@ -4354,22 +4387,35 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   await page.reload();
   await expect(page.getByText('Starting agent…')).toBeVisible();
   await expect(page).not.toHaveURL(/\/runtimes\//u);
-  await page.route('**/api/sessions/s-launched', (route) =>
+  await page.route('**/trpc/sessionSnapshot*', (route) =>
     route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        serverId: 'phase-six',
-        cursor: 2,
-        metadata: {
-          id: 's-launched',
-          file: '/tmp/project/launched.jsonl',
-          cwd: '/tmp/project',
-          title: 'Inspect the project setup',
-          updatedAt: 2,
-          workspaceId: 'w1',
-          entryCount: 1,
+        result: {
+          data: {
+            serverId: 'phase-six',
+            cursor: 2,
+            metadata: {
+              id: 's-launched',
+              file: '/tmp/project/launched.jsonl',
+              cwd: '/tmp/project',
+              title: 'Inspect the project setup',
+              updatedAt: 2,
+              workspaceId: 'w1',
+              entryCount: 1,
+            },
+            entries: [],
+            entriesComplete: true,
+            active: {
+              pendingInteractions: [],
+              messages: [],
+              tools: [],
+              delegates: [],
+              truncated: false,
+            },
+            completeThroughCursor: true,
+          },
         },
-        entries: [],
       }),
     }),
   );
