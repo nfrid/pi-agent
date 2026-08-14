@@ -14,6 +14,7 @@ import {
 const PARENT_SESSION = 'parent-session';
 
 interface RegisteredTool {
+  promptGuidelines: string[];
   execute: (
     id: string,
     params: {
@@ -82,6 +83,12 @@ function body(result: {
 describe('delegate_branches', () => {
   test('lists what is still outstanding', async () => {
     const tool = captureTool();
+    const guidelines = tool.promptGuidelines.join('\n');
+    expect(guidelines).toContain('Review a writable branch before merging');
+    expect(guidelines).toContain('Merge sibling branches one at a time');
+    expect(guidelines).toContain('Drop a branch after its work is integrated');
+    expect(guidelines).not.toContain('incremental: true');
+    expect(guidelines).not.toContain('retired read-only snapshot');
     expect(body(await tool.execute('c1', { action: 'list' }))).toBe(
       'No delegate branches.',
     );

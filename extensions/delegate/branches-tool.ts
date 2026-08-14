@@ -1,4 +1,3 @@
-import { resolve } from 'node:path';
 import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
@@ -94,8 +93,8 @@ function text(value: string) {
   return { content: [{ type: 'text' as const, text: value }] };
 }
 
-export const DELEGATE_BRANCHES_DESCRIPTION =
-  "Review and integrate harness-managed delegate branches, or inspect caller-owned worktrees without taking ownership. list defaults to this parent session; set scope: all for repository history. review gives you the task's commits and diff measured from its own starting point by default; set incremental: true to show only task patches not represented in current parent HEAD. Use summaryOnly, exact repository-relative paths, or patchBudget for bounded review. merge either lands cleanly or leaves your checkout untouched, and refuses caller-owned branches. drop never deletes a caller-owned checkout or branch. Actions: list, review, merge, drop.";
+const DELEGATE_BRANCHES_DESCRIPTION =
+  "Review and integrate harness-managed delegate branches, or inspect caller-owned worktrees without taking ownership. list defaults to this parent session; set scope: all for repository history. review gives you the task's commits and diff measured from its own starting point by default; set incremental: true to show only task patches not represented in current parent HEAD. Use summaryOnly, exact repository-relative paths, or patchBudget for bounded review. merge either lands cleanly or leaves your checkout untouched, and refuses caller-owned branches. drop never deletes a caller-owned checkout or branch.";
 
 export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
   pi.registerTool<typeof Parameters, BranchesDetails>({
@@ -104,10 +103,7 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
     description: DELEGATE_BRANCHES_DESCRIPTION,
     promptSnippet:
       'Review or merge writable delegate branches; continue or drop retired read-only snapshots',
-    promptGuidelines: loadGuidelines(
-      'extensions/delegate/branches-instructions.md',
-      resolve(__dirname, '../..'),
-    ),
+    promptGuidelines: loadGuidelines('branches-instructions.md', __dirname),
     parameters: Parameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const reviewSelectorUsed =

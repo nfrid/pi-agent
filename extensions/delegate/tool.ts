@@ -1,4 +1,3 @@
-import { resolve } from 'node:path';
 import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { type Static, Type } from 'typebox';
@@ -24,7 +23,7 @@ import {
   makeDetails,
 } from './tool-result';
 
-export const DELEGATE_TOOL_DESCRIPTION =
+const DELEGATE_TOOL_DESCRIPTION =
   'Run focused child agents with separate context. Choose a route, workspace mode, and either a prose or structured result contract; background completion is delivered automatically.';
 
 const RouteSchema = Type.String({
@@ -235,10 +234,7 @@ export function delegatePromptGuidelines(
   return [
     // Parent workflow preferences belong to the delegate extension and are
     // validated as bullet-only guidelines at load time.
-    ...loadGuidelines(
-      'extensions/delegate/instructions.md',
-      resolve(__dirname, '../..'),
-    ),
+    ...loadGuidelines('instructions.md', __dirname),
     `Delegate route catalog:\n${formatDelegateRoutingPrompt(cwd, config)}`,
   ];
 }

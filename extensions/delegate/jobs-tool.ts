@@ -1,4 +1,3 @@
-import { resolve } from 'node:path';
 import { StringEnum } from '@earendil-works/pi-ai';
 import type {
   ExtensionAPI,
@@ -11,7 +10,8 @@ import type { DelegateJobManager, DelegateJobSnapshot } from './jobs';
 
 const Parameters = Type.Object({
   action: StringEnum(['list', 'peek', 'feedback', 'cancel'] as const, {
-    description: 'Operation to perform',
+    description:
+      'list shows tracked jobs; peek inspects one job and can wait briefly; feedback sends corrective guidance to a queued or running job; cancel stops one or more jobs.',
   }),
   id: Type.Optional(
     Type.String({ description: 'Job ID for peek or feedback' }),
@@ -35,8 +35,8 @@ const Parameters = Type.Object({
   ),
 });
 
-export const DELEGATE_JOBS_DESCRIPTION =
-  'Inspect, steer, and cancel asynchronous delegate jobs. Completions are delivered automatically. Use feedback with one bounded message to steer a running child at its next safe checkpoint; a settled job reports that feedback was not delivered. Use peek for deliberate inspection, not polling. Actions: list, peek, feedback, cancel.';
+const DELEGATE_JOBS_DESCRIPTION =
+  'Inspect, steer, and cancel asynchronous delegate jobs. Completions are delivered automatically. Use feedback with one bounded message to steer a running child at its next safe checkpoint; a settled job reports that feedback was not delivered. Use peek for deliberate inspection, not polling.';
 
 function requireText(value: string | undefined, name: string): string {
   const text = value?.trim();
@@ -95,10 +95,7 @@ export function registerDelegateJobsTool(
     label: 'Delegate Jobs',
     description: DELEGATE_JOBS_DESCRIPTION,
     promptSnippet: 'Inspect, steer, or cancel asynchronous delegate jobs',
-    promptGuidelines: loadGuidelines(
-      'extensions/delegate/jobs-instructions.md',
-      resolve(__dirname, '../..'),
-    ),
+    promptGuidelines: loadGuidelines('jobs-instructions.md', __dirname),
     parameters: Parameters,
     async execute(
       _toolCallId,
