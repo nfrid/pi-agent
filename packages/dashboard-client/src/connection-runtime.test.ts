@@ -6,9 +6,12 @@ import { describe, expect, it } from 'vitest';
 import { DashboardConnectionRuntime } from './connection-runtime.js';
 import { DashboardLiveStore } from './store.js';
 
-const shellSnapshot = (cursor: number): BrowserSnapshot =>
+const shellSnapshot = (
+  cursor: number,
+  serverId = 'daemon-1',
+): BrowserSnapshot =>
   ({
-    serverId: 'daemon-1',
+    serverId,
     revision: cursor,
     cursor,
     runtimes: [],
@@ -20,9 +23,10 @@ const shellSnapshot = (cursor: number): BrowserSnapshot =>
 const sessionSnapshot = (
   cursor: number,
   id = 'session-a',
+  serverId = 'daemon-1',
 ): AuthoritativeSessionSnapshot =>
   ({
-    serverId: 'daemon-1',
+    serverId,
     cursor,
     metadata: { id, file: '', cwd: '/tmp', updatedAt: cursor },
     entries: [],
@@ -252,6 +256,208 @@ describe('DashboardConnectionRuntime', () => {
     );
     a.release();
     b.release();
+    stop();
+  });
+
+  it('accepts daemon-generation snapshots and reacquires referenced sessions', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    const a = f.runtime.acquireSession('session-a');
+    const b = f.runtime.acquireSession('session-b');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.shell({
+      id: 'shell-old',
+      data: {
+        type: 'snapshot',
+        sequence: 5,
+        snapshot: { snapshot: shellSnapshot(5), cursor: 5 },
+      },
+    });
+    f.shell({ id: 'shell-old-live', data: { type: 'caught-up', sequence: 5 } });
+    f.session('session-a', {
+      id: 'a-old',
+      data: { type: 'snapshot', sequence: 5, snapshot: sessionSnapshot(5) },
+    });
+    f.session('session-a', {
+      id: 'a-old-live',
+      data: { type: 'caught-up', sequence: 5 },
+    });
+    f.session('session-b', {
+      id: 'b-old',
+      data: {
+        type: 'snapshot',
+        sequence: 5,
+        snapshot: sessionSnapshot(5, 'session-b'),
+      },
+    });
+    f.session('session-b', {
+      id: 'b-old-live',
+      data: { type: 'caught-up', sequence: 5 },
+    });
+    expect(f.store.getSnapshot().shellSync.status).toBe('live');
+    f.shell({
+      id: 'shell-new',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: { snapshot: shellSnapshot(0, 'daemon-2'), cursor: 0 },
+      },
+    });
+    expect(f.store.getSnapshot().serverId).toBe('daemon-2');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.counts().sessionSubscriptions).toBe(4);
+    expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
+      'synchronizing',
+    );
+    f.session('session-a', {
+      id: 'a-new',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: sessionSnapshot(0, 'session-a', 'daemon-2'),
+      },
+    });
+    f.session('session-a', {
+      id: 'a-new-live',
+      data: { type: 'caught-up', sequence: 0 },
+    });
+    expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
+      'live',
+    );
+    a.release();
+    b.release();
+    stop();
+  });
+
+  it('accepts a same-generation lower snapshot for only its session', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    const a = f.runtime.acquireSession('session-a');
+    const b = f.runtime.acquireSession('session-b');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    for (const [id, sessionId] of [
+      ['a-five', 'session-a'],
+      ['b-five', 'session-b'],
+    ] as const) {
+      f.session(sessionId, {
+        id,
+        data: {
+          type: 'snapshot',
+          sequence: 5,
+          snapshot: sessionSnapshot(5, sessionId),
+        },
+      });
+      f.session(sessionId, {
+        id: `${id}-live`,
+        data: { type: 'caught-up', sequence: 5 },
+      });
+    }
+    f.session('session-a', {
+      id: 'a-rebase',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: sessionSnapshot(0, 'session-a'),
+      },
+    });
+    expect(f.store.getSnapshot().sessionSyncById['session-a']?.sequence).toBe(
+      0,
+    );
+    expect(f.store.getSnapshot().sessionSyncById['session-b']?.status).toBe(
+      'live',
+    );
+    f.session('session-a', {
+      id: 'a-rebase-live',
+      data: { type: 'caught-up', sequence: 0 },
+    });
+    expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
+      'live',
+    );
+    a.release();
+    b.release();
+    stop();
+  });
+
+  it('defers a new-server session snapshot until shell authority resets', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    const handle = f.runtime.acquireSession('session-a');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.shell({
+      id: 'shell-old',
+      data: {
+        type: 'snapshot',
+        sequence: 5,
+        snapshot: { snapshot: shellSnapshot(5), cursor: 5 },
+      },
+    });
+    f.session('session-a', {
+      id: 'a-new-before-shell',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: sessionSnapshot(0, 'session-a', 'daemon-2'),
+      },
+    });
+    expect(f.store.getSnapshot().serverId).toBe('daemon-1');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.shell({
+      id: 'shell-new-authority',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: { snapshot: shellSnapshot(0, 'daemon-2'), cursor: 0 },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.session('session-a', {
+      id: 'a-new-after-shell',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: sessionSnapshot(0, 'session-a', 'daemon-2'),
+      },
+    });
+    f.session('session-a', {
+      id: 'a-new-live',
+      data: { type: 'caught-up', sequence: 0 },
+    });
+    expect(f.store.getSnapshot().serverId).toBe('daemon-2');
+    expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
+      'live',
+    );
+    handle.release();
+    stop();
+  });
+
+  it('does not apply the same tracked snapshot twice', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    const handle = f.runtime.acquireSession('session-a');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.shell({
+      id: 'shell-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 5,
+        snapshot: { snapshot: shellSnapshot(5), cursor: 5 },
+      },
+    });
+    f.shell({
+      id: 'shell-snapshot-live',
+      data: { type: 'caught-up', sequence: 5 },
+    });
+    f.shell({
+      id: 'shell-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: { snapshot: shellSnapshot(0, 'daemon-2'), cursor: 0 },
+      },
+    });
+    expect(f.store.getSnapshot().serverId).toBe('daemon-1');
+    expect(f.store.getSnapshot().snapshotCursor).toBe(5);
+    handle.release();
     stop();
   });
 

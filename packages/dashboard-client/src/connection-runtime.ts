@@ -21,6 +21,7 @@ type DomainEntry = {
   refs: number;
   sequence: number;
   sequenceKnown: boolean;
+  snapshotId?: FeedCursorValue;
   lastEventId?: FeedCursorValue;
   subscription?: Subscription;
   opening: number;
@@ -105,6 +106,7 @@ export class DashboardConnectionRuntime {
   private shellGeneration = 0;
   private shellSequence = 0;
   private shellSequenceKnown = false;
+  private shellSnapshotId?: FeedCursorValue;
   private shellSnapshotCoverage = 0;
   private shellRefreshTarget = 0;
   private shellRefreshNeeded = false;
@@ -271,21 +273,24 @@ export class DashboardConnectionRuntime {
     return this.trpc;
   }
 
+  private resetShellDomain(): void {
+    this.shellGeneration += 1;
+    this.shellSequence = 0;
+    this.shellSequenceKnown = false;
+    this.shellSnapshotId = undefined;
+    this.shellSnapshotCoverage = 0;
+    this.shellRefreshTarget = 0;
+    this.shellRefreshNeeded = false;
+    this.shellCaughtUpTarget = undefined;
+    this.shellLastEventId = undefined;
+    this.shellRebasing = false;
+    this.store.beginShellSync(this.shellGeneration);
+  }
+
   private async openShell(rebase: boolean, after?: string): Promise<void> {
     if (!this.started || !this.isOnline()) return;
     const opening = ++this.shellOpening;
-    if (rebase) {
-      this.shellGeneration += 1;
-      this.shellSequence = 0;
-      this.shellSequenceKnown = false;
-      this.shellSnapshotCoverage = 0;
-      this.shellRefreshTarget = 0;
-      this.shellRefreshNeeded = false;
-      this.shellCaughtUpTarget = undefined;
-      this.shellLastEventId = undefined;
-      this.shellRebasing = false;
-      this.store.beginShellSync(this.shellGeneration);
-    }
+    if (rebase) this.resetShellDomain();
     try {
       const client = await this.getClient();
       if (!this.started || opening !== this.shellOpening) return;
@@ -325,6 +330,38 @@ export class DashboardConnectionRuntime {
     const payload = tracked.data;
     const sequence = numericSequence(payload);
     if (sequence === undefined) return;
+    if (payload.type === 'snapshot') {
+      if (tracked.id === this.shellSnapshotId) return;
+      const previousServerId = this.store.getSnapshot().serverId;
+      const serverChanged =
+        previousServerId !== undefined &&
+        payload.snapshot.snapshot.serverId !== previousServerId;
+      if (serverChanged) this.resetShellDomain();
+      this.shellSequence = sequence;
+      this.shellSequenceKnown = true;
+      this.shellSnapshotId = tracked.id;
+      this.shellLastEventId = tracked.id;
+      this.shellSnapshotCoverage = Math.max(
+        this.shellSnapshotCoverage,
+        payload.snapshot.cursor,
+      );
+      if (this.shellSnapshotCoverage >= this.shellRefreshTarget)
+        this.shellRefreshNeeded = false;
+      this.store.acceptShellSnapshot(
+        payload.snapshot.snapshot,
+        payload.snapshot.cursor,
+        this.shellGeneration,
+        tracked.id,
+        true,
+      );
+      if (serverChanged) this.reacquireSessions();
+      if (
+        this.shellCaughtUpTarget !== undefined &&
+        this.shellSnapshotCoverage >= this.shellCaughtUpTarget
+      )
+        this.store.completeShellSync(this.shellCaughtUpTarget, tracked.id);
+      return;
+    }
     if (isCaughtUp(payload)) {
       if (this.shellSequenceKnown && sequence < this.shellSequence) return;
       if (this.shellSequenceKnown && sequence > this.shellSequence) {
@@ -348,26 +385,6 @@ export class DashboardConnectionRuntime {
     this.shellSequence = sequence;
     this.shellSequenceKnown = true;
     this.shellLastEventId = tracked.id;
-    if (payload.type === 'snapshot') {
-      this.shellSnapshotCoverage = Math.max(
-        this.shellSnapshotCoverage,
-        payload.snapshot.cursor,
-      );
-      if (this.shellSnapshotCoverage >= this.shellRefreshTarget)
-        this.shellRefreshNeeded = false;
-      this.store.acceptShellSnapshot(
-        payload.snapshot.snapshot,
-        payload.snapshot.cursor,
-        this.shellGeneration,
-        tracked.id,
-      );
-      if (
-        this.shellCaughtUpTarget !== undefined &&
-        this.shellSnapshotCoverage >= this.shellCaughtUpTarget
-      )
-        this.store.completeShellSync(this.shellCaughtUpTarget, tracked.id);
-      return;
-    }
     this.shellRefreshTarget = Math.max(this.shellRefreshTarget, sequence);
     this.shellRefreshNeeded = true;
     if (this.store.getSnapshot().shellSync.status !== 'synchronizing')
@@ -437,6 +454,15 @@ export class DashboardConnectionRuntime {
     }
   }
 
+  private reacquireSessions(): void {
+    for (const entry of this.sessions.values()) {
+      if (entry.refs === 0) continue;
+      entry.subscription?.unsubscribe();
+      entry.subscription = undefined;
+      void this.openSession(entry, true);
+    }
+  }
+
   private rebaseShell(): void {
     if (this.shellRebasing || !this.started) return;
     this.shellRebasing = true;
@@ -456,6 +482,7 @@ export class DashboardConnectionRuntime {
       entry.generation += 1;
       entry.sequence = 0;
       entry.sequenceKnown = false;
+      entry.snapshotId = undefined;
       entry.lastEventId = undefined;
       entry.rebasing = false;
       this.store.beginSessionSync(entry.id, entry.generation);
@@ -497,6 +524,31 @@ export class DashboardConnectionRuntime {
     const payload = tracked.data;
     const sequence = numericSequence(payload);
     if (sequence === undefined) return;
+    if (payload.type === 'snapshot') {
+      if (tracked.id === entry.snapshotId) return;
+      const previousServerId = this.store.getSnapshot().serverId;
+      if (
+        previousServerId !== undefined &&
+        payload.snapshot.serverId !== previousServerId
+      ) {
+        // Shell authority owns daemon generation. Keep this acquired feed
+        // pending while the shell subscription obtains the new authority.
+        this.rebaseShell();
+        return;
+      }
+      entry.sequence = sequence;
+      entry.sequenceKnown = true;
+      entry.snapshotId = tracked.id;
+      entry.lastEventId = tracked.id;
+      this.store.acceptSessionSnapshot(
+        payload.snapshot,
+        payload.snapshot.cursor,
+        entry.generation,
+        tracked.id,
+        true,
+      );
+      return;
+    }
     if (isCaughtUp(payload)) {
       if (entry.sequenceKnown && sequence < entry.sequence) return;
       if (entry.sequenceKnown && sequence > entry.sequence) {
@@ -517,15 +569,6 @@ export class DashboardConnectionRuntime {
     entry.sequence = sequence;
     entry.sequenceKnown = true;
     entry.lastEventId = tracked.id;
-    if (payload.type === 'snapshot') {
-      this.store.acceptSessionSnapshot(
-        payload.snapshot,
-        payload.snapshot.cursor,
-        entry.generation,
-        tracked.id,
-      );
-      return;
-    }
     this.store.acceptSessionEvent(
       entry.id,
       sequence,

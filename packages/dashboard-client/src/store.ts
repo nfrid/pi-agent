@@ -99,8 +99,10 @@ export interface SnapshotAcceptanceProvenance {
   source?: 'http' | 'sse';
   requestGeneration?: number;
   currentGeneration?: number;
-  /** A replay-gap snapshot establishes the next SSE cursor baseline. */
+  /** A replay-gap or daemon-restart snapshot establishes a new domain baseline. */
   rebaseCursor?: boolean;
+  /** Accept a same-generation authoritative feed snapshot below local cursor. */
+  authoritativeRebase?: boolean;
 }
 
 export function snapshotAcceptance(
@@ -119,6 +121,8 @@ export function snapshotAcceptance(
       return { accepted: false, reset: false };
     return { accepted: true, reset: true };
   }
+  if (provenance.authoritativeRebase === true)
+    return { accepted: true, reset: false };
   return { accepted: next.cursor >= currentCursor, reset: false };
 }
 
@@ -821,14 +825,20 @@ export class DashboardLiveStore {
     sequence: number,
     generation: number,
     cursor?: string,
+    authoritativeRebase = false,
   ): boolean {
     const current = this.state.shellSync;
     if (
       current.generation !== generation ||
-      (current.sequenceKnown && sequence <= current.sequence)
+      (!authoritativeRebase &&
+        current.sequenceKnown &&
+        sequence <= current.sequence)
     )
       return false;
-    const accepted = this.installSnapshot(next, { source: 'sse' });
+    const accepted = this.installSnapshot(next, {
+      source: 'sse',
+      authoritativeRebase,
+    });
     if (!accepted) return false;
     this.publish({
       ...this.state,
@@ -849,12 +859,15 @@ export class DashboardLiveStore {
     sequence: number,
     generation: number,
     cursor?: string,
+    authoritativeRebase = false,
   ): boolean {
     const current = this.state.sessionSyncById[response.metadata.id];
     if (
       current &&
       (current.generation !== generation ||
-        (current.sequenceKnown && sequence <= current.sequence))
+        (!authoritativeRebase &&
+          current.sequenceKnown &&
+          sequence <= current.sequence))
     )
       return false;
     const projection = this.hydrateSession(response, { replace: true });
@@ -889,7 +902,7 @@ export class DashboardLiveStore {
       },
     );
     if (!decision.accepted) return false;
-    if (decision.reset) {
+    if (decision.reset && !provenance.authoritativeRebase) {
       this.generation += 1;
       this.latestSessionRequestOrders.clear();
       this.runtimeReducerStates.clear();
@@ -914,7 +927,16 @@ export class DashboardLiveStore {
       });
       return true;
     }
-    if (this.state.snapshotCursor > next.cursor) return false;
+    if (decision.reset) {
+      this.generation += 1;
+      this.latestSessionRequestOrders.clear();
+      this.runtimeReducerStates.clear();
+    }
+    if (
+      this.state.snapshotCursor > next.cursor &&
+      provenance.authoritativeRebase !== true
+    )
+      return false;
     // Ordinary HTTP reads update the authoritative projection but must not
     // jump over SSE records that were requested earlier and are still being
     // replayed. Only SSE delivery (or an explicit replay-gap rebase) advances
