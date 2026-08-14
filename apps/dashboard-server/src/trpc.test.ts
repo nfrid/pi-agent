@@ -7,6 +7,7 @@ import {
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
+import { toDashboardTrpcError } from './trpc.js';
 
 const apps: ReturnType<typeof Fastify>[] = [];
 const TOKEN = 'trpc-test-token';
@@ -174,8 +175,9 @@ describe('dashboard tRPC boundary', () => {
     apps.push(conflictApp);
     const conflictContext = context();
     conflictContext.snapshot = () => {
-      throw Object.assign(new Error('UNIQUE constraint failed: secret'), {
-        code: 'active-writer',
+      throw Object.assign(new Error('The session is already active.'), {
+        code: 'active-session',
+        cause: new Error('UNIQUE constraint failed: secret'),
       });
     };
     await conflictApp.register(dashboardRoutes, { context: conflictContext });
@@ -186,7 +188,10 @@ describe('dashboard tRPC boundary', () => {
       headers: authHeaders(),
     });
     expect(conflict.statusCode).toBe(409);
-    expect(conflict.json().error.data.domainCode).toBe('active-writer');
+    expect(conflict.json().error.data.domainCode).toBe('active-session');
+    expect(conflict.json().error.message).toBe(
+      'The orchestration request conflicts with existing state.',
+    );
     expect(JSON.stringify(conflict.json())).not.toContain('UNIQUE');
   });
 
@@ -234,6 +239,30 @@ describe('dashboard tRPC boundary', () => {
     });
     expect(events.statusCode).toBe(200);
     expect(events.headers['content-type']).toContain('text/event-stream');
+  });
+
+  it('sanitizes database detail while retaining safe domain messages', () => {
+    const wrapped = Object.assign(
+      new Error('UNIQUE constraint failed: secret'),
+      {
+        code: 'active-session',
+        cause: new Error('sqlite internal detail'),
+      },
+    );
+    const conflict = toDashboardTrpcError(wrapped);
+    expect(conflict.code).toBe('CONFLICT');
+    expect(conflict.message).toBe(
+      'The orchestration request conflicts with existing state.',
+    );
+    expect((conflict.cause as { code?: string }).code).toBe('active-session');
+
+    const safe = toDashboardTrpcError(
+      Object.assign(new Error('The session is already active.'), {
+        code: 'active-session',
+      }),
+    );
+    expect(safe.code).toBe('CONFLICT');
+    expect(safe.message).toBe('The session is already active.');
   });
 
   it('parses the public request adapter with strict fields', () => {

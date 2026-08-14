@@ -3060,7 +3060,9 @@ async function installPhase6Mocks(
           stream.controller = controller;
         },
       });
-      streams.push(stream);
+      // Publish a stream only after the fetch response has reached the app;
+      // emit waits for this current stream before delivering test records.
+      setTimeout(() => streams.push(stream), 0);
       return {
         stream,
         response: new Response(body, {
@@ -3226,8 +3228,20 @@ async function installPhase6Mocks(
     starts,
     stops,
     restarts,
-    emit: async (value: Record<string, unknown>) =>
-      page.evaluate((record) => {
+    emit: async (value: Record<string, unknown>) => {
+      await page.waitForFunction(
+        () => {
+          const phase6Stream = (
+            window as unknown as {
+              phase6Stream?: { current(): unknown };
+            }
+          ).phase6Stream;
+          return phase6Stream?.current() !== undefined;
+        },
+        undefined,
+        { timeout: 5_000 },
+      );
+      return page.evaluate((record) => {
         (
           window as unknown as {
             phase6Stream: {
@@ -3237,7 +3251,8 @@ async function installPhase6Mocks(
         ).phase6Stream
           .current()
           .emit(record);
-      }, value),
+      }, value);
+    },
     close: async () =>
       page.evaluate(() =>
         (
