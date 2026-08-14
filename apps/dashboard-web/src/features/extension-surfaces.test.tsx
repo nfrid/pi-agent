@@ -22,6 +22,7 @@ import {
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
   runtimePauseStatus,
+  shouldFetchDelegateDetail,
 } from './extension-surfaces';
 import {
   DelegateSurface,
@@ -98,6 +99,39 @@ describe('live extension surface fixtures', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('fetches persisted detail when a settled live overlay has no transcript', () => {
+    const row = {
+      id: 'lineage-1',
+      runId: 'run-1',
+      lineageId: 'lineage-1',
+      name: 'Worker',
+      kind: 'background' as const,
+      state: 'success' as const,
+      createdAt: 1,
+      allowWrites: false,
+    };
+    expect(
+      shouldFetchDelegateDetail({ persisted: true, live: true, row }),
+    ).toBe(true);
+    expect(
+      shouldFetchDelegateDetail({
+        persisted: true,
+        live: true,
+        row: { ...row, state: 'running' },
+      }),
+    ).toBe(false);
+    expect(
+      shouldFetchDelegateDetail({
+        persisted: true,
+        live: true,
+        row: {
+          ...row,
+          transcript: [{ id: 'task', type: 'task', label: 'Task' }],
+        },
+      }),
+    ).toBe(false);
   });
 
   it('invalidates once for settled transitions and every disappeared run', () => {

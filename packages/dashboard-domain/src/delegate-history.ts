@@ -663,6 +663,42 @@ function occurrences(branch: readonly unknown[]): DelegateOccurrence[] {
   });
 }
 
+/**
+ * A background launch writes a queued/running tool result before its terminal
+ * delegate-job-result. Modern runs keep the same explicit runId in both
+ * records, so retain one canonical occurrence and prefer terminal content.
+ */
+function canonicalOccurrences(
+  branch: readonly unknown[],
+): DelegateOccurrence[] {
+  const result: DelegateOccurrence[] = [];
+  const indexes = new Map<string, number>();
+  for (const occurrence of occurrences(branch)) {
+    const runId = stringValue(occurrence.run.runId, 256);
+    if (!runId) {
+      result.push(occurrence);
+      continue;
+    }
+    const index = indexes.get(runId);
+    if (index === undefined) {
+      indexes.set(runId, result.length);
+      result.push(occurrence);
+      continue;
+    }
+    const previous = result[index];
+    if (!previous) continue;
+    const previousState = normalizedState(previous.run, previous.job?.state);
+    const nextState = normalizedState(occurrence.run, occurrence.job?.state);
+    const previousTerminal =
+      previousState !== 'queued' && previousState !== 'running';
+    const nextTerminal = nextState !== 'queued' && nextState !== 'running';
+    // Terminal records win over launch placeholders. If both records have the
+    // same lifecycle class, the later persisted occurrence is authoritative.
+    if (nextTerminal || !previousTerminal) result[index] = occurrence;
+  }
+  return result;
+}
+
 function invocation(
   sessionId: string,
   occurrence: DelegateOccurrence,
@@ -782,7 +818,7 @@ export function delegateHistoryFromBranch(
   const orderedRuns: { lineageId: string; runId: string }[] = [];
   let totalRuns = 0;
   let responseTruncated = options.truncated === true;
-  for (const occurrence of occurrences(branch)) {
+  for (const occurrence of canonicalOccurrences(branch)) {
     const run = invocation(sessionId, occurrence);
     let group = groups.get(run.lineageId);
     if (!group) {
@@ -869,7 +905,7 @@ export function delegateHistoryRunDetailFromBranch(
   lineageId?: string,
   leafId?: string,
 ): DelegateHistoryRunDetailResponse {
-  for (const occurrence of occurrences(branch)) {
+  for (const occurrence of canonicalOccurrences(branch)) {
     const summary = invocation(sessionId, occurrence);
     if (summary.runId !== runId) continue;
     if (lineageId !== undefined && summary.lineageId !== lineageId) continue;

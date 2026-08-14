@@ -164,6 +164,19 @@ export function reconcileDelegateLiveRuns(
   return { next, shouldInvalidate, settledRunIds };
 }
 
+export function shouldFetchDelegateDetail(
+  run: Pick<DelegateCompositeRun, 'persisted' | 'live' | 'row'>,
+): boolean {
+  if (run.persisted !== true || run.row.transcript?.length) return false;
+  // Active live-only data is authoritative while the child is running. Once
+  // a persisted row is settled, an absent/stripped live transcript must fall
+  // back to the durable detail endpoint.
+  return (
+    run.live !== true ||
+    !isActiveDelegateState(run.row.state, run.row.pauseState)
+  );
+}
+
 export function delegateHistoryRunIds(
   history: import('@pi-dashboard/protocol').DelegateHistoryResponse | undefined,
 ): ReadonlySet<string> {
@@ -456,16 +469,12 @@ export function DelegateHistorySurface({
           historyLoading={historyLoading}
           historyError={historyError ? historyQuery.error : undefined}
           onRunSelected={(run: DelegateCompositeRun) => {
-            const hasLiveTranscript = Boolean(run.row.transcript?.length);
             setDetailSelection({
               sessionId: id,
               ...(summaryLeafId === undefined ? {} : { leafId: summaryLeafId }),
               lineageId: run.row.lineageId,
               runId: run.id,
-              shouldFetch:
-                run.persisted === true &&
-                run.live !== true &&
-                !hasLiveTranscript,
+              shouldFetch: shouldFetchDelegateDetail(run),
             });
           }}
           detail={

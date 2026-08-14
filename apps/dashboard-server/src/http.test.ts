@@ -146,6 +146,110 @@ describe('dashboard HTTP boundary', () => {
     );
   });
 
+  it('canonicalizes explicit duplicate background runs for summary and detail', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-delegate-history-duplicate-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    const run = {
+      runId: 'run-modern',
+      lineageId: 'lineage-modern',
+      backgroundJobId: 'job-modern',
+      name: 'Modern worker',
+      task: 'inspect the source',
+      state: 'success',
+      exitCode: 0,
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'terminal response' }],
+        },
+      ],
+      activities: [
+        {
+          type: 'tool',
+          label: 'terminal activity',
+          transcriptText: 'terminal activity output',
+          status: 'completed',
+        },
+      ],
+    };
+    const entries = [
+      { type: 'session', id: 'duplicate-session', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'launch-1',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            runs: [
+              {
+                ...run,
+                state: 'queued',
+                messages: [],
+                activities: [],
+              },
+            ],
+          },
+        },
+      },
+      {
+        type: 'custom_message',
+        id: 'completion-1',
+        message: {
+          customType: 'delegate-job-result',
+          details: {
+            jobs: [{ id: 'job-modern', state: 'success', runs: [run] }],
+          },
+        },
+      },
+    ];
+    await writeFile(
+      path.join(sessionDir, 'duplicate-session.jsonl'),
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      socketPath: path.join(
+        os.tmpdir(),
+        `dh-${path.basename(root).slice(-6)}.sock`,
+      ),
+      sessionDir,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const headers = { 'x-dashboard-token': 'test-token' };
+    const origin = `http://127.0.0.1:${server.port}`;
+    const summaryResponse = await fetch(
+      `${origin}/api/sessions/duplicate-session/delegate-history`,
+      { headers },
+    );
+    expect(summaryResponse.status).toBe(200);
+    const summary = (await summaryResponse.json()) as {
+      groups: Array<{ runs: Array<{ runId: string; state: string }> }>;
+    };
+    expect(summary.groups[0]?.runs).toEqual([
+      expect.objectContaining({ runId: 'run-modern', state: 'success' }),
+    ]);
+    const detailResponse = await fetch(
+      `${origin}/api/sessions/duplicate-session/delegate-history/runs/run-modern?lineageId=lineage-modern&leafId=completion-1`,
+      { headers },
+    );
+    expect(detailResponse.status).toBe(200);
+    const detail = (await detailResponse.json()) as Record<string, unknown>;
+    expect(detail.run).toMatchObject({
+      state: 'success',
+      details: {
+        response: 'terminal response',
+        activities: [{ text: 'terminal activity output' }],
+      },
+    });
+  });
+
   it('marks all unread notifications through one authenticated request', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-read-all-'),
