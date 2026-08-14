@@ -132,10 +132,8 @@ function compactDelegateSurfaces(
           const compactActivity =
             activity && typeof activity === 'object' && !Array.isArray(activity)
               ? (() => {
-                  const { latestText: _latestText, ...rest } = activity as Record<
-                    string,
-                    unknown
-                  >;
+                  const { latestText: _latestText, ...rest } =
+                    activity as Record<string, unknown>;
                   return rest;
                 })()
               : activity;
@@ -265,7 +263,8 @@ export class BridgeClient {
     this.liveSurfaces = liveSurfaces;
     const currentSurfaces = liveSurfaces?.snapshot?.() ?? [];
     this.delegateTranscriptEntries = delegateTranscriptEntries(currentSurfaces);
-    this.compactDelegateSurfaces = compactDelegateSurfaces(currentSurfaces) ?? [];
+    this.compactDelegateSurfaces =
+      compactDelegateSurfaces(currentSurfaces) ?? [];
     this.unsubscribeBroker = broker?.subscribe((event) => {
       if (event.kind === 'requested') {
         this.sendEvent({
@@ -405,7 +404,8 @@ export class BridgeClient {
         capabilities: this.resolveCapabilities(),
         ...(this.broker ? { pendingInteractions: interactions } : undefined),
       };
-      const fullSurfaces = this.liveSurfaces?.snapshot?.() ?? snapshot.extensionSurfaces;
+      const fullSurfaces =
+        this.liveSurfaces?.snapshot?.() ?? snapshot.extensionSurfaces;
       const compactSurfaces = compactDelegateSurfaces(fullSurfaces);
       this.compactDelegateSurfaces = compactSurfaces ?? [];
       const helloSent = this.sendEvent({

@@ -245,7 +245,8 @@ export function shouldFetchDelegateDetail(
   // persisted non-active run uses durable detail, even if its live overlay is
   // partial or still retained after settlement.
   return !(
-    run.live === true && isActiveDelegateState(run.row.state, run.row.pauseState)
+    run.live === true &&
+    isActiveDelegateState(run.row.state, run.row.pauseState)
   );
 }
 
