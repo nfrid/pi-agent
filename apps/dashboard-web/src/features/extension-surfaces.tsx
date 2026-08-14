@@ -409,16 +409,24 @@ export function DelegateHistorySurface({
       queryKey: dashboardQueryKeys.activeDelegateTranscripts(id),
     });
   }, [activeRows, baseline, id, queryClient]);
-  const previousRecovery = useRef({ serverId, resyncNonce });
+  const previousRecovery = useRef({
+    serverId,
+    resyncNonce,
+    sessionChange,
+  });
   useEffect(() => {
     const previous = previousRecovery.current;
-    previousRecovery.current = { serverId, resyncNonce };
-    if (previous.serverId === serverId && previous.resyncNonce === resyncNonce)
+    previousRecovery.current = { serverId, resyncNonce, sessionChange };
+    if (
+      previous.serverId === serverId &&
+      previous.resyncNonce === resyncNonce &&
+      previous.sessionChange === sessionChange
+    )
       return;
     void queryClient.invalidateQueries({
       queryKey: dashboardQueryKeys.activeDelegateTranscripts(id),
     });
-  }, [id, queryClient, resyncNonce, serverId]);
+  }, [id, queryClient, resyncNonce, serverId, sessionChange]);
   useEffect(() => {
     if (activeRows.length === 0) return;
     const refresh = () => {
