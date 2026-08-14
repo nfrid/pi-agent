@@ -6,6 +6,7 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import {
   type LoadedInstruction,
+  loadGuidelines,
   loadInstruction,
 } from '../shared/instructions';
 
@@ -161,6 +162,10 @@ export function buildSystemPrompt(
   for (const guideline of promptGuidelines ?? []) {
     const normalized = guideline.trim();
     if (normalized.length > 0) addGuidelines(normalized);
+  }
+
+  if (mode === undefined || mode === 'tui' || mode === 'rpc') {
+    addGuidelines(loadGuidelines('extensions/activity-groups/instructions.md'));
   }
 
   if (mode && mode !== 'tui') {

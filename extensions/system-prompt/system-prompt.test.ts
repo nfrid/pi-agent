@@ -154,8 +154,21 @@ describe('canonical prompt composition', () => {
       expect(prompt).not.toContain('<agent_instruction source=');
       expect(prompt).not.toContain('instructions/agent/working-style.md');
       expect(prompt).not.toContain('instructions/agent/interaction.md');
-      expect(prompt).not.toContain('natural ongoing-action form');
     }
+  });
+
+  it('includes activity-group preambles only in transcript-rendering modes', () => {
+    const tuiPrompt = buildSystemPrompt(options(), 'tui');
+    const rpcPrompt = buildSystemPrompt(options(), 'rpc');
+    const defaultPrompt = buildSystemPrompt(options());
+    const headlessPrompt = buildSystemPrompt(options(), 'json');
+
+    for (const prompt of [tuiPrompt, rpcPrompt, defaultPrompt]) {
+      expect(prompt).toContain('natural ongoing-action form');
+      expect(prompt).toContain('Write it before the calls that do the work');
+      expect(prompt).toContain('Label changes of direction, not steps');
+    }
+    expect(headlessPrompt).not.toContain('natural ongoing-action form');
   });
 
   it('fails clearly when a required instruction file is missing', () => {
