@@ -282,8 +282,10 @@ export class DashboardHttpClient {
     this.tokenStore = options.tokenStore ?? browserDashboardTokenStore;
   }
 
-  private ensureEndpoint(): Promise<EndpointSelection> {
-    if (this.candidateBaseUrls.length === 1)
+  private ensureEndpoint(
+    probeSingleCandidate = false,
+  ): Promise<EndpointSelection> {
+    if (!probeSingleCandidate && this.candidateBaseUrls.length === 1)
       return Promise.resolve({ baseUrl: this.baseUrl });
     if (!this.endpointSelection) {
       this.endpointSelection = this.selectEndpoint();
@@ -292,19 +294,17 @@ export class DashboardHttpClient {
   }
 
   private async selectEndpoint(): Promise<EndpointSelection> {
-    let mismatch: DashboardProtocolMismatchError | undefined;
     for (const baseUrl of this.candidateBaseUrls) {
       try {
         const protocolInfo = await this.probeEndpoint(baseUrl);
         if (protocolInfo) return { baseUrl, protocolInfo };
       } catch (cause) {
-        if (cause instanceof DashboardProtocolMismatchError) mismatch = cause;
+        // A known incompatible daemon must surface for reload handling; it is
+        // not a probe failure that can be hidden by selecting another daemon.
+        if (cause instanceof DashboardProtocolMismatchError) throw cause;
       }
     }
-    // A version mismatch is actionable and must not be hidden by pinning an
-    // endpoint that cannot serve the finite protocol. Other probe failures
-    // retain the legacy configured-last fallback behavior.
-    if (mismatch) throw mismatch;
+    // Other probe failures retain the configured-last fallback behavior.
     return { baseUrl: this.baseUrl };
   }
 
@@ -400,12 +400,9 @@ export class DashboardHttpClient {
 
   snapshot(): Promise<BrowserSnapshot> {
     if (this.snapshotInFlight) return this.snapshotInFlight;
-    const request =
-      this.candidateBaseUrls.length === 1
-        ? this.bootstrapAt(this.baseUrl)
-        : this.ensureEndpoint().then(({ baseUrl }) =>
-            this.bootstrapAt(baseUrl),
-          );
+    const request = this.ensureEndpoint(true).then(({ baseUrl }) =>
+      this.bootstrapAt(baseUrl),
+    );
     this.snapshotInFlight = request;
     // Keep only the in-flight request. Failed and successful reads must both
     // be eligible for a later refresh while concurrent callers share one read.

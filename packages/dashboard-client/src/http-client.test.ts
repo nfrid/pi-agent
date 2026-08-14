@@ -405,9 +405,11 @@ describe('DashboardHttpClient snapshot requests', () => {
     const ready = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const fetch = vi.fn(async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
       await ready;
-      return snapshotResponse();
+      return String(input).endsWith('/protocolInfo')
+        ? protocolInfoResponse()
+        : snapshotResponse();
     });
     const client = new DashboardHttpClient({
       fetch,
@@ -426,22 +428,26 @@ describe('DashboardHttpClient snapshot requests', () => {
       expect.objectContaining({ cursor: 7 }),
       expect.objectContaining({ cursor: 7 }),
     ]);
-    await client.snapshot();
     expect(fetch).toHaveBeenCalledTimes(2);
+    await client.snapshot();
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 
-  it('uses the authenticated tRPC bootstrap envelope and rejects malformed output', async () => {
-    const fetch = vi.fn(async (_input: RequestInfo | URL) =>
-      snapshotResponse(),
+  it('probes one candidate before the authenticated tRPC bootstrap and rejects malformed output', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith('/protocolInfo')
+        ? protocolInfoResponse()
+        : snapshotResponse(),
     );
     const client = new DashboardHttpClient({
       fetch,
       tokenStore: tokenStore(),
     });
     await expect(client.snapshot()).resolves.toEqual(validSnapshot);
-    expect(fetch.mock.calls[0]?.[0]).toBe(
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/trpc/protocolInfo',
       '/trpc/bootstrap?input=%7B%22protocolVersion%22%3A1%7D',
-    );
+    ]);
 
     const invalid = new DashboardHttpClient({
       fetch: vi.fn(async () => trpcResponse({ snapshot: validSnapshot })),
@@ -508,7 +514,9 @@ describe('DashboardHttpClient snapshot requests', () => {
       async (_input: RequestInfo | URL, init?: RequestInit) => {
         expect(String(_input)).not.toContain(token);
         expect(String(init?.body ?? '')).not.toContain(token);
-        return snapshotResponse();
+        return String(_input).endsWith('/protocolInfo')
+          ? protocolInfoResponse()
+          : snapshotResponse();
       },
     );
     const client = new DashboardHttpClient({
@@ -522,13 +530,14 @@ describe('DashboardHttpClient snapshot requests', () => {
     await client.snapshot();
     token = 'second-token';
     await client.snapshot();
+    for (const index of [0, 1])
+      expect(
+        new Headers((fetch.mock.calls[index]?.[1] as RequestInit).headers).get(
+          'x-dashboard-token',
+        ),
+      ).toBe('first-token');
     expect(
-      new Headers((fetch.mock.calls[0]?.[1] as RequestInit).headers).get(
-        'x-dashboard-token',
-      ),
-    ).toBe('first-token');
-    expect(
-      new Headers((fetch.mock.calls[1]?.[1] as RequestInit).headers).get(
+      new Headers((fetch.mock.calls[2]?.[1] as RequestInit).headers).get(
         'x-dashboard-token',
       ),
     ).toBe('second-token');
@@ -692,6 +701,37 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
       code: 'protocol-mismatch',
       kind: 'protocol-mismatch',
     });
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/lan/trpc/protocolInfo',
+    ]);
+  });
+
+  it('does not bootstrap or pin a fallback after a one-candidate protocol mismatch', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/protocolInfo'))
+        return trpcResponse({
+          protocolVersion: 2,
+          serverId: 'incompatible-generation',
+          capabilities: { bootstrap: true },
+        });
+      throw new Error('bootstrap must not be called');
+    });
+    const client = new DashboardHttpClient({
+      baseUrl: '/only',
+      fetch,
+      tokenStore: tokenStore(),
+    });
+    const error = await client.snapshot().catch((cause) => cause);
+    expect(error).toMatchObject({
+      expected: 1,
+      actual: 2,
+      serverId: 'incompatible-generation',
+      code: 'protocol-mismatch',
+    });
+    expect(error).toBeInstanceOf(DashboardProtocolMismatchError);
+    expect(fetch.mock.calls.map(([input]) => input)).toEqual([
+      '/only/trpc/protocolInfo',
+    ]);
   });
 
   it('sends a mutation once, only after endpoint selection', async () => {
