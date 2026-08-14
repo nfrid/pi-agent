@@ -71,9 +71,33 @@ const historyDetail = {
 test('shows and inspects a persisted delegate in an offline session', async ({
   page,
 }) => {
-  await page.addInitScript(() =>
-    localStorage.setItem('pi-dashboard-token', 'test-token'),
-  );
+  await page.addInitScript(() => {
+    localStorage.setItem('pi-dashboard-token', 'test-token');
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const originalFetch = window.fetch.bind(window);
+    const testWindow = window as typeof window & {
+      emitDashboardEvent(value: unknown): void;
+    };
+    testWindow.emitDashboardEvent = (value) => {
+      controller?.enqueue(
+        new TextEncoder().encode(
+          `event: dashboard\ndata: ${JSON.stringify(value)}\n\n`,
+        ),
+      );
+    };
+    window.fetch = async (input, init) => {
+      const target = typeof input === 'string' ? input : input.url;
+      if (!target.includes('/api/events')) return originalFetch(input, init);
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(nextController) {
+            controller = nextController;
+          },
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    };
+  });
   await page.route('**/api/snapshot', (route) =>
     route.fulfill({
       contentType: 'application/json',
@@ -83,12 +107,8 @@ test('shows and inspects a persisted delegate in an offline session', async ({
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await page.route('**/api/events?*', (route) =>
-    route.fulfill({
-      contentType: 'text/event-stream',
-      body: '',
-    }),
-  );
+  let historyLeafId = 'leaf-1';
+  let historyRequests = 0;
   await page.route(
     '**/api/sessions/historical-session/delegate-history/runs/run-e2e?*',
     (route) =>
@@ -99,11 +119,13 @@ test('shows and inspects a persisted delegate in an offline session', async ({
   );
   await page.route(
     '**/api/sessions/historical-session/delegate-history',
-    (route) =>
-      route.fulfill({
+    (route) => {
+      historyRequests += 1;
+      return route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify(history),
-      }),
+        body: JSON.stringify({ ...history, leafId: historyLeafId }),
+      });
+    },
   );
   await page.route('**/api/sessions/historical-session', (route) => {
     if (route.request().url().includes('/delegate-history'))
@@ -138,4 +160,31 @@ test('shows and inspects a persisted delegate in an offline session', async ({
   await expect(
     page.getByText('Earlier historical transcript entries were omitted'),
   ).toBeVisible();
+
+  historyLeafId = 'leaf-2';
+  await page.evaluate(() => {
+    const testWindow = window as typeof window & {
+      emitDashboardEvent(value: unknown): void;
+    };
+    testWindow.emitDashboardEvent({
+      cursor: 2,
+      emittedAt: Date.now(),
+      event: {
+        type: 'session.changed',
+        session: {
+          id: 'historical-session',
+          file: '/tmp/historical-session.jsonl',
+          cwd: '/tmp',
+          leafId: 'leaf-2',
+          entries: [],
+          entriesComplete: true,
+        },
+      },
+    });
+  });
+  await expect.poll(() => historyRequests).toBeGreaterThan(1);
+  await expect(
+    page.getByRole('dialog', { name: 'Delegate transcript' }),
+  ).toBeVisible();
+  await expect(page.getByText('Inspect the historical fixture')).toBeVisible();
 });

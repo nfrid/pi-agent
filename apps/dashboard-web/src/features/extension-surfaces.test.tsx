@@ -24,7 +24,9 @@ import {
   renderLiveExtensionSurface,
   runtimeExtensionSurfaces,
   runtimePauseStatus,
+  shouldClearDelegateDetailSelection,
   shouldFetchDelegateDetail,
+  shouldPromoteDelegateDetailSelection,
 } from './extension-surfaces';
 import {
   DelegateSurface,
@@ -239,6 +241,48 @@ describe('live extension surface fixtures', () => {
         },
       }),
     ).toBe(true);
+  });
+
+  it('preserves a selected delegate through history hydration and promotes settled detail', () => {
+    expect(
+      shouldClearDelegateDetailSelection({
+        ownerMatches: true,
+        fetching: true,
+        runExists: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldClearDelegateDetailSelection({
+        ownerMatches: true,
+        fetching: false,
+        runExists: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldClearDelegateDetailSelection({
+        ownerMatches: true,
+        fetching: false,
+        runExists: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldPromoteDelegateDetailSelection({
+        shouldFetch: false,
+        ownerMatches: true,
+        fetching: false,
+        persistedRunExists: true,
+        liveActive: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldPromoteDelegateDetailSelection({
+        shouldFetch: false,
+        ownerMatches: true,
+        fetching: false,
+        persistedRunExists: true,
+        liveActive: true,
+      }),
+    ).toBe(false);
   });
 
   it('invalidates once for settled transitions and every disappeared run', () => {

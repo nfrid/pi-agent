@@ -250,6 +250,32 @@ export function shouldFetchDelegateDetail(
   );
 }
 
+export function shouldClearDelegateDetailSelection(options: {
+  ownerMatches: boolean;
+  fetching: boolean;
+  runExists: boolean;
+}): boolean {
+  return (
+    !options.ownerMatches || (!options.fetching && options.runExists === false)
+  );
+}
+
+export function shouldPromoteDelegateDetailSelection(options: {
+  shouldFetch: boolean;
+  ownerMatches: boolean;
+  fetching: boolean;
+  persistedRunExists: boolean;
+  liveActive: boolean;
+}): boolean {
+  return (
+    !options.shouldFetch &&
+    options.ownerMatches &&
+    !options.fetching &&
+    options.persistedRunExists &&
+    !options.liveActive
+  );
+}
+
 export function delegateHistoryRunIds(
   history: import('@pi-dashboard/protocol').DelegateHistoryResponse | undefined,
 ): ReadonlySet<string> {
@@ -440,31 +466,33 @@ export function DelegateHistorySurface({
   }, [activeRows.length, id, queryClient]);
   const [detailSelection, setDetailSelection] = useState<{
     sessionId: string;
-    leafId?: string;
     lineageId: string;
     runId: string;
     shouldFetch: boolean;
   }>();
   const summaryLeafId = historyQuery.data?.leafId;
-  const selectionOwnerMatches =
-    detailSelection?.sessionId === id &&
-    detailSelection?.leafId === summaryLeafId;
-  const selectedRunExists = Boolean(
+  const selectionOwnerMatches = detailSelection?.sessionId === id;
+  const selectedLiveRunExists = Boolean(
     selectionOwnerMatches &&
       detailSelection &&
-      (liveRows.some(
+      liveRows.some(
         (row) =>
           row.lineageId === detailSelection.lineageId &&
           row.runId === detailSelection.runId,
-      ) ||
-        historyQuery.data?.groups.some((group) =>
-          group.runs.some(
-            (run) =>
-              run.lineageId === detailSelection.lineageId &&
-              run.runId === detailSelection.runId,
-          ),
-        )),
+      ),
   );
+  const selectedPersistedRunExists = Boolean(
+    selectionOwnerMatches &&
+      detailSelection &&
+      historyQuery.data?.groups.some((group) =>
+        group.runs.some(
+          (run) =>
+            run.lineageId === detailSelection.lineageId &&
+            run.runId === detailSelection.runId,
+        ),
+      ),
+  );
+  const selectedRunExists = selectedLiveRunExists || selectedPersistedRunExists;
   // React Query retains the previous summary while a scoped refresh is in
   // flight. Do not let that previous leaf authorize a detail request or an
   // inspector payload while its replacement is being fetched.
@@ -502,39 +530,36 @@ export function DelegateHistorySurface({
   useEffect(() => () => refreshCoordinator.dispose(), [refreshCoordinator]);
   useEffect(() => {
     if (!detailSelection) return;
-    const ownerChanged =
-      detailSelection.sessionId !== id ||
-      detailSelection.leafId !== summaryLeafId;
-    // The render-time owner check above prevents stale details immediately;
-    // this effect clears the now-invalid state and closes the inspector on the
-    // following render as well.
-    if (ownerChanged || (!historyQuery.isFetching && !selectedRunExists))
-      setDetailSelection(undefined);
-  }, [
-    detailSelection,
-    historyQuery.isFetching,
-    id,
-    selectedRunExists,
-    summaryLeafId,
-  ]);
-  useEffect(() => {
+    // Keep the selected run stable across history-leaf hydration. The current
+    // summary still reauthorizes it before detail is shown or requested.
     if (
-      !detailSelection ||
-      detailSelection.shouldFetch ||
-      !selectionOwnerMatches ||
-      historyQuery.isFetching ||
-      !selectedRunExists
+      shouldClearDelegateDetailSelection({
+        ownerMatches: detailSelection.sessionId === id,
+        fetching: historyQuery.isFetching,
+        runExists: selectedRunExists,
+      })
     )
-      return;
-    const liveCurrent = liveRows.some(
+      setDetailSelection(undefined);
+  }, [detailSelection, historyQuery.isFetching, id, selectedRunExists]);
+  useEffect(() => {
+    if (!detailSelection) return;
+    const liveActive = liveRows.some(
       (row) =>
         row.runId === detailSelection.runId &&
-        row.lineageId === detailSelection.lineageId,
+        row.lineageId === detailSelection.lineageId &&
+        isActiveDelegateState(row.state, row.pauseState),
     );
-    // A live overlay may intentionally suppress a detail request. Once it is
-    // gone and the summary still contains the stable run identity, load the
-    // selected durable transcript without requiring another click.
-    if (!liveCurrent)
+    // Once the selected run settles and the refreshed summary confirms its
+    // stable identity, hydrate durable detail without requiring another click.
+    if (
+      shouldPromoteDelegateDetailSelection({
+        shouldFetch: detailSelection.shouldFetch,
+        ownerMatches: selectionOwnerMatches,
+        fetching: historyQuery.isFetching,
+        persistedRunExists: selectedPersistedRunExists,
+        liveActive,
+      })
+    )
       setDetailSelection((current) =>
         current && !current.shouldFetch
           ? { ...current, shouldFetch: true }
@@ -544,7 +569,7 @@ export function DelegateHistorySurface({
     detailSelection,
     historyQuery.isFetching,
     liveRows,
-    selectedRunExists,
+    selectedPersistedRunExists,
     selectionOwnerMatches,
   ]);
   useEffect(() => {
@@ -617,7 +642,7 @@ export function DelegateHistorySurface({
     >
       <div className="extension-surface-slot">
         <DelegateSurface
-          key={`${id}:${summaryLeafId ?? ''}`}
+          key={id}
           surface={renderedSurface}
           pausedAt={runtimePauseStatus(runtime)?.pausedAt}
           history={historyQuery.data}
@@ -626,7 +651,6 @@ export function DelegateHistorySurface({
           onRunSelected={(run: DelegateCompositeRun) => {
             setDetailSelection({
               sessionId: id,
-              ...(summaryLeafId === undefined ? {} : { leafId: summaryLeafId }),
               lineageId: run.row.lineageId,
               runId: run.id,
               shouldFetch: shouldFetchDelegateDetail(run),
