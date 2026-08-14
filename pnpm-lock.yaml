@@ -241,10 +241,16 @@ importers:
       '@tanstack/react-query':
         specifier: ^5.90.7
         version: 5.101.4(react@19.2.8)
+      '@trpc/client':
+        specifier: 11.18.0
+        version: 11.18.0(@trpc/server@11.18.0(typescript@5.9.3))(typescript@5.9.3)
       react:
         specifier: ^19.1.0
         version: 19.2.8
     devDependencies:
+      '@pi-dashboard/server':
+        specifier: workspace:*
+        version: link:../../apps/dashboard-server
       '@types/react':
         specifier: ^19.1.0
         version: 19.2.18

@@ -20,9 +20,11 @@
     "@pi-dashboard/domain": "workspace:*",
     "@pi-dashboard/protocol": "workspace:*",
     "@tanstack/react-query": "^5.90.7",
+    "@trpc/client": "11.18.0",
     "react": "^19.1.0"
   },
   "devDependencies": {
+    "@pi-dashboard/server": "workspace:*",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "linkedom": "^0.16.11",

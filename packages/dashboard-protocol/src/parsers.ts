@@ -27,6 +27,8 @@ import {
   DashboardEventEnvelopeSchema,
   type DashboardMessage,
   DashboardMessageSchema,
+  type DashboardSnapshotResponse,
+  DashboardSnapshotResponseSchema,
   type DashboardStreamMessage,
   DashboardStreamMessageSchema,
   type DelegateHistoryResponse,
@@ -70,6 +72,20 @@ import {
 
 export function parseProtocolInfo(value: unknown): ProtocolInfo {
   return parseSchema(ProtocolInfoSchema, value, 'protocol info');
+}
+export function parseDashboardSnapshotResponse(
+  value: unknown,
+): DashboardSnapshotResponse {
+  return parseSchema(
+    DashboardSnapshotResponseSchema,
+    value,
+    'dashboard snapshot response',
+  );
+}
+export function tryParseDashboardSnapshotResponse(
+  value: unknown,
+): DashboardSnapshotResponse | undefined {
+  return tryParseSchema(DashboardSnapshotResponseSchema, value);
 }
 export function tryParseProtocolInfo(value: unknown): ProtocolInfo | undefined {
   return tryParseSchema(ProtocolInfoSchema, value);

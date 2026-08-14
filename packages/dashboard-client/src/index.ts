@@ -3,6 +3,7 @@ export * from './event-stream.js';
 export * from './http-client.js';
 export * from './query-options.js';
 export * from './store.js';
+export * from './trpc-client.js';
 
 import { useEffect, useRef } from 'react';
 import type { DashboardHttpClient } from './http-client.js';

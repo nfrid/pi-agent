@@ -466,7 +466,7 @@ describe('dashboard snapshots', () => {
     });
   });
 
-  it('rejects malformed runtime snapshots and defaults legacy HTTP collections', () => {
+  it('rejects malformed and legacy runtime snapshots', () => {
     expect(asBrowserSnapshot({ runtimeId: 'runtime-1' })).toBeUndefined();
     expect(
       asBrowserSnapshot({
@@ -475,7 +475,7 @@ describe('dashboard snapshots', () => {
         workspaces: [],
         sessions: [],
       }),
-    ).toMatchObject({ serverId: 'legacy', unread: [] });
+    ).toBeUndefined();
   });
 });
 

@@ -11,6 +11,7 @@ afterEach(async () => {
 function context(): DashboardRouteContext {
   return {
     token: 'route-token',
+    serverId: () => 'server',
     origins: () => ['http://dashboard.test'],
     snapshot: () => ({
       serverId: 'server',
@@ -305,6 +306,16 @@ describe('Fastify dashboard route plugin', () => {
       app.inject({
         method: 'GET',
         url: '/api/snapshot',
+        headers: {
+          origin: 'http://dashboard.test',
+          'x-dashboard-token': 'route-token',
+        },
+      }),
+    ).resolves.toMatchObject({ statusCode: 404 });
+    await expect(
+      app.inject({
+        method: 'GET',
+        url: '/api/usage',
         headers: {
           origin: 'http://dashboard.test',
           'x-dashboard-token': 'route-token',

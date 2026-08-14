@@ -128,6 +128,7 @@ describe('dashboard transport revisions', () => {
       asBrowserSnapshot({
         serverId: 'daemon-2',
         revision: 0,
+        cursor: 0,
         runtimes: [],
         workspaces: [],
         sessions: [],
@@ -177,14 +178,14 @@ describe('dashboard transport revisions', () => {
     ).toBeUndefined();
   });
 
-  it('keeps the explicit legacy HTTP snapshot defaults at the parser boundary', () => {
+  it('strictly rejects legacy HTTP snapshot shapes at the parser boundary', () => {
     expect(
       asBrowserSnapshot({
         runtimes: [],
         workspaces: [],
         sessions: [],
       }),
-    ).toMatchObject({ serverId: 'legacy', revision: 0, unread: [] });
+    ).toBeUndefined();
     expect(
       asSessionResponse({
         metadata: {
