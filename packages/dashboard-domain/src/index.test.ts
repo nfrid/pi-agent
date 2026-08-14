@@ -1070,6 +1070,77 @@ describe('dashboard domain reducers', () => {
     });
   });
 
+  it('retains first transcript upserts after a new delegate metadata patch', () => {
+    let state = createRuntimeReducerState({
+      ...snapshot(),
+      session: { ...snapshot().session, id: 'session-new' },
+      extensionSurfaces: [],
+    });
+    const metadata = applyRuntimeEvent(state, {
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'working',
+        snapshot: {
+          extensionSurfaces: [
+            {
+              id: 'delegate.status',
+              rendererId: 'delegate.status',
+              viewModel: {
+                version: 1,
+                statuses: [
+                  {
+                    id: 'ds-new',
+                    runId: 'run-new',
+                    lineageId: 'lineage-new',
+                    name: 'Worker',
+                    kind: 'background',
+                    state: 'running',
+                    createdAt: 1,
+                    allowWrites: false,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      runtimeSeq: 1,
+    });
+    expect(metadata.accepted).toBe(true);
+    state = metadata.state;
+    for (const [runtimeSeq, entry] of [
+      [2, { id: 'task', type: 'task', label: 'Task', text: 'inspect' }],
+      [
+        3,
+        { id: 'tool-1', type: 'tool', label: 'read source', status: 'running' },
+      ],
+    ] as const) {
+      const update = applyRuntimeEvent(state, {
+        event: {
+          type: 'delegate.transcript.updated',
+          sessionId: 'session-new',
+          lineageId: 'lineage-new',
+          runId: 'run-new',
+          entry,
+        },
+        runtimeSeq,
+      });
+      expect(update.accepted).toBe(true);
+      state = update.state;
+    }
+    expect(state.snapshot.extensionSurfaces?.[0]?.viewModel).toMatchObject({
+      statuses: [
+        {
+          runId: 'run-new',
+          transcript: [
+            { id: 'task', text: 'inspect' },
+            { id: 'tool-1', status: 'running' },
+          ],
+        },
+      ],
+    });
+  });
+
   it('fails closed on duplicate capability patches and accepts later valid updates', () => {
     const initialCapabilities = {
       version: 1 as const,

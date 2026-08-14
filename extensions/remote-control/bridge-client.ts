@@ -95,7 +95,11 @@ function compactDelegateSurfaces(
         statuses: statuses.map((status) => {
           if (!status || typeof status !== 'object' || Array.isArray(status))
             return status;
-          const { transcript: _transcript, result, ...metadata } = status as {
+          const {
+            transcript: _transcript,
+            result,
+            ...metadata
+          } = status as {
             transcript?: unknown;
             result?: unknown;
             [key: string]: unknown;
@@ -259,10 +263,24 @@ export class BridgeClient {
       try {
         const current = this.options.snapshot();
         const nextEntries = delegateTranscriptEntries(surfaces);
-        for (const next of nextEntries.values()) {
+        const changedEntries = [...nextEntries.values()].filter((next) => {
           const previous = this.delegateTranscriptEntries.get(next.key);
-          if (previous && JSON.stringify(previous.entry) === JSON.stringify(next.entry))
-            continue;
+          return (
+            !previous ||
+            JSON.stringify(previous.entry) !== JSON.stringify(next.entry)
+          );
+        });
+        // Update the reconnect authority before publishing either frame. The
+        // compact metadata patch must establish new runs before their transcript
+        // upserts arrive at the runtime reducer.
+        this.delegateTranscriptEntries = nextEntries;
+        this.options.onLiveSurfacesChanged?.(surfaces);
+        this.sendEvent({
+          type: 'runtime.stateChanged',
+          state: current.liveState,
+          snapshot: { extensionSurfaces: compactDelegateSurfaces(surfaces) },
+        });
+        for (const next of changedEntries) {
           this.sendEvent({
             type: 'delegate.transcript.updated',
             sessionId: current.session.id,
@@ -271,13 +289,6 @@ export class BridgeClient {
             entry: next.entry,
           });
         }
-        this.delegateTranscriptEntries = nextEntries;
-        this.options.onLiveSurfacesChanged?.(surfaces);
-        this.sendEvent({
-          type: 'runtime.stateChanged',
-          state: current.liveState,
-          snapshot: { extensionSurfaces: compactDelegateSurfaces(surfaces) },
-        });
       } catch {
         // A surface publisher must not make a Pi mutation fail because the
         // bridge is offline or a stale cached snapshot is unavailable.
