@@ -378,6 +378,15 @@ export class DashboardServerImpl implements DashboardServer {
           this.revision,
           this.eventStream.cursor,
         ),
+      shellSnapshot: () => {
+        const snapshot = this.application.shellSnapshot(
+          this.serverId,
+          this.revision,
+        );
+        return { snapshot, cursor: snapshot.cursor };
+      },
+      sessionSnapshot: (id, before) =>
+        this.application.sessionSnapshot(this.serverId, id, before),
       workspaces: () => this.application.workspaces.list(),
       refreshWorkspaces: () => this.refreshWorkspaces(),
       composerCommands: (workspaceId) =>

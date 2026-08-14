@@ -610,10 +610,16 @@ function delegateTranscriptPayloadSchema(depth: number): TSchema {
   ]);
 }
 
+/** Live delegate IDs may include a longer extension-generated lineage path. */
+export const DelegateTranscriptEntryIdSchema = Type.String({
+  minLength: 1,
+  maxLength: 512,
+  pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+});
 /** Bounded public activity entry shared by live delegate transport and history. */
 export const DelegateTranscriptEntrySchema = Type.Object(
   {
-    id: IdentifierSchema,
+    id: DelegateTranscriptEntryIdSchema,
     type: Type.Union([
       Type.Literal('task'),
       Type.Literal('thinking'),
@@ -1180,6 +1186,57 @@ export type BrowserSnapshot = Omit<
   readonly unread: readonly NotificationEvent[];
 };
 
+/**
+ * The tRPC shell contract is deliberately narrower than the compatibility
+ * browser snapshot: every runtime session is compacted and cannot carry a
+ * transcript entry. The old BrowserSnapshot schema remains unchanged for the
+ * websocket/SSE and bootstrap rollout path.
+ */
+const ShellRuntimeSnapshotSchema = Type.Object(
+  {
+    ...RuntimeSnapshotProperties,
+    session: Type.Object(
+      {
+        ...SessionSnapshotProperties,
+        entries: Type.Readonly(Type.Array(UnknownSchema, { maxItems: 0 })),
+      },
+      { additionalProperties: false },
+    ),
+    pendingInteractions: Type.Readonly(
+      Type.Array(InteractionSnapshotSchema, { maxItems: 128 }),
+    ),
+    extensionSurfaces: Type.Optional(
+      Type.Readonly(
+        Type.Array(RuntimeExtensionSurfaceSchema, { maxItems: 32 }),
+      ),
+    ),
+    shellStateTruncated: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+export const ShellSnapshotSchema = Type.Object(
+  {
+    serverId: Type.String({ minLength: 1, maxLength: 512 }),
+    revision: Type.Integer({ minimum: 0 }),
+    cursor: Type.Integer({ minimum: 0 }),
+    runtimes: Type.Array(ShellRuntimeSnapshotSchema, { maxItems: 4096 }),
+    workspaces: Type.Array(WorkspaceTargetSchema, { maxItems: 4096 }),
+    sessions: Type.Array(SessionIndexEntrySchema, { maxItems: 4096 }),
+    projects: Type.Optional(
+      Type.Array(ProjectSummarySchema, { maxItems: 4096 }),
+    ),
+    checkouts: Type.Optional(
+      Type.Array(CheckoutSummarySchema, { maxItems: 4096 }),
+    ),
+    threads: Type.Optional(Type.Array(ThreadSummarySchema, { maxItems: 4096 })),
+    runs: Type.Optional(Type.Array(RunSummarySchema, { maxItems: 4096 })),
+    usage: Type.Optional(UnknownSchema),
+    unread: Type.Array(NotificationEventSchema, { maxItems: 4096 }),
+  },
+  { additionalProperties: false },
+);
+export type ShellSnapshot = Static<typeof ShellSnapshotSchema>;
+
 /** Messages emitted on the authenticated browser websocket (v1 compatible). */
 const BrowserSnapshotMessageSchema = Type.Object(
   { type: Type.Literal('snapshot'), snapshot: BrowserSnapshotSchema },
@@ -1287,6 +1344,77 @@ export const SessionApiResponseSchema = Type.Object(
   { additionalProperties: false },
 );
 export type SessionApiResponse = Static<typeof SessionApiResponseSchema>;
+
+/** Input for the authoritative session query. `before` is file history only. */
+export const SessionSnapshotRequestSchema = Type.Object(
+  {
+    sessionId: Type.String({
+      minLength: 1,
+      maxLength: 200,
+      pattern: '^[a-zA-Z0-9._-]+$',
+    }),
+    before: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+  },
+  { additionalProperties: false },
+);
+export type SessionSnapshotRequest = Static<
+  typeof SessionSnapshotRequestSchema
+>;
+
+export const SessionActiveOverlaySchema = Type.Object(
+  {
+    runtimeId: Type.Optional(IdentifierSchema),
+    runtimeEpoch: Type.Optional(IdentifierSchema),
+    runtimeSeq: Type.Optional(Type.Integer({ minimum: 0 })),
+    liveState: Type.Optional(RuntimeLiveStateSchema),
+    pendingInteractions: Type.Readonly(
+      Type.Array(InteractionSnapshotSchema, { maxItems: 128 }),
+    ),
+    /** Only in-flight entities are included; terminal history stays in JSONL. */
+    messages: Type.Readonly(
+      Type.Array(NormalizedMessagePayloadSchema, { maxItems: 256 }),
+    ),
+    tools: Type.Readonly(
+      Type.Array(NormalizedToolPayloadSchema, { maxItems: 256 }),
+    ),
+    delegates: Type.Readonly(
+      Type.Array(DelegateLiveRunSchema, { maxItems: 64 }),
+    ),
+    truncated: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+export type SessionActiveOverlay = Static<typeof SessionActiveOverlaySchema>;
+
+/**
+ * Authoritative session response. `completeThroughCursor` is independent of
+ * entriesComplete: the latter describes only the returned history page, while
+ * the former describes whether the live overlay is complete through cursor.
+ */
+export const AuthoritativeSessionSnapshotSchema = Type.Object(
+  {
+    metadata: SessionIndexEntrySchema,
+    entries: Type.Array(UnknownSchema, { maxItems: 2048 }),
+    history: Type.Optional(SessionHistorySchema),
+    entriesComplete: Type.Boolean(),
+    serverId: IdentifierSchema,
+    cursor: Type.Integer({ minimum: 0 }),
+    runtimeEpoch: Type.Optional(IdentifierSchema),
+    runtimeSeq: Type.Optional(Type.Integer({ minimum: 0 })),
+    active: SessionActiveOverlaySchema,
+    completeThroughCursor: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+export type AuthoritativeSessionSnapshot = Static<
+  typeof AuthoritativeSessionSnapshotSchema
+>;
+/** Descriptive aliases used by server and migration consumers. */
+export const SessionRouteSnapshotSchema = AuthoritativeSessionSnapshotSchema;
+export type SessionRouteSnapshot = AuthoritativeSessionSnapshot;
+export const SessionSnapshotResponseV2Schema =
+  AuthoritativeSessionSnapshotSchema;
+export type SessionSnapshotResponseV2 = AuthoritativeSessionSnapshot;
 /** Existing response spelling retained for v1 clients. */
 export const SessionResponseSchema = SessionApiResponseSchema;
 export type SessionResponse = SessionApiResponse;
@@ -1563,6 +1691,13 @@ export const DashboardSnapshotResponseSchema = Type.Object(
 export type DashboardSnapshotResponse = Static<
   typeof DashboardSnapshotResponseSchema
 >;
+
+/** Strict shell query response; bootstrap remains on the compatibility schema. */
+export const ShellSnapshotResponseSchema = Type.Object(
+  { snapshot: ShellSnapshotSchema, cursor: Type.Integer({ minimum: 0 }) },
+  { additionalProperties: false },
+);
+export type ShellSnapshotResponse = Static<typeof ShellSnapshotResponseSchema>;
 
 /**
  * SSE-only snapshot records are separate from event envelopes so a client can
