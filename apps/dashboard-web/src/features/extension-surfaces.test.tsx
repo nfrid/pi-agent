@@ -151,6 +151,15 @@ describe('live extension surface fixtures', () => {
       expect.objectContaining({ id: 'tool-1', text: 'new result' }),
     ]);
     expect(result[0]?.transcriptTruncated).toBe(true);
+
+    const complete = overlayActiveDelegateTranscripts([live], {
+      ...baseline,
+      runs: baseline.runs.map((run) => ({
+        ...run,
+        transcriptTruncated: false,
+      })),
+    });
+    expect(complete[0]?.transcriptTruncated).toBe(false);
   });
 
   it('prefers the current lineage row over the inspected fallback', () => {

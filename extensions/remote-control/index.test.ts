@@ -1801,7 +1801,7 @@ describe('remote-control bridge', () => {
     expect(write).toHaveBeenCalledTimes(2);
   });
 
-  it('streams delegate transcript upserts while compacting routine surface patches', () => {
+  it('streams delegate transcript upserts without repeating unchanged metadata', () => {
     const hub = new LiveSurfaceHub();
     const client = new BridgeClient({
       socketPath: '/unused',
@@ -1813,42 +1813,45 @@ describe('remote-control bridge', () => {
     const socket = new net.Socket();
     const write = vi.spyOn(socket, 'write').mockReturnValue(true);
     Reflect.set(client, 'socket', socket);
-    hub.publish('delegate', [
-      {
-        id: 'delegate.status',
-        rendererId: 'delegate.status',
-        viewModel: {
-          version: 1,
-          statuses: [
-            {
-              id: 'ds-1',
-              runId: 'run-1',
-              lineageId: 'lineage-1',
-              name: 'Worker',
-              kind: 'background',
-              state: 'running',
-              createdAt: 1,
-              allowWrites: false,
-              transcript: [
-                {
-                  id: 'tool-1',
-                  type: 'tool',
-                  label: 'read source.ts',
-                  name: 'read',
-                  status: 'running',
+    const publish = (text?: string) =>
+      hub.publish('delegate', [
+        {
+          id: 'delegate.status',
+          rendererId: 'delegate.status',
+          viewModel: {
+            version: 1,
+            statuses: [
+              {
+                id: 'ds-1',
+                runId: 'run-1',
+                lineageId: 'lineage-1',
+                name: 'Worker',
+                kind: 'background',
+                state: 'running',
+                createdAt: 1,
+                allowWrites: false,
+                transcript: [
+                  {
+                    id: 'tool-1',
+                    type: 'tool',
+                    label: 'read source.ts',
+                    name: 'read',
+                    status: 'running',
+                    ...(text ? { text } : {}),
+                  },
+                ],
+                result: {
+                  kind: 'structured',
+                  status: 'valid',
+                  value: { secret: 'must be omitted' },
                 },
-              ],
-              result: {
-                kind: 'structured',
-                status: 'valid',
-                value: { secret: 'must be omitted' },
               },
-            },
-          ],
+            ],
+          },
         },
-      },
-    ]);
-    const frames = write.mock.calls.map(
+      ]);
+    publish();
+    let frames = write.mock.calls.map(
       (call) =>
         JSON.parse(String(call[0])) as {
           event: Record<string, unknown>;
@@ -1866,12 +1869,28 @@ describe('remote-control bridge', () => {
         ],
       },
     });
+    expect(JSON.stringify(frames[0]?.event)).not.toContain(
+      'transcriptTruncated',
+    );
     expect(frames[1]?.event).toMatchObject({
       type: 'delegate.transcript.updated',
       sessionId: 'session-test',
       lineageId: 'lineage-1',
       runId: 'run-1',
       entry: { id: 'tool-1', status: 'running' },
+    });
+
+    publish('new transcript text');
+    frames = write.mock.calls.map(
+      (call) =>
+        JSON.parse(String(call[0])) as {
+          event: Record<string, unknown>;
+        },
+    );
+    expect(frames).toHaveLength(3);
+    expect(frames[2]?.event).toMatchObject({
+      type: 'delegate.transcript.updated',
+      entry: { id: 'tool-1', text: 'new transcript text' },
     });
     client.stop();
   });
