@@ -13,7 +13,7 @@ import {
 } from './schema';
 
 const DESCRIPTION =
-  'Use this tool for non-interactive commands expected to outlive the current turn, such as servers, watchers, dev processes, and long builds; use ordinary bash for short commands that should finish within the current turn. Each process runs `/bin/bash -c` with the command as supplied and has no stdin, so it must not require input; quote shell syntax for Bash and set a working directory when needed. Processes belong to the current session and are cleaned up when that session shuts down. Output is retained in bounded tails, so inspect recent output rather than expecting an unbounded log. Completion is delivered automatically. When a process settles, its message resumes the agent turn; do not block waiting here.';
+  'Use this tool for non-interactive commands expected to outlive the current turn, such as servers, watchers, dev processes, and long builds; use ordinary bash for short commands that should finish within the current turn. Each process runs `/bin/bash -c` with the command as supplied and has no stdin, so it must not require input; quote shell syntax for Bash and set a working directory when needed. Processes belong to the current session and are cleaned up when that session shuts down. Output is retained in bounded tails, so inspect recent output rather than expecting an unbounded log. Completion is delivered automatically. When a process settles, its message resumes the agent turn.';
 
 function requireText(value: string | undefined, name: string): string {
   const text = value?.trim();
@@ -37,11 +37,8 @@ export function registerBackgroundTool(
     name: 'background',
     label: 'Background Process',
     description: DESCRIPTION,
-    promptSnippet:
-      'Start, inspect, and stop long-running non-interactive Bash commands',
-    promptGuidelines: loadGuidelines(
-      'extensions/background-terminals/instructions.md',
-    ),
+    promptSnippet: 'Run and manage long-running non-interactive Bash commands',
+    promptGuidelines: loadGuidelines('instructions.md', __dirname),
     parameters: Parameters,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const active = getManager();

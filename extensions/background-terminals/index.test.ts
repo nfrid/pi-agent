@@ -15,6 +15,7 @@ interface ThemeLike {
 interface RegisteredTool {
   name: string;
   description: string;
+  promptSnippet?: string;
   promptGuidelines?: string[];
   execute: (
     id: string,
@@ -76,10 +77,12 @@ describe('background terminals extension', () => {
     );
     expect(tool?.description).toContain('/bin/bash -c');
     expect(tool?.description).toContain('no stdin');
+    expect(tool?.description).not.toContain('do not block waiting here');
+    expect(tool?.promptSnippet).toBe(
+      'Run and manage long-running non-interactive Bash commands',
+    );
     expect(tool?.promptGuidelines).toEqual([
-      'Use background for work that is expected to outlive the current turn; use ordinary bash for short commands.',
-      'When a background process is the only remaining dependency, end the turn with one short waiting notice; do not add a recap or poll for it.',
-      'Completion resumes automatically when the background process settles, so continue from that completion rather than asking the user to check it.',
+      'When a background process is the only remaining dependency, end the turn with one short waiting notice; do not recap or poll because completion resumes automatically.',
     ]);
 
     handlers.get('session_start')?.(
