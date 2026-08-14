@@ -37,11 +37,11 @@ Rules:
 
 - Each `.md` file is an independently editable instruction part with a narrow, obvious purpose.
 - Files are loaded by explicit path, not discovered through a registry or recursive directory scan.
-- Markdown is inserted verbatim after trimming outer whitespace. The loader does not generate, summarize, or rewrite it.
+- Canonical agent Markdown is inserted verbatim after trimming outer whitespace. Extension-local guideline files contain only `- ` bullets, which `loadGuidelines` returns as individual prompt guidelines.
 - No frontmatter, JSON, YAML, manifests, IDs, priorities, templating language, or token-budget configuration.
 - Missing required instruction files should fail clearly rather than silently changing agent behavior.
 - Do not add an extra content cache. Canonical agent-policy edits apply on the next turn; extension-owned tool-policy edits apply after Pi reloads the extension.
-- `/prompt-info` reports each loaded source path and its size.
+- `/prompt-info` reports canonical agent instruction sources; extension-local guidelines stay owned and tested with their tools.
 
 Do not move every prompt-adjacent string into Markdown. Use Markdown for meaningful workflow preferences a human is expected to refine: working style, communication policy, delegation judgment, and tool-specific judgment. Keep completion contracts, route-selection policy, short tool descriptions, validation messages, labels, and generated capability facts in TypeScript when they are mechanical and coupled to extension behavior.
 
@@ -52,9 +52,9 @@ The canonical builder should continue to avoid arbitrary `customPrompt` and `app
 Each instruction should have one primary owner:
 
 - `instructions/agent/*.md`: durable global judgment, working style, communication, autonomy, verification, and delegation preference.
-- `instructions/<feature>/*.md`: substantial human-authored feature policy and completion/report contracts.
+- `extensions/<feature>/*instructions.md`: human-authored workflow preferences owned by that extension.
 - `AGENTS.md`: repository-specific conventions and required checks.
-- Tool description: what the tool does and when it is appropriate, ideally one or two sentences.
+- Tool description: detailed mechanics, lifecycle, side effects, and usage context that schemas cannot express cleanly.
 - Tool schema: actions, parameters, defaults, limits, and combinations.
 - Runtime code: hard invariants and safety boundaries.
 - Generated prompt text: current tools, route catalog data, mode, branch/worktree facts, result schema, date, cwd, and other live capabilities.
@@ -95,26 +95,19 @@ Tests must cover:
 - no prose report contract in a structured prompt;
 - no claim that external or shell side effects are isolated.
 
-### 2. Remove background waiting prose
+### 2. Clarify background mechanics and waiting behavior
 
-Delete `WAIT_GUIDANCE` from `extensions/background-terminals/tool.ts`, including both its description and `promptGuidelines` contribution.
+Keep one background tool with a provider-compatible root object schema. Describe every action in the action enum and mark action-specific fields as required in their descriptions; runtime validation remains the enforcement fallback.
 
-Keep the description to the semantic minimum:
+Keep a detailed top-level TypeScript description for shell invocation, no-stdin behavior, session cleanup, bounded output, ordinary-bash usage, and automatic completion. Do not repeat the action catalog there.
 
-```text
-Run long-lived, non-interactive commands such as servers, watchers, and long
-builds. Completion is delivered automatically; use bash for short commands.
-```
-
-Do not add `/wait`, hidden wait markers, replacement waiting commands, or any other waiting protocol. Background completions already trigger the next turn automatically.
-
-Update tests that assert the old wording and retain coverage that completion is delivered automatically.
+Keep one extension-local workflow guideline: when a background process is the only remaining dependency, end the turn with one short waiting notice without a recap or polling. Completion already triggers the next turn; do not add `/wait`, hidden wait markers, or a manual waiting protocol.
 
 ### 3. Add the Markdown instruction surface
 
 Add one small shared helper that accepts an explicit path under the agent directory, reads it, trims outer whitespace, and returns its source path plus exact content for composition and diagnostics. It does not discover files, interpret metadata, cache content, or manage precedence.
 
-Load `instructions/agent/working-style.md` and `instructions/agent/interaction.md` explicitly from `extensions/system-prompt/`.
+Load `instructions/agent/working-style.md`, `interaction.md`, and `tool-use.md` explicitly from `extensions/system-prompt/`.
 
 Render the combined agent policy once in a clearly named section such as:
 
@@ -195,7 +188,7 @@ Review todo, structured result, edit, branch, and background contributions using
 
 For structured result, the structured TypeScript contract plus terminating runtime behavior should own completion. Remove repeated global guidelines that add no judgment.
 
-Do not automatically create Markdown for todo, edit, branch, background, or every other tool. Their remaining human policy is too small to justify extra files unless the cleanup reveals a substantial coherent passage worth maintaining independently.
+Use extension-local Markdown when a tool has genuine human workflow preferences, as todo, ask-user, background, and delegate do. Keep purely mechanical tools in TypeScript rather than creating empty or ceremonial instruction files.
 
 Do not chase a numeric token target. The success criterion is removal of duplication and contradictions while retaining necessary judgment. Implementation code should also remain small: a direct file-read helper and straightforward composition are preferable to generic loaders, registries, or abstractions.
 
@@ -234,7 +227,7 @@ Compare before and after size, but judge the result primarily by:
 
 - no contradictory completion contracts;
 - no false isolation claims;
-- no manual waiting protocol;
+- no `/wait` command or manual waiting protocol;
 - no empty todo noise;
 - human preferences are editable as plain Markdown;
 - generated facts still come from current runtime configuration;
@@ -251,7 +244,7 @@ pnpm run check
 Use small reviewable commits:
 
 1. `fix(delegate): clarify completion and isolation contracts`
-2. `refactor(background): remove manual waiting guidance`
+2. `fix(background): clarify action mechanics and waiting guidance`
 3. `feat(system-prompt): load human instructions from markdown`
 4. `refactor(prompt): remove duplicated tool guidance`
 5. `fix(tasks): omit unused empty todo context`
@@ -280,9 +273,9 @@ Do not add any of the following unless the post-cleanup prompt demonstrates a co
 The work is complete when:
 
 - delegate prompts are truthful and have exactly one completion contract;
-- background tools rely solely on automatic completion delivery;
-- global agent policy and substantial delegation policy are maintained as explicit Markdown files under `instructions/`;
-- hardcoded human judgment moved into those files is concise and no longer duplicated in code;
+- background completion is automatic and an idle parent emits only a short waiting notice;
+- global agent policy lives under `instructions/agent/`, while extension workflow policy lives beside the owning extension;
+- hardcoded human judgment moved into those files is concise and no longer duplicated in mechanical descriptions or schemas;
 - the implementation uses direct composition rather than a generic prompt framework;
 - the most repetitive tool guidance has been removed without losing required behavior;
 - unused empty todo state is absent from model context;

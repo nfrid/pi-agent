@@ -6,80 +6,55 @@ export const WIDGET_KEY = 'background-terminals';
 export const RESULT_MESSAGE_TYPE = 'background-terminal-result';
 export const DEFAULT_TAIL_LINES = 40;
 
-const startParameters = Type.Object(
+export const Parameters = Type.Object(
   {
-    action: StringEnum(['start'] as const, {
+    action: StringEnum(['start', 'peek', 'list', 'stop'] as const, {
       description:
-        'Start a non-interactive Bash process and return its background id.',
+        'start launches a process and returns its id; peek inspects one process and can wait briefly; list shows retained processes and status; stop terminates one or more processes.',
     }),
-    command: Type.String({
-      description: 'Shell command to run with /bin/bash -c.',
-    }),
-    title: Type.String({
-      description: 'Short recognizable label for the process.',
-    }),
-    cwd: Type.Optional(
+    command: Type.Optional(
       Type.String({
-        description: 'Working directory; defaults to the current directory.',
+        description: 'Required for start: shell command run with /bin/bash -c.',
       }),
     ),
-  },
-  { additionalProperties: false },
-);
-
-const peekParameters = Type.Object(
-  {
-    action: StringEnum(['peek'] as const, {
-      description:
-        'Inspect one process, optionally waiting briefly for it to settle.',
-    }),
-    id: Type.String({ description: 'Background process id to inspect.' }),
+    title: Type.Optional(
+      Type.String({
+        description: 'Required for start: short recognizable process label.',
+      }),
+    ),
+    cwd: Type.Optional(
+      Type.String({
+        description:
+          'For start: working directory; defaults to the current directory.',
+      }),
+    ),
+    id: Type.Optional(
+      Type.String({ description: 'Required for peek: process id to inspect.' }),
+    ),
+    ids: Type.Optional(
+      Type.Array(Type.String(), {
+        minItems: 1,
+        description: 'Required for stop: process ids to terminate.',
+      }),
+    ),
     wait_seconds: Type.Optional(
       Type.Integer({
         minimum: 0,
         maximum: 120,
-        description: 'Wait up to this many seconds before inspecting.',
+        description:
+          'For peek: wait up to this many seconds before inspecting.',
       }),
     ),
     tail_lines: Type.Optional(
       Type.Integer({
         minimum: 1,
         maximum: 200,
-        description: 'Recent output lines per stream; default 40.',
+        description: 'For peek: recent output lines per stream; default 40.',
       }),
     ),
   },
   { additionalProperties: false },
 );
-
-const listParameters = Type.Object(
-  {
-    action: StringEnum(['list'] as const, {
-      description: 'List the retained background processes and their status.',
-    }),
-  },
-  { additionalProperties: false },
-);
-
-const stopParameters = Type.Object(
-  {
-    action: StringEnum(['stop'] as const, {
-      description: 'Stop one or more background processes.',
-    }),
-    ids: Type.Array(Type.String(), {
-      minItems: 1,
-      description: 'Background process ids to stop.',
-    }),
-  },
-  { additionalProperties: false },
-);
-
-export const Parameters = Type.Union([
-  startParameters,
-  peekParameters,
-  listParameters,
-  stopParameters,
-]);
 
 export type BackgroundParameters = Static<typeof Parameters>;
 

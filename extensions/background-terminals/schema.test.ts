@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { Parameters } from './schema';
 
 describe('background tool parameters', () => {
-  it('accepts only the fields relevant to each action', () => {
+  it('accepts each action and enforces unconditional limits', () => {
     expect(
       Value.Check(Parameters, {
         action: 'start',
@@ -24,40 +24,30 @@ describe('background tool parameters', () => {
       Value.Check(Parameters, { action: 'stop', ids: ['bg-1', 'bg-2'] }),
     ).toBe(true);
 
-    expect(
-      Value.Check(Parameters, { action: 'start', title: 'missing command' }),
-    ).toBe(false);
-    expect(Value.Check(Parameters, { action: 'peek' })).toBe(false);
     expect(Value.Check(Parameters, { action: 'stop', ids: [] })).toBe(false);
-    expect(
-      Value.Check(Parameters, {
-        action: 'start',
-        command: 'true',
-        title: 'server',
-        id: 'bg-1',
-      }),
-    ).toBe(false);
-    expect(Value.Check(Parameters, { action: 'list', command: 'true' })).toBe(
+    expect(Value.Check(Parameters, { action: 'unknown' })).toBe(false);
+    expect(Value.Check(Parameters, { action: 'list', unsupported: true })).toBe(
       false,
     );
   });
 
-  it('describes the behavior of every discriminated action branch', () => {
-    const branches = (
-      Parameters as {
-        anyOf: Array<{
-          properties: { action: { description?: string } };
-        }>;
-      }
-    ).anyOf;
-    expect(branches).toHaveLength(4);
-    expect(
-      branches.map((branch) => branch.properties.action.description),
-    ).toEqual([
-      expect.stringContaining('Start'),
-      expect.stringContaining('Inspect'),
-      expect.stringContaining('List'),
-      expect.stringContaining('Stop'),
-    ]);
+  it('describes action behavior and conditional requirements', () => {
+    const description = (schema: unknown) =>
+      (schema as { description?: string }).description;
+    const properties = Parameters.properties;
+    expect(description(properties.action)).toContain(
+      'start launches a process',
+    );
+    expect(description(properties.action)).toContain(
+      'peek inspects one process',
+    );
+    expect(description(properties.action)).toContain(
+      'list shows retained processes',
+    );
+    expect(description(properties.action)).toContain('stop terminates');
+    expect(description(properties.command)).toContain('Required for start');
+    expect(description(properties.title)).toContain('Required for start');
+    expect(description(properties.id)).toContain('Required for peek');
+    expect(description(properties.ids)).toContain('Required for stop');
   });
 });
