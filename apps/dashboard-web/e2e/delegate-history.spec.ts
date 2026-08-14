@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { installDashboardBootstrap } from './dashboard-fixtures';
 
 const snapshot = {
   serverId: 'delegate-history-e2e',
@@ -98,12 +99,7 @@ test('shows and inspects a persisted delegate in an offline session', async ({
       );
     };
   });
-  await page.route('**/api/snapshot', (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify(snapshot),
-    }),
-  );
+  await installDashboardBootstrap(page, snapshot);
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );

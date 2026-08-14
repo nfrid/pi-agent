@@ -3,6 +3,7 @@ import {
   dashboardUpdateAvailable,
   dashboardVersion,
   fetchDashboardVersion,
+  reloadDashboard,
   shouldCheckDashboardVersion,
   UPDATE_POLL_INTERVAL_MS,
 } from './pwa-update';
@@ -46,6 +47,56 @@ describe('dashboard PWA updates', () => {
 
     fetcher.mockRejectedValueOnce(new Error('offline'));
     await expect(fetchDashboardVersion(fetcher)).resolves.toBeUndefined();
+  });
+
+  it('reloads through a waiting worker after requesting an update', async () => {
+    const update = vi.fn().mockResolvedValue(undefined);
+    const postMessage = vi.fn();
+    const reload = vi.fn();
+    vi.stubGlobal('navigator', {
+      serviceWorker: {
+        getRegistration: vi.fn().mockResolvedValue({
+          update,
+          waiting: { postMessage },
+        }),
+      },
+    });
+    vi.stubGlobal('window', { location: { reload } });
+    try {
+      await reloadDashboard();
+      expect(update).toHaveBeenCalledOnce();
+      expect(postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' });
+      expect(reload).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('reloads without a worker and when an update request fails', async () => {
+    const reload = vi.fn();
+    const update = vi.fn().mockRejectedValue(new Error('offline'));
+    const postMessage = vi.fn();
+    vi.stubGlobal('navigator', {
+      serviceWorker: {
+        getRegistration: vi.fn().mockResolvedValue({
+          update,
+          waiting: undefined,
+        }),
+      },
+    });
+    vi.stubGlobal('window', { location: { reload } });
+    try {
+      await reloadDashboard();
+      expect(update).toHaveBeenCalledOnce();
+      expect(postMessage).not.toHaveBeenCalled();
+      expect(reload).toHaveBeenCalledOnce();
+
+      vi.stubGlobal('navigator', { serviceWorker: undefined });
+      await reloadDashboard();
+      expect(reload).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('shares overlapping focus, visibility, and interval checks', async () => {

@@ -1,4 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
+import { installDashboardBootstrap } from './dashboard-fixtures';
 
 const transcriptScroll = (page: Page) =>
   page.locator('.session-transcript-scroll');
@@ -61,12 +62,7 @@ test('aborts older history when navigating away from a session', async ({
   const olderRequestRelease = new Promise<void>((resolve) => {
     releaseOlder = resolve;
   });
-  await page.route('**/api/snapshot', (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify(snapshot),
-    }),
-  );
+  await installDashboardBootstrap(page, snapshot);
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
@@ -153,12 +149,7 @@ test('switching chats establishes the new transcript tail', async ({
         content: `${id} message ${index} ${'transcript detail '.repeat(8)}`,
       },
     }));
-  await page.route('**/api/snapshot', (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({ ...snapshot, sessions }),
-    }),
-  );
+  await installDashboardBootstrap(page, { ...snapshot, sessions });
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );

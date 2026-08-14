@@ -16,7 +16,10 @@ import {
   type QueryClient,
   queryOptions,
 } from '@tanstack/react-query';
-import type { DashboardHttpClient } from './http-client.js';
+import {
+  type DashboardHttpClient,
+  dashboardHttpErrorKind,
+} from './http-client.js';
 
 export const dashboardQueryKeys = {
   all: ['dashboard'] as const,
@@ -88,6 +91,8 @@ export function snapshotRequestGeneration(
 }
 
 const networkRetry = (failureCount: number, error: unknown): boolean => {
+  const kind = dashboardHttpErrorKind(error);
+  if (kind === 'authentication' || kind === 'protocol-mismatch') return false;
   const status =
     error && typeof error === 'object' && 'status' in error
       ? (error as { status?: unknown }).status
