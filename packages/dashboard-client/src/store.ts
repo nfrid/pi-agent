@@ -1076,17 +1076,9 @@ export class DashboardLiveStore {
     const sessionResponse = response as ClientSessionApiResponse & {
       __dashboardHistorical?: boolean;
     };
-    if (!sessionResponse.__dashboardHistorical) {
-      const requestOrder = sessionResponse[SESSION_REQUEST_ORDER];
-      if (requestOrder !== undefined) {
-        const accepted = this.latestSessionRequestOrders.get(
-          response.metadata.id,
-        );
-        if (accepted !== undefined && requestOrder <= accepted)
-          return undefined;
-        this.latestSessionRequestOrders.set(response.metadata.id, requestOrder);
-      }
-    }
+    const requestOrder = sessionResponse.__dashboardHistorical
+      ? undefined
+      : sessionResponse[SESSION_REQUEST_ORDER];
     if (
       response.serverId !== undefined &&
       this.state.serverId !== undefined &&
@@ -1102,6 +1094,12 @@ export class DashboardLiveStore {
       )
     )
       return undefined;
+    if (requestOrder !== undefined) {
+      const accepted = this.latestSessionRequestOrders.get(
+        response.metadata.id,
+      );
+      if (accepted !== undefined && requestOrder < accepted) return undefined;
+    }
     // A session response can arrive while older records from the same SSE
     // replay are still pending. Its entries are authoritative, but transport
     // ordering is covered only through the cursor the stream has accepted.
@@ -1391,6 +1389,8 @@ export class DashboardLiveStore {
       };
     }
     this.publish(nextState);
+    if (requestOrder !== undefined)
+      this.latestSessionRequestOrders.set(response.metadata.id, requestOrder);
     return projection;
   }
 
