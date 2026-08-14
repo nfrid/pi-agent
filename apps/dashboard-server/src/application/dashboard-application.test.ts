@@ -93,7 +93,7 @@ describe('public runtime event projection', () => {
 
   it('strips transcript entries from all session-bearing public events', () => {
     const events: BridgeEvent[] = [
-      { type: 'runtime.hello', protocolVersion: 1, snapshot: runtime },
+      { type: 'runtime.hello', protocolVersion: 2, snapshot: runtime },
       {
         type: 'runtime.stateChanged',
         state: 'working',

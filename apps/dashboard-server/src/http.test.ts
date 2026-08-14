@@ -472,7 +472,7 @@ describe('dashboard HTTP boundary', () => {
       seq: 1,
       event: {
         type: 'runtime.hello' as const,
-        protocolVersion: 1 as const,
+        protocolVersion: 2 as const,
         snapshot: {
           runtimeId: 'lifecycle-runtime',
           ownership: 'external' as const,
@@ -967,7 +967,7 @@ describe('dashboard HTTP boundary', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 1,
+          protocolVersion: 2,
           snapshot: {
             runtimeId: 'startup-runtime',
             ownership: 'external',
@@ -1095,7 +1095,7 @@ describe('dashboard HTTP boundary', () => {
     });
     const hello = {
       type: 'runtime.hello' as const,
-      protocolVersion: 1,
+      protocolVersion: 2,
       snapshot: {
         runtimeId: 'revision-runtime',
         ownership: 'external' as const,
@@ -1242,7 +1242,7 @@ describe('dashboard HTTP boundary', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 1,
+          protocolVersion: 2,
           snapshot: {
             runtimeId: 'external-runtime',
             ownership: 'external',
@@ -1390,7 +1390,7 @@ describe('dashboard HTTP boundary', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 1,
+          protocolVersion: 2,
           snapshot: {
             runtimeId: 'working-runtime',
             ownership: 'external',
@@ -1495,7 +1495,7 @@ describe('dashboard HTTP boundary', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 1,
+          protocolVersion: 2,
           snapshot: {
             runtimeId: 'idle-invalidation-runtime',
             ownership: 'external',
@@ -1632,7 +1632,7 @@ describe('dashboard HTTP boundary', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 1,
+          protocolVersion: 2,
           snapshot: {
             runtimeId: 'authority-runtime',
             ownership: 'external',
@@ -1716,7 +1716,7 @@ describe('dashboard HTTP boundary', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 1,
+          protocolVersion: 2,
           snapshot: {
             runtimeId: 'stale-runtime',
             ownership: 'external',
@@ -1825,7 +1825,7 @@ describe('dashboard HTTP boundary', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 1,
+          protocolVersion: 2,
           snapshot: {
             runtimeId: 'sparse-runtime',
             ownership: 'external',
@@ -1951,7 +1951,7 @@ describe('dashboard HTTP boundary', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 1,
+          protocolVersion: 2,
           snapshot: {
             runtimeId: 'late-runtime',
             ownership: 'external',
@@ -2003,7 +2003,7 @@ describe('dashboard HTTP boundary', () => {
         seq: 1,
         event: {
           type: 'runtime.hello',
-          protocolVersion: 1,
+          protocolVersion: 2,
           snapshot: {
             runtimeId: 'image-runtime',
             ownership: 'external',

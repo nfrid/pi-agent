@@ -1009,7 +1009,7 @@ export class DashboardApplication {
       };
       return {
         type: 'event',
-        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+        event: { type: 'runtime.hello', protocolVersion: 2, snapshot },
         runtimeId: snapshot.runtimeId,
         sessionId: snapshot.session.id,
         ...provenance,

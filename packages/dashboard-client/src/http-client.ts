@@ -1,5 +1,6 @@
 import {
   type ActiveDelegateTranscriptBaseline,
+  type AuthoritativeSessionSnapshot,
   type BrowserSnapshot,
   type CancelCommand,
   type Checkout,
@@ -24,11 +25,12 @@ import {
   tryParseActiveDelegateTranscriptBaseline,
   tryParseBrowserSnapshot,
   tryParseComposerCommandCatalogue,
-  tryParseDashboardSnapshotResponse,
+  tryParseShellSnapshotResponse,
   tryParseDashboardStreamMessage,
   tryParseDelegateHistoryResponse,
   tryParseDelegateHistoryRunDetailResponse,
   tryParseProtocolInfo,
+  tryParseAuthoritativeSessionSnapshot,
   tryParseSessionApiResponse,
 } from '@pi-dashboard/protocol';
 import {
@@ -234,6 +236,8 @@ export function asBrowserSnapshot(value: unknown): BrowserSnapshot | undefined {
 export function asSessionResponse(
   value: unknown,
 ): SessionApiResponse | undefined {
+  // This compatibility facade is retained for extension consumers; production
+  // session hydration uses the authoritative tRPC response below.
   return tryParseSessionApiResponse(value);
 }
 
@@ -418,7 +422,7 @@ export class DashboardHttpClient {
   snapshot(): Promise<BrowserSnapshot> {
     if (this.snapshotInFlight) return this.snapshotInFlight;
     const request = this.ensureEndpoint(true).then(({ baseUrl }) =>
-      this.bootstrapAt(baseUrl),
+      this.shellSnapshotAt(baseUrl),
     );
     this.snapshotInFlight = request;
     // Keep only the in-flight request. Failed and successful reads must both
@@ -436,7 +440,7 @@ export class DashboardHttpClient {
     return request;
   }
 
-  private async bootstrapAt(baseUrl: string): Promise<BrowserSnapshot> {
+  private async shellSnapshotAt(baseUrl: string): Promise<BrowserSnapshot> {
     const client = createDashboardTrpcClient({
       baseUrl,
       fetch: this.fetchImpl,
@@ -444,16 +448,16 @@ export class DashboardHttpClient {
     });
     let value: unknown;
     try {
-      value = await client.bootstrap.query({
+      value = await client.shellSnapshot.query({
         protocolVersion: PROTOCOL_VERSION,
       });
     } catch (cause) {
       throw dashboardErrorFromTrpc(cause);
     }
-    const response = tryParseDashboardSnapshotResponse(value);
-    if (!response || response.cursor !== response.snapshot.cursor)
+    const response = tryParseShellSnapshotResponse(value);
+    if (!response)
       throw malformedOutput(
-        'Dashboard returned an invalid bootstrap response.',
+        'Dashboard returned an invalid shell snapshot response.',
         value,
       );
     return response.snapshot;
@@ -464,16 +468,27 @@ export class DashboardHttpClient {
     signal?: AbortSignal,
     before?: string,
   ): Promise<SessionApiResponse> {
-    const query =
-      before === undefined ? '' : `?before=${encodeURIComponent(before)}`;
-    const value = await this.request<unknown>(
-      `/api/sessions/${encodeURIComponent(id)}${query}`,
-      signal ? { signal } : {},
-    );
-    const response = tryParseSessionApiResponse(value);
+    const client = createDashboardTrpcClient({
+      baseUrl: (await this.ensureEndpoint()).baseUrl,
+      fetch: this.fetchImpl,
+      tokenStore: this.tokenStore,
+    });
+    let value: unknown;
+    try {
+      value = await client.sessionSnapshot.query(
+        { sessionId: id, ...(before === undefined ? {} : { before }) },
+        signal ? { signal } : {},
+      );
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
+    }
+    const response = tryParseAuthoritativeSessionSnapshot(value);
     if (!response)
-      throw malformedOutput('Dashboard returned invalid session data.', value);
-    return response;
+      throw malformedOutput(
+        'Dashboard returned invalid authoritative session data.',
+        value,
+      );
+    return response as SessionApiResponse;
   }
 
   async sessionBefore(

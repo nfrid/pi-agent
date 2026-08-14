@@ -110,12 +110,11 @@ export {
 } from './orchestration-parsers.js';
 export {
   parseAuthoritativeSessionSnapshot,
-  parseBootstrapRequest,
+  parseShellSnapshotRequest,
   parseBrowserSnapshot,
   parseComposerCommandCatalogue,
   parseDashboardEventEnvelope,
   parseDashboardMessage,
-  parseDashboardSnapshotResponse,
   parseDashboardStreamMessage,
   parseDelegateHistoryDetailResponse,
   parseDelegateHistoryResponse,
@@ -130,12 +129,11 @@ export {
   parseShellSnapshotResponse,
   parseStartRuntimeRequest,
   tryParseAuthoritativeSessionSnapshot,
-  tryParseBootstrapRequest,
+  tryParseShellSnapshotRequest,
   tryParseBrowserSnapshot,
   tryParseComposerCommandCatalogue,
   tryParseDashboardEventEnvelope,
   tryParseDashboardMessage,
-  tryParseDashboardSnapshotResponse,
   tryParseDashboardStreamMessage,
   tryParseDelegateHistoryDetailResponse,
   tryParseDelegateHistoryResponse,
@@ -155,7 +153,7 @@ export {
 } from './parsers.js';
 export type {
   AuthoritativeSessionSnapshot,
-  BootstrapRequest,
+  ShellSnapshotRequest,
   BridgeEventEnvelope,
   BrowserMessage,
   BrowserSnapshot,
@@ -166,7 +164,6 @@ export type {
   DashboardEventEnvelope,
   DashboardMessage,
   DashboardSessionIndexStreamRecord,
-  DashboardSnapshotResponse,
   DashboardSnapshotStream,
   DashboardStreamMessage,
   DelegateHistoryDetailResponse,
@@ -201,7 +198,7 @@ export type {
 } from './schemas.js';
 export {
   AuthoritativeSessionSnapshotSchema,
-  BootstrapRequestSchema,
+  ShellSnapshotRequestSchema,
   BridgeEventEnvelopeSchema,
   BrowserMessageSchema,
   BrowserSnapshotSchema,
@@ -215,7 +212,6 @@ export {
   DashboardMessageSchema,
   DashboardSessionIndexStreamRecordSchema,
   DashboardSessionIndexStreamSchema,
-  DashboardSnapshotResponseSchema,
   DashboardSnapshotStreamSchema,
   DashboardStreamMessageSchema,
   DelegateHistoryDetailResponseSchema,

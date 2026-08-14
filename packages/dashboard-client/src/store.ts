@@ -8,6 +8,7 @@ import {
   type TranscriptProjection,
 } from '@pi-dashboard/domain';
 import {
+  type AuthoritativeSessionSnapshot,
   type BrowserSnapshot,
   type CheckoutSummary,
   type DashboardEventEnvelope,
@@ -1133,6 +1134,47 @@ export class DashboardLiveStore {
         ? {}
         : { runtimeSeq: baselineRuntimeSeq }),
     });
+    // Authoritative session snapshots carry the bounded active tail separately
+    // from persisted history. Feed it through the same transcript reducer as
+    // SSE events so streaming messages/tools keep stable identities and a
+    // persisted terminal replacement naturally wins without duplication.
+    const active = (
+      response as SessionApiResponse & {
+        active?: AuthoritativeSessionSnapshot['active'];
+      }
+    ).active;
+    const activeEpoch = active?.runtimeEpoch ?? response.runtimeEpoch;
+    const activeIsCurrent =
+      active !== undefined &&
+      (!currentProjection ||
+        response.cursor === undefined ||
+        response.cursor >= currentProjection.lastCursor) &&
+      (activeEpoch === undefined ||
+        currentProjection?.runtimeEpoch === undefined ||
+        activeEpoch === currentProjection.runtimeEpoch) &&
+      (active?.runtimeSeq === undefined ||
+        currentProjection?.runtimeEpoch !== activeEpoch ||
+        currentProjection.lastRuntimeSeq < active.runtimeSeq);
+    if (activeIsCurrent && active) {
+      const reducerInput = (event: unknown) =>
+        ({
+          event,
+          runtimeEpoch: activeEpoch,
+          sessionId: response.metadata.id,
+        }) as never;
+      for (const message of active.messages)
+        projection = reduceTranscriptEvent(projection, reducerInput({
+          type: 'message.updated',
+          sessionId: response.metadata.id,
+          message,
+        }));
+      for (const tool of active.tools)
+        projection = reduceTranscriptEvent(projection, reducerInput({
+          type: 'tool.updated',
+          sessionId: response.metadata.id,
+          tool,
+        }));
+    }
     const canonicalLiveMessageIds = persistedLiveMessageIds(
       projection,
       sessionEvents,
@@ -1254,6 +1296,70 @@ export class DashboardLiveStore {
       response.metadata.id,
       projection,
     );
+    // Keep pending questions and delegate status in the existing runtime
+    // projection. Historical pages intentionally carry an empty active
+    // overlay, so they cannot overwrite live runtime state.
+    const activeRuntimeId =
+      active?.runtimeId ?? response.metadata.activeRuntimeId;
+    const activeRuntime = activeRuntimeId
+      ? nextState.runtimesById[activeRuntimeId]
+      : undefined;
+    const activeRuntimeOrdering = activeRuntimeId
+      ? this.runtimeReducerStates.get(activeRuntimeId)
+      : undefined;
+    const runtimeOverlayAccepted =
+      activeIsCurrent &&
+      active !== undefined &&
+      activeRuntime !== undefined &&
+      (activeRuntimeOrdering === undefined ||
+        (activeRuntimeOrdering.lastCursor <= (response.cursor ?? 0) &&
+          (active.runtimeEpoch === undefined ||
+            activeRuntimeOrdering.runtimeEpoch === undefined ||
+            active.runtimeEpoch === activeRuntimeOrdering.runtimeEpoch) &&
+          (active.runtimeSeq === undefined ||
+            activeRuntimeOrdering.runtimeEpoch !== activeEpoch ||
+            activeRuntimeOrdering.lastRuntimeSeq < active.runtimeSeq)));
+    if (runtimeOverlayAccepted && activeRuntime && active) {
+      const delegateSurface = activeRuntime.extensionSurfaces?.find(
+        (surface) => surface.rendererId === 'delegate.status',
+      );
+      const delegateStatuses = active.delegates.map((run) => ({
+        id: run.runId,
+        ...run,
+      }));
+      const extensionSurfaces: RuntimeSnapshot['extensionSurfaces'] =
+        activeRuntime.extensionSurfaces
+          ? activeRuntime.extensionSurfaces.map((surface) =>
+              surface !== delegateSurface
+                ? surface
+                : {
+                    ...surface,
+                    viewModel: { version: 1, statuses: delegateStatuses },
+                  },
+            )
+          : active.delegates.length > 0
+            ? [
+                {
+                  id: 'delegate.status',
+                  rendererId: 'delegate.status',
+                  placement: 'main' as const,
+                  viewModel: { version: 1, statuses: delegateStatuses },
+                } as NonNullable<RuntimeSnapshot['extensionSurfaces']>[number],
+              ]
+            : undefined;
+      const projectedRuntime = {
+        ...activeRuntime,
+        pendingInteractions: [...active.pendingInteractions],
+        ...(extensionSurfaces === undefined ? {} : { extensionSurfaces }),
+      };
+      nextState = {
+        ...nextState,
+        runtimesById: {
+          ...nextState.runtimesById,
+          [activeRuntime.runtimeId]: projectedRuntime,
+        },
+      };
+    }
     this.publish(nextState);
     return projection;
   }

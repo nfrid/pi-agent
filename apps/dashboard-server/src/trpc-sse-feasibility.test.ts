@@ -1,7 +1,7 @@
 import { Writable } from 'node:stream';
 import {
   type BrowserSnapshotSchema,
-  DashboardSnapshotResponseSchema,
+  ShellSnapshotResponseSchema,
   DashboardStreamMessageSchema,
   parseDashboardStreamMessage,
   parseSchema,
@@ -370,7 +370,7 @@ const appRouter = t.router({
       parseSchema(SessionRenameRequestSchema, value, 'status input'),
     )
     .output((value: unknown) =>
-      parseSchema(DashboardSnapshotResponseSchema, value, 'status output'),
+      parseSchema(ShellSnapshotResponseSchema, value, 'status output'),
     )
     .query(({ input }) => ({
       snapshot: snapshot('g1', 'shell', 0),

@@ -26,7 +26,6 @@ function context(): DashboardRouteContext {
     refreshWorkspaces: async () => [],
     composerCommands: async () => ({ commands: [] }),
     usage: async () => ({ usage: null }),
-    readSession: async () => ({ entries: [], metadata: { id: 's' } }),
     readActiveDelegateTranscripts: async (id) => ({
       version: 1,
       serverId: 'server',

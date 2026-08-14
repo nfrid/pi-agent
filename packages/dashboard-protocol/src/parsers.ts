@@ -16,8 +16,8 @@ import {
   ActiveDelegateTranscriptBaselineSchema,
   type AuthoritativeSessionSnapshot,
   AuthoritativeSessionSnapshotSchema,
-  type BootstrapRequest,
-  BootstrapRequestSchema,
+  type ShellSnapshotRequest,
+  ShellSnapshotRequestSchema,
   type BridgeCommand,
   BridgeCommandSchema,
   type BridgeEvent,
@@ -34,8 +34,6 @@ import {
   DashboardEventEnvelopeSchema,
   type DashboardMessage,
   DashboardMessageSchema,
-  type DashboardSnapshotResponse,
-  DashboardSnapshotResponseSchema,
   type DashboardStreamMessage,
   DashboardStreamMessageSchema,
   type DelegateHistoryResponse,
@@ -86,21 +84,6 @@ import {
 export function parseProtocolInfo(value: unknown): ProtocolInfo {
   return parseSchema(ProtocolInfoSchema, value, 'protocol info');
 }
-export function parseDashboardSnapshotResponse(
-  value: unknown,
-): DashboardSnapshotResponse {
-  return parseSchema(
-    DashboardSnapshotResponseSchema,
-    value,
-    'dashboard snapshot response',
-  );
-}
-export function tryParseDashboardSnapshotResponse(
-  value: unknown,
-): DashboardSnapshotResponse | undefined {
-  return tryParseSchema(DashboardSnapshotResponseSchema, value);
-}
-
 function assertShellHasNoTranscript(snapshot: ShellSnapshot): void {
   for (const runtime of snapshot.runtimes)
     if (runtime.session.entries.length !== 0)
@@ -190,13 +173,19 @@ export const tryParseSessionSnapshotResponseV2 =
 export function tryParseProtocolInfo(value: unknown): ProtocolInfo | undefined {
   return tryParseSchema(ProtocolInfoSchema, value);
 }
-export function parseBootstrapRequest(value: unknown): BootstrapRequest {
-  return parseSchema(BootstrapRequestSchema, value, 'bootstrap request');
-}
-export function tryParseBootstrapRequest(
+export function parseShellSnapshotRequest(
   value: unknown,
-): BootstrapRequest | undefined {
-  return tryParseSchema(BootstrapRequestSchema, value);
+): ShellSnapshotRequest {
+  return parseSchema(
+    ShellSnapshotRequestSchema,
+    value,
+    'shell snapshot request',
+  );
+}
+export function tryParseShellSnapshotRequest(
+  value: unknown,
+): ShellSnapshotRequest | undefined {
+  return tryParseSchema(ShellSnapshotRequestSchema, value);
 }
 
 function validateImages(value: unknown): BridgeImageAttachment[] {

@@ -23,9 +23,9 @@ function trpcResponse(value: unknown): Response {
 
 function protocolInfoResponse(): Response {
   return trpcResponse({
-    protocolVersion: 1,
+    protocolVersion: 2,
     serverId: validSnapshot.serverId,
-    capabilities: { bootstrap: true },
+    capabilities: { shellSnapshot: true, sessionSnapshot: true },
   });
 }
 
@@ -143,14 +143,22 @@ describe('DashboardHttpClient command requests', () => {
   it('requests an older session page with an encoded opaque cursor', async () => {
     const fetch = vi.fn(
       async () =>
-        new Response(
-          JSON.stringify({
-            metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
-            entries: [],
-            history: { version: 1, start: 0, end: 1, hasOlder: false },
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
+        trpcResponse({
+          metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
+          entries: [],
+          history: { version: 1, start: 0, end: 0, hasOlder: false },
+          entriesComplete: true,
+          serverId: 'server-1',
+          cursor: 1,
+          active: {
+            pendingInteractions: [],
+            messages: [],
+            tools: [],
+            delegates: [],
+            truncated: false,
+          },
+          completeThroughCursor: true,
+        }),
     );
     const client = new DashboardHttpClient({
       fetch,
@@ -162,7 +170,9 @@ describe('DashboardHttpClient command requests', () => {
     });
     await client.sessionBefore('session-1', 'opaque token');
     const calls = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
-    expect(calls[0]?.[0]).toBe('/api/sessions/session-1?before=opaque%20token');
+    expect(calls[0]?.[0]).toBe(
+      '/trpc/sessionSnapshot?input=%7B%22sessionId%22%3A%22session-1%22%2C%22before%22%3A%22opaque%20token%22%7D',
+    );
   });
 
   it('fetches and validates the active delegate transcript baseline', async () => {
@@ -446,7 +456,7 @@ describe('DashboardHttpClient snapshot requests', () => {
     await expect(client.snapshot()).resolves.toEqual(validSnapshot);
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
       '/trpc/protocolInfo',
-      '/trpc/bootstrap?input=%7B%22protocolVersion%22%3A1%7D',
+      '/trpc/shellSnapshot?input=%7B%22protocolVersion%22%3A2%7D',
     ]);
 
     const invalid = new DashboardHttpClient({
@@ -597,7 +607,7 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
       '/lan/trpc/protocolInfo',
       '/base/trpc/protocolInfo',
-      '/base/trpc/bootstrap?input=%7B%22protocolVersion%22%3A1%7D',
+      '/base/trpc/shellSnapshot?input=%7B%22protocolVersion%22%3A2%7D',
     ]);
   });
 
@@ -620,7 +630,7 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
       '/lan/trpc/protocolInfo',
       '/base/trpc/protocolInfo',
-      '/base/trpc/bootstrap?input=%7B%22protocolVersion%22%3A1%7D',
+      '/base/trpc/shellSnapshot?input=%7B%22protocolVersion%22%3A2%7D',
     ]);
   });
 
@@ -679,9 +689,9 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     const fetch = vi.fn(async (input: RequestInfo | URL) =>
       String(input).endsWith('/protocolInfo')
         ? trpcResponse({
-            protocolVersion: 2,
+            protocolVersion: 1,
             serverId: 'old-generation',
-            capabilities: { bootstrap: true },
+            capabilities: { shellSnapshot: true, sessionSnapshot: true },
           })
         : snapshotResponse(),
     );
@@ -695,8 +705,8 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
       DashboardProtocolMismatchError,
     );
     await expect(client.snapshot()).rejects.toMatchObject({
-      expected: 1,
-      actual: 2,
+      expected: 2,
+      actual: 1,
       serverId: 'old-generation',
       code: 'protocol-mismatch',
       kind: 'protocol-mismatch',
@@ -710,9 +720,9 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     const fetch = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).endsWith('/protocolInfo'))
         return trpcResponse({
-          protocolVersion: 2,
+          protocolVersion: 1,
           serverId: 'incompatible-generation',
-          capabilities: { bootstrap: true },
+          capabilities: { shellSnapshot: true, sessionSnapshot: true },
         });
       throw new Error('bootstrap must not be called');
     });
@@ -723,8 +733,8 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     });
     const error = await client.snapshot().catch((cause) => cause);
     expect(error).toMatchObject({
-      expected: 1,
-      actual: 2,
+      expected: 2,
+      actual: 1,
       serverId: 'incompatible-generation',
       code: 'protocol-mismatch',
     });

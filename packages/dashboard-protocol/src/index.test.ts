@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ActiveDelegateTranscriptBaselineSchema,
-  BootstrapRequestSchema,
+  ShellSnapshotRequestSchema,
   ComposerCommandCatalogueSchema,
   DASHBOARD_SUPPORTED_BUILTIN_COMMANDS,
   deriveSessionTitle,
@@ -17,7 +17,7 @@ import {
   ProtocolInfoSchema,
   parseActiveDelegateTranscriptBaseline,
   parseAuthoritativeSessionSnapshot,
-  parseBootstrapRequest,
+  parseShellSnapshotRequest,
   parseBridgeCommand,
   parseBridgeEvent,
   parseComposerCommandCatalogue,
@@ -47,25 +47,32 @@ import {
 describe('dashboard protocol', () => {
   it('negotiates strict protocol information and bootstrap requests', () => {
     const info = parseProtocolInfo({
-      protocolVersion: 1,
+      protocolVersion: 2,
       serverId: 'generation-1',
-      capabilities: { bootstrap: true },
+      capabilities: { shellSnapshot: true, sessionSnapshot: true },
     });
-    expect(info.capabilities.bootstrap).toBe(true);
-    expect(parseBootstrapRequest({ protocolVersion: 1 })).toEqual({
-      protocolVersion: 1,
+    expect(info.capabilities).toEqual({
+      shellSnapshot: true,
+      sessionSnapshot: true,
+    });
+    expect(parseShellSnapshotRequest({ protocolVersion: 2 })).toEqual({
+      protocolVersion: 2,
     });
     expect(ProtocolInfoSchema).toBeDefined();
-    expect(BootstrapRequestSchema).toBeDefined();
+    expect(ShellSnapshotRequestSchema).toBeDefined();
     expect(() =>
       parseProtocolInfo({
         ...info,
-        capabilities: { bootstrap: true, extra: true },
+        capabilities: {
+          shellSnapshot: true,
+          sessionSnapshot: true,
+          extra: true,
+        },
       }),
     ).toThrow();
-    expect(() => parseBootstrapRequest({ protocolVersion: '1' })).toThrow();
+    expect(() => parseShellSnapshotRequest({ protocolVersion: '1' })).toThrow();
     expect(() =>
-      parseBootstrapRequest({ protocolVersion: 1, extra: true }),
+      parseShellSnapshotRequest({ protocolVersion: 2, extra: true }),
     ).toThrow();
   });
 
@@ -608,7 +615,7 @@ describe('dashboard protocol', () => {
     expect(
       isBridgeEvent({
         type: 'runtime.hello',
-        protocolVersion: 1,
+        protocolVersion: 2,
         capabilities: { heartbeat: true },
         snapshot: helloSnapshot,
       }),
@@ -616,7 +623,7 @@ describe('dashboard protocol', () => {
     expect(
       isBridgeEvent({
         type: 'runtime.hello',
-        protocolVersion: 1,
+        protocolVersion: 2,
         capabilities: { heartbeat: false },
         snapshot: helloSnapshot,
       }),
@@ -624,7 +631,7 @@ describe('dashboard protocol', () => {
     expect(
       isBridgeEvent({
         type: 'runtime.hello',
-        protocolVersion: 1,
+        protocolVersion: 2,
         snapshot: { runtimeId: 'r', pid: 1 },
       }),
     ).toBe(false);

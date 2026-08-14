@@ -14,19 +14,19 @@ const snapshot = {
 test('blocks an incompatible browser shell before auth or routing', async ({
   page,
 }) => {
-  let bootstrapRequests = 0;
+  let shellSnapshotRequests = 0;
   page.on('request', (request) => {
-    if (new URL(request.url()).pathname.endsWith('/trpc/bootstrap'))
-      bootstrapRequests += 1;
+    if (new URL(request.url()).pathname.endsWith('/trpc/shellSnapshot'))
+      shellSnapshotRequests += 1;
   });
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
   await installDashboardBootstrap(page, snapshot, {
     protocolInfo: {
-      protocolVersion: 2,
+      protocolVersion: 1,
       serverId: snapshot.serverId,
-      capabilities: { bootstrap: true },
+      capabilities: { shellSnapshot: true, sessionSnapshot: true },
     },
   });
 
@@ -46,5 +46,5 @@ test('blocks an incompatible browser shell before auth or routing', async ({
   await expect(
     page.getByRole('heading', { name: 'No thread selected' }),
   ).toHaveCount(0);
-  expect(bootstrapRequests).toBe(0);
+  expect(shellSnapshotRequests).toBe(0);
 });

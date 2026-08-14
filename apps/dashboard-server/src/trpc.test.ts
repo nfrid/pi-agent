@@ -1,7 +1,7 @@
 import {
   AuthoritativeSessionSnapshotSchema,
-  DashboardSnapshotResponseSchema,
-  parseBootstrapRequest,
+  ShellSnapshotResponseSchema,
+  parseShellSnapshotRequest,
   parseProtocolInfo,
   tryParseSchema,
 } from '@pi-dashboard/protocol';
@@ -13,8 +13,8 @@ import { toDashboardTrpcError } from './trpc.js';
 const apps: ReturnType<typeof Fastify>[] = [];
 const TOKEN = 'trpc-test-token';
 const ORIGIN = 'http://dashboard.test';
-const RAW_BOOTSTRAP_URL =
-  '/trpc/bootstrap?input=%7B%22protocolVersion%22%3A1%7D';
+const RAW_SHELL_URL =
+  '/trpc/shellSnapshot?input=%7B%22protocolVersion%22%3A2%7D';
 
 function snapshot() {
   return {
@@ -38,7 +38,6 @@ function context(): DashboardRouteContext {
     refreshWorkspaces: async () => [],
     composerCommands: async () => ({ commands: [] }),
     usage: async () => ({ usage: null }),
-    readSession: async () => ({ entries: [], metadata: { id: 's' } }),
     sessionSnapshot: async (sessionId, before) => ({
       metadata: {
         id: sessionId,
@@ -122,7 +121,7 @@ function input(value: unknown): string {
 }
 
 describe('dashboard tRPC boundary', () => {
-  it('serves authenticated protocolInfo and the production raw GET bootstrap shape', async () => {
+  it('serves authenticated protocol-v2 info and the production shell shape', async () => {
     const app = Fastify();
     apps.push(app);
     await app.register(dashboardRoutes, { context: context() });
@@ -136,25 +135,32 @@ describe('dashboard tRPC boundary', () => {
     expect(infoResponse.statusCode).toBe(200);
     const info = parseProtocolInfo(infoResponse.json().result.data);
     expect(info.serverId).toBe(snapshot().serverId);
-    expect(info.capabilities).toEqual({ bootstrap: true });
+    expect(info.capabilities).toEqual({
+      shellSnapshot: true,
+      sessionSnapshot: true,
+    });
     expect(infoResponse.headers['cache-control']).toBe('no-store');
     expect(infoResponse.headers['access-control-allow-origin']).toBe(ORIGIN);
 
-    const bootstrapResponse = await app.inject({
+    const shellResponse = await app.inject({
       method: 'GET',
-      url: RAW_BOOTSTRAP_URL,
+      url: RAW_SHELL_URL,
       headers: authHeaders(),
     });
-    expect(bootstrapResponse.statusCode).toBe(200);
-    const bootstrap = bootstrapResponse.json().result.data;
-    expect(tryParseSchema(DashboardSnapshotResponseSchema, bootstrap)).toEqual(
-      bootstrap,
-    );
-    expect(bootstrap.snapshot.serverId).toBe(info.serverId);
-    expect(bootstrap.cursor).toBe(bootstrap.snapshot.cursor);
+    expect(shellResponse.statusCode).toBe(200);
+    const shell = shellResponse.json().result.data;
+    expect(tryParseSchema(ShellSnapshotResponseSchema, shell)).toEqual(shell);
+    expect(shell.snapshot.serverId).toBe(info.serverId);
+    expect(shell.cursor).toBe(shell.snapshot.cursor);
+    const removedBootstrap = await app.inject({
+      method: 'GET',
+      url: '/trpc/bootstrap?input=%7B%22protocolVersion%22%3A1%7D',
+      headers: authHeaders(),
+    });
+    expect(removedBootstrap.statusCode).toBe(404);
   });
 
-  it('serves authoritative shell and session queries without changing bootstrap', async () => {
+  it('serves authoritative shell and session queries', async () => {
     const app = Fastify();
     apps.push(app);
     await app.register(dashboardRoutes, { context: context() });
@@ -162,7 +168,7 @@ describe('dashboard tRPC boundary', () => {
 
     const shell = await app.inject({
       method: 'GET',
-      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 1 })}`,
+      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 2 })}`,
       headers: authHeaders(),
     });
     expect(shell.statusCode).toBe(200);
@@ -191,14 +197,14 @@ describe('dashboard tRPC boundary', () => {
 
     const malformed = await app.inject({
       method: 'GET',
-      url: `/trpc/bootstrap?input=${input({ protocolVersion: '1' })}`,
+      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: '1' })}`,
       headers: authHeaders(),
     });
     expect(malformed.statusCode).toBe(400);
 
     const mismatch = await app.inject({
       method: 'GET',
-      url: `/trpc/bootstrap?input=${input({ protocolVersion: 2 })}`,
+      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 1 })}`,
       headers: authHeaders(),
     });
     expect(mismatch.statusCode).toBe(400);
@@ -217,7 +223,7 @@ describe('dashboard tRPC boundary', () => {
     await malformedApp.ready();
     const malformed = await malformedApp.inject({
       method: 'GET',
-      url: `/trpc/bootstrap?input=${input({ protocolVersion: 1 })}`,
+      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 2 })}`,
       headers: authHeaders(),
     });
     expect(malformed.statusCode).toBe(500);
@@ -236,7 +242,7 @@ describe('dashboard tRPC boundary', () => {
     await conflictApp.ready();
     const conflict = await conflictApp.inject({
       method: 'GET',
-      url: `/trpc/bootstrap?input=${input({ protocolVersion: 1 })}`,
+      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 2 })}`,
       headers: authHeaders(),
     });
     expect(conflict.statusCode).toBe(409);
@@ -318,8 +324,8 @@ describe('dashboard tRPC boundary', () => {
   });
 
   it('parses the public request adapter with strict fields', () => {
-    expect(parseBootstrapRequest({ protocolVersion: 1 })).toEqual({
-      protocolVersion: 1,
+    expect(parseShellSnapshotRequest({ protocolVersion: 2 })).toEqual({
+      protocolVersion: 2,
     });
   });
 });

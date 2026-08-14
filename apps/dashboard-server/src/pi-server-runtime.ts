@@ -533,7 +533,7 @@ class NativeContext {
   sendHello(native: NonNullable<LeaseLike['snapshot']>): void {
     this.sendEvent({
       type: 'runtime.hello',
-      protocolVersion: 1,
+      protocolVersion: 2,
       token: this.input.launchToken,
       identityToken: this.input.identityToken,
       snapshot: runtimeSnapshot(this.input, native),

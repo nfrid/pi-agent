@@ -70,12 +70,15 @@ export {
   ThreadSummarySchema,
 } from './orchestration-contracts.js';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const MAX_FRAME_BYTES = 512 * 1024;
 
 /** Capabilities advertised by the authenticated dashboard HTTP boundary. */
 export const ProtocolCapabilitiesSchema = Type.Object(
-  { bootstrap: Type.Literal(true) },
+  {
+    shellSnapshot: Type.Literal(true),
+    sessionSnapshot: Type.Literal(true),
+  },
   { additionalProperties: false },
 );
 export type ProtocolCapabilities = Static<typeof ProtocolCapabilitiesSchema>;
@@ -92,12 +95,12 @@ export const ProtocolInfoSchema = Type.Object(
 );
 export type ProtocolInfo = Static<typeof ProtocolInfoSchema>;
 
-/** Browser protocol version supplied to the bootstrap query. */
-export const BootstrapRequestSchema = Type.Object(
+/** Browser protocol version supplied to the shell snapshot query. */
+export const ShellSnapshotRequestSchema = Type.Object(
   { protocolVersion: Type.Integer({ minimum: 1 }) },
   { additionalProperties: false },
 );
-export type BootstrapRequest = Static<typeof BootstrapRequestSchema>;
+export type ShellSnapshotRequest = Static<typeof ShellSnapshotRequestSchema>;
 export type {
   ExtensionSurface,
   ExtensionSurfaceList,
@@ -1684,15 +1687,7 @@ export type SessionSnapshotResponse = Static<
   typeof SessionSnapshotResponseSchema
 >;
 
-export const DashboardSnapshotResponseSchema = Type.Object(
-  { snapshot: BrowserSnapshotSchema, cursor: Type.Integer({ minimum: 0 }) },
-  { additionalProperties: false },
-);
-export type DashboardSnapshotResponse = Static<
-  typeof DashboardSnapshotResponseSchema
->;
-
-/** Strict shell query response; bootstrap remains on the compatibility schema. */
+/** Strict shell query response. */
 export const ShellSnapshotResponseSchema = Type.Object(
   { snapshot: ShellSnapshotSchema, cursor: Type.Integer({ minimum: 0 }) },
   { additionalProperties: false },

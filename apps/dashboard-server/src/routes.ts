@@ -100,7 +100,6 @@ export interface DashboardRouteContext {
   refreshWorkspaces(): Promise<WorkspaceTarget[]>;
   composerCommands(workspaceId: string): Promise<ComposerCommandCatalogue>;
   usage(): Promise<{ usage: unknown; error?: string }>;
-  readSession(id: string, before?: string): Promise<unknown>;
   readActiveDelegateTranscripts(
     id: string,
   ): Promise<ActiveDelegateTranscriptBaseline>;
@@ -298,7 +297,12 @@ export const dashboardRoutes: FastifyPluginAsync<{
   registerDashboardTrpc(app, {
     serverId: context.serverId,
     snapshot: context.snapshot,
-    shellSnapshot: context.shellSnapshot,
+    shellSnapshot:
+      context.shellSnapshot ??
+      (() => {
+        const snapshot = context.snapshot();
+        return { snapshot, cursor: snapshot.cursor };
+      }),
     sessionSnapshot: context.sessionSnapshot,
   });
   app.setNotFoundHandler((_request, reply) =>
@@ -517,16 +521,6 @@ export const dashboardRoutes: FastifyPluginAsync<{
     },
   );
 
-  app.get<{
-    Params: { id: string };
-    Querystring: { before?: string };
-  }>('/api/sessions/:id', async (request, reply) => {
-    try {
-      return await context.readSession(request.params.id, request.query.before);
-    } catch (error) {
-      return sendError(reply, error);
-    }
-  });
   app.get<{ Params: { id: string } }>(
     '/api/sessions/:id/delegate-transcripts/active',
     async (request, reply) => {

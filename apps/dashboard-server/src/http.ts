@@ -16,11 +16,9 @@ import {
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
   type DelegateLiveRun,
-  isRecord,
   MAX_ID,
   MAX_SESSION_INDEX_DELTA_ITEMS,
   type RuntimeSnapshot,
-  redactImageData,
   type SessionIndexEntry,
   tryParseActiveDelegateTranscriptBaseline,
   tryParseDelegateTranscriptEntry,
@@ -44,81 +42,6 @@ import type { RegistryChange } from './runtime-registry.js';
 
 /** Keep session deltas comfortably below the 2 MiB SSE frame limit. */
 const MAX_SESSION_INDEX_DELTA_BYTES = 1_500_000;
-const MAX_SESSION_RESPONSE_ENTRY_BYTES = 384 * 1024;
-
-const NON_RENDERED_SESSION_ENTRY_TYPES = new Set([
-  'session',
-  'session_info',
-  'model_change',
-  'thinking_level_change',
-  'compaction',
-  'branch_summary',
-  'label',
-]);
-
-function hasTranscriptEntries(entries: readonly unknown[]): boolean {
-  return entries.some((entry) => {
-    if (!isRecord(entry) || typeof entry.type !== 'string') return true;
-    return !NON_RENDERED_SESSION_ENTRY_TYPES.has(entry.type);
-  });
-}
-
-function isSparseRuntimeSession(runtime: RuntimeSnapshot): boolean {
-  return !hasTranscriptEntries(runtime.session.entries);
-}
-
-function runtimeEntriesExceedPageBudget(runtime: RuntimeSnapshot): boolean {
-  let bytes = 0;
-  for (const entry of runtime.session.entries) {
-    bytes += Buffer.byteLength(JSON.stringify(redactImageData(entry)) ?? '');
-    if (bytes > MAX_SESSION_RESPONSE_ENTRY_BYTES) return true;
-  }
-  return false;
-}
-
-function boundedRuntimeEntries(entries: readonly unknown[]): {
-  entries: unknown[];
-  complete: boolean;
-} {
-  const selected: unknown[] = [];
-  let bytes = 0;
-  let complete = true;
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = redactImageData(entries[index]);
-    const serialized = JSON.stringify(entry) ?? '';
-    const sourceBytes = Buffer.byteLength(serialized);
-    let output: unknown;
-    if (sourceBytes > MAX_SESSION_RESPONSE_ENTRY_BYTES) {
-      complete = false;
-      output = {
-        type: 'history_omission',
-        ...(isRecord(entry) && typeof entry.id === 'string'
-          ? { id: entry.id }
-          : {}),
-        ...(isRecord(entry) && typeof entry.type === 'string'
-          ? { originalType: entry.type }
-          : {}),
-        reason: 'entry-exceeds-page-budget',
-        originalBytes: sourceBytes,
-      };
-    } else output = entry;
-    const outputBytes = Buffer.byteLength(JSON.stringify(output) ?? '');
-    if (
-      selected.length > 0 &&
-      bytes + outputBytes > MAX_SESSION_RESPONSE_ENTRY_BYTES
-    ) {
-      complete = false;
-      break;
-    }
-    selected.push(output);
-    bytes += outputBytes;
-  }
-  selected.reverse();
-  return {
-    entries: selected,
-    complete: complete && selected.length === entries.length,
-  };
-}
 
 function validDelegateIdentifier(value: unknown): value is string {
   return (
@@ -395,7 +318,6 @@ export class DashboardServerImpl implements DashboardServer {
           this.application.workspaces.list(),
         ),
       usage: () => this.application.usage.get(),
-      readSession: (id, before) => this.sessionResult(id, before),
       readActiveDelegateTranscripts: (id) =>
         this.activeDelegateTranscriptResult(id),
       readDelegateHistory: (id) => this.delegateHistoryResult(id),
@@ -806,201 +728,6 @@ export class DashboardServerImpl implements DashboardServer {
       query.lineageId,
       result.leafId,
     );
-  }
-
-  private async sessionResult(id: string, before?: string): Promise<unknown> {
-    if (!/^[a-zA-Z0-9._-]{1,200}$/.test(id))
-      throw new Error('Invalid session id.');
-    const activeRuntime = () =>
-      this.registry
-        .snapshots()
-        .find((item) => item.session.id === id && item.online !== false);
-    const cursor = this.eventStream.cursor;
-    const runtimeTransport = (runtime: RuntimeSnapshot) => {
-      const provenance = this.registry.transportProvenance(runtime.runtimeId);
-      return provenance && provenance.runtimeSeq >= 0 ? provenance : {};
-    };
-    const runtimeLeafId = (
-      runtime: RuntimeSnapshot | undefined,
-    ): string | undefined => {
-      const leafId = runtime
-        ? (runtime.session as { leafId?: unknown }).leafId
-        : undefined;
-      const hasControlCharacter =
-        typeof leafId === 'string' &&
-        [...leafId].some((character) => {
-          const code = character.charCodeAt(0);
-          return code <= 0x1f || code === 0x7f;
-        });
-      return typeof leafId === 'string' &&
-        leafId.length > 0 &&
-        leafId.length <= MAX_ID &&
-        !hasControlCharacter
-        ? leafId
-        : undefined;
-    };
-    const runtimeResult = (runtime: RuntimeSnapshot) => {
-      const indexedMetadata = this.sessions.get(id);
-      const bounded = boundedRuntimeEntries(runtime.session.entries);
-      const entriesComplete =
-        (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
-          true && bounded.complete;
-      return {
-        serverId: this.serverId,
-        cursor,
-        ...runtimeTransport(runtime),
-        metadata: {
-          ...indexedMetadata,
-          id,
-          file: runtime.session.file ?? indexedMetadata?.file ?? '',
-          cwd: runtime.session.cwd ?? indexedMetadata?.cwd ?? runtime.cwd,
-          name: runtime.session.name ?? indexedMetadata?.name,
-          title: runtime.session.title ?? indexedMetadata?.title,
-          updatedAt:
-            indexedMetadata?.updatedAt ?? runtime.lastSeenAt ?? Date.now(),
-          activeRuntimeId: runtime.runtimeId,
-          entryCount: runtime.session.entries.length,
-        },
-        entries: bounded.entries,
-        entriesComplete,
-      };
-    };
-    const runtimeIsWorking = (runtime: RuntimeSnapshot): boolean =>
-      runtime.liveState === 'working' || runtime.liveState === 'compacting';
-    const sameReadAuthority = (
-      left: RuntimeSnapshot | undefined,
-      right: RuntimeSnapshot | undefined,
-    ): boolean =>
-      left?.runtimeId === right?.runtimeId &&
-      left?.liveState === right?.liveState &&
-      runtimeLeafId(left) === runtimeLeafId(right);
-    const readForRuntime = (runtime: RuntimeSnapshot | undefined) =>
-      this.sessions.readEntries(
-        id,
-        before,
-        runtime && !runtimeIsWorking(runtime)
-          ? runtimeLeafId(runtime)
-          : undefined,
-        {
-          // A working runtime's snapshot is deliberately not authoritative:
-          // emitState is only refreshed at turn boundaries. Resolve the leaf
-          // from the JSONL scan that performs the read, not the file watcher.
-          resolveLatestLeaf:
-            before === undefined &&
-            runtime !== undefined &&
-            runtimeIsWorking(runtime),
-        },
-      );
-    let runtime = before === undefined ? activeRuntime() : undefined;
-    let result: Awaited<ReturnType<typeof this.sessions.readEntries>>;
-    try {
-      // Runtime state can change between the initial snapshot and the disk
-      // read. Retry a small, bounded number of times so a working/idle switch
-      // cannot select the wrong authority or branch.
-      for (let attempt = 0; ; attempt += 1) {
-        const runtimeNeedsBranch =
-          runtime !== undefined &&
-          ((runtime.session as { entriesComplete?: boolean })
-            .entriesComplete !== true ||
-            isSparseRuntimeSession(runtime));
-        if (
-          before === undefined &&
-          runtime &&
-          !runtimeIsWorking(runtime) &&
-          runtimeNeedsBranch &&
-          !runtimeLeafId(runtime)
-        )
-          return runtimeResult(runtime);
-        if (
-          before === undefined &&
-          runtime &&
-          !runtimeIsWorking(runtime) &&
-          (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
-            true &&
-          !isSparseRuntimeSession(runtime) &&
-          !runtimeEntriesExceedPageBudget(runtime)
-        )
-          return runtimeResult(runtime);
-        result = await readForRuntime(runtime);
-        if (before !== undefined) break;
-        const currentRuntime = activeRuntime();
-        if (sameReadAuthority(runtime, currentRuntime)) {
-          runtime = currentRuntime;
-          break;
-        }
-        if (attempt >= 2) {
-          // Do not attach disk entries selected under an authority that has
-          // changed again. The live snapshot is the only result tied to the
-          // current authority; with no live runtime, start a fresh unbranched
-          // read instead of returning the mismatched branch page.
-          if (currentRuntime) return runtimeResult(currentRuntime);
-          result = await readForRuntime(undefined);
-          runtime = undefined;
-          break;
-        }
-        runtime = currentRuntime;
-      }
-      if (!runtime)
-        return {
-          ...result,
-          serverId: this.serverId,
-          cursor,
-        };
-      const runtimeEntriesComplete =
-        (runtime.session as { entriesComplete?: boolean }).entriesComplete ===
-        true;
-      const withRuntimeMetadata = {
-        ...result,
-        // A disk page containing transcript entries is authoritative even if
-        // the working snapshot has not settled. If disk only has setup data,
-        // retain the incomplete live-state signal while it catches up.
-        ...(runtimeIsWorking(runtime) &&
-        (runtime.session as { entriesComplete?: boolean }).entriesComplete !==
-          true &&
-        !hasTranscriptEntries(result.entries)
-          ? { entriesComplete: false }
-          : {}),
-        serverId: this.serverId,
-        cursor,
-        ...runtimeTransport(runtime),
-        metadata: {
-          ...result.metadata,
-          ...(runtime.session.name !== undefined
-            ? { name: runtime.session.name }
-            : {}),
-          ...(runtime.session.title !== undefined
-            ? { title: runtime.session.title }
-            : {}),
-          activeRuntimeId: runtime.runtimeId,
-        },
-      };
-      if (runtimeIsWorking(runtime))
-        // While working, disk is authoritative even when the cached runtime
-        // snapshot looks complete: it can be one or more turns behind.
-        return withRuntimeMetadata;
-      if (
-        runtimeEntriesComplete &&
-        !isSparseRuntimeSession(runtime) &&
-        !runtimeEntriesExceedPageBudget(runtime)
-      )
-        return runtimeResult(runtime);
-      if (runtimeEntriesComplete) {
-        // A branch can be serialized successfully yet contain only session
-        // settings while the indexed JSONL still has the conversation. The
-        // persisted branch is the useful baseline; retain live metadata.
-        return withRuntimeMetadata;
-      }
-      return {
-        ...withRuntimeMetadata,
-        // An incomplete idle snapshot still wins the optimistic projection;
-        // the browser will poll until the branch is complete.
-        entriesComplete: false,
-      };
-    } catch (error) {
-      runtime = before === undefined ? activeRuntime() : undefined;
-      if (!runtime) throw error;
-      return runtimeResult(runtime);
-    }
   }
 
   /** Test and route seam for the SSE transport module. */

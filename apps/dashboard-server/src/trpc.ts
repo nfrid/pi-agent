@@ -1,8 +1,7 @@
 import {
   type AuthoritativeSessionSnapshot,
-  BootstrapRequestSchema,
+  ShellSnapshotRequestSchema,
   type BrowserSnapshot,
-  DashboardSnapshotResponseSchema,
   PROTOCOL_VERSION,
   type ProtocolInfo,
   ProtocolInfoSchema,
@@ -23,8 +22,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 export interface DashboardTrpcContext {
   readonly serverId: () => string;
   readonly snapshot: () => BrowserSnapshot;
-  /** New authoritative query builders; optional for old route test seams. */
-  readonly shellSnapshot?: () => unknown;
+  /** Authoritative shell query builder. */
+  readonly shellSnapshot: () => unknown;
   readonly sessionSnapshot?: (
     sessionId: string,
     before?: string,
@@ -150,40 +149,19 @@ export function createDashboardRouter(context: DashboardTrpcContext) {
           return {
             protocolVersion: PROTOCOL_VERSION,
             serverId: context.serverId(),
-            capabilities: { bootstrap: true },
+            capabilities: { shellSnapshot: true, sessionSnapshot: true },
           };
-        } catch (error) {
-          throw toDashboardTrpcError(error);
-        }
-      }),
-    bootstrap: t.procedure
-      .input((value: unknown) =>
-        parseSchema(BootstrapRequestSchema, value, 'bootstrap request'),
-      )
-      .output((value: unknown) =>
-        parseSchema(
-          DashboardSnapshotResponseSchema,
-          value,
-          'bootstrap response',
-        ),
-      )
-      .query(({ input }) => {
-        if (input.protocolVersion !== PROTOCOL_VERSION)
-          throw toDashboardTrpcError(protocolMismatch());
-        try {
-          const snapshot = context.snapshot();
-          return parseSchema(
-            DashboardSnapshotResponseSchema,
-            { snapshot, cursor: snapshot.cursor },
-            'bootstrap response',
-          );
         } catch (error) {
           throw toDashboardTrpcError(error);
         }
       }),
     shellSnapshot: t.procedure
       .input((value: unknown) =>
-        parseSchema(BootstrapRequestSchema, value, 'shell snapshot request'),
+        parseSchema(
+          ShellSnapshotRequestSchema,
+          value,
+          'shell snapshot request',
+        ),
       )
       .output((value: unknown) => parseShellSnapshotResponse(value))
       .query(({ input }) => {
@@ -191,11 +169,7 @@ export function createDashboardRouter(context: DashboardTrpcContext) {
           throw toDashboardTrpcError(protocolMismatch());
         try {
           const response =
-            context.shellSnapshot?.() ??
-            (() => {
-              const snapshot = context.snapshot();
-              return { snapshot, cursor: snapshot.cursor };
-            })();
+            context.shellSnapshot();
           return parseShellSnapshotResponse(response);
         } catch (error) {
           throw toDashboardTrpcError(error);

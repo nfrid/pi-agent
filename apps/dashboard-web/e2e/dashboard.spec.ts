@@ -1345,7 +1345,7 @@ test('live transport contains malformed data and reconnects without HTTP polling
     await route.fulfill({ contentType: 'application/json', body: '{}' });
   });
   page.on('request', (request) => {
-    if (new URL(request.url()).pathname.endsWith('/trpc/bootstrap'))
+    if (new URL(request.url()).pathname.endsWith('/trpc/shellSnapshot'))
       snapshotRequests += 1;
   });
   await installDashboardBootstrap(page, {
