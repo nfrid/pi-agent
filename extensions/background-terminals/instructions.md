@@ -1,0 +1,1 @@
+- When a background process is the only remaining dependency, end the turn with one short waiting notice; do not recap or poll because completion resumes automatically.

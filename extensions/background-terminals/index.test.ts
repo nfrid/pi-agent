@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import backgroundTerminals from './index';
+import type { BackgroundParameters } from './schema';
 
 interface Renderable {
   render: (width: number) => string[];
@@ -14,19 +15,11 @@ interface ThemeLike {
 interface RegisteredTool {
   name: string;
   description: string;
+  promptSnippet?: string;
   promptGuidelines?: string[];
   execute: (
     id: string,
-    params: {
-      action: 'start' | 'peek' | 'list' | 'stop';
-      command?: string;
-      title?: string;
-      cwd?: string;
-      id?: string;
-      ids?: string[];
-      wait_seconds?: number;
-      tail_lines?: number;
-    },
+    params: BackgroundParameters,
     signal: AbortSignal | undefined,
     onUpdate: undefined,
     ctx: { cwd: string },
@@ -47,6 +40,15 @@ interface RegisteredTool {
 }
 
 type Handler = (...args: unknown[]) => unknown;
+
+const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+beforeAll(() => {
+  process.env.PI_CODING_AGENT_DIR = process.cwd();
+});
+afterAll(() => {
+  if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+});
 
 describe('background terminals extension', () => {
   it('steers completion while busy and triggers a turn while idle', async () => {
@@ -73,7 +75,15 @@ describe('background terminals extension', () => {
     expect(tool?.description).not.toContain(
       'waiting for the background process',
     );
-    expect(tool?.promptGuidelines).toBeUndefined();
+    expect(tool?.description).toContain('/bin/bash -c');
+    expect(tool?.description).toContain('no stdin');
+    expect(tool?.description).not.toContain('do not block waiting here');
+    expect(tool?.promptSnippet).toBe(
+      'Run and manage long-running non-interactive Bash commands',
+    );
+    expect(tool?.promptGuidelines).toEqual([
+      'When a background process is the only remaining dependency, end the turn with one short waiting notice; do not recap or poll because completion resumes automatically.',
+    ]);
 
     handlers.get('session_start')?.(
       {},
