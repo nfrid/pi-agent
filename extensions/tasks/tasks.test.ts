@@ -755,6 +755,21 @@ describe('bounded todo tool results', () => {
 });
 
 describe('batch operation schema', () => {
+  const schemaDescription = (schema: unknown) =>
+    (schema as { description?: string }).description;
+
+  it('describes every action in the action schema', () => {
+    expect(schemaDescription(paramsSchema.properties.action)).toContain(
+      'list current tasks',
+    );
+    expect(schemaDescription(paramsSchema.properties.action)).toContain(
+      'batch applies ordered non-batch operations',
+    );
+    expect(schemaDescription(operationSchema.properties.action)).toContain(
+      'replace the complete task set',
+    );
+  });
+
   it('accepts current non-batch operations and rejects malformed/nested calls', () => {
     expect(
       Value.Check(paramsSchema, {

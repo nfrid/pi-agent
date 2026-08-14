@@ -3,5 +3,4 @@
 - Keep command output bounded with targeted paths, filters, counts, excerpts, diffs, or short summaries.
 - Combine related discovery into one pipeline; run unrelated independent checks in parallel.
 - Use separate calls when results need judgment, and before writes or destructive work.
-- Prefer read, edit, and write tools for file contents.
-- Use the read tool to examine files instead of cat or sed.
+- Prefer read, edit, and write over shell commands such as cat or sed for file contents.

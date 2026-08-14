@@ -6,6 +6,7 @@ import tasks from './index';
 type Handler = (...args: unknown[]) => unknown;
 
 type TodoTool = {
+  description?: string;
   promptGuidelines?: string[];
   execute: (
     id: string,
@@ -50,6 +51,9 @@ describe('tasks extension lifecycle', () => {
     const shutdown = (scope: string) =>
       emit('session_shutdown', {}, context(scope));
     await start('tasks-scope-A');
+    expect(tool?.description).toBe(
+      'Session-scoped todo state with tasks, dependencies, statuses, priorities, and notes. Mutations update the persisted session state; dependencies reference prerequisite task ids, and notes hold extra context or block reasons.',
+    );
     expect(tool?.promptGuidelines).toEqual([
       'Use todo when work has multiple meaningful steps whose progress or ordering is useful; skip it for trivial one-shot requests and simple questions.',
       'Keep the todo list synchronized with meaningful progress and plan changes rather than narrating or restating the plan in free-form text.',

@@ -14,7 +14,7 @@ import { applyMutation } from './mutations';
 import type { TaskStore } from './store';
 
 const DESCRIPTION =
-  'Session-scoped todo list with task dependencies, statuses, priorities, notes, and atomic mutations. Actions include list, add, update, start, done, block, drop, remove, clear_done, replace, and batch. Use batch for ordered non-batch mutations; use replace to provide the complete desired task set. Dependencies reference prerequisite task ids, and notes hold extra context or block reasons.';
+  'Session-scoped todo state with tasks, dependencies, statuses, priorities, and notes. Mutations update the persisted session state; dependencies reference prerequisite task ids, and notes hold extra context or block reasons.';
 const TODO_RESULT_TRUNCATION_MARKER =
   '\n… todo output truncated; use todo action:list after narrowing the active set.';
 

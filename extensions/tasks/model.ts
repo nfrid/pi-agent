@@ -6,6 +6,10 @@ const statusSchema = () =>
 const prioritySchema = () =>
   StringEnum(['low', 'normal', 'high', 'urgent'] as const);
 
+const NON_BATCH_ACTION_DESCRIPTION =
+  'list current tasks; add a task; update fields; start, done, block, or drop a task; remove a task; clear_done removes done or dropped tasks; replace the complete task set.';
+const ACTION_DESCRIPTION = `${NON_BATCH_ACTION_DESCRIPTION} batch applies ordered non-batch operations.`;
+
 const taskSchema = Type.Object(
   {
     id: Type.String({
@@ -21,18 +25,21 @@ const taskSchema = Type.Object(
 );
 
 const operationProperties = {
-  action: StringEnum([
-    'list',
-    'add',
-    'update',
-    'start',
-    'done',
-    'block',
-    'drop',
-    'remove',
-    'clear_done',
-    'replace',
-  ] as const),
+  action: StringEnum(
+    [
+      'list',
+      'add',
+      'update',
+      'start',
+      'done',
+      'block',
+      'drop',
+      'remove',
+      'clear_done',
+      'replace',
+    ] as const,
+    { description: NON_BATCH_ACTION_DESCRIPTION },
+  ),
   id: Type.Optional(Type.String()),
   text: Type.Optional(Type.String()),
   status: Type.Optional(statusSchema()),
@@ -49,19 +56,22 @@ export const operationSchema = Type.Object(operationProperties, {
 });
 
 export const paramsSchema = Type.Object({
-  action: StringEnum([
-    'list',
-    'add',
-    'update',
-    'start',
-    'done',
-    'block',
-    'drop',
-    'remove',
-    'clear_done',
-    'replace',
-    'batch',
-  ] as const),
+  action: StringEnum(
+    [
+      'list',
+      'add',
+      'update',
+      'start',
+      'done',
+      'block',
+      'drop',
+      'remove',
+      'clear_done',
+      'replace',
+      'batch',
+    ] as const,
+    { description: ACTION_DESCRIPTION },
+  ),
   id: Type.Optional(
     Type.String({
       description: 'Task id for update/start/done/block/drop/remove.',
