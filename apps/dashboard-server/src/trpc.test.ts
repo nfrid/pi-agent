@@ -212,9 +212,10 @@ describe('dashboard tRPC boundary', () => {
     await app.ready();
 
     const infoResponse = await app.inject({
-      method: 'GET',
+      method: 'POST',
       url: '/trpc/protocolInfo',
-      headers: authHeaders(),
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      payload: 'null',
     });
     expect(infoResponse.statusCode).toBe(200);
     const info = parseProtocolInfo(infoResponse.json().result.data);

@@ -25,7 +25,13 @@ export function createDashboardTrpcClient(
       httpLink<DashboardRouter>({
         url: `${options.baseUrl}/trpc`,
         methodOverride: 'POST',
-        fetch: options.fetch,
+        fetch: (input, init) =>
+          options.fetch(
+            input,
+            init?.method === 'POST' && init.body == null
+              ? { ...init, body: 'null' }
+              : init,
+          ),
         headers: () => {
           const token = options.tokenStore.get();
           return token ? { 'x-dashboard-token': token } : {};

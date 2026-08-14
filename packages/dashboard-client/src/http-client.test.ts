@@ -512,6 +512,7 @@ describe('DashboardHttpClient snapshot requests', () => {
       '/trpc/shellSnapshot',
     ]);
     expect(calls.map(([, init]) => init.method)).toEqual(['POST', 'POST']);
+    expect(calls[0]?.[1].body).toBe('null');
     expect(calls[1]?.[1].body).toBe(JSON.stringify({ protocolVersion: 2 }));
 
     const invalid = new DashboardHttpClient({
