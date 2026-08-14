@@ -974,6 +974,102 @@ describe('dashboard domain reducers', () => {
     ]);
   });
 
+  it('preserves full delegate transcripts across compact patches and applies upserts', () => {
+    const fullSurface = {
+      id: 'delegate.status',
+      rendererId: 'delegate.status',
+      viewModel: {
+        version: 1,
+        statuses: [
+          {
+            id: 'ds-1',
+            runId: 'run-1',
+            lineageId: 'lineage-1',
+            name: 'Worker',
+            kind: 'background',
+            state: 'running',
+            createdAt: 1,
+            allowWrites: false,
+            transcript: [
+              {
+                id: 'task',
+                type: 'task',
+                label: 'Task',
+                text: 'inspect source',
+                status: 'completed',
+              },
+            ],
+          },
+        ],
+      },
+    };
+    let state = createRuntimeReducerState({
+      ...snapshot(),
+      session: { ...snapshot().session, id: 'session-1' },
+      extensionSurfaces: [fullSurface],
+    });
+    const compact = applyRuntimeEvent(state, {
+      event: {
+        type: 'runtime.stateChanged',
+        state: 'working',
+        snapshot: {
+          extensionSurfaces: [
+            {
+              ...fullSurface,
+              viewModel: {
+                ...fullSurface.viewModel,
+                statuses: [
+                  {
+                    ...fullSurface.viewModel.statuses[0],
+                    activity: {
+                      type: 'tool',
+                      label: 'read source.ts',
+                      status: 'running',
+                    },
+                    transcriptTruncated: true,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      runtimeSeq: 1,
+    });
+    expect(compact.accepted).toBe(true);
+    state = compact.state;
+    const upsert = applyRuntimeEvent(state, {
+      event: {
+        type: 'delegate.transcript.updated',
+        sessionId: 'session-1',
+        lineageId: 'lineage-1',
+        runId: 'run-1',
+        entry: {
+          id: 'tool-1',
+          type: 'tool',
+          label: 'read source.ts',
+          name: 'read',
+          status: 'completed',
+          result: { lines: 3 },
+        },
+      },
+      runtimeSeq: 2,
+    });
+    expect(upsert.accepted).toBe(true);
+    expect(
+      upsert.state.snapshot.extensionSurfaces?.[0]?.viewModel,
+    ).toMatchObject({
+      statuses: [
+        {
+          transcript: [
+            { id: 'task', text: 'inspect source' },
+            { id: 'tool-1', result: { lines: 3 } },
+          ],
+        },
+      ],
+    });
+  });
+
   it('fails closed on duplicate capability patches and accepts later valid updates', () => {
     const initialCapabilities = {
       version: 1 as const,

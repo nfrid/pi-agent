@@ -1,4 +1,5 @@
 import {
+  type ActiveDelegateTranscriptBaseline,
   type BrowserSnapshot,
   type CancelCommand,
   type Checkout,
@@ -18,6 +19,7 @@ import {
   type StartRuntimeRequest,
   type Thread,
   type ThreadCreateCommand,
+  tryParseActiveDelegateTranscriptBaseline,
   tryParseBrowserSnapshot,
   tryParseComposerCommandCatalogue,
   tryParseDashboardStreamMessage,
@@ -294,6 +296,20 @@ export class DashboardHttpClient {
     signal?: AbortSignal,
   ): Promise<SessionApiResponse> {
     return this.session(id, signal, before);
+  }
+
+  async activeDelegateTranscripts(
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<ActiveDelegateTranscriptBaseline> {
+    const value = await this.request<unknown>(
+      `/api/sessions/${encodeURIComponent(id)}/delegate-transcripts/active`,
+      { signal },
+    );
+    const response = tryParseActiveDelegateTranscriptBaseline(value);
+    if (!response)
+      throw new Error('Invalid active delegate transcript response.');
+    return response;
   }
 
   async delegateHistory(

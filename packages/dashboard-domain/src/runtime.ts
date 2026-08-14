@@ -2,6 +2,7 @@ import {
   type BridgeEvent,
   type DashboardEventEnvelope,
   parseRuntimeCapabilitySnapshot,
+  type RuntimeExtensionSurface,
   type RuntimeSnapshot,
 } from '@pi-dashboard/protocol';
 import {
@@ -89,6 +90,123 @@ export function createRuntimeReducerState(
 /** Compatibility spelling for callers that call the state a projection. */
 export const createRuntimeProjection = createRuntimeReducerState;
 
+function mergeDelegateSurfacePatch(
+  previous: RuntimeExtensionSurface | undefined,
+  update: RuntimeExtensionSurface,
+): RuntimeExtensionSurface {
+  if (
+    update.rendererId !== 'delegate.status' ||
+    previous?.rendererId !== 'delegate.status'
+  )
+    return update;
+  const previousModel = previous.viewModel;
+  const updateModel = update.viewModel;
+  if (
+    !previousModel ||
+    typeof previousModel !== 'object' ||
+    Array.isArray(previousModel) ||
+    !updateModel ||
+    typeof updateModel !== 'object' ||
+    Array.isArray(updateModel)
+  )
+    return update;
+  const previousStatuses = (previousModel as { statuses?: unknown }).statuses;
+  const updateStatuses = (updateModel as { statuses?: unknown }).statuses;
+  if (!Array.isArray(previousStatuses) || !Array.isArray(updateStatuses))
+    return update;
+  const previousByLineage = new Map(
+    previousStatuses.flatMap((status) => {
+      if (!status || typeof status !== 'object' || Array.isArray(status))
+        return [];
+      const lineageId = (status as { lineageId?: unknown }).lineageId;
+      return typeof lineageId === 'string'
+        ? [[lineageId, status as Record<string, unknown>] as const]
+        : [];
+    }),
+  );
+  const statuses = updateStatuses.map((status) => {
+    if (!status || typeof status !== 'object' || Array.isArray(status))
+      return status;
+    const current = status as Record<string, unknown>;
+    const previousStatus = previousByLineage.get(
+      current.lineageId as string,
+    );
+    if (!previousStatus) return status;
+    return {
+      ...previousStatus,
+      ...current,
+      ...(Object.hasOwn(current, 'transcript')
+        ? {}
+        : previousStatus.transcript === undefined
+          ? {}
+          : { transcript: previousStatus.transcript }),
+      ...(Object.hasOwn(current, 'result')
+        ? {}
+        : previousStatus.result === undefined
+          ? {}
+          : { result: previousStatus.result }),
+    };
+  });
+  return { ...update, viewModel: { ...updateModel, statuses } };
+}
+
+function mergeDelegateTranscriptUpdate(
+  snapshot: RuntimeSnapshot,
+  event: Extract<BridgeEvent, { type: 'delegate.transcript.updated' }>,
+): RuntimeSnapshot {
+  if (event.sessionId !== snapshot.session.id) return snapshot;
+  const surfaces = snapshot.extensionSurfaces;
+  if (!surfaces) return snapshot;
+  const nextSurfaces = surfaces.map((surface) => {
+    if (surface.rendererId !== 'delegate.status') return surface;
+    const model = surface.viewModel;
+    if (!model || typeof model !== 'object' || Array.isArray(model))
+      return surface;
+    const statuses = (model as { statuses?: unknown }).statuses;
+    if (!Array.isArray(statuses)) return surface;
+    const nextStatuses = statuses.map((status) => {
+      if (!status || typeof status !== 'object' || Array.isArray(status))
+        return status;
+      const current = status as Record<string, unknown>;
+      if (
+        current.lineageId !== event.lineageId ||
+        current.runId !== event.runId
+      )
+        return status;
+      const transcript = Array.isArray(current.transcript)
+        ? [...current.transcript]
+        : [];
+      const entryKey = (value: unknown) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value))
+          return undefined;
+        const item = value as { id?: unknown; run?: unknown };
+        return typeof item.id === 'string'
+          ? `${item.run ?? 1}:${item.id}`
+          : undefined;
+      };
+      const incomingKey = entryKey(event.entry);
+      const index = transcript.findIndex(
+        (entry) => entryKey(entry) === incomingKey,
+      );
+      if (index >= 0) transcript[index] = event.entry;
+      else transcript.push(event.entry);
+      const bounded =
+        transcript.length <= 128
+          ? transcript
+          : [transcript[0], ...transcript.slice(-127)];
+      return {
+        ...current,
+        transcript: bounded,
+        ...(bounded.length < transcript.length
+          ? { transcriptTruncated: true }
+          : {}),
+      };
+    });
+    return { ...surface, viewModel: { ...model, statuses: nextStatuses } };
+  });
+  return { ...snapshot, extensionSurfaces: nextSurfaces };
+}
+
 function mergeRuntimeEvent(
   snapshot: RuntimeSnapshot,
   event: BridgeEvent,
@@ -128,7 +246,16 @@ function mergeRuntimeEvent(
           : { queueDrafts: update.queueDrafts }),
         ...(update?.extensionSurfaces === undefined
           ? {}
-          : { extensionSurfaces: update.extensionSurfaces }),
+          : {
+              extensionSurfaces: update.extensionSurfaces.map((surface) =>
+                mergeDelegateSurfacePatch(
+                  snapshot.extensionSurfaces?.find(
+                    (previous) => previous.id === surface.id,
+                  ),
+                  surface,
+                ),
+              ),
+            }),
         ...(update?.lastError === undefined
           ? {}
           : { lastError: update.lastError }),
@@ -167,6 +294,8 @@ function mergeRuntimeEvent(
         ...snapshot,
         liveState: snapshot.pendingInteractions.length > 0 ? 'waiting' : 'idle',
       };
+    case 'delegate.transcript.updated':
+      return mergeDelegateTranscriptUpdate(snapshot, event);
     case 'runtime.goodbye':
       return { ...snapshot, online: false };
     default:

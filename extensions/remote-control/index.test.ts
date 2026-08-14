@@ -1702,6 +1702,83 @@ describe('remote-control bridge', () => {
     expect(write).toHaveBeenCalledTimes(2);
   });
 
+  it('streams delegate transcript upserts while compacting routine surface patches', () => {
+    const hub = new LiveSurfaceHub();
+    const client = new BridgeClient({
+      socketPath: '/unused',
+      runtimeId: 'runtime-test',
+      snapshot: () => ({ ...snapshot, extensionSurfaces: hub.snapshot() }),
+      liveSurfaces: hub,
+      handleCommand: async () => ({ accepted: true }),
+    });
+    const socket = new net.Socket();
+    const write = vi.spyOn(socket, 'write').mockReturnValue(true);
+    Reflect.set(client, 'socket', socket);
+    hub.publish('delegate', [
+      {
+        id: 'delegate.status',
+        rendererId: 'delegate.status',
+        viewModel: {
+          version: 1,
+          statuses: [
+            {
+              id: 'ds-1',
+              runId: 'run-1',
+              lineageId: 'lineage-1',
+              name: 'Worker',
+              kind: 'background',
+              state: 'running',
+              createdAt: 1,
+              allowWrites: false,
+              transcript: [
+                {
+                  id: 'tool-1',
+                  type: 'tool',
+                  label: 'read source.ts',
+                  name: 'read',
+                  status: 'running',
+                },
+              ],
+              result: {
+                kind: 'structured',
+                status: 'valid',
+                value: { secret: 'must be omitted' },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+    const frames = write.mock.calls.map(
+      (call) =>
+        JSON.parse(String(call[0])) as {
+          event: Record<string, unknown>;
+        },
+    );
+    expect(frames[0]?.event).toMatchObject({
+      type: 'delegate.transcript.updated',
+      sessionId: 'session-test',
+      lineageId: 'lineage-1',
+      runId: 'run-1',
+      entry: { id: 'tool-1', status: 'running' },
+    });
+    expect(frames[1]?.event).toMatchObject({
+      type: 'runtime.stateChanged',
+      snapshot: {
+        extensionSurfaces: [
+          {
+            viewModel: {
+              statuses: [
+                { transcriptTruncated: true, result: { valueOmitted: true } },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    client.stop();
+  });
+
   it('processes queue drafts without waiting behind a long semantic command', async () => {
     let release: (() => void) | undefined;
     const handleCommand = vi.fn((command: BridgeCommand) => {

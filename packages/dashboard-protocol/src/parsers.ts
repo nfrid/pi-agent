@@ -7,6 +7,8 @@ import { Value } from 'typebox/value';
 
 import { MAX_ID, MAX_PATH, SESSION_NAME_MAX_LENGTH } from './limits.js';
 import {
+  type ActiveDelegateTranscriptBaseline,
+  ActiveDelegateTranscriptBaselineSchema,
   type BridgeCommand,
   BridgeCommandSchema,
   type BridgeEvent,
@@ -26,6 +28,8 @@ import {
   type DashboardStreamMessage,
   DashboardStreamMessageSchema,
   type DelegateHistoryResponse,
+  type DelegateTranscriptEntry,
+  DelegateTranscriptEntrySchema,
   DelegateHistoryResponseSchema,
   type DelegateHistoryRunDetailResponse,
   DelegateHistoryRunDetailResponseSchema,
@@ -74,6 +78,30 @@ function validateImages(value: unknown): BridgeImageAttachment[] {
     if (!safeIdentifier(image.path, MAX_PATH))
       throw new Error('Invalid image attachment.');
   return images;
+}
+
+export function parseActiveDelegateTranscriptBaseline(
+  value: unknown,
+): ActiveDelegateTranscriptBaseline {
+  return parseSchema(ActiveDelegateTranscriptBaselineSchema, value);
+}
+
+export function tryParseActiveDelegateTranscriptBaseline(
+  value: unknown,
+): ActiveDelegateTranscriptBaseline | undefined {
+  return tryParseSchema(ActiveDelegateTranscriptBaselineSchema, value);
+}
+
+export function parseDelegateTranscriptEntry(
+  value: unknown,
+): DelegateTranscriptEntry {
+  return parseSchema(DelegateTranscriptEntrySchema, value);
+}
+
+export function tryParseDelegateTranscriptEntry(
+  value: unknown,
+): DelegateTranscriptEntry | undefined {
+  return tryParseSchema(DelegateTranscriptEntrySchema, value);
 }
 
 export function validateSessionName(value: unknown): string {

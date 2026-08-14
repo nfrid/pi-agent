@@ -3,6 +3,7 @@ import { NonIdempotentActionIdGuard } from '@pi-dashboard/extension-contribution
 import {
   type BridgeCommand,
   type BridgeEvent,
+  type DelegateTranscriptEntry,
   MAX_QUEUE_DRAFTS,
   PROTOCOL_VERSION,
   parseFrame,
@@ -27,6 +28,105 @@ const BRIDGE_WRITE_QUEUE_LIMIT = 128;
 const BRIDGE_WRITE_QUEUE_BYTES = 1 * 1024 * 1024;
 const HEARTBEAT_INTERVAL_MS = 5_000;
 const COMPLETED_SEMANTIC_COMMAND_LIMIT = 128;
+
+type DelegateTranscriptSurfaceEntry = {
+  key: string;
+  lineageId: string;
+  runId: string;
+  entry: DelegateTranscriptEntry;
+};
+
+function delegateTranscriptEntries(
+  surfaces: readonly RuntimeExtensionSurface[],
+): Map<string, DelegateTranscriptSurfaceEntry> {
+  const entries = new Map<string, DelegateTranscriptSurfaceEntry>();
+  for (const surface of surfaces) {
+    if (surface.rendererId !== 'delegate.status') continue;
+    const model = surface.viewModel;
+    if (!model || typeof model !== 'object' || Array.isArray(model)) continue;
+    const statuses = (model as { statuses?: unknown }).statuses;
+    if (!Array.isArray(statuses)) continue;
+    for (const status of statuses) {
+      if (!status || typeof status !== 'object' || Array.isArray(status))
+        continue;
+      const candidate = status as {
+        lineageId?: unknown;
+        runId?: unknown;
+        transcript?: unknown;
+      };
+      if (
+        typeof candidate.lineageId !== 'string' ||
+        typeof candidate.runId !== 'string' ||
+        !Array.isArray(candidate.transcript)
+      )
+        continue;
+      for (const entry of candidate.transcript) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+          continue;
+        const value = entry as DelegateTranscriptEntry;
+        if (typeof value.id !== 'string') continue;
+        const key = `${candidate.lineageId}:${candidate.runId}:${value.run ?? 1}:${value.id}`;
+        entries.set(key, {
+          key,
+          lineageId: candidate.lineageId,
+          runId: candidate.runId,
+          entry: value,
+        });
+      }
+    }
+  }
+  return entries;
+}
+
+function compactDelegateSurfaces(
+  surfaces: readonly RuntimeExtensionSurface[],
+): readonly RuntimeExtensionSurface[] {
+  return surfaces.map((surface) => {
+    if (surface.rendererId !== 'delegate.status') return surface;
+    const model = surface.viewModel;
+    if (!model || typeof model !== 'object' || Array.isArray(model))
+      return surface;
+    const statuses = (model as { statuses?: unknown }).statuses;
+    if (!Array.isArray(statuses)) return surface;
+    return {
+      ...surface,
+      viewModel: {
+        ...model,
+        statuses: statuses.map((status) => {
+          if (!status || typeof status !== 'object' || Array.isArray(status))
+            return status;
+          const { transcript: _transcript, result, ...metadata } = status as {
+            transcript?: unknown;
+            result?: unknown;
+            [key: string]: unknown;
+          };
+          const compactResult =
+            result && typeof result === 'object' && !Array.isArray(result)
+              ? (() => {
+                  const { value: _value, ...rest } = result as Record<
+                    string,
+                    unknown
+                  >;
+                  return {
+                    ...rest,
+                    ...(Object.hasOwn(result, 'value')
+                      ? { valueOmitted: true }
+                      : {}),
+                  };
+                })()
+              : result;
+          return {
+            ...metadata,
+            ...(compactResult === undefined ? {} : { result: compactResult }),
+            ...(Array.isArray(_transcript) && _transcript.length > 0
+              ? { transcriptTruncated: true }
+              : {}),
+          };
+        }),
+      },
+    } as RuntimeExtensionSurface;
+  });
+}
 
 type SemanticCommand = Extract<
   BridgeCommand,
@@ -66,6 +166,7 @@ export interface BridgeClientOptions {
     subscribe(
       listener: (surfaces: readonly RuntimeExtensionSurface[]) => void,
     ): () => void;
+    snapshot?: () => readonly RuntimeExtensionSurface[];
   };
   onLiveSurfacesChanged?: (
     surfaces: readonly RuntimeExtensionSurface[],
@@ -110,6 +211,10 @@ export class BridgeClient {
   private unsubscribeLiveSurfaces: (() => void) | undefined;
   private broker: InteractionBroker | undefined;
   private liveSurfaces: BridgeClientOptions['liveSurfaces'];
+  private delegateTranscriptEntries = new Map<
+    string,
+    DelegateTranscriptSurfaceEntry
+  >();
 
   constructor(private readonly options: BridgeClientOptions) {
     this.bindServices(options.broker, options.liveSurfaces);
@@ -133,6 +238,9 @@ export class BridgeClient {
     this.unsubscribeLiveSurfaces = undefined;
     this.broker = broker;
     this.liveSurfaces = liveSurfaces;
+    this.delegateTranscriptEntries = delegateTranscriptEntries(
+      liveSurfaces?.snapshot?.() ?? [],
+    );
     this.unsubscribeBroker = broker?.subscribe((event) => {
       if (event.kind === 'requested') {
         this.sendEvent({
@@ -149,12 +257,26 @@ export class BridgeClient {
     });
     this.unsubscribeLiveSurfaces = liveSurfaces?.subscribe((surfaces) => {
       try {
-        this.options.onLiveSurfacesChanged?.(surfaces);
         const current = this.options.snapshot();
+        const nextEntries = delegateTranscriptEntries(surfaces);
+        for (const next of nextEntries.values()) {
+          const previous = this.delegateTranscriptEntries.get(next.key);
+          if (previous && JSON.stringify(previous.entry) === JSON.stringify(next.entry))
+            continue;
+          this.sendEvent({
+            type: 'delegate.transcript.updated',
+            sessionId: current.session.id,
+            lineageId: next.lineageId,
+            runId: next.runId,
+            entry: next.entry,
+          });
+        }
+        this.delegateTranscriptEntries = nextEntries;
+        this.options.onLiveSurfacesChanged?.(surfaces);
         this.sendEvent({
           type: 'runtime.stateChanged',
           state: current.liveState,
-          snapshot: { extensionSurfaces: surfaces },
+          snapshot: { extensionSurfaces: compactDelegateSurfaces(surfaces) },
         });
       } catch {
         // A surface publisher must not make a Pi mutation fail because the
@@ -212,11 +334,12 @@ export class BridgeClient {
       // frame, and a serialization failure must not tear down the bridge.
       return false;
     }
-    return this.enqueueOutbound(
-      socket,
-      data,
-      wireEvent.type === 'message.updated' || wireEvent.type === 'tool.updated',
-    );
+    const droppable =
+      wireEvent.type === 'message.updated' ||
+      wireEvent.type === 'tool.updated' ||
+      (wireEvent.type === 'delegate.transcript.updated' &&
+        wireEvent.entry.status === 'running');
+    return this.enqueueOutbound(socket, data, droppable);
   }
 
   private connect(): void {
