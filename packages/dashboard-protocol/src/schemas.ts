@@ -1346,6 +1346,8 @@ export const SessionApiResponseSchema = Type.Object(
     runtimeEpoch: Type.Optional(IdentifierSchema),
     /** Runtime sequence covered by the active branch snapshot. */
     runtimeSeq: Type.Optional(Type.Integer({ minimum: 0 })),
+    /** Whether the live overlay is reconciled through the response cursor. */
+    completeThroughCursor: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

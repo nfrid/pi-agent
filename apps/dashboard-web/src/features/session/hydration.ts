@@ -44,6 +44,7 @@ export function useSessionHydration({
     : undefined;
   const queryDataId = query.data?.metadata.id;
   const queryEntriesComplete = query.data?.entriesComplete;
+  const queryCompleteThroughCursor = query.data?.completeThroughCursor;
   // An incomplete response with a cursor is a valid bounded tail page. Older
   // history is user-driven pagination, not a signal that the branch is still
   // being serialized.
@@ -104,7 +105,11 @@ export function useSessionHydration({
     }
     if (store.hydrateSession(query.data)) {
       hydrationRetryCountRef.current = 0;
-      if (query.data.entriesComplete !== false) setError(undefined);
+      if (
+        query.data.entriesComplete !== false &&
+        query.data.completeThroughCursor !== false
+      )
+        setError(undefined);
       return;
     }
     const attempt = hydrationRetryCountRef.current;
@@ -157,8 +162,8 @@ export function useSessionHydration({
     void incompleteRetryNonce;
     if (
       queryDataId !== id ||
-      queryEntriesComplete !== false ||
-      queryHasOlderHistory
+      (queryCompleteThroughCursor !== false &&
+        (queryEntriesComplete !== false || queryHasOlderHistory))
     ) {
       incompleteRetryCountRef.current = 0;
       return;
@@ -180,7 +185,8 @@ export function useSessionHydration({
           if (
             !canceled &&
             isCurrentSessionResponse(id, result?.data) &&
-            result.data.entriesComplete === false
+            (result.data.entriesComplete === false ||
+              result.data.completeThroughCursor === false)
           )
             retry();
         },
@@ -197,6 +203,7 @@ export function useSessionHydration({
     incompleteRetryNonce,
     queryDataId,
     queryEntriesComplete,
+    queryCompleteThroughCursor,
     queryHasOlderHistory,
     requestSessionRefetch,
   ]);
@@ -219,7 +226,8 @@ export function useSessionHydration({
     retrySession,
     projection,
     waitingForInitialHistory:
-      data?.entriesComplete === false &&
+      (data?.entriesComplete === false ||
+        data?.completeThroughCursor === false) &&
       (!projection || projection.order.length === 0),
   };
 }

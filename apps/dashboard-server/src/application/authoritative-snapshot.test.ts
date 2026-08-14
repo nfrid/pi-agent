@@ -156,6 +156,16 @@ function runtime(
 }
 
 describe('authoritative application snapshot lifecycle', () => {
+  it('can complete a fresh idle registration when its persisted branch is authoritative', async () => {
+    const f = await fixture();
+    f.register(runtime(f.file, { liveState: 'idle' }));
+    const snapshot = await f.app.sessionSnapshot(
+      'generation-1',
+      'snapshot-session',
+    );
+    expect(snapshot.completeThroughCursor).toBe(true);
+  });
+
   it('projects partial assistant, tool, and long-id delegate state', async () => {
     const f = await fixture();
     const live = runtime(f.file, {
@@ -228,6 +238,36 @@ describe('authoritative application snapshot lifecycle', () => {
     expect(snapshot.active.delegates[0]?.transcript[0]?.id).toBe(
       'd'.repeat(300),
     );
+  });
+
+  it('keeps a reconnected runtime uncertain after its first lifecycle event', async () => {
+    const f = await fixture();
+    const reconnected = runtime(f.file, { liveState: 'idle' });
+    f.register(reconnected, 'epoch-reconnected', true);
+    f.event(
+      reconnected,
+      {
+        type: 'message.updated',
+        sessionId: 'snapshot-session',
+        message: {
+          messageId: 'replayed-late',
+          role: 'assistant',
+          content: 'late event',
+          phase: 'updated',
+        },
+      },
+      'epoch-reconnected',
+      2,
+    );
+
+    const snapshot = await f.app.sessionSnapshot(
+      'generation-1',
+      'snapshot-session',
+    );
+    expect(snapshot.active.messages).toMatchObject([
+      { messageId: 'replayed-late' },
+    ]);
+    expect(snapshot.completeThroughCursor).toBe(false);
   });
 
   it('keeps terminal state dirty until disk proves it, then settles old sessions', async () => {
@@ -334,8 +374,12 @@ describe('authoritative application snapshot lifecycle', () => {
     const originalRead = f.sessions.readEntries.bind(f.sessions);
     let release!: () => void;
     let started!: () => void;
-    const startedPromise = new Promise<void>((resolve) => (started = resolve));
-    const releasePromise = new Promise<void>((resolve) => (release = resolve));
+    const startedPromise = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const releasePromise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const readSpy = vi
       .spyOn(f.sessions, 'readEntries')
       .mockImplementation(async (...args) => {

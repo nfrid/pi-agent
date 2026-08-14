@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   DashboardHttpClient,
   DashboardProtocolMismatchError,
+  SESSION_REQUEST_ORDER,
 } from './http-client.js';
 
 const validSnapshot = {
@@ -172,6 +173,51 @@ describe('DashboardHttpClient command requests', () => {
     expect(calls[0]?.[0]).toBe(
       '/trpc/sessionSnapshot?input=%7B%22sessionId%22%3A%22session-1%22%2C%22before%22%3A%22opaque%20token%22%7D',
     );
+  });
+
+  it('orders latest session responses while isolating historical pages', async () => {
+    let releaseFirst!: () => void;
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let calls = 0;
+    const response = () =>
+      trpcResponse({
+        metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
+        entries: [],
+        entriesComplete: true,
+        serverId: 'server-1',
+        cursor: 1,
+        active: {
+          pendingInteractions: [],
+          messages: [],
+          tools: [],
+          delegates: [],
+          truncated: false,
+        },
+        completeThroughCursor: true,
+      });
+    const fetch = vi.fn(async (_input: RequestInfo | URL) => {
+      calls += 1;
+      if (calls === 1) await firstRelease;
+      return response();
+    });
+    const client = new DashboardHttpClient({ fetch, tokenStore: tokenStore() });
+    const first = client.session('session-1');
+    await Promise.resolve();
+    const second = client.session('session-1');
+    const historical = client.sessionBefore('session-1', 'older');
+    releaseFirst();
+    const [a, b, older] = await Promise.all([first, second, historical]);
+    expect(
+      (a as typeof a & Record<string, unknown>)[SESSION_REQUEST_ORDER],
+    ).toBe(1);
+    expect(
+      (b as typeof b & Record<string, unknown>)[SESSION_REQUEST_ORDER],
+    ).toBe(2);
+    expect(
+      (older as typeof older & Record<string, unknown>)[SESSION_REQUEST_ORDER],
+    ).toBeUndefined();
   });
 
   it('fetches and validates the active delegate transcript baseline', async () => {

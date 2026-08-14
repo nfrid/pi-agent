@@ -255,3 +255,133 @@ test('switching chats establishes the new transcript tail', async ({
   });
   await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
 });
+
+test('active to old to active ignores a delayed stale latest snapshot', async ({
+  page,
+}) => {
+  let releaseStale!: () => void;
+  let staleStarted!: () => void;
+  const staleRelease = new Promise<void>((resolve) => {
+    releaseStale = resolve;
+  });
+  const staleRequest = new Promise<void>((resolve) => {
+    staleStarted = resolve;
+  });
+  const runtime = {
+    runtimeId: 'runtime-1',
+    ownership: 'external',
+    pid: 1,
+    cwd: '/tmp',
+    liveState: 'working',
+    session: { id: 'session-1', entries: [], entriesComplete: false },
+    pendingInteractions: [],
+    online: true,
+  };
+  const activeSnapshot = { ...snapshot, runtimes: [runtime] };
+  await installDashboardBootstrap(page, activeSnapshot);
+  await page.route('**/api/usage', (route) =>
+    route.fulfill({ contentType: 'application/json', body: '{}' }),
+  );
+  let activeRequests = 0;
+  await page.route('**/trpc/sessionSnapshot*', async (route) => {
+    const input = JSON.parse(
+      new URL(route.request().url()).searchParams.get('input') ?? '{}',
+    ) as { sessionId?: string };
+    const id = input.sessionId ?? '';
+    if (id === 'session-1') {
+      activeRequests += 1;
+      if (activeRequests === 1) {
+        staleStarted();
+        await staleRelease;
+      }
+    }
+    const current = id === 'session-1' && activeRequests >= 2;
+    const session = snapshot.sessions[id === 'session-2' ? 1 : 0];
+    const messageId = current ? 'assistant-current' : 'assistant-stale';
+    const toolId = current ? 'tool-current' : 'tool-stale';
+    const delegateId = current ? 'delegate-current' : 'delegate-stale';
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        result: {
+          data: {
+            metadata: {
+              ...session,
+              ...(id === 'session-1' ? { activeRuntimeId: 'runtime-1' } : {}),
+            },
+            entries: id === 'session-2' ? entries['session-2'] : [],
+            entriesComplete: true,
+            serverId: snapshot.serverId,
+            cursor: 1,
+            active:
+              id === 'session-1'
+                ? {
+                    runtimeId: 'runtime-1',
+                    pendingInteractions: [],
+                    messages: [
+                      {
+                        messageId,
+                        role: 'assistant',
+                        content: current ? 'partial current' : 'partial stale',
+                        phase: 'updated',
+                      },
+                    ],
+                    tools: [
+                      { toolCallId: toolId, name: 'read', status: 'running' },
+                    ],
+                    delegates: [
+                      {
+                        runId: delegateId,
+                        lineageId: `lineage-${delegateId}`,
+                        name: 'worker',
+                        kind: 'background',
+                        state: 'running',
+                        createdAt: 1,
+                        allowWrites: false,
+                        transcript: [],
+                      },
+                    ],
+                    truncated: false,
+                  }
+                : {
+                    pendingInteractions: [],
+                    messages: [],
+                    tools: [],
+                    delegates: [],
+                    truncated: false,
+                  },
+            completeThroughCursor: true,
+          },
+        },
+      }),
+    });
+  });
+
+  await page.goto('/sessions/session-1');
+  await staleRequest;
+  await page.goto('/sessions/session-2');
+  await expect(page).toHaveURL(/\/sessions\/session-2$/u);
+  await expect(page.getByText('second session')).toBeVisible();
+  await page.goto('/sessions/session-1');
+  await expect.poll(() => activeRequests).toBe(2);
+  await expect(page.getByText('partial current')).toHaveCount(1);
+  await expect(page.getByText('partial stale')).toHaveCount(0);
+  await expect(
+    page.locator('[data-transcript-key="assistant-current"]'),
+  ).toHaveCount(1);
+  await expect(
+    page.locator('[data-transcript-key="tool-current"]'),
+  ).toHaveCount(1);
+
+  releaseStale();
+  await expect(page.getByText('partial current')).toHaveCount(1);
+  await expect(page.getByText('partial stale')).toHaveCount(0);
+  await expect(
+    page.locator('[data-transcript-key="assistant-current"]'),
+  ).toHaveCount(1);
+  await expect(
+    page.locator('[data-transcript-key="tool-current"]'),
+  ).toHaveCount(1);
+  await expect(page.getByText('worker')).toHaveCount(1);
+  await expect(page.locator('.delegate-row')).toHaveCount(1);
+});
