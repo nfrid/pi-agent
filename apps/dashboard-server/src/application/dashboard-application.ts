@@ -212,8 +212,6 @@ type ActiveTranscriptState = {
   unresolvedTerminalIds: readonly string[];
   /** Set on settlement/offline/reconnect until a complete disk read proves safety. */
   uncertain: boolean;
-  /** Registration provenance; reconnects require authoritative reconciliation. */
-  reconnected: boolean;
 };
 
 type ActiveCapture = {
@@ -636,7 +634,6 @@ export class DashboardApplication {
         // A fresh registration starts with a complete live observation. A
         // reconnect starts uncertain because its earlier lifecycle is unknown.
         uncertain: change.reconnected === true,
-        reconnected: change.reconnected === true,
       });
       return;
     }
@@ -650,7 +647,6 @@ export class DashboardApplication {
       truncated: false,
       unresolvedTerminalIds: [],
       uncertain: true,
-      reconnected: false,
     };
     if (prior.runtimeEpoch !== runtimeEpoch) {
       this.activeTranscripts.set(sessionId, {
@@ -664,8 +660,6 @@ export class DashboardApplication {
         truncated: false,
         unresolvedTerminalIds: [],
         uncertain: true,
-        reconnected:
-          change.kind === 'registered' && change.reconnected === true,
       });
       return;
     }

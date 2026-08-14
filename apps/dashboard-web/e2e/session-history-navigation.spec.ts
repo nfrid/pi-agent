@@ -361,7 +361,9 @@ test('active to old to active ignores a delayed stale latest snapshot', async ({
   await staleRequest;
   await page.goto('/sessions/session-2');
   await expect(page).toHaveURL(/\/sessions\/session-2$/u);
-  await expect(page.getByText('second session')).toBeVisible();
+  await expect(
+    page.getByLabel('Transcript', { exact: true }).getByText('second session'),
+  ).toBeVisible();
   await page.goto('/sessions/session-1');
   await expect.poll(() => activeRequests).toBe(2);
   await expect(page.getByText('partial current')).toHaveCount(1);
@@ -382,6 +384,9 @@ test('active to old to active ignores a delayed stale latest snapshot', async ({
   await expect(
     page.locator('[data-transcript-key="tool-current"]'),
   ).toHaveCount(1);
-  await expect(page.getByText('worker')).toHaveCount(1);
+  await page.getByRole('button', { name: /Delegates/u }).click();
   await expect(page.locator('.delegate-row')).toHaveCount(1);
+  await expect(page.locator('.delegate-row').getByText('worker')).toHaveCount(
+    1,
+  );
 });

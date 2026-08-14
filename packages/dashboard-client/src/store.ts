@@ -1355,25 +1355,23 @@ export class DashboardLiveStore {
         id: run.runId,
         ...run,
       }));
+      const delegateStatusSurface = {
+        id: 'delegate.status',
+        rendererId: 'delegate.status',
+        placement: 'main' as const,
+        viewModel: { version: 1, statuses: delegateStatuses },
+      } as NonNullable<RuntimeSnapshot['extensionSurfaces']>[number];
       const extensionSurfaces: RuntimeSnapshot['extensionSurfaces'] =
         activeRuntime.extensionSurfaces
-          ? activeRuntime.extensionSurfaces.map((surface) =>
-              surface !== delegateSurface
-                ? surface
-                : {
-                    ...surface,
-                    viewModel: { version: 1, statuses: delegateStatuses },
-                  },
-            )
+          ? delegateSurface
+            ? activeRuntime.extensionSurfaces.map((surface) =>
+                surface === delegateSurface ? delegateStatusSurface : surface,
+              )
+            : active.delegates.length > 0
+              ? [...activeRuntime.extensionSurfaces, delegateStatusSurface]
+              : activeRuntime.extensionSurfaces
           : active.delegates.length > 0
-            ? [
-                {
-                  id: 'delegate.status',
-                  rendererId: 'delegate.status',
-                  placement: 'main' as const,
-                  viewModel: { version: 1, statuses: delegateStatuses },
-                } as NonNullable<RuntimeSnapshot['extensionSurfaces']>[number],
-              ]
+            ? [delegateStatusSurface]
             : undefined;
       const projectedRuntime = {
         ...activeRuntime,

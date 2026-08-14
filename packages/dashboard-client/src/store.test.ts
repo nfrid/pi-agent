@@ -142,7 +142,7 @@ describe('DashboardLiveStore', () => {
     uncoveredStore.installSnapshot(snapshot('daemon-1', 4));
     expect(
       uncoveredStore.hydrateSession(
-        orderedResponse({ ...sessionResponse(99), entriesComplete: true }, 2),
+        orderedResponse({ ...sessionResponse(1), entriesComplete: true }, 2),
       ),
     ).toBeUndefined();
     expect(

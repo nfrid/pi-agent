@@ -242,7 +242,7 @@ describe('authoritative application snapshot lifecycle', () => {
 
   it('keeps a reconnected runtime uncertain after its first lifecycle event', async () => {
     const f = await fixture();
-    const reconnected = runtime(f.file, { liveState: 'idle' });
+    const reconnected = runtime(f.file);
     f.register(reconnected, 'epoch-reconnected', true);
     f.event(
       reconnected,
