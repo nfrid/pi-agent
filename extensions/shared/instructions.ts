@@ -59,7 +59,6 @@ export function loadGuidelines(
   }
 
   const lines = content.split(/\r?\n/);
-  if (lines.at(-1) === '') lines.pop();
   return lines.map((line, index) => {
     if (!line.startsWith('- ') || line.slice(2).trim().length === 0) {
       throw new Error(

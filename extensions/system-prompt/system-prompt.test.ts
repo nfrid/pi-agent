@@ -142,10 +142,12 @@ describe('canonical prompt composition', () => {
     for (const prompt of prompts) {
       expect(prompt).toContain('<agent_instructions>\n# Working style');
       expect(prompt).toContain('\n\n# Interaction\n');
+      expect(prompt).toContain('\n\n# Tool use\n');
       expect(prompt).toContain('\n\n- Keep command output bounded');
       expect(prompt).toContain('\n</agent_instructions>');
       expect(prompt.match(/# Working style/g)).toHaveLength(1);
       expect(prompt.match(/# Interaction/g)).toHaveLength(1);
+      expect(prompt.match(/# Tool use/g)).toHaveLength(1);
       expect(prompt).not.toContain('<agent_instruction source=');
       expect(prompt).not.toContain('instructions/agent/working-style.md');
       expect(prompt).not.toContain('instructions/agent/interaction.md');

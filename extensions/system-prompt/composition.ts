@@ -6,22 +6,14 @@ import {
 } from '@earendil-works/pi-coding-agent';
 import {
   type LoadedInstruction,
-  loadGuidelines,
   loadInstruction,
 } from '../shared/instructions';
 
 export function loadAgentInstructions(): LoadedInstruction[] {
   const workingStyle = loadInstruction('instructions/agent/working-style.md');
   const interaction = loadInstruction('instructions/agent/interaction.md');
-  const toolUse = loadGuidelines('instructions/agent/tool-use.md');
-  return [
-    workingStyle,
-    interaction,
-    {
-      path: 'instructions/agent/tool-use.md',
-      content: toolUse.map((guideline) => `- ${guideline}`).join('\n'),
-    },
-  ];
+  const toolUse = loadInstruction('instructions/agent/tool-use.md');
+  return [workingStyle, interaction, toolUse];
 }
 
 export function formatSkillsForPrompt(
