@@ -1487,6 +1487,105 @@ describe('remote-control bridge', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('keeps reconnect hello compact and replays active delegate entries after it', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'pi-bridge-'));
+    const socketPath = path.join(directory, 'bridge.sock');
+    const received: Array<Record<string, unknown>> = [];
+    const server = net.createServer((socket) => {
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk) => {
+        for (const line of String(chunk).split('\n').filter(Boolean))
+          received.push(JSON.parse(line) as Record<string, unknown>);
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    const hub = new LiveSurfaceHub();
+    hub.publish('delegate', [
+      {
+        id: 'delegate.status',
+        rendererId: 'delegate.status',
+        viewModel: {
+          version: 1,
+          statuses: [
+            {
+              id: 'ds-1',
+              runId: 'run-1',
+              lineageId: 'lineage-1',
+              name: 'Worker',
+              kind: 'background',
+              state: 'running',
+              createdAt: 1,
+              allowWrites: false,
+              transcript: [
+                {
+                  id: 'task',
+                  type: 'task',
+                  label: 'Task',
+                  text: 'inspect source',
+                  status: 'completed',
+                },
+                {
+                  id: 'tool-1',
+                  type: 'tool',
+                  label: 'read source',
+                  status: 'completed',
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+    const client = new BridgeClient({
+      socketPath,
+      runtimeId: 'runtime-test',
+      snapshot: () => snapshot,
+      liveSurfaces: hub,
+      handleCommand: async (command) => ({ type: command.type }),
+    });
+    client.start();
+    await waitFor(() =>
+      received.some(
+        (frame) =>
+          (frame.event as { type?: string } | undefined)?.type ===
+          'delegate.transcript.updated',
+      ),
+    );
+    const hello = received.find(
+      (frame) =>
+        (frame.event as { type?: string } | undefined)?.type ===
+        'runtime.hello',
+    );
+    expect(JSON.stringify(hello)).not.toContain('transcript');
+    const replay = received.filter(
+      (frame) =>
+        (frame.event as { type?: string } | undefined)?.type ===
+        'delegate.transcript.updated',
+    );
+    expect(replay).toHaveLength(2);
+    expect(
+      replay.map(
+        (frame) => (frame.event as { entry: { id: string } }).entry.id,
+      ),
+    ).toEqual(['task', 'tool-1']);
+    expect(
+      received.findIndex(
+        (frame) =>
+          (frame.event as { type?: string } | undefined)?.type ===
+          'runtime.hello',
+      ),
+    ).toBeLessThan(
+      received.findIndex(
+        (frame) =>
+          (frame.event as { type?: string } | undefined)?.type ===
+          'delegate.transcript.updated',
+      ),
+    );
+    client.stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  });
+
   it('replays a stable prompt ACK after reconnect without executing Pi twice', async () => {
     let release!: () => void;
     const handleCommand = vi.fn(
@@ -1761,9 +1860,7 @@ describe('remote-control bridge', () => {
         extensionSurfaces: [
           {
             viewModel: {
-              statuses: [
-                { transcriptTruncated: true, result: { valueOmitted: true } },
-              ],
+              statuses: [{ result: { valueOmitted: true } }],
             },
           },
         ],
