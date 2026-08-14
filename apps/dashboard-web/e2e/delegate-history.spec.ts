@@ -91,7 +91,8 @@ test('shows and inspects a persisted delegate in an offline session', async ({
     };
     window.fetch = async (input, init) => {
       const target = typeof input === 'string' ? input : input.url;
-      if (!target.includes('/api/events')) return originalFetch(input, init);
+      if (!target.includes('/trpc/shellSubscribe'))
+        return originalFetch(input, init);
       return new Response(
         new ReadableStream<Uint8Array>({
           start(nextController) {

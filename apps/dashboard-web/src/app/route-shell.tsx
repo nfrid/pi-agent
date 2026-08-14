@@ -47,9 +47,9 @@ export function RouteShell() {
         {(dashboard.error || dashboard.connectionState !== 'connected') && (
           <div className="notice sync-notice" role="status" aria-live="polite">
             {dashboard.error ??
-              (dashboard.connectionState === 'reconnecting'
-                ? 'Live updates disconnected; reconnecting…'
-                : 'Connecting to live updates…')}
+              (dashboard.connectionState === 'connecting'
+                ? 'Connecting to live updates…'
+                : 'Live updates unavailable.')}
           </div>
         )}
         <main

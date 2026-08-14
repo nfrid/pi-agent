@@ -3,7 +3,7 @@ import {
   reduceTranscriptEvent,
   selectLegacyTranscriptEntries,
 } from '@pi-dashboard/domain';
-import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
+import type { BridgeEvent, RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import {
   addImageAttachments,
@@ -25,7 +25,6 @@ import {
   readComposerDraft,
   resumeRuntimeRequest,
   runtimeSupportsImages,
-  sessionCursorRangeCovered,
   sessionDisplayTitle,
   sessionNavigationTarget,
   sessionPathForRuntime,
@@ -37,7 +36,6 @@ import {
   upsertQueuedMessage,
   writeComposerDraft,
 } from './App';
-import type { DashboardEvent } from './dashboard-transport';
 import {
   activityGroupMetadata,
   activityGroupPresentation,
@@ -491,19 +489,17 @@ describe('session hydration cursor coverage', () => {
     expect(shouldApplySessionMetadata(8, 9)).toBe(false);
     expect(shouldApplySessionMetadata(10, 9)).toBe(true);
   });
-
-  it('requires every stream cursor between the HTTP snapshot and current state', () => {
-    expect(sessionCursorRangeCovered(4, 7, [5, 6, 7])).toBe(true);
-    expect(sessionCursorRangeCovered(4, 7, [6, 7])).toBe(false);
-    expect(sessionCursorRangeCovered(4, 4, [])).toBe(true);
-  });
 });
 
 describe('session replacement navigation', () => {
   const sessionEvent = (
     type: 'session.changed' | 'session.snapshot',
     id: string,
-  ) => ({ type, session: { id, entries: [] } }) as DashboardEvent['event'];
+  ) =>
+    ({ type, session: { id, entries: [] } }) as Extract<
+      BridgeEvent,
+      { type: 'session.changed' | 'session.snapshot' }
+    >;
 
   it.each([
     'session.changed',

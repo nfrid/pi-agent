@@ -1,5 +1,4 @@
-import { deriveSessionTitle } from '@pi-dashboard/protocol';
-import type { DashboardEvent } from './dashboard-transport';
+import { type BridgeEvent, deriveSessionTitle } from '@pi-dashboard/protocol';
 
 export function sessionDisplayTitle(
   session: { name?: string; title?: string },
@@ -38,27 +37,11 @@ export function shouldApplySessionMetadata(
   return eventCursor > metadataCursor;
 }
 
-export function sessionCursorRangeCovered(
-  snapshotCursor: number,
-  currentCursor: number,
-  cursorHistory: readonly number[],
-): boolean {
-  if (currentCursor <= snapshotCursor) return true;
-  let expected = snapshotCursor + 1;
-  for (const cursor of cursorHistory) {
-    if (cursor < expected) continue;
-    if (cursor !== expected) return false;
-    expected += 1;
-    if (expected > currentCursor) return true;
-  }
-  return expected > currentCursor;
-}
-
 export function sessionNavigationTarget(
   currentSessionId: string,
   associatedRuntimeId: string | undefined,
   eventRuntimeId: string | undefined,
-  event: DashboardEvent['event'],
+  event: Extract<BridgeEvent, { type: 'session.changed' | 'session.snapshot' }>,
 ): string | undefined {
   if (
     (event.type !== 'session.changed' && event.type !== 'session.snapshot') ||

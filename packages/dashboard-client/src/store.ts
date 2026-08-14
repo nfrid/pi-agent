@@ -30,7 +30,6 @@ import {
   SESSION_REQUEST_ORDER,
 } from './http-client.js';
 
-export const LIVE_BUFFER_LIMIT = 256;
 export const LIVE_RENDER_INTERVAL_MS = 32;
 
 export type ConnectionStatus =
@@ -70,9 +69,12 @@ export interface DashboardLiveState {
     /** Compatibility diagnostic; live domains use their own sequence values. */
     lastCursor: number;
     error?: string;
+    errorKind?: import('./http-client.js').DashboardHttpErrorKind;
   };
   shellSync: DomainSyncState;
   sessionSyncById: Readonly<Record<string, DomainSyncState>>;
+  /** Latest authoritative response delivered by an acquired session feed. */
+  sessionSnapshotsById: Readonly<Record<string, SessionApiResponse>>;
   workspacesById: Readonly<Record<string, WorkspaceTarget>>;
   workspaceOrder: readonly string[];
   runtimesById: Readonly<Record<string, RuntimeSnapshot>>;
@@ -89,9 +91,6 @@ export interface DashboardLiveState {
     Record<string, BrowserSnapshot['unread'][number]>
   >;
   transcriptsBySessionId: Readonly<Record<string, TranscriptProjection>>;
-  cursorHistory: readonly number[];
-  recentEvents: readonly DashboardEventEnvelope[];
-  resyncNonce: number;
   usageError?: string;
 }
 
@@ -261,6 +260,7 @@ function emptyState(): DashboardLiveState {
       sequenceKnown: false,
     },
     sessionSyncById: {},
+    sessionSnapshotsById: {},
     workspacesById: {},
     workspaceOrder: [],
     runtimesById: {},
@@ -272,9 +272,6 @@ function emptyState(): DashboardLiveState {
     sessionReplacementBySessionId: {},
     notificationsById: {},
     transcriptsBySessionId: {},
-    cursorHistory: [],
-    recentEvents: [],
-    resyncNonce: 0,
   };
 }
 
@@ -703,13 +700,18 @@ export class DashboardLiveStore {
     return { ...state, notificationsById };
   }
 
-  setConnection(status: ConnectionStatus, error?: string): void {
+  setConnection(
+    status: ConnectionStatus,
+    error?: string,
+    errorKind?: import('./http-client.js').DashboardHttpErrorKind,
+  ): void {
     const normalizedStatus = status;
     const current = this.state.connection;
     if (
       current.status === normalizedStatus &&
       current.lastCursor === this.state.cursor &&
-      current.error === error
+      current.error === error &&
+      current.errorKind === errorKind
     )
       return;
     this.publish({
@@ -718,6 +720,7 @@ export class DashboardLiveStore {
         status: normalizedStatus,
         lastCursor: this.state.cursor,
         ...(error ? { error } : {}),
+        ...(errorKind ? { errorKind } : {}),
       },
     });
   }
@@ -737,6 +740,7 @@ export class DashboardLiveStore {
       connection: {
         ...this.state.connection,
         ...(error ? { error } : { error: undefined }),
+        ...(error ? {} : { errorKind: undefined }),
       },
     });
   }
@@ -884,6 +888,10 @@ export class DashboardLiveStore {
           ...(cursor === undefined ? {} : { cursor }),
         },
       },
+      sessionSnapshotsById: {
+        ...this.state.sessionSnapshotsById,
+        [response.metadata.id]: response,
+      },
     });
     return true;
   }
@@ -922,8 +930,6 @@ export class DashboardLiveStore {
         sessionChangeById: {},
         sessionReplacementByRuntimeId: {},
         sessionReplacementBySessionId: {},
-        cursorHistory: [next.cursor].slice(-LIVE_BUFFER_LIMIT),
-        resyncNonce: this.state.resyncNonce + 1,
       });
       return true;
     }
@@ -937,10 +943,8 @@ export class DashboardLiveStore {
       provenance.authoritativeRebase !== true
     )
       return false;
-    // Ordinary HTTP reads update the authoritative projection but must not
-    // jump over SSE records that were requested earlier and are still being
-    // replayed. Only SSE delivery (or an explicit replay-gap rebase) advances
-    // the transport cursor.
+    // Finite reads never advance live feed ordering. Subscription snapshots
+    // and explicit rebases carry their own domain sequence.
     const advanceCursor =
       provenance.source !== 'http' || provenance.rebaseCursor === true;
     const cursor = advanceCursor ? next.cursor : this.state.cursor;
@@ -949,9 +953,6 @@ export class DashboardLiveStore {
       ...projected,
       cursor,
       connection: { ...projected.connection, lastCursor: cursor },
-      cursorHistory: advanceCursor
-        ? [...projected.cursorHistory, next.cursor].slice(-LIVE_BUFFER_LIMIT)
-        : projected.cursorHistory,
     });
     return true;
   }
@@ -989,9 +990,6 @@ export class DashboardLiveStore {
         sessionChangeById,
         cursor: record.cursor,
         connection: { ...projected.connection, lastCursor: record.cursor },
-        cursorHistory: [...projected.cursorHistory, record.cursor].slice(
-          -LIVE_BUFFER_LIMIT,
-        ),
       });
       return true;
     }
@@ -1015,9 +1013,6 @@ export class DashboardLiveStore {
         ...this.state,
         cursor: record.cursor,
         connection: { ...this.state.connection, lastCursor: record.cursor },
-        cursorHistory: [...this.state.cursorHistory, record.cursor].slice(
-          -LIVE_BUFFER_LIMIT,
-        ),
       });
       return true;
     }
@@ -1273,13 +1268,6 @@ export class DashboardLiveStore {
                 ...nextState.connection,
                 lastCursor: envelope.cursor,
               },
-              cursorHistory: [
-                ...nextState.cursorHistory,
-                envelope.cursor,
-              ].slice(-LIVE_BUFFER_LIMIT),
-              recentEvents: [...nextState.recentEvents, envelope].slice(
-                -LIVE_BUFFER_LIMIT,
-              ),
             }),
       },
       event.type === 'message.updated' || event.type === 'tool.updated',
@@ -1342,67 +1330,22 @@ export class DashboardLiveStore {
     )
       return undefined;
     const snapshotCursor = response.cursor ?? this.state.cursor;
-    if (
-      !options.replace &&
-      !sessionCursorRangeCovered(
-        snapshotCursor,
-        this.state.cursor,
-        this.state.cursorHistory,
-      )
-    )
-      return undefined;
     if (requestOrder !== undefined) {
       const accepted = this.latestSessionRequestOrders.get(
         response.metadata.id,
       );
       if (accepted !== undefined && requestOrder < accepted) return undefined;
     }
-    // A session response can arrive while older records from the same SSE
-    // replay are still pending. Its entries are authoritative, but transport
-    // ordering is covered only through the cursor the stream has accepted.
-    const coveredCursor = options.replace
-      ? snapshotCursor
-      : Math.min(snapshotCursor, this.state.cursor);
+    // Authoritative feed snapshots replace the selected domain directly.
+    // Finite mutation/recovery responses retain their request-order guard but
+    // never replay a removed global browser event buffer.
+    const coveredCursor = snapshotCursor;
     const currentProjection = options.replace
       ? undefined
       : this.state.transcriptsBySessionId[response.metadata.id];
-    const sessionEvents = options.replace
-      ? []
-      : this.state.recentEvents.filter((envelope) => {
-          if (sessionIdForEvent(envelope) !== response.metadata.id)
-            return false;
-          // The HTTP branch belongs to its advertised runtime generation. Older
-          // generations cannot refine it; a newer generation after the response
-          // cursor is still replayed and may intentionally replace it.
-          return (
-            response.runtimeEpoch === undefined ||
-            envelope.runtimeEpoch === undefined ||
-            envelope.runtimeEpoch === response.runtimeEpoch ||
-            envelope.cursor > snapshotCursor
-          );
-        });
-    // The HTTP cursor covers event publication, not necessarily Pi's append to
-    // JSONL. Replay the bounded live buffer so a terminal tool event emitted
-    // just before persistence is reconciled, and so a complete /tree snapshot
-    // can replace stale append-only data already returned by HTTP.
-    const firstReplayCursor = sessionEvents[0]?.cursor;
-    const replayCursor =
-      firstReplayCursor === undefined
-        ? coveredCursor
-        : Math.min(coveredCursor, firstReplayCursor) - 1;
-    const firstResponseEpochSeq = sessionEvents
-      .filter(
-        (envelope) =>
-          response.runtimeEpoch !== undefined &&
-          envelope.runtimeEpoch === response.runtimeEpoch &&
-          envelope.runtimeSeq !== undefined,
-      )
-      .map((envelope) => envelope.runtimeSeq as number)
-      .sort((a, b) => a - b)[0];
-    const baselineRuntimeSeq =
-      firstResponseEpochSeq === undefined
-        ? response.runtimeSeq
-        : firstResponseEpochSeq - 1;
+    const sessionEvents: DashboardEventEnvelope[] = [];
+    const replayCursor = coveredCursor;
+    const baselineRuntimeSeq = response.runtimeSeq;
     let projection = hydrateTranscript(response.entries, response.metadata.id, {
       // Persisted Pi messages are not guaranteed to carry explicit IDs. The
       // session API boundary assigns deterministic entry-index identities so
@@ -1819,7 +1762,11 @@ export class DashboardLiveStore {
   }
 
   reconnect(): void {
-    this.connectionRuntime?.start();
+    this.connectionRuntime?.reconnect();
+  }
+
+  reconnectSession(sessionId: string): void {
+    this.connectionRuntime?.reconnectSession(sessionId);
   }
 
   acquireSession(sessionId: string) {
@@ -1829,22 +1776,17 @@ export class DashboardLiveStore {
   releaseSession(sessionId: string): void {
     this.connectionRuntime?.releaseSession(sessionId);
   }
-}
 
-export function sessionCursorRangeCovered(
-  snapshotCursor: number,
-  currentCursor: number,
-  cursorHistory: readonly number[],
-): boolean {
-  if (currentCursor <= snapshotCursor) return true;
-  let expected = snapshotCursor + 1;
-  for (const cursor of cursorHistory) {
-    if (cursor < expected) continue;
-    if (cursor !== expected) return false;
-    expected += 1;
-    if (expected > currentCursor) return true;
+  clearSessionSnapshot(sessionId: string): void {
+    const sessionSnapshotsById = { ...this.state.sessionSnapshotsById };
+    const sessionSyncById = { ...this.state.sessionSyncById };
+    const hadSnapshot = sessionSnapshotsById[sessionId] !== undefined;
+    const hadSync = sessionSyncById[sessionId] !== undefined;
+    if (!hadSnapshot && !hadSync) return;
+    delete sessionSnapshotsById[sessionId];
+    delete sessionSyncById[sessionId];
+    this.publish({ ...this.state, sessionSnapshotsById, sessionSyncById });
   }
-  return expected > currentCursor;
 }
 
 export function useDashboardStore<T>(
@@ -1967,6 +1909,9 @@ export const selectSessionSync =
 export const selectTranscript =
   (sessionId: string) => (state: DashboardLiveState) =>
     state.transcriptsBySessionId[sessionId];
+export const selectSessionSnapshot =
+  (sessionId: string) => (state: DashboardLiveState) =>
+    state.sessionSnapshotsById[sessionId];
 export const selectSession =
   (sessionId: string) => (state: DashboardLiveState) =>
     state.sessionsById[sessionId];

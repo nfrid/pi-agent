@@ -304,12 +304,6 @@ test('runtime row lifecycle menu supports desktop, touch, and keyboard access', 
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await page.route('**/api/events?*', async (route) =>
-    route.fulfill({
-      contentType: 'text/event-stream',
-      body: ': heartbeat\n\n',
-    }),
-  );
   await installDashboardBootstrap(page, {
     serverId: 'dashboard-context-menu',
     revision: 1,
@@ -686,12 +680,6 @@ test('session shell shows compaction progress', async ({ page }) => {
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await page.route('**/api/events?*', async (route) =>
-    route.fulfill({
-      contentType: 'text/event-stream',
-      body: ': heartbeat\n\n',
-    }),
-  );
   const commands: unknown[] = [];
   await page.route(
     '**/api/runtimes/runtime-compacting/command',
@@ -789,13 +777,6 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await page.route('**/api/events?*', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    await route.fulfill({
-      contentType: 'text/event-stream',
-      body: ': heartbeat\n\n',
-    });
-  });
   await installDashboardBootstrap(page, {
     serverId: 'server-loading',
     revision: 1,
@@ -1066,12 +1047,6 @@ test('delayed command completion does not scroll a destination session', async (
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await page.route('**/api/events?*', async (route) =>
-    route.fulfill({
-      contentType: 'text/event-stream',
-      body: ': heartbeat\n\n',
-    }),
-  );
   const metadata = (id: string, title: string) => ({
     id,
     file: '',
@@ -1324,7 +1299,8 @@ test('live transport contains malformed data and reconnects without HTTP polling
     };
     window.fetch = async (input, init) => {
       const target = typeof input === 'string' ? input : input.url;
-      if (!target.includes('/api/events')) return originalFetch(input, init);
+      if (!target.includes('/trpc/shellSubscribe'))
+        return originalFetch(input, init);
       if (replayGapPending) {
         replayGapPending = false;
         return new Response(JSON.stringify({ code: 'replay-gap' }), {
@@ -1565,7 +1541,8 @@ test('dense mobile session keeps conversation and activity readable', async ({
     };
     window.fetch = async (input, init) => {
       const target = typeof input === 'string' ? input : input.url;
-      if (!target.includes('/api/events')) return originalFetch(input, init);
+      if (!target.includes('/trpc/shellSubscribe'))
+        return originalFetch(input, init);
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           stream.controller = controller;
@@ -3095,7 +3072,8 @@ async function installPhase6Mocks(
     };
     window.fetch = async (input, init) => {
       const target = typeof input === 'string' ? input : input.url;
-      if (!target.includes('/api/events')) return originalFetch(input, init);
+      if (!target.includes('/trpc/shellSubscribe'))
+        return originalFetch(input, init);
       return createStream().response;
     };
     Object.assign(window, {

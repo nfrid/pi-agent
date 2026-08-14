@@ -1,13 +1,11 @@
 import {
   type DashboardLiveStore,
-  dashboardHttpClient,
   selectRuntimeForSession,
   selectSessionChange,
-  sessionQueryOptions,
+  selectSessionSnapshot,
   useDashboardStore,
 } from '@pi-dashboard/client';
-import { useQuery } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect } from 'react';
 
 export function useSessionHydration({
   id,
@@ -18,10 +16,13 @@ export function useSessionHydration({
   store: DashboardLiveStore;
   onReplacement: (sessionId: string) => void;
 }) {
-  const query = useQuery(sessionQueryOptions(dashboardHttpClient, id));
   const runtime = useDashboardStore(store, selectRuntimeForSession(id));
   const sessionChange = useDashboardStore(store, selectSessionChange(id));
-  const resyncNonce = useDashboardStore(store, (state) => state.resyncNonce);
+  const sessionSnapshot = useDashboardStore(store, selectSessionSnapshot(id));
+  const sessionSync = useDashboardStore(
+    store,
+    (state) => state.sessionSyncById[id],
+  );
   const storedMetadata = useDashboardStore(
     store,
     (state) => state.sessionsById[id],
@@ -30,119 +31,35 @@ export function useSessionHydration({
     store,
     (state) => state.transcriptsBySessionId[id],
   );
-  const data = query.data
-    ? { ...query.data, metadata: storedMetadata ?? query.data.metadata }
-    : undefined;
-  const [error, setError] = useState<string>();
-  const hydrationRetryCountRef = useRef(0);
-  const sessionChangeRef = useRef({ id, value: sessionChange });
-  const sessionRefetchRef = useRef<
-    | {
-        id: string;
-        promise: ReturnType<typeof query.refetch>;
+  const data = sessionSnapshot
+    ? {
+        ...sessionSnapshot,
+        metadata: storedMetadata ?? sessionSnapshot.metadata,
       }
-    | undefined
-  >(undefined);
-  const refetchSession = query.refetch;
-  const requestSessionRefetch = useCallback(() => {
-    if (document.visibilityState !== 'visible') return undefined;
-    const current = sessionRefetchRef.current;
-    if (current?.id === id) return current.promise;
-    if (current) sessionRefetchRef.current = undefined;
-    const pending = refetchSession();
-    const request = { id, promise: pending };
-    sessionRefetchRef.current = request;
-    void pending.then(
-      () => {
-        if (sessionRefetchRef.current === request)
-          sessionRefetchRef.current = undefined;
-      },
-      () => {
-        if (sessionRefetchRef.current === request)
-          sessionRefetchRef.current = undefined;
-      },
-    );
-    return pending;
-  }, [id, refetchSession]);
+    : undefined;
 
   useEffect(() => {
-    if (sessionRefetchRef.current?.id !== id)
-      sessionRefetchRef.current = undefined;
     if (!id) return;
-    setError(undefined);
-    hydrationRetryCountRef.current = 0;
-  }, [id]);
+    const subscription = store.acquireSession(id);
+    return () => subscription?.release();
+  }, [id, store]);
 
   useEffect(() => {
-    // A refetch can reuse structurally equal data; its timestamp still marks a
-    // new hydration attempt that must be evaluated.
-    void query.dataUpdatedAt;
-    if (!query.data) return;
-    if (query.data.metadata.id !== id) {
-      onReplacement(query.data.metadata.id);
-      return;
-    }
-    if (store.hydrateSession(query.data)) {
-      hydrationRetryCountRef.current = 0;
-      setError(undefined);
-      return;
-    }
-    const attempt = hydrationRetryCountRef.current;
-    if (attempt >= 6) {
-      setError('Session changed repeatedly while loading. Retry when ready.');
-      return;
-    }
-    hydrationRetryCountRef.current = attempt + 1;
-    setError('Session changed while loading; retrying…');
-    const retry = window.setTimeout(
-      () => void requestSessionRefetch(),
-      Math.min(8_000, 250 * 2 ** attempt),
-    );
-    return () => window.clearTimeout(retry);
-  }, [
-    id,
-    onReplacement,
-    query.data,
-    query.dataUpdatedAt,
-    requestSessionRefetch,
-    store,
-  ]);
-
-  useEffect(() => {
-    const previous = sessionChangeRef.current;
-    sessionChangeRef.current = { id, value: sessionChange };
-    if (previous.id !== id || previous.value === sessionChange) return;
-    void requestSessionRefetch();
-  }, [id, requestSessionRefetch, sessionChange]);
-
-  useEffect(() => {
-    if (resyncNonce > 0) void requestSessionRefetch();
-  }, [requestSessionRefetch, resyncNonce]);
-
-  useEffect(() => {
-    const reconcileWhenVisible = () => {
-      if (document.visibilityState !== 'visible') return;
-      hydrationRetryCountRef.current = 0;
-      void requestSessionRefetch();
-    };
-    document.addEventListener('visibilitychange', reconcileWhenVisible);
-    return () =>
-      document.removeEventListener('visibilitychange', reconcileWhenVisible);
-  }, [requestSessionRefetch]);
+    if (sessionSnapshot && sessionSnapshot.metadata.id !== id)
+      onReplacement(sessionSnapshot.metadata.id);
+  }, [id, onReplacement, sessionSnapshot]);
 
   const retrySession = useCallback(() => {
-    hydrationRetryCountRef.current = 0;
-    setError(undefined);
-    void requestSessionRefetch();
-  }, [requestSessionRefetch]);
+    store.reconnectSession(id);
+  }, [id, store]);
 
   return {
     data,
-    queryError: query.error,
+    queryError: null,
     runtime,
     sessionChange,
     storedMetadata,
-    error,
+    error: sessionSync?.status === 'error' ? sessionSync.error : undefined,
     retrySession,
     projection,
     waitingForInitialHistory:

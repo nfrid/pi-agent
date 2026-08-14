@@ -1,5 +1,5 @@
+import type { useDashboardShell } from '@pi-dashboard/client';
 import { createContext, useContext } from 'react';
-import type { useDashboardShell } from '../dashboard-transport';
 
 export type DashboardContextValue = ReturnType<typeof useDashboardShell>;
 

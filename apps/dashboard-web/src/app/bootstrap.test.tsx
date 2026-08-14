@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
 
-let snapshotOutcome: unknown;
 const snapshot = {
   serverId: 'server-compatible',
   revision: 1,
@@ -17,6 +16,14 @@ const snapshot = {
 const dashboardState = {
   snapshot: undefined as typeof snapshot | undefined,
   error: undefined as string | undefined,
+  errorKind: undefined as
+    | 'authentication'
+    | 'protocol-mismatch'
+    | 'network'
+    | 'malformed-output'
+    | 'domain'
+    | 'request'
+    | undefined,
   usageError: undefined as string | undefined,
   connectionState: 'connected' as const,
   store: {
@@ -25,6 +32,7 @@ const dashboardState = {
     setError: vi.fn(),
     updateUsage: vi.fn(),
     setUsageError: vi.fn(),
+    reconnect: vi.fn(),
   },
 };
 
@@ -35,24 +43,17 @@ vi.mock('@pi-dashboard/client', async () => {
   return {
     ...actual,
     dashboardHttpClient: {
-      snapshot: () =>
-        snapshotOutcome instanceof Error
-          ? Promise.reject(snapshotOutcome)
-          : Promise.resolve(snapshotOutcome),
       usage: () => Promise.resolve({}),
+    },
+    useDashboardShell: () => {
+      const [snapshot, setSnapshot] = useState(dashboardState.snapshot);
+      dashboardState.store.installSnapshot.mockImplementation((value) =>
+        setSnapshot(value),
+      );
+      return { ...dashboardState, snapshot };
     },
   };
 });
-
-vi.mock('../dashboard-transport', () => ({
-  useDashboardShell: () => {
-    const [snapshot, setSnapshot] = useState(dashboardState.snapshot);
-    dashboardState.store.installSnapshot.mockImplementation((value) =>
-      setSnapshot(value),
-    );
-    return { ...dashboardState, snapshot };
-  },
-}));
 
 vi.mock('react-aria-components', () => ({
   Button: ({ children, ...props }: { children: ReactNode }) =>
@@ -84,6 +85,8 @@ describe('dashboard startup', () => {
   afterEach(() => {
     dashboardQueryClient.clear();
     dashboardState.snapshot = undefined;
+    dashboardState.error = undefined;
+    dashboardState.errorKind = undefined;
     vi.clearAllMocks();
   });
 
@@ -91,8 +94,16 @@ describe('dashboard startup', () => {
     outcome: unknown,
     initialSnapshot?: typeof snapshot,
   ): Promise<ReactTestRenderer> {
-    snapshotOutcome = outcome;
-    dashboardState.snapshot = initialSnapshot;
+    dashboardState.snapshot =
+      outcome instanceof Error ? initialSnapshot : (outcome as typeof snapshot);
+    dashboardState.error =
+      outcome instanceof Error ? outcome.message : undefined;
+    dashboardState.errorKind =
+      outcome instanceof DashboardProtocolMismatchError
+        ? 'protocol-mismatch'
+        : outcome instanceof DashboardHttpError
+          ? outcome.kind
+          : undefined;
     dashboardQueryClient.setDefaultOptions({
       queries: { retryDelay: 0 },
     });
@@ -108,7 +119,7 @@ describe('dashboard startup', () => {
 
   it('renders the compatible bootstrap through the current app/store path', async () => {
     const renderer = await renderStartup(snapshot);
-    expect(dashboardState.store.installSnapshot).toHaveBeenCalledOnce();
+    expect(dashboardState.store.installSnapshot).not.toHaveBeenCalled();
     expect(
       renderer.root.findByProps({ 'data-testid': 'router-provider' }),
     ).toBeTruthy();

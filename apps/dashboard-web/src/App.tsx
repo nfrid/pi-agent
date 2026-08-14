@@ -1,23 +1,22 @@
 import { DashboardBootstrap } from './app/bootstrap';
 
 export {
+  api,
+  asBrowserSnapshot,
+  asSessionResponse,
+} from '@pi-dashboard/client';
+export {
   DashboardContext,
   type DashboardContextValue,
   useDashboardContext,
 } from './app/dashboard-context';
 export {
   isNearPageBottom,
-  sessionCursorRangeCovered,
   sessionDisplayTitle,
   sessionNavigationTarget,
   shouldApplySessionMetadata,
   shouldShowJumpToLatest,
 } from './app-helpers';
-export {
-  api,
-  asBrowserSnapshot,
-  asSessionResponse,
-} from './dashboard-transport';
 export {
   buildTranscriptLandmarks,
   shouldShowActivityLead,

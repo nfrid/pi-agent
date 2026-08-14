@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   dashboardTrpcInput,
   installDashboardBootstrap,
+  trpcSseData,
 } from './dashboard-fixtures';
 
 const snapshot = {
@@ -37,6 +38,51 @@ test('loads earlier session history on demand', async ({ page }) => {
   const olderResponse = new Promise<void>((resolve) => {
     releaseOlder = resolve;
   });
+  await page.route('**/trpc/sessionSubscribe*', async (route) =>
+    route.fulfill({
+      contentType: 'text/event-stream',
+      body: trpcSseData(
+        {
+          type: 'snapshot',
+          sequence: 1,
+          snapshot: {
+            metadata,
+            entries: [
+              ...Array.from({ length: 90 }, (_, index) => ({
+                type: 'message',
+                id: `history-${index}`,
+                message: { role: 'user', content: `history ${index}` },
+              })),
+              {
+                type: 'message',
+                id: 'latest',
+                message: { role: 'assistant', content: 'latest response' },
+              },
+            ],
+            entriesComplete: false,
+            serverId: 'history-test',
+            cursor: 1,
+            history: {
+              version: 1,
+              start: 2,
+              end: 3,
+              hasOlder: true,
+              nextBefore: 'token-1',
+            },
+            active: {
+              pendingInteractions: [],
+              messages: [],
+              tools: [],
+              delegates: [],
+              truncated: false,
+            },
+            completeThroughCursor: false,
+          },
+        },
+        'session-feed-1',
+      ),
+    }),
+  );
   await page.route('**/trpc/sessionSnapshot*', async (route) => {
     const input = dashboardTrpcInput(route.request()) as {
       before?: string;
@@ -105,7 +151,8 @@ test('loads earlier session history on demand', async ({ page }) => {
   await expect(
     page.getByRole('button', { name: 'Load earlier history' }),
   ).toBeVisible();
-  await expect.poll(() => initialReads).toBe(1);
+  // The selected feed supplies the initial baseline; only the older page is finite.
+  await expect.poll(() => initialReads).toBe(0);
   await page.getByRole('button', { name: 'Load earlier history' }).click();
   await expect.poll(() => beforeRequest).toBe('token-1');
   const beforePrepend = await page

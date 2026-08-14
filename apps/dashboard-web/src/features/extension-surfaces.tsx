@@ -392,7 +392,10 @@ export function DelegateHistorySurface({
     delegateHistoryQueryOptions(dashboardHttpClient, id),
   );
   const queryClient = useQueryClient();
-  const resyncNonce = useDashboardStore(store, (state) => state.resyncNonce);
+  const sessionSyncGeneration = useDashboardStore(
+    store,
+    (state) => state.sessionSyncById[id]?.generation ?? 0,
+  );
   const serverId = useDashboardStore(store, (state) => state.serverId);
   const live = delegateSurface(runtime);
   const liveRows = live?.model.statuses ?? [];
@@ -437,22 +440,26 @@ export function DelegateHistorySurface({
   }, [activeRows, baseline, id, queryClient]);
   const previousRecovery = useRef({
     serverId,
-    resyncNonce,
+    sessionSyncGeneration,
     sessionChange,
   });
   useEffect(() => {
     const previous = previousRecovery.current;
-    previousRecovery.current = { serverId, resyncNonce, sessionChange };
+    previousRecovery.current = {
+      serverId,
+      sessionSyncGeneration,
+      sessionChange,
+    };
     if (
       previous.serverId === serverId &&
-      previous.resyncNonce === resyncNonce &&
+      previous.sessionSyncGeneration === sessionSyncGeneration &&
       previous.sessionChange === sessionChange
     )
       return;
     void queryClient.invalidateQueries({
       queryKey: dashboardQueryKeys.activeDelegateTranscripts(id),
     });
-  }, [id, queryClient, resyncNonce, serverId, sessionChange]);
+  }, [id, queryClient, serverId, sessionChange, sessionSyncGeneration]);
   useEffect(() => {
     if (activeRows.length === 0) return;
     const refresh = () => {

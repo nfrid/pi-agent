@@ -5,7 +5,12 @@ import type {
 } from '@pi-dashboard/protocol';
 import type { DashboardTokenStore } from './authentication.js';
 import type { FetchLike } from './http-client.js';
-import { DashboardHttpClient, DashboardHttpError } from './http-client.js';
+import {
+  DashboardHttpClient,
+  DashboardHttpError,
+  type DashboardHttpErrorKind,
+  dashboardHttpErrorKind,
+} from './http-client.js';
 import type { DashboardLiveStore } from './store.js';
 import type { DashboardTrpcClient } from './trpc-client.js';
 
@@ -53,8 +58,20 @@ function trackedValue<T>(value: unknown): { id?: string; data: T } {
     'id' in value &&
     'data' in value &&
     typeof (value as { id?: unknown }).id === 'string'
-  )
-    return value as { id: string; data: T };
+  ) {
+    const tracked = value as { id: string; data: unknown };
+    // tRPC's subscription link retains the tracked envelope while the SSE
+    // adapter may already have serialized one. Normalize both forms here.
+    if (
+      tracked.data &&
+      typeof tracked.data === 'object' &&
+      'id' in tracked.data &&
+      'data' in tracked.data &&
+      typeof (tracked.data as { id?: unknown }).id === 'string'
+    )
+      return tracked.data as { id: string; data: T };
+    return tracked as { id: string; data: T };
+  }
   return { data: value as T };
 }
 
@@ -77,14 +94,27 @@ function isCaughtUp(value: unknown): value is FeedCaughtUp {
   );
 }
 
-function isAuthenticationError(error: unknown): boolean {
+function connectionErrorKind(
+  error: unknown,
+): DashboardHttpErrorKind | undefined {
+  const classified = dashboardHttpErrorKind(error);
+  if (classified) return classified;
   if (error instanceof DashboardHttpError)
-    return error.status === 401 || error.status === 403;
-  const code =
-    error && typeof error === 'object' && 'data' in error
-      ? (error as { data?: { code?: unknown } }).data?.code
+    return error.status === 401 || error.status === 403
+      ? 'authentication'
       : undefined;
-  return code === 'UNAUTHORIZED' || code === 'FORBIDDEN';
+  const source =
+    error && typeof error === 'object'
+      ? (error as Record<string, unknown>)
+      : {};
+  const data =
+    source.data && typeof source.data === 'object'
+      ? (source.data as Record<string, unknown>)
+      : {};
+  const code = data.code ?? source.code;
+  if (code === 'UNAUTHORIZED' || code === 'FORBIDDEN') return 'authentication';
+  if (data.domainCode === 'protocol-mismatch') return 'protocol-mismatch';
+  return undefined;
 }
 
 function messageError(error: unknown): string {
@@ -180,6 +210,21 @@ export class DashboardConnectionRuntime {
     return this.start();
   }
 
+  /** Explicitly replace live subscriptions without adding a retry timer. */
+  reconnect(): void {
+    if (!this.started) {
+      this.start();
+      return;
+    }
+    this.replaceSubscriptions();
+  }
+
+  /** Explicitly rebase one acquired session without disturbing other domains. */
+  reconnectSession(sessionId: string): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry) this.rebaseSession(entry);
+  }
+
   stopShell(): void {
     this.stop();
   }
@@ -230,6 +275,7 @@ export class DashboardConnectionRuntime {
     entry.subscription?.unsubscribe();
     entry.subscription = undefined;
     this.sessions.delete(sessionId);
+    this.store.clearSessionSnapshot(sessionId);
   }
 
   private installListeners(): void {
@@ -303,11 +349,12 @@ export class DashboardConnectionRuntime {
         },
         onError: (error) => {
           if (opening !== this.shellOpening || !this.started) return;
-          if (isAuthenticationError(error)) {
-            this.store.setConnection('blocked', messageError(error));
+          const kind = connectionErrorKind(error);
+          if (kind === 'authentication' || kind === 'protocol-mismatch') {
+            this.store.setConnection('blocked', messageError(error), kind);
             return;
           }
-          this.store.setConnection('error', messageError(error));
+          this.store.setConnection('error', messageError(error), kind);
         },
       });
       if (opening !== this.shellOpening || !this.started) {
@@ -317,9 +364,13 @@ export class DashboardConnectionRuntime {
       this.shellSubscription = subscription;
     } catch (error) {
       if (opening !== this.shellOpening || !this.started) return;
+      const kind = connectionErrorKind(error);
       this.store.setConnection(
-        isAuthenticationError(error) ? 'blocked' : 'error',
+        kind === 'authentication' || kind === 'protocol-mismatch'
+          ? 'blocked'
+          : 'error',
         messageError(error),
+        kind,
       );
     }
   }

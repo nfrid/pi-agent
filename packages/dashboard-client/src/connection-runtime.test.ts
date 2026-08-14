@@ -527,4 +527,69 @@ describe('DashboardConnectionRuntime', () => {
     expect(store.getSnapshot().shellSync.status).toBe('live');
     stop();
   });
+
+  it('explicitly reconnects after an initial shell open failure', async () => {
+    let attempts = 0;
+    let observer: Observer | undefined;
+    const client = {
+      getTrpcClient: async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('offline');
+        return {
+          shellSubscribe: {
+            subscribe: (_input: unknown, next: Observer) => {
+              observer = next;
+              return { unsubscribe: () => undefined };
+            },
+          },
+          sessionSubscribe: {
+            subscribe: () => ({ unsubscribe: () => undefined }),
+          },
+        };
+      },
+      snapshot: async () => shellSnapshot(0),
+    };
+    const store = new DashboardLiveStore();
+    const runtime = new DashboardConnectionRuntime({
+      client: client as never,
+      store,
+      isOnline: () => true,
+    });
+    const stop = runtime.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.getSnapshot().connection.status).toBe('error');
+    runtime.reconnect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(attempts).toBe(2);
+    observer?.onData({
+      id: 'recovered-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: { snapshot: shellSnapshot(0), cursor: 0 },
+      },
+    });
+    observer?.onData({
+      id: 'recovered-live',
+      data: { type: 'caught-up', sequence: 0 },
+    });
+    expect(store.getSnapshot().serverId).toBe('daemon-1');
+    expect(store.getSnapshot().shellSync.status).toBe('live');
+    stop();
+  });
+
+  it('explicitly rebases only the requested acquired session', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    const a = f.runtime.acquireSession('session-a');
+    const b = f.runtime.acquireSession('session-b');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.counts().sessionSubscriptions).toBe(2);
+    f.runtime.reconnectSession('session-a');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.counts().sessionSubscriptions).toBe(3);
+    a.release();
+    b.release();
+    stop();
+  });
 });

@@ -7,7 +7,6 @@ const workspaceRoot = path.resolve(__dirname, '../..');
 const dashboardTarget = `http://127.0.0.1:${process.env.PI_DASHBOARD_PORT ?? 4173}`;
 const proxy = {
   '/api': { target: dashboardTarget },
-  '/ws': { target: dashboardTarget, ws: true },
   '/trpc': { target: dashboardTarget },
 };
 const dashboardBuildId =

@@ -385,7 +385,10 @@ export class DashboardHttpClient {
    * read by each link request, so a token rotation never rebuilds a feed.
    */
   async getTrpcClient(): Promise<DashboardTrpcClient> {
-    const { baseUrl } = await this.ensureEndpoint();
+    // The shell feed is the bootstrap authority, but protocol selection still
+    // runs as a narrow finite probe so incompatible daemons never receive a
+    // subscription request or install partial shell state.
+    const { baseUrl } = await this.ensureEndpoint(true);
     if (this.selectedTrpcClient?.baseUrl === baseUrl)
       return this.selectedTrpcClient.client;
     const client = createDashboardTrpcClient({

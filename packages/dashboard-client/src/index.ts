@@ -17,21 +17,17 @@ import {
 export interface DashboardState {
   snapshot: ReturnType<typeof selectSnapshot>;
   error?: string;
+  errorKind?: ReturnType<
+    DashboardLiveStore['getSnapshot']
+  >['connection']['errorKind'];
   usageError?: string;
-  events: ReturnType<DashboardLiveStore['getSnapshot']>['recentEvents'];
-  cursorHistory: ReturnType<DashboardLiveStore['getSnapshot']>['cursorHistory'];
-  cursor: number;
-  resyncNonce: number;
   connectionState: ReturnType<
     DashboardLiveStore['getSnapshot']
   >['connection']['status'];
   store: DashboardLiveStore;
 }
 
-export type DashboardShellState = Omit<
-  DashboardState,
-  'events' | 'cursorHistory' | 'cursor' | 'resyncNonce'
->;
+export type DashboardShellState = DashboardState;
 
 function useConnectedDashboardStore(client: DashboardHttpClient) {
   const storeRef = useRef<DashboardLiveStore | undefined>(undefined);
@@ -42,7 +38,7 @@ function useConnectedDashboardStore(client: DashboardHttpClient) {
   return store;
 }
 
-/** Full compatibility adapter, including raw stream metadata. */
+/** Normalized dashboard state for non-shell consumers. */
 export function useDashboard(
   client: DashboardHttpClient = dashboardHttpClient,
 ): DashboardState {
@@ -52,11 +48,8 @@ export function useDashboard(
   return {
     snapshot,
     error: state.connection.error,
+    errorKind: state.connection.errorKind,
     usageError: state.usageError,
-    events: state.recentEvents,
-    cursorHistory: state.cursorHistory,
-    cursor: state.cursor,
-    resyncNonce: state.resyncNonce,
     connectionState: state.connection.status,
     store,
   };
@@ -72,10 +65,21 @@ export function useDashboardShell(
   const store = useConnectedDashboardStore(client);
   const snapshot = useDashboardStore(store, selectSnapshot);
   const error = useDashboardStore(store, (state) => state.connection.error);
+  const errorKind = useDashboardStore(
+    store,
+    (state) => state.connection.errorKind,
+  );
   const usageError = useDashboardStore(store, (state) => state.usageError);
   const connectionState = useDashboardStore(
     store,
     (state) => state.connection.status,
   );
-  return { snapshot, error, usageError, connectionState, store };
+  return {
+    snapshot,
+    error,
+    errorKind,
+    usageError,
+    connectionState,
+    store,
+  };
 }

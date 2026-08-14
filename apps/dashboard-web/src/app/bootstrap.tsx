@@ -1,9 +1,7 @@
 import {
   dashboardHttpClient,
-  dashboardHttpErrorKind,
-  snapshotQueryOptions,
-  snapshotRequestGeneration,
   usageQueryOptions,
+  useDashboardShell,
 } from '@pi-dashboard/client';
 import {
   QueryClient,
@@ -13,7 +11,6 @@ import {
 import { RouterProvider } from '@tanstack/react-router';
 import { type FormEvent, useEffect, useState } from 'react';
 import { Button as AriaButton } from 'react-aria-components';
-import { useDashboardShell } from '../dashboard-transport';
 import { reloadDashboard } from '../pwa-update';
 import { dashboardRouterInstance } from '../routes/tree';
 import { DashboardContext } from './dashboard-context';
@@ -75,35 +72,14 @@ function ReloadRequiredState() {
 
 function DashboardApp() {
   const dashboard = useDashboardShell();
-  const snapshotQuery = useQuery(
-    snapshotQueryOptions(dashboardHttpClient, () =>
-      dashboard.store.getGeneration(),
-    ),
-  );
   const usageQuery = useQuery(usageQueryOptions(dashboardHttpClient));
-  useEffect(() => {
-    if (snapshotQuery.data) {
-      const requestGeneration = snapshotRequestGeneration(snapshotQuery.data);
-      if (requestGeneration !== undefined)
-        dashboard.store.installSnapshot(snapshotQuery.data, {
-          source: 'http',
-          requestGeneration,
-        });
-    }
-    if (snapshotQuery.error)
-      dashboard.store.setError(
-        snapshotQuery.error instanceof Error
-          ? snapshotQuery.error.message
-          : String(snapshotQuery.error),
-      );
-  }, [dashboard.store, snapshotQuery.data, snapshotQuery.error]);
   useEffect(() => {
     if (usageQuery.data?.usage !== undefined)
       dashboard.store.updateUsage(usageQuery.data.usage);
     if (usageQuery.data?.error)
       dashboard.store.setUsageError(usageQuery.data.error);
   }, [dashboard.store, usageQuery.data]);
-  const startupErrorKind = dashboardHttpErrorKind(snapshotQuery.error);
+  const startupErrorKind = dashboard.errorKind;
   if (!dashboard.snapshot && startupErrorKind === 'protocol-mismatch')
     return <ReloadRequiredState />;
   if (!dashboard.snapshot && startupErrorKind === 'authentication')
@@ -113,7 +89,7 @@ function DashboardApp() {
       <main className="shell centered">
         <h1>Pi Dashboard</h1>
         <p className="error">{dashboard.error ?? 'Connecting…'}</p>
-        <button type="button" onClick={() => void snapshotQuery.refetch()}>
+        <button type="button" onClick={() => dashboard.store.reconnect()}>
           Retry
         </button>
       </main>

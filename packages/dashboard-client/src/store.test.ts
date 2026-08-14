@@ -8,7 +8,6 @@ import {
   DashboardLiveStore,
   selectRuntimeForSession,
   selectSnapshot,
-  sessionCursorRangeCovered,
 } from './store.js';
 
 const snapshot = (serverId: string, cursor: number): BrowserSnapshot =>
@@ -144,12 +143,12 @@ describe('DashboardLiveStore', () => {
       uncoveredStore.hydrateSession(
         orderedResponse({ ...sessionResponse(1), entriesComplete: true }, 2),
       ),
-    ).toBeUndefined();
+    ).toBeDefined();
     expect(
       uncoveredStore.hydrateSession(
         orderedResponse({ ...sessionResponse(4), entriesComplete: true }, 1),
       ),
-    ).toBeDefined();
+    ).toBeUndefined();
   });
 
   it('accepts an idempotent replay of the same latest request order', () => {
@@ -316,8 +315,6 @@ describe('DashboardLiveStore', () => {
       ],
     } as unknown as BrowserSnapshot);
     store.hydrateSession(sessionResponse(1));
-    const beforeNonce = store.getSnapshot().resyncNonce;
-
     expect(
       store.acceptStreamRecord({
         type: 'sessions',
@@ -348,8 +345,6 @@ describe('DashboardLiveStore', () => {
       store.getSnapshot().transcriptsBySessionId['session-1'],
     ).toBeDefined();
     expect(store.getSnapshot().cursor).toBe(2);
-    expect(store.getSnapshot().cursorHistory).toContain(2);
-    expect(store.getSnapshot().resyncNonce).toBe(beforeNonce);
     expect(
       store.acceptStreamRecord({
         type: 'sessions',
@@ -415,7 +410,6 @@ describe('DashboardLiveStore', () => {
 
     expect(store.getSnapshot().sessionsById['session-1']?.updatedAt).toBe(101);
     expect(store.getSnapshot().cursor).toBe(101);
-    expect(store.getSnapshot().resyncNonce).toBe(0);
     expect(store.getSnapshot().sessionChangeById['session-1']).toBeUndefined();
     expect(
       store.getSnapshot().transcriptsBySessionId['session-1'],
@@ -1233,56 +1227,13 @@ describe('DashboardLiveStore', () => {
     expect(selectSnapshot(afterMutation)?.sessions).toHaveLength(1);
   });
 
-  it('keeps bounded cursor/event history and rejects replay gaps', () => {
+  it('rejects gaps without retaining global browser event history', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 4));
     store.acceptStreamRecord(envelope(5));
     expect(store.acceptStreamRecord(envelope(7))).toBe(false);
     store.acceptStreamRecord(envelope(6));
-    const state = store.getSnapshot();
-    expect(state.cursor).toBe(6);
-    expect(state.cursorHistory).toEqual([4, 5, 6]);
-    expect(state.recentEvents.map((item) => item.cursor)).toEqual([5, 6]);
-  });
-
-  it('does not let an HTTP snapshot skip pending SSE transcript replay', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot(snapshot('daemon-1', 5), {
-      source: 'http',
-      requestGeneration: 0,
-    });
-    expect(store.getSnapshot().cursor).toBe(0);
-    store.hydrateSession(sessionResponse(5));
-
-    for (const [cursor, type, content] of [
-      [1, 'message.started', ''],
-      [2, 'message.updated', 'hel'],
-      [3, 'message.updated', 'hello'],
-      [4, 'message.finished', 'hello'],
-    ] as const)
-      store.acceptStreamRecord({
-        cursor,
-        emittedAt: cursor,
-        sessionId: 'session-1',
-        event: {
-          type,
-          sessionId: 'session-1',
-          message: {
-            messageId: 'answer-1',
-            role: 'assistant',
-            content,
-            phase: type.split('.')[1],
-          },
-        },
-      } as StreamRecord);
-    store.acceptStreamRecord(envelope(5));
-
-    expect(store.getSnapshot().cursor).toBe(5);
-    expect(
-      store.getSnapshot().transcriptsBySessionId['session-1']?.items[
-        'answer-1'
-      ],
-    ).toMatchObject({ content: 'hello', status: 'finished' });
+    expect(store.getSnapshot().cursor).toBe(6);
   });
 
   it('coalesces live token notifications and reconciles only terminal events', () => {
@@ -1367,17 +1318,16 @@ describe('DashboardLiveStore', () => {
       rebaseCursor: true,
     });
     expect(store.getSnapshot().cursor).toBe(8);
-    expect(store.getSnapshot().cursorHistory).toEqual([8]);
   });
 
-  it('hydrates at an HTTP cursor and replays buffered records newer than it', () => {
+  it('hydrates a finite response without replaying removed global records', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 3));
     store.acceptStreamRecord(envelope(4));
     store.acceptStreamRecord(envelope(5));
     const projection = store.hydrateSession(sessionResponse(3));
     expect(projection?.sessionId).toBe('session-1');
-    expect(projection?.lastCursor).toBe(5);
+    expect(projection?.lastCursor).toBe(3);
     expect(store.getSnapshot().transcriptsBySessionId['session-1']).toBe(
       projection,
     );
@@ -1445,43 +1395,6 @@ describe('DashboardLiveStore', () => {
     expect(appended?.order).toEqual(['entry-a', 'entry-b', 'entry-c']);
     expect(appended?.items['entry-a']).toBe(firstItem);
     expect(appended?.items['entry-b']).toBe(secondItem);
-  });
-
-  it('installs authoritative history when a live tail arrived first', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot(snapshot('daemon-1', 1));
-    store.acceptStreamRecord({
-      cursor: 2,
-      emittedAt: 2,
-      runtimeEpoch: 'epoch-a',
-      runtimeSeq: 1,
-      sessionId: 'session-1',
-      event: {
-        type: 'message.finished',
-        sessionId: 'session-1',
-        message: {
-          messageId: 'live-answer',
-          role: 'assistant',
-          content: 'Live answer',
-          phase: 'finished',
-        },
-      },
-    } as never);
-
-    const projection = store.hydrateSession({
-      ...sessionResponse(2),
-      runtimeEpoch: 'epoch-a',
-      runtimeSeq: 1,
-      entries: [
-        {
-          type: 'message',
-          message: { id: 'history', role: 'user', content: 'Prior history' },
-        },
-      ],
-    });
-
-    expect(projection?.items.history).toBeDefined();
-    expect(projection?.items['live-answer']).toBeDefined();
   });
 
   it('does not duplicate a persisted final message when replaying its live updates', () => {
@@ -1575,121 +1488,6 @@ describe('DashboardLiveStore', () => {
     const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
     expect(projection?.order).toEqual(['persisted-answer']);
     expect(projection?.items['epoch-a:1']).toBeUndefined();
-  });
-
-  it('does not merge distinct messages that happen to share a timestamp', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot(snapshot('daemon-1', 4));
-    store.hydrateSession({
-      ...sessionResponse(5),
-      entries: [
-        {
-          id: 'persisted-answer',
-          type: 'message',
-          message: {
-            role: 'assistant',
-            content: 'Earlier answer',
-            timestamp: 1720000000000,
-          },
-        },
-      ],
-    });
-
-    store.acceptStreamRecord({
-      cursor: 5,
-      emittedAt: 5,
-      sessionId: 'session-1',
-      event: {
-        type: 'message.finished',
-        sessionId: 'session-1',
-        message: {
-          messageId: 'epoch-a:2',
-          role: 'assistant',
-          content: 'Different answer',
-          timestamp: 1720000000000,
-          phase: 'finished',
-        },
-      },
-    } as StreamRecord);
-
-    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
-    expect(projection?.order).toEqual(['persisted-answer', 'epoch-a:2']);
-  });
-
-  it('keeps numeric and string timestamps as distinct message identities', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot(snapshot('daemon-1', 4));
-    store.hydrateSession({
-      ...sessionResponse(5),
-      entries: [
-        {
-          id: 'persisted-answer',
-          type: 'message',
-          message: {
-            role: 'assistant',
-            content: 'Same answer',
-            timestamp: '1720000000000',
-          },
-        },
-      ],
-    });
-
-    store.acceptStreamRecord({
-      cursor: 5,
-      emittedAt: 5,
-      sessionId: 'session-1',
-      event: {
-        type: 'message.finished',
-        sessionId: 'session-1',
-        message: {
-          messageId: 'epoch-a:typed',
-          role: 'assistant',
-          content: 'Same answer',
-          timestamp: 1720000000000,
-          phase: 'finished',
-        },
-      },
-    } as StreamRecord);
-
-    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
-    expect(projection?.order).toEqual(['persisted-answer', 'epoch-a:typed']);
-  });
-
-  it('fails open when repeated persisted messages make identity ambiguous', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot(snapshot('daemon-1', 4));
-    store.hydrateSession({
-      ...sessionResponse(5),
-      entries: ['first', 'second'].map((id) => ({
-        id,
-        type: 'message',
-        message: {
-          role: 'assistant',
-          content: 'Repeated answer',
-          timestamp: 1720000000000,
-        },
-      })),
-    });
-
-    store.acceptStreamRecord({
-      cursor: 5,
-      emittedAt: 5,
-      sessionId: 'session-1',
-      event: {
-        type: 'message.finished',
-        sessionId: 'session-1',
-        message: {
-          messageId: 'epoch-a:3',
-          role: 'assistant',
-          content: 'Repeated answer',
-          timestamp: 1720000000000,
-          phase: 'finished',
-        },
-      },
-    } as StreamRecord);
-
-    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
-    expect(projection?.order).toEqual(['first', 'second', 'epoch-a:3']);
   });
 
   it('protects incomplete refreshes but clears an authoritative sparse branch', () => {
@@ -1848,92 +1646,6 @@ describe('DashboardLiveStore', () => {
     expect(projection?.items.stale).toBeUndefined();
   });
 
-  it('reconciles a terminal tool event covered by the HTTP cursor', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot(snapshot('daemon-1', 1));
-    store.acceptStreamRecord({
-      cursor: 2,
-      emittedAt: 2,
-      sessionId: 'session-1',
-      event: {
-        type: 'tool.finished',
-        sessionId: 'session-1',
-        tool: {
-          toolCallId: 'call-1',
-          name: 'read',
-          result: 'done',
-          status: 'completed',
-        },
-      },
-    } as never);
-    const projection = store.hydrateSession({
-      ...sessionResponse(2),
-      entries: [{ type: 'tool', tool: { toolCallId: 'call-1', name: 'read' } }],
-    });
-    expect(projection?.items['call-1']).toMatchObject({
-      status: 'finished',
-      result: 'done',
-    });
-  });
-
-  it('prepends older history, enriches a boundary tool, and keeps live events', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot(snapshot('daemon-1', 1));
-    store.acceptStreamRecord({
-      cursor: 2,
-      emittedAt: 2,
-      sessionId: 'session-1',
-      event: {
-        type: 'tool.finished',
-        sessionId: 'session-1',
-        tool: {
-          toolCallId: 'live-call',
-          name: 'live-tool',
-          result: 'live result',
-          status: 'completed',
-        },
-      },
-    } as never);
-    store.hydrateSession({
-      ...sessionResponse(2),
-      entries: [
-        {
-          type: 'message',
-          message: {
-            role: 'toolResult',
-            toolCallId: 'boundary-call',
-            content: 'new result',
-          },
-        },
-      ],
-    });
-    const projection = store.prependSessionHistory({
-      ...sessionResponse(2),
-      history: { version: 1, start: 10, end: 11, hasOlder: false },
-      entries: [
-        {
-          type: 'tool',
-          tool: {
-            toolCallId: 'boundary-call',
-            name: 'older-tool',
-            arguments: { path: '/tmp/file' },
-          },
-        },
-      ],
-    });
-    expect(projection?.items['boundary-call']).toMatchObject({
-      name: 'older-tool',
-      arguments: { path: '/tmp/file' },
-      result: 'new result',
-      status: 'finished',
-    });
-    expect(projection?.items['live-call']).toMatchObject({
-      result: 'live result',
-      status: 'finished',
-    });
-    expect(projection?.order).toEqual(['boundary-call', 'live-call']);
-  });
-
   it('rejects prepending a page without history metadata', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
@@ -2024,39 +1736,6 @@ describe('DashboardLiveStore', () => {
         } as never),
       ).toBe(true);
     expect(store.getSnapshot().sessionChangeById['session-1']).toBeUndefined();
-  });
-
-  it('does not let stale HTTP hydration resurrect a complete tree replacement', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot(snapshot('daemon-1', 4));
-    store.acceptStreamRecord({
-      cursor: 5,
-      emittedAt: 5,
-      event: {
-        type: 'session.snapshot',
-        session: {
-          id: 'session-1',
-          entriesComplete: true,
-          entries: [
-            {
-              type: 'message',
-              message: { id: 'new-tail', role: 'user', content: 'new' },
-            },
-          ],
-        },
-      },
-    } as never);
-    const projection = store.hydrateSession({
-      ...sessionResponse(5),
-      entries: [
-        {
-          type: 'message',
-          message: { id: 'old-tail', role: 'user', content: 'old' },
-        },
-      ],
-    });
-    expect(projection?.items['new-tail']).toBeDefined();
-    expect(projection?.items['old-tail']).toBeUndefined();
   });
 
   it('attributes reconnect hydration to the response runtime epoch', () => {
@@ -2173,41 +1852,6 @@ describe('DashboardLiveStore', () => {
     expect(projection?.items['old-tail']).toBeDefined();
   });
 
-  it('replays a tree replacement beyond the former 64-event overlap', () => {
-    const store = new DashboardLiveStore();
-    store.installSnapshot(snapshot('daemon-1', 1));
-    store.acceptStreamRecord({
-      cursor: 2,
-      emittedAt: 2,
-      event: {
-        type: 'session.snapshot',
-        session: {
-          id: 'session-1',
-          entriesComplete: true,
-          entries: [
-            {
-              type: 'message',
-              message: { id: 'new-tail', role: 'user', content: 'new' },
-            },
-          ],
-        },
-      },
-    } as never);
-    for (let cursor = 3; cursor <= 72; cursor += 1)
-      store.acceptStreamRecord(envelope(cursor));
-    const projection = store.hydrateSession({
-      ...sessionResponse(72),
-      entries: [
-        {
-          type: 'message',
-          message: { id: 'old-tail', role: 'user', content: 'old' },
-        },
-      ],
-    });
-    expect(projection?.items['new-tail']).toBeDefined();
-    expect(projection?.items['old-tail']).toBeUndefined();
-  });
-
   it('publishes semantic session changes and replacement targets without raw page events', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot({
@@ -2242,7 +1886,6 @@ describe('DashboardLiveStore', () => {
     expect(store.getSnapshot().serverId).toBe('daemon-2');
     expect(store.getSnapshot().cursor).toBe(1);
     expect(store.getSnapshot().connection.lastCursor).toBe(1);
-    expect(store.getSnapshot().resyncNonce).toBe(1);
     expect(
       store.installSnapshot(snapshot('daemon-1', 13), {
         source: 'http',
@@ -2262,13 +1905,5 @@ describe('DashboardLiveStore', () => {
       store.hydrateSession(sessionResponse(1, 'daemon-a')),
     ).toBeUndefined();
     expect(store.hydrateSession(sessionResponse(1, 'daemon-b'))).toBeDefined();
-  });
-});
-
-describe('session cursor coverage', () => {
-  it('requires all cursors between an HTTP read and current live state', () => {
-    expect(sessionCursorRangeCovered(4, 7, [5, 6, 7])).toBe(true);
-    expect(sessionCursorRangeCovered(4, 7, [6, 7])).toBe(false);
-    expect(sessionCursorRangeCovered(4, 4, [])).toBe(true);
   });
 });
