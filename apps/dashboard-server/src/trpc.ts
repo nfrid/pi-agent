@@ -1,11 +1,15 @@
 import {
+  type AuthoritativeSessionSnapshot,
   BootstrapRequestSchema,
   type BrowserSnapshot,
   DashboardSnapshotResponseSchema,
   PROTOCOL_VERSION,
   type ProtocolInfo,
   ProtocolInfoSchema,
+  parseAuthoritativeSessionSnapshot,
   parseSchema,
+  parseShellSnapshotResponse,
+  SessionSnapshotRequestSchema,
 } from '@pi-dashboard/protocol';
 import { initTRPC, TRPCError } from '@trpc/server';
 import { fastifyRequestHandler } from '@trpc/server/adapters/fastify';
@@ -19,6 +23,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 export interface DashboardTrpcContext {
   readonly serverId: () => string;
   readonly snapshot: () => BrowserSnapshot;
+  /** New authoritative query builders; optional for old route test seams. */
+  readonly shellSnapshot?: () => unknown;
+  readonly sessionSnapshot?: (
+    sessionId: string,
+    before?: string,
+  ) => Promise<AuthoritativeSessionSnapshot>;
 }
 
 export const DASHBOARD_DOMAIN_CODES = [
@@ -166,6 +176,48 @@ export function createDashboardRouter(context: DashboardTrpcContext) {
             DashboardSnapshotResponseSchema,
             { snapshot, cursor: snapshot.cursor },
             'bootstrap response',
+          );
+        } catch (error) {
+          throw toDashboardTrpcError(error);
+        }
+      }),
+    shellSnapshot: t.procedure
+      .input((value: unknown) =>
+        parseSchema(BootstrapRequestSchema, value, 'shell snapshot request'),
+      )
+      .output((value: unknown) => parseShellSnapshotResponse(value))
+      .query(({ input }) => {
+        if (input.protocolVersion !== PROTOCOL_VERSION)
+          throw toDashboardTrpcError(protocolMismatch());
+        try {
+          const response =
+            context.shellSnapshot?.() ??
+            (() => {
+              const snapshot = context.snapshot();
+              return { snapshot, cursor: snapshot.cursor };
+            })();
+          return parseShellSnapshotResponse(response);
+        } catch (error) {
+          throw toDashboardTrpcError(error);
+        }
+      }),
+    sessionSnapshot: t.procedure
+      .input((value: unknown) =>
+        parseSchema(
+          SessionSnapshotRequestSchema,
+          value,
+          'session snapshot request',
+        ),
+      )
+      .output((value: unknown) => parseAuthoritativeSessionSnapshot(value))
+      .query(async ({ input }) => {
+        if (!context.sessionSnapshot)
+          throw toDashboardTrpcError(
+            new Error('Authoritative session snapshots are unavailable.'),
+          );
+        try {
+          return parseAuthoritativeSessionSnapshot(
+            await context.sessionSnapshot(input.sessionId, input.before),
           );
         } catch (error) {
           throw toDashboardTrpcError(error);

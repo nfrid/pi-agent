@@ -15,6 +15,7 @@ import {
   MAX_RUNTIME_EXTENSION_SURFACES,
   ProtocolInfoSchema,
   parseActiveDelegateTranscriptBaseline,
+  parseAuthoritativeSessionSnapshot,
   parseBootstrapRequest,
   parseBridgeCommand,
   parseBridgeEvent,
@@ -30,6 +31,7 @@ import {
   parseRuntimeSnapshot,
   parseSessionAdoptCommand,
   parseSessionApiResponse,
+  parseShellSnapshotResponse,
   RuntimeExtensionSurfaceSchema,
   redactImageData,
   serializeFrame,
@@ -200,6 +202,72 @@ describe('dashboard protocol', () => {
       parseSessionApiResponse({
         ...response,
         history: { ...response.history, extra: true },
+      }),
+    ).toThrow();
+  });
+
+  it('keeps shell transcript-free and validates bounded authoritative sessions', () => {
+    const shell = {
+      snapshot: {
+        serverId: 'server-1',
+        revision: 2,
+        cursor: 3,
+        runtimes: [],
+        workspaces: [],
+        sessions: [],
+        unread: [],
+      },
+      cursor: 3,
+    };
+    expect(parseShellSnapshotResponse(shell).snapshot.sessions).toEqual([]);
+    expect(() =>
+      parseShellSnapshotResponse({
+        ...shell,
+        cursor: 4,
+        snapshot: {
+          ...shell.snapshot,
+          cursor: 4,
+          runtimes: [
+            {
+              runtimeId: 'runtime-1',
+              ownership: 'external',
+              pid: 1,
+              cwd: '/tmp',
+              liveState: 'working',
+              session: { id: 'session-1', entries: [{ type: 'message' }] },
+              pendingInteractions: [],
+            },
+          ],
+        },
+      }),
+    ).toThrow();
+    const session = {
+      metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
+      entries: [],
+      entriesComplete: true,
+      serverId: 'server-1',
+      cursor: 3,
+      active: {
+        pendingInteractions: [],
+        messages: [],
+        tools: [],
+        delegates: [],
+        truncated: false,
+      },
+      completeThroughCursor: true,
+    };
+    expect(parseAuthoritativeSessionSnapshot(session).cursor).toBe(3);
+    expect(() =>
+      parseAuthoritativeSessionSnapshot({
+        ...session,
+        active: {
+          ...session.active,
+          messages: Array.from({ length: 257 }, (_, index) => ({
+            messageId: `message-${index}`,
+            role: 'assistant',
+            content: 'x',
+          })),
+        },
       }),
     ).toThrow();
   });

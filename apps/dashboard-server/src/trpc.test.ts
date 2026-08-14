@@ -1,4 +1,5 @@
 import {
+  AuthoritativeSessionSnapshotSchema,
   DashboardSnapshotResponseSchema,
   parseBootstrapRequest,
   parseProtocolInfo,
@@ -38,6 +39,28 @@ function context(): DashboardRouteContext {
     composerCommands: async () => ({ commands: [] }),
     usage: async () => ({ usage: null }),
     readSession: async () => ({ entries: [], metadata: { id: 's' } }),
+    sessionSnapshot: async (sessionId, before) => ({
+      metadata: {
+        id: sessionId,
+        file: '/tmp/session.jsonl',
+        cwd: '/tmp',
+        updatedAt: 1,
+        ...(before === undefined ? {} : { entryCount: 0 }),
+      },
+      entries: [],
+      history: { version: 1, start: 0, end: 0, hasOlder: false },
+      entriesComplete: true,
+      serverId: 'generation-1',
+      cursor: 8,
+      active: {
+        pendingInteractions: [],
+        messages: [],
+        tools: [],
+        delegates: [],
+        truncated: false,
+      },
+      completeThroughCursor: before === undefined,
+    }),
     readActiveDelegateTranscripts: async () => ({
       version: 1,
       serverId: 'generation-1',
@@ -129,6 +152,35 @@ describe('dashboard tRPC boundary', () => {
     );
     expect(bootstrap.snapshot.serverId).toBe(info.serverId);
     expect(bootstrap.cursor).toBe(bootstrap.snapshot.cursor);
+  });
+
+  it('serves authoritative shell and session queries without changing bootstrap', async () => {
+    const app = Fastify();
+    apps.push(app);
+    await app.register(dashboardRoutes, { context: context() });
+    await app.ready();
+
+    const shell = await app.inject({
+      method: 'GET',
+      url: `/trpc/shellSnapshot?input=${input({ protocolVersion: 1 })}`,
+      headers: authHeaders(),
+    });
+    expect(shell.statusCode).toBe(200);
+    expect(shell.json().result.data.snapshot.runtimes).toEqual([]);
+
+    const session = await app.inject({
+      method: 'GET',
+      url: `/trpc/sessionSnapshot?input=${input({ sessionId: 's' })}`,
+      headers: authHeaders(),
+    });
+    expect(session.statusCode).toBe(200);
+    expect(
+      tryParseSchema(
+        AuthoritativeSessionSnapshotSchema,
+        session.json().result.data,
+      ),
+    ).toEqual(session.json().result.data);
+    expect(session.json().result.data.completeThroughCursor).toBe(true);
   });
 
   it('rejects malformed requests and reports a stable protocol mismatch code', async () => {

@@ -3,6 +3,7 @@ import { URL } from 'node:url';
 import {
   type ActiveDelegateTranscriptBaseline,
   ArchiveThreadCommandSchema,
+  type AuthoritativeSessionSnapshot,
   type BrowserSnapshot,
   CancelCommandSchema,
   CheckoutActionCommandSchema,
@@ -90,6 +91,11 @@ export interface DashboardRouteContext {
   serverId(): string;
   origins(): readonly string[];
   snapshot(): BrowserSnapshot;
+  shellSnapshot?(): unknown;
+  sessionSnapshot?(
+    id: string,
+    before?: string,
+  ): Promise<AuthoritativeSessionSnapshot>;
   workspaces(): WorkspaceTarget[];
   refreshWorkspaces(): Promise<WorkspaceTarget[]>;
   composerCommands(workspaceId: string): Promise<ComposerCommandCatalogue>;
@@ -292,6 +298,8 @@ export const dashboardRoutes: FastifyPluginAsync<{
   registerDashboardTrpc(app, {
     serverId: context.serverId,
     snapshot: context.snapshot,
+    shellSnapshot: context.shellSnapshot,
+    sessionSnapshot: context.sessionSnapshot,
   });
   app.setNotFoundHandler((_request, reply) =>
     reply.code(404).send({ error: 'Not found.' }),

@@ -9,6 +9,8 @@ import { MAX_ID, MAX_PATH, SESSION_NAME_MAX_LENGTH } from './limits.js';
 import {
   type ActiveDelegateTranscriptBaseline,
   ActiveDelegateTranscriptBaselineSchema,
+  type AuthoritativeSessionSnapshot,
+  AuthoritativeSessionSnapshotSchema,
   type BootstrapRequest,
   BootstrapRequestSchema,
   type BridgeCommand,
@@ -58,6 +60,12 @@ import {
   SessionRenameRequestSchema,
   type SessionSnapshotPatch,
   SessionSnapshotPatchSchema,
+  type SessionSnapshotRequest,
+  SessionSnapshotRequestSchema,
+  type ShellSnapshot,
+  type ShellSnapshotResponse,
+  ShellSnapshotResponseSchema,
+  ShellSnapshotSchema,
   type StartRuntimeRequest,
   StartRuntimeRequestSchema,
 } from './schemas.js';
@@ -87,6 +95,85 @@ export function tryParseDashboardSnapshotResponse(
 ): DashboardSnapshotResponse | undefined {
   return tryParseSchema(DashboardSnapshotResponseSchema, value);
 }
+
+function assertShellHasNoTranscript(snapshot: ShellSnapshot): void {
+  for (const runtime of snapshot.runtimes)
+    if (runtime.session.entries.length !== 0)
+      throw new Error('Shell snapshot contains transcript entries.');
+}
+
+export function parseShellSnapshotResponse(
+  value: unknown,
+): ShellSnapshotResponse {
+  const response = parseSchema(
+    ShellSnapshotResponseSchema,
+    value,
+    'shell snapshot response',
+  );
+  assertShellHasNoTranscript(response.snapshot);
+  if (response.cursor !== response.snapshot.cursor)
+    throw new Error('Shell snapshot cursor mismatch.');
+  return response;
+}
+
+export function tryParseShellSnapshotResponse(
+  value: unknown,
+): ShellSnapshotResponse | undefined {
+  try {
+    return parseShellSnapshotResponse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+export function parseShellSnapshot(value: unknown): ShellSnapshot {
+  const snapshot = parseSchema(ShellSnapshotSchema, value, 'shell snapshot');
+  assertShellHasNoTranscript(snapshot);
+  return snapshot;
+}
+
+export function tryParseShellSnapshot(
+  value: unknown,
+): ShellSnapshot | undefined {
+  try {
+    return parseShellSnapshot(value);
+  } catch {
+    return undefined;
+  }
+}
+
+export function parseAuthoritativeSessionSnapshot(
+  value: unknown,
+): AuthoritativeSessionSnapshot {
+  const response = parseSchema(
+    AuthoritativeSessionSnapshotSchema,
+    value,
+    'authoritative session snapshot',
+  );
+  if (response.runtimeSeq !== undefined && response.runtimeEpoch === undefined)
+    throw new Error('Session runtime sequence has no epoch.');
+  const bytes = new TextEncoder().encode(JSON.stringify(response)).byteLength;
+  if (bytes > 2 * 1024 * 1024)
+    throw new Error('Authoritative session snapshot is too large.');
+  return response;
+}
+
+export function tryParseAuthoritativeSessionSnapshot(
+  value: unknown,
+): AuthoritativeSessionSnapshot | undefined {
+  try {
+    return parseAuthoritativeSessionSnapshot(value);
+  } catch {
+    return undefined;
+  }
+}
+
+export const parseSessionRouteSnapshot = parseAuthoritativeSessionSnapshot;
+export const tryParseSessionRouteSnapshot =
+  tryParseAuthoritativeSessionSnapshot;
+export const parseSessionSnapshotResponseV2 = parseAuthoritativeSessionSnapshot;
+export const tryParseSessionSnapshotResponseV2 =
+  tryParseAuthoritativeSessionSnapshot;
 export function tryParseProtocolInfo(value: unknown): ProtocolInfo | undefined {
   return tryParseSchema(ProtocolInfoSchema, value);
 }
@@ -660,6 +747,22 @@ export function tryParseComposerCommandCatalogue(
 
 export function parseSessionApiResponse(value: unknown): SessionApiResponse {
   return parseSchema(SessionApiResponseSchema, value, 'session API response');
+}
+
+export function parseSessionSnapshotRequest(
+  value: unknown,
+): SessionSnapshotRequest {
+  return parseSchema(
+    SessionSnapshotRequestSchema,
+    value,
+    'session snapshot request',
+  );
+}
+
+export function tryParseSessionSnapshotRequest(
+  value: unknown,
+): SessionSnapshotRequest | undefined {
+  return tryParseSchema(SessionSnapshotRequestSchema, value);
 }
 
 export function parseDelegateHistoryResponse(

@@ -1,12 +1,24 @@
-import type {
-  BridgeEvent,
-  BrowserSnapshot,
-  NotificationEvent,
-  RuntimeSnapshot,
-  RuntimeSnapshotPatch,
-  SessionIndexEntry,
-  SessionSnapshot,
-  WorkspaceTarget,
+import {
+  applyTranscriptEvent,
+  createTranscriptProjection,
+  type TranscriptItem,
+  type TranscriptProjection,
+} from '@pi-dashboard/domain';
+import {
+  type AuthoritativeSessionSnapshot,
+  type BridgeEvent,
+  type BrowserSnapshot,
+  type DelegateLiveRun,
+  type InteractionSnapshot,
+  type NormalizedMessagePayload,
+  type NormalizedToolPayload,
+  type NotificationEvent,
+  type RuntimeSnapshot,
+  type RuntimeSnapshotPatch,
+  type SessionIndexEntry,
+  type SessionSnapshot,
+  tryParseDelegateTranscriptEntry,
+  type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { DashboardEventStream } from '../event-stream.js';
 import type { MetadataStore } from '../metadata.js';
@@ -139,6 +151,187 @@ function compactPublicRuntime<T extends RuntimeSnapshot | RuntimeSnapshotPatch>(
   } as T;
 }
 
+const MAX_ACTIVE_ENTITIES = 256;
+const MAX_ACTIVE_BYTES = 512 * 1024;
+const SESSION_ID_PATTERN = /^[a-zA-Z0-9._-]{1,200}$/;
+
+type ActiveTranscriptState = {
+  runtimeId: string;
+  runtimeEpoch: string;
+  runtimeSeq: number;
+  liveState: RuntimeSnapshot['liveState'];
+  pendingInteractions: readonly InteractionSnapshot[];
+  projection: TranscriptProjection;
+  truncated: boolean;
+};
+
+type ActiveCapture = {
+  runtime?: RuntimeSnapshot;
+  state?: ActiveTranscriptState;
+};
+
+function sameRuntimeCapture(
+  left: ActiveCapture,
+  right: ActiveCapture,
+): boolean {
+  return (
+    left.runtime?.runtimeId === right.runtime?.runtimeId &&
+    left.state?.runtimeEpoch === right.state?.runtimeEpoch &&
+    left.state?.runtimeSeq === right.state?.runtimeSeq
+  );
+}
+
+function trimProjection(
+  projection: TranscriptProjection,
+  wasTruncated: boolean,
+): { projection: TranscriptProjection; truncated: boolean } {
+  const selected: string[] = [];
+  const items: Record<string, TranscriptItem> = {};
+  let bytes = 0;
+  let truncated = wasTruncated;
+  for (let index = projection.order.length - 1; index >= 0; index -= 1) {
+    const id = projection.order[index];
+    const item = id === undefined ? undefined : projection.items[id];
+    if (!id || !item) continue;
+    const itemBytes = Buffer.byteLength(JSON.stringify(item) ?? '');
+    if (
+      selected.length >= MAX_ACTIVE_ENTITIES ||
+      bytes + itemBytes > MAX_ACTIVE_BYTES
+    ) {
+      truncated = true;
+      continue;
+    }
+    selected.push(id);
+    items[id] = item;
+    bytes += itemBytes;
+  }
+  selected.reverse();
+  return {
+    projection: { ...projection, order: selected, items },
+    truncated,
+  };
+}
+
+function activeDelegateRuns(runtime: RuntimeSnapshot): {
+  runs: DelegateLiveRun[];
+  truncated: boolean;
+} {
+  const surface = runtime.extensionSurfaces?.find(
+    (item) => item.rendererId === 'delegate.status',
+  );
+  const model = surface?.viewModel;
+  const statuses =
+    model && typeof model === 'object' && !Array.isArray(model)
+      ? (model as { statuses?: unknown }).statuses
+      : undefined;
+  if (!Array.isArray(statuses)) return { runs: [], truncated: false };
+  const runs: DelegateLiveRun[] = [];
+  let truncated = statuses.length > 64;
+  for (const raw of statuses.slice(0, 64)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const value = raw as Record<string, unknown>;
+    const state = value.state;
+    const pauseState = value.pauseState;
+    if (
+      !(
+        state === 'queued' ||
+        state === 'running' ||
+        pauseState === 'pausing' ||
+        pauseState === 'paused'
+      )
+    )
+      continue;
+    if (
+      typeof value.runId !== 'string' ||
+      typeof value.lineageId !== 'string' ||
+      typeof value.name !== 'string' ||
+      (value.kind !== 'foreground' && value.kind !== 'background') ||
+      typeof value.createdAt !== 'number' ||
+      !Number.isFinite(value.createdAt) ||
+      typeof value.allowWrites !== 'boolean'
+    )
+      continue;
+    const sourceTranscript = Array.isArray(value.transcript)
+      ? value.transcript
+      : [];
+    if (sourceTranscript.length > 128) truncated = true;
+    const transcript = sourceTranscript.flatMap((entry) => {
+      const parsed = tryParseDelegateTranscriptEntry(entry);
+      return parsed ? [parsed] : [];
+    });
+    runs.push({
+      runId: value.runId,
+      lineageId: value.lineageId,
+      name: value.name,
+      kind: value.kind,
+      state: state === 'queued' ? 'queued' : 'running',
+      createdAt: value.createdAt,
+      ...(typeof value.startedAt === 'number'
+        ? { startedAt: value.startedAt }
+        : {}),
+      ...(typeof value.finishedAt === 'number'
+        ? { finishedAt: value.finishedAt }
+        : {}),
+      ...(typeof value.jobId === 'string' ? { jobId: value.jobId } : {}),
+      ...(typeof value.route === 'string' ? { route: value.route } : {}),
+      ...(value.context === 'branch' ||
+      value.context === 'fresh' ||
+      value.context === 'continuation'
+        ? { context: value.context }
+        : {}),
+      allowWrites: value.allowWrites,
+      ...(pauseState === 'pausing' || pauseState === 'paused'
+        ? { pauseState }
+        : {}),
+      ...(typeof value.pausedAt === 'number'
+        ? { pausedAt: value.pausedAt }
+        : {}),
+      transcript: transcript.slice(0, 128),
+      ...(value.transcriptTruncated === true
+        ? { transcriptTruncated: true }
+        : {}),
+    });
+  }
+  return { runs, truncated };
+}
+
+function itemMessage(
+  item: TranscriptItem,
+): NormalizedMessagePayload | undefined {
+  if (item.kind !== 'message' || item.status !== 'streaming') return undefined;
+  return {
+    messageId: item.messageId,
+    role: item.role,
+    content: item.content,
+    ...(item.timestamp === undefined ? {} : { timestamp: item.timestamp }),
+    ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+    ...(item.toolCallIds === undefined
+      ? {}
+      : { toolCallIds: [...item.toolCallIds] }),
+    phase: 'updated',
+    ...(item.data === undefined ? {} : { data: item.data }),
+  };
+}
+
+function itemTool(item: TranscriptItem): NormalizedToolPayload | undefined {
+  if (
+    item.kind !== 'tool' ||
+    (item.status !== 'pending' && item.status !== 'running')
+  )
+    return undefined;
+  return {
+    toolCallId: item.toolCallId,
+    name: item.name,
+    ...(item.arguments === undefined ? {} : { arguments: item.arguments }),
+    ...(item.result === undefined ? {} : { result: item.result }),
+    ...(item.isError === undefined ? {} : { isError: item.isError }),
+    status: item.status,
+    ...(item.turnId === undefined ? {} : { turnId: item.turnId }),
+    ...(item.data === undefined ? {} : { data: item.data }),
+    phase: 'updated',
+  };
+}
+
 /**
  * Public event projection. RuntimeRegistry retains full snapshots for server
  * authority, but SSE and WebSocket consumers only receive metadata patches.
@@ -183,6 +376,8 @@ export class DashboardApplication {
   private readonly sessionIndex: SessionIndex;
   /** Metadata emitted by the last authoritative snapshot/index publication. */
   private sessionMetadataBaseline?: ReadonlyMap<string, SessionIndexEntry>;
+  /** Bounded, process-local live transcript projection; never persisted. */
+  private readonly activeTranscripts = new Map<string, ActiveTranscriptState>();
   readonly orchestrationService?: OrchestrationService;
 
   constructor(options: DashboardApplicationOptions) {
@@ -292,11 +487,9 @@ export class DashboardApplication {
     return { upsert, remove };
   }
 
-  snapshot(
-    serverId: string,
-    revision: number,
-    cursor = this.eventStream.cursor,
-  ): BrowserSnapshot {
+  /** Build a shell snapshot synchronously from one daemon cursor. */
+  shellSnapshot(serverId: string, revision: number): BrowserSnapshot {
+    const cursor = this.eventStream.cursor;
     const liveRuntimes = this.registry.snapshots();
     const sessions = this.sessionMetadata(liveRuntimes);
     this.setSessionMetadataBaseline(sessions);
@@ -316,7 +509,326 @@ export class DashboardApplication {
     };
   }
 
+  /** Compatibility builder retained for bootstrap, SSE, and websocket paths. */
+  snapshot(
+    serverId: string,
+    revision: number,
+    cursor = this.eventStream.cursor,
+  ): BrowserSnapshot {
+    // Event-stream publication passes its allocated cursor explicitly. Direct
+    // callers retain the historical ability to request that cursor.
+    if (cursor === this.eventStream.cursor)
+      return this.shellSnapshot(serverId, revision);
+    const liveRuntimes = this.registry.snapshots();
+    const sessions = this.sessionMetadata(liveRuntimes);
+    this.setSessionMetadataBaseline(sessions);
+    return {
+      serverId,
+      revision,
+      cursor,
+      runtimes: liveRuntimes.map((runtime) => compactPublicRuntime(runtime)),
+      workspaces: this.workspaces.list(),
+      projects: this.orchestration.projectSummaries(),
+      checkouts: this.orchestration.checkoutSummaries(),
+      threads: this.orchestration.threadSummaries(),
+      runs: this.orchestration.runSummaries(),
+      sessions,
+      usage: this.usage.cached(),
+      unread: this.metadata.unreadNotifications(),
+    };
+  }
+
+  private updateActiveTranscript(change: RegistryChange): void {
+    const sessionId = change.snapshot.session?.id;
+    if (!sessionId) return;
+    if (change.kind === 'offline') {
+      this.activeTranscripts.delete(sessionId);
+      return;
+    }
+    const runtimeEpoch = change.runtimeEpoch ?? change.snapshot.runtimeId;
+    const runtimeSeq = change.runtimeSeq ?? 0;
+    if (change.kind === 'registered') {
+      this.activeTranscripts.set(sessionId, {
+        runtimeId: change.snapshot.runtimeId,
+        runtimeEpoch,
+        runtimeSeq,
+        liveState: change.snapshot.liveState,
+        pendingInteractions: change.snapshot.pendingInteractions.slice(0, 128),
+        projection: createTranscriptProjection(sessionId),
+        truncated: false,
+      });
+      return;
+    }
+    const prior = this.activeTranscripts.get(sessionId) ?? {
+      runtimeId: change.snapshot.runtimeId,
+      runtimeEpoch,
+      runtimeSeq: runtimeSeq - 1,
+      liveState: change.snapshot.liveState,
+      pendingInteractions: [],
+      projection: createTranscriptProjection(sessionId),
+      truncated: false,
+    };
+    if (prior.runtimeEpoch !== runtimeEpoch) {
+      this.activeTranscripts.set(sessionId, {
+        ...prior,
+        runtimeId: change.snapshot.runtimeId,
+        runtimeEpoch,
+        runtimeSeq,
+        liveState: change.snapshot.liveState,
+        pendingInteractions: change.snapshot.pendingInteractions.slice(0, 128),
+        projection: createTranscriptProjection(sessionId),
+        truncated: false,
+      });
+      return;
+    }
+    let projection = prior.projection;
+    let truncated = prior.truncated;
+    if (change.kind === 'event') {
+      if (change.event.type === 'agent.settled') {
+        projection = createTranscriptProjection(sessionId);
+        truncated = false;
+      } else {
+        const reduced = applyTranscriptEvent(projection, {
+          event: change.event,
+          sessionId,
+          runtimeEpoch,
+          runtimeSeq,
+        });
+        projection = reduced.state;
+      }
+      const trimmed = trimProjection(projection, truncated);
+      projection = trimmed.projection;
+      truncated = trimmed.truncated;
+    }
+    this.activeTranscripts.set(sessionId, {
+      ...prior,
+      runtimeId: change.snapshot.runtimeId,
+      runtimeEpoch,
+      runtimeSeq,
+      liveState: change.snapshot.liveState,
+      pendingInteractions: change.snapshot.pendingInteractions.slice(0, 128),
+      projection,
+      truncated,
+    });
+    if (change.kind === 'event' && change.event.type === 'runtime.goodbye')
+      this.activeTranscripts.delete(sessionId);
+  }
+
+  private captureActive(sessionId: string): ActiveCapture {
+    const runtime = this.registry
+      .snapshots()
+      .find((item) => item.session.id === sessionId && item.online !== false);
+    const state = this.activeTranscripts.get(sessionId);
+    return { runtime, state };
+  }
+
+  private activeOverlay(
+    capture: ActiveCapture,
+  ): AuthoritativeSessionSnapshot['active'] {
+    const state = capture.state;
+    const runtime = capture.runtime;
+    const messages: NormalizedMessagePayload[] = [];
+    const tools: NormalizedToolPayload[] = [];
+    if (state) {
+      for (const id of state.projection.order) {
+        const item = state.projection.items[id];
+        if (!item) continue;
+        const message = itemMessage(item);
+        if (message) messages.push(message);
+        const tool = itemTool(item);
+        if (tool) tools.push(tool);
+      }
+    }
+    let pending = (
+      state?.pendingInteractions ??
+      runtime?.pendingInteractions ??
+      []
+    )
+      .slice(0, 128)
+      .map((interaction) => ({
+        ...interaction,
+        choices: [...interaction.choices],
+      }));
+    const delegateProjection = runtime
+      ? activeDelegateRuns(runtime)
+      : { runs: [], truncated: false };
+    let delegates = delegateProjection.runs;
+    let truncated = (state?.truncated ?? false) || delegateProjection.truncated;
+    if (
+      (state?.pendingInteractions.length ??
+        runtime?.pendingInteractions.length ??
+        0) > pending.length
+    )
+      truncated = true;
+    const bytes = (value: unknown): number =>
+      Buffer.byteLength(JSON.stringify(value) ?? '');
+    while (
+      bytes({ messages, tools, delegates, pendingInteractions: pending }) >
+        MAX_ACTIVE_BYTES &&
+      pending.length > 0
+    ) {
+      pending = pending.slice(1);
+      truncated = true;
+    }
+    while (
+      bytes({ messages, tools, delegates, pendingInteractions: pending }) >
+        MAX_ACTIVE_BYTES &&
+      (delegates.length > 0 || tools.length > 0 || messages.length > 0)
+    ) {
+      if (delegates.length > 0) delegates = delegates.slice(1);
+      else if (tools.length > 0) tools.splice(0, 1);
+      else messages.splice(0, 1);
+      truncated = true;
+    }
+    return {
+      ...(runtime ? { runtimeId: runtime.runtimeId } : {}),
+      ...(state?.runtimeEpoch === undefined
+        ? {}
+        : { runtimeEpoch: state.runtimeEpoch }),
+      ...(state && state.runtimeSeq >= 0
+        ? { runtimeSeq: state.runtimeSeq }
+        : {}),
+      ...(runtime ? { liveState: runtime.liveState } : {}),
+      pendingInteractions: pending,
+      messages,
+      tools,
+      delegates,
+      truncated,
+    };
+  }
+
+  /**
+   * Read persisted history and the bounded active projection under one
+   * runtime/cursor capture. A changing runtime epoch or sequence is retried;
+   * no disk page is ever paired with a different live runtime.
+   */
+  async sessionSnapshot(
+    serverId: string,
+    sessionId: string,
+    before?: string,
+  ): Promise<AuthoritativeSessionSnapshot> {
+    if (!SESSION_ID_PATTERN.test(sessionId))
+      throw new Error('Invalid session id.');
+    type SessionRead = Awaited<ReturnType<SessionIndex['readEntries']>>;
+    const runtimeLeafId = (
+      runtime: RuntimeSnapshot | undefined,
+    ): string | undefined => {
+      const leafId = runtime
+        ? (runtime.session as { leafId?: unknown }).leafId
+        : undefined;
+      return typeof leafId === 'string' && leafId.length > 0
+        ? leafId
+        : undefined;
+    };
+    const runtimeIsWorking = (runtime: RuntimeSnapshot | undefined): boolean =>
+      runtime?.liveState === 'working' || runtime?.liveState === 'compacting';
+    const runtimeMetadata = (
+      runtime: RuntimeSnapshot,
+      indexed: SessionIndexEntry | undefined,
+    ): SessionIndexEntry => ({
+      ...(indexed ?? {
+        id: sessionId,
+        file: runtime.session.file ?? '',
+        cwd: runtime.session.cwd ?? runtime.cwd,
+        updatedAt: runtime.lastSeenAt ?? Date.now(),
+      }),
+      id: sessionId,
+      file: runtime.session.file ?? indexed?.file ?? '',
+      cwd: runtime.session.cwd ?? indexed?.cwd ?? runtime.cwd,
+      ...(runtime.session.name === undefined
+        ? indexed?.name === undefined
+          ? {}
+          : { name: indexed.name }
+        : { name: runtime.session.name }),
+      ...(runtime.session.title === undefined
+        ? indexed?.title === undefined
+          ? {}
+          : { title: indexed.title }
+        : { title: runtime.session.title }),
+      activeRuntimeId: runtime.runtimeId,
+      entryCount: runtime.session.entries.length,
+    });
+    const boundedRuntimeRead = (
+      runtime: RuntimeSnapshot,
+      indexed: SessionIndexEntry | undefined,
+    ): SessionRead => {
+      const entries = runtime.session.entries.slice(-2048);
+      const complete = entries.length === runtime.session.entries.length;
+      return {
+        metadata: runtimeMetadata(runtime, indexed),
+        entries: [...entries],
+        entriesComplete: complete,
+        history: {
+          version: 1,
+          start: complete ? 0 : runtime.session.entries.length - entries.length,
+          end: runtime.session.entries.length,
+          hasOlder: !complete,
+        },
+      };
+    };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const cursor = this.eventStream.cursor;
+      const capture = before === undefined ? this.captureActive(sessionId) : {};
+      const indexed = this.sessionIndex.get(sessionId);
+      let result: SessionRead;
+      try {
+        if (!indexed && capture.runtime)
+          result = boundedRuntimeRead(capture.runtime, indexed);
+        else
+          result = await this.sessionIndex.readEntries(
+            sessionId,
+            before,
+            before === undefined && !runtimeIsWorking(capture.runtime)
+              ? runtimeLeafId(capture.runtime)
+              : undefined,
+            {
+              resolveLatestLeaf:
+                before === undefined && runtimeIsWorking(capture.runtime),
+            },
+          );
+      } catch (error) {
+        if (!capture.runtime || before !== undefined) throw error;
+        result = boundedRuntimeRead(capture.runtime, indexed);
+      }
+      if (
+        before === undefined &&
+        (this.eventStream.cursor !== cursor ||
+          !sameRuntimeCapture(capture, this.captureActive(sessionId)))
+      )
+        continue;
+      const active =
+        before === undefined
+          ? this.activeOverlay(capture)
+          : this.activeOverlay({});
+      const provenance = capture.runtime
+        ? this.registry.transportProvenance(capture.runtime.runtimeId)
+        : undefined;
+      const runtimeEpoch =
+        provenance?.runtimeEpoch ?? capture.state?.runtimeEpoch;
+      const runtimeSeq = provenance?.runtimeSeq ?? capture.state?.runtimeSeq;
+      const metadata = capture.runtime
+        ? runtimeMetadata(capture.runtime, result.metadata)
+        : result.metadata;
+      const completeThroughCursor =
+        before === undefined && result.entriesComplete && !active.truncated;
+      return {
+        metadata,
+        entries: result.entries,
+        ...(result.history ? { history: result.history } : {}),
+        entriesComplete: result.entriesComplete,
+        serverId,
+        cursor,
+        ...(runtimeEpoch === undefined ? {} : { runtimeEpoch }),
+        ...(runtimeSeq === undefined || runtimeSeq < 0 ? {} : { runtimeSeq }),
+        active,
+        completeThroughCursor,
+      };
+    }
+    throw new Error('Runtime changed while reading session snapshot; retry.');
+  }
+
   onRegistryChange(change: RegistryChange): ApplicationChange {
+    this.updateActiveTranscript(change);
     this.orchestrationService?.onRegistryChange(change);
     if (this.notifications.shouldPersistRuntime(change))
       this.metadata.saveRuntime(change.snapshot);
