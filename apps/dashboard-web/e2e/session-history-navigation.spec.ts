@@ -2,6 +2,7 @@ import { expect, type Page, test } from '@playwright/test';
 import {
   dashboardTrpcInput,
   installDashboardBootstrap,
+  trpcSseData,
 } from './dashboard-fixtures';
 
 const transcriptScroll = (page: Page) =>
@@ -69,6 +70,43 @@ test('aborts older history when navigating away from a session', async ({
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
+  await page.route('**/trpc/sessionSubscribe*', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    const id = input.sessionId === 'session-2' ? 'session-2' : 'session-1';
+    const response = {
+      metadata: snapshot.sessions[id === 'session-2' ? 1 : 0],
+      entries: entries[id],
+      entriesComplete: false,
+      serverId: snapshot.serverId,
+      cursor: 1,
+      ...(id === 'session-1'
+        ? {
+            history: {
+              version: 1,
+              start: 2,
+              end: 3,
+              hasOlder: true,
+              nextBefore: 'token-1',
+            },
+          }
+        : {}),
+      active: {
+        pendingInteractions: [],
+        messages: [],
+        tools: [],
+        delegates: [],
+        truncated: false,
+      },
+      completeThroughCursor: false,
+    };
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body: trpcSseData(
+        { type: 'snapshot', sequence: 1, snapshot: response },
+        `session-feed-${id}`,
+      ),
+    });
+  });
   await page.route('**/trpc/sessionSnapshot*', async (route) => {
     const input = dashboardTrpcInput(route.request()) as {
       sessionId?: string;
@@ -191,7 +229,7 @@ test('switching chats establishes the new transcript tail', async ({
   const secondSessionResponse = new Promise<void>((resolve) => {
     releaseSecondSession = resolve;
   });
-  await page.route('**/trpc/sessionSnapshot*', async (route) => {
+  await page.route('**/trpc/sessionSubscribe*', async (route) => {
     const input = dashboardTrpcInput(route.request()) as {
       sessionId?: string;
     };
@@ -202,10 +240,12 @@ test('switching chats establishes the new transcript tail', async ({
       await secondSessionResponse;
     }
     return route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        result: {
-          data: {
+      contentType: 'text/event-stream',
+      body: trpcSseData(
+        {
+          type: 'snapshot',
+          sequence: 1,
+          snapshot: {
             metadata: sessions[sessionIndex],
             entries: sessionEntries(id),
             entriesComplete: false,
@@ -221,7 +261,8 @@ test('switching chats establishes the new transcript tail', async ({
             completeThroughCursor: false,
           },
         },
-      }),
+        `session-feed-${id}`,
+      ),
     });
   });
 
@@ -285,7 +326,7 @@ test('active to old to active ignores a delayed stale latest snapshot', async ({
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
   let activeRequests = 0;
-  await page.route('**/trpc/sessionSnapshot*', async (route) => {
+  await page.route('**/trpc/sessionSubscribe*', async (route) => {
     const input = dashboardTrpcInput(route.request()) as {
       sessionId?: string;
     };
@@ -303,10 +344,12 @@ test('active to old to active ignores a delayed stale latest snapshot', async ({
     const toolId = current ? 'tool-current' : 'tool-stale';
     const delegateId = current ? 'delegate-current' : 'delegate-stale';
     return route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        result: {
-          data: {
+      contentType: 'text/event-stream',
+      body: trpcSseData(
+        {
+          type: 'snapshot',
+          sequence: 1,
+          snapshot: {
             metadata: {
               ...session,
               ...(id === 'session-1' ? { activeRuntimeId: 'runtime-1' } : {}),
@@ -355,7 +398,8 @@ test('active to old to active ignores a delayed stale latest snapshot', async ({
             completeThroughCursor: true,
           },
         },
-      }),
+        `session-feed-${id}-${activeRequests}`,
+      ),
     });
   });
 

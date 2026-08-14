@@ -1,8 +1,5 @@
 import { expect, test } from '@playwright/test';
-import {
-  dashboardTrpcInput,
-  installDashboardBootstrap,
-} from './dashboard-fixtures';
+import { installDashboardBootstrap } from './dashboard-fixtures';
 
 const snapshot = {
   serverId: 'delegate-history-e2e',
@@ -75,34 +72,92 @@ const historyDetail = {
 test('shows and inspects a persisted delegate in an offline session', async ({
   page,
 }) => {
-  await page.addInitScript(() => {
+  const initialSessionSnapshot = {
+    metadata,
+    entries: [
+      { type: 'session', id: 'historical-session', cwd: '/tmp' },
+      {
+        type: 'message',
+        id: 'historical-message',
+        message: {
+          role: 'user',
+          content: 'Show persisted delegate work',
+        },
+      },
+    ],
+    entriesComplete: true,
+    serverId: 'delegate-history-e2e',
+    cursor: 0,
+    active: {
+      pendingInteractions: [],
+      messages: [],
+      tools: [],
+      delegates: [],
+      truncated: false,
+    },
+    completeThroughCursor: true,
+  };
+  await page.addInitScript((initial) => {
     localStorage.setItem('pi-dashboard-token', 'test-token');
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let sequence = 0;
     const originalFetch = window.fetch.bind(window);
+    const frame = (id: string, data: unknown) =>
+      `id: ${id}\ndata: ${JSON.stringify(data)}\n\n`;
     const testWindow = window as typeof window & {
-      emitDashboardEvent(value: unknown): void;
+      emitDashboardEvent(value: { event?: unknown }): void;
     };
     testWindow.emitDashboardEvent = (value) => {
+      const next = ++sequence;
       controller?.enqueue(
         new TextEncoder().encode(
-          `event: dashboard\ndata: ${JSON.stringify(value)}\n\n`,
+          frame(`session-${next}`, {
+            type: 'session-event',
+            sequence: next,
+            sessionId: 'historical-session',
+            event: value.event,
+          }),
         ),
       );
     };
     window.fetch = async (input, init) => {
-      const target = typeof input === 'string' ? input : input.url;
-      if (!target.includes('/trpc/shellSubscribe'))
+      const target =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (!target.includes('/trpc/sessionSubscribe'))
         return originalFetch(input, init);
       return new Response(
         new ReadableStream<Uint8Array>({
           start(nextController) {
             controller = nextController;
+            controller.enqueue(
+              new TextEncoder().encode(
+                'event: connected\ndata: {"reconnectAfterInactivityMs":60000}\n\n',
+              ),
+            );
+            controller.enqueue(
+              new TextEncoder().encode(
+                frame('session-snapshot', {
+                  type: 'snapshot',
+                  sequence: 0,
+                  snapshot: initial,
+                }),
+              ),
+            );
+            controller.enqueue(
+              new TextEncoder().encode(
+                frame('session-caught-up', { type: 'caught-up', sequence: 0 }),
+              ),
+            );
           },
         }),
         { headers: { 'content-type': 'text/event-stream' } },
       );
     };
-  });
+  }, initialSessionSnapshot);
   await installDashboardBootstrap(page, snapshot);
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
@@ -127,44 +182,6 @@ test('shows and inspects a persisted delegate in an offline session', async ({
       });
     },
   );
-  await page.route('**/trpc/sessionSnapshot*', (route) => {
-    const input = dashboardTrpcInput(route.request()) as {
-      sessionId?: string;
-    };
-    if (input.sessionId !== 'historical-session') return route.fallback();
-    return route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        result: {
-          data: {
-            metadata,
-            entries: [
-              { type: 'session', id: 'historical-session', cwd: '/tmp' },
-              {
-                type: 'message',
-                id: 'historical-message',
-                message: {
-                  role: 'user',
-                  content: 'Show persisted delegate work',
-                },
-              },
-            ],
-            entriesComplete: true,
-            serverId: 'delegate-history-e2e',
-            cursor: 1,
-            active: {
-              pendingInteractions: [],
-              messages: [],
-              tools: [],
-              delegates: [],
-              truncated: false,
-            },
-            completeThroughCursor: true,
-          },
-        },
-      }),
-    });
-  });
 
   await page.goto('/sessions/historical-session');
   const delegateLauncher = page.getByRole('button', {

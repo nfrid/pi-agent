@@ -8,6 +8,8 @@ export type DashboardFixtureOptions = {
   protocolInfo?: Record<string, unknown>;
   shellSnapshot?: Record<string, unknown>;
   sessionSnapshot?: Record<string, unknown>;
+  sessionSnapshots?: Record<string, Record<string, unknown>>;
+  sessionSubscribeDelayMs?: number;
 };
 
 function trpcData(data: unknown): string {
@@ -120,13 +122,17 @@ export async function installDashboardBootstrap(
       cwd: '',
       updatedAt: 1,
     };
+    if (options.sessionSubscribeDelayMs)
+      await new Promise((resolve) =>
+        setTimeout(resolve, options.sessionSubscribeDelayMs),
+      );
     await route.fulfill({
       contentType: 'text/event-stream',
       body: trpcSseData(
         {
           type: 'snapshot',
           sequence: snapshot.cursor,
-          snapshot: options.sessionSnapshot ?? {
+          snapshot: {
             metadata,
             entries: [],
             entriesComplete: true,
@@ -140,6 +146,9 @@ export async function installDashboardBootstrap(
               truncated: false,
             },
             completeThroughCursor: true,
+            ...(options.sessionSnapshots?.[sessionId] ??
+              options.sessionSnapshot ??
+              {}),
           },
         },
         `session-fixture-${sessionId}`,

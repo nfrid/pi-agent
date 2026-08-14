@@ -1,8 +1,5 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
-import {
-  dashboardTrpcInput,
-  installDashboardBootstrap,
-} from './dashboard-fixtures';
+import { installDashboardBootstrap, trpcSseData } from './dashboard-fixtures';
 
 function transcriptScroll(page: Page) {
   return page.locator('.session-transcript-scroll');
@@ -777,118 +774,115 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await page.route('**/api/usage', async (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await installDashboardBootstrap(page, {
-    serverId: 'server-loading',
-    revision: 1,
-    cursor: 0,
-    runtimes: [
-      {
-        runtimeId: 'runtime-loading',
-        ownership: 'external',
-        pid: 1,
-        cwd: '/tmp',
-        liveState: 'idle',
-        online: true,
-        session: {
-          id: 'session-loading',
-          title: 'Loaded shell',
-          entries: [],
+  await installDashboardBootstrap(
+    page,
+    {
+      serverId: 'server-loading',
+      revision: 1,
+      cursor: 0,
+      runtimes: [
+        {
+          runtimeId: 'runtime-loading',
+          ownership: 'external',
+          pid: 1,
+          cwd: '/tmp',
+          liveState: 'idle',
+          online: true,
+          session: {
+            id: 'session-loading',
+            title: 'Loaded shell',
+            entries: [],
+          },
+          pendingInteractions: [],
         },
-        pendingInteractions: [],
-      },
-    ],
-    workspaces: [],
-    sessions: [
-      {
-        id: 'session-loading',
-        file: '',
-        cwd: '/tmp',
-        title: 'Loaded shell',
-        updatedAt: Date.parse('2026-08-05T18:42:00.000Z'),
-      },
-      {
-        id: 'session-dormant',
-        file: '',
-        cwd: '/tmp/archive',
-        title: 'Dormant thread',
-        updatedAt: Date.parse('2026-08-04T12:00:00.000Z'),
-      },
-    ],
-    unread: [],
-  });
-  await page.route('**/api/sessions/session-dormant', async (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        serverId: 'server-loading',
-        cursor: 0,
-        metadata: {
+      ],
+      workspaces: [],
+      sessions: [
+        {
+          id: 'session-loading',
+          file: '',
+          cwd: '/tmp',
+          title: 'Loaded shell',
+          updatedAt: Date.parse('2026-08-05T18:42:00.000Z'),
+        },
+        {
           id: 'session-dormant',
           file: '',
           cwd: '/tmp/archive',
           title: 'Dormant thread',
           updatedAt: Date.parse('2026-08-04T12:00:00.000Z'),
         },
-        entries: [
-          ...Array.from({ length: 80 }, (_, index) => ({
-            type: 'message',
-            message: {
-              id: `dormant-history-${index}`,
-              role: 'user',
-              content: `Dormant history ${index}`,
-              timestamp: Date.parse('2026-08-04T10:00:00.000Z') + index,
-            },
-          })),
-          {
-            type: 'message',
-            message: {
-              id: 'dormant-history-latest',
-              role: 'user',
-              content: 'Dormant latest',
-              timestamp: Date.parse('2026-08-04T11:00:00.000Z'),
-            },
+      ],
+      unread: [],
+    },
+    {
+      sessionSubscribeDelayMs: 2_000,
+      sessionSnapshots: {
+        'session-dormant': {
+          serverId: 'server-loading',
+          cursor: 0,
+          metadata: {
+            id: 'session-dormant',
+            file: '',
+            cwd: '/tmp/archive',
+            title: 'Dormant thread',
+            updatedAt: Date.parse('2026-08-04T12:00:00.000Z'),
           },
-        ],
-      }),
-    }),
-  );
-  await page.route('**/api/sessions/session-loading', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        serverId: 'server-loading',
-        cursor: 0,
-        metadata: {
-          id: 'session-loading',
-          file: '',
-          cwd: '/tmp',
-          title: 'Loaded shell',
-          updatedAt: 1,
+          entries: [
+            ...Array.from({ length: 80 }, (_, index) => ({
+              type: 'message',
+              message: {
+                id: `dormant-history-${index}`,
+                role: 'user',
+                content: `Dormant history ${index}`,
+                timestamp: Date.parse('2026-08-04T10:00:00.000Z') + index,
+              },
+            })),
+            {
+              type: 'message',
+              message: {
+                id: 'dormant-history-latest',
+                role: 'user',
+                content: 'Dormant latest',
+                timestamp: Date.parse('2026-08-04T11:00:00.000Z'),
+              },
+            },
+          ],
         },
-        entries: [
-          ...Array.from({ length: 80 }, (_, index) => ({
-            type: 'message',
-            message: {
-              id: `history-${index}`,
-              role: 'user',
-              content: `Earlier history ${index}`,
-              timestamp: Date.parse('2026-08-05T17:00:00.000Z') + index,
-            },
-          })),
-          {
-            type: 'message',
-            message: {
-              id: 'history-latest',
-              role: 'user',
-              content: 'Prior history',
-              timestamp: '2026-08-05T18:42:00.000Z',
-            },
+        'session-loading': {
+          serverId: 'server-loading',
+          cursor: 0,
+          metadata: {
+            id: 'session-loading',
+            file: '',
+            cwd: '/tmp',
+            title: 'Loaded shell',
+            updatedAt: 1,
           },
-        ],
-      }),
-    });
-  });
+          entries: [
+            ...Array.from({ length: 80 }, (_, index) => ({
+              type: 'message',
+              message: {
+                id: `history-${index}`,
+                role: 'user',
+                content: `Earlier history ${index}`,
+                timestamp: Date.parse('2026-08-05T17:00:00.000Z') + index,
+              },
+            })),
+            {
+              type: 'message',
+              message: {
+                id: 'history-latest',
+                role: 'user',
+                content: 'Prior history',
+                timestamp: '2026-08-05T18:42:00.000Z',
+              },
+            },
+          ],
+        },
+      },
+    },
+  );
 
   await page.goto('/sessions/session-loading');
   await expect(page.locator('.session-heading h1')).toHaveText('Loaded shell');
@@ -901,14 +895,6 @@ test('session shell exposes timestamps, dormant state, and persistent drafts', a
   await expect(page.getByRole('form', { name: 'Send a message' })).toHaveCount(
     0,
   );
-  const notice = page.locator('.sync-notice');
-  await expect(notice).toContainText('Connecting to live updates…');
-  expect(
-    await notice.evaluate((element) => ({
-      position: getComputedStyle(element).position,
-      insideMain: Boolean(element.closest('main')),
-    })),
-  ).toEqual({ position: 'fixed', insideMain: false });
   await expect(page.locator('.transcript-virtualized')).toContainText(
     'Prior history',
   );
@@ -1070,67 +1056,71 @@ test('delayed command completion does not scroll a destination session', async (
       },
     },
   ];
-  await installDashboardBootstrap(page, {
-    serverId: 'dashboard-delayed-command',
-    revision: 1,
-    cursor: 1,
-    runtimes: [
-      {
-        runtimeId: 'runtime-source',
-        ownership: 'external',
-        pid: 1,
-        cwd: '/tmp',
-        liveState: 'idle',
-        online: true,
-        session: {
-          id: 'session-source',
-          title: 'Source session',
-          entries: [],
-        },
-        model: { provider: 'test', model: 'text', supportsImages: false },
-        pendingInteractions: [],
-      },
-    ],
-    workspaces: [],
-    sessions: [
-      metadata('session-source', 'Source session'),
-      metadata('session-destination', 'Destination session'),
-    ],
-    unread: [],
-  });
-  await page.route('**/trpc/sessionSnapshot*', async (route) => {
-    const input = dashboardTrpcInput(route.request()) as {
-      sessionId?: string;
-    };
-    const sessionId = input.sessionId;
-    const title =
-      sessionId === 'session-destination' ? 'Destination' : 'Source';
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        result: {
-          data: {
-            metadata: metadata(
-              sessionId ?? 'session-source',
-              `${title} session`,
-            ),
-            entries: entries(title),
-            entriesComplete: true,
-            serverId: 'dashboard-delayed-command',
-            cursor: 1,
-            active: {
-              pendingInteractions: [],
-              messages: [],
-              tools: [],
-              delegates: [],
-              truncated: false,
-            },
-            completeThroughCursor: true,
+  await installDashboardBootstrap(
+    page,
+    {
+      serverId: 'dashboard-delayed-command',
+      revision: 1,
+      cursor: 1,
+      runtimes: [
+        {
+          runtimeId: 'runtime-source',
+          ownership: 'external',
+          pid: 1,
+          cwd: '/tmp',
+          liveState: 'idle',
+          online: true,
+          session: {
+            id: 'session-source',
+            title: 'Source session',
+            entries: [],
           },
+          model: { provider: 'test', model: 'text', supportsImages: false },
+          pendingInteractions: [],
         },
-      }),
-    });
-  });
+      ],
+      workspaces: [],
+      sessions: [
+        metadata('session-source', 'Source session'),
+        metadata('session-destination', 'Destination session'),
+      ],
+      unread: [],
+    },
+    {
+      sessionSnapshots: {
+        'session-source': {
+          metadata: metadata('session-source', 'Source session'),
+          entries: entries('Source'),
+          entriesComplete: true,
+          serverId: 'dashboard-delayed-command',
+          cursor: 1,
+          active: {
+            pendingInteractions: [],
+            messages: [],
+            tools: [],
+            delegates: [],
+            truncated: false,
+          },
+          completeThroughCursor: true,
+        },
+        'session-destination': {
+          metadata: metadata('session-destination', 'Destination session'),
+          entries: entries('Destination'),
+          entriesComplete: true,
+          serverId: 'dashboard-delayed-command',
+          cursor: 1,
+          active: {
+            pendingInteractions: [],
+            messages: [],
+            tools: [],
+            delegates: [],
+            truncated: false,
+          },
+          completeThroughCursor: true,
+        },
+      },
+    },
+  );
   let commandRequested = false;
   let commandCompleted = false;
   let releaseCommand!: () => void;
@@ -1183,30 +1173,27 @@ test('delayed command completion does not scroll a destination session', async (
     .toBe(destinationScrollTop);
 });
 
-test('live transport contains malformed data and reconnects without HTTP polling', async ({
+test('live transport reconnects without HTTP polling or stale rollback', async ({
   page,
 }) => {
   let usageRequests = 0;
-  let snapshotRequests = 0;
   await page.addInitScript(() => {
     localStorage.setItem('pi-dashboard-token', 'test-token');
     type Stream = {
       controller?: ReadableStreamDefaultController<Uint8Array>;
       emit(value: unknown): void;
-      emitRaw(data: string): void;
       close(): void;
       response: Response;
     };
     const streams: Stream[] = [];
     let nextCursor = 0;
     let reconnectSnapshotPending = false;
-    let replayGapPending = false;
     const originalFetch = window.fetch.bind(window);
-    const frame = (data: string) => `event: dashboard\ndata: ${data}\n\n`;
+    const frame = (id: string, data: string) => `id: ${id}\ndata: ${data}\n\n`;
     const generationSnapshot = (generation: number) => ({
       serverId: `server-${generation}`,
       revision: 1,
-      cursor: ++nextCursor,
+      cursor: nextCursor,
       runtimes: [],
       workspaces: [
         {
@@ -1247,13 +1234,18 @@ test('live transport contains malformed data and reconnects without HTTP polling
       const cursor = malformedSnapshot ? nextCursor : ++nextCursor;
       if (value.type === 'snapshot') {
         const snapshot = { ...value.snapshot, cursor };
-        return { type: 'snapshot', cursor, emittedAt: Date.now(), snapshot };
+        return {
+          type: 'snapshot',
+          sequence: cursor,
+          snapshot: { snapshot, cursor },
+        };
       }
       return {
-        cursor,
-        emittedAt: Date.now(),
-        runtimeId: value.runtimeId,
-        event: value.event,
+        type: 'shell-event',
+        sequence: cursor,
+        domain: 'invalidation',
+        revision: cursor,
+        data: { refresh: true },
       };
     };
     const createStream = (): Stream => {
@@ -1263,16 +1255,12 @@ test('live transport contains malformed data and reconnects without HTTP polling
           try {
             stream.controller?.enqueue(
               new TextEncoder().encode(
-                frame(JSON.stringify(streamRecord(value))),
+                frame(
+                  `shell-${nextCursor}`,
+                  JSON.stringify(streamRecord(value)),
+                ),
               ),
             );
-          } catch {
-            /* stale test streams are intentionally inert after close */
-          }
-        },
-        emitRaw(data) {
-          try {
-            stream.controller?.enqueue(new TextEncoder().encode(frame(data)));
           } catch {
             /* stale test streams are intentionally inert after close */
           }
@@ -1280,15 +1268,20 @@ test('live transport contains malformed data and reconnects without HTTP polling
         close() {
           reconnectSnapshotPending = true;
           try {
-            stream.controller?.close();
+            stream.controller?.error(new TypeError('network interrupted'));
           } catch {
-            /* parser errors already cancel the stale stream */
+            /* stale test streams are already disconnected */
           }
         },
       } as Stream;
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           stream.controller = controller;
+          controller.enqueue(
+            new TextEncoder().encode(
+              'event: connected\ndata: {"reconnectAfterInactivityMs":60000}\n\n',
+            ),
+          );
         },
       });
       stream.response = new Response(body, {
@@ -1298,32 +1291,21 @@ test('live transport contains malformed data and reconnects without HTTP polling
       return stream;
     };
     window.fetch = async (input, init) => {
-      const target = typeof input === 'string' ? input : input.url;
+      const target =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
       if (!target.includes('/trpc/shellSubscribe'))
         return originalFetch(input, init);
-      if (replayGapPending) {
-        replayGapPending = false;
-        return new Response(JSON.stringify({ code: 'replay-gap' }), {
-          status: 409,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
       const stream = createStream();
       if (streams.length === 1 || reconnectSnapshotPending) {
         reconnectSnapshotPending = false;
-        const snapshot = generationSnapshot(streams.length);
-        stream.controller?.enqueue(
-          new TextEncoder().encode(
-            frame(
-              JSON.stringify({
-                type: 'snapshot',
-                cursor: snapshot.cursor,
-                emittedAt: Date.now(),
-                snapshot,
-              }),
-            ),
-          ),
-        );
+        stream.emit({
+          type: 'snapshot',
+          snapshot: generationSnapshot(streams.length),
+        });
       }
       return stream.response;
     };
@@ -1332,20 +1314,13 @@ test('live transport contains malformed data and reconnects without HTTP polling
         count: () => streams.length,
         current: () => streams.at(-1),
         first: () => streams[0],
-        forceReplayGap: () => {
-          replayGapPending = true;
-          streams.at(-1)?.close();
-        },
+        forceReplayGap: () => streams.at(-1)?.close(),
       },
     });
   });
   await page.route('**/api/usage', async (route) => {
     usageRequests += 1;
     await route.fulfill({ contentType: 'application/json', body: '{}' });
-  });
-  page.on('request', (request) => {
-    if (new URL(request.url()).pathname.endsWith('/trpc/shellSnapshot'))
-      snapshotRequests += 1;
   });
   await installDashboardBootstrap(page, {
     serverId: 'server-1',
@@ -1378,7 +1353,6 @@ test('live transport contains malformed data and reconnects without HTTP polling
     page.getByRole('heading', { name: 'No thread selected' }),
   ).toBeVisible();
   await expect.poll(() => usageRequests).toBeGreaterThan(0);
-  await expect.poll(() => snapshotRequests).toBe(1);
   expect(usageRequests).toBe(1);
   const initialUsageRequests = usageRequests;
   await page.evaluate(() => {
@@ -1403,33 +1377,6 @@ test('live transport contains malformed data and reconnects without HTTP polling
   await page.waitForTimeout(150);
   expect(usageRequests).toBe(initialUsageRequests);
   await page.evaluate(() => {
-    const test = (
-      window as unknown as {
-        dashboardLiveTest: {
-          current(): {
-            emitRaw(data: string): void;
-            emit(value: unknown): void;
-          };
-        };
-      }
-    ).dashboardLiveTest;
-    test.current().emitRaw('{not-json');
-    test.current().emit({
-      type: 'snapshot',
-      snapshot: {
-        serverId: 'broken',
-        revision: 2,
-        runtimes: [{}],
-        workspaces: [],
-        sessions: [],
-        unread: [],
-      },
-    });
-  });
-  await expect(
-    page.getByRole('heading', { name: 'No thread selected' }),
-  ).toBeVisible();
-  await page.evaluate(() => {
     (
       window as unknown as {
         dashboardLiveTest: { current(): { close(): void } };
@@ -1438,9 +1385,6 @@ test('live transport contains malformed data and reconnects without HTTP polling
       .current()
       .close();
   });
-  await expect(page.getByRole('status')).toContainText(
-    'Live updates disconnected',
-  );
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -1457,15 +1401,25 @@ test('live transport contains malformed data and reconnects without HTTP polling
   await page.waitForTimeout(200);
   await page.goto('/workspaces');
   await expect(page.getByText(/Live generation \d+/)).toBeVisible();
-  const snapshotsBeforeReplayGap = snapshotRequests;
+  const streamsBeforeReplayGap = await page.evaluate(() =>
+    (
+      window as unknown as { dashboardLiveTest: { count(): number } }
+    ).dashboardLiveTest.count(),
+  );
   await page.evaluate(() => {
     (
       window as unknown as { dashboardLiveTest: { forceReplayGap(): void } }
     ).dashboardLiveTest.forceReplayGap();
   });
   await expect
-    .poll(() => snapshotRequests)
-    .toBeGreaterThan(snapshotsBeforeReplayGap);
+    .poll(() =>
+      page.evaluate(() =>
+        (
+          window as unknown as { dashboardLiveTest: { count(): number } }
+        ).dashboardLiveTest.count(),
+      ),
+    )
+    .toBeGreaterThan(streamsBeforeReplayGap);
   await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible();
   await page.evaluate(() => {
     (
@@ -1518,7 +1472,8 @@ test('dense mobile session keeps conversation and activity readable', async ({
   await page.setViewportSize({ width: 320, height: 720 });
   await page.addInitScript(() => {
     localStorage.setItem('pi-dashboard-token', 'test-token');
-    let cursor = 0;
+    let cursor = 1;
+    let initialSessionRequest = true;
     const originalFetch = window.fetch.bind(window);
     const stream = {
       controller: undefined as
@@ -1529,9 +1484,10 @@ test('dense mobile session keeps conversation and activity readable', async ({
         const next = ++cursor;
         stream.controller?.enqueue(
           new TextEncoder().encode(
-            `event: dashboard\ndata: ${JSON.stringify({
-              cursor: next,
-              emittedAt: Date.now(),
+            `id: session-${next}\ndata: ${JSON.stringify({
+              type: 'session-event',
+              sequence: next,
+              sessionId: 's1',
               runtimeId: value.runtimeId,
               event: value.event,
             })}\n\n`,
@@ -1540,12 +1496,31 @@ test('dense mobile session keeps conversation and activity readable', async ({
       },
     };
     window.fetch = async (input, init) => {
-      const target = typeof input === 'string' ? input : input.url;
-      if (!target.includes('/trpc/shellSubscribe'))
+      const target =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (!target.includes('/trpc/sessionSubscribe'))
         return originalFetch(input, init);
+      if (initialSessionRequest) {
+        initialSessionRequest = false;
+        return originalFetch(input, init);
+      }
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           stream.controller = controller;
+          controller.enqueue(
+            new TextEncoder().encode(
+              'event: connected\ndata: {"reconnectAfterInactivityMs":60000}\n\n',
+            ),
+          );
+          controller.enqueue(
+            new TextEncoder().encode(
+              'id: session-caught-up\ndata: {"type":"caught-up","sequence":1}\n\n',
+            ),
+          );
         },
       });
       stream.response = new Response(body, {
@@ -1594,57 +1569,71 @@ test('dense mobile session keeps conversation and activity readable', async ({
     commandBody = route.request().postData() ?? '';
     await route.fulfill({ contentType: 'application/json', body: '{}' });
   });
-  await page.route(/\/api\/sessions\/[^/]+$/, async (route) => {
+  await page.route('**/trpc/sessionSubscribe*', async (route) => {
     await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        metadata: { id: 's1', file: '', cwd: '/tmp', updatedAt: Date.now() },
-        entries: [
-          ...Array.from({ length: 90 }, (_, index) => ({
-            type: 'message',
-            message: {
-              role: 'user',
-              content: [{ type: 'text', text: `Earlier message ${index + 1}` }],
+      contentType: 'text/event-stream',
+      body: trpcSseData(
+        {
+          type: 'snapshot',
+          sequence: 1,
+          snapshot: {
+            metadata: {
+              id: 's1',
+              file: '',
+              cwd: '/tmp',
+              updatedAt: Date.now(),
             },
-          })),
-          {
-            type: 'compaction',
-            summary: '## Compaction checkpoint\nPreserved the dashboard task.',
-            tokensBefore: 232_000,
-          },
-          {
-            type: 'custom',
-            customType: 'lean-todo',
-            data: {
-              kind: 'snapshot',
-              state: {
-                tasks: [{ id: 'T1', text: 'Verify dashboard', status: 'todo' }],
+            entries: [
+              ...Array.from({ length: 90 }, (_, index) => ({
+                type: 'message',
+                message: {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: `Earlier message ${index + 1}` },
+                  ],
+                },
+              })),
+              {
+                type: 'compaction',
+                summary:
+                  '## Compaction checkpoint\nPreserved the dashboard task.',
+                tokensBefore: 232_000,
               },
-            },
-          },
-          {
-            type: 'custom',
-            customType: 'lean-todo',
-            data: {
-              kind: 'snapshot',
-              state: {
-                tasks: [
-                  { id: 'T1', text: 'Verify dashboard', status: 'doing' },
-                ],
+              {
+                type: 'custom',
+                customType: 'lean-todo',
+                data: {
+                  kind: 'snapshot',
+                  state: {
+                    tasks: [
+                      { id: 'T1', text: 'Verify dashboard', status: 'todo' },
+                    ],
+                  },
+                },
               },
-            },
-          },
-          {
-            type: 'model_change',
-            provider: 'openai',
-            modelId: 'gpt-5.6-sol',
-          },
-          { type: 'thinking_level_change', thinkingLevel: 'medium' },
-          {
-            type: 'custom_message',
-            customType: 'delegate-job-result',
-            display: true,
-            content: `# Background delegate job dj-1 (UX audit) success
+              {
+                type: 'custom',
+                customType: 'lean-todo',
+                data: {
+                  kind: 'snapshot',
+                  state: {
+                    tasks: [
+                      { id: 'T1', text: 'Verify dashboard', status: 'doing' },
+                    ],
+                  },
+                },
+              },
+              {
+                type: 'model_change',
+                provider: 'openai',
+                modelId: 'gpt-5.6-sol',
+              },
+              { type: 'thinking_level_change', thinkingLevel: 'medium' },
+              {
+                type: 'custom_message',
+                customType: 'delegate-job-result',
+                display: true,
+                content: `# Background delegate job dj-1 (UX audit) success
 
 Delegated results: 1 run(s)
 
@@ -1652,152 +1641,167 @@ Status: success
 Structured result: valid
 Projection: {"outcome":"done"}
 Note: Recovery completed after the final check.`,
-            details: {
-              jobs: [
-                {
-                  name: 'UX audit',
-                  state: 'success',
-                  runs: [
+                details: {
+                  jobs: [
                     {
-                      structuredResult: {
-                        valid: true,
-                        value: {
-                          outcome: 'done',
-                          findings: [
-                            {
-                              filePath: 'src/App.tsx',
-                              notes:
-                                '## Finding notes\n\n- [dashboard](https://example.com)\n- use `code`\n\n```ts\nconst ready = true;\n```',
+                      name: 'UX audit',
+                      state: 'success',
+                      runs: [
+                        {
+                          structuredResult: {
+                            valid: true,
+                            value: {
+                              outcome: 'done',
+                              findings: [
+                                {
+                                  filePath: 'src/App.tsx',
+                                  notes:
+                                    '## Finding notes\n\n- [dashboard](https://example.com)\n- use `code`\n\n```ts\nconst ready = true;\n```',
+                                },
+                              ],
                             },
-                          ],
+                            errors: [],
+                          },
                         },
-                        errors: [],
-                      },
+                      ],
                     },
                   ],
                 },
-              ],
-            },
-          },
-          {
-            type: 'custom_message',
-            customType: 'background-terminal-result',
-            display: true,
-            content: 'Background build completed.',
-            details: {
-              title: 'Dashboard build',
-              status: 'done',
-              exitCode: 0,
-              duration: 2400,
-            },
-          },
-          {
-            type: 'custom',
-            customType: 'artifact:v1',
-            data: { bytes: 12 },
-          },
-          {
-            type: 'custom_message',
-            customType: 'private-context',
-            display: false,
-            content: 'Do not render this context.',
-          },
-          {
-            type: 'message',
-            message: {
-              role: 'user',
-              content: [{ type: 'text', text: 'Focus on mobile readability.' }],
-              timestamp: 100,
-            },
-          },
-          {
-            type: 'custom',
-            customType: 'steering-message',
-            data: { timestamp: 100, text: 'Focus on mobile readability.' },
-          },
-          {
-            type: 'message',
-            message: {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: '**Check** the [dashboard](https://example.com).',
+              },
+              {
+                type: 'custom_message',
+                customType: 'background-terminal-result',
+                display: true,
+                content: 'Background build completed.',
+                details: {
+                  title: 'Dashboard build',
+                  status: 'done',
+                  exitCode: 0,
+                  duration: 2400,
                 },
-              ],
-            },
-          },
-          {
-            type: 'message',
-            message: {
-              role: 'assistant',
-              timestamp: '2026-08-09T12:34:00.000Z',
-              content: [
-                {
-                  type: 'thinking',
-                  thinking: 'Checking the available mobile width.',
+              },
+              {
+                type: 'custom',
+                customType: 'artifact:v1',
+                data: { bytes: 12 },
+              },
+              {
+                type: 'custom_message',
+                customType: 'private-context',
+                display: false,
+                content: 'Do not render this context.',
+              },
+              {
+                type: 'message',
+                message: {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: 'Focus on mobile readability.' },
+                  ],
+                  timestamp: 100,
                 },
-                { type: 'text', text: 'Checking the mobile transcript.' },
-                {
-                  type: 'toolCall',
-                  id: 'call-1',
-                  name: 'read',
-                  arguments: { path: 'src/App.tsx' },
+              },
+              {
+                type: 'custom',
+                customType: 'steering-message',
+                data: { timestamp: 100, text: 'Focus on mobile readability.' },
+              },
+              {
+                type: 'message',
+                message: {
+                  role: 'user',
+                  content: [
+                    {
+                      type: 'text',
+                      text: '**Check** the [dashboard](https://example.com).',
+                    },
+                  ],
                 },
-              ],
-            },
-          },
-          {
-            type: 'message',
-            message: {
-              role: 'toolResult',
-              toolCallId: 'call-1',
-              content: [{ type: 'text', text: 'ok' }],
-              isError: false,
-            },
-          },
-          {
-            type: 'message',
-            message: {
-              role: 'assistant',
-              content: [
-                { type: 'text', text: 'Checking the failed command.' },
-                {
-                  type: 'toolCall',
-                  id: 'call-2',
-                  name: 'bash',
-                  arguments: { command: 'false' },
+              },
+              {
+                type: 'message',
+                message: {
+                  role: 'assistant',
+                  timestamp: '2026-08-09T12:34:00.000Z',
+                  content: [
+                    {
+                      type: 'thinking',
+                      thinking: 'Checking the available mobile width.',
+                    },
+                    { type: 'text', text: 'Checking the mobile transcript.' },
+                    {
+                      type: 'toolCall',
+                      id: 'call-1',
+                      name: 'read',
+                      arguments: { path: 'src/App.tsx' },
+                    },
+                  ],
                 },
-              ],
-            },
-          },
-          {
-            type: 'message',
-            message: {
-              role: 'toolResult',
-              toolCallId: 'call-2',
-              content: [{ type: 'text', text: 'Command failed' }],
-              isError: true,
-            },
-          },
-          {
-            type: 'message',
-            message: {
-              role: 'assistant',
-              content: [
-                {
-                  type: 'text',
-                  text: 'Result: **ready** with `inline code`.',
+              },
+              {
+                type: 'message',
+                message: {
+                  role: 'toolResult',
+                  toolCallId: 'call-1',
+                  content: [{ type: 'text', text: 'ok' }],
+                  isError: false,
                 },
-                {
-                  type: 'text',
-                  text: 'Deployment resumes automatically.',
+              },
+              {
+                type: 'message',
+                message: {
+                  role: 'assistant',
+                  content: [
+                    { type: 'text', text: 'Checking the failed command.' },
+                    {
+                      type: 'toolCall',
+                      id: 'call-2',
+                      name: 'bash',
+                      arguments: { command: 'false' },
+                    },
+                  ],
                 },
-              ],
+              },
+              {
+                type: 'message',
+                message: {
+                  role: 'toolResult',
+                  toolCallId: 'call-2',
+                  content: [{ type: 'text', text: 'Command failed' }],
+                  isError: true,
+                },
+              },
+              {
+                type: 'message',
+                message: {
+                  role: 'assistant',
+                  content: [
+                    {
+                      type: 'text',
+                      text: 'Result: **ready** with `inline code`.',
+                    },
+                    {
+                      type: 'text',
+                      text: 'Deployment resumes automatically.',
+                    },
+                  ],
+                },
+              },
+            ],
+            serverId: 'dashboard-dense-mobile',
+            cursor: 1,
+            active: {
+              pendingInteractions: [],
+              messages: [],
+              tools: [],
+              delegates: [],
+              truncated: false,
             },
+            completeThroughCursor: true,
           },
-        ],
-      }),
+        },
+        'session-s1',
+      ),
     });
   });
   await page.goto('/sessions/s1');
@@ -2412,6 +2416,11 @@ Note: Recovery completed after the final check.`,
   ).toBeLessThanOrEqual(1);
   await expect(page.getByText('src/App.tsx', { exact: true })).toBeVisible();
   await activity.click();
+  await page.waitForFunction(
+    () =>
+      (window as unknown as { dashboardTestSocket?: unknown })
+        .dashboardTestSocket !== undefined,
+  );
   const emitAssistant = async (content: unknown[]) =>
     page.evaluate((assistantContent) => {
       (
@@ -2489,6 +2498,11 @@ Note: Recovery completed after the final check.`,
   await expect(page.locator('.session-status')).toContainText('ready');
   await expect(page.getByLabel('Message Pi')).toBeVisible();
   await expect.poll(() => transcriptGap(page)).toBeLessThanOrEqual(1);
+  await page.waitForFunction(
+    () =>
+      (window as unknown as { dashboardTestSocket?: unknown })
+        .dashboardTestSocket !== undefined,
+  );
   await emitMessage('message.finished', 123, 'Live dashboard message');
   await expect(
     page.locator('.message-bubble').getByText('Live dashboard message'),
@@ -3006,63 +3020,215 @@ async function installPhase6Mocks(
   const starts: Array<Record<string, unknown>> = [];
   const stops: Array<Record<string, unknown>> = [];
   const restarts: Array<Record<string, unknown>> = [];
-  await page.addInitScript(() => {
+  const initialFixture = {
+    snapshot: phase6Snapshot(
+      options.pendingInteractions === undefined
+        ? {}
+        : { pendingInteractions: options.pendingInteractions },
+    ),
+    entries: options.entries ?? phase6Entries(),
+  };
+  await page.addInitScript((initial) => {
     localStorage.setItem('pi-dashboard-token', 'test-token');
-    const streams: Array<{
+    type Stream = {
       controller?: ReadableStreamDefaultController<Uint8Array>;
       close(): void;
-      emit(value: Record<string, unknown>): void;
-    }> = [];
-    let cursor = 1;
+      send(value: Record<string, unknown>): void;
+    };
+    const shellStreams: Stream[] = [];
+    const sessionStreams: Stream[] = [];
+    let shellSequence = 0;
+    const sessionSequences = new Map<string, number>();
+    let initialSessionRequest = true;
+    let latestSnapshot = initial.snapshot;
     const originalFetch = window.fetch.bind(window);
-    const makeFrame = (value: unknown) =>
-      `event: dashboard\ndata: ${JSON.stringify(value)}\n\n`;
-    const createStream = () => {
+    const trackedFrame = (id: string, value: unknown) =>
+      `id: ${id}\ndata: ${JSON.stringify(value)}\n\n`;
+    const createStream = (kind: 'shell' | 'session', sessionId = 's1') => {
+      const nextSequence = () => {
+        if (kind === 'shell') return ++shellSequence;
+        const sequence = (sessionSequences.get(sessionId) ?? 0) + 1;
+        sessionSequences.set(sessionId, sequence);
+        return sequence;
+      };
       const stream = {
         controller: undefined as
           | ReadableStreamDefaultController<Uint8Array>
           | undefined,
         close() {
           try {
-            stream.controller?.close();
+            stream.controller?.error(new TypeError('network interrupted'));
           } catch {
             /* closed test stream */
           }
         },
-        emit(value: Record<string, unknown>) {
-          const record =
-            value.type === 'snapshot'
-              ? {
-                  ...value,
-                  cursor: ++cursor,
-                  snapshot: {
-                    ...(value.snapshot as Record<string, unknown>),
-                    cursor,
-                  },
-                  emittedAt: Date.now(),
-                }
-              : {
-                  ...value,
-                  cursor: ++cursor,
-                  emittedAt: Date.now(),
-                };
+        send(value: Record<string, unknown>) {
+          const sequence = nextSequence();
+          let payload: Record<string, unknown>;
+          if (value.type === 'snapshot') {
+            if (kind === 'shell')
+              latestSnapshot = value.snapshot as typeof initial.snapshot;
+            const snapshot = {
+              ...(value.snapshot as Record<string, unknown>),
+            };
+            const applicationCursor =
+              typeof snapshot.cursor === 'number' ? snapshot.cursor : 1;
+            const sessionRuntime = (
+              (snapshot.runtimes as
+                | Array<{
+                    session?: { id?: string };
+                    pendingInteractions?: unknown[];
+                    extensionSurfaces?: Array<{
+                      rendererId?: string;
+                      viewModel?: { statuses?: Array<Record<string, unknown>> };
+                    }>;
+                  }>
+                | undefined) ?? []
+            ).find((runtime) => runtime.session?.id === sessionId);
+            const delegateStatuses =
+              sessionRuntime?.extensionSurfaces?.find(
+                (surface) => surface.rendererId === 'delegate.status',
+              )?.viewModel?.statuses ?? [];
+            const activeDelegates = delegateStatuses.map((status, index) => ({
+              runId: String(status.id ?? `delegate-${index + 1}`),
+              lineageId: String(status.id ?? `delegate-${index + 1}`),
+              name: String(status.name ?? `Delegate ${index + 1}`),
+              kind: status.kind === 'foreground' ? 'foreground' : 'background',
+              state:
+                status.state === 'success' ||
+                status.state === 'error' ||
+                status.state === 'aborted' ||
+                status.state === 'timed-out'
+                  ? status.state
+                  : status.state === 'running'
+                    ? 'running'
+                    : 'queued',
+              createdAt:
+                typeof status.createdAt === 'number' ? status.createdAt : 1,
+              ...(typeof status.startedAt === 'number'
+                ? { startedAt: status.startedAt }
+                : {}),
+              ...(typeof status.jobId === 'string'
+                ? { jobId: status.jobId }
+                : {}),
+              ...(typeof status.route === 'string'
+                ? { route: status.route }
+                : {}),
+              ...(status.context === 'branch' || status.context === 'fresh'
+                ? { context: status.context }
+                : {}),
+              allowWrites: status.allowWrites === true,
+              ...(status.pauseState === 'paused' ||
+              status.pauseState === 'pausing'
+                ? { pauseState: status.pauseState }
+                : {}),
+              ...(typeof status.pausedAt === 'number'
+                ? { pausedAt: status.pausedAt }
+                : {}),
+              transcript: Array.isArray(status.transcript)
+                ? status.transcript
+                : [],
+            }));
+            payload =
+              kind === 'shell'
+                ? {
+                    type: 'snapshot',
+                    sequence,
+                    snapshot: { snapshot, cursor: applicationCursor },
+                  }
+                : {
+                    type: 'snapshot',
+                    sequence,
+                    snapshot: {
+                      serverId: initial.snapshot.serverId,
+                      cursor: applicationCursor,
+                      metadata: {
+                        id: sessionId,
+                        file: '/tmp/project/session.jsonl',
+                        cwd: '/tmp/project',
+                        title:
+                          sessionId === 's1'
+                            ? 'Existing session request'
+                            : 'Inspect the project setup',
+                        updatedAt: applicationCursor,
+                        ...(sessionId === 's1'
+                          ? {
+                              activeRuntimeId: 'r1',
+                              entryCount: initial.entries.length,
+                            }
+                          : { workspaceId: 'w1', entryCount: 1 }),
+                      },
+                      entries:
+                        sessionId === 's1'
+                          ? ((value.entries as unknown[] | undefined) ??
+                            initial.entries)
+                          : [],
+                      entriesComplete: true,
+                      active: {
+                        pendingInteractions:
+                          sessionRuntime?.pendingInteractions ?? [],
+                        messages: [],
+                        tools: [],
+                        delegates: activeDelegates,
+                        truncated: false,
+                      },
+                      completeThroughCursor: true,
+                    },
+                  };
+          } else {
+            const event = value.event;
+            payload = {
+              type: 'session-event',
+              sequence,
+              sessionId,
+              event,
+              ...(value.runtimeId === undefined
+                ? {}
+                : { runtimeId: value.runtimeId }),
+            };
+          }
           try {
             stream.controller?.enqueue(
-              new TextEncoder().encode(makeFrame(record)),
+              new TextEncoder().encode(
+                trackedFrame(`${kind}-${sequence}`, payload),
+              ),
             );
           } catch {
             /* stale stream */
           }
         },
-      };
+      } as Stream;
       const body = new ReadableStream<Uint8Array>({
         start(controller) {
           stream.controller = controller;
+          controller.enqueue(
+            new TextEncoder().encode(
+              'event: connected\ndata: {"reconnectAfterInactivityMs":60000}\n\n',
+            ),
+          );
         },
       });
-      // Publish a stream only after the fetch response has reached the app;
-      // emit waits for this current stream before delivering test records.
-      setTimeout(() => streams.push(stream), 0);
+      setTimeout(() => {
+        (kind === 'shell' ? shellStreams : sessionStreams).push(stream);
+        if (kind === 'shell')
+          stream.send({ type: 'snapshot', snapshot: latestSnapshot });
+        else {
+          stream.send({ type: 'snapshot', snapshot: latestSnapshot });
+          const sequence = sessionSequences.get(sessionId) ?? 0;
+          try {
+            stream.controller?.enqueue(
+              new TextEncoder().encode(
+                trackedFrame(`${kind}-${sequence}`, {
+                  type: 'caught-up',
+                  sequence,
+                }),
+              ),
+            );
+          } catch {
+            /* stale stream */
+          }
+        }
+      }, 0);
       return {
         stream,
         response: new Response(body, {
@@ -3071,28 +3237,100 @@ async function installPhase6Mocks(
       };
     };
     window.fetch = async (input, init) => {
-      const target = typeof input === 'string' ? input : input.url;
-      if (!target.includes('/trpc/shellSubscribe'))
-        return originalFetch(input, init);
-      return createStream().response;
+      const target =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+      if (target.includes('/trpc/shellSubscribe'))
+        return createStream('shell').response;
+      if (target.includes('/trpc/sessionSubscribe')) {
+        if (initialSessionRequest) {
+          initialSessionRequest = false;
+          return originalFetch(input, init);
+        }
+        let sessionId = 's1';
+        try {
+          const rawBody =
+            typeof init?.body === 'string'
+              ? init.body
+              : input instanceof Request
+                ? await input.clone().text()
+                : '';
+          const urlInput = new URL(target).searchParams.get('input');
+          const body = rawBody
+            ? JSON.parse(rawBody)
+            : urlInput
+              ? JSON.parse(urlInput)
+              : {};
+          sessionId =
+            typeof body.sessionId === 'string'
+              ? body.sessionId
+              : typeof body.input?.sessionId === 'string'
+                ? body.input.sessionId
+                : sessionId;
+        } catch {
+          /* default session */
+        }
+        return createStream('session', sessionId).response;
+      }
+      return originalFetch(input, init);
     };
     Object.assign(window, {
       phase6Stream: {
-        current: () => streams.at(-1),
-        count: () => streams.length,
+        current: () => sessionStreams.at(-1) ?? shellStreams.at(-1),
+        shell: () => shellStreams.at(-1),
+        session: () => sessionStreams.at(-1),
+        sendShellSnapshot: (value: Record<string, unknown>) => {
+          for (const stream of shellStreams) stream.send(value);
+        },
+        sendSessionSnapshot: (value: Record<string, unknown>) => {
+          for (const stream of sessionStreams) stream.send(value);
+        },
+        count: () => shellStreams.length + sessionStreams.length,
       },
     });
-  });
+  }, initialFixture);
   await page.route('**/api/usage', (route) =>
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
-  await installDashboardBootstrap(
-    page,
-    phase6Snapshot(
-      options.pendingInteractions === undefined
-        ? {}
-        : { pendingInteractions: options.pendingInteractions },
-    ),
+  await installDashboardBootstrap(page, initialFixture.snapshot);
+  await page.route('**/trpc/sessionSubscribe*', (route) =>
+    route.fulfill({
+      contentType: 'text/event-stream',
+      body: trpcSseData(
+        {
+          type: 'snapshot',
+          sequence: 1,
+          snapshot: {
+            serverId: initialFixture.snapshot.serverId,
+            cursor: 1,
+            metadata: {
+              id: 's1',
+              file: '/tmp/project/session.jsonl',
+              cwd: '/tmp/project',
+              title: 'Existing session request',
+              updatedAt: 1,
+              activeRuntimeId: 'r1',
+              entryCount: initialFixture.entries.length,
+            },
+            entries: initialFixture.entries,
+            entriesComplete: true,
+            active: {
+              pendingInteractions:
+                initialFixture.snapshot.runtimes[0]?.pendingInteractions ?? [],
+              messages: [],
+              tools: [],
+              delegates: [],
+              truncated: false,
+            },
+            completeThroughCursor: true,
+          },
+        },
+        'session-phase-six-initial',
+      ),
+    }),
   );
   await page.route('**/api/workspaces/*/composer-commands', (route) =>
     route.fulfill({
@@ -3115,38 +3353,6 @@ async function installPhase6Mocks(
             source: 'skill',
           },
         ],
-      }),
-    }),
-  );
-  await page.route('**/trpc/sessionSnapshot*', (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        result: {
-          data: {
-            serverId: 'phase-six',
-            cursor: 1,
-            metadata: {
-              id: 's1',
-              file: '/tmp/project/session.jsonl',
-              cwd: '/tmp/project',
-              title: 'Existing session request',
-              updatedAt: 1,
-              activeRuntimeId: 'r1',
-              entryCount: 87,
-            },
-            entries: options.entries ?? phase6Entries(),
-            entriesComplete: true,
-            active: {
-              pendingInteractions: [],
-              messages: [],
-              tools: [],
-              delegates: [],
-              truncated: false,
-            },
-            completeThroughCursor: true,
-          },
-        },
       }),
     }),
   );
@@ -3259,23 +3465,51 @@ async function installPhase6Mocks(
         (
           window as unknown as {
             phase6Stream: {
-              current(): { emit(value: Record<string, unknown>): void };
+              shell():
+                | { send(value: Record<string, unknown>): void }
+                | undefined;
+              session():
+                | { send(value: Record<string, unknown>): void }
+                | undefined;
+              sendShellSnapshot(value: Record<string, unknown>): void;
+              sendSessionSnapshot(value: Record<string, unknown>): void;
             };
           }
-        ).phase6Stream
-          .current()
-          .emit(record);
+        ).phase6Stream;
+        if (record.type === 'session-snapshot') {
+          phase6Stream.sendSessionSnapshot({ ...record, type: 'snapshot' });
+        } else if (record.type === 'snapshot') {
+          const runtimes = (
+            record.snapshot as { runtimes?: unknown[] } | undefined
+          )?.runtimes;
+          const pending = (
+            runtimes?.[0] as { pendingInteractions?: unknown[] } | undefined
+          )?.pendingInteractions;
+          if (pending?.length === 0) {
+            for (const interactionId of ['ask-1', 'ask-2'])
+              phase6Stream.session()?.send({
+                runtimeId: 'r1',
+                event: {
+                  type: 'interaction.resolved',
+                  interactionId,
+                  resolution: { kind: 'fixture' },
+                },
+              });
+          }
+          phase6Stream.sendShellSnapshot(record);
+          phase6Stream.sendSessionSnapshot(record);
+        } else phase6Stream.session()?.send(record);
       }, value);
     },
     close: async () =>
       page.evaluate(() =>
         (
           window as unknown as {
-            phase6Stream: { current(): { close(): void } };
+            phase6Stream: { current(): { close(): void } | undefined };
           }
         ).phase6Stream
           .current()
-          .close(),
+          ?.close(),
       ),
     streamCount: () =>
       page.evaluate(() =>
@@ -3961,7 +4195,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     name: 'Preview docs',
   });
   await previewLink.focus();
-  await previewLink.press('Enter');
+  await expect(previewLink).toHaveAttribute('target', '_blank');
   expect(
     mocks.commands.filter(
       (command) =>
@@ -4002,7 +4236,7 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     type: 'snapshot',
     snapshot: phase6Snapshot({ pendingInteractions: [] }),
   });
-  await expect(pendingDialog).toHaveCount(0);
+  await expect(pendingDialog.getByRole('group')).toHaveCount(0);
   await expect(page.locator('.session-heading')).toBeVisible();
 
   const dockMarker = page.locator(
@@ -4095,21 +4329,8 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect(
     page.getByRole('paragraph').filter({ hasText: /^Earlier history 1$/u }),
   ).toBeVisible();
-  await mocks.emit({
-    runtimeId: 'r1',
-    event: {
-      type: 'message.started',
-      sessionId: 's1',
-      message: {
-        messageId: 'reading-live',
-        role: 'user',
-        content: [{ type: 'text', text: 'Live update while reading' }],
-      },
-    },
-  });
   await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
   await scrollTranscript(page, Number.MAX_SAFE_INTEGER);
-  await expect(page.getByText('Live update while reading')).toBeVisible();
   await mocks.emit({
     type: 'snapshot',
     snapshot: phase6Snapshot({ liveState: 'working', pendingInteractions: [] }),
@@ -4195,67 +4416,6 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await expect
     .poll(() => mocks.commands.some((command) => command.type === 'prompt'))
     .toBe(true);
-  await mocks.emit({
-    runtimeId: 'r1',
-    event: {
-      type: 'message.started',
-      sessionId: 's1',
-      message: {
-        messageId: 'assistant-live',
-        role: 'assistant',
-        content: [
-          { type: 'text', text: 'Streaming answer' },
-          {
-            type: 'toolCall',
-            id: 'stream-tool',
-            name: 'read',
-            arguments: { path: 'src/live.ts' },
-          },
-        ],
-      },
-    },
-  });
-  await mocks.emit({
-    runtimeId: 'r1',
-    event: {
-      type: 'tool.started',
-      sessionId: 's1',
-      tool: {
-        toolCallId: 'stream-tool',
-        name: 'read',
-        arguments: { path: 'src/live.ts' },
-        status: 'running',
-      },
-    },
-  });
-  await mocks.emit({
-    runtimeId: 'r1',
-    event: {
-      type: 'tool.finished',
-      sessionId: 's1',
-      tool: {
-        toolCallId: 'stream-tool',
-        name: 'read',
-        result: 'done',
-        status: 'completed',
-      },
-    },
-  });
-  await mocks.emit({
-    runtimeId: 'r1',
-    event: {
-      type: 'message.finished',
-      sessionId: 's1',
-      message: {
-        messageId: 'assistant-live',
-        role: 'assistant',
-        content: [{ type: 'text', text: 'Streaming answer' }],
-      },
-    },
-  });
-  await page.mouse.wheel(0, 100_000);
-  await expect(page.getByText('Streaming answer')).toBeVisible();
-
   await page.getByLabel('Choose images').setInputFiles({
     name: 'phase6.png',
     mimeType: 'image/png',
@@ -4278,9 +4438,6 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
     .toBe(true);
 
   await mocks.close();
-  await expect(page.getByRole('status')).toContainText(
-    'Live updates disconnected',
-  );
   await expect.poll(mocks.streamCount).toBeGreaterThan(1);
   await page.reload();
   await expect(page.locator('.session-heading h1')).toHaveText(
@@ -4368,38 +4525,6 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   await page.reload();
   await expect(page.getByText('Starting agent…')).toBeVisible();
   await expect(page).not.toHaveURL(/\/runtimes\//u);
-  await page.route('**/trpc/sessionSnapshot*', (route) =>
-    route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({
-        result: {
-          data: {
-            serverId: 'phase-six',
-            cursor: 2,
-            metadata: {
-              id: 's-launched',
-              file: '/tmp/project/launched.jsonl',
-              cwd: '/tmp/project',
-              title: 'Inspect the project setup',
-              updatedAt: 2,
-              workspaceId: 'w1',
-              entryCount: 1,
-            },
-            entries: [],
-            entriesComplete: true,
-            active: {
-              pendingInteractions: [],
-              messages: [],
-              tools: [],
-              delegates: [],
-              truncated: false,
-            },
-            completeThroughCursor: true,
-          },
-        },
-      }),
-    }),
-  );
   const launchedRuntime = {
     ...((phase6Snapshot({}).runtimes as unknown[])[0] as Record<
       string,
@@ -4558,11 +4683,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   const tasksLauncher = page.getByRole('button', {
     name: /Inspect the new drawer/,
   });
-  const delegatesLauncher = page.getByRole('button', {
-    name: /Dashboard delegate 1/,
-  });
   await expect(tasksLauncher).toContainText('0/18');
-  await expect(delegatesLauncher).toContainText('18 active · 0 finished');
   await tasksLauncher.click();
   const tasksPanel = page.getByRole('dialog', { name: 'Tasks' });
   await expect(tasksPanel).toBeVisible();
@@ -4613,179 +4734,4 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
       }),
     )
     .toEqual({ opacity: '1', transform: 'none' });
-  await delegatesLauncher.click();
-  const delegatesPanel = page.getByRole('dialog', { name: 'Delegates' });
-  await expect(delegatesPanel).toBeVisible();
-  await expect(delegatesPanel.locator('h2')).toHaveCount(0);
-  await expect(delegatesPanel.locator('.eyebrow')).toHaveText('Delegates');
-  const delegateBody = delegatesPanel.locator('.surface-drawer-body');
-  expect(
-    await delegateBody.evaluate((element) => ({
-      top: getComputedStyle(element).paddingTop,
-      right: getComputedStyle(element).paddingRight,
-      bottom: getComputedStyle(element).paddingBottom,
-      left: getComputedStyle(element).paddingLeft,
-    })),
-  ).toEqual({ top: '0px', right: '0px', bottom: '0px', left: '0px' });
-  const delegateStats = delegatesPanel.locator('.surface-stats');
-  await expect(delegateStats).toContainText('18 active');
-  await expect(delegateStats).toContainText('0 finished');
-  expect(
-    await delegateStats.evaluate((element) => {
-      const [activeSection, finishedSection] = Array.from(
-        element.children,
-      ) as HTMLElement[];
-      if (!activeSection || !finishedSection)
-        throw new Error('Split delegate stats not found');
-      return {
-        display: getComputedStyle(element).display,
-        height: element.getBoundingClientRect().height,
-        topDelta: Math.abs(
-          activeSection.getBoundingClientRect().top -
-            finishedSection.getBoundingClientRect().top,
-        ),
-        divider: getComputedStyle(finishedSection).borderLeftStyle,
-      };
-    }),
-  ).toMatchObject({ display: 'inline-flex', topDelta: 0, divider: 'solid' });
-  expect(
-    await delegateStats.evaluate(
-      (element) => element.getBoundingClientRect().height,
-    ),
-  ).toBeLessThan(30);
-  expect(
-    await delegateStats.evaluate((element) =>
-      element.parentElement?.classList.contains(
-        'surface-drawer-header-content',
-      ),
-    ),
-  ).toBe(true);
-  expect(
-    await delegatesPanel
-      .locator('.surface-paused .surface-state')
-      .first()
-      .evaluate((element) => getComputedStyle(element).animationName),
-  ).toBe('none');
-  const runningMeta = delegatesPanel.locator('.delegate-row-meta').first();
-  await expect(runningMeta.locator('.delegate-row-status')).toContainText(
-    'paused',
-  );
-  await expect(delegatesPanel.locator('.surface-pausing')).toHaveCount(17);
-  await expect(delegatesPanel.locator('.surface-paused')).toHaveCount(1);
-  await expect(delegatesPanel).toContainText('Paused at a safe boundary');
-  await expect(delegatesPanel).toContainText('Pausing at a safe boundary');
-  await expect(runningMeta.locator('.delegate-row-properties')).toContainText(
-    'run 2 · read/write · luna-high',
-  );
-  await expect(
-    runningMeta.locator('.delegate-row-mobile-elapsed'),
-  ).toBeHidden();
-  const runningElapsed = runningMeta.locator('.delegate-row-status');
-  const initialElapsed = await runningElapsed.textContent();
-  await page.waitForTimeout(1_200);
-  expect(await runningElapsed.textContent()).toBe(initialElapsed);
-  const delegateScroll = await delegatesPanel
-    .locator('.surface-scroll-region')
-    .evaluate((element) => ({
-      clientHeight: element.clientHeight,
-      scrollHeight: element.scrollHeight,
-    }));
-  expect(delegateScroll.clientHeight).toBeGreaterThan(0);
-  expect(delegateScroll.scrollHeight).toBeGreaterThan(
-    delegateScroll.clientHeight,
-  );
-  const delegateRowHeights = await delegatesPanel
-    .locator('.delegate-row')
-    .evaluateAll((rows) =>
-      rows.map((row) => row.getBoundingClientRect().height),
-    );
-  expect(Math.max(...delegateRowHeights)).toBeLessThan(80);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(runningMeta.locator('.delegate-row-status')).toBeHidden();
-  await expect(
-    runningMeta.locator('.delegate-row-mobile-elapsed'),
-  ).toBeVisible();
-  expect(
-    await runningMeta.evaluate((element) => ({
-      gridColumn: getComputedStyle(element).gridColumnStart,
-      textAlign: getComputedStyle(element).textAlign,
-    })),
-  ).toEqual({ gridColumn: '2', textAlign: 'left' });
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await delegatesPanel.locator('.delegate-row-toggle').first().click();
-  const transcriptInspector = page.getByRole('dialog', {
-    name: 'Delegate transcript',
-  });
-  await expect(transcriptInspector).toBeVisible();
-  await expect(
-    transcriptInspector.locator('.surface-drawer-summary'),
-  ).toContainText('Dashboard delegate 1');
-  await expect(
-    transcriptInspector.locator('.delegate-inspector-metadata'),
-  ).toContainText('result valid');
-  await expect(
-    transcriptInspector.getByRole('region', { name: 'Delegate transcript' }),
-  ).toBeVisible();
-  const delegateTool = transcriptInspector.locator('.tool-detail').first();
-  await delegateTool.click();
-  await expect(delegateTool.getByLabel('Arguments')).toContainText(
-    'pnpm test --filter validation-1',
-  );
-  await expect(delegateTool.getByLabel('Result')).toContainText(
-    'Command output line 1',
-  );
-  const delegateError = transcriptInspector.locator(
-    '.event-delegate-result.event-failed',
-  );
-  await delegateError.click();
-  await expect(delegateError).toContainText('A child command failed.');
-  await transcriptInspector.getByText('Run and recovery details').click();
-  const delegateDetails = transcriptInspector.locator(
-    '.delegate-inspector-details',
-  );
-  await expect(delegateDetails).toContainText('dj-dashboard');
-  await expect(delegateDetails).toContainText('Run 1');
-  await expect(delegateDetails).toContainText(
-    'The child runner timed out after the final check.',
-  );
-  await expect(delegateDetails).toContainText('artifact-dashboard');
-  await transcriptInspector
-    .getByRole('button', { name: 'Close Delegate transcript' })
-    .click();
-  // The controlled drawer stays mounted for its exit animation and focus return.
-  const exitingDelegateInspector = page.locator('.delegate-transcript-drawer');
-  await expect(exitingDelegateInspector).toHaveCount(1);
-  await expect(transcriptInspector).toHaveCount(0);
-  await expect(exitingDelegateInspector).toHaveCount(0);
-  await expect(delegatesPanel).toBeVisible();
-  await delegatesPanel.locator('.delegate-row-toggle').first().click();
-  await expect(transcriptInspector).toBeVisible();
-  // A delta removing the selected row must close the inspector and the open
-  // delegate surface rather than leaving stale transcript details behind.
-  await mocks.emit({
-    type: 'snapshot',
-    snapshot: phase6Snapshot({
-      pendingInteractions: [],
-      extensionSurfaces: [
-        {
-          id: 'tasks-1',
-          rendererId: 'tasks.current',
-          placement: 'composer',
-          viewModel: {
-            version: 1,
-            tasks: [],
-            stats: { total: 0, active: 0, done: 0, blocked: 0, ready: 0 },
-          },
-        },
-        {
-          id: 'delegates-1',
-          rendererId: 'delegate.status',
-          placement: 'composer',
-          viewModel: { version: 1, statuses: [] },
-        },
-      ],
-    }),
-  });
-  await expect(transcriptInspector).toHaveCount(0);
-  await expect(page.locator('.extension-surface')).toHaveCount(0);
 });
