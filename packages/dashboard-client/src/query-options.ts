@@ -1,4 +1,5 @@
 import type {
+  ActiveDelegateTranscriptBaseline,
   BrowserSnapshot,
   DelegateHistoryResponse,
   DelegateHistoryRunDetailResponse,
@@ -24,6 +25,8 @@ export const dashboardQueryKeys = {
   session: (id: string) => ['dashboard', 'session', id] as const,
   delegateHistory: (id: string) =>
     ['dashboard', 'delegate-history', id] as const,
+  activeDelegateTranscripts: (id: string) =>
+    ['dashboard', 'active-delegate-transcripts', id] as const,
   delegateHistoryDetail: (id: string) =>
     ['dashboard', 'delegate-history-detail', id] as const,
   delegateHistoryRun: (
@@ -135,6 +138,19 @@ export function delegateHistoryQueryOptions(
 }
 
 export const sessionDelegateHistoryQueryOptions = delegateHistoryQueryOptions;
+
+export function activeDelegateTranscriptQueryOptions(
+  client: DashboardHttpClient,
+  id: string,
+) {
+  return queryOptions<ActiveDelegateTranscriptBaseline>({
+    queryKey: dashboardQueryKeys.activeDelegateTranscripts(id),
+    queryFn: ({ signal }) => client.activeDelegateTranscripts(id, signal),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: networkRetry,
+    enabled: Boolean(id),
+  });
+}
 
 export function delegateHistoryRunQueryOptions(
   client: DashboardHttpClient,

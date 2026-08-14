@@ -3,6 +3,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it, vi } from 'vitest';
 import type { DashboardHttpClient } from './http-client.js';
 import {
+  activeDelegateTranscriptQueryOptions,
   commandMutationOptions,
   composerCommandsQueryOptions,
   createThreadMutationOptions,
@@ -67,6 +68,39 @@ describe('dashboard query and mutation factories', () => {
       groups: [],
     });
     expect(delegateHistory).toHaveBeenCalledWith('session-1', undefined);
+  });
+
+  it('queries the bounded active delegate transcript baseline', async () => {
+    const activeDelegateTranscripts = vi.fn(async () => ({
+      version: 1 as const,
+      serverId: 'server-1',
+      cursor: 4,
+      sessionId: 'session-1',
+      runs: [],
+    }));
+    const options = activeDelegateTranscriptQueryOptions(
+      { activeDelegateTranscripts } as unknown as DashboardHttpClient,
+      'session-1',
+    );
+    expect(options.queryKey).toEqual([
+      'dashboard',
+      'active-delegate-transcripts',
+      'session-1',
+    ]);
+    if (!options.queryFn) throw new Error('Query function is missing.');
+    await expect(
+      options.queryFn({ signal: undefined } as never),
+    ).resolves.toEqual({
+      version: 1,
+      serverId: 'server-1',
+      cursor: 4,
+      sessionId: 'session-1',
+      runs: [],
+    });
+    expect(activeDelegateTranscripts).toHaveBeenCalledWith(
+      'session-1',
+      undefined,
+    );
   });
 
   it('keys one delegate detail by session, lineage, run, and leaf', async () => {
