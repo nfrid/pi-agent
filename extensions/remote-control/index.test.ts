@@ -1756,13 +1756,6 @@ describe('remote-control bridge', () => {
         },
     );
     expect(frames[0]?.event).toMatchObject({
-      type: 'delegate.transcript.updated',
-      sessionId: 'session-test',
-      lineageId: 'lineage-1',
-      runId: 'run-1',
-      entry: { id: 'tool-1', status: 'running' },
-    });
-    expect(frames[1]?.event).toMatchObject({
       type: 'runtime.stateChanged',
       snapshot: {
         extensionSurfaces: [
@@ -1775,6 +1768,13 @@ describe('remote-control bridge', () => {
           },
         ],
       },
+    });
+    expect(frames[1]?.event).toMatchObject({
+      type: 'delegate.transcript.updated',
+      sessionId: 'session-test',
+      lineageId: 'lineage-1',
+      runId: 'run-1',
+      entry: { id: 'tool-1', status: 'running' },
     });
     client.stop();
   });
