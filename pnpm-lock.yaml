@@ -238,6 +238,9 @@ importers:
       '@trpc/client':
         specifier: 11.18.0
         version: 11.18.0(@trpc/server@11.18.0(typescript@5.9.3))(typescript@5.9.3)
+      eventsource:
+        specifier: 5.1.0
+        version: 5.1.0
       react:
         specifier: ^19.1.0
         version: 19.2.8

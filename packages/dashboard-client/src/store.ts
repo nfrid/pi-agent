@@ -23,21 +23,35 @@ import {
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { useSyncExternalStore } from 'react';
-import { DashboardEventStream } from './event-stream.js';
+import { DashboardConnectionRuntime } from './connection-runtime.js';
+import type { DashboardHttpClient } from './http-client.js';
 import {
   type ClientSessionApiResponse,
-  type DashboardHttpClient,
-  ReplayGapError,
   SESSION_REQUEST_ORDER,
 } from './http-client.js';
 
 export const LIVE_BUFFER_LIMIT = 256;
 export const LIVE_RENDER_INTERVAL_MS = 32;
-export const INITIAL_REPLAY_OVERLAP = 128;
-const BOOTSTRAP_RETRY_MIN_MS = 500;
-const BOOTSTRAP_RETRY_MAX_MS = 30_000;
 
-export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting';
+export type ConnectionStatus =
+  | 'offline'
+  | 'connecting'
+  | 'connected'
+  | 'blocked'
+  | 'error';
+export type SyncStatus =
+  | 'empty'
+  | 'cached'
+  | 'synchronizing'
+  | 'live'
+  | 'error';
+export interface DomainSyncState {
+  status: SyncStatus;
+  generation: number;
+  sequence: number;
+  cursor?: string;
+  error?: string;
+}
 
 export interface DashboardLiveState {
   /** Transport metadata is retained separately from hydrated entities. */
@@ -52,9 +66,12 @@ export interface DashboardLiveState {
   cursor: number;
   connection: {
     status: ConnectionStatus;
+    /** Compatibility diagnostic; live domains use their own sequence values. */
     lastCursor: number;
     error?: string;
   };
+  shellSync: DomainSyncState;
+  sessionSyncById: Readonly<Record<string, DomainSyncState>>;
   workspacesById: Readonly<Record<string, WorkspaceTarget>>;
   workspaceOrder: readonly string[];
   runtimesById: Readonly<Record<string, RuntimeSnapshot>>;
@@ -231,7 +248,9 @@ function emptyState(): DashboardLiveState {
     revision: 0,
     snapshotCursor: 0,
     cursor: 0,
-    connection: { status: 'connecting', lastCursor: 0 },
+    connection: { status: 'offline', lastCursor: 0 },
+    shellSync: { status: 'empty', generation: 0, sequence: 0 },
+    sessionSyncById: {},
     workspacesById: {},
     workspaceOrder: [],
     runtimesById: {},
@@ -418,9 +437,7 @@ export class DashboardLiveStore {
   private latestSessionRequestOrders = new Map<string, number>();
   /** Runtime snapshots omit transport metadata; retain it outside the wire model. */
   private runtimeReducerStates = new Map<string, RuntimeReducerState>();
-  private stream?: DashboardEventStream;
-  private connectionAttempt = 0;
-  private bootstrapReconnect?: () => void;
+  private connectionRuntime?: DashboardConnectionRuntime;
   private deferredNotification?: ReturnType<typeof setTimeout>;
 
   getGeneration(): number {
@@ -677,9 +694,10 @@ export class DashboardLiveStore {
   }
 
   setConnection(status: ConnectionStatus, error?: string): void {
+    const normalizedStatus = status;
     const current = this.state.connection;
     if (
-      current.status === status &&
+      current.status === normalizedStatus &&
       current.lastCursor === this.state.cursor &&
       current.error === error
     )
@@ -687,7 +705,7 @@ export class DashboardLiveStore {
     this.publish({
       ...this.state,
       connection: {
-        status,
+        status: normalizedStatus,
         lastCursor: this.state.cursor,
         ...(error ? { error } : {}),
       },
@@ -711,6 +729,134 @@ export class DashboardLiveStore {
         ...(error ? { error } : { error: undefined }),
       },
     });
+  }
+
+  private updateDomain(
+    _domain: 'shell' | 'session',
+    sessionId: string | undefined,
+    update: Partial<DomainSyncState> & { status: SyncStatus },
+  ): void {
+    const current = sessionId
+      ? this.state.sessionSyncById[sessionId]
+      : this.state.shellSync;
+    const next = { ...(current ?? { generation: 0, sequence: 0 }), ...update };
+    if (sessionId) {
+      if (current && JSON.stringify(current) === JSON.stringify(next)) return;
+      this.publish({
+        ...this.state,
+        sessionSyncById: { ...this.state.sessionSyncById, [sessionId]: next },
+      });
+      return;
+    }
+    if (JSON.stringify(current) === JSON.stringify(next)) return;
+    this.publish({ ...this.state, shellSync: next });
+  }
+
+  beginShellSync(generation: number, sequence = 0): void {
+    this.updateDomain('shell', undefined, {
+      status: 'synchronizing',
+      generation,
+      sequence,
+      error: undefined,
+    });
+  }
+
+  completeShellSync(sequence: number, cursor?: string): void {
+    this.updateDomain('shell', undefined, {
+      status: 'live',
+      sequence,
+      ...(cursor === undefined ? {} : { cursor }),
+      error: undefined,
+    });
+  }
+
+  failShellSync(error: string): void {
+    this.updateDomain('shell', undefined, { status: 'error', error });
+  }
+
+  beginSessionSync(
+    sessionId: string,
+    generation: number,
+    cached = false,
+  ): void {
+    const current = this.state.sessionSyncById[sessionId];
+    this.updateDomain('session', sessionId, {
+      status: cached && current ? 'cached' : 'synchronizing',
+      generation,
+      sequence: 0,
+      error: undefined,
+    });
+  }
+
+  completeSessionSync(
+    sessionId: string,
+    sequence: number,
+    cursor?: string,
+  ): void {
+    this.updateDomain('session', sessionId, {
+      status: 'live',
+      sequence,
+      ...(cursor === undefined ? {} : { cursor }),
+      error: undefined,
+    });
+  }
+
+  failSessionSync(sessionId: string, error: string): void {
+    this.updateDomain('session', sessionId, { status: 'error', error });
+  }
+
+  /** Install the shell feed's authoritative snapshot at its own sequence. */
+  acceptShellSnapshot(
+    next: BrowserSnapshot,
+    sequence: number,
+    generation: number,
+    cursor?: string,
+  ): boolean {
+    const current = this.state.shellSync;
+    if (current.generation !== generation || sequence < current.sequence)
+      return false;
+    const accepted = this.installSnapshot(next, { source: 'sse' });
+    if (!accepted) return false;
+    this.publish({
+      ...this.state,
+      shellSync: {
+        status: 'synchronizing',
+        generation,
+        sequence,
+        ...(cursor === undefined ? {} : { cursor }),
+      },
+    });
+    return true;
+  }
+
+  /** Route session feed snapshots through the existing transcript projection. */
+  acceptSessionSnapshot(
+    response: SessionApiResponse,
+    sequence: number,
+    generation: number,
+    cursor?: string,
+  ): boolean {
+    const current = this.state.sessionSyncById[response.metadata.id];
+    if (
+      current &&
+      (current.generation !== generation || sequence < current.sequence)
+    )
+      return false;
+    const projection = this.hydrateSession(response, { replace: true });
+    if (!projection) return false;
+    this.publish({
+      ...this.state,
+      sessionSyncById: {
+        ...this.state.sessionSyncById,
+        [response.metadata.id]: {
+          status: 'synchronizing',
+          generation,
+          sequence,
+          ...(cursor === undefined ? {} : { cursor }),
+        },
+      },
+    });
+    return true;
   }
 
   installSnapshot(
@@ -772,12 +918,15 @@ export class DashboardLiveStore {
     return true;
   }
 
-  acceptStreamRecord(record: DashboardStreamMessage): boolean {
-    if ('type' in record && record.type === 'sessions') {
+  acceptStreamRecord(
+    record: DashboardStreamMessage,
+    domain?: { sessionId: string; generation: number },
+  ): boolean {
+    if (!domain && 'type' in record && record.type === 'sessions') {
       const priorCursor = this.state.cursor;
       if (record.cursor <= priorCursor) return false;
       if (record.cursor > priorCursor + 1 && this.state.serverId !== undefined)
-        throw new ReplayGapError();
+        return false;
       const projected = this.installSessionIndexProjection(
         this.state,
         record.upsert,
@@ -808,7 +957,7 @@ export class DashboardLiveStore {
       });
       return true;
     }
-    if ('type' in record && record.type === 'snapshot') {
+    if (!domain && 'type' in record && record.type === 'snapshot') {
       if (
         record.snapshot.serverId === this.state.serverId &&
         record.cursor <= this.state.cursor
@@ -835,11 +984,14 @@ export class DashboardLiveStore {
       return true;
     }
     const envelope = record as DashboardEventEnvelope;
-    const priorCursor = this.state.cursor;
+    const priorCursor = domain
+      ? (this.state.sessionSyncById[domain.sessionId]?.sequence ?? 0)
+      : this.state.cursor;
     const previousRuntimeSessionId = envelope.runtimeId
       ? this.state.runtimesById[envelope.runtimeId]?.session.id
       : undefined;
     if (
+      !domain &&
       envelope.snapshot &&
       envelope.snapshot.serverId !== this.state.serverId &&
       !this.installSnapshot(envelope.snapshot, { source: 'sse' })
@@ -847,12 +999,14 @@ export class DashboardLiveStore {
       return false;
     if (envelope.cursor <= priorCursor) return false;
     if (
+      !domain &&
       envelope.cursor > priorCursor + 1 &&
       this.state.serverId !== undefined &&
       !envelope.snapshot
     )
-      throw new ReplayGapError();
+      return false;
     if (
+      !domain &&
       envelope.snapshot &&
       envelope.snapshot.serverId === this.state.serverId &&
       envelope.snapshot.cursor >= this.state.snapshotCursor
@@ -1049,36 +1203,98 @@ export class DashboardLiveStore {
           [previousRuntimeSessionId]: sessionId,
         };
     }
+    const domainState = domain
+      ? this.state.sessionSyncById[domain.sessionId]
+      : undefined;
     this.publish(
       {
         ...nextState,
         sessionChangeById,
         sessionReplacementByRuntimeId,
         sessionReplacementBySessionId,
-        cursor: envelope.cursor,
-        connection: { ...nextState.connection, lastCursor: envelope.cursor },
-        cursorHistory: [...nextState.cursorHistory, envelope.cursor].slice(
-          -LIVE_BUFFER_LIMIT,
-        ),
-        recentEvents: [...nextState.recentEvents, envelope].slice(
-          -LIVE_BUFFER_LIMIT,
-        ),
+        ...(domain
+          ? {
+              sessionSyncById: {
+                ...nextState.sessionSyncById,
+                [domain.sessionId]: {
+                  ...(domainState ?? {
+                    status: 'synchronizing' as const,
+                    generation: domain.generation,
+                    sequence: 0,
+                  }),
+                  sequence: envelope.cursor,
+                  generation: domain.generation,
+                },
+              },
+            }
+          : {
+              cursor: envelope.cursor,
+              connection: {
+                ...nextState.connection,
+                lastCursor: envelope.cursor,
+              },
+              cursorHistory: [
+                ...nextState.cursorHistory,
+                envelope.cursor,
+              ].slice(-LIVE_BUFFER_LIMIT),
+              recentEvents: [...nextState.recentEvents, envelope].slice(
+                -LIVE_BUFFER_LIMIT,
+              ),
+            }),
       },
       event.type === 'message.updated' || event.type === 'tool.updated',
     );
     return true;
   }
 
-  /** Install a session HTTP result, then replay buffered events newer than its cursor. */
+  /** Reduce one session-feed event through the canonical runtime/transcript path. */
+  acceptSessionEvent(
+    sessionId: string,
+    sequence: number,
+    value: {
+      event: DashboardEventEnvelope['event'];
+      runtimeId?: string;
+      runtimeEpoch?: string;
+      runtimeSeq?: number;
+    },
+    generation: number,
+  ): boolean {
+    const current = this.state.sessionSyncById[sessionId];
+    if (current && current.generation !== generation) return false;
+    if (current && sequence <= current.sequence) return false;
+    return this.acceptStreamRecord(
+      {
+        cursor: sequence,
+        emittedAt: Date.now(),
+        sessionId,
+        ...(value.runtimeId === undefined
+          ? {}
+          : { runtimeId: value.runtimeId }),
+        ...(value.runtimeEpoch === undefined
+          ? {}
+          : { runtimeEpoch: value.runtimeEpoch }),
+        ...(value.runtimeSeq === undefined
+          ? {}
+          : { runtimeSeq: value.runtimeSeq }),
+        event: value.event as never,
+      },
+      { sessionId, generation },
+    );
+  }
+
+  /** Install an authoritative session-feed snapshot. */
   hydrateSession(
     response: SessionApiResponse,
+    options: { replace?: boolean } = {},
   ): TranscriptProjection | undefined {
     const sessionResponse = response as ClientSessionApiResponse & {
       __dashboardHistorical?: boolean;
     };
-    const requestOrder = sessionResponse.__dashboardHistorical
+    const requestOrder = options.replace
       ? undefined
-      : sessionResponse[SESSION_REQUEST_ORDER];
+      : sessionResponse.__dashboardHistorical
+        ? undefined
+        : sessionResponse[SESSION_REQUEST_ORDER];
     if (
       response.serverId !== undefined &&
       this.state.serverId !== undefined &&
@@ -1087,6 +1303,7 @@ export class DashboardLiveStore {
       return undefined;
     const snapshotCursor = response.cursor ?? this.state.cursor;
     if (
+      !options.replace &&
       !sessionCursorRangeCovered(
         snapshotCursor,
         this.state.cursor,
@@ -1103,21 +1320,27 @@ export class DashboardLiveStore {
     // A session response can arrive while older records from the same SSE
     // replay are still pending. Its entries are authoritative, but transport
     // ordering is covered only through the cursor the stream has accepted.
-    const coveredCursor = Math.min(snapshotCursor, this.state.cursor);
-    const currentProjection =
-      this.state.transcriptsBySessionId[response.metadata.id];
-    const sessionEvents = this.state.recentEvents.filter((envelope) => {
-      if (sessionIdForEvent(envelope) !== response.metadata.id) return false;
-      // The HTTP branch belongs to its advertised runtime generation. Older
-      // generations cannot refine it; a newer generation after the response
-      // cursor is still replayed and may intentionally replace it.
-      return (
-        response.runtimeEpoch === undefined ||
-        envelope.runtimeEpoch === undefined ||
-        envelope.runtimeEpoch === response.runtimeEpoch ||
-        envelope.cursor > snapshotCursor
-      );
-    });
+    const coveredCursor = options.replace
+      ? snapshotCursor
+      : Math.min(snapshotCursor, this.state.cursor);
+    const currentProjection = options.replace
+      ? undefined
+      : this.state.transcriptsBySessionId[response.metadata.id];
+    const sessionEvents = options.replace
+      ? []
+      : this.state.recentEvents.filter((envelope) => {
+          if (sessionIdForEvent(envelope) !== response.metadata.id)
+            return false;
+          // The HTTP branch belongs to its advertised runtime generation. Older
+          // generations cannot refine it; a newer generation after the response
+          // cursor is still replayed and may intentionally replace it.
+          return (
+            response.runtimeEpoch === undefined ||
+            envelope.runtimeEpoch === undefined ||
+            envelope.runtimeEpoch === response.runtimeEpoch ||
+            envelope.cursor > snapshotCursor
+          );
+        });
     // The HTTP cursor covers event publication, not necessarily Pi's append to
     // JSONL. Replay the bounded live buffer so a terminal tool event emitted
     // just before persistence is reconciled, and so a complete /tree snapshot
@@ -1176,7 +1399,7 @@ export class DashboardLiveStore {
         activeEpoch === currentProjection.runtimeEpoch) &&
       (active?.runtimeSeq === undefined ||
         currentProjection?.runtimeEpoch !== activeEpoch ||
-        currentProjection.lastRuntimeSeq < active.runtimeSeq);
+        (currentProjection?.lastRuntimeSeq ?? -1) < active.runtimeSeq);
     if (activeIsCurrent && active) {
       const reducerInput = (event: unknown) =>
         ({
@@ -1547,130 +1770,24 @@ export class DashboardLiveStore {
   }
 
   connect(client: DashboardHttpClient): () => void {
-    this.stream?.stop();
-    this.stream = undefined;
-    this.bootstrapReconnect = undefined;
-    const attempt = ++this.connectionAttempt;
-    let stopped = false;
-    let eventStream: DashboardEventStream | undefined;
-    let bootstrapTimer: ReturnType<typeof setTimeout> | undefined;
-    let bootstrapDelay = BOOTSTRAP_RETRY_MIN_MS;
-    const stop = () => {
-      if (stopped) return;
-      stopped = true;
-      if (bootstrapTimer !== undefined) clearTimeout(bootstrapTimer);
-      if (this.connectionAttempt !== attempt) return;
-      this.connectionAttempt += 1;
-      eventStream?.stop();
-      if (this.stream === eventStream) this.stream = undefined;
-      if (this.bootstrapReconnect === reconnectBootstrap)
-        this.bootstrapReconnect = undefined;
-    };
-    const scheduleBootstrap = () => {
-      if (stopped || this.connectionAttempt !== attempt) return;
-      if (bootstrapTimer !== undefined) clearTimeout(bootstrapTimer);
-      bootstrapTimer = setTimeout(() => {
-        bootstrapTimer = undefined;
-        void bootstrap();
-      }, bootstrapDelay);
-      bootstrapDelay = Math.min(BOOTSTRAP_RETRY_MAX_MS, bootstrapDelay * 2);
-    };
-    const reconnectBootstrap = () => {
-      if (stopped || eventStream) return;
-      if (bootstrapTimer !== undefined) clearTimeout(bootstrapTimer);
-      bootstrapTimer = undefined;
-      bootstrapDelay = BOOTSTRAP_RETRY_MIN_MS;
-      void bootstrap();
-    };
-    const bootstrap = async () => {
-      if (stopped || this.connectionAttempt !== attempt || eventStream) return;
-      const requestGeneration = this.generation;
-      try {
-        const snapshot = await client.snapshot();
-        if (stopped || this.connectionAttempt !== attempt || eventStream)
-          return;
-        const priorTransportCursor =
-          this.state.serverId === snapshot.serverId ? this.state.cursor : 0;
-        if (
-          !this.installSnapshot(snapshot, {
-            source: 'http',
-            requestGeneration,
-          })
-        )
-          throw new Error('Dashboard bootstrap snapshot was not accepted.');
-        // Browser snapshots intentionally omit transcript entries. Replay a
-        // bounded live overlap so a terminal message published at the HTTP
-        // snapshot cursor still reaches transcript reconciliation.
-        const replayCursor = Math.max(
-          priorTransportCursor,
-          snapshot.cursor - INITIAL_REPLAY_OVERLAP,
-          0,
-        );
-        this.publish({
-          ...this.state,
-          cursor: replayCursor,
-          connection: {
-            ...this.state.connection,
-            lastCursor: replayCursor,
-          },
-          cursorHistory: [replayCursor],
-        });
-        if (stopped || this.connectionAttempt !== attempt) return;
-        bootstrapDelay = BOOTSTRAP_RETRY_MIN_MS;
-        eventStream = new DashboardEventStream({
-          client,
-          getCursor: () => this.state.cursor,
-          getServerId: () => this.state.serverId,
-          onRecord: (record) => {
-            this.acceptStreamRecord(record);
-          },
-          onReplayGap: async () => {
-            const resyncGeneration = this.generation;
-            if (this.stream !== eventStream) return;
-            try {
-              const next = await client.snapshot();
-              if (this.stream !== eventStream) return;
-              const accepted = this.installSnapshot(next, {
-                source: 'http',
-                requestGeneration: resyncGeneration,
-                rebaseCursor: true,
-              });
-              if (!accepted)
-                throw new Error('Dashboard resync snapshot was not accepted.');
-              this.publish({
-                ...this.state,
-                resyncNonce: this.state.resyncNonce + 1,
-              });
-            } catch (cause) {
-              this.setError(
-                cause instanceof Error ? cause.message : String(cause),
-              );
-              // A failed rebase must reach the reconnect loop so its existing
-              // exponential delay is retained instead of being reset.
-              throw cause;
-            }
-          },
-          onState: (status) => this.setConnection(status),
-          onError: (error) => this.setError(error?.message),
-        });
-        this.stream = eventStream;
-        this.bootstrapReconnect = undefined;
-        eventStream.start();
-      } catch (cause) {
-        if (stopped || this.connectionAttempt !== attempt || eventStream)
-          return;
-        this.setError(cause instanceof Error ? cause.message : String(cause));
-        scheduleBootstrap();
-      }
-    };
-    this.bootstrapReconnect = reconnectBootstrap;
-    void bootstrap();
-    return stop;
+    this.connectionRuntime?.stop();
+    this.connectionRuntime = new DashboardConnectionRuntime({
+      client,
+      store: this,
+    });
+    return this.connectionRuntime.start();
   }
 
   reconnect(): void {
-    if (this.stream) this.stream.reconnect();
-    else this.bootstrapReconnect?.();
+    this.connectionRuntime?.start();
+  }
+
+  acquireSession(sessionId: string) {
+    return this.connectionRuntime?.acquireSession(sessionId);
+  }
+
+  releaseSession(sessionId: string): void {
+    this.connectionRuntime?.releaseSession(sessionId);
   }
 }
 
@@ -1798,6 +1915,14 @@ export const selectSessions = (state: DashboardLiveState) =>
   materializeSnapshot(state)?.sessions ?? EMPTY_SESSIONS;
 export const selectNotifications = (state: DashboardLiveState) =>
   materializeSnapshot(state)?.unread ?? EMPTY_NOTIFICATIONS;
+export const selectShellSync = (state: DashboardLiveState) => state.shellSync;
+export const selectSessionSync =
+  (sessionId: string) => (state: DashboardLiveState) =>
+    state.sessionSyncById[sessionId] ?? {
+      status: 'empty' as const,
+      generation: 0,
+      sequence: 0,
+    };
 export const selectTranscript =
   (sessionId: string) => (state: DashboardLiveState) =>
     state.transcriptsBySessionId[sessionId];

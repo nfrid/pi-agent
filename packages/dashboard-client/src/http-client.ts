@@ -6,7 +6,6 @@ import {
   type CommandReceipt,
   type ComposerCommandCatalogue,
   DASHBOARD_PROTOCOL_VERSION,
-  type DashboardStreamMessage,
   type DelegateHistoryResponse,
   type DelegateHistoryRunDetailResponse,
   type DelegateHistoryRunQuery,
@@ -25,7 +24,6 @@ import {
   tryParseAuthoritativeSessionSnapshot,
   tryParseBrowserSnapshot,
   tryParseComposerCommandCatalogue,
-  tryParseDashboardStreamMessage,
   tryParseDelegateHistoryResponse,
   tryParseDelegateHistoryRunDetailResponse,
   tryParseProtocolInfo,
@@ -36,7 +34,10 @@ import {
   browserDashboardTokenStore,
   type DashboardTokenStore,
 } from './authentication.js';
-import { createDashboardTrpcClient } from './trpc-client.js';
+import {
+  createDashboardTrpcClient,
+  type DashboardTrpcClient,
+} from './trpc-client.js';
 
 export type FetchLike = (
   input: RequestInfo | URL,
@@ -246,12 +247,6 @@ export function asSessionResponse(
   return tryParseSessionApiResponse(value);
 }
 
-export function asDashboardStreamMessage(
-  value: unknown,
-): DashboardStreamMessage | undefined {
-  return tryParseDashboardStreamMessage(value);
-}
-
 async function responseBody(response: Response): Promise<unknown> {
   return response.json().catch(() => ({}));
 }
@@ -283,6 +278,10 @@ export class DashboardHttpClient {
   private readonly candidateBaseUrls: readonly string[];
   private readonly selectionTimeoutMs: number;
   private endpointSelection?: Promise<EndpointSelection>;
+  private selectedTrpcClient?: {
+    baseUrl: string;
+    client: DashboardTrpcClient;
+  };
   private snapshotInFlight?: Promise<BrowserSnapshot>;
   private sessionRequestOrder = 0;
 
@@ -378,6 +377,24 @@ export class DashboardHttpClient {
     } finally {
       if (timeout !== undefined) clearTimeout(timeout);
     }
+  }
+
+  /**
+   * Return the one split-link client used by the live connection runtime.
+   * Endpoint selection is shared with finite requests and the token store is
+   * read by each link request, so a token rotation never rebuilds a feed.
+   */
+  async getTrpcClient(): Promise<DashboardTrpcClient> {
+    const { baseUrl } = await this.ensureEndpoint();
+    if (this.selectedTrpcClient?.baseUrl === baseUrl)
+      return this.selectedTrpcClient.client;
+    const client = createDashboardTrpcClient({
+      baseUrl,
+      fetch: this.fetchImpl,
+      tokenStore: this.tokenStore,
+    });
+    this.selectedTrpcClient = { baseUrl, client };
+    return client;
   }
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -856,64 +873,6 @@ export class DashboardHttpClient {
       method: 'POST',
       body: '{}',
     });
-  }
-
-  async events(
-    cursor: number,
-    signal: AbortSignal,
-    serverId?: string,
-  ): Promise<Response> {
-    const { baseUrl } = await this.ensureEndpoint();
-    const token = this.tokenStore.get();
-    if (!token) throw new DashboardHttpError(401, 'Authentication required.');
-    const params = new URLSearchParams({ cursor: String(cursor) });
-    if (serverId) params.set('serverId', serverId);
-    let response: Response;
-    try {
-      response = await this.fetchImpl(
-        `${baseUrl}/api/events?${params.toString()}`,
-        {
-          headers: {
-            accept: 'text/event-stream',
-            'x-dashboard-token': token,
-          },
-          signal,
-        },
-      );
-    } catch (cause) {
-      throw networkError(cause);
-    }
-    if (response.status === 409) {
-      const body = await responseBody(response);
-      if (
-        body &&
-        typeof body === 'object' &&
-        (body as { code?: unknown }).code === 'replay-gap'
-      )
-        throw new ReplayGapError();
-    }
-    if (!response.ok)
-      throw new DashboardHttpError(
-        response.status,
-        `Event stream failed (${response.status}).`,
-      );
-    return response;
-  }
-
-  async parseStreamRecord(value: unknown): Promise<DashboardStreamMessage> {
-    const record = tryParseDashboardStreamMessage(value);
-    if (!record)
-      throw malformedOutput('Dashboard returned an invalid event.', value);
-    return record;
-  }
-}
-
-export class ReplayGapError extends Error {
-  readonly code = 'replay-gap';
-
-  constructor() {
-    super('Dashboard event replay coverage expired.');
-    this.name = 'ReplayGapError';
   }
 }
 

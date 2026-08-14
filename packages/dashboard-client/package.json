@@ -21,6 +21,7 @@
     "@pi-dashboard/protocol": "workspace:*",
     "@tanstack/react-query": "^5.90.7",
     "@trpc/client": "11.18.0",
+    "eventsource": "5.1.0",
     "react": "^19.1.0"
   },
   "devDependencies": {

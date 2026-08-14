@@ -3,7 +3,7 @@ import type {
   SessionApiResponse,
 } from '@pi-dashboard/protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { ReplayGapError, SESSION_REQUEST_ORDER } from './http-client.js';
+import { SESSION_REQUEST_ORDER } from './http-client.js';
 import {
   DashboardLiveStore,
   selectRuntimeForSession,
@@ -359,7 +359,7 @@ describe('DashboardLiveStore', () => {
         remove: [],
       }),
     ).toBe(false);
-    expect(() =>
+    expect(
       store.acceptStreamRecord({
         type: 'sessions',
         cursor: 4,
@@ -367,7 +367,7 @@ describe('DashboardLiveStore', () => {
         upsert: [],
         remove: [],
       }),
-    ).toThrow(ReplayGapError);
+    ).toBe(false);
   });
 
   it('does not resync hydrated transcripts for repeated session metadata records', () => {
@@ -1237,7 +1237,7 @@ describe('DashboardLiveStore', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 4));
     store.acceptStreamRecord(envelope(5));
-    expect(() => store.acceptStreamRecord(envelope(7))).toThrow('replay');
+    expect(store.acceptStreamRecord(envelope(7))).toBe(false);
     store.acceptStreamRecord(envelope(6));
     const state = store.getSnapshot();
     expect(state.cursor).toBe(6);
@@ -1368,36 +1368,6 @@ describe('DashboardLiveStore', () => {
     });
     expect(store.getSnapshot().cursor).toBe(8);
     expect(store.getSnapshot().cursorHistory).toEqual([8]);
-  });
-
-  it('increments the recovery nonce exactly once when a replay gap rebases the snapshot', async () => {
-    vi.stubGlobal('navigator', { onLine: true });
-    const store = new DashboardLiveStore();
-    let snapshots = 0;
-    let events = 0;
-    const client = {
-      snapshot: async () => {
-        snapshots += 1;
-        return snapshot('daemon-1', snapshots === 1 ? 1 : 8);
-      },
-      events: async () => {
-        events += 1;
-        if (events === 1) throw new ReplayGapError();
-        return new Response(
-          new ReadableStream<Uint8Array>({ start: () => undefined }),
-        );
-      },
-    } as never;
-
-    const stop = store.connect(client);
-    try {
-      await expect.poll(() => store.getSnapshot().resyncNonce).toBe(1);
-      expect(snapshots).toBe(2);
-      expect(events).toBe(1);
-    } finally {
-      stop();
-      vi.unstubAllGlobals();
-    }
   });
 
   it('hydrates at an HTTP cursor and replays buffered records newer than it', () => {
@@ -2263,43 +2233,6 @@ describe('DashboardLiveStore', () => {
     expect(
       store.getSnapshot().sessionReplacementBySessionId['old-session'],
     ).toBe('new-session');
-  });
-
-  it('retries bootstrap immediately when connectivity returns after a snapshot failure', async () => {
-    vi.stubGlobal('navigator', { onLine: true });
-    const store = new DashboardLiveStore();
-    let snapshots = 0;
-    let streams = 0;
-    const client = {
-      snapshot: async () => {
-        snapshots += 1;
-        if (snapshots === 1) throw new Error('offline');
-        return snapshot('daemon-1', 200);
-      },
-      events: async (
-        cursor: number,
-        _signal: AbortSignal,
-        serverId?: string,
-      ) => {
-        streams += 1;
-        expect(cursor).toBe(72);
-        expect(serverId).toBe('daemon-1');
-        return new Response(
-          new ReadableStream<Uint8Array>({ start: () => undefined }),
-        );
-      },
-    } as never;
-
-    const stop = store.connect(client);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(snapshots).toBe(1);
-    expect(streams).toBe(0);
-    store.reconnect();
-    await expect.poll(() => snapshots).toBe(2);
-    await expect.poll(() => streams).toBe(1);
-    expect(store.getSnapshot().connection.status).toBe('connected');
-    stop();
-    vi.unstubAllGlobals();
   });
 
   it('resets state for daemon replacement and refuses stale HTTP generations', () => {
