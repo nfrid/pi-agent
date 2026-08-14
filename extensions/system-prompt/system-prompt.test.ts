@@ -188,7 +188,7 @@ describe('canonical prompt composition', () => {
         'In English, normally open with subjectless `-ing`; in Russian, use a natural first-person present form without `Я`',
       );
       expect(prompt).toContain(
-        'not a standalone converb/deепричастие such as `Проверяя` as the lead',
+        'not a standalone Russian деепричастие such as `Проверяя` as the lead',
       );
       expect(prompt).toContain(
         'Add a concise purpose, reason, dependency, or nearest likely/conditional next step when useful',
@@ -202,9 +202,12 @@ describe('canonical prompt composition', () => {
       expect(prompt).toContain(
         'Put it before the calls that do the work, in the same message.',
       );
-      expect(prompt).toContain('label direction changes rather than steps');
+      expect(prompt).toContain('Label direction changes rather than steps');
       expect(prompt).toContain(
-        'reject completed-work recaps, speculative full roadmaps, generic narration, and individual tool-call narration',
+        'Keep it specific to the concrete work and scope rather than generic self-narration',
+      );
+      expect(prompt).toContain(
+        'do not turn it into a completed-work recap, speculative full roadmap, generic narration, or individual tool-call narration',
       );
       expect(prompt).not.toContain('natural ongoing-action form');
     }
