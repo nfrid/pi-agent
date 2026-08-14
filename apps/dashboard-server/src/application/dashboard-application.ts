@@ -22,7 +22,6 @@ import {
   tryParseDelegateTranscriptEntry,
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
-import { DashboardEventStream } from '../event-stream.js';
 import type { MetadataStore } from '../metadata.js';
 import type { PushSender } from '../push.js';
 import type { SqliteOrchestrationRepository } from '../repositories/sqlite-orchestration-repository.js';
@@ -59,7 +58,6 @@ export interface DashboardApplicationOptions {
   usage: UsageProvider;
   push: PushSender;
   stateDir: string;
-  eventStream?: DashboardEventStream;
   onChange?: () => void;
   orchestration?: OrchestrationService;
 }
@@ -230,6 +228,16 @@ function sameRuntimeCapture(
   );
 }
 
+/**
+ * A pinned disk read may intentionally return the old capture, but it must
+ * never write that capture over a publication received while the read was
+ * awaiting I/O. State identity catches changes even when a provider repeats a
+ * runtime sequence number.
+ */
+function sameActiveCapture(left: ActiveCapture, right: ActiveCapture): boolean {
+  return sameRuntimeCapture(left, right) && left.state === right.state;
+}
+
 function trimProjection(
   projection: TranscriptProjection,
   wasTruncated: boolean,
@@ -395,6 +403,72 @@ function persistedTerminalMessageCounts(
   return counts;
 }
 
+function normalizedMessageContent(value: unknown): string {
+  const normalize = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(normalize);
+    if (input && typeof input === 'object') {
+      return Object.fromEntries(
+        Object.entries(input as Record<string, unknown>)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, item]) => [key, normalize(item)]),
+      );
+    }
+    return input;
+  };
+  return JSON.stringify(normalize(value)) ?? '';
+}
+
+/**
+ * Remove only active message overlays already proven present in the persisted
+ * branch. Timestamp-less messages are never guessed; equal timestamp/content
+ * pairs must be unique so repeated messages cannot be accidentally retired.
+ */
+export function retirePersistedMessageOverlays(
+  active: TranscriptProjection,
+  persisted: TranscriptProjection,
+): TranscriptProjection {
+  const persistedMessages = Object.values(persisted.items).filter(
+    (item): item is Extract<TranscriptItem, { kind: 'message' }> =>
+      item.kind === 'message',
+  );
+  const retire = new Set<string>();
+  for (const id of active.order) {
+    const item = active.items[id];
+    if (item?.kind !== 'message') continue;
+    const sameContent = (candidate: typeof item): boolean =>
+      candidate.role === item.role &&
+      normalizedMessageContent(candidate.content) ===
+        normalizedMessageContent(item.content) &&
+      (item.timestamp === undefined ||
+        candidate.timestamp === undefined ||
+        String(candidate.timestamp) === String(item.timestamp));
+    const explicit = persistedMessages.filter(
+      (candidate) =>
+        candidate.messageId === item.messageId && sameContent(candidate),
+    );
+    if (explicit.length === 1) {
+      retire.add(id);
+      continue;
+    }
+    if (item.timestamp === undefined) continue;
+    const semantic = persistedMessages.filter(
+      (candidate) =>
+        candidate.timestamp !== undefined &&
+        String(candidate.timestamp) === String(item.timestamp) &&
+        sameContent(candidate),
+    );
+    if (semantic.length === 1) retire.add(id);
+  }
+  if (retire.size === 0) return active;
+  const items = { ...active.items };
+  for (const id of retire) delete items[id];
+  return {
+    ...active,
+    order: active.order.filter((id) => !retire.has(id)),
+    items,
+  };
+}
+
 function itemTool(
   item: TranscriptItem,
   includeTerminal = false,
@@ -427,7 +501,7 @@ function itemTool(
 
 /**
  * Public event projection. RuntimeRegistry retains full snapshots for server
- * authority, but SSE and WebSocket consumers only receive metadata patches.
+ * authority, while browser feeds only receive bounded metadata projections.
  */
 export function projectPublicBridgeEvent(event: BridgeEvent): BridgeEvent {
   switch (event.type) {
@@ -461,7 +535,6 @@ export class DashboardApplication {
   readonly composerCommands: ComposerCommandService;
   readonly usage: UsageService;
   readonly uploads: UploadService;
-  readonly eventStream: DashboardEventStream;
   private readonly registry: RuntimeRegistry;
   private readonly manager: RuntimeManager;
   private readonly metadata: MetadataStore;
@@ -480,7 +553,6 @@ export class DashboardApplication {
     this.orchestration = options.metadata.orchestration;
     this.sessionIndex = options.sessions;
     this.orchestrationService = options.orchestration;
-    this.eventStream = options.eventStream ?? new DashboardEventStream(256);
     this.runtime = new RuntimeService(
       options.registry,
       options.manager,
@@ -581,8 +653,11 @@ export class DashboardApplication {
   }
 
   /** Build a shell snapshot synchronously from one daemon cursor. */
-  shellSnapshot(serverId: string, revision: number): BrowserSnapshot {
-    const cursor = this.eventStream.cursor;
+  shellSnapshot(
+    serverId: string,
+    revision: number,
+    cursor = 0,
+  ): BrowserSnapshot {
     const liveRuntimes = this.registry.snapshots();
     const sessions = this.sessionMetadata(liveRuntimes);
     this.setSessionMetadataBaseline(sessions);
@@ -602,15 +677,10 @@ export class DashboardApplication {
     };
   }
 
-  /** Compatibility builder retained for bootstrap, SSE, and websocket paths. */
-  snapshot(
-    serverId: string,
-    revision: number,
-    cursor = this.eventStream.cursor,
-  ): BrowserSnapshot {
-    // Event-stream publication passes its allocated cursor explicitly. Keep
-    // this compatibility builder independent of the stricter shell query so
-    // bootstrap/SSE/WS payloads retain their historical shape.
+  /** Build a full snapshot at an explicitly pinned feed sequence. */
+  snapshot(serverId: string, revision: number, cursor = 0): BrowserSnapshot {
+    // Keep the full session snapshot shape independent of the compact shell
+    // projection; callers supply the owning feed sequence explicitly.
     const liveRuntimes = this.registry.snapshots();
     const sessions = this.sessionMetadata(liveRuntimes);
     this.setSessionMetadataBaseline(sessions);
@@ -852,6 +922,7 @@ export class DashboardApplication {
     serverId: string,
     sessionId: string,
     before?: string,
+    feedSequence?: number,
   ): Promise<AuthoritativeSessionSnapshot> {
     if (!SESSION_ID_PATTERN.test(sessionId))
       throw new Error('Invalid session id.');
@@ -917,7 +988,7 @@ export class DashboardApplication {
       };
     };
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const cursor = this.eventStream.cursor;
+      const cursor = feedSequence ?? 0;
       const capture = before === undefined ? this.captureActive(sessionId) : {};
       const indexed = this.sessionIndex.get(sessionId);
       let result: SessionRead;
@@ -942,19 +1013,31 @@ export class DashboardApplication {
       }
       if (
         before === undefined &&
+        feedSequence === undefined &&
         !sameRuntimeCapture(capture, this.captureActive(sessionId))
       )
         continue;
       let resolvedCapture = capture;
       if (before === undefined && capture.state) {
         const persisted = hydrateTranscript(result.entries, sessionId);
+        const reconciledProjection = retirePersistedMessageOverlays(
+          capture.state.projection,
+          persisted,
+        );
+        const reconciledState = {
+          ...capture.state,
+          projection: reconciledProjection,
+        };
         const persistedIds = new Set(Object.keys(persisted.items));
         const persistedMessageCounts =
           persistedTerminalMessageCounts(persisted);
         const unresolvedTerminalIds =
-          capture.state.unresolvedTerminalIds.filter((id) => {
+          reconciledState.unresolvedTerminalIds.filter((id) => {
+            if (!reconciledState.projection.items[id]) return false;
             if (persistedIds.has(id)) return false;
-            const key = terminalMessageKey(capture.state?.projection.items[id]);
+            const key = terminalMessageKey(
+              reconciledState.projection.items[id],
+            );
             return key === undefined || persistedMessageCounts.get(key) !== 1;
           });
         const fullyProved =
@@ -962,11 +1045,18 @@ export class DashboardApplication {
           unresolvedTerminalIds.length === 0 &&
           !runtimeIsWorking(capture.runtime);
         const state = {
-          ...capture.state,
+          ...reconciledState,
           unresolvedTerminalIds,
-          uncertain: fullyProved ? false : capture.state.uncertain,
+          uncertain: fullyProved ? false : reconciledState.uncertain,
         };
-        this.activeTranscripts.set(sessionId, state);
+        // `feedSequence` pins the response and deliberately skips the normal
+        // retry, so the active map may have advanced while disk I/O awaited.
+        // Never let this old reconciliation erase that newer publication.
+        if (sameActiveCapture(capture, this.captureActive(sessionId)))
+          this.activeTranscripts.set(sessionId, state);
+        // The response still uses its pinned, reconciled capture even when a
+        // newer publication won the race; only the process-global map is
+        // protected from the stale write above.
         resolvedCapture = { ...capture, state };
       }
       const active =
@@ -1085,7 +1175,6 @@ export class DashboardApplication {
     await this.orchestrationService?.stop();
     await this.uploads.close();
     this.sessionIndex.close();
-    this.eventStream.close();
     this.registry.close();
     this.notifications.close();
     this.metadata.close();

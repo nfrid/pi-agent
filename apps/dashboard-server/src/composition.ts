@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { AgentRuntimeProvider } from '@pi-dashboard/protocol';
 import type { DashboardApplication } from './application/dashboard-application.js';
 import type { OrchestrationService } from './application/orchestration-service.js';
-import type { DashboardEventStream } from './event-stream.js';
+import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 import type { MetadataStore } from './metadata.js';
 import type { PushSender } from './push.js';
 import type { SqliteOrchestrationRepository } from './repositories/sqlite-orchestration-repository.js';
@@ -34,10 +34,13 @@ export interface DashboardServerOptions {
   registry?: RuntimeRegistry;
   usage?: UsageProvider;
   push?: PushSender;
-  /** Maximum number of daemon events retained for SSE replay. */
-  eventBufferSize?: number;
-  sseHeartbeatMs?: number;
-  sseBufferBytes?: number;
+  /** Bounded replay and subscriber memory for shell/session feeds. */
+  feedReplayCount?: number;
+  feedReplayBytes?: number;
+  feedQueueCount?: number;
+  feedQueueBytes?: number;
+  feedPingMs?: number;
+  feedInactivityMs?: number;
 }
 
 export interface DashboardConfiguration {
@@ -49,8 +52,12 @@ export interface DashboardConfiguration {
   readonly experimentalPiServer: boolean;
   readonly piServerSocketPath?: string;
   readonly origins: string[];
-  readonly sseHeartbeatMs: number;
-  readonly sseBufferBytes: number;
+  readonly feedReplayCount: number;
+  readonly feedReplayBytes: number;
+  readonly feedQueueCount: number;
+  readonly feedQueueBytes: number;
+  readonly feedPingMs: number;
+  readonly feedInactivityMs: number;
 }
 
 /** All non-transport collaborators assembled by the manual daemon root. */
@@ -65,7 +72,8 @@ export interface DashboardDependencies {
   readonly usage: UsageProvider;
   push: PushSender;
   readonly pushConfigured: boolean;
-  readonly eventStream: DashboardEventStream;
+  readonly shellFeed: ShellFeed;
+  readonly sessionFeeds: SessionFeedRegistry;
   readonly registry: RuntimeRegistry;
   readonly manager: RuntimeManager;
   readonly orchestrationService: OrchestrationService;

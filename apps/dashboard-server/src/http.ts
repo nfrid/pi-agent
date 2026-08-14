@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import type http from 'node:http';
-import type { URL } from 'node:url';
 import {
   delegateHistoryFromBranch,
   delegateHistoryRunDetailFromBranch,
@@ -18,8 +17,8 @@ import {
   type DelegateLiveRun,
   MAX_ID,
   MAX_SESSION_INDEX_DELTA_ITEMS,
+  PROTOCOL_VERSION,
   type RuntimeSnapshot,
-  type SessionIndexEntry,
   tryParseActiveDelegateTranscriptBaseline,
   tryParseDelegateTranscriptEntry,
   validateBridgeCommand,
@@ -32,15 +31,18 @@ import type {
   DashboardDependencies,
   DashboardServerOptions,
 } from './composition.js';
-import type { DashboardEventStreamRecord } from './event-stream.js';
 import { BridgeListener } from './http/bridge-listener.js';
-import { SseWriter } from './http/sse-writer.js';
-import { WsCompatChannel } from './http/ws-channel.js';
+import {
+  compactShellEventData,
+  type SessionFeedRegistry,
+  type ShellFeed,
+  shellDomainForEvent,
+} from './live-feeds.js';
 import { createPushSender } from './push.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 import type { RegistryChange } from './runtime-registry.js';
 
-/** Keep session deltas comfortably below the 2 MiB SSE frame limit. */
+/** Keep session deltas comfortably below the authoritative frame limit. */
 const MAX_SESSION_INDEX_DELTA_BYTES = 1_500_000;
 
 function validDelegateIdentifier(value: unknown): value is string {
@@ -156,41 +158,22 @@ function activeDelegateTranscriptBaseline(
   return tryParseActiveDelegateTranscriptBaseline(result) ?? base;
 }
 
-/**
- * Browser reducers already own runtime/transcript projections for these
- * events. Session-index metadata uses dedicated deltas; lifecycle
- * registration/offline deltas use their small synthetic events.
- */
-function requiresBrowserSnapshot(change: RegistryChange): boolean {
-  if (change.kind === 'offline') return false;
-  if (change.kind === 'registered') return !change.reconnected;
-  switch (change.event.type) {
-    case 'runtime.stateChanged':
-    case 'runtime.heartbeat':
-    case 'message.started':
-    case 'message.updated':
-    case 'message.finished':
-    case 'session.compacted':
-    case 'tool.started':
-    case 'tool.updated':
-    case 'tool.finished':
-    case 'delegate.transcript.updated':
-      return false;
-    case 'agent.settled':
-      return process.env.PI_DASHBOARD_NOTIFY_SETTLED === '1';
-    case 'session.changed':
-    case 'session.snapshot':
-      return false;
-    case 'interaction.requested':
-    case 'interaction.resolved':
-    case 'runtime.goodbye':
-      // Session events also refresh the sessions index metadata; notification
-      // unread/waiting state and runtime removal are not reduced from the event
-      // envelope alone.
-      return true;
-    default:
-      return true;
+function sessionEventCoalesceKey(event: BridgeEvent): string | undefined {
+  if (event.type === 'delegate.transcript.updated')
+    return `delegate:${event.runId}`;
+  if (event.type === 'message.updated' || event.type === 'message.finished') {
+    const message = event.message;
+    return typeof message === 'object' && message !== null
+      ? `message:${String((message as { messageId?: unknown }).messageId ?? '')}`
+      : undefined;
   }
+  if (event.type === 'tool.updated' || event.type === 'tool.finished') {
+    const tool = event.tool;
+    return typeof tool === 'object' && tool !== null
+      ? `tool:${String((tool as { toolCallId?: unknown }).toolCallId ?? '')}`
+      : undefined;
+  }
+  return undefined;
 }
 
 export interface DashboardServer {
@@ -208,8 +191,8 @@ export interface DashboardServer {
 }
 
 /**
- * Thin Fastify lifecycle owner. Transport concerns live in http/bridge-listener,
- * http/sse-writer, and http/ws-channel.
+ * Thin Fastify lifecycle owner. The Unix bridge remains separate from the
+ * browser feed protocol.
  */
 export class DashboardServerImpl implements DashboardServer {
   readonly token: string;
@@ -220,6 +203,7 @@ export class DashboardServerImpl implements DashboardServer {
   private readonly host: string;
   private readonly origins: string[];
   private readonly stateDir: string;
+  private readonly configuration: DashboardDependencies['configuration'];
   private readonly metadata: DashboardDependencies['metadata'];
   private readonly sessions: DashboardDependencies['sessions'];
   private readonly pushConfigured: boolean;
@@ -227,11 +211,10 @@ export class DashboardServerImpl implements DashboardServer {
   private readonly app: FastifyInstance;
   private readonly http: http.Server;
   private readonly bridge: BridgeListener;
-  private readonly eventStream: DashboardDependencies['eventStream'];
+  private readonly shellFeed: ShellFeed;
+  private readonly sessionFeeds: SessionFeedRegistry;
   private readonly application: DashboardDependencies['application'];
   private readonly runtimeProvider: DashboardDependencies['runtimeProvider'];
-  private readonly sse: SseWriter;
-  private readonly ws: WsCompatChannel;
   private workspaces: WorkspaceTarget[] = [];
   private readonly serverId = randomBytes(12).toString('base64url');
   private revision = 0;
@@ -240,12 +223,14 @@ export class DashboardServerImpl implements DashboardServer {
   private httpHasStarted = false;
   private startPromise: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
+  private feedSweepTimer: NodeJS.Timeout | undefined;
 
   constructor(dependencies: DashboardDependencies) {
     const config = dependencies.configuration;
     this.host = config.host;
     this.port = config.port;
     this.stateDir = config.stateDir;
+    this.configuration = config;
     this.token = config.token;
     this.socketPath = config.socketPath;
     this.metadata = dependencies.metadata;
@@ -254,30 +239,13 @@ export class DashboardServerImpl implements DashboardServer {
     this.push = dependencies.push;
     this.registry = dependencies.registry;
     this.manager = dependencies.manager;
-    this.eventStream = dependencies.eventStream;
+    this.shellFeed = dependencies.shellFeed;
+    this.sessionFeeds = dependencies.sessionFeeds;
     this.application = dependencies.application;
     this.runtimeProvider = dependencies.runtimeProvider;
     this.origins = config.origins;
 
     this.bridge = new BridgeListener((socket) => this.registry.accept(socket));
-    this.sse = new SseWriter({
-      eventStream: this.eventStream,
-      serverId: () => this.serverId,
-      sseHeartbeatMs: config.sseHeartbeatMs,
-      sseBufferBytes: config.sseBufferBytes,
-    });
-    this.ws = new WsCompatChannel({
-      token: this.token,
-      origins: () => this.origins,
-      host: () => this.host,
-      port: () => this.port,
-      onAuthenticated: (client) => {
-        this.ws.send(client, {
-          type: 'snapshot',
-          snapshot: this.snapshot(),
-        });
-      },
-    });
 
     this.app = Fastify({
       logger: false,
@@ -287,7 +255,6 @@ export class DashboardServerImpl implements DashboardServer {
     });
     this.app.register(dashboardRoutes, { context: this.routeContext() });
     this.http = this.app.server;
-    this.ws.attachUpgrade(this.http);
   }
 
   private routeContext(): DashboardRouteContext {
@@ -299,17 +266,40 @@ export class DashboardServerImpl implements DashboardServer {
         this.application.snapshot(
           this.serverId,
           this.revision,
-          this.eventStream.cursor,
+          this.shellFeed.sequence,
         ),
       shellSnapshot: () => {
         const snapshot = this.application.shellSnapshot(
           this.serverId,
           this.revision,
+          this.shellFeed.sequence,
         );
         return { snapshot, cursor: snapshot.cursor };
       },
       sessionSnapshot: (id, before) =>
-        this.application.sessionSnapshot(this.serverId, id, before),
+        this.application.sessionSnapshot(
+          this.serverId,
+          id,
+          before,
+          this.sessionFeeds.get(id).sequence,
+        ),
+      shellFeed: this.shellFeed,
+      sessionFeeds: this.sessionFeeds,
+      shellSnapshotAt: (sequence) => {
+        const snapshot = this.application.shellSnapshot(
+          this.serverId,
+          this.revision,
+          sequence,
+        );
+        return { snapshot, cursor: sequence };
+      },
+      sessionSnapshotAt: (id, sequence) =>
+        this.application.sessionSnapshot(
+          this.serverId,
+          id,
+          undefined,
+          sequence,
+        ),
       workspaces: () => this.application.workspaces.list(),
       refreshWorkspaces: () => this.refreshWorkspaces(),
       composerCommands: (workspaceId) =>
@@ -407,8 +397,6 @@ export class DashboardServerImpl implements DashboardServer {
       },
       pushSubscribe: (body) => this.savePushSubscription(body),
       vapidPublicKey: () => process.env.PI_DASHBOARD_VAPID_PUBLIC_KEY ?? null,
-      handleSse: (request, response, url) =>
-        this.handleSse(request, response, url),
       adoptProject: (command) => {
         const service = this.application.orchestrationService;
         if (!service) throw new Error('Orchestration is unavailable.');
@@ -515,7 +503,18 @@ export class DashboardServerImpl implements DashboardServer {
       if (!this.pushConfigured)
         this.push = await createPushSender(this.metadata);
       this.application.setPush(this.push);
-      this.ws.startHeartbeat();
+      this.feedSweepTimer = setInterval(
+        () =>
+          this.sessionFeeds.sweep(
+            Date.now(),
+            this.configuration.feedInactivityMs,
+          ),
+        Math.max(
+          30_000,
+          Math.min(this.configuration.feedInactivityMs, 5 * 60_000),
+        ),
+      );
+      this.feedSweepTimer.unref();
       this.lifecycle = 'started';
       // Startup callbacks are suppressed while the workspace and session
       // state is being assembled. Publish one authoritative initial snapshot.
@@ -567,7 +566,8 @@ export class DashboardServerImpl implements DashboardServer {
   }
 
   private async stopInternal(): Promise<void> {
-    this.ws.stopHeartbeat();
+    if (this.feedSweepTimer) clearInterval(this.feedSweepTimer);
+    this.feedSweepTimer = undefined;
     await this.application.orchestrationService?.stop();
     await (
       this.runtimeProvider as DashboardDependencies['runtimeProvider'] & {
@@ -575,13 +575,10 @@ export class DashboardServerImpl implements DashboardServer {
       }
     ).close?.();
     this.sessions.close();
-    this.eventStream.close();
+    this.shellFeed.close();
+    this.sessionFeeds.close();
     this.registry.close();
-    this.sse.destroyAll();
-    this.ws.closeAll();
-    // Destroy raw transports before waiting for their listening servers to
-    // close. Otherwise a silent pre-hello bridge or open SSE can keep shutdown
-    // pending indefinitely.
+    // Destroy raw bridge clients before waiting for the HTTP server to close.
     this.bridge.destroyClients();
     await this.app.close();
     await this.bridge.close(this.socketPath);
@@ -591,7 +588,8 @@ export class DashboardServerImpl implements DashboardServer {
   }
 
   private async cleanupFailedStart(): Promise<void> {
-    this.ws.stopHeartbeat();
+    if (this.feedSweepTimer) clearInterval(this.feedSweepTimer);
+    this.feedSweepTimer = undefined;
     await this.application.orchestrationService?.stop();
     await (
       this.runtimeProvider as DashboardDependencies['runtimeProvider'] & {
@@ -599,9 +597,7 @@ export class DashboardServerImpl implements DashboardServer {
       }
     ).close?.();
     this.sessions.close();
-    this.eventStream.close();
     this.registry.close();
-    this.sse.destroyAll();
     this.bridge.destroyClients();
     if (this.http.listening)
       await new Promise<void>((resolve) => this.http.close(() => resolve()));
@@ -609,7 +605,7 @@ export class DashboardServerImpl implements DashboardServer {
     await this.application.uploads.close().catch(() => undefined);
   }
 
-  snapshot(cursor = this.eventStream.cursor): BrowserSnapshot {
+  snapshot(cursor = this.shellFeed.sequence): BrowserSnapshot {
     return this.application.snapshot(this.serverId, this.revision, cursor);
   }
 
@@ -629,7 +625,7 @@ export class DashboardServerImpl implements DashboardServer {
       .find((item) => item.session.id === id && item.online !== false);
     return activeDelegateTranscriptBaseline(
       this.serverId,
-      this.eventStream.cursor,
+      this.shellFeed.sequence,
       id,
       runtime,
       runtime
@@ -730,15 +726,6 @@ export class DashboardServerImpl implements DashboardServer {
     );
   }
 
-  /** Test and route seam for the SSE transport module. */
-  private handleSse(
-    request: http.IncomingMessage,
-    response: http.ServerResponse,
-    url: URL,
-  ): void {
-    this.sse.handle(request, response, url);
-  }
-
   private savePushSubscription(body: unknown): void {
     if (
       !body ||
@@ -759,16 +746,85 @@ export class DashboardServerImpl implements DashboardServer {
   public handleRegistryChange(change: RegistryChange): void {
     const applicationChange = this.application.onRegistryChange(change);
     if (this.lifecycle !== 'started') return;
-    this.changed(
-      applicationChange.type === 'event'
-        ? {
-            ...applicationChange,
-            ...(requiresBrowserSnapshot(change)
-              ? { snapshot: change.snapshot }
-              : {}),
-          }
-        : { type: 'snapshot', snapshot: this.snapshot() },
-    );
+    this.revision += 1;
+    const sessionId = change.snapshot.session.id;
+    const runtimeGone =
+      change.kind === 'offline' ||
+      (change.kind === 'event' && change.event.type === 'runtime.goodbye');
+    this.sessionFeeds.setActive(sessionId, !runtimeGone);
+    if (applicationChange.type === 'event') {
+      const event = projectPublicBridgeEvent(
+        applicationChange.event as BridgeEvent,
+      );
+      const key = sessionEventCoalesceKey(event);
+      try {
+        this.sessionFeeds.publish(
+          sessionId,
+          event,
+          {
+            ...(applicationChange.runtimeId === undefined
+              ? {}
+              : { runtimeId: applicationChange.runtimeId }),
+            ...(applicationChange.runtimeEpoch === undefined
+              ? {}
+              : { runtimeEpoch: applicationChange.runtimeEpoch }),
+            ...(applicationChange.runtimeSeq === undefined
+              ? {}
+              : { runtimeSeq: applicationChange.runtimeSeq }),
+          },
+          key,
+        );
+      } catch {
+        // The next reconnect receives an authoritative session snapshot.
+      }
+      const domain = shellDomainForEvent(event);
+      if (domain !== undefined) {
+        try {
+          this.shellFeed.publishSemantic(
+            domain,
+            this.revision,
+            compactShellEventData(event),
+            sessionId,
+            `runtime:${sessionId}:${domain}`,
+          );
+        } catch {
+          // The authoritative shell snapshot is the recovery path.
+        }
+      }
+      return;
+    }
+    const hello = projectPublicBridgeEvent({
+      type: 'runtime.hello',
+      protocolVersion: PROTOCOL_VERSION,
+      snapshot: change.snapshot,
+    } as BridgeEvent);
+    try {
+      this.sessionFeeds.publish(sessionId, hello, {
+        runtimeId: change.snapshot.runtimeId,
+        ...(change.runtimeEpoch === undefined
+          ? {}
+          : { runtimeEpoch: change.runtimeEpoch }),
+        ...(change.runtimeSeq === undefined
+          ? {}
+          : { runtimeSeq: change.runtimeSeq }),
+      });
+    } catch {
+      // A reconnect always has the authoritative session snapshot fallback.
+    }
+    try {
+      this.shellFeed.publishSemantic(
+        'runtime',
+        this.revision,
+        {
+          runtimeId: change.snapshot.runtimeId,
+          liveState: change.snapshot.liveState,
+        },
+        sessionId,
+        `runtime:${sessionId}:lifecycle`,
+      );
+    } catch {
+      // The authoritative shell snapshot is the recovery path.
+    }
   }
 
   public publishChange(message?: unknown): void {
@@ -780,26 +836,23 @@ export class DashboardServerImpl implements DashboardServer {
     if (this.lifecycle !== 'started') return;
     const delta = this.application.sessionMetadataDelta();
     if (!delta) return;
-    if (
+    const tooLarge =
       delta.upsert.length > MAX_SESSION_INDEX_DELTA_ITEMS ||
       delta.remove.length > MAX_SESSION_INDEX_DELTA_ITEMS ||
-      Buffer.byteLength(
-        JSON.stringify({
-          type: 'sessions',
-          cursor: this.eventStream.cursor + 1,
-          emittedAt: Date.now(),
-          upsert: delta.upsert,
-          remove: delta.remove,
-        }),
-        'utf8',
-      ) >= MAX_SESSION_INDEX_DELTA_BYTES
-    ) {
-      // The baseline has already advanced. A full snapshot is authoritative
-      // and resets it again while keeping the SSE frame bounded by its writer.
-      this.changed();
-      return;
+      Buffer.byteLength(JSON.stringify(delta), 'utf8') >=
+        MAX_SESSION_INDEX_DELTA_BYTES;
+    this.revision += 1;
+    try {
+      this.shellFeed.publishSemantic(
+        'session-index',
+        this.revision,
+        tooLarge ? { refresh: true } : delta,
+        undefined,
+        'session-index',
+      );
+    } catch {
+      // The next shell subscription starts from an authoritative snapshot.
     }
-    this.changed({ type: 'sessions', ...delta });
   }
 
   private changed(message?: unknown): void {
@@ -808,80 +861,37 @@ export class DashboardServerImpl implements DashboardServer {
       message && typeof message === 'object' && !Array.isArray(message)
         ? (message as Record<string, unknown>)
         : undefined;
-    if (
-      record?.type === 'sessions' &&
+    const domain =
+      record?.type === 'sessions'
+        ? 'session-index'
+        : record?.domain === 'usage'
+          ? 'usage'
+          : record?.domain === 'workspace'
+            ? 'workspace'
+            : record?.domain === 'orchestration'
+              ? 'orchestration'
+              : 'invalidation';
+    const data =
+      domain === 'session-index' &&
+      record &&
       Array.isArray(record.upsert) &&
       Array.isArray(record.remove)
-    ) {
-      this.eventStream.publish((cursor, emittedAt) => ({
-        type: 'sessions' as const,
-        cursor,
-        emittedAt,
-        upsert: record.upsert as readonly SessionIndexEntry[],
-        remove: record.remove as readonly string[],
-      }));
-      return;
+        ? {
+            upsert: record.upsert.slice(0, MAX_SESSION_INDEX_DELTA_ITEMS),
+            remove: record.remove.slice(0, MAX_SESSION_INDEX_DELTA_ITEMS),
+          }
+        : { refresh: true };
+    try {
+      this.shellFeed.publishSemantic(
+        domain,
+        this.revision,
+        data,
+        undefined,
+        `application:${domain}`,
+      );
+    } catch {
+      // A bounded feed retries via its authoritative shell snapshot.
     }
-    if (record?.type === 'event' && record.event) {
-      const publicEvent = projectPublicBridgeEvent(record.event as BridgeEvent);
-      const includeSnapshot =
-        record.snapshot !== undefined && typeof record.snapshot === 'object';
-      let streamRecord: Extract<
-        DashboardEventStreamRecord,
-        { event: BridgeEvent }
-      >;
-      try {
-        streamRecord = this.eventStream.publish((cursor, emittedAt) => {
-          const snapshot = includeSnapshot ? this.snapshot(cursor) : undefined;
-          return {
-            cursor,
-            emittedAt,
-            event: publicEvent,
-            ...(record.runtimeId === undefined
-              ? {}
-              : { runtimeId: record.runtimeId as string }),
-            ...(record.runtimeEpoch === undefined
-              ? {}
-              : { runtimeEpoch: record.runtimeEpoch as string }),
-            ...(record.runtimeSeq === undefined
-              ? {}
-              : { runtimeSeq: record.runtimeSeq as number }),
-            ...(record.sessionId === undefined
-              ? {}
-              : { sessionId: record.sessionId as string }),
-            ...(snapshot === undefined ? {} : { snapshot }),
-          };
-        }) as Extract<DashboardEventStreamRecord, { event: BridgeEvent }>;
-      } catch {
-        // A malformed optional provider payload must not escape a runtime
-        // callback and take down the daemon.
-        return;
-      }
-      this.ws.publish({
-        type: 'event',
-        serverId: this.serverId,
-        revision: this.revision,
-        runtimeId:
-          typeof record.runtimeId === 'string' && record.runtimeId.length > 0
-            ? record.runtimeId
-            : 'dashboard',
-        event: publicEvent,
-        ...(includeSnapshot && streamRecord.snapshot !== undefined
-          ? { snapshot: streamRecord.snapshot }
-          : {}),
-      });
-      return;
-    }
-    const streamRecord = this.eventStream.publish((cursor, emittedAt) => ({
-      type: 'snapshot' as const,
-      cursor,
-      emittedAt,
-      snapshot: this.snapshot(cursor),
-    })) as Extract<DashboardEventStreamRecord, { type: 'snapshot' }>;
-    this.ws.publish({
-      type: 'snapshot',
-      snapshot: streamRecord.snapshot,
-    });
   }
 }
 

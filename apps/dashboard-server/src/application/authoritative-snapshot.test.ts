@@ -7,7 +7,6 @@ import {
   type RuntimeSnapshot,
 } from '@pi-dashboard/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DashboardEventStream } from '../event-stream.js';
 import { MetadataStore } from '../metadata.js';
 import type { RuntimeRegistry } from '../runtime-registry.js';
 import { SessionIndex } from '../session-index.js';
@@ -80,7 +79,6 @@ async function fixture(
     usage: { get: async () => null },
     push: { notify: async () => undefined },
     stateDir: path.join(root, 'state'),
-    eventStream: new DashboardEventStream(),
   });
   await app.start();
   const result: Fixture = {
@@ -443,6 +441,133 @@ describe('authoritative application snapshot lifecycle', () => {
     expect(older.completeThroughCursor).toBe(false);
   });
 
+  it('does not erase newer active state during a pinned snapshot read', async () => {
+    const f = await fixture();
+    const live = runtime(f.file);
+    f.register(live);
+    f.event(live, {
+      type: 'message.updated',
+      sessionId: 'snapshot-session',
+      message: {
+        messageId: 'old-live-message',
+        role: 'assistant',
+        content: 'old',
+        phase: 'updated',
+      },
+    });
+    const originalRead = f.sessions.readEntries.bind(f.sessions);
+    let release!: () => void;
+    let started!: () => void;
+    const startedPromise = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const releasePromise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const readSpy = vi
+      .spyOn(f.sessions, 'readEntries')
+      .mockImplementation(async (...args) => {
+        started();
+        await releasePromise;
+        return originalRead(...args);
+      });
+
+    const pending = f.app.sessionSnapshot(
+      'generation-pinned',
+      'snapshot-session',
+      undefined,
+      2,
+    );
+    await startedPromise;
+    const newer = runtime(f.file, {
+      pendingInteractions: [
+        {
+          id: 'new-interaction',
+          type: 'ask_user',
+          question: 'continue?',
+          choices: [{ label: 'yes', value: 'yes' }],
+          allowCustom: false,
+          createdAt: 2,
+        },
+      ],
+      extensionSurfaces: [
+        {
+          id: 'delegate-surface',
+          rendererId: 'delegate.status',
+          placement: 'right-rail',
+          viewModel: {
+            statuses: [
+              {
+                runId: 'run-new',
+                lineageId: 'lineage-new',
+                name: 'worker',
+                kind: 'background',
+                state: 'running',
+                createdAt: 2,
+                allowWrites: false,
+                transcript: [],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    f.event(
+      newer,
+      {
+        type: 'message.updated',
+        sessionId: 'snapshot-session',
+        message: {
+          messageId: 'new-live-message',
+          role: 'assistant',
+          content: 'new',
+          phase: 'updated',
+        },
+      },
+      'epoch-1',
+      3,
+    );
+    f.event(
+      newer,
+      {
+        type: 'tool.updated',
+        sessionId: 'snapshot-session',
+        tool: {
+          toolCallId: 'new-tool',
+          name: 'read',
+          status: 'running',
+          phase: 'updated',
+        },
+      },
+      'epoch-1',
+      4,
+    );
+    release();
+    const pinned = await pending;
+    readSpy.mockRestore();
+
+    // The pinned response may expose only the old capture, but the newer
+    // publication must remain in the process-global active projection.
+    expect(pinned.active.messages).toMatchObject([
+      { messageId: 'old-live-message' },
+    ]);
+    const current = await f.app.sessionSnapshot(
+      'generation-current',
+      'snapshot-session',
+    );
+    expect(current.active.messages).toMatchObject([
+      { messageId: 'old-live-message' },
+      { messageId: 'new-live-message' },
+    ]);
+    expect(current.active.tools).toMatchObject([
+      { toolCallId: 'new-tool', status: 'running' },
+    ]);
+    expect(current.active.pendingInteractions).toMatchObject([
+      { id: 'new-interaction' },
+    ]);
+    expect(current.active.delegates).toMatchObject([{ runId: 'run-new' }]);
+  });
+
   it('does not restart a session read for unrelated global events', async () => {
     const f = await fixture();
     f.register(runtime(f.file));
@@ -468,12 +593,6 @@ describe('authoritative application snapshot lifecycle', () => {
       'snapshot-session',
     );
     await startedPromise;
-    f.app.eventStream.publish((cursor, emittedAt) => ({
-      type: 'snapshot',
-      cursor,
-      emittedAt,
-      snapshot: f.app.shellSnapshot('generation-unrelated', cursor),
-    }));
     release();
 
     const snapshot = await pending;
@@ -507,12 +626,6 @@ describe('authoritative application snapshot lifecycle', () => {
       'snapshot-session',
     );
     await startedPromise;
-    f.app.eventStream.publish((cursor, emittedAt) => ({
-      type: 'snapshot',
-      cursor,
-      emittedAt,
-      snapshot: f.app.shellSnapshot('generation-race', 1),
-    }));
     const replacement = runtime(f.file, { runtimeId: 'replacement-runtime' });
     f.register(replacement, 'epoch-new', true);
     release();
@@ -546,7 +659,7 @@ describe('authoritative application snapshot lifecycle', () => {
       snapshot: shell,
       cursor: shell.cursor,
     });
-    expect(parsed.snapshot.cursor).toBe(1);
+    expect(parsed.snapshot.cursor).toBe(0);
     expect(parsed.snapshot.runtimes[0]?.session.entries).toEqual([]);
     expect(
       parsed.snapshot.runtimes[0]?.pendingInteractions.length,

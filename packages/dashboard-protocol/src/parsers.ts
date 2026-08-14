@@ -40,6 +40,8 @@ import {
   DelegateHistoryRunDetailResponseSchema,
   type DelegateTranscriptEntry,
   DelegateTranscriptEntrySchema,
+  type FeedCursor,
+  FeedCursorSchema,
   type InteractionSnapshot,
   InteractionSnapshotSchema,
   MAX_FRAME_BYTES,
@@ -57,12 +59,20 @@ import {
   RuntimeSnapshotSchema,
   type SessionApiResponse,
   SessionApiResponseSchema,
+  type SessionFeedInput,
+  SessionFeedInputSchema,
+  type SessionFeedMessage,
+  SessionFeedMessageSchema,
   type SessionRenameRequest,
   SessionRenameRequestSchema,
   type SessionSnapshotPatch,
   SessionSnapshotPatchSchema,
   type SessionSnapshotRequest,
   SessionSnapshotRequestSchema,
+  type ShellFeedInput,
+  ShellFeedInputSchema,
+  type ShellFeedMessage,
+  ShellFeedMessageSchema,
   type ShellSnapshot,
   type ShellSnapshotRequest,
   ShellSnapshotRequestSchema,
@@ -84,6 +94,39 @@ import {
 export function parseProtocolInfo(value: unknown): ProtocolInfo {
   return parseSchema(ProtocolInfoSchema, value, 'protocol info');
 }
+
+export function parseFeedCursor(value: unknown): FeedCursor {
+  return parseSchema(FeedCursorSchema, value, 'feed cursor');
+}
+export const tryParseFeedCursor = (value: unknown): FeedCursor | undefined =>
+  tryParseSchema(FeedCursorSchema, value);
+export function parseShellFeedInput(value: unknown): ShellFeedInput {
+  return parseSchema(ShellFeedInputSchema, value, 'shell feed input');
+}
+export const tryParseShellFeedInput = (
+  value: unknown,
+): ShellFeedInput | undefined => tryParseSchema(ShellFeedInputSchema, value);
+export function parseSessionFeedInput(value: unknown): SessionFeedInput {
+  return parseSchema(SessionFeedInputSchema, value, 'session feed input');
+}
+export const tryParseSessionFeedInput = (
+  value: unknown,
+): SessionFeedInput | undefined =>
+  tryParseSchema(SessionFeedInputSchema, value);
+export function parseShellFeedMessage(value: unknown): ShellFeedMessage {
+  return parseSchema(ShellFeedMessageSchema, value, 'shell feed message');
+}
+export const tryParseShellFeedMessage = (
+  value: unknown,
+): ShellFeedMessage | undefined =>
+  tryParseSchema(ShellFeedMessageSchema, value);
+export function parseSessionFeedMessage(value: unknown): SessionFeedMessage {
+  return parseSchema(SessionFeedMessageSchema, value, 'session feed message');
+}
+export const tryParseSessionFeedMessage = (
+  value: unknown,
+): SessionFeedMessage | undefined =>
+  tryParseSchema(SessionFeedMessageSchema, value);
 function assertShellHasNoTranscript(snapshot: ShellSnapshot): void {
   for (const runtime of snapshot.runtimes)
     if (runtime.session.entries.length !== 0)

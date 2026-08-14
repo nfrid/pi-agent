@@ -14,7 +14,6 @@ import {
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DashboardApplication } from './application/dashboard-application.js';
-import { DashboardEventStream } from './event-stream.js';
 import { MetadataStore } from './metadata.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 import { RuntimeRegistry } from './runtime-registry.js';
@@ -108,10 +107,6 @@ function context(): DashboardRouteContext {
     markAllNotificationsRead: () => undefined,
     pushSubscribe: () => undefined,
     vapidPublicKey: () => null,
-    handleSse: (_request, response) => {
-      response.writeHead(200, { 'content-type': 'text/event-stream' });
-      response.end();
-    },
   };
 }
 
@@ -168,7 +163,6 @@ async function realSessionSnapshotFixture() {
     usage: { get: async () => null },
     push: { notify: async () => undefined },
     stateDir: path.join(root, 'state'),
-    eventStream: new DashboardEventStream(),
   });
   await application.start();
   const runtime: RuntimeSnapshot = {
@@ -444,14 +438,6 @@ describe('dashboard tRPC boundary', () => {
     expect(preflight.headers['access-control-allow-private-network']).toBe(
       'true',
     );
-
-    const events = await app.inject({
-      method: 'GET',
-      url: '/api/events',
-      headers: authHeaders(),
-    });
-    expect(events.statusCode).toBe(200);
-    expect(events.headers['content-type']).toContain('text/event-stream');
   });
 
   it('sanitizes database detail while retaining safe domain messages', () => {

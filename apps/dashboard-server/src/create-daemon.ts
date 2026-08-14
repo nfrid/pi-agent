@@ -10,8 +10,8 @@ import {
   type DashboardServerOptions,
   sessionDirectory,
 } from './composition.js';
-import { DashboardEventStream } from './event-stream.js';
 import { type DashboardServer, DashboardServerImpl } from './http.js';
+import { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 import { MetadataStore } from './metadata.js';
 import {
   PiClientRuntimeProvider,
@@ -25,10 +25,8 @@ import { SessionIndex } from './session-index.js';
 import { TmuxAdapter, TmuxRuntimeProvider } from './tmux.js';
 import { CodexUsageProvider } from './usage.js';
 
-const SSE_HEARTBEAT_MS = 15_000;
-// Runtime contribution snapshots can approach 1 MiB; retain bounded headroom
-// for one snapshot plus live records while the browser drains the response.
-const SSE_BUFFER_BYTES = 4 * 1024 * 1024;
+const FEED_PING_MS = 15_000;
+const FEED_INACTIVITY_MS = 5 * 60_000;
 
 function loadOrCreateToken(stateDir: string): string {
   const file = path.join(stateDir, 'browser-token');
@@ -95,8 +93,12 @@ function configuration(
     experimentalPiServer,
     ...(piServerSocketPath ? { piServerSocketPath } : {}),
     origins,
-    sseHeartbeatMs: options.sseHeartbeatMs ?? SSE_HEARTBEAT_MS,
-    sseBufferBytes: options.sseBufferBytes ?? SSE_BUFFER_BYTES,
+    feedReplayCount: options.feedReplayCount ?? 256,
+    feedReplayBytes: options.feedReplayBytes ?? 4 * 1024 * 1024,
+    feedQueueCount: options.feedQueueCount ?? 128,
+    feedQueueBytes: options.feedQueueBytes ?? 4 * 1024 * 1024,
+    feedPingMs: options.feedPingMs ?? FEED_PING_MS,
+    feedInactivityMs: options.feedInactivityMs ?? FEED_INACTIVITY_MS,
   };
 }
 
@@ -154,7 +156,19 @@ function dependencies(
         )
       : tmuxProvider);
   const usage = options.usage ?? new CodexUsageProvider();
-  const eventStream = new DashboardEventStream(options.eventBufferSize ?? 256);
+  const shellFeed = new ShellFeed({
+    replayCount: config.feedReplayCount,
+    replayBytes: config.feedReplayBytes,
+    subscriberQueueCount: config.feedQueueCount,
+    subscriberQueueBytes: config.feedQueueBytes,
+  });
+  const sessionFeeds = new SessionFeedRegistry({
+    generation: shellFeed.generation,
+    replayCount: config.feedReplayCount,
+    replayBytes: config.feedReplayBytes,
+    subscriberQueueCount: config.feedQueueCount,
+    subscriberQueueBytes: config.feedQueueBytes,
+  });
   const pushConfigured = Boolean(options.push);
   const push = options.push ?? noopPush();
 
@@ -186,7 +200,6 @@ function dependencies(
     usage,
     push,
     stateDir: config.stateDir,
-    eventStream,
     orchestration: orchestrationService,
     onChange: () => applicationChanges.publish(undefined),
   });
@@ -202,7 +215,8 @@ function dependencies(
       usage,
       push,
       pushConfigured,
-      eventStream,
+      shellFeed,
+      sessionFeeds,
       registry,
       manager,
       orchestrationService,

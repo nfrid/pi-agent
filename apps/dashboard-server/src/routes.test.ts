@@ -63,7 +63,6 @@ function context(): DashboardRouteContext {
     markAllNotificationsRead: () => undefined,
     pushSubscribe: () => undefined,
     vapidPublicKey: () => null,
-    handleSse: () => undefined,
   };
 }
 
@@ -260,33 +259,6 @@ describe('Fastify dashboard route plugin', () => {
         url: '/api/workspaces/workspace-1/composer-commands',
       }),
     ).resolves.toMatchObject({ statusCode: 401 });
-  });
-
-  it('preserves CORS headers on hijacked SSE conflict responses', async () => {
-    const app = Fastify();
-    apps.push(app);
-    const routeContext = context();
-    routeContext.handleSse = (_request, response) => {
-      response.writeHead(409, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ code: 'replay-gap' }));
-    };
-    await app.register(dashboardRoutes, { context: routeContext });
-    await app.ready();
-
-    const response = await app.inject({
-      method: 'GET',
-      url: '/api/events?cursor=1&serverId=old-server',
-      headers: {
-        origin: 'http://dashboard.test',
-        'x-dashboard-token': 'route-token',
-      },
-    });
-    expect(response.statusCode).toBe(409);
-    expect(response.headers['access-control-allow-origin']).toBe(
-      'http://dashboard.test',
-    );
-    expect(response.headers.vary).toBe('Origin');
-    expect(response.json()).toEqual({ code: 'replay-gap' });
   });
 
   it('supports inject without starting an HTTP listener', async () => {

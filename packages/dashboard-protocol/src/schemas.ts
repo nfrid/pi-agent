@@ -1746,6 +1746,111 @@ export type DashboardStreamMessage = Static<
   typeof DashboardStreamMessageSchema
 >;
 
+/** Opaque tRPC tracked IDs. Numeric sequence values are never resumable alone. */
+export const FeedCursorSchema = Type.String({
+  minLength: 8,
+  maxLength: 2048,
+  pattern: '^[A-Za-z0-9_-]+$',
+});
+export type FeedCursor = Static<typeof FeedCursorSchema>;
+
+export const FeedCaughtUpSchema = Type.Object(
+  {
+    type: Type.Literal('caught-up'),
+    sequence: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+export type FeedCaughtUp = Static<typeof FeedCaughtUpSchema>;
+
+export const ShellFeedDomainSchema = Type.Union([
+  Type.Literal('runtime'),
+  Type.Literal('session-index'),
+  Type.Literal('interaction'),
+  Type.Literal('notification'),
+  Type.Literal('workspace'),
+  Type.Literal('orchestration'),
+  Type.Literal('usage'),
+  Type.Literal('invalidation'),
+]);
+export type ShellFeedDomain = Static<typeof ShellFeedDomainSchema>;
+export const ShellFeedEventSchema = Type.Object(
+  {
+    type: Type.Literal('shell-event'),
+    domain: ShellFeedDomainSchema,
+    revision: Type.Integer({ minimum: 0 }),
+    sessionId: Type.Optional(IdentifierSchema),
+    /** Domain-specific semantic data; transcript payloads are forbidden by routing. */
+    data: Type.Unknown(),
+  },
+  { additionalProperties: false },
+);
+export type ShellFeedEvent = Static<typeof ShellFeedEventSchema>;
+
+export const ShellFeedSnapshotSchema = Type.Object(
+  {
+    type: Type.Literal('snapshot'),
+    sequence: Type.Integer({ minimum: 0 }),
+    snapshot: ShellSnapshotResponseSchema,
+  },
+  { additionalProperties: false },
+);
+export type ShellFeedSnapshot = Static<typeof ShellFeedSnapshotSchema>;
+export const ShellFeedMessageSchema = Type.Union([
+  ShellFeedSnapshotSchema,
+  ShellFeedEventSchema,
+  FeedCaughtUpSchema,
+]);
+export type ShellFeedMessage = Static<typeof ShellFeedMessageSchema>;
+
+export const SessionFeedEventSchema = Type.Object(
+  {
+    type: Type.Literal('session-event'),
+    sessionId: IdentifierSchema,
+    runtimeId: Type.Optional(IdentifierSchema),
+    runtimeEpoch: Type.Optional(IdentifierSchema),
+    runtimeSeq: Type.Optional(Type.Integer({ minimum: 0 })),
+    event: BridgeEventSchema,
+  },
+  { additionalProperties: false },
+);
+export type SessionFeedEvent = Static<typeof SessionFeedEventSchema>;
+export const SessionFeedSnapshotSchema = Type.Object(
+  {
+    type: Type.Literal('snapshot'),
+    sequence: Type.Integer({ minimum: 0 }),
+    snapshot: AuthoritativeSessionSnapshotSchema,
+  },
+  { additionalProperties: false },
+);
+export type SessionFeedSnapshot = Static<typeof SessionFeedSnapshotSchema>;
+export const SessionFeedMessageSchema = Type.Union([
+  SessionFeedSnapshotSchema,
+  SessionFeedEventSchema,
+  FeedCaughtUpSchema,
+]);
+export type SessionFeedMessage = Static<typeof SessionFeedMessageSchema>;
+
+export const ShellFeedInputSchema = Type.Object(
+  {
+    after: Type.Optional(FeedCursorSchema),
+    /** Cursor spelling used by tRPC's automatic subscription reconnect. */
+    lastEventId: Type.Optional(FeedCursorSchema),
+  },
+  { additionalProperties: false },
+);
+export type ShellFeedInput = Static<typeof ShellFeedInputSchema>;
+export const SessionFeedInputSchema = Type.Object(
+  {
+    sessionId: IdentifierSchema,
+    after: Type.Optional(FeedCursorSchema),
+    /** Cursor spelling used by tRPC's automatic subscription reconnect. */
+    lastEventId: Type.Optional(FeedCursorSchema),
+  },
+  { additionalProperties: false },
+);
+export type SessionFeedInput = Static<typeof SessionFeedInputSchema>;
+
 export const StartRuntimeRequestSchema = Type.Object(
   {
     workspaceId: Type.String({ minLength: 1, maxLength: 256 }),

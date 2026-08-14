@@ -1,5 +1,3 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
-import { URL } from 'node:url';
 import {
   type ActiveDelegateTranscriptBaseline,
   ArchiveThreadCommandSchema,
@@ -27,6 +25,7 @@ import type {
   FastifyRequest,
 } from 'fastify';
 import { Type } from 'typebox';
+import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 import { allowedOrigin, authorizeRequest } from './security.js';
 import { registerDashboardTrpc } from './trpc.js';
 
@@ -96,6 +95,13 @@ export interface DashboardRouteContext {
     id: string,
     before?: string,
   ): Promise<AuthoritativeSessionSnapshot>;
+  shellFeed?: ShellFeed;
+  sessionFeeds?: SessionFeedRegistry;
+  shellSnapshotAt?(sequence: number): unknown;
+  sessionSnapshotAt?(
+    id: string,
+    sequence: number,
+  ): Promise<AuthoritativeSessionSnapshot>;
   workspaces(): WorkspaceTarget[];
   refreshWorkspaces(): Promise<WorkspaceTarget[]>;
   composerCommands(workspaceId: string): Promise<ComposerCommandCatalogue>;
@@ -127,7 +133,6 @@ export interface DashboardRouteContext {
   markAllNotificationsRead(): void;
   pushSubscribe(body: unknown): void;
   vapidPublicKey(): string | null;
-  handleSse(request: IncomingMessage, response: ServerResponse, url: URL): void;
   adoptProject?(command: unknown): Promise<unknown>;
   createThread?(projectId: string, command: unknown): Promise<unknown>;
   adoptSession?(
@@ -141,13 +146,6 @@ export interface DashboardRouteContext {
   mergeCheckout?(checkoutId: string, commandId: string): Promise<unknown>;
   retireCheckout?(checkoutId: string, commandId: string): Promise<unknown>;
   archiveThread?(threadId: string, commandId: string): Promise<unknown>;
-}
-
-function requestUrl(request: FastifyRequest): URL {
-  return new URL(
-    request.raw.url ?? '/',
-    `http://${request.headers.host ?? '127.0.0.1'}`,
-  );
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -304,6 +302,10 @@ export const dashboardRoutes: FastifyPluginAsync<{
         return { snapshot, cursor: snapshot.cursor };
       }),
     sessionSnapshot: context.sessionSnapshot,
+    shellFeed: context.shellFeed,
+    sessionFeeds: context.sessionFeeds,
+    shellSnapshotAt: context.shellSnapshotAt,
+    sessionSnapshotAt: context.sessionSnapshotAt,
   });
   app.setNotFoundHandler((_request, reply) =>
     reply.code(404).send({ error: 'Not found.' }),
@@ -315,16 +317,6 @@ export const dashboardRoutes: FastifyPluginAsync<{
     { schema: { response: { 200: Type.Object({ ok: Type.Boolean() }) } } },
     async () => ({ ok: true }),
   );
-  app.get('/api/events', async (request, reply) => {
-    // Hijacked replies bypass Fastify's normal header serialization. Copy the
-    // headers installed by the CORS hook so replay-gap responses remain
-    // readable when the dashboard switches between public and LAN daemons.
-    for (const [name, value] of Object.entries(reply.getHeaders())) {
-      if (value !== undefined) reply.raw.setHeader(name, value);
-    }
-    reply.hijack();
-    context.handleSse(request.raw, reply.raw, requestUrl(request));
-  });
   app.get('/api/workspaces', async () => ({
     workspaces: context.workspaces(),
   }));
