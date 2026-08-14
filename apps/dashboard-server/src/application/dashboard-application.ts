@@ -95,7 +95,7 @@ function compactPublicExtensionSurfaces(
     const statuses = (
       surface.viewModel as { statuses: Array<Record<string, unknown>> }
     ).statuses.map((status) => {
-      const { transcript, result, ...metadata } = status;
+      const { transcript: _transcript, result, ...metadata } = status;
       const compactResult =
         result && typeof result === 'object'
           ? (() => {
@@ -112,9 +112,6 @@ function compactPublicExtensionSurfaces(
       return {
         ...metadata,
         ...(compactResult === undefined ? {} : { result: compactResult }),
-        ...(Array.isArray(transcript) && transcript.length > 0
-          ? { transcriptTruncated: true }
-          : {}),
       };
     });
     return {

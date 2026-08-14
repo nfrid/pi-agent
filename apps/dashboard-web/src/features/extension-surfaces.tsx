@@ -240,13 +240,12 @@ export function overlayActiveDelegateTranscripts(
 export function shouldFetchDelegateDetail(
   run: Pick<DelegateCompositeRun, 'persisted' | 'live' | 'row'>,
 ): boolean {
-  if (run.persisted !== true || run.row.transcript?.length) return false;
-  // Active live-only data is authoritative while the child is running. Once
-  // a persisted row is settled, an absent/stripped live transcript must fall
-  // back to the durable detail endpoint.
-  return (
-    run.live !== true ||
-    !isActiveDelegateState(run.row.state, run.row.pauseState)
+  if (run.persisted !== true) return false;
+  // Active live data is authoritative while the child is running. Every
+  // persisted non-active run uses durable detail, even if its live overlay is
+  // partial or still retained after settlement.
+  return !(
+    run.live === true && isActiveDelegateState(run.row.state, run.row.pauseState)
   );
 }
 
