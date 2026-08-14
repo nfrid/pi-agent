@@ -149,6 +149,7 @@ export function SessionControlLayer({
   Composer,
   runtime,
   sessionChange,
+  store,
   runtimes,
   sessionId,
   workspaceId,
@@ -160,6 +161,7 @@ export function SessionControlLayer({
   Composer: ComponentType<SessionComposerProps>;
   runtime: RuntimeSnapshot | undefined;
   sessionChange: number;
+  store: DashboardLiveStore;
   runtimes: readonly RuntimeSnapshot[];
   sessionId: string;
   workspaceId: string | undefined;
@@ -181,6 +183,7 @@ export function SessionControlLayer({
         id={sessionId}
         runtime={runtime}
         sessionChange={sessionChange}
+        store={store}
       />
       <ExtensionSurfaceStack
         runtime={runtime}

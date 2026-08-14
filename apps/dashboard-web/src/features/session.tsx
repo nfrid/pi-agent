@@ -255,6 +255,7 @@ export function SessionView({
           Composer={Composer}
           runtime={runtime}
           sessionChange={sessionChange}
+          store={store}
           runtimes={snapshot.runtimes}
           sessionId={id}
           workspaceId={workspaceId}
