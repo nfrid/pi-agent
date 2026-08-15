@@ -190,15 +190,23 @@ export function useOlderSessionHistory({
   }, [clearPrependRestore, scrollElementRef, sessionMounted]);
 
   useEffect(() => {
-    if (data?.metadata.id !== id || !data.history) return;
+    if (data?.metadata.id !== id) return;
     const windowKey = sessionHistoryWindowKey(data.cursor, data.history);
     if (
       historySessionRef.current !== id ||
       historyWindowRef.current !== windowKey
     ) {
+      // A new authoritative window invalidates every page request based on
+      // the old range. Advance the generation before installing its metadata
+      // so an already-resolving page cannot prepend into the new baseline.
+      historyGenerationRef.current += 1;
+      historyRequestRef.current?.controller.abort();
+      historyRequestRef.current = undefined;
       historySessionRef.current = id;
       historyWindowRef.current = windowKey;
       clearPrependRestore();
+      setHistoryLoading(false);
+      setHistoryError(undefined);
       setHistory(data.history);
     }
   }, [clearPrependRestore, data, id]);
