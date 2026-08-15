@@ -105,8 +105,8 @@ describe('production tRPC feed procedures', () => {
                     /\r?\n\r?\n/.test(pendingText)
                   ) {
                     cut = true;
-                    feed.publishSemantic('invalidation', 1, { value: 1 });
-                    feed.publishSemantic('invalidation', 2, { value: 2 });
+                    feed.publishSemantic('usage', 1, { usage: { value: 1 } });
+                    feed.publishSemantic('usage', 2, { usage: { value: 2 } });
                     void reader.cancel();
                   }
                 },
@@ -146,7 +146,8 @@ describe('production tRPC feed procedures', () => {
                 payload &&
                 typeof payload === 'object' &&
                 'data' in payload &&
-                (payload as { data?: { value?: number } }).data?.value === 2
+                (payload as { data?: { usage?: { value?: number } } }).data
+                  ?.usage?.value === 2
               );
             })
           )
@@ -191,12 +192,12 @@ describe('production tRPC feed procedures', () => {
           expect.objectContaining({
             type: 'shell-event',
             sequence: 1,
-            data: { value: 1 },
+            data: { usage: { value: 1 } },
           }),
           expect.objectContaining({
             type: 'shell-event',
             sequence: 2,
-            data: { value: 2 },
+            data: { usage: { value: 2 } },
           }),
         ]),
       );
@@ -236,7 +237,7 @@ describe('production tRPC feed procedures', () => {
     const caughtUp = (await stream.next()).value as unknown[];
     const lastId = caughtUp[0] as string;
     for (let value = 1; value <= 4; value += 1)
-      feed.publishSemantic('invalidation', value, { value });
+      feed.publishSemantic('usage', value, { usage: { value } });
     await expect(stream.next()).rejects.toBeInstanceOf(Error);
     expect(feed.metrics().subscribers).toBe(0);
 
@@ -277,8 +278,8 @@ describe('production tRPC feed procedures', () => {
     await stream.next();
     const waiting = stream.next();
     expect(() =>
-      feed.publishSemantic('invalidation', 1, {
-        refresh: 'x'.repeat(2_000),
+      feed.publishSemantic('usage', 1, {
+        usage: 'x'.repeat(2_000),
       }),
     ).toThrow();
     await expect(waiting).rejects.toBeInstanceOf(Error);
@@ -330,7 +331,7 @@ describe('production tRPC feed procedures', () => {
     expect((caughtUp.value as unknown[])[1]).toMatchObject({
       type: 'caught-up',
     });
-    feed.publishSemantic('invalidation', 1, { refresh: true });
+    feed.publishSemantic('usage', 1, { usage: { refresh: true } });
     const live = await stream.next();
     expect((live.value as unknown[])[1]).toMatchObject({
       type: 'shell-event',

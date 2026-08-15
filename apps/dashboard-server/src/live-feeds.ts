@@ -2,10 +2,12 @@ import type {
   AuthoritativeSessionSnapshot,
   BridgeEvent,
   SessionFeedEvent,
+  ShellFeedData,
   ShellFeedDomain,
   ShellFeedEvent,
   ShellSnapshotResponse,
 } from '@pi-dashboard/protocol';
+import { projectShellInteraction } from './application/dashboard-application.js';
 import { BoundedFeed, type FeedBounds, type FeedMetrics } from './live-feed.js';
 
 export interface LiveFeedOptions extends FeedBounds {
@@ -32,7 +34,7 @@ export class ShellFeed extends BoundedFeed<
   publishSemantic(
     domain: ShellFeedDomain,
     revision: number,
-    data: unknown,
+    data: ShellFeedData,
     sessionId?: string,
     key?: string,
   ): void {
@@ -44,7 +46,7 @@ export class ShellFeed extends BoundedFeed<
         revision,
         ...(sessionId === undefined ? {} : { sessionId }),
         data,
-      },
+      } as ShellFeedEvent,
       key === undefined ? {} : { key },
     );
   }
@@ -173,58 +175,36 @@ export function sessionFeedKey(event: BridgeEvent): string | undefined {
 /** Only compact semantic state may cross the shell feed. */
 export function shellDomainForEvent(
   event: BridgeEvent,
-): ShellFeedDomain | undefined {
+): 'interaction' | undefined {
   switch (event.type) {
-    case 'message.started':
-    case 'message.updated':
-    case 'message.finished':
-    case 'tool.started':
-    case 'tool.updated':
-    case 'tool.finished':
-    case 'delegate.transcript.updated':
-      return undefined;
     case 'interaction.requested':
     case 'interaction.resolved':
       return 'interaction';
-    case 'runtime.hello':
-    case 'runtime.goodbye':
-    case 'runtime.stateChanged':
-    case 'runtime.heartbeat':
-    case 'agent.settled':
-      return 'runtime';
-    case 'session.changed':
-    case 'session.snapshot':
-    case 'session.compacted':
-      return 'session-index';
     default:
+      // Message, tool, and delegate transcript activity is session-feed only.
+      // Runtime shell changes are detected from the compact runtime snapshot.
       return undefined;
   }
 }
 
-export function compactShellEventData(event: BridgeEvent): unknown {
+export function compactShellEventData(
+  event: BridgeEvent,
+  runtimeId: string,
+): Extract<ShellFeedData, { kind: string }> {
   switch (event.type) {
-    case 'runtime.hello':
-      return {
-        runtimeId: event.snapshot.runtimeId,
-        liveState: event.snapshot.liveState,
-      };
-    case 'runtime.goodbye':
-      return { reason: event.reason };
-    case 'runtime.stateChanged':
-    case 'runtime.heartbeat':
-      return { state: event.state };
     case 'interaction.requested':
-      return { interactionId: event.interaction.id };
+      return {
+        kind: 'upsert',
+        runtimeId,
+        interaction: projectShellInteraction(event.interaction),
+      } as Extract<ShellFeedData, { kind: 'upsert'; interaction: unknown }>;
     case 'interaction.resolved':
-      return { interactionId: event.interactionId };
-    case 'agent.settled':
-      return { settled: true };
-    case 'session.changed':
-    case 'session.snapshot':
-      return { sessionId: event.session.id };
-    case 'session.compacted':
-      return { sessionId: event.sessionId };
+      return {
+        kind: 'remove',
+        runtimeId,
+        interactionId: event.interactionId,
+      };
     default:
-      return { changed: true };
+      throw new Error(`Event ${event.type} has no shell patch.`);
   }
 }

@@ -199,9 +199,9 @@ describe('DashboardConnectionRuntime', () => {
       data: {
         type: 'shell-event',
         sequence: 2,
-        domain: 'invalidation',
+        domain: 'usage',
         revision: 2,
-        data: { refresh: true },
+        data: { usage: { refresh: true } },
       },
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -461,11 +461,7 @@ describe('DashboardConnectionRuntime', () => {
     stop();
   });
 
-  it('drains a shell refresh race and waits for caught-up coverage', async () => {
-    let resolveFirst!: () => void;
-    const firstReady = new Promise<void>((resolve) => {
-      resolveFirst = resolve;
-    });
+  it('applies a burst of shell patches without finite snapshot reads', async () => {
     let reads = 0;
     let shellObserver: Observer | undefined;
     const client = {
@@ -482,7 +478,6 @@ describe('DashboardConnectionRuntime', () => {
       }),
       snapshot: async () => {
         reads += 1;
-        if (reads === 1) await firstReady;
         return shellSnapshot(reads);
       },
     };
@@ -495,36 +490,33 @@ describe('DashboardConnectionRuntime', () => {
     const stop = runtime.start();
     await new Promise((resolve) => setTimeout(resolve, 0));
     shellObserver?.onData({
-      id: 'shell-one',
+      id: 'shell-zero',
       data: {
-        type: 'shell-event',
-        sequence: 1,
-        domain: 'invalidation',
-        revision: 1,
-        data: { refresh: true },
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: { snapshot: shellSnapshot(0), cursor: 0 },
       },
     });
-    shellObserver?.onData({
-      id: 'shell-two',
-      data: {
-        type: 'shell-event',
-        sequence: 2,
-        domain: 'invalidation',
-        revision: 2,
-        data: { refresh: true },
-      },
-    });
+    for (let sequence = 1; sequence <= 32; sequence += 1)
+      shellObserver?.onData({
+        id: `shell-${sequence}`,
+        data: {
+          type: 'shell-event',
+          sequence,
+          domain: 'usage',
+          revision: sequence,
+          data: { usage: { refresh: sequence } },
+        },
+      });
     shellObserver?.onData({
       id: 'shell-caught-up',
-      data: { type: 'caught-up', sequence: 2 },
+      data: { type: 'caught-up', sequence: 32 },
     });
-    expect(store.getSnapshot().shellSync.status).toBe('synchronizing');
-    resolveFirst();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(reads).toBe(2);
-    expect(store.getSnapshot().snapshotCursor).toBe(2);
+    expect(store.getSnapshot().usage).toEqual({ refresh: 32 });
+    expect(store.getSnapshot().shellSync.sequence).toBe(32);
     expect(store.getSnapshot().shellSync.status).toBe('live');
+    expect(store.getSnapshot().snapshotCursor).toBe(0);
+    expect(reads).toBe(0);
     stop();
   });
 

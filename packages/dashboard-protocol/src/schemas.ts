@@ -31,6 +31,8 @@ import {
   MAX_DELEGATE_HISTORY_TASK,
   MAX_ID,
   MAX_PATH,
+  MAX_SESSION_INDEX_DELTA_ITEMS,
+  MAX_SHELL_INDEX_ITEMS,
   MAX_TEXT,
 } from './limits.js';
 import {
@@ -307,6 +309,7 @@ export const InteractionSnapshotSchema = Type.Object(
   { additionalProperties: false },
 );
 type InteractionSnapshotStatic = Static<typeof InteractionSnapshotSchema>;
+/** Keep the public snapshot assignable from readonly runtime broker choices. */
 export type InteractionSnapshot = Omit<InteractionSnapshotStatic, 'choices'> & {
   readonly choices: readonly InteractionChoice[];
 };
@@ -1144,6 +1147,27 @@ export const NotificationEventSchema = Type.Object(
 );
 export type NotificationEvent = Static<typeof NotificationEventSchema>;
 
+export const ShellProjectionDomainSchema = Type.Union([
+  Type.Literal('workspaces'),
+  Type.Literal('projects'),
+  Type.Literal('checkouts'),
+  Type.Literal('threads'),
+  Type.Literal('runs'),
+  Type.Literal('unread'),
+]);
+export type ShellProjectionDomain = Static<typeof ShellProjectionDomainSchema>;
+/** Describes catalogue entities omitted to fit the aggregate shell budget. */
+export const ShellProjectionSchema = Type.Object(
+  {
+    truncated: Type.Boolean(),
+    omitted: Type.Readonly(
+      Type.Array(ShellProjectionDomainSchema, { maxItems: 6 }),
+    ),
+  },
+  { additionalProperties: false },
+);
+export type ShellProjection = Static<typeof ShellProjectionSchema>;
+
 export const BrowserSnapshotSchema = Type.Object(
   {
     /** Changes whenever the dashboard daemon process restarts. */
@@ -1166,6 +1190,8 @@ export const BrowserSnapshotSchema = Type.Object(
     runs: Type.Optional(Type.Array(RunSummarySchema, { maxItems: 4096 })),
     usage: Type.Optional(UnknownSchema),
     unread: Type.Array(NotificationEventSchema),
+    /** Present on shell projections; omitted on full compatibility snapshots. */
+    shellProjection: Type.Optional(ShellProjectionSchema),
   },
   { additionalProperties: false },
 );
@@ -1197,7 +1223,7 @@ export type BrowserSnapshot = Omit<
  * transcript entry. The old BrowserSnapshot schema remains unchanged for the
  * websocket/SSE and bootstrap rollout path.
  */
-const ShellRuntimeSnapshotSchema = Type.Object(
+export const ShellRuntimeSnapshotSchema = Type.Object(
   {
     ...RuntimeSnapshotProperties,
     session: Type.Object(
@@ -1219,24 +1245,84 @@ const ShellRuntimeSnapshotSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+export type ShellRuntimeSnapshot = Static<typeof ShellRuntimeSnapshotSchema>;
+
+/** Bounded JSON-like usage data allowed on shell feed patches. */
+const ShellUsageScalarSchema = Type.Union([
+  Type.String({ maxLength: MAX_TEXT }),
+  Type.Number(),
+  Type.Boolean(),
+  Type.Null(),
+]);
+const ShellUsageDepth0Schema = ShellUsageScalarSchema;
+const ShellUsageDepth1Schema = Type.Union([
+  ShellUsageScalarSchema,
+  Type.Readonly(Type.Array(ShellUsageDepth0Schema, { maxItems: 128 })),
+  Type.Record(Type.String({ maxLength: 128 }), ShellUsageDepth0Schema, {
+    maxProperties: 128,
+  }),
+]);
+const ShellUsageDepth2Schema = Type.Union([
+  ShellUsageScalarSchema,
+  Type.Readonly(Type.Array(ShellUsageDepth1Schema, { maxItems: 128 })),
+  Type.Record(Type.String({ maxLength: 128 }), ShellUsageDepth1Schema, {
+    maxProperties: 128,
+  }),
+]);
+const ShellUsageDepth3Schema = Type.Union([
+  ShellUsageScalarSchema,
+  Type.Readonly(Type.Array(ShellUsageDepth2Schema, { maxItems: 128 })),
+  Type.Record(Type.String({ maxLength: 128 }), ShellUsageDepth2Schema, {
+    maxProperties: 128,
+  }),
+]);
+const ShellUsageDepth4Schema = Type.Union([
+  ShellUsageScalarSchema,
+  Type.Readonly(Type.Array(ShellUsageDepth3Schema, { maxItems: 128 })),
+  Type.Record(Type.String({ maxLength: 128 }), ShellUsageDepth3Schema, {
+    maxProperties: 128,
+  }),
+]);
+export const ShellUsageSchema = Type.Union([
+  ShellUsageScalarSchema,
+  Type.Readonly(Type.Array(ShellUsageDepth4Schema, { maxItems: 128 })),
+  Type.Record(Type.String({ maxLength: 128 }), ShellUsageDepth4Schema, {
+    maxProperties: 128,
+  }),
+]);
+export type ShellUsage = Static<typeof ShellUsageSchema>;
+
 export const ShellSnapshotSchema = Type.Object(
   {
     serverId: Type.String({ minLength: 1, maxLength: 512 }),
     revision: Type.Integer({ minimum: 0 }),
     cursor: Type.Integer({ minimum: 0 }),
-    runtimes: Type.Array(ShellRuntimeSnapshotSchema, { maxItems: 4096 }),
-    workspaces: Type.Array(WorkspaceTargetSchema, { maxItems: 4096 }),
-    sessions: Type.Array(SessionIndexEntrySchema, { maxItems: 4096 }),
+    runtimes: Type.Array(ShellRuntimeSnapshotSchema, {
+      maxItems: MAX_SHELL_INDEX_ITEMS,
+    }),
+    workspaces: Type.Array(WorkspaceTargetSchema, {
+      maxItems: MAX_SHELL_INDEX_ITEMS,
+    }),
+    sessions: Type.Array(SessionIndexEntrySchema, {
+      maxItems: MAX_SHELL_INDEX_ITEMS,
+    }),
     projects: Type.Optional(
-      Type.Array(ProjectSummarySchema, { maxItems: 4096 }),
+      Type.Array(ProjectSummarySchema, { maxItems: MAX_SHELL_INDEX_ITEMS }),
     ),
     checkouts: Type.Optional(
-      Type.Array(CheckoutSummarySchema, { maxItems: 4096 }),
+      Type.Array(CheckoutSummarySchema, { maxItems: MAX_SHELL_INDEX_ITEMS }),
     ),
-    threads: Type.Optional(Type.Array(ThreadSummarySchema, { maxItems: 4096 })),
-    runs: Type.Optional(Type.Array(RunSummarySchema, { maxItems: 4096 })),
-    usage: Type.Optional(UnknownSchema),
-    unread: Type.Array(NotificationEventSchema, { maxItems: 4096 }),
+    threads: Type.Optional(
+      Type.Array(ThreadSummarySchema, { maxItems: MAX_SHELL_INDEX_ITEMS }),
+    ),
+    runs: Type.Optional(
+      Type.Array(RunSummarySchema, { maxItems: MAX_SHELL_INDEX_ITEMS }),
+    ),
+    usage: Type.Optional(ShellUsageSchema),
+    unread: Type.Array(NotificationEventSchema, {
+      maxItems: MAX_SHELL_INDEX_ITEMS,
+    }),
+    shellProjection: Type.Optional(ShellProjectionSchema),
   },
   { additionalProperties: false },
 );
@@ -1723,21 +1809,190 @@ export const ShellFeedDomainSchema = Type.Union([
   Type.Literal('workspace'),
   Type.Literal('orchestration'),
   Type.Literal('usage'),
-  Type.Literal('invalidation'),
 ]);
 export type ShellFeedDomain = Static<typeof ShellFeedDomainSchema>;
-export const ShellFeedEventSchema = Type.Object(
+
+const ShellFeedEventProperties = {
+  type: Type.Literal('shell-event'),
+  sequence: Type.Integer({ minimum: 0 }),
+  revision: Type.Integer({ minimum: 0 }),
+  sessionId: Type.Optional(IdentifierSchema),
+};
+const ShellRuntimePatchSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal('upsert'),
+      runtime: ShellRuntimeSnapshotSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal('remove'),
+      runtimeId: IdentifierSchema,
+    },
+    { additionalProperties: false },
+  ),
+]);
+const ShellInteractionPatchSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal('upsert'),
+      runtimeId: IdentifierSchema,
+      interaction: InteractionSnapshotSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal('remove'),
+      runtimeId: IdentifierSchema,
+      interactionId: IdentifierSchema,
+    },
+    { additionalProperties: false },
+  ),
+]);
+const ShellSessionIndexDeltaSchema = Type.Object(
   {
-    type: Type.Literal('shell-event'),
-    sequence: Type.Integer({ minimum: 0 }),
-    domain: ShellFeedDomainSchema,
-    revision: Type.Integer({ minimum: 0 }),
-    sessionId: Type.Optional(IdentifierSchema),
-    /** Domain-specific semantic data; transcript payloads are forbidden by routing. */
-    data: Type.Unknown(),
+    kind: Type.Literal('delta'),
+    upsert: Type.Readonly(
+      Type.Array(SessionIndexEntrySchema, {
+        maxItems: MAX_SESSION_INDEX_DELTA_ITEMS,
+      }),
+    ),
+    remove: Type.Readonly(
+      Type.Array(IdentifierSchema, {
+        maxItems: MAX_SESSION_INDEX_DELTA_ITEMS,
+      }),
+    ),
   },
   { additionalProperties: false },
 );
+const ShellSessionIndexReplaceSchema = Type.Object(
+  {
+    kind: Type.Literal('replace'),
+    sessions: Type.Readonly(
+      Type.Array(SessionIndexEntrySchema, { maxItems: MAX_SHELL_INDEX_ITEMS }),
+    ),
+  },
+  { additionalProperties: false },
+);
+const ShellSessionIndexPatchSchema = Type.Union([
+  ShellSessionIndexDeltaSchema,
+  ShellSessionIndexReplaceSchema,
+]);
+const ShellWorkspacePatchSchema = Type.Object(
+  {
+    workspaces: Type.Readonly(
+      Type.Array(WorkspaceTargetSchema, { maxItems: MAX_SHELL_INDEX_ITEMS }),
+    ),
+    shellProjection: Type.Optional(ShellProjectionSchema),
+  },
+  { additionalProperties: false },
+);
+const ShellOrchestrationPatchSchema = Type.Object(
+  {
+    projects: Type.Readonly(
+      Type.Array(ProjectSummarySchema, { maxItems: MAX_SHELL_INDEX_ITEMS }),
+    ),
+    checkouts: Type.Readonly(
+      Type.Array(CheckoutSummarySchema, { maxItems: MAX_SHELL_INDEX_ITEMS }),
+    ),
+    threads: Type.Readonly(
+      Type.Array(ThreadSummarySchema, { maxItems: MAX_SHELL_INDEX_ITEMS }),
+    ),
+    runs: Type.Readonly(
+      Type.Array(RunSummarySchema, { maxItems: MAX_SHELL_INDEX_ITEMS }),
+    ),
+    shellProjection: Type.Optional(ShellProjectionSchema),
+  },
+  { additionalProperties: false },
+);
+const ShellNotificationPatchSchema = Type.Object(
+  {
+    unread: Type.Readonly(
+      Type.Array(NotificationEventSchema, { maxItems: MAX_SHELL_INDEX_ITEMS }),
+    ),
+    shellProjection: Type.Optional(ShellProjectionSchema),
+  },
+  { additionalProperties: false },
+);
+const ShellUsagePatchSchema = Type.Object(
+  {
+    usage: Type.Optional(ShellUsageSchema),
+    shellProjection: Type.Optional(ShellProjectionSchema),
+  },
+  { additionalProperties: false },
+);
+
+export const ShellFeedDataSchema = Type.Union([
+  ShellRuntimePatchSchema,
+  ShellInteractionPatchSchema,
+  ShellSessionIndexPatchSchema,
+  ShellWorkspacePatchSchema,
+  ShellOrchestrationPatchSchema,
+  ShellNotificationPatchSchema,
+  ShellUsagePatchSchema,
+]);
+export const ShellFeedEventSchema = Type.Union([
+  Type.Object(
+    {
+      ...ShellFeedEventProperties,
+      domain: Type.Literal('runtime'),
+      data: ShellRuntimePatchSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...ShellFeedEventProperties,
+      domain: Type.Literal('interaction'),
+      data: ShellInteractionPatchSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...ShellFeedEventProperties,
+      domain: Type.Literal('session-index'),
+      data: ShellSessionIndexPatchSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...ShellFeedEventProperties,
+      domain: Type.Literal('workspace'),
+      data: ShellWorkspacePatchSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...ShellFeedEventProperties,
+      domain: Type.Literal('orchestration'),
+      data: ShellOrchestrationPatchSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...ShellFeedEventProperties,
+      domain: Type.Literal('notification'),
+      data: ShellNotificationPatchSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...ShellFeedEventProperties,
+      domain: Type.Literal('usage'),
+      data: ShellUsagePatchSchema,
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type ShellFeedData = Static<typeof ShellFeedDataSchema>;
 export type ShellFeedEvent = Static<typeof ShellFeedEventSchema>;
 
 export const ShellFeedSnapshotSchema = Type.Object(

@@ -136,14 +136,9 @@ export class DashboardConnectionRuntime {
   private shellSequence = 0;
   private shellSequenceKnown = false;
   private shellSnapshotId?: FeedCursorValue;
-  private shellSnapshotCoverage = 0;
-  private shellRefreshTarget = 0;
-  private shellRefreshNeeded = false;
-  private shellCaughtUpTarget?: number;
   private shellOpening = 0;
   private shellSubscription?: Subscription;
   private shellRebasing = false;
-  private shellRefresh?: Promise<void>;
   private sessions = new Map<string, DomainEntry>();
   private hiddenAt?: number;
   private listenersInstalled = false;
@@ -321,10 +316,6 @@ export class DashboardConnectionRuntime {
     this.shellSequence = 0;
     this.shellSequenceKnown = false;
     this.shellSnapshotId = undefined;
-    this.shellSnapshotCoverage = 0;
-    this.shellRefreshTarget = 0;
-    this.shellRefreshNeeded = false;
-    this.shellCaughtUpTarget = undefined;
     this.shellRebasing = false;
     this.store.beginShellSync(this.shellGeneration);
   }
@@ -389,24 +380,13 @@ export class DashboardConnectionRuntime {
       this.shellSequence = sequence;
       this.shellSequenceKnown = true;
       this.shellSnapshotId = tracked.id;
-      this.shellSnapshotCoverage = Math.max(
-        this.shellSnapshotCoverage,
-        payload.snapshot.cursor,
-      );
-      if (this.shellSnapshotCoverage >= this.shellRefreshTarget)
-        this.shellRefreshNeeded = false;
       this.store.acceptShellSnapshot(
         payload.snapshot.snapshot,
-        payload.snapshot.cursor,
+        sequence,
         this.shellGeneration,
         true,
       );
       if (serverChanged) this.reacquireSessions();
-      if (
-        this.shellCaughtUpTarget !== undefined &&
-        this.shellSnapshotCoverage >= this.shellCaughtUpTarget
-      )
-        this.store.completeShellSync(this.shellCaughtUpTarget);
       return;
     }
     if (isCaughtUp(payload)) {
@@ -417,10 +397,8 @@ export class DashboardConnectionRuntime {
       }
       this.shellSequence = sequence;
       this.shellSequenceKnown = true;
-      this.shellCaughtUpTarget = sequence;
-      if (this.shellSnapshotCoverage >= sequence)
+      if (this.store.getSnapshot().shellSync.status !== 'live')
         this.store.completeShellSync(sequence);
-      else void this.drainShellRefresh();
       return;
     }
     if (this.shellSequenceKnown && sequence <= this.shellSequence) return;
@@ -428,64 +406,14 @@ export class DashboardConnectionRuntime {
       this.rebaseShell();
       return;
     }
+    // A contiguous shell event is the complete state transition. There is no
+    // finite shellSnapshot fallback in the live path.
+    if (!this.store.acceptShellEvent(payload, this.shellGeneration)) {
+      this.rebaseShell();
+      return;
+    }
     this.shellSequence = sequence;
     this.shellSequenceKnown = true;
-    this.shellRefreshTarget = Math.max(this.shellRefreshTarget, sequence);
-    this.shellRefreshNeeded = true;
-    if (this.store.getSnapshot().shellSync.status !== 'synchronizing')
-      this.store.beginShellSync(
-        this.shellGeneration,
-        this.shellSnapshotCoverage,
-      );
-    void this.drainShellRefresh();
-  }
-
-  /** Drain one semantic refresh and at most one follow-up for a burst. */
-  private async drainShellRefresh(): Promise<void> {
-    if (this.shellRefresh || !this.started) return;
-    const generation = this.shellGeneration;
-    const run = (async () => {
-      for (let read = 0; read < 2; read += 1) {
-        const target = Math.max(
-          this.shellRefreshTarget,
-          this.shellCaughtUpTarget ?? 0,
-        );
-        if (!this.shellRefreshNeeded && this.shellSnapshotCoverage >= target) {
-          if (this.shellCaughtUpTarget !== undefined)
-            this.store.completeShellSync(this.shellCaughtUpTarget);
-          return;
-        }
-        const snapshot = await this.client.snapshot();
-        if (!this.started || generation !== this.shellGeneration) return;
-        // The authoritative cursor is the feed coverage. Never label an old
-        // finite read with a newer event sequence captured while it awaited.
-        this.shellSnapshotCoverage = Math.max(
-          this.shellSnapshotCoverage,
-          snapshot.cursor,
-        );
-        this.store.acceptShellSnapshot(snapshot, snapshot.cursor, generation);
-        const latestTarget = Math.max(
-          this.shellRefreshTarget,
-          this.shellCaughtUpTarget ?? 0,
-        );
-        if (this.shellSnapshotCoverage >= latestTarget) {
-          this.shellRefreshNeeded = false;
-          if (this.shellCaughtUpTarget !== undefined)
-            this.store.completeShellSync(this.shellCaughtUpTarget);
-          return;
-        }
-      }
-      // A stale finite read is not retried indefinitely. A later semantic
-      // event starts another bounded drain.
-    })();
-    this.shellRefresh = run;
-    try {
-      await run;
-    } catch (error) {
-      if (this.started) this.store.failShellSync(messageError(error));
-    } finally {
-      if (this.shellRefresh === run) this.shellRefresh = undefined;
-    }
   }
 
   private reacquireSessions(): void {

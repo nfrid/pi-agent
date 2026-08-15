@@ -657,7 +657,9 @@ export class RuntimeRegistry {
     record.snapshot = {
       ...reducedState.snapshot,
       online: true,
-      lastSeenAt: Date.now(),
+      // Keep heartbeat recency strictly advancing even when multiple bridge
+      // frames arrive within one clock tick.
+      lastSeenAt: Math.max(Date.now(), (record.snapshot.lastSeenAt ?? 0) + 1),
     };
     // lastSeenAt and online are transport-owned observations, but keeping them
     // in reducer state makes the next event a pure continuation of this one.

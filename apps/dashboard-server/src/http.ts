@@ -17,8 +17,13 @@ import {
   type DelegateLiveRun,
   MAX_ID,
   MAX_SESSION_INDEX_DELTA_ITEMS,
+  MAX_SHELL_INDEX_ITEMS,
+  MAX_SHELL_SNAPSHOT_BYTES,
   PROTOCOL_VERSION,
   type RuntimeSnapshot,
+  type ShellFeedData,
+  type ShellFeedDomain,
+  type ShellRuntimeSnapshot,
   tryParseActiveDelegateTranscriptBaseline,
   tryParseDelegateTranscriptEntry,
   validateBridgeCommand,
@@ -26,7 +31,11 @@ import {
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { projectPublicBridgeEvent } from './application/dashboard-application.js';
+import {
+  projectPublicBridgeEvent,
+  type SessionMetadataDelta,
+  shellRuntime,
+} from './application/dashboard-application.js';
 import type {
   DashboardDependencies,
   DashboardServerOptions,
@@ -44,6 +53,33 @@ import type { RegistryChange } from './runtime-registry.js';
 
 /** Keep session deltas comfortably below the authoritative frame limit. */
 const MAX_SESSION_INDEX_DELTA_BYTES = 1_500_000;
+
+function shellRuntimeComparison(
+  runtime: ShellRuntimeSnapshot,
+  suppressHeartbeat: boolean,
+): unknown {
+  if (!suppressHeartbeat) return runtime;
+  const { lastSeenAt: _lastSeenAt, ...stable } = runtime;
+  return stable;
+}
+
+function transcriptOnlyShellEvent(event: BridgeEvent): boolean {
+  switch (event.type) {
+    case 'message.started':
+    case 'message.updated':
+    case 'message.finished':
+    case 'tool.started':
+    case 'tool.updated':
+    case 'tool.finished':
+    case 'delegate.transcript.updated':
+    case 'session.changed':
+    case 'session.snapshot':
+    case 'session.compacted':
+      return true;
+    default:
+      return false;
+  }
+}
 
 function validDelegateIdentifier(value: unknown): value is string {
   return (
@@ -224,6 +260,13 @@ export class DashboardServerImpl implements DashboardServer {
   private startPromise: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
   private feedSweepTimer: NodeJS.Timeout | undefined;
+  /** Last concrete shell state sent for each independently coalesced patch. */
+  private readonly shellPatchSignatures = new Map<string, string>();
+  /** Runtime signatures retain both heartbeat recency and stable shell state. */
+  private readonly shellRuntimeSignatures = new Map<
+    string,
+    { stable: string; full: string }
+  >();
 
   constructor(dependencies: DashboardDependencies) {
     const config = dependencies.configuration;
@@ -516,9 +559,50 @@ export class DashboardServerImpl implements DashboardServer {
       );
       this.feedSweepTimer.unref();
       this.lifecycle = 'started';
+      // The first subscription snapshot is authoritative. Seed runtime patch
+      // signatures so transcript-only callbacks cannot echo the same runtime.
+      for (const runtime of this.registry.snapshots()) {
+        const compacted = shellRuntime(runtime) as ShellRuntimeSnapshot;
+        const stable = JSON.stringify({
+          kind: 'upsert',
+          runtime: shellRuntimeComparison(compacted, true),
+        });
+        this.shellPatchSignatures.set(`runtime:${runtime.runtimeId}`, stable);
+        this.shellRuntimeSignatures.set(`runtime:${runtime.runtimeId}`, {
+          stable,
+          full: JSON.stringify({ kind: 'upsert', runtime: compacted }),
+        });
+      }
       // Startup callbacks are suppressed while the workspace and session
-      // state is being assembled. Publish one authoritative initial snapshot.
-      this.changed();
+      // state is being assembled. The subscription's initial snapshot is the
+      // authority; retain one concrete event for the historical cursor.
+      try {
+        const projection = this.application.shellProjection();
+        this.seedApplicationDomainSignatures(projection);
+        this.shellPatchSignatures.delete('workspace');
+        this.publishShellPatch(
+          'workspace',
+          {
+            workspaces: projection.workspaces,
+            shellProjection: projection.shellProjection,
+          },
+          undefined,
+          'workspace',
+        );
+      } catch (error) {
+        // Keep startup available so the shell endpoint can report an explicit
+        // hard-capacity failure for an oversized authoritative session index.
+        if (
+          !(
+            error instanceof Error &&
+            (error.message ===
+              'The authoritative session index exceeds shell capacity.' ||
+              error.message ===
+                'The authoritative shell snapshot exceeds its frame limit.')
+          )
+        )
+          throw error;
+      }
     } catch (error) {
       await this.cleanupFailedStart();
       this.lifecycle = 'stopped';
@@ -612,6 +696,18 @@ export class DashboardServerImpl implements DashboardServer {
   async refreshWorkspaces(): Promise<WorkspaceTarget[]> {
     const workspaces = await this.application.refreshWorkspaces();
     this.workspaces = workspaces;
+    if (this.lifecycle === 'started') {
+      const projection = this.application.shellProjection();
+      this.publishShellPatch(
+        'workspace',
+        {
+          workspaces: projection.workspaces,
+          shellProjection: projection.shellProjection,
+        },
+        undefined,
+        'workspace',
+      );
+    }
     return workspaces;
   }
 
@@ -746,11 +842,11 @@ export class DashboardServerImpl implements DashboardServer {
   public handleRegistryChange(change: RegistryChange): void {
     const applicationChange = this.application.onRegistryChange(change);
     if (this.lifecycle !== 'started') return;
-    this.revision += 1;
     const sessionId = change.snapshot.session.id;
     const runtimeGone =
-      change.kind === 'offline' ||
-      (change.kind === 'event' && change.event.type === 'runtime.goodbye');
+      change.kind === 'event' &&
+      change.event.type === 'runtime.goodbye' &&
+      this.registry.get(change.snapshot.runtimeId) === undefined;
     this.sessionFeeds.setActive(sessionId, !runtimeGone);
     if (applicationChange.type === 'event') {
       const event = projectPublicBridgeEvent(
@@ -779,52 +875,54 @@ export class DashboardServerImpl implements DashboardServer {
       }
       const domain = shellDomainForEvent(event);
       if (domain !== undefined) {
-        try {
-          this.shellFeed.publishSemantic(
-            domain,
-            this.revision,
-            compactShellEventData(event),
-            sessionId,
-            `runtime:${sessionId}:${domain}`,
-          );
-        } catch {
-          // The authoritative shell snapshot is the recovery path.
-        }
+        this.publishShellPatch(
+          domain,
+          compactShellEventData(event, change.snapshot.runtimeId),
+          sessionId,
+          `runtime:${sessionId}:${domain}`,
+        );
       }
-      return;
-    }
-    const hello = projectPublicBridgeEvent({
-      type: 'runtime.hello',
-      protocolVersion: PROTOCOL_VERSION,
-      snapshot: change.snapshot,
-    } as BridgeEvent);
-    try {
-      this.sessionFeeds.publish(sessionId, hello, {
-        runtimeId: change.snapshot.runtimeId,
-        ...(change.runtimeEpoch === undefined
-          ? {}
-          : { runtimeEpoch: change.runtimeEpoch }),
-        ...(change.runtimeSeq === undefined
-          ? {}
-          : { runtimeSeq: change.runtimeSeq }),
-      });
-    } catch {
-      // A reconnect always has the authoritative session snapshot fallback.
-    }
-    try {
-      this.shellFeed.publishSemantic(
-        'runtime',
-        this.revision,
-        {
+    } else {
+      const hello = projectPublicBridgeEvent({
+        type: 'runtime.hello',
+        protocolVersion: PROTOCOL_VERSION,
+        snapshot: change.snapshot,
+      } as BridgeEvent);
+      try {
+        this.sessionFeeds.publish(sessionId, hello, {
           runtimeId: change.snapshot.runtimeId,
-          liveState: change.snapshot.liveState,
-        },
-        sessionId,
-        `runtime:${sessionId}:lifecycle`,
-      );
-    } catch {
-      // The authoritative shell snapshot is the recovery path.
+          ...(change.runtimeEpoch === undefined
+            ? {}
+            : { runtimeEpoch: change.runtimeEpoch }),
+          ...(change.runtimeSeq === undefined
+            ? {}
+            : { runtimeSeq: change.runtimeSeq }),
+        });
+      } catch {
+        // A reconnect always has the authoritative session snapshot fallback.
+      }
     }
+
+    if (runtimeGone) {
+      const runtimeKey = `runtime:${change.snapshot.runtimeId}`;
+      this.shellRuntimeSignatures.delete(runtimeKey);
+      this.publishShellPatch(
+        'runtime',
+        { kind: 'remove', runtimeId: change.snapshot.runtimeId },
+        sessionId,
+        runtimeKey,
+      );
+    } else
+      this.publishRuntimePatch(
+        change.snapshot,
+        sessionId,
+        change.kind === 'event' && !transcriptOnlyShellEvent(change.event),
+      );
+    this.publishSessionIndexDelta(this.application.sessionMetadataDelta());
+    // Registry callbacks may also update notifications or orchestration. The
+    // concrete signatures suppress host.changed() amplification when they do
+    // not alter shell-visible state.
+    this.publishApplicationDomains();
   }
 
   public publishChange(message?: unknown): void {
@@ -834,63 +932,188 @@ export class DashboardServerImpl implements DashboardServer {
 
   public publishSessionIndexChange(): void {
     if (this.lifecycle !== 'started') return;
-    const delta = this.application.sessionMetadataDelta();
+    this.publishSessionIndexDelta(this.application.sessionMetadataDelta());
+  }
+
+  private publishSessionIndexDelta(
+    delta: SessionMetadataDelta | undefined,
+  ): void {
     if (!delta) return;
     const tooLarge =
       delta.upsert.length > MAX_SESSION_INDEX_DELTA_ITEMS ||
       delta.remove.length > MAX_SESSION_INDEX_DELTA_ITEMS ||
       Buffer.byteLength(JSON.stringify(delta), 'utf8') >=
         MAX_SESSION_INDEX_DELTA_BYTES;
-    this.revision += 1;
-    try {
-      this.shellFeed.publishSemantic(
-        'session-index',
-        this.revision,
-        tooLarge ? { refresh: true } : delta,
-        undefined,
-        'session-index',
+    const sessions = this.application.sessionMetadata();
+    if (sessions.length > MAX_SHELL_INDEX_ITEMS)
+      throw new Error(
+        'The authoritative session index exceeds shell capacity.',
       );
-    } catch {
-      // The next shell subscription starts from an authoritative snapshot.
-    }
+    const data: ShellFeedData = (
+      tooLarge
+        ? { kind: 'replace', sessions }
+        : {
+            kind: 'delta',
+            upsert: delta.upsert,
+            remove: delta.remove,
+          }
+    ) as ShellFeedData;
+    if (
+      Buffer.byteLength(JSON.stringify(data), 'utf8') > MAX_SHELL_SNAPSHOT_BYTES
+    )
+      throw new Error(
+        'The authoritative session index exceeds its frame limit.',
+      );
+    this.publishShellPatch('session-index', data, undefined, 'session-index');
   }
 
-  private changed(message?: unknown): void {
+  private publishRuntimePatch(
+    runtime: RuntimeSnapshot,
+    sessionId: string,
+    includeHeartbeat: boolean,
+  ): void {
+    const compacted = shellRuntime(runtime) as ShellRuntimeSnapshot;
+    const key = `runtime:${runtime.runtimeId}`;
+    const stable = JSON.stringify({
+      kind: 'upsert',
+      runtime: shellRuntimeComparison(compacted, true),
+    });
+    const full = JSON.stringify({ kind: 'upsert', runtime: compacted });
+    const prior = this.shellRuntimeSignatures.get(key);
+    if (
+      prior?.[includeHeartbeat ? 'full' : 'stable'] ===
+      (includeHeartbeat ? full : stable)
+    )
+      return;
+    this.publishShellPatch(
+      'runtime',
+      { kind: 'upsert', runtime: compacted },
+      sessionId,
+      key,
+      includeHeartbeat ? full : stable,
+    );
+    this.shellRuntimeSignatures.set(key, { stable, full });
+  }
+
+  private seedApplicationDomainSignatures(
+    projection = this.application.shellProjection(),
+  ): void {
+    this.shellPatchSignatures.set(
+      'workspace',
+      JSON.stringify({
+        workspaces: projection.workspaces,
+        shellProjection: projection.shellProjection,
+      }),
+    );
+    this.shellPatchSignatures.set(
+      'orchestration',
+      JSON.stringify({
+        projects: projection.projects,
+        checkouts: projection.checkouts,
+        threads: projection.threads,
+        runs: projection.runs,
+        shellProjection: projection.shellProjection,
+      }),
+    );
+    this.shellPatchSignatures.set(
+      'usage',
+      JSON.stringify({
+        usage: projection.usage,
+        shellProjection: projection.shellProjection,
+      }),
+    );
+    this.shellPatchSignatures.set(
+      'notification',
+      JSON.stringify({
+        unread: projection.unread,
+        shellProjection: projection.shellProjection,
+      }),
+    );
+  }
+
+  private publishApplicationDomains(): void {
+    const projection = this.application.shellProjection();
+    this.publishShellPatch(
+      'workspace',
+      {
+        workspaces: projection.workspaces,
+        shellProjection: projection.shellProjection,
+      },
+      undefined,
+      'workspace',
+    );
+    this.publishShellPatch(
+      'orchestration',
+      {
+        projects: projection.projects,
+        checkouts: projection.checkouts,
+        threads: projection.threads,
+        runs: projection.runs,
+        shellProjection: projection.shellProjection,
+      },
+      undefined,
+      'orchestration',
+    );
+    this.publishShellPatch(
+      'usage',
+      {
+        usage: projection.usage,
+        shellProjection: projection.shellProjection,
+      },
+      undefined,
+      'usage',
+    );
+    this.publishShellPatch(
+      'notification',
+      {
+        unread: projection.unread,
+        shellProjection: projection.shellProjection,
+      },
+      undefined,
+      'notification',
+    );
+  }
+
+  private publishShellPatch(
+    domain: ShellFeedDomain,
+    data: ShellFeedData,
+    sessionId: string | undefined,
+    key: string,
+    signatureValue: unknown = data,
+  ): void {
+    const signature = JSON.stringify(signatureValue);
+    if (this.shellPatchSignatures.get(key) === signature) return;
+    this.shellPatchSignatures.set(key, signature);
     this.revision += 1;
-    const record =
-      message && typeof message === 'object' && !Array.isArray(message)
-        ? (message as Record<string, unknown>)
-        : undefined;
-    const domain =
-      record?.type === 'sessions'
-        ? 'session-index'
-        : record?.domain === 'usage'
-          ? 'usage'
-          : record?.domain === 'workspace'
-            ? 'workspace'
-            : record?.domain === 'orchestration'
-              ? 'orchestration'
-              : 'invalidation';
-    const data =
-      domain === 'session-index' &&
-      record &&
-      Array.isArray(record.upsert) &&
-      Array.isArray(record.remove)
-        ? {
-            upsert: record.upsert.slice(0, MAX_SESSION_INDEX_DELTA_ITEMS),
-            remove: record.remove.slice(0, MAX_SESSION_INDEX_DELTA_ITEMS),
-          }
-        : { refresh: true };
     try {
       this.shellFeed.publishSemantic(
         domain,
         this.revision,
         data,
-        undefined,
-        `application:${domain}`,
+        sessionId,
+        key,
       );
     } catch {
-      // A bounded feed retries via its authoritative shell snapshot.
+      // Overflow and oversized records are recovered by a cursor-free shell
+      // subscription snapshot; no finite read is scheduled here.
+    }
+  }
+
+  private changed(message?: unknown): void {
+    const record =
+      message && typeof message === 'object' && !Array.isArray(message)
+        ? (message as Record<string, unknown>)
+        : undefined;
+    if (record?.type === 'sessions')
+      this.publishSessionIndexDelta(this.application.sessionMetadataDelta());
+    else if (record?.domain === 'usage') this.publishApplicationDomains();
+    else if (record?.domain === 'workspace') this.publishApplicationDomains();
+    else if (record?.domain === 'orchestration')
+      this.publishApplicationDomains();
+    else {
+      // applicationChanges intentionally carries no source context. Compare
+      // every concrete catalogue instead of emitting an opaque event.
+      this.publishApplicationDomains();
     }
   }
 }

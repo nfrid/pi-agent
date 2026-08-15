@@ -1,3 +1,5 @@
+/// <reference path="./web-push.d.ts" />
+
 import { createHash } from 'node:crypto';
 import type { NotificationEvent } from '@pi-dashboard/protocol';
 import type { MetadataStore } from './metadata.js';

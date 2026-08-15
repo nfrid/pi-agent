@@ -18,6 +18,9 @@ import {
   type RuntimeSnapshot,
   type SessionApiResponse,
   type SessionIndexEntry,
+  type ShellFeedEvent,
+  type ShellProjection,
+  type ShellRuntimeSnapshot,
   type ThreadSummary,
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
@@ -56,6 +59,8 @@ export interface DashboardLiveState {
   serverId?: string;
   revision: number;
   snapshotCursor: number;
+  /** Whether the shell catalogue is a complete authoritative projection. */
+  shellProjection?: ShellProjection;
   usage?: unknown;
   projects?: readonly ProjectSummary[];
   checkouts?: readonly CheckoutSummary[];
@@ -509,6 +514,7 @@ export class DashboardLiveStore {
       serverId: snapshot.serverId,
       revision: snapshot.revision,
       snapshotCursor: snapshot.cursor,
+      shellProjection: snapshot.shellProjection,
       usage: snapshot.usage,
       projects: snapshot.projects,
       checkouts: snapshot.checkouts,
@@ -563,6 +569,31 @@ export class DashboardLiveStore {
       optimisticSessionTitlesById: optimisticSessions,
       optimisticRuntimeTitlesById: optimisticRuntimes,
     };
+  }
+
+  private installSessionReplacementProjection(
+    state: DashboardLiveState,
+    sessions: readonly SessionIndexEntry[],
+  ): DashboardLiveState {
+    let nextState: DashboardLiveState = {
+      ...state,
+      sessionsById: indexed(sessions),
+    };
+    for (const runtime of Object.values(nextState.runtimesById)) {
+      const metadata = nextState.sessionsById[runtime.session.id];
+      const session = { ...runtime.session };
+      // The replacement is authoritative for overlays. Remove fields that
+      // disappeared instead of retaining stale values from the old index.
+      delete session.name;
+      delete session.title;
+      if (metadata?.name !== undefined) session.name = metadata.name;
+      if (metadata?.title !== undefined) session.title = metadata.title;
+      nextState = this.installRuntimeProjection(nextState, {
+        ...runtime,
+        session,
+      });
+    }
+    return nextState;
   }
 
   private installSessionProjection(
@@ -754,6 +785,137 @@ export class DashboardLiveStore {
         status: 'synchronizing',
         generation,
         sequence,
+        sequenceKnown: true,
+      },
+    });
+    return true;
+  }
+
+  /**
+   * Apply one contiguous semantic shell patch without a finite snapshot read.
+   * A false result is a transport recovery signal, never a request to invent
+   * state from a partial payload.
+   */
+  acceptShellEvent(event: ShellFeedEvent, generation: number): boolean {
+    const sync = this.state.shellSync;
+    if (
+      sync.generation !== generation ||
+      !sync.sequenceKnown ||
+      event.sequence <= sync.sequence ||
+      event.sequence !== sync.sequence + 1
+    )
+      return false;
+
+    let nextState = this.state;
+    switch (event.domain) {
+      case 'runtime': {
+        if (event.data.kind === 'remove') {
+          const runtimesById = { ...nextState.runtimesById };
+          delete runtimesById[event.data.runtimeId];
+          this.runtimeReducerStates.delete(event.data.runtimeId);
+          nextState = { ...nextState, runtimesById };
+        } else {
+          const runtime = event.data.runtime as ShellRuntimeSnapshot;
+          nextState = this.installRuntimeProjection(nextState, runtime);
+          this.runtimeReducerStates.set(
+            runtime.runtimeId,
+            createRuntimeReducerState(runtime),
+          );
+        }
+        break;
+      }
+      case 'interaction': {
+        const data = event.data;
+        const runtime = nextState.runtimesById[data.runtimeId];
+        if (!runtime) return false;
+        const pending = [...runtime.pendingInteractions];
+        if (data.kind === 'remove') {
+          const index = pending.findIndex(
+            (item) => item.id === data.interactionId,
+          );
+          if (index >= 0) pending.splice(index, 1);
+        } else {
+          const index = pending.findIndex(
+            (item) => item.id === data.interaction.id,
+          );
+          if (index >= 0) pending[index] = data.interaction;
+          else pending.push(data.interaction);
+        }
+        nextState = this.installRuntimeProjection(nextState, {
+          ...runtime,
+          pendingInteractions: pending,
+        });
+        break;
+      }
+      case 'session-index': {
+        if (event.data.kind === 'replace')
+          nextState = this.installSessionReplacementProjection(
+            nextState,
+            event.data.sessions,
+          );
+        else {
+          for (const session of event.data.upsert)
+            nextState = this.installSessionProjection(nextState, session);
+          if (event.data.remove.length > 0) {
+            const sessionsById = { ...nextState.sessionsById };
+            for (const id of event.data.remove) delete sessionsById[id];
+            nextState = { ...nextState, sessionsById };
+          }
+        }
+        break;
+      }
+      case 'workspace':
+        nextState = {
+          ...nextState,
+          ...(event.data.shellProjection === undefined
+            ? {}
+            : { shellProjection: event.data.shellProjection }),
+          workspacesById: indexed(event.data.workspaces),
+          workspaceOrder: event.data.workspaces.map((item) => item.id),
+        };
+        break;
+      case 'orchestration':
+        nextState = {
+          ...nextState,
+          ...(event.data.shellProjection === undefined
+            ? {}
+            : { shellProjection: event.data.shellProjection }),
+          projects: event.data.projects,
+          checkouts: event.data.checkouts,
+          threads: event.data.threads,
+          runs: event.data.runs,
+        };
+        break;
+      case 'usage':
+        nextState = {
+          ...nextState,
+          ...(event.data.shellProjection === undefined
+            ? {}
+            : { shellProjection: event.data.shellProjection }),
+          usage: event.data.usage,
+        };
+        break;
+      case 'notification':
+        nextState = {
+          ...nextState,
+          ...(event.data.shellProjection === undefined
+            ? {}
+            : { shellProjection: event.data.shellProjection }),
+          notificationsById: indexed(event.data.unread),
+        };
+        break;
+    }
+    this.publish({
+      ...nextState,
+      revision: Math.max(nextState.revision, event.revision),
+      cursor: event.sequence,
+      connection: {
+        ...nextState.connection,
+        lastCursor: event.sequence,
+      },
+      shellSync: {
+        ...nextState.shellSync,
+        sequence: event.sequence,
         sequenceKnown: true,
       },
     });
@@ -1651,6 +1813,7 @@ let lastMaterializedParts:
       | 'serverId'
       | 'revision'
       | 'snapshotCursor'
+      | 'shellProjection'
       | 'usage'
       | 'projects'
       | 'checkouts'
@@ -1674,6 +1837,7 @@ export function materializeSnapshot(
     serverId: state.serverId,
     revision: state.revision,
     snapshotCursor: state.snapshotCursor,
+    shellProjection: state.shellProjection,
     usage: state.usage,
     projects: state.projects,
     checkouts: state.checkouts,
@@ -1710,6 +1874,9 @@ export function materializeSnapshot(
     ...(state.checkouts === undefined ? {} : { checkouts: state.checkouts }),
     ...(state.threads === undefined ? {} : { threads: state.threads }),
     ...(state.runs === undefined ? {} : { runs: state.runs }),
+    ...(state.shellProjection === undefined
+      ? {}
+      : { shellProjection: state.shellProjection }),
     unread: Object.values(state.notificationsById),
   };
   lastMaterializedParts = parts;

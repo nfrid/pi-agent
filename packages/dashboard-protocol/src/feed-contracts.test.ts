@@ -28,9 +28,9 @@ describe('feed protocol contracts', () => {
       parseShellFeedMessage({
         type: 'shell-event',
         sequence: 5,
-        domain: 'invalidation',
+        domain: 'usage',
         revision: 6,
-        data: { refresh: true },
+        data: { usage: { refresh: true } },
       }),
     ).toMatchObject({ type: 'shell-event', sequence: 5 });
     expect(
@@ -54,9 +54,18 @@ describe('feed protocol contracts', () => {
     expect(
       tryParseShellFeedMessage({
         type: 'shell-event',
-        domain: 'invalidation',
+        domain: 'usage',
         revision: 1,
         data: {},
+      }),
+    ).toBeUndefined();
+    expect(
+      tryParseShellFeedMessage({
+        type: 'shell-event',
+        sequence: 1,
+        domain: 'invalidation',
+        revision: 1,
+        data: { refresh: true },
       }),
     ).toBeUndefined();
     expect(

@@ -9,16 +9,27 @@ import {
   type AuthoritativeSessionSnapshot,
   type BridgeEvent,
   type BrowserSnapshot,
+  type CheckoutSummary,
   type DelegateLiveRun,
   type InteractionSnapshot,
+  MAX_SHELL_INDEX_ITEMS,
+  MAX_SHELL_SNAPSHOT_BYTES,
+  MAX_TEXT,
   type NormalizedMessagePayload,
   type NormalizedToolPayload,
   type NotificationEvent,
   PROTOCOL_VERSION,
+  type ProjectSummary,
+  type RunSummary,
   type RuntimeSnapshot,
   type RuntimeSnapshotPatch,
   type SessionIndexEntry,
   type SessionSnapshot,
+  type ShellProjection,
+  type ShellProjectionDomain,
+  type ShellRuntimeSnapshot,
+  type ShellUsage,
+  type ThreadSummary,
   tryParseDelegateTranscriptEntry,
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
@@ -151,44 +162,169 @@ function compactPublicRuntime<T extends RuntimeSnapshot | RuntimeSnapshotPatch>(
   } as T;
 }
 
-function shellRuntime(runtime: RuntimeSnapshot): RuntimeSnapshot {
+const SHELL_USAGE_BYTES = 64 * 1024;
+
+/** The single usage projection used by shell snapshots and usage patches. */
+export function projectShellUsage(value: unknown): ShellUsage | undefined {
+  if (value === undefined) return undefined;
+  const project = (input: unknown, depth: number): ShellUsage => {
+    if (input === null || typeof input === 'boolean') return input;
+    if (typeof input === 'string') return input.slice(0, MAX_TEXT);
+    if (typeof input === 'number') return Number.isFinite(input) ? input : null;
+    if (depth <= 0) return null;
+    if (Array.isArray(input)) {
+      const result = input
+        .slice(0, 128)
+        .map((item) => project(item, depth - 1));
+      try {
+        return Buffer.byteLength(JSON.stringify(result), 'utf8') <=
+          SHELL_USAGE_BYTES
+          ? (result as ShellUsage)
+          : { truncated: true };
+      } catch {
+        return { truncated: true };
+      }
+    }
+    if (typeof input !== 'object') return null;
+    const result: Record<string, ShellUsage> = {};
+    for (const [key, item] of Object.entries(input).slice(0, 128))
+      result[key.slice(0, 128)] = project(item, depth - 1);
+    try {
+      return Buffer.byteLength(JSON.stringify(result), 'utf8') <=
+        SHELL_USAGE_BYTES
+        ? (result as ShellUsage)
+        : { truncated: true };
+    } catch {
+      return { truncated: true };
+    }
+  };
+  const projected = project(value, 5);
+  try {
+    return Buffer.byteLength(JSON.stringify(projected), 'utf8') <=
+      SHELL_USAGE_BYTES
+      ? projected
+      : { truncated: true };
+  } catch {
+    return { truncated: true };
+  }
+}
+
+/** Project one interaction identically for shell snapshots and patches. */
+export function projectShellInteraction(
+  interaction: InteractionSnapshot,
+): InteractionSnapshot {
+  const bytes = (value: unknown) =>
+    Buffer.byteLength(JSON.stringify(value) ?? '');
+  const base = {
+    ...interaction,
+    choices: interaction.choices.slice(0, 128),
+  };
+  try {
+    if (bytes(base) <= MAX_SHELL_INTERACTION_BYTES) return base;
+  } catch {
+    // Fall through to the bounded representation.
+  }
+  const bounded = {
+    ...base,
+    question: interaction.question.slice(0, 4_096),
+    choices: base.choices.slice(0, 8).map((choice) => ({
+      ...choice,
+      label: choice.label.slice(0, 512),
+      value: choice.value.slice(0, 512),
+      ...(choice.description === undefined
+        ? {}
+        : { description: choice.description.slice(0, 256) }),
+      ...(choice.preview === undefined
+        ? {}
+        : { preview: choice.preview.slice(0, 512) }),
+    })),
+    viewModel: { truncated: true },
+  };
+  return bounded as InteractionSnapshot;
+}
+
+const MAX_SHELL_RUNTIME_BYTES = 256 * 1024;
+const MAX_SHELL_CATALOGUE_BYTES = 350_000;
+const SHELL_PROJECTION_DOMAINS = [
+  'workspaces',
+  'projects',
+  'checkouts',
+  'threads',
+  'runs',
+  'unread',
+] as const satisfies readonly ShellProjectionDomain[];
+
+export interface ShellProjectionResult {
+  readonly shellProjection: ShellProjection;
+  readonly runtimes: ShellRuntimeSnapshot[];
+  readonly sessions: SessionIndexEntry[];
+  readonly workspaces: WorkspaceTarget[];
+  readonly projects: ProjectSummary[];
+  readonly checkouts: CheckoutSummary[];
+  readonly threads: ThreadSummary[];
+  readonly runs: RunSummary[];
+  readonly unread: NotificationEvent[];
+  readonly usage?: ShellUsage;
+}
+
+/** Compact runtime state shared by authoritative snapshots and shell patches. */
+export function shellRuntime(
+  runtime: RuntimeSnapshot,
+  maxBytes = MAX_SHELL_RUNTIME_BYTES,
+): RuntimeSnapshot {
   const compacted = compactPublicRuntime(runtime);
   let truncated = false;
-  const pendingInteractions = runtime.pendingInteractions
+  let pendingInteractions = runtime.pendingInteractions
     .slice(0, 128)
-    .filter((interaction) => {
-      const keep =
-        Buffer.byteLength(JSON.stringify(interaction) ?? '') <=
-        MAX_SHELL_INTERACTION_BYTES;
-      if (!keep) truncated = true;
-      return keep;
-    });
+    .map(projectShellInteraction);
   if (runtime.pendingInteractions.length > pendingInteractions.length)
     truncated = true;
-  const extensionSurfaces = compacted.extensionSurfaces
+  let extensionSurfaces = compacted.extensionSurfaces
     ?.slice(0, MAX_SHELL_SURFACES)
     .map((surface) => {
-      const bytes = Buffer.byteLength(JSON.stringify(surface) ?? '');
-      if (bytes <= MAX_SHELL_SURFACE_BYTES) return surface;
+      const surfaceBytes = Buffer.byteLength(JSON.stringify(surface) ?? '');
+      if (surfaceBytes <= MAX_SHELL_SURFACE_BYTES) return surface;
       truncated = true;
       return { ...surface, viewModel: { truncated: true } };
     });
   if ((compacted.extensionSurfaces?.length ?? 0) > MAX_SHELL_SURFACES)
     truncated = true;
-  return {
-    ...compacted,
-    pendingInteractions,
-    ...(extensionSurfaces === undefined ? {} : { extensionSurfaces }),
-    ...(truncated ? { shellStateTruncated: true } : {}),
-  } as RuntimeSnapshot;
+  const makeResult = (): RuntimeSnapshot =>
+    ({
+      ...compacted,
+      pendingInteractions,
+      ...(extensionSurfaces === undefined ? {} : { extensionSurfaces }),
+      ...(truncated ? { shellStateTruncated: true } : {}),
+    }) as RuntimeSnapshot;
+  while (Buffer.byteLength(JSON.stringify(makeResult()) ?? '') > maxBytes) {
+    if (pendingInteractions.length > 0)
+      pendingInteractions = pendingInteractions.slice(1);
+    else if (extensionSurfaces && extensionSurfaces.length > 0)
+      extensionSurfaces = extensionSurfaces.slice(1);
+    else {
+      truncated = true;
+      break;
+    }
+    truncated = true;
+  }
+  return makeResult();
 }
 
-function boundedShellUsage(value: unknown): unknown {
-  if (value === undefined) return value;
-  return Buffer.byteLength(JSON.stringify(value) ?? '') <=
-    MAX_SHELL_SURFACE_BYTES
-    ? value
-    : { truncated: true };
+/** Bound a catalogue for both a shell patch and a snapshot projection. */
+export function projectShellArray<T>(
+  values: readonly T[],
+  maxBytes = 350_000,
+): T[] {
+  const result: T[] = [];
+  let total = 2;
+  for (const value of values) {
+    if (result.length >= MAX_SHELL_INDEX_ITEMS) break;
+    const itemBytes = Buffer.byteLength(JSON.stringify(value) ?? '');
+    if (total + itemBytes > maxBytes) break;
+    result.push(value);
+    total += itemBytes + (result.length === 1 ? 0 : 1);
+  }
+  return result;
 }
 
 const MAX_ACTIVE_ENTITIES = 256;
@@ -652,28 +788,133 @@ export class DashboardApplication {
     return { upsert, remove };
   }
 
+  /**
+   * Build the one bounded shell projection used by snapshots and every shell
+   * catalogue patch. The source arrays are read once and then trimmed in a
+   * fixed order, so a reconnect cannot silently describe different entities
+   * from the live feed.
+   */
+  shellProjection(): ShellProjectionResult {
+    const liveRuntimes = this.registry.snapshots();
+    const sessions = this.sessionMetadata(liveRuntimes);
+    if (sessions.length > MAX_SHELL_INDEX_ITEMS)
+      throw new Error(
+        'The authoritative session index exceeds shell capacity.',
+      );
+    this.setSessionMetadataBaseline(sessions);
+    let runtimes = liveRuntimes.map(
+      (runtime) => shellRuntime(runtime) as ShellRuntimeSnapshot,
+    );
+    const omitted = new Set<ShellProjectionDomain>();
+    const catalogue = <T>(
+      domain: ShellProjectionDomain,
+      values: readonly T[],
+    ): T[] => {
+      const projected = projectShellArray(values, MAX_SHELL_CATALOGUE_BYTES);
+      if (projected.length !== values.length) omitted.add(domain);
+      return projected;
+    };
+    const workspaces = catalogue('workspaces', this.workspaces.list());
+    const projects = catalogue(
+      'projects',
+      this.orchestration.projectSummaries(),
+    );
+    const checkouts = catalogue(
+      'checkouts',
+      this.orchestration.checkoutSummaries(),
+    );
+    const threads = catalogue('threads', this.orchestration.threadSummaries());
+    const runs = catalogue('runs', this.orchestration.runSummaries());
+    const unread = catalogue('unread', this.metadata.unreadNotifications());
+    const usage = projectShellUsage(this.usage.cached());
+    const makeMarker = (): ShellProjection => ({
+      truncated: omitted.size > 0,
+      omitted: SHELL_PROJECTION_DOMAINS.filter((domain) => omitted.has(domain)),
+    });
+    const makeSnapshot = (): BrowserSnapshot => ({
+      // Reserve the largest transport metadata representation because this
+      // projection is reused by callers with different daemon cursors.
+      serverId: 's'.repeat(512),
+      revision: Number.MAX_SAFE_INTEGER,
+      cursor: Number.MAX_SAFE_INTEGER,
+      runtimes,
+      workspaces,
+      projects,
+      checkouts,
+      threads,
+      runs,
+      sessions,
+      ...(usage === undefined ? {} : { usage }),
+      unread,
+      shellProjection: makeMarker(),
+    });
+    const setCollections = [
+      { domain: 'unread' as const, items: unread },
+      { domain: 'runs' as const, items: runs },
+      { domain: 'threads' as const, items: threads },
+      { domain: 'checkouts' as const, items: checkouts },
+      { domain: 'projects' as const, items: projects },
+      { domain: 'workspaces' as const, items: workspaces },
+    ];
+    while (
+      Buffer.byteLength(JSON.stringify(makeSnapshot()) ?? '') >
+      MAX_SHELL_SNAPSHOT_BYTES
+    ) {
+      const collection = setCollections.find(({ items }) => items.length > 0);
+      if (!collection) break;
+      collection.items.pop();
+      omitted.add(collection.domain);
+    }
+    // A large runtime is compacted further before it can make reconnects fail.
+    if (
+      Buffer.byteLength(JSON.stringify(makeSnapshot()) ?? '') >
+      MAX_SHELL_SNAPSHOT_BYTES
+    )
+      runtimes = liveRuntimes.map(
+        (runtime) => shellRuntime(runtime, 8 * 1024) as ShellRuntimeSnapshot,
+      );
+    if (
+      Buffer.byteLength(JSON.stringify(makeSnapshot()) ?? '') >
+      MAX_SHELL_SNAPSHOT_BYTES
+    )
+      throw new Error(
+        'The authoritative shell snapshot exceeds its frame limit.',
+      );
+    return {
+      shellProjection: makeMarker(),
+      runtimes,
+      sessions,
+      workspaces,
+      projects,
+      checkouts,
+      threads,
+      runs,
+      unread,
+      ...(usage === undefined ? {} : { usage }),
+    };
+  }
+
   /** Build a shell snapshot synchronously from one daemon cursor. */
   shellSnapshot(
     serverId: string,
     revision: number,
     cursor = 0,
   ): BrowserSnapshot {
-    const liveRuntimes = this.registry.snapshots();
-    const sessions = this.sessionMetadata(liveRuntimes);
-    this.setSessionMetadataBaseline(sessions);
+    const projection = this.shellProjection();
     return {
       serverId,
       revision,
       cursor,
-      runtimes: liveRuntimes.map((runtime) => shellRuntime(runtime)),
-      workspaces: this.workspaces.list(),
-      projects: this.orchestration.projectSummaries(),
-      checkouts: this.orchestration.checkoutSummaries(),
-      threads: this.orchestration.threadSummaries(),
-      runs: this.orchestration.runSummaries(),
-      sessions,
-      usage: boundedShellUsage(this.usage.cached()),
-      unread: this.metadata.unreadNotifications(),
+      runtimes: projection.runtimes,
+      workspaces: projection.workspaces,
+      projects: projection.projects,
+      checkouts: projection.checkouts,
+      threads: projection.threads,
+      runs: projection.runs,
+      sessions: projection.sessions,
+      ...(projection.usage === undefined ? {} : { usage: projection.usage }),
+      unread: projection.unread,
+      shellProjection: projection.shellProjection,
     };
   }
 

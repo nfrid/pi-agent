@@ -443,6 +443,220 @@ describe('dashboard HTTP boundary', () => {
     bridge.destroy();
   });
 
+  it('does not publish shell refreshes for managed transcript activity', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-transcript-shell-feed-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      socketPath: path.join(
+        os.tmpdir(),
+        `pd-${path.basename(root).slice(-8)}-transcript.sock`,
+      ),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    const runtime = {
+      runtimeId: 'managed-transcript-runtime',
+      ownership: 'external',
+      pid: 1,
+      cwd: '/tmp/project',
+      liveState: 'idle',
+      session: { id: 'managed-transcript-session', entries: [] },
+      pendingInteractions: [],
+    };
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: runtime,
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const afterHello = server.snapshot().cursor;
+    expect(afterHello).toBeGreaterThan(1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const beforeHeartbeat = server
+      .snapshot()
+      .runtimes.find(
+        (item) => item.runtimeId === runtime.runtimeId,
+      )?.lastSeenAt;
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 2,
+        event: { type: 'runtime.heartbeat', state: 'idle' },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const afterHeartbeat = server.snapshot();
+    expect(afterHeartbeat.cursor).toBeGreaterThan(afterHello);
+    const heartbeatLastSeenAt = afterHeartbeat.runtimes.find(
+      (item) => item.runtimeId === runtime.runtimeId,
+    )?.lastSeenAt;
+    expect(heartbeatLastSeenAt).toBeDefined();
+    expect(heartbeatLastSeenAt).toBeGreaterThan(beforeHeartbeat ?? 0);
+    for (const [seq, type] of [
+      [3, 'message.updated'],
+      [4, 'message.finished'],
+      [5, 'tool.updated'],
+      [6, 'tool.finished'],
+    ] as const) {
+      bridge.write(
+        serializeFrame({
+          kind: 'event',
+          seq,
+          event: {
+            type,
+            sessionId: 'managed-transcript-session',
+            ...(type.startsWith('message')
+              ? {
+                  message: {
+                    messageId: `assistant-stream-${seq}`,
+                    role: 'assistant',
+                    content: `transcript ${seq}`,
+                    phase: 'updated',
+                  },
+                }
+              : {
+                  tool: {
+                    toolCallId: `tool-${seq}`,
+                    name: 'shell',
+                    phase: 'updated',
+                  },
+                }),
+          },
+        }),
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    // Heartbeat recency is published once; transcript activity does not
+    // alternate the runtime signature back to a shape without lastSeenAt.
+    expect(server.snapshot().cursor).toBe(afterHeartbeat.cursor);
+    bridge.destroy();
+  });
+
+  it('re-emits an identical runtime after goodbye removal', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-runtime-readd-'),
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      socketPath: path.join(
+        os.tmpdir(),
+        `pd-${path.basename(root).slice(-8)}-readd.sock`,
+      ),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    const runtime = {
+      runtimeId: 'readd-runtime',
+      ownership: 'external' as const,
+      pid: 1,
+      cwd: '/tmp/project',
+      liveState: 'idle' as const,
+      session: { id: 'readd-session', entries: [] },
+      pendingInteractions: [],
+    };
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot: runtime },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 2,
+        event: { type: 'runtime.goodbye', reason: 'reload' },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const removed = server.snapshot();
+    expect(removed.runtimes).toHaveLength(0);
+    bridge.destroy();
+    const replacement = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      replacement.once('connect', resolve);
+      replacement.once('error', reject);
+    });
+    replacement.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot: runtime },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const readded = server.snapshot();
+    expect(readded.cursor).toBeGreaterThan(removed.cursor);
+    expect(readded.runtimes).toHaveLength(1);
+    expect(readded.runtimes[0]?.runtimeId).toBe(runtime.runtimeId);
+    replacement.destroy();
+  });
+
+  it('rejects an authoritative session index that exceeds frame capacity', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-session-replacement-'),
+    );
+    // Count alone is not the capacity policy: 4,096 authoritative entries
+    // with large metadata must fail rather than be silently truncated.
+    const sessions = Array.from({ length: 4_096 }, (_, index) => ({
+      id: `session-${index}`,
+      file: '',
+      cwd: '/tmp',
+      title: 'x'.repeat(600),
+      updatedAt: index,
+    }));
+    const sessionIndex = {
+      start: async () => undefined,
+      close: () => undefined,
+      list: () => sessions,
+      get: (id: string) => sessions.find((session) => session.id === id),
+    } as unknown as SessionIndex;
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir: path.join(root, 'sessions'),
+      socketPath: path.join(
+        os.tmpdir(),
+        `pd-${path.basename(root).slice(-8)}-index.sock`,
+      ),
+      sessions: sessionIndex,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const input = encodeURIComponent(JSON.stringify({ protocolVersion: 2 }));
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/trpc/shellSnapshot?input=${input}`,
+      { headers: { authorization: 'Bearer test-token' } },
+    );
+    expect(response.status).toBe(500);
+  });
+
   it('cleans up a failed startup so the server can be retried', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-startup-retry-'),

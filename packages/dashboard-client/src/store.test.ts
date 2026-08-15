@@ -1,6 +1,8 @@
 import type {
   BrowserSnapshot,
   SessionApiResponse,
+  ShellFeedEvent,
+  ShellProjection,
 } from '@pi-dashboard/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { SESSION_REQUEST_ORDER } from './http-client.js';
@@ -51,6 +53,183 @@ function orderedResponse(
 }
 
 describe('DashboardLiveStore', () => {
+  it('converges near-capacity catalogue patches with a fresh shell snapshot', () => {
+    const projection: ShellProjection = {
+      truncated: true,
+      omitted: [
+        'workspaces',
+        'projects',
+        'checkouts',
+        'threads',
+        'runs',
+        'unread',
+      ],
+    };
+    const workspaces = [{ id: 'workspace-kept' }];
+    const projects = [{ id: 'project-kept' }];
+    const checkouts = [{ id: 'checkout-kept' }];
+    const threads = [{ id: 'thread-kept' }];
+    const runs = [{ id: 'run-kept' }];
+    const unread = [{ id: 'notification-kept' }];
+    const fresh = {
+      ...snapshot('daemon-1', 4),
+      workspaces,
+      projects,
+      checkouts,
+      threads,
+      runs,
+      unread,
+      shellProjection: projection,
+    } as unknown as BrowserSnapshot;
+    const store = new DashboardLiveStore();
+    store.beginShellSync(1);
+    expect(store.acceptShellSnapshot(fresh, 0, 1, true)).toBe(true);
+    const events = [
+      {
+        sequence: 1,
+        revision: 1,
+        domain: 'workspace' as const,
+        data: { workspaces, shellProjection: projection },
+      },
+      {
+        sequence: 2,
+        revision: 2,
+        domain: 'orchestration' as const,
+        data: {
+          projects,
+          checkouts,
+          threads,
+          runs,
+          shellProjection: projection,
+        },
+      },
+      {
+        sequence: 3,
+        revision: 3,
+        domain: 'notification' as const,
+        data: { unread, shellProjection: projection },
+      },
+      {
+        sequence: 4,
+        revision: 4,
+        domain: 'usage' as const,
+        data: { shellProjection: projection },
+      },
+    ] as unknown as ShellFeedEvent[];
+    for (const event of events)
+      expect(store.acceptShellEvent(event, 1)).toBe(true);
+    const patched = selectSnapshot(store.getSnapshot());
+    expect(patched?.workspaces).toEqual(fresh.workspaces);
+    expect(patched?.projects).toEqual(fresh.projects);
+    expect(patched?.checkouts).toEqual(fresh.checkouts);
+    expect(patched?.threads).toEqual(fresh.threads);
+    expect(patched?.runs).toEqual(fresh.runs);
+    expect(patched?.unread).toEqual(fresh.unread);
+    expect(patched?.shellProjection).toEqual(fresh.shellProjection);
+  });
+
+  it('replaces the complete session index without retaining stale rows', () => {
+    const store = new DashboardLiveStore();
+    const first = {
+      id: 'session-first',
+      file: '',
+      cwd: '/tmp',
+      updatedAt: 1,
+    };
+    const stale = {
+      id: 'session-stale',
+      file: '',
+      cwd: '/tmp',
+      updatedAt: 1,
+    };
+    const runtime = {
+      runtimeId: 'runtime-first',
+      ownership: 'external',
+      pid: 1,
+      cwd: '/tmp',
+      liveState: 'idle',
+      session: { id: first.id, name: 'Old name', entries: [] },
+      pendingInteractions: [],
+    } as const;
+    store.beginShellSync(1);
+    expect(
+      store.acceptShellSnapshot(
+        {
+          ...snapshot('daemon-1', 0),
+          runtimes: [runtime],
+          sessions: [{ ...first, name: 'Old name' }, stale],
+        },
+        0,
+        1,
+        true,
+      ),
+    ).toBe(true);
+    const replacement = {
+      type: 'shell-event',
+      sequence: 1,
+      revision: 1,
+      domain: 'session-index',
+      data: {
+        kind: 'replace',
+        sessions: [first],
+      },
+    } satisfies ShellFeedEvent;
+    expect(store.acceptShellEvent(replacement, 1)).toBe(true);
+    expect(Object.keys(store.getSnapshot().sessionsById)).toEqual([
+      'session-first',
+    ]);
+    expect(
+      store.getSnapshot().runtimesById['runtime-first']?.session.name,
+    ).toBeUndefined();
+  });
+
+  it('converges an offline runtime patch with its authoritative snapshot', () => {
+    const store = new DashboardLiveStore();
+    const online = {
+      runtimeId: 'runtime-offline',
+      ownership: 'external',
+      pid: 1,
+      cwd: '/tmp',
+      liveState: 'idle',
+      online: true,
+      lastSeenAt: 1,
+      session: { id: 'session-offline', entries: [] },
+      pendingInteractions: [],
+    } as const;
+    const offline = { ...online, online: false, lastSeenAt: 2 };
+    store.beginShellSync(1);
+    expect(
+      store.acceptShellSnapshot(
+        { ...snapshot('daemon-1', 0), runtimes: [online] },
+        0,
+        1,
+        true,
+      ),
+    ).toBe(true);
+    const patch = {
+      type: 'shell-event',
+      sequence: 1,
+      revision: 1,
+      domain: 'runtime',
+      data: { kind: 'upsert', runtime: offline },
+    } as unknown as ShellFeedEvent;
+    expect(store.acceptShellEvent(patch, 1)).toBe(true);
+    const patched = store.getSnapshot().runtimesById['runtime-offline'];
+    const snapshotStore = new DashboardLiveStore();
+    snapshotStore.beginShellSync(1);
+    expect(
+      snapshotStore.acceptShellSnapshot(
+        { ...snapshot('daemon-1', 1), runtimes: [offline] },
+        1,
+        1,
+        true,
+      ),
+    ).toBe(true);
+    expect(patched).toEqual(
+      snapshotStore.getSnapshot().runtimesById['runtime-offline'],
+    );
+  });
+
   it('rejects a stale same-generation latest response before it regresses live state', () => {
     const store = new DashboardLiveStore();
     const runtime = {
