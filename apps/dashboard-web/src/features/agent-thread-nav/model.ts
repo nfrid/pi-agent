@@ -18,8 +18,8 @@ export type AgentThreadRow = {
   statusLabel?: string;
   runtime?: RuntimeSnapshot;
   session?: SessionIndexEntry;
-  startedAt: number;
-  updatedAt: number;
+  startedAt?: number;
+  updatedAt?: number;
 };
 
 export type AgentThreadGroup = {
@@ -31,12 +31,13 @@ export type AgentThreadGroup = {
 export const MAX_VISIBLE_ACTIVE_THREADS = 40;
 export const MAX_VISIBLE_HISTORY_THREADS = 24;
 
+// Runtime snapshots are live overlays, not session-index metadata. Keep their
+// chronology neutral until the authoritative index publishes a real timestamp.
 function isInactiveThread(row: AgentThreadRow): boolean {
   return row.status === 'offline' || row.status === 'dormant';
 }
 
 export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
-  const now = Date.now();
   const workspaces = snapshot.workspaces;
   const sessionsById = new Map(
     snapshot.sessions.map((session) => [session.id, session]),
@@ -62,8 +63,8 @@ export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
       statusLabel: pauseStatus?.label,
       runtime,
       session,
-      startedAt: session?.startedAt ?? now,
-      updatedAt: session?.updatedAt ?? now,
+      startedAt: session?.startedAt,
+      updatedAt: session?.updatedAt,
     });
   }
   for (const session of snapshot.sessions) {
@@ -86,13 +87,20 @@ export function agentThreadRows(snapshot: BrowserSnapshot): AgentThreadRow[] {
   return [...rows.values()].sort(
     (left, right) =>
       inactiveRank(left.status) - inactiveRank(right.status) ||
-      right.startedAt - left.startedAt ||
+      activeUnindexedRank(left) - activeUnindexedRank(right) ||
+      (right.startedAt ?? 0) - (left.startedAt ?? 0) ||
       left.title.localeCompare(right.title),
   );
 }
 
 function inactiveRank(status: AgentThreadRow['status']): number {
   return status === 'offline' || status === 'dormant' ? 1 : 0;
+}
+
+function activeUnindexedRank(row: AgentThreadRow): number {
+  return !isInactiveThread(row) && row.session?.startedAt === undefined
+    ? -1
+    : 0;
 }
 
 export function filterAgentThreadRows(
