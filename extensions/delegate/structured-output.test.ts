@@ -203,6 +203,108 @@ describe('structured delegate output handoff', () => {
     }
   });
 
+  test('automatically repairs a missing delegate_result call in the same child session', async () => {
+    const spec = normalizeDelegateResultSpec({
+      shape: { ok: 'boolean' },
+      projection: 'all',
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    const spawn = vi
+      .spyOn(delegateChild, 'spawnDelegateChild')
+      .mockImplementationOnce(async (run) => {
+        run.messages = [
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'I finished but forgot the tool.' }],
+          },
+        ] as never;
+        return { exitCode: 0, wasAborted: false, timedOut: false };
+      })
+      .mockImplementationOnce(async (run, options) => {
+        expect(options.args.join(' ')).toContain(
+          'previous response ended without calling delegate_result',
+        );
+        captureDelegateResultEvent(run, { details: { ok: true } }, false);
+        return { exitCode: 0, wasAborted: false, timedOut: false };
+      });
+    try {
+      const run = await runDelegate({
+        cwd: '/tmp',
+        task: 'structured repair task',
+        context: 'fresh',
+        sessionPath: '/tmp/structured-repair-session.jsonl',
+        isolation: 'shared',
+        resultSpec: spec,
+        timeoutMs: 5_000,
+        maxConcurrency: 1,
+        mode: 'single',
+      });
+      settleDelegateResult(run);
+      expect(spawn).toHaveBeenCalledTimes(2);
+      expect(run.state).toBe('success');
+      expect(buildParentHandoff([run])).toContain(
+        'Projection: {"ok":true}',
+      );
+      expect(buildParentHandoff([run])).not.toContain('forgot the tool');
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  test('surfaces bounded final prose when the automatic structured repair still omits the tool', async () => {
+    const spec = normalizeDelegateResultSpec({
+      shape: { ok: 'boolean' },
+      projection: 'all',
+    });
+    if (!spec) throw new Error('expected normalized result spec');
+    const spawn = vi
+      .spyOn(delegateChild, 'spawnDelegateChild')
+      .mockImplementationOnce(async (run) => {
+        run.messages = [
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'Initial useful prose.' }],
+          },
+        ] as never;
+        return { exitCode: 0, wasAborted: false, timedOut: false };
+      })
+      .mockImplementationOnce(async (run) => {
+        run.messages.push({
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'Recovery explanation without the required tool.',
+            },
+          ],
+        } as never);
+        return { exitCode: 0, wasAborted: false, timedOut: false };
+      });
+    try {
+      const run = await runDelegate({
+        cwd: '/tmp',
+        task: 'structured repair failure',
+        context: 'fresh',
+        sessionPath: '/tmp/structured-repair-failure.jsonl',
+        isolation: 'shared',
+        resultSpec: spec,
+        timeoutMs: 5_000,
+        maxConcurrency: 1,
+        mode: 'single',
+      });
+      const handoff = buildParentHandoff([run]);
+      expect(spawn).toHaveBeenCalledTimes(2);
+      expect(run.state).toBe('error');
+      expect(handoff).toContain('delegate_result channel is missing');
+      expect(handoff).toContain('Unvalidated child prose (recovery only)');
+      expect(handoff).toContain(
+        'Recovery explanation without the required tool.',
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   test('sanitizes structured runs across details, jobs, status, and sessions', async () => {
     const spec = normalizeDelegateResultSpec({
       schema: {

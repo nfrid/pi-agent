@@ -722,8 +722,9 @@ function schemaAtPath(
 
 function normalizePathList(value: unknown, label: string): string[] {
   if (value === undefined) return [];
+  if (value === 'all') return ['/'];
   if (!Array.isArray(value))
-    throw new Error(`${label} must be an array of paths`);
+    throw new Error(`${label} must be "all" or an array of paths`);
   if (value.length > STRUCTURED_RESULT_CAPS.maxProjectionPaths)
     throw new Error(
       `${label} exceeds the ${STRUCTURED_RESULT_CAPS.maxProjectionPaths}-path limit`,

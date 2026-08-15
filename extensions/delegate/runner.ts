@@ -53,6 +53,10 @@ const TOOL_ARGUMENT_VALIDATION_EXTENSION = path.resolve(
   '../tool-argument-validation/index.ts',
 );
 
+export const STRUCTURED_RESULT_REPAIR_TIMEOUT_MS = 30_000;
+const STRUCTURED_RESULT_REPAIR_TASK =
+  'Your previous response ended without calling delegate_result. Do not repeat the investigation. Use the existing session context to submit the complete result now, making delegate_result your final action.';
+
 export { mapWithConcurrency } from './concurrency';
 
 type OnUpdate = (partial: {
@@ -261,37 +265,69 @@ export async function runDelegate(
       },
     };
 
-    const { exitCode, wasAborted, timedOut, spawnError } =
-      await spawnDelegateChild(run, {
+    const acknowledgeControl = (id: string, kind: string, generation?: number) =>
+      control.acknowledge(
+        id,
+        kind as import('./control').DelegateControlKind,
+        generation,
+      );
+    let childResult = await spawnDelegateChild(run, {
+      command: spawnTarget.command,
+      args: spawnTarget.args,
+      cwd: spawnTarget.cwd,
+      env: spawnTarget.env,
+      timeoutMs: options.timeoutMs,
+      checkpointLeadMs: checkpointLeadMs(options.timeoutMs),
+      killGraceMs: options.killGraceMs,
+      signal: options.signal,
+      onCheckpoint: () => {
+        const requestedAt = Date.now();
+        const queued = control.enqueue('checkpoint', checkpointRequestMessage());
+        run.checkpoint = {
+          requestedAt,
+          state: queued.accepted ? 'requested' : 'unavailable',
+        };
+        emitUpdate();
+      },
+      onControlAck: acknowledgeControl,
+      onLine: emitUpdate,
+    });
+
+    if (
+      options.resultSpec &&
+      !getDelegateChannelPresent(run) &&
+      childResult.exitCode === 0 &&
+      !childResult.wasAborted &&
+      !childResult.timedOut &&
+      !childResult.spawnError &&
+      !options.signal?.aborted
+    ) {
+      const repairArgs = buildChildArgs(
+        {
+          ...options,
+          task: STRUCTURED_RESULT_REPAIR_TASK,
+          resuming: true,
+        },
+        options.sessionPath,
+      );
+      childResult = await spawnDelegateChild(run, {
         command: spawnTarget.command,
-        args: spawnTarget.args,
+        args: [...prefixArgs, ...repairArgs],
         cwd: spawnTarget.cwd,
         env: spawnTarget.env,
-        timeoutMs: options.timeoutMs,
-        checkpointLeadMs: checkpointLeadMs(options.timeoutMs),
+        timeoutMs: Math.min(
+          options.timeoutMs,
+          STRUCTURED_RESULT_REPAIR_TIMEOUT_MS,
+        ),
+        checkpointLeadMs: 0,
         killGraceMs: options.killGraceMs,
         signal: options.signal,
-        onCheckpoint: () => {
-          const requestedAt = Date.now();
-          const queued = control.enqueue(
-            'checkpoint',
-            checkpointRequestMessage(),
-          );
-          run.checkpoint = {
-            requestedAt,
-            state: queued.accepted ? 'requested' : 'unavailable',
-          };
-          emitUpdate();
-        },
-        onControlAck: (id, kind, generation) =>
-          control.acknowledge(
-            id,
-            kind as import('./control').DelegateControlKind,
-            generation,
-          ),
+        onControlAck: acknowledgeControl,
         onLine: emitUpdate,
       });
+    }
 
+    const { exitCode, wasAborted, timedOut, spawnError } = childResult;
     run.exitCode = exitCode;
     if (spawnError) {
       run.stopReason = 'error';

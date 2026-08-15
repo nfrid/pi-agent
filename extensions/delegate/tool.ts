@@ -103,10 +103,16 @@ const HandoffFromSchema = Type.Union([
 ]);
 
 const ResultProjectionSchema = Type.Optional(
-  Type.Array(Type.String({ maxLength: 256 }), {
-    maxItems: 32,
-    description: 'Static schema paths selected for the compact parent envelope',
-  }),
+  Type.Union([
+    Type.Literal('all', {
+      description: 'Expose the complete bounded result to the parent',
+    }),
+    Type.Array(Type.String({ maxLength: 256 }), {
+      maxItems: 32,
+      description:
+        'Static result paths selected for the compact parent envelope; use "/" for the complete result',
+    }),
+  ]),
 );
 const ResultViewsSchema = Type.Optional(
   Type.Record(
@@ -119,30 +125,17 @@ const ResultViewsSchema = Type.Optional(
     { maxProperties: 16 },
   ),
 );
-const ResultSpecSchema = Type.Union([
-  Type.Object(
-    {
-      schema: Type.Any({
-        description:
-          'Bounded JSON-schema subset for the complete machine-readable result',
-      }),
-      projection: ResultProjectionSchema,
-      views: ResultViewsSchema,
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
-      shape: Type.Any({
-        description:
-          'Compact result shape: primitive type tokens; required-by-default object fields; one-item arrays for homogeneous lists; multi-literal arrays for enums; exact {$optional: shape} wrappers; and $type descriptors for constraints',
-      }),
-      projection: ResultProjectionSchema,
-      views: ResultViewsSchema,
-    },
-    { additionalProperties: false },
-  ),
-]);
+const ResultSpecSchema = Type.Object(
+  {
+    shape: Type.Any({
+      description:
+        'Complete result shape: primitive type tokens; required-by-default object fields; one-item arrays for homogeneous lists; multi-literal arrays for enums; exact {$optional: shape} wrappers; and $type descriptors for constraints',
+    }),
+    projection: ResultProjectionSchema,
+    views: ResultViewsSchema,
+  },
+  { additionalProperties: false },
+);
 
 export type DelegateHandoffFrom = Static<typeof HandoffArtifactSchema>;
 export type DelegateHandoffInput = Static<typeof HandoffFromSchema>;
