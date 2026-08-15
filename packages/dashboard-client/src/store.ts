@@ -16,19 +16,19 @@ import {
   type ProjectSummary,
   type RunSummary,
   type RuntimeSnapshot,
-  type SessionApiResponse,
   type SessionIndexEntry,
   type ShellFeedEvent,
   type ShellProjection,
   type ShellRuntimeSnapshot,
   type ThreadSummary,
+  tryParseAuthoritativeSessionSnapshot,
   type WorkspaceTarget,
 } from '@pi-dashboard/protocol';
 import { useSyncExternalStore } from 'react';
 import { DashboardConnectionRuntime } from './connection-runtime.js';
 import type { DashboardHttpClient } from './http-client.js';
 import {
-  type ClientSessionApiResponse,
+  type ClientAuthoritativeSessionSnapshot,
   SESSION_REQUEST_ORDER,
 } from './http-client.js';
 
@@ -77,7 +77,7 @@ export interface DashboardLiveState {
   shellSync: DomainSyncState;
   sessionSyncById: Readonly<Record<string, DomainSyncState>>;
   /** Latest authoritative response delivered by an acquired session feed. */
-  sessionSnapshotsById: Readonly<Record<string, SessionApiResponse>>;
+  sessionSnapshotsById: Readonly<Record<string, AuthoritativeSessionSnapshot>>;
   workspacesById: Readonly<Record<string, WorkspaceTarget>>;
   workspaceOrder: readonly string[];
   runtimesById: Readonly<Record<string, RuntimeSnapshot>>;
@@ -392,20 +392,6 @@ function withoutTranscriptMessage(
     items,
     order: projection.order.filter((id) => id !== messageId),
   };
-}
-
-function persistedLiveMessageIds(
-  projection: TranscriptProjection,
-  events: readonly DashboardEventEnvelope[],
-): ReadonlySet<string> {
-  const matched = new Set<string>();
-  for (const envelope of events) {
-    if (envelope.event.type !== 'message.finished') continue;
-    const live = liveMessageIdentity(envelope);
-    if (live && persistedMessageIdForLive(projection, live))
-      matched.add(live.messageId);
-  }
-  return matched;
 }
 
 /**
@@ -924,7 +910,7 @@ export class DashboardLiveStore {
 
   /** Route session feed snapshots through the existing transcript projection. */
   acceptSessionSnapshot(
-    response: SessionApiResponse,
+    response: AuthoritativeSessionSnapshot,
     sequence: number,
     generation: number,
     authoritativeRebase = false,
@@ -1319,17 +1305,12 @@ export class DashboardLiveStore {
 
   /** Install an authoritative session-feed snapshot. */
   hydrateSession(
-    response: SessionApiResponse,
+    response: AuthoritativeSessionSnapshot,
     options: { replace?: boolean } = {},
   ): TranscriptProjection | undefined {
-    const sessionResponse = response as ClientSessionApiResponse & {
-      __dashboardHistorical?: boolean;
-    };
     const requestOrder = options.replace
       ? undefined
-      : sessionResponse.__dashboardHistorical
-        ? undefined
-        : sessionResponse[SESSION_REQUEST_ORDER];
+      : (response as ClientAuthoritativeSessionSnapshot)[SESSION_REQUEST_ORDER];
     if (
       response.serverId !== undefined &&
       this.state.serverId !== undefined &&
@@ -1345,12 +1326,11 @@ export class DashboardLiveStore {
     }
     // Authoritative feed snapshots replace the selected domain directly.
     // Finite mutation/recovery responses retain their request-order guard but
-    // never replay a removed global browser event buffer.
+    // preserve an incomplete established history baseline.
     const coveredCursor = snapshotCursor;
     const previousProjection =
       this.state.transcriptsBySessionId[response.metadata.id];
     const currentProjection = options.replace ? undefined : previousProjection;
-    const sessionEvents: DashboardEventEnvelope[] = [];
     const replayCursor = coveredCursor;
     const baselineRuntimeSeq = response.runtimeSeq;
     let projection = hydrateTranscript(response.entries, response.metadata.id, {
@@ -1371,13 +1351,7 @@ export class DashboardLiveStore {
     // from persisted history. Feed it through the same transcript reducer as
     // SSE events so streaming messages/tools keep stable identities and a
     // persisted terminal replacement naturally wins without duplication.
-    const authoritativeResponse = response as SessionApiResponse & {
-      active?: AuthoritativeSessionSnapshot['active'];
-      __dashboardHistorical?: boolean;
-    };
-    const active = authoritativeResponse.__dashboardHistorical
-      ? undefined
-      : authoritativeResponse.active;
+    const active = response.active;
     const activeEpoch = active?.runtimeEpoch ?? response.runtimeEpoch;
     const activeIsCurrent =
       active !== undefined &&
@@ -1415,17 +1389,6 @@ export class DashboardLiveStore {
             tool,
           }),
         );
-    }
-    const canonicalLiveMessageIds = persistedLiveMessageIds(
-      projection,
-      sessionEvents,
-    );
-    for (const envelope of sessionEvents) {
-      if (envelope.cursor <= projection.lastCursor) continue;
-      const liveMessage = liveMessageIdentity(envelope);
-      if (liveMessage && canonicalLiveMessageIds.has(liveMessage.messageId))
-        continue;
-      projection = reduceTranscriptEvent(projection, envelope);
     }
     const retiredEpochs = new Set([
       ...projection.retiredEpochs,
@@ -1607,7 +1570,7 @@ export class DashboardLiveStore {
 
   /** Prepend a bounded disk page without replacing the live transcript baseline. */
   prependSessionHistory(
-    response: SessionApiResponse,
+    response: AuthoritativeSessionSnapshot,
   ): TranscriptProjection | undefined {
     if (!response.history) return undefined;
     if (
@@ -1693,8 +1656,10 @@ export class DashboardLiveStore {
       typeof result === 'object' &&
       'metadata' in result &&
       'entries' in result
-    )
-      this.hydrateSession(result as SessionApiResponse);
+    ) {
+      const session = tryParseAuthoritativeSessionSnapshot(result);
+      if (session) this.hydrateSession(session);
+    }
   }
 
   updateUsage(usage: unknown): void {

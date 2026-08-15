@@ -1,6 +1,6 @@
 import type {
+  AuthoritativeSessionSnapshot,
   BrowserSnapshot,
-  SessionApiResponse,
   ShellFeedEvent,
   ShellProjection,
 } from '@pi-dashboard/protocol';
@@ -36,18 +36,28 @@ const envelope = (cursor: number, sessionId = 'session-1'): StreamRecord =>
 const sessionResponse = (
   cursor: number,
   serverId = 'daemon-1',
-): SessionApiResponse =>
+): AuthoritativeSessionSnapshot =>
   ({
     serverId,
     cursor,
     metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: cursor },
     entries: [],
-  }) as SessionApiResponse;
+    history: { version: 1, start: 0, end: 0, hasOlder: false },
+    entriesComplete: true,
+    active: {
+      pendingInteractions: [],
+      messages: [],
+      tools: [],
+      delegates: [],
+      truncated: false,
+    },
+    completeThroughCursor: true,
+  }) as AuthoritativeSessionSnapshot;
 
 function orderedResponse(
-  response: SessionApiResponse,
+  response: AuthoritativeSessionSnapshot,
   order: number,
-): SessionApiResponse {
+): AuthoritativeSessionSnapshot {
   Object.defineProperty(response, SESSION_REQUEST_ORDER, { value: order });
   return response;
 }
@@ -376,7 +386,7 @@ describe('DashboardLiveStore', () => {
           truncated: false,
         },
         completeThroughCursor: true,
-      } as SessionApiResponse;
+      } as AuthoritativeSessionSnapshot;
       Object.defineProperty(response, SESSION_REQUEST_ORDER, { value: order });
       return response;
     };
@@ -392,6 +402,46 @@ describe('DashboardLiveStore', () => {
     expect(projectedRuntime?.extensionSurfaces?.[0]?.viewModel).toMatchObject({
       statuses: [{ runId: 'response-b-delegate' }],
     });
+  });
+
+  it('keeps latest request ordering through a structural response clone', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    const current = {
+      ...sessionResponse(1),
+      entries: [
+        {
+          type: 'message',
+          id: 'current-message',
+          message: { role: 'assistant', content: 'current' },
+        },
+      ],
+      [SESSION_REQUEST_ORDER]: 2,
+    } as AuthoritativeSessionSnapshot;
+    const stale = structuredClone({
+      ...current,
+      entries: [
+        {
+          type: 'message',
+          id: 'stale-message',
+          message: { role: 'assistant', content: 'stale' },
+        },
+      ],
+      [SESSION_REQUEST_ORDER]: 1,
+    }) as AuthoritativeSessionSnapshot;
+
+    expect(store.hydrateSession(current)).toBeDefined();
+    expect(store.hydrateSession(stale)).toBeUndefined();
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.items[
+        'current-message'
+      ],
+    ).toBeDefined();
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.items[
+        'stale-message'
+      ],
+    ).toBeUndefined();
   });
 
   it('does not poison ordering from invalid higher-order responses', () => {
@@ -489,7 +539,7 @@ describe('DashboardLiveStore', () => {
         truncated: false,
       },
       completeThroughCursor: false,
-    } as SessionApiResponse);
+    } as AuthoritativeSessionSnapshot);
 
     const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
     expect(projection?.order).toEqual([
@@ -1262,6 +1312,72 @@ describe('DashboardLiveStore', () => {
     expect(selectSnapshot(afterMutation)?.sessions).toHaveLength(1);
   });
 
+  it('accepts complete authoritative mutation snapshots with active provenance', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.applyMutationResult({
+      ...sessionResponse(2),
+      runtimeEpoch: 'mutation-epoch',
+      runtimeSeq: 7,
+      active: {
+        ...sessionResponse(2).active,
+        messages: [
+          {
+            messageId: 'mutation-message',
+            role: 'assistant',
+            content: 'from mutation',
+          },
+        ],
+        tools: [
+          {
+            toolCallId: 'mutation-tool',
+            name: 'read',
+            status: 'running' as const,
+          },
+        ],
+      },
+    });
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.items['mutation-message']).toMatchObject({
+      kind: 'message',
+      content: 'from mutation',
+    });
+    expect(projection?.items['mutation-tool']).toMatchObject({
+      kind: 'tool',
+      status: 'running',
+    });
+    expect(projection).toMatchObject({
+      lastCursor: 2,
+      runtimeEpoch: 'mutation-epoch',
+      lastRuntimeSeq: 7,
+    });
+  });
+
+  it('ignores legacy-shaped mutation session data at the authoritative ingress', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+
+    store.applyMutationResult({
+      serverId: 'daemon-1',
+      cursor: 2,
+      metadata: {
+        id: 'session-1',
+        file: '',
+        cwd: '/tmp',
+        updatedAt: 2,
+        title: 'legacy response',
+      },
+      entries: [],
+      entriesComplete: true,
+    });
+
+    expect(store.getSnapshot().sessionsById['session-1']).toBeUndefined();
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1'],
+    ).toBeUndefined();
+  });
+
   it('rejects gaps without retaining global browser event history', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 4));
@@ -1747,12 +1863,79 @@ describe('DashboardLiveStore', () => {
     );
   });
 
+  it('merges historical pages without replacing the authoritative active overlay', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    const authoritative = {
+      ...sessionResponse(1),
+      entries: [
+        {
+          type: 'message',
+          id: 'newer-message',
+          message: { role: 'assistant', content: 'newer' },
+        },
+      ],
+      active: {
+        ...sessionResponse(1).active,
+        messages: [
+          { messageId: 'active-message', role: 'assistant', content: 'live' },
+        ],
+        tools: [
+          {
+            toolCallId: 'active-tool',
+            name: 'read',
+            status: 'running' as const,
+          },
+        ],
+      },
+    };
+    expect(store.acceptSessionSnapshot(authoritative, 1, 1, true)).toBe(true);
+
+    expect(
+      store.prependSessionHistory({
+        ...sessionResponse(1),
+        entries: [
+          {
+            type: 'message',
+            id: 'older-message',
+            message: { role: 'assistant', content: 'older' },
+          },
+        ],
+        history: { version: 1, start: 0, end: 1, hasOlder: false },
+        active: {
+          ...sessionResponse(1).active,
+          messages: [],
+          tools: [],
+        },
+      }),
+    ).toBeDefined();
+
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual([
+      'older-message',
+      'newer-message',
+      'active-message',
+      'active-tool',
+    ]);
+    expect(
+      store.getSnapshot().sessionSnapshotsById['session-1']?.active,
+    ).toMatchObject({
+      messages: [{ messageId: 'active-message' }],
+      tools: [{ toolCallId: 'active-tool' }],
+    });
+  });
+
   it('rejects prepending a page without history metadata', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));
     store.hydrateSession({ ...sessionResponse(1), entries: [] });
     expect(
-      store.prependSessionHistory({ ...sessionResponse(1), entries: [] }),
+      store.prependSessionHistory({
+        ...sessionResponse(1),
+        entries: [],
+        history: undefined,
+      }),
     ).toBeUndefined();
   });
 

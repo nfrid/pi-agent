@@ -1,5 +1,6 @@
 import type {
   ActiveDelegateTranscriptBaseline,
+  AuthoritativeSessionSnapshot,
   BrowserSnapshot,
   DelegateHistoryResponse,
   DelegateHistoryRunDetailResponse,
@@ -7,7 +8,6 @@ import type {
   ProjectCreateCommand,
   RetryCommand,
   SessionAdoptCommand,
-  SessionApiResponse,
   StartRuntimeRequest,
   ThreadCreateCommand,
 } from '@pi-dashboard/protocol';
@@ -120,7 +120,7 @@ export function snapshotQueryOptions(
 }
 
 export function sessionQueryOptions(client: DashboardHttpClient, id: string) {
-  return queryOptions<SessionApiResponse>({
+  return queryOptions<AuthoritativeSessionSnapshot>({
     queryKey: dashboardQueryKeys.session(id),
     queryFn: ({ signal }) => client.session(id, signal),
     staleTime: Number.POSITIVE_INFINITY,

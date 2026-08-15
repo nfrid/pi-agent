@@ -180,6 +180,26 @@ describe('DashboardHttpClient command requests', () => {
     });
   });
 
+  it('rejects legacy-shaped session responses missing authoritative fields', async () => {
+    const client = new DashboardHttpClient({
+      fetch: vi.fn(async () =>
+        trpcResponse({
+          metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
+          entries: [],
+          entriesComplete: true,
+          serverId: 'server-1',
+          cursor: 1,
+        }),
+      ),
+      tokenStore: tokenStore(),
+    });
+
+    await expect(client.session('session-1')).rejects.toMatchObject({
+      kind: 'malformed-output',
+      code: 'malformed-output',
+    });
+  });
+
   it('orders latest session responses while isolating historical pages', async () => {
     let releaseFirst!: () => void;
     const firstRelease = new Promise<void>((resolve) => {
@@ -214,6 +234,10 @@ describe('DashboardHttpClient command requests', () => {
     const historical = client.sessionBefore('session-1', 'older');
     releaseFirst();
     const [a, b, older] = await Promise.all([first, second, historical]);
+    expect(a).toMatchObject({
+      active: { messages: [], tools: [], pendingInteractions: [] },
+      completeThroughCursor: true,
+    });
     expect(
       (a as typeof a & Record<string, unknown>)[SESSION_REQUEST_ORDER],
     ).toBe(1);

@@ -27,13 +27,22 @@ const sessionSnapshot = (
   cursor: number,
   id = 'session-a',
   serverId = 'daemon-1',
-): AuthoritativeSessionSnapshot =>
-  ({
-    serverId,
-    cursor,
-    metadata: { id, file: '', cwd: '/tmp', updatedAt: cursor },
-    entries: [],
-  }) as unknown as AuthoritativeSessionSnapshot;
+): AuthoritativeSessionSnapshot => ({
+  serverId,
+  cursor,
+  metadata: { id, file: '', cwd: '/tmp', updatedAt: cursor },
+  entries: [],
+  history: { version: 1, start: 0, end: 0, hasOlder: false },
+  entriesComplete: true,
+  active: {
+    pendingInteractions: [],
+    messages: [],
+    tools: [],
+    delegates: [],
+    truncated: false,
+  },
+  completeThroughCursor: true,
+});
 
 type Observer = {
   onData: (value: unknown) => void;

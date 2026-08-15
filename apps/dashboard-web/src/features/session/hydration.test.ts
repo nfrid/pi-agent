@@ -1,16 +1,23 @@
 import { DashboardLiveStore } from '@pi-dashboard/client';
-import type { SessionApiResponse } from '@pi-dashboard/protocol';
+import type { AuthoritativeSessionSnapshot } from '@pi-dashboard/protocol';
 import { createElement, StrictMode } from 'react';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import { useSessionHydration } from './hydration';
 
-const response: SessionApiResponse = {
+const response: AuthoritativeSessionSnapshot = {
   serverId: 'server-1',
   cursor: 0,
   metadata: { id: 'session-1', file: '', cwd: '/tmp', updatedAt: 1 },
   entries: [],
   entriesComplete: true,
+  active: {
+    pendingInteractions: [],
+    messages: [],
+    tools: [],
+    delegates: [],
+    truncated: false,
+  },
   completeThroughCursor: true,
 };
 
