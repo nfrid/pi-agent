@@ -23,7 +23,7 @@
     "dashboard:daemon": "node scripts/dashboard-dev.mjs daemon",
     "dashboard:web": "node scripts/dashboard-dev.mjs web",
     "dashboard:deploy": "pnpm run workspace:build && launchctl kickstart -k \"gui/$(id -u)/com.pi.dashboard\"",
-    "dashboard:dist-smoke": "pnpm --filter @pi-dashboard/server build && node scripts/dashboard-dist-smoke.mjs",
+    "dashboard:dist-smoke": "pnpm --filter @pi-dashboard/protocol build && pnpm --filter @pi-dashboard/server build && node scripts/dashboard-dist-smoke.mjs",
     "workspace:typecheck": "pnpm -r --filter './packages/**' --filter './apps/**' typecheck",
     "workspace:build": "pnpm -r --filter './packages/**' --filter './apps/**' build",
     "workspace:test": "pnpm -r --filter './packages/**' --filter './apps/**' test",

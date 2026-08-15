@@ -12,7 +12,7 @@ export type DashboardFixtureOptions = {
   sessionSubscribeDelayMs?: number;
 };
 
-function trpcData(data: unknown): string {
+export function trpcData(data: unknown): string {
   return JSON.stringify({ result: { data } });
 }
 

@@ -1402,6 +1402,53 @@ describe('DashboardLiveStore', () => {
     expect(selectSnapshot(afterMutation)?.sessions).toHaveLength(1);
   });
 
+  it('keeps mutation receipts inert before and after live session events', () => {
+    const receipt = {
+      runtimeId: 'runtime-1',
+      commandId: 'command-1',
+      status: 'completed',
+      result: { accepted: true },
+    };
+    const live = {
+      cursor: 2,
+      emittedAt: 2,
+      sessionId: 'session-1',
+      event: {
+        type: 'message.finished',
+        sessionId: 'session-1',
+        message: {
+          messageId: 'live-answer',
+          role: 'assistant',
+          content: 'Live answer',
+          phase: 'finished',
+        },
+      },
+    } as unknown as StreamRecord;
+
+    const eventFirst = new DashboardLiveStore();
+    eventFirst.installSnapshot(snapshot('daemon-1', 1));
+    eventFirst.hydrateSession(sessionResponse(1), { replace: true });
+    eventFirst.applyEventEnvelope(live);
+    const accepted =
+      eventFirst.getSnapshot().transcriptsBySessionId['session-1'];
+    eventFirst.applyMutationResult(receipt);
+    expect(eventFirst.getSnapshot().transcriptsBySessionId['session-1']).toBe(
+      accepted,
+    );
+    expect(accepted?.items['live-answer']).toBeDefined();
+
+    const receiptFirst = new DashboardLiveStore();
+    receiptFirst.installSnapshot(snapshot('daemon-1', 1));
+    receiptFirst.hydrateSession(sessionResponse(1), { replace: true });
+    receiptFirst.applyMutationResult(receipt);
+    receiptFirst.applyEventEnvelope(live);
+    expect(
+      receiptFirst.getSnapshot().transcriptsBySessionId['session-1']?.items[
+        'live-answer'
+      ],
+    ).toBeDefined();
+  });
+
   it('accepts complete authoritative mutation snapshots with active provenance', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

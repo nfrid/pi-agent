@@ -1,5 +1,10 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
-import { installDashboardBootstrap, trpcSseData } from './dashboard-fixtures';
+import {
+  dashboardTrpcInput,
+  installDashboardBootstrap,
+  trpcData,
+  trpcSseData,
+} from './dashboard-fixtures';
 
 function transcriptScroll(page: Page) {
   return page.locator('.session-transcript-scroll');
@@ -549,21 +554,36 @@ test('session title supports reliable inline renaming', async ({ page }) => {
   );
   let failNextRename = false;
   const renamedValues: string[] = [];
-  await page.route('**/api/sessions/session-rename/name', async (route) => {
-    const body = route.request().postDataJSON() as { name: string };
-    renamedValues.push(body.name);
+  await page.route('**/trpc/renameSession', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    const name = typeof input.name === 'string' ? input.name : '';
+    renamedValues.push(name);
     if (failNextRename) {
       failNextRename = false;
       await route.fulfill({
         status: 500,
         contentType: 'application/json',
-        body: JSON.stringify({ error: 'Rename unavailable' }),
+        body: JSON.stringify({
+          error: {
+            message: 'Rename unavailable',
+            code: -32603,
+            data: {
+              code: 'INTERNAL_SERVER_ERROR',
+              httpStatus: 500,
+              path: 'renameSession',
+            },
+          },
+        }),
       });
       return;
     }
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ accepted: true }),
+      body: trpcData({
+        commandId: input.commandId,
+        status: 'completed',
+        result: { sessionId: input.sessionId, name },
+      }),
     });
   });
 
@@ -648,11 +668,19 @@ test('command palette identifies the runtime before invoking repeated actions', 
     unread: [],
   });
   let invokedRuntime: string | undefined;
-  await page.route('**/api/runtimes/*/command', async (route) => {
-    invokedRuntime = new URL(route.request().url()).pathname.split('/')[3];
+  await page.route('**/trpc/runtimeCommand', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    const command = input.command as Record<string, unknown> | undefined;
+    invokedRuntime =
+      typeof input.runtimeId === 'string' ? input.runtimeId : undefined;
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ accepted: true }),
+      body: trpcData({
+        runtimeId: input.runtimeId,
+        commandId: command?.id,
+        status: 'completed',
+        result: { accepted: true },
+      }),
     });
   });
   await page.goto('/');
@@ -678,16 +706,20 @@ test('session shell shows compaction progress', async ({ page }) => {
     route.fulfill({ contentType: 'application/json', body: '{}' }),
   );
   const commands: unknown[] = [];
-  await page.route(
-    '**/api/runtimes/runtime-compacting/command',
-    async (route) => {
-      commands.push(route.request().postDataJSON());
-      await route.fulfill({
-        contentType: 'application/json',
-        body: JSON.stringify({ accepted: true }),
-      });
-    },
-  );
+  await page.route('**/trpc/runtimeCommand', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    const command = input.command as Record<string, unknown> | undefined;
+    commands.push(command);
+    await route.fulfill({
+      contentType: 'application/json',
+      body: trpcData({
+        runtimeId: input.runtimeId,
+        commandId: command?.id,
+        status: 'completed',
+        result: { accepted: true },
+      }),
+    });
+  });
   const runtime = {
     runtimeId: 'runtime-compacting',
     ownership: 'external',
@@ -1127,12 +1159,19 @@ test('delayed command completion does not scroll a destination session', async (
   const commandReleased = new Promise<void>((resolve) => {
     releaseCommand = resolve;
   });
-  await page.route('**/api/runtimes/runtime-source/command', async (route) => {
+  await page.route('**/trpc/runtimeCommand', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    const command = input.command as Record<string, unknown> | undefined;
     commandRequested = true;
     await commandReleased;
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ accepted: true }),
+      body: trpcData({
+        runtimeId: input.runtimeId,
+        commandId: command?.id,
+        status: 'completed',
+        result: { accepted: true },
+      }),
     });
     commandCompleted = true;
   });
@@ -3373,65 +3412,60 @@ async function installPhase6Mocks(
       }),
     }),
   );
-  await page.route('**/api/runtimes/start', async (route) => {
-    try {
-      starts.push(
-        JSON.parse(route.request().postData() ?? '{}') as Record<
-          string,
-          unknown
-        >,
-      );
-    } catch {
-      starts.push({});
-    }
+  await page.route('**/trpc/startRuntime', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    starts.push(input);
     await route.fulfill({
-      status: 201,
       contentType: 'application/json',
-      body: JSON.stringify({ runtimeId: 'r-launched' }),
+      body: trpcData({
+        commandId: input.commandId,
+        status: 'completed',
+        result: { runtimeId: 'r-launched' },
+      }),
     });
   });
-  await page.route('**/api/runtimes/r1/restart', async (route) => {
-    try {
-      restarts.push(
-        JSON.parse(route.request().postData() ?? '{}') as Record<
-          string,
-          unknown
-        >,
-      );
-    } catch {
-      restarts.push({});
-    }
+  await page.route('**/trpc/restartRuntime', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    restarts.push(input);
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ ok: true, result: { runtimeId: 'r-restarted' } }),
+      body: trpcData({
+        commandId: input.commandId,
+        status: 'completed',
+        result: { runtimeId: 'r-restarted' },
+      }),
     });
   });
-  await page.route('**/api/runtimes/r1/stop', async (route) => {
-    try {
-      stops.push(
-        JSON.parse(route.request().postData() ?? '{}') as Record<
-          string,
-          unknown
-        >,
-      );
-    } catch {
-      stops.push({});
-    }
+  await page.route('**/trpc/stopRuntime', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    stops.push(input);
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ ok: true }),
+      body: trpcData({
+        commandId: input.commandId,
+        status: 'completed',
+        result: { runtimeId: input.runtimeId, stopped: true },
+      }),
+    });
+  });
+  await page.route('**/trpc/runtimeCommand', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    const command = input.command as Record<string, unknown> | undefined;
+    if (command) commands.push(command);
+    else commands.push({ type: 'invalid-command' });
+    await route.fulfill({
+      contentType: 'application/json',
+      body: trpcData({
+        runtimeId: input.runtimeId,
+        commandId: command?.id,
+        status: 'completed',
+        result: { accepted: true },
+      }),
     });
   });
   await page.route('**/api/runtimes/r1/command', async (route) => {
-    const contentType = route.request().headers()['content-type'] ?? '';
     const body = route.request().postData() ?? '';
-    if (contentType.startsWith('application/json')) {
-      try {
-        commands.push(JSON.parse(body) as Record<string, unknown>);
-      } catch {
-        commands.push({ type: 'invalid-json' });
-      }
-    } else commands.push({ type: 'multipart', body });
+    commands.push({ type: 'multipart', body });
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ ok: true, result: { accepted: true } }),
@@ -4539,6 +4573,7 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
     workspaceId: 'w1',
     initialPrompt: 'Inspect the project setup',
     model: { provider: 'test', model: 'text', thinking: 'medium' },
+    commandId: expect.any(String),
   });
   await page.reload();
   await expect(page.getByText('Starting agent…')).toBeVisible();
@@ -4570,7 +4605,11 @@ test('phase six mocked workspace flow covers refresh, fallback notification, age
   });
   await page.getByRole('button', { name: 'Resume session' }).click();
   await expect(page.getByText('Starting agent…')).toBeVisible();
-  expect(mocks.starts[1]).toEqual({ workspaceId: 'w1', sessionId: 's1' });
+  expect(mocks.starts[1]).toEqual({
+    workspaceId: 'w1',
+    sessionId: 's1',
+    commandId: expect.any(String),
+  });
   const delegateStartedAt = Date.now();
   await mocks.emit({
     type: 'snapshot',

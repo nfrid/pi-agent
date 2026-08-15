@@ -328,6 +328,11 @@ describe('dashboard query and mutation factories', () => {
         kind: 'domain',
       }),
     ).toBe(false);
+    expect(
+      (lifecycleRetry as (count: number, error: unknown) => boolean)(0, {
+        kind: 'authentication',
+      }),
+    ).toBe(false);
     const retry = commandMutationOptions(client).retry;
     expect(typeof retry).toBe('function');
     expect(
@@ -348,6 +353,11 @@ describe('dashboard query and mutation factories', () => {
     expect(
       (retry as (count: number, error: unknown) => boolean)(0, {
         kind: 'domain',
+      }),
+    ).toBe(false);
+    expect(
+      (retry as (count: number, error: unknown) => boolean)(0, {
+        kind: 'authentication',
       }),
     ).toBe(false);
     expect(typeof startRuntimeMutationOptions(client).retry).toBe('function');
