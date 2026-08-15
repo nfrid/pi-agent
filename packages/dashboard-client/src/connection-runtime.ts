@@ -110,8 +110,25 @@ function connectionErrorKind(
     source.data && typeof source.data === 'object'
       ? (source.data as Record<string, unknown>)
       : {};
-  const code = data.code ?? source.code;
-  if (code === 'UNAUTHORIZED' || code === 'FORBIDDEN') return 'authentication';
+  const shape =
+    source.shape && typeof source.shape === 'object'
+      ? (source.shape as Record<string, unknown>)
+      : {};
+  const cause =
+    source.cause && typeof source.cause === 'object'
+      ? (source.cause as Record<string, unknown>)
+      : {};
+  const codes = [data.code, shape.code, source.code, cause.code];
+  if (
+    codes.some(
+      (code) =>
+        code === 401 ||
+        code === 403 ||
+        code === 'UNAUTHORIZED' ||
+        code === 'FORBIDDEN',
+    )
+  )
+    return 'authentication';
   if (data.domainCode === 'protocol-mismatch') return 'protocol-mismatch';
   return undefined;
 }

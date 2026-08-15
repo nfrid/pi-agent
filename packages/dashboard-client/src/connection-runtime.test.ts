@@ -78,6 +78,7 @@ function fixture() {
     runtime,
     store,
     shell: (value: unknown) => shellObserver?.onData(value),
+    shellError: (error: unknown) => shellObserver?.onError?.(error),
     session: (id: string, value: unknown) =>
       sessionObservers.get(id)?.onData(value),
     counts: () => ({ shellSubscriptions, sessionSubscriptions }),
@@ -85,6 +86,28 @@ function fixture() {
 }
 
 describe('DashboardConnectionRuntime', () => {
+  it('classifies wrapped EventSource HTTP auth errors from their numeric code', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    f.shellError(
+      Object.assign(new Error('Non-200 status code (401)'), {
+        shape: {
+          type: 'error',
+          code: 401,
+          message: 'Non-200 status code (401)',
+        },
+      }),
+    );
+
+    expect(f.store.getSnapshot().connection).toMatchObject({
+      status: 'blocked',
+      errorKind: 'authentication',
+    });
+    stop();
+  });
+
   it('owns one shell subscription and reference-counts session feeds', async () => {
     const f = fixture();
     const stop = f.runtime.start();
