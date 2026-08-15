@@ -285,6 +285,25 @@ export function isActiveDelegateStatus(row: DelegateStatus): boolean {
   );
 }
 
+/** IDs whose durable state proves that a live settlement has been persisted. */
+export function delegateHistorySettledRunIds(
+  history: DelegateHistoryResponse | undefined,
+): ReadonlySet<string> {
+  return new Set(
+    history?.groups.flatMap((group) => {
+      const groupSettled =
+        group.state !== 'queued' && group.state !== 'running';
+      return group.runs
+        .filter(
+          (run) =>
+            (run.state !== 'queued' && run.state !== 'running') ||
+            (groupSettled && run.runId === group.runId),
+        )
+        .map((run) => run.runId);
+    }) ?? [],
+  );
+}
+
 function runLabel(
   index: number,
   row: DelegateStatus,
@@ -310,7 +329,11 @@ function groupModel(
     };
   });
   const liveDurableIndex = live
-    ? durableRuns.findIndex((run) => run.id === live.runId)
+    ? durableRuns.findIndex(
+        (run) =>
+          run.id === live.runId ||
+          (live.jobId !== undefined && run.row.jobId === live.jobId),
+      )
     : -1;
   const liveRow = live
     ? augmentLiveStatus(

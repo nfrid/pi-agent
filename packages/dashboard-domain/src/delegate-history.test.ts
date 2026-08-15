@@ -245,6 +245,173 @@ describe('delegate history adapter', () => {
     });
   });
 
+  it('reconciles settled completion evidence by background job ID', () => {
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'launch-legacy',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            runs: [
+              oldRun({
+                runId: 'launch-run',
+                lineageId: 'launch-lineage',
+                backgroundJobId: 'job-legacy',
+                state: 'queued',
+                task: 'Phase 3.5 regression review',
+              }),
+            ],
+          },
+        },
+      },
+      {
+        type: 'custom_message',
+        id: 'completion-legacy',
+        message: {
+          customType: 'delegate-job-result',
+          details: {
+            jobs: [
+              {
+                id: 'job-legacy',
+                state: 'success',
+                // Older completion records can omit the run's backgroundJobId
+                // and use a distinct run identity.
+                runs: [
+                  oldRun({
+                    runId: 'terminal-run',
+                    lineageId: 'terminal-lineage',
+                    state: 'success',
+                    messages: [
+                      {
+                        role: 'assistant',
+                        content: [{ type: 'text', text: 'review complete' }],
+                      },
+                    ],
+                  }),
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ];
+
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups).toHaveLength(1);
+    expect(response.groups[0]).toMatchObject({
+      lineageId: 'terminal-lineage',
+      state: 'success',
+      runs: [
+        {
+          runId: 'terminal-run',
+          state: 'success',
+          jobId: 'job-legacy',
+        },
+      ],
+    });
+  });
+
+  it('uses settled job metadata when completion runs are not persisted', () => {
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'launch-without-terminal',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            runs: [
+              oldRun({
+                runId: 'run-without-terminal',
+                lineageId: 'lineage-without-terminal',
+                backgroundJobId: 'job-without-terminal',
+                state: 'queued',
+              }),
+            ],
+          },
+        },
+      },
+      {
+        type: 'custom_message',
+        id: 'completion-without-run',
+        message: {
+          customType: 'delegate-job-result',
+          details: {
+            jobs: [
+              {
+                id: 'job-without-terminal',
+                name: 'Completed review',
+                state: 'success',
+                settledAt: 42,
+              },
+            ],
+          },
+        },
+      },
+    ];
+
+    const projectedCompletion = projectDelegateHistoryEntry(branch[2], {
+      sessionId: 'parent-1',
+    }).entry;
+    const response = delegateHistoryFromBranch('parent-1', [
+      branch[0],
+      branch[1],
+      projectedCompletion,
+    ]);
+    expect(response.groups).toHaveLength(1);
+    expect(response.groups[0]?.runs).toHaveLength(1);
+    expect(response.groups[0]?.runs[0]).toMatchObject({
+      runId: 'run-without-terminal',
+      lineageId: 'lineage-without-terminal',
+      state: 'success',
+      finishedAt: 42,
+      jobId: 'job-without-terminal',
+    });
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      [branch[0], branch[1], projectedCompletion],
+      'run-without-terminal',
+      'lineage-without-terminal',
+    );
+    expect(detail.run).toMatchObject({
+      state: 'success',
+      details: { task: 'inspect the change', truncated: false },
+    });
+  });
+
+  it('keeps a genuinely queued launch active without settlement evidence', () => {
+    const response = delegateHistoryFromBranch('parent-1', [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'still-queued',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            runs: [
+              oldRun({
+                runId: 'still-queued-run',
+                lineageId: 'still-queued-lineage',
+                backgroundJobId: 'still-queued-job',
+                state: 'queued',
+              }),
+            ],
+          },
+        },
+      },
+    ]);
+    expect(response.groups[0]?.runs).toHaveLength(1);
+    expect(response.groups[0]?.runs[0]).toMatchObject({
+      runId: 'still-queued-run',
+      state: 'queued',
+    });
+  });
+
   it('bounds runs per lineage and marks omitted records', () => {
     const branch = [
       { type: 'session', id: 'parent-1' },

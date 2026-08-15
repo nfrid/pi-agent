@@ -418,13 +418,14 @@ function projectRun(
   runIndex: string,
   options: DelegateHistoryEntryProjectionOptions,
   fallbackState?: unknown,
+  deriveCompatibilityId = true,
 ): { run: ProjectedRun; matches: boolean; detailBytes?: number } {
   const explicitRunId = stringValue(run.runId, 256);
   const runId =
     explicitRunId ??
-    (entryIdentity === undefined
-      ? undefined
-      : compatibilityRunId(options.sessionId, entryIdentity, runIndex));
+    (deriveCompatibilityId && entryIdentity !== undefined
+      ? compatibilityRunId(options.sessionId, entryIdentity, runIndex)
+      : undefined);
   const projected: ProjectedRun = {};
   if (runId) projected.runId = runId;
   const childSessionId = stringValue(run.sessionId, 256);
@@ -547,22 +548,31 @@ export function projectDelegateHistoryEntry(
     let detailBytes = 0;
     let truncated = false;
     for (const [jobIndex, sourceJob] of sourceMessage.details.jobs.entries()) {
-      if (!isRecord(sourceJob) || !Array.isArray(sourceJob.runs)) continue;
+      if (!isRecord(sourceJob)) continue;
+      // A completion can be persisted with job metadata before its bounded run
+      // payload is materialized. Retain one identity-only placeholder so the
+      // domain can reconcile it with the queued launch by background job ID.
+      const sourceRuns =
+        Array.isArray(sourceJob.runs) && sourceJob.runs.length > 0
+          ? sourceJob.runs
+          : [undefined];
       const projectedRuns: RecordValue[] = [];
-      for (const [runIndex, sourceRun] of sourceJob.runs.entries()) {
-        if (!isRecord(sourceRun)) continue;
+      for (const [runIndex, sourceRun] of sourceRuns.entries()) {
+        if (sourceRun !== undefined && !isRecord(sourceRun)) continue;
+        const synthetic = sourceRun === undefined;
         const projected = projectRun(
-          sourceRun,
+          synthetic ? {} : sourceRun,
           entryIdentity,
           `${jobIndex}:${runIndex}`,
           options,
           sourceJob.state,
+          !synthetic,
         );
-        if (
+        const retain =
           options.detailRunId !== undefined
-            ? projected.matches
-            : runCount < MAX_DELEGATE_HISTORY_TOTAL_RUNS
-        ) {
+            ? projected.matches || synthetic
+            : runCount < MAX_DELEGATE_HISTORY_TOTAL_RUNS;
+        if (retain) {
           projectedRuns.push(projected.run);
           detailBytes += projected.detailBytes ?? 0;
           runCount += 1;
@@ -630,8 +640,12 @@ function backgroundDetails(
   if (!Array.isArray(jobs)) return [];
   const occurrences: DelegateOccurrence[] = [];
   jobs.forEach((job, jobIndex) => {
-    if (!isRecord(job) || !Array.isArray(job.runs)) return;
-    job.runs.forEach((run, runIndex) => {
+    if (!isRecord(job)) return;
+    // Completion delivery may contain settled job state without a persisted
+    // run array. The job itself is still durable settlement evidence.
+    const runs =
+      Array.isArray(job.runs) && job.runs.length > 0 ? job.runs : [{}];
+    runs.forEach((run, runIndex) => {
       if (!isRecord(run)) return;
       occurrences.push({
         run,
@@ -668,35 +682,87 @@ function occurrences(branch: readonly unknown[]): DelegateOccurrence[] {
 /**
  * A background launch writes a queued/running tool result before its terminal
  * delegate-job-result. Modern runs keep the same explicit runId in both
- * records, so retain one canonical occurrence and prefer terminal content.
+ * records, but older/partially persisted records only retain the background
+ * job ID. Reconcile on either identity so a settled completion cannot leave
+ * its launch placeholder in the active section.
  */
+function occurrenceJobId(occurrence: DelegateOccurrence): string | undefined {
+  return (
+    stringValue(occurrence.run.backgroundJobId, 256) ??
+    stringValue(occurrence.job?.id, 256)
+  );
+}
+
+function occurrenceKeys(occurrence: DelegateOccurrence): string[] {
+  const keys: string[] = [];
+  const runId = stringValue(occurrence.run.runId, 256);
+  const jobId = occurrenceJobId(occurrence);
+  if (runId) keys.push(`run:${runId}`);
+  if (jobId) keys.push(`job:${jobId}`);
+  return keys;
+}
+
+function occurrenceState(
+  occurrence: DelegateOccurrence,
+): DelegateHistoryInvocation['state'] {
+  const jobState = stringValue(occurrence.job?.state, 32);
+  // A delegate-job-result is itself the terminal record. Its aggregate job
+  // state must settle an incompletely persisted run payload, even if that
+  // payload still carries the queued placeholder state.
+  if (
+    occurrence.kind === 'background' &&
+    jobState !== undefined &&
+    jobState !== 'queued' &&
+    jobState !== 'running'
+  )
+    return normalizedState({}, jobState);
+  return normalizedState(occurrence.run, occurrence.job?.state);
+}
+
+function mergeCanonicalOccurrences(
+  previous: DelegateOccurrence,
+  next: DelegateOccurrence,
+): DelegateOccurrence {
+  const previousState = occurrenceState(previous);
+  const nextState = occurrenceState(next);
+  const previousTerminal =
+    previousState !== 'queued' && previousState !== 'running';
+  const nextTerminal = nextState !== 'queued' && nextState !== 'running';
+  if (!nextTerminal && previousTerminal) return previous;
+  if (!nextTerminal && !previousTerminal) return next;
+  // Keep launch metadata (notably task and explicit run ID) when a terminal
+  // job record has only bounded/partial payload, while terminal fields win.
+  return {
+    ...next,
+    run: { ...previous.run, ...next.run },
+    ...(next.job === undefined && previous.job === undefined
+      ? {}
+      : { job: next.job ?? previous.job }),
+  };
+}
+
 function canonicalOccurrences(
   branch: readonly unknown[],
 ): DelegateOccurrence[] {
   const result: DelegateOccurrence[] = [];
   const indexes = new Map<string, number>();
   for (const occurrence of occurrences(branch)) {
-    const runId = stringValue(occurrence.run.runId, 256);
-    if (!runId) {
-      result.push(occurrence);
-      continue;
-    }
-    const index = indexes.get(runId);
+    const keys = occurrenceKeys(occurrence);
+    const index = keys
+      .map((key) => indexes.get(key))
+      .find((candidate): candidate is number => candidate !== undefined);
     if (index === undefined) {
-      indexes.set(runId, result.length);
+      const nextIndex = result.length;
       result.push(occurrence);
+      for (const key of keys) indexes.set(key, nextIndex);
       continue;
     }
     const previous = result[index];
     if (!previous) continue;
-    const previousState = normalizedState(previous.run, previous.job?.state);
-    const nextState = normalizedState(occurrence.run, occurrence.job?.state);
-    const previousTerminal =
-      previousState !== 'queued' && previousState !== 'running';
-    const nextTerminal = nextState !== 'queued' && nextState !== 'running';
-    // Terminal records win over launch placeholders. If both records have the
-    // same lifecycle class, the later persisted occurrence is authoritative.
-    if (nextTerminal || !previousTerminal) result[index] = occurrence;
+    const merged = mergeCanonicalOccurrences(previous, occurrence);
+    result[index] = merged;
+    for (const key of [...occurrenceKeys(previous), ...keys])
+      indexes.set(key, index);
   }
   return result;
 }
@@ -716,7 +782,7 @@ function invocation(
   const lineageId =
     explicitLineageId ??
     (continuation ? compatibilityLineageId(continuation) : runId);
-  const state = normalizedState(occurrence.run, occurrence.job?.state);
+  const state = occurrenceState(occurrence);
   const childSessionId = stringValue(occurrence.run.sessionId, 256);
   const name =
     stringValue(occurrence.run.name, 2_000) ??
