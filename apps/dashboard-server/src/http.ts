@@ -533,6 +533,12 @@ export class DashboardServerImpl implements DashboardServer {
       await fs.mkdir(this.stateDir, { recursive: true, mode: 0o700 });
       await this.application.uploads.start();
       await this.bridge.listen(this.socketPath);
+      // Keep the HTTP boundary closed until the initial workspace refresh and
+      // session index startup (including watcher installation) are complete.
+      // refreshWorkspaces performs the first scan; start performs the second
+      // scan before installing watchers, avoiding a scan-to-watcher gap.
+      await this.refreshWorkspaces();
+      await this.sessions.start(this.workspaces);
       if (this.httpHasStarted) await this.listenHttp();
       else {
         await this.app.listen({ port: this.port, host: this.host });
@@ -546,8 +552,6 @@ export class DashboardServerImpl implements DashboardServer {
       ]) {
         if (!this.origins.includes(origin)) this.origins.push(origin);
       }
-      await this.refreshWorkspaces();
-      await this.sessions.start(this.workspaces);
       // Seed metadata before the file watcher is allowed to publish deltas.
       this.application.initializeSessionMetadataBaseline();
       await this.application.orchestrationService?.start();

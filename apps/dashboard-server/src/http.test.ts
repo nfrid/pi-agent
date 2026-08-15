@@ -395,6 +395,13 @@ describe('dashboard HTTP boundary', () => {
     const workspaceRelease = new Promise<void>((resolve) => {
       releaseWorkspaces = resolve;
     });
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    for (const id of ['startup-session-one', 'startup-session-two'])
+      await writeFile(
+        path.join(sessionDir, `${id}.jsonl`),
+        `${JSON.stringify({ type: 'session', id, cwd: '/tmp/project' })}\n`,
+      );
     server = await createDashboardServer({
       port: 0,
       authToken: 'test-token',
@@ -410,6 +417,8 @@ describe('dashboard HTTP boundary', () => {
     });
     const startup = server.start();
     await workspaceStarted;
+    const http = (server as unknown as { http: { listening: boolean } }).http;
+    expect(http.listening).toBe(false);
     const bridge = net.createConnection(server.socketPath);
     await new Promise<void>((resolve, reject) => {
       bridge.once('connect', resolve);
@@ -439,6 +448,22 @@ describe('dashboard HTTP boundary', () => {
     expect(server.snapshot().cursor).toBe(0);
     releaseWorkspaces();
     await startup;
+    expect(http.listening).toBe(true);
+    const input = encodeURIComponent(JSON.stringify({ protocolVersion: 2 }));
+    const response = await fetch(
+      `http://127.0.0.1:${server.port}/trpc/shellSnapshot?input=${input}`,
+      { headers: { authorization: 'Bearer test-token' } },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      result?: {
+        data?: { snapshot?: { sessions?: Array<{ id: string }> } };
+      };
+    };
+    expect(body.result?.data?.snapshot?.sessions?.map(({ id }) => id)).toEqual([
+      'startup-session-two',
+      'startup-session-one',
+    ]);
     expect(server.snapshot().revision).toBe(1);
     expect(server.snapshot().cursor).toBe(1);
     bridge.destroy();
