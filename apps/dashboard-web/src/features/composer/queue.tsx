@@ -4,7 +4,14 @@ import {
 } from '@pi-dashboard/client';
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { useMutation } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { Button as AriaButton } from 'react-aria-components';
 import styles from './queue.module.css';
 
@@ -47,6 +54,26 @@ export function upsertQueuedMessage(
   );
 }
 
+/**
+ * Merge a live server queue with rows awaiting live-event confirmation.
+ * Server rows win by ID; optimistic rows survive a stale event but cannot
+ * create duplicate UI rows when the runtime event arrives first.
+ */
+export function mergeQueuedMessages(
+  serverItems: readonly QueuedMessage[],
+  awaitingItems: readonly QueuedMessage[],
+): QueuedMessage[] {
+  const seen = new Set(serverItems.map((item) => item.id));
+  return [
+    ...serverItems,
+    ...awaitingItems.filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    }),
+  ];
+}
+
 export function newQueueId(): string {
   return (
     globalThis.crypto?.randomUUID?.() ??
@@ -84,17 +111,69 @@ export function shouldShowQueuePanel(
 
 export function useComposerQueue(runtime: RuntimeSnapshot | undefined) {
   const serverQueue = queuedMessagesForRuntime(runtime);
+  const serverQueueKnown = Array.isArray(runtime?.queueDrafts);
   const serverQueueKey = JSON.stringify(serverQueue);
+  const runtimeKey = runtime
+    ? `${runtime.runtimeId}:${runtime.session.id}`
+    : undefined;
   const serverQueueKeyRef = useRef(serverQueueKey);
+  const runtimeKeyRef = useRef(runtimeKey);
+  const awaitingRef = useRef(new Map<string, QueuedMessage>());
+  const serverQueueRef = useRef<readonly QueuedMessage[]>(serverQueue);
   const [queue, setQueue] = useState<QueuedMessage[]>(() => [...serverQueue]);
 
   useEffect(() => {
+    const runtimeChanged = runtimeKeyRef.current !== runtimeKey;
+    if (runtimeChanged) {
+      // A command acknowledged by a replaced runtime belongs to the old
+      // session. Do not leak it into the replacement composer.
+      runtimeKeyRef.current = runtimeKey;
+      awaitingRef.current.clear();
+      serverQueueKeyRef.current = serverQueueKey;
+      serverQueueRef.current = serverQueue;
+      setQueue(serverQueueKnown ? [...serverQueue] : []);
+      return;
+    }
+    if (!serverQueueKnown) return;
+    serverQueueRef.current = serverQueue;
     if (serverQueueKeyRef.current === serverQueueKey) return;
     serverQueueKeyRef.current = serverQueueKey;
-    setQueue([...serverQueue]);
-  }, [serverQueue, serverQueueKey]);
+    for (const id of awaitingRef.current.keys())
+      if (serverQueue.some((item) => item.id === id))
+        awaitingRef.current.delete(id);
+    setQueue(
+      mergeQueuedMessages(serverQueue, [...awaitingRef.current.values()]),
+    );
+  }, [runtimeKey, serverQueue, serverQueueKey, serverQueueKnown]);
 
-  return [queue, setQueue] as const;
+  const addOptimistic = useCallback((item: QueuedMessage) => {
+    awaitingRef.current.set(item.id, item);
+    setQueue((current) => upsertQueuedMessage(current, item));
+  }, []);
+  const rejectOptimistic = useCallback((id: string) => {
+    awaitingRef.current.delete(id);
+    setQueue(
+      mergeQueuedMessages(serverQueueRef.current, [
+        ...awaitingRef.current.values(),
+      ]),
+    );
+  }, []);
+  const updateQueue = useCallback((next: SetStateAction<QueuedMessage[]>) => {
+    setQueue((current) => {
+      const updated = typeof next === 'function' ? next(current) : next;
+      for (const id of awaitingRef.current.keys())
+        if (!updated.some((item) => item.id === id))
+          awaitingRef.current.delete(id);
+      return updated;
+    });
+  }, []);
+
+  return {
+    queue,
+    setQueue: updateQueue,
+    addOptimistic,
+    rejectOptimistic,
+  };
 }
 
 export function QueuePanel({
@@ -104,7 +183,7 @@ export function QueuePanel({
 }: {
   runtimeId: string;
   items: readonly QueuedMessage[];
-  onItemsChange: (items: QueuedMessage[]) => void;
+  onItemsChange: Dispatch<SetStateAction<QueuedMessage[]>>;
 }) {
   const mutation = useMutation(commandMutationOptions(dashboardHttpClient));
   const [editingId, setEditingId] = useState<string>();
@@ -124,8 +203,8 @@ export function QueuePanel({
         runtimeId,
         command: queueCommand('queue.update', item.id, item.mode, text),
       });
-      onItemsChange(
-        items.map((candidate) =>
+      onItemsChange((current) =>
+        current.map((candidate) =>
           candidate.id === item.id ? { ...candidate, text } : candidate,
         ),
       );
@@ -142,7 +221,9 @@ export function QueuePanel({
         runtimeId,
         command: queueRemoveCommand(item.id),
       });
-      onItemsChange(items.filter((candidate) => candidate.id !== item.id));
+      onItemsChange((current) =>
+        current.filter((candidate) => candidate.id !== item.id),
+      );
       if (editingId === item.id) setEditingId(undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

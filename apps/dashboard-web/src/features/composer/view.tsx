@@ -22,7 +22,6 @@ import {
   QueuePanel,
   queueCommand,
   shouldShowQueuePanel,
-  upsertQueuedMessage,
   useComposerQueue,
 } from './queue';
 import {
@@ -105,7 +104,8 @@ export function Composer({
   );
   const composerCommands =
     runtime?.composerCommands ?? commandCatalogue.data?.commands;
-  const [queue, setQueue] = useComposerQueue(runtime);
+  const { queue, setQueue, addOptimistic, rejectOptimistic } =
+    useComposerQueue(runtime);
   const disabled =
     !runtime ||
     runtime.online === false ||
@@ -223,23 +223,30 @@ export function Composer({
     try {
       if (queueTextOnly) {
         const queueId = newQueueId();
-        await commandMutation.mutateAsync({
-          runtimeId: runtime.runtimeId,
-          command: queueCommand(
-            'queue.add',
-            queueId,
-            mode === 'prompt' ? 'followUp' : mode,
-            trimmedText,
-          ),
-        });
-        if (!mountedRef.current) return;
-        setQueue((current) =>
-          upsertQueuedMessage(current, {
-            id: queueId,
-            mode: mode === 'prompt' ? 'followUp' : mode,
-            text: trimmedText,
-          }),
-        );
+        const queuedItem = {
+          id: queueId,
+          mode: mode === 'prompt' ? ('followUp' as const) : mode,
+          text: trimmedText,
+        };
+        // Install the row before waiting for the HTTP acknowledgement. The
+        // runtime event and command response are independent streams and may
+        // arrive in either order; the hook reconciles the optimistic row with
+        // the authoritative server queue when the event arrives.
+        addOptimistic(queuedItem);
+        try {
+          await commandMutation.mutateAsync({
+            runtimeId: runtime.runtimeId,
+            command: queueCommand(
+              'queue.add',
+              queueId,
+              queuedItem.mode,
+              trimmedText,
+            ),
+          });
+        } catch (cause) {
+          if (mountedRef.current) rejectOptimistic(queueId);
+          throw cause;
+        }
       } else if (attachments.length)
         await dashboardHttpClient.sendCommandWithImages(
           runtime.runtimeId,
