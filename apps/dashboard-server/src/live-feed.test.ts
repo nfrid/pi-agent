@@ -102,12 +102,22 @@ describe('BoundedFeed', () => {
     });
     expect(await next(foreign)).toMatchObject({ kind: 'snapshot' });
     await foreign.return(undefined);
+    expect(feed.metrics().snapshotFallbacks.foreign).toBe(1);
     const future = feed.subscribe({
       lastEventId: cursorAt(second.id, 3),
       buildSnapshot: async (sequence) => ({ value: sequence }),
     });
     expect(await next(future)).toMatchObject({ kind: 'snapshot' });
     await future.return(undefined);
+    expect(feed.metrics().snapshotFallbacks.future).toBe(1);
+
+    const invalid = feed.subscribe({
+      lastEventId: 'not-a-cursor',
+      buildSnapshot: async (sequence) => ({ value: sequence }),
+    });
+    expect(await next(invalid)).toMatchObject({ kind: 'snapshot' });
+    await invalid.return(undefined);
+    expect(feed.metrics().snapshotFallbacks.invalid).toBe(1);
 
     feed.publish({ value: 3 });
     const expired = feed.subscribe({
@@ -116,6 +126,51 @@ describe('BoundedFeed', () => {
     });
     expect(await next(expired)).toMatchObject({ kind: 'snapshot' });
     await expired.return(undefined);
+    expect(feed.metrics().snapshotFallbacks.expired).toBe(1);
+  });
+
+  it('closes active subscribers deterministically during feed shutdown', async () => {
+    const feed = new BoundedFeed<Snapshot, Event>(
+      'shell',
+      bounds,
+      'generation',
+    );
+    const iterator = feed.subscribe({
+      buildSnapshot: async () => ({ value: 0 }),
+    });
+    await next(iterator);
+    await next(iterator);
+    const pending = iterator.next();
+    feed.close();
+    await expect(pending).rejects.toThrow('Feed closed.');
+    expect(feed.metrics().subscribers).toBe(0);
+  });
+
+  it('aborts a subscription while its authoritative snapshot is pending', async () => {
+    const feed = new BoundedFeed<Snapshot, Event>(
+      'shell',
+      bounds,
+      'generation',
+    );
+    const controller = new AbortController();
+    let release!: () => void;
+    const building = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const iterator = feed.subscribe({
+      signal: controller.signal,
+      buildSnapshot: async () => {
+        await building;
+        return { value: 0 };
+      },
+    });
+    const pending = iterator.next();
+    await Promise.resolve();
+    expect(feed.metrics().subscribers).toBe(1);
+    controller.abort();
+    release();
+    await expect(pending).resolves.toMatchObject({ done: true });
+    expect(feed.metrics().subscribers).toBe(0);
   });
 
   it('keeps deferred keyed records ordered and cleans aborted subscribers', async () => {
@@ -204,11 +259,66 @@ describe('BoundedFeed', () => {
       buildSnapshot: async (sequence) => ({ value: sequence }),
     });
     expect(await next(afterSecond)).toMatchObject({
-      kind: 'event',
+      kind: 'snapshot',
       sequence: 3,
-      event: { value: 3 },
     });
     await afterSecond.return(undefined);
+  });
+
+  it('keeps coalescing gaps bounded under a large replacement burst', async () => {
+    const feed = new BoundedFeed<Snapshot, Event>(
+      'shell',
+      { ...bounds, replayCount: 8 },
+      'generation',
+    );
+    feed.publish({ value: 0 });
+    const first = feed.publish(
+      { value: 1, key: 'summary' },
+      { key: 'summary' },
+    );
+    for (let value = 2; value <= 10_001; value += 1)
+      feed.publish({ value, key: 'summary' }, { key: 'summary' });
+
+    const metrics = feed.metrics();
+    expect(metrics.replayCount).toBeLessThanOrEqual(8);
+    expect(metrics.replayBytes).toBeLessThanOrEqual(bounds.replayBytes);
+    expect(metrics.coalesced).toBe(10_000);
+    expect(metrics.unavailableSequenceFloor).toBe(2);
+    expect(
+      (feed as unknown as { unavailableSequences?: unknown })
+        .unavailableSequences,
+    ).toBeUndefined();
+
+    const resumed = feed.subscribe({
+      lastEventId: first.id,
+      buildSnapshot: async (sequence) => ({ value: sequence }),
+    });
+    expect(await next(resumed)).toMatchObject({
+      kind: 'snapshot',
+      sequence: 10_002,
+    });
+    expect(feed.metrics().snapshotFallbacks.unavailable).toBe(1);
+    await resumed.return(undefined);
+  });
+
+  it('reports replay fallback when the replay itself exceeds queue bounds', async () => {
+    const feed = new BoundedFeed<Snapshot, Event>(
+      'shell',
+      { ...bounds, subscriberQueueCount: 2 },
+      'generation',
+    );
+    const first = feed.publish({ value: 1 });
+    feed.publish({ value: 2 });
+    const resumed = feed.subscribe({
+      lastEventId: cursorAt(first.id, 0),
+      buildSnapshot: async (sequence) => ({ value: sequence }),
+    });
+    expect(await next(resumed)).toMatchObject({
+      kind: 'snapshot',
+      sequence: 2,
+    });
+    expect(feed.metrics().snapshotFallbacks['too-large']).toBe(1);
+    await resumed.return(undefined);
   });
 
   it('terminates connected subscribers on one oversized event and rebases on resume', async () => {

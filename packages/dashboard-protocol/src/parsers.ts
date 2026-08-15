@@ -42,6 +42,10 @@ import {
   FeedCursorSchema,
   type InteractionSnapshot,
   InteractionSnapshotSchema,
+  type LiveDiagnosticsRequest,
+  LiveDiagnosticsRequestSchema,
+  type LiveDiagnosticsResponse,
+  LiveDiagnosticsResponseSchema,
   MAX_FRAME_BYTES,
   type NormalizedMessagePayload,
   NormalizedMessagePayloadSchema,
@@ -112,6 +116,33 @@ import {
 export function parseProtocolInfo(value: unknown): ProtocolInfo {
   return parseSchema(ProtocolInfoSchema, value, 'protocol info');
 }
+
+export function parseLiveDiagnosticsRequest(
+  value: unknown,
+): LiveDiagnosticsRequest {
+  return parseSchema(
+    LiveDiagnosticsRequestSchema,
+    value,
+    'live diagnostics request',
+  );
+}
+export const tryParseLiveDiagnosticsRequest = (
+  value: unknown,
+): LiveDiagnosticsRequest | undefined =>
+  tryParseSchema(LiveDiagnosticsRequestSchema, value);
+export function parseLiveDiagnosticsResponse(
+  value: unknown,
+): LiveDiagnosticsResponse {
+  return parseSchema(
+    LiveDiagnosticsResponseSchema,
+    value,
+    'live diagnostics response',
+  );
+}
+export const tryParseLiveDiagnosticsResponse = (
+  value: unknown,
+): LiveDiagnosticsResponse | undefined =>
+  tryParseSchema(LiveDiagnosticsResponseSchema, value);
 
 export function parseFeedCursor(value: unknown): FeedCursor {
   return parseSchema(FeedCursorSchema, value, 'feed cursor');

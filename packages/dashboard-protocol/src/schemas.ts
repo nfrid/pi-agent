@@ -99,6 +99,77 @@ export const ProtocolInfoSchema = Type.Object(
 );
 export type ProtocolInfo = Static<typeof ProtocolInfoSchema>;
 
+export const LiveDiagnosticsRequestSchema = Type.Object(
+  {},
+  { additionalProperties: false },
+);
+export type LiveDiagnosticsRequest = Static<
+  typeof LiveDiagnosticsRequestSchema
+>;
+
+export const LiveDiagnosticsFallbacksSchema = Type.Object(
+  {
+    initial: Type.Integer({ minimum: 0 }),
+    invalid: Type.Integer({ minimum: 0 }),
+    foreign: Type.Integer({ minimum: 0 }),
+    future: Type.Integer({ minimum: 0 }),
+    expired: Type.Integer({ minimum: 0 }),
+    unavailable: Type.Integer({ minimum: 0 }),
+    'too-large': Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+export type LiveDiagnosticsFallbacks = Static<
+  typeof LiveDiagnosticsFallbacksSchema
+>;
+
+export const LiveFeedDiagnosticsSchema = Type.Object(
+  {
+    generation: Type.String({ minLength: 1, maxLength: 512 }),
+    feed: Type.String({ minLength: 1, maxLength: 128 }),
+    sessionId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_ID })),
+    active: Type.Optional(Type.Boolean()),
+    sequence: Type.Integer({ minimum: 0 }),
+    subscribers: Type.Integer({ minimum: 0 }),
+    subscriptionOpens: Type.Integer({ minimum: 0 }),
+    resumedSubscriptions: Type.Integer({ minimum: 0 }),
+    replayCount: Type.Integer({ minimum: 0 }),
+    replayBytes: Type.Integer({ minimum: 0 }),
+    replayCountLimit: Type.Integer({ minimum: 1 }),
+    replayBytesLimit: Type.Integer({ minimum: 1 }),
+    queueCountLimit: Type.Integer({ minimum: 1 }),
+    queueBytesLimit: Type.Integer({ minimum: 1 }),
+    maxFrameBytes: Type.Integer({ minimum: 1 }),
+    oldestSequence: Type.Optional(Type.Integer({ minimum: 0 })),
+    newestSequence: Type.Optional(Type.Integer({ minimum: 0 })),
+    oldestCursor: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })),
+    newestCursor: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })),
+    queuedCount: Type.Integer({ minimum: 0 }),
+    queuedBytes: Type.Integer({ minimum: 0 }),
+    coalesced: Type.Integer({ minimum: 0 }),
+    overflowTerminations: Type.Integer({ minimum: 0 }),
+    oversizedTerminations: Type.Integer({ minimum: 0 }),
+    largestFrameBytes: Type.Integer({ minimum: 0 }),
+    unavailableSequenceFloor: Type.Optional(Type.Integer({ minimum: 0 })),
+    snapshotFallbacks: LiveDiagnosticsFallbacksSchema,
+  },
+  { additionalProperties: false },
+);
+export type LiveFeedDiagnostics = Static<typeof LiveFeedDiagnosticsSchema>;
+
+export const LiveDiagnosticsResponseSchema = Type.Object(
+  {
+    shell: LiveFeedDiagnosticsSchema,
+    sessions: Type.Array(LiveFeedDiagnosticsSchema, {
+      maxItems: MAX_SHELL_INDEX_ITEMS,
+    }),
+  },
+  { additionalProperties: false },
+);
+export type LiveDiagnosticsResponse = Static<
+  typeof LiveDiagnosticsResponseSchema
+>;
+
 /** Browser protocol version supplied to the shell snapshot query. */
 export const ShellSnapshotRequestSchema = Type.Object(
   { protocolVersion: Type.Integer({ minimum: 1 }) },

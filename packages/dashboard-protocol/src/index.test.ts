@@ -7,6 +7,7 @@ import {
   ExtensionSurfaceSchema,
   firstUserMessageText,
   isBridgeEvent,
+  LiveDiagnosticsResponseSchema,
   LiveExtensionSurfaceSchema,
   MAX_FRAME_BYTES,
   MAX_QUEUE_DRAFT_TEXT,
@@ -23,6 +24,8 @@ import {
   parseDelegateHistoryResponse,
   parseDelegateHistoryRunDetailResponse,
   parseFrame,
+  parseLiveDiagnosticsRequest,
+  parseLiveDiagnosticsResponse,
   parseNormalizedMessagePayload,
   parseProtocolInfo,
   parseRuntimeCommandInput,
@@ -77,6 +80,53 @@ describe('dashboard protocol', () => {
         status: 'unexpected',
         result: null,
       }),
+    ).toThrow();
+  });
+
+  it('validates bounded live diagnostics contracts', () => {
+    const diagnostics = {
+      generation: 'generation-1',
+      feed: 'shell',
+      sequence: 4,
+      subscribers: 1,
+      subscriptionOpens: 3,
+      resumedSubscriptions: 2,
+      replayCount: 2,
+      replayBytes: 120,
+      replayCountLimit: 256,
+      replayBytesLimit: 4_000_000,
+      queueCountLimit: 128,
+      queueBytesLimit: 4_000_000,
+      maxFrameBytes: 2_000_000,
+      oldestSequence: 3,
+      newestSequence: 4,
+      oldestCursor: 'oldest',
+      newestCursor: 'newest',
+      queuedCount: 0,
+      queuedBytes: 0,
+      coalesced: 2,
+      overflowTerminations: 1,
+      oversizedTerminations: 0,
+      largestFrameBytes: 800,
+      unavailableSequenceFloor: 2,
+      snapshotFallbacks: {
+        initial: 1,
+        invalid: 0,
+        foreign: 1,
+        future: 0,
+        expired: 0,
+        unavailable: 2,
+        'too-large': 0,
+      },
+    };
+    expect(parseLiveDiagnosticsRequest({})).toEqual({});
+    expect(
+      parseLiveDiagnosticsResponse({ shell: diagnostics, sessions: [] }),
+    ).toEqual({ shell: diagnostics, sessions: [] });
+    expect(LiveDiagnosticsResponseSchema).toBeDefined();
+    expect(() => parseLiveDiagnosticsRequest({ extra: true })).toThrow();
+    expect(() =>
+      parseLiveDiagnosticsResponse({ shell: diagnostics }),
     ).toThrow();
   });
 

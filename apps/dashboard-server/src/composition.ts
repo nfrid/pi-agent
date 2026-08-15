@@ -41,7 +41,7 @@ export interface DashboardServerOptions {
   feedReplayBytes?: number;
   feedQueueCount?: number;
   feedQueueBytes?: number;
-  feedPingMs?: number;
+  /** Idle session-feed eviction; transport inactivity uses the locked tRPC constant. */
   feedInactivityMs?: number;
 }
 
@@ -58,7 +58,6 @@ export interface DashboardConfiguration {
   readonly feedReplayBytes: number;
   readonly feedQueueCount: number;
   readonly feedQueueBytes: number;
-  readonly feedPingMs: number;
   readonly feedInactivityMs: number;
 }
 

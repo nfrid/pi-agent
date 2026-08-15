@@ -4,6 +4,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import {
   AuthoritativeSessionSnapshotSchema,
+  parseLiveDiagnosticsResponse,
   parseProtocolInfo,
   parseShellSnapshotRequest,
   type RuntimeSnapshot,
@@ -14,11 +15,16 @@ import {
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DashboardApplication } from './application/dashboard-application.js';
+import { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
 import { MetadataStore } from './metadata.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
 import { RuntimeRegistry } from './runtime-registry.js';
 import { SessionIndex } from './session-index.js';
-import { toDashboardTrpcError } from './trpc.js';
+import {
+  DASHBOARD_FEED_INACTIVITY_RECONNECT_MS,
+  DASHBOARD_FEED_PING_INTERVAL_MS,
+  toDashboardTrpcError,
+} from './trpc.js';
 
 const apps: ReturnType<typeof Fastify>[] = [];
 const TOKEN = 'trpc-test-token';
@@ -199,6 +205,14 @@ async function realSessionSnapshotFixture() {
 }
 
 describe('dashboard tRPC boundary', () => {
+  it('keeps feed heartbeat below the client inactivity reconnect timeout', () => {
+    expect(DASHBOARD_FEED_PING_INTERVAL_MS).toBe(15_000);
+    expect(DASHBOARD_FEED_INACTIVITY_RECONNECT_MS).toBe(5 * 60_000);
+    expect(DASHBOARD_FEED_INACTIVITY_RECONNECT_MS).toBeGreaterThan(
+      DASHBOARD_FEED_PING_INTERVAL_MS * 2,
+    );
+  });
+
   it('serves authenticated protocol-v2 info and the production shell shape', async () => {
     const app = Fastify();
     apps.push(app);
@@ -243,6 +257,59 @@ describe('dashboard tRPC boundary', () => {
       headers: authHeaders(),
     });
     expect(removedSessionRoute.statusCode).toBe(404);
+  });
+
+  it('serves authenticated bounded live diagnostics and rejects unauthenticated access', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    const shellFeed = new ShellFeed();
+    const sessionFeeds = new SessionFeedRegistry();
+    shellFeed.publishSemantic('interaction', 1, {
+      kind: 'remove',
+      runtimeId: 'runtime-1',
+      interactionId: 'interaction-1',
+    });
+    routeContext.shellFeed = shellFeed;
+    routeContext.sessionFeeds = sessionFeeds;
+    sessionFeeds.setActive('session-1', true);
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/trpc/liveDiagnostics',
+      headers: { ...authHeaders(), 'content-type': 'application/json' },
+      payload: {},
+    });
+    expect(response.statusCode).toBe(200);
+    const diagnostics = parseLiveDiagnosticsResponse(
+      response.json().result.data,
+    );
+    expect(diagnostics.shell).toMatchObject({
+      feed: 'shell',
+      sequence: 1,
+      replayCount: 1,
+      replayCountLimit: 256,
+      queueCountLimit: 128,
+      maxFrameBytes: 2 * 1024 * 1024,
+    });
+    expect(diagnostics.sessions).toHaveLength(1);
+    expect(diagnostics.sessions[0]).toMatchObject({
+      sessionId: 'session-1',
+      active: true,
+      feed: expect.stringContaining('session-'),
+    });
+
+    const unauthorized = await app.inject({
+      method: 'POST',
+      url: '/trpc/liveDiagnostics',
+      headers: { origin: ORIGIN, 'content-type': 'application/json' },
+      payload: {},
+    });
+    expect(unauthorized.statusCode).toBe(401);
+    shellFeed.close();
+    sessionFeeds.close();
   });
 
   it('serves authoritative shell and session queries', async () => {
