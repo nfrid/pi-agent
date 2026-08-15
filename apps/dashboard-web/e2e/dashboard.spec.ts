@@ -797,6 +797,105 @@ test('session shell shows compaction progress', async ({ page }) => {
     });
 });
 
+test('older active transcript events render before newer persisted history', async ({
+  page,
+}) => {
+  const session = {
+    id: 'session-active-chronology',
+    file: '',
+    cwd: '/tmp',
+    title: 'Active chronology',
+    updatedAt: Date.parse('2024-06-01T13:00:00.000Z'),
+  };
+  await installDashboardBootstrap(
+    page,
+    {
+      serverId: 'server-active-chronology',
+      revision: 1,
+      cursor: 4,
+      runtimes: [
+        {
+          runtimeId: 'runtime-active-chronology',
+          ownership: 'external',
+          pid: 1,
+          cwd: session.cwd,
+          liveState: 'working',
+          online: true,
+          session: { id: session.id, title: session.title, entries: [] },
+          pendingInteractions: [],
+        },
+      ],
+      workspaces: [],
+      sessions: [session],
+      unread: [],
+    },
+    {
+      sessionSnapshot: {
+        serverId: 'server-active-chronology',
+        cursor: 4,
+        runtimeEpoch: 'epoch-active-chronology',
+        runtimeSeq: 2,
+        entries: [
+          {
+            type: 'message',
+            id: 'persisted-newer',
+            message: {
+              role: 'assistant',
+              content: 'Newer persisted response',
+              timestamp: '2024-06-01T13:00:00.000Z',
+            },
+          },
+        ],
+        entriesComplete: true,
+        active: {
+          runtimeId: 'runtime-active-chronology',
+          runtimeEpoch: 'epoch-active-chronology',
+          runtimeSeq: 2,
+          pendingInteractions: [],
+          messages: [
+            {
+              messageId: 'active-older',
+              role: 'assistant',
+              content: 'Older active response',
+              timestamp: 1717243200000,
+              turnId: 'turn-active-older',
+              toolCallIds: ['active-older-tool'],
+            },
+          ],
+          tools: [
+            {
+              toolCallId: 'active-older-tool',
+              name: 'search',
+              status: 'running',
+              turnId: 'turn-active-older',
+            },
+          ],
+          delegates: [],
+          truncated: false,
+        },
+        completeThroughCursor: false,
+      },
+    },
+  );
+
+  await page.goto('/sessions/session-active-chronology');
+  const transcript = page.locator('.transcript');
+  await expect(transcript.getByText('Older active response')).toBeVisible();
+  await expect(transcript.getByText('Newer persisted response')).toBeVisible();
+  await expect
+    .poll(async () =>
+      (await transcript.locator('.markdown > p').allTextContents()).filter(
+        (text) =>
+          text === 'Older active response' ||
+          text === 'Newer persisted response',
+      ),
+    )
+    .toEqual(['Older active response', 'Newer persisted response']);
+  await expect(
+    page.getByRole('button', { name: /Older active response/ }),
+  ).toHaveAccessibleDescription(/1 tool/);
+});
+
 test('session shell exposes timestamps, dormant state, and persistent drafts', async ({
   page,
 }) => {
