@@ -573,6 +573,42 @@ describe('session index', () => {
     );
   });
 
+  it('only treats auxiliary JSONL watcher events as catalogue inputs', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-watcher-events-'),
+    );
+    const auxiliary = path.join(root, '.delegate-sessions');
+    await mkdir(auxiliary);
+    const index = new SessionIndex(root, undefined, undefined, auxiliary);
+    const internals = index as unknown as {
+      handleWatcherEvent: (
+        watcherRoot: string,
+        filename: string | Buffer | null | undefined,
+      ) => void;
+      scheduleIndex: (file: string) => void;
+    };
+    const scheduleIndex = vi
+      .spyOn(internals, 'scheduleIndex')
+      .mockImplementation(() => undefined);
+    const rebuild = vi.spyOn(index, 'rebuild').mockResolvedValue(undefined);
+    try {
+      internals.handleWatcherEvent(auxiliary, 'delegate.jsonl');
+      internals.handleWatcherEvent(auxiliary, 'delegate.json');
+      internals.handleWatcherEvent(auxiliary, 'delegate.json.123.tmp');
+      expect(scheduleIndex).toHaveBeenCalledWith(
+        path.join(auxiliary, 'delegate.jsonl'),
+      );
+      expect(rebuild).not.toHaveBeenCalled();
+
+      const normal = path.join(root, 'normal');
+      internals.handleWatcherEvent(normal, 'session.json');
+      expect(rebuild).toHaveBeenCalledTimes(1);
+    } finally {
+      scheduleIndex.mockRestore();
+      rebuild.mockRestore();
+    }
+  });
+
   it('fans file-watcher changes out to live snapshot observers', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-watch-'));
     let changed!: () => void;

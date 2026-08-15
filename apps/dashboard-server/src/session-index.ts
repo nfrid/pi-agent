@@ -828,20 +828,7 @@ export class SessionIndex {
       const watcher = fsModule.watch(
         root,
         { recursive: true },
-        (_event, filename) => {
-          if (!filename) {
-            void this.rebuild(this.workspaces)
-              .then(() => this.notifyChange())
-              .catch(() => undefined);
-            return;
-          }
-          const file = path.resolve(root, String(filename));
-          if (file.endsWith('.jsonl')) this.scheduleIndex(file);
-          else
-            void this.rebuild(this.workspaces)
-              .then(() => this.notifyChange())
-              .catch(() => undefined);
-        },
+        (_event, filename) => this.handleWatcherEvent(root, filename),
       );
       this.watchers.set(root, watcher);
       watcher.on('error', () => {
@@ -853,6 +840,30 @@ export class SessionIndex {
       // A root may not exist yet. Retry so later delegate/session creation is observed.
       this.scheduleWatcherRetry(root);
     }
+  }
+
+  private handleWatcherEvent(
+    root: string,
+    filename: string | Buffer | null | undefined,
+  ): void {
+    if (!filename) {
+      void this.rebuild(this.workspaces)
+        .then(() => this.notifyChange())
+        .catch(() => undefined);
+      return;
+    }
+    const file = path.resolve(root, String(filename));
+    if (file.endsWith('.jsonl')) {
+      this.scheduleIndex(file);
+      return;
+    }
+    // Auxiliary roots contain delegate sidecars and atomic-write scratch files.
+    // They are not catalogue inputs; only their JSONL transcript triggers an
+    // incremental index update. Normal roots retain the fallback rebuild.
+    if (this.isAuxiliaryFile(file)) return;
+    void this.rebuild(this.workspaces)
+      .then(() => this.notifyChange())
+      .catch(() => undefined);
   }
 
   private notifyChange(sessionId?: string, auxiliary?: boolean): void {
