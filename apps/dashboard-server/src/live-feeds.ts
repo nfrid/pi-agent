@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type {
   AuthoritativeSessionSnapshot,
   BridgeEvent,
@@ -14,7 +15,8 @@ export interface LiveFeedOptions extends FeedBounds {
   readonly generation?: string;
 }
 
-const MAX_DIAGNOSTIC_SESSION_FEEDS = 4_096;
+/** Maximum retained session feeds; inactive, unsubscribed feeds are evicted first. */
+export const MAX_SESSION_FEEDS = 256;
 
 const DEFAULT_BOUNDS: FeedBounds = {
   replayCount: 256,
@@ -64,8 +66,11 @@ export class SessionFeed extends BoundedFeed<
 
   constructor(sessionId: string, options: Partial<LiveFeedOptions> = {}) {
     const { generation: _generation, ...bounds } = options;
+    const feedKey = createHash('sha256')
+      .update(sessionId, 'utf8')
+      .digest('hex');
     super(
-      `session-${Buffer.from(sessionId, 'utf8').toString('base64url')}`,
+      `session-${feedKey}`,
       { ...DEFAULT_BOUNDS, ...bounds },
       options.generation,
     );
@@ -106,11 +111,33 @@ export class SessionFeedRegistry {
   get(sessionId: string): SessionFeed {
     let feed = this.feeds.get(sessionId);
     if (!feed) {
+      this.evictForCapacity();
+      if (this.feeds.size >= MAX_SESSION_FEEDS)
+        throw new Error('Session feed capacity is reserved for active feeds.');
       feed = new SessionFeed(sessionId, this.options);
       this.feeds.set(sessionId, feed);
     }
     feed.lastPublishedAt = Date.now();
     return feed;
+  }
+
+  private evictForCapacity(): void {
+    if (this.feeds.size < MAX_SESSION_FEEDS) return;
+    let candidate: [string, SessionFeed] | undefined;
+    for (const entry of this.feeds) {
+      const [, feed] = entry;
+      if (
+        feed.active ||
+        feed.metrics().subscribers !== 0 ||
+        (candidate && feed.lastPublishedAt >= candidate[1].lastPublishedAt)
+      )
+        continue;
+      candidate = entry;
+    }
+    if (candidate) {
+      candidate[1].close();
+      this.feeds.delete(candidate[0]);
+    }
   }
 
   publish(
@@ -158,7 +185,7 @@ export class SessionFeedRegistry {
   }
 
   metrics(
-    limit = MAX_DIAGNOSTIC_SESSION_FEEDS,
+    limit = MAX_SESSION_FEEDS,
   ): readonly (FeedMetrics & { sessionId: string; active: boolean })[] {
     const result: (FeedMetrics & { sessionId: string; active: boolean })[] = [];
     for (const feed of this.feeds.values()) {

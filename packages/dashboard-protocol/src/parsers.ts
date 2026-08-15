@@ -30,8 +30,6 @@ import {
   ComposerCommandCatalogueSchema,
   type DashboardEventEnvelope,
   DashboardEventEnvelopeSchema,
-  type DashboardMessage,
-  DashboardMessageSchema,
   type DelegateHistoryResponse,
   DelegateHistoryResponseSchema,
   type DelegateHistoryRunDetailResponse,
@@ -950,29 +948,6 @@ export function tryParseBrowserSnapshot(
 ): BrowserSnapshot | undefined {
   try {
     return parseBrowserSnapshot(value);
-  } catch {
-    return undefined;
-  }
-}
-export function parseDashboardMessage(value: unknown): DashboardMessage {
-  const message = parseSchema(
-    DashboardMessageSchema,
-    value,
-    'dashboard message',
-  );
-  if (message.type === 'snapshot')
-    validateBrowserSnapshotCapabilities(message.snapshot);
-  else {
-    validateBridgeEventCapabilities(message.event);
-    if (message.snapshot) validateBrowserSnapshotCapabilities(message.snapshot);
-  }
-  return message;
-}
-export function tryParseDashboardMessage(
-  value: unknown,
-): DashboardMessage | undefined {
-  try {
-    return parseDashboardMessage(value);
   } catch {
     return undefined;
   }

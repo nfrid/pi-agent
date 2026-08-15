@@ -1441,40 +1441,6 @@ export const ShellSnapshotSchema = Type.Object(
 );
 export type ShellSnapshot = Static<typeof ShellSnapshotSchema>;
 
-/** Messages emitted on the authenticated browser websocket (v1 compatible). */
-const BrowserSnapshotMessageSchema = Type.Object(
-  { type: Type.Literal('snapshot'), snapshot: BrowserSnapshotSchema },
-  { additionalProperties: false },
-);
-const BrowserEventMessageSchema = Type.Object(
-  {
-    type: Type.Literal('event'),
-    serverId: Type.String({ minLength: 1, maxLength: 512 }),
-    revision: Type.Integer({ minimum: 0 }),
-    runtimeId: IdentifierSchema,
-    event: BridgeEventSchema,
-    /** Transcript deltas omit the state snapshot to keep streaming bounded. */
-    snapshot: Type.Optional(BrowserSnapshotSchema),
-  },
-  { additionalProperties: false },
-);
-export const DashboardMessageSchema = Type.Union([
-  BrowserSnapshotMessageSchema,
-  BrowserEventMessageSchema,
-]);
-type DashboardMessageStatic = Static<typeof DashboardMessageSchema>;
-export type DashboardMessage =
-  | Extract<DashboardMessageStatic, { type: 'snapshot' }>
-  | (Omit<
-      Extract<DashboardMessageStatic, { type: 'event' }>,
-      'event' | 'snapshot'
-    > & {
-      event: BridgeEvent;
-      snapshot?: BrowserSnapshot;
-    });
-export const BrowserMessageSchema = DashboardMessageSchema;
-export type BrowserMessage = DashboardMessage;
-
 /** Canonical daemon event envelope used by reducers and resumable SSE. */
 export const DashboardEventEnvelopeSchema = Type.Object(
   {

@@ -5,7 +5,11 @@ import {
   type FeedItem,
   FeedOverflowError,
 } from './live-feed.js';
-import { SessionFeedRegistry } from './live-feeds.js';
+import {
+  MAX_SESSION_FEEDS,
+  SessionFeed,
+  SessionFeedRegistry,
+} from './live-feeds.js';
 
 const bounds = {
   replayCount: 8,
@@ -436,6 +440,26 @@ describe('BoundedFeed', () => {
   });
 });
 
+describe('session feed identifiers', () => {
+  it('hashes maximum-length ASCII and unicode IDs into fixed-length feed keys', () => {
+    for (const sessionId of ['a'.repeat(256), '😀'.repeat(256)]) {
+      const feed = new SessionFeed(sessionId, bounds);
+      expect(new SessionFeed(sessionId, bounds).feed).toBe(feed.feed);
+      const decoded = decodeFeedId(feed.currentId);
+      expect(decoded?.feed).toMatch(/^session-[0-9a-f]{64}$/u);
+      expect(decoded?.feed).toHaveLength(72);
+      expect(decoded?.feed).not.toContain(sessionId);
+
+      feed.publishEvent({
+        type: 'session.compacted',
+        sessionId,
+        entry: {},
+      });
+      expect(feed.sessionId).toBe(sessionId);
+    }
+  });
+});
+
 describe('feed registry routing', () => {
   it('creates session feeds lazily and isolates session A from B', async () => {
     const registry = new SessionFeedRegistry(bounds);
@@ -463,6 +487,29 @@ describe('feed registry routing', () => {
     await iterator.return(undefined);
     expect(a.metrics().replayCount).toBe(1);
     expect(b.metrics().replayCount).toBe(0);
+    registry.close();
+  });
+
+  it('bounds arbitrary feed growth without evicting active or subscribed feeds', async () => {
+    const registry = new SessionFeedRegistry(bounds);
+    registry.setActive('active', true);
+    const subscribed = registry.get('subscribed');
+    const iterator = subscribed.subscribe({
+      buildSnapshot: async () => ({}) as never,
+    });
+    await next(iterator);
+    await next(iterator);
+
+    for (let index = 0; index < MAX_SESSION_FEEDS - 2; index += 1)
+      registry.get(`inactive-${index}`);
+    expect(registry.metrics()).toHaveLength(MAX_SESSION_FEEDS);
+
+    registry.get('overflow');
+    expect(registry.metrics()).toHaveLength(MAX_SESSION_FEEDS);
+    expect(registry.get('active').active).toBe(true);
+    expect(registry.get('subscribed').metrics().subscribers).toBe(1);
+
+    await iterator.return(undefined);
     registry.close();
   });
 
