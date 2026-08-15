@@ -203,7 +203,7 @@ describe('structured delegate output handoff', () => {
     }
   });
 
-  test('automatically repairs a missing delegate_result call in the same child session', async () => {
+  test('does not respawn a clean child when its structured channel is missing', async () => {
     const spec = normalizeDelegateResultSpec({
       shape: { ok: 'boolean' },
       projection: 'all',
@@ -211,20 +211,15 @@ describe('structured delegate output handoff', () => {
     if (!spec) throw new Error('expected normalized result spec');
     const spawn = vi
       .spyOn(delegateChild, 'spawnDelegateChild')
-      .mockImplementationOnce(async (run) => {
+      .mockImplementation(async (run) => {
         run.messages = [
           {
             role: 'assistant',
-            content: [{ type: 'text', text: 'I finished but forgot the tool.' }],
+            content: [
+              { type: 'text', text: 'I finished but forgot the tool.' },
+            ],
           },
         ] as never;
-        return { exitCode: 0, wasAborted: false, timedOut: false };
-      })
-      .mockImplementationOnce(async (run, options) => {
-        expect(options.args.join(' ')).toContain(
-          'previous response ended without calling delegate_result',
-        );
-        captureDelegateResultEvent(run, { details: { ok: true } }, false);
         return { exitCode: 0, wasAborted: false, timedOut: false };
       });
     try {
@@ -239,47 +234,38 @@ describe('structured delegate output handoff', () => {
         maxConcurrency: 1,
         mode: 'single',
       });
-      settleDelegateResult(run);
-      expect(spawn).toHaveBeenCalledTimes(2);
-      expect(run.state).toBe('success');
-      expect(buildParentHandoff([run])).toContain(
-        'Projection: {"ok":true}',
-      );
-      expect(buildParentHandoff([run])).not.toContain('forgot the tool');
+      const handoff = buildParentHandoff([run]);
+      expect(spawn).toHaveBeenCalledOnce();
+      expect(run.state).toBe('error');
+      expect(handoff).toContain('delegate_result channel is missing');
+      expect(handoff).not.toContain('forgot the tool');
     } finally {
       vi.restoreAllMocks();
     }
   });
 
-  test('surfaces bounded final prose when the automatic structured repair still omits the tool', async () => {
+  test('uses only the lifecycle diagnostic when a structured child omits its channel', async () => {
     const spec = normalizeDelegateResultSpec({
       shape: { ok: 'boolean' },
       projection: 'all',
     });
     if (!spec) throw new Error('expected normalized result spec');
-    const spawn = vi
-      .spyOn(delegateChild, 'spawnDelegateChild')
-      .mockImplementationOnce(async (run) => {
+    vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
+      async (run) => {
         run.messages = [
           {
             role: 'assistant',
-            content: [{ type: 'text', text: 'Initial useful prose.' }],
+            content: [
+              {
+                type: 'text',
+                text: 'Recovery explanation without the required tool.',
+              },
+            ],
           },
         ] as never;
         return { exitCode: 0, wasAborted: false, timedOut: false };
-      })
-      .mockImplementationOnce(async (run) => {
-        run.messages.push({
-          role: 'assistant',
-          content: [
-            {
-              type: 'text',
-              text: 'Recovery explanation without the required tool.',
-            },
-          ],
-        } as never);
-        return { exitCode: 0, wasAborted: false, timedOut: false };
-      });
+      },
+    );
     try {
       const run = await runDelegate({
         cwd: '/tmp',
@@ -293,13 +279,12 @@ describe('structured delegate output handoff', () => {
         mode: 'single',
       });
       const handoff = buildParentHandoff([run]);
-      expect(spawn).toHaveBeenCalledTimes(2);
       expect(run.state).toBe('error');
       expect(handoff).toContain('delegate_result channel is missing');
-      expect(handoff).toContain('Unvalidated child prose (recovery only)');
-      expect(handoff).toContain(
+      expect(handoff).not.toContain(
         'Recovery explanation without the required tool.',
       );
+      expect(handoff).not.toContain('Unvalidated child prose');
     } finally {
       vi.restoreAllMocks();
     }

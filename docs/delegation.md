@@ -77,8 +77,8 @@ Omit `result` on a continuation to return to the legacy prose contract, or
 supply a new task-level/top-level contract explicitly. The contract is
 independent for every parallel task; a top-level `result` is the shared default
 and a task-level `result` replaces it. A contract requires exactly one of a
-compact `shape` or the bounded `schema` escape hatch. Prefer `shape` for ordinary
-contracts:
+compact `shape` or the deprecated bounded `schema` compatibility form. Prefer
+`shape` for new contracts; it is the ideal common API:
 
 ```json
 {
@@ -108,7 +108,9 @@ descriptor adds supported constraints, such as
 field names are reserved. The shorthand is expanded deterministically into the
 same closed bounded schema used everywhere else.
 
-Use `schema` when the explicit form is clearer or needs finer control:
+The legacy `schema` form remains accepted for compatibility, but is deprecated
+for new calls. It is useful while migrating contracts that rely on JSON-schema
+property names or constraints not yet expressible by `shape`:
 
 ```json
 {
@@ -145,8 +147,10 @@ formats, executable predicates, and all other keywords are rejected. Objects
 are closed by default, so undeclared result properties fail validation.
 
 Paths use canonical JSON-pointer-like syntax: `/` means the complete result,
-otherwise each segment is a declared object property. `~0` and `~1` encode `~`
-and `/`. Empty, `.`, `..`, numeric array indexes, arbitrary JSONPath, and bad
+otherwise each segment is a declared object property. Use `projection: "all"` as
+shorthand for `projection: ["/"]`; explicit path arrays, including `["/"]`,
+remain supported. `~0` and `~1` encode `~` and `/`. Empty, `.`, `..`, numeric
+array indexes, arbitrary JSONPath, and bad
 escapes are rejected. Numeric object-property names are allowed when declared;
 array indexes must use `*`, not a numeric segment. The only wildcard is `*`,
 and it may select an array's items (`/findings/*/title`). A named view cannot
@@ -165,7 +169,10 @@ items, 4,096 Unicode characters per string, 64 KiB result bytes, 32 projection
 paths, 8 KiB projected bytes, and 16 named views. Schema/path errors are
 reported before child setup or launch. The child receives a dynamic terminating
 `delegate_result` tool and must call it exactly once as its final action; JSON
-in prose is not a structured result. Parent settlement validates the captured
+in prose is not a structured result. If the first agent turn ends cleanly without
+that call, the child extension sends one hidden bounded follow-up in the same
+process/session; no follow-up is attempted after any result call, and the
+original hard timeout remains authoritative. Parent settlement validates the captured
 tool details once. Missing/malformed channels, wrong types, missing required
 properties, extra properties, enum violations, and limits make the run
 non-success with bounded validation errors.
@@ -211,7 +218,9 @@ worktree still retained by its continuation session. A read-only diagnostic
 checkout and a retired read-only snapshot both count as read-only recovery
 resources until removed. The same projection is rendered for single and
 parallel foreground results and for background/job completion and inspection;
-missing or invalid structured child results receive the same contract.
+missing or invalid structured child results receive the same contract. Invalid
+structured runs expose bounded harness validation/lifecycle diagnostics only;
+child prose is never a fallback result channel.
 
 ## Read-only delegates
 

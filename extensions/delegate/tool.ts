@@ -127,10 +127,18 @@ const ResultViewsSchema = Type.Optional(
 );
 const ResultSpecSchema = Type.Object(
   {
-    shape: Type.Any({
-      description:
-        'Complete result shape: primitive type tokens; required-by-default object fields; one-item arrays for homogeneous lists; multi-literal arrays for enums; exact {$optional: shape} wrappers; and $type descriptors for constraints',
-    }),
+    shape: Type.Optional(
+      Type.Any({
+        description:
+          'Recommended complete result shape: primitive type tokens; required-by-default object fields; one-item arrays for homogeneous lists; multi-literal arrays for enums; exact {$optional: shape} wrappers; and $type descriptors for constraints',
+      }),
+    ),
+    schema: Type.Optional(
+      Type.Any({
+        description:
+          'Deprecated compatibility form. Use shape for new contracts; this bounded JSON-schema subset remains accepted while shape coverage is expanded.',
+      }),
+    ),
     projection: ResultProjectionSchema,
     views: ResultViewsSchema,
   },

@@ -111,13 +111,10 @@ function runBody(run: DelegatedRun): {
   text: string;
   originalReport?: string;
 } {
-  const structured = getSettledDelegateResult(run) ?? run.structuredResult;
-  // Valid structured children expose only their declared projection. For an
-  // invalid structured run, retain the child's final prose as explicitly
-  // unvalidated recovery evidence so the parent can diagnose a missing result
-  // call or continue the same child.
-  if ((getDelegateResultSpec(run) || run.structuredResult) && structured?.valid !== false)
-    return { text: '' };
+  // Structured children are artifact/projection-only. This remains true for
+  // invalid settlement: child prose is not a harness-authored diagnostic and
+  // must not become a second, unvalidated result channel.
+  if (getDelegateResultSpec(run) || run.structuredResult) return { text: '' };
   const originalReport = getExactFinalAssistantText(run.messages);
   if (originalReport) return { text: originalReport, originalReport };
   return {
@@ -163,8 +160,8 @@ interface PreparedRun {
 }
 
 function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
-  // Settle first so invalid structured runs may expose bounded recovery prose,
-  // while valid runs continue to suppress every assistant text field.
+  // Settle first so invalid structured runs receive the same bounded lifecycle
+  // diagnostic as every other failed run; all child prose stays suppressed.
   const structured = structuredEnvelope(run);
   const { text: originalBody, originalReport } = runBody(run);
   const lines = [
@@ -184,11 +181,6 @@ function prepareRun(run: DelegatedRun, inlineFallback: boolean): PreparedRun {
               : []),
           ...(structured.omittedPaths.length
             ? [`Projection omissions: ${structured.omittedPaths.join(', ')}`]
-            : []),
-          ...(!structured.settlement.valid && originalBody.trim()
-            ? [
-                `Unvalidated child prose (recovery only): ${clip(originalBody, 2_000)}`,
-              ]
             : []),
         ]
       : [

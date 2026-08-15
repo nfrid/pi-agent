@@ -1,4 +1,8 @@
-import { ensureDelegateLifecycle, setDelegateLifecycle } from './lifecycle';
+import {
+  buildLifecycleDiagnostic,
+  ensureDelegateLifecycle,
+  setDelegateLifecycle,
+} from './lifecycle';
 import {
   projectStructuredResult,
   validateStructuredResult,
@@ -167,7 +171,10 @@ export function settleDelegateResult(
       setDelegateLifecycle(
         run,
         'child-result-invalid',
-        validation.errors.join('; '),
+        buildLifecycleDiagnostic(
+          'child-result-invalid',
+          `Unvalidated structured result: ${validation.errors.join('; ')}`,
+        ),
       );
     run.stopReason = 'error';
     const summary = validation.errors.join('; ').slice(0, 900);

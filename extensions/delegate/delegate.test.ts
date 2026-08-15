@@ -548,7 +548,7 @@ describe('delegate', () => {
         {
           task: 'return a fresh machine-readable audit',
           continuation: session.token,
-          result: { schema: { type: 'string' } },
+          result: { shape: 'string' },
         } as never,
         context,
         config,
@@ -566,7 +566,7 @@ describe('delegate', () => {
             {
               name: 'text',
               task: 'text contract',
-              result: { schema: { type: 'string' } },
+              result: { shape: 'string' },
             },
             {
               name: 'count',
