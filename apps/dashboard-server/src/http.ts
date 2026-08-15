@@ -392,16 +392,33 @@ export class DashboardServerImpl implements DashboardServer {
         this.changed();
         return result;
       },
-      restartRuntime: async (runtimeId, commandId) => {
-        const result = await this.application.runtime.restart(
-          runtimeId,
-          commandId,
-        );
+      restartRuntime: async (runtimeId, _commandId) => {
+        const result = await this.application.runtime.restart(runtimeId);
         this.changed();
         return result;
       },
       runtimeCommand: async (runtimeId: string, command: BridgeCommand) =>
         this.application.runtime.commandWithReceipt(runtimeId, command),
+      startRuntimeMutation: async (input: unknown) => {
+        const result = await this.application.runtime.startWithReceipt(input);
+        this.changed();
+        return result;
+      },
+      restartRuntimeMutation: async (input: unknown) => {
+        const result = await this.application.runtime.restartWithReceipt(input);
+        this.changed();
+        return result;
+      },
+      stopRuntimeMutation: async (input: unknown) => {
+        const result = await this.application.runtime.stopWithReceipt(input);
+        this.changed();
+        return result;
+      },
+      renameSessionMutation: async (input: unknown) => {
+        const result = await this.application.runtime.renameWithReceipt(input);
+        this.changed();
+        return result;
+      },
       commandRuntime: async (runtimeId, input, imageBuffers) => {
         if (!input || typeof input !== 'object' || Array.isArray(input))
           throw new Error('Invalid command body.');

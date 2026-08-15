@@ -1,5 +1,4 @@
 import { DatabaseSync } from 'node:sqlite';
-import { MAX_NON_IDEMPOTENT_ACTION_IDS } from '@pi-dashboard/extension-contributions';
 import { describe, expect, it, vi } from 'vitest';
 import { runMigrations } from '../repositories/migrations.js';
 import { SqliteOrchestrationRepository } from '../repositories/sqlite-orchestration-repository.js';
@@ -127,8 +126,128 @@ describe('RuntimeService runtime command receipts', () => {
   });
 });
 
-describe('RuntimeService restart replay protection', () => {
-  it('does not consume an ID for an unknown or unmanaged target', async () => {
+describe('RuntimeService lifecycle mutation receipts', () => {
+  function lifecycleFixture() {
+    const receipts = new Map<string, Record<string, unknown>>();
+    const repository = {
+      getCommandReceipt: (id: string) => receipts.get(id),
+      recordCommandReceipt: (receipt: Record<string, unknown>) => {
+        receipts.set(receipt.idempotencyKey as string, receipt);
+      },
+    };
+    const snapshots: unknown[] = [];
+    const registry = {
+      snapshots: () => snapshots,
+      sendCommand: vi.fn(async () => ({ accepted: true })),
+    };
+    const manager = {
+      launch: vi.fn(async () => ({ runtimeId: 'runtime-started' })),
+      canRestart: vi.fn(() => true),
+      restart: vi.fn(async () => ({ runtimeId: 'runtime-restarted' })),
+      stop: vi.fn(async () => undefined),
+    };
+    const sessions = { rename: vi.fn(async () => ({ id: 'dormant' })) };
+    const service = new RuntimeService(
+      registry as never,
+      manager as never,
+      sessions as never,
+      repository as never,
+    );
+    return { manager, registry, sessions, service, snapshots };
+  }
+
+  it('executes start once across concurrent and response-loss retries', async () => {
+    const fixture = lifecycleFixture();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fixture.manager.launch.mockImplementation(async () => {
+      await blocked;
+      return { runtimeId: 'runtime-started' };
+    });
+    const input = { commandId: 'start-once', workspaceId: 'workspace-1' };
+    const first = fixture.service.startWithReceipt(input);
+    const concurrent = fixture.service.startWithReceipt(input);
+    release();
+    await expect(first).resolves.toMatchObject({ status: 'completed' });
+    await expect(concurrent).resolves.toMatchObject({
+      status: 'already-completed',
+    });
+    await expect(
+      fixture.service.startWithReceipt(input),
+    ).resolves.toMatchObject({
+      status: 'already-completed',
+      result: { runtimeId: 'runtime-started' },
+    });
+    expect(fixture.manager.launch).toHaveBeenCalledOnce();
+  });
+
+  it('replays restart and rejects a force-stop payload conflict', async () => {
+    const fixture = lifecycleFixture();
+    const restart = { commandId: 'restart-once', runtimeId: 'runtime-1' };
+    await expect(
+      fixture.service.restartWithReceipt(restart),
+    ).resolves.toMatchObject({
+      status: 'completed',
+      result: { runtimeId: 'runtime-restarted' },
+    });
+    await expect(
+      fixture.service.restartWithReceipt(restart),
+    ).resolves.toMatchObject({
+      status: 'already-completed',
+    });
+    expect(fixture.manager.restart).toHaveBeenCalledOnce();
+
+    await fixture.service.stopWithReceipt({
+      commandId: 'stop-force',
+      runtimeId: 'runtime-1',
+      force: true,
+    });
+    await expect(
+      fixture.service.stopWithReceipt({
+        commandId: 'stop-force',
+        runtimeId: 'runtime-1',
+        force: false,
+      }),
+    ).rejects.toMatchObject({ code: 'idempotency-conflict' });
+  });
+
+  it('resolves live and dormant rename targets during execution', async () => {
+    const fixture = lifecycleFixture();
+    fixture.snapshots.push({
+      runtimeId: 'runtime-live',
+      online: true,
+      session: { id: 'session-live' },
+    });
+    const live = {
+      commandId: 'rename-live',
+      sessionId: 'session-live',
+      name: 'Live title',
+    };
+    await fixture.service.renameWithReceipt(live);
+    fixture.snapshots.length = 0;
+    await expect(
+      fixture.service.renameWithReceipt(live),
+    ).resolves.toMatchObject({
+      status: 'already-completed',
+    });
+    expect(fixture.registry.sendCommand).toHaveBeenCalledOnce();
+    expect(fixture.sessions.rename).not.toHaveBeenCalled();
+
+    const dormant = {
+      commandId: 'rename-dormant',
+      sessionId: 'session-dormant',
+      name: 'Dormant title',
+    };
+    await fixture.service.renameWithReceipt(dormant);
+    await fixture.service.renameWithReceipt(dormant);
+    expect(fixture.sessions.rename).toHaveBeenCalledOnce();
+  });
+});
+
+describe('RuntimeService legacy restart adapter', () => {
+  it('retains the managed-runtime precondition outside the browser mutation', async () => {
     let canRestart = false;
     const manager = {
       canRestart: () => canRestart,
@@ -140,35 +259,13 @@ describe('RuntimeService restart replay protection', () => {
       {} as never,
     );
 
-    await expect(
-      service.restart('missing', 'retry-after-precondition'),
-    ).rejects.toMatchObject({ code: 'restart-precondition' });
-    canRestart = true;
-    await expect(
-      service.restart('managed', 'retry-after-precondition'),
-    ).resolves.toEqual({ runtimeId: 'new-runtime' });
-    expect(manager.restart).toHaveBeenCalledOnce();
-  });
-
-  it('rejects duplicate IDs and fails closed at bounded capacity', async () => {
-    const manager = {
-      canRestart: () => true,
-      restart: vi.fn(async () => ({ runtimeId: 'new-runtime' })),
-    };
-    const service = new RuntimeService(
-      {} as never,
-      manager as never,
-      {} as never,
-    );
-
-    await service.restart('managed', 'same-id');
-    await expect(service.restart('managed', 'same-id')).rejects.toMatchObject({
-      code: 'duplicate-action-id',
+    await expect(service.restart('missing')).rejects.toMatchObject({
+      code: 'restart-precondition',
     });
-    for (let index = 1; index < MAX_NON_IDEMPOTENT_ACTION_IDS; index += 1)
-      await service.restart('managed', `restart-${index}`);
-    await expect(
-      service.restart('managed', 'over-capacity'),
-    ).rejects.toMatchObject({ code: 'action-command-capacity' });
+    canRestart = true;
+    await expect(service.restart('managed')).resolves.toEqual({
+      runtimeId: 'new-runtime',
+    });
+    expect(manager.restart).toHaveBeenCalledOnce();
   });
 });

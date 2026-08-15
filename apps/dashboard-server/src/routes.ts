@@ -126,6 +126,10 @@ export interface DashboardRouteContext {
   ): Promise<unknown>;
   /** Non-multipart browser commands use the typed tRPC receipt boundary. */
   runtimeCommand?(runtimeId: string, command: BridgeCommand): Promise<unknown>;
+  startRuntimeMutation?(input: unknown): Promise<unknown>;
+  restartRuntimeMutation?(input: unknown): Promise<unknown>;
+  stopRuntimeMutation?(input: unknown): Promise<unknown>;
+  renameSessionMutation?(input: unknown): Promise<unknown>;
   stopRuntime(runtimeId: string, force: boolean): Promise<void>;
   interaction(
     interactionId: string,
@@ -310,6 +314,10 @@ export const dashboardRoutes: FastifyPluginAsync<{
     shellSnapshotAt: context.shellSnapshotAt,
     sessionSnapshotAt: context.sessionSnapshotAt,
     runtimeCommand: context.runtimeCommand,
+    startRuntime: context.startRuntimeMutation,
+    restartRuntime: context.restartRuntimeMutation,
+    stopRuntime: context.stopRuntimeMutation,
+    renameSession: context.renameSessionMutation,
   });
   app.setNotFoundHandler((_request, reply) =>
     reply.code(404).send({ error: 'Not found.' }),

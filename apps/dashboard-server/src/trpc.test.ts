@@ -390,6 +390,52 @@ describe('dashboard tRPC boundary', () => {
     expect(malformedOutput.statusCode).toBe(500);
   });
 
+  it('serves typed lifecycle mutations and rejects malformed input/output', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    const startRuntimeMutation = vi.fn(async () => ({
+      commandId: 'start-1',
+      status: 'completed' as const,
+      result: { runtimeId: 'runtime-1' },
+    }));
+    routeContext.startRuntimeMutation = startRuntimeMutation;
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+
+    const valid = await app.inject({
+      method: 'POST',
+      url: '/trpc/startRuntime',
+      headers: authHeaders(),
+      payload: { commandId: 'start-1', workspaceId: 'workspace-1' },
+    });
+    expect(valid.statusCode).toBe(200);
+    expect(valid.json().result.data.result.runtimeId).toBe('runtime-1');
+    expect(startRuntimeMutation).toHaveBeenCalledOnce();
+
+    const malformed = await app.inject({
+      method: 'POST',
+      url: '/trpc/startRuntime',
+      headers: authHeaders(),
+      payload: {
+        commandId: 'start-2',
+        workspaceId: 'workspace-1',
+        unexpected: true,
+      },
+    });
+    expect(malformed.statusCode).toBe(400);
+    expect(startRuntimeMutation).toHaveBeenCalledOnce();
+
+    startRuntimeMutation.mockResolvedValueOnce({ invalid: true } as never);
+    const malformedOutput = await app.inject({
+      method: 'POST',
+      url: '/trpc/startRuntime',
+      headers: authHeaders(),
+      payload: { commandId: 'start-3', workspaceId: 'workspace-1' },
+    });
+    expect(malformedOutput.statusCode).toBe(500);
+  });
+
   it('rejects malformed requests and reports a stable protocol mismatch code', async () => {
     const app = Fastify();
     apps.push(app);

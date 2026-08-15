@@ -50,6 +50,14 @@ import {
   type ProtocolInfo,
   ProtocolInfoSchema,
   type QueueDraftMode,
+  type RenameSessionMutationInput,
+  RenameSessionMutationInputSchema,
+  type RenameSessionMutationOutput,
+  RenameSessionMutationOutputSchema,
+  type RestartRuntimeMutationInput,
+  RestartRuntimeMutationInputSchema,
+  type RestartRuntimeMutationOutput,
+  RestartRuntimeMutationOutputSchema,
   type RuntimeCommandInput,
   RuntimeCommandInputSchema,
   type RuntimeCommandOutput,
@@ -81,8 +89,16 @@ import {
   type ShellSnapshotResponse,
   ShellSnapshotResponseSchema,
   ShellSnapshotSchema,
+  type StartRuntimeMutationInput,
+  StartRuntimeMutationInputSchema,
+  type StartRuntimeMutationOutput,
+  StartRuntimeMutationOutputSchema,
   type StartRuntimeRequest,
   StartRuntimeRequestSchema,
+  type StopRuntimeMutationInput,
+  StopRuntimeMutationInputSchema,
+  type StopRuntimeMutationOutput,
+  StopRuntimeMutationOutputSchema,
 } from './schemas.js';
 import {
   isRecord,
@@ -427,6 +443,144 @@ export const tryParseRuntimeCommandOutput = (
   value: unknown,
 ): RuntimeCommandOutput | undefined =>
   tryParseSchema(RuntimeCommandOutputSchema, value);
+export function parseStartRuntimeMutationInput(
+  value: unknown,
+): StartRuntimeMutationInput {
+  const input = parseSchema(
+    StartRuntimeMutationInputSchema,
+    value,
+    'start runtime mutation input',
+  ) as StartRuntimeMutationInput;
+  const { commandId, ...request } = input;
+  return { ...parseStartRuntimeRequest(request), commandId };
+}
+export const tryParseStartRuntimeMutationInput = (
+  value: unknown,
+): StartRuntimeMutationInput | undefined => {
+  try {
+    return parseStartRuntimeMutationInput(value);
+  } catch {
+    return undefined;
+  }
+};
+export function parseStartRuntimeMutationOutput(
+  value: unknown,
+): StartRuntimeMutationOutput {
+  return parseSchema(
+    StartRuntimeMutationOutputSchema,
+    value,
+    'start runtime mutation output',
+  );
+}
+export const tryParseStartRuntimeMutationOutput = (
+  value: unknown,
+): StartRuntimeMutationOutput | undefined =>
+  tryParseSchema(StartRuntimeMutationOutputSchema, value);
+export const parseStartRuntimeInput = parseStartRuntimeMutationInput;
+export const parseStartRuntimeOutput = parseStartRuntimeMutationOutput;
+export const tryParseStartRuntimeInput = tryParseStartRuntimeMutationInput;
+export const tryParseStartRuntimeOutput = tryParseStartRuntimeMutationOutput;
+
+export function parseRestartRuntimeMutationInput(
+  value: unknown,
+): RestartRuntimeMutationInput {
+  return parseSchema(
+    RestartRuntimeMutationInputSchema,
+    value,
+    'restart runtime mutation input',
+  );
+}
+export const tryParseRestartRuntimeMutationInput = (
+  value: unknown,
+): RestartRuntimeMutationInput | undefined =>
+  tryParseSchema(RestartRuntimeMutationInputSchema, value);
+export function parseRestartRuntimeMutationOutput(
+  value: unknown,
+): RestartRuntimeMutationOutput {
+  return parseSchema(
+    RestartRuntimeMutationOutputSchema,
+    value,
+    'restart runtime mutation output',
+  );
+}
+export const tryParseRestartRuntimeMutationOutput = (
+  value: unknown,
+): RestartRuntimeMutationOutput | undefined =>
+  tryParseSchema(RestartRuntimeMutationOutputSchema, value);
+export const parseRestartRuntimeInput = parseRestartRuntimeMutationInput;
+export const parseRestartRuntimeOutput = parseRestartRuntimeMutationOutput;
+export const tryParseRestartRuntimeInput = tryParseRestartRuntimeMutationInput;
+export const tryParseRestartRuntimeOutput =
+  tryParseRestartRuntimeMutationOutput;
+
+export function parseStopRuntimeMutationInput(
+  value: unknown,
+): StopRuntimeMutationInput {
+  return parseSchema(
+    StopRuntimeMutationInputSchema,
+    value,
+    'stop runtime mutation input',
+  );
+}
+export const tryParseStopRuntimeMutationInput = (
+  value: unknown,
+): StopRuntimeMutationInput | undefined =>
+  tryParseSchema(StopRuntimeMutationInputSchema, value);
+export function parseStopRuntimeMutationOutput(
+  value: unknown,
+): StopRuntimeMutationOutput {
+  return parseSchema(
+    StopRuntimeMutationOutputSchema,
+    value,
+    'stop runtime mutation output',
+  );
+}
+export const tryParseStopRuntimeMutationOutput = (
+  value: unknown,
+): StopRuntimeMutationOutput | undefined =>
+  tryParseSchema(StopRuntimeMutationOutputSchema, value);
+export const parseStopRuntimeInput = parseStopRuntimeMutationInput;
+export const parseStopRuntimeOutput = parseStopRuntimeMutationOutput;
+export const tryParseStopRuntimeInput = tryParseStopRuntimeMutationInput;
+export const tryParseStopRuntimeOutput = tryParseStopRuntimeMutationOutput;
+
+export function parseRenameSessionMutationInput(
+  value: unknown,
+): RenameSessionMutationInput {
+  const input = parseSchema(
+    RenameSessionMutationInputSchema,
+    value,
+    'rename session mutation input',
+  ) as RenameSessionMutationInput;
+  return { ...input, name: validateSessionName(input.name) };
+}
+export const tryParseRenameSessionMutationInput = (
+  value: unknown,
+): RenameSessionMutationInput | undefined => {
+  try {
+    return parseRenameSessionMutationInput(value);
+  } catch {
+    return undefined;
+  }
+};
+export function parseRenameSessionMutationOutput(
+  value: unknown,
+): RenameSessionMutationOutput {
+  return parseSchema(
+    RenameSessionMutationOutputSchema,
+    value,
+    'rename session mutation output',
+  );
+}
+export const tryParseRenameSessionMutationOutput = (
+  value: unknown,
+): RenameSessionMutationOutput | undefined =>
+  tryParseSchema(RenameSessionMutationOutputSchema, value);
+export const parseRenameSessionInput = parseRenameSessionMutationInput;
+export const parseRenameSessionOutput = parseRenameSessionMutationOutput;
+export const tryParseRenameSessionInput = tryParseRenameSessionMutationInput;
+export const tryParseRenameSessionOutput = tryParseRenameSessionMutationOutput;
+
 export const parseRuntimeCommandRequest = parseRuntimeCommandInput;
 export const tryParseRuntimeCommandRequest = tryParseRuntimeCommandInput;
 export const parseRuntimeCommandReceipt = parseRuntimeCommandOutput;

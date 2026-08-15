@@ -15,11 +15,19 @@ import {
   type ProjectAdoptCommand,
   type ProjectCreateCommand,
   type ProtocolInfo,
+  parseRenameSessionMutationOutput,
+  parseRestartRuntimeMutationOutput,
+  parseStartRuntimeMutationOutput,
+  parseStopRuntimeMutationOutput,
+  type RenameSessionMutationOutput,
+  type RestartRuntimeMutationOutput,
   type RetryCommand,
   type Run,
   type SessionAdoptCommand,
   type SessionApiResponse,
+  type StartRuntimeMutationOutput,
   type StartRuntimeRequest,
+  type StopRuntimeMutationOutput,
   type Thread,
   type ThreadCreateCommand,
   tryParseActiveDelegateTranscriptBaseline,
@@ -811,41 +819,70 @@ export class DashboardHttpClient {
   }
 
   async startRuntime(
-    request: StartRuntimeRequest,
-  ): Promise<{ runtimeId: string }> {
-    return this.request('/api/runtimes/start', {
-      method: 'POST',
-      body: JSON.stringify(request),
-    });
+    request: StartRuntimeRequest & { commandId?: string },
+  ): Promise<StartRuntimeMutationOutput> {
+    const client = await this.getTrpcClient();
+    try {
+      const value = await client.startRuntime.mutate({
+        ...request,
+        commandId: request.commandId ?? this.newCommandId('dashboard-start'),
+      });
+      return parseStartRuntimeMutationOutput(value);
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
+    }
   }
 
-  async renameSession(id: string, name: string): Promise<unknown> {
-    return this.request(`/api/sessions/${encodeURIComponent(id)}/name`, {
-      method: 'POST',
-      body: JSON.stringify({ name }),
-    });
+  async renameSession(
+    id: string,
+    name: string,
+    commandId?: string,
+  ): Promise<RenameSessionMutationOutput> {
+    const client = await this.getTrpcClient();
+    try {
+      const value = await client.renameSession.mutate({
+        sessionId: id,
+        name,
+        commandId: commandId ?? this.newCommandId('dashboard-rename'),
+      });
+      return parseRenameSessionMutationOutput(value);
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
+    }
   }
 
-  async stopRuntime(runtimeId: string, force = false): Promise<unknown> {
-    return this.request(`/api/runtimes/${encodeURIComponent(runtimeId)}/stop`, {
-      method: 'POST',
-      body: JSON.stringify({ force }),
-    });
+  async stopRuntime(
+    runtimeId: string,
+    force = false,
+    commandId?: string,
+  ): Promise<StopRuntimeMutationOutput> {
+    const client = await this.getTrpcClient();
+    try {
+      const value = await client.stopRuntime.mutate({
+        runtimeId,
+        force,
+        commandId: commandId ?? this.newCommandId('dashboard-stop'),
+      });
+      return parseStopRuntimeMutationOutput(value);
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
+    }
   }
 
   async restartRuntime(
     runtimeId: string,
     commandId?: string,
-  ): Promise<unknown> {
-    return this.request(
-      `/api/runtimes/${encodeURIComponent(runtimeId)}/restart`,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          id: commandId ?? this.newCommandId('dashboard-restart'),
-        }),
-      },
-    );
+  ): Promise<RestartRuntimeMutationOutput> {
+    const client = await this.getTrpcClient();
+    try {
+      const value = await client.restartRuntime.mutate({
+        runtimeId,
+        commandId: commandId ?? this.newCommandId('dashboard-restart'),
+      });
+      return parseRestartRuntimeMutationOutput(value);
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
+    }
   }
 
   async answerInteraction(

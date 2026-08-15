@@ -283,7 +283,7 @@ export function NewChatView({
             },
           ),
         );
-        runtimeId = result.runtimeId;
+        runtimeId = result.result.runtimeId;
         if (attachments.length) setStartedRuntimeId(runtimeId);
       }
       store.optimisticallyTitleRuntime(runtimeId, initialPrompt);

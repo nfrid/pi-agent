@@ -6,6 +6,10 @@ import {
   type ProtocolInfo,
   ProtocolInfoSchema,
   parseAuthoritativeSessionSnapshot,
+  parseRenameSessionMutationInput,
+  parseRenameSessionMutationOutput,
+  parseRestartRuntimeMutationInput,
+  parseRestartRuntimeMutationOutput,
   parseRuntimeCommandInput,
   parseRuntimeCommandOutput,
   parseSchema,
@@ -14,6 +18,10 @@ import {
   parseShellFeedInput,
   parseShellFeedMessage,
   parseShellSnapshotResponse,
+  parseStartRuntimeMutationInput,
+  parseStartRuntimeMutationOutput,
+  parseStopRuntimeMutationInput,
+  parseStopRuntimeMutationOutput,
   type SessionFeedMessage,
   SessionSnapshotRequestSchema,
   type ShellFeedMessage,
@@ -42,6 +50,10 @@ export interface DashboardTrpcContext {
     runtimeId: string,
     command: BridgeCommand,
   ) => Promise<unknown>;
+  readonly startRuntime?: (input: unknown) => Promise<unknown>;
+  readonly restartRuntime?: (input: unknown) => Promise<unknown>;
+  readonly stopRuntime?: (input: unknown) => Promise<unknown>;
+  readonly renameSession?: (input: unknown) => Promise<unknown>;
   readonly shellFeed?: ShellFeed;
   readonly sessionFeeds?: SessionFeedRegistry;
   readonly shellSnapshotAt?: (sequence: number) => unknown;
@@ -226,6 +238,68 @@ const dashboardRouter = t.router({
         return parseRuntimeCommandOutput(
           await ctx.runtimeCommand(input.runtimeId, input.command),
         );
+      } catch (error) {
+        throw toDashboardTrpcError(error);
+      }
+    }),
+  startRuntime: t.procedure
+    .input((value: unknown) => parseStartRuntimeMutationInput(value))
+    .output((value: unknown) => parseStartRuntimeMutationOutput(value))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.startRuntime)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Runtime start is unavailable.',
+        });
+      try {
+        return parseStartRuntimeMutationOutput(await ctx.startRuntime(input));
+      } catch (error) {
+        throw toDashboardTrpcError(error);
+      }
+    }),
+  restartRuntime: t.procedure
+    .input((value: unknown) => parseRestartRuntimeMutationInput(value))
+    .output((value: unknown) => parseRestartRuntimeMutationOutput(value))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.restartRuntime)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Runtime restart is unavailable.',
+        });
+      try {
+        return parseRestartRuntimeMutationOutput(
+          await ctx.restartRuntime(input),
+        );
+      } catch (error) {
+        throw toDashboardTrpcError(error);
+      }
+    }),
+  stopRuntime: t.procedure
+    .input((value: unknown) => parseStopRuntimeMutationInput(value))
+    .output((value: unknown) => parseStopRuntimeMutationOutput(value))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.stopRuntime)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Runtime stop is unavailable.',
+        });
+      try {
+        return parseStopRuntimeMutationOutput(await ctx.stopRuntime(input));
+      } catch (error) {
+        throw toDashboardTrpcError(error);
+      }
+    }),
+  renameSession: t.procedure
+    .input((value: unknown) => parseRenameSessionMutationInput(value))
+    .output((value: unknown) => parseRenameSessionMutationOutput(value))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.renameSession)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Session rename is unavailable.',
+        });
+      try {
+        return parseRenameSessionMutationOutput(await ctx.renameSession(input));
       } catch (error) {
         throw toDashboardTrpcError(error);
       }
