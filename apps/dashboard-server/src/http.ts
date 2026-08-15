@@ -920,6 +920,7 @@ export class DashboardServerImpl implements DashboardServer {
       }
     }
 
+    this.publishSessionIndexDelta(this.application.sessionMetadataDelta());
     if (runtimeGone) {
       const runtimeKey = `runtime:${change.snapshot.runtimeId}`;
       this.shellRuntimeSignatures.delete(runtimeKey);
@@ -935,7 +936,6 @@ export class DashboardServerImpl implements DashboardServer {
         sessionId,
         change.kind === 'event' && !transcriptOnlyShellEvent(change.event),
       );
-    this.publishSessionIndexDelta(this.application.sessionMetadataDelta());
     // Registry callbacks may also update notifications or orchestration. The
     // concrete signatures suppress host.changed() amplification when they do
     // not alter shell-visible state.
