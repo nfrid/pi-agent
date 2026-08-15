@@ -195,9 +195,13 @@ function dashboardErrorFromTrpc(cause: unknown): DashboardHttpError {
       : typeof data?.protocolVersion === 'number'
         ? data.protocolVersion
         : undefined;
+  const expected =
+    typeof data?.expected === 'number'
+      ? data.expected
+      : DASHBOARD_PROTOCOL_VERSION;
   if (domainCode === 'protocol-mismatch' && actual !== undefined)
     return new DashboardProtocolMismatchError(
-      DASHBOARD_PROTOCOL_VERSION,
+      expected,
       actual,
       typeof data?.serverId === 'string' ? data.serverId : undefined,
     );

@@ -161,16 +161,18 @@ export class DashboardConnectionRuntime {
   private shellRebasing = false;
   private sessions = new Map<string, DomainEntry>();
   private readonly inactiveSessions = new Map<string, true>();
+  private blocked?: 'authentication' | 'protocol-mismatch';
   private hiddenAt?: number;
   private listenersInstalled = false;
   private readonly onOnline = () => {
-    if (this.started) {
-      this.replaceSubscriptions();
-    }
+    if (this.started && !this.blocked) this.replaceSubscriptions();
   };
   private readonly onOffline = () => {
-    this.store.setConnection('offline');
+    this.suspendDomains();
     this.closeSubscriptions();
+    if (this.blocked)
+      this.store.setConnection('blocked', undefined, this.blocked);
+    else this.store.setConnection('offline');
   };
   private readonly onVisibilityChange = () => {
     if (typeof document === 'undefined') return;
@@ -182,6 +184,7 @@ export class DashboardConnectionRuntime {
     this.hiddenAt = undefined;
     if (
       this.started &&
+      !this.blocked &&
       hiddenAt !== undefined &&
       Date.now() - hiddenAt >= this.visibilityStaleMs
     )
@@ -209,6 +212,10 @@ export class DashboardConnectionRuntime {
     if (this.started) return () => this.stop();
     this.started = true;
     this.installListeners();
+    if (this.blocked) {
+      this.store.setConnection('blocked', undefined, this.blocked);
+      return () => this.stop();
+    }
     if (!this.isOnline()) {
       this.store.setConnection('offline');
       return () => this.stop();
@@ -226,6 +233,7 @@ export class DashboardConnectionRuntime {
 
   /** Explicitly replace live subscriptions without adding a retry timer. */
   reconnect(): void {
+    if (this.blocked) return;
     if (!this.started) {
       this.start();
       return;
@@ -233,8 +241,16 @@ export class DashboardConnectionRuntime {
     this.replaceSubscriptions();
   }
 
+  /** Explicit user action for a corrected token; protocol blocks require reload. */
+  retryAuthentication(): void {
+    if (this.blocked !== 'authentication') return;
+    this.blocked = undefined;
+    this.replaceSubscriptions();
+  }
+
   /** Explicitly rebase one acquired session without disturbing other domains. */
   reconnectSession(sessionId: string): void {
+    if (this.blocked) return;
     const entry = this.sessions.get(sessionId);
     if (entry) this.rebaseSession(entry);
   }
@@ -247,6 +263,7 @@ export class DashboardConnectionRuntime {
     if (!this.started) return;
     this.started = false;
     this.removeListeners();
+    this.suspendDomains();
     this.closeSubscriptions();
     this.store.setConnection('offline');
   }
@@ -274,7 +291,9 @@ export class DashboardConnectionRuntime {
       this.store.beginSessionSync(sessionId, entry.generation, true);
     }
     entry.refs += 1;
-    if (entry.refs === 1 && this.started) void this.openSession(entry, false);
+    if (this.blocked) this.store.suspendSessionSync(sessionId);
+    else if (entry.refs === 1 && this.started)
+      void this.openSession(entry, false);
     let released = false;
     return {
       sessionId,
@@ -333,6 +352,12 @@ export class DashboardConnectionRuntime {
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
   }
 
+  private suspendDomains(): void {
+    this.store.suspendShellSync();
+    for (const entry of this.sessions.values())
+      if (entry.refs > 0) this.store.suspendSessionSync(entry.id);
+  }
+
   private closeSubscriptions(): void {
     // Invalidate endpoint/client acquisition already in flight. Otherwise an
     // offline or stopped runtime can install a subscription after its awaited
@@ -348,7 +373,8 @@ export class DashboardConnectionRuntime {
   }
 
   private replaceSubscriptions(): void {
-    if (!this.started) return;
+    if (!this.started || this.blocked) return;
+    this.suspendDomains();
     this.closeSubscriptions();
     if (!this.isOnline()) {
       this.store.setConnection('offline');
@@ -376,9 +402,10 @@ export class DashboardConnectionRuntime {
   }
 
   private async openShell(rebase: boolean): Promise<void> {
-    if (!this.started || !this.isOnline()) return;
+    if (!this.started || !this.isOnline() || this.blocked) return;
     const opening = ++this.shellOpening;
     if (rebase) this.resetShellDomain();
+    else this.store.beginShellSync(this.shellGeneration, 0, true);
     try {
       const client = await this.getClient();
       if (!this.started || opening !== this.shellOpening || !this.isOnline())
@@ -489,7 +516,8 @@ export class DashboardConnectionRuntime {
     entry: DomainEntry,
     rebase: boolean,
   ): Promise<void> {
-    if (!this.started || entry.refs === 0 || !this.isOnline()) return;
+    if (!this.started || entry.refs === 0 || !this.isOnline() || this.blocked)
+      return;
     const opening = ++entry.opening;
     if (rebase) {
       entry.generation += 1;
@@ -498,7 +526,7 @@ export class DashboardConnectionRuntime {
       entry.lastEventId = undefined;
       entry.rebasing = false;
       this.store.beginSessionSync(entry.id, entry.generation);
-    }
+    } else this.store.beginSessionSync(entry.id, entry.generation, false, true);
     try {
       const client = await this.getClient();
       if (
@@ -555,6 +583,8 @@ export class DashboardConnectionRuntime {
     kind: 'authentication' | 'protocol-mismatch',
     error: unknown,
   ): void {
+    this.blocked = kind;
+    this.suspendDomains();
     this.closeSubscriptions();
     this.store.setConnection('blocked', messageError(error), kind);
   }

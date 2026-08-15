@@ -63,6 +63,93 @@ function orderedResponse(
 }
 
 describe('DashboardLiveStore', () => {
+  it('suspends domains to cached or empty while preserving their ordering cut', () => {
+    const store = new DashboardLiveStore();
+    store.beginShellSync(1);
+    expect(store.acceptShellSnapshot(snapshot('daemon-1', 4), 4, 1, true)).toBe(
+      true,
+    );
+    store.completeShellSync(4);
+    store.suspendShellSync();
+    expect(store.getSnapshot().shellSync).toMatchObject({
+      status: 'cached',
+      sequence: 4,
+      sequenceKnown: true,
+    });
+
+    store.beginSessionSync('session-1', 1);
+    expect(store.acceptSessionSnapshot(sessionResponse(4), 7, 1, true)).toBe(
+      true,
+    );
+    store.completeSessionSync('session-1', 7);
+    store.suspendSessionSync('session-1');
+    expect(store.getSnapshot().sessionSyncById['session-1']).toMatchObject({
+      status: 'cached',
+      sequence: 7,
+      sequenceKnown: true,
+    });
+
+    const empty = new DashboardLiveStore();
+    empty.beginShellSync(1);
+    empty.suspendShellSync();
+    empty.beginSessionSync('missing', 1);
+    empty.suspendSessionSync('missing');
+    expect(empty.getSnapshot().shellSync.status).toBe('empty');
+    expect(empty.getSnapshot().sessionSyncById.missing?.status).toBe('empty');
+  });
+
+  it('accepts the deferred session event after a pinned snapshot cut', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.beginSessionSync('session-1', 1);
+    expect(
+      store.acceptSessionSnapshot(
+        {
+          ...sessionResponse(2),
+          runtimeEpoch: 'epoch-1',
+          runtimeSeq: 2,
+          active: {
+            pendingInteractions: [],
+            messages: [
+              { messageId: 'old-live', role: 'assistant', content: 'old' },
+            ],
+            tools: [],
+            delegates: [],
+            truncated: false,
+          },
+        },
+        2,
+        1,
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      store.acceptSessionEvent(
+        'session-1',
+        3,
+        {
+          runtimeEpoch: 'epoch-1',
+          runtimeSeq: 3,
+          event: {
+            type: 'message.updated',
+            sessionId: 'session-1',
+            message: {
+              messageId: 'new-live',
+              role: 'assistant',
+              content: 'new',
+            },
+          },
+        },
+        1,
+      ),
+    ).toBe(true);
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.items[
+        'new-live'
+      ],
+    ).toMatchObject({ content: 'new' });
+  });
+
   it('converges near-capacity catalogue patches with a fresh shell snapshot', () => {
     const projection: ShellProjection = {
       truncated: true,

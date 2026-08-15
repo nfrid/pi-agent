@@ -1,3 +1,4 @@
+import { DASHBOARD_PROTOCOL_VERSION } from '@pi-dashboard/protocol';
 import type { DashboardRouter } from '@pi-dashboard/server/trpc';
 import {
   createTRPCClient,
@@ -32,7 +33,10 @@ export function createDashboardTrpcClient(
   const url = `${options.baseUrl}/trpc`;
   const headers = () => {
     const token = options.tokenStore.get();
-    return token ? { 'x-dashboard-token': token } : {};
+    return {
+      'x-dashboard-protocol-version': String(DASHBOARD_PROTOCOL_VERSION),
+      ...(token ? { 'x-dashboard-token': token } : {}),
+    };
   };
   const finiteLink = httpLink<DashboardRouter>({
     url,
@@ -58,6 +62,10 @@ export function createDashboardTrpcClient(
       // the URL, or a tracked event ID.
       fetch: (input, init) => {
         const requestHeaders = new Headers(init?.headers);
+        requestHeaders.set(
+          'x-dashboard-protocol-version',
+          String(DASHBOARD_PROTOCOL_VERSION),
+        );
         const token = options.tokenStore.get();
         if (token) requestHeaders.set('x-dashboard-token', token);
         return options.fetch(input, { ...init, headers: requestHeaders });

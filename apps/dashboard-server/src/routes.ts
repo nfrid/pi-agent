@@ -245,7 +245,7 @@ function installCorsAndAuth(
       reply.header('access-control-allow-origin', origin);
       reply.header(
         'access-control-allow-headers',
-        'authorization, content-type, x-dashboard-token',
+        'authorization, content-type, last-event-id, x-dashboard-protocol-version, x-dashboard-token',
       );
       reply.header('access-control-allow-methods', 'GET, POST, OPTIONS');
       if (request.headers['access-control-request-private-network'] === 'true')

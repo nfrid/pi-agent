@@ -694,12 +694,17 @@ export class DashboardLiveStore {
     this.publish({ ...this.state, shellSync: next });
   }
 
-  beginShellSync(generation: number, sequence = 0): void {
+  beginShellSync(
+    generation: number,
+    sequence = 0,
+    preserveSequence = false,
+  ): void {
+    const current = this.state.shellSync;
     this.updateDomain('shell', undefined, {
       status: 'synchronizing',
       generation,
-      sequence,
-      sequenceKnown: false,
+      sequence: preserveSequence ? current.sequence : sequence,
+      sequenceKnown: preserveSequence ? current.sequenceKnown : false,
       error: undefined,
     });
   }
@@ -721,13 +726,40 @@ export class DashboardLiveStore {
     sessionId: string,
     generation: number,
     cached = false,
+    preserveSequence = false,
   ): void {
     const current = this.state.sessionSyncById[sessionId];
     this.updateDomain('session', sessionId, {
       status: cached && current ? 'cached' : 'synchronizing',
       generation,
-      sequence: cached && current ? current.sequence : 0,
-      sequenceKnown: cached && current ? current.sequenceKnown : false,
+      sequence: preserveSequence && current ? current.sequence : 0,
+      sequenceKnown:
+        preserveSequence && current ? current.sequenceKnown : false,
+      error: undefined,
+    });
+  }
+
+  /** Suspend transport-owned domains without discarding their last ordering cut. */
+  suspendShellSync(): void {
+    const hasProjection =
+      this.state.serverId !== undefined ||
+      this.state.shellProjection !== undefined ||
+      Object.keys(this.state.runtimesById).length > 0 ||
+      Object.keys(this.state.sessionsById).length > 0;
+    this.updateDomain('shell', undefined, {
+      status: hasProjection ? 'cached' : 'empty',
+      error: undefined,
+    });
+  }
+
+  suspendSessionSync(sessionId: string): void {
+    const current = this.state.sessionSyncById[sessionId];
+    if (!current) return;
+    const hasProjection =
+      this.state.transcriptsBySessionId[sessionId] !== undefined ||
+      this.state.sessionSnapshotsById[sessionId] !== undefined;
+    this.updateDomain('session', sessionId, {
+      status: hasProjection ? 'cached' : 'empty',
       error: undefined,
     });
   }
@@ -1744,6 +1776,10 @@ export class DashboardLiveStore {
 
   reconnect(): void {
     this.connectionRuntime?.reconnect();
+  }
+
+  retryAuthentication(): void {
+    this.connectionRuntime?.retryAuthentication();
   }
 
   reconnectSession(sessionId: string): void {

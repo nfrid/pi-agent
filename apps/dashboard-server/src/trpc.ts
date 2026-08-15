@@ -69,6 +69,8 @@ export interface DashboardTrpcContext {
   ) => Promise<AuthoritativeSessionSnapshot>;
   /** Injected by the HTTP adapter from the Last-Event-ID header. */
   readonly lastEventId?: string;
+  /** Injected by the HTTP adapter from X-Dashboard-Protocol-Version. */
+  readonly protocolVersion?: number;
 }
 
 export const DASHBOARD_DOMAIN_CODES = [
@@ -155,10 +157,41 @@ export function toDashboardTrpcError(error: unknown): TRPCError {
   });
 }
 
-function protocolMismatch(): Error {
+function protocolMismatch(actual: number, serverId: string): Error {
   return Object.assign(new Error('Protocol version mismatch.'), {
     code: 'protocol-mismatch',
+    expected: DASHBOARD_PROTOCOL_VERSION,
+    actual,
+    serverId,
   });
+}
+
+function protocolMismatchDetails(error: unknown): {
+  expected?: number;
+  actual?: number;
+  serverId?: string;
+} {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current; depth += 1) {
+    const value = current as {
+      expected?: unknown;
+      actual?: unknown;
+      serverId?: unknown;
+      cause?: unknown;
+    };
+    if (
+      typeof value.expected === 'number' &&
+      typeof value.actual === 'number' &&
+      typeof value.serverId === 'string'
+    )
+      return {
+        expected: value.expected,
+        actual: value.actual,
+        serverId: value.serverId,
+      };
+    current = value.cause;
+  }
+  return {};
 }
 
 const t = initTRPC.context<DashboardTrpcContext>().create({
@@ -170,15 +203,29 @@ const t = initTRPC.context<DashboardTrpcContext>().create({
   },
   errorFormatter({ shape, error }) {
     const code = domainCode(error);
+    const mismatch =
+      code === 'protocol-mismatch' ? protocolMismatchDetails(error) : {};
     return {
       ...shape,
       data: {
         ...shape.data,
         ...(code ? { domainCode: code } : {}),
+        ...(code === 'protocol-mismatch' ? mismatch : {}),
       },
     };
   },
 });
+
+const protocolMiddleware = t.middleware(({ ctx, path, next }) => {
+  // protocolInfo is the negotiation endpoint and must remain callable by a
+  // stale client so it can report the daemon's current version and server ID.
+  if (path === 'protocolInfo') return next();
+  const actual = ctx.protocolVersion ?? 0;
+  if (actual !== DASHBOARD_PROTOCOL_VERSION)
+    throw toDashboardTrpcError(protocolMismatch(actual, ctx.serverId()));
+  return next();
+});
+const dashboardProcedure = t.procedure.use(protocolMiddleware);
 
 /** The module-level router keeps the exported client contract concrete. */
 const dashboardRouter = t.router({
@@ -197,7 +244,7 @@ const dashboardRouter = t.router({
         throw toDashboardTrpcError(error);
       }
     }),
-  liveDiagnostics: t.procedure
+  liveDiagnostics: dashboardProcedure
     .input((value: unknown) => parseLiveDiagnosticsRequest(value))
     .output((value: unknown) => parseLiveDiagnosticsResponse(value))
     .query(({ ctx }) => {
@@ -211,21 +258,23 @@ const dashboardRouter = t.router({
         sessions: ctx.sessionFeeds.metrics(),
       });
     }),
-  shellSnapshot: t.procedure
+  shellSnapshot: dashboardProcedure
     .input((value: unknown) =>
       parseSchema(ShellSnapshotRequestSchema, value, 'shell snapshot request'),
     )
     .output((value: unknown) => parseShellSnapshotResponse(value))
     .query(({ ctx, input }) => {
       if (input.protocolVersion !== DASHBOARD_PROTOCOL_VERSION)
-        throw toDashboardTrpcError(protocolMismatch());
+        throw toDashboardTrpcError(
+          protocolMismatch(input.protocolVersion, ctx.serverId()),
+        );
       try {
         return parseShellSnapshotResponse(ctx.shellSnapshot());
       } catch (error) {
         throw toDashboardTrpcError(error);
       }
     }),
-  sessionSnapshot: t.procedure
+  sessionSnapshot: dashboardProcedure
     .input((value: unknown) =>
       parseSchema(
         SessionSnapshotRequestSchema,
@@ -247,7 +296,7 @@ const dashboardRouter = t.router({
         throw toDashboardTrpcError(error);
       }
     }),
-  runtimeCommand: t.procedure
+  runtimeCommand: dashboardProcedure
     .input((value: unknown) => parseRuntimeCommandInput(value))
     .output((value: unknown) => parseRuntimeCommandOutput(value))
     .mutation(async ({ ctx, input }) => {
@@ -264,7 +313,7 @@ const dashboardRouter = t.router({
         throw toDashboardTrpcError(error);
       }
     }),
-  startRuntime: t.procedure
+  startRuntime: dashboardProcedure
     .input((value: unknown) => parseStartRuntimeMutationInput(value))
     .output((value: unknown) => parseStartRuntimeMutationOutput(value))
     .mutation(async ({ ctx, input }) => {
@@ -279,7 +328,7 @@ const dashboardRouter = t.router({
         throw toDashboardTrpcError(error);
       }
     }),
-  restartRuntime: t.procedure
+  restartRuntime: dashboardProcedure
     .input((value: unknown) => parseRestartRuntimeMutationInput(value))
     .output((value: unknown) => parseRestartRuntimeMutationOutput(value))
     .mutation(async ({ ctx, input }) => {
@@ -296,7 +345,7 @@ const dashboardRouter = t.router({
         throw toDashboardTrpcError(error);
       }
     }),
-  stopRuntime: t.procedure
+  stopRuntime: dashboardProcedure
     .input((value: unknown) => parseStopRuntimeMutationInput(value))
     .output((value: unknown) => parseStopRuntimeMutationOutput(value))
     .mutation(async ({ ctx, input }) => {
@@ -311,7 +360,7 @@ const dashboardRouter = t.router({
         throw toDashboardTrpcError(error);
       }
     }),
-  renameSession: t.procedure
+  renameSession: dashboardProcedure
     .input((value: unknown) => parseRenameSessionMutationInput(value))
     .output((value: unknown) => parseRenameSessionMutationOutput(value))
     .mutation(async ({ ctx, input }) => {
@@ -326,7 +375,7 @@ const dashboardRouter = t.router({
         throw toDashboardTrpcError(error);
       }
     }),
-  shellSubscribe: t.procedure
+  shellSubscribe: dashboardProcedure
     .input((value: unknown) => parseShellFeedInput(value))
     .subscription(async function* ({ ctx, input, signal }) {
       const shellFeed = ctx.shellFeed;
@@ -356,7 +405,7 @@ const dashboardRouter = t.router({
         yield tracked(item.id, parseShellFeedMessage(message));
       }
     }),
-  sessionSubscribe: t.procedure
+  sessionSubscribe: dashboardProcedure
     .input((value: unknown) => parseSessionFeedInput(value))
     .subscription(async function* ({ ctx, input, signal }) {
       const sessionFeeds = ctx.sessionFeeds;
@@ -419,6 +468,12 @@ export function registerDashboardTrpc(
           lastEventId:
             typeof request.headers['last-event-id'] === 'string'
               ? request.headers['last-event-id']
+              : undefined,
+          protocolVersion:
+            typeof request.headers['x-dashboard-protocol-version'] ===
+              'string' &&
+            /^\d+$/.test(request.headers['x-dashboard-protocol-version'])
+              ? Number(request.headers['x-dashboard-protocol-version'])
               : undefined,
         }),
         allowMethodOverride: true,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isContiguousOlderHistory } from './history';
+import { isContiguousOlderHistory, sessionHistoryWindowKey } from './history';
 
 const current = {
   version: 1 as const,
@@ -8,6 +8,31 @@ const current = {
   hasOlder: true,
   nextBefore: 'cursor-20',
 };
+
+describe('sessionHistoryWindowKey', () => {
+  it('changes when an authoritative same-session snapshot rebases the feed', () => {
+    const loadedOlderPages = {
+      version: 1 as const,
+      start: 0,
+      end: 20,
+      hasOlder: true,
+      nextBefore: 'cursor-0',
+    };
+    const latestWindow = {
+      version: 1 as const,
+      start: 20,
+      end: 40,
+      hasOlder: true,
+      nextBefore: 'cursor-20',
+    };
+    expect(sessionHistoryWindowKey(40, loadedOlderPages)).not.toBe(
+      sessionHistoryWindowKey(41, latestWindow),
+    );
+    expect(sessionHistoryWindowKey(41, latestWindow)).toBe(
+      JSON.stringify([41, 1, 20, 40, true, 'cursor-20']),
+    );
+  });
+});
 
 describe('isContiguousOlderHistory', () => {
   it('accepts a contiguous page and advances its cursor', () => {

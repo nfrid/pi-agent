@@ -195,8 +195,11 @@ in browser local storage; it does not embed the token in its build.
 
 Workspace and session launch requests use IDs from trusted indexes, never raw
 paths or flags. Uploads are bounded, server-owned temporary files and are removed
-after command acknowledgement. Missing usage or VAPID configuration is isolated
-from runtime control and in-app notifications.
+after command acknowledgement. Dashboard mutation command IDs are protected
+against concurrent duplicates and response-loss retries once their receipt is
+durable; a daemon crash after the runtime side effect but before receipt
+persistence can still permit one duplicate on retry. Missing usage or VAPID
+configuration is isolated from runtime control and in-app notifications.
 
 ## Intentional limits
 

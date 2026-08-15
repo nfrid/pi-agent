@@ -124,6 +124,7 @@ function authHeaders(extra: Record<string, string> = {}) {
   return {
     origin: ORIGIN,
     'x-dashboard-token': TOKEN,
+    'x-dashboard-protocol-version': '2',
     ...extra,
   };
 }
@@ -525,6 +526,11 @@ describe('dashboard tRPC boundary', () => {
     const error = mismatch.json().error;
     expect(error.data.code).toBe('BAD_REQUEST');
     expect(error.data.domainCode).toBe('protocol-mismatch');
+    expect(error.data).toMatchObject({
+      expected: 2,
+      actual: 1,
+      serverId: 'generation-1',
+    });
     expect(JSON.stringify(error)).not.toContain('sqlite');
   });
 
@@ -595,11 +601,19 @@ describe('dashboard tRPC boundary', () => {
       url: '/trpc/protocolInfo',
       headers: {
         origin: ORIGIN,
+        'access-control-request-headers':
+          'x-dashboard-token, x-dashboard-protocol-version, last-event-id',
         'access-control-request-private-network': 'true',
       },
     });
     expect(preflight.statusCode).toBe(204);
     expect(preflight.headers['access-control-allow-origin']).toBe(ORIGIN);
+    expect(preflight.headers['access-control-allow-headers']).toContain(
+      'last-event-id',
+    );
+    expect(preflight.headers['access-control-allow-headers']).toContain(
+      'x-dashboard-protocol-version',
+    );
     expect(preflight.headers['access-control-allow-private-network']).toBe(
       'true',
     );

@@ -28,6 +28,7 @@ describe('production tRPC feed procedures', () => {
     const feed = new ShellFeed({ generation: 'generation' });
     const context: DashboardTrpcContext = {
       serverId: () => 'server-generation',
+      protocolVersion: 2,
       snapshot: () => shellSnapshot(feed.sequence),
       shellSnapshot: () => ({
         snapshot: shellSnapshot(feed.sequence),
@@ -48,7 +49,11 @@ describe('production tRPC feed procedures', () => {
     const address = app.server.address();
     if (!address || typeof address === 'string') throw new Error('No port.');
     const initialCursor = feed.currentId;
-    const requests: { url: string; token: string | undefined }[] = [];
+    const requests: {
+      url: string;
+      token: string | undefined;
+      protocol: string | undefined;
+    }[] = [];
     let cutFirstConnection = true;
     const values: unknown[] = [];
     let resolveValues!: () => void;
@@ -66,9 +71,12 @@ describe('production tRPC feed procedures', () => {
             fetch: async (input, init) => {
               const headers = new Headers(init?.headers);
               headers.set('x-dashboard-token', 'test-token');
+              headers.set('x-dashboard-protocol-version', '2');
               requests.push({
                 url: String(input),
                 token: headers.get('x-dashboard-token') ?? undefined,
+                protocol:
+                  headers.get('x-dashboard-protocol-version') ?? undefined,
               });
               const response = await fetch(input, { ...init, headers });
               if (!cutFirstConnection || !response.body) return response;
@@ -175,6 +183,7 @@ describe('production tRPC feed procedures', () => {
       expect(requests.every((request) => request.token === 'test-token')).toBe(
         true,
       );
+      expect(requests.every((request) => request.protocol === '2')).toBe(true);
       const reconnectInput = JSON.parse(
         new URL(requests[1]?.url ?? '').searchParams.get('input') ?? '{}',
       ) as { lastEventId?: string; json?: { lastEventId?: string } };
@@ -225,6 +234,7 @@ describe('production tRPC feed procedures', () => {
 
     const context: DashboardTrpcContext = {
       serverId: () => 'server-generation',
+      protocolVersion: 2,
       snapshot: () => shellSnapshot(feed.sequence),
       shellSnapshot: () => ({
         snapshot: shellSnapshot(feed.sequence),
@@ -259,6 +269,7 @@ describe('production tRPC feed procedures', () => {
     });
     const context: DashboardTrpcContext = {
       serverId: () => 'server-generation',
+      protocolVersion: 2,
       snapshot: () => shellSnapshot(feed.sequence),
       shellSnapshot: () => ({
         snapshot: shellSnapshot(feed.sequence),
@@ -299,6 +310,7 @@ describe('production tRPC feed procedures', () => {
     });
     const context: DashboardTrpcContext = {
       serverId: () => 'server-generation',
+      protocolVersion: 2,
       snapshot: () => shellSnapshot(feed.sequence),
       shellSnapshot: () => ({
         snapshot: shellSnapshot(feed.sequence),
@@ -349,6 +361,7 @@ describe('production tRPC feed procedures', () => {
     const feed = new ShellFeed({ generation: 'generation' });
     const context: DashboardTrpcContext = {
       serverId: () => 'server-generation',
+      protocolVersion: 2,
       snapshot: () => shellSnapshot(feed.sequence),
       shellSnapshot: () => ({
         snapshot: shellSnapshot(feed.sequence),

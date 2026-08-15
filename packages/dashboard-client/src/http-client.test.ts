@@ -556,6 +556,9 @@ describe('DashboardHttpClient snapshot requests', () => {
     ]);
     expect(calls.map(([, init]) => init.method)).toEqual(['POST', 'POST']);
     expect(calls[0]?.[1].body).toBe('null');
+    expect(
+      new Headers(calls[1]?.[1].headers).get('x-dashboard-protocol-version'),
+    ).toBe('2');
     expect(calls[1]?.[1].body).toBe(JSON.stringify({ protocolVersion: 2 }));
 
     const invalid = new DashboardHttpClient({
@@ -565,6 +568,26 @@ describe('DashboardHttpClient snapshot requests', () => {
     await expect(invalid.snapshot()).rejects.toMatchObject({
       kind: 'malformed-output',
       code: 'malformed-output',
+    });
+  });
+
+  it('retains structured mismatch details from an operation after acquisition', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith('/protocolInfo')
+        ? protocolInfoResponse()
+        : trpcErrorResponse('BAD_REQUEST', 400, {
+            domainCode: 'protocol-mismatch',
+            expected: 3,
+            actual: 2,
+            serverId: 'upgraded-daemon',
+          }),
+    );
+    const client = new DashboardHttpClient({ fetch, tokenStore: tokenStore() });
+    await expect(client.snapshot()).rejects.toMatchObject({
+      kind: 'protocol-mismatch',
+      expected: 3,
+      actual: 2,
+      serverId: 'upgraded-daemon',
     });
   });
 

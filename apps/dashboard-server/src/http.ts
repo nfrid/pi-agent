@@ -883,15 +883,20 @@ export class DashboardServerImpl implements DashboardServer {
       (change.kind === 'event' &&
         change.event.type === 'runtime.goodbye' &&
         this.registry.get(change.snapshot.runtimeId) === undefined);
-    const sessionActive =
-      !runtimeGone ||
-      this.registry
-        .snapshots()
-        .some(
-          (runtime) =>
-            runtime.session.id === sessionId && runtime.online !== false,
-        );
-    this.sessionFeeds.setActive(sessionId, sessionActive);
+    // Feed activity follows online runtime ownership, not registry record
+    // retention. Offline records remain available for bounded replay only.
+    const sessionActive = this.registry
+      .snapshots()
+      .some(
+        (runtime) =>
+          runtime.session.id === sessionId && runtime.online !== false,
+      );
+    try {
+      this.sessionFeeds.setActive(sessionId, sessionActive);
+    } catch {
+      // Capacity exhaustion is recoverable: the next subscription gets an
+      // authoritative snapshot, and registry callbacks must not escape.
+    }
     if (applicationChange.type === 'event') {
       const event = projectPublicBridgeEvent(
         applicationChange.event as BridgeEvent,

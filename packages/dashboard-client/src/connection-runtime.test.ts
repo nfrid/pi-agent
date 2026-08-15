@@ -306,7 +306,7 @@ describe('DashboardConnectionRuntime', () => {
 
     const second = f.runtime.acquireSession('session-a');
     expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
-      'cached',
+      'synchronizing',
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(f.sessionInputs.at(-1)).toEqual({
@@ -851,7 +851,7 @@ describe('DashboardConnectionRuntime', () => {
       errorKind: 'authentication',
     });
     expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
-      'error',
+      'empty',
     );
     priorShellObserver?.onData({
       id: 'stale-shell-snapshot',
@@ -929,7 +929,7 @@ describe('DashboardConnectionRuntime', () => {
     });
     expect(f.store.getSnapshot().connection.status).toBe('blocked');
     expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
-      'synchronizing',
+      'empty',
     );
     handle.release();
     stop();
@@ -1056,6 +1056,103 @@ describe('DashboardConnectionRuntime', () => {
       globals.document.dispatch('visibilitychange');
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(f.counts().shellSubscriptions).toBe(3);
+    } finally {
+      globals.restore();
+    }
+  });
+
+  it('suspends live domains on offline and resumes them with preserved cuts', async () => {
+    const globals = lifecycleGlobals();
+    try {
+      let online = true;
+      const f = fixture();
+      const runtime = new DashboardConnectionRuntime({
+        client: f.client as never,
+        store: f.store,
+        isOnline: () => online,
+      });
+      const stop = runtime.start();
+      const handle = runtime.acquireSession('session-a');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      f.shell({
+        id: 'shell-snapshot',
+        data: {
+          type: 'snapshot',
+          sequence: 0,
+          snapshot: { snapshot: shellSnapshot(0), cursor: 0 },
+        },
+      });
+      f.shell({ id: 'shell-live', data: { type: 'caught-up', sequence: 0 } });
+      f.session('session-a', {
+        id: 'session-snapshot',
+        data: { type: 'snapshot', sequence: 0, snapshot: sessionSnapshot(0) },
+      });
+      f.session('session-a', {
+        id: 'session-live',
+        data: { type: 'caught-up', sequence: 0 },
+      });
+      expect(f.store.getSnapshot().shellSync.status).toBe('live');
+      expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
+        'live',
+      );
+
+      online = false;
+      globals.window.dispatch('offline');
+      expect(f.store.getSnapshot().connection.status).toBe('offline');
+      expect(f.store.getSnapshot().shellSync).toMatchObject({
+        status: 'cached',
+        sequence: 0,
+        sequenceKnown: true,
+      });
+      expect(f.store.getSnapshot().sessionSyncById['session-a']).toMatchObject({
+        status: 'cached',
+        sequence: 0,
+        sequenceKnown: true,
+      });
+
+      online = true;
+      globals.window.dispatch('online');
+      expect(f.store.getSnapshot().shellSync.status).toBe('synchronizing');
+      expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
+        'synchronizing',
+      );
+      handle.release();
+      stop();
+    } finally {
+      globals.restore();
+    }
+  });
+
+  it('latches authentication and protocol blocks against automatic retries', async () => {
+    const globals = lifecycleGlobals();
+    try {
+      const f = fixture();
+      const stop = f.runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      f.shellError(
+        Object.assign(new Error('unauthorized'), { shape: { code: 401 } }),
+      );
+      const blockedCount = f.counts().shellSubscriptions;
+      globals.window.dispatch('online');
+      globals.document.visibilityState = 'hidden';
+      globals.document.dispatch('visibilitychange');
+      globals.document.visibilityState = 'visible';
+      globals.document.dispatch('visibilitychange');
+      f.runtime.reconnect();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(f.counts().shellSubscriptions).toBe(blockedCount);
+      f.runtime.retryAuthentication();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(f.counts().shellSubscriptions).toBe(blockedCount + 1);
+      f.shellError({
+        data: { domainCode: 'protocol-mismatch', actual: 3 },
+      });
+      const protocolBlockedCount = f.counts().shellSubscriptions;
+      globals.window.dispatch('online');
+      f.runtime.reconnect();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(f.counts().shellSubscriptions).toBe(protocolBlockedCount);
+      stop();
     } finally {
       globals.restore();
     }

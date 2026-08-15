@@ -9,6 +9,21 @@ import type {
 import type { RefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+export function sessionHistoryWindowKey(
+  cursor: number | undefined,
+  history: SessionHistory | undefined,
+): string | undefined {
+  if (!history) return undefined;
+  return JSON.stringify([
+    cursor,
+    history.version,
+    history.start,
+    history.end,
+    history.hasOlder,
+    history.nextBefore,
+  ]);
+}
+
 export function isContiguousOlderHistory(
   sessionId: string,
   pageMetadataId: string,
@@ -67,6 +82,10 @@ export function useOlderSessionHistory({
   const [historyError, setHistoryError] = useState<string>();
   const [prependRevision, setPrependRevision] = useState(0);
   const historySessionRef = useRef<string | undefined>(undefined);
+  // The feed snapshot is authoritative for the newest history window. Track
+  // its range/cursor so a same-session rebase cannot leave stale pagination
+  // metadata claiming that discarded older rows were already loaded.
+  const historyWindowRef = useRef<string | undefined>(undefined);
   const historyGenerationRef = useRef(0);
   const historyRequestRef = useRef<HistoryRequest | undefined>(undefined);
   const historyRequestSequenceRef = useRef(0);
@@ -101,6 +120,7 @@ export function useOlderSessionHistory({
     historyRequestRef.current = undefined;
     clearPrependRestore();
     historySessionRef.current = undefined;
+    historyWindowRef.current = undefined;
     setHistory(undefined);
     setHistoryLoading(false);
     setHistoryError(undefined);
@@ -170,15 +190,18 @@ export function useOlderSessionHistory({
   }, [clearPrependRestore, scrollElementRef, sessionMounted]);
 
   useEffect(() => {
+    if (data?.metadata.id !== id || !data.history) return;
+    const windowKey = sessionHistoryWindowKey(data.cursor, data.history);
     if (
-      data?.metadata.id === id &&
-      data.history &&
-      historySessionRef.current !== id
+      historySessionRef.current !== id ||
+      historyWindowRef.current !== windowKey
     ) {
       historySessionRef.current = id;
+      historyWindowRef.current = windowKey;
+      clearPrependRestore();
       setHistory(data.history);
     }
-  }, [data, id]);
+  }, [clearPrependRestore, data, id]);
 
   const loadEarlierHistory = useCallback(async () => {
     const currentHistory = history;

@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createDashboardServer } from './http.js';
 import type { ShellFeed } from './live-feeds.js';
 import { MetadataStore } from './metadata.js';
+import { RuntimeRegistry } from './runtime-registry.js';
 import { SessionIndex } from './session-index.js';
 
 let server: Awaited<ReturnType<typeof createDashboardServer>> | undefined;
@@ -452,7 +453,12 @@ describe('dashboard HTTP boundary', () => {
     const input = encodeURIComponent(JSON.stringify({ protocolVersion: 2 }));
     const response = await fetch(
       `http://127.0.0.1:${server.port}/trpc/shellSnapshot?input=${input}`,
-      { headers: { authorization: 'Bearer test-token' } },
+      {
+        headers: {
+          authorization: 'Bearer test-token',
+          'x-dashboard-protocol-version': '2',
+        },
+      },
     );
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
@@ -841,6 +847,75 @@ describe('dashboard HTTP boundary', () => {
     for (const bridge of bridges) bridge.destroy();
   });
 
+  it('marks a retained offline runtime feed inactive', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-runtime-offline-feed-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'offline-session.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'offline-session', cwd: '/tmp' })}\n`,
+    );
+    const registry = new RuntimeRegistry({
+      allowExternalWithoutToken: true,
+      disconnectGraceMs: 0,
+      onChange: (change) =>
+        (
+          server as unknown as
+            | { handleRegistryChange(value: unknown): void }
+            | undefined
+        )?.handleRegistryChange(change),
+    });
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir,
+      socketPath: path.join(
+        os.tmpdir(),
+        `pd-${path.basename(root).slice(-8)}-offline.sock`,
+      ),
+      sesh: { list: async () => [] },
+      registry,
+    });
+    await server.start();
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            runtimeId: 'offline-runtime',
+            ownership: 'external',
+            pid: 1,
+            cwd: '/tmp',
+            liveState: 'idle',
+            session: { id: 'offline-session', entries: [] },
+            pendingInteractions: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const feeds = (
+      server as unknown as {
+        sessionFeeds: { get: (id: string) => { active: boolean } };
+      }
+    ).sessionFeeds;
+    expect(feeds.get('offline-session').active).toBe(true);
+    bridge.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(feeds.get('offline-session').active).toBe(false);
+  });
+
   it('re-emits an identical runtime after goodbye removal', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-runtime-readd-'),
@@ -945,7 +1020,12 @@ describe('dashboard HTTP boundary', () => {
     const input = encodeURIComponent(JSON.stringify({ protocolVersion: 2 }));
     const response = await fetch(
       `http://127.0.0.1:${server.port}/trpc/shellSnapshot?input=${input}`,
-      { headers: { authorization: 'Bearer test-token' } },
+      {
+        headers: {
+          authorization: 'Bearer test-token',
+          'x-dashboard-protocol-version': '2',
+        },
+      },
     );
     expect(response.status).toBe(500);
   });

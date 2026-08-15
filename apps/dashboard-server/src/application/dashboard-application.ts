@@ -351,6 +351,9 @@ type ActiveTranscriptState = {
 type ActiveCapture = {
   runtime?: RuntimeSnapshot;
   state?: ActiveTranscriptState;
+  /** Captured synchronously with the active runtime/state before disk I/O. */
+  runtimeEpoch?: string;
+  runtimeSeq?: number;
 };
 
 function sameRuntimeCapture(
@@ -359,6 +362,8 @@ function sameRuntimeCapture(
 ): boolean {
   return (
     left.runtime?.runtimeId === right.runtime?.runtimeId &&
+    left.runtimeEpoch === right.runtimeEpoch &&
+    left.runtimeSeq === right.runtimeSeq &&
     left.state?.runtimeEpoch === right.state?.runtimeEpoch &&
     left.state?.runtimeSeq === right.state?.runtimeSeq
   );
@@ -1075,7 +1080,17 @@ export class DashboardApplication {
       .snapshots()
       .find((item) => item.session.id === sessionId && item.online !== false);
     const state = this.activeTranscripts.get(sessionId);
-    return { runtime, state };
+    // Provenance is part of the same synchronous cut as the runtime/state.
+    // Never look it up again after session-index I/O for a pinned snapshot.
+    const provenance = runtime
+      ? this.registry.transportProvenance(runtime.runtimeId)
+      : undefined;
+    return {
+      runtime,
+      state,
+      runtimeEpoch: state?.runtimeEpoch ?? provenance?.runtimeEpoch,
+      runtimeSeq: state?.runtimeSeq ?? provenance?.runtimeSeq,
+    };
   }
 
   private activeOverlay(
@@ -1308,13 +1323,13 @@ export class DashboardApplication {
         before === undefined
           ? this.activeOverlay(resolvedCapture)
           : this.activeOverlay({});
-      const provenance = resolvedCapture.runtime
-        ? this.registry.transportProvenance(resolvedCapture.runtime.runtimeId)
-        : undefined;
+      // `resolvedCapture` is the pinned synchronous cut. In particular, do not
+      // query the registry here: a deferred publication may have advanced its
+      // provenance while the disk read was awaiting I/O.
       const runtimeEpoch =
-        provenance?.runtimeEpoch ?? resolvedCapture.state?.runtimeEpoch;
+        resolvedCapture.runtimeEpoch ?? resolvedCapture.state?.runtimeEpoch;
       const runtimeSeq =
-        provenance?.runtimeSeq ?? resolvedCapture.state?.runtimeSeq;
+        resolvedCapture.runtimeSeq ?? resolvedCapture.state?.runtimeSeq;
       const metadata = resolvedCapture.runtime
         ? runtimeMetadata(resolvedCapture.runtime, result.metadata)
         : result.metadata;

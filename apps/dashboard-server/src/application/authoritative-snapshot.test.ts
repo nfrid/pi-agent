@@ -551,6 +551,11 @@ describe('authoritative application snapshot lifecycle', () => {
     expect(pinned.active.messages).toMatchObject([
       { messageId: 'old-live-message' },
     ]);
+    // The deferred events use the same pinned runtime cut; newer registry
+    // provenance must not make the client discard the next event as a
+    // duplicate-runtime-seq.
+    expect(pinned.runtimeEpoch).toBe('epoch-1');
+    expect(pinned.runtimeSeq).toBe(2);
     const current = await f.app.sessionSnapshot(
       'generation-current',
       'snapshot-session',
