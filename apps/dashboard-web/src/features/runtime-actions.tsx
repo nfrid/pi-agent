@@ -368,10 +368,10 @@ export function RuntimeLifecycleActions({
     setError(undefined);
     setRestarting(true);
     try {
-      const result = (await restart.mutateAsync(runtime.runtimeId)) as {
-        result?: { runtimeId?: unknown };
-      };
-      const nextId = result.result?.runtimeId;
+      const result = await restart.mutateAsync({
+        runtimeId: runtime.runtimeId,
+      });
+      const nextId = result.result.runtimeId;
       if (typeof nextId !== 'string')
         throw new Error('Restart did not return a runtime ID.');
       closeMenu(true);

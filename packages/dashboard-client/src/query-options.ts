@@ -84,6 +84,7 @@ function withMutationCommandId<T extends { commandId: string }>(
 
 const snapshotRequestGenerations = new WeakMap<object, number>();
 const runtimeCommandIds = new WeakMap<object, string>();
+const lifecycleCommandIds = new WeakMap<object, string>();
 
 function runtimeCommandId(command: Record<string, unknown>): string {
   if (typeof command.id === 'string' && command.id.length > 0)
@@ -92,6 +93,19 @@ function runtimeCommandId(command: Record<string, unknown>): string {
   if (prior) return prior;
   const id = mutationCommandId('dashboard-command');
   runtimeCommandIds.set(command, id);
+  return id;
+}
+
+function lifecycleCommandId(
+  prefix: string,
+  variables: Record<string, unknown>,
+): string {
+  if (typeof variables.commandId === 'string' && variables.commandId.length > 0)
+    return variables.commandId;
+  const prior = lifecycleCommandIds.get(variables);
+  if (prior) return prior;
+  const id = mutationCommandId(prefix);
+  lifecycleCommandIds.set(variables, id);
   return id;
 }
 
@@ -278,9 +292,13 @@ export function settingsQueryOptions(client: DashboardHttpClient) {
 
 export function renameSessionMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
-    mutationFn: ({ id, name }: { id: string; name: string }) =>
-      client.renameSession(id, name),
-    retry: false,
+    mutationFn: (variables: { id: string; name: string; commandId?: string }) =>
+      client.renameSession(
+        variables.id,
+        variables.name,
+        lifecycleCommandId('dashboard-rename', variables),
+      ),
+    retry: commandNetworkRetry,
   });
 }
 
@@ -320,21 +338,28 @@ export function actionMutationOptions(client: DashboardHttpClient) {
 
 export function stopRuntimeMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
-    mutationFn: ({
-      runtimeId,
-      force = false,
-    }: {
+    mutationFn: (variables: {
       runtimeId: string;
       force?: boolean;
-    }) => client.stopRuntime(runtimeId, force),
-    retry: false,
+      commandId?: string;
+    }) =>
+      client.stopRuntime(
+        variables.runtimeId,
+        variables.force ?? false,
+        lifecycleCommandId('dashboard-stop', variables),
+      ),
+    retry: commandNetworkRetry,
   });
 }
 
 export function restartRuntimeMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
-    mutationFn: (runtimeId: string) => client.restartRuntime(runtimeId),
-    retry: false,
+    mutationFn: (variables: { runtimeId: string; commandId?: string }) =>
+      client.restartRuntime(
+        variables.runtimeId,
+        lifecycleCommandId('dashboard-restart', variables),
+      ),
+    retry: commandNetworkRetry,
   });
 }
 
@@ -386,8 +411,12 @@ export function workspaceRefreshMutationOptions(client: DashboardHttpClient) {
 
 export function startRuntimeMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
-    mutationFn: (request: StartRuntimeRequest) => client.startRuntime(request),
-    retry: false,
+    mutationFn: (request: StartRuntimeRequest & { commandId?: string }) =>
+      client.startRuntime({
+        ...request,
+        commandId: lifecycleCommandId('dashboard-start', request),
+      }),
+    retry: commandNetworkRetry,
   });
 }
 

@@ -394,13 +394,15 @@ describe('DashboardHttpClient command requests', () => {
     expect(first.command?.id).not.toBe(second.command?.id);
   });
 
-  it('uses a stable non-retried ID for restart requests', async () => {
-    const fetch = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
+  it('uses a stable caller ID for typed restart requests', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith('/protocolInfo')
+        ? protocolInfoResponse()
+        : trpcResponse({
+            commandId: 'restart-id',
+            status: 'completed',
+            result: { runtimeId: 'runtime-2' },
+          }),
     );
     const client = new DashboardHttpClient({
       fetch,
@@ -412,8 +414,10 @@ describe('DashboardHttpClient command requests', () => {
     });
     await client.restartRuntime('runtime-1', 'restart-id');
     const call = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
-    expect(JSON.parse(String(call[0]?.[1]?.body))).toMatchObject({
-      id: 'restart-id',
+    expect(String(call[1]?.[0])).toContain('/trpc/restartRuntime');
+    expect(JSON.parse(String(call[1]?.[1]?.body))).toMatchObject({
+      runtimeId: 'runtime-1',
+      commandId: 'restart-id',
     });
   });
 
@@ -434,13 +438,15 @@ describe('DashboardHttpClient command requests', () => {
     expect(call[0]?.[1]?.body).toBeUndefined();
   });
 
-  it('posts a project-scoped first-message runtime request', async () => {
-    const fetch = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ runtimeId: 'runtime-1' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
+  it('posts a project-scoped first-message runtime request through tRPC', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith('/protocolInfo')
+        ? protocolInfoResponse()
+        : trpcResponse({
+            commandId: 'start-id',
+            status: 'completed',
+            result: { runtimeId: 'runtime-1' },
+          }),
     );
     const client = new DashboardHttpClient({
       fetch,
@@ -453,22 +459,26 @@ describe('DashboardHttpClient command requests', () => {
     await client.startRuntime({
       workspaceId: 'workspace-1',
       initialPrompt: 'inspect this',
+      commandId: 'start-id',
     });
     const call = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
-    expect(call[0]?.[0]).toBe('/api/runtimes/start');
-    expect(JSON.parse(String(call[0]?.[1]?.body))).toEqual({
+    expect(String(call[1]?.[0])).toContain('/trpc/startRuntime');
+    expect(JSON.parse(String(call[1]?.[1]?.body))).toEqual({
       workspaceId: 'workspace-1',
       initialPrompt: 'inspect this',
+      commandId: 'start-id',
     });
   });
 
-  it('posts a resume request with the existing session identity', async () => {
-    const fetch = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ runtimeId: 'runtime-1' }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
+  it('posts a resume request with the existing session identity through tRPC', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith('/protocolInfo')
+        ? protocolInfoResponse()
+        : trpcResponse({
+            commandId: 'resume-id',
+            status: 'completed',
+            result: { runtimeId: 'runtime-1' },
+          }),
     );
     const client = new DashboardHttpClient({
       fetch,
@@ -481,11 +491,13 @@ describe('DashboardHttpClient command requests', () => {
     await client.startRuntime({
       workspaceId: 'workspace-1',
       sessionId: 'session-1',
+      commandId: 'resume-id',
     });
     const call = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
-    expect(JSON.parse(String(call[0]?.[1]?.body))).toEqual({
+    expect(JSON.parse(String(call[1]?.[1]?.body))).toEqual({
       workspaceId: 'workspace-1',
       sessionId: 'session-1',
+      commandId: 'resume-id',
     });
   });
 });

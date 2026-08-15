@@ -393,15 +393,35 @@ export class DashboardServerImpl implements DashboardServer {
         return result;
       },
       restartRuntime: async (runtimeId, commandId) => {
-        const result = await this.application.runtime.restart(
+        const result = await this.application.runtime.restartWithReceipt({
           runtimeId,
           commandId,
-        );
-        this.changed();
+        });
+        if (result.status === 'completed') this.changed();
         return result;
       },
       runtimeCommand: async (runtimeId: string, command: BridgeCommand) =>
         this.application.runtime.commandWithReceipt(runtimeId, command),
+      startRuntimeMutation: async (input: unknown) => {
+        const result = await this.application.runtime.startWithReceipt(input);
+        if (result.status === 'completed') this.changed();
+        return result;
+      },
+      restartRuntimeMutation: async (input: unknown) => {
+        const result = await this.application.runtime.restartWithReceipt(input);
+        if (result.status === 'completed') this.changed();
+        return result;
+      },
+      stopRuntimeMutation: async (input: unknown) => {
+        const result = await this.application.runtime.stopWithReceipt(input);
+        if (result.status === 'completed') this.changed();
+        return result;
+      },
+      renameSessionMutation: async (input: unknown) => {
+        const result = await this.application.runtime.renameWithReceipt(input);
+        if (result.status === 'completed') this.changed();
+        return result;
+      },
       commandRuntime: async (runtimeId, input, imageBuffers) => {
         if (!input || typeof input !== 'object' || Array.isArray(input))
           throw new Error('Invalid command body.');

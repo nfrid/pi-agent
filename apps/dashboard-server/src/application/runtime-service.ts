@@ -1,10 +1,17 @@
 import { createHash } from 'node:crypto';
-import { NonIdempotentActionIdGuard } from '@pi-dashboard/extension-contributions';
 import {
   type BridgeCommand,
   type CommandReceipt,
+  parseRenameSessionMutationInput,
+  parseRestartRuntimeMutationInput,
+  parseStartRuntimeMutationInput,
+  parseStopRuntimeMutationInput,
+  type RenameSessionMutationOutput,
+  type RestartRuntimeMutationOutput,
   type RuntimeCommandOutput,
   type RuntimeSnapshot,
+  type StartRuntimeMutationOutput,
+  type StopRuntimeMutationOutput,
   validateBridgeCommand,
 } from '@pi-dashboard/protocol';
 import type { OrchestrationRepository } from '../repositories/types.js';
@@ -44,7 +51,6 @@ function runtimeCommandConflict(id: string): Error & { code: string } {
 }
 
 export class RuntimeService {
-  private readonly restartCommandIds = new NonIdempotentActionIdGuard();
   private readonly runtimeCommandInFlight = new Map<
     string,
     { fingerprint: string; execution: Promise<unknown> }
@@ -69,52 +75,59 @@ export class RuntimeService {
     return this.registry.sendCommand(runtimeId, input);
   }
 
-  /** Execute a browser command once and retain its acknowledged result. */
-  async commandWithReceipt(
-    runtimeId: string,
-    input: BridgeCommand,
-  ): Promise<RuntimeCommandOutput> {
+  /**
+   * The one receipt boundary for live-state mutations. It deliberately stores
+   * only a SHA-256 fingerprint and the bounded result; execution resolves the
+   * current manager/registry/session state after dedupe has been checked.
+   */
+  private async executeWithReceipt<T>(options: {
+    commandId: string;
+    commandType: string;
+    target?: string;
+    runtimeId?: string;
+    payload: unknown;
+    execute: () => Promise<T>;
+  }): Promise<{ status: 'completed' | 'already-completed'; result: T }> {
     const repository = this.repository;
     if (!repository)
       throw new Error('Runtime command receipts are unavailable.');
-    const command = validateBridgeCommand(input);
-    const { id, ...payload } = command;
-    const fingerprint = runtimeCommandFingerprint(runtimeId, payload);
-    const existing = repository.getCommandReceipt(id);
+    const fingerprint = runtimeCommandFingerprint(
+      options.target ?? '',
+      options.payload,
+    );
+    const inFlightFingerprint = `${options.commandType}:${fingerprint}`;
+    const existing = repository.getCommandReceipt(options.commandId);
     if (existing) {
       if (
-        existing.commandType !== 'runtime.command' ||
-        existing.runtimeId !== runtimeId ||
+        existing.commandType !== options.commandType ||
+        (existing.runtimeId ?? undefined) !== options.runtimeId ||
+        (existing.resourceId !== undefined &&
+          existing.resourceId !== (options.target ?? undefined)) ||
         existing.commandFingerprint !== fingerprint
       )
-        throw runtimeCommandConflict(id);
-      return {
-        runtimeId,
-        commandId: id,
-        status: 'already-completed',
-        result: existing.result,
-      };
+        throw runtimeCommandConflict(options.commandId);
+      return { status: 'already-completed', result: existing.result as T };
     }
-    const inFlight = this.runtimeCommandInFlight.get(id);
+    const inFlight = this.runtimeCommandInFlight.get(options.commandId);
     if (inFlight) {
-      if (inFlight.fingerprint !== fingerprint)
-        throw runtimeCommandConflict(id);
+      if (inFlight.fingerprint !== inFlightFingerprint)
+        throw runtimeCommandConflict(options.commandId);
       return {
-        runtimeId,
-        commandId: id,
         status: 'already-completed',
-        result: await inFlight.execution,
+        result: (await inFlight.execution) as T,
       };
     }
     const execution = (async () => {
-      // Registry lookup and connection selection happen only at execution
-      // time; a receipt never authorizes a replacement runtime generation.
-      const acknowledged = await this.registry.sendCommand(runtimeId, command);
-      const result = acknowledged === undefined ? null : acknowledged;
+      const result = await options.execute();
       const receipt: CommandReceipt = {
-        idempotencyKey: id,
-        commandType: 'runtime.command',
-        runtimeId,
+        idempotencyKey: options.commandId,
+        commandType: options.commandType,
+        ...(options.runtimeId === undefined
+          ? {}
+          : { runtimeId: options.runtimeId }),
+        ...(options.target === undefined
+          ? {}
+          : { resourceType: 'runtime-lifecycle', resourceId: options.target }),
         commandFingerprint: fingerprint,
         result,
         createdAt: Date.now(),
@@ -122,41 +135,156 @@ export class RuntimeService {
       repository.recordCommandReceipt(receipt);
       return result;
     })();
-    this.runtimeCommandInFlight.set(id, { fingerprint, execution });
+    this.runtimeCommandInFlight.set(options.commandId, {
+      fingerprint: inFlightFingerprint,
+      execution,
+    });
     try {
-      return {
-        runtimeId,
-        commandId: id,
-        status: 'completed',
-        result: await execution,
-      };
+      return { status: 'completed', result: await execution };
     } finally {
-      if (this.runtimeCommandInFlight.get(id)?.execution === execution)
-        this.runtimeCommandInFlight.delete(id);
+      if (
+        this.runtimeCommandInFlight.get(options.commandId)?.execution ===
+        execution
+      )
+        this.runtimeCommandInFlight.delete(options.commandId);
     }
+  }
+
+  /** Execute a browser command once and retain its acknowledged result. */
+  async commandWithReceipt(
+    runtimeId: string,
+    input: BridgeCommand,
+  ): Promise<RuntimeCommandOutput> {
+    const command = validateBridgeCommand(input);
+    const { id, ...payload } = command;
+    const completion = await this.executeWithReceipt({
+      commandId: id,
+      commandType: 'runtime.command',
+      target: runtimeId,
+      runtimeId,
+      payload,
+      execute: async () => {
+        // Registry lookup and connection selection happen only at execution
+        // time; a receipt never authorizes a replacement runtime generation.
+        const acknowledged = await this.registry.sendCommand(
+          runtimeId,
+          command,
+        );
+        return acknowledged === undefined ? null : acknowledged;
+      },
+    });
+    return {
+      runtimeId,
+      commandId: id,
+      status: completion.status,
+      result: completion.result,
+    };
+  }
+
+  async startWithReceipt(value: unknown): Promise<StartRuntimeMutationOutput> {
+    const input = parseStartRuntimeMutationInput(value);
+    const { commandId, ...request } = input;
+    const completion = await this.executeWithReceipt({
+      commandId,
+      commandType: 'runtime.start',
+      target: input.workspaceId,
+      ...(input.runtimeId ? { runtimeId: input.runtimeId } : {}),
+      payload: request,
+      execute: async () => {
+        const launched = await this.manager.launch(request);
+        return { runtimeId: launched.runtimeId };
+      },
+    });
+    return { commandId, status: completion.status, result: completion.result };
+  }
+
+  async restartWithReceipt(
+    value: unknown,
+  ): Promise<RestartRuntimeMutationOutput> {
+    const input = parseRestartRuntimeMutationInput(value);
+    const completion = await this.executeWithReceipt({
+      commandId: input.commandId,
+      commandType: 'runtime.restart',
+      target: input.runtimeId,
+      runtimeId: input.runtimeId,
+      payload: {},
+      execute: async () => {
+        // This check belongs inside the receipt execution. A failed
+        // precondition does not consume the caller's command ID.
+        if (!this.manager.canRestart(input.runtimeId))
+          throw Object.assign(new Error('Only managed runtimes can restart.'), {
+            code: 'restart-precondition',
+          });
+        const restarted = await this.manager.restart(input.runtimeId);
+        return { runtimeId: restarted.runtimeId };
+      },
+    });
+    return {
+      commandId: input.commandId,
+      status: completion.status,
+      result: completion.result,
+    };
+  }
+
+  async stopWithReceipt(value: unknown): Promise<StopRuntimeMutationOutput> {
+    const input = parseStopRuntimeMutationInput(value);
+    const completion = await this.executeWithReceipt({
+      commandId: input.commandId,
+      commandType: 'runtime.stop',
+      target: input.runtimeId,
+      runtimeId: input.runtimeId,
+      payload: { force: input.force },
+      execute: async () => {
+        await this.manager.stop(input.runtimeId, input.force);
+        return { runtimeId: input.runtimeId, stopped: true as const };
+      },
+    });
+    return {
+      commandId: input.commandId,
+      status: completion.status,
+      result: completion.result,
+    };
+  }
+
+  async renameWithReceipt(
+    value: unknown,
+  ): Promise<RenameSessionMutationOutput> {
+    const input = parseRenameSessionMutationInput(value);
+    const completion = await this.executeWithReceipt({
+      commandId: input.commandId,
+      commandType: 'session.rename',
+      target: input.sessionId,
+      payload: { name: input.name },
+      execute: async () => {
+        // Resolve live-vs-dormant at execution time, not when the request was
+        // queued. A response-loss retry therefore cannot rename twice.
+        const runtime = this.registry
+          .snapshots()
+          .find(
+            (item) =>
+              item.session.id === input.sessionId && item.online !== false,
+          );
+        if (runtime) {
+          await this.registry.sendCommand(runtime.runtimeId, {
+            id: input.commandId,
+            type: 'setSessionName',
+            name: input.name,
+          });
+        } else {
+          await this.sessions.rename(input.sessionId, input.name);
+        }
+        return { sessionId: input.sessionId, name: input.name };
+      },
+    });
+    return {
+      commandId: input.commandId,
+      status: completion.status,
+      result: completion.result,
+    };
   }
 
   async stop(runtimeId: string, force = false): Promise<void> {
     await this.manager.stop(runtimeId, force);
-  }
-
-  async restart(runtimeId: string, commandId: string): Promise<unknown> {
-    // Check the target before reserving replay memory. An unknown or external
-    // runtime must remain retryable after the caller fixes its precondition.
-    if (!this.manager.canRestart(runtimeId))
-      throw Object.assign(new Error('Only managed runtimes can restart.'), {
-        code: 'restart-precondition',
-      });
-    const reservation = this.restartCommandIds.reserve(commandId);
-    if (reservation === 'duplicate')
-      throw Object.assign(new Error('Duplicate restart command ID.'), {
-        code: 'duplicate-action-id',
-      });
-    if (reservation === 'capacity')
-      throw Object.assign(new Error('Restart command capacity is full.'), {
-        code: 'action-command-capacity',
-      });
-    return this.manager.restart(runtimeId);
   }
 
   async answerInteraction(

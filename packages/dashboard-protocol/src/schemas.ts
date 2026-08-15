@@ -1046,6 +1046,14 @@ export const BridgeCommandSchema = Type.Union([
 export type BridgeCommand = Static<typeof BridgeCommandSchema>;
 export type BridgeCommandBase = { id: string };
 
+/** Caller-owned IDs for durable browser lifecycle mutations. */
+export const LifecycleCommandIdSchema = Type.String({
+  minLength: 1,
+  maxLength: 128,
+  pattern: '^[^\\u0000-\\u001F\\u007F]*$',
+});
+export type LifecycleCommandId = Static<typeof LifecycleCommandIdSchema>;
+
 /** One bounded, idempotent browser command sent to a live runtime. */
 export const RuntimeCommandInputSchema = Type.Object(
   {
@@ -2131,8 +2139,146 @@ export const StartRuntimeRequestSchema = Type.Object(
 );
 export type StartRuntimeRequest = Static<typeof StartRuntimeRequestSchema>;
 
+/** Durable browser start/resume mutation. The command ID is not part of the
+ * manager's launch payload and is stripped at the application boundary. */
+export const StartRuntimeMutationInputSchema = Type.Object(
+  {
+    ...StartRuntimeRequestSchema.properties,
+    commandId: LifecycleCommandIdSchema,
+  },
+  { additionalProperties: false },
+);
+export type StartRuntimeMutationInput = Static<
+  typeof StartRuntimeMutationInputSchema
+>;
+export const StartRuntimeInputSchema = StartRuntimeMutationInputSchema;
+export type StartRuntimeInput = StartRuntimeMutationInput;
+
+export const LifecycleMutationStatusSchema = Type.Union([
+  Type.Literal('completed'),
+  Type.Literal('already-completed'),
+]);
+export type LifecycleMutationStatus = Static<
+  typeof LifecycleMutationStatusSchema
+>;
+
+export const StartRuntimeMutationOutputSchema = Type.Object(
+  {
+    commandId: LifecycleCommandIdSchema,
+    status: LifecycleMutationStatusSchema,
+    result: Type.Object(
+      { runtimeId: IdentifierSchema },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+export type StartRuntimeMutationOutput = Static<
+  typeof StartRuntimeMutationOutputSchema
+>;
+export const StartRuntimeOutputSchema = StartRuntimeMutationOutputSchema;
+export type StartRuntimeOutput = StartRuntimeMutationOutput;
+
+export const RestartRuntimeMutationInputSchema = Type.Object(
+  { runtimeId: IdentifierSchema, commandId: LifecycleCommandIdSchema },
+  { additionalProperties: false },
+);
+export type RestartRuntimeMutationInput = Static<
+  typeof RestartRuntimeMutationInputSchema
+>;
+export const RestartRuntimeInputSchema = RestartRuntimeMutationInputSchema;
+export type RestartRuntimeInput = RestartRuntimeMutationInput;
+
+export const RestartRuntimeMutationOutputSchema = Type.Object(
+  {
+    commandId: LifecycleCommandIdSchema,
+    status: LifecycleMutationStatusSchema,
+    result: Type.Object(
+      { runtimeId: IdentifierSchema },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+export type RestartRuntimeMutationOutput = Static<
+  typeof RestartRuntimeMutationOutputSchema
+>;
+export const RestartRuntimeOutputSchema = RestartRuntimeMutationOutputSchema;
+export type RestartRuntimeOutput = RestartRuntimeMutationOutput;
+
+export const StopRuntimeMutationInputSchema = Type.Object(
+  {
+    runtimeId: IdentifierSchema,
+    commandId: LifecycleCommandIdSchema,
+    force: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+export type StopRuntimeMutationInput = Static<
+  typeof StopRuntimeMutationInputSchema
+>;
+export const StopRuntimeInputSchema = StopRuntimeMutationInputSchema;
+export type StopRuntimeInput = StopRuntimeMutationInput;
+
+export const StopRuntimeMutationOutputSchema = Type.Object(
+  {
+    commandId: LifecycleCommandIdSchema,
+    status: LifecycleMutationStatusSchema,
+    result: Type.Object(
+      { runtimeId: IdentifierSchema, stopped: Type.Literal(true) },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+export type StopRuntimeMutationOutput = Static<
+  typeof StopRuntimeMutationOutputSchema
+>;
+export const StopRuntimeOutputSchema = StopRuntimeMutationOutputSchema;
+export type StopRuntimeOutput = StopRuntimeMutationOutput;
+
 export const SessionRenameRequestSchema = Type.Object(
   { name: Type.String({ minLength: 1, maxLength: 512 }) },
   { additionalProperties: false },
 );
 export type SessionRenameRequest = Static<typeof SessionRenameRequestSchema>;
+
+export const RenameSessionMutationInputSchema = Type.Object(
+  {
+    sessionId: IdentifierSchema,
+    commandId: LifecycleCommandIdSchema,
+    name: Type.String({ minLength: 1, maxLength: 512 }),
+  },
+  { additionalProperties: false },
+);
+export type RenameSessionMutationInput = Static<
+  typeof RenameSessionMutationInputSchema
+>;
+export const SessionRenameMutationInputSchema =
+  RenameSessionMutationInputSchema;
+export type SessionRenameMutationInput = RenameSessionMutationInput;
+export const RenameSessionInputSchema = RenameSessionMutationInputSchema;
+export type RenameSessionInput = RenameSessionMutationInput;
+
+export const RenameSessionMutationOutputSchema = Type.Object(
+  {
+    commandId: LifecycleCommandIdSchema,
+    status: LifecycleMutationStatusSchema,
+    result: Type.Object(
+      {
+        sessionId: IdentifierSchema,
+        name: Type.String({ minLength: 1, maxLength: 512 }),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+export type RenameSessionMutationOutput = Static<
+  typeof RenameSessionMutationOutputSchema
+>;
+export const SessionRenameMutationOutputSchema =
+  RenameSessionMutationOutputSchema;
+export type SessionRenameMutationOutput = RenameSessionMutationOutput;
+export const RenameSessionOutputSchema = RenameSessionMutationOutputSchema;
+export type RenameSessionOutput = RenameSessionMutationOutput;

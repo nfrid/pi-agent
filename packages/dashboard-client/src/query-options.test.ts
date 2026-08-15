@@ -14,9 +14,11 @@ import {
   delegateHistoryQueryOptions,
   delegateHistoryRunQueryOptions,
   renameSessionMutationOptions,
+  restartRuntimeMutationOptions,
   snapshotQueryOptions,
   snapshotRequestGeneration,
   startRuntimeMutationOptions,
+  stopRuntimeMutationOptions,
 } from './query-options.js';
 import { DashboardLiveStore } from './store.js';
 
@@ -259,8 +261,73 @@ describe('dashboard query and mutation factories', () => {
     expect(second.id).toBe(first.id);
   });
 
+  it('reuses one lifecycle command ID across retry attempts', async () => {
+    const startRuntime = vi.fn(async (value: unknown) => value);
+    const renameSession = vi.fn(async (...value: unknown[]) => value);
+    const stopRuntime = vi.fn(async (...value: unknown[]) => value);
+    const restartRuntime = vi.fn(async (...value: unknown[]) => value);
+    const start = startRuntimeMutationOptions({
+      startRuntime,
+    } as unknown as DashboardHttpClient);
+    const rename = renameSessionMutationOptions({
+      renameSession,
+    } as unknown as DashboardHttpClient);
+    const stop = stopRuntimeMutationOptions({
+      stopRuntime,
+    } as unknown as DashboardHttpClient);
+    const restart = restartRuntimeMutationOptions({
+      restartRuntime,
+    } as unknown as DashboardHttpClient);
+    const startVariables = { workspaceId: 'workspace-1' };
+    const renameVariables = { id: 'session-1', name: 'Renamed' };
+    const stopVariables = { runtimeId: 'runtime-1', force: true };
+    const restartVariables = { runtimeId: 'runtime-1' };
+    for (const [mutation, variables] of [
+      [start, startVariables],
+      [rename, renameVariables],
+      [stop, stopVariables],
+      [restart, restartVariables],
+    ] as const) {
+      if (!mutation.mutationFn)
+        throw new Error('Mutation function is missing.');
+      await (mutation.mutationFn as (value: unknown) => Promise<unknown>)(
+        variables,
+      );
+      await (mutation.mutationFn as (value: unknown) => Promise<unknown>)(
+        variables,
+      );
+    }
+    const firstStart = startRuntime.mock.calls[0]?.[0] as {
+      commandId?: string;
+    };
+    const secondStart = startRuntime.mock.calls[1]?.[0] as {
+      commandId?: string;
+    };
+    expect(firstStart.commandId).toEqual(expect.any(String));
+    expect(secondStart.commandId).toBe(firstStart.commandId);
+    const renameCalls = renameSession.mock.calls as unknown as Array<unknown[]>;
+    const stopCalls = stopRuntime.mock.calls as unknown as Array<unknown[]>;
+    const restartCalls = restartRuntime.mock.calls as unknown as Array<
+      unknown[]
+    >;
+    expect(renameCalls[1]?.[2]).toBe(renameCalls[0]?.[2]);
+    expect(stopCalls[1]?.[2]).toBe(stopCalls[0]?.[2]);
+    expect(restartCalls[1]?.[1]).toBe(restartCalls[0]?.[1]);
+  });
+
   it('retries runtime commands only for network failures', () => {
-    expect(renameSessionMutationOptions(client).retry).toBe(false);
+    const lifecycleRetry = renameSessionMutationOptions(client).retry;
+    expect(typeof lifecycleRetry).toBe('function');
+    expect(
+      (lifecycleRetry as (count: number, error: unknown) => boolean)(0, {
+        kind: 'network',
+      }),
+    ).toBe(true);
+    expect(
+      (lifecycleRetry as (count: number, error: unknown) => boolean)(0, {
+        kind: 'domain',
+      }),
+    ).toBe(false);
     const retry = commandMutationOptions(client).retry;
     expect(typeof retry).toBe('function');
     expect(
@@ -283,7 +350,7 @@ describe('dashboard query and mutation factories', () => {
         kind: 'domain',
       }),
     ).toBe(false);
-    expect(startRuntimeMutationOptions(client).retry).toBe(false);
+    expect(typeof startRuntimeMutationOptions(client).retry).toBe('function');
   });
 
   it('rejects a stale snapshot query after an SSE generation replacement', async () => {
