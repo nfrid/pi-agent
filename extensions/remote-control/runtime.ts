@@ -401,15 +401,11 @@ export function emitAgentSettlement(
   ctx: ExtensionContext,
 ): void {
   const hasIdleApi = typeof ctx.isIdle === 'function';
-  if (
-    !(hasIdleApi
-      ? isGenuineAgentSettlement(false, ctx.sessionManager.getSessionId())
-      : isGenuineAgentSettlement())
-  ) {
-    emitState(runtime, ctx, 'working');
-    return;
-  }
+  const genuinelySettled = hasIdleApi
+    ? isGenuineAgentSettlement(false, ctx.sessionManager.getSessionId())
+    : isGenuineAgentSettlement();
   emitState(runtime, ctx);
+  if (!genuinelySettled) return;
   if (!runtime.isCurrent(ctx)) return;
   runtime.client.sendEvent({
     type: 'agent.settled',

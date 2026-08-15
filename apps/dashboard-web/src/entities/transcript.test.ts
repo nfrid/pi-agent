@@ -215,6 +215,16 @@ describe('activity row views and virtual transcript construction', () => {
       role: 'other',
       state: 'complete',
     });
+    expect(
+      activityStepParts({
+        name: 'delegate_jobs',
+        args: { action: 'feedback', id: 'dj-1' },
+      }),
+    ).toMatchObject({
+      label: 'Sending feedback to delegate job dj-1',
+      action: 'Sending feedback to delegate job',
+      argument: 'dj-1',
+    });
     const longPath = `src/${'wide-segment/'.repeat(40)}dashboard.tsx`;
     expect(
       activityStepParts({ name: 'read', args: { path: longPath } }).argument,

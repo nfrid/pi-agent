@@ -223,9 +223,11 @@ export function activityStepParts(
     action =
       operation === 'peek'
         ? 'Checking delegate job'
-        : operation === 'cancel'
-          ? 'Cancelling delegate jobs'
-          : 'Listing delegate jobs';
+        : operation === 'feedback'
+          ? 'Sending feedback to delegate job'
+          : operation === 'cancel'
+            ? 'Cancelling delegate jobs'
+            : 'Listing delegate jobs';
     argument =
       stringArg(tool.args, 'id') ??
       (arrayArg(tool.args, 'ids').length
