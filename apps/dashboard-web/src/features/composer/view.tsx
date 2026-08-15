@@ -21,6 +21,7 @@ import {
   newQueueId,
   QueuePanel,
   queueCommand,
+  shouldQueueComposerMessage,
   shouldShowQueuePanel,
   useComposerQueue,
 } from './queue';
@@ -112,8 +113,6 @@ export function Composer({
     runtime.liveState === 'stopping' ||
     runtime.liveState === 'waiting' ||
     runtime.pendingInteractions.length > 0;
-  const queueable =
-    runtime?.liveState === 'working' || runtime?.liveState === 'compacting';
   const submissionDisabled = disabled;
   const attachmentsEnabled =
     runtime?.liveState !== 'compacting' &&
@@ -135,6 +134,13 @@ export function Composer({
     busy: busy || disabled,
     onError: setError,
   });
+  const queuesCurrentMessage = runtime
+    ? shouldQueueComposerMessage(
+        runtime.liveState,
+        mode,
+        attachments.length > 0,
+      )
+    : false;
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -219,9 +225,8 @@ export function Composer({
       text: trimmedText,
     };
     if (runtime.liveState === 'idle') onPromptSubmitted?.(trimmedText);
-    const queueTextOnly = queueable && attachments.length === 0;
     try {
-      if (queueTextOnly) {
+      if (queuesCurrentMessage) {
         const queueId = newQueueId();
         const queuedItem = {
           id: queueId,
@@ -363,13 +368,11 @@ export function Composer({
                 busy ||
                 (!text.trim() && !attachments.length)
               }
-              aria-label={
-                queueable && !attachments.length ? 'Queue message' : 'Send'
-              }
+              aria-label={queuesCurrentMessage ? 'Queue message' : 'Send'}
             >
               <span aria-hidden="true">↑</span>
               <span className="sr-only">
-                {queueable && !attachments.length ? 'Queue' : 'Send'}
+                {queuesCurrentMessage ? 'Queue' : 'Send'}
               </span>
             </AriaButton>
             {runtime.liveState === 'working' && (

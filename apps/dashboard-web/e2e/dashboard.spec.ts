@@ -4356,6 +4356,24 @@ test('phase six mocked session flow covers semantic controls and reconnect safet
   await deliveryMode.click();
   await expect(deliveryMode).toHaveText('Later');
   await expect(deliveryMode).toHaveAttribute('aria-pressed', 'false');
+  const commandCountBeforeFollowUp = mocks.commands.length;
+  await workingComposerInput.fill('Follow up while delegates run');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect
+    .poll(() => mocks.commands.slice(commandCountBeforeFollowUp).at(-1))
+    .toMatchObject({
+      type: 'followUp',
+      text: 'Follow up while delegates run',
+    });
+  expect(
+    mocks.commands
+      .slice(commandCountBeforeFollowUp)
+      .some(
+        (command) =>
+          command.type === 'queue.add' &&
+          command.text === 'Follow up while delegates run',
+      ),
+  ).toBe(false);
   await mocks.emit({
     type: 'snapshot',
     snapshot: phase6Snapshot({ liveState: 'idle', pendingInteractions: [] }),

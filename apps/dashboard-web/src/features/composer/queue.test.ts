@@ -7,6 +7,7 @@ import {
   queueCommand,
   queuedMessagesForRuntime,
   queueRemoveCommand,
+  shouldQueueComposerMessage,
   shouldShowQueuePanel,
   upsertQueuedMessage,
   useComposerQueue,
@@ -240,5 +241,16 @@ describe('composer queue model', () => {
     ).toEqual([{ id: 'q1', mode: 'steer', text: 'new' }]);
     expect(shouldShowQueuePanel('working', 0)).toBe(true);
     expect(shouldShowQueuePanel('idle', 0)).toBe(false);
+  });
+
+  it('dispatches working follow-ups immediately while retaining steer and compaction queues', () => {
+    expect(shouldQueueComposerMessage('working', 'followUp', false)).toBe(
+      false,
+    );
+    expect(shouldQueueComposerMessage('working', 'steer', false)).toBe(true);
+    expect(shouldQueueComposerMessage('compacting', 'followUp', false)).toBe(
+      true,
+    );
+    expect(shouldQueueComposerMessage('working', 'steer', true)).toBe(false);
   });
 });

@@ -2309,7 +2309,7 @@ describe('remote-control bridge', () => {
 });
 
 describe('agent settlement', () => {
-  it('makes the dashboard idle but suppresses final settlement while a process is pending', () => {
+  it('keeps the dashboard working and suppresses settlement while a process is pending', () => {
     const source = {};
     const events: unknown[] = [];
     let currentSnapshot = { ...snapshot };
@@ -2323,22 +2323,21 @@ describe('agent settlement', () => {
       client: { sendEvent: (event: unknown) => events.push(event) },
     } as unknown as Parameters<typeof emitAgentSettlement>[0];
     const ctx = {
-      isIdle: () => true,
       sessionManager: { getSessionId: () => 'session-test' },
     } as unknown as ExtensionContext;
 
-    setPendingProcessCount(source, 1, 'session-test');
+    setPendingProcessCount(source, 1);
     try {
       emitAgentSettlement(runtime, ctx);
     } finally {
-      setPendingProcessCount(source, 0, 'session-test');
+      setPendingProcessCount(source, 0);
     }
 
     expect(events).toEqual([
       expect.objectContaining({
         type: 'runtime.stateChanged',
-        state: 'idle',
-        snapshot: expect.objectContaining({ liveState: 'idle' }),
+        state: 'working',
+        snapshot: expect.objectContaining({ liveState: 'working' }),
       }),
     ]);
   });

@@ -109,6 +109,16 @@ export function shouldShowQueuePanel(
   );
 }
 
+export function shouldQueueComposerMessage(
+  liveState: RuntimeSnapshot['liveState'],
+  mode: 'prompt' | 'steer' | 'followUp',
+  hasAttachments: boolean,
+): boolean {
+  if (hasAttachments) return false;
+  if (liveState === 'compacting') return true;
+  return liveState === 'working' && mode !== 'followUp';
+}
+
 export function useComposerQueue(runtime: RuntimeSnapshot | undefined) {
   const serverQueue = queuedMessagesForRuntime(runtime);
   const serverQueueKnown = Array.isArray(runtime?.queueDrafts);
