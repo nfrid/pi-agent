@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import { StructuredDelegateResults } from '../entities/transcript/entries';
+import { delegateHistorySettledRunIds } from './delegate-history';
 import {
   DelegateInspectorMetadata,
   DelegateInspectorTranscript,
@@ -395,10 +396,53 @@ describe('live extension surface fixtures', () => {
     );
     expect(disappeared.shouldInvalidate).toBe(true);
     expect(disappeared.next.size).toBe(0);
+    expect(disappeared.settledRunIds).toEqual(['settled']);
     expect(
       reconcileDelegateLiveRuns('session-1', disappeared.next, [])
         .shouldInvalidate,
     ).toBe(false);
+  });
+
+  it('does not treat a queued launch as persisted settlement evidence', () => {
+    const settled = delegateHistorySettledRunIds({
+      version: 2,
+      sessionId: 'session-1',
+      groups: [
+        {
+          id: 'lineage-1',
+          runId: 'queued-run',
+          lineageId: 'lineage-1',
+          name: 'Queued review',
+          kind: 'background',
+          state: 'queued',
+          createdAt: 1,
+          allowWrites: false,
+          runCount: 2,
+          runs: [
+            {
+              runId: 'queued-run',
+              lineageId: 'lineage-1',
+              name: 'Queued review',
+              kind: 'background',
+              state: 'queued',
+              createdAt: 1,
+              allowWrites: false,
+            },
+            {
+              runId: 'settled-run',
+              lineageId: 'lineage-1',
+              name: 'Queued review',
+              kind: 'background',
+              state: 'success',
+              createdAt: 2,
+              finishedAt: 3,
+              allowWrites: false,
+            },
+          ],
+        },
+      ],
+    } as unknown as DelegateHistoryResponse);
+    expect([...settled]).toEqual(['settled-run']);
   });
 
   it('preserves an inspected historical run across refreshed options', () => {

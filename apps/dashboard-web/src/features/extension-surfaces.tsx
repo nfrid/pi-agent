@@ -34,7 +34,10 @@ import {
   type DashboardRendererContext,
   renderDashboardContribution,
 } from '../renderer-registry';
-import type { DelegateCompositeRun } from './delegate-history';
+import {
+  type DelegateCompositeRun,
+  delegateHistorySettledRunIds,
+} from './delegate-history';
 import { DelegateSurface } from './live-surface-renderers';
 
 /** Compatibility export for callers that used the old dashboard-local name. */
@@ -161,6 +164,13 @@ export function reconcileDelegateLiveRuns(
       continue;
     }
     if (!currentKeys.has(key)) {
+      // A terminal row can disappear as part of the same publication that
+      // clears the live surface. Keep its settlement in the bounded refresh
+      // path so a queued launch placeholder cannot mask the pending history
+      // write. A queued/running disappearance is not settlement evidence.
+      const prior = next.get(key);
+      if (prior !== undefined && !isActiveDelegateState(prior))
+        settledRunIds.push(key.slice(`${sessionId}:`.length));
       // Remove disappeared keys before the caller schedules invalidation. A
       // later render therefore cannot invalidate the same disappearance loop.
       next.delete(key);
@@ -599,8 +609,13 @@ export function DelegateHistorySurface({
       previousStates.current = new Map();
       previousSessionId.current = id;
     }
-    const historyRunIds = delegateHistoryRunIds(historyQuery.data);
-    refreshCoordinator.observe(historyRunIds);
+    // A queued launch is already present in durable history, but it does not
+    // prove that a live settlement was persisted. Only terminal history rows
+    // satisfy the refresh coordinator; otherwise the launch masks retries.
+    const historySettledRunIds = delegateHistorySettledRunIds(
+      historyQuery.data,
+    );
+    refreshCoordinator.observe(historySettledRunIds);
     const reconciliation = reconcileDelegateLiveRuns(
       id,
       previousStates.current,
@@ -608,7 +623,7 @@ export function DelegateHistorySurface({
     );
     previousStates.current = reconciliation.next;
     const unresolvedSettlements = reconciliation.settledRunIds.filter(
-      (runId) => !historyRunIds.has(runId),
+      (runId) => !historySettledRunIds.has(runId),
     );
     refreshCoordinator.markSettled(unresolvedSettlements);
     if (reconciliation.shouldInvalidate && unresolvedSettlements.length === 0)

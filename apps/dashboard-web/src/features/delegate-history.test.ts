@@ -134,6 +134,41 @@ describe('delegate history composition', () => {
     ).toHaveLength(0);
   });
 
+  it('reconciles a settled live run with a queued history launch by job ID', () => {
+    const queuedHistory = {
+      ...history,
+      groups: [
+        {
+          ...history.groups[0],
+          runId: 'launch-run',
+          state: 'queued' as const,
+          runCount: 1,
+          runs: [
+            {
+              ...history.groups[0].runs[0],
+              runId: 'launch-run',
+              state: 'queued' as const,
+              jobId: 'job-review',
+            },
+          ],
+        },
+      ],
+    };
+    const model = composeDelegateHistory(queuedHistory, [
+      {
+        ...liveRun3,
+        runId: 'terminal-run',
+        state: 'success',
+        jobId: 'job-review',
+      },
+    ]);
+    expect(model.groups[0]?.runs.map((run) => run.id)).toEqual([
+      'terminal-run',
+    ]);
+    expect(model.groups[0]?.row.state).toBe('success');
+    expect(model.groups[0]?.section).toBe('recent');
+  });
+
   it('keeps each continuation run option on its own transcript segment', () => {
     const live = {
       ...liveRun3,
