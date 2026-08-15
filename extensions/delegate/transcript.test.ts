@@ -3,7 +3,7 @@ import { processJsonLine } from './events';
 import { getDetails } from './render-utils';
 import {
   captureDelegateResultEvent,
-  normalizeDelegateResultSpec,
+  normalizeInternalDelegateResultSpec as normalizeDelegateResultSpec,
   setDelegateResultSpec,
   settleDelegateResult,
 } from './structured-result';

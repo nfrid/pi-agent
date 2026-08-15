@@ -8,11 +8,17 @@ import type { TSchema } from 'typebox';
  * Paths use a JSON-pointer-like grammar documented in docs/delegation.md.  A
  * `*` segment is only valid when it selects the items of an array schema.
  */
+/** Public delegate result input. JSON-schema compatibility is deliberately not part of this API. */
 export interface DelegateResultSpecInput {
-  schema?: unknown;
   shape?: unknown;
   projection?: unknown;
   views?: unknown;
+}
+
+/** Internal child-transport input; never exposed by the delegate tool contract. */
+export interface InternalDelegateResultSpecInput
+  extends DelegateResultSpecInput {
+  schema?: unknown;
 }
 
 export interface JsonSchemaNode {
@@ -231,6 +237,17 @@ interface SchemaCounters {
   nodes: { value: number };
 }
 
+interface ShapeTraversalCounters {
+  depth: number;
+  optionalWrappers: number;
+}
+
+// Optional wrappers are syntax, not semantic schema nodes. Keep their traversal
+// bounded independently so they cannot consume the semantic budget or recurse
+// until the process overflows its stack.
+const MAX_SHAPE_TRAVERSAL_DEPTH = 256;
+const MAX_SHAPE_OPTIONAL_WRAPPERS = 256;
+
 interface ExpandedShapeNode {
   schema: JsonSchemaNode;
   optional: boolean;
@@ -274,21 +291,28 @@ function shapeLiteralType(values: unknown[]): string {
 
 function expandShapeProperties(
   input: unknown,
-  counters: SchemaCounters,
+  counters: ShapeTraversalCounters,
+  allowDollarNames = false,
 ): { properties: Record<string, unknown>; required: string[] } {
   if (!isPlainObject(input))
     throw new Error('result shape object properties must be an object');
+  if (Object.keys(input).length > STRUCTURED_RESULT_CAPS.maxProperties)
+    throw new Error(
+      `result shape exceeds the ${STRUCTURED_RESULT_CAPS.maxProperties}-property limit`,
+    );
   const properties: Record<string, unknown> = Object.create(null) as Record<
     string,
     unknown
   >;
   const required: string[] = [];
   for (const [name, child] of Object.entries(input)) {
-    if (name.startsWith('$'))
+    if (DANGEROUS_PROPERTY_NAMES.has(name))
+      throw new Error(`result shape property name is not supported: ${name}`);
+    if (name.startsWith('$') && !allowDollarNames)
       throw new Error(`result shape property name is reserved: ${name}`);
     const expanded = expandShapeNode(child, {
       depth: counters.depth + 1,
-      nodes: counters.nodes,
+      optionalWrappers: counters.optionalWrappers,
     });
     properties[name] = expanded.schema;
     if (!expanded.optional) required.push(name);
@@ -298,16 +322,11 @@ function expandShapeProperties(
 
 function expandShapeNode(
   input: unknown,
-  counters: SchemaCounters,
+  counters: ShapeTraversalCounters,
 ): ExpandedShapeNode {
-  counters.nodes.value++;
-  if (counters.nodes.value > STRUCTURED_RESULT_CAPS.schemaNodes)
+  if (counters.depth > MAX_SHAPE_TRAVERSAL_DEPTH)
     throw new Error(
-      `result shape exceeds the ${STRUCTURED_RESULT_CAPS.schemaNodes}-node limit`,
-    );
-  if (counters.depth > STRUCTURED_RESULT_CAPS.schemaDepth)
-    throw new Error(
-      `result shape exceeds the ${STRUCTURED_RESULT_CAPS.schemaDepth}-level depth limit`,
+      `result shape exceeds the ${MAX_SHAPE_TRAVERSAL_DEPTH}-level syntax traversal limit`,
     );
 
   if (typeof input === 'string' && SHAPE_PRIMITIVE_TYPES.has(input))
@@ -319,7 +338,7 @@ function expandShapeNode(
     if (input.length === 1) {
       const item = expandShapeNode(input[0], {
         depth: counters.depth + 1,
-        nodes: counters.nodes,
+        optionalWrappers: counters.optionalWrappers,
       });
       if (item.optional)
         throw new Error('result shape array items cannot be optional');
@@ -328,6 +347,10 @@ function expandShapeNode(
         optional: false,
       };
     }
+    if (input.length > STRUCTURED_RESULT_CAPS.maxEnumItems)
+      throw new Error(
+        `result shape enum exceeds the ${STRUCTURED_RESULT_CAPS.maxEnumItems}-item limit`,
+      );
     return {
       schema: { type: shapeLiteralType(input), enum: input },
       optional: false,
@@ -340,9 +363,16 @@ function expandShapeNode(
     );
 
   if (Object.keys(input).length === 1 && Object.hasOwn(input, '$optional')) {
+    counters.optionalWrappers++;
+    if (counters.optionalWrappers > MAX_SHAPE_OPTIONAL_WRAPPERS)
+      throw new Error(
+        `result shape exceeds the ${MAX_SHAPE_OPTIONAL_WRAPPERS}-wrapper syntax limit`,
+      );
+    // This wrapper changes requiredness only. Do not charge it semantic depth
+    // or node budget; those are enforced after expansion by normalizeSchemaNode.
     const expanded = expandShapeNode(input.$optional, {
-      depth: counters.depth + 1,
-      nodes: counters.nodes,
+      depth: counters.depth,
+      optionalWrappers: counters.optionalWrappers,
     });
     if (expanded.optional)
       throw new Error('result shape optional wrappers cannot be nested');
@@ -366,7 +396,7 @@ function expandShapeNode(
     if ($type === 'array' && Object.hasOwn(schema, 'items')) {
       const item = expandShapeNode(schema.items, {
         depth: counters.depth + 1,
-        nodes: counters.nodes,
+        optionalWrappers: counters.optionalWrappers,
       });
       if (item.optional)
         throw new Error('result shape array items cannot be optional');
@@ -377,7 +407,7 @@ function expandShapeNode(
         throw new Error(
           'result shape object descriptors derive required fields; use $optional wrappers instead',
         );
-      const expanded = expandShapeProperties(schema.properties, counters);
+      const expanded = expandShapeProperties(schema.properties, counters, true);
       schema.properties = expanded.properties;
       schema.required = expanded.required;
     }
@@ -398,7 +428,10 @@ function expandShapeNode(
 }
 
 function expandResultShape(input: unknown): JsonSchemaNode {
-  const expanded = expandShapeNode(input, { depth: 1, nodes: { value: 0 } });
+  const expanded = expandShapeNode(input, {
+    depth: 1,
+    optionalWrappers: 0,
+  });
   if (expanded.optional)
     throw new Error('the complete result shape cannot be optional');
   return expanded.schema;
@@ -779,23 +812,28 @@ function normalizeViews(value: unknown): Record<string, string> {
   return views;
 }
 
-/** Validate, close, normalize, and bound a public result specification. */
-export function normalizeDelegateResultSpec(
-  input: DelegateResultSpecInput | undefined,
+/** Validate, close, normalize, and bound a result specification. */
+function normalizeResultSpec(
+  input: InternalDelegateResultSpecInput | undefined,
+  allowSchema: boolean,
 ): NormalizedDelegateResultSpec | undefined {
   if (input === undefined) return undefined;
   if (!isPlainObject(input))
     throw new Error('delegate result specification must be an object');
   for (const key of Object.keys(input))
-    if (!new Set(['schema', 'shape', 'projection', 'views']).has(key))
+    if (!['schema', 'shape', 'projection', 'views'].includes(key))
       throw new Error(
         `Unsupported delegate result specification field: ${key}`,
       );
   const hasSchema = Object.hasOwn(input, 'schema');
   const hasShape = Object.hasOwn(input, 'shape');
+  if (hasSchema && !allowSchema)
+    throw new Error(
+      'delegate result schema form is internal-only; provide a result shape instead',
+    );
   if (hasSchema === hasShape)
     throw new Error(
-      'delegate result specification requires exactly one of schema or shape',
+      `delegate result specification requires exactly one of ${allowSchema ? 'schema or shape' : 'shape'}`,
     );
   const schemaInput = hasShape ? expandResultShape(input.shape) : input.schema;
   const schema = normalizeSchemaNode(schemaInput, {
@@ -820,6 +858,20 @@ export function normalizeDelegateResultSpec(
     }
   }
   return { schema, projection, views, schemaBytes };
+}
+
+/** Normalize the public shape-only delegate result contract. */
+export function normalizeDelegateResultSpec(
+  input: DelegateResultSpecInput | undefined,
+): NormalizedDelegateResultSpec | undefined {
+  return normalizeResultSpec(input, false);
+}
+
+/** Normalize the bounded schema used only by child transport and internals. */
+export function normalizeInternalDelegateResultSpec(
+  input: InternalDelegateResultSpecInput | undefined,
+): NormalizedDelegateResultSpec | undefined {
+  return normalizeResultSpec(input, true);
 }
 
 /** Convert a normalized declarative schema to the SDK's TypeBox boundary. */

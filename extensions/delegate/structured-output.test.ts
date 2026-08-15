@@ -16,7 +16,7 @@ import {
   captureDelegateResultEvent,
   getDelegateResultSpec,
   markStructuredResultRepair,
-  normalizeDelegateResultSpec,
+  normalizeInternalDelegateResultSpec as normalizeDelegateResultSpec,
   setDelegateResultSpec,
   settleDelegateResult,
 } from './structured-result';

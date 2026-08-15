@@ -133,12 +133,6 @@ const ResultSpecSchema = Type.Object(
           'Recommended complete result shape: primitive type tokens; required-by-default object fields; one-item arrays for homogeneous lists; multi-literal arrays for enums; exact {$optional: shape} wrappers; and $type descriptors for constraints',
       }),
     ),
-    schema: Type.Optional(
-      Type.Any({
-        description:
-          'Deprecated compatibility form. Use shape for new contracts; this bounded JSON-schema subset remains accepted while shape coverage is expanded.',
-      }),
-    ),
     projection: ResultProjectionSchema,
     views: ResultViewsSchema,
   },
