@@ -740,8 +740,8 @@ export class DashboardLiveStore {
     this.updateDomain('session', sessionId, {
       status: cached && current ? 'cached' : 'synchronizing',
       generation,
-      sequence: 0,
-      sequenceKnown: false,
+      sequence: cached && current ? current.sequence : 0,
+      sequenceKnown: cached && current ? current.sequenceKnown : false,
       error: undefined,
     });
   }
@@ -1663,6 +1663,15 @@ export class DashboardLiveStore {
       sessionId,
       projection,
     );
+    const currentSnapshot = nextState.sessionSnapshotsById[sessionId];
+    if (currentSnapshot)
+      nextState = {
+        ...nextState,
+        sessionSnapshotsById: {
+          ...nextState.sessionSnapshotsById,
+          [sessionId]: { ...currentSnapshot, history: response.history },
+        },
+      };
     this.publish(nextState);
     return projection;
   }
@@ -1784,15 +1793,49 @@ export class DashboardLiveStore {
     this.connectionRuntime?.releaseSession(sessionId);
   }
 
-  clearSessionSnapshot(sessionId: string): void {
+  markSessionCached(
+    sessionId: string,
+    generation: number,
+    sequence: number,
+    sequenceKnown: boolean,
+  ): boolean {
+    if (
+      !this.state.sessionSnapshotsById[sessionId] ||
+      !this.state.transcriptsBySessionId[sessionId]
+    )
+      return false;
+    this.updateDomain('session', sessionId, {
+      status: 'cached',
+      generation,
+      sequence,
+      sequenceKnown,
+      error: undefined,
+    });
+    return true;
+  }
+
+  evictSessionProjection(sessionId: string): void {
     const sessionSnapshotsById = { ...this.state.sessionSnapshotsById };
     const sessionSyncById = { ...this.state.sessionSyncById };
-    const hadSnapshot = sessionSnapshotsById[sessionId] !== undefined;
-    const hadSync = sessionSyncById[sessionId] !== undefined;
-    if (!hadSnapshot && !hadSync) return;
+    const transcriptsBySessionId = { ...this.state.transcriptsBySessionId };
+    const sessionChangeById = { ...this.state.sessionChangeById };
+    const hadProjection =
+      sessionSnapshotsById[sessionId] !== undefined ||
+      sessionSyncById[sessionId] !== undefined ||
+      transcriptsBySessionId[sessionId] !== undefined;
+    if (!hadProjection) return;
     delete sessionSnapshotsById[sessionId];
     delete sessionSyncById[sessionId];
-    this.publish({ ...this.state, sessionSnapshotsById, sessionSyncById });
+    delete transcriptsBySessionId[sessionId];
+    delete sessionChangeById[sessionId];
+    this.latestSessionRequestOrders.delete(sessionId);
+    this.publish({
+      ...this.state,
+      sessionSnapshotsById,
+      sessionSyncById,
+      transcriptsBySessionId,
+      sessionChangeById,
+    });
   }
 }
 

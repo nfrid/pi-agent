@@ -15,6 +15,14 @@ async function transcriptGap(page: Page) {
   );
 }
 
+async function navigateInDashboard(page: Page, pathname: string) {
+  await page.evaluate((nextPathname) => {
+    window.history.pushState({}, '', nextPathname);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, pathname);
+  await expect(page).toHaveURL(new RegExp(`${pathname}$`, 'u'));
+}
+
 const snapshot = {
   serverId: 'history-navigation-test',
   revision: 1,
@@ -297,6 +305,117 @@ test('switching chats establishes the new transcript tail', async ({
     element.scrollTop = Math.max(0, element.scrollTop - 240);
   });
   await expect.poll(() => transcriptGap(page)).toBeGreaterThan(120);
+});
+
+test('renders retained sessions immediately and loads evicted sessions fresh', async ({
+  page,
+}) => {
+  const sessions = Array.from({ length: 4 }, (_, index) => ({
+    id: `cache-session-${index + 1}`,
+    file: `/tmp/cache-session-${index + 1}.jsonl`,
+    cwd: '/tmp',
+    title: `Cache session ${index + 1}`,
+    updatedAt: index + 1,
+  }));
+  await installDashboardBootstrap(page, { ...snapshot, sessions });
+  const requestCounts = new Map<string, number>();
+  let releaseCached!: () => void;
+  let cachedStarted!: () => void;
+  const cachedRequest = new Promise<void>((resolve) => {
+    cachedStarted = resolve;
+  });
+  const cachedRelease = new Promise<void>((resolve) => {
+    releaseCached = resolve;
+  });
+  let releaseEvicted!: () => void;
+  let evictedStarted!: () => void;
+  const evictedRequest = new Promise<void>((resolve) => {
+    evictedStarted = resolve;
+  });
+  const evictedRelease = new Promise<void>((resolve) => {
+    releaseEvicted = resolve;
+  });
+  let cachedResumeCursor: unknown;
+  let evictedResumeCursor: unknown;
+  await page.route('**/trpc/sessionSubscribe*', async (route) => {
+    const input = dashboardTrpcInput(route.request());
+    const id = String(input.sessionId ?? '');
+    const count = (requestCounts.get(id) ?? 0) + 1;
+    requestCounts.set(id, count);
+    if (id === 'cache-session-1' && count === 2) {
+      cachedResumeCursor = input.lastEventId;
+      cachedStarted();
+      await cachedRelease;
+    }
+    if (id === 'cache-session-1' && count === 3) {
+      evictedResumeCursor = input.lastEventId;
+      evictedStarted();
+      await evictedRelease;
+    }
+    const index = Number(id.at(-1)) - 1;
+    const content =
+      id === 'cache-session-1' && count === 2
+        ? 'session one refreshed'
+        : `session ${index + 1} cached content`;
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body: trpcSseData(
+        {
+          type: 'snapshot',
+          sequence: count,
+          snapshot: {
+            metadata: sessions[index],
+            entries: [
+              {
+                type: 'message',
+                id: `${id}-message-${count}`,
+                message: { role: 'assistant', content },
+              },
+            ],
+            entriesComplete: true,
+            serverId: snapshot.serverId,
+            cursor: count,
+            active: {
+              pendingInteractions: [],
+              messages: [],
+              tools: [],
+              delegates: [],
+              truncated: false,
+            },
+            completeThroughCursor: true,
+          },
+        },
+        `${id}-feed-${count}`,
+      ),
+    });
+  });
+
+  await page.goto('/sessions/cache-session-1');
+  await expect(page.getByText('session 1 cached content')).toBeVisible();
+  await navigateInDashboard(page, '/sessions/cache-session-2');
+  await expect(page.getByText('session 2 cached content')).toBeVisible();
+  await navigateInDashboard(page, '/sessions/cache-session-1');
+  await cachedRequest;
+  await expect(page.getByText('session 1 cached content')).toBeVisible();
+  await expect(page.locator('.session-loading-curtain')).toHaveCount(0);
+  expect(cachedResumeCursor).toBe('cache-session-1-feed-1-caught-up');
+  releaseCached();
+  await expect(page.getByText('session one refreshed')).toBeVisible();
+  await expect(page.getByText('session 1 cached content')).toHaveCount(0);
+
+  for (const id of ['cache-session-2', 'cache-session-3', 'cache-session-4']) {
+    await navigateInDashboard(page, `/sessions/${id}`);
+    await expect(
+      page.getByText(new RegExp(`${id.at(-1)} cached content`)),
+    ).toBeVisible();
+  }
+  await navigateInDashboard(page, '/sessions/cache-session-1');
+  await evictedRequest;
+  expect(evictedResumeCursor).toBeUndefined();
+  await expect(page.locator('.session-page-loading')).toBeVisible();
+  await expect(page.getByText('session one refreshed')).toHaveCount(0);
+  releaseEvicted();
+  await expect(page.getByText('session 1 cached content')).toBeVisible();
 });
 
 test('active to old to active ignores a delayed stale latest snapshot', async ({

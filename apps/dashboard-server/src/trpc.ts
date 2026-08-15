@@ -216,7 +216,7 @@ const dashboardRouter = t.router({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Shell feed is unavailable.',
         });
-      const after = input.lastEventId ?? ctx.lastEventId;
+      const after = ctx.lastEventId ?? input.lastEventId;
       for await (const item of shellFeed.subscribe({
         lastEventId: after,
         signal,
@@ -247,7 +247,7 @@ const dashboardRouter = t.router({
           message: 'Session feed is unavailable.',
         });
       const feed = sessionFeeds.get(input.sessionId);
-      const after = input.lastEventId ?? ctx.lastEventId;
+      const after = ctx.lastEventId ?? input.lastEventId;
       for await (const item of feed.subscribe({
         lastEventId: after,
         signal,

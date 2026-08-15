@@ -1568,6 +1568,90 @@ describe('DashboardLiveStore', () => {
     expect(projection?.items.stale).toBeUndefined();
   });
 
+  it('retains the oldest loaded history cursor with the cached projection', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.beginSessionSync('session-1', 1);
+    store.acceptSessionSnapshot(
+      {
+        ...sessionResponse(1),
+        entries: [
+          {
+            type: 'message',
+            id: 'newer-message',
+            message: { role: 'assistant', content: 'same content' },
+          },
+        ],
+        history: {
+          version: 1,
+          start: 10,
+          end: 20,
+          hasOlder: true,
+          nextBefore: 'older-page',
+        },
+      },
+      1,
+      1,
+      true,
+    );
+    expect(
+      store.prependSessionHistory({
+        ...sessionResponse(1),
+        entries: [
+          {
+            type: 'message',
+            id: 'older-message',
+            message: { role: 'assistant', content: 'same content' },
+          },
+        ],
+        history: {
+          version: 1,
+          start: 0,
+          end: 10,
+          hasOlder: false,
+        },
+      }),
+    ).toBeDefined();
+
+    expect(
+      store.getSnapshot().sessionSnapshotsById['session-1']?.history,
+    ).toEqual({ version: 1, start: 0, end: 10, hasOlder: false });
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(expect.arrayContaining(['older-message', 'newer-message']));
+    expect(
+      store.acceptSessionEvent(
+        'session-1',
+        2,
+        {
+          event: {
+            type: 'message.finished',
+            sessionId: 'session-1',
+            message: {
+              messageId: 'live-message',
+              role: 'assistant',
+              content: 'same content',
+            },
+          },
+        },
+        1,
+      ),
+    ).toBe(true);
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(
+      expect.arrayContaining([
+        'older-message',
+        'newer-message',
+        'live-message',
+      ]),
+    );
+    expect(store.markSessionCached('session-1', 1, 2, true)).toBe(true);
+    expect(store.getSnapshot().sessionSyncById['session-1']?.status).toBe(
+      'cached',
+    );
+  });
+
   it('rejects prepending a page without history metadata', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

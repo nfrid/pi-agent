@@ -26,11 +26,14 @@ type DomainEntry = {
   refs: number;
   sequence: number;
   sequenceKnown: boolean;
-  snapshotId?: FeedCursorValue;
+  lastEventId?: FeedCursorValue;
   subscription?: Subscription;
   opening: number;
   rebasing: boolean;
 };
+
+/** Maximum inactive session projections retained in memory. */
+export const SESSION_PROJECTION_CACHE_LIMIT = 2;
 
 export interface SessionSubscriptionHandle {
   readonly sessionId: string;
@@ -157,6 +160,7 @@ export class DashboardConnectionRuntime {
   private shellSubscription?: Subscription;
   private shellRebasing = false;
   private sessions = new Map<string, DomainEntry>();
+  private readonly inactiveSessions = new Map<string, true>();
   private hiddenAt?: number;
   private listenersInstalled = false;
   private readonly onOnline = () => {
@@ -247,7 +251,7 @@ export class DashboardConnectionRuntime {
     this.store.setConnection('offline');
   }
 
-  /** Acquire a session feed; the final release closes that feed immediately. */
+  /** Acquire a session feed; the final release closes it and caches projection state. */
   acquireSession(sessionId: string): SessionSubscriptionHandle {
     if (!sessionId) throw new Error('A session ID is required.');
     let entry = this.sessions.get(sessionId);
@@ -262,6 +266,11 @@ export class DashboardConnectionRuntime {
         rebasing: false,
       };
       this.sessions.set(sessionId, entry);
+      this.store.beginSessionSync(sessionId, entry.generation);
+    } else if (entry.refs === 0) {
+      this.inactiveSessions.delete(sessionId);
+      entry.generation += 1;
+      entry.rebasing = false;
       this.store.beginSessionSync(sessionId, entry.generation, true);
     }
     entry.refs += 1;
@@ -282,10 +291,30 @@ export class DashboardConnectionRuntime {
     if (!entry) return;
     entry.refs = Math.max(0, entry.refs - 1);
     if (entry.refs > 0) return;
+    entry.opening += 1;
     entry.subscription?.unsubscribe();
     entry.subscription = undefined;
-    this.sessions.delete(sessionId);
-    this.store.clearSessionSnapshot(sessionId);
+    if (
+      !this.store.markSessionCached(
+        sessionId,
+        entry.generation,
+        entry.sequence,
+        entry.sequenceKnown,
+      )
+    ) {
+      this.sessions.delete(sessionId);
+      this.store.evictSessionProjection(sessionId);
+      return;
+    }
+    this.inactiveSessions.delete(sessionId);
+    this.inactiveSessions.set(sessionId, true);
+    while (this.inactiveSessions.size > SESSION_PROJECTION_CACHE_LIMIT) {
+      const oldest = this.inactiveSessions.keys().next().value;
+      if (oldest === undefined) break;
+      this.inactiveSessions.delete(oldest);
+      this.sessions.delete(oldest);
+      this.store.evictSessionProjection(oldest);
+    }
   }
 
   private installListeners(): void {
@@ -460,7 +489,7 @@ export class DashboardConnectionRuntime {
       entry.generation += 1;
       entry.sequence = 0;
       entry.sequenceKnown = false;
-      entry.snapshotId = undefined;
+      entry.lastEventId = undefined;
       entry.rebasing = false;
       this.store.beginSessionSync(entry.id, entry.generation);
     }
@@ -468,7 +497,12 @@ export class DashboardConnectionRuntime {
       const client = await this.getClient();
       if (!this.started || entry.opening !== opening || entry.refs === 0)
         return;
-      const input = { sessionId: entry.id };
+      const input = {
+        sessionId: entry.id,
+        ...(entry.lastEventId === undefined
+          ? {}
+          : { lastEventId: entry.lastEventId }),
+      };
       const subscription = client.sessionSubscribe.subscribe(input, {
         onData: (value) => {
           if (!this.started || entry.opening !== opening || entry.refs === 0)
@@ -487,7 +521,8 @@ export class DashboardConnectionRuntime {
       }
       entry.subscription = subscription;
     } catch (error) {
-      if (!this.started || entry.refs === 0) return;
+      if (!this.started || entry.opening !== opening || entry.refs === 0)
+        return;
       this.store.failSessionSync(entry.id, messageError(error));
     }
   }
@@ -498,8 +533,8 @@ export class DashboardConnectionRuntime {
     const payload = tracked.data;
     const sequence = numericSequence(payload);
     if (sequence === undefined) return;
+    if (tracked.id === entry.lastEventId) return;
     if (payload.type === 'snapshot') {
-      if (tracked.id === entry.snapshotId) return;
       const previousServerId = this.store.getSnapshot().serverId;
       if (
         previousServerId !== undefined &&
@@ -510,15 +545,18 @@ export class DashboardConnectionRuntime {
         this.rebaseShell();
         return;
       }
+      if (
+        !this.store.acceptSessionSnapshot(
+          payload.snapshot,
+          sequence,
+          entry.generation,
+          true,
+        )
+      )
+        return;
       entry.sequence = sequence;
       entry.sequenceKnown = true;
-      entry.snapshotId = tracked.id;
-      this.store.acceptSessionSnapshot(
-        payload.snapshot,
-        payload.snapshot.cursor,
-        entry.generation,
-        true,
-      );
+      entry.lastEventId = tracked.id;
       return;
     }
     if (isCaughtUp(payload)) {
@@ -529,6 +567,7 @@ export class DashboardConnectionRuntime {
       }
       entry.sequence = sequence;
       entry.sequenceKnown = true;
+      entry.lastEventId = tracked.id;
       this.store.completeSessionSync(entry.id, sequence);
       return;
     }
@@ -537,14 +576,20 @@ export class DashboardConnectionRuntime {
       this.rebaseSession(entry);
       return;
     }
+    if (
+      !this.store.acceptSessionEvent(
+        entry.id,
+        sequence,
+        payload,
+        entry.generation,
+      )
+    ) {
+      this.rebaseSession(entry);
+      return;
+    }
     entry.sequence = sequence;
     entry.sequenceKnown = true;
-    this.store.acceptSessionEvent(
-      entry.id,
-      sequence,
-      payload,
-      entry.generation,
-    );
+    entry.lastEventId = tracked.id;
   }
 
   private rebaseSession(entry: DomainEntry): void {

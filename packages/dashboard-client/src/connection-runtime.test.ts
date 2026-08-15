@@ -3,7 +3,10 @@ import type {
   BrowserSnapshot,
 } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
-import { DashboardConnectionRuntime } from './connection-runtime.js';
+import {
+  DashboardConnectionRuntime,
+  SESSION_PROJECTION_CACHE_LIMIT,
+} from './connection-runtime.js';
 import { DashboardLiveStore } from './store.js';
 
 const shellSnapshot = (
@@ -42,6 +45,10 @@ function fixture() {
   const sessionObservers = new Map<string, Observer>();
   let shellSubscriptions = 0;
   let sessionSubscriptions = 0;
+  const sessionInputs: Array<{
+    sessionId: string;
+    lastEventId?: string;
+  }> = [];
   const client = {
     getTrpcClient: async () => ({
       shellSubscribe: {
@@ -56,8 +63,12 @@ function fixture() {
         },
       },
       sessionSubscribe: {
-        subscribe: (input: { sessionId: string }, observer: Observer) => {
+        subscribe: (
+          input: { sessionId: string; lastEventId?: string },
+          observer: Observer,
+        ) => {
           sessionSubscriptions += 1;
+          sessionInputs.push(input);
           sessionObservers.set(input.sessionId, observer);
           return {
             unsubscribe: () => sessionObservers.delete(input.sessionId),
@@ -82,6 +93,7 @@ function fixture() {
     session: (id: string, value: unknown) =>
       sessionObservers.get(id)?.onData(value),
     counts: () => ({ shellSubscriptions, sessionSubscriptions }),
+    sessionInputs,
   };
 }
 
@@ -122,6 +134,227 @@ describe('DashboardConnectionRuntime', () => {
     second.release();
     f.shell({ id: 'shell-00000001', data: { type: 'caught-up', sequence: 0 } });
     expect(f.store.getSnapshot().shellSync.status).toBe('live');
+    stop();
+  });
+
+  it('renders a released session from cache and resumes from its opaque cursor', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    const first = f.runtime.acquireSession('session-a');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.session('session-a', {
+      id: 'session-cursor-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 1,
+        snapshot: {
+          ...sessionSnapshot(1),
+          entries: [
+            {
+              type: 'message',
+              id: 'cached-message',
+              message: { role: 'assistant', content: 'cached answer' },
+            },
+          ],
+        },
+      },
+    });
+    f.session('session-a', {
+      id: 'session-cursor-live',
+      data: { type: 'caught-up', sequence: 1 },
+    });
+    for (const [sequence, id, event] of [
+      [
+        2,
+        'stream-started',
+        {
+          type: 'message.started',
+          sessionId: 'session-a',
+          message: {
+            messageId: 'streaming-answer',
+            role: 'assistant',
+            content: '',
+          },
+        },
+      ],
+      [
+        3,
+        'stream-updated',
+        {
+          type: 'message.updated',
+          sessionId: 'session-a',
+          message: {
+            messageId: 'streaming-answer',
+            role: 'assistant',
+            content: 'partial answer',
+          },
+        },
+      ],
+      [
+        4,
+        'tool-started',
+        {
+          type: 'tool.started',
+          sessionId: 'session-a',
+          tool: {
+            toolCallId: 'running-tool',
+            name: 'read',
+            arguments: { path: '/tmp/file' },
+            phase: 'started',
+          },
+        },
+      ],
+      [
+        5,
+        'tool-running',
+        {
+          type: 'tool.updated',
+          sessionId: 'session-a',
+          tool: {
+            toolCallId: 'running-tool',
+            name: 'read',
+            status: 'running',
+            phase: 'updated',
+          },
+        },
+      ],
+    ] as const)
+      f.session('session-a', {
+        id,
+        data: {
+          type: 'session-event',
+          sequence,
+          sessionId: 'session-a',
+          event,
+        },
+      });
+    first.release();
+
+    expect(f.store.getSnapshot().sessionSyncById['session-a']).toMatchObject({
+      status: 'cached',
+      sequence: 5,
+      sequenceKnown: true,
+    });
+    const cached = f.store.getSnapshot().transcriptsBySessionId['session-a'];
+    expect(cached?.items['cached-message']).toBeDefined();
+    expect(cached?.items['streaming-answer']).toMatchObject({
+      kind: 'message',
+      content: 'partial answer',
+    });
+    expect(cached?.items['running-tool']).toMatchObject({
+      kind: 'tool',
+      status: 'running',
+    });
+
+    const second = f.runtime.acquireSession('session-a');
+    expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
+      'cached',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.sessionInputs.at(-1)).toEqual({
+      sessionId: 'session-a',
+      lastEventId: 'tool-running',
+    });
+    f.session('session-a', {
+      id: 'session-cursor-replay',
+      data: {
+        type: 'session-event',
+        sequence: 6,
+        sessionId: 'session-a',
+        event: { type: 'agent.settled', sessionId: 'session-a' },
+      },
+    });
+    f.session('session-a', {
+      id: 'session-cursor-caught-up',
+      data: { type: 'caught-up', sequence: 6 },
+    });
+    expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
+      'live',
+    );
+    second.release();
+    stop();
+  });
+
+  it('replaces a cached projection when resume falls back to a fresh snapshot', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    const first = f.runtime.acquireSession('session-a');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.session('session-a', {
+      id: 'old-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 1,
+        snapshot: {
+          ...sessionSnapshot(1),
+          entries: [
+            {
+              type: 'message',
+              id: 'old-message',
+              message: { role: 'assistant', content: 'old' },
+            },
+          ],
+        },
+      },
+    });
+    first.release();
+    const second = f.runtime.acquireSession('session-a');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.session('session-a', {
+      id: 'fresh-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 8,
+        snapshot: {
+          ...sessionSnapshot(8),
+          entries: [
+            {
+              type: 'message',
+              id: 'fresh-message',
+              message: { role: 'assistant', content: 'fresh' },
+            },
+          ],
+        },
+      },
+    });
+    const projection =
+      f.store.getSnapshot().transcriptsBySessionId['session-a'];
+    expect(projection?.items['fresh-message']).toBeDefined();
+    expect(projection?.items['old-message']).toBeUndefined();
+    second.release();
+    stop();
+  });
+
+  it('evicts the least-recently released inactive session projection', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    const ids = Array.from(
+      { length: SESSION_PROJECTION_CACHE_LIMIT + 1 },
+      (_, index) => `session-${index}`,
+    );
+    for (const [index, id] of ids.entries()) {
+      const handle = f.runtime.acquireSession(id);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      f.session(id, {
+        id: `snapshot-${index}`,
+        data: {
+          type: 'snapshot',
+          sequence: index,
+          snapshot: sessionSnapshot(index, id),
+        },
+      });
+      handle.release();
+    }
+
+    const oldest = ids[0] as string;
+    expect(f.store.getSnapshot().sessionSnapshotsById[oldest]).toBeUndefined();
+    expect(
+      f.store.getSnapshot().transcriptsBySessionId[oldest],
+    ).toBeUndefined();
+    for (const retained of ids.slice(1))
+      expect(f.store.getSnapshot().sessionSyncById[retained]?.status).toBe(
+        'cached',
+      );
     stop();
   });
 

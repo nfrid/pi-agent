@@ -207,6 +207,51 @@ describe('production tRPC feed procedures', () => {
     }
   }, 15_000);
 
+  it('prefers the transport resume cursor over an initial input cursor', async () => {
+    const feed = new ShellFeed({ generation: 'generation' });
+    const raw = feed.subscribe({
+      buildSnapshot: async (sequence) => ({
+        snapshot: shellSnapshot(sequence),
+        cursor: sequence,
+      }),
+    });
+    await raw.next();
+    await raw.next();
+    feed.publishSemantic('usage', 1, { usage: { value: 1 } });
+    const first = await raw.next();
+    feed.publishSemantic('usage', 2, { usage: { value: 2 } });
+    const second = await raw.next();
+    await raw.return(undefined);
+
+    const context: DashboardTrpcContext = {
+      serverId: () => 'server-generation',
+      snapshot: () => shellSnapshot(feed.sequence),
+      shellSnapshot: () => ({
+        snapshot: shellSnapshot(feed.sequence),
+        cursor: feed.sequence,
+      }),
+      shellFeed: feed,
+      shellSnapshotAt: (sequence) => ({
+        snapshot: shellSnapshot(sequence),
+        cursor: sequence,
+      }),
+      lastEventId: second.value?.id,
+    };
+    const caller = createDashboardRouter(context).createCaller(
+      context,
+    ) as unknown as {
+      shellSubscribe(input: {
+        lastEventId: string;
+      }): Promise<AsyncGenerator<unknown>>;
+    };
+    const stream = await caller.shellSubscribe({
+      lastEventId: first.value?.id ?? '',
+    });
+    const resumed = (await stream.next()).value as unknown[];
+    expect(resumed[1]).toMatchObject({ type: 'caught-up', sequence: 2 });
+    await stream.return(undefined);
+  });
+
   it('reconnects with a snapshot after a paused shell subscriber overflows', async () => {
     const feed = new ShellFeed({
       generation: 'generation',

@@ -246,7 +246,7 @@ Fill this table as work proceeds.
 | 2. Authoritative domain snapshots |  |  | not started |  |
 | 3. Direct live cutover |  |  | not started |  |
 | 3.5. Delegate sessions as normal live sessions | `2a0463e` | phase commit (reported at exit) | passed | Explicit child identity; lazy normal-session inspector acquisition; bounded legacy fallback; hidden auxiliary session indexing. |
-| 4. Session switching and in-memory cache |  |  | not started |  |
+| 4. Session switching and in-memory cache | `f348799` | phase commit (reported at exit) | passed | Reference-counted inactive LRU; immediate cached rendering; opaque-cursor replay; coherent eviction and retained history windows. |
 | 5. Mutation reliability for touched paths |  |  | not started |  |
 | 6. Lifecycle, performance, and failure hardening |  |  | not started |  |
 | 7. Optional persistent cache |  |  | deferred |  |
