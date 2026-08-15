@@ -176,6 +176,7 @@ export function delegateHistoryInvocationToStatus(
   return {
     id: run.runId,
     runId: run.runId,
+    ...(run.sessionId === undefined ? {} : { sessionId: run.sessionId }),
     lineageId: run.lineageId,
     name: run.name,
     kind: run.kind,

@@ -21,6 +21,8 @@ export interface DashboardServerOptions {
   origins?: readonly string[];
   stateDir?: string;
   sessionDir?: string;
+  /** Hidden Pi child sessions addressable by ID but omitted from shell listings. */
+  delegateSessionDir?: string;
   sesh?: SeshAdapter;
   /** Legacy tmux runner seam retained for callers that customize launch. */
   tmux?: TmuxAdapter;
@@ -98,5 +100,15 @@ export function sessionDirectory(options: DashboardServerOptions): string {
     options.sessionDir ??
     process.env.PI_SESSION_DIR ??
     path.join(process.env.HOME ?? process.cwd(), '.pi', 'agent', 'sessions')
+  );
+}
+
+export function delegateSessionDirectory(
+  options: DashboardServerOptions,
+): string {
+  return (
+    options.delegateSessionDir ??
+    process.env.PI_DELEGATE_SESSION_DIR ??
+    path.join(path.dirname(sessionDirectory(options)), '.delegate-sessions')
   );
 }

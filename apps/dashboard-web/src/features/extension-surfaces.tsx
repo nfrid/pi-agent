@@ -655,6 +655,7 @@ export function DelegateHistorySurface({
           history={historyQuery.data}
           historyLoading={historyLoading}
           historyError={historyError ? historyQuery.error : undefined}
+          store={store}
           onRunSelected={(run: DelegateCompositeRun) => {
             setDetailSelection({
               sessionId: id,

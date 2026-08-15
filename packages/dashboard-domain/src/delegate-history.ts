@@ -427,6 +427,8 @@ function projectRun(
       : compatibilityRunId(options.sessionId, entryIdentity, runIndex));
   const projected: ProjectedRun = {};
   if (runId) projected.runId = runId;
+  const childSessionId = stringValue(run.sessionId, 256);
+  if (childSessionId) projected.sessionId = childSessionId;
   const lineageId = stringValue(run.lineageId, 256);
   const continuation = stringValue(run.continuation, 4096);
   if (lineageId) projected.lineageId = lineageId;
@@ -715,6 +717,7 @@ function invocation(
     explicitLineageId ??
     (continuation ? compatibilityLineageId(continuation) : runId);
   const state = normalizedState(occurrence.run, occurrence.job?.state);
+  const childSessionId = stringValue(occurrence.run.sessionId, 256);
   const name =
     stringValue(occurrence.run.name, 2_000) ??
     stringValue(occurrence.job?.name, 2_000) ??
@@ -743,6 +746,7 @@ function invocation(
     occurrence.run.allowWrites === true || occurrence.job?.allowWrites === true;
   return {
     runId,
+    ...(childSessionId === undefined ? {} : { sessionId: childSessionId }),
     lineageId,
     name,
     ...(task === undefined ? {} : { task }),
@@ -780,6 +784,9 @@ function aggregateHistoryGroup(
   return {
     id: lineageId,
     runId: current.runId,
+    ...(current.sessionId === undefined
+      ? {}
+      : { sessionId: current.sessionId }),
     lineageId,
     name: current.name,
     kind: current.kind,

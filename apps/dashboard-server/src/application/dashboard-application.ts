@@ -458,6 +458,9 @@ function activeDelegateRuns(runtime: RuntimeSnapshot): {
       truncated = true;
     runs.push({
       runId: value.runId,
+      ...(typeof value.sessionId === 'string' && value.sessionId.length > 0
+        ? { sessionId: value.sessionId }
+        : {}),
       lineageId: value.lineageId,
       name: value.name,
       kind: value.kind,

@@ -98,6 +98,7 @@ describe('dashboard protocol', () => {
         runs: [
           {
             runId: 'run-1',
+            sessionId: 'child-session-1',
             lineageId: 'lineage-1',
             name: 'Worker',
             kind: 'background',
@@ -140,6 +141,7 @@ describe('dashboard protocol', () => {
           runs: [
             {
               runId: 'run-1',
+              sessionId: 'child-session-1',
               lineageId: 'lineage-1',
               name: 'Review',
               kind: 'foreground',
@@ -150,6 +152,9 @@ describe('dashboard protocol', () => {
           ],
         },
       ],
+    });
+    expect(response.groups[0]?.runs[0]).toMatchObject({
+      sessionId: 'child-session-1',
     });
     expect(response.groups[0]?.runs[0]).not.toHaveProperty('details');
     expect(() =>

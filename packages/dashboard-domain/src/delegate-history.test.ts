@@ -21,6 +21,61 @@ function oldRun(overrides: Record<string, unknown> = {}) {
 }
 
 describe('delegate history adapter', () => {
+  it('round-trips explicit child session identity without deriving legacy values', () => {
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'message',
+        id: 'current-result',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: {
+            mode: 'single',
+            runs: [
+              oldRun({
+                runId: 'run-current',
+                lineageId: 'lineage-current',
+                sessionId: 'child-session-current',
+              }),
+            ],
+          },
+        },
+      },
+      {
+        type: 'message',
+        id: 'legacy-result',
+        message: {
+          role: 'toolResult',
+          toolName: 'delegate',
+          details: { mode: 'single', runs: [oldRun()] },
+        },
+      },
+    ];
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    const current = response.groups.find(
+      (group) => group.runId === 'run-current',
+    );
+    expect(current).toMatchObject({
+      sessionId: 'child-session-current',
+      runs: [{ sessionId: 'child-session-current' }],
+    });
+    const legacy = response.groups.find(
+      (group) => group.runId !== 'run-current',
+    );
+    expect(legacy).not.toHaveProperty('sessionId');
+    expect(legacy?.runs[0]).not.toHaveProperty('sessionId');
+    const detail = delegateHistoryRunDetailFromBranch(
+      'parent-1',
+      branch,
+      'run-current',
+      'lineage-current',
+    );
+    expect(detail.run.sessionId).toBe('child-session-current');
+    expect(parseDelegateHistoryResponse(response)).toEqual(response);
+    expect(parseDelegateHistoryRunDetailResponse(detail)).toEqual(detail);
+  });
+
   it('extracts foreground and background summary metadata from the selected branch', () => {
     const response = delegateHistoryFromBranch(
       'parent-1',

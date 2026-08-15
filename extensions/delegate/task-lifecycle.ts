@@ -392,6 +392,7 @@ export async function runPreparedDelegateTask(
   if (prepared.worktree) options.onWorktreeRunning?.(prepared.worktree);
   const run = await runDelegate({
     runId: prepared.runId,
+    sessionId: prepared.session.sessionId,
     lineageId: prepared.session.lineageId,
     cwd: prepared.cwd,
     name: prepared.plan.name,

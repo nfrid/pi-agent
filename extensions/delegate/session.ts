@@ -21,6 +21,8 @@ interface SessionSnapshotSource {
 
 export interface DelegateSession {
   token: string;
+  /** Canonical Pi session identity used by dashboard session APIs. */
+  sessionId: string;
   /** Stable child-session lineage shared by all continuations. */
   lineageId: string;
   filePath: string;
@@ -160,6 +162,7 @@ export function createDelegateSession(options: {
   }
   return {
     token,
+    sessionId: token,
     lineageId,
     filePath,
     cwd: options.cwd,
@@ -190,6 +193,7 @@ export function resolveDelegateSession(token: string): DelegateSession | null {
       return null;
     return {
       token,
+      sessionId: token,
       lineageId:
         typeof metadata.lineageId === 'string' && metadata.lineageId.trim()
           ? metadata.lineageId.trim()

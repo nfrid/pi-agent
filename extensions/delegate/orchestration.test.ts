@@ -81,6 +81,7 @@ function prepared(
     },
     session: {
       token: 'tok',
+      sessionId: 'session-test',
       lineageId: 'lineage-test',
       filePath: '/tmp/delegate.jsonl',
       cwd: '/tmp/project',
@@ -887,6 +888,7 @@ describe('pending delegate runs', () => {
     const run = pendingRuns({ mode: 'single', tasks: [task] })[0];
     expect(run).toMatchObject({
       runId: task.runId,
+      sessionId: task.session.sessionId,
       lineageId: task.session.lineageId,
       allowWrites: false,
       isolation: 'worktree',
@@ -900,6 +902,7 @@ describe('pending delegate runs', () => {
       toolResult.makeDetails('single', run ? [run] : []).runs[0],
     ).toMatchObject({
       runId: task.runId,
+      sessionId: task.session.sessionId,
       lineageId: task.session.lineageId,
     });
   });
@@ -1002,6 +1005,7 @@ describe('executeSingleDelegate lifecycle', () => {
     );
 
     expect(result.details?.runs?.[0]).toMatchObject({
+      sessionId: 'session-test',
       exitCode: 1,
       state: 'error',
       errorMessage: expect.stringContaining('spawn failed'),

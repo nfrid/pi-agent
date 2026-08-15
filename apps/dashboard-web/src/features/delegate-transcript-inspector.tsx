@@ -1,16 +1,27 @@
+import {
+  type DashboardLiveStore,
+  selectRuntimeForSession,
+  selectSessionSnapshot,
+  selectTranscript,
+  useDashboardStore,
+} from '@pi-dashboard/client';
 import type { DelegateHistoryRunDetailResponse } from '@pi-dashboard/protocol';
 import { useEffect, useRef, useState } from 'react';
 import type {
   DelegateStatus,
   DelegateTranscriptEntry,
 } from '../../../../extensions/delegate/contribution';
+import { Transcript } from '../entities/transcript';
 import { TranscriptEntry } from '../entities/transcript/entries';
 import { StructuredResultSection } from '../entities/transcript/inspector';
+import { useDashboardNavigate } from '../routes/navigation';
 import type { TranscriptModelItem } from '../transcript';
 import {
   type DelegateInspectionStatus,
   delegateHistoryInvocationToStatus,
 } from './delegate-history';
+import { useOlderSessionHistory } from './session/history';
+import { SessionHistoryControl } from './session/views';
 import { SurfaceDrawer } from './surface-drawer';
 
 function text(value: string | undefined, fallback = ''): string {
@@ -182,6 +193,122 @@ export function DelegateTranscript({
         <p className="delegate-transcript-truncated">{truncatedMessage}</p>
       )}
     </section>
+  );
+}
+
+function DelegateBoundedFallback({
+  row,
+  reason,
+}: {
+  row: DelegateInspectionStatus;
+  reason: string;
+}) {
+  const entries = row.transcript ?? [];
+  return (
+    <section aria-label="Bounded delegate transcript fallback">
+      <p className="delegate-transcript-truncated">{reason}</p>
+      {entries.length > 0 || row.transcriptTruncated ? (
+        <DelegateTranscript
+          entries={entries}
+          truncated={row.transcriptTruncated === true}
+          truncatedMessage={
+            row.historyIncomplete
+              ? 'Delegate history is incomplete; some historical runs or transcript entries were omitted from this view.'
+              : row.historical
+                ? 'Earlier historical transcript entries were omitted from this view.'
+                : undefined
+          }
+        />
+      ) : (
+        <p className="delegate-transcript-empty">
+          Waiting for bounded delegate transcript activity.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function DelegateCanonicalTranscript({
+  sessionId,
+  store,
+  fallback,
+}: {
+  sessionId: string;
+  store: DashboardLiveStore;
+  fallback: DelegateInspectionStatus;
+}) {
+  const projection = useDashboardStore(store, selectTranscript(sessionId));
+  const runtime = useDashboardStore(store, selectRuntimeForSession(sessionId));
+  const snapshot = useDashboardStore(store, selectSessionSnapshot(sessionId));
+  const sync = useDashboardStore(
+    store,
+    (state) => state.sessionSyncById[sessionId],
+  );
+  useEffect(() => {
+    const handle = store.acquireSession(sessionId);
+    return () => handle?.release();
+  }, [sessionId, store]);
+  const mounted = Boolean(projection && snapshot?.metadata.id === sessionId);
+  const { history, historyError, historyLoading, loadEarlierHistory } =
+    useOlderSessionHistory({
+      id: sessionId,
+      data: snapshot,
+      store,
+      sessionMounted: mounted,
+    });
+  if (!mounted)
+    return (
+      <DelegateBoundedFallback
+        row={fallback}
+        reason={
+          sync?.status === 'error'
+            ? 'Bounded parent transcript — the canonical child session is unavailable.'
+            : 'Bounded parent transcript — synchronizing the canonical child session.'
+        }
+      />
+    );
+  return (
+    <section
+      className="delegate-canonical-session-transcript"
+      aria-label="Canonical child session transcript"
+    >
+      {history?.hasOlder && (
+        <SessionHistoryControl
+          loading={historyLoading}
+          error={historyError}
+          onLoad={() => void loadEarlierHistory()}
+        />
+      )}
+      <Transcript projection={projection} runtime={runtime} />
+    </section>
+  );
+}
+
+export function DelegateInspectorTranscript({
+  row,
+  store,
+  isOpen,
+}: {
+  row: DelegateInspectionStatus;
+  store?: DashboardLiveStore;
+  isOpen: boolean;
+}) {
+  return isOpen && row.sessionId && store ? (
+    <DelegateCanonicalTranscript
+      key={row.sessionId}
+      sessionId={row.sessionId}
+      store={store}
+      fallback={row}
+    />
+  ) : (
+    <DelegateBoundedFallback
+      row={row}
+      reason={
+        row.sessionId
+          ? 'Bounded parent transcript — open the inspector to acquire the canonical child session.'
+          : 'Bounded parent transcript — this legacy invocation has no canonical child session identity.'
+      }
+    />
   );
 }
 
@@ -392,6 +519,7 @@ export function DelegateTranscriptInspector({
   runOptions,
   detail,
   onRunSelected,
+  store,
   isOpen,
   paused = false,
   onClose,
@@ -401,10 +529,12 @@ export function DelegateTranscriptInspector({
   runOptions?: readonly DelegateInspectorRunOption[];
   detail?: DelegateInspectorDetailState;
   onRunSelected?: (run: DelegateInspectorRunOption) => void;
+  store?: DashboardLiveStore;
   isOpen: boolean;
   paused?: boolean;
   onClose: () => void;
 }) {
+  const go = useDashboardNavigate();
   const [selectedRunId, setSelectedRunId] = useState<string>();
   const lineageRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -426,7 +556,6 @@ export function DelegateTranscriptInspector({
       ? delegateHistoryInvocationToStatus(detail.run.run)
       : undefined;
   const displayedRow = selectedDetail ?? inspectedRow;
-  const entries = displayedRow.transcript ?? [];
   return (
     <SurfaceDrawer
       title="Delegate transcript"
@@ -470,25 +599,26 @@ export function DelegateTranscriptInspector({
             Unable to load this persisted delegate transcript.
           </p>
         )}
+        {displayedRow.sessionId && (
+          <button
+            type="button"
+            className="delegate-open-session"
+            onClick={() =>
+              go(
+                `/sessions/${encodeURIComponent(displayedRow.sessionId ?? '')}`,
+              )
+            }
+          >
+            Open as session
+          </button>
+        )}
         <DelegateStructuredResultSection row={displayedRow} />
         <DelegateInspectorDetails row={displayedRow} now={now} />
-        {entries.length > 0 || displayedRow.transcriptTruncated ? (
-          <DelegateTranscript
-            entries={entries}
-            truncated={displayedRow.transcriptTruncated === true}
-            truncatedMessage={
-              displayedRow.historyIncomplete
-                ? 'Delegate history is incomplete; some historical runs or transcript entries were omitted from this view.'
-                : displayedRow.historical
-                  ? 'Earlier historical transcript entries were omitted from this view.'
-                  : undefined
-            }
-          />
-        ) : (
-          <p className="delegate-transcript-empty">
-            Waiting for the delegate to report transcript activity.
-          </p>
-        )}
+        <DelegateInspectorTranscript
+          row={displayedRow}
+          store={store}
+          isOpen={isOpen}
+        />
       </div>
     </SurfaceDrawer>
   );

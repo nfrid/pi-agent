@@ -176,22 +176,31 @@ function workspaceFor(
 export class SessionIndex {
   private readonly files = new Map<string, IndexedFile>();
   private readonly fileIds = new Map<string, string>();
-  private watcher?: ReturnType<typeof import('node:fs').watch>;
-  private watcherRetry?: NodeJS.Timeout;
+  private readonly watchers = new Map<
+    string,
+    ReturnType<typeof import('node:fs').watch>
+  >();
+  private readonly watcherRetries = new Map<string, NodeJS.Timeout>();
   private readonly scheduled = new Map<string, NodeJS.Timeout>();
   private readonly indexing = new Map<string, Promise<void>>();
   private workspaces: readonly WorkspaceTarget[] = [];
   constructor(
     private readonly sessionDir: string,
     private readonly metadata?: MetadataStore,
-    private readonly onChange?: () => void,
+    private readonly onChange?: (
+      sessionId?: string,
+      auxiliary?: boolean,
+    ) => void,
+    private readonly auxiliarySessionDir?: string,
   ) {}
 
   async rebuild(workspaces: readonly WorkspaceTarget[] = []): Promise<void> {
     this.workspaces = workspaces;
     this.files.clear();
     this.fileIds.clear();
-    const paths = await this.findJsonl(this.sessionDir);
+    const paths = (
+      await Promise.all(this.sessionRoots().map((root) => this.findJsonl(root)))
+    ).flat();
     for (const file of paths)
       await this.indexFile(file, this.workspaces).catch(() => undefined);
   }
@@ -199,7 +208,9 @@ export class SessionIndex {
   async start(workspaces: readonly WorkspaceTarget[] = []): Promise<void> {
     this.workspaces = workspaces;
     await this.rebuild(this.workspaces);
-    await this.ensureWatcher();
+    await Promise.all(
+      this.sessionRoots().map((root) => this.ensureWatcher(root)),
+    );
   }
 
   async refresh(workspaces: readonly WorkspaceTarget[] = []): Promise<void> {
@@ -209,6 +220,7 @@ export class SessionIndex {
 
   list(workspaceId?: string): SessionIndexEntry[] {
     return [...this.files.values()]
+      .filter((file) => !this.isAuxiliaryFile(file.file))
       .filter((file) => !workspaceId || file.workspaceId === workspaceId)
       .map(({ header: _header, lastEntryId: _lastEntryId, ...entry }) => entry)
       .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -216,13 +228,12 @@ export class SessionIndex {
 
   get(id: string): SessionIndexEntry | undefined {
     const entry = this.files.get(id);
-    if (!entry) return undefined;
-    const {
-      header: _header,
-      lastEntryId: _lastEntryId,
-      ...publicEntry
-    } = entry;
-    return publicEntry;
+    return entry ? this.publicEntry(entry) : undefined;
+  }
+
+  isAuxiliary(id: string): boolean {
+    const entry = this.files.get(id);
+    return entry ? this.isAuxiliaryFile(entry.file) : false;
   }
 
   // TODO: switch older pages to reverse-file reads if page counts grow; the
@@ -239,7 +250,7 @@ export class SessionIndex {
     history: SessionHistoryPage;
   }> {
     const indexed = this.files.get(id);
-    if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
+    if (!indexed || !(await this.isSafeSessionFile(indexed.file)))
       throw new Error('Unknown session.');
     const stat = await fs.stat(indexed.file).catch(() => undefined);
     if (!stat) throw new Error('Unknown session.');
@@ -257,7 +268,7 @@ export class SessionIndex {
     )
       throw new Error('Stale history cursor.');
     const upperBound = cursor?.before;
-    const { header: _header, lastEntryId: _lastEntryId, ...metadata } = indexed;
+    const metadata = this.publicEntry(indexed);
     if (requestedLeafId !== undefined || options.resolveLatestLeaf) {
       const resolveLatestLeaf =
         options.resolveLatestLeaf === true && requestedLeafId === undefined;
@@ -433,11 +444,11 @@ export class SessionIndex {
     options: SelectedBranchReadOptions = {},
   ): Promise<SelectedBranchReadResult> {
     const indexed = this.files.get(id);
-    if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
+    if (!indexed || !(await this.isSafeSessionFile(indexed.file)))
       throw new Error('Unknown session.');
     const stat = await fs.stat(indexed.file).catch(() => undefined);
     if (!stat) throw new Error('Unknown session.');
-    const { header: _header, lastEntryId: _lastEntryId, ...metadata } = indexed;
+    const metadata = this.publicEntry(indexed);
     let latestStat = stat;
     for (let attempt = 0; attempt < LATEST_LEAF_READ_ATTEMPTS; attempt += 1) {
       try {
@@ -730,7 +741,7 @@ export class SessionIndex {
   /** Rename a known dormant session by appending a normal Pi session_info entry. */
   async rename(id: string, name: string): Promise<SessionIndexEntry> {
     const indexed = this.files.get(id);
-    if (!indexed || !within(path.resolve(this.sessionDir), indexed.file))
+    if (!indexed || !(await this.isSafeSessionFile(indexed.file)))
       throw new Error('Unknown session.');
     const safeName = validateSessionName(name);
     const entry = {
@@ -746,25 +757,76 @@ export class SessionIndex {
     await this.indexFile(indexed.file, this.workspaces);
     const renamed = this.files.get(id);
     if (!renamed) throw new Error('Session disappeared while renaming.');
-    const { header: _header, lastEntryId: _lastEntryId, ...metadata } = renamed;
-    return metadata;
+    return this.publicEntry(renamed);
   }
 
   close(): void {
-    this.watcher?.close();
-    this.watcher = undefined;
-    if (this.watcherRetry) clearTimeout(this.watcherRetry);
-    this.watcherRetry = undefined;
+    for (const watcher of this.watchers.values()) watcher.close();
+    this.watchers.clear();
+    for (const retry of this.watcherRetries.values()) clearTimeout(retry);
+    this.watcherRetries.clear();
     for (const timer of this.scheduled.values()) clearTimeout(timer);
     this.scheduled.clear();
   }
 
-  private async ensureWatcher(): Promise<void> {
-    if (this.watcher) return;
+  private sessionRoots(): string[] {
+    const roots = [path.resolve(this.sessionDir)];
+    if (this.auxiliarySessionDir) {
+      const auxiliary = path.resolve(this.auxiliarySessionDir);
+      if (!roots.includes(auxiliary)) roots.push(auxiliary);
+    }
+    return roots;
+  }
+
+  private isAuxiliaryFile(file: string): boolean {
+    return Boolean(
+      this.auxiliarySessionDir &&
+        within(path.resolve(this.auxiliarySessionDir), path.resolve(file)),
+    );
+  }
+
+  private publicEntry(entry: IndexedFile): SessionIndexEntry {
+    const {
+      header: _header,
+      lastEntryId: _lastEntryId,
+      ...publicEntry
+    } = entry;
+    return this.isAuxiliaryFile(entry.file)
+      ? { ...publicEntry, file: '' }
+      : publicEntry;
+  }
+
+  private async isSafeSessionFile(file: string): Promise<boolean> {
+    const resolved = path.resolve(file);
+    const root = this.sessionRoots().find((candidate) =>
+      within(candidate, resolved),
+    );
+    if (!root) return false;
+    try {
+      const [rootStat, fileStat, realRoot, realFile] = await Promise.all([
+        fs.lstat(root),
+        fs.lstat(resolved),
+        fs.realpath(root),
+        fs.realpath(resolved),
+      ]);
+      return (
+        rootStat.isDirectory() &&
+        !rootStat.isSymbolicLink() &&
+        fileStat.isFile() &&
+        !fileStat.isSymbolicLink() &&
+        within(realRoot, realFile)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private async ensureWatcher(root: string): Promise<void> {
+    if (this.watchers.has(root)) return;
     try {
       const fsModule = await import('node:fs');
-      this.watcher = fsModule.watch(
-        this.sessionDir,
+      const watcher = fsModule.watch(
+        root,
         { recursive: true },
         (_event, filename) => {
           if (!filename) {
@@ -773,7 +835,7 @@ export class SessionIndex {
               .catch(() => undefined);
             return;
           }
-          const file = path.resolve(this.sessionDir, String(filename));
+          const file = path.resolve(root, String(filename));
           if (file.endsWith('.jsonl')) this.scheduleIndex(file);
           else
             void this.rebuild(this.workspaces)
@@ -781,34 +843,35 @@ export class SessionIndex {
               .catch(() => undefined);
         },
       );
-      this.watcher.on('error', () => {
-        this.watcher?.close();
-        this.watcher = undefined;
-        this.scheduleWatcherRetry();
+      this.watchers.set(root, watcher);
+      watcher.on('error', () => {
+        watcher.close();
+        this.watchers.delete(root);
+        this.scheduleWatcherRetry(root);
       });
     } catch {
-      // The session directory may not exist yet, or the platform may not
-      // support recursive fs.watch. Retry so a later-created directory works.
-      this.scheduleWatcherRetry();
+      // A root may not exist yet. Retry so later delegate/session creation is observed.
+      this.scheduleWatcherRetry(root);
     }
   }
 
-  private notifyChange(): void {
+  private notifyChange(sessionId?: string, auxiliary?: boolean): void {
     try {
-      this.onChange?.();
+      this.onChange?.(sessionId, auxiliary);
     } catch {
       // Filesystem observation must never fail because a downstream listener
       // is temporarily unavailable.
     }
   }
 
-  private scheduleWatcherRetry(): void {
-    if (this.watcherRetry) return;
-    this.watcherRetry = setTimeout(() => {
-      this.watcherRetry = undefined;
-      void this.ensureWatcher();
+  private scheduleWatcherRetry(root: string): void {
+    if (this.watcherRetries.has(root)) return;
+    const retry = setTimeout(() => {
+      this.watcherRetries.delete(root);
+      void this.ensureWatcher(root);
     }, 1_000);
-    this.watcherRetry.unref?.();
+    retry.unref?.();
+    this.watcherRetries.set(root, retry);
   }
 
   private scheduleIndex(file: string): void {
@@ -817,10 +880,16 @@ export class SessionIndex {
     const timer = setTimeout(() => {
       this.scheduled.delete(file);
       const previous = this.indexing.get(file) ?? Promise.resolve();
+      const previousId = this.fileIds.get(path.resolve(file));
       const next = previous
         .then(() => this.indexFile(file, this.workspaces))
         .catch(() => this.removeFile(file))
-        .then(() => this.notifyChange())
+        .then(() =>
+          this.notifyChange(
+            this.fileIds.get(path.resolve(file)) ?? previousId,
+            this.isAuxiliaryFile(file),
+          ),
+        )
         .finally(() => {
           if (this.indexing.get(file) === next) this.indexing.delete(file);
         });
@@ -855,9 +924,12 @@ export class SessionIndex {
     file: string,
     workspaces: readonly WorkspaceTarget[],
   ): Promise<void> {
-    const root = path.resolve(this.sessionDir);
     const resolved = path.resolve(file);
-    if (!within(root, resolved) || !resolved.endsWith('.jsonl')) return;
+    if (
+      !resolved.endsWith('.jsonl') ||
+      !(await this.isSafeSessionFile(resolved))
+    )
+      return this.removeFile(resolved);
     try {
       const input = createReadStream(resolved, { encoding: 'utf8' });
       const lines = readline.createInterface({ input, crlfDelay: Infinity });
@@ -910,8 +982,16 @@ export class SessionIndex {
       const id =
         typeof header.id === 'string' ? header.id : this.idForPath(resolved);
       const previous = this.files.get(id);
-      if (previous && previous.file !== resolved)
+      if (previous && previous.file !== resolved) {
+        // Normal sessions win the practically-impossible ID collision without
+        // making an auxiliary delegate path browser-visible.
+        if (
+          !this.isAuxiliaryFile(previous.file) &&
+          this.isAuxiliaryFile(resolved)
+        )
+          return;
         this.fileIds.delete(previous.file);
+      }
       const entry: IndexedFile = {
         id,
         file: resolved,
@@ -932,7 +1012,7 @@ export class SessionIndex {
       };
       this.files.set(id, entry);
       this.fileIds.set(resolved, id);
-      this.metadata?.saveSession(entry);
+      if (!this.isAuxiliaryFile(resolved)) this.metadata?.saveSession(entry);
     } catch (error) {
       this.removeFile(resolved);
       throw error;

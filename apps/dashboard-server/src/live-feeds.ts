@@ -131,6 +131,13 @@ export class SessionFeedRegistry {
     if (feed) feed.active = active;
   }
 
+  invalidate(sessionId: string): void {
+    const feed = this.feeds.get(sessionId);
+    if (!feed) return;
+    feed.close();
+    this.feeds.delete(sessionId);
+  }
+
   /** Never removes a live feed; inactive feeds are discarded only after a bounded idle window. */
   sweep(now = Date.now(), maxInactiveMs = 15 * 60_000): number {
     let removed = 0;

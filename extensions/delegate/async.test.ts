@@ -88,6 +88,7 @@ function prepared(
     },
     session: {
       token,
+      sessionId: `session-${token}`,
       lineageId: `lineage-${token}`,
       filePath: '/tmp/delegate.jsonl',
       cwd: '/tmp/project',

@@ -94,6 +94,8 @@ function progressText(run: DelegatedRun): string {
 export interface RunDelegateOptions {
   /** Stable invocation identity allocated during preparation. */
   runId?: string;
+  /** Canonical Pi child session used by dashboard session APIs. */
+  sessionId?: string;
   /** Stable child-session lineage from the prepared durable session. */
   lineageId?: string;
   cwd: string;
@@ -195,6 +197,7 @@ export async function runDelegate(
   const allowWrites = options.allowWrites === true;
   const run = createRun(options.task, options.routing, {
     runId: options.runId,
+    sessionId: options.sessionId,
     lineageId: options.lineageId,
     name: options.name,
     cwd: options.cwd,

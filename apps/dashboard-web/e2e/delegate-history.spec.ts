@@ -192,6 +192,11 @@ test('shows and inspects a persisted delegate in an offline session', async ({
   await page.getByRole('button', { name: /Offline historical worker/ }).click();
   await expect(page.getByText('Inspect the historical fixture')).toBeVisible();
   await expect(
+    page.getByText(
+      'Bounded parent transcript — this legacy invocation has no canonical child session identity.',
+    ),
+  ).toBeVisible();
+  await expect(
     page.getByText('Earlier historical transcript entries were omitted'),
   ).toBeVisible();
 

@@ -5,6 +5,7 @@ import {
   mkdtemp,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import os from 'node:os';
@@ -505,6 +506,71 @@ describe('session index', () => {
       name: 'Latest name',
       title: 'Investigate the dashboard title',
     });
+  });
+
+  it('reads auxiliary delegate sessions by ID without listing or persisting their paths', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-sessions-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    await writeFile(
+      path.join(sessions, 'main.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'main-id', cwd: '/tmp' })}\n`,
+    );
+    await writeFile(
+      path.join(delegates, 'child.jsonl'),
+      `${JSON.stringify({ type: 'session', id: 'child-id', cwd: '/tmp' })}\n${JSON.stringify({ type: 'message', id: 'child-message', message: { role: 'assistant', content: 'working' } })}\n`,
+    );
+    const saveSession = vi.fn();
+    const index = new SessionIndex(
+      sessions,
+      { saveSession } as never,
+      undefined,
+      delegates,
+    );
+    await index.rebuild();
+
+    expect(index.list().map((entry) => entry.id)).toEqual(['main-id']);
+    expect(index.isAuxiliary('child-id')).toBe(true);
+    const child = await index.readEntries('child-id');
+    expect(child).toMatchObject({
+      metadata: { id: 'child-id', file: '' },
+      entries: [
+        { type: 'session', id: 'child-id' },
+        { type: 'message', id: 'child-message' },
+      ],
+    });
+    expect(saveSession).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify({ list: index.list(), child })).not.toContain(
+      '.delegate-sessions',
+    );
+  });
+
+  it('rejects auxiliary session symlinks that escape the configured root', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-auxiliary-symlink-'),
+    );
+    const sessions = path.join(root, 'sessions');
+    const delegates = path.join(root, '.delegate-sessions');
+    const outside = path.join(root, 'outside.jsonl');
+    await mkdir(sessions);
+    await mkdir(delegates);
+    await writeFile(
+      outside,
+      `${JSON.stringify({ type: 'session', id: 'escaped-id', cwd: '/tmp' })}\n`,
+    );
+    await symlink(outside, path.join(delegates, 'escaped.jsonl'));
+
+    const index = new SessionIndex(sessions, undefined, undefined, delegates);
+    await index.rebuild();
+
+    expect(index.get('escaped-id')).toBeUndefined();
+    await expect(index.readEntries('escaped-id')).rejects.toThrow(
+      'Unknown session.',
+    );
   });
 
   it('fans file-watcher changes out to live snapshot observers', async () => {

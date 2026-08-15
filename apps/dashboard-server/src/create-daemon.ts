@@ -8,6 +8,7 @@ import {
   type DashboardConfiguration,
   type DashboardDependencies,
   type DashboardServerOptions,
+  delegateSessionDirectory,
   sessionDirectory,
 } from './composition.js';
 import { type DashboardServer, DashboardServerImpl } from './http.js';
@@ -117,18 +118,31 @@ function dependencies(
   dependencies: DashboardDependencies;
   registryChanges: ChangeRelay<RegistryChange>;
   applicationChanges: ChangeRelay<void>;
-  sessionIndexChanges: ChangeRelay<void>;
+  sessionIndexChanges: ChangeRelay<{
+    sessionId?: string;
+    auxiliary?: boolean;
+  }>;
 } {
   const registryChanges = new ChangeRelay<RegistryChange>();
   const applicationChanges = new ChangeRelay<void>();
-  const sessionIndexChanges = new ChangeRelay<void>();
+  const sessionIndexChanges = new ChangeRelay<{
+    sessionId?: string;
+    auxiliary?: boolean;
+  }>();
   const metadata =
     options.metadata ??
     new MetadataStore(path.join(config.stateDir, 'dashboard.sqlite'));
   const sessions =
     options.sessions ??
-    new SessionIndex(sessionDirectory(options), metadata, () =>
-      sessionIndexChanges.publish(undefined),
+    new SessionIndex(
+      sessionDirectory(options),
+      metadata,
+      (sessionId, auxiliary) =>
+        sessionIndexChanges.publish({
+          ...(sessionId === undefined ? {} : { sessionId }),
+          ...(auxiliary === undefined ? {} : { auxiliary }),
+        }),
+      delegateSessionDirectory(options),
     );
   const sesh = options.sesh ?? new CliSeshAdapter();
   const tmux = options.tmux ?? new TmuxAdapter();
@@ -239,8 +253,8 @@ export async function createDaemon(
     server.handleRegistryChange(change),
   );
   composed.applicationChanges.connect(() => server.publishChange());
-  composed.sessionIndexChanges.connect(() =>
-    server.publishSessionIndexChange(),
+  composed.sessionIndexChanges.connect((change) =>
+    server.publishSessionIndexChange(change.sessionId, change.auxiliary),
   );
   return server;
 }

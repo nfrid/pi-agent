@@ -1,12 +1,15 @@
+import { DashboardLiveStore } from '@pi-dashboard/client';
 import type {
   DelegateHistoryResponse,
   RuntimeSnapshot,
 } from '@pi-dashboard/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { act, create } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import { StructuredDelegateResults } from '../entities/transcript/entries';
 import {
   DelegateInspectorMetadata,
+  DelegateInspectorTranscript,
   DelegateStructuredResultSection,
   delegateDetailHasError,
   delegateTranscriptItems,
@@ -38,6 +41,89 @@ const runtimeFixture = (extensionSurfaces: unknown): RuntimeSnapshot =>
   ({ extensionSurfaces }) as unknown as RuntimeSnapshot;
 
 describe('live extension surface fixtures', () => {
+  it('acquires only the explicitly opened child session and releases on selection changes', async () => {
+    const store = new DashboardLiveStore();
+    const releases = new Map<string, ReturnType<typeof vi.fn>>();
+    const acquire = vi
+      .spyOn(store, 'acquireSession')
+      .mockImplementation((id) => {
+        const release = vi.fn();
+        releases.set(id, release);
+        return { sessionId: id, release };
+      });
+    const row = {
+      id: 'delegate-1',
+      runId: 'run-1',
+      sessionId: 'child-session-1',
+      lineageId: 'lineage-1',
+      name: 'Worker',
+      kind: 'background' as const,
+      state: 'running' as const,
+      createdAt: 1,
+      allowWrites: false,
+    };
+    let renderer: ReturnType<typeof create>;
+    await act(async () => {
+      renderer = create(
+        <DelegateInspectorTranscript row={row} store={store} isOpen={false} />,
+      );
+    });
+    expect(acquire).not.toHaveBeenCalled();
+
+    await act(async () => {
+      renderer.update(
+        <DelegateInspectorTranscript row={row} store={store} isOpen />,
+      );
+    });
+    expect(acquire).toHaveBeenCalledTimes(1);
+    expect(acquire).toHaveBeenLastCalledWith('child-session-1');
+
+    await act(async () => {
+      renderer.update(
+        <DelegateInspectorTranscript
+          row={{ ...row, runId: 'run-2', sessionId: 'child-session-2' }}
+          store={store}
+          isOpen
+        />,
+      );
+    });
+    expect(releases.get('child-session-1')).toHaveBeenCalledTimes(1);
+    expect(acquire).toHaveBeenLastCalledWith('child-session-2');
+
+    await act(async () => renderer.unmount());
+    expect(releases.get('child-session-2')).toHaveBeenCalledTimes(1);
+  });
+
+  it('labels legacy delegate transcript fallback as bounded', () => {
+    const markup = renderToStaticMarkup(
+      <DelegateInspectorTranscript
+        isOpen={false}
+        row={{
+          id: 'legacy',
+          runId: 'legacy-run',
+          lineageId: 'legacy-lineage',
+          name: 'Legacy worker',
+          kind: 'foreground',
+          state: 'success',
+          createdAt: 1,
+          allowWrites: false,
+          transcript: [
+            {
+              id: 'response',
+              type: 'assistant',
+              label: 'Response',
+              text: 'Legacy bounded output',
+            },
+          ],
+        }}
+      />,
+    );
+    expect(markup).toContain(
+      'legacy invocation has no canonical child session',
+    );
+    expect(markup).toContain('Legacy bounded output');
+  });
+
   it('refreshes delegate history only for revisions of the mounted session', () => {
     expect(
       delegateHistoryRevisionChanged(undefined, {

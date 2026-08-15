@@ -238,6 +238,7 @@ export function DelegateSurface({
   historyError,
   onRunSelected,
   detail,
+  store,
 }: {
   surface: ExtensionSurface;
   pausedAt?: number;
@@ -246,6 +247,7 @@ export function DelegateSurface({
   historyError?: unknown;
   onRunSelected?: (run: DelegateCompositeRun) => void;
   detail?: DelegateInspectorDetailState;
+  store?: import('@pi-dashboard/client').DashboardLiveStore;
 }) {
   const model = surface.viewModel as DelegateStatusViewModel;
   const liveRows = delegateRows(model);
@@ -479,6 +481,7 @@ export function DelegateSurface({
           runOptions={inspectorRuns}
           detail={detail}
           onRunSelected={onRunSelected}
+          store={store}
           isOpen={inspectorOpen}
           paused={pausedAt !== undefined}
           onClose={() => setInspectorOpen(false)}

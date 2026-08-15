@@ -157,6 +157,9 @@ function activeDelegateTranscriptBaseline(
         : [];
       runs.push({
         runId: value.runId,
+        ...(validDelegateIdentifier(value.sessionId)
+          ? { sessionId: value.sessionId }
+          : {}),
         lineageId: value.lineageId,
         name: value.name,
         kind: value.kind as DelegateLiveRun['kind'],
@@ -267,6 +270,11 @@ export class DashboardServerImpl implements DashboardServer {
     string,
     { stable: string; full: string }
   >();
+  private readonly auxiliarySessionPublications = new Map<
+    string,
+    Promise<void>
+  >();
+  private readonly auxiliarySessionVersions = new Map<string, number>();
 
   constructor(dependencies: DashboardDependencies) {
     const config = dependencies.configuration;
@@ -930,9 +938,86 @@ export class DashboardServerImpl implements DashboardServer {
     this.changed(message);
   }
 
-  public publishSessionIndexChange(): void {
+  public publishSessionIndexChange(
+    sessionId?: string,
+    _auxiliary = false,
+  ): void {
     if (this.lifecycle !== 'started') return;
     this.publishSessionIndexDelta(this.application.sessionMetadataDelta());
+    if (!sessionId) return;
+    const version = (this.auxiliarySessionVersions.get(sessionId) ?? 0) + 1;
+    this.auxiliarySessionVersions.set(sessionId, version);
+    const current = this.sessions.get(sessionId);
+    const currentlyAuxiliary = this.sessions.isAuxiliary(sessionId);
+    if (!current) {
+      this.sessionFeeds.invalidate(sessionId);
+      if (!this.auxiliarySessionPublications.has(sessionId))
+        this.auxiliarySessionVersions.delete(sessionId);
+      return;
+    }
+    // A normal session wins an ID collision; never publish it on a child feed.
+    if (!currentlyAuxiliary) {
+      if (!this.auxiliarySessionPublications.has(sessionId))
+        this.auxiliarySessionVersions.delete(sessionId);
+      return;
+    }
+    const previous =
+      this.auxiliarySessionPublications.get(sessionId) ?? Promise.resolve();
+    const next = previous
+      .then(async () => {
+        if (
+          this.lifecycle !== 'started' ||
+          this.auxiliarySessionVersions.get(sessionId) !== version ||
+          !this.sessions.isAuxiliary(sessionId)
+        )
+          return;
+        const feed = this.sessionFeeds.get(sessionId);
+        const snapshot = await this.application.sessionSnapshot(
+          this.serverId,
+          sessionId,
+          undefined,
+          feed.sequence,
+        );
+        if (
+          this.lifecycle !== 'started' ||
+          this.auxiliarySessionVersions.get(sessionId) !== version ||
+          !this.sessions.isAuxiliary(sessionId)
+        )
+          return;
+        this.sessionFeeds.publish(
+          sessionId,
+          {
+            type: 'session.snapshot',
+            session: {
+              id: sessionId,
+              ...(snapshot.metadata.file
+                ? { file: snapshot.metadata.file }
+                : {}),
+              ...(snapshot.metadata.name === undefined
+                ? {}
+                : { name: snapshot.metadata.name }),
+              ...(snapshot.metadata.title === undefined
+                ? {}
+                : { title: snapshot.metadata.title }),
+              cwd: snapshot.metadata.cwd,
+              entries: snapshot.entries,
+              entriesComplete: snapshot.entriesComplete,
+            },
+          },
+          {},
+          `session:${sessionId}`,
+        );
+      })
+      .catch(() => {
+        // The next subscription snapshot or file change rebases canonically.
+      })
+      .finally(() => {
+        if (this.auxiliarySessionPublications.get(sessionId) !== next) return;
+        this.auxiliarySessionPublications.delete(sessionId);
+        if (this.auxiliarySessionVersions.get(sessionId) === version)
+          this.auxiliarySessionVersions.delete(sessionId);
+      });
+    this.auxiliarySessionPublications.set(sessionId, next);
   }
 
   private publishSessionIndexDelta(

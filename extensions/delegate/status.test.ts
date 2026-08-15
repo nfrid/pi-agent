@@ -11,6 +11,7 @@ describe('delegate status store', () => {
       undefined,
       {
         name: 'Audit for regressions',
+        sessionId: 'child-session-1',
       },
     );
     run.routing = {
@@ -27,6 +28,7 @@ describe('delegate status store', () => {
       {
         id,
         runId: run.runId,
+        sessionId: 'child-session-1',
         lineageId: id,
         name: 'Audit for regressions',
         kind: 'foreground',
@@ -162,6 +164,7 @@ describe('delegate status store', () => {
     const store = new DelegateStatusStore();
     const first = createRun('initial', undefined, {
       name: 'Implementation',
+      sessionId: 'child-session',
       continuation: 'child-token',
     });
     first.startedAt = 1_000;
@@ -173,6 +176,7 @@ describe('delegate status store', () => {
 
     const continued = createRun('continue', undefined, {
       name: 'Implementation follow-up',
+      sessionId: 'child-session',
       continuation: 'child-token',
       context: 'continuation',
     });
@@ -184,6 +188,7 @@ describe('delegate status store', () => {
       {
         id: firstId,
         name: 'Implementation follow-up',
+        sessionId: 'child-session',
         state: 'running',
         context: 'continuation',
         runCount: 2,

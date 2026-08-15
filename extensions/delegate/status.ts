@@ -42,6 +42,8 @@ export interface DelegateStatusSnapshot {
   id: string;
   /** Stable invocation identity for the current aggregated run. */
   runId: string;
+  /** Canonical Pi child session used by dashboard session APIs. */
+  sessionId?: string;
   /** Stable child-session lineage identity shared by continuations. */
   lineageId: string;
   name: string;
@@ -223,6 +225,7 @@ export class DelegateStatusStore {
       this.records.set(id, {
         id,
         runId: run.runId,
+        ...(run.sessionId ? { sessionId: run.sessionId } : {}),
         lineageId: run.lineageId ?? run.continuation ?? id,
         name: run.name,
         kind,
@@ -251,6 +254,7 @@ export class DelegateStatusStore {
     const record = this.records.get(id);
     if (!record) return;
     record.runId = run.runId;
+    record.sessionId = run.sessionId;
     record.name = run.name;
     record.state = getRunState(run);
     record.startedAt = run.startedAt;
@@ -273,6 +277,7 @@ export class DelegateStatusStore {
       if (!record || !inputRun) continue;
       const run = serializeDelegateRunForPublic(inputRun);
       record.runId = run.runId;
+      record.sessionId = run.sessionId;
       record.name = run.name;
       record.state = getRunState(run);
       record.startedAt = run.startedAt;

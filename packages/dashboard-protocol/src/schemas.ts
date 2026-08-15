@@ -669,6 +669,8 @@ const DelegateLiveRunStateSchema = Type.Union([
 const DelegateLiveRunSchema = Type.Object(
   {
     runId: IdentifierSchema,
+    /** Missing only for legacy delegate records. */
+    sessionId: Type.Optional(IdentifierSchema),
     lineageId: IdentifierSchema,
     name: Type.String({ minLength: 1, maxLength: 2_000 }),
     kind: Type.Union([Type.Literal('foreground'), Type.Literal('background')]),
@@ -1622,6 +1624,8 @@ export type DelegateHistoryDetails = Static<
 const DelegateHistoryInvocationSchema = Type.Object(
   {
     runId: IdentifierSchema,
+    /** Missing only for legacy delegate records. */
+    sessionId: Type.Optional(IdentifierSchema),
     lineageId: IdentifierSchema,
     name: Type.String({ minLength: 1, maxLength: 2_000 }),
     /** Task is run metadata; transcript/activity payloads are detail-only. */
@@ -1653,6 +1657,8 @@ export type DelegateHistoryInvocation = Static<
 export const DelegateHistoryRunDetailSchema = Type.Object(
   {
     runId: IdentifierSchema,
+    /** Missing only for legacy delegate records. */
+    sessionId: Type.Optional(IdentifierSchema),
     lineageId: IdentifierSchema,
     name: Type.String({ minLength: 1, maxLength: 2_000 }),
     task: Type.Optional(Type.String({ maxLength: MAX_DELEGATE_HISTORY_TASK })),
@@ -1685,6 +1691,8 @@ const DelegateHistoryGroupSchema = Type.Object(
     /** Stable lineage row identity; unlike live status IDs this survives reload. */
     id: IdentifierSchema,
     runId: IdentifierSchema,
+    /** Child session of the currently selected invocation, when retained. */
+    sessionId: Type.Optional(IdentifierSchema),
     lineageId: IdentifierSchema,
     name: Type.String({ minLength: 1, maxLength: 2_000 }),
     kind: DelegateHistoryKindSchema,

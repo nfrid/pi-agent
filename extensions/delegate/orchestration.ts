@@ -60,6 +60,7 @@ export function pendingRuns(
   return execution.tasks.map((item) => {
     const run = createRun(item.plan.task, item.plan.routing, {
       runId: item.runId,
+      sessionId: item.session.sessionId || item.plan.resumed?.sessionId,
       lineageId: item.session.lineageId || item.plan.resumed?.lineageId,
       name: item.plan.name,
       cwd: item.cwd,
@@ -138,6 +139,8 @@ async function runPreparedWithLifecycle(
   const parallel = mode === 'parallel';
   // Setup failures still represent one stable invocation in public details.
   const runId = prepared.runId;
+  const sessionId =
+    prepared.session.sessionId || prepared.plan.resumed?.sessionId;
   const lineageId =
     prepared.session.lineageId || prepared.plan.resumed?.lineageId;
   if (prepared.setupFailure) {
@@ -146,6 +149,7 @@ async function runPreparedWithLifecycle(
       prepared.plan.routing,
       {
         runId,
+        sessionId,
         lineageId,
         name: prepared.plan.name,
         cwd: prepared.cwd,
@@ -186,6 +190,7 @@ async function runPreparedWithLifecycle(
       prepared.plan.routing,
       {
         runId,
+        sessionId,
         lineageId,
         name: prepared.plan.name,
         cwd: prepared.cwd,
@@ -248,6 +253,7 @@ function setupFailurePlans(
     runId: createOpaqueId(),
     session: {
       token: task.plan.resumed?.token ?? '',
+      sessionId: task.plan.resumed?.sessionId ?? '',
       lineageId: task.plan.resumed?.lineageId ?? '',
       filePath: '',
       cwd: task.preflight.cwd,

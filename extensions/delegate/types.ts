@@ -132,6 +132,8 @@ export interface DelegateCheckpoint {
 export interface DelegateRunMetadata {
   /** Stable identity for this invocation; generated for every new run. */
   runId?: string;
+  /** Canonical Pi child session used by dashboard session APIs. */
+  sessionId?: string;
   /** Stable child-session lineage, when preparation has a delegate session. */
   lineageId?: string;
   name?: string;
