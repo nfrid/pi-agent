@@ -6,7 +6,7 @@ import {
 import { type RuntimeSnapshot, serializeFrame } from '@pi-dashboard/protocol';
 import { Type } from 'typebox';
 import { describe, expect, it, vi } from 'vitest';
-import { RuntimeRegistry } from './runtime-registry.js';
+import { type RegistryChange, RuntimeRegistry } from './runtime-registry.js';
 
 const actionManifest: ExtensionManifest = {
   id: 'registry-test',
@@ -81,8 +81,12 @@ describe('runtime registry', () => {
     rejected.close();
   });
 
-  it('tombstones forgotten runtimes so leaked clients cannot reconnect', async () => {
-    const registry = new RuntimeRegistry({ expectedToken: () => true });
+  it('publishes forgotten runtime removal and tombstones leaked clients', async () => {
+    const changes: RegistryChange[] = [];
+    const registry = new RuntimeRegistry({
+      expectedToken: () => true,
+      onChange: (change) => changes.push(change),
+    });
     const first = new PassThrough();
     registry.accept(first as never);
     first.write(
@@ -97,6 +101,11 @@ describe('runtime registry', () => {
       runtimeId: 'runtime-1',
     });
     expect(registry.get('runtime-1')).toBeUndefined();
+    expect(changes.at(-1)).toMatchObject({
+      kind: 'removed',
+      snapshot: { runtimeId: 'runtime-1' },
+      runtimeSeq: 2,
+    });
     const reconnect = new PassThrough();
     registry.accept(reconnect as never);
     reconnect.write(
@@ -267,6 +276,38 @@ describe('runtime registry', () => {
     replacement.destroy();
     await eventually(() => changes.some((change) => change.kind === 'offline'));
     registry.close();
+  });
+
+  it('advances synthetic runtime sequence from offline to removal', async () => {
+    const changes: RegistryChange[] = [];
+    const registry = new RuntimeRegistry({
+      expectedToken: () => true,
+      disconnectGraceMs: 0,
+      onChange: (change) => changes.push(change),
+    });
+    const bridge = new PassThrough();
+    registry.accept(bridge as never);
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: { type: 'runtime.hello', protocolVersion: 1, snapshot },
+      }),
+    );
+    await eventually(() => registry.get('runtime-1'));
+    bridge.destroy();
+    await eventually(() => changes.find((change) => change.kind === 'offline'));
+    registry.forget('runtime-1');
+    expect(
+      changes
+        .filter(
+          (change) => change.kind === 'offline' || change.kind === 'removed',
+        )
+        .map((change) => [change.kind, change.runtimeSeq]),
+    ).toEqual([
+      ['offline', 2],
+      ['removed', 3],
+    ]);
   });
 
   it('allows the same managed runtime identity to reconnect after extension reload', async () => {

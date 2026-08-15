@@ -548,6 +548,168 @@ describe('dashboard HTTP boundary', () => {
     bridge.destroy();
   });
 
+  it('publishes a shell removal when stop forgets a runtime without goodbye', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-runtime-stop-shell-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'stop-shell-session.jsonl'),
+      `${JSON.stringify({
+        type: 'session',
+        version: 4,
+        id: 'stop-shell-session',
+        timestamp: new Date().toISOString(),
+        cwd: '/tmp/project',
+      })}\n`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir,
+      socketPath: path.join(
+        os.tmpdir(),
+        `pd-${path.basename(root).slice(-8)}-stop.sock`,
+      ),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const bridge = net.createConnection(server.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    bridge.write(
+      serializeFrame({
+        kind: 'event',
+        seq: 1,
+        event: {
+          type: 'runtime.hello',
+          protocolVersion: 1,
+          snapshot: {
+            runtimeId: 'stop-shell-runtime',
+            ownership: 'external',
+            pid: 1,
+            cwd: '/tmp/project',
+            liveState: 'idle',
+            session: { id: 'stop-shell-session', entries: [] },
+            pendingInteractions: [],
+          },
+        },
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const before = server.snapshot();
+    expect(before.runtimes).toHaveLength(1);
+    expect(
+      before.sessions.find((item) => item.id === 'stop-shell-session'),
+    ).toMatchObject({ activeRuntimeId: 'stop-shell-runtime' });
+
+    // RuntimeManager.stop() ends every successful stop path with forget().
+    // Exercise that authoritative transition directly so this test isolates
+    // shell publication from command acknowledgement timing.
+    server.registry.forget('stop-shell-runtime');
+    const after = server.snapshot();
+    expect(after.runtimes).toHaveLength(0);
+    expect(
+      after.sessions.find((item) => item.id === 'stop-shell-session')
+        ?.activeRuntimeId,
+    ).toBeUndefined();
+    // One runtime removal plus one session-index upsert clearing
+    // activeRuntimeId must reach the shell feed.
+    expect(after.cursor - before.cursor).toBe(2);
+    bridge.destroy();
+  });
+
+  it('keeps a shared session feed active when one sibling runtime is removed', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-runtime-sibling-stop-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(
+      path.join(sessionDir, 'shared-session.jsonl'),
+      `${JSON.stringify({
+        type: 'session',
+        version: 4,
+        id: 'shared-session',
+        timestamp: new Date().toISOString(),
+        cwd: '/tmp/project',
+      })}\n`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir,
+      socketPath: path.join(
+        os.tmpdir(),
+        `pd-${path.basename(root).slice(-8)}-sibling.sock`,
+      ),
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const bridges = [
+      net.createConnection(server.socketPath),
+      net.createConnection(server.socketPath),
+    ];
+    await Promise.all(
+      bridges.map(
+        (bridge) =>
+          new Promise<void>((resolve, reject) => {
+            bridge.once('connect', resolve);
+            bridge.once('error', reject);
+          }),
+      ),
+    );
+    for (const [index, bridge] of bridges.entries())
+      bridge.write(
+        serializeFrame({
+          kind: 'event',
+          seq: 1,
+          event: {
+            type: 'runtime.hello',
+            protocolVersion: 1,
+            snapshot: {
+              runtimeId: `shared-runtime-${index + 1}`,
+              ownership: 'external',
+              pid: index + 1,
+              cwd: '/tmp/project',
+              liveState: 'idle',
+              session: { id: 'shared-session', entries: [] },
+              pendingInteractions: [],
+            },
+          },
+        }),
+      );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const before = server.snapshot();
+    expect(before.runtimes).toHaveLength(2);
+    expect(
+      before.sessions.find((item) => item.id === 'shared-session'),
+    ).toMatchObject({ activeRuntimeId: 'shared-runtime-2' });
+
+    server.registry.forget('shared-runtime-1');
+    const after = server.snapshot();
+    expect(after.runtimes.map((runtime) => runtime.runtimeId)).toEqual([
+      'shared-runtime-2',
+    ]);
+    expect(
+      after.sessions.find((item) => item.id === 'shared-session'),
+    ).toMatchObject({ activeRuntimeId: 'shared-runtime-2' });
+    expect(
+      (
+        server as unknown as {
+          sessionFeeds: { get: (sessionId: string) => { active: boolean } };
+        }
+      ).sessionFeeds.get('shared-session').active,
+    ).toBe(true);
+    expect(after.cursor - before.cursor).toBe(1);
+    for (const bridge of bridges) bridge.destroy();
+  });
+
   it('re-emits an identical runtime after goodbye removal', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-runtime-readd-'),

@@ -852,10 +852,19 @@ export class DashboardServerImpl implements DashboardServer {
     if (this.lifecycle !== 'started') return;
     const sessionId = change.snapshot.session.id;
     const runtimeGone =
-      change.kind === 'event' &&
-      change.event.type === 'runtime.goodbye' &&
-      this.registry.get(change.snapshot.runtimeId) === undefined;
-    this.sessionFeeds.setActive(sessionId, !runtimeGone);
+      change.kind === 'removed' ||
+      (change.kind === 'event' &&
+        change.event.type === 'runtime.goodbye' &&
+        this.registry.get(change.snapshot.runtimeId) === undefined);
+    const sessionActive =
+      !runtimeGone ||
+      this.registry
+        .snapshots()
+        .some(
+          (runtime) =>
+            runtime.session.id === sessionId && runtime.online !== false,
+        );
+    this.sessionFeeds.setActive(sessionId, sessionActive);
     if (applicationChange.type === 'event') {
       const event = projectPublicBridgeEvent(
         applicationChange.event as BridgeEvent,

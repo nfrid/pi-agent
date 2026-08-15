@@ -85,6 +85,13 @@ export type RegistryChange =
       runtimeEpoch?: string;
       /** Synthetic lifecycle events use the next sequence after the last bridge frame. */
       runtimeSeq?: number;
+    }
+  | {
+      /** Authoritative removal initiated outside a bridge goodbye event. */
+      kind: 'removed';
+      snapshot: RuntimeSnapshot;
+      runtimeEpoch?: string;
+      runtimeSeq?: number;
     };
 
 function isQueueDraftCommand(command: BridgeCommand): boolean {
@@ -340,11 +347,17 @@ export class RuntimeRegistry {
           online: false,
           lastSeenAt: Date.now(),
         };
+        const runtimeSeq = disconnectedRecord.reducerState.lastRuntimeSeq + 1;
+        disconnectedRecord.reducerState = {
+          ...disconnectedRecord.reducerState,
+          snapshot: disconnectedRecord.snapshot,
+          lastRuntimeSeq: runtimeSeq,
+        };
         this.options.onChange?.({
           kind: 'offline',
           snapshot: disconnectedRecord.snapshot,
           runtimeEpoch: disconnectedRecord.runtimeEpoch,
-          runtimeSeq: disconnectedRecord.reducerState.lastRuntimeSeq + 1,
+          runtimeSeq,
         });
       };
       if (
@@ -365,6 +378,14 @@ export class RuntimeRegistry {
 
   /** Remove a stopped or unusable runtime and reject reconnects for this daemon lifetime. */
   forget(runtimeId: string, tombstone = true): RuntimeSnapshot | undefined {
+    return this.remove(runtimeId, tombstone, true);
+  }
+
+  private remove(
+    runtimeId: string,
+    tombstone: boolean,
+    publish: boolean,
+  ): RuntimeSnapshot | undefined {
     const record = this.runtimes.get(runtimeId);
     if (tombstone) this.forgotten.add(runtimeId);
     if (!record) return undefined;
@@ -380,6 +401,13 @@ export class RuntimeRegistry {
     record.commandQueue = [];
     record.writeBlocked = false;
     record.socket?.destroy();
+    if (publish)
+      this.options.onChange?.({
+        kind: 'removed',
+        snapshot: record.snapshot,
+        runtimeEpoch: record.runtimeEpoch,
+        runtimeSeq: record.reducerState.lastRuntimeSeq + 1,
+      });
     return record.snapshot;
   }
 
@@ -668,7 +696,9 @@ export class RuntimeRegistry {
       record.socket?.end();
       // Remove first so observers build their authoritative snapshot after the
       // cleanly exited runtime has left the registry.
-      this.forget(record.snapshot.runtimeId, event.reason !== 'reload');
+      // The actual goodbye event below is the removal notification. Avoid a
+      // second synthetic removal for the same authoritative transition.
+      this.remove(record.snapshot.runtimeId, event.reason !== 'reload', false);
     }
     this.options.onChange?.({
       kind: 'event',

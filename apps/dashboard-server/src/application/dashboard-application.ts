@@ -947,7 +947,7 @@ export class DashboardApplication {
   private updateActiveTranscript(change: RegistryChange): void {
     const sessionId = change.snapshot.session?.id;
     if (!sessionId) return;
-    if (change.kind === 'offline') {
+    if (change.kind === 'offline' || change.kind === 'removed') {
       const prior = this.activeTranscripts.get(sessionId);
       if (prior)
         this.activeTranscripts.set(sessionId, {
@@ -1374,6 +1374,14 @@ export class DashboardApplication {
         ...provenance,
       };
     }
+    if (change.kind === 'removed')
+      return {
+        type: 'event',
+        event: { type: 'runtime.goodbye', reason: 'stopped' },
+        runtimeId: change.snapshot.runtimeId,
+        sessionId: change.snapshot.session.id,
+        ...provenance,
+      };
     if (change.kind === 'offline')
       return {
         type: 'event',

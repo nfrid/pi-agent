@@ -25,7 +25,9 @@ export function handleRegistryChange(
   change: RegistryChange,
 ): Promise<void> {
   const runtimeId =
-    change.kind === 'registered' || change.kind === 'offline'
+    change.kind === 'registered' ||
+    change.kind === 'offline' ||
+    change.kind === 'removed'
       ? change.snapshot.runtimeId
       : change.runtimeId;
   const run = host.repository.getRunByRuntimeId(runtimeId);
