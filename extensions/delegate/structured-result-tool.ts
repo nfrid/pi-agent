@@ -21,6 +21,24 @@ export function parseChildDelegateResultSpec(
 /** The one bounded follow-up allowed for a missing structured result. */
 export const STRUCTURED_RESULT_REPAIR_MESSAGE =
   'Your previous response ended without calling delegate_result. Do not repeat the investigation. Use the existing session context to submit the complete result now, making delegate_result your final action.';
+export const STRUCTURED_RESULT_REPAIR_EVENT = 'delegate_structured_repair';
+
+function announceStructuredResultRepair(): void {
+  if (
+    process.env.PI_DELEGATE_CHILD !== '1' ||
+    !process.env.PI_DELEGATE_RESULT_SCHEMA
+  )
+    return;
+  try {
+    // This private one-line protocol record lets the parent distinguish a
+    // first missing channel from a repair that also exhausted without one.
+    process.stdout.write(
+      `${JSON.stringify({ type: STRUCTURED_RESULT_REPAIR_EVENT })}\n`,
+    );
+  } catch {
+    // The follow-up remains bounded even if the private marker cannot be sent.
+  }
+}
 
 /** Register the child-only terminating machine-readable completion channel. */
 export function registerChildDelegateResultTool(
@@ -41,6 +59,7 @@ export function registerChildDelegateResultTool(
     // Set this before sending the follow-up: its agent_end must never create a
     // second follow-up, even if the result tool is unavailable or fails.
     repairTriggered = true;
+    announceStructuredResultRepair();
     try {
       pi.sendMessage(
         {

@@ -220,7 +220,9 @@ resources until removed. The same projection is rendered for single and
 parallel foreground results and for background/job completion and inspection;
 missing or invalid structured child results receive the same contract. Invalid
 structured runs expose bounded harness validation/lifecycle diagnostics only;
-child prose is never a fallback result channel.
+when the one missing-channel repair also ends without a result, that diagnostic
+may include a clearly labelled, UTF-8-bounded final-prose recovery excerpt.
+Structured result fields and ordinary child prose are never fallback channels.
 
 ## Read-only delegates
 

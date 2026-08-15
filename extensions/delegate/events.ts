@@ -1,6 +1,7 @@
 import type { Message } from '@earendil-works/pi-ai';
 import {
   captureDelegateResultEvent,
+  markStructuredResultRepair,
   redactDelegateResultTerminalProse,
 } from './structured-result';
 import type { DelegatedRun } from './types';
@@ -394,6 +395,9 @@ export function processJsonLine(line: string, run: DelegatedRun): boolean {
   if (!event) return false;
 
   switch (event.type) {
+    case 'delegate_structured_repair':
+      markStructuredResultRepair(run);
+      return true;
     case 'message_end':
       if (
         event.message &&

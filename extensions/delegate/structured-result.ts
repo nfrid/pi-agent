@@ -12,6 +12,7 @@ export {
   getSettledDelegateResult,
   getStructuredArtifacts,
   getUserVisibleStructuredResult,
+  markStructuredResultRepair,
   redactDelegateResultTerminalProse,
   setDelegateResultSpec,
   setStructuredArtifacts,

@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { normalizeDelegateResultSpec } from './structured-result-schema';
 import {
   registerChildDelegateResultTool,
@@ -7,7 +7,10 @@ import {
 
 type Handler = (...args: never[]) => unknown;
 
+afterEach(() => vi.restoreAllMocks());
+
 function childApi() {
+  vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
   const handlers = new Map<string, Handler>();
   const sendMessage = vi.fn();
   const pi = {

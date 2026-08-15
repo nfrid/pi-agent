@@ -1,7 +1,9 @@
 import {
+  boundLifecycleText,
   buildLifecycleDiagnostic,
   ensureDelegateLifecycle,
-  setDelegateLifecycle,
+  LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
+  setDelegateLifecycleText,
 } from './lifecycle';
 import {
   projectStructuredResult,
@@ -13,7 +15,11 @@ import {
   type StructuredArtifacts,
   type StructuredValidationResult,
 } from './structured-result-schema';
-import type { DelegatedRun, DelegateStructuredResult } from './types';
+import {
+  type DelegatedRun,
+  type DelegateStructuredResult,
+  getExactFinalAssistantText,
+} from './types';
 
 interface StructuredAttempt {
   detailsPresent: boolean;
@@ -30,6 +36,7 @@ interface StructuredChannel {
 const resultSpecs = new WeakMap<DelegatedRun, NormalizedDelegateResultSpec>();
 const channels = new WeakMap<DelegatedRun, StructuredChannel>();
 const structuredChannelRuns = new WeakSet<DelegatedRun>();
+const structuredRepairRuns = new WeakSet<DelegatedRun>();
 const settlements = new WeakMap<DelegatedRun, StructuredValidationResult>();
 const artifactViews = new WeakMap<DelegatedRun, StructuredArtifacts>();
 
@@ -167,15 +174,30 @@ export function settleDelegateResult(
   };
   if (!validation.valid) {
     const lifecycle = ensureDelegateLifecycle(run);
-    if (!lifecycle || lifecycle.reason === 'unknown')
-      setDelegateLifecycle(
+    if (!lifecycle || lifecycle.reason === 'unknown') {
+      const diagnostic = buildLifecycleDiagnostic(
+        'child-result-invalid',
+        `Unvalidated structured result: ${validation.errors.join('; ')}`,
+      );
+      const finalProse =
+        !channel && hasStructuredResultRepair(run)
+          ? getExactFinalAssistantText(run.messages).trim()
+          : '';
+      const recoveryPrefix = '\nUnvalidated child prose (recovery only): ';
+      const recoveryBudget =
+        LIFECYCLE_INLINE_DIAGNOSTIC_BYTES -
+        Buffer.byteLength(diagnostic, 'utf8') -
+        Buffer.byteLength(recoveryPrefix, 'utf8');
+      const recovery =
+        finalProse && recoveryBudget > 0
+          ? `${recoveryPrefix}${boundLifecycleText(finalProse, recoveryBudget)}`
+          : '';
+      setDelegateLifecycleText(
         run,
         'child-result-invalid',
-        buildLifecycleDiagnostic(
-          'child-result-invalid',
-          `Unvalidated structured result: ${validation.errors.join('; ')}`,
-        ),
+        `${diagnostic}${recovery}`,
       );
+    }
     run.stopReason = 'error';
     const summary = validation.errors.join('; ').slice(0, 900);
     run.errorMessage = `Structured delegate result invalid: ${summary}`;
@@ -204,6 +226,15 @@ export function getUserVisibleStructuredResult(
 
 export function getDelegateChannelPresent(run: DelegatedRun): boolean {
   return Boolean(channels.get(run));
+}
+
+/** Mark the private child follow-up without adding it to public run data. */
+export function markStructuredResultRepair(run: DelegatedRun): void {
+  structuredRepairRuns.add(run);
+}
+
+function hasStructuredResultRepair(run: DelegatedRun): boolean {
+  return structuredRepairRuns.has(run);
 }
 
 export function setStructuredArtifacts(

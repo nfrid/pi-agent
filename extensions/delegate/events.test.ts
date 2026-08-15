@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { processJsonLine } from './events';
+import { getDelegateLifecycle } from './lifecycle';
+import {
+  normalizeDelegateResultSpec,
+  setDelegateResultSpec,
+  settleDelegateResult,
+} from './structured-result';
 import { createRun } from './types';
 
 const assistantMessage = {
@@ -9,6 +15,30 @@ const assistantMessage = {
 };
 
 describe('events', () => {
+  test('retains the private repair marker without exposing it as child content', () => {
+    const run = createRun('repair marker');
+    const spec = normalizeDelegateResultSpec({ shape: { ok: 'boolean' } });
+    if (!spec) throw new Error('expected normalized result spec');
+    setDelegateResultSpec(run, spec);
+    run.messages = [
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'repair recovery prose' }],
+      },
+    ] as never;
+    expect(
+      processJsonLine(
+        JSON.stringify({ type: 'delegate_structured_repair' }),
+        run,
+      ),
+    ).toBe(true);
+    settleDelegateResult(run);
+    expect(JSON.stringify(run)).not.toContain('delegate_structured_repair');
+    expect(getDelegateLifecycle(run)?.diagnostic).toContain(
+      'repair recovery prose',
+    );
+  });
+
   test('does not duplicate agent_end messages received through message_end', () => {
     const run = createRun('test');
     expect(

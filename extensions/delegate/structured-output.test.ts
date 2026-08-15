@@ -3,6 +3,7 @@ import * as delegateChild from './delegate-child';
 import { processJsonLine } from './events';
 import { DelegateJobManager } from './jobs';
 import {
+  getDelegateLifecycle,
   LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
   LIFECYCLE_PUBLIC_FALLBACK_MARKER,
   setDelegateLifecycle,
@@ -14,6 +15,7 @@ import { DelegateStatusStore } from './status';
 import {
   captureDelegateResultEvent,
   getDelegateResultSpec,
+  markStructuredResultRepair,
   normalizeDelegateResultSpec,
   setDelegateResultSpec,
   settleDelegateResult,
@@ -252,13 +254,14 @@ describe('structured delegate output handoff', () => {
     if (!spec) throw new Error('expected normalized result spec');
     vi.spyOn(delegateChild, 'spawnDelegateChild').mockImplementation(
       async (run) => {
+        markStructuredResultRepair(run);
         run.messages = [
           {
             role: 'assistant',
             content: [
               {
                 type: 'text',
-                text: 'Recovery explanation without the required tool.',
+                text: `Recovery explanation without the required tool. ${'🙂'.repeat(2_000)}`,
               },
             ],
           },
@@ -281,10 +284,15 @@ describe('structured delegate output handoff', () => {
       const handoff = buildParentHandoff([run]);
       expect(run.state).toBe('error');
       expect(handoff).toContain('delegate_result channel is missing');
-      expect(handoff).not.toContain(
+      expect(handoff).toContain('Unvalidated child prose (recovery only)');
+      expect(handoff).toContain(
         'Recovery explanation without the required tool.',
       );
-      expect(handoff).not.toContain('Unvalidated child prose');
+      expect(handoff).not.toContain('🙂'.repeat(2_000));
+      const diagnostic = getDelegateLifecycle(run)?.diagnostic ?? '';
+      expect(Buffer.byteLength(diagnostic, 'utf8')).toBeLessThanOrEqual(
+        LIFECYCLE_INLINE_DIAGNOSTIC_BYTES,
+      );
     } finally {
       vi.restoreAllMocks();
     }

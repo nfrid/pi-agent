@@ -1,5 +1,6 @@
 import { Value } from 'typebox/value';
 import { describe, expect, test } from 'vitest';
+import { getDelegateLifecycle } from './lifecycle';
 import {
   asToolSchema,
   captureDelegateResultEvent,
@@ -380,6 +381,12 @@ describe('schema-driven delegate results', () => {
       },
     });
     const run = createRun('structured');
+    run.messages = [
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'arbitrary malformed-attempt prose' }],
+      },
+    ] as never;
     setDelegateResultSpec(run, spec);
     captureDelegateResultEvent(run, { details: { ok: 'wrong' } }, false);
     const settled = settleDelegateResult(run);
@@ -388,5 +395,8 @@ describe('schema-driven delegate results', () => {
     expect(JSON.stringify(run)).not.toContain('wrong');
     expect(getSettledDelegateResult(run)?.errors[0]).toContain('/ok');
     expect(getDelegateResultSpec(run)).toBe(spec);
+    expect(getDelegateLifecycle(run)?.diagnostic).not.toContain(
+      'arbitrary malformed-attempt prose',
+    );
   });
 });
