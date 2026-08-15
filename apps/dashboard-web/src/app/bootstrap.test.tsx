@@ -25,7 +25,7 @@ const dashboardState = {
     | 'request'
     | undefined,
   usageError: undefined as string | undefined,
-  connectionState: 'connected' as const,
+  connectionState: 'connected' as 'connected' | 'blocked' | 'error',
   store: {
     getGeneration: () => 0,
     installSnapshot: vi.fn(),
@@ -87,6 +87,7 @@ describe('dashboard startup', () => {
     dashboardState.snapshot = undefined;
     dashboardState.error = undefined;
     dashboardState.errorKind = undefined;
+    dashboardState.connectionState = 'connected';
     vi.clearAllMocks();
   });
 
@@ -104,6 +105,13 @@ describe('dashboard startup', () => {
         : outcome instanceof DashboardHttpError
           ? outcome.kind
           : undefined;
+    dashboardState.connectionState =
+      dashboardState.errorKind === 'authentication' ||
+      dashboardState.errorKind === 'protocol-mismatch'
+        ? 'blocked'
+        : outcome instanceof Error
+          ? 'error'
+          : 'connected';
     dashboardQueryClient.setDefaultOptions({
       queries: { retryDelay: 0 },
     });
@@ -140,6 +148,35 @@ describe('dashboard startup', () => {
       renderer.root.findByProps({ children: 'Reload to update' }),
     ).toBeTruthy();
     expect(renderer.root.findAllByType('form')).toHaveLength(0);
+    expect(
+      renderer.root.findAllByProps({ 'data-testid': 'router-provider' }),
+    ).toHaveLength(0);
+  });
+
+  it('replaces an established snapshot with AuthPrompt when auth becomes blocked', async () => {
+    const renderer = await renderStartup(
+      new DashboardHttpError(401, 'expired token', undefined, {
+        kind: 'authentication',
+      }),
+      snapshot,
+    );
+    expect(
+      renderer.root.findByProps({ 'aria-label': 'Dashboard token' }),
+    ).toBeTruthy();
+    expect(
+      renderer.root.findAllByProps({ 'data-testid': 'router-provider' }),
+    ).toHaveLength(0);
+  });
+
+  it('replaces an established snapshot with reload state on protocol mismatch', async () => {
+    const renderer = await renderStartup(
+      new DashboardProtocolMismatchError(1, 2, 'old-server'),
+      snapshot,
+    );
+    expect(renderer.root.findByProps({ role: 'alert' })).toBeTruthy();
+    expect(
+      renderer.root.findByProps({ children: 'Dashboard update required' }),
+    ).toBeTruthy();
     expect(
       renderer.root.findAllByProps({ 'data-testid': 'router-provider' }),
     ).toHaveLength(0);

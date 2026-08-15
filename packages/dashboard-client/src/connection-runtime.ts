@@ -334,17 +334,26 @@ export class DashboardConnectionRuntime {
   }
 
   private closeSubscriptions(): void {
+    // Invalidate endpoint/client acquisition already in flight. Otherwise an
+    // offline or stopped runtime can install a subscription after its awaited
+    // client selection resolves.
+    this.shellOpening += 1;
     this.shellSubscription?.unsubscribe();
     this.shellSubscription = undefined;
     for (const entry of this.sessions.values()) {
+      entry.opening += 1;
       entry.subscription?.unsubscribe();
       entry.subscription = undefined;
     }
   }
 
   private replaceSubscriptions(): void {
-    if (!this.started || !this.isOnline()) return;
+    if (!this.started) return;
     this.closeSubscriptions();
+    if (!this.isOnline()) {
+      this.store.setConnection('offline');
+      return;
+    }
     this.store.setConnection('connecting');
     void this.openShell(false);
     for (const entry of this.sessions.values())
@@ -372,7 +381,8 @@ export class DashboardConnectionRuntime {
     if (rebase) this.resetShellDomain();
     try {
       const client = await this.getClient();
-      if (!this.started || opening !== this.shellOpening) return;
+      if (!this.started || opening !== this.shellOpening || !this.isOnline())
+        return;
       const subscription = client.shellSubscribe.subscribe(
         {},
         {
@@ -385,14 +395,14 @@ export class DashboardConnectionRuntime {
             if (opening !== this.shellOpening || !this.started) return;
             const kind = connectionErrorKind(error);
             if (kind === 'authentication' || kind === 'protocol-mismatch') {
-              this.store.setConnection('blocked', messageError(error), kind);
+              this.blockConnection(kind, error);
               return;
             }
             this.store.setConnection('error', messageError(error), kind);
           },
         },
       );
-      if (opening !== this.shellOpening || !this.started) {
+      if (opening !== this.shellOpening || !this.started || !this.isOnline()) {
         subscription.unsubscribe();
         return;
       }
@@ -400,13 +410,9 @@ export class DashboardConnectionRuntime {
     } catch (error) {
       if (opening !== this.shellOpening || !this.started) return;
       const kind = connectionErrorKind(error);
-      this.store.setConnection(
-        kind === 'authentication' || kind === 'protocol-mismatch'
-          ? 'blocked'
-          : 'error',
-        messageError(error),
-        kind,
-      );
+      if (kind === 'authentication' || kind === 'protocol-mismatch')
+        this.blockConnection(kind, error);
+      else this.store.setConnection('error', messageError(error), kind);
     }
   }
 
@@ -495,7 +501,12 @@ export class DashboardConnectionRuntime {
     }
     try {
       const client = await this.getClient();
-      if (!this.started || entry.opening !== opening || entry.refs === 0)
+      if (
+        !this.started ||
+        entry.opening !== opening ||
+        entry.refs === 0 ||
+        !this.isOnline()
+      )
         return;
       const input = {
         sessionId: entry.id,
@@ -512,10 +523,15 @@ export class DashboardConnectionRuntime {
         onError: (error) => {
           if (!this.started || entry.opening !== opening || entry.refs === 0)
             return;
-          this.store.failSessionSync(entry.id, messageError(error));
+          this.failSessionSubscription(entry.id, error);
         },
       });
-      if (!this.started || entry.opening !== opening || entry.refs === 0) {
+      if (
+        !this.started ||
+        entry.opening !== opening ||
+        entry.refs === 0 ||
+        !this.isOnline()
+      ) {
         subscription.unsubscribe();
         return;
       }
@@ -523,8 +539,24 @@ export class DashboardConnectionRuntime {
     } catch (error) {
       if (!this.started || entry.opening !== opening || entry.refs === 0)
         return;
-      this.store.failSessionSync(entry.id, messageError(error));
+      this.failSessionSubscription(entry.id, error);
     }
+  }
+
+  private failSessionSubscription(sessionId: string, error: unknown): void {
+    this.store.failSessionSync(sessionId, messageError(error));
+    const kind = connectionErrorKind(error);
+    if (kind === 'authentication' || kind === 'protocol-mismatch')
+      this.blockConnection(kind, error);
+  }
+
+  /** Block configuration failures until the application input changes. */
+  private blockConnection(
+    kind: 'authentication' | 'protocol-mismatch',
+    error: unknown,
+  ): void {
+    this.closeSubscriptions();
+    this.store.setConnection('blocked', messageError(error), kind);
   }
 
   private acceptSession(entry: DomainEntry, value: unknown): void {

@@ -80,9 +80,15 @@ function DashboardApp() {
       dashboard.store.setUsageError(usageQuery.data.error);
   }, [dashboard.store, usageQuery.data]);
   const startupErrorKind = dashboard.errorKind;
-  if (!dashboard.snapshot && startupErrorKind === 'protocol-mismatch')
+  if (
+    dashboard.connectionState === 'blocked' &&
+    startupErrorKind === 'protocol-mismatch'
+  )
     return <ReloadRequiredState />;
-  if (!dashboard.snapshot && startupErrorKind === 'authentication')
+  if (
+    dashboard.connectionState === 'blocked' &&
+    startupErrorKind === 'authentication'
+  )
     return <AuthPrompt />;
   if (!dashboard.snapshot)
     return (

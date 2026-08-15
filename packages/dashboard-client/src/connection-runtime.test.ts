@@ -49,8 +49,53 @@ type Observer = {
   onError?: (error: unknown) => void;
 };
 
+function lifecycleGlobals() {
+  type Listener = () => void;
+  class EventTargetShim {
+    private readonly listeners = new Map<string, Set<Listener>>();
+    addEventListener(type: string, listener: Listener): void {
+      let listeners = this.listeners.get(type);
+      if (!listeners) {
+        listeners = new Set();
+        this.listeners.set(type, listeners);
+      }
+      listeners.add(listener);
+    }
+    removeEventListener(type: string, listener: Listener): void {
+      this.listeners.get(type)?.delete(listener);
+    }
+    dispatch(type: string): void {
+      for (const listener of this.listeners.get(type) ?? []) listener();
+    }
+  }
+  const root = globalThis as unknown as {
+    window?: unknown;
+    document?: unknown;
+  };
+  const previousWindow = root.window;
+  const previousDocument = root.document;
+  const windowTarget = new EventTargetShim();
+  const documentTarget = new EventTargetShim() as EventTargetShim & {
+    visibilityState: Document['visibilityState'];
+  };
+  documentTarget.visibilityState = 'visible';
+  root.window = windowTarget;
+  root.document = documentTarget;
+  return {
+    window: windowTarget,
+    document: documentTarget,
+    restore: () => {
+      if (previousWindow === undefined) delete root.window;
+      else root.window = previousWindow;
+      if (previousDocument === undefined) delete root.document;
+      else root.document = previousDocument;
+    },
+  };
+}
+
 function fixture() {
   let shellObserver: Observer | undefined;
+  const shellHistory: Observer[] = [];
   const sessionObservers = new Map<string, Observer>();
   let shellSubscriptions = 0;
   let sessionSubscriptions = 0;
@@ -64,6 +109,7 @@ function fixture() {
         subscribe: (_input: unknown, observer: Observer) => {
           shellSubscriptions += 1;
           shellObserver = observer;
+          shellHistory.push(observer);
           return {
             unsubscribe: () => {
               if (shellObserver === observer) shellObserver = undefined;
@@ -101,6 +147,9 @@ function fixture() {
     shellError: (error: unknown) => shellObserver?.onError?.(error),
     session: (id: string, value: unknown) =>
       sessionObservers.get(id)?.onData(value),
+    sessionError: (id: string, error: unknown) =>
+      sessionObservers.get(id)?.onError?.(error),
+    shellHistory,
     counts: () => ({ shellSubscriptions, sessionSubscriptions }),
     sessionInputs,
   };
@@ -783,6 +832,233 @@ describe('DashboardConnectionRuntime', () => {
     expect(store.getSnapshot().snapshotCursor).toBe(0);
     expect(reads).toBe(0);
     stop();
+  });
+
+  it('blocks globally on session authentication and ignores stale shell events', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    const handle = f.runtime.acquireSession('session-a');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const priorShellObserver = f.shellHistory[0];
+    f.sessionError(
+      'session-a',
+      Object.assign(new Error('Session unauthorized'), {
+        shape: { code: 401 },
+      }),
+    );
+    expect(f.store.getSnapshot().connection).toMatchObject({
+      status: 'blocked',
+      errorKind: 'authentication',
+    });
+    expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
+      'error',
+    );
+    priorShellObserver?.onData({
+      id: 'stale-shell-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: { snapshot: shellSnapshot(0), cursor: 0 },
+      },
+    });
+    priorShellObserver?.onData({
+      id: 'stale-shell-live',
+      data: { type: 'caught-up', sequence: 0 },
+    });
+    expect(f.store.getSnapshot().connection).toMatchObject({
+      status: 'blocked',
+      errorKind: 'authentication',
+    });
+    expect(f.counts()).toEqual({
+      shellSubscriptions: 1,
+      sessionSubscriptions: 1,
+    });
+    handle.release();
+    stop();
+  });
+
+  it('keeps ordinary session network failures isolated from a healthy shell', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    const handle = f.runtime.acquireSession('session-a');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.shell({
+      id: 'shell-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: { snapshot: shellSnapshot(0), cursor: 0 },
+      },
+    });
+    f.shell({ id: 'shell-live', data: { type: 'caught-up', sequence: 0 } });
+    f.sessionError('session-a', new Error('temporary session network failure'));
+    expect(f.store.getSnapshot().connection.status).toBe('connected');
+    expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
+      'error',
+    );
+    handle.release();
+    stop();
+  });
+
+  it('blocks shell authentication and closes acquired session subscriptions', async () => {
+    const f = fixture();
+    const stop = f.runtime.start();
+    const handle = f.runtime.acquireSession('session-a');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    f.shellError(
+      Object.assign(new Error('Dashboard unauthorized'), {
+        shape: { code: 401 },
+      }),
+    );
+    expect(f.store.getSnapshot().connection).toMatchObject({
+      status: 'blocked',
+      errorKind: 'authentication',
+    });
+    const priorShellObserver = f.shellHistory[0];
+    priorShellObserver?.onData({
+      id: 'stale-shell-live',
+      data: { type: 'caught-up', sequence: 0 },
+    });
+    f.session('session-a', {
+      id: 'stale-session-snapshot',
+      data: {
+        type: 'snapshot',
+        sequence: 0,
+        snapshot: sessionSnapshot(0),
+      },
+    });
+    expect(f.store.getSnapshot().connection.status).toBe('blocked');
+    expect(f.store.getSnapshot().sessionSyncById['session-a']?.status).toBe(
+      'synchronizing',
+    );
+    handle.release();
+    stop();
+  });
+
+  it('does not install feeds when offline or stopped while client acquisition is pending', async () => {
+    let online = true;
+    let resolveClient!: (value: unknown) => void;
+    const pendingClient = new Promise((resolve) => {
+      resolveClient = resolve;
+    });
+    let shellSubscriptions = 0;
+    const trpc = {
+      shellSubscribe: {
+        subscribe: () => {
+          shellSubscriptions += 1;
+          return { unsubscribe: () => undefined };
+        },
+      },
+      sessionSubscribe: {
+        subscribe: () => ({ unsubscribe: () => undefined }),
+      },
+    };
+    const client = {
+      getTrpcClient: () => pendingClient,
+      snapshot: async () => shellSnapshot(0),
+    };
+    const store = new DashboardLiveStore();
+    const runtime = new DashboardConnectionRuntime({
+      client: client as never,
+      store,
+      isOnline: () => online,
+    });
+    const stop = runtime.start();
+    online = false;
+    runtime.reconnect();
+    resolveClient(trpc);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(shellSubscriptions).toBe(0);
+
+    online = true;
+    runtime.reconnect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(shellSubscriptions).toBe(1);
+    stop();
+
+    let stoppedSubscriptions = 0;
+    let resolveStopped!: (value: unknown) => void;
+    const stoppedClient = {
+      getTrpcClient: () =>
+        new Promise((resolve) => {
+          resolveStopped = resolve;
+        }),
+      snapshot: async () => shellSnapshot(0),
+    };
+    const stoppedRuntime = new DashboardConnectionRuntime({
+      client: stoppedClient as never,
+      store: new DashboardLiveStore(),
+      isOnline: () => true,
+    });
+    const stoppedTrpc = {
+      ...trpc,
+      shellSubscribe: {
+        subscribe: () => {
+          stoppedSubscriptions += 1;
+          return { unsubscribe: () => undefined };
+        },
+      },
+    };
+    const stopped = stoppedRuntime.start();
+    stopped();
+    resolveStopped(stoppedTrpc);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(stoppedSubscriptions).toBe(0);
+  });
+
+  it('recovers online/offline feeds and replaces only after a stale hidden period', async () => {
+    const globals = lifecycleGlobals();
+    try {
+      let online = false;
+      const f = fixture();
+      const runtime = new DashboardConnectionRuntime({
+        client: f.client as never,
+        store: f.store,
+        isOnline: () => online,
+        visibilityStaleMs: 5,
+      });
+      const stop = runtime.start();
+      expect(f.counts().shellSubscriptions).toBe(0);
+
+      online = true;
+      globals.window.dispatch('online');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(f.counts().shellSubscriptions).toBe(1);
+
+      globals.document.visibilityState = 'hidden';
+      globals.document.dispatch('visibilitychange');
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      globals.document.visibilityState = 'visible';
+      globals.document.dispatch('visibilitychange');
+      expect(f.counts().shellSubscriptions).toBe(1);
+
+      globals.document.visibilityState = 'hidden';
+      globals.document.dispatch('visibilitychange');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      globals.document.visibilityState = 'visible';
+      globals.document.dispatch('visibilitychange');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(f.counts().shellSubscriptions).toBe(2);
+
+      online = false;
+      globals.window.dispatch('offline');
+      expect(f.store.getSnapshot().connection.status).toBe('offline');
+      online = true;
+      globals.window.dispatch('online');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(f.counts().shellSubscriptions).toBe(3);
+
+      stop();
+      globals.window.dispatch('online');
+      globals.document.visibilityState = 'hidden';
+      globals.document.dispatch('visibilitychange');
+      globals.document.visibilityState = 'visible';
+      globals.document.dispatch('visibilitychange');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(f.counts().shellSubscriptions).toBe(3);
+    } finally {
+      globals.restore();
+    }
   });
 
   it('explicitly reconnects after an initial shell open failure', async () => {

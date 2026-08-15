@@ -396,15 +396,21 @@ describe('dashboard query and mutation factories', () => {
     expect(store.getSnapshot().serverId).toBe('daemon-b');
   });
 
-  it('does not retry authentication or protocol mismatch failures', () => {
+  it('retries finite queries only for bounded network failures', () => {
     const retry = snapshotQueryOptions(client).retry;
     expect(typeof retry).toBe('function');
     const shouldRetry = retry as (count: number, error: unknown) => boolean;
+    expect(shouldRetry(0, { kind: 'network' })).toBe(true);
+    expect(shouldRetry(1, { kind: 'network' })).toBe(true);
+    expect(shouldRetry(2, { kind: 'network' })).toBe(false);
     expect(shouldRetry(0, { status: 401 })).toBe(false);
     expect(shouldRetry(0, new DashboardProtocolMismatchError(1, 2))).toBe(
       false,
     );
-    expect(shouldRetry(0, { status: 500 })).toBe(true);
-    expect(shouldRetry(0, { kind: 'malformed-output' })).toBe(true);
+    expect(shouldRetry(0, { status: 500 })).toBe(false);
+    expect(shouldRetry(0, { kind: 'domain' })).toBe(false);
+    expect(shouldRetry(0, { kind: 'malformed-output' })).toBe(false);
+    expect(shouldRetry(0, { kind: 'request' })).toBe(false);
+    expect(shouldRetry(0, new Error('unknown failure'))).toBe(false);
   });
 });

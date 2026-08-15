@@ -118,16 +118,8 @@ export function snapshotRequestGeneration(
   return snapshotRequestGenerations.get(snapshot);
 }
 
-const networkRetry = (failureCount: number, error: unknown): boolean => {
-  const kind = dashboardHttpErrorKind(error);
-  if (kind === 'authentication' || kind === 'protocol-mismatch') return false;
-  const status =
-    error && typeof error === 'object' && 'status' in error
-      ? (error as { status?: unknown }).status
-      : undefined;
-  if (status === 401 || status === 403) return false;
-  return failureCount < 2;
-};
+const networkRetry = (failureCount: number, error: unknown): boolean =>
+  dashboardHttpErrorKind(error) === 'network' && failureCount < 2;
 
 export function snapshotQueryOptions(
   client: DashboardHttpClient,
