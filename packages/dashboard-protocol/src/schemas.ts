@@ -150,7 +150,7 @@ export const LiveFeedDiagnosticsSchema = Type.Object(
     overflowTerminations: Type.Integer({ minimum: 0 }),
     oversizedTerminations: Type.Integer({ minimum: 0 }),
     largestFrameBytes: Type.Integer({ minimum: 0 }),
-    unavailableSequenceFloor: Type.Optional(Type.Integer({ minimum: 0 })),
+    unavailableThroughSequence: Type.Optional(Type.Integer({ minimum: 0 })),
     snapshotFallbacks: LiveDiagnosticsFallbacksSchema,
   },
   { additionalProperties: false },

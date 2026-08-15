@@ -1453,6 +1453,25 @@ test('live transport reconnects without HTTP polling or stale rollback', async (
         current: () => streams.at(-1),
         first: () => streams[0],
         forceReplayGap: () => streams.at(-1)?.close(),
+        suspendAndResume: () => {
+          const originalNow = Date.now;
+          let now = originalNow();
+          Date.now = () => now;
+          Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            value: 'hidden',
+          });
+          document.dispatchEvent(new Event('visibilitychange'));
+          now += 16_000;
+          reconnectSnapshotPending = true;
+          Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            value: 'visible',
+          });
+          document.dispatchEvent(new Event('visibilitychange'));
+          Date.now = originalNow;
+          Reflect.deleteProperty(document, 'visibilityState');
+        },
       },
     });
   });
@@ -1493,6 +1512,30 @@ test('live transport reconnects without HTTP polling or stale rollback', async (
   await expect.poll(() => usageRequests).toBeGreaterThan(0);
   expect(usageRequests).toBe(1);
   const initialUsageRequests = usageRequests;
+  const streamsBeforeResume = await page.evaluate(() =>
+    (
+      window as unknown as { dashboardLiveTest: { count(): number } }
+    ).dashboardLiveTest.count(),
+  );
+  await page.evaluate(() => {
+    (
+      window as unknown as {
+        dashboardLiveTest: { suspendAndResume(): void };
+      }
+    ).dashboardLiveTest.suspendAndResume();
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (
+          window as unknown as {
+            dashboardLiveTest: { count(): number };
+          }
+        ).dashboardLiveTest.count(),
+      ),
+    )
+    .toBeGreaterThan(streamsBeforeResume);
+  await expect(page.getByRole('status')).toHaveCount(0);
   await page.evaluate(() => {
     (
       window as unknown as {

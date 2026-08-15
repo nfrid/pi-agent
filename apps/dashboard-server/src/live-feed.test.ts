@@ -59,6 +59,11 @@ describe('BoundedFeed', () => {
     await Promise.resolve();
     expect(captured).toBe(0);
     feed.publish({ value: 1 });
+    expect(feed.metrics()).toMatchObject({
+      queuedCount: 1,
+      queuedBytes: expect.any(Number),
+    });
+    expect(feed.metrics().queuedBytes).toBeGreaterThan(0);
     release();
     expect((await pending).value).toMatchObject({
       kind: 'snapshot',
@@ -217,7 +222,7 @@ describe('BoundedFeed', () => {
     expect(feed.metrics().subscribers).toBe(0);
   });
 
-  it('rebases cursors before and at a coalesced record, while preserving replay order', async () => {
+  it('rebases before a coalesced record while preserving observed cursors', async () => {
     const feed = new BoundedFeed<Snapshot, Event>(
       'shell',
       bounds,
@@ -249,9 +254,14 @@ describe('BoundedFeed', () => {
       buildSnapshot: async (sequence) => ({ value: sequence }),
     });
     expect(await next(atCoalesced)).toMatchObject({
-      kind: 'snapshot',
+      kind: 'event',
+      sequence: 2,
+    });
+    expect(await next(atCoalesced)).toMatchObject({
+      kind: 'event',
       sequence: 3,
     });
+    expect(await next(atCoalesced)).toMatchObject({ kind: 'caught-up' });
     await atCoalesced.return(undefined);
 
     const afterSecond = feed.subscribe({
@@ -259,9 +269,10 @@ describe('BoundedFeed', () => {
       buildSnapshot: async (sequence) => ({ value: sequence }),
     });
     expect(await next(afterSecond)).toMatchObject({
-      kind: 'snapshot',
+      kind: 'event',
       sequence: 3,
     });
+    expect(await next(afterSecond)).toMatchObject({ kind: 'caught-up' });
     await afterSecond.return(undefined);
   });
 
@@ -283,7 +294,7 @@ describe('BoundedFeed', () => {
     expect(metrics.replayCount).toBeLessThanOrEqual(8);
     expect(metrics.replayBytes).toBeLessThanOrEqual(bounds.replayBytes);
     expect(metrics.coalesced).toBe(10_000);
-    expect(metrics.unavailableSequenceFloor).toBe(2);
+    expect(metrics.unavailableThroughSequence).toBe(10_000);
     expect(
       (feed as unknown as { unavailableSequences?: unknown })
         .unavailableSequences,
@@ -293,12 +304,27 @@ describe('BoundedFeed', () => {
       lastEventId: first.id,
       buildSnapshot: async (sequence) => ({ value: sequence }),
     });
-    expect(await next(resumed)).toMatchObject({
+    const rebased = await next(resumed);
+    expect(rebased).toMatchObject({
       kind: 'snapshot',
       sequence: 10_002,
     });
     expect(feed.metrics().snapshotFallbacks.unavailable).toBe(1);
+    expect(await next(resumed)).toMatchObject({ kind: 'caught-up' });
     await resumed.return(undefined);
+
+    feed.publish({ value: 10_002 });
+    const postRebase = feed.subscribe({
+      lastEventId: rebased.id,
+      buildSnapshot: async (sequence) => ({ value: sequence }),
+    });
+    expect(await next(postRebase)).toMatchObject({
+      kind: 'event',
+      sequence: 10_003,
+    });
+    expect(await next(postRebase)).toMatchObject({ kind: 'caught-up' });
+    expect(feed.metrics().snapshotFallbacks.unavailable).toBe(1);
+    await postRebase.return(undefined);
   });
 
   it('reports replay fallback when the replay itself exceeds queue bounds', async () => {

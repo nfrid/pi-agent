@@ -108,7 +108,7 @@ describe('dashboard protocol', () => {
       overflowTerminations: 1,
       oversizedTerminations: 0,
       largestFrameBytes: 800,
-      unavailableSequenceFloor: 2,
+      unavailableThroughSequence: 2,
       snapshotFallbacks: {
         initial: 1,
         invalid: 0,

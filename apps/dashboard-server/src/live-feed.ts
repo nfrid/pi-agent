@@ -88,7 +88,7 @@ export interface FeedMetrics {
   readonly overflowTerminations: number;
   readonly oversizedTerminations: number;
   readonly largestFrameBytes: number;
-  readonly unavailableSequenceFloor?: number;
+  readonly unavailableThroughSequence?: number;
   readonly snapshotFallbacks: FeedSnapshotFallbacks;
 }
 
@@ -176,11 +176,11 @@ export class BoundedFeed<TSnapshot, TEvent> {
   private records: FeedRecord<TEvent>[] = [];
   private replayBytesValue = 0;
   /**
-   * The earliest sequence that cannot be replayed exactly. A floor is
-   * deliberately conservative: once a coalesced/rejected gap exists, all
-   * later non-current cursors rebase instead of retaining one entry per gap.
+   * The latest cursor that predates a coalesced or rejected publication.
+   * Keeping one boundary is deliberately conservative and O(1): cursors at
+   * or before it rebase, while a later authoritative snapshot can resume.
    */
-  private unavailableSequenceFloor?: number;
+  private unavailableThroughSequence?: number;
   private readonly subscribers = new Set<Subscriber<TSnapshot, TEvent>>();
   private coalescedValue = 0;
   private overflowTerminationsValue = 0;
@@ -241,8 +241,8 @@ export class BoundedFeed<TSnapshot, TEvent> {
     let queuedCount = 0;
     let queuedBytes = 0;
     for (const subscriber of this.subscribers) {
-      queuedCount += subscriber.queue.length;
-      queuedBytes += subscriber.queueBytes;
+      queuedCount += subscriber.queue.length + subscriber.deferred.length;
+      queuedBytes += subscriber.queueBytes + subscriber.deferredBytes;
     }
     const oldest = this.records[0];
     const newest = this.records.at(-1);
@@ -272,9 +272,9 @@ export class BoundedFeed<TSnapshot, TEvent> {
       overflowTerminations: this.overflowTerminationsValue,
       oversizedTerminations: this.oversizedTerminationsValue,
       largestFrameBytes: this.largestFrameBytesValue,
-      ...(this.unavailableSequenceFloor === undefined
+      ...(this.unavailableThroughSequence === undefined
         ? {}
-        : { unavailableSequenceFloor: this.unavailableSequenceFloor }),
+        : { unavailableThroughSequence: this.unavailableThroughSequence }),
       snapshotFallbacks: { ...this.snapshotFallbacksValue },
     };
   }
@@ -335,17 +335,17 @@ export class BoundedFeed<TSnapshot, TEvent> {
   }
 
   private markUnavailable(sequence: number): void {
-    this.unavailableSequenceFloor =
-      this.unavailableSequenceFloor === undefined
-        ? sequence
-        : Math.min(this.unavailableSequenceFloor, sequence);
+    const through = Math.max(0, sequence - 1);
+    this.unavailableThroughSequence =
+      this.unavailableThroughSequence === undefined
+        ? through
+        : Math.max(this.unavailableThroughSequence, through);
   }
 
   private isUnavailable(sequence: number): boolean {
     return (
-      this.unavailableSequenceFloor !== undefined &&
-      sequence >= this.unavailableSequenceFloor &&
-      sequence !== this.sequenceValue
+      this.unavailableThroughSequence !== undefined &&
+      sequence <= this.unavailableThroughSequence
     );
   }
 
@@ -365,11 +365,10 @@ export class BoundedFeed<TSnapshot, TEvent> {
     const oldest = this.records[0]?.sequence ?? this.sequenceValue + 1;
     if (sequence < oldest - 1 || sequence > this.sequenceValue)
       return undefined;
-    // A cursor at or after a coalesced/rejected gap cannot prove that the
-    // client saw the exact record represented by that cursor. A snapshot is
-    // authoritative at the current position, including when that position
-    // was consumed by a rejected publication, so the latest tracked ID is
-    // allowed to settle instead of looping snapshots.
+    // A cursor before a coalesced/rejected publication cannot prove that it
+    // saw every later record. The missing sequence itself is a safe boundary:
+    // a live client may have observed it, and a rejected publication can only
+    // issue that cursor through an authoritative snapshot.
     if (this.isUnavailable(sequence)) return undefined;
     const replay = this.records.filter((record) => record.sequence > sequence);
     let expected = sequence + 1;
