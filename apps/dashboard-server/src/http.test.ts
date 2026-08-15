@@ -12,6 +12,7 @@ import path from 'node:path';
 import { parseFrame, serializeFrame } from '@pi-dashboard/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDashboardServer } from './http.js';
+import type { ShellFeed } from './live-feeds.js';
 import { MetadataStore } from './metadata.js';
 import { SessionIndex } from './session-index.js';
 
@@ -441,6 +442,111 @@ describe('dashboard HTTP boundary', () => {
     expect(server.snapshot().revision).toBe(1);
     expect(server.snapshot().cursor).toBe(1);
     bridge.destroy();
+  });
+
+  it('publishes session metadata before a replacement runtime upsert', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-session-ordering-'),
+    );
+    const sessionDir = path.join(root, 'sessions');
+    await mkdir(sessionDir, { recursive: true });
+    const startedAt = Date.parse('2026-08-15T12:00:00.000Z');
+    await writeFile(
+      path.join(sessionDir, 'replacement-session.jsonl'),
+      `${JSON.stringify({
+        type: 'session',
+        id: 'replacement-session',
+        timestamp: new Date(startedAt).toISOString(),
+        cwd: '/tmp/project',
+      })}\n${JSON.stringify({
+        type: 'session_info',
+        id: 'session-info-1',
+        name: 'Replacement session',
+      })}\n`,
+    );
+    server = await createDashboardServer({
+      port: 0,
+      authToken: 'test-token',
+      stateDir: path.join(root, 'state'),
+      sessionDir,
+      sesh: { list: async () => [] },
+    });
+    await server.start();
+    const runningServer = server;
+    const shellFeed = (runningServer as unknown as { shellFeed: ShellFeed })
+      .shellFeed;
+    const shellStream = shellFeed.subscribe({
+      buildSnapshot: (sequence) => ({
+        snapshot: runningServer.snapshot() as never,
+        cursor: sequence,
+      }),
+    });
+    await shellStream.next();
+    await shellStream.next();
+    const bridge = net.createConnection(runningServer.socketPath);
+    await new Promise<void>((resolve, reject) => {
+      bridge.once('connect', resolve);
+      bridge.once('error', reject);
+    });
+    try {
+      bridge.write(
+        serializeFrame({
+          kind: 'event',
+          seq: 1,
+          event: {
+            type: 'runtime.hello',
+            protocolVersion: 1,
+            snapshot: {
+              runtimeId: 'replacement-runtime',
+              ownership: 'external',
+              pid: 1,
+              cwd: '/tmp/project',
+              liveState: 'idle',
+              session: { id: 'replacement-session', entries: [] },
+              pendingInteractions: [],
+            },
+          },
+        }),
+      );
+      const metadataEvent = await shellStream.next();
+      const runtimeEvent = await shellStream.next();
+      expect(metadataEvent.value).toMatchObject({
+        kind: 'event',
+        event: {
+          domain: 'session-index',
+          data: {
+            kind: 'delta',
+            upsert: [
+              expect.objectContaining({
+                id: 'replacement-session',
+                name: 'Replacement session',
+                startedAt,
+              }),
+            ],
+          },
+        },
+      });
+      const runtimeShellEvent = (
+        runtimeEvent.value as {
+          event: {
+            domain: string;
+            data: {
+              kind: string;
+              runtime?: { runtimeId?: string; session?: { id?: string } };
+            };
+          };
+        }
+      ).event;
+      expect(runtimeShellEvent.domain).toBe('runtime');
+      expect(runtimeShellEvent.data.kind).toBe('upsert');
+      expect(runtimeShellEvent.data.runtime).toMatchObject({
+        runtimeId: 'replacement-runtime',
+        session: { id: 'replacement-session' },
+      });
+    } finally {
+      await shellStream.return(undefined);
+      bridge.destroy();
+    }
   });
 
   it('does not publish shell refreshes for managed transcript activity', async () => {

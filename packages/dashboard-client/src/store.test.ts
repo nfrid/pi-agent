@@ -183,6 +183,101 @@ describe('DashboardLiveStore', () => {
     ).toBeUndefined();
   });
 
+  it('keeps replacement thread metadata and ordering through an ordered shell transition', () => {
+    const store = new DashboardLiveStore();
+    const existing = {
+      id: 'existing-session',
+      file: '',
+      cwd: '/tmp',
+      startedAt: 100,
+      updatedAt: 100,
+    };
+    const replacement = {
+      id: 'replacement-session',
+      file: '',
+      cwd: '/tmp',
+      name: 'Replacement session',
+      startedAt: 200,
+      updatedAt: 200,
+    };
+    store.beginShellSync(1);
+    expect(
+      store.acceptShellSnapshot(
+        {
+          ...snapshot('daemon-1', 0),
+          runtimes: [
+            {
+              runtimeId: 'runtime-1',
+              liveState: 'working',
+              pendingInteractions: [],
+              session: { id: existing.id, entries: [] },
+            } as never,
+          ],
+          sessions: [existing],
+        },
+        0,
+        1,
+        true,
+      ),
+    ).toBe(true);
+
+    expect(
+      store.acceptShellEvent(
+        {
+          type: 'shell-event',
+          sequence: 1,
+          revision: 1,
+          domain: 'session-index',
+          data: { kind: 'delta', upsert: [replacement], remove: [] },
+        },
+        1,
+      ),
+    ).toBe(true);
+    const afterMetadata = selectSnapshot(store.getSnapshot());
+    expect(afterMetadata?.sessions.map((session) => session.id)).toEqual([
+      'existing-session',
+      'replacement-session',
+    ]);
+    expect(afterMetadata?.sessions[1]).toMatchObject({
+      id: 'replacement-session',
+      name: 'Replacement session',
+      startedAt: 200,
+    });
+
+    expect(
+      store.acceptShellEvent(
+        {
+          type: 'shell-event',
+          sequence: 2,
+          revision: 2,
+          domain: 'runtime',
+          data: {
+            kind: 'upsert',
+            runtime: {
+              runtimeId: 'runtime-1',
+              liveState: 'working',
+              pendingInteractions: [],
+              session: { id: 'replacement-session', entries: [] },
+            },
+          },
+        } as unknown as ShellFeedEvent,
+        1,
+      ),
+    ).toBe(true);
+    const afterRuntime = selectSnapshot(store.getSnapshot());
+    expect(afterRuntime?.sessions.map((session) => session.id)).toEqual([
+      'existing-session',
+      'replacement-session',
+    ]);
+    expect(afterRuntime?.sessions[1]?.startedAt).toBe(200);
+    expect(
+      store.getSnapshot().runtimesById['runtime-1']?.session,
+    ).toMatchObject({
+      id: 'replacement-session',
+      name: 'Replacement session',
+    });
+  });
+
   it('converges an offline runtime patch with its authoritative snapshot', () => {
     const store = new DashboardLiveStore();
     const online = {
