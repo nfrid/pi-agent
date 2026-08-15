@@ -12,7 +12,7 @@ import {
   tryParseSchema,
 } from '@pi-dashboard/protocol';
 import Fastify from 'fastify';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DashboardApplication } from './application/dashboard-application.js';
 import { MetadataStore } from './metadata.js';
 import { type DashboardRouteContext, dashboardRoutes } from './routes.js';
@@ -336,6 +336,58 @@ describe('dashboard tRPC boundary', () => {
       await fixture.application.close();
       await rm(fixture.root, { recursive: true, force: true });
     }
+  });
+
+  it('serves runtime command receipts and rejects malformed input/output', async () => {
+    const app = Fastify();
+    apps.push(app);
+    const routeContext = context();
+    const runtimeCommand = vi.fn(async () => ({
+      runtimeId: 'runtime-1',
+      commandId: 'command-1',
+      status: 'completed' as const,
+      result: { accepted: true },
+    }));
+    routeContext.runtimeCommand = runtimeCommand;
+    await app.register(dashboardRoutes, { context: routeContext });
+    await app.ready();
+
+    const valid = await app.inject({
+      method: 'POST',
+      url: '/trpc/runtimeCommand',
+      headers: authHeaders(),
+      payload: {
+        runtimeId: 'runtime-1',
+        command: { id: 'command-1', type: 'abort' },
+      },
+    });
+    expect(valid.statusCode).toBe(200);
+    expect(valid.json().result.data.status).toBe('completed');
+    expect(runtimeCommand).toHaveBeenCalledOnce();
+
+    const malformed = await app.inject({
+      method: 'POST',
+      url: '/trpc/runtimeCommand',
+      headers: authHeaders(),
+      payload: {
+        runtimeId: 'runtime-1',
+        command: { id: 'command-2', type: 'abort', extra: true },
+      },
+    });
+    expect(malformed.statusCode).toBe(400);
+    expect(runtimeCommand).toHaveBeenCalledOnce();
+
+    runtimeCommand.mockResolvedValueOnce({ invalid: true } as never);
+    const malformedOutput = await app.inject({
+      method: 'POST',
+      url: '/trpc/runtimeCommand',
+      headers: authHeaders(),
+      payload: {
+        runtimeId: 'runtime-1',
+        command: { id: 'command-3', type: 'abort' },
+      },
+    });
+    expect(malformedOutput.statusCode).toBe(500);
   });
 
   it('rejects malformed requests and reports a stable protocol mismatch code', async () => {

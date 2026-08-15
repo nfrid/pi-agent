@@ -25,6 +25,8 @@ import {
   parseFrame,
   parseNormalizedMessagePayload,
   parseProtocolInfo,
+  parseRuntimeCommandInput,
+  parseRuntimeCommandOutput,
   parseRuntimeExtensionSurface,
   parseRuntimeSnapshot,
   parseSessionAdoptCommand,
@@ -44,6 +46,40 @@ import {
 } from './index.js';
 
 describe('dashboard protocol', () => {
+  it('validates typed runtime command input and receipts', () => {
+    expect(
+      parseRuntimeCommandInput({
+        runtimeId: 'runtime-1',
+        command: { id: 'command-1', type: 'abort' },
+      }),
+    ).toEqual({
+      runtimeId: 'runtime-1',
+      command: { id: 'command-1', type: 'abort' },
+    });
+    expect(
+      parseRuntimeCommandOutput({
+        runtimeId: 'runtime-1',
+        commandId: 'command-1',
+        status: 'already-completed',
+        result: { accepted: true },
+      }).status,
+    ).toBe('already-completed');
+    expect(() =>
+      parseRuntimeCommandInput({
+        runtimeId: 'runtime-1',
+        command: { id: 'command-1', type: 'abort', extra: true },
+      }),
+    ).toThrow();
+    expect(() =>
+      parseRuntimeCommandOutput({
+        runtimeId: 'runtime-1',
+        commandId: 'command-1',
+        status: 'unexpected',
+        result: null,
+      }),
+    ).toThrow();
+  });
+
   it('negotiates strict protocol information and bootstrap requests', () => {
     const info = parseProtocolInfo({
       protocolVersion: 2,

@@ -1046,6 +1046,38 @@ export const BridgeCommandSchema = Type.Union([
 export type BridgeCommand = Static<typeof BridgeCommandSchema>;
 export type BridgeCommandBase = { id: string };
 
+/** One bounded, idempotent browser command sent to a live runtime. */
+export const RuntimeCommandInputSchema = Type.Object(
+  {
+    runtimeId: IdentifierSchema,
+    command: BridgeCommandSchema,
+  },
+  { additionalProperties: false },
+);
+export type RuntimeCommandInput = Static<typeof RuntimeCommandInputSchema>;
+export const RuntimeCommandRequestSchema = RuntimeCommandInputSchema;
+export type RuntimeCommandRequest = RuntimeCommandInput;
+
+export const RuntimeCommandStatusSchema = Type.Union([
+  Type.Literal('completed'),
+  Type.Literal('already-completed'),
+]);
+export type RuntimeCommandStatus = Static<typeof RuntimeCommandStatusSchema>;
+export const RuntimeCommandOutputSchema = Type.Object(
+  {
+    runtimeId: IdentifierSchema,
+    commandId: Type.String({ minLength: 1, maxLength: 128 }),
+    status: RuntimeCommandStatusSchema,
+    result: Type.Unknown(),
+  },
+  { additionalProperties: false },
+);
+export type RuntimeCommandOutput = Static<typeof RuntimeCommandOutputSchema>;
+export const RuntimeCommandReceiptSchema = RuntimeCommandOutputSchema;
+export type RuntimeCommandReceipt = RuntimeCommandOutput;
+export const RuntimeCommandResponseSchema = RuntimeCommandOutputSchema;
+export type RuntimeCommandResponse = RuntimeCommandOutput;
+
 const EventFrameSchema = Type.Object(
   {
     kind: Type.Literal('event'),

@@ -263,6 +263,39 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
         );
     },
   },
+  {
+    version: 7,
+    name: 'runtime-command-receipt-fingerprint',
+    up(db) {
+      const tableExists = db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='command_receipt'",
+        )
+        .get();
+      if (!tableExists)
+        db.exec(`
+          CREATE TABLE command_receipt (
+            idempotency_key TEXT PRIMARY KEY,
+            command_type TEXT NOT NULL,
+            resource_type TEXT,
+            resource_id TEXT,
+            result_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            runtime_id TEXT,
+            command_fingerprint TEXT
+          )
+        `);
+      else {
+        const existing = columns(db, 'command_receipt');
+        if (!existing.has('runtime_id'))
+          db.exec('ALTER TABLE command_receipt ADD COLUMN runtime_id TEXT');
+        if (!existing.has('command_fingerprint'))
+          db.exec(
+            'ALTER TABLE command_receipt ADD COLUMN command_fingerprint TEXT',
+          );
+      }
+    },
+  },
 ];
 
 /** Apply each numbered migration exactly once, including on pre-migration DBs. */

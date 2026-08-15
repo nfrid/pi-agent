@@ -9,6 +9,7 @@ import {
 } from '@pi-dashboard/domain';
 import {
   type ActiveDelegateTranscriptBaseline,
+  type BridgeCommand,
   type BridgeEvent,
   type BrowserSnapshot,
   type DelegateHistoryResponse,
@@ -399,6 +400,8 @@ export class DashboardServerImpl implements DashboardServer {
         this.changed();
         return result;
       },
+      runtimeCommand: async (runtimeId: string, command: BridgeCommand) =>
+        this.application.runtime.commandWithReceipt(runtimeId, command),
       commandRuntime: async (runtimeId, input, imageBuffers) => {
         if (!input || typeof input !== 'object' || Array.isArray(input))
           throw new Error('Invalid command body.');

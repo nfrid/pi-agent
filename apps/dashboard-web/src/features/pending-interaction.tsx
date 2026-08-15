@@ -209,7 +209,11 @@ function InteractionCard({
           { interactionId: interaction.id, answer: value },
         );
       else if (legacyInteraction)
-        await answerMutation.mutateAsync({ id: interaction.id, answer: value });
+        await answerMutation.mutateAsync({
+          runtimeId: runtime.runtimeId,
+          id: interaction.id,
+          answer: value,
+        });
       else throw new Error('Answer action is not supported by this runtime.');
       setSent(true);
     } catch (cause) {
@@ -227,7 +231,10 @@ function InteractionCard({
           { interactionId: interaction.id },
         );
       else if (legacyInteraction)
-        await cancelMutation.mutateAsync(interaction.id);
+        await cancelMutation.mutateAsync({
+          runtimeId: runtime.runtimeId,
+          id: interaction.id,
+        });
       else throw new Error('Cancel action is not supported by this runtime.');
       setSent(true);
     } catch (cause) {

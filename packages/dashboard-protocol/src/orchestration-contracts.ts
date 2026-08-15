@@ -237,6 +237,16 @@ export const CommandReceiptSchema = Type.Object(
     commandType: Type.String({ minLength: 1, maxLength: 128 }),
     resourceType: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     resourceId: Type.Optional(IdentifierSchema),
+    /** Runtime command receipts share this table with orchestration receipts. */
+    runtimeId: Type.Optional(IdentifierSchema),
+    /** Fixed-size digest used to reject ID reuse with different intent. */
+    commandFingerprint: Type.Optional(
+      Type.String({
+        minLength: 64,
+        maxLength: 64,
+        pattern: '^[0-9a-f]{64}$',
+      }),
+    ),
     result: Type.Unknown(),
     createdAt: TimestampSchema,
   },

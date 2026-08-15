@@ -1,6 +1,7 @@
 import {
   type ActiveDelegateTranscriptBaseline,
   type AuthoritativeSessionSnapshot,
+  type BridgeCommand,
   type BrowserSnapshot,
   type CancelCommand,
   type Checkout,
@@ -28,6 +29,7 @@ import {
   tryParseDelegateHistoryResponse,
   tryParseDelegateHistoryRunDetailResponse,
   tryParseProtocolInfo,
+  tryParseRuntimeCommandOutput,
   tryParseSessionApiResponse,
   tryParseShellSnapshotResponse,
 } from '@pi-dashboard/protocol';
@@ -743,16 +745,29 @@ export class DashboardHttpClient {
     runtimeId: string,
     command: Record<string, unknown>,
   ): Promise<unknown> {
-    // IDs are allocated once at the browser boundary. The daemon/bridge never
-    // retries a command and can therefore fail closed on a replacement epoch.
+    // Allocate before entering tRPC so a caller-owned ID survives endpoint
+    // selection and any mutation retry. Multipart callers remain on REST.
     const withId =
       typeof command.id === 'string' && command.id.length > 0
         ? command
         : { ...command, id: this.newCommandId('dashboard-command') };
-    return this.request(
-      `/api/runtimes/${encodeURIComponent(runtimeId)}/command`,
-      { method: 'POST', body: JSON.stringify(withId) },
-    );
+    const client = await this.getTrpcClient();
+    let value: unknown;
+    try {
+      value = await client.runtimeCommand.mutate({
+        runtimeId,
+        command: withId as BridgeCommand,
+      });
+    } catch (cause) {
+      throw dashboardErrorFromTrpc(cause);
+    }
+    const receipt = tryParseRuntimeCommandOutput(value);
+    if (!receipt)
+      throw malformedOutput(
+        'Dashboard returned an invalid runtime command receipt.',
+        value,
+      );
+    return receipt;
   }
 
   private newCommandId(prefix: string): string {
@@ -833,17 +848,29 @@ export class DashboardHttpClient {
     );
   }
 
-  async answerInteraction(id: string, answer: string): Promise<unknown> {
-    return this.request(`/api/interactions/${encodeURIComponent(id)}/answer`, {
-      method: 'POST',
-      body: JSON.stringify({ answer }),
+  async answerInteraction(
+    runtimeId: string,
+    interactionId: string,
+    answer: unknown,
+    commandId?: string,
+  ): Promise<unknown> {
+    return this.sendCommand(runtimeId, {
+      id: commandId ?? this.newCommandId('dashboard-interaction-answer'),
+      type: 'interaction.answer',
+      interactionId,
+      answer,
     });
   }
 
-  async cancelInteraction(id: string): Promise<unknown> {
-    return this.request(`/api/interactions/${encodeURIComponent(id)}/cancel`, {
-      method: 'POST',
-      body: '{}',
+  async cancelInteraction(
+    runtimeId: string,
+    interactionId: string,
+    commandId?: string,
+  ): Promise<unknown> {
+    return this.sendCommand(runtimeId, {
+      id: commandId ?? this.newCommandId('dashboard-interaction-cancel'),
+      type: 'interaction.cancel',
+      interactionId,
     });
   }
 

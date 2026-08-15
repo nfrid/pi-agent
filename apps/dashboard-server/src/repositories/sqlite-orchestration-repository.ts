@@ -90,6 +90,7 @@ function optionalString(
 function jsonValue<T>(value: unknown): T | undefined {
   return value == null ? undefined : (JSON.parse(String(value)) as T);
 }
+
 function rows<T>(value: unknown): T[] {
   return value as T[];
 }
@@ -975,6 +976,12 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
       ...(optionalString(row, 'resource_id') === undefined
         ? {}
         : { resourceId: optionalString(row, 'resource_id') }),
+      ...(optionalString(row, 'runtime_id') === undefined
+        ? {}
+        : { runtimeId: optionalString(row, 'runtime_id') }),
+      ...(optionalString(row, 'command_fingerprint') === undefined
+        ? {}
+        : { commandFingerprint: optionalString(row, 'command_fingerprint') }),
       result: JSON.parse(stringValue(row, 'result_json')) as unknown,
       createdAt: Number(row.created_at),
     };
@@ -983,9 +990,14 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
   recordCommandReceipt(receipt: CommandReceipt): void {
     this.withTransaction(() => {
       const existing = this.getCommandReceipt(receipt.idempotencyKey);
-      if (existing && existing.commandType !== receipt.commandType)
+      if (
+        existing &&
+        (existing.commandType !== receipt.commandType ||
+          existing.runtimeId !== receipt.runtimeId ||
+          existing.commandFingerprint !== receipt.commandFingerprint)
+      )
         throw idempotencyConflict(receipt.idempotencyKey, existing.commandType);
-      this.insertReceipt(receipt);
+      if (!existing) this.insertReceipt(receipt);
     });
   }
 
@@ -1287,15 +1299,17 @@ export class SqliteOrchestrationRepository implements OrchestrationRepository {
     this.db
       .prepare(
         `INSERT INTO command_receipt
-         (idempotency_key,command_type,resource_type,resource_id,result_json,created_at)
-         VALUES (?,?,?,?,?,?)`,
+         (idempotency_key,command_type,resource_type,resource_id,runtime_id,command_fingerprint,result_json,created_at)
+         VALUES (?,?,?,?,?,?,?,?)`,
       )
       .run(
         receipt.idempotencyKey,
         receipt.commandType,
         receipt.resourceType ?? null,
         receipt.resourceId ?? null,
-        JSON.stringify(receipt.result),
+        receipt.runtimeId ?? null,
+        receipt.commandFingerprint ?? null,
+        JSON.stringify(receipt.result === undefined ? null : receipt.result),
         receipt.createdAt,
       );
   }

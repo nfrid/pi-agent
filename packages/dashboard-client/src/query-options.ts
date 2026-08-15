@@ -83,6 +83,20 @@ function withMutationCommandId<T extends { commandId: string }>(
 }
 
 const snapshotRequestGenerations = new WeakMap<object, number>();
+const runtimeCommandIds = new WeakMap<object, string>();
+
+function runtimeCommandId(command: Record<string, unknown>): string {
+  if (typeof command.id === 'string' && command.id.length > 0)
+    return command.id;
+  const prior = runtimeCommandIds.get(command);
+  if (prior) return prior;
+  const id = mutationCommandId('dashboard-command');
+  runtimeCommandIds.set(command, id);
+  return id;
+}
+
+const commandNetworkRetry = (failureCount: number, error: unknown): boolean =>
+  dashboardHttpErrorKind(error) === 'network' && failureCount < 2;
 
 export function snapshotRequestGeneration(
   snapshot: BrowserSnapshot,
@@ -278,8 +292,12 @@ export function commandMutationOptions(client: DashboardHttpClient) {
     }: {
       runtimeId: string;
       command: Record<string, unknown>;
-    }) => client.sendCommand(runtimeId, command),
-    retry: false,
+    }) =>
+      client.sendCommand(runtimeId, {
+        ...command,
+        id: runtimeCommandId(command),
+      }),
+    retry: commandNetworkRetry,
   });
 }
 
@@ -322,15 +340,32 @@ export function restartRuntimeMutationOptions(client: DashboardHttpClient) {
 
 export function interactionAnswerMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
-    mutationFn: ({ id, answer }: { id: string; answer: string }) =>
-      client.answerInteraction(id, answer),
+    mutationFn: ({
+      runtimeId,
+      id,
+      answer,
+      commandId,
+    }: {
+      runtimeId: string;
+      id: string;
+      answer: unknown;
+      commandId?: string;
+    }) => client.answerInteraction(runtimeId, id, answer, commandId),
     retry: false,
   });
 }
 
 export function interactionCancelMutationOptions(client: DashboardHttpClient) {
   return mutationOptions({
-    mutationFn: (id: string) => client.cancelInteraction(id),
+    mutationFn: ({
+      runtimeId,
+      id,
+      commandId,
+    }: {
+      runtimeId: string;
+      id: string;
+      commandId?: string;
+    }) => client.cancelInteraction(runtimeId, id, commandId),
     retry: false,
   });
 }

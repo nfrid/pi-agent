@@ -362,12 +362,13 @@ describe('DashboardHttpClient command requests', () => {
   });
 
   it('allocates one command ID without changing caller-owned IDs', async () => {
-    const fetch = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        }),
+    const fetch = vi.fn(async () =>
+      trpcResponse({
+        runtimeId: 'runtime-1',
+        commandId: 'dashboard-command-1',
+        status: 'completed',
+        result: { ok: true },
+      }),
     );
     const client = new DashboardHttpClient({
       fetch,
@@ -380,11 +381,17 @@ describe('DashboardHttpClient command requests', () => {
     await client.sendCommand('runtime-1', { type: 'abort' });
     await client.sendCommand('runtime-1', { id: 'caller-id', type: 'abort' });
     const calls = fetch.mock.calls as unknown as Array<[unknown, RequestInit]>;
-    const first = JSON.parse(String(calls[0]?.[1]?.body)) as { id?: string };
-    const second = JSON.parse(String(calls[1]?.[1]?.body)) as { id?: string };
-    expect(first.id).toBeTruthy();
-    expect(second.id).toBe('caller-id');
-    expect(first.id).not.toBe(second.id);
+    const first = JSON.parse(String(calls[1]?.[1]?.body)) as {
+      runtimeId?: string;
+      command?: { id?: string };
+    };
+    const second = JSON.parse(String(calls[2]?.[1]?.body)) as {
+      runtimeId?: string;
+      command?: { id?: string };
+    };
+    expect(first.command?.id).toBeTruthy();
+    expect(second.command?.id).toBe('caller-id');
+    expect(first.command?.id).not.toBe(second.command?.id);
   });
 
   it('uses a stable non-retried ID for restart requests', async () => {
@@ -829,7 +836,12 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
       async (input: RequestInfo | URL, _init?: RequestInit) =>
         String(input).endsWith('/trpc/protocolInfo')
           ? protocolInfoResponse()
-          : new Response(JSON.stringify({ ok: true }), { status: 200 }),
+          : trpcResponse({
+              runtimeId: 'runtime-1',
+              commandId: 'command-1',
+              status: 'completed',
+              result: null,
+            }),
     );
     const client = new DashboardHttpClient({
       baseUrl: '/base',
@@ -841,7 +853,7 @@ describe('DashboardHttpClient candidate endpoint selection', () => {
     await client.sendCommand('runtime-1', { id: 'command-1', type: 'abort' });
     expect(fetch.mock.calls.map(([input]) => input)).toEqual([
       '/lan/trpc/protocolInfo',
-      '/lan/api/runtimes/runtime-1/command',
+      '/lan/trpc/runtimeCommand',
     ]);
     expect(fetch.mock.calls[1]?.[1]).toEqual(
       expect.objectContaining({ method: 'POST' }),

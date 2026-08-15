@@ -236,9 +236,53 @@ describe('dashboard query and mutation factories', () => {
     expect(createThread).toHaveBeenCalledOnce();
   });
 
-  it('never retries prompt, command, launch, or rename mutations', () => {
+  it('reuses one command ID when a network retry reruns the mutation', async () => {
+    const sendCommand = vi.fn(async (_runtimeId: string, command: unknown) => ({
+      command,
+    }));
+    const options = commandMutationOptions({
+      sendCommand,
+    } as unknown as DashboardHttpClient);
+    if (!options.mutationFn) throw new Error('Mutation function is missing.');
+    const variables = {
+      runtimeId: 'runtime-1',
+      command: { type: 'abort' },
+    };
+    const mutationFn = options.mutationFn as unknown as (
+      value: typeof variables,
+    ) => Promise<unknown>;
+    await mutationFn(variables);
+    await mutationFn(variables);
+    const first = sendCommand.mock.calls[0]?.[1] as { id?: string };
+    const second = sendCommand.mock.calls[1]?.[1] as { id?: string };
+    expect(first.id).toBeTruthy();
+    expect(second.id).toBe(first.id);
+  });
+
+  it('retries runtime commands only for network failures', () => {
     expect(renameSessionMutationOptions(client).retry).toBe(false);
-    expect(commandMutationOptions(client).retry).toBe(false);
+    const retry = commandMutationOptions(client).retry;
+    expect(typeof retry).toBe('function');
+    expect(
+      (retry as (count: number, error: unknown) => boolean)(0, {
+        kind: 'network',
+      }),
+    ).toBe(true);
+    expect(
+      (retry as (count: number, error: unknown) => boolean)(1, {
+        kind: 'network',
+      }),
+    ).toBe(true);
+    expect(
+      (retry as (count: number, error: unknown) => boolean)(2, {
+        kind: 'network',
+      }),
+    ).toBe(false);
+    expect(
+      (retry as (count: number, error: unknown) => boolean)(0, {
+        kind: 'domain',
+      }),
+    ).toBe(false);
     expect(startRuntimeMutationOptions(client).retry).toBe(false);
   });
 

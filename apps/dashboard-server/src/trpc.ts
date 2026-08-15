@@ -1,10 +1,13 @@
 import {
   type AuthoritativeSessionSnapshot,
+  type BridgeCommand,
   type BrowserSnapshot,
   DASHBOARD_PROTOCOL_VERSION,
   type ProtocolInfo,
   ProtocolInfoSchema,
   parseAuthoritativeSessionSnapshot,
+  parseRuntimeCommandInput,
+  parseRuntimeCommandOutput,
   parseSchema,
   parseSessionFeedInput,
   parseSessionFeedMessage,
@@ -35,6 +38,10 @@ export interface DashboardTrpcContext {
     sessionId: string,
     before?: string,
   ) => Promise<AuthoritativeSessionSnapshot>;
+  readonly runtimeCommand?: (
+    runtimeId: string,
+    command: BridgeCommand,
+  ) => Promise<unknown>;
   readonly shellFeed?: ShellFeed;
   readonly sessionFeeds?: SessionFeedRegistry;
   readonly shellSnapshotAt?: (sequence: number) => unknown;
@@ -201,6 +208,23 @@ const dashboardRouter = t.router({
       try {
         return parseAuthoritativeSessionSnapshot(
           await ctx.sessionSnapshot(input.sessionId, input.before),
+        );
+      } catch (error) {
+        throw toDashboardTrpcError(error);
+      }
+    }),
+  runtimeCommand: t.procedure
+    .input((value: unknown) => parseRuntimeCommandInput(value))
+    .output((value: unknown) => parseRuntimeCommandOutput(value))
+    .mutation(async ({ ctx, input }) => {
+      if (!ctx.runtimeCommand)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Runtime commands are unavailable.',
+        });
+      try {
+        return parseRuntimeCommandOutput(
+          await ctx.runtimeCommand(input.runtimeId, input.command),
         );
       } catch (error) {
         throw toDashboardTrpcError(error);

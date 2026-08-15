@@ -696,6 +696,7 @@ export class DashboardApplication {
       options.registry,
       options.manager,
       options.sessions,
+      options.metadata.orchestration,
     );
     this.sessions = new SessionService(options.sessions);
     this.workspaces = new WorkspaceService(

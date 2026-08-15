@@ -50,6 +50,10 @@ import {
   type ProtocolInfo,
   ProtocolInfoSchema,
   type QueueDraftMode,
+  type RuntimeCommandInput,
+  RuntimeCommandInputSchema,
+  type RuntimeCommandOutput,
+  RuntimeCommandOutputSchema,
   type RuntimeHelloCapabilities,
   type RuntimeSnapshot,
   type RuntimeSnapshotPatch,
@@ -390,6 +394,43 @@ export const tryParseBridgeCommand = (
     return undefined;
   }
 };
+
+export function parseRuntimeCommandInput(value: unknown): RuntimeCommandInput {
+  const input = parseSchema(
+    RuntimeCommandInputSchema,
+    value,
+    'runtime command input',
+  );
+  if ('images' in input.command && input.command.images !== undefined)
+    throw new Error('Image attachments require multipart upload.');
+  return { ...input, command: parseBridgeCommand(input.command) };
+}
+export const tryParseRuntimeCommandInput = (
+  value: unknown,
+): RuntimeCommandInput | undefined => {
+  try {
+    return parseRuntimeCommandInput(value);
+  } catch {
+    return undefined;
+  }
+};
+export function parseRuntimeCommandOutput(
+  value: unknown,
+): RuntimeCommandOutput {
+  return parseSchema(
+    RuntimeCommandOutputSchema,
+    value,
+    'runtime command output',
+  );
+}
+export const tryParseRuntimeCommandOutput = (
+  value: unknown,
+): RuntimeCommandOutput | undefined =>
+  tryParseSchema(RuntimeCommandOutputSchema, value);
+export const parseRuntimeCommandRequest = parseRuntimeCommandInput;
+export const tryParseRuntimeCommandRequest = tryParseRuntimeCommandInput;
+export const parseRuntimeCommandReceipt = parseRuntimeCommandOutput;
+export const tryParseRuntimeCommandReceipt = tryParseRuntimeCommandOutput;
 
 function validateRuntimeSnapshotCapabilities(
   snapshot: Pick<RuntimeSnapshot, 'capabilities'>,

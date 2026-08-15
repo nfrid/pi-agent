@@ -2,6 +2,7 @@ import {
   type ActiveDelegateTranscriptBaseline,
   ArchiveThreadCommandSchema,
   type AuthoritativeSessionSnapshot,
+  type BridgeCommand,
   type BrowserSnapshot,
   CancelCommandSchema,
   CheckoutActionCommandSchema,
@@ -123,6 +124,8 @@ export interface DashboardRouteContext {
     input: unknown,
     images: readonly Buffer[],
   ): Promise<unknown>;
+  /** Non-multipart browser commands use the typed tRPC receipt boundary. */
+  runtimeCommand?(runtimeId: string, command: BridgeCommand): Promise<unknown>;
   stopRuntime(runtimeId: string, force: boolean): Promise<void>;
   interaction(
     interactionId: string,
@@ -306,6 +309,7 @@ export const dashboardRoutes: FastifyPluginAsync<{
     sessionFeeds: context.sessionFeeds,
     shellSnapshotAt: context.shellSnapshotAt,
     sessionSnapshotAt: context.sessionSnapshotAt,
+    runtimeCommand: context.runtimeCommand,
   });
   app.setNotFoundHandler((_request, reply) =>
     reply.code(404).send({ error: 'Not found.' }),
