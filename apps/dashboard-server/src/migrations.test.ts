@@ -43,7 +43,7 @@ it('applies numbered dashboard migrations idempotently', async () => {
 describe('migration metadata', () => {
   it('uses stable ascending migration numbers', () => {
     expect(DASHBOARD_MIGRATIONS.map((migration) => migration.version)).toEqual([
-      1, 2, 3, 4, 5, 6, 7,
+      1, 2, 3, 4, 5, 6, 7, 8,
     ]);
   });
 
@@ -78,6 +78,54 @@ describe('migration metadata', () => {
       expect(db.prepare('SELECT mode FROM managed_launch').get()).toEqual({
         mode: 'write',
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each([
+    'worktree-owner-projection',
+    'runtime-command-receipt-fingerprint',
+  ])('reconciles the forked version-seven migration: %s', (versionSeven) => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      runMigrations(db, DASHBOARD_MIGRATIONS.slice(0, 6));
+      if (versionSeven === 'worktree-owner-projection')
+        db.exec(`
+          CREATE TABLE worktree_owner (
+            checkout_id TEXT PRIMARY KEY REFERENCES checkout(id) ON DELETE CASCADE,
+            owner_kind TEXT NOT NULL CHECK (owner_kind IN ('execution','delegate-session')),
+            owner_id TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+        `);
+      else
+        db.exec(`
+          ALTER TABLE command_receipt ADD COLUMN runtime_id TEXT;
+          ALTER TABLE command_receipt ADD COLUMN command_fingerprint TEXT;
+        `);
+      db.prepare(
+        'INSERT INTO schema_migrations (version,name,applied_at) VALUES (7,?,7)',
+      ).run(versionSeven);
+
+      runMigrations(db);
+
+      expect(
+        db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='worktree_owner'",
+          )
+          .get(),
+      ).toEqual({ name: 'worktree_owner' });
+      expect(
+        db
+          .prepare('PRAGMA table_info(command_receipt)')
+          .all()
+          .map((row) => row.name),
+      ).toEqual(expect.arrayContaining(['runtime_id', 'command_fingerprint']));
+      expect(
+        db.prepare('SELECT name FROM schema_migrations WHERE version=8').get(),
+      ).toEqual({ name: 'reconcile-worktree-owner-and-command-receipts' });
     } finally {
       db.close();
     }

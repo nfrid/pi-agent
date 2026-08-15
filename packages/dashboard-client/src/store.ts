@@ -1363,7 +1363,7 @@ export class DashboardLiveStore {
         activeEpoch === currentProjection.runtimeEpoch) &&
       (active?.runtimeSeq === undefined ||
         currentProjection?.runtimeEpoch !== activeEpoch ||
-        (currentProjection?.lastRuntimeSeq ?? -1) < active.runtimeSeq);
+        (currentProjection?.lastRuntimeSeq ?? -1) <= active.runtimeSeq);
     if (activeIsCurrent && active) {
       const reducerInput = (event: unknown) =>
         ({
@@ -1522,7 +1522,7 @@ export class DashboardLiveStore {
             active.runtimeEpoch === activeRuntimeOrdering.runtimeEpoch) &&
           (active.runtimeSeq === undefined ||
             activeRuntimeOrdering.runtimeEpoch !== activeEpoch ||
-            activeRuntimeOrdering.lastRuntimeSeq < active.runtimeSeq)));
+            activeRuntimeOrdering.lastRuntimeSeq <= active.runtimeSeq)));
     if (runtimeOverlayAccepted && activeRuntime && active) {
       const delegateSurface = activeRuntime.extensionSurfaces?.find(
         (surface) => surface.rendererId === 'delegate.status',

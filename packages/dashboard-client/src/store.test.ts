@@ -2367,6 +2367,78 @@ describe('DashboardLiveStore', () => {
     ).toBe('new-session');
   });
 
+  it('clears stale delegate surfaces from an equal-sequence authoritative overlay', () => {
+    const store = new DashboardLiveStore();
+    const runtime = {
+      runtimeId: 'runtime-1',
+      liveState: 'working',
+      online: true,
+      cwd: '/tmp',
+      session: { id: 'session-1', entries: [], entriesComplete: false },
+      pendingInteractions: [],
+      extensionSurfaces: [
+        {
+          id: 'delegate.status',
+          rendererId: 'delegate.status',
+          placement: 'main',
+          viewModel: {
+            version: 1,
+            statuses: [
+              {
+                id: 'stale-run',
+                runId: 'stale-run',
+                lineageId: 'stale-lineage',
+                name: 'Stale delegate',
+                kind: 'background',
+                state: 'queued',
+                createdAt: 1,
+                allowWrites: false,
+                transcript: [],
+              },
+            ],
+          },
+        },
+      ],
+    };
+    store.installSnapshot({
+      ...snapshot('daemon-1', 0),
+      runtimes: [runtime],
+    } as unknown as BrowserSnapshot);
+    store.applyEventEnvelope({
+      cursor: 1,
+      emittedAt: 1,
+      runtimeId: 'runtime-1',
+      runtimeEpoch: 'epoch-1',
+      runtimeSeq: 7,
+      sessionId: 'session-1',
+      event: { type: 'runtime.hello', protocolVersion: 1, snapshot: runtime },
+    } as unknown as StreamRecord);
+
+    store.hydrateSession({
+      ...sessionResponse(1),
+      runtimeEpoch: 'epoch-1',
+      runtimeSeq: 7,
+      metadata: {
+        ...sessionResponse(1).metadata,
+        activeRuntimeId: 'runtime-1',
+      },
+      active: {
+        ...sessionResponse(1).active,
+        runtimeId: 'runtime-1',
+        runtimeEpoch: 'epoch-1',
+        runtimeSeq: 7,
+        delegates: [],
+      },
+    });
+
+    const surface = store
+      .getSnapshot()
+      .runtimesById['runtime-1']?.extensionSurfaces?.find(
+        (candidate) => candidate.rendererId === 'delegate.status',
+      );
+    expect(surface?.viewModel).toMatchObject({ statuses: [] });
+  });
+
   it('resets state for daemon replacement and refuses stale HTTP generations', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 12));

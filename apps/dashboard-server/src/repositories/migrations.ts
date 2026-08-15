@@ -265,8 +265,32 @@ export const DASHBOARD_MIGRATIONS: readonly DashboardMigration[] = [
   },
   {
     version: 7,
-    name: 'runtime-command-receipt-fingerprint',
+    name: 'worktree-owner-projection',
     up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS worktree_owner (
+          checkout_id TEXT PRIMARY KEY REFERENCES checkout(id) ON DELETE CASCADE,
+          owner_kind TEXT NOT NULL CHECK (owner_kind IN ('execution','delegate-session')),
+          owner_id TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+      `);
+    },
+  },
+  {
+    version: 8,
+    name: 'reconcile-worktree-owner-and-command-receipts',
+    up(db) {
+      // Version 7 existed independently on two merged histories. Repair both
+      // possible schemas so either ledger converges at version 8.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS worktree_owner (
+          checkout_id TEXT PRIMARY KEY REFERENCES checkout(id) ON DELETE CASCADE,
+          owner_kind TEXT NOT NULL CHECK (owner_kind IN ('execution','delegate-session')),
+          owner_id TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+      `);
       const tableExists = db
         .prepare(
           "SELECT 1 FROM sqlite_master WHERE type='table' AND name='command_receipt'",
