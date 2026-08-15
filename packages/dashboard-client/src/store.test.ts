@@ -557,6 +557,60 @@ describe('DashboardLiveStore', () => {
     });
   });
 
+  it('hydrates older active messages and tools before newer persisted history', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 4));
+    store.hydrateSession({
+      ...sessionResponse(4),
+      entries: [
+        {
+          type: 'message',
+          id: 'persisted-newer',
+          message: {
+            role: 'assistant',
+            content: 'newer answer',
+            timestamp: 200,
+          },
+        },
+      ],
+      active: {
+        pendingInteractions: [],
+        messages: [
+          {
+            messageId: 'active-older',
+            role: 'assistant',
+            content: 'older answer',
+            timestamp: 100,
+            turnId: 'turn-older',
+            toolCallIds: ['active-tool'],
+          },
+        ],
+        tools: [
+          {
+            toolCallId: 'active-tool',
+            name: 'search',
+            status: 'running',
+            turnId: 'turn-older',
+          },
+        ],
+        delegates: [],
+        truncated: false,
+      },
+      completeThroughCursor: false,
+    } as AuthoritativeSessionSnapshot);
+
+    const projection = store.getSnapshot().transcriptsBySessionId['session-1'];
+    expect(projection?.order).toEqual([
+      'active-older',
+      'active-tool',
+      'persisted-newer',
+    ]);
+    expect(projection?.items['active-tool']).toMatchObject({
+      kind: 'tool',
+      status: 'running',
+    });
+  });
+
   it('applies compaction completion as a transcript delta', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

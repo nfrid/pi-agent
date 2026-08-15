@@ -427,6 +427,227 @@ describe('dashboard domain reducers', () => {
     });
   });
 
+  it('inserts delayed older messages and owned tools into transcript chronology', () => {
+    let state = hydrateTranscript(
+      [
+        { type: 'custom_message', id: 'opaque-boundary', text: 'boundary' },
+        {
+          type: 'message',
+          id: 'persisted-newer',
+          message: {
+            role: 'assistant',
+            content: 'newer answer',
+            timestamp: '2024-06-01T13:00:00.000Z',
+          },
+        },
+      ],
+      's',
+    );
+    state = reduceTranscriptEvent(state, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        messageId: 'active-older',
+        role: 'assistant',
+        content: 'older answer',
+        timestamp: 1717243200000,
+        turnId: 'turn-older',
+        toolCallIds: ['active-tool'],
+      },
+    });
+    state = reduceTranscriptEvent(state, {
+      type: 'tool.updated',
+      sessionId: 's',
+      tool: {
+        toolCallId: 'active-tool',
+        name: 'search',
+        status: 'running',
+        turnId: 'turn-older',
+      },
+    });
+
+    expect(state.order).toEqual([
+      'opaque-boundary',
+      'active-older',
+      'active-tool',
+      'persisted-newer',
+    ]);
+    const beforeUpdate = state.order;
+    state = reduceTranscriptEvent(state, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        messageId: 'active-older',
+        role: 'assistant',
+        content: 'older answer updated',
+        timestamp: '1717243200000',
+        phase: 'updated',
+      },
+    });
+    expect(state.order).toBe(beforeUpdate);
+    expect(state.items['active-older']).toMatchObject({
+      content: 'older answer updated',
+      timestamp: '1717243200000',
+    });
+  });
+
+  it('fails closed for missing, invalid, and equal timestamps', () => {
+    const initial = hydrateTranscript(
+      [
+        { type: 'custom_message', id: 'opaque-boundary', text: 'boundary' },
+        {
+          type: 'message',
+          id: 'persisted-newer',
+          message: { role: 'assistant', content: 'newer', timestamp: 200 },
+        },
+      ],
+      's',
+    );
+    let state = reduceTranscriptEvent(initial, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        messageId: 'missing-timestamp',
+        role: 'assistant',
+        content: 'unknown chronology',
+      },
+    });
+    state = reduceTranscriptEvent(state, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        messageId: 'invalid-timestamp',
+        role: 'assistant',
+        content: 'invalid chronology',
+        timestamp: 'not-a-date',
+      },
+    });
+    state = reduceTranscriptEvent(state, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        messageId: 'equal-timestamp',
+        role: 'assistant',
+        content: 'equal chronology',
+        timestamp: '200',
+      },
+    });
+
+    expect(state.order).toEqual([
+      'opaque-boundary',
+      'persisted-newer',
+      'missing-timestamp',
+      'invalid-timestamp',
+      'equal-timestamp',
+    ]);
+  });
+
+  it('scans past unknown and equal rows to the first later timestamp anchor', () => {
+    const initial = hydrateTranscript(
+      [
+        { type: 'custom_message', id: 'opaque-before', text: 'boundary' },
+        {
+          type: 'message',
+          id: 'missing-before',
+          message: { role: 'assistant', content: 'unknown before' },
+        },
+        {
+          type: 'message',
+          id: 'equal-before',
+          message: {
+            role: 'assistant',
+            content: 'equal before',
+            timestamp: 100,
+          },
+        },
+        {
+          type: 'message',
+          id: 'later-anchor',
+          message: { role: 'assistant', content: 'later', timestamp: 200 },
+        },
+        {
+          type: 'message',
+          id: 'missing-after',
+          message: { role: 'assistant', content: 'unknown after' },
+        },
+      ],
+      's',
+    );
+    const state = reduceTranscriptEvent(initial, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        messageId: 'between',
+        role: 'assistant',
+        content: 'between timestamps',
+        timestamp: 150,
+      },
+    });
+
+    expect(state.order).toEqual([
+      'opaque-before',
+      'missing-before',
+      'equal-before',
+      'between',
+      'later-anchor',
+      'missing-after',
+    ]);
+  });
+
+  it('does not compare synthetic scalar clocks with ISO epoch timestamps', () => {
+    const initial = hydrateTranscript(
+      [
+        {
+          type: 'message',
+          id: 'iso-user',
+          message: {
+            role: 'user',
+            content: 'persisted user',
+            timestamp: '2026-08-04T12:00:00.000Z',
+          },
+        },
+      ],
+      's',
+    );
+    const state = reduceTranscriptEvent(initial, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        messageId: 'synthetic-assistant',
+        role: 'assistant',
+        content: 'synthetic live response',
+        timestamp: 1005,
+      },
+    });
+
+    expect(state.order).toEqual(['iso-user', 'synthetic-assistant']);
+  });
+
+  it('uses a nonempty turn ID to place an otherwise unowned tool', () => {
+    let state = hydrateTranscript([], 's');
+    state = reduceTranscriptEvent(state, {
+      type: 'message.updated',
+      sessionId: 's',
+      message: {
+        messageId: 'turn-message',
+        role: 'assistant',
+        content: 'working',
+        turnId: 'turn-1',
+      },
+    });
+    state = reduceTranscriptEvent(state, {
+      type: 'tool.updated',
+      sessionId: 's',
+      tool: {
+        toolCallId: 'turn-tool',
+        name: 'read',
+        status: 'running',
+        turnId: 'turn-1',
+      },
+    });
+    expect(state.order).toEqual(['turn-message', 'turn-tool']);
+  });
+
   it('projects canonical render IDs, pairing, lifecycle, and streaming state', () => {
     let state = hydrateTranscript([], 's');
     state = reduceTranscriptEvent(state, {

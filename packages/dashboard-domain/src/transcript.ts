@@ -327,6 +327,9 @@ function normalizedMessage(
     ...(directToolCallIds(message.content).length > 0
       ? { toolCallIds: directToolCallIds(message.content) }
       : {}),
+    ...(directString(message, 'turnId') === undefined
+      ? {}
+      : { turnId: directString(message, 'turnId') }),
     phase,
   };
 }
@@ -357,6 +360,7 @@ function normalizedTool(value: unknown): NormalizedToolPayload | undefined {
     directString(tool, 'toolCallId') ?? directString(tool, 'id');
   if (!toolCallId) return undefined;
   const status = normalizedToolStatus(tool.status);
+  const turnId = directString(tool, 'turnId');
   return {
     toolCallId,
     name:
@@ -366,6 +370,7 @@ function normalizedTool(value: unknown): NormalizedToolPayload | undefined {
     ...(tool.result === undefined ? {} : { result: tool.result }),
     ...(typeof tool.isError === 'boolean' ? { isError: tool.isError } : {}),
     ...(status === undefined ? {} : { status }),
+    ...(turnId === undefined ? {} : { turnId }),
   };
 }
 
@@ -381,6 +386,122 @@ function copyItems(
   projection: TranscriptProjection,
 ): Record<string, TranscriptItem> {
   return { ...projection.items };
+}
+
+type ComparableTranscriptTimestamp = {
+  domain: 'scalar' | 'epoch';
+  value: number;
+};
+
+/** Normalize timestamps without merging synthetic scalar and wall-clock domains. */
+function comparableTranscriptTimestamp(
+  value: number | string | undefined,
+): ComparableTranscriptTimestamp | undefined {
+  const epochThreshold = 100_000_000_000;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return undefined;
+    return {
+      domain: Math.abs(value) >= epochThreshold ? 'epoch' : 'scalar',
+      value,
+    };
+  }
+  if (typeof value !== 'string' || value.trim().length === 0) return undefined;
+  const text = value.trim();
+  const numeric = Number(text);
+  if (Number.isFinite(numeric))
+    return {
+      domain: Math.abs(numeric) >= epochThreshold ? 'epoch' : 'scalar',
+      value: numeric,
+    };
+  const parsed = Date.parse(text);
+  return Number.isFinite(parsed)
+    ? { domain: 'epoch', value: parsed }
+    : undefined;
+}
+
+/**
+ * Keep existing rows in their established order while placing a new message
+ * before the first message that is provably later in the same clock domain.
+ * Unknown, equal, or cross-domain existing timestamps remain in place while
+ * the scan continues; an unknown incoming timestamp appends.
+ */
+function insertMessageOrder(
+  projection: TranscriptProjection,
+  items: Readonly<Record<string, TranscriptItem>>,
+  messageId: string,
+  timestamp: number | string | undefined,
+): readonly string[] {
+  const normalized = comparableTranscriptTimestamp(timestamp);
+  if (normalized === undefined) return [...projection.order, messageId];
+  let insertionIndex = -1;
+  for (let index = 0; index < projection.order.length; index += 1) {
+    const existing = items[projection.order[index] ?? ''];
+    if (existing?.kind !== 'message') continue;
+    const existingTimestamp = comparableTranscriptTimestamp(existing.timestamp);
+    if (
+      insertionIndex < 0 &&
+      existingTimestamp !== undefined &&
+      existingTimestamp.domain === normalized.domain &&
+      existingTimestamp.value > normalized.value
+    )
+      insertionIndex = index;
+  }
+  return insertionIndex < 0
+    ? [...projection.order, messageId]
+    : [
+        ...projection.order.slice(0, insertionIndex),
+        messageId,
+        ...projection.order.slice(insertionIndex),
+      ];
+}
+
+/** Place a new tool with its canonical message owner when one is known. */
+function insertToolOrder(
+  projection: TranscriptProjection,
+  items: Readonly<Record<string, TranscriptItem>>,
+  payload: NormalizedToolPayload,
+): readonly string[] {
+  let ownerIndex = -1;
+  let ownerToolCallIds: readonly string[] = [];
+  for (let index = 0; index < projection.order.length; index += 1) {
+    const item = items[projection.order[index] ?? ''];
+    if (
+      item?.kind === 'message' &&
+      item.toolCallIds?.includes(payload.toolCallId)
+    ) {
+      ownerIndex = index;
+      ownerToolCallIds = item.toolCallIds;
+      break;
+    }
+  }
+  const hasTurnId = payload.turnId !== undefined && payload.turnId.length > 0;
+  if (ownerIndex < 0 && hasTurnId) {
+    // Prefer the latest same-turn message when an explicit tool owner is not
+    // available; this keeps a tool beside the active turn's final message.
+    for (let index = 0; index < projection.order.length; index += 1) {
+      const item = items[projection.order[index] ?? ''];
+      if (item?.kind === 'message' && item.turnId === payload.turnId)
+        ownerIndex = index;
+    }
+  }
+  if (ownerIndex < 0) return [...projection.order, payload.toolCallId];
+
+  let insertionIndex = ownerIndex + 1;
+  while (insertionIndex < projection.order.length) {
+    const existing = items[projection.order[insertionIndex] ?? ''];
+    if (existing?.kind !== 'tool') break;
+    const associated =
+      ownerToolCallIds.length > 0
+        ? ownerToolCallIds.includes(existing.toolCallId)
+        : hasTurnId && existing.turnId === payload.turnId;
+    if (!associated) break;
+    insertionIndex += 1;
+  }
+  return [
+    ...projection.order.slice(0, insertionIndex),
+    payload.toolCallId,
+    ...projection.order.slice(insertionIndex),
+  ];
 }
 
 function isFinished(item: TranscriptItem | undefined): boolean {
@@ -452,7 +573,12 @@ function mergeMessage(
     ...projection,
     order: previous
       ? projection.order
-      : [...projection.order, payload.messageId],
+      : insertMessageOrder(
+          projection,
+          items,
+          payload.messageId,
+          payload.timestamp,
+        ),
     items,
   };
 }
@@ -518,7 +644,7 @@ function mergeTool(
     ...projection,
     order: previous
       ? projection.order
-      : [...projection.order, payload.toolCallId],
+      : insertToolOrder(projection, items, payload),
     items,
   };
 }
@@ -809,6 +935,9 @@ export function hydrateTranscript(
                 ? { isError: message.isError }
                 : {}),
               status: message.isError === true ? 'error' : 'finished',
+              ...(directString(message, 'turnId') === undefined
+                ? {}
+                : { turnId: directString(message, 'turnId') }),
             };
             order.push(toolCallId);
           }
@@ -824,6 +953,7 @@ export function hydrateTranscript(
         )
           ? ('steer' as const)
           : undefined;
+      const turnId = directString(message, 'turnId');
       const explicitToolCallIds = Array.isArray(message.toolCallIds)
         ? message.toolCallIds.filter(
             (id): id is string => typeof id === 'string' && id.length > 0,
@@ -837,6 +967,7 @@ export function hydrateTranscript(
         role,
         content,
         ...(timestamp === undefined ? {} : { timestamp }),
+        ...(turnId === undefined ? {} : { turnId }),
         ...(toolCallIds.length > 0 ? { toolCallIds } : {}),
         ...(deliveryMode === undefined ? {} : { deliveryMode }),
         status:
@@ -857,6 +988,7 @@ export function hydrateTranscript(
             items[toolCallId]?.kind === 'tool'
               ? (items[toolCallId] as TranscriptToolItem)
               : undefined;
+          const turnId = directString(part, 'turnId');
           items[toolCallId] = {
             kind: 'tool',
             toolCallId,
@@ -886,9 +1018,11 @@ export function hydrateTranscript(
                 ? { isError: part.isError }
                 : {}),
             status: existingTool?.status ?? persistedToolStatus(part),
-            ...(existingTool?.turnId === undefined
-              ? {}
-              : { turnId: existingTool.turnId }),
+            ...(turnId === undefined
+              ? existingTool?.turnId === undefined
+                ? {}
+                : { turnId: existingTool.turnId }
+              : { turnId }),
             ...(existingTool?.data === undefined
               ? {}
               : { data: existingTool.data }),
@@ -907,6 +1041,7 @@ export function hydrateTranscript(
       const toolCallId =
         directString(tool, 'toolCallId') ?? directString(tool, 'id');
       if (toolCallId) {
+        const turnId = directString(tool, 'turnId');
         items[toolCallId] = {
           kind: 'tool',
           toolCallId,
@@ -925,6 +1060,7 @@ export function hydrateTranscript(
           ...(typeof tool.isError === 'boolean'
             ? { isError: tool.isError }
             : {}),
+          ...(turnId === undefined ? {} : { turnId }),
           ...(tool.data === undefined ? {} : { data: tool.data }),
         };
         if (!order.includes(toolCallId)) order.push(toolCallId);
