@@ -6,4 +6,4 @@
 - Preserve the current work mode across turns—exploration, plan-only, implementation, review, or operation. Leave plan-only only after an explicit transition; do not edit before then.
 - Verify with evidence. Run the relevant checks, respond to what they report, and distinguish what was verified from what was not.
 - In broad repair loops, after a meaningful phase—or when retries yield no new evidence—summarize remaining blockers and stop rather than widening scope.
-- Delegate only when the benefit clearly exceeds the handoff cost.
+- Remember to orchestrate your work effectively so you preserve clean and focused context.
