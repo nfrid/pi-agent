@@ -392,31 +392,34 @@ export class DashboardServerImpl implements DashboardServer {
         this.changed();
         return result;
       },
-      restartRuntime: async (runtimeId, _commandId) => {
-        const result = await this.application.runtime.restart(runtimeId);
-        this.changed();
+      restartRuntime: async (runtimeId, commandId) => {
+        const result = await this.application.runtime.restartWithReceipt({
+          runtimeId,
+          commandId,
+        });
+        if (result.status === 'completed') this.changed();
         return result;
       },
       runtimeCommand: async (runtimeId: string, command: BridgeCommand) =>
         this.application.runtime.commandWithReceipt(runtimeId, command),
       startRuntimeMutation: async (input: unknown) => {
         const result = await this.application.runtime.startWithReceipt(input);
-        this.changed();
+        if (result.status === 'completed') this.changed();
         return result;
       },
       restartRuntimeMutation: async (input: unknown) => {
         const result = await this.application.runtime.restartWithReceipt(input);
-        this.changed();
+        if (result.status === 'completed') this.changed();
         return result;
       },
       stopRuntimeMutation: async (input: unknown) => {
         const result = await this.application.runtime.stopWithReceipt(input);
-        this.changed();
+        if (result.status === 'completed') this.changed();
         return result;
       },
       renameSessionMutation: async (input: unknown) => {
         const result = await this.application.runtime.renameWithReceipt(input);
-        this.changed();
+        if (result.status === 'completed') this.changed();
         return result;
       },
       commandRuntime: async (runtimeId, input, imageBuffers) => {

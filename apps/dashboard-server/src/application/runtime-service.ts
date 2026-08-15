@@ -266,6 +266,7 @@ export class RuntimeService {
           );
         if (runtime) {
           await this.registry.sendCommand(runtime.runtimeId, {
+            id: input.commandId,
             type: 'setSessionName',
             name: input.name,
           });
@@ -284,14 +285,6 @@ export class RuntimeService {
 
   async stop(runtimeId: string, force = false): Promise<void> {
     await this.manager.stop(runtimeId, force);
-  }
-
-  async restart(runtimeId: string): Promise<unknown> {
-    if (!this.manager.canRestart(runtimeId))
-      throw Object.assign(new Error('Only managed runtimes can restart.'), {
-        code: 'restart-precondition',
-      });
-    return this.manager.restart(runtimeId);
   }
 
   async answerInteraction(

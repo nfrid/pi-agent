@@ -198,6 +198,12 @@ describe('RuntimeService lifecycle mutation receipts', () => {
       status: 'already-completed',
     });
     expect(fixture.manager.restart).toHaveBeenCalledOnce();
+    await expect(
+      fixture.service.restartWithReceipt({
+        commandId: 'restart-once',
+        runtimeId: 'runtime-2',
+      }),
+    ).rejects.toMatchObject({ code: 'idempotency-conflict' });
 
     await fixture.service.stopWithReceipt({
       commandId: 'stop-force',
@@ -233,6 +239,10 @@ describe('RuntimeService lifecycle mutation receipts', () => {
       status: 'already-completed',
     });
     expect(fixture.registry.sendCommand).toHaveBeenCalledOnce();
+    expect(fixture.registry.sendCommand).toHaveBeenCalledWith(
+      'runtime-live',
+      expect.objectContaining({ id: 'rename-live', type: 'setSessionName' }),
+    );
     expect(fixture.sessions.rename).not.toHaveBeenCalled();
 
     const dormant = {
@@ -243,29 +253,5 @@ describe('RuntimeService lifecycle mutation receipts', () => {
     await fixture.service.renameWithReceipt(dormant);
     await fixture.service.renameWithReceipt(dormant);
     expect(fixture.sessions.rename).toHaveBeenCalledOnce();
-  });
-});
-
-describe('RuntimeService legacy restart adapter', () => {
-  it('retains the managed-runtime precondition outside the browser mutation', async () => {
-    let canRestart = false;
-    const manager = {
-      canRestart: () => canRestart,
-      restart: vi.fn(async () => ({ runtimeId: 'new-runtime' })),
-    };
-    const service = new RuntimeService(
-      {} as never,
-      manager as never,
-      {} as never,
-    );
-
-    await expect(service.restart('missing')).rejects.toMatchObject({
-      code: 'restart-precondition',
-    });
-    canRestart = true;
-    await expect(service.restart('managed')).resolves.toEqual({
-      runtimeId: 'new-runtime',
-    });
-    expect(manager.restart).toHaveBeenCalledOnce();
   });
 });
