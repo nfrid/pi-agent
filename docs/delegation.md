@@ -76,9 +76,8 @@ invocation only: a continuation does not inherit the prior call's contract.
 Omit `result` on a continuation to return to the legacy prose contract, or
 supply a new task-level/top-level contract explicitly. The contract is
 independent for every parallel task; a top-level `result` is the shared default
-and a task-level `result` replaces it. A contract requires exactly one of a
-compact `shape` or the deprecated bounded `schema` compatibility form. Prefer
-`shape` for new contracts; it is the ideal common API:
+and a task-level `result` replaces it. A contract uses the compact `shape`
+form, which is the complete agent-facing result API:
 
 ```json
 {
@@ -104,47 +103,15 @@ homogeneous list, while an array of two or more same-typed JSON literals declare
 an enum. Nest those forms to declare a list of enum values. An exact
 `{"$optional": shape}` wrapper makes one object field optional. A `$type`
 descriptor adds supported constraints, such as
-`{"$type":"string","minLength":1,"maxLength":500}`. Dollar-prefixed object
-field names are reserved. The shorthand is expanded deterministically into the
-same closed bounded schema used everywhere else.
-
-The legacy `schema` form remains accepted for compatibility, but is deprecated
-for new calls. It is useful while migrating contracts that rely on JSON-schema
-property names or constraints not yet expressible by `shape`:
-
-```json
-{
-  "result": {
-    "schema": {
-      "type": "object",
-      "properties": {
-        "findings": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "title": { "type": "string", "minLength": 1 },
-              "severity": { "type": "string", "enum": ["high", "low"] },
-              "evidence": { "type": "string" }
-            },
-            "required": ["title", "severity", "evidence"]
-          }
-        }
-      },
-      "required": ["findings"]
-    },
-    "projection": ["/findings/*/title", "/findings/*/severity"],
-    "views": { "evidence": "/findings/*/evidence" }
-  }
-}
-```
-
-The schema is a bounded JSON-compatible subset: one `type` (`object`,
-`array`, `string`, `number`, `integer`, `boolean`, or `null`), closed object
-`properties`/`required`, array `items`, `enum`, string length, array length and
-uniqueness, and numeric bounds/multiplicity. `$ref`, composition, patterns,
-formats, executable predicates, and all other keywords are rejected. Objects
-are closed by default, so undeclared result properties fail validation.
+`{"$type":"string","minLength":1,"maxLength":500}`. Ordinary shape-object
+keys beginning with `$` are reserved for these operators. To use a safe
+`$`-prefixed result property, use the explicit object descriptor form, for
+example `{"$type":"object","properties":{"$metadata":"string"}}`.
+The dangerous names `__proto__`, `constructor`, and `prototype` remain
+rejected. Shapes are expanded deterministically into one closed bounded
+normalized representation used for child registration, validation, projection,
+and artifacts; JSON-schema syntax is an internal transport detail, not a
+parent-call compatibility form.
 
 Paths use canonical JSON-pointer-like syntax: `/` means the complete result,
 otherwise each segment is a declared object property. Use `projection: "all"` as
@@ -164,8 +131,9 @@ an explicit unavailable notice. The complete validated result remains
 owner-session artifact-only (including named views), so these UI bounds never
 weaken artifact redaction.
 
-The global bounds are 16 KiB schema bytes, depth 8, 128 schema nodes, 64 array
-items, 4,096 Unicode characters per string, 64 KiB result bytes, 32 projection
+The global bounds are 16 KiB normalized-schema bytes, depth 8, 128 schema
+nodes, 64 array items, 4,096 Unicode characters per string, 64 KiB result
+bytes, 32 projection
 paths, 8 KiB projected bytes, and 16 named views. Schema/path errors are
 reported before child setup or launch. The child receives a dynamic terminating
 `delegate_result` tool and must call it exactly once as its final action; JSON

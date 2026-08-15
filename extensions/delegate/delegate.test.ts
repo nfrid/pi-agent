@@ -39,7 +39,7 @@ import {
   resolveDelegateSession,
   updateDelegateSessionRouting,
 } from './session';
-import { normalizeDelegateResultSpec } from './structured-result-schema';
+import { normalizeInternalDelegateResultSpec as normalizeDelegateResultSpec } from './structured-result-schema';
 import { delegatePromptGuidelines } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import {
@@ -543,6 +543,19 @@ describe('delegate', () => {
         () => null,
       );
       expect(legacy.tasks[0]?.plan.resultSpec).toBeUndefined();
+      expect(() =>
+        buildDelegatePlans(
+          {
+            name: 'Schema rejection',
+            task: 'legacy schema must be rejected',
+            continuation: session.token,
+            result: { schema: { type: 'string' } },
+          } as never,
+          context,
+          config,
+          () => null,
+        ),
+      ).toThrow(/internal-only.*shape/);
 
       const structured = buildDelegatePlans(
         {

@@ -26,9 +26,11 @@ export {
 export {
   asToolSchema,
   type DelegateResultSpecInput,
+  type InternalDelegateResultSpecInput,
   type JsonSchemaNode,
   type NormalizedDelegateResultSpec,
   normalizeDelegateResultSpec,
+  normalizeInternalDelegateResultSpec,
   STRUCTURED_RESULT_CAPS,
   STRUCTURED_RESULT_LIMITS,
   type StructuredArtifacts,

@@ -2,7 +2,7 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   asToolSchema,
   type NormalizedDelegateResultSpec,
-  normalizeDelegateResultSpec,
+  normalizeInternalDelegateResultSpec,
 } from './structured-result-schema';
 
 /** Parse only the bounded schema passed to a child process. */
@@ -12,7 +12,7 @@ export function parseChildDelegateResultSpec(
   if (!encoded) return undefined;
   try {
     const schema = JSON.parse(encoded) as unknown;
-    return normalizeDelegateResultSpec({ schema });
+    return normalizeInternalDelegateResultSpec({ schema });
   } catch {
     return undefined;
   }

@@ -6,7 +6,8 @@ import {
   captureDelegateResultEvent,
   getDelegateResultSpec,
   getSettledDelegateResult,
-  normalizeDelegateResultSpec,
+  normalizeInternalDelegateResultSpec as normalizeDelegateResultSpec,
+  normalizeDelegateResultSpec as normalizePublicDelegateResultSpec,
   projectStructuredResult,
   STRUCTURED_RESULT_CAPS,
   setDelegateResultSpec,
@@ -15,7 +16,7 @@ import {
 } from './structured-result';
 import { createRun } from './types';
 
-describe('schema-driven delegate results', () => {
+describe('shape-driven delegate results', () => {
   const schema = {
     type: 'object',
     properties: {
@@ -70,6 +71,66 @@ describe('schema-driven delegate results', () => {
       ],
     });
     expect(JSON.stringify(projection.value)).not.toContain('SECRET');
+  });
+
+  test('rejects the internal schema form from the public normalizer', () => {
+    expect(() =>
+      normalizePublicDelegateResultSpec({
+        schema: { type: 'string' },
+      } as never),
+    ).toThrow(/internal-only.*shape/);
+  });
+
+  test('does not charge optional wrappers against semantic depth', () => {
+    const nested = (depth: number, optional: boolean): unknown => {
+      let value: unknown = 'string';
+      for (let index = 0; index < depth; index++) {
+        value = { child: optional ? { $optional: value } : value };
+      }
+      return value;
+    };
+    const boundary = normalizeDelegateResultSpec({
+      shape: nested(7, false),
+    });
+    const wrappedBoundary = normalizeDelegateResultSpec({
+      shape: nested(7, true),
+    });
+    expect(boundary?.schema).toBeDefined();
+    expect(wrappedBoundary?.schema).toBeDefined();
+    expect(() =>
+      normalizeDelegateResultSpec({ shape: nested(8, true) }),
+    ).toThrow(/depth limit/);
+  });
+
+  test('allows safe dollar properties in explicit object descriptors', () => {
+    const spec = normalizeDelegateResultSpec({
+      shape: {
+        $type: 'object',
+        properties: {
+          $metadata: 'string',
+          $type: 'string',
+          $optional: 'boolean',
+          ok: 'boolean',
+        },
+      },
+      projection: ['/$metadata'],
+    });
+    expect(spec?.schema).toMatchObject({
+      properties: {
+        $metadata: { type: 'string' },
+        $type: { type: 'string' },
+        $optional: { type: 'boolean' },
+      },
+      required: ['$metadata', '$optional', '$type', 'ok'],
+    });
+    expect(() =>
+      normalizeDelegateResultSpec({
+        shape: {
+          $type: 'object',
+          properties: { constructor: 'string' },
+        },
+      }),
+    ).toThrow(/not supported/);
   });
 
   test('expands compact shapes into the same closed bounded schema', () => {
