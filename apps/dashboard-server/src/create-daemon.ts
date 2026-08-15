@@ -26,7 +26,6 @@ import { SessionIndex } from './session-index.js';
 import { TmuxAdapter, TmuxRuntimeProvider } from './tmux.js';
 import { CodexUsageProvider } from './usage.js';
 
-const FEED_PING_MS = 15_000;
 const FEED_INACTIVITY_MS = 5 * 60_000;
 
 function loadOrCreateToken(stateDir: string): string {
@@ -98,7 +97,6 @@ function configuration(
     feedReplayBytes: options.feedReplayBytes ?? 4 * 1024 * 1024,
     feedQueueCount: options.feedQueueCount ?? 128,
     feedQueueBytes: options.feedQueueBytes ?? 4 * 1024 * 1024,
-    feedPingMs: options.feedPingMs ?? FEED_PING_MS,
     feedInactivityMs: options.feedInactivityMs ?? FEED_INACTIVITY_MS,
   };
 }

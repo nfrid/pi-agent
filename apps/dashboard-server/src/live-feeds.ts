@@ -14,6 +14,8 @@ export interface LiveFeedOptions extends FeedBounds {
   readonly generation?: string;
 }
 
+const MAX_DIAGNOSTIC_SESSION_FEEDS = 4_096;
+
 const DEFAULT_BOUNDS: FeedBounds = {
   replayCount: 256,
   replayBytes: 4 * 1024 * 1024,
@@ -155,12 +157,19 @@ export class SessionFeedRegistry {
     return removed;
   }
 
-  metrics(): readonly (FeedMetrics & { sessionId: string; active: boolean })[] {
-    return [...this.feeds.values()].map((feed) => ({
-      ...feed.metrics(),
-      sessionId: feed.sessionId,
-      active: feed.active,
-    }));
+  metrics(
+    limit = MAX_DIAGNOSTIC_SESSION_FEEDS,
+  ): readonly (FeedMetrics & { sessionId: string; active: boolean })[] {
+    const result: (FeedMetrics & { sessionId: string; active: boolean })[] = [];
+    for (const feed of this.feeds.values()) {
+      if (result.length >= limit) result.shift();
+      result.push({
+        ...feed.metrics(),
+        sessionId: feed.sessionId,
+        active: feed.active,
+      });
+    }
+    return result;
   }
 
   close(): void {

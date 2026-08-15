@@ -49,17 +49,47 @@ export interface FeedSubscriptionOptions<TSnapshot> {
   readonly buildSnapshot: (sequence: number) => TSnapshot | Promise<TSnapshot>;
 }
 
+export const FEED_SNAPSHOT_FALLBACK_REASONS = [
+  'initial',
+  'invalid',
+  'foreign',
+  'future',
+  'expired',
+  'unavailable',
+  'too-large',
+] as const;
+export type FeedSnapshotFallbackReason =
+  (typeof FEED_SNAPSHOT_FALLBACK_REASONS)[number];
+export type FeedSnapshotFallbacks = Readonly<
+  Record<FeedSnapshotFallbackReason, number>
+>;
+
 export interface FeedMetrics {
   readonly generation: string;
   readonly feed: string;
   readonly sequence: number;
   readonly subscribers: number;
+  readonly subscriptionOpens: number;
+  readonly resumedSubscriptions: number;
   readonly replayCount: number;
   readonly replayBytes: number;
+  readonly replayCountLimit: number;
+  readonly replayBytesLimit: number;
+  readonly queueCountLimit: number;
+  readonly queueBytesLimit: number;
+  readonly maxFrameBytes: number;
+  readonly oldestSequence?: number;
+  readonly newestSequence?: number;
+  readonly oldestCursor?: string;
+  readonly newestCursor?: string;
   readonly queuedCount: number;
   readonly queuedBytes: number;
   readonly coalesced: number;
   readonly overflowTerminations: number;
+  readonly oversizedTerminations: number;
+  readonly largestFrameBytes: number;
+  readonly unavailableSequenceFloor?: number;
+  readonly snapshotFallbacks: FeedSnapshotFallbacks;
 }
 
 export class FeedOverflowError extends Error {
@@ -145,11 +175,31 @@ export class BoundedFeed<TSnapshot, TEvent> {
   private sequenceValue = 0;
   private records: FeedRecord<TEvent>[] = [];
   private replayBytesValue = 0;
-  /** Sequences deliberately removed by coalescing or rejected publication. */
-  private readonly unavailableSequences = new Set<number>();
+  /**
+   * The earliest sequence that cannot be replayed exactly. A floor is
+   * deliberately conservative: once a coalesced/rejected gap exists, all
+   * later non-current cursors rebase instead of retaining one entry per gap.
+   */
+  private unavailableSequenceFloor?: number;
   private readonly subscribers = new Set<Subscriber<TSnapshot, TEvent>>();
   private coalescedValue = 0;
   private overflowTerminationsValue = 0;
+  private oversizedTerminationsValue = 0;
+  private subscriptionOpensValue = 0;
+  private resumedSubscriptionsValue = 0;
+  private largestFrameBytesValue = 0;
+  private readonly snapshotFallbacksValue: Record<
+    FeedSnapshotFallbackReason,
+    number
+  > = {
+    initial: 0,
+    invalid: 0,
+    foreign: 0,
+    future: 0,
+    expired: 0,
+    unavailable: 0,
+    'too-large': 0,
+  };
   private closed = false;
   private readonly maxFrameBytes: number;
 
@@ -194,17 +244,38 @@ export class BoundedFeed<TSnapshot, TEvent> {
       queuedCount += subscriber.queue.length;
       queuedBytes += subscriber.queueBytes;
     }
+    const oldest = this.records[0];
+    const newest = this.records.at(-1);
     return {
       generation: this.generation,
       feed: this.feed,
       sequence: this.sequenceValue,
       subscribers: this.subscribers.size,
+      subscriptionOpens: this.subscriptionOpensValue,
+      resumedSubscriptions: this.resumedSubscriptionsValue,
       replayCount: this.records.length,
       replayBytes: this.replayBytesValue,
+      replayCountLimit: this.replayCount,
+      replayBytesLimit: this.replayByteLimit,
+      queueCountLimit: this.queueCount,
+      queueBytesLimit: this.queueByteLimit,
+      maxFrameBytes: this.maxFrameBytes,
+      ...(oldest === undefined
+        ? {}
+        : { oldestSequence: oldest.sequence, oldestCursor: oldest.id }),
+      ...(newest === undefined
+        ? {}
+        : { newestSequence: newest.sequence, newestCursor: newest.id }),
       queuedCount,
       queuedBytes,
       coalesced: this.coalescedValue,
       overflowTerminations: this.overflowTerminationsValue,
+      oversizedTerminations: this.oversizedTerminationsValue,
+      largestFrameBytes: this.largestFrameBytesValue,
+      ...(this.unavailableSequenceFloor === undefined
+        ? {}
+        : { unavailableSequenceFloor: this.unavailableSequenceFloor }),
+      snapshotFallbacks: { ...this.snapshotFallbacksValue },
     };
   }
 
@@ -219,13 +290,14 @@ export class BoundedFeed<TSnapshot, TEvent> {
       bytes: bytes(event),
       ...(options.key === undefined ? {} : { key: options.key }),
     };
+    this.noteFrameBytes(record.bytes);
     if (record.bytes > this.maxFrameBytes) {
       // The sequence is intentionally consumed. Existing subscribers must not
       // remain connected across an event that cannot be represented; their
       // retryable termination causes tRPC to resume with a snapshot because
       // this sequence is permanently unavailable.
-      this.unavailableSequences.add(sequence);
-      this.pruneUnavailable();
+      this.markUnavailable(sequence);
+      this.oversizedTerminationsValue += this.subscribers.size;
       this.terminateSubscribers(new FeedOverflowError());
       throw new FeedPayloadTooLargeError();
     }
@@ -236,7 +308,7 @@ export class BoundedFeed<TSnapshot, TEvent> {
         const previous = this.records.splice(index, 1)[0];
         if (previous) {
           this.replayBytesValue -= previous.bytes;
-          this.unavailableSequences.add(previous.sequence);
+          this.markUnavailable(previous.sequence);
           this.coalescedValue += 1;
         }
       }
@@ -260,13 +332,25 @@ export class BoundedFeed<TSnapshot, TEvent> {
       if (!removed) break;
       this.replayBytesValue -= removed.bytes;
     }
-    this.pruneUnavailable();
   }
 
-  private pruneUnavailable(): void {
-    const oldest = this.records[0]?.sequence ?? this.sequenceValue + 1;
-    for (const sequence of this.unavailableSequences)
-      if (sequence < oldest - 1) this.unavailableSequences.delete(sequence);
+  private markUnavailable(sequence: number): void {
+    this.unavailableSequenceFloor =
+      this.unavailableSequenceFloor === undefined
+        ? sequence
+        : Math.min(this.unavailableSequenceFloor, sequence);
+  }
+
+  private isUnavailable(sequence: number): boolean {
+    return (
+      this.unavailableSequenceFloor !== undefined &&
+      sequence >= this.unavailableSequenceFloor &&
+      sequence !== this.sequenceValue
+    );
+  }
+
+  private recordFallback(reason: FeedSnapshotFallbackReason): void {
+    this.snapshotFallbacksValue[reason] += 1;
   }
 
   private id(sequence: number): string {
@@ -281,16 +365,12 @@ export class BoundedFeed<TSnapshot, TEvent> {
     const oldest = this.records[0]?.sequence ?? this.sequenceValue + 1;
     if (sequence < oldest - 1 || sequence > this.sequenceValue)
       return undefined;
-    // A cursor at a coalesced/rejected sequence cannot prove that the client
-    // saw the exact record represented by that cursor.
-    // A snapshot is itself authoritative at the current position, including
-    // when that position was consumed by a rejected publication. Let its
-    // tracked ID establish the new rebase point instead of looping snapshots.
-    if (
-      this.unavailableSequences.has(sequence) &&
-      sequence !== this.sequenceValue
-    )
-      return undefined;
+    // A cursor at or after a coalesced/rejected gap cannot prove that the
+    // client saw the exact record represented by that cursor. A snapshot is
+    // authoritative at the current position, including when that position
+    // was consumed by a rejected publication, so the latest tracked ID is
+    // allowed to settle instead of looping snapshots.
+    if (this.isUnavailable(sequence)) return undefined;
     const replay = this.records.filter((record) => record.sequence > sequence);
     let expected = sequence + 1;
     for (const record of replay) {
@@ -312,6 +392,8 @@ export class BoundedFeed<TSnapshot, TEvent> {
     options: FeedSubscriptionOptions<TSnapshot>,
   ): AsyncGenerator<FeedItem<TSnapshot, TEvent>> {
     if (this.closed) return;
+    this.subscriptionOpensValue += 1;
+    if (options.lastEventId !== undefined) this.resumedSubscriptionsValue += 1;
     const subscriber: Subscriber<TSnapshot, TEvent> = {
       queue: [],
       queueBytes: 0,
@@ -327,13 +409,30 @@ export class BoundedFeed<TSnapshot, TEvent> {
     else options.signal?.addEventListener('abort', abort, { once: true });
 
     try {
-      const cursor = options.lastEventId
-        ? decodeCursor(options.lastEventId)
-        : undefined;
-      const canReplay =
-        cursor?.generation === this.generation && cursor.feed === this.feed;
-      const replay = canReplay ? this.replayAfter(cursor.sequence) : undefined;
-      const seed = replay;
+      let seed: FeedRecord<TEvent>[] | undefined;
+      let fallbackReason: FeedSnapshotFallbackReason | undefined;
+      if (options.lastEventId === undefined) fallbackReason = 'initial';
+      else {
+        const cursor = decodeCursor(options.lastEventId);
+        if (!cursor) fallbackReason = 'invalid';
+        else if (
+          cursor.generation !== this.generation ||
+          cursor.feed !== this.feed
+        )
+          fallbackReason = 'foreign';
+        else if (cursor.sequence > this.sequenceValue)
+          fallbackReason = 'future';
+        else {
+          const oldest = this.records[0]?.sequence ?? this.sequenceValue + 1;
+          if (cursor.sequence < oldest - 1) fallbackReason = 'expired';
+          else if (this.isUnavailable(cursor.sequence))
+            fallbackReason = 'unavailable';
+          else {
+            seed = this.replayAfter(cursor.sequence);
+            if (seed === undefined) fallbackReason = 'unavailable';
+          }
+        }
+      }
       const caughtUpBytes = bytes({
         kind: 'caught-up',
         sequence: this.sequenceValue,
@@ -343,8 +442,11 @@ export class BoundedFeed<TSnapshot, TEvent> {
           this.enqueue(subscriber, this.eventItem(record));
         subscriber.handoff = false;
       } else {
-        // Invalid, foreign, future, expired, or too-large replay is a normal
-        // recovery path: one authoritative snapshot, never a reconnect loop.
+        if (seed !== undefined) fallbackReason = 'too-large';
+        this.recordFallback(fallbackReason ?? 'unavailable');
+        // Invalid, foreign, future, expired, unavailable, or too-large replay
+        // is a normal recovery path: one authoritative snapshot, never a
+        // reconnect loop.
         const sequence = this.sequenceValue;
         const snapshot = await options.buildSnapshot(sequence);
         if (subscriber.closed) {
@@ -420,14 +522,20 @@ export class BoundedFeed<TSnapshot, TEvent> {
     };
   }
 
+  private noteFrameBytes(value: number): void {
+    this.largestFrameBytesValue = Math.max(this.largestFrameBytesValue, value);
+  }
+
   private itemBytes(item: FeedItem<TSnapshot, TEvent>): number {
-    return bytes(
+    const value = bytes(
       item.kind === 'snapshot'
         ? item.snapshot
         : item.kind === 'event'
           ? item.event
           : item,
     );
+    this.noteFrameBytes(value);
+    return value;
   }
 
   private enqueue(
@@ -468,8 +576,10 @@ export class BoundedFeed<TSnapshot, TEvent> {
         subscriber.deferred.length + subscriber.queue.length + 1 >
           this.queueCount ||
         subscriber.deferredBytes + subscriber.queueBytes > this.queueByteLimit
-      )
+      ) {
+        this.overflowTerminationsValue += 1;
         this.closeSubscriber(subscriber, new FeedOverflowError());
+      }
       return;
     }
     // Queue every published sequence. Keyed coalescing is replay-only; doing

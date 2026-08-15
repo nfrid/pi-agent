@@ -6,6 +6,8 @@ import {
   type ProtocolInfo,
   ProtocolInfoSchema,
   parseAuthoritativeSessionSnapshot,
+  parseLiveDiagnosticsRequest,
+  parseLiveDiagnosticsResponse,
   parseRenameSessionMutationInput,
   parseRenameSessionMutationOutput,
   parseRestartRuntimeMutationInput,
@@ -31,6 +33,10 @@ import { initTRPC, TRPCError, tracked } from '@trpc/server';
 import { fastifyRequestHandler } from '@trpc/server/adapters/fastify';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { SessionFeedRegistry, ShellFeed } from './live-feeds.js';
+
+/** Keep the server heartbeat comfortably below the client inactivity timeout. */
+export const DASHBOARD_FEED_PING_INTERVAL_MS = 15_000;
+export const DASHBOARD_FEED_INACTIVITY_RECONNECT_MS = 5 * 60_000;
 
 /**
  * The only context needed by the finite Phase 1 router.  The callbacks keep
@@ -157,8 +163,10 @@ function protocolMismatch(): Error {
 
 const t = initTRPC.context<DashboardTrpcContext>().create({
   sse: {
-    ping: { enabled: true, intervalMs: 15_000 },
-    client: { reconnectAfterInactivityMs: 5 * 60_000 },
+    ping: { enabled: true, intervalMs: DASHBOARD_FEED_PING_INTERVAL_MS },
+    client: {
+      reconnectAfterInactivityMs: DASHBOARD_FEED_INACTIVITY_RECONNECT_MS,
+    },
   },
   errorFormatter({ shape, error }) {
     const code = domainCode(error);
@@ -188,6 +196,20 @@ const dashboardRouter = t.router({
       } catch (error) {
         throw toDashboardTrpcError(error);
       }
+    }),
+  liveDiagnostics: t.procedure
+    .input((value: unknown) => parseLiveDiagnosticsRequest(value))
+    .output((value: unknown) => parseLiveDiagnosticsResponse(value))
+    .query(({ ctx }) => {
+      if (!ctx.shellFeed || !ctx.sessionFeeds)
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Live diagnostics are unavailable.',
+        });
+      return parseLiveDiagnosticsResponse({
+        shell: ctx.shellFeed.metrics(),
+        sessions: ctx.sessionFeeds.metrics(),
+      });
     }),
   shellSnapshot: t.procedure
     .input((value: unknown) =>
