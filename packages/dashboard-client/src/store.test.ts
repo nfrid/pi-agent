@@ -629,6 +629,96 @@ describe('DashboardLiveStore', () => {
     });
   });
 
+  it('keeps runtime surface upserts separate from later indexed chronology', () => {
+    const store = new DashboardLiveStore();
+    const runtime = {
+      runtimeId: 'runtime-live',
+      liveState: 'working',
+      online: true,
+      cwd: '/tmp',
+      session: { id: 'session-live', title: 'Live thread', entries: [] },
+      extensionSurfaces: [
+        { id: 'delegate.status', rendererId: 'delegate.status', viewModel: {} },
+      ],
+      pendingInteractions: [],
+    };
+    store.beginShellSync(1);
+    expect(
+      store.acceptShellSnapshot(
+        { ...snapshot('daemon-1', 0), runtimes: [runtime] } as never,
+        0,
+        1,
+        true,
+      ),
+    ).toBe(true);
+    const first = selectSnapshot(store.getSnapshot());
+
+    vi.spyOn(Date, 'now').mockReturnValue(900);
+    expect(
+      store.acceptShellEvent(
+        {
+          type: 'shell-event',
+          sequence: 1,
+          revision: 1,
+          domain: 'runtime',
+          data: {
+            kind: 'upsert',
+            runtime: {
+              ...runtime,
+              extensionSurfaces: [
+                {
+                  id: 'delegate.status',
+                  rendererId: 'delegate.status',
+                  viewModel: { statuses: [{ state: 'finished' }] },
+                },
+              ],
+            },
+          },
+        } as never,
+        1,
+      ),
+    ).toBe(true);
+    vi.restoreAllMocks();
+    const second = selectSnapshot(store.getSnapshot());
+    expect(first?.sessions).toEqual([]);
+    expect(second?.sessions).toEqual([]);
+    expect(second?.runtimes[0]?.session.id).toBe('session-live');
+
+    expect(
+      store.acceptShellEvent(
+        {
+          type: 'shell-event',
+          sequence: 2,
+          revision: 2,
+          domain: 'session-index',
+          data: {
+            kind: 'delta',
+            upsert: [
+              {
+                id: 'session-live',
+                file: '/tmp/session.jsonl',
+                cwd: '/tmp',
+                startedAt: 100,
+                updatedAt: 200,
+              },
+            ],
+            remove: [],
+          },
+        } as never,
+        1,
+      ),
+    ).toBe(true);
+    expect(selectSnapshot(store.getSnapshot())?.sessions).toEqual([
+      {
+        id: 'session-live',
+        file: '/tmp/session.jsonl',
+        cwd: '/tmp',
+        startedAt: 100,
+        updatedAt: 200,
+      },
+    ]);
+  });
+
   it('carries a launched runtime title into its first published session', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 1));

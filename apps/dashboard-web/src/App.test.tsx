@@ -770,9 +770,9 @@ describe('ask-user keyboard contract', () => {
 });
 
 describe('workspace-first agent navigation', () => {
-  it('uses the current time until a live runtime has indexed session metadata', () => {
+  it('keeps unindexed live rows stable until session metadata arrives', () => {
     const dateNow = vi.spyOn(Date, 'now').mockReturnValue(700);
-    const rows = agentThreadRows({
+    const snapshot = {
       runtimes: [
         {
           runtimeId: 'new',
@@ -798,11 +798,23 @@ describe('workspace-first agent navigation', () => {
           updatedAt: 600,
         },
       ],
+    };
+    const first = agentThreadRows(snapshot as never);
+    dateNow.mockReturnValue(800);
+    const second = agentThreadRows({
+      ...snapshot,
+      runtimes: snapshot.runtimes.map((runtime) => ({
+        ...runtime,
+        extensionSurfaces: [{ id: 'delegate.status', viewModel: {} }],
+      })),
     } as never);
     dateNow.mockRestore();
 
-    expect(rows.map((row) => row.id)).toEqual(['new-session', 'old-session']);
-    expect(rows[0]).toMatchObject({ startedAt: 700, updatedAt: 700 });
+    expect(second.map((row) => row.id)).toEqual(first.map((row) => row.id));
+    expect(second[0]).toMatchObject({
+      startedAt: undefined,
+      updatedAt: undefined,
+    });
   });
 
   it('keeps offline and dormant threads below everything else', () => {

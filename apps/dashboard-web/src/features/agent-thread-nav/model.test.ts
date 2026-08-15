@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AgentThreadRow } from './model';
 import {
+  agentThreadRows,
   boundedAgentThreadRows,
   filterAgentThreadRows,
   groupAgentThreadRows,
@@ -26,6 +27,79 @@ function row(
 }
 
 describe('agent thread view model', () => {
+  it('keeps unindexed runtime chronology stable across live surface updates', () => {
+    const snapshot = (surface: unknown) =>
+      ({
+        runtimes: [
+          {
+            runtimeId: 'runtime-1',
+            liveState: 'working',
+            online: true,
+            cwd: '/work/app',
+            session: { id: 'session-1', title: 'Active thread', entries: [] },
+            extensionSurfaces: [surface],
+          },
+          {
+            runtimeId: 'runtime-2',
+            liveState: 'working',
+            online: true,
+            cwd: '/work/app',
+            session: { id: 'session-2', title: 'Other thread', entries: [] },
+          },
+        ],
+        workspaces: [{ id: 'app', name: 'App', canonicalPath: '/work/app' }],
+        sessions: [],
+      }) as never;
+
+    const clock = vi.spyOn(Date, 'now');
+    clock.mockReturnValueOnce(100).mockReturnValueOnce(200);
+    const first = agentThreadRows(
+      snapshot({ statuses: [{ state: 'running' }] }),
+    );
+    const second = agentThreadRows(
+      snapshot({ statuses: [{ state: 'finished', finishedAt: 200 }] }),
+    );
+    clock.mockRestore();
+
+    expect(second.map((item) => item.id)).toEqual(first.map((item) => item.id));
+    expect(
+      second.map(({ startedAt, updatedAt }) => [startedAt, updatedAt]),
+    ).toEqual(first.map(({ startedAt, updatedAt }) => [startedAt, updatedAt]));
+  });
+
+  it('lets indexed chronology replace the neutral runtime fallback', () => {
+    const runtime = {
+      runtimeId: 'runtime-1',
+      liveState: 'working',
+      online: true,
+      cwd: '/work/app',
+      session: { id: 'session-1', title: 'Active thread', entries: [] },
+    };
+    const base = {
+      runtimes: [runtime],
+      workspaces: [{ id: 'app', name: 'App', canonicalPath: '/work/app' }],
+      sessions: [],
+    };
+    const before = agentThreadRows(base as never)[0];
+    const after = agentThreadRows({
+      ...base,
+      sessions: [
+        {
+          id: 'session-1',
+          cwd: '/work/app',
+          startedAt: 100,
+          updatedAt: 200,
+        },
+      ],
+    } as never)[0];
+
+    expect(before).toMatchObject({
+      startedAt: undefined,
+      updatedAt: undefined,
+    });
+    expect(after).toMatchObject({ startedAt: 100, updatedAt: 200 });
+  });
+
   it('filters by title, workspace, path, or status', () => {
     const rows = [
       row('backend', 'Dashboard'),
