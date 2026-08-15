@@ -1,6 +1,7 @@
 import type { RuntimeSnapshot } from '@pi-dashboard/protocol';
 import { describe, expect, it } from 'vitest';
 import {
+  mergeQueuedMessages,
   queueCommand,
   queuedMessagesForRuntime,
   queueRemoveCommand,
@@ -21,6 +22,21 @@ describe('composer queue model', () => {
       } as unknown as RuntimeSnapshot),
     ).toEqual([
       { id: 'q1', mode: 'steer', text: 'inspect this' },
+      { id: 'q2', mode: 'followUp', text: 'then test it' },
+    ]);
+  });
+
+  it('reconciles either command/event ordering without duplicate rows', () => {
+    const item = { id: 'q1', mode: 'steer' as const, text: 'inspect this' };
+    expect(mergeQueuedMessages([], [item])).toEqual([item]);
+    expect(mergeQueuedMessages([item], [item])).toEqual([item]);
+    expect(
+      mergeQueuedMessages(
+        [{ id: 'q1', mode: 'steer', text: 'server text' }],
+        [item, { id: 'q2', mode: 'followUp', text: 'then test it' }],
+      ),
+    ).toEqual([
+      { id: 'q1', mode: 'steer', text: 'server text' },
       { id: 'q2', mode: 'followUp', text: 'then test it' },
     ]);
   });

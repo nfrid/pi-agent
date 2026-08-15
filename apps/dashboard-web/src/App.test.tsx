@@ -13,6 +13,7 @@ import {
   contextIndicatorData,
   formatContextTokens,
   isNearPageBottom,
+  mergeQueuedMessages,
   newChatModelOptions,
   newChatPath,
   newChatRequest,
@@ -93,6 +94,14 @@ describe('queued message commands', () => {
     expect(shouldShowQueuePanel('idle', 1)).toBe(true);
     expect(shouldShowQueuePanel('waiting', 1)).toBe(true);
     expect(shouldShowQueuePanel('idle', 0)).toBe(false);
+  });
+
+  it('keeps an accepted row through either command/event ordering', () => {
+    const item = { id: 'q1', mode: 'steer' as const, text: 'inspect this' };
+    // HTTP response first: retain the optimistic row until the live event.
+    expect(mergeQueuedMessages([], [item])).toEqual([item]);
+    // Live event first: the authoritative row replaces the optimistic one.
+    expect(mergeQueuedMessages([item], [item])).toEqual([item]);
   });
 
   it('upserts an optimistic item when the server snapshot arrived first', () => {

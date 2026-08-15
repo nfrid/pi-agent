@@ -31,6 +31,7 @@ export {
   composerDraftStorageKey,
   contextIndicatorData,
   formatContextTokens,
+  mergeQueuedMessages,
   queueCommand,
   queuedMessagesForRuntime,
   queueRemoveCommand,

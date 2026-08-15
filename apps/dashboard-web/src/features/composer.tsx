@@ -13,6 +13,7 @@ export {
 export { MarkdownComposerEditor } from './composer/editor';
 export type { QueuedMessage } from './composer/queue';
 export {
+  mergeQueuedMessages,
   queueCommand,
   queuedMessagesForRuntime,
   queueRemoveCommand,
