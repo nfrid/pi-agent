@@ -5,7 +5,10 @@ import {
   deriveCompatibilityLineageId,
   deriveCompatibilityRunId,
 } from './identity';
-import type { AttemptIdentity, LogicalId } from './workflow-model';
+import {
+  normalizeWorkflowAttempt,
+  type WorkflowAttempt,
+} from './workflow-model';
 import type { WorktreeSummary } from './worktree/model';
 
 /** Harness-observed causes for a non-successful delegate settlement. */
@@ -133,10 +136,8 @@ export interface DelegateCheckpoint {
 export interface DelegateRunMetadata {
   /** Stable identity for this invocation; generated for every new run. */
   runId?: string;
-  /** Session-scoped logical workflow node, when workflow identity is supplied. */
-  logicalId?: LogicalId;
-  /** Immutable public attempt identity, e.g. `impl@2`. */
-  attemptIdentity?: AttemptIdentity;
+  /** Session-scoped immutable workflow identity, when supplied. */
+  workflowAttempt?: WorkflowAttempt;
   /** Canonical Pi child session used by dashboard session APIs. */
   sessionId?: string;
   /** Stable child-session lineage, when preparation has a delegate session. */
@@ -222,6 +223,10 @@ export function createRun(
   routing?: DelegateRouteState,
   metadata: DelegateRunMetadata = {},
 ): DelegatedRun {
+  const workflowAttempt =
+    metadata.workflowAttempt === undefined
+      ? undefined
+      : normalizeWorkflowAttempt(metadata.workflowAttempt);
   return {
     task,
     exitCode: -1,
@@ -233,6 +238,7 @@ export function createRun(
     state: 'queued',
     queuedAt: Date.now(),
     ...metadata,
+    ...(workflowAttempt ? { workflowAttempt } : {}),
     runId: metadata.runId ?? createOpaqueId(),
     name: metadata.name?.trim() || 'Subagent',
   };
@@ -274,12 +280,20 @@ export function normalizeDelegateRun(run: LegacyDelegatedRun): DelegatedRun {
     (run.continuation
       ? deriveCompatibilityLineageId(run.continuation)
       : undefined);
-  return run.state && run.runId && (run.lineageId || !run.continuation)
+  const workflowAttempt =
+    run.workflowAttempt === undefined
+      ? undefined
+      : normalizeWorkflowAttempt(run.workflowAttempt);
+  return run.state &&
+    run.runId &&
+    (run.lineageId || !run.continuation) &&
+    workflowAttempt === undefined
     ? (run as DelegatedRun)
     : {
         ...run,
         runId,
         ...(lineageId ? { lineageId } : {}),
+        ...(workflowAttempt ? { workflowAttempt } : {}),
         state: run.state ?? inferLegacyRunState(run),
       };
 }
@@ -287,7 +301,11 @@ export function normalizeDelegateRun(run: LegacyDelegatedRun): DelegatedRun {
 export function normalizeDelegateDetails(
   details: LegacyDelegateDetails,
 ): DelegateDetails {
-  if (details.runs.every((run) => run.state && run.runId))
+  if (
+    details.runs.every(
+      (run) => run.state && run.runId && run.workflowAttempt === undefined,
+    )
+  )
     return details as DelegateDetails;
   return {
     ...details,

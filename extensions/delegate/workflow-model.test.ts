@@ -3,6 +3,7 @@ import {
   createWorkflowModel,
   isLogicalId,
   MAX_LOGICAL_ID_LENGTH,
+  normalizeWorkflowAttempt,
   parseWorkflowReference,
 } from './workflow-model';
 
@@ -104,6 +105,34 @@ describe('WorkflowModel', () => {
     expect(model.snapshot().attempts).toEqual([
       { logicalId: 'impl', ordinal: 1, identity: 'impl@1' },
     ]);
+  });
+
+  test('validates and freezes attempts at adapter boundaries', () => {
+    const normalized = normalizeWorkflowAttempt({
+      logicalId: 'impl',
+      ordinal: 2,
+      identity: 'impl@2',
+    });
+    expect(Object.isFrozen(normalized)).toBe(true);
+    expect(normalized).toEqual({
+      logicalId: 'impl',
+      ordinal: 2,
+      identity: 'impl@2',
+    });
+    expect(() =>
+      normalizeWorkflowAttempt({
+        logicalId: 'impl',
+        ordinal: 2,
+        identity: 'impl@1',
+      }),
+    ).toThrow(/logical ID, ordinal, and identity must agree/);
+    expect(() =>
+      normalizeWorkflowAttempt({
+        logicalId: 'Impl',
+        ordinal: 1,
+        identity: 'Impl@1',
+      }),
+    ).toThrow(/logical ID, ordinal, and identity must agree/);
   });
 
   test('parses bare and exact references distinctly', () => {

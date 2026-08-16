@@ -13,7 +13,10 @@ import {
 } from './structured-result';
 import type { DelegateDetails, DelegatedRun } from './types';
 import { getRunState, isRunError } from './types';
-import type { AttemptIdentity, LogicalId } from './workflow-model';
+import {
+  normalizeWorkflowAttempt,
+  type WorkflowAttempt,
+} from './workflow-model';
 import { failedLifecycleRun } from './worktree-lifecycle';
 
 export const MAX_DELEGATE_JOBS = 20;
@@ -61,9 +64,9 @@ export interface DelegateJobSnapshot {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
-  /** Optional workflow identity supplied by the session-scoped model. */
-  logicalId?: LogicalId;
-  attemptIdentity?: AttemptIdentity;
+  /** Optional workflow identity projected from the session-scoped model. */
+  logicalId?: string;
+  attemptIdentity?: string;
 }
 
 interface DelegateJobRecord extends JobRecord<DelegateJobState> {
@@ -80,8 +83,7 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
-  logicalId?: LogicalId;
-  attemptIdentity?: AttemptIdentity;
+  workflowAttempt?: WorkflowAttempt;
   feedback?: (
     message: string,
   ) => import('./control').DelegateControlEnqueueResult;
@@ -109,8 +111,7 @@ export interface DelegateJobStartOptions {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
-  logicalId?: LogicalId;
-  attemptIdentity?: AttemptIdentity;
+  workflowAttempt?: WorkflowAttempt;
   feedback?: (
     message: string,
   ) => import('./control').DelegateControlEnqueueResult;
@@ -166,8 +167,15 @@ export class DelegateJobManager {
 
   startMany(options: DelegateJobStartOptions[]): DelegateJobSnapshot[] {
     this.registry.assertAccepting(options.length);
-    const records = options.map(
-      (item): DelegateJobRecord => ({
+    const validated = options.map((item) => ({
+      item,
+      workflowAttempt:
+        item.workflowAttempt === undefined
+          ? undefined
+          : normalizeWorkflowAttempt(item.workflowAttempt),
+    }));
+    const records = validated.map(
+      ({ item, workflowAttempt }): DelegateJobRecord => ({
         ...this.registry.newRecord('queued'),
         name: item.name?.trim() || 'Subagent',
         ownerSessionId: item.ownerSessionId,
@@ -176,8 +184,7 @@ export class DelegateJobManager {
         deliveryEpoch: item.deliveryEpoch,
         route: item.route,
         allowWrites: item.allowWrites,
-        logicalId: item.logicalId,
-        attemptIdentity: item.attemptIdentity,
+        workflowAttempt,
         feedback: item.feedback,
         controller: new AbortController(),
         execute: item.execute,
@@ -394,9 +401,11 @@ function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
     deliveryEpoch: record.deliveryEpoch,
     route: record.route,
     allowWrites: record.allowWrites,
-    ...(record.logicalId ? { logicalId: record.logicalId } : {}),
-    ...(record.attemptIdentity
-      ? { attemptIdentity: record.attemptIdentity }
+    ...(record.workflowAttempt
+      ? {
+          logicalId: record.workflowAttempt.logicalId,
+          attemptIdentity: record.workflowAttempt.identity,
+        }
       : {}),
   };
 }

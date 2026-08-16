@@ -70,6 +70,34 @@ function copyAttempt(attempt: WorkflowAttempt): WorkflowAttempt {
   return Object.freeze({ ...attempt });
 }
 
+/** Validate and detach an attempt received at an adapter boundary. */
+export function normalizeWorkflowAttempt(value: unknown): WorkflowAttempt {
+  if (value === null || typeof value !== 'object')
+    throw new Error('Invalid workflow attempt: expected an attempt object.');
+  const candidate = value as {
+    logicalId?: unknown;
+    ordinal?: unknown;
+    identity?: unknown;
+  };
+  if (
+    typeof candidate.logicalId !== 'string' ||
+    !isLogicalId(candidate.logicalId) ||
+    typeof candidate.ordinal !== 'number' ||
+    !Number.isSafeInteger(candidate.ordinal) ||
+    candidate.ordinal < 1 ||
+    candidate.ordinal > MAX_ATTEMPT_ORDINAL ||
+    candidate.identity !== `${candidate.logicalId}@${candidate.ordinal}`
+  )
+    throw new Error(
+      'Invalid workflow attempt: logical ID, ordinal, and identity must agree.',
+    );
+  return Object.freeze({
+    logicalId: candidate.logicalId,
+    ordinal: candidate.ordinal,
+    identity: candidate.identity,
+  });
+}
+
 /**
  * Session-scoped identity model for logical workflow nodes and immutable
  * attempts. It deliberately owns no execution or job lifecycle state.
@@ -133,26 +161,6 @@ export class WorkflowModel {
   /** Resolve an already-created reference; equivalent to bind for this model. */
   lookup(reference: string): WorkflowAttempt {
     return this.bind(reference);
-  }
-
-  /** Alias with a descriptive name for callers that bind dependencies. */
-  bindReference(reference: string): WorkflowAttempt {
-    return this.bind(reference);
-  }
-
-  /** Alias for createFresh for callers that use the shorter operation name. */
-  create(logicalId: LogicalId): WorkflowAttempt {
-    return this.createFresh(logicalId);
-  }
-
-  /** Alias for createFresh when the call site emphasizes a fresh node. */
-  fresh(logicalId: LogicalId): WorkflowAttempt {
-    return this.createFresh(logicalId);
-  }
-
-  /** Alias with an explicit operation name for callers avoiding `continue`. */
-  continueAttempt(logicalId: LogicalId): WorkflowAttempt {
-    return this.continue(logicalId);
   }
 
   /** Return detached, immutable records in creation order. */

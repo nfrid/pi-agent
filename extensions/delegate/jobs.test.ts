@@ -228,8 +228,11 @@ describe('DelegateJobManager', () => {
     const started = manager.start({
       mode: 'single',
       tasks: ['inspect'],
-      logicalId: 'impl',
-      attemptIdentity: 'impl@1',
+      workflowAttempt: {
+        logicalId: 'impl',
+        ordinal: 1,
+        identity: 'impl@1',
+      },
       execute: async () => successfulResult(),
     });
 
@@ -245,6 +248,45 @@ describe('DelegateJobManager', () => {
       attemptIdentity: 'impl@1',
     });
     await manager.dispose();
+  });
+
+  test('rejects malformed workflow identity before entering job snapshots', () => {
+    const manager = new DelegateJobManager();
+    const execute = async () => successfulResult();
+    expect(() =>
+      manager.start({
+        mode: 'single',
+        tasks: ['inspect'],
+        workflowAttempt: {
+          logicalId: 'impl',
+          ordinal: 1,
+          identity: 'wrong@1',
+        },
+        execute,
+      }),
+    ).toThrow(/logical ID, ordinal, and identity must agree/);
+    expect(() =>
+      manager.start({
+        mode: 'single',
+        tasks: ['inspect'],
+        workflowAttempt: {
+          logicalId: 'Impl',
+          ordinal: 1,
+          identity: 'Impl@1',
+        },
+        execute,
+      }),
+    ).toThrow(/logical ID, ordinal, and identity must agree/);
+    expect(manager.list()).toEqual([]);
+    expect(() =>
+      createRun('inspect', undefined, {
+        workflowAttempt: {
+          logicalId: 'impl',
+          ordinal: 1,
+          identity: 'impl@2',
+        },
+      }),
+    ).toThrow(/logical ID, ordinal, and identity must agree/);
   });
 
   test('does not auto-deliver a result returned by a waiting peek', async () => {
