@@ -383,7 +383,8 @@
 body:has(.session-page) .global-new-agent,
 body:has(.session-page) .global-notifications,
 body:has(.session-page) .global-tools > .push-button,
-body:has(.session-page) .global-tools > .palette-trigger {
+body:has(.session-page) .global-tools > .palette-trigger,
+body:has(.session-page) .global-tools > .global-usage {
   display: none;
 }
 .session-page.has-pending-interaction .queue-panel {

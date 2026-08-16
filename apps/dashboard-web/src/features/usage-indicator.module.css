@@ -1,0 +1,134 @@
+.capsule {
+  position: relative;
+  min-width: 0;
+}
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 32px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-alt) 94%, transparent);
+  color: var(--muted);
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.trigger:hover,
+.trigger[aria-expanded="true"] {
+  border-color: var(--purple);
+  background: color-mix(in srgb, var(--purple) 10%, var(--bg-alt));
+  color: var(--fg);
+}
+.capsuleTitle {
+  color: var(--muted);
+}
+.windows {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.windowWrap {
+  display: inline-flex;
+  min-width: 0;
+}
+.window {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.percent {
+  font-weight: 650;
+}
+.window[data-tone="green"] .dot {
+  background: var(--green, #5dbb75);
+}
+.window[data-tone="green"] .percent {
+  color: var(--green, #5dbb75);
+}
+.window[data-tone="amber"] .dot {
+  background: var(--orange, #d99b46);
+}
+.window[data-tone="amber"] .percent {
+  color: var(--orange, #d99b46);
+}
+.window[data-tone="red"] .dot {
+  background: var(--red, #d86666);
+}
+.window[data-tone="red"] .percent {
+  color: var(--red, #d86666);
+}
+.window[data-tone="neutral"] .percent {
+  color: var(--muted);
+}
+.reset {
+  color: var(--muted);
+  font-size: 10px;
+}
+.details {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 7px);
+  right: 0;
+  display: grid;
+  gap: 8px;
+  min-width: 190px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg-alt);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 22%);
+  padding: 10px;
+  color: var(--fg);
+  font-size: 11px;
+}
+.details[hidden] {
+  display: none;
+}
+.details strong {
+  font-size: 11px;
+}
+.details .window {
+  justify-content: space-between;
+}
+.compactWindow {
+  display: flex;
+}
+@media (max-width: 1080px) {
+  .windowWrap:not(.urgent) {
+    display: none;
+  }
+  .windows {
+    gap: 0;
+  }
+}
+@media (max-width: 700px) {
+  .trigger {
+    gap: 4px;
+    padding-inline: 7px;
+  }
+  .capsuleTitle,
+  .windowLabel,
+  .reset {
+    display: none;
+  }
+  .window {
+    gap: 3px;
+  }
+}
+.details .windowLabel {
+  flex: 1;
+}
