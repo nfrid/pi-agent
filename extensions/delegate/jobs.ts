@@ -354,6 +354,7 @@ export class DelegateJobManager {
             {
               name: record.name,
               backgroundJobId: record.id,
+              workflowAttempt: record.workflowAttempt,
               warnings: [],
             },
             error,

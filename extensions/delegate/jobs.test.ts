@@ -289,6 +289,39 @@ describe('DelegateJobManager', () => {
     ).toThrow(/logical ID, ordinal, and identity must agree/);
   });
 
+  test('retains workflow identity when execution throws', async () => {
+    const manager = new DelegateJobManager();
+    const started = manager.start({
+      mode: 'single',
+      tasks: ['inspect'],
+      workflowAttempt: {
+        logicalId: 'impl',
+        ordinal: 1,
+        identity: 'impl@1',
+      },
+      execute: async () => {
+        throw new Error('launch failed');
+      },
+    });
+
+    const settled = await manager.peek(started.id, 1_000);
+    expect(settled).toMatchObject({
+      state: 'error',
+      logicalId: 'impl',
+      attemptIdentity: 'impl@1',
+      runs: [
+        {
+          workflowAttempt: {
+            logicalId: 'impl',
+            ordinal: 1,
+            identity: 'impl@1',
+          },
+        },
+      ],
+    });
+    await manager.dispose();
+  });
+
   test('does not auto-deliver a result returned by a waiting peek', async () => {
     let finish!: (result: DelegateJobResult) => void;
     const onSettled = vi.fn();
