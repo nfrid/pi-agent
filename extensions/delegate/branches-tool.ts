@@ -2,7 +2,6 @@ import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
-import { loadGuidelines } from '../shared/instructions';
 import {
   type BranchEntry,
   formatBranchDetail,
@@ -101,9 +100,6 @@ export function registerDelegateBranchesTool(pi: ExtensionAPI): void {
     name: 'delegate_branches',
     label: 'Delegate Branches',
     description: DELEGATE_BRANCHES_DESCRIPTION,
-    promptSnippet:
-      'Review or merge writable delegate branches; continue or drop retired read-only snapshots',
-    promptGuidelines: loadGuidelines('branches-instructions.md', __dirname),
     parameters: Parameters,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const reviewSelectorUsed =

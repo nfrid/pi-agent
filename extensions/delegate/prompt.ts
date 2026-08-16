@@ -1,7 +1,4 @@
-import {
-  type NormalizedDelegateResultSpec,
-  STRUCTURED_RESULT_CAPS,
-} from './structured-result';
+import type { NormalizedDelegateResultSpec } from './structured-result';
 
 /** Completion contract for children that return a concise prose handoff. */
 export const DELEGATE_CHILD_PROSE_CONTRACT = `## Child report
@@ -47,14 +44,14 @@ export function buildDelegatePrompt(
     timeoutMs?: number;
     /** Branch of the worktree this task runs in, when it has one. */
     branch?: string;
-    /** Bounded schema shown only to structured-result children. */
+    /** Structured-result contract used to select the child completion guidance. */
     resultSpec?: NormalizedDelegateResultSpec;
   } = {},
 ): string {
   if (options.allowWrites && !options.branch)
     throw new Error('Writable delegate prompts require a worktree branch.');
   const capability = options.allowWrites
-    ? `You are working in an isolated git worktree on branch ${options.branch}; repository-file changes do not affect the parent checkout or other agents. Your shell is unsandboxed and can affect shared external state such as the home directory, processes, network, and services. Edit this worktree freely; commit as you go with clear messages — the branch is how your work reaches the parent, and anything left uncommitted is committed for you under a generic message. Do not merge, rebase, push, or switch branches: the parent integrates this branch.`
+    ? `You are working in an isolated git worktree on branch ${options.branch}; repository-file changes do not affect the parent checkout or other agents. Your shell is unsandboxed and can affect shared external state such as the home directory, processes, network, and services. Edit this worktree freely; commit as you go with clear messages — the branch is how your work reaches the parent, and anything left uncommitted is committed for you under a generic message. Follow-up continuations on a branch already returned to the parent must append new commits; do not amend, rebase, reset, or otherwise rewrite its recorded history. Do not merge, rebase, push, or switch branches: the parent integrates this branch.`
     : options.branch
       ? `Treat this as read-only in isolated git worktree branch ${options.branch}: do not edit repository files. The worktree isolates repository files, not the unsandboxed shell or shared external state such as the home directory, processes, network, and services.`
       : 'Treat this as read-only in the shared checkout: do not edit repository files. The shell is unsandboxed and can affect the checkout and external state such as the home directory, processes, network, and services.';
@@ -66,9 +63,6 @@ export function buildDelegatePrompt(
     : '';
   const handoff = options.handoffText?.trim()
     ? `\n\n${options.handoffText.trim()}\n${DELEGATE_HANDOFF_PROMPT_SUFFIX}`
-    : '';
-  const structured = options.resultSpec
-    ? `\n\nThe delegate_result tool accepts up to ${STRUCTURED_RESULT_CAPS.maxAttempts} attempts. The bounded schema is:\n<delegate_result_schema>\n${JSON.stringify(options.resultSpec.schema)}\n</delegate_result_schema>`
     : '';
   // Select exactly one completion contract: structured children never receive
   // the prose report contract, and prose children never receive the schema one.
@@ -86,5 +80,5 @@ export function buildDelegatePrompt(
     options.timeoutMs > 0
       ? `\n\nThis run has a maximum runtime of approximately ${formatRuntime(options.timeoutMs)}; reserve time to ${options.resultSpec ? 'complete the structured result' : 'return partial findings'}. If you receive a pre-timeout checkpoint request, stop starting new work and leave a coherent inspectable state.`
       : '';
-  return `You are a coding subagent reporting to a parent agent. Work only on the delegated task. If something is unclear, pick one reasonable default and say what you assumed.\n\n${task}${context}${scope}${handoff}${structured}\n\n${policy}\n\n${framing}${runtime}\n\n${capability}`;
+  return `You are a coding subagent reporting to a parent agent. Work only on the delegated task. If something is unclear, pick one reasonable default and say what you assumed.\n\n${task}${context}${scope}${handoff}\n\n${policy}\n\n${framing}${runtime}\n\n${capability}`;
 }

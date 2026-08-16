@@ -5,7 +5,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { Type } from 'typebox';
-import { loadGuidelines } from '../shared/instructions';
+import type { AutomaticDeliveryState } from './completion-delivery';
 import type { DelegateJobManager, DelegateJobSnapshot } from './jobs';
 
 const Parameters = Type.Object({
@@ -75,12 +75,39 @@ function result(job: DelegateJobSnapshot): string {
   return `${summary(job)}\nCompletion will be delivered automatically.`;
 }
 
+function automaticDeliveryStatus(
+  job: DelegateJobSnapshot,
+  state: AutomaticDeliveryState,
+): string {
+  return state === 'queued'
+    ? `Automatic result for ${job.id} is already queued and will enter context shortly.`
+    : `Automatic result for ${job.id} was already delivered; no duplicate completion is returned.`;
+}
+
+function compactJob(job: DelegateJobSnapshot): DelegateJobSnapshot {
+  return {
+    id: job.id,
+    name: job.name,
+    mode: job.mode,
+    state: job.state,
+    // The already-delivered response is a status, not another task replay.
+    tasks: [],
+    createdAt: job.createdAt,
+    startedAt: job.startedAt,
+    settledAt: job.settledAt,
+    deliveryEpoch: job.deliveryEpoch,
+    route: job.route,
+    allowWrites: job.allowWrites,
+  };
+}
+
 export function registerDelegateJobsTool(
   pi: ExtensionAPI,
   manager: DelegateJobManager,
   onResultEntered: (jobs: readonly DelegateJobSnapshot[]) => void = () => {},
-  isAutomaticDeliveryQueued: (job: DelegateJobSnapshot) => boolean = () =>
-    false,
+  getAutomaticDeliveryState: (
+    job: DelegateJobSnapshot,
+  ) => AutomaticDeliveryState | undefined = () => undefined,
 ): void {
   pi.registerTool<
     typeof Parameters,
@@ -88,14 +115,17 @@ export function registerDelegateJobsTool(
       action: 'list' | 'peek' | 'feedback' | 'cancel';
       job?: DelegateJobSnapshot;
       jobs?: DelegateJobSnapshot[];
-      delivery?: 'queued' | 'settled' | 'unavailable' | 'automatic-queued';
+      delivery?:
+        | 'queued'
+        | 'settled'
+        | 'unavailable'
+        | 'automatic-queued'
+        | 'automatic-delivered';
     }
   >({
     name: 'delegate_jobs',
     label: 'Delegate Jobs',
     description: DELEGATE_JOBS_DESCRIPTION,
-    promptSnippet: 'Inspect, steer, or cancel asynchronous delegate jobs',
-    promptGuidelines: loadGuidelines('jobs-instructions.md', __dirname),
     parameters: Parameters,
     async execute(
       _toolCallId,
@@ -127,28 +157,31 @@ export function registerDelegateJobsTool(
             signal,
             ctx,
           );
+          const automaticDelivery = getAutomaticDeliveryState(job);
+          if (automaticDelivery) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: automaticDeliveryStatus(job, automaticDelivery),
+                },
+              ],
+              details: {
+                action: 'peek',
+                job: compactJob(job),
+                delivery:
+                  automaticDelivery === 'queued'
+                    ? 'automatic-queued'
+                    : 'automatic-delivered',
+              },
+            };
+          }
           job = await manager.materialize(job.id, ctx);
-          const automaticQueued = isAutomaticDeliveryQueued(job);
-          if (
-            !automaticQueued &&
-            job.state !== 'queued' &&
-            job.state !== 'running'
-          )
+          if (job.state !== 'queued' && job.state !== 'running')
             onResultEntered([job]);
           return {
-            content: [
-              {
-                type: 'text',
-                text: automaticQueued
-                  ? `Automatic result for ${job.id} is already queued and will enter context shortly.`
-                  : result(job),
-              },
-            ],
-            details: {
-              action: 'peek',
-              job,
-              ...(automaticQueued ? { delivery: 'automatic-queued' } : {}),
-            },
+            content: [{ type: 'text', text: result(job) }],
+            details: { action: 'peek', job },
           };
         }
         case 'feedback': {
@@ -176,32 +209,57 @@ export function registerDelegateJobsTool(
           const ids = params.ids?.map((id) => id.trim()).filter(Boolean) ?? [];
           if (ids.length === 0) throw new Error('ids is required.');
           const jobs = await manager.cancel(ids, signal, ctx);
-          const automaticQueuedIds = new Set(
-            jobs.filter(isAutomaticDeliveryQueued).map((job) => job.id),
-          );
-          onResultEntered(
-            jobs.filter((job) => !automaticQueuedIds.has(job.id)),
-          );
+          const automaticJobs = jobs
+            .map((job) => ({ job, state: getAutomaticDeliveryState(job) }))
+            .filter(
+              (
+                item,
+              ): item is {
+                job: DelegateJobSnapshot;
+                state: AutomaticDeliveryState;
+              } => item.state !== undefined,
+            );
+          const automaticIds = new Set(automaticJobs.map(({ job }) => job.id));
+          const queuedIds = automaticJobs
+            .filter(({ state }) => state === 'queued')
+            .map(({ job }) => job.id);
+          const deliveredIds = automaticJobs
+            .filter(({ state }) => state === 'entered')
+            .map(({ job }) => job.id);
+          onResultEntered(jobs.filter((job) => !automaticIds.has(job.id)));
           return {
             content: [
               {
                 type: 'text',
                 text: jobs
-                  .map((job) =>
-                    automaticQueuedIds.has(job.id)
-                      ? `Automatic result for ${job.id} is already queued and will enter context shortly.`
-                      : result(job),
-                  )
+                  .map((job) => {
+                    const automatic = automaticJobs.find(
+                      (item) => item.job.id === job.id,
+                    );
+                    return automatic
+                      ? automaticDeliveryStatus(job, automatic.state)
+                      : result(job);
+                  })
                   .join('\n\n'),
               },
             ],
             details: {
               action: 'cancel',
-              jobs,
-              ...(automaticQueuedIds.size > 0
+              jobs: jobs.map((job) =>
+                automaticIds.has(job.id) ? compactJob(job) : job,
+              ),
+              ...(automaticIds.size > 0
                 ? {
-                    delivery: 'automatic-queued',
-                    automaticQueuedJobIds: [...automaticQueuedIds],
+                    delivery:
+                      queuedIds.length > 0
+                        ? 'automatic-queued'
+                        : 'automatic-delivered',
+                    ...(queuedIds.length > 0
+                      ? { automaticQueuedJobIds: queuedIds }
+                      : {}),
+                    ...(deliveredIds.length > 0
+                      ? { automaticDeliveredJobIds: deliveredIds }
+                      : {}),
                   }
                 : {}),
             },

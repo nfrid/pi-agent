@@ -137,7 +137,7 @@ describe('structured delegate output handoff', () => {
     ).runs[0];
     expect(getDelegateResultSpec(persistedRun)).toBeUndefined();
     const handoff = buildParentHandoff([persistedRun]);
-    expect(handoff).toContain('Structured result: valid');
+    expect(handoff).not.toContain('Structured result: valid');
     expect(handoff).not.toContain('full value must stay out of parent handoff');
     expect(handoff).not.toContain('Projection:');
   });

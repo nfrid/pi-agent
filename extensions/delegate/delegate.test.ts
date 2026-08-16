@@ -40,7 +40,7 @@ import {
   updateDelegateSessionRouting,
 } from './session';
 import { normalizeInternalDelegateResultSpec as normalizeDelegateResultSpec } from './structured-result-schema';
-import { delegatePromptGuidelines } from './tool';
+import { delegatePromptGuidelines, registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import {
   createRun,
@@ -147,6 +147,35 @@ describe('delegate', () => {
     expect(prompt).not.toMatch(/Use this exact structure/);
   });
 
+  test('keeps the serialized delegate schema compact', () => {
+    let parameters: unknown;
+    registerDelegateTool(
+      {
+        registerTool(definition: { parameters: unknown }) {
+          parameters = definition.parameters;
+        },
+      } as never,
+      '/tmp/project',
+    );
+    expect(Buffer.byteLength(JSON.stringify(parameters), 'utf8')).toBeLessThan(
+      9_000,
+    );
+  });
+
+  test('protects recorded branch history in writable continuations', () => {
+    const prompt = buildDelegatePrompt('Continue the implementation', {
+      allowWrites: true,
+      branch: 'pi/continuation-a1b2',
+      continuation: true,
+    });
+    expect(prompt).toContain(
+      'Follow-up continuations on a branch already returned to the parent must append new commits',
+    );
+    expect(prompt).toContain(
+      'do not amend, rebase, reset, or otherwise rewrite its recorded history',
+    );
+  });
+
   test('gives structured children only the delegate_result completion contract', () => {
     const resultSpec = normalizeDelegateResultSpec({
       schema: {
@@ -166,6 +195,8 @@ describe('delegate', () => {
       'Return a short result the parent can act on.',
     );
     expect(prompt).toContain('## Machine-readable completion');
+    expect(prompt).not.toContain('<delegate_result_schema>');
+    expect(prompt).not.toContain('"properties":{"ok":{"type":"boolean"}}');
   });
 
   test('frames forwarded artifacts as untrusted upstream evidence', () => {

@@ -15,7 +15,7 @@ interface ThemeLike {
 
 interface RegisteredTool {
   description: string;
-  promptGuidelines: string[];
+  promptGuidelines?: string[];
   parameters: {
     properties?: {
       action?: { description?: string };
@@ -76,13 +76,8 @@ describe('delegate_jobs rendering', () => {
     expect(actionDescription).toContain('feedback sends corrective guidance');
     expect(actionDescription).toContain('cancel stops one or more jobs');
     expect(tool?.description).not.toContain('Actions:');
-    const guidelines = tool?.promptGuidelines.join('\n') ?? '';
-    expect(guidelines).toContain(
-      'Use delegate_jobs feedback only when concrete corrective guidance is needed',
-    );
-    expect(guidelines).toContain('never repeat it to poll');
-    expect(guidelines).not.toContain('Background completion resumes');
-    expect(guidelines).not.toContain('/continue');
+    expect(tool?.promptGuidelines).toBeUndefined();
+    expect(tool?.description).toContain('Use peek for deliberate inspection');
     await manager.dispose();
   });
 
@@ -124,7 +119,9 @@ describe('delegate_jobs rendering', () => {
       },
     } as unknown as ExtensionAPI;
     let automaticQueued = true;
-    registerDelegateJobsTool(pi, manager, undefined, () => automaticQueued);
+    registerDelegateJobsTool(pi, manager, undefined, () =>
+      automaticQueued ? 'queued' : undefined,
+    );
 
     const started = manager.start({
       mode: 'single',
@@ -142,8 +139,9 @@ describe('delegate_jobs rendering', () => {
     expect(suppressed?.content[0]?.text).toContain('already queued');
     expect(suppressed?.details).toMatchObject({
       delivery: 'automatic-queued',
-      job: { id: started.id, handoff: expect.stringContaining(longTail) },
+      job: { id: started.id },
     });
+    expect(JSON.stringify(suppressed?.details)).not.toContain(longTail);
 
     automaticQueued = false;
     const result = await tool?.execute('call-1', {
