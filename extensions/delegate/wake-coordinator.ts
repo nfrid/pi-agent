@@ -435,7 +435,7 @@ function timestampOrderIsValid(record: WakeRecord): boolean {
 }
 
 function shouldKeepLiveRecord(live: WakeRecord, incoming: WakeRecord): boolean {
-  if (live.revision > incoming.revision) return true;
+  if (live.revision >= incoming.revision) return true;
   const liveProgress = wakeStateProgress(live.state);
   const incomingProgress = wakeStateProgress(incoming.state);
   if (liveProgress > incomingProgress) return true;
