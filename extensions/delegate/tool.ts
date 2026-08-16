@@ -22,6 +22,7 @@ import {
   delegateToolResult,
   makeDetails,
 } from './tool-result';
+import type { DelegateWorkflowCoordinator } from './workflow-coordinator';
 
 const DELEGATE_TOOL_DESCRIPTION =
   'Run focused child agents with separate context. Choose a route, workspace mode, and either a prose or structured result contract; background completion is delivered automatically.';
@@ -222,6 +223,8 @@ export function delegatePromptGuidelines(
 }
 
 export interface DelegateBackgroundRuntime {
+  /** Exposed for the next async-only migration; legacy execution ignores it. */
+  workflow?: DelegateWorkflowCoordinator;
   manager: DelegateJobManager;
   statuses: DelegateStatusStore;
   getDeliveryEpoch: () => number;

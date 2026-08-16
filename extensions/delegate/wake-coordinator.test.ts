@@ -7,7 +7,11 @@ import {
   settleDelegateResult,
 } from './structured-result';
 import { createRun } from './types';
-import { WakeCoordinator, type WakeDispatch } from './wake-coordinator';
+import {
+  cloneAndFreezeWakeJson,
+  WakeCoordinator,
+  type WakeDispatch,
+} from './wake-coordinator';
 import { DelegateWorkflowCoordinator } from './workflow-coordinator';
 
 function result(
@@ -318,54 +322,16 @@ describe('WakeCoordinator', () => {
     await workflow.dispose();
   });
 
-  test('deep-clones own __proto__ payload keys safely', async () => {
-    const run = createRun('proto');
-    run.state = 'success';
-    run.exitCode = 0;
-    const spec = normalizeInternalDelegateResultSpec({
-      schema: {
-        type: 'object',
-        properties: { payload: { type: 'object' } },
-        required: ['payload'],
-      },
-      views: { payload: '/payload' },
-    });
-    setDelegateResultSpec(run, spec);
-    const payloadValue = JSON.parse('{"__proto__":{"safe":"yes"}}');
-    captureDelegateResultEvent(
-      run,
-      { details: { payload: payloadValue } },
-      false,
-    );
-    settleDelegateResult(run);
-    const workflow = new DelegateWorkflowCoordinator();
-    const attempt = workflow.schedule({
-      logicalId: 'proto',
-      mode: 'single',
-      tasks: ['proto'],
-      execute: async () => ({ runs: [run], handoff: 'proto' }),
-    });
-    await settled(workflow, attempt.identity);
-    let payload!: WakeDispatch['payload'];
-    const wake = new WakeCoordinator({
-      workflow,
-      dispatch: (dispatch) => {
-        payload = dispatch.payload;
-      },
-    });
-    wake.register({
-      id: 'proto-view',
-      condition: { node: attempt.identity },
-      payload: [{ view: 'payload' }],
-    });
-    const selected = payload.sources['proto@1']?.views?.payload as Record<
-      string,
-      unknown
-    >;
+  test('deep-clones own __proto__ payload keys safely', () => {
+    const selected = cloneAndFreezeWakeJson(
+      JSON.parse('{"__proto__":{"safe":"yes"}}'),
+    ) as Record<string, unknown>;
     expect(Object.hasOwn(selected, '__proto__')).toBe(true);
-    expect(selected['__proto__']).toEqual({ safe: 'yes' });
+    expect(
+      Object.getOwnPropertyDescriptor(selected, '__proto__')?.value,
+    ).toEqual({ safe: 'yes' });
     expect(Object.getPrototypeOf(selected)).toBeNull();
-    await workflow.dispose();
+    expect(Object.isFrozen(selected)).toBe(true);
   });
 
   test('any readiness uses the ref that settles first, not references[0]', async () => {

@@ -235,7 +235,8 @@ function jsonBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
 }
 
-function cloneAndFreezeJson(
+/** @internal Exported for boundary-focused tests. */
+export function cloneAndFreezeWakeJson(
   value: unknown,
   seen = new WeakSet<object>(),
 ): unknown {
@@ -243,7 +244,7 @@ function cloneAndFreezeJson(
   if (seen.has(value)) throw new Error('Wake payload contains a cycle.');
   seen.add(value);
   if (Array.isArray(value)) {
-    const result = value.map((item) => cloneAndFreezeJson(item, seen));
+    const result = value.map((item) => cloneAndFreezeWakeJson(item, seen));
     seen.delete(value);
     return Object.freeze(result);
   }
@@ -253,7 +254,7 @@ function cloneAndFreezeJson(
   >;
   for (const [key, item] of Object.entries(value))
     Object.defineProperty(result, key, {
-      value: cloneAndFreezeJson(item, seen),
+      value: cloneAndFreezeWakeJson(item, seen),
       enumerable: true,
       configurable: true,
       writable: true,
@@ -753,6 +754,14 @@ export class WakeCoordinator {
     return this.retry(id);
   }
 
+  /** Explicit operator recovery for an accepted-but-unentered delivery. */
+  recover(id: string): WakeSnapshot {
+    const record = this.requireRecord(id);
+    if (record.state !== 'queued' && record.state !== 'ready')
+      throw new Error(`Wake "${id}" is not recoverable from ${record.state}.`);
+    return this.retryDispatch(id);
+  }
+
   reconcileQueued(id: string): WakeSnapshot {
     return this.retryDispatch(id);
   }
@@ -1073,7 +1082,7 @@ export class WakeCoordinator {
             throw new Error('Wake metadata payload exceeds its bounded limit.');
           next = {
             ...current,
-            metadata: cloneAndFreezeJson(selected.value) as Record<
+            metadata: cloneAndFreezeWakeJson(selected.value) as Record<
               string,
               unknown
             >,
@@ -1090,7 +1099,7 @@ export class WakeCoordinator {
             ...current,
             views: Object.freeze({
               ...(current.views ?? {}),
-              [selector.name ?? '']: cloneAndFreezeJson(selected.value),
+              [selector.name ?? '']: cloneAndFreezeWakeJson(selected.value),
             }),
           };
         }

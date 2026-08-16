@@ -1,5 +1,6 @@
 import type {
   ExtensionAPI,
+  ExtensionContext,
   ExtensionUIContext,
 } from '@earendil-works/pi-coding-agent';
 import {
@@ -51,11 +52,23 @@ import {
 import { registerDelegateTool } from './tool';
 import { delegateToolBoundary } from './tool-boundary';
 import { registerDelegateTranscriptCommand } from './transcript';
+import { WakeCoordinator } from './wake-coordinator';
+import {
+  createWakeDelivery,
+  registerWakeMessageRenderer,
+} from './wake-delivery';
+import {
+  attachWakeStore,
+  latestWakeState,
+  restoreWakeState,
+} from './wake-store';
+import { registerDelegateWakeTool } from './wake-tool';
 import {
   DELEGATE_WIDGET_MAX_WIDTH,
   DELEGATE_WIDGET_MIN_WIDTH,
   renderDelegateWidget,
 } from './widget';
+import { createDelegateWorkflowCoordinator } from './workflow-coordinator';
 import { loadWorktree } from './worktree';
 import { registerDelegateWorktreesCommand } from './worktrees-command';
 
@@ -105,8 +118,26 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   }
 
   let jobs: DelegateJobManager | undefined;
+  let workflow:
+    | ReturnType<typeof createDelegateWorkflowCoordinator>
+    | undefined;
   let statuses: DelegateStatusStore | undefined;
   let ui: ExtensionUIContext | undefined;
+  type WakeBranch = {
+    readonly key: string;
+    readonly coordinator: WakeCoordinator;
+    detachStore?: () => void;
+  };
+  const wakeBranches = new Map<string, WakeBranch>();
+  let activeWake: WakeBranch | undefined;
+  let wakeBranchKey = 'root';
+  let nextWakeEpoch = 0;
+  const wakeDelivery = createWakeDelivery({
+    pi,
+    getRuntimeActive: () => runtimeActive,
+    getActiveCoordinator: () => activeWake?.coordinator,
+  });
+  registerDelegateWakeTool(pi, () => activeWake?.coordinator);
   let scopeId: SessionScopeId = 'default';
   let deliveryEpoch = 0;
   let runtimeActive = false;
@@ -125,6 +156,52 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         reason: string;
       }
     | undefined;
+
+  const detachActiveWake = () => {
+    if (!activeWake) return;
+    activeWake.detachStore?.();
+    activeWake.detachStore = undefined;
+    activeWake.coordinator.setDispatchHandler(undefined);
+    activeWake = undefined;
+  };
+
+  const disposeWakeRuntime = () => {
+    detachActiveWake();
+    for (const branch of wakeBranches.values()) branch.coordinator.dispose();
+    wakeBranches.clear();
+  };
+
+  const activateWakeBranch = (ctx: ExtensionContext, key: string): void => {
+    const activeWorkflow = workflow;
+    if (!activeWorkflow || !runtimeActive) return;
+    const current = activeWake;
+    if (current?.key === key) return;
+    detachActiveWake();
+    const existing = wakeBranches.get(key);
+    let branch = existing;
+    if (!branch) {
+      const persisted = latestWakeState(ctx);
+      const inheritedEpoch =
+        persisted?.ownerSessionId === scopeId
+          ? persisted.ownerEpoch
+          : undefined;
+      const ownerEpoch =
+        inheritedEpoch ?? (nextWakeEpoch > 0 ? nextWakeEpoch : 0);
+      nextWakeEpoch = Math.max(nextWakeEpoch, ownerEpoch + 1);
+      const coordinator = new WakeCoordinator({
+        workflow: activeWorkflow,
+        ownerSessionId: scopeId,
+        ownerEpoch,
+      });
+      if (persisted?.ownerSessionId === scopeId)
+        restoreWakeState(coordinator, ctx);
+      branch = { key, coordinator };
+      wakeBranches.set(key, branch);
+    }
+    activeWake = branch;
+    branch.detachStore = attachWakeStore(branch.coordinator, pi);
+    branch.coordinator.setDispatchHandler(wakeDelivery.dispatch);
+  };
 
   const delivery = createCompletionDelivery({
     pi,
@@ -254,10 +331,16 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     }).catch(() => []);
     if (jobs && scopeId !== 'default' && scopeId !== sessionScopeId) {
       const closingJobs = jobs;
+      const closingWorkflow = workflow;
       const closingStatuses = statuses;
       jobs = undefined;
+      workflow = undefined;
       statuses = undefined;
-      void closingJobs.dispose().then(() => closingStatuses?.clear());
+      runtimeActive = false;
+      disposeWakeRuntime();
+      await closingWorkflow?.dispose();
+      await closingJobs.dispose();
+      closingStatuses?.clear();
     }
     if (scopeId !== 'default' && scopeId !== sessionScopeId)
       clearDelegateSurface(scopeId);
@@ -275,6 +358,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     runtimeActive = true;
     ui = ctx.hasUI ? ctx.ui : undefined;
     deliveryEpoch = 0;
+    nextWakeEpoch = 0;
+    wakeBranchKey = `${sessionScopeId}:root`;
+    if (wakeBranches.size > 0) disposeWakeRuntime();
     widgetDetailed = true;
     delivery.clearPending();
     delivery.resetAutomaticDelivery();
@@ -294,12 +380,19 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     jobs = new DelegateJobManager({
       scopeId: sessionScopeId,
       pendingProcesses: scopedServices.pendingProcesses,
-      onSettled: delivery.queueCompletion,
+      // Coordinator-owned jobs settle through workflow terminal listeners and
+      // must not also appear as legacy automatic completions.
+      onSettled: (job) => {
+        if (!job.attemptIdentity) delivery.queueCompletion(job);
+      },
     });
+    workflow = createDelegateWorkflowCoordinator({ jobs });
+    scopedServices.delegateWorkflow = workflow;
     registerDelegateTool(
       pi,
       ctx.cwd,
       {
+        workflow,
         manager: jobs,
         statuses,
         getDeliveryEpoch: () => deliveryEpoch,
@@ -331,17 +424,32 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     setDelegateToolActive(pi, 'delegate_jobs', false);
     setDelegateToolActive(pi, 'delegate_branches', false);
     if (branchEntries.length > 0) activateBranchesTool();
+    activateWakeBranch(ctx, wakeBranchKey);
     syncWidget();
   });
 
-  pi.on('session_tree', () => {
+  pi.on('session_tree', (event, ctx) => {
     deliveryEpoch++;
     delivery.resetAutomaticDelivery();
+    const treeEvent = event as { newLeafId?: string | null };
+    // A leaf ID is stable across navigate-away/back. If an older host shim
+    // omits it, the persisted owner epoch still provides a conservative key.
+    const persisted = latestWakeState(ctx);
+    wakeBranchKey =
+      treeEvent.newLeafId === null
+        ? `${scopeId}:root`
+        : treeEvent.newLeafId
+          ? `${scopeId}:${treeEvent.newLeafId}`
+          : persisted
+            ? `${scopeId}:epoch:${persisted.ownerEpoch}`
+            : `${scopeId}:epoch:${nextWakeEpoch++}`;
+    activateWakeBranch(ctx, wakeBranchKey);
   });
   pi.on('context', (event) => {
     // Keep the automatic-delivery marker through context entry so a later
     // peek does not replay the same settled completion.
     delivery.markAutomaticDeliveriesEntered(event.messages);
+    wakeDelivery.markContextEntered(event.messages);
   });
   // Unlike background-terminals, this widget is not force-remounted at agent
   // boundaries: a delegate run is live across them, and tearing the component
@@ -384,11 +492,19 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     delivery.resetAutomaticDelivery();
     widget.detach();
     const closing = jobs;
+    const closingWorkflow = workflow;
     const closingStatuses = statuses;
     jobs = undefined;
+    workflow = undefined;
     statuses = undefined;
+    disposeWakeRuntime();
+    await closingWorkflow?.dispose();
+    // Workflow coordinators use this shared manager but do not own it.
     await closing?.dispose();
     closingStatuses?.clear();
+    const scopedServices = getScopedServices(closingScopeId);
+    if (scopedServices.delegateWorkflow === closingWorkflow)
+      scopedServices.delegateWorkflow = undefined;
     clearDelegateSurface(closingScopeId);
     ui = undefined;
     if (scopeId === closingScopeId) scopeId = 'default';
@@ -407,6 +523,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       );
     },
   );
+  registerWakeMessageRenderer(pi);
 
   pi.registerCommand('delegates', {
     description: DELEGATES_COMMAND_DESCRIPTION,

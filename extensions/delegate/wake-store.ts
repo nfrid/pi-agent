@@ -47,16 +47,10 @@ export function persistWakeState(
   } satisfies WakeStoreEntry);
 }
 
-/**
- * Restore the validated append-only wake history on the current session
- * branch. Invalid history is fail-closed; the coordinator consolidates each
- * wake by revision/state before changing live records.
- */
-export function restoreWakeState(
-  coordinator: WakeCoordinator,
+function wakeHistory(
   ctx: SessionBranch,
-): void {
-  const history: WakeStoreEntry[] = [];
+): WakeCoordinatorSnapshot[] | undefined {
+  const history: WakeCoordinatorSnapshot[] = [];
   for (const entry of ctx.sessionManager.getBranch()) {
     if (
       !isRecord(entry) ||
@@ -64,11 +58,30 @@ export function restoreWakeState(
       entry.customType !== WAKE_ENTRY_TYPE
     )
       continue;
-    if (!isWakeStoreEntry(entry.data)) return;
-    history.push(entry.data);
+    if (!isWakeStoreEntry(entry.data)) return undefined;
+    history.push(entry.data.state);
   }
-  if (history.length > 0)
-    coordinator.restoreHistory(history.map((entry) => entry.state));
+  return history;
+}
+
+/** Return the latest valid snapshot envelope on the current session branch. */
+export function latestWakeState(
+  ctx: SessionBranch,
+): WakeCoordinatorSnapshot | undefined {
+  return wakeHistory(ctx)?.at(-1);
+}
+
+/**
+ * Restore validated append-only wake history on the current session branch.
+ * Invalid history fails closed; the coordinator consolidates each wake by
+ * revision/state before changing live records.
+ */
+export function restoreWakeState(
+  coordinator: WakeCoordinator,
+  ctx: SessionBranch,
+): void {
+  const history = wakeHistory(ctx);
+  if (history?.length) coordinator.restoreHistory(history);
 }
 
 /** Attach append-only persistence to wake state changes. */
