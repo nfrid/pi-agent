@@ -1754,7 +1754,15 @@ export class DashboardLiveStore {
           runtimeEpoch: activeEpoch,
           sessionId: response.metadata.id,
         }) as never;
-      for (const message of active.messages)
+      // An active snapshot can carry a live ID for a message already present
+      // in persisted history. Match only against this hydration's persisted
+      // baseline; ambiguous persisted matches remain fail-open in the existing helper.
+      const persistedProjection = projection;
+      for (const message of active.messages) {
+        if (
+          persistedMessageIdForLive(persistedProjection, message) !== undefined
+        )
+          continue;
         projection = reduceTranscriptEvent(
           projection,
           reducerInput({
@@ -1763,6 +1771,7 @@ export class DashboardLiveStore {
             message,
           }),
         );
+      }
       for (const tool of active.tools)
         projection = reduceTranscriptEvent(
           projection,

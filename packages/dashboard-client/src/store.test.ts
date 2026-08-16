@@ -644,6 +644,65 @@ describe('DashboardLiveStore', () => {
     });
   });
 
+  it('deduplicates reacquired active messages against fallback persisted IDs', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 4));
+    const response = {
+      ...sessionResponse(4),
+      entriesComplete: true,
+      entries: [
+        {
+          type: 'message',
+          message: {
+            role: 'user',
+            content: 'switch back to this session',
+            timestamp: 123,
+          },
+        },
+      ],
+      active: {
+        pendingInteractions: [],
+        messages: [
+          {
+            messageId: 'live-user-copy',
+            role: 'user',
+            content: 'switch back to this session',
+            timestamp: 123,
+          },
+          {
+            messageId: 'live-tail',
+            role: 'assistant',
+            content: 'still streaming',
+            timestamp: 124,
+          },
+        ],
+        tools: [],
+        delegates: [],
+        truncated: false,
+      },
+      completeThroughCursor: true,
+    } as AuthoritativeSessionSnapshot;
+
+    expect(store.hydrateSession(response)?.order).toEqual([
+      'entry-0',
+      'live-tail',
+    ]);
+    // Reacquisition can replay the same authoritative snapshot; keep both
+    // identities and their chronology stable across that switch-back.
+    expect(store.hydrateSession(response)?.order).toEqual([
+      'entry-0',
+      'live-tail',
+    ]);
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['entry-0', 'live-tail']);
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.items[
+        'live-user-copy'
+      ],
+    ).toBeUndefined();
+  });
+
   it('hydrates older active messages and tools before newer persisted history', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 4));
