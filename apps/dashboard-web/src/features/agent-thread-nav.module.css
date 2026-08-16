@@ -367,6 +367,11 @@
   border-color: var(--purple);
   color: var(--fg);
 }
+.usageRow {
+  width: calc(100% - 16px);
+  min-width: 0;
+  margin: auto 8px 6px;
+}
 .footer {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -375,6 +380,9 @@
   margin-top: auto;
   border-top: 1px solid var(--line-soft);
   padding: 8px;
+}
+.sessionFooter {
+  margin-top: 0;
 }
 .utility {
   position: relative;

@@ -47,7 +47,7 @@ describe('usage parsing and formatting', () => {
     ]);
     const secondary = {
       kind: 'secondary' as const,
-      label: 'weekly',
+      label: 'wk',
       usedPercent: 85,
     };
     expect(
@@ -90,10 +90,10 @@ describe('dashboard notification and usage previews', () => {
         }}
       />,
     );
-    expect(markup).toContain('aria-label="Usage: 5h 25%, weekly 75%"');
+    expect(markup).toContain('aria-label="Usage: 5h 25%, wk 75%"');
     expect(markup).toContain('aria-label="Usage limits"');
     expect(markup).toContain('5h');
-    expect(markup).toContain('weekly');
+    expect(markup).toContain('wk');
     expect(markup).toContain('Codex usage');
   });
 

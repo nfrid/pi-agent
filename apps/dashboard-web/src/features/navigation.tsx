@@ -85,7 +85,9 @@ export function Header({ snapshot }: { snapshot: BrowserSnapshot }) {
             </b>
           )}
         </button>
-        <UsageCapsule usage={snapshot.usage} />
+        {!activeSessionId && (
+          <UsageCapsule usage={snapshot.usage} variant="toolbar" />
+        )}
         <CommandPalette snapshot={snapshot} disabled={paletteDisabled} />
       </div>
     </header>

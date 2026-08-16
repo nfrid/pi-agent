@@ -24,6 +24,7 @@ import {
   type RuntimeLifecycleThreadProps,
 } from './runtime-actions';
 import { DashboardTime } from './timestamp';
+import { UsageCapsule } from './usage-indicator';
 
 export type { AgentThreadRow } from './agent-thread-nav/model';
 export {
@@ -262,7 +263,14 @@ export function AgentThreadNav({
             : 's'}
         </button>
       )}
-      <footer className={`agent-nav-footer ${styles.footer}`}>
+      {mode === 'session' && (
+        <div className={styles.usageRow}>
+          <UsageCapsule usage={snapshot.usage} variant="sidebar" />
+        </div>
+      )}
+      <footer
+        className={`agent-nav-footer ${styles.footer} ${mode === 'session' ? styles.sessionFooter : ''}`}
+      >
         <button
           type="button"
           className={`agent-nav-utility ${styles.utility}`}

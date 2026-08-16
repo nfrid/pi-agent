@@ -70,7 +70,12 @@ function windowLabel(
   kind: 'primary' | 'secondary',
 ): string {
   const explicit = value.windowLabel ?? value.window_label ?? value.label;
-  if (typeof explicit === 'string' && explicit.trim()) return explicit;
+  if (typeof explicit === 'string' && explicit.trim()) {
+    const normalized = explicit.trim();
+    if (/^weekly$/iu.test(normalized)) return 'wk';
+    if (/^5\s*hours?$/iu.test(normalized)) return '5h';
+    return normalized;
+  }
   const minutes =
     numberFrom(value, [
       'windowMinutes',
@@ -85,7 +90,7 @@ function windowLabel(
       'limit_window_seconds',
     ]) ?? 0) / 60;
   if (minutes === 300) return '5h';
-  if (minutes === 10_080) return 'weekly';
+  if (minutes === 10_080) return 'wk';
   if (minutes !== undefined && minutes > 0) {
     if (minutes % 1_440 === 0) return `${minutes / 1_440}d`;
     if (minutes % 60 === 0) return `${minutes / 60}h`;
@@ -220,7 +225,15 @@ function WindowSummary({
   );
 }
 
-export function UsageCapsule({ usage }: { usage: BrowserSnapshot['usage'] }) {
+export type UsageCapsuleVariant = 'toolbar' | 'sidebar';
+
+export function UsageCapsule({
+  usage,
+  variant = 'toolbar',
+}: {
+  usage: BrowserSnapshot['usage'];
+  variant?: UsageCapsuleVariant;
+}) {
   const limits = parseUsage(usage);
   const first = limits[0];
   const windows = first
@@ -256,7 +269,10 @@ export function UsageCapsule({ usage }: { usage: BrowserSnapshot['usage'] }) {
 
   if (!first || !urgent) return null;
   return (
-    <div className={`${styles.capsule} global-usage`} ref={capsuleRef}>
+    <div
+      className={`${styles.capsule} global-usage ${variant === 'sidebar' ? styles.sidebar : ''}`}
+      ref={capsuleRef}
+    >
       <button
         type="button"
         className={styles.trigger}
@@ -265,7 +281,6 @@ export function UsageCapsule({ usage }: { usage: BrowserSnapshot['usage'] }) {
         aria-label={`Usage: ${windows.map((window) => `${window.label} ${Math.round(window.usedPercent)}%`).join(', ')}`}
         onClick={() => setOpen((value) => !value)}
       >
-        <span className={styles.capsuleTitle}>Usage</span>
         <span className={styles.windows} aria-hidden="true">
           {windows.map((window) => (
             <span
