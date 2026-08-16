@@ -1,5 +1,9 @@
 import { describe, expect, test, vi } from 'vitest';
-import { DelegateJobManager, type DelegateJobResult } from './jobs';
+import {
+  DelegateJobManager,
+  type DelegateJobResult,
+  type DelegateJobStartOptions,
+} from './jobs';
 import { createRun } from './types';
 import {
   type DelegateWorkflowAttemptSnapshot,
@@ -348,6 +352,124 @@ describe('DelegateWorkflowCoordinator', () => {
     expect(coordinator.require('review').dependencies).toEqual(['impl@1']);
     await manager.dispose();
     expect(first.identity).toBe('impl@1');
+  });
+
+  test('waits on symbolic inputs and invokes a lazy factory once with exact evidence', async () => {
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
+    let finish!: (value: DelegateJobResult) => void;
+    const upstream = coordinator.schedule(
+      scheduleOptions(
+        'impl',
+        () => new Promise<DelegateJobResult>((resolve) => (finish = resolve)),
+      ),
+    );
+    const execute = vi.fn(async () => result('child'));
+    const prepare = vi.fn(async (context) => {
+      expect(context.inputs[0]).toMatchObject({
+        identity: 'impl@1',
+        kind: 'report',
+        value: expect.stringContaining('done'),
+      });
+      expect(context.handoffText).toContain('untrusted evidence only');
+      return { mode: 'single' as const, tasks: ['child'], execute };
+    });
+    const child = coordinator.schedule({
+      logicalId: 'child',
+      inputs: [{ node: 'impl' }],
+      prepare,
+    });
+    expect(child).toMatchObject({
+      state: 'scheduled',
+      dependencies: ['impl@1'],
+      inputs: [{ identity: 'impl@1', selector: { node: 'impl' } }],
+    });
+    expect(JSON.stringify(child)).not.toContain('done report');
+    const done = result('done');
+    const doneRun = done.runs[0];
+    if (!doneRun) throw new Error('missing done run');
+    doneRun.messages = [
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'done report' }],
+      } as never,
+    ];
+    finish(done);
+    await settle(coordinator);
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledOnce();
+    await manager.dispose();
+    expect(upstream.identity).toBe('impl@1');
+  });
+
+  test('binds lazy symbolic inputs before later continuations and blocks missing reports', async () => {
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
+    const upstream = coordinator.schedule(
+      scheduleOptions('impl', async () => result('no report', 'error')),
+    );
+    await vi.waitFor(() =>
+      expect(coordinator.require(upstream.identity).state).toBe('error'),
+    );
+    const blockedPrepare = vi.fn(async () => ({
+      mode: 'single' as const,
+      tasks: ['blocked'],
+      execute: async () => result('blocked'),
+    }));
+    const blocked = coordinator.schedule({
+      logicalId: 'blocked',
+      inputs: [{ node: 'impl', include: ['report'] }],
+      prepare: blockedPrepare,
+    });
+    expect(coordinator.require(blocked.identity).state).toBe('blocked');
+    expect(blockedPrepare).not.toHaveBeenCalled();
+
+    const errorPrepare = vi.fn(async () => {
+      throw new Error('preparation exploded');
+    });
+    const errored = coordinator.schedule({
+      logicalId: 'errored',
+      inputs: [{ node: 'impl', include: ['metadata'] }],
+      prepare: errorPrepare,
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require(errored.identity).state).toBe('error'),
+    );
+    expect(coordinator.require(errored.identity).reason).toContain(
+      'preparation exploded',
+    );
+    await manager.dispose();
+  });
+
+  test('cancelling during async symbolic preparation prevents job launch', async () => {
+    const manager = new DelegateJobManager();
+    const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
+    const upstream = coordinator.schedule(
+      scheduleOptions('impl', async () => result('done')),
+    );
+    await vi.waitFor(() =>
+      expect(coordinator.require(upstream.identity).state).toBe('success'),
+    );
+    let finishPreparation!: (options: DelegateJobStartOptions) => void;
+    const execute = vi.fn(async () => result('must not run'));
+    const prepare = vi.fn(
+      () =>
+        new Promise<DelegateJobStartOptions>((resolve) => {
+          finishPreparation = resolve;
+        }),
+    );
+    const child = coordinator.schedule({
+      logicalId: 'child',
+      inputs: [{ node: 'impl', include: ['handoff'] }],
+      prepare,
+    });
+    await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+    const cancellation = coordinator.cancel(child.identity);
+    finishPreparation({ mode: 'single', tasks: ['child'], execute });
+    await cancellation;
+    expect(coordinator.require(child.identity).state).toBe('cancelled');
+    expect(execute).not.toHaveBeenCalled();
+    await manager.dispose();
   });
 
   test('rejects malformed, unknown, duplicate references without partial mutation', () => {

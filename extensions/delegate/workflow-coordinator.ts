@@ -5,6 +5,14 @@ import {
   type DelegateJobStartOptions,
 } from './jobs';
 import {
+  type BoundWorkflowSelector,
+  type ResolvedWorkflowInput,
+  resolveWorkflowInputs,
+  type SymbolicWorkflowSelector,
+  WorkflowInputBlockedError,
+  type WorkflowInputSource,
+} from './workflow-inputs';
+import {
   type AttemptIdentity,
   assertWorkflowAttemptTransition,
   createWorkflowModel,
@@ -17,14 +25,39 @@ import {
 
 const MAX_WORKFLOW_REASON_LENGTH = 256;
 
+export interface DelegateWorkflowLaunchContext {
+  readonly attempt: WorkflowAttempt;
+  readonly dependencies: readonly BoundWorkflowSelector[];
+  readonly inputs: readonly ResolvedWorkflowInput[];
+  readonly handoffText: string;
+  /** Resolve another bound source without exposing it in coordinator snapshots. */
+  readonly resolve: (
+    identity: AttemptIdentity,
+  ) => readonly ResolvedWorkflowInput[];
+}
+
+export type DelegateWorkflowLaunchFactory = (
+  context: DelegateWorkflowLaunchContext,
+) => DelegateJobStartOptions | Promise<DelegateJobStartOptions>;
+
 export interface DelegateWorkflowScheduleOptions
-  extends Omit<DelegateJobStartOptions, 'workflowAttempt' | 'onTerminal'> {
+  extends Omit<
+    DelegateJobStartOptions,
+    'workflowAttempt' | 'onTerminal' | 'mode' | 'tasks' | 'execute'
+  > {
   /** Logical identity of the new attempt. */
   logicalId: string;
   /** Continue the latest attempt in this lineage instead of creating @1. */
   continuation?: boolean;
   /** References to attempts that must settle before this attempt launches. */
   after?: readonly string[];
+  /** Symbolic sources, each of which becomes an implicit dependency. */
+  inputs?: readonly SymbolicWorkflowSelector[];
+  /** Mutually exclusive lazy preparation for the actual job launch. */
+  prepare?: DelegateWorkflowLaunchFactory;
+  mode?: DelegateJobStartOptions['mode'];
+  tasks?: string[];
+  execute?: DelegateJobStartOptions['execute'];
 }
 
 export interface DelegateWorkflowAttemptSnapshot {
@@ -33,6 +66,7 @@ export interface DelegateWorkflowAttemptSnapshot {
   readonly ordinal: number;
   readonly identity: AttemptIdentity;
   readonly dependencies: readonly AttemptIdentity[];
+  readonly inputs: readonly BoundWorkflowSelector[];
   readonly state: WorkflowAttemptState;
   readonly createdAt: number;
   readonly scheduledAt: number;
@@ -77,7 +111,10 @@ interface WorkflowRecord {
   cancellationWaiters: Array<() => void>;
   cancellationInFlight?: Promise<void>;
   result?: DelegateJobResult;
-  launch: DelegateJobStartOptions;
+  selectors: readonly BoundWorkflowSelector[];
+  prepare?: DelegateWorkflowLaunchFactory;
+  preparationInFlight?: Promise<void>;
+  launch?: DelegateJobStartOptions;
 }
 
 function boundedReason(value: unknown): string {
@@ -102,15 +139,28 @@ function validateScheduleInput(options: DelegateWorkflowScheduleOptions): void {
     throw new Error(
       'Invalid workflow dependency: expected a string reference.',
     );
-  if (options.mode !== 'single' && options.mode !== 'parallel')
-    throw new Error('Invalid delegate mode.');
-  if (
-    !Array.isArray(options.tasks) ||
-    options.tasks.some((task) => typeof task !== 'string')
-  )
-    throw new Error('Invalid delegate tasks: expected an array of strings.');
-  if (typeof options.execute !== 'function')
-    throw new Error('Invalid delegate launch: execute must be a function.');
+  if (options.inputs !== undefined && !Array.isArray(options.inputs))
+    throw new Error('Invalid symbolic workflow inputs: expected an array.');
+  if (options.prepare !== undefined && typeof options.prepare !== 'function')
+    throw new Error('Invalid lazy workflow launch factory.');
+  const lazy = options.prepare !== undefined;
+  if (lazy && options.execute !== undefined)
+    throw new Error(
+      'Static execute options and lazy preparation are mutually exclusive.',
+    );
+  if (!lazy) {
+    if (options.mode !== 'single' && options.mode !== 'parallel')
+      throw new Error('Invalid delegate mode.');
+    if (
+      !Array.isArray(options.tasks) ||
+      options.tasks.some((task) => typeof task !== 'string')
+    )
+      throw new Error('Invalid delegate tasks: expected an array of strings.');
+    if (typeof options.execute !== 'function')
+      throw new Error('Invalid delegate launch: execute must be a function.');
+    if (options.inputs?.length)
+      throw new Error('Symbolic workflow inputs require lazy preparation.');
+  }
   if (options.route !== undefined && typeof options.route !== 'string')
     throw new Error('Invalid delegate route.');
 }
@@ -154,7 +204,12 @@ export class DelegateWorkflowCoordinator {
     const plan = options.continuation
       ? this.model.planContinuation(options.logicalId)
       : this.model.planFresh(options.logicalId);
-    const dependencies = this.bindDependencies(plan, options.after ?? []);
+    const selectors = this.bindSelectors(options.inputs ?? []);
+    const dependencies = this.bindDependencies(
+      plan,
+      options.after ?? [],
+      selectors,
+    );
 
     // This is the adapter's only preflight. No model or coordinator identity
     // has been committed before every reference and launch input is checked.
@@ -171,18 +226,23 @@ export class DelegateWorkflowCoordinator {
       launched: false,
       cancellationRequested: false,
       cancellationWaiters: [],
-      launch: {
-        name: options.name,
-        ownerSessionId: options.ownerSessionId,
-        mode: options.mode,
-        tasks: [...options.tasks],
-        execute: options.execute,
-        materialize: options.materialize,
-        deliveryEpoch: options.deliveryEpoch,
-        route: options.route,
-        allowWrites: options.allowWrites,
-        feedback: options.feedback,
-      },
+      selectors,
+      prepare: options.prepare,
+      launch:
+        options.prepare === undefined
+          ? {
+              name: options.name,
+              ownerSessionId: options.ownerSessionId,
+              mode: options.mode as DelegateJobStartOptions['mode'],
+              tasks: [...(options.tasks ?? [])],
+              execute: options.execute as DelegateJobStartOptions['execute'],
+              materialize: options.materialize,
+              deliveryEpoch: options.deliveryEpoch,
+              route: options.route,
+              allowWrites: options.allowWrites,
+              feedback: options.feedback,
+            }
+          : undefined,
     };
 
     // The plan was fully validated and is now the single identity mutation.
@@ -290,9 +350,59 @@ export class DelegateWorkflowCoordinator {
     this.changed();
   }
 
+  private bindSelectors(
+    selectors: readonly SymbolicWorkflowSelector[],
+  ): readonly BoundWorkflowSelector[] {
+    return Object.freeze(
+      selectors.map((selector) => {
+        if (!selector || typeof selector !== 'object')
+          throw new Error('Invalid symbolic workflow selector.');
+        if (typeof selector.node !== 'string')
+          throw new Error('Invalid symbolic workflow selector node.');
+        if (selector.include !== undefined && !Array.isArray(selector.include))
+          throw new Error('Invalid symbolic workflow selector include list.');
+        const include = selector.include?.map((kind) => {
+          if (
+            kind !== 'report' &&
+            kind !== 'handoff' &&
+            kind !== 'branch' &&
+            kind !== 'metadata'
+          )
+            throw new Error(
+              `Invalid symbolic workflow input kind "${String(kind)}".`,
+            );
+          return kind;
+        });
+        if (include && new Set(include).size !== include.length)
+          throw new Error(
+            'Duplicate symbolic workflow input kinds are not allowed.',
+          );
+        if (selector.view !== undefined && typeof selector.view !== 'string')
+          throw new Error('Invalid symbolic workflow selector view.');
+        if (selector.label !== undefined && typeof selector.label !== 'string')
+          throw new Error('Invalid symbolic workflow selector label.');
+        const attempt = this.model.bind(selector.node);
+        if (!this.records.has(attempt.identity))
+          throw new Error(
+            `Unknown workflow attempt "${attempt.identity}" in coordinator.`,
+          );
+        return Object.freeze({
+          selector: Object.freeze({
+            node: selector.node,
+            ...(include ? { include: Object.freeze(include) } : {}),
+            ...(selector.view !== undefined ? { view: selector.view } : {}),
+            ...(selector.label !== undefined ? { label: selector.label } : {}),
+          }),
+          identity: attempt.identity,
+        });
+      }),
+    );
+  }
+
   private bindDependencies(
     plan: WorkflowModelPlan,
     references: readonly string[],
+    selectors: readonly BoundWorkflowSelector[],
   ): AttemptIdentity[] {
     const dependencies: AttemptIdentity[] = [];
     if (plan.predecessor) {
@@ -302,21 +412,24 @@ export class DelegateWorkflowCoordinator {
         );
       dependencies.push(plan.predecessor.identity);
     }
+    const explicit = new Set<AttemptIdentity>();
     for (const reference of references) {
       const dependency = this.model.bind(reference);
       if (!this.records.has(dependency.identity))
         throw new Error(
           `Unknown workflow attempt "${dependency.identity}" in coordinator.`,
         );
-      if (
-        dependency.identity === plan.attempt.identity ||
-        dependencies.includes(dependency.identity)
-      )
+      if (explicit.has(dependency.identity))
         throw new Error(
           `Duplicate workflow dependency "${dependency.identity}".`,
         );
-      dependencies.push(dependency.identity);
+      explicit.add(dependency.identity);
+      if (!dependencies.includes(dependency.identity))
+        dependencies.push(dependency.identity);
     }
+    for (const selector of selectors)
+      if (!dependencies.includes(selector.identity))
+        dependencies.push(selector.identity);
     return dependencies;
   }
 
@@ -335,11 +448,101 @@ export class DelegateWorkflowCoordinator {
       this.settle(record, 'cancelled', 'Cancelled before launch.');
       return;
     }
+    if (record.prepare) {
+      record.reason = 'Preparing symbolic workflow inputs.';
+      this.changed();
+      const work = this.prepareAndLaunch(record);
+      record.preparationInFlight = work;
+      void work.finally(() => {
+        if (record.preparationInFlight === work)
+          record.preparationInFlight = undefined;
+      });
+      return;
+    }
+    this.startJob(record, record.launch);
+  }
+
+  private async prepareAndLaunch(record: WorkflowRecord): Promise<void> {
+    try {
+      const resolved = resolveWorkflowInputs(record.selectors, (identity) =>
+        this.sourceFor(identity),
+      );
+      if (
+        record.cancellationRequested ||
+        isTerminalWorkflowAttemptState(record.state)
+      )
+        return;
+      const prepare = record.prepare;
+      if (!prepare) throw new Error('Missing workflow launch factory.');
+      const launch = await prepare({
+        attempt: copyAttempt(record.attempt),
+        dependencies: record.selectors,
+        inputs: resolved.inputs,
+        handoffText: resolved.handoffText,
+        resolve: (identity) =>
+          resolved.inputs.filter((input) => input.identity === identity),
+      });
+      if (
+        record.cancellationRequested ||
+        isTerminalWorkflowAttemptState(record.state)
+      )
+        return;
+      this.validatePreparedLaunch(launch);
+      if (launch.route !== undefined) record.route = launch.route;
+      this.startJob(record, launch);
+    } catch (error) {
+      if (isTerminalWorkflowAttemptState(record.state)) return;
+      this.settle(
+        record,
+        error instanceof WorkflowInputBlockedError ? 'blocked' : 'error',
+        boundedReason(error),
+      );
+    }
+  }
+
+  private validatePreparedLaunch(
+    value: unknown,
+  ): asserts value is DelegateJobStartOptions {
+    if (!value || typeof value !== 'object')
+      throw new Error('Lazy workflow launch factory must return job options.');
+    const launch = value as Partial<DelegateJobStartOptions>;
+    if (launch.mode !== 'single' && launch.mode !== 'parallel')
+      throw new Error('Lazy workflow launch factory returned an invalid mode.');
+    if (
+      !Array.isArray(launch.tasks) ||
+      launch.tasks.some((task) => typeof task !== 'string')
+    )
+      throw new Error('Lazy workflow launch factory returned invalid tasks.');
+    if (typeof launch.execute !== 'function')
+      throw new Error(
+        'Lazy workflow launch factory returned no execute function.',
+      );
+  }
+
+  private startJob(
+    record: WorkflowRecord,
+    launch: DelegateJobStartOptions | undefined,
+  ): void {
+    if (!launch) {
+      this.settle(
+        record,
+        'error',
+        'No static or lazy workflow launch options were supplied.',
+      );
+      return;
+    }
+    if (record.cancellationRequested) {
+      this.settle(record, 'cancelled', 'Cancelled before launch.');
+      return;
+    }
+    record.reason = undefined;
     record.queuedAt = this.now();
     this.transition(record, 'queued');
     try {
+      // Lazy capacity is checked here, immediately before the adapter call.
+      this.jobs.assertAccepting();
       const job = this.jobs.start({
-        ...record.launch,
+        ...launch,
         workflowAttempt: record.attempt,
         onTerminal: (result, snapshot) =>
           this.handleTerminal(record, result, snapshot),
@@ -363,6 +566,23 @@ export class DelegateWorkflowCoordinator {
           : `Launch failed: ${boundedReason(error)}`,
       );
     }
+  }
+
+  private sourceFor(identity: AttemptIdentity): WorkflowInputSource {
+    const record = this.records.get(identity);
+    if (!record)
+      throw new WorkflowInputBlockedError(
+        `Required symbolic source ${identity} is unavailable.`,
+      );
+    return {
+      attempt: copyAttempt(record.attempt),
+      state: record.state,
+      settledAt: record.settledAt,
+      startedAt: record.startedAt,
+      route: record.route,
+      jobId: record.jobId,
+      result: this.results.get(identity),
+    };
   }
 
   private dependenciesReady(dependencies: readonly AttemptIdentity[]): boolean {
@@ -477,6 +697,19 @@ export class DelegateWorkflowCoordinator {
       ordinal: attempt.ordinal,
       identity: attempt.identity,
       dependencies: Object.freeze([...record.dependencies]),
+      inputs: Object.freeze(
+        record.selectors.map((selector) =>
+          Object.freeze({
+            selector: Object.freeze({
+              ...selector.selector,
+              ...(selector.selector.include
+                ? { include: Object.freeze([...selector.selector.include]) }
+                : {}),
+            }),
+            identity: selector.identity,
+          }),
+        ),
+      ),
       state: record.state,
       createdAt: record.createdAt,
       scheduledAt: record.scheduledAt,
