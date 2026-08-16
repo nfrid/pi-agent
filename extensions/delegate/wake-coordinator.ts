@@ -718,12 +718,18 @@ export class WakeCoordinator {
         references: Object.freeze(references),
       };
       if (!Array.isArray(value.payload)) return undefined;
+      const restoredSelectors = normalizePayload({
+        id,
+        condition: normalized.condition,
+        payload: value.payload as readonly WakePayloadSelector[],
+      });
+      for (const selector of restoredSelectors)
+        if (selector.node !== undefined) {
+          const attempt = this.workflow.require(selector.node);
+          if (attempt.identity !== selector.node) throw new Error('not exact');
+        }
       payloadSelectors = this.bindPayloadSelectors(
-        normalizePayload({
-          id,
-          condition: normalized.condition,
-          payload: value.payload as readonly WakePayloadSelector[],
-        }),
+        restoredSelectors,
         normalized.references,
       );
     } catch {
@@ -753,14 +759,10 @@ export class WakeCoordinator {
         value.dispatchAttempts <= 1000
           ? value.dispatchAttempts
           : 0,
-      lastDispatchFailure:
-        typeof value.lastDispatchFailure === 'string'
-          ? boundedReason(value.lastDispatchFailure)
-          : undefined,
-      reason:
-        typeof value.reason === 'string'
-          ? boundedReason(value.reason)
-          : undefined,
+      // Failure/cancellation prose is deliberately not trusted from a session
+      // entry; the state and timestamps are enough to recover delivery safely.
+      lastDispatchFailure: undefined,
+      reason: undefined,
       dispatchGeneration: 0,
     };
     if (record.state === 'entered' && record.enteredAt === undefined)
