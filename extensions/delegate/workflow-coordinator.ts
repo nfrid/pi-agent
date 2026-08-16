@@ -1,3 +1,4 @@
+import { isBranchOwnerId } from './branch-ownership';
 import {
   DelegateJobManager,
   type DelegateJobResult,
@@ -81,6 +82,8 @@ export interface DelegateWorkflowScheduleOptions
 
 export interface DelegateWorkflowAttemptSnapshot {
   readonly attempt: WorkflowAttempt;
+  /** Immutable internal owner; omitted from public/dashboard projections. */
+  readonly ownerBranchId?: string;
   readonly logicalId: string;
   readonly ordinal: number;
   readonly identity: AttemptIdentity;
@@ -108,6 +111,8 @@ export interface DelegateWorkflowSnapshot {
 
 /** Metadata-only projection suitable for durable session history. */
 export interface DelegateWorkflowMetadataSnapshot {
+  /** Bounded immutable branch marker used only for ancestry checks. */
+  readonly ownerBranchId?: string;
   readonly logicalId: string;
   readonly attempt: number;
   readonly identity: AttemptIdentity;
@@ -134,6 +139,8 @@ export type DelegateWorkflowTerminalListener = (
 ) => void;
 
 export interface DelegateWorkflowCoordinatorOptions {
+  /** Immutable branch that owns attempts created by this coordinator. */
+  ownerBranchId?: string;
   /** Existing execution adapter. */
   jobs?: DelegateJobManager;
   /** Alias for jobs, useful at integration boundaries. */
@@ -145,6 +152,8 @@ export interface DelegateWorkflowCoordinatorOptions {
 
 interface WorkflowRecord {
   attempt: WorkflowAttempt;
+  /** Immutable owner branch; imported records retain their original owner. */
+  ownerBranchId?: string;
   dependencies: readonly AttemptIdentity[];
   state: WorkflowAttemptState;
   createdAt: number;
@@ -296,6 +305,7 @@ export class DelegateWorkflowCoordinator {
   readonly model: WorkflowModel;
   private readonly jobs: DelegateJobManager;
   private readonly ownsJobs: boolean;
+  readonly ownerBranchId: string | undefined;
   private readonly now: () => number;
   private readonly onChange?: () => void;
   private readonly terminalListeners =
@@ -304,8 +314,19 @@ export class DelegateWorkflowCoordinator {
   private readonly records = new Map<AttemptIdentity, WorkflowRecord>();
   private readonly results = new Map<AttemptIdentity, DelegateJobResult>();
   private disposed = false;
+  private readonly importedSources = new Set<DelegateWorkflowCoordinator>();
+  private readonly importedSourceDetachers = new Map<
+    DelegateWorkflowCoordinator,
+    () => void
+  >();
 
   constructor(options: DelegateWorkflowCoordinatorOptions = {}) {
+    if (
+      options.ownerBranchId !== undefined &&
+      !isBranchOwnerId(options.ownerBranchId)
+    )
+      throw new Error('Invalid delegate workflow owner branch ID.');
+    this.ownerBranchId = options.ownerBranchId;
     this.model = options.model ?? createWorkflowModel();
     this.jobs = options.jobs ?? options.jobManager ?? new DelegateJobManager();
     this.ownsJobs =
@@ -342,6 +363,7 @@ export class DelegateWorkflowCoordinator {
     const timestamp = this.now();
     const record: WorkflowRecord = {
       attempt: copyAttempt(plan.attempt),
+      ownerBranchId: this.ownerBranchId,
       dependencies: Object.freeze([...dependencies]),
       state: 'scheduled',
       createdAt: timestamp,
@@ -360,6 +382,7 @@ export class DelegateWorkflowCoordinator {
           ? {
               name: options.name,
               ownerSessionId: options.ownerSessionId,
+              ownerBranchId: this.ownerBranchId,
               mode: options.mode as DelegateJobStartOptions['mode'],
               tasks: [...(options.tasks ?? [])],
               execute: options.execute as DelegateJobStartOptions['execute'],
@@ -407,6 +430,9 @@ export class DelegateWorkflowCoordinator {
             );
           });
           return Object.freeze({
+            ...(record.ownerBranchId
+              ? { ownerBranchId: record.ownerBranchId }
+              : {}),
             logicalId: record.attempt.logicalId,
             attempt: record.attempt.ordinal,
             identity: record.attempt.identity,
@@ -479,6 +505,134 @@ export class DelegateWorkflowCoordinator {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Import attempts owned by an ancestor runtime. Records are intentionally
+   * shared, so a still-running ancestor job settles dependent workflows in
+   * every descendant projection without creating a second job or cancelling
+   * the owner runtime.
+   */
+  importFrom(source: DelegateWorkflowCoordinator): () => void {
+    if (source === this) return () => {};
+    if (source.ownerBranchId === undefined)
+      throw new Error(
+        'Cannot import a workflow runtime without branch ownership.',
+      );
+    for (const record of source.records.values()) {
+      if (record.ownerBranchId !== source.ownerBranchId) continue;
+      try {
+        this.importRecord(record, source.results.get(record.attempt.identity));
+      } catch {
+        // A later-owned ordinal can be imported once its inherited
+        // predecessor is present; do not merge a partial sibling lineage.
+      }
+    }
+    if (this.importedSources.has(source))
+      return this.importedSourceDetachers.get(source) ?? (() => {});
+    this.importedSources.add(source);
+    const detach = source.subscribeChanges(() =>
+      this.reconcileImportedDependants(),
+    );
+    this.importedSourceDetachers.set(source, detach);
+    return detach;
+  }
+
+  /** Restore metadata that remains after an owner runtime was not cached. */
+  restoreMetadata(
+    state: DelegateWorkflowMetadataHistory,
+    ownerBranchId?: string,
+  ): void {
+    const attempts = [...state.attempts].sort(
+      (left, right) =>
+        left.createdAt - right.createdAt || left.attempt - right.attempt,
+    );
+    for (const metadata of attempts) {
+      const owner = metadata.ownerBranchId ?? ownerBranchId;
+      if (!isBranchOwnerId(owner)) continue;
+      const attempt = Object.freeze({
+        logicalId: metadata.logicalId,
+        ordinal: metadata.attempt,
+        identity: metadata.identity,
+      });
+      try {
+        this.model.importAttempt(attempt);
+      } catch {
+        continue;
+      }
+      if (this.records.has(attempt.identity)) continue;
+      const record: WorkflowRecord = {
+        attempt,
+        ownerBranchId: owner,
+        dependencies: Object.freeze([...metadata.dependencies]),
+        state: metadata.state,
+        createdAt: metadata.createdAt,
+        scheduledAt: metadata.scheduledAt,
+        queuedAt: metadata.queuedAt,
+        startedAt: metadata.startedAt,
+        settledAt: metadata.settledAt,
+        route: metadata.route,
+        allowWrites: metadata.allowWrites,
+        jobId: undefined,
+        reason: metadata.reason,
+        launched: true,
+        cancellationRequested: false,
+        cancellationWaiters: [],
+        selectors: Object.freeze([]),
+      };
+      this.records.set(attempt.identity, record);
+    }
+    this.reconcileImportedDependants();
+  }
+
+  private importRecord(
+    record: WorkflowRecord,
+    result: DelegateJobResult | undefined,
+  ): void {
+    const existing = this.records.get(record.attempt.identity);
+    if (existing && existing !== record) {
+      if (existing.ownerBranchId !== record.ownerBranchId)
+        throw new Error(
+          `Conflicting workflow owner for ${record.attempt.identity}.`,
+        );
+      return;
+    }
+    if (!existing) {
+      try {
+        this.model.importAttempt(record.attempt);
+      } catch (error) {
+        // A local attempt with the same public identity is only valid when it
+        // is the same owner record. Never silently merge sibling attempts.
+        if (
+          !this.model
+            .snapshot()
+            .attempts.some(
+              (attempt) => attempt.identity === record.attempt.identity,
+            )
+        )
+          throw error;
+      }
+      this.records.set(record.attempt.identity, record);
+    }
+    if (result) this.results.set(record.attempt.identity, result);
+  }
+
+  private reconcileImportedDependants(): void {
+    for (const source of this.importedSources) {
+      for (const record of source.records.values()) {
+        if (record.ownerBranchId !== source.ownerBranchId) continue;
+        const result = source.results.get(record.attempt.identity);
+        if (result) this.results.set(record.attempt.identity, result);
+      }
+    }
+    for (const dependent of this.records.values()) {
+      if (
+        dependent.state === 'scheduled' &&
+        this.dependenciesReady(dependent.dependencies)
+      )
+        this.launch(dependent);
+    }
+    this.onChange?.();
   }
 
   /**
@@ -557,6 +711,9 @@ export class DelegateWorkflowCoordinator {
     const identities = this.list().map((attempt) => attempt.identity);
     await this.cancel(identities, false);
     if (this.ownsJobs) await this.jobs.dispose();
+    for (const detach of this.importedSourceDetachers.values()) detach();
+    this.importedSourceDetachers.clear();
+    this.importedSources.clear();
     this.records.clear();
     this.changed();
   }
@@ -816,6 +973,7 @@ export class DelegateWorkflowCoordinator {
       this.jobs.assertAccepting();
       const job = this.jobs.start({
         ...launch,
+        ownerBranchId: record.ownerBranchId,
         workflowAttempt: record.attempt,
         onTerminal: (result, snapshot) =>
           this.handleTerminal(record, result, snapshot),
@@ -981,6 +1139,7 @@ export class DelegateWorkflowCoordinator {
     const attempt = copyAttempt(record.attempt);
     return Object.freeze({
       attempt,
+      ...(record.ownerBranchId ? { ownerBranchId: record.ownerBranchId } : {}),
       logicalId: attempt.logicalId,
       ordinal: attempt.ordinal,
       identity: attempt.identity,

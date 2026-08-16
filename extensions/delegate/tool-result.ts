@@ -274,19 +274,38 @@ export async function buildArtifactBackedHandoff(
 }
 
 /** Publish only while the parent is still on the session that launched the job. */
+function hideStructuredBranchValue(run: DelegatedRun): DelegatedRun {
+  const structured = run.structuredResult;
+  if (!structured?.valid || structured.value === undefined) return run;
+  const { value: _value, ...withoutValue } = structured;
+  return {
+    ...run,
+    structuredResult: { ...withoutValue, valueOmitted: true },
+  };
+}
+
 export async function buildSessionBoundArtifactBackedHandoff(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   launchSessionId: string,
   runs: DelegatedRun[],
+  launchBranchId?: string,
+  isLaunchBranchActive?: () => boolean,
 ): Promise<string> {
-  if (ctx.sessionManager.getSessionId() !== launchSessionId) {
+  const ownerBranchActive =
+    launchBranchId === undefined ? true : (isLaunchBranchActive?.() ?? false);
+  if (
+    ctx.sessionManager.getSessionId() !== launchSessionId ||
+    !ownerBranchActive
+  ) {
     // A stale branch may still inspect the retained job. Never expose an
     // artifact handle owned by the launch session on that branch; retain the
     // original runs so a later inspection on the owner can publish/use it.
-    const safeRuns = runs.map((run) =>
-      serializeDelegateRunForStaleSession(run),
-    );
+    const sameSession = ctx.sessionManager.getSessionId() === launchSessionId;
+    const safeRuns = runs.map((run) => {
+      const safe = serializeDelegateRunForStaleSession(run);
+      return sameSession ? hideStructuredBranchValue(safe) : safe;
+    });
     for (const [index, run] of safeRuns.entries()) {
       const spec = getDelegateResultSpec(runs[index]);
       if (spec) {
@@ -301,8 +320,11 @@ export async function buildSessionBoundArtifactBackedHandoff(
     });
   }
   const assertLaunchSession = () => {
-    if (ctx.sessionManager.getSessionId() !== launchSessionId)
-      throw new Error('The delegate launch session is no longer current.');
+    if (
+      ctx.sessionManager.getSessionId() !== launchSessionId ||
+      (launchBranchId !== undefined && !isLaunchBranchActive?.())
+    )
+      throw new Error('The delegate launch branch is no longer current.');
   };
   const put = async (
     putPi: Parameters<typeof artifactProducer.put>[0],
@@ -323,12 +345,16 @@ export async function delegateToolResult(
   mode: DelegateDetails['mode'],
   runs: DelegatedRun[],
   launchSessionId = ctx.sessionManager.getSessionId(),
+  launchBranchId?: string,
+  isLaunchBranchActive?: () => boolean,
 ) {
   const handoff = await buildSessionBoundArtifactBackedHandoff(
     pi,
     ctx,
     launchSessionId,
     runs,
+    launchBranchId,
+    isLaunchBranchActive,
   );
   // A structured contract reports invalid child evidence as a non-success
   // envelope rather than throwing away all per-run diagnostics. Legacy prose
@@ -338,10 +364,17 @@ export async function delegateToolResult(
     !runs.some((run) => getDelegateLifecycle(run))
   )
     throwIfAllRunsFailed(runs, handoff);
-  const visibleRuns =
-    ctx.sessionManager.getSessionId() === launchSessionId
-      ? runs
-      : runs.map((run) => serializeDelegateRunForStaleSession(run));
+  const exactOwnerVisible =
+    ctx.sessionManager.getSessionId() === launchSessionId &&
+    (launchBranchId === undefined || isLaunchBranchActive?.() === true);
+  const visibleRuns = exactOwnerVisible
+    ? runs
+    : runs.map((run) => {
+        const safe = serializeDelegateRunForStaleSession(run);
+        return ctx.sessionManager.getSessionId() === launchSessionId
+          ? hideStructuredBranchValue(safe)
+          : safe;
+      });
   return {
     content: [{ type: 'text' as const, text: handoff }],
     details: makeDetails(mode, visibleRuns),

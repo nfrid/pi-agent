@@ -78,6 +78,8 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
   runs?: DelegatedRun[];
   /** A branch-safe view; the retained runs stay private for retry. */
   snapshotRuns?: DelegatedRun[];
+  /** Immutable branch owning exact handoff/artifact publication. */
+  ownerBranchId?: string;
   handoff?: string;
   error?: string;
   deliveryEpoch?: number;
@@ -99,6 +101,11 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
 
 export interface DelegateJobManagerOptions {
   scopeId?: SessionScopeId;
+  /** Exact owner branch guard; absent keeps legacy session-only behavior. */
+  isOwnerBranchActive?: (
+    ownerBranchId: string,
+    ctx: ExtensionContext,
+  ) => boolean;
   pendingProcesses?: PendingProcessAccounting;
   onSettled?: (snapshot: DelegateJobSnapshot) => void;
   onChange?: () => void;
@@ -108,6 +115,8 @@ export interface DelegateJobStartOptions {
   name?: string;
   /** Session whose branch owns artifact publication and exact handoff text. */
   ownerSessionId?: string;
+  /** Immutable branch whose path owns exact handoff/artifact publication. */
+  ownerBranchId?: string;
   mode: DelegateDetails['mode'];
   tasks: string[];
   execute: (signal: AbortSignal) => Promise<DelegateJobResult>;
@@ -124,6 +133,16 @@ export interface DelegateJobStartOptions {
   feedback?: (
     message: string,
   ) => import('./control').DelegateControlEnqueueResult;
+}
+
+function hideStructuredBranchValue(run: DelegatedRun): DelegatedRun {
+  const structured = run.structuredResult;
+  if (!structured?.valid || structured.value === undefined) return run;
+  const { value: _value, ...withoutValue } = structured;
+  return {
+    ...run,
+    structuredResult: { ...withoutValue, valueOmitted: true },
+  };
 }
 
 function aggregateState(
@@ -145,8 +164,10 @@ export class DelegateJobManager {
     DelegateJobRecord,
     DelegateJobSnapshot
   >;
+  private readonly isOwnerBranchActive?: DelegateJobManagerOptions['isOwnerBranchActive'];
 
   constructor(options: DelegateJobManagerOptions = {}) {
+    this.isOwnerBranchActive = options.isOwnerBranchActive;
     this.registry = new AsyncJobRegistry({
       idPrefix: 'dj',
       label: 'delegate job',
@@ -188,6 +209,7 @@ export class DelegateJobManager {
         ...this.registry.newRecord('queued'),
         name: item.name?.trim() || 'Subagent',
         ownerSessionId: item.ownerSessionId,
+        ownerBranchId: item.ownerBranchId,
         mode: item.mode,
         tasks: [...item.tasks],
         deliveryEpoch: item.deliveryEpoch,
@@ -239,6 +261,12 @@ export class DelegateJobManager {
       record.state === 'queued' ||
       record.state === 'running'
     )
+      return this.visibleSnapshot(snapshot(record), ctx);
+
+    // Materialization is an owner write. A sibling may inspect the bounded
+    // stale projection, but it must not publish into the active sibling's
+    // session branch or acquire the owner's exact artifact handle.
+    if (ctx && !this.exactOwnerVisible(record, ctx))
       return this.visibleSnapshot(snapshot(record), ctx);
 
     if (!record.materializing) {
@@ -327,22 +355,32 @@ export class DelegateJobManager {
     job: DelegateJobSnapshot,
     ctx?: ExtensionContext,
   ): DelegateJobSnapshot {
-    const ownerSessionId = this.registryOwnerSessionId(job.id);
-    if (
-      !ctx ||
-      !ownerSessionId ||
-      ctx.sessionManager.getSessionId() === ownerSessionId
-    )
-      return job;
-    const runs = job.runs?.map((run) =>
-      serializeDelegateRunForStaleSession(run),
-    );
+    const record = this.registry.require(job.id);
+    if (!ctx || this.exactOwnerVisible(record, ctx)) return job;
+    const branchMismatch =
+      record.ownerBranchId !== undefined &&
+      this.isOwnerBranchActive !== undefined &&
+      !this.isOwnerBranchActive(record.ownerBranchId, ctx);
+    const runs = job.runs?.map((run) => {
+      const safe = serializeDelegateRunForStaleSession(run);
+      return branchMismatch ? hideStructuredBranchValue(safe) : safe;
+    });
     const { handoff: _handoff, ...safeJob } = job;
     return { ...safeJob, runs };
   }
 
-  private registryOwnerSessionId(id: string): string | undefined {
-    return this.registry.require(id).ownerSessionId;
+  private exactOwnerVisible(
+    record: DelegateJobRecord,
+    ctx: ExtensionContext,
+  ): boolean {
+    if (
+      record.ownerSessionId &&
+      ctx.sessionManager.getSessionId() !== record.ownerSessionId
+    )
+      return false;
+    if (record.ownerBranchId && this.isOwnerBranchActive)
+      return this.isOwnerBranchActive(record.ownerBranchId, ctx);
+    return true;
   }
 
   private async run(record: DelegateJobRecord): Promise<void> {

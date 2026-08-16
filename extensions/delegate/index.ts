@@ -22,6 +22,14 @@ import {
   type SessionScopeId,
 } from '../shared/runtime/scoped-services';
 import { createRailPanel } from '../shared/ui/rail';
+import {
+  appendBranchOwnerMarker,
+  branchContainsWorkflowOwner,
+  branchOwnerMarkers,
+  branchRuntimeKey,
+  eventLeafId,
+  getSessionLeafId,
+} from './branch-ownership';
 import { listBranchEntries } from './branches';
 import { registerDelegateBranchesTool } from './branches-tool';
 import {
@@ -70,7 +78,11 @@ import {
   renderDelegateWidget,
 } from './widget';
 import { createDelegateWorkflowCoordinator } from './workflow-coordinator';
-import { attachWorkflowStore } from './workflow-store';
+import {
+  attachWorkflowStore,
+  latestWorkflowState,
+  persistWorkflowState,
+} from './workflow-store';
 import { loadWorktree } from './worktree';
 import { registerDelegateWorktreesCommand } from './worktrees-command';
 
@@ -124,8 +136,18 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     | ReturnType<typeof createDelegateWorkflowCoordinator>
     | undefined;
   let statuses: DelegateStatusStore | undefined;
-  let detachWorkflowStore: (() => void) | undefined;
   let ui: ExtensionUIContext | undefined;
+  type BranchRuntime = {
+    readonly branchId: string;
+    readonly workflow: ReturnType<typeof createDelegateWorkflowCoordinator>;
+    readonly statuses: DelegateStatusStore;
+    detachStore?: () => void;
+    ownerMarkerWritten: boolean;
+  };
+  const branchRuntimes = new Map<string, BranchRuntime>();
+  const branchLeafRuntimes = new Map<string, BranchRuntime>();
+  let activeRuntime: BranchRuntime | undefined;
+  let activeContext: ExtensionContext | undefined;
   type WakeBranch = {
     readonly key: string;
     readonly coordinator: WakeCoordinator;
@@ -137,6 +159,12 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     if (!statuses) return;
     if (workflow) statuses.updateWorkflow(workflow.list());
     if (activeWake) statuses.setWakes(activeWake.coordinator.snapshot().wakes);
+    if (activeContext && activeRuntime) {
+      const leaf = branchRuntimeKey(
+        getSessionLeafId(activeContext.sessionManager),
+      );
+      if (leaf) branchLeafRuntimes.set(leaf, activeRuntime);
+    }
   };
   let wakeBranchKey = 'root';
   let nextWakeEpoch = 0;
@@ -153,18 +181,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   let deliveryEpoch = 0;
   let runtimeActive = false;
   let widgetDetailed = true;
-  const sessionLeafId = (ctx: ExtensionContext): string | null | undefined => {
-    const manager = ctx.sessionManager as ExtensionContext['sessionManager'] & {
-      getLeafId?: () => string | null | undefined;
-    };
-    if (typeof manager.getLeafId === 'function') {
-      const leafId = manager.getLeafId();
-      return leafId === '' ? null : leafId;
-    }
-    const branch = manager.getBranch();
-    const last = branch.at(-1) as { id?: unknown } | undefined;
-    return typeof last?.id === 'string' ? last.id : undefined;
-  };
+  const sessionLeafId = (ctx: ExtensionContext): string | null | undefined =>
+    getSessionLeafId(ctx.sessionManager);
   const wakeOwnerId = (branchKey: string): string => {
     if (
       branchKey.length <= 256 &&
@@ -190,6 +208,97 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         reason: string;
       }
     | undefined;
+
+  const ownerBranchIsActive = (ownerBranchId: string): boolean =>
+    runtimeActive && activeRuntime?.branchId === ownerBranchId;
+
+  const activateWorkflowRuntime = (
+    ctx: ExtensionContext,
+    branchId: string,
+  ): BranchRuntime | undefined => {
+    if (!jobs || !runtimeActive) return undefined;
+    const existing = branchRuntimes.get(branchId);
+    if (existing) {
+      activeRuntime = existing;
+      workflow = existing.workflow;
+      statuses = existing.statuses;
+      if (existing.workflow.list().length > 0)
+        persistWorkflowState(existing.workflow, pi, {
+          isOwnerActive: () => ownerBranchIsActive(branchId),
+        });
+      syncWorkflowSurface();
+      return existing;
+    }
+
+    let nextStatuses: DelegateStatusStore;
+    nextStatuses = new DelegateStatusStore(() => {
+      syncWidget();
+      if (activeRuntime?.statuses === nextStatuses)
+        publishDelegateSurface(nextStatuses, scopeId);
+    });
+    const nextWorkflow = createDelegateWorkflowCoordinator({
+      jobs,
+      ownerBranchId: branchId,
+      onChange: syncWorkflowSurface,
+    });
+    // Import only owners whose marker is in the active branch ancestry. A
+    // sibling's public impl@1 is deliberately absent and can be scheduled
+    // independently without colliding with this runtime.
+    for (const candidate of branchRuntimes.values()) {
+      if (
+        candidate.branchId !== branchId &&
+        branchContainsWorkflowOwner(ctx.sessionManager, candidate.branchId)
+      ) {
+        try {
+          nextWorkflow.importFrom(candidate.workflow);
+        } catch {
+          // Ambiguous or incomplete persisted ancestry fails closed.
+        }
+      }
+    }
+    const persisted = latestWorkflowState(ctx);
+    if (persisted) nextWorkflow.restoreMetadata(persisted);
+    const runtime: BranchRuntime = {
+      branchId,
+      workflow: nextWorkflow,
+      statuses: nextStatuses,
+      ownerMarkerWritten: branchOwnerMarkers(ctx.sessionManager).includes(
+        branchId,
+      ),
+    };
+    runtime.detachStore = attachWorkflowStore(nextWorkflow, pi, {
+      isOwnerActive: () => ownerBranchIsActive(branchId),
+      onPersist: () => {
+        const leaf = branchRuntimeKey(getSessionLeafId(ctx.sessionManager));
+        if (leaf) branchLeafRuntimes.set(leaf, runtime);
+      },
+    });
+    branchRuntimes.set(branchId, runtime);
+    const currentLeaf = branchRuntimeKey(getSessionLeafId(ctx.sessionManager));
+    if (currentLeaf) branchLeafRuntimes.set(currentLeaf, runtime);
+    activeRuntime = runtime;
+    workflow = nextWorkflow;
+    statuses = nextStatuses;
+    if (nextWorkflow.list().length > 0)
+      persistWorkflowState(nextWorkflow, pi, {
+        isOwnerActive: () => ownerBranchIsActive(branchId),
+      });
+    syncWorkflowSurface();
+    return runtime;
+  };
+
+  const ensureBranchOwner = (runtime: BranchRuntime, ctx: ExtensionContext) => {
+    if (runtime.ownerMarkerWritten) return;
+    if (!runtimeActive || activeRuntime !== runtime)
+      throw new Error('Delegate branch ownership is not active.');
+    appendBranchOwnerMarker(pi, runtime.branchId);
+    runtime.ownerMarkerWritten = true;
+    const leaf = branchRuntimeKey(getSessionLeafId(ctx.sessionManager));
+    if (leaf) branchLeafRuntimes.set(leaf, runtime);
+    // appendEntry advances the host leaf. Keep the old immutable owner ID as
+    // the runtime key; subsequent navigation uses the persisted marker.
+    void ctx;
+  };
 
   const detachActiveWake = () => {
     if (!activeWake) return;
@@ -377,9 +486,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const sessionScopeId = getSessionScopeId(ctx);
     const previousScopeId = scopeId;
     const closingJobs = jobs;
-    const closingWorkflow = workflow;
-    const closingStatuses = statuses;
-    const closingWorkflowStore = detachWorkflowStore;
+    const closingRuntimes = [...branchRuntimes.values()];
 
     // Invalidate and detach the previous generation immediately, including a
     // repeated session_start for the same session ID.
@@ -387,18 +494,20 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     jobs = undefined;
     workflow = undefined;
     statuses = undefined;
-    detachWorkflowStore = undefined;
-    closingWorkflowStore?.();
+    activeRuntime = undefined;
+    activeContext = undefined;
+    for (const runtime of closingRuntimes) runtime.detachStore?.();
+    branchRuntimes.clear();
+    branchLeafRuntimes.clear();
     disposeWakeRuntime();
     delivery.clearTimer();
     delivery.clearPending();
     delivery.resetAutomaticDelivery();
     widget.detach();
-    await closingWorkflow?.dispose();
+    for (const runtime of closingRuntimes) await runtime.workflow.dispose();
     await closingJobs?.dispose();
-    closingStatuses?.clear();
     const previousServices = getScopedServices(previousScopeId);
-    if (previousServices.delegateWorkflow === closingWorkflow)
+    if (previousServices.delegateWorkflow)
       previousServices.delegateWorkflow = undefined;
     if (previousScopeId !== 'default') clearDelegateSurface(previousScopeId);
     if (generation !== runtimeGeneration) return;
@@ -425,45 +534,50 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     ui = ctx.hasUI ? ctx.ui : undefined;
     deliveryEpoch = 0;
     nextWakeEpoch = 0;
-    wakeBranchKey = `${sessionScopeId}:${sessionLeafId(ctx) ?? 'root'}`;
+    const initialBranchId =
+      branchRuntimeKey(sessionLeafId(ctx)) ?? 'legacy-root';
+    wakeBranchKey = `${sessionScopeId}:${initialBranchId}`;
     widgetDetailed = true;
     widget.attach(ui);
     pruneDelegateSessions({
       isWorktreeRetained: (id) => Boolean(loadWorktree(id)),
     });
-    let nextStatuses: DelegateStatusStore | undefined;
-    nextStatuses = new DelegateStatusStore(() => {
-      syncWidget();
-      if (nextStatuses) publishDelegateSurface(nextStatuses, sessionScopeId);
-    });
-    statuses = nextStatuses;
-    publishDelegateSurface(nextStatuses, sessionScopeId);
     const scopedServices = getScopedServices(sessionScopeId);
     jobs = new DelegateJobManager({
       scopeId: sessionScopeId,
       pendingProcesses: scopedServices.pendingProcesses,
+      isOwnerBranchActive: (ownerBranchId) =>
+        ownerBranchIsActive(ownerBranchId),
       // Coordinator-owned jobs settle through workflow terminal listeners and
       // must not also appear as legacy automatic completions.
       onSettled: (job) => {
         if (!job.attemptIdentity) delivery.queueCompletion(job);
       },
     });
-    workflow = createDelegateWorkflowCoordinator({
-      jobs,
-      onChange: syncWorkflowSurface,
-    });
-    detachWorkflowStore = attachWorkflowStore(workflow, pi);
-    scopedServices.delegateWorkflow = workflow;
+    runtimeActive = true;
+    activeContext = ctx;
+    const initialRuntime = activateWorkflowRuntime(ctx, initialBranchId);
+    if (!initialRuntime)
+      throw new Error('Delegate branch runtime unavailable.');
+    scopedServices.delegateWorkflow = initialRuntime.workflow;
     registerDelegateTool(
       pi,
       ctx.cwd,
       {
-        workflow,
+        getWorkflow: () => activeRuntime?.workflow,
+        workflow: initialRuntime.workflow,
         manager: jobs,
-        statuses,
+        statuses: initialRuntime.statuses,
+        getStatuses: () => activeRuntime?.statuses,
+        getBranchId: () => activeRuntime?.branchId,
         getDeliveryEpoch: () => deliveryEpoch,
         activateJobs: activateJobsTool,
         activateBranches: activateBranchesTool,
+        ensureBranchOwner: (currentCtx) => {
+          if (!activeRuntime)
+            throw new Error('Delegate branch runtime unavailable.');
+          ensureBranchOwner(activeRuntime, currentCtx);
+        },
       },
       promptConfig,
     );
@@ -483,7 +597,8 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         statuses?.jobResultEntered(completed.map((job) => job.id));
       },
       delivery.automaticDeliveryState,
-      workflow,
+      initialRuntime.workflow,
+      () => activeRuntime?.workflow,
     );
     registerDelegateBranchesTool(pi);
     // Keep the broker tools registered for stable extension ownership, but do
@@ -507,14 +622,40 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       getSessionScopeId(ctx) !== scopeId
     )
       return;
-    const treeEvent = event as { newLeafId?: string | null };
-    const eventLeafId = treeEvent.newLeafId === '' ? null : treeEvent.newLeafId;
-    const leafId = eventLeafId === undefined ? sessionLeafId(ctx) : eventLeafId;
+    const destinationLeaf = eventLeafId(event);
+    const leafId =
+      destinationLeaf === undefined ? sessionLeafId(ctx) : destinationLeaf;
     // Old host shims without branch identity cannot safely distinguish a fork;
-    // keep the current wake branch rather than abandoning or cross-binding it.
+    // keep the current runtime and do not import or expose another branch.
     if (leafId === undefined) return;
-    wakeBranchKey = `${scopeId}:${leafId ?? 'root'}`;
+    activeContext = ctx;
+    const leafKey = branchRuntimeKey(leafId);
+    if (!leafKey) return;
+    const knownRuntime = branchLeafRuntimes.get(leafKey);
+    const manager = ctx.sessionManager as ExtensionContext['sessionManager'] & {
+      getChildren?: (parentId: string) => unknown[];
+    };
+    const targetIsInterior =
+      knownRuntime !== undefined &&
+      (leafId === null
+        ? ctx.sessionManager.getEntries().length > 0
+        : typeof manager.getChildren === 'function'
+          ? manager.getChildren(leafId).length > 0
+          : true);
+    // Reuse only a known leaf that is still a tip. Navigating to a mapped
+    // interior entry creates a sibling branch and therefore a fresh namespace.
+    // Older host shims without getChildren fail closed instead of sharing.
+    const known = targetIsInterior ? undefined : knownRuntime;
+    const target = known ?? activateWorkflowRuntime(ctx, leafKey);
+    if (!target) return;
+    branchLeafRuntimes.set(leafKey, target);
+    activeRuntime = target;
+    workflow = target.workflow;
+    statuses = target.statuses;
+    wakeBranchKey = `${scopeId}:${target.branchId}`;
     activateWakeBranch(ctx, wakeBranchKey);
+    syncWorkflowSurface();
+    syncWidget();
   });
   pi.on('context', (event) => {
     // Keep the automatic-delivery marker through context entry so a later
@@ -570,21 +711,21 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     delivery.resetAutomaticDelivery();
     widget.detach();
     const closing = jobs;
-    const closingWorkflow = workflow;
-    const closingStatuses = statuses;
-    const closingWorkflowStore = detachWorkflowStore;
+    const closingRuntimes = [...branchRuntimes.values()];
     jobs = undefined;
     workflow = undefined;
     statuses = undefined;
-    detachWorkflowStore = undefined;
-    closingWorkflowStore?.();
+    activeRuntime = undefined;
+    activeContext = undefined;
+    for (const runtime of closingRuntimes) runtime.detachStore?.();
+    branchRuntimes.clear();
+    branchLeafRuntimes.clear();
     disposeWakeRuntime();
-    await closingWorkflow?.dispose();
+    for (const runtime of closingRuntimes) await runtime.workflow.dispose();
     // Workflow coordinators use this shared manager but do not own it.
     await closing?.dispose();
-    closingStatuses?.clear();
     const scopedServices = getScopedServices(closingScopeId);
-    if (scopedServices.delegateWorkflow === closingWorkflow)
+    if (scopedServices.delegateWorkflow)
       scopedServices.delegateWorkflow = undefined;
     clearDelegateSurface(closingScopeId);
     ui = undefined;

@@ -283,6 +283,33 @@ export class WorkflowModel {
     return this.bind(reference);
   }
 
+  /**
+   * Import an attempt that was persisted on an ancestor branch. Imported
+   * attempts retain their public identity but do not create a new ordinal.
+   */
+  importAttempt(value: WorkflowAttempt): WorkflowAttempt {
+    const attempt = normalizeWorkflowAttempt(value);
+    const existing = this.attemptsByLogicalId.get(attempt.logicalId) ?? [];
+    const duplicate = existing.find(
+      (candidate) => candidate.ordinal === attempt.ordinal,
+    );
+    if (duplicate) {
+      if (duplicate.identity !== attempt.identity)
+        throw new Error('Conflicting imported workflow attempt identity.');
+      return copyAttempt(duplicate);
+    }
+    const latest = existing.at(-1);
+    if (latest && attempt.ordinal !== latest.ordinal + 1)
+      throw new Error(
+        `Cannot import workflow attempt ${attempt.identity} without its predecessor.`,
+      );
+    if (!latest && attempt.ordinal !== 1)
+      throw new Error(
+        `Cannot import workflow attempt ${attempt.identity} without its first attempt.`,
+      );
+    return this.addAttempt(attempt.logicalId, attempt.ordinal);
+  }
+
   /** Return detached, immutable records in creation order. */
   snapshot(): WorkflowModelSnapshot {
     return Object.freeze({

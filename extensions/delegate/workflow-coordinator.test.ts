@@ -50,6 +50,82 @@ async function settle(coordinator: DelegateWorkflowCoordinator): Promise<void> {
 }
 
 describe('DelegateWorkflowCoordinator', () => {
+  test('keeps same public IDs independent across immutable branch owners', async () => {
+    const manager = new DelegateJobManager();
+    const left = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-left',
+    });
+    const right = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-right',
+    });
+
+    const leftAttempt = left.schedule(
+      scheduleOptions('impl', async () => result('left')),
+    );
+    const rightAttempt = right.schedule(
+      scheduleOptions('impl', async () => result('right')),
+    );
+
+    expect(leftAttempt.identity).toBe('impl@1');
+    expect(rightAttempt.identity).toBe('impl@1');
+    await settle(left);
+    await settle(right);
+    expect(left.getResult('impl@1')?.runs[0]?.task).toBe('left');
+    expect(right.getResult('impl@1')?.runs[0]?.task).toBe('right');
+    expect(left.require('impl@1').ownerBranchId).toBe('branch-left');
+    expect(right.require('impl@1').ownerBranchId).toBe('branch-right');
+    await left.dispose();
+    await right.dispose();
+    await manager.dispose();
+  });
+
+  test('imports an ancestor attempt before assigning a descendant continuation ordinal', async () => {
+    const manager = new DelegateJobManager();
+    const ancestor = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-ancestor',
+    });
+    const descendant = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'branch-descendant',
+    });
+    const ancestorResult = result('ancestor');
+    const ancestorRun = ancestorResult.runs[0];
+    if (!ancestorRun) throw new Error('missing ancestor run');
+    ancestorRun.continuation = 'ancestor-continuation-token';
+    const first = ancestor.schedule(
+      scheduleOptions('impl', async () => ancestorResult),
+    );
+    await settle(ancestor);
+    descendant.importFrom(ancestor);
+
+    let inheritedToken: string | undefined;
+    const continuation = descendant.schedule({
+      logicalId: 'impl',
+      continuation: 'impl@1',
+      prepare: async (context) => {
+        inheritedToken = context.continuationToken;
+        return {
+          mode: 'single' as const,
+          tasks: ['descendant'],
+          execute: async () => result('descendant'),
+        };
+      },
+    });
+    expect(continuation.identity).toBe('impl@2');
+    expect(continuation.dependencies).toEqual(['impl@1']);
+    expect(descendant.getResult(first.identity)?.runs[0]?.task).toBe(
+      'ancestor',
+    );
+    await settle(descendant);
+    expect(inheritedToken).toBe('ancestor-continuation-token');
+    await ancestor.dispose();
+    await descendant.dispose();
+    await manager.dispose();
+  });
+
   test('launches a fresh attempt immediately without dependencies', async () => {
     const manager = new DelegateJobManager();
     const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
