@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -146,12 +147,23 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
   let widgetDetailed = true;
   const sessionLeafId = (ctx: ExtensionContext): string | null | undefined => {
     const manager = ctx.sessionManager as ExtensionContext['sessionManager'] & {
-      getLeafId?: () => string | null;
+      getLeafId?: () => string | null | undefined;
     };
     if (typeof manager.getLeafId === 'function') return manager.getLeafId();
     const branch = manager.getBranch();
     const last = branch.at(-1) as { id?: unknown } | undefined;
     return typeof last?.id === 'string' ? last.id : undefined;
+  };
+  const wakeOwnerId = (branchKey: string): string => {
+    if (
+      branchKey.length <= 256 &&
+      ![...branchKey].some((character) => {
+        const code = character.charCodeAt(0);
+        return code < 32 || code === 127;
+      })
+    )
+      return branchKey;
+    return `branch-${createHash('sha256').update(branchKey).digest('hex')}`;
   };
   const activateJobsTool = () =>
     setDelegateToolActive(pi, 'delegate_jobs', true);
@@ -195,7 +207,9 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       // The branch key is part of ownership and therefore of every delivery
       // acknowledgement. Inherited entries from a fork cannot acknowledge a
       // wake on the newly selected branch.
-      const ownerSessionId = key;
+      const legacyRootOwner =
+        key === `${scopeId}:root` && persisted?.ownerSessionId === scopeId;
+      const ownerSessionId = legacyRootOwner ? scopeId : wakeOwnerId(key);
       const inheritedEpoch =
         persisted?.ownerSessionId === ownerSessionId
           ? persisted.ownerEpoch
@@ -360,12 +374,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     await closingWorkflow?.dispose();
     await closingJobs?.dispose();
     closingStatuses?.clear();
-    if (previousScopeId !== 'default') {
-      const previousServices = getScopedServices(previousScopeId);
-      if (previousServices.delegateWorkflow === closingWorkflow)
-        previousServices.delegateWorkflow = undefined;
-      clearDelegateSurface(previousScopeId);
-    }
+    const previousServices = getScopedServices(previousScopeId);
+    if (previousServices.delegateWorkflow === closingWorkflow)
+      previousServices.delegateWorkflow = undefined;
+    if (previousScopeId !== 'default') clearDelegateSurface(previousScopeId);
     if (generation !== runtimeGeneration) return;
 
     const branchEntries = await listBranchEntries({
@@ -459,11 +471,19 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const eventGeneration = sessionManagerGenerations.get(ctx.sessionManager);
     if (
       !runtimeActive ||
-      (eventGeneration === undefined
-        ? getSessionScopeId(ctx) !== scopeId
-        : eventGeneration !== runtimeGeneration)
+      (eventGeneration !== undefined && eventGeneration !== runtimeGeneration)
     )
       return;
+    // A known current manager may expose a changed synthetic session ID in
+    // compatibility shims. Preserve legacy completion invalidation, but never
+    // activate wake state from the foreign scope.
+    if (getSessionScopeId(ctx) !== scopeId) {
+      if (eventGeneration === runtimeGeneration) {
+        deliveryEpoch++;
+        delivery.resetAutomaticDelivery();
+      }
+      return;
+    }
     deliveryEpoch++;
     delivery.resetAutomaticDelivery();
     const treeEvent = event as { newLeafId?: string | null };
@@ -471,10 +491,10 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
       treeEvent.newLeafId === undefined
         ? sessionLeafId(ctx)
         : treeEvent.newLeafId;
-    wakeBranchKey =
-      leafId === undefined
-        ? `${scopeId}:legacy-${nextWakeEpoch++}`
-        : `${scopeId}:${leafId ?? 'root'}`;
+    // Old host shims without branch identity cannot safely distinguish a fork;
+    // keep the current wake branch rather than abandoning or cross-binding it.
+    if (leafId === undefined) return;
+    wakeBranchKey = `${scopeId}:${leafId ?? 'root'}`;
     activateWakeBranch(ctx, wakeBranchKey);
   });
   pi.on('context', (event) => {
