@@ -266,6 +266,15 @@ describe('dashboard protocol', () => {
             createdAt: 1,
             scheduledAt: 1,
           },
+          wake: {
+            id: 'review-wake',
+            state: 'entered',
+            references: ['review@1'],
+            createdAt: 1,
+            enteredAt: 2,
+            revision: 1,
+            dispatchAttempts: 1,
+          },
           runCount: 1,
           runs: [
             {
@@ -285,6 +294,15 @@ describe('dashboard protocol', () => {
                 dependencies: [],
                 createdAt: 1,
                 scheduledAt: 1,
+              },
+              wake: {
+                id: 'review-wake',
+                state: 'entered',
+                references: ['review@1'],
+                createdAt: 1,
+                enteredAt: 2,
+                revision: 1,
+                dispatchAttempts: 1,
               },
             },
           ],

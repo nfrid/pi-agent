@@ -735,4 +735,114 @@ describe('delegate history adapter', () => {
     expect(allRuns[0]?.runId).not.toBe(allRuns[2]?.runId);
     expect(allRuns[0]?.lineageId).toBe(allRuns[0]?.runId);
   });
+
+  it('projects durable workflow snapshots after reload without secret payloads', () => {
+    const branch = [
+      { type: 'session', id: 'parent-1' },
+      {
+        type: 'custom',
+        id: 'workflow-entry-1',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [
+              {
+                logicalId: 'later',
+                attempt: 1,
+                identity: 'later@1',
+                state: 'scheduled',
+                dependencies: ['gate@1'],
+                waitingFor: ['gate@1'],
+                createdAt: 1,
+                scheduledAt: 1,
+                reason: 'waiting for dependency',
+              },
+            ],
+            report: 'secret report must not appear',
+          },
+        },
+      },
+      {
+        type: 'custom',
+        id: 'workflow-entry-2',
+        customType: 'delegate-workflow:v1',
+        data: {
+          version: 1,
+          kind: 'snapshot',
+          state: {
+            version: 1,
+            attempts: [
+              {
+                logicalId: 'later',
+                attempt: 1,
+                identity: 'later@1',
+                state: 'success',
+                dependencies: ['gate@1'],
+                waitingFor: [],
+                createdAt: 1,
+                scheduledAt: 1,
+                settledAt: 3,
+                route: 'review',
+              },
+            ],
+          },
+        },
+      },
+    ];
+    const response = delegateHistoryFromBranch('parent-1', branch);
+    expect(response.groups[0]).toMatchObject({
+      lineageId: 'later',
+      state: 'success',
+      workflow: { identity: 'later@1', dependencies: ['gate@1'] },
+    });
+    expect(response.groups[0]?.runs[0]).not.toHaveProperty('jobId');
+    expect(JSON.stringify(response)).not.toContain('secret report');
+  });
+
+  it('projects entered wake metadata from existing wake entries after reload', () => {
+    const entry = {
+      type: 'custom',
+      id: 'wake-entry-1',
+      customType: 'delegate-wake:v1',
+      data: {
+        version: 1,
+        kind: 'snapshot',
+        state: {
+          version: 1,
+          ownerSessionId: 'parent-1',
+          ownerEpoch: 1,
+          wakes: [
+            {
+              id: 'review',
+              state: 'entered',
+              condition: { node: 'later@1' },
+              references: ['later@1'],
+              payload: [{ kind: 'handoff' }],
+              createdAt: 1,
+              enteredAt: 4,
+              revision: 2,
+              dispatchGeneration: 1,
+              dispatchAttempts: 1,
+              handoff: 'secret wake handoff',
+            },
+          ],
+        },
+      },
+    };
+    const response = delegateHistoryFromBranch('parent-1', [entry]);
+    expect(response.groups[0]).toMatchObject({
+      lineageId: 'wake:review',
+      state: 'success',
+      wake: { id: 'review', state: 'entered', enteredAt: 4 },
+    });
+    expect(JSON.stringify(response)).not.toContain('secret wake handoff');
+    expect(
+      JSON.stringify(
+        projectDelegateHistoryEntry(entry, { sessionId: 'parent-1' }).entry,
+      ),
+    ).not.toContain('payload');
+  });
 });
