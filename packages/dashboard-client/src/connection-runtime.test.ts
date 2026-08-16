@@ -2,7 +2,7 @@ import type {
   AuthoritativeSessionSnapshot,
   BrowserSnapshot,
 } from '@pi-dashboard/protocol';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   DashboardConnectionRuntime,
   SESSION_PROJECTION_CACHE_LIMIT,
@@ -1068,6 +1068,8 @@ describe('DashboardConnectionRuntime', () => {
 
   it('recovers online/offline feeds and replaces only after a stale hidden period', async () => {
     const globals = lifecycleGlobals();
+    let now = 1_000;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {
       let online = false;
       const f = fixture();
@@ -1087,14 +1089,14 @@ describe('DashboardConnectionRuntime', () => {
 
       globals.document.visibilityState = 'hidden';
       globals.document.dispatch('visibilitychange');
-      await new Promise((resolve) => setTimeout(resolve, 1));
+      now += 1;
       globals.document.visibilityState = 'visible';
       globals.document.dispatch('visibilitychange');
       expect(f.counts().shellSubscriptions).toBe(1);
 
       globals.document.visibilityState = 'hidden';
       globals.document.dispatch('visibilitychange');
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      now += 10;
       globals.document.visibilityState = 'visible';
       globals.document.dispatch('visibilitychange');
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -1117,6 +1119,7 @@ describe('DashboardConnectionRuntime', () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(f.counts().shellSubscriptions).toBe(3);
     } finally {
+      clock.mockRestore();
       globals.restore();
     }
   });
