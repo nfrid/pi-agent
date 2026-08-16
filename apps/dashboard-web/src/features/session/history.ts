@@ -1,13 +1,22 @@
 import {
   type DashboardLiveStore,
   dashboardHttpClient,
+  selectSessionHistoryCoverage,
+  useDashboardStore,
 } from '@pi-dashboard/client';
 import type {
+  AuthoritativeSessionSnapshot,
   SessionApiResponse,
   SessionHistory,
 } from '@pi-dashboard/protocol';
 import type { RefObject } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 export function sessionHistoryWindowKey(
   cursor: number | undefined,
@@ -21,6 +30,9 @@ export function sessionHistoryWindowKey(
     history.end,
     history.hasOlder,
     history.nextBefore,
+    ...(history.leadingContinuation === undefined
+      ? []
+      : [history.leadingContinuation]),
   ]);
 }
 
@@ -37,15 +49,14 @@ export function isContiguousOlderHistory(
     pageHistory?.version === currentHistory.version &&
     pageHistory.end === currentHistory.start &&
     pageHistory.start < currentHistory.start &&
-    (!pageHistory.hasOlder ||
-      (Boolean(pageHistory.nextBefore) &&
-        pageHistory.nextBefore !== currentNextBefore))
+    pageHistory.nextBefore !== currentNextBefore &&
+    (!pageHistory.hasOlder || Boolean(pageHistory.nextBefore))
   );
 }
 
 type ScrollAnchor = {
-  scrollHeight: number;
-  scrollTop: number;
+  key: string;
+  offset: number;
 };
 
 type HistoryRequest = {
@@ -54,15 +65,29 @@ type HistoryRequest = {
   requestId: number;
   controller: AbortController;
   intentRevision: number;
-  scrollAnchor?: ScrollAnchor;
+  anchor?: ScrollAnchor;
 };
 
-type PrependRestore = ScrollAnchor & {
-  id: string;
-  generation: number;
-  requestId: number;
-  intentRevision: number;
-};
+function firstVisibleAnchor(element: HTMLDivElement): ScrollAnchor | undefined {
+  const viewport = element.getBoundingClientRect();
+  const candidates = Array.from(
+    element.querySelectorAll<HTMLElement>(
+      '[data-transcript-row], [data-transcript-key]',
+    ),
+  );
+  const visible = candidates.find((candidate) => {
+    const rect = candidate.getBoundingClientRect();
+    return rect.bottom >= viewport.top && rect.top <= viewport.bottom;
+  });
+  if (!visible) return undefined;
+  const key =
+    visible.dataset.transcriptRow ?? visible.dataset.transcriptKey ?? '';
+  if (!key) return undefined;
+  return {
+    key,
+    offset: visible.getBoundingClientRect().top - viewport.top,
+  };
+}
 
 export function useOlderSessionHistory({
   id,
@@ -70,81 +95,133 @@ export function useOlderSessionHistory({
   store,
   scrollElementRef,
   sessionMounted,
+  virtualized = false,
 }: {
   id: string;
   data: SessionApiResponse | undefined;
   store: DashboardLiveStore;
   sessionMounted: boolean;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
+  /** VirtualizedTranscript is the sole owner of virtual row restoration. */
+  virtualized?: boolean;
 }) {
+  const coverage = useDashboardStore(store, selectSessionHistoryCoverage(id));
   const [history, setHistory] = useState<SessionApiResponse['history']>();
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string>();
-  const [prependRevision, setPrependRevision] = useState(0);
+  const [prependAnchor, setPrependAnchor] = useState<
+    (ScrollAnchor & { revision: number }) | undefined
+  >(undefined);
+  const historyRef = useRef<SessionApiResponse['history']>(undefined);
   const historySessionRef = useRef<string | undefined>(undefined);
-  // The feed snapshot is authoritative for the newest history window. Track
-  // its range/cursor so a same-session rebase cannot leave stale pagination
-  // metadata claiming that discarded older rows were already loaded.
   const historyWindowRef = useRef<string | undefined>(undefined);
   const historyGenerationRef = useRef(0);
   const historyRequestRef = useRef<HistoryRequest | undefined>(undefined);
   const historyRequestSequenceRef = useRef(0);
   const scrollIntentRevisionRef = useRef(0);
-  const prependRestoreRef = useRef<PrependRestore | undefined>(undefined);
-  const prependRestoreFrameRef = useRef<number | undefined>(undefined);
-  const prependRestoreFrameCountRef = useRef(0);
-  const prependRestoreDeadlineRef = useRef(0);
-  const cancelPrependRestoreFrame = useCallback(() => {
-    if (prependRestoreFrameRef.current !== undefined) {
-      window.cancelAnimationFrame(prependRestoreFrameRef.current);
-      prependRestoreFrameRef.current = undefined;
-    }
+  const topIntentRef = useRef(false);
+  const previousScrollTopRef = useRef<number | undefined>(undefined);
+  const restoredRevisionRef = useRef(0);
+  const preserveAnchorOnCoverageRef = useRef(false);
+  const loadEarlierHistoryRef = useRef<() => Promise<void>>(
+    async () => undefined,
+  );
+
+  const clearAnchor = useCallback(() => {
+    setPrependAnchor(undefined);
   }, []);
-  const clearPrependRestore = useCallback(() => {
-    prependRestoreRef.current = undefined;
-    prependRestoreFrameCountRef.current = 0;
-    prependRestoreDeadlineRef.current = 0;
-    cancelPrependRestoreFrame();
-  }, [cancelPrependRestoreFrame]);
+
   const cancelScrollRestore = useCallback(() => {
     scrollIntentRevisionRef.current += 1;
     const request = historyRequestRef.current;
-    if (request) request.scrollAnchor = undefined;
-    clearPrependRestore();
-  }, [clearPrependRestore]);
+    if (request) request.anchor = undefined;
+    clearAnchor();
+  }, [clearAnchor]);
 
   useEffect(() => {
-    if (!id) return;
+    void id;
     historyGenerationRef.current += 1;
     historyRequestRef.current?.controller.abort();
     historyRequestRef.current = undefined;
-    clearPrependRestore();
     historySessionRef.current = undefined;
     historyWindowRef.current = undefined;
+    historyRef.current = undefined;
     setHistory(undefined);
     setHistoryLoading(false);
     setHistoryError(undefined);
+    clearAnchor();
     return () => {
       historyGenerationRef.current += 1;
       historyRequestRef.current?.controller.abort();
       historyRequestRef.current = undefined;
-      clearPrependRestore();
     };
-  }, [clearPrependRestore, id]);
+  }, [clearAnchor, id]);
+
+  // Coverage is the store-owned authority. In particular, a live append can
+  // advance data.cursor without changing the oldest verified nextBefore.
+  useEffect(() => {
+    if (data?.metadata.id !== id && !coverage) return;
+    const authoritativeHistory = coverage
+      ? {
+          version: coverage.version,
+          start: coverage.coveredStart,
+          end: coverage.coveredEnd,
+          hasOlder: coverage.hasOlder,
+          ...(coverage.nextBefore === undefined
+            ? {}
+            : { nextBefore: coverage.nextBefore }),
+          ...(coverage.leadingContinuation === undefined
+            ? {}
+            : { leadingContinuation: coverage.leadingContinuation }),
+        }
+      : data?.history;
+    if (!authoritativeHistory) return;
+    const nextKey = coverage
+      ? JSON.stringify([
+          coverage.generation,
+          coverage.serverId,
+          coverage.runtimeEpoch,
+          coverage.coveredStart,
+          coverage.coveredEnd,
+          coverage.nextBefore,
+          coverage.leadingContinuation,
+        ])
+      : sessionHistoryWindowKey(data?.cursor, authoritativeHistory);
+    if (
+      historySessionRef.current === id &&
+      historyWindowRef.current === nextKey
+    ) {
+      historyRef.current = authoritativeHistory;
+      return;
+    }
+    historyGenerationRef.current += 1;
+    historyRequestRef.current?.controller.abort();
+    historyRequestRef.current = undefined;
+    historySessionRef.current = id;
+    historyWindowRef.current = nextKey;
+    historyRef.current = authoritativeHistory;
+    setHistory(authoritativeHistory);
+    setHistoryLoading(false);
+    setHistoryError(undefined);
+    if (preserveAnchorOnCoverageRef.current)
+      preserveAnchorOnCoverageRef.current = false;
+    else clearAnchor();
+  }, [clearAnchor, coverage, data, id]);
 
   useEffect(() => {
-    if (!sessionMounted) clearPrependRestore();
-  }, [clearPrependRestore, sessionMounted]);
-
-  useEffect(() => {
-    const scrollElement = scrollElementRef?.current;
-    if (!sessionMounted || !scrollElement) return;
-    const noteScrollIntent = () => {
+    const element = scrollElementRef?.current;
+    if (!sessionMounted || !element) return;
+    const noteIntent = () => {
+      topIntentRef.current = true;
       scrollIntentRevisionRef.current += 1;
       const request = historyRequestRef.current;
-      if (request) request.scrollAnchor = undefined;
-      clearPrependRestore();
+      if (request) request.anchor = undefined;
+      clearAnchor();
     };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) noteIntent();
+    };
+    const onTouchMove = () => noteIntent();
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
       if (
@@ -165,136 +242,131 @@ export function useOlderSessionHistory({
           'Space',
         ].includes(event.code)
       )
-        noteScrollIntent();
+        noteIntent();
     };
-    scrollElement.addEventListener('pointerdown', noteScrollIntent, {
-      passive: true,
-    });
-    scrollElement.addEventListener('wheel', noteScrollIntent, {
-      passive: true,
-    });
-    scrollElement.addEventListener('touchstart', noteScrollIntent, {
-      passive: true,
-    });
-    scrollElement.addEventListener('touchmove', noteScrollIntent, {
-      passive: true,
-    });
+    const onScroll = () => {
+      const top = element.scrollTop;
+      const previous = previousScrollTopRef.current;
+      previousScrollTopRef.current = top;
+      if (
+        topIntentRef.current &&
+        top <= 96 &&
+        (previous === undefined || previous > 96 || top === 0)
+      ) {
+        topIntentRef.current = false;
+        void loadEarlierHistoryRef.current();
+      }
+    };
+    element.addEventListener('wheel', onWheel, { passive: true });
+    element.addEventListener('touchmove', onTouchMove, { passive: true });
+    element.addEventListener('pointerdown', noteIntent, { passive: true });
+    element.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('keydown', onKeyDown);
+    previousScrollTopRef.current = element.scrollTop;
     return () => {
-      scrollElement.removeEventListener('pointerdown', noteScrollIntent);
-      scrollElement.removeEventListener('wheel', noteScrollIntent);
-      scrollElement.removeEventListener('touchstart', noteScrollIntent);
-      scrollElement.removeEventListener('touchmove', noteScrollIntent);
+      element.removeEventListener('wheel', onWheel);
+      element.removeEventListener('touchmove', onTouchMove);
+      element.removeEventListener('pointerdown', noteIntent);
+      element.removeEventListener('scroll', onScroll);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [clearPrependRestore, scrollElementRef, sessionMounted]);
-
-  useEffect(() => {
-    if (data?.metadata.id !== id) return;
-    const windowKey = sessionHistoryWindowKey(data.cursor, data.history);
-    if (
-      historySessionRef.current !== id ||
-      historyWindowRef.current !== windowKey
-    ) {
-      // A new authoritative window invalidates every page request based on
-      // the old range. Advance the generation before installing its metadata
-      // so an already-resolving page cannot prepend into the new baseline.
-      historyGenerationRef.current += 1;
-      historyRequestRef.current?.controller.abort();
-      historyRequestRef.current = undefined;
-      historySessionRef.current = id;
-      historyWindowRef.current = windowKey;
-      clearPrependRestore();
-      setHistoryLoading(false);
-      setHistoryError(undefined);
-      setHistory(data.history);
-    }
-  }, [clearPrependRestore, data, id]);
+  });
 
   const loadEarlierHistory = useCallback(async () => {
-    const currentHistory = history;
-    if (
-      historyLoading ||
-      !currentHistory?.hasOlder ||
-      !currentHistory.nextBefore
-    )
-      return;
-    const scrollElement = scrollElementRef?.current;
+    if (historyRequestRef.current) return;
+    const initialHistory = historyRef.current ?? history;
+    if (!initialHistory?.hasOlder || !initialHistory.nextBefore) return;
+    const capturedAnchor = scrollElementRef?.current
+      ? firstVisibleAnchor(scrollElementRef.current)
+      : undefined;
     const request: HistoryRequest = {
       id,
       generation: historyGenerationRef.current,
       requestId: historyRequestSequenceRef.current + 1,
       controller: new AbortController(),
       intentRevision: scrollIntentRevisionRef.current,
-      ...(scrollElement
-        ? {
-            scrollAnchor: {
-              scrollHeight: scrollElement.scrollHeight,
-              scrollTop: scrollElement.scrollTop,
-            },
-          }
-        : {}),
+      ...(capturedAnchor ? { anchor: capturedAnchor } : {}),
     };
     historyRequestSequenceRef.current = request.requestId;
     historyRequestRef.current = request;
     setHistoryLoading(true);
     setHistoryError(undefined);
-    const clearRequestRestore = () => {
-      request.scrollAnchor = undefined;
-      if (prependRestoreRef.current?.requestId === request.requestId)
-        clearPrependRestore();
-    };
-    const isCurrentRequest = () =>
+    const isCurrent = () =>
       historyRequestRef.current === request &&
       historyGenerationRef.current === request.generation &&
       request.id === id &&
       !request.controller.signal.aborted;
+    const pages: AuthoritativeSessionSnapshot[] = [];
+    let expected = initialHistory;
     try {
-      const page = await dashboardHttpClient.sessionBefore(
-        id,
-        currentHistory.nextBefore,
-        request.controller.signal,
-      );
-      if (!isCurrentRequest()) {
-        clearRequestRestore();
-        return;
-      }
-      if (
-        !isContiguousOlderHistory(
+      while (expected.hasOlder && expected.nextBefore) {
+        const before = expected.nextBefore;
+        const page = await dashboardHttpClient.sessionBefore(
           id,
-          page.metadata.id,
-          page.history,
-          currentHistory,
-          currentHistory.nextBefore,
-        )
-      )
-        throw new Error('Dashboard returned non-contiguous older history.');
-      const scrollAnchor = request.scrollAnchor;
-      if (!store.prependSessionHistory(page))
+          before,
+          request.controller.signal,
+        );
+        if (!isCurrent()) return;
+        if (
+          !isContiguousOlderHistory(
+            id,
+            page.metadata.id,
+            page.history,
+            expected,
+            before,
+          )
+        ) {
+          // Route the malformed response through the store's fail-closed
+          // validator so verified coverage is reset, not merely retried.
+          store.prependSessionHistoryPages([...pages, page]);
+          throw new Error('Dashboard returned non-contiguous older history.');
+        }
+        pages.push(page);
+        if (!page.history)
+          throw new Error('Dashboard returned missing history metadata.');
+        expected = page.history;
+        // A leading continuation must be resolved to its owner or origin
+        // before any buffered page is made visible.
+        if (!expected.leadingContinuation || !expected.hasOlder) break;
+      }
+      if (!isCurrent()) return;
+      const resolvedAnchor =
+        request.anchor ??
+        (scrollElementRef?.current
+          ? firstVisibleAnchor(scrollElementRef.current)
+          : undefined);
+      preserveAnchorOnCoverageRef.current = true;
+      if (!store.prependSessionHistoryPages(pages)) {
+        preserveAnchorOnCoverageRef.current = false;
         throw new Error('Session changed while loading older history.');
-      prependRestoreRef.current =
-        scrollAnchor &&
+      }
+      const nextCoverage = store.getSnapshot().sessionHistoryCoverageById[id];
+      const nextHistory = nextCoverage
+        ? {
+            version: nextCoverage.version,
+            start: nextCoverage.coveredStart,
+            end: nextCoverage.coveredEnd,
+            hasOlder: nextCoverage.hasOlder,
+            ...(nextCoverage.nextBefore === undefined
+              ? {}
+              : { nextBefore: nextCoverage.nextBefore }),
+            ...(nextCoverage.leadingContinuation === undefined
+              ? {}
+              : { leadingContinuation: nextCoverage.leadingContinuation }),
+          }
+        : expected;
+      historyRef.current = nextHistory;
+      setHistory(nextHistory);
+      if (
+        resolvedAnchor &&
         request.intentRevision === scrollIntentRevisionRef.current
-          ? {
-              ...scrollAnchor,
-              id: request.id,
-              generation: request.generation,
-              requestId: request.requestId,
-              intentRevision: request.intentRevision,
-            }
-          : undefined;
-      if (prependRestoreRef.current) {
-        prependRestoreFrameCountRef.current = 0;
-        prependRestoreDeadlineRef.current = Date.now() + 2_000;
-      }
-      setHistory(page.history);
-      setPrependRevision((revision) => revision + 1);
+      )
+        setPrependAnchor({
+          ...resolvedAnchor,
+          revision: request.requestId,
+        });
     } catch (loadError) {
-      if (!isCurrentRequest()) {
-        clearRequestRestore();
-        return;
-      }
-      clearRequestRestore();
+      if (!isCurrent()) return;
       if (loadError instanceof Error && loadError.name === 'AbortError') return;
       setHistoryError(
         loadError instanceof Error
@@ -302,123 +374,48 @@ export function useOlderSessionHistory({
           : 'Could not load older history.',
       );
     } finally {
-      if (isCurrentRequest()) {
+      if (isCurrent()) {
         historyRequestRef.current = undefined;
         setHistoryLoading(false);
       }
     }
-  }, [
-    clearPrependRestore,
-    history,
-    historyLoading,
-    id,
-    scrollElementRef,
-    store,
-  ]);
+  }, [history, id, scrollElementRef, store]);
+  loadEarlierHistoryRef.current = loadEarlierHistory;
 
+  // A partial head is never rendered as a hanging activity. Resolve its owner
+  // automatically; the visible control remains available for retry/error UI.
   useEffect(() => {
-    // These values are the render signal for the prepended transcript.
-    void data;
-    void history;
-    void prependRevision;
-    const scrollElement = scrollElementRef?.current;
-    const restore = prependRestoreRef.current;
-    if (!sessionMounted || !scrollElement || !restore) return;
-    let lastObservedHeight = restore.scrollHeight;
-    let stableHeightFrames = 0;
-    const isValidRestore = () => {
-      const current = prependRestoreRef.current;
-      return (
-        current === restore &&
-        restore.id === id &&
-        restore.generation === historyGenerationRef.current &&
-        restore.intentRevision === scrollIntentRevisionRef.current
-      );
-    };
-    const applyRestore = () => {
-      prependRestoreFrameRef.current = undefined;
-      prependRestoreFrameCountRef.current += 1;
-      if (
-        prependRestoreFrameCountRef.current > 120 ||
-        Date.now() > prependRestoreDeadlineRef.current
-      ) {
-        clearPrependRestore();
-        return;
-      }
-      if (!isValidRestore()) {
-        clearPrependRestore();
-        return;
-      }
-      const currentHeight = scrollElement.scrollHeight;
-      const delta = currentHeight - restore.scrollHeight;
-      // History state can commit before virtualization has rendered the
-      // prepended rows. Keep the anchor until the actual height delta exists
-      // and remains stable for a frame.
-      if (delta === 0) {
-        lastObservedHeight = currentHeight;
-        stableHeightFrames = 0;
-        scheduleRestore();
-        return;
-      }
-      if (currentHeight !== lastObservedHeight) {
-        lastObservedHeight = currentHeight;
-        stableHeightFrames = 0;
-      } else stableHeightFrames += 1;
-      scrollElement.scrollTop = restore.scrollTop + delta;
-      if (stableHeightFrames < 8) {
-        scheduleRestore();
-        return;
-      }
-      clearPrependRestore();
-    };
-    const scheduleRestore = () => {
-      if (prependRestoreFrameRef.current === undefined)
-        prependRestoreFrameRef.current =
-          window.requestAnimationFrame(applyRestore);
-    };
-    const observer =
-      typeof MutationObserver === 'undefined'
-        ? undefined
-        : new MutationObserver(() => {
-            cancelPrependRestoreFrame();
-            applyRestore();
-          });
-    observer?.observe(scrollElement, {
-      attributes: true,
-      attributeFilter: ['style'],
-      childList: true,
-      subtree: true,
-    });
-    const resizeObserver =
-      typeof ResizeObserver === 'undefined'
-        ? undefined
-        : new ResizeObserver(() => {
-            cancelPrependRestoreFrame();
-            applyRestore();
-          });
-    resizeObserver?.observe(scrollElement);
-    const transcriptContent = scrollElement.querySelector<HTMLElement>(
-      '.transcript, .transcript-virtualizer',
-    );
-    if (transcriptContent && transcriptContent !== scrollElement)
-      resizeObserver?.observe(transcriptContent);
-    applyRestore();
+    if (
+      !sessionMounted ||
+      !history?.leadingContinuation ||
+      historyRequestRef.current
+    )
+      return;
+    void loadEarlierHistory();
+  }, [history, loadEarlierHistory, sessionMounted]);
 
-    return () => {
-      observer?.disconnect();
-      resizeObserver?.disconnect();
-      cancelPrependRestoreFrame();
-    };
-  }, [
-    cancelPrependRestoreFrame,
-    clearPrependRestore,
-    data,
-    history,
-    id,
-    prependRevision,
-    scrollElementRef,
-    sessionMounted,
-  ]);
+  // Non-virtualized rows restore the first visible semantic key in layout.
+  // There is intentionally no height delta fallback or timeout writer.
+  useLayoutEffect(() => {
+    if (virtualized || !scrollElementRef?.current || !prependAnchor) return;
+    if (restoredRevisionRef.current === prependAnchor.revision) return;
+    const element = scrollElementRef.current;
+    const target = Array.from(
+      element.querySelectorAll<HTMLElement>(
+        '[data-transcript-row], [data-transcript-key]',
+      ),
+    ).find(
+      (candidate) =>
+        (candidate.dataset.transcriptRow ?? candidate.dataset.transcriptKey) ===
+        prependAnchor.key,
+    );
+    if (!target) return;
+    if (prependAnchor.revision <= 0) return;
+    const offset =
+      target.getBoundingClientRect().top - element.getBoundingClientRect().top;
+    element.scrollTop += offset - prependAnchor.offset;
+    restoredRevisionRef.current = prependAnchor.revision;
+  }, [prependAnchor, scrollElementRef, virtualized]);
 
   return {
     history,
@@ -426,5 +423,6 @@ export function useOlderSessionHistory({
     historyError,
     loadEarlierHistory,
     cancelScrollRestore,
+    prependAnchor,
   };
 }

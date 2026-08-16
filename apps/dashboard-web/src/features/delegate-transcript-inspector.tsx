@@ -249,13 +249,18 @@ function DelegateCanonicalTranscript({
     return () => handle?.release();
   }, [sessionId, store]);
   const mounted = Boolean(projection && snapshot?.metadata.id === sessionId);
-  const { history, historyError, historyLoading, loadEarlierHistory } =
-    useOlderSessionHistory({
-      id: sessionId,
-      data: snapshot,
-      store,
-      sessionMounted: mounted,
-    });
+  const {
+    history,
+    historyError,
+    historyLoading,
+    loadEarlierHistory,
+    prependAnchor,
+  } = useOlderSessionHistory({
+    id: sessionId,
+    data: snapshot,
+    store,
+    sessionMounted: mounted,
+  });
   if (!mounted)
     return (
       <DelegateBoundedFallback
@@ -279,7 +284,14 @@ function DelegateCanonicalTranscript({
           onLoad={() => void loadEarlierHistory()}
         />
       )}
-      <Transcript projection={projection} runtime={runtime} />
+      <Transcript
+        projection={projection}
+        runtime={runtime}
+        leadingContinuation={
+          history?.hasOlder ? history.leadingContinuation : undefined
+        }
+        prependAnchor={prependAnchor}
+      />
     </section>
   );
 }

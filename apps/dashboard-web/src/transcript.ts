@@ -5,6 +5,7 @@ import {
   describeTools,
   headersOf,
   isNarration,
+  leadingContinuationSpan,
   toolActionSummary,
 } from '@pi-dashboard/activity-model';
 import {
@@ -481,6 +482,7 @@ function toolRaw(item: TranscriptRenderToolItem) {
  */
 export function toTranscriptEntries(
   input: TranscriptInput,
+  options: { leadingContinuation?: boolean } = {},
 ): TranscriptModelItem[] {
   const result: TranscriptModelItem[] = [];
   let previousTodo: readonly TranscriptTodoTask[] | undefined;
@@ -695,10 +697,17 @@ export function toTranscriptEntries(
   // Grouping boundaries are owned by activity-model for both persisted raw
   // entries and the domain projection. Keep all presentation fields above,
   // but replace the boundary payload with the canonical raw mapping.
-  return result.map((item) => ({
+  const mapped = result.map((item) => ({
     ...item,
     entry: activityEntryFromRaw(item.raw),
   }));
+  const hidden = leadingContinuationSpan(
+    mapped.map((item) => item.entry),
+    options.leadingContinuation,
+  );
+  return hidden
+    ? mapped.filter((_, index) => index < hidden.start || index > hidden.end)
+    : mapped;
 }
 
 /** Compatibility helper retained for consumers with raw tool entries. */

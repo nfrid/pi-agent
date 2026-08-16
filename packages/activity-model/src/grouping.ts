@@ -233,6 +233,46 @@ export interface ActivityGroupBoundary {
   end: number;
 }
 
+export interface LeadingContinuationSpan {
+  /** First entry in the partial activity segment. */
+  start: number;
+  /** Last entry hidden before its owner or a hard boundary arrives. */
+  end: number;
+}
+
+function startsActivityBoundary(entry: TranscriptEntry): boolean {
+  if (entry.kind === 'assistant')
+    return entry.speaks || entry.titleKind === 'preamble';
+  return entry.kind === 'other' && entry.continuesGroup !== true;
+}
+
+/**
+ * Return the partial activity prefix described by a paginated history head.
+ *
+ * A page can begin in the middle of a group, where the owning preamble is on
+ * the preceding page. Do not infer this from consecutive tools: thinking
+ * messages and semantic continuation events (todo/custom/compaction) are part
+ * of the same hidden span too. The first ordinary assistant/boundary entry is
+ * the owner of the next visible segment; at origin there is no partial prefix.
+ */
+export function leadingContinuationSpan(
+  entries: readonly TranscriptEntry[],
+  leadingContinuation = false,
+): LeadingContinuationSpan | undefined {
+  const first = entries[0];
+  if (!leadingContinuation || !first || startsActivityBoundary(first))
+    return undefined;
+  for (let index = 1; index < entries.length; index += 1) {
+    const entry = entries[index];
+    if (entry && startsActivityBoundary(entry))
+      return { start: 0, end: index - 1 };
+  }
+  return { start: 0, end: entries.length - 1 };
+}
+
+/** Compatibility spelling for consumers that call this a leading activity span. */
+export const leadingActivityContinuationSpan = leadingContinuationSpan;
+
 /**
  * Find the group owning an entry. This is intentionally derived from
  * `groupTranscript`, rather than a pagination-specific heuristic.

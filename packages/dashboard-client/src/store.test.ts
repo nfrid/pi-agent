@@ -2587,6 +2587,104 @@ describe('DashboardLiveStore', () => {
     expect(surface?.viewModel).toMatchObject({ statuses: [] });
   });
 
+  it('preserves verified older coverage across a same-generation latest append', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.acceptSessionSnapshot(
+      {
+        ...sessionResponse(1),
+        runtimeEpoch: 'epoch-1',
+        entries: [
+          {
+            type: 'message',
+            id: 'newer',
+            message: { role: 'assistant', content: 'newer' },
+          },
+        ],
+        history: {
+          version: 1,
+          start: 10,
+          end: 20,
+          hasOlder: true,
+          nextBefore: 'before-10',
+        },
+      },
+      1,
+      1,
+      true,
+    );
+    expect(
+      store.prependSessionHistory({
+        ...sessionResponse(1),
+        runtimeEpoch: 'epoch-1',
+        entries: [
+          {
+            type: 'message',
+            id: 'older',
+            message: { role: 'user', content: 'older' },
+          },
+        ],
+        history: { version: 1, start: 0, end: 10, hasOlder: false },
+      }),
+    ).toBeDefined();
+
+    expect(
+      store.getSnapshot().sessionHistoryCoverageById['session-1'],
+    ).toMatchObject({
+      coveredStart: 0,
+      coveredEnd: 20,
+      pageCount: 2,
+      runtimeEpoch: 'epoch-1',
+    });
+    store.hydrateSession({
+      ...sessionResponse(2),
+      runtimeEpoch: 'epoch-1',
+      entries: [
+        {
+          type: 'message',
+          id: 'newer-2',
+          message: { role: 'assistant', content: 'newer 2' },
+        },
+      ],
+      history: { version: 1, start: 10, end: 21, hasOlder: false },
+    });
+    const coverage =
+      store.getSnapshot().sessionHistoryCoverageById['session-1'];
+    expect(coverage).toMatchObject({
+      coveredStart: 0,
+      coveredEnd: 21,
+      pageCount: 2,
+      hasOlder: false,
+    });
+    expect(
+      store.getSnapshot().transcriptsBySessionId['session-1']?.order,
+    ).toEqual(['older', 'newer-2']);
+  });
+
+  it('rejects duplicate and non-contiguous prepends and resets to the newest window', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.hydrateSession({
+      ...sessionResponse(1),
+      history: {
+        version: 1,
+        start: 10,
+        end: 20,
+        hasOlder: true,
+        nextBefore: 'before-10',
+      } as const,
+    });
+    const page = {
+      ...sessionResponse(1),
+      history: { version: 1, start: 0, end: 10, hasOlder: false } as const,
+    };
+    expect(store.prependSessionHistory(page)).toBeDefined();
+    expect(store.prependSessionHistory(page)).toBeUndefined();
+    expect(
+      store.getSnapshot().sessionHistoryCoverageById['session-1'],
+    ).toMatchObject({ coveredStart: 10, coveredEnd: 20, pageCount: 1 });
+  });
+
   it('resets state for daemon replacement and refuses stale HTTP generations', () => {
     const store = new DashboardLiveStore();
     store.installSnapshot(snapshot('daemon-1', 12));
