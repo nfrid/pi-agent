@@ -29,16 +29,23 @@ import {
   validateExistingWorktree,
   type WorktreeBase,
   type WorktreeRecord,
+  writeWorktreeRecord,
 } from './worktree';
 
 export interface DelegateTaskPlan {
   name: string;
   task: string;
   requestedCwd: string;
+  /** Whether cwd was explicitly supplied rather than inherited from ctx. */
+  cwdExplicit?: boolean;
   context: DelegateContext;
   contextNote?: string;
   scope?: string[];
   base?: WorktreeBase;
+  /** Exact immutable commit/ref supplied by a symbolic branch input. */
+  baseRef?: string;
+  /** Relative working directory captured from a symbolic branch input. */
+  workingDirectory?: string;
   /** Existing caller-owned checkout selected for a fresh task. */
   worktreePath?: string;
   /** Explicit source for a read-only continuation replacement snapshot. */
@@ -174,18 +181,37 @@ export async function prepareDelegateTask(
         cwd: plan.requestedCwd,
         name: plan.name,
         base: plan.base,
+        baseRef: plan.baseRef,
         worktreePath: plan.worktreePath,
         parentSessionId,
       });
+      if (prepared.worktree && plan.workingDirectory !== undefined) {
+        const root = prepared.worktree.record.worktreePath;
+        const workingDirectory = path.normalize(plan.workingDirectory);
+        if (
+          path.isAbsolute(workingDirectory) ||
+          workingDirectory === '..' ||
+          workingDirectory.startsWith(`..${path.sep}`)
+        )
+          throw new Error('Symbolic branch working directory is unsafe.');
+        const record = {
+          ...prepared.worktree.record,
+          workingDirectory,
+        };
+        writeWorktreeRecord(record);
+        state.worktree = { ...prepared.worktree, record };
+        state.cwd = path.join(root, workingDirectory);
+      }
       if (!prepared.worktree)
         throw new Error(
           prepared.fallbackReason ?? 'Worktree setup failed before launch.',
         );
-      state.worktree = prepared.worktree;
-      state.cwd = path.join(
-        prepared.worktree.record.worktreePath,
-        prepared.worktree.record.workingDirectory,
-      );
+      if (!state.worktree) state.worktree = prepared.worktree;
+      if (plan.workingDirectory === undefined)
+        state.cwd = path.join(
+          prepared.worktree.record.worktreePath,
+          prepared.worktree.record.workingDirectory,
+        );
     }
 
     if (plan.resumed && state.worktree?.record.ownership === 'caller') {

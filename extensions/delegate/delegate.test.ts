@@ -160,6 +160,16 @@ describe('delegate', () => {
     expect(Buffer.byteLength(JSON.stringify(parameters), 'utf8')).toBeLessThan(
       9_000,
     );
+    const schema = parameters as {
+      properties?: Record<string, unknown>;
+    };
+    expect(schema.properties?.background).toBeUndefined();
+    expect(schema.properties?.tasks).toBeUndefined();
+    expect(schema.properties?.continuation).toBeUndefined();
+    expect(schema.properties?.id).toBeDefined();
+    expect(schema.properties?.continue).toBeDefined();
+    expect(schema.properties?.after).toBeDefined();
+    expect(schema.properties?.inputs).toBeDefined();
   });
 
   test('protects recorded branch history in writable continuations', () => {

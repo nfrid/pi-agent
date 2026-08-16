@@ -1,2 +1,2 @@
-- Use delegate_jobs feedback only when concrete corrective guidance is needed for a background child.
-- Use peek for deliberate inspection or once when a bounded timeout will change the next action; never repeat it to poll.
+- Use delegate_jobs status for compact metadata, feedback for concrete corrective guidance, and cancel when work is no longer needed.
+- Do not use delegate_jobs to poll or consume results; register delegate_wake for selected completion evidence and settle while work continues.

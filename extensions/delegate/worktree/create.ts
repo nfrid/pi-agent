@@ -43,6 +43,8 @@ export async function prepareWorktree(options: {
   cwd: string;
   name: string;
   base?: WorktreeBase;
+  /** Exact commit/ref used as the immutable source for symbolic branch inputs. */
+  baseRef?: string;
   /** Existing caller-owned Git worktree; no checkout or branch is created. */
   worktreePath?: string;
   parentSessionId?: string;

@@ -72,12 +72,13 @@ describe('delegate_jobs rendering', () => {
     );
     const actionDescription = tool?.parameters.properties?.action?.description;
     expect(actionDescription).toContain('list shows tracked jobs');
-    expect(actionDescription).toContain('peek inspects one job');
+    expect(actionDescription).toContain('status shows bounded metadata');
+    expect(actionDescription).not.toContain('peek');
     expect(actionDescription).toContain('feedback sends corrective guidance');
     expect(actionDescription).toContain('cancel stops one or more jobs');
     expect(tool?.description).not.toContain('Actions:');
     expect(tool?.promptGuidelines).toBeUndefined();
-    expect(tool?.description).toContain('Use peek for deliberate inspection');
+    expect(tool?.description).not.toContain('peek');
     await manager.dispose();
   });
 

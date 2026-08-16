@@ -191,8 +191,9 @@ export class WorkflowModel {
   }
 
   /** Prepare the next immutable attempt without mutating identity state. */
-  planContinuation(logicalId: LogicalId): WorkflowModelPlan {
-    assertLogicalId(logicalId);
+  planContinuation(reference: string): WorkflowModelPlan {
+    const parsed = parseWorkflowReference(reference);
+    const logicalId = parsed.logicalId;
     const lineage = this.attemptsByLogicalId.get(logicalId);
     if (!lineage)
       throw new Error(
@@ -201,6 +202,10 @@ export class WorkflowModel {
     const predecessor = lineage[lineage.length - 1];
     if (!predecessor)
       throw new Error(`Logical ID "${logicalId}" has no attempts.`);
+    if (parsed.ordinal !== undefined && parsed.ordinal !== predecessor.ordinal)
+      throw new Error(
+        `Cannot continue ${reference}; ${logicalId} latest attempt is ${predecessor.identity}.`,
+      );
     if (predecessor.ordinal >= MAX_ATTEMPT_ORDINAL)
       throw new Error(
         `Logical ID "${logicalId}" has reached its attempt limit.`,
