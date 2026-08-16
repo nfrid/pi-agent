@@ -638,6 +638,14 @@ export class WakeCoordinator {
     return this.retry(id);
   }
 
+  /** Explicit operator recovery for an accepted-but-unentered delivery. */
+  recover(id: string): WakeSnapshot {
+    const record = this.requireRecord(id);
+    if (record.state !== 'queued' && record.state !== 'ready')
+      throw new Error(`Wake "${id}" is not recoverable from ${record.state}.`);
+    return this.retryDispatch(id);
+  }
+
   reconcileQueued(id: string): WakeSnapshot {
     return this.retryDispatch(id);
   }

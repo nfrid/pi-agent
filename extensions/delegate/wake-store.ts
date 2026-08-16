@@ -47,15 +47,10 @@ export function persistWakeState(
   } satisfies WakeStoreEntry);
 }
 
-/**
- * Restore the latest valid snapshot on the current session branch. The wake
- * coordinator performs per-record validation against exact live attempts and
- * silently drops untrusted records rather than inventing identity.
- */
-export function restoreWakeState(
-  coordinator: WakeCoordinator,
+/** Return the latest valid snapshot on the current session branch. */
+export function latestWakeState(
   ctx: SessionBranch,
-): void {
+): WakeCoordinatorSnapshot | undefined {
   let latest: WakeStoreEntry | undefined;
   for (const entry of ctx.sessionManager.getBranch()) {
     if (
@@ -66,7 +61,20 @@ export function restoreWakeState(
       continue;
     if (isWakeStoreEntry(entry.data)) latest = entry.data;
   }
-  if (latest) coordinator.restore(latest.state);
+  return latest?.state;
+}
+
+/**
+ * Restore the latest valid snapshot on the current session branch. The wake
+ * coordinator performs per-record validation against exact live attempts and
+ * silently drops untrusted records rather than inventing identity.
+ */
+export function restoreWakeState(
+  coordinator: WakeCoordinator,
+  ctx: SessionBranch,
+): void {
+  const state = latestWakeState(ctx);
+  if (state) coordinator.restore(state);
 }
 
 /** Attach append-only persistence to wake state changes. */
