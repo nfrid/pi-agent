@@ -2066,7 +2066,8 @@ export class DashboardLiveStore {
         !page ||
         response.metadata.id !== sessionId ||
         (response.serverId ?? serverId) !== coverage.serverId ||
-        response.runtimeEpoch !== coverage.runtimeEpoch ||
+        (response.runtimeEpoch !== undefined &&
+          response.runtimeEpoch !== coverage.runtimeEpoch) ||
         response.history?.version !== coverage.version ||
         (!emptyOriginPlaceholder &&
           (page.end !== workingCoverage.coveredStart ||

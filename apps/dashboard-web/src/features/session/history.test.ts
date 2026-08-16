@@ -171,6 +171,7 @@ describe('useOlderSessionHistory', () => {
     const initial = {
       serverId: 'daemon-1',
       cursor: 40,
+      runtimeEpoch: 'epoch-1',
       metadata,
       entries: [
         {
@@ -210,6 +211,7 @@ describe('useOlderSessionHistory', () => {
     } as AuthoritativeSessionSnapshot;
     const stalePage = {
       ...initial,
+      runtimeEpoch: undefined,
       entries: [],
       history: {
         version: 1 as const,
@@ -220,6 +222,7 @@ describe('useOlderSessionHistory', () => {
     } as AuthoritativeSessionSnapshot;
     const currentPage = {
       ...rebased,
+      runtimeEpoch: undefined,
       entries: [
         {
           type: 'message',

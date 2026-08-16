@@ -2675,7 +2675,7 @@ describe('DashboardLiveStore', () => {
     expect(
       store.prependSessionHistory({
         ...sessionResponse(1),
-        runtimeEpoch: 'epoch-1',
+        // Historical disk pages intentionally omit the live runtime epoch.
         entries: [
           {
             type: 'message',
@@ -2718,6 +2718,38 @@ describe('DashboardLiveStore', () => {
     expect(
       store.getSnapshot().transcriptsBySessionId['session-1']?.order,
     ).toEqual(['older', 'newer-2']);
+  });
+
+  it('rejects an explicit runtime mismatch on a historical page', () => {
+    const store = new DashboardLiveStore();
+    store.installSnapshot(snapshot('daemon-1', 1));
+    store.hydrateSession({
+      ...sessionResponse(1),
+      runtimeEpoch: 'epoch-1',
+      history: {
+        version: 1,
+        start: 10,
+        end: 20,
+        hasOlder: true,
+        nextBefore: 'before-10',
+      },
+    });
+
+    expect(
+      store.prependSessionHistory({
+        ...sessionResponse(1),
+        runtimeEpoch: 'epoch-2',
+        history: { version: 1, start: 0, end: 10, hasOlder: false },
+      }),
+    ).toBeUndefined();
+    expect(
+      store.getSnapshot().sessionHistoryCoverageById['session-1'],
+    ).toMatchObject({
+      coveredStart: 10,
+      coveredEnd: 20,
+      pageCount: 1,
+      runtimeEpoch: 'epoch-1',
+    });
   });
 
   it('fails closed when the newest bounded window advances past its verified bridge', () => {

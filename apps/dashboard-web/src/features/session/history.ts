@@ -350,7 +350,8 @@ export function useOlderSessionHistory({
             existingCoverage &&
             ((page.serverId ?? attemptState.serverId) !==
               existingCoverage.serverId ||
-              page.runtimeEpoch !== existingCoverage.runtimeEpoch)
+              (page.runtimeEpoch !== undefined &&
+                page.runtimeEpoch !== existingCoverage.runtimeEpoch))
           )
             failClosed(
               'Dashboard returned history for a different session generation.',
