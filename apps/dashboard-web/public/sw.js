@@ -1,37 +1,54 @@
-const CACHE = 'pi-dashboard-v2';
+const DASHBOARD_BUILD_ID = '__PI_DASHBOARD_BUILD_ID__';
+const CACHE_PREFIX = 'pi-dashboard-';
+const CACHE = `${CACHE_PREFIX}${DASHBOARD_BUILD_ID}`;
+
 self.addEventListener('install', (event) =>
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(['/']))),
+  event.waitUntil(
+    (async () => {
+      await self.skipWaiting();
+      try {
+        const response = await fetch('/', { cache: 'no-store' });
+        if (response.ok) await (await caches.open(CACHE)).put('/', response);
+      } catch {
+        // Cache population is best effort; activation must not be blocked.
+      }
+    })(),
+  ),
 );
 self.addEventListener('activate', (event) =>
   event.waitUntil(
-    Promise.all([
-      self.clients.claim(),
-      caches
-        .keys()
-        .then((keys) =>
-          Promise.all(
-            keys
-              .filter((key) => key !== CACHE)
-              .map((key) => caches.delete(key)),
-          ),
-        ),
-    ]),
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(
+        keys
+          .filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE)
+          .map((key) => caches.delete(key)),
+      );
+      await self.clients.claim();
+    })(),
   ),
 );
 self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') return;
+  if (event.request.method !== 'GET' || event.request.mode !== 'navigate')
+    return;
   const url = new URL(event.request.url);
   if (url.pathname.startsWith('/api/')) return;
   event.respondWith(
-    fetch(event.request).catch(() =>
-      caches
-        .match(event.request)
-        .then(
-          (cached) =>
-            cached ||
-            (event.request.mode === 'navigate' ? caches.match('/') : undefined),
-        ),
-    ),
+    (async () => {
+      try {
+        const response = await fetch(event.request, { cache: 'no-store' });
+        if (response.ok)
+          event.waitUntil(
+            caches
+              .open(CACHE)
+              .then((cache) => cache.put('/', response.clone()))
+              .catch(() => undefined),
+          );
+        return response;
+      } catch {
+        return (await caches.match('/')) ?? Response.error();
+      }
+    })(),
   );
 });
 self.addEventListener('message', (event) => {

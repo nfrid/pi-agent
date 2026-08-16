@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import react from '@vitejs/plugin-react';
 import { defineConfig, type Plugin } from 'vite';
@@ -12,15 +13,64 @@ const proxy = {
 const dashboardBuildId =
   process.env.PI_DASHBOARD_BUILD_ID?.trim() || randomUUID();
 const versionPayload = `${JSON.stringify({ version: dashboardBuildId })}\n`;
+const serviceWorkerSource = readFileSync(
+  path.resolve(__dirname, 'public/sw.js'),
+  'utf8',
+);
+const serviceWorkerMarker = "'__PI_DASHBOARD_BUILD_ID__'";
+
+export function stampDashboardServiceWorker(
+  source: string,
+  buildId: string,
+): string {
+  if (!source.includes(serviceWorkerMarker))
+    throw new Error('Dashboard service worker build marker is missing.');
+  return source.replace(serviceWorkerMarker, JSON.stringify(buildId));
+}
+
+const serviceWorkerPayload = stampDashboardServiceWorker(
+  serviceWorkerSource,
+  dashboardBuildId,
+);
+
+function serveDashboardAsset(
+  response: {
+    setHeader(name: string, value: string): void;
+    end(body: string): void;
+  },
+  contentType: string,
+  payload: string,
+): void {
+  response.setHeader('Content-Type', contentType);
+  response.setHeader('Cache-Control', 'no-store');
+  response.end(payload);
+}
 
 function dashboardVersionPlugin(): Plugin {
   return {
     name: 'dashboard-version',
     configureServer(server) {
       server.middlewares.use('/version.json', (_request, response) => {
-        response.setHeader('Content-Type', 'application/json');
-        response.setHeader('Cache-Control', 'no-store');
-        response.end(versionPayload);
+        serveDashboardAsset(response, 'application/json', versionPayload);
+      });
+      server.middlewares.use('/sw.js', (_request, response) => {
+        serveDashboardAsset(
+          response,
+          'application/javascript',
+          serviceWorkerPayload,
+        );
+      });
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use('/version.json', (_request, response) => {
+        serveDashboardAsset(response, 'application/json', versionPayload);
+      });
+      server.middlewares.use('/sw.js', (_request, response) => {
+        serveDashboardAsset(
+          response,
+          'application/javascript',
+          serviceWorkerPayload,
+        );
       });
     },
     generateBundle() {
@@ -28,6 +78,11 @@ function dashboardVersionPlugin(): Plugin {
         type: 'asset',
         fileName: 'version.json',
         source: versionPayload,
+      });
+      this.emitFile({
+        type: 'asset',
+        fileName: 'sw.js',
+        source: serviceWorkerPayload,
       });
     },
   };

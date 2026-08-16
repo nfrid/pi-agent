@@ -36,7 +36,7 @@ class DashboardErrorBoundary extends Component<
 }
 
 if ('serviceWorker' in navigator)
-  void navigator.serviceWorker.register('/sw.js');
+  void navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
 const root = document.getElementById('root');
 if (!root) throw new Error('Dashboard root element is missing.');
 createRoot(root).render(
