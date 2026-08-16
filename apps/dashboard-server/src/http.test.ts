@@ -25,9 +25,7 @@ afterEach(async () => {
 
 describe('dashboard HTTP boundary', () => {
   it('publishes auxiliary JSONL appends as ordered normalized session events', async () => {
-    const root = await mkdtemp(
-      path.join(os.tmpdir(), 'pi-aux-live-'),
-    );
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-aux-live-'));
     const sessionDir = path.join(root, 'sessions');
     const delegateDir = path.join(root, '.delegate-sessions');
     await mkdir(sessionDir, { recursive: true });
@@ -186,9 +184,7 @@ describe('dashboard HTTP boundary', () => {
   });
 
   it('carries a contiguous trailing marker suffix across bounded ranges', async () => {
-    const root = await mkdtemp(
-      path.join(os.tmpdir(), 'pi-aux-markers-'),
-    );
+    const root = await mkdtemp(path.join(os.tmpdir(), 'pi-aux-markers-'));
     const sessionDir = path.join(root, 'sessions');
     const delegateDir = path.join(root, '.delegate-sessions');
     await mkdir(sessionDir, { recursive: true });

@@ -17,9 +17,9 @@ describe('dashboard Vite proxy configuration', () => {
   });
 
   it('lets preview serve the build-time version assets unchanged', () => {
-    const plugins = (
-      (config as { plugins?: unknown[] }).plugins ?? []
-    ).flat(Infinity) as Array<{
+    const plugins = ((config as { plugins?: unknown[] }).plugins ?? []).flat(
+      Infinity,
+    ) as Array<{
       name?: string;
       configurePreviewServer?: unknown;
     }>;
