@@ -277,7 +277,8 @@ function resolveBranch(source: WorkflowInputSource): WorkflowBranchSource {
     record.worktreePath !== summary.worktreePath ||
     record.branch !== summary.branch ||
     !COMMIT_PATTERN.test(record.headCommit) ||
-    !COMMIT_PATTERN.test(workBase ?? '') ||
+    typeof workBase !== 'string' ||
+    !COMMIT_PATTERN.test(workBase) ||
     !path.isAbsolute(record.repositoryRoot) ||
     !path.isAbsolute(record.worktreePath) ||
     !safeBranchString(record.repositoryRoot, 4096) ||

@@ -697,6 +697,24 @@ describe('DelegateWorkflowCoordinator', () => {
     await coordinator.dispose();
   });
 
+  test('publishes narrow terminal events exactly once', async () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    const terminal = vi.fn();
+    const unsubscribe = coordinator.subscribeTerminal(terminal);
+    const attempt = coordinator.schedule(
+      scheduleOptions('terminal-event', async () => result('terminal-event')),
+    );
+    await vi.waitFor(() =>
+      expect(coordinator.require(attempt.identity).settledAt).toBeDefined(),
+    );
+    expect(terminal).toHaveBeenCalledOnce();
+    expect(terminal).toHaveBeenCalledWith(
+      expect.objectContaining({ identity: attempt.identity, state: 'success' }),
+    );
+    unsubscribe();
+    await coordinator.dispose();
+  });
+
   test('keeps route and internal job identity in snapshots', async () => {
     const coordinator = new DelegateWorkflowCoordinator();
     const attempt = coordinator.schedule(
