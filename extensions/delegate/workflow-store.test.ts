@@ -229,6 +229,55 @@ describe('workflow store', () => {
     expect(workflowStoreHistory(branch([valid, malformed]))).toBeUndefined();
   });
 
+  test('rejects noncanonical and inconsistent journal metadata as a whole', () => {
+    const attempt = (overrides: Record<string, unknown> = {}) => ({
+      logicalId: 'foo',
+      attempt: 1,
+      identity: 'foo@1',
+      state: 'scheduled',
+      dependencies: ['gate@1'],
+      waitingFor: ['gate@1'],
+      createdAt: 1,
+      scheduledAt: 1,
+      ...overrides,
+    });
+    const entry = (metadata: Record<string, unknown>) => ({
+      type: 'custom',
+      customType: WORKFLOW_ENTRY_TYPE,
+      data: {
+        version: 1,
+        kind: 'snapshot',
+        state: { version: 1, attempts: [metadata] },
+      },
+    });
+    const malformed = [
+      attempt({ logicalId: 'Foo', identity: 'Foo@1' }),
+      attempt({ logicalId: 'foo\u0000bar', identity: 'foo\u0000bar@1' }),
+      attempt({ identity: 'foo@2' }),
+      attempt({ attempt: 0, identity: 'foo@0' }),
+      attempt({ attempt: 1_000_000_000, identity: 'foo@1000000000' }),
+      attempt({ dependencies: ['gate'] }),
+      attempt({ dependencies: ['Gate@1'] }),
+      attempt({ dependencies: ['gate@1', 'gate@1'] }),
+      attempt({ waitingFor: ['other@1'] }),
+      attempt({
+        dependencies: Array.from(
+          { length: 33 },
+          (_, index) => `gate-${index}@1`,
+        ),
+        waitingFor: [],
+      }),
+      attempt({
+        dependencies: ['gate@1'],
+        waitingFor: Array.from({ length: 33 }, (_, index) => `gate-${index}@1`),
+      }),
+    ];
+    for (const metadata of malformed) {
+      expect(latestWorkflowState(branch([entry(metadata)]))).toBeUndefined();
+      expect(workflowStoreHistory(branch([entry(metadata)]))).toBeUndefined();
+    }
+  });
+
   test('writes the versioned custom entry type', () => {
     const coordinator = new DelegateWorkflowCoordinator();
     const entries: unknown[] = [];

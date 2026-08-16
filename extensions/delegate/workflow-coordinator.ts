@@ -44,6 +44,7 @@ import {
   assertWorkflowAttemptTransition,
   createWorkflowModel,
   isTerminalWorkflowAttemptState,
+  MAX_WORKFLOW_DEPENDENCIES,
   type WorkflowAttempt,
   type WorkflowAttemptState,
   type WorkflowModel,
@@ -233,6 +234,10 @@ function validateScheduleInput(options: DelegateWorkflowScheduleOptions): void {
     throw new Error('Invalid workflow continuation reference.');
   if (options.after !== undefined && !Array.isArray(options.after))
     throw new Error('Invalid workflow dependencies: expected an array.');
+  if (options.after && options.after.length > MAX_WORKFLOW_DEPENDENCIES)
+    throw new Error(
+      `A workflow attempt may declare at most ${MAX_WORKFLOW_DEPENDENCIES} explicit dependencies.`,
+    );
   if (options.after?.some((reference) => typeof reference !== 'string'))
     throw new Error(
       'Invalid workflow dependency: expected a string reference.',
@@ -1179,6 +1184,10 @@ export class DelegateWorkflowCoordinator {
     for (const selector of selectors)
       if (!dependencies.includes(selector.identity))
         dependencies.push(selector.identity);
+    if (dependencies.length > MAX_WORKFLOW_DEPENDENCIES)
+      throw new Error(
+        `A workflow attempt may persist at most ${MAX_WORKFLOW_DEPENDENCIES} combined dependencies.`,
+      );
     return dependencies;
   }
 

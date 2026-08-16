@@ -7,6 +7,8 @@ import type {
   DelegateHistoryRunDetailResponse,
 } from '@pi-dashboard/protocol';
 import {
+  isCanonicalWorkflowAttemptReference,
+  isCanonicalWorkflowLogicalId,
   MAX_DELEGATE_HISTORY_DETAIL_BYTES,
   MAX_DELEGATE_HISTORY_DETAIL_ENTRIES,
   MAX_DELEGATE_HISTORY_DETAIL_TEXT,
@@ -15,6 +17,8 @@ import {
   MAX_DELEGATE_HISTORY_SUMMARY_BYTES,
   MAX_DELEGATE_HISTORY_TASK,
   MAX_DELEGATE_HISTORY_TOTAL_RUNS,
+  MAX_WORKFLOW_ATTEMPT_ORDINAL,
+  MAX_WORKFLOW_DEPENDENCIES,
 } from '@pi-dashboard/protocol';
 
 /**
@@ -424,33 +428,65 @@ function projectWorkflow(
   createdAt: number,
   route?: string,
 ): RecordValue | undefined {
-  const source = isRecord(run.workflow) ? run.workflow : run.workflowAttempt;
+  const hasWorkflowMetadata = run.workflow !== undefined;
+  const source = hasWorkflowMetadata ? run.workflow : run.workflowAttempt;
   if (!isRecord(source)) return undefined;
   const ownerBranchId = validWorkflowText(source.ownerBranchId, 256);
-  const logicalId = validWorkflowText(source.logicalId, 64);
-  const identity = validWorkflowText(source.identity, 80);
+  if (
+    (source.ownerBranchId !== undefined && ownerBranchId === undefined) ||
+    (hasWorkflowMetadata && source.dependencies === undefined)
+  )
+    return undefined;
+  const logicalId = isCanonicalWorkflowLogicalId(source.logicalId)
+    ? source.logicalId
+    : undefined;
+  const identity = isCanonicalWorkflowAttemptReference(source.identity)
+    ? source.identity
+    : undefined;
   const ordinal = source.ordinal;
   if (
     logicalId === undefined ||
     identity === undefined ||
     typeof ordinal !== 'number' ||
     !Number.isSafeInteger(ordinal) ||
-    ordinal < 1
+    ordinal < 1 ||
+    ordinal > MAX_WORKFLOW_ATTEMPT_ORDINAL ||
+    identity !== `${logicalId}@${ordinal}`
   )
     return undefined;
-  const dependencies = Array.isArray(source.dependencies)
-    ? source.dependencies.flatMap((value) => {
-        const identity = stringValue(value, 80);
-        return identity ? [identity] : [];
-      })
-    : [];
-  const waitingFor = Array.isArray(source.waitingFor)
-    ? source.waitingFor.flatMap((value) => {
-        const identity = stringValue(value, 80);
-        return identity ? [identity] : [];
-      })
-    : undefined;
-  const reason = stringValue(source.reason, 256);
+  const dependencies =
+    source.dependencies === undefined
+      ? []
+      : Array.isArray(source.dependencies) &&
+          source.dependencies.length <= MAX_WORKFLOW_DEPENDENCIES &&
+          source.dependencies.every(isCanonicalWorkflowAttemptReference)
+        ? (source.dependencies as string[])
+        : undefined;
+  if (
+    dependencies === undefined ||
+    new Set(dependencies).size !== dependencies.length ||
+    dependencies.includes(identity)
+  )
+    return undefined;
+  const waitingFor =
+    source.waitingFor === undefined
+      ? undefined
+      : Array.isArray(source.waitingFor) &&
+          source.waitingFor.length <= MAX_WORKFLOW_DEPENDENCIES &&
+          source.waitingFor.every(isCanonicalWorkflowAttemptReference)
+        ? (source.waitingFor as string[])
+        : undefined;
+  if (
+    waitingFor !== undefined &&
+    (new Set(waitingFor).size !== waitingFor.length ||
+      waitingFor.some((reference) => !dependencies.includes(reference)))
+  )
+    return undefined;
+  const reason =
+    source.reason === undefined
+      ? undefined
+      : validWorkflowText(source.reason, 256);
+  if (source.reason !== undefined && reason === undefined) return undefined;
   return {
     ...(ownerBranchId ? { ownerBranchId } : {}),
     logicalId,
@@ -548,6 +584,8 @@ function projectRun(
 }
 
 const WORKFLOW_STORE_ENTRY_TYPE = 'delegate-workflow:v1';
+const MAX_WORKFLOW_HISTORY_ATTEMPTS = 256;
+const MAX_WORKFLOW_DELTA_ATTEMPTS = 32;
 const WORKFLOW_STATES = new Set([
   'scheduled',
   'queued',
@@ -561,16 +599,16 @@ const WORKFLOW_STATES = new Set([
 ]);
 
 function validWorkflowText(value: unknown, max: number): string | undefined {
-  const text = stringValue(value, max);
+  if (typeof value !== 'string' || value.length === 0 || value.length > max)
+    return undefined;
   if (
-    text === undefined ||
-    [...text].some((character) => {
+    [...value].some((character) => {
       const code = character.charCodeAt(0);
       return code < 32 || code === 127;
     })
   )
     return undefined;
-  return text;
+  return value;
 }
 
 function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
@@ -579,38 +617,45 @@ function projectWorkflowStoreAttempt(value: unknown): RecordValue | undefined {
     value.ownerBranchId === undefined
       ? undefined
       : validWorkflowText(value.ownerBranchId, 256);
-  const logicalId = validWorkflowText(value.logicalId, 64);
-  const identity = validWorkflowText(value.identity, 80);
+  const logicalId = isCanonicalWorkflowLogicalId(value.logicalId)
+    ? value.logicalId
+    : undefined;
+  const identity = isCanonicalWorkflowAttemptReference(value.identity)
+    ? value.identity
+    : undefined;
   const attempt = value.attempt;
   const state = stringValue(value.state, 32);
   if (
     (value.ownerBranchId !== undefined && ownerBranchId === undefined) ||
-    !logicalId ||
-    !identity ||
+    logicalId === undefined ||
+    identity === undefined ||
     typeof attempt !== 'number' ||
     !Number.isSafeInteger(attempt) ||
     attempt < 1 ||
+    attempt > MAX_WORKFLOW_ATTEMPT_ORDINAL ||
     identity !== `${logicalId}@${attempt}` ||
     !state ||
     !WORKFLOW_STATES.has(state) ||
     !Array.isArray(value.dependencies) ||
-    value.dependencies.length > 32 ||
+    value.dependencies.length > MAX_WORKFLOW_DEPENDENCIES ||
     value.dependencies.some(
-      (dependency) => validWorkflowText(dependency, 80) === undefined,
+      (dependency) => !isCanonicalWorkflowAttemptReference(dependency),
     ) ||
+    new Set(value.dependencies).size !== value.dependencies.length ||
+    value.dependencies.includes(identity as string) ||
     !Array.isArray(value.waitingFor) ||
-    value.waitingFor.length > 32 ||
+    value.waitingFor.length > MAX_WORKFLOW_DEPENDENCIES ||
     value.waitingFor.some(
-      (dependency) => validWorkflowText(dependency, 80) === undefined,
+      (dependency) => !isCanonicalWorkflowAttemptReference(dependency),
+    ) ||
+    new Set(value.waitingFor).size !== value.waitingFor.length ||
+    value.waitingFor.some(
+      (dependency) => !(value.dependencies as unknown[]).includes(dependency),
     )
   )
     return undefined;
-  const dependencies = value.dependencies.map((item) =>
-    validWorkflowText(item, 80),
-  ) as string[];
-  const waitingFor = value.waitingFor.map((item) =>
-    validWorkflowText(item, 80),
-  ) as string[];
+  const dependencies = value.dependencies as string[];
+  const waitingFor = value.waitingFor as string[];
   const createdAt = finiteNumber(value.createdAt);
   const scheduledAt = finiteNumber(value.scheduledAt);
   if (createdAt === undefined || scheduledAt === undefined) return undefined;
@@ -662,7 +707,10 @@ function workflowStoreOperation(
   const data = isRecord(entry.data) ? entry.data : undefined;
   const state = data && isRecord(data.state) ? data.state : undefined;
   const kind = data?.kind;
-  const max = kind === 'snapshot' ? 256 : 32;
+  const max =
+    kind === 'snapshot'
+      ? MAX_WORKFLOW_HISTORY_ATTEMPTS
+      : MAX_WORKFLOW_DELTA_ATTEMPTS;
   if (
     data?.version !== 1 ||
     (kind !== 'snapshot' && kind !== 'delta') ||
@@ -1081,6 +1129,11 @@ function workflowJournal(
         entryIdentity: stringValue(value.id),
         entryTimestamp: entryTimestamp(value),
       });
+    }
+    while (latest.size > MAX_WORKFLOW_HISTORY_ATTEMPTS) {
+      const oldest = latest.keys().next().value;
+      if (oldest === undefined) break;
+      latest.delete(oldest);
     }
   }
   return [...latest.values()];

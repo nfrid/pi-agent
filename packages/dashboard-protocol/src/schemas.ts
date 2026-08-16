@@ -741,6 +741,49 @@ const DelegateLiveRunStateSchema = Type.Union([
   Type.Literal('aborted'),
   Type.Literal('timed-out'),
 ]);
+
+/** Canonical workflow identity bounds shared by dashboard consumers. */
+export const MAX_WORKFLOW_LOGICAL_ID_LENGTH = 64;
+export const MAX_WORKFLOW_ATTEMPT_ORDINAL = 999_999_999;
+export const MAX_WORKFLOW_DEPENDENCIES = 32;
+const WORKFLOW_LOGICAL_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const WORKFLOW_ATTEMPT_REFERENCE_PATTERN =
+  /^(?<logicalId>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)@(?<ordinal>[1-9][0-9]{0,8})$/;
+
+export function isCanonicalWorkflowLogicalId(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MAX_WORKFLOW_LOGICAL_ID_LENGTH &&
+    WORKFLOW_LOGICAL_ID_PATTERN.test(value)
+  );
+}
+
+export function isCanonicalWorkflowAttemptReference(
+  value: unknown,
+): value is string {
+  if (typeof value !== 'string') return false;
+  const match = WORKFLOW_ATTEMPT_REFERENCE_PATTERN.exec(value);
+  if (!match?.groups) return false;
+  const logicalId = match.groups.logicalId;
+  const ordinal = Number(match.groups.ordinal);
+  return (
+    isCanonicalWorkflowLogicalId(logicalId) &&
+    ordinal <= MAX_WORKFLOW_ATTEMPT_ORDINAL &&
+    value === `${logicalId}@${ordinal}`
+  );
+}
+
+const WorkflowLogicalIdSchema = Type.String({
+  minLength: 1,
+  maxLength: MAX_WORKFLOW_LOGICAL_ID_LENGTH,
+  pattern: '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$',
+});
+const WorkflowAttemptReferenceSchema = Type.String({
+  minLength: 3,
+  maxLength: MAX_WORKFLOW_LOGICAL_ID_LENGTH + 1 + 9,
+  pattern: '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*@[1-9][0-9]{0,8}$',
+});
 const DelegateWorkflowStateSchema = Type.Union([
   Type.Literal('scheduled'),
   Type.Literal('queued'),
@@ -756,19 +799,22 @@ export const DelegateWorkflowMetadataSchema = Type.Object(
   {
     /** Immutable branch owner used to disambiguate identical logical attempts. */
     ownerBranchId: Type.Optional(IdentifierSchema),
-    logicalId: Type.String({ minLength: 1, maxLength: 64 }),
-    attempt: Type.Integer({ minimum: 1 }),
-    identity: Type.String({ minLength: 1, maxLength: 80 }),
+    logicalId: WorkflowLogicalIdSchema,
+    attempt: Type.Integer({
+      minimum: 1,
+      maximum: MAX_WORKFLOW_ATTEMPT_ORDINAL,
+    }),
+    identity: WorkflowAttemptReferenceSchema,
     state: DelegateWorkflowStateSchema,
     dependencies: Type.Readonly(
-      Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
-        maxItems: 32,
+      Type.Array(WorkflowAttemptReferenceSchema, {
+        maxItems: MAX_WORKFLOW_DEPENDENCIES,
       }),
     ),
     waitingFor: Type.Optional(
       Type.Readonly(
-        Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
-          maxItems: 32,
+        Type.Array(WorkflowAttemptReferenceSchema, {
+          maxItems: MAX_WORKFLOW_DEPENDENCIES,
         }),
       ),
     ),
