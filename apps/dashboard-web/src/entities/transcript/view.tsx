@@ -111,8 +111,16 @@ export function Transcript({
     if (!target) return;
     const offset =
       target.getBoundingClientRect().top - element.getBoundingClientRect().top;
+    element.dataset.prependRestoring = 'true';
     element.scrollTop += offset - prependAnchor.offset;
     restoredRevisionRef.current = prependAnchor.revision;
+    const frame = window.requestAnimationFrame(() => {
+      delete element.dataset.prependRestoring;
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      delete element.dataset.prependRestoring;
+    };
   }, [isVirtualizedTranscript, prependAnchor, transcriptScrollElementRef]);
   const landmarks = useMemo(
     () => buildTranscriptLandmarks(items, groups),
@@ -390,14 +398,22 @@ function VirtualizedTranscript({
     if (rowIndex === undefined) return;
     // VirtualizedTranscript is the sole prepend restore owner. Resolve the
     // semantic row after the virtualizer has accepted the new row map.
+    scrollElement.dataset.prependRestoring = 'true';
     virtualizer.measure();
     virtualizer.scrollToIndex(rowIndex, { align: 'start' });
     let correctionFrame: number | undefined;
+    let releaseFrame: number | undefined;
     let attempts = 0;
+    const release = () => {
+      delete scrollElement.dataset.prependRestoring;
+    };
     const correct = () => {
       correctionFrame = undefined;
       attempts += 1;
-      if (attempts > 60) return;
+      if (attempts > 60) {
+        release();
+        return;
+      }
       const row = Array.from(
         virtualizerRef.current?.querySelectorAll<HTMLElement>('[data-index]') ??
           [],
@@ -411,6 +427,7 @@ function VirtualizedTranscript({
         row.getBoundingClientRect().top -
         scrollElement.getBoundingClientRect().top;
       scrollElement.scrollTop += offset - anchor.offset;
+      releaseFrame = window.requestAnimationFrame(release);
     };
     correctionFrame = window.requestAnimationFrame(() => {
       correctionFrame = window.requestAnimationFrame(correct);
@@ -418,6 +435,8 @@ function VirtualizedTranscript({
     return () => {
       if (correctionFrame !== undefined)
         window.cancelAnimationFrame(correctionFrame);
+      if (releaseFrame !== undefined) window.cancelAnimationFrame(releaseFrame);
+      release();
     };
   }, [
     prependAnchor,

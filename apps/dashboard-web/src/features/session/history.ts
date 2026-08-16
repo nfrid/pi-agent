@@ -55,6 +55,8 @@ type ScrollAnchor = {
   offset: number;
 };
 
+type PrependAnchor = ScrollAnchor & { revision: number };
+
 type HistoryRequest = {
   id: string;
   generation: number;
@@ -128,9 +130,9 @@ export function useOlderSessionHistory({
   const [history, setHistory] = useState<SessionApiResponse['history']>();
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string>();
-  const [prependAnchor, setPrependAnchor] = useState<
-    (ScrollAnchor & { revision: number }) | undefined
-  >(undefined);
+  const [prependAnchor, setPrependAnchor] = useState<PrependAnchor | undefined>(
+    undefined,
+  );
   const historyRef = useRef<SessionApiResponse['history']>(undefined);
   const historySessionRef = useRef<string | undefined>(undefined);
   const historyWindowRef = useRef<string | undefined>(undefined);
@@ -140,6 +142,8 @@ export function useOlderSessionHistory({
   const scrollIntentRevisionRef = useRef(0);
   const topIntentRef = useRef(false);
   const previousScrollTopRef = useRef<number | undefined>(undefined);
+  const pointerGestureRef = useRef(false);
+  const pendingPrependAnchorRef = useRef<PrependAnchor | undefined>(undefined);
   const preserveAnchorOnCoverageRef = useRef(false);
   const preserveErrorOnCoverageRef = useRef(false);
   const loadEarlierHistoryRef = useRef<() => Promise<void>>(
@@ -147,6 +151,7 @@ export function useOlderSessionHistory({
   );
 
   const clearAnchor = useCallback(() => {
+    pendingPrependAnchorRef.current = undefined;
     setPrependAnchor(undefined);
   }, []);
 
@@ -228,17 +233,39 @@ export function useOlderSessionHistory({
   useEffect(() => {
     const element = scrollElementRef?.current;
     if (!sessionMounted || !element) return;
-    const noteIntent = () => {
-      topIntentRef.current = true;
+    const cancelPendingRestore = () => {
       scrollIntentRevisionRef.current += 1;
       const request = historyRequestRef.current;
       if (request) request.anchor = undefined;
       clearAnchor();
     };
-    const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) noteIntent();
+    const noteUpIntent = () => {
+      topIntentRef.current = true;
+      // Trackpads keep emitting upward wheel events after reaching scrollTop 0.
+      // That inertia is the same load-earlier gesture, not a request to discard
+      // the message currently anchoring the viewport.
+      if (element.scrollTop > 96) cancelPendingRestore();
     };
-    const onTouchMove = () => noteIntent();
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) noteUpIntent();
+      else if (event.deltaY > 0) {
+        topIntentRef.current = false;
+        cancelPendingRestore();
+      }
+    };
+    const onPointerDown = () => {
+      pointerGestureRef.current = true;
+      if (prependAnchor) {
+        topIntentRef.current = false;
+        cancelPendingRestore();
+      } else noteUpIntent();
+    };
+    const onPointerEnd = () => {
+      pointerGestureRef.current = false;
+      const pendingAnchor = pendingPrependAnchorRef.current;
+      pendingPrependAnchorRef.current = undefined;
+      if (pendingAnchor) setPrependAnchor(pendingAnchor);
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target;
       if (
@@ -248,23 +275,25 @@ export function useOlderSessionHistory({
         )
       )
         return;
-      if (
-        [
-          'ArrowUp',
-          'ArrowDown',
-          'PageUp',
-          'PageDown',
-          'Home',
-          'End',
-          'Space',
-        ].includes(event.code)
-      )
-        noteIntent();
+      if (['ArrowUp', 'PageUp', 'Home'].includes(event.code)) noteUpIntent();
+      else if (
+        ['ArrowDown', 'PageDown', 'End'].includes(event.code) ||
+        (event.code === 'Space' && !event.shiftKey)
+      ) {
+        topIntentRef.current = false;
+        cancelPendingRestore();
+      } else if (event.code === 'Space') noteUpIntent();
     };
     const onScroll = () => {
       const top = element.scrollTop;
       const previous = previousScrollTopRef.current;
       previousScrollTopRef.current = top;
+      if (previous !== undefined && top > previous + 1) {
+        topIntentRef.current = false;
+        const programmaticRestore = element.dataset.prependRestoring === 'true';
+        if (pointerGestureRef.current || !programmaticRestore)
+          cancelPendingRestore();
+      }
       if (
         topIntentRef.current &&
         top <= 96 &&
@@ -275,19 +304,21 @@ export function useOlderSessionHistory({
       }
     };
     element.addEventListener('wheel', onWheel, { passive: true });
-    element.addEventListener('touchmove', onTouchMove, { passive: true });
-    element.addEventListener('pointerdown', noteIntent, { passive: true });
+    element.addEventListener('pointerdown', onPointerDown, { passive: true });
     element.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('pointerup', onPointerEnd, { passive: true });
+    window.addEventListener('pointercancel', onPointerEnd, { passive: true });
     window.addEventListener('keydown', onKeyDown);
     previousScrollTopRef.current = element.scrollTop;
     return () => {
       element.removeEventListener('wheel', onWheel);
-      element.removeEventListener('touchmove', onTouchMove);
-      element.removeEventListener('pointerdown', noteIntent);
+      element.removeEventListener('pointerdown', onPointerDown);
       element.removeEventListener('scroll', onScroll);
+      window.removeEventListener('pointerup', onPointerEnd);
+      window.removeEventListener('pointercancel', onPointerEnd);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [clearAnchor, scrollElementRef, sessionMounted]);
+  }, [clearAnchor, prependAnchor, scrollElementRef, sessionMounted]);
 
   const loadEarlierHistory = useCallback(async () => {
     if (historyRequestRef.current) return;
@@ -427,11 +458,15 @@ export function useOlderSessionHistory({
         if (
           resolvedAnchor &&
           request.intentRevision === scrollIntentRevisionRef.current
-        )
-          setPrependAnchor({
+        ) {
+          const nextAnchor = {
             ...resolvedAnchor,
             revision: request.requestId,
-          });
+          };
+          if (pointerGestureRef.current)
+            pendingPrependAnchorRef.current = nextAnchor;
+          else setPrependAnchor(nextAnchor);
+        }
         return;
       }
     } catch (loadError) {

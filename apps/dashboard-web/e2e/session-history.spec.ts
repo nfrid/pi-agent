@@ -153,7 +153,11 @@ async function verifyEarlierHistoryAnchor(page: Page) {
   ).toBeVisible();
   // The selected feed supplies the initial baseline; only the older page is finite.
   await expect.poll(() => initialReads).toBe(0);
-  await page.getByRole('button', { name: 'Load earlier history' }).click();
+  await page.locator('.session-transcript-scroll').evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
+  });
   await expect.poll(() => beforeRequest).toBe('token-1');
   const beforePrepend = await page
     .locator('.session-transcript-scroll')
@@ -179,6 +183,15 @@ async function verifyEarlierHistoryAnchor(page: Page) {
       };
     });
   expect(beforePrepend.key).not.toBe('');
+  // Real trackpads keep emitting upward inertia after reaching scrollTop 0.
+  // Those events must not cancel the anchor captured for this same prepend.
+  await page.locator('.session-transcript-scroll').evaluate((element) => {
+    for (let index = 0; index < 3; index += 1)
+      element.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+    // A touch/pointer gesture can span response completion. Restoration waits
+    // for release so its own scroll write cannot be mistaken for user motion.
+    element.dispatchEvent(new PointerEvent('pointerdown'));
+  });
   releaseOlder();
   await expect
     .poll(() =>
@@ -187,6 +200,9 @@ async function verifyEarlierHistoryAnchor(page: Page) {
         .evaluate((element) => element.scrollHeight),
     )
     .toBeGreaterThan(beforePrepend.scrollHeight);
+  await page.evaluate(() =>
+    window.dispatchEvent(new PointerEvent('pointerup')),
+  );
   await expect
     .poll(() =>
       page.locator('.session-transcript-scroll').evaluate((element, key) => {
