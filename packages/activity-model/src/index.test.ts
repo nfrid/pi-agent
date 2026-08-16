@@ -3,6 +3,7 @@ import {
   activityEntryFromRaw,
   groupTranscript,
   headersOf,
+  leadingContinuationSpan,
   owningActivityGroupBoundary,
   projectActivityGroups,
   toolActionSummary,
@@ -373,6 +374,44 @@ describe('shared activity model', () => {
       { kind: 'tool', name: 'edit', args: {}, status: 'running' },
     ]);
     expect(groups.map(({ status }) => status)).toEqual(['settled', 'live']);
+  });
+
+  it('hides a complete leading continuation through semantic events', () => {
+    const entries = [
+      { kind: 'tool' as const, name: 'read', args: {} },
+      { kind: 'assistant' as const, speaks: false },
+      { kind: 'other' as const, continuesGroup: true },
+      { kind: 'assistant' as const, speaks: true },
+      { kind: 'tool' as const, name: 'edit', args: {} },
+    ];
+    expect(leadingContinuationSpan(entries, true)).toEqual({
+      start: 0,
+      end: 2,
+    });
+    expect(
+      leadingContinuationSpan(
+        [
+          ...entries.slice(0, 3),
+          { kind: 'other' as const },
+          { kind: 'tool' as const, name: 'edit', args: {} },
+        ],
+        true,
+      ),
+    ).toEqual({ start: 0, end: 2 });
+    expect(
+      leadingContinuationSpan(
+        [
+          {
+            kind: 'assistant' as const,
+            speaks: false,
+            title: 'Owner',
+            titleKind: 'preamble' as const,
+          },
+          { kind: 'tool' as const, name: 'read', args: {} },
+        ],
+        true,
+      ),
+    ).toBeUndefined();
   });
 
   it('maps persisted preambles, narration, tools, and continuation events canonically', () => {

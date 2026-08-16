@@ -87,6 +87,7 @@ export function SessionView({
     historyLoading,
     loadEarlierHistory,
     cancelScrollRestore,
+    prependAnchor,
   } = useOlderSessionHistory({
     id,
     data,
@@ -245,6 +246,10 @@ export function SessionView({
             onOutlineOpenChange={setOutlineOpen}
             onBeforeScroll={cancelScrollRestore}
             scrollElementRef={embedded ? undefined : transcriptScrollRef}
+            leadingContinuation={
+              history?.hasOlder ? history.leadingContinuation : undefined
+            }
+            prependAnchor={prependAnchor}
             virtualize={!embedded}
           />
         </section>

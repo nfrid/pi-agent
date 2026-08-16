@@ -16,6 +16,7 @@ import {
   type ProjectSummary,
   type RunSummary,
   type RuntimeSnapshot,
+  type SessionHistory,
   type SessionIndexEntry,
   type ShellFeedEvent,
   type ShellProjection,
@@ -54,6 +55,42 @@ export interface DomainSyncState {
   error?: string;
 }
 
+export interface SessionHistoryPageCoverage {
+  start: number;
+  end: number;
+  hasOlder: boolean;
+  nextBefore?: string;
+  leadingContinuation?: boolean;
+  /** IDs accounted for by this page; used to make a cap reset reloadable. */
+  entryIds: readonly string[];
+  entryCount: number;
+  byteCount: number;
+}
+
+export interface SessionHistoryCoverage {
+  serverId?: string;
+  generation: number;
+  runtimeEpoch?: string;
+  version: SessionHistory['version'];
+  /** The verified oldest contiguous range retained by the store. */
+  coveredStart: number;
+  coveredEnd: number;
+  hasOlder: boolean;
+  nextBefore?: string;
+  leadingContinuation?: boolean;
+  pages: readonly SessionHistoryPageCoverage[];
+  pageCount: number;
+  entryCount: number;
+  byteCount: number;
+}
+
+/** Explicit caps keep historical pages from becoming an unbounded cache. */
+export const SESSION_HISTORY_BUDGET = {
+  maxPages: 32,
+  maxEntries: 4096,
+  maxBytes: 4 * 1024 * 1024,
+} as const;
+
 export interface DashboardLiveState {
   /** Transport metadata is retained separately from hydrated entities. */
   serverId?: string;
@@ -78,6 +115,8 @@ export interface DashboardLiveState {
   sessionSyncById: Readonly<Record<string, DomainSyncState>>;
   /** Latest authoritative response delivered by an acquired session feed. */
   sessionSnapshotsById: Readonly<Record<string, AuthoritativeSessionSnapshot>>;
+  /** Verified, contiguous disk-history coverage owned by the store. */
+  sessionHistoryCoverageById: Readonly<Record<string, SessionHistoryCoverage>>;
   workspacesById: Readonly<Record<string, WorkspaceTarget>>;
   workspaceOrder: readonly string[];
   runtimesById: Readonly<Record<string, RuntimeSnapshot>>;
@@ -146,6 +185,152 @@ function sameTranscriptValue(left: unknown, right: unknown): boolean {
   } catch {
     return false;
   }
+}
+
+function jsonByteCount(value: unknown): number {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined
+      ? 0
+      : new TextEncoder().encode(serialized).byteLength;
+  } catch {
+    // An unmeasurable response is not safe to retain in a bounded cache.
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function historyPageCoverage(
+  history: SessionHistory,
+  entries: readonly unknown[],
+  entryIds: readonly string[],
+): SessionHistoryPageCoverage {
+  return {
+    start: history.start,
+    end: history.end,
+    hasOlder: history.hasOlder,
+    ...(history.nextBefore === undefined
+      ? {}
+      : { nextBefore: history.nextBefore }),
+    ...(history.leadingContinuation === undefined
+      ? {}
+      : { leadingContinuation: history.leadingContinuation }),
+    entryIds: [...new Set(entryIds)],
+    entryCount: entries.length,
+    byteCount: jsonByteCount(entries),
+  };
+}
+
+function historyFromPages(
+  pages: readonly SessionHistoryPageCoverage[],
+): SessionHistory | undefined {
+  const oldest = pages[0];
+  const newest = pages.at(-1);
+  if (!oldest || !newest) return undefined;
+  return {
+    version: 1,
+    start: oldest.start,
+    end: newest.end,
+    hasOlder: oldest.hasOlder,
+    ...(oldest.nextBefore === undefined
+      ? {}
+      : { nextBefore: oldest.nextBefore }),
+    ...(oldest.leadingContinuation === true && oldest.hasOlder
+      ? { leadingContinuation: true }
+      : {}),
+  };
+}
+
+function mergeLatestTranscript(
+  retained: TranscriptProjection,
+  latest: TranscriptProjection,
+  coverage: SessionHistoryCoverage,
+): TranscriptProjection {
+  // Replace the prior newest page, while retaining only verified older rows
+  // and live-only entities. This prevents a routine append from duplicating a
+  // bounded tail whose IDs changed as the file window advanced.
+  const newestPageIds = new Set(coverage.pages.at(-1)?.entryIds ?? []);
+  const allHistoryIds = new Set(
+    coverage.pages.flatMap((page) => page.entryIds),
+  );
+  const latestIds = new Set(latest.order);
+  const retainedHistory = retained.order.filter(
+    (id) =>
+      allHistoryIds.has(id) &&
+      !newestPageIds.has(id) &&
+      !latestIds.has(id),
+  );
+  const retainedLive = retained.order.filter(
+    (id) => !allHistoryIds.has(id) && !latestIds.has(id),
+  );
+  const retainedOrder = [...retainedHistory, ...retainedLive];
+  const items: Record<string, TranscriptProjection['items'][string]> = {};
+  for (const id of retainedOrder) {
+    const item = retained.items[id];
+    if (item) items[id] = item;
+  }
+  for (const [id, item] of Object.entries(latest.items)) items[id] = item;
+  return {
+    ...latest,
+    order: [...retainedHistory, ...latest.order, ...retainedLive],
+    items,
+  };
+}
+
+/**
+ * Reconstruct the newest authoritative window plus live-only entities. This is
+ * the safe fallback when retaining another page would exceed the cache cap.
+ */
+function newestProjection(
+  current: TranscriptProjection,
+  coverage: SessionHistoryCoverage,
+): TranscriptProjection {
+  const newest = coverage.pages.at(-1);
+  if (!newest) return current;
+  const allHistoryIds = new Set(
+    coverage.pages.flatMap((page) => page.entryIds),
+  );
+  const newestIds = new Set(newest.entryIds);
+  const order = current.order.filter(
+    (id) => newestIds.has(id) || !allHistoryIds.has(id),
+  );
+  const items = Object.fromEntries(
+    order.flatMap((id) => {
+      const item = current.items[id];
+      return item ? [[id, item] as const] : [];
+    }),
+  );
+  return { ...current, order, items };
+}
+
+function sameTranscriptProjection(
+  left: TranscriptProjection,
+  right: TranscriptProjection,
+): boolean {
+  return (
+    left.order.length === right.order.length &&
+    left.order.every(
+      (id, index) =>
+        id === right.order[index] &&
+        sameTranscriptValue(left.items[id], right.items[id]),
+    )
+  );
+}
+
+function sameAuthoritativePage(
+  current: TranscriptProjection,
+  response: AuthoritativeSessionSnapshot,
+): boolean {
+  if (!response.history) return false;
+  const page = hydrateTranscript(response.entries, response.metadata.id, {
+    fallbackEntryIds: true,
+    fallbackEntryOffset: response.history.start,
+  });
+  return (
+    page.order.length === page.order.filter((id) => current.items[id]).length &&
+    page.order.every((id) =>
+      sameTranscriptValue(page.items[id], current.items[id]),
+    )
+  );
 }
 
 /**
@@ -237,6 +422,7 @@ function emptyState(): DashboardLiveState {
     },
     sessionSyncById: {},
     sessionSnapshotsById: {},
+    sessionHistoryCoverageById: {},
     workspacesById: {},
     workspaceOrder: [],
     runtimesById: {},
@@ -619,6 +805,117 @@ export class DashboardLiveStore {
     };
   }
 
+  private pageCoverage(
+    response: AuthoritativeSessionSnapshot,
+  ): SessionHistoryPageCoverage | undefined {
+    if (!response.history) return undefined;
+    const page = hydrateTranscript(response.entries, response.metadata.id, {
+      fallbackEntryIds: true,
+      fallbackEntryOffset: response.history.start,
+    });
+    return historyPageCoverage(response.history, response.entries, page.order);
+  }
+
+  private coverageWithPages(
+    pages: readonly SessionHistoryPageCoverage[],
+    serverId: string | undefined,
+    runtimeEpoch: string | undefined,
+  ): SessionHistoryCoverage | undefined {
+    const history = historyFromPages(pages);
+    if (!history) return undefined;
+    return {
+      ...(serverId === undefined ? {} : { serverId }),
+      generation: this.generation,
+      ...(runtimeEpoch === undefined ? {} : { runtimeEpoch }),
+      version: history.version,
+      coveredStart: history.start,
+      coveredEnd: history.end,
+      hasOlder: history.hasOlder,
+      ...(history.nextBefore === undefined
+        ? {}
+        : { nextBefore: history.nextBefore }),
+      ...(history.leadingContinuation === undefined
+        ? {}
+        : { leadingContinuation: history.leadingContinuation }),
+      pages,
+      pageCount: pages.length,
+      entryCount: pages.reduce((total, page) => total + page.entryCount, 0),
+      byteCount: pages.reduce((total, page) => total + page.byteCount, 0),
+    };
+  }
+
+  private withCoverage(
+    state: DashboardLiveState,
+    sessionId: string,
+    coverage: SessionHistoryCoverage | undefined,
+  ): DashboardLiveState {
+    const sessionHistoryCoverageById = {
+      ...state.sessionHistoryCoverageById,
+    };
+    if (coverage) sessionHistoryCoverageById[sessionId] = coverage;
+    else delete sessionHistoryCoverageById[sessionId];
+    const snapshot = state.sessionSnapshotsById[sessionId];
+    const newestPage = coverage?.pages.at(-1);
+    return {
+      ...state,
+      sessionHistoryCoverageById,
+      ...(coverage && snapshot && newestPage
+        ? {
+            sessionSnapshotsById: {
+              ...state.sessionSnapshotsById,
+              [sessionId]: {
+                ...snapshot,
+                // Keep the wire snapshot's newest-window semantics. The
+                // aggregate covered range is exposed by the coverage selector.
+                history: historyFromPages([newestPage]),
+              },
+            },
+          }
+        : {}),
+    };
+  }
+
+  private clearHistoryCoverage(sessionId: string): void {
+    if (!this.state.sessionHistoryCoverageById[sessionId]) return;
+    this.publish(this.withCoverage(this.state, sessionId, undefined));
+  }
+
+  /** Fail closed to the newest authoritative window for an expected session. */
+  resetSessionHistoryToNewest(sessionId: string): void {
+    const coverage = this.state.sessionHistoryCoverageById[sessionId];
+    const current = this.state.transcriptsBySessionId[sessionId];
+    if (!coverage || !current) {
+      this.clearHistoryCoverage(sessionId);
+      return;
+    }
+    this.publish(this.resetCoverageToNewest(sessionId, current, coverage));
+  }
+
+  private resetCoverageToNewest(
+    sessionId: string,
+    current: TranscriptProjection | undefined,
+    coverage: SessionHistoryCoverage | undefined,
+  ): DashboardLiveState {
+    if (!current || !coverage)
+      return this.withCoverage(this.state, sessionId, undefined);
+    const newest = newestProjection(current, coverage);
+    const newestPage = coverage.pages.at(-1);
+    const nextCoverage = newestPage
+      ? this.coverageWithPages(
+          [newestPage],
+          coverage.serverId,
+          coverage.runtimeEpoch,
+        )
+      : undefined;
+    let nextState = this.installTranscriptProjection(
+      this.withCoverage(this.state, sessionId, nextCoverage),
+      sessionId,
+      newest,
+    );
+    nextState = this.withCoverage(nextState, sessionId, nextCoverage);
+    return nextState;
+  }
+
   private removeNotificationProjection(
     state: DashboardLiveState,
     id: string,
@@ -946,18 +1243,31 @@ export class DashboardLiveStore {
     sequence: number,
     generation: number,
     authoritativeRebase = false,
+    expectedSessionId = response.metadata.id,
   ): boolean {
-    const current = this.state.sessionSyncById[response.metadata.id];
+    const current = this.state.sessionSyncById[expectedSessionId];
     if (
       current &&
       (current.generation !== generation ||
         (!authoritativeRebase &&
           current.sequenceKnown &&
           sequence <= current.sequence))
-    )
+    ) {
+      if (current.generation !== generation)
+        this.resetSessionHistoryToNewest(expectedSessionId);
       return false;
-    const projection = this.hydrateSession(response, { replace: true });
+    }
+    if (response.metadata.id !== expectedSessionId) {
+      this.resetSessionHistoryToNewest(expectedSessionId);
+      return false;
+    }
+    const projection = this.hydrateSession(response, {
+      replace: true,
+      expectedSessionId,
+    });
     if (!projection) return false;
+    const coverage =
+      this.state.sessionHistoryCoverageById[response.metadata.id];
     this.publish({
       ...this.state,
       sessionSyncById: {
@@ -971,7 +1281,10 @@ export class DashboardLiveStore {
       },
       sessionSnapshotsById: {
         ...this.state.sessionSnapshotsById,
-        [response.metadata.id]: response,
+        [response.metadata.id]: {
+          ...response,
+          ...(coverage ? { history: historyFromPages(coverage.pages) } : {}),
+        },
       },
     });
     return true;
@@ -1313,9 +1626,25 @@ export class DashboardLiveStore {
     generation: number,
   ): boolean {
     const current = this.state.sessionSyncById[sessionId];
-    if (current && current.generation !== generation) return false;
-    if (current?.sequenceKnown && sequence <= current.sequence) return false;
-    if (value.event.type === 'session.transcript.reset') return false;
+    if (current && current.generation !== generation) {
+      this.resetSessionHistoryToNewest(sessionId);
+      return false;
+    }
+    const coverage = this.state.sessionHistoryCoverageById[sessionId];
+    if (
+      coverage &&
+      value.runtimeEpoch !== undefined &&
+      value.runtimeEpoch !== coverage.runtimeEpoch
+    )
+      this.resetSessionHistoryToNewest(sessionId);
+    if (current?.sequenceKnown && sequence <= current.sequence) {
+      this.resetSessionHistoryToNewest(sessionId);
+      return false;
+    }
+    if (value.event.type === 'session.transcript.reset') {
+      this.resetSessionHistoryToNewest(sessionId);
+      return false;
+    }
     return this.applyEventEnvelope(
       {
         cursor: sequence,
@@ -1339,30 +1668,53 @@ export class DashboardLiveStore {
   /** Install an authoritative session-feed snapshot. */
   hydrateSession(
     response: AuthoritativeSessionSnapshot,
-    options: { replace?: boolean } = {},
+    options: { replace?: boolean; expectedSessionId?: string } = {},
   ): TranscriptProjection | undefined {
+    const expectedSessionId = options.expectedSessionId;
+    if (
+      expectedSessionId !== undefined &&
+      response.metadata.id !== expectedSessionId
+    ) {
+      this.resetSessionHistoryToNewest(expectedSessionId);
+      return undefined;
+    }
     const requestOrder = options.replace
       ? undefined
       : (response as ClientAuthoritativeSessionSnapshot)[SESSION_REQUEST_ORDER];
+    const sessionId = response.metadata.id;
     if (
       response.serverId !== undefined &&
       this.state.serverId !== undefined &&
       response.serverId !== this.state.serverId
-    )
+    ) {
+      this.resetSessionHistoryToNewest(sessionId);
       return undefined;
+    }
     const snapshotCursor = response.cursor ?? this.state.cursor;
     if (requestOrder !== undefined) {
-      const accepted = this.latestSessionRequestOrders.get(
-        response.metadata.id,
-      );
-      if (accepted !== undefined && requestOrder < accepted) return undefined;
+      const accepted = this.latestSessionRequestOrders.get(sessionId);
+      if (accepted !== undefined && requestOrder < accepted) {
+        this.resetSessionHistoryToNewest(sessionId);
+        return undefined;
+      }
+    }
+    const previousProjection = this.state.transcriptsBySessionId[sessionId];
+    const previousCoverage = this.state.sessionHistoryCoverageById[sessionId];
+    if (
+      !options.replace &&
+      previousProjection &&
+      response.cursor !== undefined &&
+      response.cursor < previousProjection.lastCursor
+    ) {
+      // A stale/rewrite response must not leave a verified cursor claiming
+      // continuity through data it never observed.
+      this.resetSessionHistoryToNewest(sessionId);
+      return undefined;
     }
     // Authoritative feed snapshots replace the selected domain directly.
     // Finite mutation/recovery responses retain their request-order guard but
     // preserve an incomplete established history baseline.
     const coveredCursor = snapshotCursor;
-    const previousProjection =
-      this.state.transcriptsBySessionId[response.metadata.id];
     const currentProjection = options.replace ? undefined : previousProjection;
     const replayCursor = coveredCursor;
     const baselineRuntimeSeq = response.runtimeSeq;
@@ -1492,6 +1844,71 @@ export class DashboardLiveStore {
         };
       }
     }
+
+    const responsePage = this.pageCoverage(response);
+    let nextCoverage: SessionHistoryCoverage | undefined;
+    let retainVerifiedCoverage = false;
+    if (responsePage) {
+      const responseServerId = response.serverId ?? this.state.serverId;
+      const responseEpoch = response.runtimeEpoch;
+      if (previousCoverage) {
+        const newestPage = previousCoverage.pages.at(-1);
+        const sameIdentity =
+          previousCoverage.generation === this.generation &&
+          previousCoverage.serverId === responseServerId &&
+          previousCoverage.runtimeEpoch === responseEpoch;
+        const contiguousLatestWindow =
+          newestPage !== undefined &&
+          // A moving window cannot skip the bridge between the old newest
+          // page and the new response. We do not retain raw bridge rows, so
+          // reset to the authoritative latest window when its start advances.
+          responsePage.start <= newestPage.start &&
+          responsePage.end >= newestPage.start &&
+          responsePage.end >= previousCoverage.coveredEnd;
+        const rewrite =
+          response.cursor !== undefined &&
+          previousProjection !== undefined &&
+          response.cursor <= previousProjection.lastCursor &&
+          (!sameAuthoritativePage(
+            newestProjection(previousProjection, previousCoverage),
+            response,
+          ) ||
+            !sameTranscriptProjection(
+              newestProjection(previousProjection, previousCoverage),
+              projection,
+            ));
+        retainVerifiedCoverage =
+          sameIdentity && contiguousLatestWindow && !rewrite;
+        if (retainVerifiedCoverage) {
+          const pages = [...previousCoverage.pages];
+          // The newest page is a replaceable live window; older verified pages
+          // are immutable and remain the reloadable prefix.
+          pages[pages.length - 1] = responsePage;
+          nextCoverage = this.coverageWithPages(
+            pages,
+            responseServerId,
+            responseEpoch,
+          );
+        }
+      }
+      if (!nextCoverage)
+        nextCoverage = this.coverageWithPages(
+          [responsePage],
+          responseServerId,
+          responseEpoch,
+        );
+    }
+    if (retainVerifiedCoverage && previousProjection && previousCoverage)
+      projection = mergeLatestTranscript(
+        previousProjection,
+        projection,
+        previousCoverage,
+      );
+    else if (previousCoverage && !retainVerifiedCoverage) {
+      // A branch, range, generation, or server rewrite cannot be proven
+      // contiguous. The incoming window is still authoritative, but all
+      // older verification is discarded.
+    }
     projection = reuseTranscriptProjection(previousProjection, projection);
     const currentMetadata = this.state.sessionsById[response.metadata.id];
     const optimisticTitle =
@@ -1533,6 +1950,7 @@ export class DashboardLiveStore {
       response.metadata.id,
       projection,
     );
+    nextState = this.withCoverage(nextState, sessionId, nextCoverage);
     // Keep pending questions and delegate status in the existing runtime
     // projection. Historical pages intentionally carry an empty active
     // overlay, so they cannot overwrite live runtime state.
@@ -1601,40 +2019,107 @@ export class DashboardLiveStore {
     return projection;
   }
 
-  /** Prepend a bounded disk page without replacing the live transcript baseline. */
-  prependSessionHistory(
-    response: AuthoritativeSessionSnapshot,
+  /**
+   * Validate and atomically prepend one or more pages. Callers may fetch a
+   * continuation chain, but no page is published until the whole chain is
+   * proven contiguous.
+   */
+  prependSessionHistoryPages(
+    responses: readonly AuthoritativeSessionSnapshot[],
+    expectedSessionId?: string,
   ): TranscriptProjection | undefined {
-    if (!response.history) return undefined;
-    if (
-      response.serverId !== undefined &&
-      this.state.serverId !== undefined &&
-      response.serverId !== this.state.serverId
-    )
-      return undefined;
-    const sessionId = response.metadata.id;
+    if (responses.length === 0) return undefined;
+    const first = responses[0];
+    const sessionId = expectedSessionId ?? first?.metadata.id;
+    if (!sessionId) return undefined;
     const current = this.state.transcriptsBySessionId[sessionId];
-    if (!current) return undefined;
-    const older = hydrateTranscript(response.entries, sessionId, {
-      fallbackEntryIds: true,
-      fallbackEntryOffset: response.history.start,
-    });
-    const projection = mergePrependedTranscript(current, older);
+    const coverage = this.state.sessionHistoryCoverageById[sessionId];
+    if (!current || !coverage) return undefined;
+    const serverId = this.state.serverId;
+    const seenRanges = new Set(
+      coverage.pages.map((page) => `${page.start}:${page.end}`),
+    );
+    const seenCursors = new Set(
+      coverage.pages.flatMap((page) =>
+        page.nextBefore === undefined ? [] : [page.nextBefore],
+      ),
+    );
+    let workingPages = [...coverage.pages];
+    let workingCoverage = coverage;
+    let projection = current;
+    for (const response of responses) {
+      const page = this.pageCoverage(response);
+      const emptyOriginPlaceholder =
+        workingCoverage.coveredStart === 0 &&
+        workingCoverage.coveredEnd === 0 &&
+        !workingCoverage.hasOlder &&
+        workingPages.length === 1 &&
+        page?.start === 0;
+      if (
+        !page ||
+        response.metadata.id !== sessionId ||
+        (response.serverId ?? serverId) !== coverage.serverId ||
+        response.runtimeEpoch !== coverage.runtimeEpoch ||
+        response.history?.version !== coverage.version ||
+        (!emptyOriginPlaceholder &&
+          (page.end !== workingCoverage.coveredStart ||
+            page.start >= workingCoverage.coveredStart)) ||
+        seenRanges.has(`${page.start}:${page.end}`) ||
+        (page.nextBefore !== undefined && seenCursors.has(page.nextBefore))
+      ) {
+        const reset = this.resetCoverageToNewest(sessionId, current, coverage);
+        this.publish(reset);
+        return undefined;
+      }
+      if (page.byteCount === Number.POSITIVE_INFINITY) {
+        const reset = this.resetCoverageToNewest(sessionId, current, coverage);
+        this.publish(reset);
+        return reset.transcriptsBySessionId[sessionId];
+      }
+      seenRanges.add(`${page.start}:${page.end}`);
+      if (page.nextBefore !== undefined) seenCursors.add(page.nextBefore);
+      workingPages = [page, ...workingPages];
+      workingCoverage =
+        this.coverageWithPages(
+          workingPages,
+          coverage.serverId,
+          coverage.runtimeEpoch,
+        ) ?? workingCoverage;
+      const older = hydrateTranscript(response.entries, sessionId, {
+        fallbackEntryIds: true,
+        fallbackEntryOffset: page.start,
+      });
+      projection = mergePrependedTranscript(projection, older);
+    }
+
+    if (
+      workingCoverage.pageCount > SESSION_HISTORY_BUDGET.maxPages ||
+      workingCoverage.entryCount > SESSION_HISTORY_BUDGET.maxEntries ||
+      workingCoverage.byteCount > SESSION_HISTORY_BUDGET.maxBytes
+    ) {
+      // The oldest pages cannot be discarded from a single merged projection
+      // without retaining a reloadable boundary. Reset to the newest page
+      // instead of rejecting forever at the cap.
+      const reset = this.resetCoverageToNewest(sessionId, current, coverage);
+      this.publish(reset);
+      return reset.transcriptsBySessionId[sessionId];
+    }
+
     const currentMetadata = this.state.sessionsById[sessionId];
     const optimisticTitle = this.state.optimisticSessionTitlesById[sessionId];
     const metadata = {
-      ...response.metadata,
-      ...(response.metadata.startedAt === undefined &&
+      ...first.metadata,
+      ...(first.metadata.startedAt === undefined &&
       currentMetadata?.startedAt !== undefined
         ? { startedAt: currentMetadata.startedAt }
         : {}),
-      ...(response.metadata.activeRuntimeId !== undefined && currentMetadata
+      ...(first.metadata.activeRuntimeId !== undefined && currentMetadata
         ? { updatedAt: currentMetadata.updatedAt }
         : {}),
-      ...(response.metadata.name === undefined && currentMetadata?.name
+      ...(first.metadata.name === undefined && currentMetadata?.name
         ? { name: currentMetadata.name }
         : {}),
-      ...(response.metadata.title === undefined
+      ...(first.metadata.title === undefined
         ? optimisticTitle !== undefined
           ? { title: optimisticTitle }
           : currentMetadata?.title !== undefined
@@ -1644,32 +2129,37 @@ export class DashboardLiveStore {
     };
     let nextState = this.installSessionProjection(this.state, metadata);
     if (
-      response.metadata.name !== undefined ||
-      response.metadata.title !== undefined
+      first.metadata.name !== undefined ||
+      first.metadata.title !== undefined
     ) {
       const optimistic = { ...nextState.optimisticSessionTitlesById };
       delete optimistic[sessionId];
-      nextState = {
-        ...nextState,
-        optimisticSessionTitlesById: optimistic,
-      };
+      nextState = { ...nextState, optimisticSessionTitlesById: optimistic };
     }
     nextState = this.installTranscriptProjection(
       nextState,
       sessionId,
       projection,
     );
+    nextState = this.withCoverage(nextState, sessionId, workingCoverage);
     const currentSnapshot = nextState.sessionSnapshotsById[sessionId];
     if (currentSnapshot)
       nextState = {
         ...nextState,
         sessionSnapshotsById: {
           ...nextState.sessionSnapshotsById,
-          [sessionId]: { ...currentSnapshot, history: response.history },
+          [sessionId]: { ...currentSnapshot, history: first.history },
         },
       };
     this.publish(nextState);
     return projection;
+  }
+
+  /** Prepend one verified page; chains use prependSessionHistoryPages. */
+  prependSessionHistory(
+    response: AuthoritativeSessionSnapshot,
+  ): TranscriptProjection | undefined {
+    return this.prependSessionHistoryPages([response]);
   }
 
   applyMutationResult(
@@ -1830,6 +2320,10 @@ export class DashboardLiveStore {
     delete sessionSyncById[sessionId];
     delete transcriptsBySessionId[sessionId];
     delete sessionChangeById[sessionId];
+    const sessionHistoryCoverageById = {
+      ...this.state.sessionHistoryCoverageById,
+    };
+    delete sessionHistoryCoverageById[sessionId];
     this.latestSessionRequestOrders.delete(sessionId);
     this.publish({
       ...this.state,
@@ -1837,6 +2331,7 @@ export class DashboardLiveStore {
       sessionSyncById,
       transcriptsBySessionId,
       sessionChangeById,
+      sessionHistoryCoverageById,
     });
   }
 }
@@ -1969,6 +2464,9 @@ export const selectTranscript =
 export const selectSessionSnapshot =
   (sessionId: string) => (state: DashboardLiveState) =>
     state.sessionSnapshotsById[sessionId];
+export const selectSessionHistoryCoverage =
+  (sessionId: string) => (state: DashboardLiveState) =>
+    state.sessionHistoryCoverageById[sessionId];
 export const selectSession =
   (sessionId: string) => (state: DashboardLiveState) =>
     state.sessionsById[sessionId];

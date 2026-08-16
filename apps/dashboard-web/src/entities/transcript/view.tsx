@@ -45,6 +45,8 @@ export function Transcript({
   onOutlineOpenChange,
   onBeforeScroll,
   scrollElementRef,
+  leadingContinuation,
+  prependAnchor,
   virtualize = false,
 }: {
   /** Legacy raw-entry input retained for embedders. */
@@ -59,10 +61,15 @@ export function Transcript({
   /** Session routes opt into virtualization only with an attached scrollport. */
   virtualize?: boolean;
   scrollElementRef?: RefObject<HTMLDivElement | null>;
+  leadingContinuation?: boolean;
+  prependAnchor?: { key: string; offset: number; revision: number };
 }) {
   const transcriptScrollElementRef = scrollElementRef;
   const input = projection ?? entries ?? [];
-  const items = useMemo(() => toTranscriptEntries(input), [input]);
+  const items = useMemo(
+    () => toTranscriptEntries(input, { leadingContinuation }),
+    [input, leadingContinuation],
+  );
   const modelEntries = useMemo(() => items.map((item) => item.entry), [items]);
   const groups = useMemo(
     () =>
@@ -80,6 +87,33 @@ export function Transcript({
     [modelEntries, runtime],
   );
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const isVirtualizedTranscript =
+    items.length > 80 && virtualize && Boolean(transcriptScrollElementRef);
+  const restoredRevisionRef = useRef(0);
+  useLayoutEffect(() => {
+    if (
+      isVirtualizedTranscript ||
+      !transcriptScrollElementRef?.current ||
+      !prependAnchor ||
+      restoredRevisionRef.current === prependAnchor.revision
+    )
+      return;
+    const element = transcriptScrollElementRef.current;
+    const target = Array.from(
+      element.querySelectorAll<HTMLElement>(
+        '[data-transcript-row], [data-transcript-key]',
+      ),
+    ).find(
+      (candidate) =>
+        (candidate.dataset.transcriptRow ?? candidate.dataset.transcriptKey) ===
+        prependAnchor.key,
+    );
+    if (!target) return;
+    const offset =
+      target.getBoundingClientRect().top - element.getBoundingClientRect().top;
+    element.scrollTop += offset - prependAnchor.offset;
+    restoredRevisionRef.current = prependAnchor.revision;
+  }, [isVirtualizedTranscript, prependAnchor, transcriptScrollElementRef]);
   const landmarks = useMemo(
     () => buildTranscriptLandmarks(items, groups),
     [groups, items],
@@ -111,7 +145,7 @@ export function Transcript({
     () => buildTranscriptGroupCoverage(items.length, groups),
     [groups, items.length],
   );
-  if (items.length > 80 && virtualize && transcriptScrollElementRef)
+  if (isVirtualizedTranscript && transcriptScrollElementRef)
     return (
       <VirtualizedTranscript
         items={items}
@@ -124,6 +158,7 @@ export function Transcript({
         onOutlineOpenChange={onOutlineOpenChange}
         onBeforeScroll={onBeforeScroll}
         scrollElementRef={transcriptScrollElementRef}
+        prependAnchor={prependAnchor}
       />
     );
   return (
@@ -268,6 +303,7 @@ function VirtualizedTranscript({
   onOutlineOpenChange,
   onBeforeScroll,
   scrollElementRef,
+  prependAnchor,
 }: {
   items: readonly TranscriptModelItem[];
   groups: readonly TranscriptGroup[];
@@ -279,6 +315,7 @@ function VirtualizedTranscript({
   onOutlineOpenChange?: (open: boolean) => void;
   onBeforeScroll?: () => void;
   scrollElementRef: RefObject<HTMLDivElement | null>;
+  prependAnchor?: { key: string; offset: number; revision: number };
 }) {
   const rows = useMemo(
     () => buildVirtualTranscriptRows(items, groups),
@@ -345,6 +382,50 @@ function VirtualizedTranscript({
     });
     return result;
   }, [items, rows]);
+  useLayoutEffect(() => {
+    const anchor = prependAnchor;
+    const scrollElement = scrollElementRef.current;
+    if (!anchor || !scrollElement || rows.length === 0) return;
+    const rowIndex = rowIndexByKey.get(anchor.key);
+    if (rowIndex === undefined) return;
+    // VirtualizedTranscript is the sole prepend restore owner. Resolve the
+    // semantic row after the virtualizer has accepted the new row map.
+    virtualizer.measure();
+    virtualizer.scrollToIndex(rowIndex, { align: 'start' });
+    let correctionFrame: number | undefined;
+    let attempts = 0;
+    const correct = () => {
+      correctionFrame = undefined;
+      attempts += 1;
+      if (attempts > 60) return;
+      const row = Array.from(
+        virtualizerRef.current?.querySelectorAll<HTMLElement>('[data-index]') ??
+          [],
+      ).find((element) => element.dataset.transcriptRow === anchor.key);
+      if (!row) {
+        correctionFrame = window.requestAnimationFrame(correct);
+        return;
+      }
+      virtualizer.measureElement(row);
+      const offset =
+        row.getBoundingClientRect().top -
+        scrollElement.getBoundingClientRect().top;
+      scrollElement.scrollTop += offset - anchor.offset;
+    };
+    correctionFrame = window.requestAnimationFrame(() => {
+      correctionFrame = window.requestAnimationFrame(correct);
+    });
+    return () => {
+      if (correctionFrame !== undefined)
+        window.cancelAnimationFrame(correctionFrame);
+    };
+  }, [
+    prependAnchor,
+    rowIndexByKey,
+    rows.length,
+    scrollElementRef,
+    virtualizer,
+  ]);
   const jumpToLandmark = (landmark: TranscriptLandmark) => {
     onBeforeScroll?.();
     const rowIndex = rowIndexByKey.get(landmark.key);
