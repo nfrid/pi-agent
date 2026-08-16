@@ -386,70 +386,74 @@ export class DelegateWorkflowCoordinator {
       throw new Error(
         'A workflow attempt may declare at most 4 symbolic selectors.',
       );
-    return Object.freeze(
-      selectors.map((selector) => {
-        if (!selector || typeof selector !== 'object')
-          throw new Error('Invalid symbolic workflow selector.');
-        if (typeof selector.node !== 'string')
-          throw new Error('Invalid symbolic workflow selector node.');
-        if (selector.include !== undefined && !Array.isArray(selector.include))
-          throw new Error('Invalid symbolic workflow selector include list.');
-        const include = selector.include?.map((kind) => {
-          if (
-            kind !== 'report' &&
-            kind !== 'handoff' &&
-            kind !== 'branch' &&
-            kind !== 'metadata'
-          )
-            throw new Error(
-              `Invalid symbolic workflow input kind "${String(kind)}".`,
-            );
-          return kind;
-        });
+    const bound = selectors.map((selector) => {
+      if (!selector || typeof selector !== 'object')
+        throw new Error('Invalid symbolic workflow selector.');
+      if (typeof selector.node !== 'string')
+        throw new Error('Invalid symbolic workflow selector node.');
+      if (selector.include !== undefined && !Array.isArray(selector.include))
+        throw new Error('Invalid symbolic workflow selector include list.');
+      const include = selector.include?.map((kind) => {
         if (
-          selector.include &&
-          selector.include.length === 0 &&
-          selector.view === undefined
+          kind !== 'report' &&
+          kind !== 'handoff' &&
+          kind !== 'branch' &&
+          kind !== 'metadata'
         )
           throw new Error(
-            'Symbolic workflow selector include cannot be empty.',
+            `Invalid symbolic workflow input kind "${String(kind)}".`,
           );
-        if (include && new Set(include).size !== include.length)
-          throw new Error(
-            'Duplicate symbolic workflow input kinds are not allowed.',
-          );
-        if (
-          selector.view !== undefined &&
-          (typeof selector.view !== 'string' ||
-            !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(selector.view))
-        )
-          throw new Error(
-            'Invalid or noncanonical symbolic workflow selector view.',
-          );
-        if (
-          selector.label !== undefined &&
-          (typeof selector.label !== 'string' ||
-            Buffer.byteLength(selector.label, 'utf8') > 256)
-        )
-          throw new Error(
-            'Symbolic workflow selector label exceeds 256 bytes.',
-          );
-        const attempt = this.model.bind(selector.node);
-        if (!this.records.has(attempt.identity))
-          throw new Error(
-            `Unknown workflow attempt "${attempt.identity}" in coordinator.`,
-          );
-        return Object.freeze({
-          selector: Object.freeze({
-            node: selector.node,
-            ...(include ? { include: Object.freeze(include) } : {}),
-            ...(selector.view !== undefined ? { view: selector.view } : {}),
-            ...(selector.label !== undefined ? { label: selector.label } : {}),
-          }),
-          identity: attempt.identity,
-        });
-      }),
-    );
+        return kind;
+      });
+      if (
+        selector.include &&
+        selector.include.length === 0 &&
+        selector.view === undefined
+      )
+        throw new Error('Symbolic workflow selector include cannot be empty.');
+      if (include && new Set(include).size !== include.length)
+        throw new Error(
+          'Duplicate symbolic workflow input kinds are not allowed.',
+        );
+      if (
+        selector.view !== undefined &&
+        (typeof selector.view !== 'string' ||
+          !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(selector.view))
+      )
+        throw new Error(
+          'Invalid or noncanonical symbolic workflow selector view.',
+        );
+      if (
+        selector.label !== undefined &&
+        (typeof selector.label !== 'string' || selector.label.length > 120)
+      )
+        throw new Error(
+          'Symbolic workflow selector label exceeds 120 characters.',
+        );
+      const attempt = this.model.bind(selector.node);
+      if (!this.records.has(attempt.identity))
+        throw new Error(
+          `Unknown workflow attempt "${attempt.identity}" in coordinator.`,
+        );
+      return Object.freeze({
+        selector: Object.freeze({
+          node: selector.node,
+          ...(include ? { include: Object.freeze(include) } : {}),
+          ...(selector.view !== undefined ? { view: selector.view } : {}),
+          ...(selector.label !== undefined ? { label: selector.label } : {}),
+        }),
+        identity: attempt.identity,
+      });
+    });
+    const identities = new Set<AttemptIdentity>();
+    for (const selector of bound) {
+      if (identities.has(selector.identity))
+        throw new Error(
+          `Duplicate symbolic workflow source "${selector.identity}". Combine its requested inputs in one selector.`,
+        );
+      identities.add(selector.identity);
+    }
+    return Object.freeze(bound);
   }
 
   private bindDependencies(

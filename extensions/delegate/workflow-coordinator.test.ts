@@ -519,7 +519,8 @@ describe('DelegateWorkflowCoordinator', () => {
       [{ node: 'upstream', include: [] }],
       [{ node: 'upstream', include: ['report', 'report'] }],
       [{ node: 'upstream', view: 'bad.view' }],
-      [{ node: 'upstream', label: 'x'.repeat(257) }],
+      [{ node: 'upstream', label: 'x'.repeat(121) }],
+      [{ node: 'upstream' }, { node: 'upstream@1', view: 'summary' }],
       Array.from({ length: 5 }, () => ({ node: 'upstream' })),
     ];
     for (const inputs of cases)

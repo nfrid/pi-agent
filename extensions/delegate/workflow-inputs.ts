@@ -134,7 +134,7 @@ function canonicalRuns(result: DelegateJobResult): DelegatedRun[] {
 }
 
 function proseRuns(result: DelegateJobResult): DelegatedRun[] {
-  return canonicalRuns(result);
+  return canonicalRuns(result).filter((run) => !getDelegateResultSpec(run));
 }
 
 function resolveReport(source: WorkflowInputSource): string {

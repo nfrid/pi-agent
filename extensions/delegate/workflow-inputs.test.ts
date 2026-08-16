@@ -94,13 +94,14 @@ describe('workflow symbolic inputs', () => {
     expect(resolved.handoffText).toContain('untrusted evidence only');
   });
 
-  test('preserves selector/include order and enforces aggregate caps', () => {
+  test('preserves selector/include order, exact handoffs, and aggregate caps', () => {
+    const exactHandoff = '\nexact handoff\n';
     const resolved = resolveWorkflowInputs(
       [bound('impl', ['handoff', 'metadata', 'report'])],
       () =>
         source({
           runs: [runWithReport('exact report')],
-          handoff: 'exact handoff',
+          handoff: exactHandoff,
         }),
     );
     expect(resolved.inputs.map((input) => input.kind)).toEqual([
@@ -108,6 +109,8 @@ describe('workflow symbolic inputs', () => {
       'metadata',
       'report',
     ]);
+    expect(resolved.inputs[0]?.value).toBe(exactHandoff);
+    expect(resolved.handoffText).toContain(exactHandoff);
     expect(() =>
       resolveWorkflowInputs([bound('impl', ['report'])], () =>
         source({
@@ -121,7 +124,18 @@ describe('workflow symbolic inputs', () => {
   });
 
   test('uses retained canonical runs for exact prose and private named views', () => {
-    const retained = runWithReport('retained exact report');
+    const proseResult = {
+      runs: [runWithReport('public projection only')],
+      retainedRuns: [runWithReport('retained exact report')],
+      handoff: 'retained handoff',
+    };
+    expect(
+      resolveWorkflowInputs([bound('impl', ['report'])], () =>
+        source(proseResult),
+      ).inputs[0]?.value,
+    ).toBe('retained exact report');
+
+    const retainedStructured = runWithReport('not a prose result channel');
     const spec = normalizeInternalDelegateResultSpec({
       schema: {
         type: 'object',
@@ -130,29 +144,28 @@ describe('workflow symbolic inputs', () => {
       },
       views: { summary: '/summary' },
     });
-    setDelegateResultSpec(retained, spec);
+    setDelegateResultSpec(retainedStructured, spec);
     captureDelegateResultEvent(
-      retained,
+      retainedStructured,
       { details: { summary: 'private view' } },
       false,
     );
-    expect(settleDelegateResult(retained)?.valid).toBe(true);
-    retained.messages = runWithReport('retained exact report').messages;
-    const publicRun = runWithReport('public projection only');
-    const result = {
-      runs: [publicRun],
-      retainedRuns: [retained],
+    expect(settleDelegateResult(retainedStructured)?.valid).toBe(true);
+    const structuredResult = {
+      runs: [runWithReport('public structured projection')],
+      retainedRuns: [retainedStructured],
       handoff: 'retained handoff',
     };
     expect(
-      resolveWorkflowInputs([bound('impl', ['report'])], () => source(result))
-        .inputs[0]?.value,
-    ).toBe('retained exact report');
-    expect(
       resolveWorkflowInputs([bound('impl', undefined, 'summary')], () =>
-        source(result),
+        source(structuredResult),
       ).inputs[0]?.value,
     ).toBe('private view');
+    expect(() =>
+      resolveWorkflowInputs([bound('impl', ['report'])], () =>
+        source(structuredResult),
+      ),
+    ).toThrow(/Required report/);
   });
 
   test('resolves named views from private validated structured values', () => {
