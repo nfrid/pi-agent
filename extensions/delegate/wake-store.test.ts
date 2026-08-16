@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from 'vitest';
-import { WakeCoordinator } from './wake-coordinator';
+import { WAKE_MAX_SUBSCRIPTIONS, WakeCoordinator } from './wake-coordinator';
 import {
   attachWakeStore,
   persistWakeState,
@@ -141,12 +141,14 @@ describe('wake store', () => {
       },
     });
     let dispatches = 0;
+    let acknowledgement!: Parameters<WakeCoordinator['markEntered']>[1];
     const restored = new WakeCoordinator({
       workflow,
       ownerSessionId: 'session-q',
       ownerEpoch: 2,
-      dispatch: () => {
+      dispatch: (dispatch) => {
         dispatches++;
+        acknowledgement = dispatch.acknowledgement;
       },
     });
     restoreWakeState(restored, branch(entries));
@@ -154,8 +156,12 @@ describe('wake store', () => {
     expect(dispatches).toBe(0);
     expect(restored.retryDispatch('queued-wake').state).toBe('queued');
     expect(dispatches).toBe(1);
-    expect(restored.markEntered('queued-wake').state).toBe('entered');
-    expect(restored.markEntered('queued-wake').state).toBe('entered');
+    expect(restored.markEntered('queued-wake', acknowledgement).state).toBe(
+      'entered',
+    );
+    expect(restored.markEntered('queued-wake', acknowledgement).state).toBe(
+      'entered',
+    );
     await workflow.dispose();
   });
 
@@ -199,6 +205,46 @@ describe('wake store', () => {
     await workflow.dispose();
   });
 
+  test('enforces the subscription cap after merging restored and live wakes', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const gate = workflow.schedule({
+      logicalId: 'cap-gate',
+      mode: 'single',
+      tasks: ['cap-gate'],
+      execute: (signal) =>
+        new Promise((resolve) =>
+          signal.addEventListener(
+            'abort',
+            () => resolve({ runs: [], handoff: 'gate' }),
+            { once: true },
+          ),
+        ),
+    });
+    for (let index = 0; index <= WAKE_MAX_SUBSCRIPTIONS; index++)
+      workflow.schedule({
+        logicalId: `cap-node-${index}`,
+        mode: 'single',
+        tasks: [`cap-node-${index}`],
+        after: [gate.identity],
+        execute: async () => ({ runs: [], handoff: 'cap' }),
+      });
+    const source = new WakeCoordinator({ workflow });
+    for (let index = 0; index < WAKE_MAX_SUBSCRIPTIONS; index++)
+      source.register({
+        id: `cap-wake-${index}`,
+        condition: { node: `cap-node-${index}` },
+      });
+    const target = new WakeCoordinator({ workflow });
+    target.register({
+      id: 'live-cap-wake',
+      condition: { node: `cap-node-${WAKE_MAX_SUBSCRIPTIONS}` },
+    });
+    target.restore(source.snapshot());
+    expect(target.list()).toHaveLength(1);
+    expect(target.require('live-cap-wake').state).toBe('pending');
+    await workflow.dispose();
+  });
+
   test('invalid records leave existing wakes unchanged as one transaction', async () => {
     const workflow = new DelegateWorkflowCoordinator();
     workflow.schedule({
@@ -231,6 +277,118 @@ describe('wake store', () => {
     });
     expect(wake.require('live-wake').state).toBe('ready');
     expect(wake.list()).toHaveLength(1);
+    await workflow.dispose();
+  });
+
+  test('restore validates readyReferences against condition semantics', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const a = workflow.schedule({
+      logicalId: 'ready-a',
+      mode: 'single',
+      tasks: ['ready-a'],
+      execute: async () => ({ runs: [], handoff: 'a' }),
+    });
+    const b = workflow.schedule({
+      logicalId: 'ready-b',
+      mode: 'single',
+      tasks: ['ready-b'],
+      execute: async () => ({ runs: [], handoff: 'b' }),
+    });
+    await vi.waitFor(() =>
+      expect(workflow.require(a.identity).settledAt).toBeDefined(),
+    );
+    await vi.waitFor(() =>
+      expect(workflow.require(b.identity).settledAt).toBeDefined(),
+    );
+    const source = new WakeCoordinator({ workflow });
+    source.register({
+      id: 'all-ready',
+      condition: { all: [a.identity, b.identity] },
+    });
+    const snapshot = source.snapshot();
+    const wake = snapshot.wakes[0];
+    if (!wake) throw new Error('missing ready wake');
+    const invalid = {
+      ...snapshot,
+      wakes: [{ ...wake, readyReferences: [a.identity] }],
+    };
+    const target = new WakeCoordinator({ workflow });
+    target.restore(invalid);
+    expect(target.list()).toEqual([]);
+    await workflow.dispose();
+  });
+
+  test('history keeps entered state over a later stale high-revision pending snapshot', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    workflow.schedule({
+      logicalId: 'history',
+      mode: 'single',
+      tasks: ['history'],
+      execute: async () => ({ runs: [], handoff: 'history' }),
+    });
+    await vi.waitFor(() =>
+      expect(workflow.require('history@1').settledAt).toBeDefined(),
+    );
+    let entered!: WakeCoordinator;
+    entered = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'history-owner',
+      ownerEpoch: 3,
+      dispatch: (dispatch) => {
+        entered.markEntered(dispatch.wake.id, dispatch.acknowledgement);
+      },
+    });
+    entered.register({ id: 'history-wake', condition: { node: 'history' } });
+    const enteredSnapshot = entered.snapshot();
+    const enteredWake = enteredSnapshot.wakes[0];
+    if (!enteredWake?.enteredAcknowledgement)
+      throw new Error('missing entered wake acknowledgement');
+    const staleWake = {
+      ...enteredWake,
+      state: 'pending' as const,
+      revision: enteredWake.revision + 100,
+      readyAt: undefined,
+      readyReferences: undefined,
+      queuedAt: undefined,
+      enteredAt: undefined,
+      enteredAcknowledgement: undefined,
+      dispatchGeneration: 0,
+      dispatchAttempts: 0,
+    };
+    const staleSnapshot = {
+      ...enteredSnapshot,
+      wakes: [staleWake],
+    };
+    let dispatches = 0;
+    const restored = new WakeCoordinator({
+      workflow,
+      ownerSessionId: 'history-owner',
+      ownerEpoch: 3,
+      dispatch: () => {
+        dispatches++;
+      },
+    });
+    restoreWakeState(
+      restored,
+      branch([
+        {
+          type: 'custom',
+          customType: WAKE_ENTRY_TYPE,
+          data: { version: 1, kind: 'snapshot', state: enteredSnapshot },
+        },
+        {
+          type: 'custom',
+          customType: WAKE_ENTRY_TYPE,
+          data: { version: 1, kind: 'snapshot', state: staleSnapshot },
+        },
+      ]),
+    );
+    expect(restored.require('history-wake').state).toBe('entered');
+    expect(
+      restored.markEntered('history-wake', enteredWake.enteredAcknowledgement)
+        .state,
+    ).toBe('entered');
+    expect(dispatches).toBe(0);
     await workflow.dispose();
   });
 

@@ -104,7 +104,7 @@ describe('WakeCoordinator', () => {
       workflow,
       dispatch: (dispatch) => {
         entered(dispatch);
-        wake.markEntered(dispatch.wake.id);
+        wake.markEntered(dispatch.wake.id, dispatch.acknowledgement);
       },
     });
     const registered = wake.register({
@@ -201,16 +201,18 @@ describe('WakeCoordinator', () => {
     );
     await settled(workflow, attempt.identity);
     const dispatches: WakeDispatch[] = [];
+    let firstAcknowledgement!: WakeDispatch['acknowledgement'];
     let fail = true;
     const wake = new WakeCoordinator({
       workflow,
       dispatch: (dispatch) => {
         dispatches.push(dispatch);
         if (fail) {
+          firstAcknowledgement = dispatch.acknowledgement;
           fail = false;
           throw new Error('queue unavailable');
         }
-        wake.markEntered(dispatch.wake.id);
+        wake.markEntered(dispatch.wake.id, dispatch.acknowledgement);
       },
     });
     expect(
@@ -221,6 +223,9 @@ describe('WakeCoordinator', () => {
     );
     expect(wake.retry('retryable').state).toBe('entered');
     expect(dispatches).toHaveLength(2);
+    expect(() => wake.markEntered('retryable', firstAcknowledgement)).toThrow(
+      /stale/,
+    );
     await workflow.dispose();
   });
 
@@ -310,6 +315,56 @@ describe('WakeCoordinator', () => {
     expect(JSON.stringify(payloads[0]?.payload)).not.toContain(
       'must stay private',
     );
+    await workflow.dispose();
+  });
+
+  test('deep-clones own __proto__ payload keys safely', async () => {
+    const run = createRun('proto');
+    run.state = 'success';
+    run.exitCode = 0;
+    const spec = normalizeInternalDelegateResultSpec({
+      schema: {
+        type: 'object',
+        properties: { payload: { type: 'object' } },
+        required: ['payload'],
+      },
+      views: { payload: '/payload' },
+    });
+    setDelegateResultSpec(run, spec);
+    const payloadValue = JSON.parse('{"__proto__":{"safe":"yes"}}');
+    captureDelegateResultEvent(
+      run,
+      { details: { payload: payloadValue } },
+      false,
+    );
+    settleDelegateResult(run);
+    const workflow = new DelegateWorkflowCoordinator();
+    const attempt = workflow.schedule({
+      logicalId: 'proto',
+      mode: 'single',
+      tasks: ['proto'],
+      execute: async () => ({ runs: [run], handoff: 'proto' }),
+    });
+    await settled(workflow, attempt.identity);
+    let payload!: WakeDispatch['payload'];
+    const wake = new WakeCoordinator({
+      workflow,
+      dispatch: (dispatch) => {
+        payload = dispatch.payload;
+      },
+    });
+    wake.register({
+      id: 'proto-view',
+      condition: { node: attempt.identity },
+      payload: [{ view: 'payload' }],
+    });
+    const selected = payload.sources['proto@1']?.views?.payload as Record<
+      string,
+      unknown
+    >;
+    expect(Object.hasOwn(selected, '__proto__')).toBe(true);
+    expect(selected['__proto__']).toEqual({ safe: 'yes' });
+    expect(Object.getPrototypeOf(selected)).toBeNull();
     await workflow.dispose();
   });
 
@@ -465,14 +520,26 @@ describe('WakeCoordinator', () => {
     await settled(workflow, attempt.identity);
     const warnings: string[] = [];
     const dispatches: WakeDispatch[] = [];
-    const wake = new WakeCoordinator({
+    let reentrantRejected = false;
+    let wake!: WakeCoordinator;
+    wake = new WakeCoordinator({
       workflow,
       ownerSessionId: 'session-a',
       ownerEpoch: 4,
       dispatch: (dispatch) => {
         dispatches.push(dispatch);
       },
-      onWarning: ({ message }) => warnings.push(message),
+      onWarning: ({ message }) => {
+        warnings.push(message);
+        try {
+          wake.register({
+            id: 'second',
+            condition: { node: attempt.identity },
+          });
+        } catch {
+          reentrantRejected = true;
+        }
+      },
     });
     wake.register({ id: 'first', condition: { node: attempt.identity } });
     const second = wake.register({
@@ -486,15 +553,61 @@ describe('WakeCoordinator', () => {
     });
     expect(second.warnings?.length).toBe(1);
     expect(warnings).toHaveLength(1);
+    expect(reentrantRejected).toBe(true);
     expect(dispatches[1]).toMatchObject({
       ownerSessionId: 'session-a',
       ownerEpoch: 4,
       deliveryKey: 'session-a:4:second',
+      acknowledgement: {
+        deliveryKey: 'session-a:4:second',
+        dispatchGeneration: 1,
+        dispatchAttempt: 1,
+      },
     });
     expect(wake.snapshot()).toMatchObject({
       ownerSessionId: 'session-a',
       ownerEpoch: 4,
     });
+    await workflow.dispose();
+  });
+
+  test('overlap warnings compare effective payload channels', async () => {
+    const workflow = new DelegateWorkflowCoordinator();
+    const a = workflow.schedule(options('channel-a', async () => result('a')));
+    const b = workflow.schedule(options('channel-b', async () => result('b')));
+    const c = workflow.schedule(options('channel-c', async () => result('c')));
+    const warnings: string[] = [];
+    const wake = new WakeCoordinator({
+      workflow,
+      onWarning: ({ message }) => warnings.push(message),
+    });
+    wake.register({
+      id: 'ab-handoff',
+      condition: { all: [a.identity, b.identity] },
+      payload: ['handoff'],
+    });
+    wake.register({
+      id: 'ac-handoff',
+      condition: { all: [a.identity, c.identity] },
+      payload: ['handoff'],
+    });
+    expect(warnings).toHaveLength(1);
+    const differentWarnings: string[] = [];
+    const different = new WakeCoordinator({
+      workflow,
+      onWarning: ({ message }) => differentWarnings.push(message),
+    });
+    different.register({
+      id: 'ab-handoff',
+      condition: { all: [a.identity, b.identity] },
+      payload: ['handoff'],
+    });
+    different.register({
+      id: 'ac-metadata',
+      condition: { all: [a.identity, c.identity] },
+      payload: ['metadata'],
+    });
+    expect(differentWarnings).toHaveLength(0);
     await workflow.dispose();
   });
 

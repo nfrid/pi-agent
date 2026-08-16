@@ -48,15 +48,15 @@ export function persistWakeState(
 }
 
 /**
- * Restore the latest valid snapshot on the current session branch. The wake
- * coordinator performs per-record validation against exact live attempts and
- * silently drops untrusted records rather than inventing identity.
+ * Restore the validated append-only wake history on the current session
+ * branch. Invalid history is fail-closed; the coordinator consolidates each
+ * wake by revision/state before changing live records.
  */
 export function restoreWakeState(
   coordinator: WakeCoordinator,
   ctx: SessionBranch,
 ): void {
-  let latest: WakeStoreEntry | undefined;
+  const history: WakeStoreEntry[] = [];
   for (const entry of ctx.sessionManager.getBranch()) {
     if (
       !isRecord(entry) ||
@@ -64,9 +64,11 @@ export function restoreWakeState(
       entry.customType !== WAKE_ENTRY_TYPE
     )
       continue;
-    if (isWakeStoreEntry(entry.data)) latest = entry.data;
+    if (!isWakeStoreEntry(entry.data)) return;
+    history.push(entry.data);
   }
-  if (latest) coordinator.restore(latest.state);
+  if (history.length > 0)
+    coordinator.restoreHistory(history.map((entry) => entry.state));
 }
 
 /** Attach append-only persistence to wake state changes. */
