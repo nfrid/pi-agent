@@ -534,8 +534,12 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     ui = ctx.hasUI ? ctx.ui : undefined;
     deliveryEpoch = 0;
     nextWakeEpoch = 0;
+    const resumableOwner =
+      event.reason === 'fork' || event.reason === 'new'
+        ? undefined
+        : branchOwnerMarkers(ctx.sessionManager).at(-1);
     const initialBranchId =
-      branchRuntimeKey(sessionLeafId(ctx)) ?? 'legacy-root';
+      resumableOwner ?? branchRuntimeKey(sessionLeafId(ctx)) ?? 'legacy-root';
     wakeBranchKey = `${sessionScopeId}:${initialBranchId}`;
     widgetDetailed = true;
     widget.attach(ui);
@@ -635,20 +639,30 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
     const manager = ctx.sessionManager as ExtensionContext['sessionManager'] & {
       getChildren?: (parentId: string) => unknown[];
     };
+    const summarizedFork =
+      typeof event === 'object' &&
+      event !== null &&
+      Object.hasOwn(event, 'summaryEntry') &&
+      (event as { summaryEntry?: unknown }).summaryEntry !== undefined;
     const targetIsInterior =
-      knownRuntime !== undefined &&
+      summarizedFork ||
       (leafId === null
         ? ctx.sessionManager.getEntries().length > 0
         : typeof manager.getChildren === 'function'
           ? manager.getChildren(leafId).length > 0
-          : true);
+          : knownRuntime !== undefined);
     // Reuse only a known leaf that is still a tip. Navigating to a mapped
     // interior entry creates a sibling branch and therefore a fresh namespace.
     // Older host shims without getChildren fail closed instead of sharing.
     const known = targetIsInterior ? undefined : knownRuntime;
-    const target = known ?? activateWorkflowRuntime(ctx, leafKey);
+    const persistedOwner = targetIsInterior
+      ? undefined
+      : branchOwnerMarkers(ctx.sessionManager).at(-1);
+    const target =
+      known ?? activateWorkflowRuntime(ctx, persistedOwner ?? leafKey);
     if (!target) return;
     branchLeafRuntimes.set(leafKey, target);
+    if (targetIsInterior) ensureBranchOwner(target, ctx);
     activeRuntime = target;
     workflow = target.workflow;
     statuses = target.statuses;

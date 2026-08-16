@@ -182,7 +182,18 @@ afterEach(() => {
   rmSync(artifactRoot, { recursive: true, force: true });
 });
 
-async function createAsyncHarness(initialScope = 'parent') {
+async function createAsyncHarness(
+  initialScope = 'parent',
+  restored?: {
+    entries: Array<{
+      type: string;
+      customType?: string;
+      data?: unknown;
+      message?: unknown;
+    }>;
+    leafId?: string;
+  },
+) {
   vi.spyOn(configModule, 'loadDelegateConfig').mockReturnValue({
     ...config,
     maxParallelTasks: 3,
@@ -203,8 +214,12 @@ async function createAsyncHarness(initialScope = 'parent') {
   const activeTools = new Set(['delegate', 'artifact_retrieve']);
   const sendMessage = vi.fn();
   const eventListeners = new Map<string, Set<(value: unknown) => void>>();
-  const entries: Array<{ type: string; customType?: string; data?: unknown }> =
-    [];
+  const entries: Array<{
+    type: string;
+    customType?: string;
+    data?: unknown;
+    message?: unknown;
+  }> = restored ? [...restored.entries] : [];
   const pi = {
     on(event: string, handler: Handler) {
       handlers.set(event, handler);
@@ -246,7 +261,10 @@ async function createAsyncHarness(initialScope = 'parent') {
       getSessionId: () => initialScope,
       getEntries: () => entries,
       getHeader: () => ({}),
-      getBranch: () => [],
+      getBranch: () => (restored ? entries : []),
+      ...(restored?.leafId
+        ? { getLeafId: () => restored.leafId as string }
+        : {}),
     },
   } as unknown as ExtensionContext;
 
@@ -272,6 +290,7 @@ async function createAsyncHarness(initialScope = 'parent') {
     sendMessage,
     tools,
     activeTools,
+    entries,
   };
 }
 
@@ -1554,6 +1573,75 @@ describe('async delegate extension', () => {
     await vi.waitFor(() => expect(hasFinish('descendant task')).toBe(true));
     finish('descendant task');
     await handlers.get('session_shutdown')?.({}, ctx);
+  });
+
+  test('admits one persisted queued wake after runtime recreation', async () => {
+    const first = await createAsyncHarness('reload-parent');
+    await first.tools
+      .get('delegate')
+      ?.execute(
+        'reload-source-call',
+        { id: 'reload-source', task: 'reload source task', route: 'quick' },
+        undefined,
+        undefined,
+        first.ctx,
+      );
+    await vi.waitFor(() =>
+      expect(first.hasFinish('reload source task')).toBe(true),
+    );
+    first.finish('reload source task');
+    await vi.waitFor(async () => {
+      const status = await first.tools
+        .get('delegate_jobs')
+        ?.execute(
+          'reload-source-status',
+          { action: 'status', id: 'reload-source@1' },
+          undefined,
+          undefined,
+          first.ctx,
+        );
+      expect(status?.content[0]?.text).toContain('success');
+    });
+    await first.tools.get('delegate_wake')?.execute(
+      'reload-wake-call',
+      {
+        action: 'subscribe',
+        id: 'reload-ready',
+        condition: { node: 'reload-source@1' },
+        payload: ['handoff'],
+      },
+      undefined,
+      undefined,
+      first.ctx,
+    );
+    await vi.waitFor(() => expect(first.sendMessage).toHaveBeenCalledOnce());
+    const persistedMessage = first.sendMessage.mock.calls[0]?.[0];
+    if (!persistedMessage) throw new Error('missing queued wake message');
+    await first.handlers.get('session_shutdown')?.({}, first.ctx);
+
+    const persistedEntries = [
+      ...first.entries,
+      {
+        type: 'custom_message',
+        customType: 'delegate-wake-result',
+        message: persistedMessage,
+      },
+    ];
+    const restored = await createAsyncHarness('reload-parent', {
+      entries: persistedEntries,
+      leafId: 'leaf-after-reload',
+    });
+    expect(restored.sendMessage).not.toHaveBeenCalled();
+    const firstContext = restored.handlers.get('context')?.({
+      messages: [persistedMessage],
+    }) as { messages?: unknown[] } | undefined;
+    expect(firstContext?.messages).toEqual([persistedMessage]);
+    const repeatedContext = restored.handlers.get('context')?.({
+      messages: [persistedMessage],
+    }) as { messages?: unknown[] } | undefined;
+    expect(repeatedContext?.messages).toEqual([]);
+    expect(restored.sendMessage).not.toHaveBeenCalled();
+    await restored.handlers.get('session_shutdown')?.({}, restored.ctx);
   });
 
   test('shows live activity and suppresses delivery after tree navigation', async () => {
