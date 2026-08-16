@@ -45,6 +45,7 @@ describe('dashboard HTTP boundary', () => {
     });
     await server.start();
     const internals = server as unknown as {
+      sessions: { close(): void };
       sessionFeeds: {
         get(id: string): {
           subscribe(options: {
@@ -59,6 +60,9 @@ describe('dashboard HTTP boundary', () => {
         sequence: number,
       ): Promise<unknown>;
     };
+    // This boundary test drives publication explicitly. The SessionIndex suite
+    // covers real watcher ordering; disable it here to avoid racing two sources.
+    internals.sessions.close();
     const feed = internals.sessionFeeds.get('live-child');
     const stream = feed.subscribe({
       buildSnapshot: (sequence) =>
@@ -202,6 +206,7 @@ describe('dashboard HTTP boundary', () => {
     });
     await server.start();
     const internals = server as unknown as {
+      sessions: { close(): void };
       sessionFeeds: {
         get(id: string): {
           subscribe(options: {
@@ -215,6 +220,7 @@ describe('dashboard HTTP boundary', () => {
         sequence: number,
       ): Promise<unknown>;
     };
+    internals.sessions.close();
     const stream = internals.sessionFeeds.get('marker-child').subscribe({
       buildSnapshot: (sequence) =>
         internals.buildSessionSnapshot('marker-child', undefined, sequence),

@@ -964,7 +964,7 @@ describe('session index', () => {
     }
   });
 
-  it('publishes auxiliary watcher changes only after marking the source generation', async () => {
+  it('publishes auxiliary watcher callbacks only after marking the source generation', async () => {
     const root = await mkdtemp(
       path.join(os.tmpdir(), 'pi-dashboard-auxiliary-watcher-order-'),
     );
@@ -987,25 +987,28 @@ describe('session index', () => {
       () => resolveChange(),
       delegates,
     );
-    await index.start();
-    const hashSpy = vi.spyOn(
-      index as unknown as {
-        hashAuxiliaryPrefix: (...args: never[]) => Promise<unknown>;
-      },
-      'hashAuxiliaryPrefix',
-    );
+    await index.rebuild();
+    const internals = index as unknown as {
+      handleWatcherEvent(
+        root: string,
+        filename: string | Buffer | null | undefined,
+      ): void;
+      hashAuxiliaryPrefix: (...args: never[]) => Promise<unknown>;
+    };
+    const hashSpy = vi.spyOn(internals, 'hashAuxiliaryPrefix');
     try {
       const cursor = await index.readAppendCursor('watcher-order-child');
       await appendFile(
         file,
         `${JSON.stringify({ type: 'message', id: 'watcher-entry', message: { role: 'assistant', content: 'watcher' } })}\n`,
       );
+      internals.handleWatcherEvent(delegates, 'child.jsonl');
       await Promise.race([
         changed,
         new Promise<never>((_resolve, reject) =>
           setTimeout(
             () => reject(new Error('Auxiliary watcher did not publish.')),
-            5_000,
+            2_000,
           ),
         ),
       ]);
