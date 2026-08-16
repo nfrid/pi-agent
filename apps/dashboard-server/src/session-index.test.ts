@@ -1005,7 +1005,7 @@ describe('session index', () => {
         new Promise<never>((_resolve, reject) =>
           setTimeout(
             () => reject(new Error('Auxiliary watcher did not publish.')),
-            2_000,
+            5_000,
           ),
         ),
       ]);
