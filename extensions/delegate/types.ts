@@ -5,6 +5,7 @@ import {
   deriveCompatibilityLineageId,
   deriveCompatibilityRunId,
 } from './identity';
+import type { AttemptIdentity, LogicalId } from './workflow-model';
 import type { WorktreeSummary } from './worktree/model';
 
 /** Harness-observed causes for a non-successful delegate settlement. */
@@ -132,6 +133,10 @@ export interface DelegateCheckpoint {
 export interface DelegateRunMetadata {
   /** Stable identity for this invocation; generated for every new run. */
   runId?: string;
+  /** Session-scoped logical workflow node, when workflow identity is supplied. */
+  logicalId?: LogicalId;
+  /** Immutable public attempt identity, e.g. `impl@2`. */
+  attemptIdentity?: AttemptIdentity;
   /** Canonical Pi child session used by dashboard session APIs. */
   sessionId?: string;
   /** Stable child-session lineage, when preparation has a delegate session. */

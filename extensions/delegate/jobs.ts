@@ -13,6 +13,7 @@ import {
 } from './structured-result';
 import type { DelegateDetails, DelegatedRun } from './types';
 import { getRunState, isRunError } from './types';
+import type { AttemptIdentity, LogicalId } from './workflow-model';
 import { failedLifecycleRun } from './worktree-lifecycle';
 
 export const MAX_DELEGATE_JOBS = 20;
@@ -60,6 +61,9 @@ export interface DelegateJobSnapshot {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  /** Optional workflow identity supplied by the session-scoped model. */
+  logicalId?: LogicalId;
+  attemptIdentity?: AttemptIdentity;
 }
 
 interface DelegateJobRecord extends JobRecord<DelegateJobState> {
@@ -76,6 +80,8 @@ interface DelegateJobRecord extends JobRecord<DelegateJobState> {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  logicalId?: LogicalId;
+  attemptIdentity?: AttemptIdentity;
   feedback?: (
     message: string,
   ) => import('./control').DelegateControlEnqueueResult;
@@ -103,6 +109,8 @@ export interface DelegateJobStartOptions {
   deliveryEpoch?: number;
   route?: string;
   allowWrites?: boolean;
+  logicalId?: LogicalId;
+  attemptIdentity?: AttemptIdentity;
   feedback?: (
     message: string,
   ) => import('./control').DelegateControlEnqueueResult;
@@ -168,6 +176,8 @@ export class DelegateJobManager {
         deliveryEpoch: item.deliveryEpoch,
         route: item.route,
         allowWrites: item.allowWrites,
+        logicalId: item.logicalId,
+        attemptIdentity: item.attemptIdentity,
         feedback: item.feedback,
         controller: new AbortController(),
         execute: item.execute,
@@ -384,5 +394,9 @@ function snapshot(record: DelegateJobRecord): DelegateJobSnapshot {
     deliveryEpoch: record.deliveryEpoch,
     route: record.route,
     allowWrites: record.allowWrites,
+    ...(record.logicalId ? { logicalId: record.logicalId } : {}),
+    ...(record.attemptIdentity
+      ? { attemptIdentity: record.attemptIdentity }
+      : {}),
   };
 }

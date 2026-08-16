@@ -223,6 +223,30 @@ describe('DelegateJobManager', () => {
     await manager.dispose();
   });
 
+  test('retains optional workflow identity separately from opaque job IDs', async () => {
+    const manager = new DelegateJobManager();
+    const started = manager.start({
+      mode: 'single',
+      tasks: ['inspect'],
+      logicalId: 'impl',
+      attemptIdentity: 'impl@1',
+      execute: async () => successfulResult(),
+    });
+
+    expect(started).toMatchObject({
+      id: 'dj-1',
+      logicalId: 'impl',
+      attemptIdentity: 'impl@1',
+    });
+    await vi.waitFor(() => expect(manager.runningCount).toBe(0));
+    expect(manager.get(started.id)).toMatchObject({
+      id: 'dj-1',
+      logicalId: 'impl',
+      attemptIdentity: 'impl@1',
+    });
+    await manager.dispose();
+  });
+
   test('does not auto-deliver a result returned by a waiting peek', async () => {
     let finish!: (result: DelegateJobResult) => void;
     const onSettled = vi.fn();
