@@ -60,4 +60,27 @@ describe('PWA assets', () => {
       height: 180,
     });
   });
+
+  it('uses a build-stamped worker with a bounded shell fallback', () => {
+    const serviceWorker = readPublic('sw.js').toString('utf8');
+
+    expect(serviceWorker).toContain("'__PI_DASHBOARD_BUILD_ID__'");
+    expect(serviceWorker).toContain(
+      `const CACHE = \`\${CACHE_PREFIX}\${DASHBOARD_BUILD_ID}\`;`,
+    );
+    expect(serviceWorker).toContain('self.skipWaiting()');
+    expect(serviceWorker).toContain('key.startsWith(CACHE_PREFIX)');
+    expect(serviceWorker).toContain('self.clients.claim()');
+    expect(serviceWorker).toContain("cache.put('/', response.clone())");
+    expect(serviceWorker).toContain("cache: 'no-store'");
+    expect(serviceWorker).not.toContain("'pi-dashboard-v2'");
+    expect(serviceWorker).not.toContain('addAll');
+    expect(serviceWorker).not.toContain('client.navigate(client.url)');
+    expect(serviceWorker).toContain('showNotification');
+
+    const main = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+    expect(main).toContain(
+      "navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })",
+    );
+  });
 });
