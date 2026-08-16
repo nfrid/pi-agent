@@ -382,6 +382,7 @@ describe('shared activity model', () => {
         message: {
           role: 'assistant',
           toolCallIds: ['call-1'],
+          __dashboardStreaming: true,
           content: [{ type: 'text', text: 'Inspecting files.' }],
         },
       },
@@ -395,6 +396,8 @@ describe('shared activity model', () => {
         kind: 'assistant',
         title: 'Inspecting files',
         titleKind: 'preamble',
+        streaming: true,
+        speaks: false,
       },
       { kind: 'tool', name: 'read' },
       { kind: 'other', continuesGroup: true },

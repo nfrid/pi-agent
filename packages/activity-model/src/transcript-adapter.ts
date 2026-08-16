@@ -80,7 +80,11 @@ function assistantEntry(raw: Record<string, unknown>): TranscriptEntry {
   const narratedTitle = (
     textHeaders.length > 0 ? textHeaders : thinkingHeaders
   ).at(-1);
-  const streaming = raw.__dashboardStreaming === true || raw.streaming === true;
+  const streaming =
+    raw.__dashboardStreaming === true ||
+    raw.streaming === true ||
+    message?.__dashboardStreaming === true ||
+    message?.streaming === true;
   return {
     kind: 'assistant',
     speaks: streaming ? false : Boolean(visibleText),

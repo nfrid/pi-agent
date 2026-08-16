@@ -202,6 +202,8 @@ export const HISTORY_PAGE_ENTRIES = 256;
 /** Extra backward extension reserved for the owning activity group. */
 export const HISTORY_OVERSCAN_BYTES = 128 * 1024;
 export const HISTORY_OVERSCAN_ENTRIES = 64;
+export const INDEX_SCAN_CHUNK_BYTES = 64 * 1024;
+export const INDEX_MAX_LINE_BYTES = 32 * 1024 * 1024;
 const LATEST_LEAF_READ_ATTEMPTS = 3;
 /** A single source line must leave room for its normalized protocol envelope. */
 const AUXILIARY_ENTRY_BYTES = 384 * 1024;
@@ -441,6 +443,7 @@ export class SessionIndex {
     ) => void,
     private readonly auxiliarySessionDir?: string,
     private readonly onHistoryReadBytes?: (bytes: number) => void,
+    private readonly onIndexPendingBytes?: (bytes: number) => void,
   ) {}
 
   /** Bytes read by indexed history pages; useful for bounded-read diagnostics. */
@@ -1014,7 +1017,9 @@ export class SessionIndex {
     ) {
       // A watcher may not have delivered an append yet. Refresh exactly once;
       // the refresh itself is the only operation allowed to scan the file.
-      await this.indexFile(indexed.file, this.workspaces);
+      await this.indexFile(indexed.file, this.workspaces, [
+        ...previous.prefixHashes.keys(),
+      ]);
       indexed = this.files.get(id);
       if (!indexed) throw new Error('Unknown session.');
     }
@@ -1248,32 +1253,39 @@ export class SessionIndex {
       end = cursor.selectedOrdinal;
     }
     const selection = this.selectHistoryPage(descriptors, groups, end);
+    const readStart = await fs.stat(indexed.file).catch(() => undefined);
+    if (
+      !readStart ||
+      readStart.dev !== index.dev ||
+      readStart.ino !== index.ino ||
+      readStart.size !== index.size ||
+      readStart.mtimeMs !== index.mtimeMs ||
+      readStart.ctimeMs !== index.ctimeMs
+    )
+      throw new SessionFileChangedError();
     const entries = await this.readHistoryDescriptors(
       indexed.file,
       selection.entries,
     );
     const after = await fs.stat(indexed.file).catch(() => undefined);
-    // A writer can win immediately after stat() returns (and tests exercise
-    // that exact race). Take one settling observation before accepting a
-    // latest-leaf page.
+    // A writer can win while descriptor reads are in flight. Any metadata
+    // change invalidates the page, including append growth; the caller then
+    // refreshes the index and revalidates its cursor before retrying.
     const settled = await fs.stat(indexed.file).catch(() => undefined);
     const observed = settled ?? after;
     if (
       !observed ||
-      observed.dev !== index.dev ||
-      observed.ino !== index.ino ||
-      observed.size < index.size ||
-      (observed.size === index.size &&
-        (observed.mtimeMs !== index.mtimeMs ||
-          observed.ctimeMs !== index.ctimeMs))
-    )
-      throw new Error('Stale history cursor.');
-    if (
-      options.resolveLatestLeaf &&
-      !cursor &&
-      (observed.size !== index.size ||
-        observed.mtimeMs !== index.mtimeMs ||
-        observed.ctimeMs !== index.ctimeMs)
+      !after ||
+      observed.dev !== readStart.dev ||
+      observed.ino !== readStart.ino ||
+      observed.size !== readStart.size ||
+      observed.mtimeMs !== readStart.mtimeMs ||
+      observed.ctimeMs !== readStart.ctimeMs ||
+      after.dev !== readStart.dev ||
+      after.ino !== readStart.ino ||
+      after.size !== readStart.size ||
+      after.mtimeMs !== readStart.mtimeMs ||
+      after.ctimeMs !== readStart.ctimeMs
     )
       throw new SessionFileChangedError();
     const metadata = this.publicEntry(indexed);
@@ -1319,20 +1331,13 @@ export class SessionIndex {
     leafId: string | undefined,
     options: SessionReadOptions,
   ): Promise<SessionEntriesResult> {
-    const shouldResolve =
-      options.resolveLatestLeaf === true && before === undefined;
-    for (
-      let attempt = 0;
-      attempt < (shouldResolve ? LATEST_LEAF_READ_ATTEMPTS : 1);
-      attempt += 1
-    ) {
+    for (let attempt = 0; attempt < LATEST_LEAF_READ_ATTEMPTS; attempt += 1) {
       try {
         const indexed = await this.currentIndexedFile(id);
         return await this.readIndexedPage(indexed, id, before, leafId, options);
       } catch (error) {
         if (
           !(error instanceof SessionFileChangedError) ||
-          !shouldResolve ||
           attempt === LATEST_LEAF_READ_ATTEMPTS - 1
         )
           throw error;
@@ -2181,6 +2186,27 @@ export class SessionIndex {
   private async indexFile(
     file: string,
     workspaces: readonly WorkspaceTarget[],
+    proofOffsets: readonly number[] = [],
+  ): Promise<void> {
+    const resolved = path.resolve(file);
+    const existingId = this.fileIds.get(resolved);
+    const existing =
+      existingId === undefined ? undefined : this.files.get(existingId);
+    return this.indexFileStreaming(
+      file,
+      workspaces,
+      proofOffsets.concat(
+        existing === undefined
+          ? []
+          : [...existing.historyIndex.prefixHashes.keys()],
+      ),
+    );
+  }
+
+  private async indexFileStreaming(
+    file: string,
+    workspaces: readonly WorkspaceTarget[],
+    proofOffsets: readonly number[],
   ): Promise<void> {
     const resolved = path.resolve(file);
     if (
@@ -2189,13 +2215,17 @@ export class SessionIndex {
     )
       return this.removeFile(resolved);
     try {
-      const stat = await fs.stat(resolved);
-      const data = await fs.readFile(resolved);
+      const handle = await fs.open(resolved, 'r');
+      const stat = await handle.stat();
       const decoder = new TextDecoder('utf-8', { fatal: true });
       const descriptors: SessionLineDescriptor[] = [];
       const prefixHashes = new Map<number, string>();
       const byId = new Map<string, SessionLineDescriptor>();
       const fullHash = createHash('sha256');
+      const checkpoints = [...new Set([0, ...proofOffsets])]
+        .filter((offset) => Number.isSafeInteger(offset) && offset >= 0)
+        .sort((left, right) => left - right);
+      let checkpointIndex = 0;
       prefixHashes.set(0, fullHash.copy().digest('hex'));
       let header: Record<string, unknown> | undefined;
       let name: string | undefined;
@@ -2205,43 +2235,45 @@ export class SessionIndex {
       let latestEntryId: string | undefined;
       let ordinal = 0;
       let offset = 0;
-      while (offset < data.length) {
-        const newline = data.indexOf(0x0a, offset);
-        const end = newline < 0 ? data.length : newline + 1;
-        const rawLine = data.subarray(offset, end);
-        const content = data.subarray(offset, newline < 0 ? end : newline);
+      const processLine = (rawLine: Buffer): void => {
+        const start = offset;
+        const end = start + rawLine.length;
+        const newline = rawLine.at(-1) === 0x0a;
+        const content = rawLine.subarray(
+          0,
+          newline ? rawLine.length - 1 : rawLine.length,
+        );
         const withoutCr =
           content.at(-1) === 0x0d
             ? content.subarray(0, content.length - 1)
             : content;
+        const prefixHash = fullHash.copy().digest('hex');
         if (!isBlankJsonlLine(withoutCr)) {
           let parsed: unknown;
           try {
             parsed = JSON.parse(decoder.decode(withoutCr)) as unknown;
           } catch {
-            // Invalid or partial JSONL is not an indexed logical entry. Its
-            // bytes remain part of every later physical prefix proof.
-            fullHash.update(rawLine);
+            // Malformed and partial lines remain physical bytes but are not
+            // logical descriptors.
+            updateRawPrefix(rawLine, start, prefixHash);
             offset = end;
-            prefixHashes.set(offset, fullHash.copy().digest('hex'));
-            continue;
+            return;
           }
           if (!header) {
             if (!isRecord(parsed) || parsed.type !== 'session') {
-              this.removeFile(resolved);
-              return;
+              throw new Error('Invalid session header.');
             }
             header = parsed;
             const entry = redactImageData(parsed);
             const descriptor: SessionLineDescriptor = {
               ordinal,
-              start: offset,
+              start,
               end,
               outputBytes: Math.min(
                 Buffer.byteLength(JSON.stringify(entry) ?? ''),
                 HISTORY_PAGE_BYTES,
               ),
-              prefixHash: fullHash.copy().digest('hex'),
+              prefixHash,
               ...(typeof parsed.id === 'string' ? { id: parsed.id } : {}),
               ...(Object.hasOwn(parsed, 'parentId')
                 ? { parentId: parsed.parentId }
@@ -2258,16 +2290,15 @@ export class SessionIndex {
             ordinal += 1;
           } else {
             const entry = redactImageData(parsed);
-            const serialized = JSON.stringify(entry);
             const descriptor: SessionLineDescriptor = {
               ordinal,
-              start: offset,
+              start,
               end,
               outputBytes: Math.min(
-                Buffer.byteLength(serialized ?? ''),
+                Buffer.byteLength(JSON.stringify(entry) ?? ''),
                 HISTORY_PAGE_BYTES,
               ),
-              prefixHash: fullHash.copy().digest('hex'),
+              prefixHash,
               ...(isRecord(parsed) && typeof parsed.id === 'string'
                 ? { id: parsed.id }
                 : {}),
@@ -2303,73 +2334,127 @@ export class SessionIndex {
             ordinal += 1;
           }
         }
-        fullHash.update(rawLine);
+        updateRawPrefix(rawLine, start, prefixHash);
         offset = end;
-        prefixHashes.set(offset, fullHash.copy().digest('hex'));
-      }
-      if (!header || typeof header.cwd !== 'string') {
-        this.removeFile(resolved);
-        return;
-      }
-      const endStat = await fs.stat(resolved);
-      if (
-        endStat.dev !== stat.dev ||
-        endStat.ino !== stat.ino ||
-        endStat.size !== data.length
-      )
-        throw new SessionFileChangedError();
-      const activities = descriptors.map((descriptor) => descriptor.activity);
-      const historyIndex: SessionHistoryIndex = {
-        dev: endStat.dev,
-        ino: endStat.ino,
-        size: endStat.size,
-        mtimeMs: endStat.mtimeMs,
-        ctimeMs: endStat.ctimeMs,
-        fileHash: fullHash.copy().digest('hex'),
-        prefixHashes,
-        descriptors,
-        byId,
-        latestEntryId,
-        groups: groupTranscript(activities),
       };
-      const id =
-        typeof header.id === 'string' ? header.id : this.idForPath(resolved);
-      const previous = this.files.get(id);
-      if (previous && previous.file !== resolved) {
-        // Normal sessions win the practically-impossible ID collision without
-        // making an auxiliary delegate path browser-visible.
+      const updateRawPrefix = (
+        rawLine: Buffer,
+        start: number,
+        _prefixHash: string,
+      ): void => {
+        let consumed = 0;
+        while (checkpointIndex < checkpoints.length) {
+          const checkpoint = checkpoints[checkpointIndex];
+          if (checkpoint === undefined || checkpoint >= start + rawLine.length)
+            break;
+          if (checkpoint < start) {
+            checkpointIndex += 1;
+            continue;
+          }
+          const length = checkpoint - start - consumed;
+          if (length > 0)
+            fullHash.update(rawLine.subarray(consumed, consumed + length));
+          consumed += Math.max(0, length);
+          prefixHashes.set(checkpoint, fullHash.copy().digest('hex'));
+          checkpointIndex += 1;
+        }
+        if (consumed < rawLine.length)
+          fullHash.update(rawLine.subarray(consumed));
+        prefixHashes.set(start + rawLine.length, fullHash.copy().digest('hex'));
+      };
+      // `processLine` calls the function declared below; initialize the
+      // closure before reading any source bytes.
+      const chunk = Buffer.allocUnsafe(INDEX_SCAN_CHUNK_BYTES);
+      let pending = Buffer.alloc(0);
+      let pendingStart = 0;
+      try {
+        while (true) {
+          const result = await handle.read(chunk, 0, chunk.length, null);
+          if (result.bytesRead === 0) break;
+          pending =
+            pending.length === 0
+              ? Buffer.from(chunk.subarray(0, result.bytesRead))
+              : Buffer.concat([pending, chunk.subarray(0, result.bytesRead)]);
+          this.onIndexPendingBytes?.(pending.length);
+          while (true) {
+            const newline = pending.indexOf(0x0a);
+            if (newline < 0) break;
+            const rawLine = Buffer.from(pending.subarray(0, newline + 1));
+            offset = pendingStart;
+            processLine(rawLine);
+            pending = pending.subarray(newline + 1);
+            pendingStart += rawLine.length;
+          }
+          if (pending.length > INDEX_MAX_LINE_BYTES)
+            throw new Error('Session index line exceeds bounded scan limit.');
+        }
+        if (pending.length > 0) {
+          offset = pendingStart;
+          processLine(Buffer.from(pending));
+        }
+        const endStat = await handle.stat();
         if (
-          !this.isAuxiliaryFile(previous.file) &&
-          this.isAuxiliaryFile(resolved)
+          endStat.dev !== stat.dev ||
+          endStat.ino !== stat.ino ||
+          endStat.size !== offset
         )
+          throw new SessionFileChangedError();
+        if (!header || typeof header.cwd !== 'string') {
+          this.removeFile(resolved);
           return;
-        this.fileIds.delete(previous.file);
+        }
+        const historyIndex: SessionHistoryIndex = {
+          dev: endStat.dev,
+          ino: endStat.ino,
+          size: endStat.size,
+          mtimeMs: endStat.mtimeMs,
+          ctimeMs: endStat.ctimeMs,
+          fileHash: fullHash.copy().digest('hex'),
+          prefixHashes,
+          descriptors,
+          byId,
+          latestEntryId,
+          groups: groupTranscript(
+            descriptors.map((descriptor) => descriptor.activity),
+          ),
+        };
+        const id =
+          typeof header.id === 'string' ? header.id : this.idForPath(resolved);
+        const previous = this.files.get(id);
+        if (previous && previous.file !== resolved) {
+          if (
+            !this.isAuxiliaryFile(previous.file) &&
+            this.isAuxiliaryFile(resolved)
+          )
+            return;
+          this.fileIds.delete(previous.file);
+        }
+        const entry: IndexedFile = {
+          id,
+          file: resolved,
+          cwd: header.cwd,
+          workspaceId: workspaceFor(header.cwd, workspaces),
+          ...(sawSessionInfo && name ? { name } : {}),
+          title: deriveSessionTitle(
+            firstUserEntry === undefined ? [] : [firstUserEntry],
+          ),
+          startedAt:
+            typeof header.timestamp === 'string' &&
+            Number.isFinite(Date.parse(header.timestamp))
+              ? Date.parse(header.timestamp)
+              : endStat.birthtimeMs,
+          updatedAt: endStat.mtimeMs,
+          header,
+          lastEntryId,
+          historyIndex,
+        };
+        this.files.set(id, entry);
+        this.fileIds.set(resolved, id);
+        if (!this.isAuxiliaryFile(resolved)) this.metadata?.saveSession(entry);
+      } finally {
+        await handle.close().catch(() => undefined);
       }
-      const entry: IndexedFile = {
-        id,
-        file: resolved,
-        cwd: header.cwd,
-        workspaceId: workspaceFor(header.cwd, workspaces),
-        ...(sawSessionInfo && name ? { name } : {}),
-        title: deriveSessionTitle(
-          firstUserEntry === undefined ? [] : [firstUserEntry],
-        ),
-        startedAt:
-          typeof header.timestamp === 'string' &&
-          Number.isFinite(Date.parse(header.timestamp))
-            ? Date.parse(header.timestamp)
-            : endStat.birthtimeMs,
-        updatedAt: endStat.mtimeMs,
-        header,
-        lastEntryId,
-        historyIndex,
-      };
-      this.files.set(id, entry);
-      this.fileIds.set(resolved, id);
-      if (!this.isAuxiliaryFile(resolved)) this.metadata?.saveSession(entry);
     } catch (error) {
-      // A concurrent append is retried by the page reader; do not erase a
-      // previously valid index just because this refresh raced the writer.
       if (!(error instanceof SessionFileChangedError))
         this.removeFile(resolved);
       throw error;
