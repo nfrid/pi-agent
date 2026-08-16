@@ -552,6 +552,63 @@ function persistedTerminalMessageCounts(
   return counts;
 }
 
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function delegateJobIds(value: unknown): readonly string[] | undefined {
+  const jobs = record(value)?.jobs;
+  if (!Array.isArray(jobs)) return undefined;
+  const ids = jobs.flatMap((job) => {
+    const id = record(job)?.id;
+    return typeof id === 'string' && id.length > 0 ? [id] : [];
+  });
+  return ids.length > 0 ? [...new Set(ids)].sort() : undefined;
+}
+
+function persistedCustomMessage(
+  item: TranscriptItem,
+): Record<string, unknown> | undefined {
+  if (item.kind !== 'other') return undefined;
+  const raw = record(item.raw);
+  return raw?.type === 'custom_message' ? raw : undefined;
+}
+
+function samePersistedCustomMessage(
+  active: Extract<TranscriptItem, { kind: 'message' }>,
+  persisted: Record<string, unknown>,
+): boolean {
+  if (active.role !== 'custom') return false;
+  const data = record(active.data);
+  if (
+    typeof persisted.customType !== 'string' ||
+    persisted.customType !== data?.customType ||
+    normalizedMessageContent(persisted.content) !==
+      normalizedMessageContent(active.content)
+  )
+    return false;
+  if (persisted.id === active.messageId) return true;
+  const activeTimestamp = active.timestamp;
+  const persistedTimestamp = persisted.timestamp;
+  if (
+    activeTimestamp !== undefined &&
+    persistedTimestamp !== undefined &&
+    String(activeTimestamp) === String(persistedTimestamp)
+  )
+    return true;
+  if (persisted.customType !== 'delegate-job-result') return false;
+  const activeJobIds = delegateJobIds(record(data?.details));
+  const persistedJobIds = delegateJobIds(record(persisted.details));
+  return (
+    activeJobIds !== undefined &&
+    persistedJobIds !== undefined &&
+    activeJobIds.length === persistedJobIds.length &&
+    activeJobIds.every((id, index) => id === persistedJobIds[index])
+  );
+}
+
 function normalizedMessageContent(value: unknown): string {
   const normalize = (input: unknown): unknown => {
     if (Array.isArray(input)) return input.map(normalize);
@@ -576,14 +633,26 @@ export function retirePersistedMessageOverlays(
   active: TranscriptProjection,
   persisted: TranscriptProjection,
 ): TranscriptProjection {
-  const persistedMessages = Object.values(persisted.items).filter(
+  const persistedItems = Object.values(persisted.items);
+  const persistedMessages = persistedItems.filter(
     (item): item is Extract<TranscriptItem, { kind: 'message' }> =>
       item.kind === 'message',
   );
+  const persistedCustomMessages = persistedItems.flatMap((item) => {
+    const message = persistedCustomMessage(item);
+    return message ? [message] : [];
+  });
   const retire = new Set<string>();
   for (const id of active.order) {
     const item = active.items[id];
     if (item?.kind !== 'message') continue;
+    const matchingCustomMessages = persistedCustomMessages.filter((candidate) =>
+      samePersistedCustomMessage(item, candidate),
+    );
+    if (matchingCustomMessages.length === 1) {
+      retire.add(id);
+      continue;
+    }
     const sameContent = (candidate: typeof item): boolean =>
       candidate.role === item.role &&
       normalizedMessageContent(candidate.content) ===

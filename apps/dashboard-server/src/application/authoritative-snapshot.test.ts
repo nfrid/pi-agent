@@ -334,6 +334,63 @@ describe('authoritative application snapshot lifecycle', () => {
     expect(oldSnapshot.active.messages).toEqual([]);
   });
 
+  it('retires a live delegate completion once its custom message is durable', async () => {
+    const f = await fixture();
+    const live = runtime(f.file, { liveState: 'idle' });
+    f.register(live);
+    const content = '# Background delegate job dj-1 (Review) success';
+    f.event(live, {
+      type: 'message.finished',
+      sessionId: 'snapshot-session',
+      message: {
+        messageId: 'live-delegate-result',
+        role: 'custom',
+        content,
+        phase: 'finished',
+        data: {
+          customType: 'delegate-job-result',
+          display: true,
+          details: { jobs: [{ id: 'dj-1', name: 'Review', state: 'success' }] },
+        },
+      },
+    });
+
+    const liveSnapshot = await f.app.sessionSnapshot(
+      'generation-1',
+      'snapshot-session',
+    );
+    expect(liveSnapshot.active.messages).toHaveLength(1);
+
+    await writeFile(
+      f.file,
+      `${JSON.stringify({ type: 'session', id: 'snapshot-session', cwd: '/tmp/snapshot' })}\n${JSON.stringify(
+        {
+          type: 'custom_message',
+          id: 'persisted-delegate-result',
+          customType: 'delegate-job-result',
+          content,
+          display: true,
+          details: {
+            jobs: [{ id: 'dj-1', name: 'Review', state: 'success' }],
+          },
+        },
+      )}\n`,
+    );
+    await f.sessions.refresh([]);
+
+    const durableSnapshot = await f.app.sessionSnapshot(
+      'generation-1',
+      'snapshot-session',
+    );
+    expect(durableSnapshot.active.messages).toEqual([]);
+    expect(durableSnapshot.entries).toContainEqual(
+      expect.objectContaining({
+        type: 'custom_message',
+        id: 'persisted-delegate-result',
+      }),
+    );
+  });
+
   it('does not confuse earlier repeated message or tool content with current durability', async () => {
     const f = await fixture('snapshot-session', [
       { type: 'session', id: 'snapshot-session', cwd: '/tmp/snapshot' },
