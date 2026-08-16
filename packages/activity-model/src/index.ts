@@ -5,6 +5,16 @@
  */
 export * from './grouping.js';
 export * from './outcome.mjs';
+export * from './raw.js';
 export * from './title.js';
+export {
+  activityEntriesFromRaw,
+  activityGroupBoundary,
+  adaptRawTranscriptEntry,
+  groupOwningBoundary,
+  owningActivityBoundary,
+  owningActivityGroup,
+  transcriptEntryFromRaw,
+} from './transcript-adapter.js';
 export * from './types.js';
 export * from './view-model.js';

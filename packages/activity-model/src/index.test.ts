@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  activityEntryFromRaw,
   groupTranscript,
   headersOf,
+  owningActivityGroupBoundary,
   projectActivityGroups,
   toolActionSummary,
 } from './index.js';
@@ -371,5 +373,36 @@ describe('shared activity model', () => {
       { kind: 'tool', name: 'edit', args: {}, status: 'running' },
     ]);
     expect(groups.map(({ status }) => status)).toEqual(['settled', 'live']);
+  });
+
+  it('maps persisted preambles, narration, tools, and continuation events canonically', () => {
+    const raw = [
+      {
+        type: 'message',
+        message: {
+          role: 'assistant',
+          toolCallIds: ['call-1'],
+          content: [{ type: 'text', text: 'Inspecting files.' }],
+        },
+      },
+      { type: 'tool', tool: { name: 'read', arguments: { path: 'a.ts' } } },
+      { type: 'custom', customType: 'lean-todo' },
+      { type: 'compaction', summary: 'kept' },
+    ];
+    const entries = raw.map(activityEntryFromRaw);
+    expect(entries).toMatchObject([
+      {
+        kind: 'assistant',
+        title: 'Inspecting files',
+        titleKind: 'preamble',
+      },
+      { kind: 'tool', name: 'read' },
+      { kind: 'other', continuesGroup: true },
+      { kind: 'other', continuesGroup: true },
+    ]);
+    expect(owningActivityGroupBoundary(entries, 2)).toEqual({
+      start: 0,
+      end: 3,
+    });
   });
 });

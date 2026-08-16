@@ -1023,6 +1023,57 @@ describe('session index', () => {
     }
   });
 
+  it('reconstructs reverse pages from bounded descriptor reads and strict v2 cursors', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-dashboard-indexed-pages-'),
+    );
+    const file = path.join(root, 'indexed.jsonl');
+    const entries = [
+      { type: 'session', id: 'indexed-id', cwd: '/tmp' },
+      ...Array.from({ length: 8 }, (_, index) => ({
+        type: 'message',
+        id: `entry-${index}`,
+        message: { role: 'user', content: 'x'.repeat(150_000) },
+      })),
+    ];
+    await writeFile(
+      file,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    const index = new SessionIndex(root);
+    await index.rebuild();
+    let page = await index.readEntries('indexed-id');
+    const pages = [page.entries.map((entry) => (entry as { id?: string }).id)];
+    const firstCursor = page.history.nextBefore;
+    expect(firstCursor).toBeTruthy();
+    while (page.history.hasOlder) {
+      index.resetHistoryReadBytes();
+      page = await index.readEntries('indexed-id', page.history.nextBefore);
+      expect(index.historyReadBytes).toBeLessThan(500_000);
+      pages.unshift(page.entries.map((entry) => (entry as { id?: string }).id));
+    }
+    expect(pages.flat()).toEqual(entries.map((entry) => entry.id));
+    if (!firstCursor) throw new Error('cursor missing');
+    const decoded = JSON.parse(
+      Buffer.from(firstCursor, 'base64url').toString('utf8'),
+    ) as Record<string, unknown>;
+    const malformed = Buffer.from(
+      JSON.stringify({ ...decoded, extra: true }),
+      'utf8',
+    ).toString('base64url');
+    await expect(index.readEntries('indexed-id', malformed)).rejects.toThrow(
+      'Invalid history cursor',
+    );
+    await appendFile(
+      file,
+      `${JSON.stringify({ type: 'message', id: 'new-entry', message: { role: 'user', content: 'new' } })}\n`,
+    );
+    const olderAfterAppend = await index.readEntries('indexed-id', firstCursor);
+    expect(
+      olderAfterAppend.entries.map((entry) => (entry as { id?: string }).id),
+    ).toEqual(pages.at(-2));
+  });
+
   it('fans file-watcher changes out to live snapshot observers', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-watch-'));
     let changes = 0;
