@@ -502,6 +502,7 @@ export async function prepareDelegateWorkflowLaunch(
     finalPlan,
     preflightDelegateContinuation(finalPlan),
     launchSessionId,
+    workflow.signal,
   );
   const pending = pendingRuns({ mode: 'single', tasks: [prepared] })[0];
   if (pending) hooks.onRunUpdate?.(pending);

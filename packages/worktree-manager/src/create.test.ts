@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -138,6 +139,72 @@ describe('work-in-progress capture', () => {
 });
 
 describe('worktree creator rehydration', () => {
+  it('starts from a captured immutable WIP ref after the parent changes', async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), 'pi-worktree-captured-ref-'),
+    );
+    let source: Awaited<ReturnType<typeof captureWorkInProgress>> | undefined;
+    const records = new Map<string, WorktreeRecord>();
+    const store = {
+      loadWorktree: (id: string) => records.get(id),
+      writeWorktreeRecord: (record: WorktreeRecord) =>
+        records.set(record.id, record),
+      deleteWorktreeRecord: (id: string) => records.delete(id),
+    };
+    try {
+      await git(root, 'init', '-b', 'main');
+      await git(root, 'config', 'user.email', 'test@example.test');
+      await git(root, 'config', 'user.name', 'Test');
+      await writeFile(path.join(root, 'tracked.txt'), 'base\n');
+      await git(root, 'add', '.');
+      await git(root, 'commit', '-m', 'base');
+      await writeFile(path.join(root, 'tracked.txt'), 'captured\n');
+      await writeFile(path.join(root, 'captured.txt'), 'captured untracked\n');
+      source = await captureWorkInProgress(root);
+      await writeFile(path.join(root, 'tracked.txt'), 'later\n');
+      await writeFile(path.join(root, 'later.txt'), 'later untracked\n');
+
+      const creator = createWorktreeCreator(store);
+      const prepared = await creator.prepareWorktree({
+        cwd: root,
+        name: 'captured',
+        baseRef: source.ref,
+      });
+      if (!prepared.worktree) throw new Error('worktree was not prepared');
+      expect(
+        await readFile(
+          path.join(prepared.worktree.record.worktreePath, 'tracked.txt'),
+          'utf8',
+        ),
+      ).toBe('captured\n');
+      expect(
+        await readFile(
+          path.join(prepared.worktree.record.worktreePath, 'captured.txt'),
+          'utf8',
+        ),
+      ).toBe('captured untracked\n');
+      expect(
+        existsSync(
+          path.join(prepared.worktree.record.worktreePath, 'later.txt'),
+        ),
+      ).toBe(false);
+      expect(prepared.worktree.record.baseRef).toBe(source.ref);
+      await source.dispose();
+      source = undefined;
+      await git(
+        root,
+        'worktree',
+        'remove',
+        '--force',
+        prepared.worktree.record.worktreePath,
+      );
+      await git(root, 'branch', '-D', prepared.worktree.record.branch);
+    } finally {
+      await source?.dispose();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('starts a fresh worktree from an explicit branch/ref and records provenance', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-worktree-base-ref-'));
     const records = new Map<string, WorktreeRecord>();

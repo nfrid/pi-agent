@@ -55,6 +55,9 @@ export const MAX_WORKFLOW_ATTEMPTS = 256;
 const MAX_WORKFLOW_REASON_LENGTH = 256;
 const MAX_WORKFLOW_TOKEN_BYTES = 16 * 1024;
 const MAX_TERMINAL_FIELD_BYTES = 1024;
+const DEFAULT_PREPARATION_GRACE_MS = 100;
+
+type PreparationCleanup = () => void | Promise<void>;
 
 export interface DelegateWorkflowLaunchContext {
   readonly attempt: WorkflowAttempt;
@@ -65,6 +68,8 @@ export interface DelegateWorkflowLaunchContext {
   readonly predecessor?: AttemptIdentity;
   /** Opaque token retained by the canonical predecessor result. */
   readonly continuationToken?: string;
+  /** Aborted when lazy preparation is cancelled or the coordinator shuts down. */
+  readonly signal: AbortSignal;
   /** Resolve another bound source without exposing it in coordinator snapshots. */
   readonly resolve: (
     identity: AttemptIdentity,
@@ -101,6 +106,8 @@ export interface DelegateWorkflowScheduleOptions
   inputs?: readonly SymbolicWorkflowSelector[];
   /** Mutually exclusive lazy preparation for the actual job launch. */
   prepare?: DelegateWorkflowLaunchFactory;
+  /** Resource cleanup for work captured before this identity was admitted. */
+  preparationCleanup?: PreparationCleanup;
   mode?: DelegateJobStartOptions['mode'];
   tasks?: string[];
   execute?: DelegateJobStartOptions['execute'];
@@ -171,6 +178,8 @@ export interface DelegateWorkflowCoordinatorOptions {
   maxAttempts?: number;
   /** Existing execution adapter. */
   jobs?: DelegateJobManager;
+  /** Maximum time cancellation/disposal waits for preparation cleanup. */
+  preparationGraceMs?: number;
   /** Alias for jobs, useful at integration boundaries. */
   jobManager?: DelegateJobManager;
   model?: WorkflowModel;
@@ -202,10 +211,14 @@ interface WorkflowRecord {
   selectors: readonly BoundWorkflowSelector[];
   prepare?: DelegateWorkflowLaunchFactory;
   preparationInFlight?: Promise<void>;
+  preparationController?: AbortController;
   launch?: DelegateJobStartOptions;
   discard?: () => void | Promise<void>;
-  continuationPredecessor?: AttemptIdentity;
+  preparationCleanup?: PreparationCleanup;
+  preparationCleanupDone?: boolean;
   preparationDiscarded?: boolean;
+  preparationDiscardInFlight?: Promise<void>;
+  continuationPredecessor?: AttemptIdentity;
 }
 
 function copyRouting(
@@ -241,6 +254,11 @@ function validateScheduleInput(options: DelegateWorkflowScheduleOptions): void {
     throw new Error('Invalid symbolic workflow inputs: expected an array.');
   if (options.prepare !== undefined && typeof options.prepare !== 'function')
     throw new Error('Invalid lazy workflow launch factory.');
+  if (
+    options.preparationCleanup !== undefined &&
+    typeof options.preparationCleanup !== 'function'
+  )
+    throw new Error('Invalid workflow preparation cleanup.');
   const lazy = options.prepare !== undefined;
   if (lazy && options.execute !== undefined)
     throw new Error(
@@ -614,11 +632,14 @@ export class DelegateWorkflowCoordinator {
   readonly ownerBranchId: string | undefined;
   readonly maxAttempts: number;
   private readonly now: () => number;
+  private readonly preparationGraceMs: number;
   private readonly onChange?: () => void;
   private readonly terminalListeners =
     new Set<DelegateWorkflowTerminalListener>();
   private readonly changeListeners = new Set<() => void>();
   private readonly records = new Map<AttemptIdentity, WorkflowRecord>();
+  /** Records imported from an ancestor are shared and never locally mutable. */
+  private readonly importedRecordIdentities = new Set<AttemptIdentity>();
   private readonly results = new Map<
     AttemptIdentity,
     DelegateWorkflowResultRecord
@@ -648,6 +669,14 @@ export class DelegateWorkflowCoordinator {
     this.ownsJobs =
       options.jobs === undefined && options.jobManager === undefined;
     this.now = options.now ?? Date.now;
+    if (
+      options.preparationGraceMs !== undefined &&
+      (!Number.isSafeInteger(options.preparationGraceMs) ||
+        options.preparationGraceMs < 0)
+    )
+      throw new Error('Invalid workflow preparation grace period.');
+    this.preparationGraceMs =
+      options.preparationGraceMs ?? DEFAULT_PREPARATION_GRACE_MS;
     this.onChange = options.onChange;
   }
 
@@ -698,6 +727,7 @@ export class DelegateWorkflowCoordinator {
       cancellationWaiters: [],
       selectors,
       prepare: options.prepare,
+      preparationCleanup: options.preparationCleanup,
       continuationPredecessor: plan.predecessor?.identity,
       launch:
         options.prepare === undefined
@@ -864,15 +894,7 @@ export class DelegateWorkflowCoordinator {
       throw new Error(
         'Cannot import a workflow runtime without branch ownership.',
       );
-    for (const record of source.records.values()) {
-      if (record.ownerBranchId !== source.ownerBranchId) continue;
-      try {
-        this.importRecord(record, source.results.get(record.attempt.identity));
-      } catch {
-        // A later-owned ordinal can be imported once its inherited
-        // predecessor is present; do not merge a partial sibling lineage.
-      }
-    }
+    this.importSourceRecords(source);
     if (this.importedSources.has(source))
       return this.importedSourceDetachers.get(source) ?? (() => {});
     this.importedSources.add(source);
@@ -931,6 +953,25 @@ export class DelegateWorkflowCoordinator {
     this.reconcileImportedDependants();
   }
 
+  private importSourceRecords(source: DelegateWorkflowCoordinator): void {
+    const records = [...source.records.values()]
+      .filter((record) => record.ownerBranchId === source.ownerBranchId)
+      .sort(
+        (left, right) =>
+          left.createdAt - right.createdAt ||
+          left.attempt.logicalId.localeCompare(right.attempt.logicalId) ||
+          left.attempt.ordinal - right.attempt.ordinal,
+      );
+    for (const record of records) {
+      if (this.importedRecordIdentities.has(record.attempt.identity)) continue;
+      try {
+        this.importRecord(record, source.results.get(record.attempt.identity));
+      } catch {
+        // A conflicting identity or exhausted admission slot stays hidden.
+      }
+    }
+  }
+
   private importRecord(
     record: WorkflowRecord,
     result: DelegateWorkflowResultRecord | undefined,
@@ -963,14 +1004,21 @@ export class DelegateWorkflowCoordinator {
           throw error;
       }
       this.records.set(record.attempt.identity, record);
+      this.importedRecordIdentities.add(record.attempt.identity);
     }
     if (result) this.results.set(record.attempt.identity, result);
   }
 
   private reconcileImportedDependants(): void {
     for (const source of this.importedSources) {
+      this.importSourceRecords(source);
       for (const record of source.records.values()) {
-        if (record.ownerBranchId !== source.ownerBranchId) continue;
+        if (
+          record.ownerBranchId !== source.ownerBranchId ||
+          !this.importedRecordIdentities.has(record.attempt.identity) ||
+          this.records.get(record.attempt.identity) !== record
+        )
+          continue;
         const result = source.results.get(record.attempt.identity);
         if (result) this.results.set(record.attempt.identity, result);
       }
@@ -1014,13 +1062,23 @@ export class DelegateWorkflowCoordinator {
       records.push(record);
     }
 
+    const localRecords = records.filter(
+      (record) => !this.importedRecordIdentities.has(record.attempt.identity),
+    );
+
     // Mark the complete request before settling one scheduled record. That
     // prevents an upstream barrier release from launching a requested child.
-    for (const record of records)
-      if (!isTerminalWorkflowAttemptState(record.state))
+    for (const record of localRecords) {
+      if (!isTerminalWorkflowAttemptState(record.state)) {
         record.cancellationRequested = true;
+        this.abortPreparation(
+          record,
+          new Error('Workflow preparation was cancelled.'),
+        );
+      }
+    }
 
-    const active = records.filter(
+    const active = localRecords.filter(
       (record) => record.state === 'queued' || record.state === 'running',
     );
     const launching = active.filter((record) => record.jobId === undefined);
@@ -1028,11 +1086,12 @@ export class DelegateWorkflowCoordinator {
       this.waitForCancellation(record),
     );
     const preparing = waitForPreparation
-      ? records
+      ? localRecords
           .map((record) => record.preparationInFlight)
           .filter((work): work is Promise<void> => work !== undefined)
+          .map((work) => this.waitForPreparationGrace(work))
       : [];
-    for (const record of records)
+    for (const record of localRecords)
       if (record.state === 'scheduled')
         this.settle(record, 'cancelled', 'Cancelled before launch.');
 
@@ -1042,6 +1101,7 @@ export class DelegateWorkflowCoordinator {
         .map((record) => this.cancelStartedJob(record)),
       ...waitingForLaunch,
       ...preparing,
+      ...localRecords.map((record) => this.discardPrepared(record)),
     ]);
     return records.map((record) => this.snapshotRecord(record));
   }
@@ -1051,20 +1111,26 @@ export class DelegateWorkflowCoordinator {
     const record = this.requireRecord(reference);
     if (record.state !== 'scheduled')
       throw new Error(`Only scheduled workflow attempts can be blocked.`);
+    if (this.importedRecordIdentities.has(record.attempt.identity))
+      throw new Error('Imported workflow attempts cannot be blocked locally.');
     this.settle(record, 'blocked', boundedReason(reason));
+    void this.discardPrepared(record);
     return this.snapshotRecord(record);
   }
 
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
-    const identities = this.list().map((attempt) => attempt.identity);
+    const identities = this.list()
+      .filter((attempt) => !this.importedRecordIdentities.has(attempt.identity))
+      .map((attempt) => attempt.identity);
     await this.cancel(identities, false);
     if (this.ownsJobs) await this.jobs.dispose();
     for (const detach of this.importedSourceDetachers.values()) detach();
     this.importedSourceDetachers.clear();
     this.importedSources.clear();
     this.records.clear();
+    this.importedRecordIdentities.clear();
     this.results.clear();
     this.changed();
   }
@@ -1199,28 +1265,54 @@ export class DelegateWorkflowCoordinator {
     }
     if (record.prepare) {
       record.reason = 'Preparing symbolic workflow inputs.';
+      const controller = new AbortController();
+      record.preparationController = controller;
+      if (record.cancellationRequested || this.disposed)
+        controller.abort(new Error('Workflow preparation was cancelled.'));
       this.changed();
-      const work = this.prepareAndLaunch(record);
+      const work = this.prepareAndLaunch(record, controller.signal);
       record.preparationInFlight = work;
-      void work.finally(() => {
-        if (record.preparationInFlight === work)
-          record.preparationInFlight = undefined;
-      });
+      // Do not use a bare finally here: its returned rejecting promise would
+      // become an unhandled rejection when a factory fails late.
+      void work.then(
+        () => {
+          if (record.preparationInFlight === work) {
+            record.preparationInFlight = undefined;
+            record.preparationController = undefined;
+            if (isTerminalWorkflowAttemptState(record.state))
+              record.prepare = undefined;
+          }
+        },
+        () => {
+          if (record.preparationInFlight === work) {
+            record.preparationInFlight = undefined;
+            record.preparationController = undefined;
+            if (isTerminalWorkflowAttemptState(record.state))
+              record.prepare = undefined;
+          }
+        },
+      );
       return;
     }
     this.startJob(record, record.launch);
   }
 
-  private async prepareAndLaunch(record: WorkflowRecord): Promise<void> {
+  private async prepareAndLaunch(
+    record: WorkflowRecord,
+    signal: AbortSignal,
+  ): Promise<void> {
     try {
       const resolved = resolveWorkflowInputs(record.selectors, (identity) =>
         this.sourceFor(identity),
       );
       if (
+        signal.aborted ||
         record.cancellationRequested ||
         isTerminalWorkflowAttemptState(record.state)
-      )
+      ) {
+        await this.discardPrepared(record);
         return;
+      }
       const prepare = record.prepare;
       if (!prepare) throw new Error('Missing workflow launch factory.');
       const predecessor = record.continuationPredecessor;
@@ -1237,11 +1329,13 @@ export class DelegateWorkflowCoordinator {
         handoffText: resolved.handoffText,
         predecessor,
         continuationToken,
+        signal,
         resolve: (identity) =>
           resolved.inputs.filter((input) => input.identity === identity),
       });
       const normalized = normalizePreparedLaunch(prepared);
       record.discard = normalized.discard;
+      await this.releasePreparation(record);
       if (
         record.cancellationRequested ||
         isTerminalWorkflowAttemptState(record.state)
@@ -1256,11 +1350,9 @@ export class DelegateWorkflowCoordinator {
         record.route = normalized.launch.route;
       this.startJob(record, normalized.launch);
     } catch (error) {
-      if (isTerminalWorkflowAttemptState(record.state)) {
-        if (record.discard) await this.discardPrepared(record);
-        return;
-      }
-      if (record.discard) await this.discardPrepared(record);
+      const discard = this.discardPrepared(record);
+      if (discard) await discard;
+      if (isTerminalWorkflowAttemptState(record.state)) return;
       this.settle(
         record,
         error instanceof WorkflowInputBlockedError ? 'blocked' : 'error',
@@ -1269,16 +1361,75 @@ export class DelegateWorkflowCoordinator {
     }
   }
 
-  private async discardPrepared(record: WorkflowRecord): Promise<void> {
+  private discardPrepared(record: WorkflowRecord): Promise<void> | undefined {
+    const work: Promise<void>[] = [];
     const discard = record.discard;
-    if (!discard || record.preparationDiscarded) return;
-    record.preparationDiscarded = true;
-    record.discard = undefined;
-    try {
-      await discard();
-    } catch (error) {
-      if (!record.reason) record.reason = boundedReason(error);
+    if (discard && !record.preparationDiscarded) {
+      record.preparationDiscarded = true;
+      record.discard = undefined;
+      work.push(this.runBoundedCleanup(discard, record));
     }
+    if (record.preparationCleanup && !record.preparationCleanupDone) {
+      const cleanup = record.preparationCleanup;
+      record.preparationCleanupDone = true;
+      record.preparationCleanup = undefined;
+      work.push(this.runBoundedCleanup(cleanup, record));
+    }
+    if (!work.length) return undefined;
+    const combined = Promise.all(work).then(() => undefined);
+    record.preparationDiscardInFlight = combined;
+    return combined.finally(() => {
+      if (record.preparationDiscardInFlight === combined)
+        record.preparationDiscardInFlight = undefined;
+    });
+  }
+
+  private async releasePreparation(record: WorkflowRecord): Promise<void> {
+    const cleanup = record.preparationCleanup;
+    if (!cleanup || record.preparationCleanupDone) return;
+    record.preparationCleanupDone = true;
+    record.preparationCleanup = undefined;
+    await this.runBoundedCleanup(cleanup, record);
+  }
+
+  private async runBoundedCleanup(
+    cleanup: PreparationCleanup,
+    record: WorkflowRecord,
+  ): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observed = Promise.resolve()
+      .then(cleanup)
+      .catch((error) => {
+        if (!record.reason) record.reason = boundedReason(error);
+      });
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, this.preparationGraceMs);
+    });
+    await Promise.race([observed, timeout]);
+    if (timer !== undefined) clearTimeout(timer);
+    // `observed` owns the rejection handler even if the grace period wins;
+    // late cleanup is allowed to finish without leaking an unhandled rejection.
+    void observed;
+  }
+
+  private waitForPreparationGrace(work: Promise<void>): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const observed = work.then(
+      () => undefined,
+      () => undefined,
+    );
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, this.preparationGraceMs);
+    });
+    return Promise.race([observed, timeout]).finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    });
+  }
+
+  private abortPreparation(record: WorkflowRecord, reason: unknown): void {
+    if (!record.preparationController) return;
+    if (!record.preparationController.signal.aborted)
+      record.preparationController.abort(reason);
   }
 
   private validatePreparedLaunch(
@@ -1304,6 +1455,11 @@ export class DelegateWorkflowCoordinator {
     record: WorkflowRecord,
     launch: DelegateJobStartOptions | undefined,
   ): void {
+    if (this.disposed || record.cancellationRequested) {
+      if (!isTerminalWorkflowAttemptState(record.state))
+        this.settle(record, 'cancelled', 'Cancelled before launch.');
+      return;
+    }
     if (!launch) {
       this.settle(
         record,
@@ -1312,7 +1468,7 @@ export class DelegateWorkflowCoordinator {
       );
       return;
     }
-    if (record.cancellationRequested) {
+    if (this.disposed || record.cancellationRequested) {
       this.settle(record, 'cancelled', 'Cancelled before launch.');
       return;
     }
@@ -1420,7 +1576,9 @@ export class DelegateWorkflowCoordinator {
     this.results.set(record.attempt.identity, evidence);
     if (isTerminalWorkflowAttemptState(record.state)) {
       record.launch = undefined;
-      if (!record.preparationInFlight) record.prepare = undefined;
+      // Drop lazy closures immediately. A late preparation still writes its
+      // returned discard handle and calls discardPrepared exactly once.
+      record.prepare = undefined;
       return;
     }
 
@@ -1470,7 +1628,9 @@ export class DelegateWorkflowCoordinator {
     // Once terminal evidence exists, drop it rather than keeping that graph
     // alive alongside the compact canonical record.
     record.launch = undefined;
-    if (!record.preparationInFlight) record.prepare = undefined;
+    // Terminal records must not retain the lazy factory while an abortable
+    // preparation settles in the background.
+    record.prepare = undefined;
     this.changed();
     const settledSnapshot = this.snapshotRecord(record);
     for (const listener of this.terminalListeners) {

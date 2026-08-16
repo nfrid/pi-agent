@@ -37,6 +37,7 @@ import type {
   DelegateWorkflowCoordinator,
 } from './workflow-coordinator';
 import { parseWorkflowReference } from './workflow-model';
+import { captureWorkInProgress } from './worktree';
 
 const DELEGATE_TOOL_DESCRIPTION =
   'Schedule one focused child agent asynchronously. Choose a route, workspace mode, and either a prose or structured result contract; use after and inputs to compose work and delegate_wake to receive selected results.';
@@ -461,6 +462,41 @@ export function registerDelegateTool(
           initialPlan = built.tasks[0]?.plan;
           if (!initialPlan) throw new Error('Delegate plan was not created.');
         }
+        const symbolicBranchSource =
+          params.inputs?.some((input) => input.include?.includes('branch')) ??
+          false;
+        let capturedWip:
+          | Awaited<ReturnType<typeof captureWorkInProgress>>
+          | undefined;
+        if (
+          !continuationReference &&
+          initialPlan &&
+          initialPlan.isolation === 'worktree' &&
+          initialPlan.worktreePath === undefined &&
+          initialPlan.baseRef === undefined &&
+          initialPlan.base !== 'head' &&
+          !symbolicBranchSource
+        ) {
+          capturedWip = await captureWorkInProgress(initialPlan.requestedCwd, {
+            signal,
+          });
+          initialPlan = {
+            ...initialPlan,
+            base: undefined,
+            baseRef: capturedWip.ref,
+          };
+        }
+        const releaseCapturedWip = async (): Promise<void> => {
+          const source = capturedWip;
+          capturedWip = undefined;
+          if (source) await source.dispose();
+        };
+        if (signal?.aborted) {
+          await releaseCapturedWip();
+          throw (
+            signal.reason ?? new Error('Delegate scheduling was cancelled.')
+          );
+        }
         const pending = createRun(task, routing, {
           name: params.name?.trim() || logicalId,
           context: continuationReference
@@ -470,8 +506,10 @@ export function registerDelegateTool(
           writeRequested: params.allowWrites,
           isolation: params.isolation,
         });
-        const statusIds = activeStatuses.start([pending], 'background');
+        let statusIds: string[] = [];
+        let scheduled = false;
         try {
+          statusIds = activeStatuses.start([pending], 'background');
           const attempt = activeWorkflow.schedule({
             logicalId,
             continuation: continuationReference,
@@ -485,6 +523,7 @@ export function registerDelegateTool(
             route: routing.route,
             routing,
             allowWrites: params.allowWrites,
+            ...(capturedWip ? { preparationCleanup: releaseCapturedWip } : {}),
 
             prepare: async (workflowContext) => {
               let plan = initialPlan;
@@ -539,6 +578,7 @@ export function registerDelegateTool(
               );
             },
           });
+          scheduled = true;
           const statusId = statusIds[0];
           if (statusId) activeStatuses.setWorkflow(statusId, attempt);
           if (statusId && attempt.jobId)
@@ -571,6 +611,7 @@ export function registerDelegateTool(
             details: import('./types').LegacyDelegateDetails;
           };
         } catch (error) {
+          if (!scheduled) await releaseCapturedWip().catch(() => undefined);
           activeStatuses.finish(statusIds);
           throw error;
         }

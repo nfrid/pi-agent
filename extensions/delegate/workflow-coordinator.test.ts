@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 import {
   DelegateJobManager,
   type DelegateJobResult,
+  type DelegateJobSnapshot,
   type DelegateJobStartOptions,
 } from './jobs';
 import { getDelegateLifecycle } from './lifecycle';
@@ -566,10 +567,12 @@ describe('DelegateWorkflowCoordinator', () => {
       expect(coordinator.require(upstream.identity).state).toBe('success'),
     );
     let finishPreparation!: (options: DelegateJobStartOptions) => void;
+    let preparationSignal!: AbortSignal;
     const execute = vi.fn(async () => result('must not run'));
     const prepare = vi.fn(
-      () =>
+      (context: { signal: AbortSignal }) =>
         new Promise<DelegateJobStartOptions>((resolve) => {
+          preparationSignal = context.signal;
           finishPreparation = resolve;
         }),
     );
@@ -580,11 +583,47 @@ describe('DelegateWorkflowCoordinator', () => {
     });
     await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
     const cancellation = coordinator.cancel(child.identity);
+    expect(preparationSignal.aborted).toBe(true);
     finishPreparation({ mode: 'single', tasks: ['child'], execute });
     await cancellation;
     expect(coordinator.require(child.identity).state).toBe('cancelled');
     expect(execute).not.toHaveBeenCalled();
     await manager.dispose();
+  });
+
+  test('bounds cancellation and discards a late unabortable preparation once', async () => {
+    const coordinator = new DelegateWorkflowCoordinator({
+      preparationGraceMs: 10,
+    });
+    let release!: (
+      value:
+        | DelegateJobStartOptions
+        | { launch: DelegateJobStartOptions; discard: () => Promise<void> },
+    ) => void;
+    const execute = vi.fn(async () => result('must not run'));
+    const discard = vi.fn(() => new Promise<void>(() => {}));
+    const attempt = coordinator.schedule({
+      logicalId: 'bounded-cleanup',
+      prepare: () =>
+        new Promise<
+          | DelegateJobStartOptions
+          | { launch: DelegateJobStartOptions; discard: () => Promise<void> }
+        >((resolve) => {
+          release = resolve;
+        }),
+    });
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    const startedAt = Date.now();
+    const cancellation = coordinator.cancel(attempt.identity);
+    await cancellation;
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    release({
+      launch: { mode: 'single', tasks: ['bounded-cleanup'], execute },
+      discard,
+    });
+    await vi.waitFor(() => expect(discard).toHaveBeenCalledOnce());
+    expect(execute).not.toHaveBeenCalled();
+    await coordinator.dispose();
   });
 
   test('disposal cancels unresolved preparation without recreating a job', async () => {
@@ -1032,5 +1071,113 @@ describe('DelegateWorkflowCoordinator', () => {
     await vi.waitFor(() => expect(discard).toHaveBeenCalledOnce());
     expect(execute).not.toHaveBeenCalled();
     await coordinator.dispose();
+  });
+
+  test('does not cancel or settle imported ancestor attempts', async () => {
+    const manager = new DelegateJobManager();
+    const ancestor = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'ancestor-branch',
+    });
+    const descendant = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'descendant-branch',
+    });
+    let finish!: (value: DelegateJobResult) => void;
+    const attempt = ancestor.schedule(
+      scheduleOptions(
+        'ancestor-work',
+        () =>
+          new Promise<DelegateJobResult>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    );
+    descendant.importFrom(ancestor);
+    await descendant.cancel(attempt.identity);
+    expect(ancestor.require(attempt.identity).state).toBe('running');
+    await descendant.dispose();
+    expect(ancestor.require(attempt.identity).state).toBe('running');
+    finish(result('ancestor-work'));
+    await settle(ancestor);
+    await ancestor.dispose();
+    await manager.dispose();
+  });
+
+  test('imports later ancestor attempts during reconciliation in lineage order', async () => {
+    const manager = new DelegateJobManager();
+    const ancestor = new DelegateWorkflowCoordinator({
+      jobs: manager,
+      ownerBranchId: 'ancestor-lineage',
+    });
+    const descendant = new DelegateWorkflowCoordinator({
+      ownerBranchId: 'descendant-lineage',
+    });
+    let finish!: (value: DelegateJobResult) => void;
+    const first = ancestor.schedule(
+      scheduleOptions(
+        'lineage',
+        () =>
+          new Promise<DelegateJobResult>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    );
+    descendant.importFrom(ancestor);
+    const second = ancestor.schedule(
+      scheduleOptions('lineage', async () => result('second'), {
+        continuation: first.identity,
+      }),
+    );
+    expect(descendant.get(second.identity)).toBeDefined();
+    finish(result('first'));
+    await settle(ancestor);
+    await vi.waitFor(() =>
+      expect(descendant.require(second.identity).state).toBe('success'),
+    );
+    await descendant.dispose();
+    await ancestor.dispose();
+    await manager.dispose();
+  });
+
+  test('clears lazy closures after a synchronous terminal settlement', async () => {
+    const manager = new DelegateJobManager();
+    const synchronous = result('synchronous');
+    vi.spyOn(manager, 'start').mockImplementation((options) => {
+      const snapshot = {
+        id: 'dj-sync',
+        name: options.name ?? 'Subagent',
+        mode: options.mode,
+        state: 'success',
+        tasks: [...options.tasks],
+        createdAt: Date.now(),
+        settledAt: Date.now(),
+      } satisfies DelegateJobSnapshot;
+      options.onTerminal?.(synchronous, snapshot);
+      return snapshot;
+    });
+    const coordinator = new DelegateWorkflowCoordinator({ jobs: manager });
+    const prepare = vi.fn(async () => ({
+      mode: 'single' as const,
+      tasks: ['synchronous'],
+      execute: async () => result('must not replace synchronous settlement'),
+    }));
+    const attempt = coordinator.schedule({
+      logicalId: 'synchronous',
+      prepare,
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require(attempt.identity).state).toBe('success'),
+    );
+    const records = (
+      coordinator as unknown as {
+        records: Map<string, { prepare?: unknown; launch?: unknown }>;
+      }
+    ).records;
+    expect(records.get(attempt.identity)).toMatchObject({
+      prepare: undefined,
+      launch: undefined,
+    });
+    await coordinator.dispose();
+    await manager.dispose();
   });
 });
