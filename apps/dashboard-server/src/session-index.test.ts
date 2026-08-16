@@ -1025,31 +1025,28 @@ describe('session index', () => {
 
   it('fans file-watcher changes out to live snapshot observers', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-watch-'));
-    let changed!: () => void;
-    const observed = new Promise<void>((resolve) => {
-      changed = resolve;
+    let changes = 0;
+    const index = new SessionIndex(root, undefined, () => {
+      changes += 1;
     });
-    const index = new SessionIndex(root, undefined, changed);
     await index.start();
+    // fs.watch may return before the macOS backend is ready to deliver its
+    // first event. Keep this as a real watcher test, but cross one timer turn.
+    await new Promise((resolve) => setTimeout(resolve, 100));
     try {
       await writeFile(
         path.join(root, 'watched.jsonl'),
         `${JSON.stringify({ type: 'session', id: 'watched-id', cwd: '/tmp' })}\n`,
       );
-      await Promise.race([
-        observed,
-        new Promise<never>((_resolve, reject) =>
-          setTimeout(
-            () => reject(new Error('Watcher did not publish.')),
-            2_000,
-          ),
-        ),
-      ]);
+      const deadline = Date.now() + 5_000;
+      while (!index.get('watched-id') && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(changes).toBeGreaterThan(0);
       expect(index.get('watched-id')).toMatchObject({ id: 'watched-id' });
     } finally {
       index.close();
     }
-  });
+  }, 10_000);
 
   it('renames a known dormant session by appending session_info', async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), 'pi-dashboard-rename-'));
