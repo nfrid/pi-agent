@@ -112,12 +112,14 @@ export function transformTodoContext(
 export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
   let needsRecovery = false;
   let hasTodoHistory = false;
+  let emptyResetPersisted = false;
 
   const hasActiveTasks = () => store.state.tasks.some(unfinished);
 
   pi.on('session_start', () => {
     needsRecovery = false;
     hasTodoHistory = store.state.tasks.length > 0;
+    emptyResetPersisted = false;
   });
   pi.on('session_compact', () => {
     needsRecovery = true;
@@ -126,9 +128,24 @@ export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
     needsRecovery = true;
   });
   pi.on('before_agent_start', () => {
-    needsRecovery = false;
-    if (hasActiveTasks()) hasTodoHistory = true;
-    if (!hasTodoHistory) return undefined;
+    const active = hasActiveTasks();
+    if (active) {
+      hasTodoHistory = true;
+      emptyResetPersisted = false;
+      needsRecovery = false;
+    } else if (!hasTodoHistory) {
+      needsRecovery = false;
+      return undefined;
+    } else if (!emptyResetPersisted) {
+      // Persist one reset after the state transitions from used to empty.
+      emptyResetPersisted = true;
+      needsRecovery = false;
+    } else {
+      // A persisted reset is already in history. Let context handle recovery
+      // if compaction/tree restoration requested it, but do not emit a new
+      // byte-identical before-agent snapshot.
+      return undefined;
+    }
     return {
       message: {
         customType: TODO_SNAPSHOT_TYPE,
@@ -138,7 +155,11 @@ export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
     };
   });
   pi.on('context', (event) => {
-    if (store.state.tasks.length > 0) hasTodoHistory = true;
+    const active = hasActiveTasks();
+    if (active) {
+      hasTodoHistory = true;
+      emptyResetPersisted = false;
+    }
     if (
       event.messages.some(
         (message) =>
@@ -153,17 +174,35 @@ export function registerTodoContext(pi: ExtensionAPI, store: TaskStore): void {
       };
 
     // Once the list is cleared, old snapshots would otherwise keep stale tasks
-    // visible. The empty snapshot is the explicit reset for that prior state.
-    const input = hasActiveTasks()
+    // visible. Keep the newest matching empty snapshot as the reset anchor so
+    // unchanged empty turns do not append another byte-identical snapshot.
+    const snapshot = turnSnapshotText(store);
+    let newestSnapshotIndex = -1;
+    let newestEmptySnapshotIndex = -1;
+    for (let index = 0; index < event.messages.length; index++) {
+      const message = event.messages[index];
+      if (!isTodoSnapshot(message)) continue;
+      newestSnapshotIndex = index;
+      if (!active && message.role === 'custom' && message.content === snapshot)
+        newestEmptySnapshotIndex = index;
+    }
+    const input = active
       ? event.messages
-      : event.messages.filter((message) => !isTodoSnapshot(message));
-    return {
-      messages: transformTodoContext(
-        input,
-        turnSnapshotText(store),
-        Date.now(),
-        needsRecovery,
-      ),
-    };
+      : event.messages.filter(
+          (message, index) =>
+            !isTodoSnapshot(message) ||
+            (index === newestEmptySnapshotIndex &&
+              newestEmptySnapshotIndex === newestSnapshotIndex),
+        );
+    const messages = transformTodoContext(
+      input,
+      snapshot,
+      Date.now(),
+      needsRecovery,
+    );
+    // Recovery is a one-shot provider-context repair. A before-agent snapshot
+    // has already handled it when one was emitted.
+    needsRecovery = false;
+    return { messages };
   });
 }

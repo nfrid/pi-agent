@@ -62,6 +62,10 @@ function snapshot(
   };
 }
 
+function isSnapshot(message: TodoContextMessages[number]): boolean {
+  return message.role === 'custom' && message.customType === TODO_SNAPSHOT_TYPE;
+}
+
 function legacyReplay(
   content: string,
   timestamp: number,
@@ -251,23 +255,52 @@ describe('registerTodoContext', () => {
     expect(turnStart.message.content).toContain('active task');
   });
 
-  it('injects an empty reset after used state is cleared', () => {
+  it('persists one empty reset across subsequent empty turns', () => {
     store = createTaskStore();
     mutate(store, 'add', { action: 'add', text: 'stale task' });
     const handlers = registeredContext();
-    handlers.get('before_agent_start')?.();
+    const activeStart = handlers.get('before_agent_start')?.() as {
+      message: { customType: string; content: string };
+    };
+    let history: TodoContextMessages = [
+      snapshot(activeStart.message.content, 1),
+    ];
+
     store.state.tasks = [];
-    const contextualized = handlers.get('context')?.({
-      messages: [snapshot('stale task snapshot', 1)],
-    }) as { messages: TodoContextMessages };
-    expect(contextualized.messages).toHaveLength(1);
-    expect(contextualized.messages[0]).toMatchObject({
-      role: 'custom',
-      customType: TODO_SNAPSHOT_TYPE,
-    });
+    const resetStart = handlers.get('before_agent_start')?.() as {
+      message: { customType: string; content: string };
+    };
+    expect(resetStart.message.customType).toBe(TODO_SNAPSHOT_TYPE);
+    history = [...history, snapshot(resetStart.message.content, 2)];
+    const first = handlers.get('context')?.({ messages: history }) as {
+      messages: TodoContextMessages;
+    };
     expect(
-      (contextualized.messages[0] as { content: string }).content,
-    ).not.toContain('stale task');
+      first.messages.filter(
+        (message) => message.role === 'custom' && isSnapshot(message),
+      ),
+    ).toHaveLength(1);
+
+    history = [...history, user('first unchanged empty turn', 3)];
+    expect(handlers.get('before_agent_start')?.()).toBeUndefined();
+    const second = handlers.get('context')?.({ messages: history }) as {
+      messages: TodoContextMessages;
+    };
+    history = [...history, user('second unchanged empty turn', 4)];
+    expect(handlers.get('before_agent_start')?.()).toBeUndefined();
+    const third = handlers.get('context')?.({ messages: history }) as {
+      messages: TodoContextMessages;
+    };
+
+    for (const contextualized of [first, second, third]) {
+      const snapshots = contextualized.messages.filter(
+        (message) => message.role === 'custom' && isSnapshot(message),
+      );
+      expect(snapshots).toHaveLength(1);
+      expect((snapshots[0] as { content: string }).content).not.toContain(
+        'stale task',
+      );
+    }
   });
 
   it('recovers active state after compaction/tree recovery', () => {
@@ -709,6 +742,69 @@ describe('todo widget lifecycle', () => {
 });
 
 describe('bounded todo tool results', () => {
+  it('keeps replace and batch results concise while list remains exact', async () => {
+    const localStore = createTaskStore();
+    let tool:
+      | {
+          execute: (
+            id: string,
+            params: Record<string, unknown>,
+            signal: AbortSignal | undefined,
+            onUpdate: undefined,
+            ctx: unknown,
+          ) => Promise<{ content: Array<{ text: string }> }>;
+        }
+      | undefined;
+    registerTodoTool(
+      {
+        registerTool(value: typeof tool) {
+          tool = value;
+        },
+        appendEntry() {},
+      } as never,
+      localStore,
+    );
+
+    const replaced = await tool?.execute(
+      'call-replace',
+      {
+        action: 'replace',
+        tasks: [
+          { id: 'T1', text: 'submitted task one' },
+          { id: 'T2', text: 'submitted task two' },
+        ],
+      },
+      undefined,
+      undefined,
+      { hasUI: false } as never,
+    );
+    expect(replaced?.content[0]?.text).toBe('replaced with 2 tasks');
+    expect(replaced?.content[0]?.text).not.toContain('submitted task one');
+
+    const batched = await tool?.execute(
+      'call-batch',
+      {
+        action: 'batch',
+        operations: [{ action: 'done', id: 'T1' }],
+      },
+      undefined,
+      undefined,
+      { hasUI: false } as never,
+    );
+    expect(batched?.content[0]?.text).toBe('done T1');
+    expect(batched?.content[0]?.text).not.toContain('submitted task');
+
+    const batchedList = await tool?.execute(
+      'call-batch-list',
+      { action: 'batch', operations: [{ action: 'list' }] },
+      undefined,
+      undefined,
+      { hasUI: false } as never,
+    );
+    expect(batchedList?.content[0]?.text).toBe('listed 1 tasks');
+    expect(batchedList?.content[0]?.text).not.toContain('submitted task');
+  });
+
   it('caps large task rows and marks omitted state', async () => {
     const localStore = createTaskStore();
     for (let index = 0; index < 100; index += 1) {

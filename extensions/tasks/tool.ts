@@ -2,7 +2,6 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Text, truncateToWidth } from '@earendil-works/pi-tui';
 import { loadGuidelines } from '../shared/instructions';
 import { normalizeId, stats } from './domain';
-import { dashboard } from './format';
 import {
   ACTION_GLYPH,
   MAX_TODO_RESULT_CHARS,
@@ -51,15 +50,11 @@ export function registerTodoTool(pi: ExtensionAPI, store: TaskStore): void {
         message,
         stats: stats(store),
       };
-      // The list message already is the dashboard; do not render it twice.
-      const text =
-        params.action === 'list'
-          ? message
-          : boundedResultText(
-              `${message}\n${dashboard(store, Boolean(params.include_done), 24, MAX_TODO_RESULT_CHARS)}`,
-            );
+      // Exact state is available through an explicit list request. Mutation
+      // results stay cache-safe by reporting only their delta; aggregate stats
+      // remain available in details and the rendered tool result.
       return {
-        content: [{ type: 'text', text }],
+        content: [{ type: 'text', text: message }],
         details,
       };
     },

@@ -8,6 +8,7 @@ import {
   newId,
   normalizeId,
   normalizeIds,
+  stats,
   validateDependencyGraph,
   validateDeps,
 } from './domain';
@@ -120,7 +121,11 @@ function mutateBatchUnsafe(
   let changed = false;
   for (const operation of operations) {
     const step = mutateUnsafe(store, operation.action, operation);
-    messages.push(step.error ? `error: ${step.message}` : step.message);
+    const message =
+      operation.action === 'list' && !step.error
+        ? `listed ${operation.include_done ? stats(store).total : stats(store).active} tasks`
+        : step.message;
+    messages.push(step.error ? `error: ${message}` : message);
     if (step.error)
       return {
         changed: false,
