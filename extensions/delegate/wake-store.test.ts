@@ -1,5 +1,9 @@
 import { describe, expect, test, vi } from 'vitest';
-import { WAKE_MAX_SUBSCRIPTIONS, WakeCoordinator } from './wake-coordinator';
+import {
+  WAKE_MAX_SUBSCRIPTIONS,
+  WAKE_RELOAD_ORPHAN_REASON,
+  WakeCoordinator,
+} from './wake-coordinator';
 import {
   attachWakeStore,
   persistWakeState,
@@ -163,6 +167,117 @@ describe('wake store', () => {
       'entered',
     );
     await workflow.dispose();
+  });
+
+  test('restores queued wakes onto a fresh empty workflow without redispatch', async () => {
+    const sourceWorkflow = new DelegateWorkflowCoordinator();
+    sourceWorkflow.schedule({
+      logicalId: 'queued-reload',
+      mode: 'single',
+      tasks: ['queued-reload'],
+      execute: async () => ({
+        runs: [],
+        handoff: 'raw report must stay out of wake metadata',
+      }),
+    });
+    await vi.waitFor(() =>
+      expect(sourceWorkflow.require('queued-reload@1').settledAt).toBeDefined(),
+    );
+    const sourceDispatch = vi.fn();
+    const source = new WakeCoordinator({
+      workflow: sourceWorkflow,
+      ownerSessionId: 'reload-owner',
+      ownerEpoch: 7,
+      dispatch: sourceDispatch,
+    });
+    source.register({
+      id: 'queued-reload-wake',
+      condition: { node: 'queued-reload' },
+    });
+    const entries: unknown[] = [];
+    persistWakeState(source, {
+      appendEntry(type: string, data: unknown) {
+        entries.push({ type: 'custom', customType: type, data });
+      },
+    });
+
+    const restoredWorkflow = new DelegateWorkflowCoordinator();
+    const restoredDispatch = vi.fn();
+    const restored = new WakeCoordinator({
+      workflow: restoredWorkflow,
+      ownerSessionId: 'reload-owner',
+      ownerEpoch: 7,
+      dispatch: restoredDispatch,
+    });
+    restoreWakeState(restored, branch(entries));
+
+    expect(restored.require('queued-reload-wake').state).toBe('queued');
+    expect(restoredDispatch).not.toHaveBeenCalled();
+    expect(JSON.stringify(restored.snapshot())).not.toContain('raw report');
+    await sourceWorkflow.dispose();
+    await restoredWorkflow.dispose();
+  });
+
+  test('blocks pending and ready wakes orphaned by a reload', async () => {
+    const pendingWorkflow = new DelegateWorkflowCoordinator();
+    pendingWorkflow.schedule({
+      logicalId: 'pending-orphan',
+      mode: 'single',
+      tasks: ['pending-orphan'],
+      execute: (signal) =>
+        new Promise((resolve) =>
+          signal.addEventListener(
+            'abort',
+            () => resolve({ runs: [], handoff: 'cancelled' }),
+            { once: true },
+          ),
+        ),
+    });
+    const pendingWake = new WakeCoordinator({ workflow: pendingWorkflow });
+    pendingWake.register({
+      id: 'pending-orphan-wake',
+      condition: { node: 'pending-orphan' },
+    });
+
+    const readyWorkflow = new DelegateWorkflowCoordinator();
+    readyWorkflow.schedule({
+      logicalId: 'ready-orphan',
+      mode: 'single',
+      tasks: ['ready-orphan'],
+      execute: async () => ({ runs: [], handoff: 'ready' }),
+    });
+    await vi.waitFor(() =>
+      expect(readyWorkflow.require('ready-orphan@1').settledAt).toBeDefined(),
+    );
+    const readyWake = new WakeCoordinator({ workflow: readyWorkflow });
+    readyWake.register({
+      id: 'ready-orphan-wake',
+      condition: { node: 'ready-orphan' },
+    });
+
+    const restored = new WakeCoordinator({
+      workflow: new DelegateWorkflowCoordinator(),
+    });
+    restored.restore({
+      ...pendingWake.snapshot(),
+      wakes: [pendingWake.snapshot().wakes[0]],
+    });
+    restored.restore({
+      ...readyWake.snapshot(),
+      wakes: [readyWake.snapshot().wakes[0]],
+    });
+
+    expect(restored.require('pending-orphan-wake')).toMatchObject({
+      state: 'blocked',
+      reason: WAKE_RELOAD_ORPHAN_REASON,
+    });
+    expect(restored.require('ready-orphan-wake')).toMatchObject({
+      state: 'blocked',
+      reason: WAKE_RELOAD_ORPHAN_REASON,
+    });
+    await pendingWorkflow.dispose();
+    await readyWorkflow.dispose();
+    await restored.workflow.dispose();
   });
 
   test('rejects ownership-mismatched snapshots without changing live state', async () => {

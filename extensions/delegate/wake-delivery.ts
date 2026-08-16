@@ -61,6 +61,49 @@ function deliveryDetails(dispatch: WakeDispatch): WakeDeliveryDetails {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isAcknowledgement(value: unknown): value is WakeAcknowledgement {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.deliveryKey === 'string' &&
+    typeof value.dispatchGeneration === 'number' &&
+    Number.isSafeInteger(value.dispatchGeneration) &&
+    value.dispatchGeneration >= 1 &&
+    typeof value.dispatchAttempt === 'number' &&
+    Number.isSafeInteger(value.dispatchAttempt) &&
+    value.dispatchAttempt >= 1
+  );
+}
+
+function expectedSources(wake: WakeSnapshot): readonly string[] | undefined {
+  const readyReferences = wake.readyReferences;
+  if (!readyReferences || readyReferences.length === 0) return undefined;
+  const sources: string[] = [];
+  for (const selector of wake.payload) {
+    const selected =
+      selector.node === undefined ? readyReferences : [selector.node];
+    for (const source of selected) {
+      if (!readyReferences.includes(source)) return undefined;
+      if (sources.includes(source)) continue;
+      sources.push(source);
+    }
+  }
+  return sources.length > 0 ? sources : undefined;
+}
+
+function sameSources(
+  actual: readonly string[],
+  expected: readonly string[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((source, index) => source === expected[index])
+  );
+}
+
 export interface WakeDeliveryController {
   readonly dispatch: WakeDispatchHandler;
   readonly filterContext: <T>(messages: readonly T[]) => T[];
@@ -120,11 +163,16 @@ export function createWakeDelivery(options: {
       if (
         !usable ||
         !active ||
-        !details ||
+        !isRecord(details) ||
         typeof details.deliveryKey !== 'string' ||
         typeof details.wakeId !== 'string' ||
+        details.ownerSessionId !== active.ownerSessionId ||
+        details.ownerEpoch !== active.ownerEpoch ||
+        details.state !== 'queued' ||
         !Array.isArray(details.sources) ||
-        !details.acknowledgement ||
+        details.sources.length === 0 ||
+        details.sources.some((source) => typeof source !== 'string') ||
+        !isAcknowledgement(details.acknowledgement) ||
         details.deliveryKey !==
           `${active.ownerSessionId}:${active.ownerEpoch}:${details.wakeId}` ||
         details.acknowledgement.deliveryKey !== details.deliveryKey ||
@@ -132,7 +180,17 @@ export function createWakeDelivery(options: {
       )
         continue;
       const wake = active.get(details.wakeId);
-      if (wake?.deliveryKey !== details.deliveryKey) continue;
+      const sources = wake ? expectedSources(wake) : undefined;
+      if (
+        wake?.state !== 'queued' ||
+        wake.deliveryKey !== details.deliveryKey ||
+        details.acknowledgement.dispatchGeneration !==
+          wake.dispatchGeneration ||
+        details.acknowledgement.dispatchAttempt !== wake.dispatchAttempts ||
+        !sources ||
+        !sameSources(details.sources, sources)
+      )
+        continue;
       try {
         const entered = active.markEntered(
           details.wakeId,

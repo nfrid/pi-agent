@@ -57,6 +57,83 @@ describe('wake delivery', () => {
     await workflow.dispose();
   });
 
+  test('restores a queued message once and rejects forged metadata', async () => {
+    const sourceWorkflow = new DelegateWorkflowCoordinator();
+    const attempt = sourceWorkflow.schedule({
+      logicalId: 'reload-source',
+      mode: 'single',
+      tasks: ['reload-source'],
+      execute: async () => result(),
+    });
+    await vi.waitFor(() =>
+      expect(sourceWorkflow.require(attempt.identity).settledAt).toBeDefined(),
+    );
+    const sendMessage = vi.fn();
+    let source: WakeCoordinator | undefined;
+    const sourceDelivery = createWakeDelivery({
+      pi: { sendMessage } as unknown as ExtensionAPI,
+      getRuntimeActive: () => true,
+      getActiveCoordinator: () => source,
+    });
+    source = new WakeCoordinator({
+      workflow: sourceWorkflow,
+      ownerSessionId: 'reload-session',
+      ownerEpoch: 5,
+      dispatch: sourceDelivery.dispatch,
+    });
+    source.register({
+      id: 'reload-wake',
+      condition: { node: attempt.identity },
+    });
+    const message = sendMessage.mock.calls[0]?.[0];
+    if (!message) throw new Error('missing queued wake message');
+
+    const restoredWorkflow = new DelegateWorkflowCoordinator();
+    let restored: WakeCoordinator | undefined;
+    const restoredDelivery = createWakeDelivery({
+      pi: { sendMessage: vi.fn() } as unknown as ExtensionAPI,
+      getRuntimeActive: () => true,
+      getActiveCoordinator: () => restored,
+    });
+    restored = new WakeCoordinator({
+      workflow: restoredWorkflow,
+      ownerSessionId: 'reload-session',
+      ownerEpoch: 5,
+    });
+    restored.restore(source.snapshot());
+
+    const details = message.details as Record<string, unknown>;
+    const acknowledgement = details.acknowledgement as Record<string, unknown>;
+    const forged = [
+      { ...message, details: { ...details, ownerSessionId: 'foreign' } },
+      { ...message, details: { ...details, ownerEpoch: 6 } },
+      {
+        ...message,
+        details: {
+          ...details,
+          acknowledgement: { ...acknowledgement, dispatchGeneration: 2 },
+        },
+      },
+      {
+        ...message,
+        details: {
+          ...details,
+          acknowledgement: { ...acknowledgement, dispatchAttempt: 2 },
+        },
+      },
+      { ...message, details: { ...details, sources: ['foreign@1'] } },
+    ];
+    for (const candidate of forged)
+      expect(restoredDelivery.filterContext([candidate])).toEqual([]);
+    expect(restored.require('reload-wake').state).toBe('queued');
+    expect(restoredDelivery.filterContext([message])).toEqual([message]);
+    expect(restored.require('reload-wake').state).toBe('entered');
+    expect(restoredDelivery.filterContext([message])).toEqual([]);
+
+    await sourceWorkflow.dispose();
+    await restoredWorkflow.dispose();
+  });
+
   test('filters stale recovery attempts before provider context', async () => {
     const workflow = new DelegateWorkflowCoordinator();
     const attempt = workflow.schedule({

@@ -10,9 +10,13 @@ import type {
 import {
   type AttemptIdentity,
   isTerminalWorkflowAttemptState,
+  parseWorkflowReference,
 } from './workflow-model';
 
 export const WAKE_COORDINATOR_VERSION = 1 as const;
+/** Fixed, metadata-only reason for wakes whose workflow was not rehydrated. */
+export const WAKE_RELOAD_ORPHAN_REASON =
+  'Wake blocked: workflow state unavailable after reload.' as const;
 export const WAKE_ID_MAX_LENGTH = 64;
 export const WAKE_MAX_SUBSCRIPTIONS = 256;
 export const WAKE_MAX_CONDITION_REFERENCES = 32;
@@ -265,6 +269,19 @@ export function cloneAndFreezeWakeJson(
 
 function validTimestamp(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isExactAttemptIdentity(value: unknown): value is AttemptIdentity {
+  if (typeof value !== 'string') return false;
+  try {
+    const parsed = parseWorkflowReference(value);
+    return (
+      parsed.ordinal !== undefined &&
+      value === `${parsed.logicalId}@${parsed.ordinal}`
+    );
+  } catch {
+    return false;
+  }
 }
 
 function copyCondition(condition: WakeCondition): WakeCondition {
@@ -719,9 +736,27 @@ export class WakeCoordinator {
     this.records.clear();
     for (const [id, record] of next) this.records.set(id, record);
     for (const record of accepted) {
+      this.blockReloadOrphan(record);
       this.emit(record);
       this.reevaluate(record);
     }
+  }
+
+  private blockReloadOrphan(record: WakeRecord): void {
+    if (
+      (record.state !== 'pending' && record.state !== 'ready') ||
+      !record.references.some((reference) => !this.workflow.get(reference))
+    )
+      return;
+    record.state = 'blocked';
+    record.blockedAt = Math.max(
+      this.now(),
+      record.createdAt,
+      record.readyAt ?? 0,
+      record.queuedAt ?? 0,
+    );
+    record.reason = WAKE_RELOAD_ORPHAN_REASON;
+    record.payload = undefined;
   }
 
   setDispatchHandler(handler: WakeDispatchHandler | undefined): void {
@@ -1236,18 +1271,33 @@ export class WakeCoordinator {
     } catch {
       return undefined;
     }
-    if (!validTimestamp(value.createdAt) || !isRecord(value.condition))
+    if (
+      value.ownerSessionId !== this.ownerSessionId ||
+      value.ownerEpoch !== this.ownerEpoch ||
+      value.deliveryKey !==
+        deliveryKey(this.ownerSessionId, this.ownerEpoch, id) ||
+      !validTimestamp(value.createdAt) ||
+      !isRecord(value.condition) ||
+      !Array.isArray(value.references)
+    )
       return undefined;
     let normalized: { condition: WakeCondition; references: readonly string[] };
     let payloadSelectors: readonly CanonicalWakePayloadSelector[];
     try {
       normalized = normalizeCondition(value.condition as WakeCondition);
       const references = normalized.references.map((reference) => {
-        const attempt = this.workflow.require(reference);
-        // Restored refs must already be exact and must not silently bind latest.
-        if (attempt.identity !== reference) throw new Error('not exact');
-        return attempt.identity;
+        if (!isExactAttemptIdentity(reference)) throw new Error('not exact');
+        return reference;
       });
+      if (
+        value.references.length !== references.length ||
+        value.references.some(
+          (reference, index) =>
+            !isExactAttemptIdentity(reference) ||
+            reference !== references[index],
+        )
+      )
+        return undefined;
       normalized = {
         condition: this.bindCondition(normalized.condition, references),
         references: Object.freeze(references),
@@ -1259,14 +1309,16 @@ export class WakeCoordinator {
         payload: value.payload as readonly WakePayloadSelector[],
       });
       for (const selector of restoredSelectors)
-        if (selector.node !== undefined) {
-          const attempt = this.workflow.require(selector.node);
-          if (attempt.identity !== selector.node) throw new Error('not exact');
-        }
-      payloadSelectors = this.bindPayloadSelectors(
-        restoredSelectors,
-        normalized.references,
-      );
+        if (
+          selector.node !== undefined &&
+          (!isExactAttemptIdentity(selector.node) ||
+            !normalized.references.includes(selector.node))
+        )
+          return undefined;
+      // Restored selectors are already exact and have been checked against the
+      // condition references. Do not require workflow results merely to retain
+      // a queued acknowledgement across a process reload.
+      payloadSelectors = copyPayloadSelectors(restoredSelectors);
     } catch {
       return undefined;
     }
@@ -1290,15 +1342,12 @@ export class WakeCoordinator {
           )
             return undefined;
           const restored = value.readyReferences.map((reference) => {
-            if (typeof reference !== 'string')
-              throw new Error('invalid ready source');
-            const attempt = this.workflow.require(reference);
             if (
-              attempt.identity !== reference ||
-              !normalized.references.includes(attempt.identity)
+              !isExactAttemptIdentity(reference) ||
+              !normalized.references.includes(reference)
             )
               throw new Error('invalid ready source');
-            return attempt.identity;
+            return reference;
           });
           if (
             new Set(restored).size !== restored.length ||
@@ -1359,6 +1408,14 @@ export class WakeCoordinator {
       !Number.isSafeInteger(value.dispatchAttempts) ||
       value.dispatchAttempts < 0 ||
       value.dispatchAttempts > 1000
+    )
+      return undefined;
+    if (
+      state === 'queued' &&
+      (readyReferences === undefined ||
+        readyReferences.length === 0 ||
+        value.dispatchGeneration < 1 ||
+        value.dispatchAttempts < 1)
     )
       return undefined;
     const record: WakeRecord = {
