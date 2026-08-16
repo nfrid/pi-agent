@@ -33,15 +33,28 @@ export interface DelegateWorkflowLaunchContext {
   readonly dependencies: readonly BoundWorkflowSelector[];
   readonly inputs: readonly ResolvedWorkflowInput[];
   readonly handoffText: string;
+  /** Exact predecessor for a logical continuation, once it has settled. */
+  readonly predecessor?: AttemptIdentity;
+  /** Opaque token retained by the canonical predecessor result. */
+  readonly continuationToken?: string;
   /** Resolve another bound source without exposing it in coordinator snapshots. */
   readonly resolve: (
     identity: AttemptIdentity,
   ) => readonly ResolvedWorkflowInput[];
 }
 
+export interface DelegateWorkflowPreparedLaunch {
+  readonly launch: DelegateJobStartOptions;
+  /** Dispose resources created by lazy preparation when launch is cancelled. */
+  readonly discard?: () => void | Promise<void>;
+}
+
 export type DelegateWorkflowLaunchFactory = (
   context: DelegateWorkflowLaunchContext,
-) => DelegateJobStartOptions | Promise<DelegateJobStartOptions>;
+) =>
+  | DelegateJobStartOptions
+  | DelegateWorkflowPreparedLaunch
+  | Promise<DelegateJobStartOptions | DelegateWorkflowPreparedLaunch>;
 
 export interface DelegateWorkflowScheduleOptions
   extends Omit<
@@ -51,7 +64,7 @@ export interface DelegateWorkflowScheduleOptions
   /** Logical identity of the new attempt. */
   logicalId: string;
   /** Continue the latest attempt in this lineage instead of creating @1. */
-  continuation?: boolean;
+  continuation?: boolean | string;
   /** References to attempts that must settle before this attempt launches. */
   after?: readonly string[];
   /** Symbolic sources, each of which becomes an implicit dependency. */
@@ -122,6 +135,9 @@ interface WorkflowRecord {
   prepare?: DelegateWorkflowLaunchFactory;
   preparationInFlight?: Promise<void>;
   launch?: DelegateJobStartOptions;
+  discard?: () => void | Promise<void>;
+  continuationPredecessor?: AttemptIdentity;
+  preparationDiscarded?: boolean;
 }
 
 function boundedReason(value: unknown): string {
@@ -137,9 +153,10 @@ function validateScheduleInput(options: DelegateWorkflowScheduleOptions): void {
     throw new Error('Invalid workflow logical ID: expected a string.');
   if (
     options.continuation !== undefined &&
-    typeof options.continuation !== 'boolean'
+    typeof options.continuation !== 'boolean' &&
+    typeof options.continuation !== 'string'
   )
-    throw new Error('Invalid workflow continuation flag.');
+    throw new Error('Invalid workflow continuation reference.');
   if (options.after !== undefined && !Array.isArray(options.after))
     throw new Error('Invalid workflow dependencies: expected an array.');
   if (options.after?.some((reference) => typeof reference !== 'string'))
@@ -178,6 +195,39 @@ function copyAttempt(attempt: WorkflowAttempt): WorkflowAttempt {
 
 function emptyResult(reason: string): DelegateJobResult {
   return { runs: [], handoff: reason };
+}
+
+function canonicalContinuationToken(
+  result: DelegateJobResult,
+): string | undefined {
+  const runs = result.retainedRuns ?? result.runs;
+  const tokens = runs
+    .map((run) => run.continuation?.trim())
+    .filter((token): token is string => Boolean(token));
+  const token = tokens[0];
+  if (!token)
+    throw new WorkflowInputBlockedError(
+      'Logical continuation is unavailable: the predecessor retained no continuation token.',
+    );
+  if (tokens.some((candidate) => candidate !== token))
+    throw new WorkflowInputBlockedError(
+      'Logical continuation is ambiguous across predecessor runs.',
+    );
+  return token;
+}
+
+function normalizePreparedLaunch(
+  value: DelegateJobStartOptions | DelegateWorkflowPreparedLaunch,
+): DelegateWorkflowPreparedLaunch {
+  if (
+    value &&
+    typeof value === 'object' &&
+    'launch' in value &&
+    value.launch &&
+    typeof value.launch === 'object'
+  )
+    return value as DelegateWorkflowPreparedLaunch;
+  return { launch: value as DelegateJobStartOptions };
 }
 
 function setupFailureResult(
@@ -234,7 +284,11 @@ export class DelegateWorkflowCoordinator {
       throw new Error('Delegate workflow coordinator is disposed.');
     validateScheduleInput(options);
     const plan = options.continuation
-      ? this.model.planContinuation(options.logicalId)
+      ? this.model.planContinuation(
+          typeof options.continuation === 'string'
+            ? options.continuation
+            : options.logicalId,
+        )
       : this.model.planFresh(options.logicalId);
     const selectors = this.bindSelectors(options.inputs ?? []);
     const dependencies = this.bindDependencies(
@@ -260,6 +314,7 @@ export class DelegateWorkflowCoordinator {
       cancellationWaiters: [],
       selectors,
       prepare: options.prepare,
+      continuationPredecessor: plan.predecessor?.identity,
       launch:
         options.prepare === undefined
           ? {
@@ -348,6 +403,7 @@ export class DelegateWorkflowCoordinator {
   /** Cancel scheduled attempts locally, or delegate active cancellation to jobs. */
   async cancel(
     references: string | readonly string[],
+    waitForPreparation = true,
   ): Promise<DelegateWorkflowAttemptSnapshot[]> {
     const requested =
       typeof references === 'string' ? [references] : references;
@@ -373,6 +429,11 @@ export class DelegateWorkflowCoordinator {
     const waitingForLaunch = launching.map((record) =>
       this.waitForCancellation(record),
     );
+    const preparing = waitForPreparation
+      ? records
+          .map((record) => record.preparationInFlight)
+          .filter((work): work is Promise<void> => work !== undefined)
+      : [];
     for (const record of records)
       if (record.state === 'scheduled')
         this.settle(record, 'cancelled', 'Cancelled before launch.');
@@ -382,6 +443,7 @@ export class DelegateWorkflowCoordinator {
         .filter((record) => record.jobId !== undefined)
         .map((record) => this.cancelStartedJob(record)),
       ...waitingForLaunch,
+      ...preparing,
     ]);
     return records.map((record) => this.snapshotRecord(record));
   }
@@ -399,7 +461,7 @@ export class DelegateWorkflowCoordinator {
     if (this.disposed) return;
     this.disposed = true;
     const identities = this.list().map((attempt) => attempt.identity);
-    await this.cancel(identities);
+    await this.cancel(identities, false);
     if (this.ownsJobs) await this.jobs.dispose();
     this.records.clear();
     this.changed();
@@ -559,29 +621,61 @@ export class DelegateWorkflowCoordinator {
         return;
       const prepare = record.prepare;
       if (!prepare) throw new Error('Missing workflow launch factory.');
-      const launch = await prepare({
+      const predecessor = record.continuationPredecessor;
+      const predecessorResult = predecessor
+        ? this.results.get(predecessor)
+        : undefined;
+      const continuationToken = predecessorResult
+        ? canonicalContinuationToken(predecessorResult)
+        : undefined;
+      const prepared = await prepare({
         attempt: copyAttempt(record.attempt),
         dependencies: record.selectors,
         inputs: resolved.inputs,
         handoffText: resolved.handoffText,
+        predecessor,
+        continuationToken,
         resolve: (identity) =>
           resolved.inputs.filter((input) => input.identity === identity),
       });
+      const normalized = normalizePreparedLaunch(prepared);
+      record.discard = normalized.discard;
       if (
         record.cancellationRequested ||
         isTerminalWorkflowAttemptState(record.state)
-      )
+      ) {
+        await this.discardPrepared(record);
+        if (!isTerminalWorkflowAttemptState(record.state))
+          this.settle(record, 'cancelled', 'Cancelled before launch.');
         return;
-      this.validatePreparedLaunch(launch);
-      if (launch.route !== undefined) record.route = launch.route;
-      this.startJob(record, launch);
+      }
+      this.validatePreparedLaunch(normalized.launch);
+      if (normalized.launch.route !== undefined)
+        record.route = normalized.launch.route;
+      this.startJob(record, normalized.launch);
     } catch (error) {
-      if (isTerminalWorkflowAttemptState(record.state)) return;
+      if (isTerminalWorkflowAttemptState(record.state)) {
+        if (record.discard) await this.discardPrepared(record);
+        return;
+      }
+      if (record.discard) await this.discardPrepared(record);
       this.settle(
         record,
         error instanceof WorkflowInputBlockedError ? 'blocked' : 'error',
         boundedReason(error),
       );
+    }
+  }
+
+  private async discardPrepared(record: WorkflowRecord): Promise<void> {
+    const discard = record.discard;
+    if (!discard || record.preparationDiscarded) return;
+    record.preparationDiscarded = true;
+    record.discard = undefined;
+    try {
+      await discard();
+    } catch (error) {
+      if (!record.reason) record.reason = boundedReason(error);
     }
   }
 
@@ -633,6 +727,7 @@ export class DelegateWorkflowCoordinator {
           this.handleTerminal(record, result, snapshot),
       });
       record.jobId = job.id;
+      record.discard = undefined;
       // A cancellation can be requested by an adapter change hook while
       // start() is still assigning its opaque job identity. Abort this exact
       // job as soon as the identity is available.

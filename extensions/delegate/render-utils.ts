@@ -44,6 +44,10 @@ export type ToolResultLike = {
 };
 
 export type DelegateCallTask = {
+  id?: unknown;
+  continue?: unknown;
+  after?: unknown;
+  inputs?: unknown;
   name?: unknown;
   task?: unknown;
   route?: unknown;
@@ -56,6 +60,7 @@ export type DelegateCallTask = {
 };
 
 export type DelegateCallArgs = DelegateCallTask & {
+  /** Legacy rendering compatibility; not advertised in the schema. */
   tasks?: DelegateCallTask[];
   background?: unknown;
 };

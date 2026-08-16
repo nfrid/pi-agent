@@ -427,6 +427,7 @@ export function buildDelegatePlans(
       name: task.input.name,
       task: task.input.task,
       requestedCwd: task.requestedCwd,
+      cwdExplicit: task.input.cwd !== undefined || shared.cwd !== undefined,
       context: task.context,
       contextNote: task.input.contextNote ?? shared.contextNote,
       scope: task.scope,

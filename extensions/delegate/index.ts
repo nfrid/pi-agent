@@ -466,6 +466,7 @@ export default defineExtension('delegate', (pi: ExtensionAPI) => {
         statuses?.jobResultEntered(completed.map((job) => job.id));
       },
       delivery.automaticDeliveryState,
+      workflow,
     );
     registerDelegateBranchesTool(pi);
     // Keep the broker tools registered for stable extension ownership, but do

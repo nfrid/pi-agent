@@ -726,4 +726,63 @@ describe('DelegateWorkflowCoordinator', () => {
     expect(attempt.jobId).toBe('dj-1');
     await coordinator.dispose();
   });
+
+  test('logical exact continuation derives its opaque token after settlement', async () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    const firstResult = result('first');
+    const firstRun = firstResult.runs[0];
+    if (!firstRun) throw new Error('missing first run');
+    firstRun.continuation = 'opaque-child-token';
+    const first = coordinator.schedule({
+      ...scheduleOptions('lineage', async () => firstResult),
+      route: 'pinned',
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require(first.identity).state).toBe('success'),
+    );
+    let token: string | undefined;
+    const second = coordinator.schedule({
+      logicalId: 'lineage',
+      continuation: 'lineage@1',
+      route: 'pinned',
+      prepare: async (context) => {
+        token = context.continuationToken;
+        return {
+          mode: 'single' as const,
+          tasks: ['second'],
+          execute: async () => result('second'),
+        };
+      },
+    });
+    await vi.waitFor(() =>
+      expect(coordinator.require(second.identity).state).toBe('success'),
+    );
+    expect(token).toBe('opaque-child-token');
+    expect(second.dependencies).toEqual(['lineage@1']);
+    await coordinator.dispose();
+  });
+
+  test('discards one lazy preparation exactly once when cancellation wins', async () => {
+    const coordinator = new DelegateWorkflowCoordinator();
+    let release!: (launch: DelegateJobStartOptions) => void;
+    const discard = vi.fn();
+    const execute = vi.fn(async () => result('must not run'));
+    const attempt = coordinator.schedule({
+      logicalId: 'cleanup',
+      prepare: () =>
+        new Promise<
+          | DelegateJobStartOptions
+          | { launch: DelegateJobStartOptions; discard: () => void }
+        >((resolve) => {
+          release = (launch) => resolve({ launch, discard });
+        }),
+    });
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    const cancelled = coordinator.cancel(attempt.identity);
+    release({ mode: 'single', tasks: ['cleanup'], execute });
+    await cancelled;
+    await vi.waitFor(() => expect(discard).toHaveBeenCalledOnce());
+    expect(execute).not.toHaveBeenCalled();
+    await coordinator.dispose();
+  });
 });

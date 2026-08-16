@@ -18,7 +18,9 @@ export function renderDelegateCall(
   const fg = theme.fg.bind(theme);
   const expanded = context?.expanded === true;
   const background =
-    args.background === true ? fg('warning', ' · background') : '';
+    args.background === true && !args.id && !args.continue
+      ? fg('warning', ' · legacy background')
+      : '';
   const container = new Container();
 
   if (Array.isArray(args.tasks) && args.tasks.length > 0) {
@@ -84,7 +86,15 @@ export function renderDelegateCall(
     new Text(`${fg('toolTitle', theme.bold('Delegate'))}${background}`, 0, 0),
   );
   container.addChild(
-    new Text(fieldLine('Name', String(args.name || 'Subagent'), fg), 0, 0),
+    new Text(
+      fieldLine(
+        'ID',
+        String(args.id || args.continue || args.name || 'Subagent'),
+        fg,
+      ),
+      0,
+      0,
+    ),
   );
   container.addChild(taskBlock('Task', args.task, expanded, fg));
   container.addChild(
@@ -94,7 +104,7 @@ export function renderDelegateCall(
         modeDescription(
           {
             context: args.context,
-            continuation: args.continuation,
+            continuation: args.continuation ?? args.continue,
             allowWrites: args.allowWrites,
             isolation: args.isolation,
             worktreePath: args.worktreePath,
